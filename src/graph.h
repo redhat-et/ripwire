@@ -7136,6 +7136,122 @@ inline std::string_view rustFileAlias( const IngestResult& ing, std::uint32_t f,
     return hit == at->second.end() ? std::string_view() : std::string_view( hit->second );
 }
 
+// EDGE-PRELUDE-VETO, MACRO SCOPE: where a `macro_rules!` without #[macro_export] (Symbol::internalLinkage on a Rust macro) is in scope.
+// Such a macro is TEXTUAL: a call names it only in the file that defines it and in that file's child modules (a `mod x;` file under
+// the module's directory: `src/a.rs` owns `src/a/`, a `lib.rs` / `main.rs` / `mod.rs` owns its own directory). `#[macro_use]` on
+// the `mod` that declares the macro's module keeps its macros in scope after it, so the scope widens to the parent module's, and on up
+// while each parent is itself declared `#[macro_use]`. Source order inside a module is not read (a call above the definition binds), nor
+// a `#[path]` module; the scope is a set of files and directory prefixes, read once per macro file (one parent file read per level).
+struct RustMacroScope
+{
+    std::vector<std::string> files;   // identity paths of the files whose whole text sees the macro
+    std::vector<std::string> dirs;    // identity directory prefixes (no trailing '/') whose files are child modules in scope
+    bool holds( std::string_view path ) const
+    {
+        return std::ranges::find( files, path ) != files.end()
+            || std::ranges::any_of( dirs, [ & ]( const std::string& d )
+                                   { return d.empty() || ( path.size() > d.size() && path.starts_with( d ) && path[ d.size() ] == '/' ); } );   // "": the top level owns all
+    }
+};
+using RustMacroScopeCache = HashMap<std::uint32_t, RustMacroScope>;
+
+// Does `text` declare `mod name` under `#[macro_use]` (`#[macro_use] mod name;`, `#[macro_use]\npub(crate) mod name {`, other attributes
+// between)? A bare text scan: a spelling inside a comment or string is read like code.
+inline bool rustDeclaresMacroUseMod( std::string_view text, std::string_view name )
+{
+    constexpr std::string_view kMark = "#[macro_use]";
+    const auto skipSpace = [ & ]( std::size_t at ) { return std::min( text.find_first_not_of( " \t\r\n", at ), text.size() ); };
+    const auto isIdent   = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    for( std::size_t hit = text.find( kMark ); hit != std::string_view::npos; hit = text.find( kMark, hit + 1 ) )
+    {
+        std::size_t at = skipSpace( hit + kMark.size() );
+        while( text.substr( at ).starts_with( "#[" ) )   // another attribute of the same item
+        {
+            const std::size_t close = text.find( ']', at );
+            at = close == std::string_view::npos ? text.size() : skipSpace( close + 1 );
+        }
+        if( text.substr( at ).starts_with( "pub" ) && ( at + 3 >= text.size() || !isIdent( text[ at + 3 ] ) ) )
+        {
+            at = skipSpace( at + 3 );
+            if( text.substr( at ).starts_with( "(" ) )
+            {
+                const std::size_t close = text.find( ')', at );
+                at = close == std::string_view::npos ? text.size() : skipSpace( close + 1 );
+            }
+        }
+        if( !text.substr( at ).starts_with( "mod" ) || at + 3 >= text.size() || isIdent( text[ at + 3 ] ) )
+        {
+            continue;
+        }
+        at = skipSpace( at + 3 );
+        if( text.substr( at ).starts_with( name ) && ( at + name.size() >= text.size() || !isIdent( text[ at + name.size() ] ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The scope of the non-exported macros file `m` defines (RustMacroScope), built once per file.
+inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uint32_t m, RustMacroScopeCache& cache )
+{
+    auto [ at, fresh ] = cache.try_emplace( m );
+    if( !fresh )
+    {
+        return at->second;
+    }
+    RustMacroScope& scope = at->second;
+    std::string     ident = ing.files[ m ];
+    std::string     disk  = diskPath( ing, m );
+    for( int level = 0; level < 64; ++level )   // a module tree deeper than 64 levels stops widening: the scope only narrows, so binds fewer
+    {
+        const auto split = []( const std::string& p )
+        {
+            const std::size_t slash = p.rfind( '/' );
+            return slash == std::string::npos ? std::pair{ std::string(), p } : std::pair{ p.substr( 0, slash ), p.substr( slash + 1 ) };
+        };
+        const auto [ identDir, base ] = split( ident );
+        const std::string diskDir     = split( disk ).first;
+        const std::string stem        = base.ends_with( ".rs" ) ? base.substr( 0, base.size() - 3 ) : base;
+        const bool        dirOwner    = stem == "mod" || stem == "lib" || stem == "main";
+        scope.files.push_back( ident );
+        scope.dirs.push_back( dirOwner ? identDir : ( identDir.empty() ? stem : identDir + "/" + stem ) );
+        if( stem == "lib" || stem == "main" || ( stem == "mod" && identDir.empty() ) )
+        {
+            break;   // a crate root (or a bare top-level mod.rs): no parent module to widen into
+        }
+        // The module's name and the directory its parent module owns.
+        const std::string modName      = stem == "mod" ? split( identDir ).second : stem;
+        const std::string parentIdent  = stem == "mod" ? split( identDir ).first : identDir;
+        const std::string parentDisk   = stem == "mod" ? split( diskDir ).first : diskDir;
+        const auto        join         = []( const std::string& d, std::string_view f ) { return d.empty() ? std::string( f ) : d + "/" + std::string( f ); };
+        bool              widened      = false;
+        for( const std::string_view parentFile : { "lib.rs", "main.rs", "mod.rs", "" } )
+        {
+            // "" = the 2018 layout's `parent.rs` beside the `parent/` directory
+            const std::string pIdent = parentFile.empty() ? parentIdent + ".rs" : join( parentIdent, parentFile );
+            const std::string pDisk  = parentFile.empty() ? parentDisk + ".rs" : join( parentDisk, parentFile );
+            if( parentFile.empty() && parentIdent.empty() )
+            {
+                continue;
+            }
+            const std::optional<std::string> text = docparse::detail::readWholeFile( pDisk );
+            if( text && rustDeclaresMacroUseMod( *text, modName ) )
+            {
+                ident   = pIdent;
+                disk    = pDisk;
+                widened = true;
+                break;
+            }
+        }
+        if( !widened )
+        {
+            break;
+        }
+    }
+    return scope;
+}
+
 // Rust base clause table values: the head of the `use` is DECIDED outside the tree ('\0') or UNDECIDED ('u').
 inline constexpr char kRustUseUndecided = 'u';
 
@@ -9970,6 +10086,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             break;
         }
     }
+    RustMacroScopeCache macroScopes;   // EDGE-PRELUDE-VETO: a non-exported Rust macro file's textual scope, read once when a site asks
     for( siteIndex = 0; siteIndex < ing.references.size(); ++siteIndex )
     {
         const Reference& site = ing.references[ siteIndex ];
@@ -10020,7 +10137,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // macro of the name, or a function the language's written binding proves (a Rust procedural macro, `#[proc_macro] pub fn sql`, reached
         // through `use sqlez_macros::sql;`). A C-family Macro site names a #define by construction (retagMacroCallReferences); a Rust `assert!`
         // or `json!` with neither is a std or outside crate's macro: external=, whatever same-named definitions the tree holds.
-        const auto macroDef = [ & ]( NodeId c ) { return symKind[ c ] == SymKind::Macro && langCompatible( symLang[ c ], r.lang ); };
+        // A Rust `macro_rules!` without #[macro_export] (internalLinkage) is textual: it binds a site in its own file, a child module of it
+        // or, through `#[macro_use] mod`, its parent's (rustMacroScopeOf), or one a `use` names (a `pub(crate) use m;` re-export).
+        const auto macroDef = [ & ]( NodeId c )
+        {
+            return symKind[ c ] == SymKind::Macro && langCompatible( symLang[ c ], r.lang )
+                && ( ing.symbols[ c ].internalLinkage == 0 || macroRefLang( symLang[ c ] ) || symFileId[ c ] == r.fileId
+                     || rustMacroScopeOf( ing, symFileId[ c ], macroScopes ).holds( ing.files[ r.fileId ] )
+                     || ( langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) ) );
+        };
         const auto procMacroDef = [ & ]( NodeId c )
         {
             return symKind[ c ] == SymKind::Function && langCompatible( symLang[ c ], r.lang ) && langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse

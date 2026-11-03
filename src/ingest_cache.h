@@ -366,7 +366,9 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 295;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 297;          // bump on any grammar/.scm/extraction change
+                                                      // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage
+                                                      //   (textual scope, graph.h rustMacroScopeOf). Rich file tag 298. kCacheVersion unchanged.
                                                       // 295 = 2026-11-03 (lane edge-prelude-veto): a Rust macro invocation is captured @reference.macro (role Macro,
                                                       //   queries/rust/tags.scm), no longer @reference.call. Rich file tag 296. kCacheVersion unchanged.
                                                       // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
