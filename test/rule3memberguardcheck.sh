@@ -55,9 +55,11 @@ w "$R/src/globuser.rs" 'use crate::a::*;\nfn g_glob() { globbed(); }\n'
 w "$R/src/nest.rs" 'use crate::a::helper;\nuse std::mem::swap;\nmod tests {\n    use super::*;\n    fn t_super_glob() -> i32 { Ok(1) }\n    fn t_super_use() { helper(); }\n    fn t_super_out() { swap(); }\n}\n'
 row R1.use        "$R" callees u_use        src/a.rs helper  proven
 row R1.far        "$R" callees u_use        src/far.rs helper none
-row R2.prelude    "$R" callees u_prelude    src/a.rs Ok      name
+# EDGE-PRELUDE-VETO: a prelude name (`Ok`), a std macro (`assert!`) and an outside crate's macro (`json!`) with no written binding leave the graph,
+# counted external= (test/preludevetocheck.sh); before that lane these three read via="name"
+row R2.prelude    "$R" callees u_prelude    src/a.rs Ok      none
 row R2.neighbour  "$R" callees u_prelude    src/far.rs Ok    none
-row R3.macro      "$R" callees u_macro      src/a.rs assert  name
+row R3.macro      "$R" callees u_macro      src/a.rs assert  none
 row R4.type       "$R" callees u_type       src/a.rs Thing::new proven
 row R5.module     "$R" callees u_module     src/a.rs channel proven
 row R6.outside    "$R" callees u_outside    src/a.rs channel none
@@ -66,15 +68,16 @@ row R7.stdtype    "$R" callees u_stdtype    src/a.rs new     none
 row R7.twin       "$R" callees u_stdtype    src/a.rs helper  proven
 row R8.stduse     "$R" callees u_stduse     src/a.rs swap    name
 row R5.alias      "$R" callees u_alias      src/a.rs Thing::new proven
-row R5.extuse     "$R" callees u_ext_use    src/a.rs json    name
+row R5.extuse     "$R" callees u_ext_use    src/a.rs json    none
 # Rust records no local or parameter binding (RUST-LOCALS card): a closure named like a def, called, keeps Rule 3's file hedged like any unbound name
 row R5.closure    "$R" callees u_closure    src/a.rs conv    name
 row R9.glob       "$R" callees g_glob       src/a.rs globbed proven
-row R10.superglob "$R" callees t_super_glob src/a.rs Ok      name
+row R10.superglob "$R" callees t_super_glob src/a.rs Ok      none
 row R11.superuse  "$R" callees t_super_use  src/a.rs helper  proven
 row R11.superout  "$R" callees t_super_out  src/a.rs swap    name
-row R12.callers   "$R" callers Ok           src/user.rs u_prelude name
-row M.rust        "$R" callees u_member     src/a.rs Thing::lock name
+row R12.callers   "$R" callers Ok           src/user.rs u_prelude none
+# `lock` joined the Rust standard-member table (EDGE-PRELUDE-VETO's hand sample): an unproven `x.lock()` is declined, counted
+row M.rust        "$R" callees u_member     src/a.rs Thing::lock none
 
 # ---- Rust, a qualifier written with more than one segment (fix 4). Reference::qualifier keeps only the last one (`far` of `crate::far::helper()`);
 # the guard reads the path whole from its root, so a module reached through `crate::`, `super::`, `self::`, a `use … as` alias or the crate's own name is
@@ -123,7 +126,7 @@ w "$Z/crates/gr/src/gr.rs" 'pub mod f;\nuse gr::f::*;\nfn z_own_glob() { globz()
 w "$Z/crates/gr/src/f.rs" 'pub fn globz() {}\n'
 printf 'pub fn globz() {}\n' >> "$Z/crates/other/src/other.rs"
 row Z1.crate   "$Z" callees z_crate         crates/settings/src/file.rs update_file proven
-row Z2.prelude "$Z" callees z_crate_prelude crates/settings/src/file.rs Ok name
+row Z2.prelude "$Z" callees z_crate_prelude crates/settings/src/file.rs Ok none
 # a root naming ANOTHER package is no proof of the target package's file (`use other::shared` over the closure's `shared`); a root naming the target's own package is
 row Z3.otherroot "$Z" callees z_other_root crates/settings/src/file.rs shared name
 row Z4.ownroot   "$Z" callees z_own_root   crates/settings/src/file.rs viaown proven

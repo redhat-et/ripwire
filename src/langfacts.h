@@ -176,6 +176,19 @@ struct LangFacts
     /// None: Rule 3 keeps deciding as it did (hand samples of C, C++, TS, Go: reports/rule3-member-guard.md).
     Rule3NameProof rule3NameProof = Rule3NameProof::None;
 
+    /// EDGE-PRELUDE-VETO: the names a bare call means in the language's prelude, bound outside the tree unless a binding of the name is
+    /// written (a definition in the caller's file, or one the rule3NameProof writing proves: a Rust `use`). Such a call joins the Phase-5
+    /// external-name veto beside Python's builtins and the C family's library names, BEFORE Rule 3 (graph.h preludeSite), so an
+    /// associated `type Ok;` or a nested `fn drop` an imported file defines never takes `Ok(x)` / `drop(x)`. Rust only (kRustPreludeCalls).
+    std::span<const std::string_view> preludeCalls = {};
+    constexpr bool isPreludeCall( std::string_view name ) const noexcept { return std::ranges::contains( preludeCalls, name ); }
+
+    /// EDGE-PRELUDE-VETO: the language invokes a macro only by a site the grammar spells as one (Rust `name!(..)`, queries/rust/tags.scm
+    /// @reference.macro, role Macro), so a role Call site never binds to a macro (graph.h siteNamespaceCompatible), and a macro definition
+    /// without an export attribute is textually scoped (ingest_names.h internalLinkageBit: Rust `macro_rules!` without #[macro_export]).
+    /// False where a macro is called like a function (a Clojure `defmacro` invoked as `(name ..)`) and in the C family (a #define).
+    bool bangMacros = false;
+
     /// Kotlin: an `interface` is a class_declaration like a class (queries/kotlin/tags.scm: "both land here as @definition.class"),
     /// so the symbol's kind cannot tell the two apart; shared code that needs an interface (ifacedispatch.h's lambda test) reads a
     /// class of such a language as a possible one.
@@ -321,6 +334,11 @@ struct LangFacts
     bool localBraceNotData = false;
 };
 
+/// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
+/// std::mem::drop. `None` is never called; types (`Box`, `Vec`, `String`) are reached through a path (`Box::new`), and macros
+/// (`assert!`, `vec!`) are role Macro (queries/rust/tags.scm). LangFacts::preludeCalls.
+inline constexpr std::array<std::string_view, 4> kRustPreludeCalls = { "Err", "Ok", "Some", "drop" };
+
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
 inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals", "hashCode", "toString" };
 
@@ -337,7 +355,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },

@@ -911,6 +911,8 @@ struct Symbol
     // cache record, so kParserVer gates it like every other extracted fact. 0 (the SAFE state) means "no internal
     // linkage found", so a grammar that never sets it keeps today's gather. Shares testScope's byte as a bit-field:
     // Symbol has no pad byte left (the static_assert below holds unchanged).
+    // RUST (EDGE-PRELUDE-VETO): on a `macro_rules!` the same bit means NO #[macro_export]: the macro is textually scoped (its file, child
+    // modules, a `#[macro_use] mod` parent's: graph.h rustMacroScopeOf), so a `name!(..)` elsewhere does not bind it.
     std::uint8_t  internalLinkage : 1 = 0;
     // STD-ROOTED SCOPE (#150, C++ only): 1 ⇒ walking this def's FULL enclosing-owner chain out to the
     // translation unit, the OUTERMOST namespace found is literally `std` — i.e. this def genuinely lives
