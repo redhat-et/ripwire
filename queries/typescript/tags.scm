@@ -272,3 +272,13 @@
 (call_expression
   function: [ (identifier) (import) ]
   arguments: (arguments . (string) @import.path))
+
+; #448 route registration — `obj.VERB('/path', …, handler)`, captured like every other shape (family 7)
+; instead of the old text-gated walk. The C++ arm re-checks the verb table, the leading '/' and a
+; function-valued last argument — a Map/cache `.get('/x', fallback)` with a non-function second
+; argument must not register a route.
+(call_expression
+  function: (member_expression
+    property: (property_identifier))
+  arguments: (arguments
+    . (string))) @route.def
