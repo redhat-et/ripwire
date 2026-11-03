@@ -102,6 +102,38 @@ w "$P/reexp/__init__.py" ''
 w "$P/reexp/inner/__init__.py" 'from .impl import re_f\n'
 w "$P/reexp/inner/impl.py" 'def re_f(v):\n    return v\n'
 w "$P/use_re.py" 'from reexp import inner\n\ndef run_re():\n    return inner.re_f(1)\n'
+# MF1 (rv-py-mod): the submodule's def of f must be f's ONLY module-scope binding — a later assignment, a named accelerator import under
+# try, an import of f from another module (plain or `as`), a `del`, or a package submodule that re-imports f all withhold; the twin
+# (an assignment of ANOTHER name from f, a decorated def) still proves
+w "$P/app/m1a.py" 'def m1a_f(x):\n    return x\n\ndef m1a_g(x):\n    return x\n\nm1a_f = m1a_g\n'
+w "$P/app/m1i.py" 'def m1i_f(x):\n    return x\n\ntry:\n    from _m1speed import m1i_f\nexcept ImportError:\n    pass\n'
+w "$P/app/m1r.py" 'def m1r_f(x):\n    return x\n\nfrom ._m1impl import m1r_f\n'
+w "$P/app/m1s.py" 'def m1s_f(x):\n    return x\n\nfrom ._m1impl import m1s_g as m1s_f\n'
+w "$P/app/_m1impl.py" 'def m1r_f(x):\n    return x * 2\n\ndef m1s_g(x):\n    return x * 3\n'
+w "$P/app/m1d.py" 'def m1d_f(x):\n    return x\n\ndel m1d_f\n'
+w "$P/app/m1p/__init__.py" 'def m1p_f(x):\n    return x\n\nfrom .impl import m1p_f\n'
+w "$P/app/m1p/impl.py" 'def m1p_f(x):\n    return x * 2\n'
+w "$P/app/m1ok.py" 'import functools\n\ndef deco(fn):\n    @functools.wraps(fn)\n    def w(*a):\n        return fn(*a)\n    return w\n\ndef m1ok_f(x):\n    return x\n\nm1ok_alias = m1ok_f\n\n@deco\ndef m1ok_d(x):\n    return x\n'
+w "$P/app/use_m1.py" 'from . import m1a, m1i, m1r, m1s, m1d, m1p, m1ok\n\ndef run_m1a():\n    return m1a.m1a_f(1)\n\ndef run_m1i():\n    return m1i.m1i_f(1)\n\ndef run_m1r():\n    return m1r.m1r_f(1)\n\ndef run_m1s():\n    return m1s.m1s_f(1)\n\ndef run_m1d():\n    return m1d.m1d_f(1)\n\ndef run_m1p():\n    return m1p.m1p_f(1)\n\ndef run_m1ok():\n    return m1ok.m1ok_f(1)\n\ndef run_m1okd():\n    return m1ok.m1ok_d(1)\n'
+# MF2: a FUNCTION-LOCAL from-import binds a local, so it neither contests a module-level binding (base's `import a.b as mod` edge, a
+# module-level `from . import x as rm`) nor makes a package bind the name (`def lazy(): from . import other as ly` in the __init__)
+w "$P/app/real_i.py" 'def i_f(x):\n    return x\n'
+w "$P/app/alt_i.py" 'def i_f(x):\n    return x\n'
+w "$P/app/use_i.py" 'import app.real_i as mod\n\ndef run_itop():\n    return mod.i_f(1)\n\ndef run_iloc():\n    from . import alt_i as mod\n    return mod.i_f(2)\n'
+w "$P/app/use_i3.py" 'from . import real_i as rm\n\ndef run_i3top():\n    return rm.i_f(4)\n\ndef run_i3loc():\n    from . import alt_i as rm\n    return rm.i_f(5)\n'
+w "$P/lzp/__init__.py" 'def lazy():\n    from . import other as ly\n    return ly\n'
+w "$P/lzp/ly.py" 'def ly_f(x):\n    return x\n'
+w "$P/lzp/other.py" 'def ly_f(x):\n    return x\n'
+w "$P/use_lzp.py" 'from lzp import ly\n\ndef run_lzp():\n    return ly.ly_f(1)\n'
+# MF2 disclosed floor: `if TYPE_CHECKING: from . import y` / `else: import app.y_rt as y` — two module-scope bindings of y to two files,
+# the guard is not read, so the call is declined and counted (base proved the runtime one; no wrong edge either way)
+w "$P/app/tm_a.py" 'def t_f(x):\n    return x\n'
+w "$P/app/tm_b.py" 'def t_f(x):\n    return x\n'
+w "$P/app/use_t.py" 'from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from . import tm_a as tm\nelse:\n    import app.tm_b as tm\n\ndef run_t():\n    return tm.t_f(1)\n'
+# MF3: p/y.py beside p/y/__init__.py — Python's FileFinder binds the package
+w "$P/app/dual.py" 'def dual_f(x):\n    return x\n'
+w "$P/app/dual/__init__.py" 'def dual_f(x):\n    return x\n'
+w "$P/app/use_dual.py" 'from . import dual\n\ndef run_dual():\n    return dual.dual_f(1)\n'
 ( cd "$P" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
 
 # ---- S: the accepted spellings bind the call (S3 is the module form Rule 2d already read: the twin)
@@ -132,6 +164,28 @@ row N7.starimport   dyn_s    use_dyn.py        run_dyns  declined
 row N8.reexport     re_f     use_re.py         run_re    declined
 row N9.twomodules   two_f    app/use_two.py    run_two   declined
 row N10.method      only_meth app/use_meth.py  run_meth  name
+# ---- MF1: f's one module-scope binding (the twin M1.ok/M1.deco proves)
+row M1.assign       app/m1a.py:m1a_f  app/use_m1.py run_m1a declined
+row M1.tryimport    app/m1i.py:m1i_f  app/use_m1.py run_m1i declined
+row M1.reimport     app/m1r.py:m1r_f  app/use_m1.py run_m1r declined
+row M1.reimport2    app/_m1impl.py:m1r_f app/use_m1.py run_m1r none
+row M1.asimport     app/m1s.py:m1s_f  app/use_m1.py run_m1s declined
+row M1.del          app/m1d.py:m1d_f  app/use_m1.py run_m1d declined
+row M1.pkgsub       app/m1p/__init__.py:m1p_f app/use_m1.py run_m1p declined
+row M1.ok           app/m1ok.py:m1ok_f app/use_m1.py run_m1ok proven
+row M1.deco         app/m1ok.py:m1ok_d app/use_m1.py run_m1okd proven
+# ---- MF2: function-local from-imports do not poison
+row M2.modform      app/real_i.py:i_f app/use_i.py   run_itop  proven
+row M2.fromform     app/real_i.py:i_f app/use_i3.py  run_i3top proven
+row M2.localnone    app/alt_i.py:i_f  app/use_i.py   run_iloc  none
+row M2.pkglocal     lzp/ly.py:ly_f    use_lzp.py     run_lzp   proven
+row M2.typecheck    app/tm_b.py:t_f   app/use_t.py   run_t     declined
+# ---- MF3: the package directory wins
+row M3.pkgfirst     app/dual/__init__.py:dual_f app/use_dual.py run_dual proven
+row M3.notmodule    app/dual.py:dual_f app/use_dual.py run_dual none
+# ---- S pinned by file (the arms above match the caller by name across every def of the callee name)
+row S1.pinned       app/boot.py:setup_a app/use_a.py run_a proven
+row S2.pinned       app/boot.py:setup_b app/use_b.py run_b proven
 
 if [ "$fail" = 0 ]; then echo "pymodcallsitescheck: PASS"; else echo "pymodcallsitescheck: FAIL"; fi
 exit "$fail"

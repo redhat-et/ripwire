@@ -2302,10 +2302,13 @@ inline NodeId pythonBindScope( const IngestResult& ing, const Binding& b ) noexc
 // PythonScopeFacts::nameBinds: every binding of a name a Python class's base clause starts with (the bare base, else its
 // qualifier) or is looked up under (addPythonLookupNames), per file and scope. buildPythonModuleRebindVetoes keeps only the module-scope facts; the base-name rule (pythonBaseNameProven)
 // needs the scoped ones too, because a class statement resolves its base in ITS lexical scope chain, not the module's.
-inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing )
+inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing, HashMap<std::string, char> wanted = {} )
 {
     HashMap<std::string, std::vector<PythonNameBind>> binds;
-    HashMap<std::string, char>                        wanted = pythonBaseClauseNames( ing );
+    for( auto& [ name, c ] : pythonBaseClauseNames( ing ) )
+    {
+        wanted.try_emplace( name, c );
+    }
     addPythonLookupNames( ing, wanted );
     std::string                                       key;
     for( const Binding& b : ing.bindings )
@@ -2405,9 +2408,9 @@ inline void recordMemberImportFile( const Binding& b, std::uint32_t resolved, co
 inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std::uint32_t moduleFile, const HashMap<std::string, std::uint32_t>& fileIndex,
                                  std::string& key, HashMap<std::string, PythonSubmoduleBind>& out )
 {
-    if( b.importedName == "module" || b.typeName.empty() || b.var.empty() || b.var == "*" )
+    if( b.importedName == "module" || b.typeName.empty() || b.var.empty() || b.var == "*" || pythonBindScope( ing, b ) != kNoNode )
     {
-        return;
+        return;   // a function-local from-import binds a local (hasLocal), not the module-level name: it neither proves nor contests y
     }
     const std::string_view member = b.importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() )
                                                                                        : std::string_view( b.var );
@@ -2454,8 +2457,9 @@ inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std:
             const auto it = fileIndex.find( lexicalNormalize( p ) );
             return it == fileIndex.end() ? kNoFile : inImporterRoot( ing.fileRoot, b.fileId, it->second );
         };
-        sub = look( std::string( member ).append( ".py" ) );
-        sub = sub != kNoFile ? sub : look( std::string( member ).append( "/__init__.py" ) );
+        // Python's FileFinder tries the package directory before the module file: p/y/__init__.py wins over p/y.py
+        sub = look( std::string( member ).append( "/__init__.py" ) );
+        sub = sub != kNoFile ? sub : look( std::string( member ).append( ".py" ) );
         pkg = look( "__init__.py" );
     }
     key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
@@ -2511,10 +2515,11 @@ inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBi
                 const auto own = t.importBindFile.find( mk( p, sb.member ) );
                 mayBind = own != t.importBindFile.end() && own->second != file;
             }
-            if( !mayBind && t.memberImportFile.contains( mk( p, sb.member ) ) )
+            if( !mayBind )
             {
-                const auto own = pending.find( pk );
-                mayBind = own == pending.end() || own->second.file != file;   // the package's from-import of x must name this submodule too
+                // the package's module-scope from-import of x must name this submodule too (a function-local one binds no package attribute)
+                const auto own = pending.find( mk( p, sb.member ) );
+                mayBind = own != pending.end() && own->second.file != file;
             }
             if( mayBind )
             {
@@ -2523,27 +2528,6 @@ inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBi
         }
         t.submoduleBindFile.emplace( key, file );
     }
-}
-
-// PY-MOD-CALL-SITES: may `y.f()` read submodule file `sub`'s own module-scope f? Not when nothing proved the binding (kNoFile), when
-// the module may write its namespace dynamically (`globals()` / `setattr`, kPythonDynamicWrite: any name may be rebound), or when f's
-// def sits under an `if` / `try` / `with` / loop (kPythonCondDefPrefix: it may not run, and the other branch may bind f otherwise —
-// `json_bytes = partial(...)` — or leave it to a module `__getattr__`), or when the module star-imports another (an accelerator's
-// `from _elementtree import *` rebinds f, in which order is not read). An unconditional def answers before any `__getattr__` (PEP 562).
-// `key` is the caller's reused buffer.
-inline bool pythonSubmoduleAttrProven( const ExternalVetoTables& v, std::uint32_t sub, std::string_view f, std::string& key )
-{
-    if( sub == kNoFile )
-    {
-        return false;
-    }
-    const auto marked = [ & ]( std::string_view a, std::string_view b )
-    {
-        key.clear();  Narrower::appendUint( key, sub );  key.push_back( '#' );  key.append( a ).append( b );
-        return v.pythonModuleRebind.contains( key );
-    };
-    const bool star = sub < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ sub ].empty();   // `from _c import *` may rebind f
-    return !star && !marked( kPythonDynamicWrite, {} ) && !marked( kPythonCondDefPrefix, f );
 }
 
 // the file a Python import directive names — Step-A, else the memoized suffix match; kNoFile for a non-Python includer or no match
@@ -2635,6 +2619,27 @@ inline std::uint32_t pythonFromImportModuleFile( const Binding& b, std::uint32_t
     return resolved != kNoFile ? resolved : memo.resolve( b.typeName, fileIndex, b.fileId );
 }
 
+// PY-MOD-CALL-SITES: the attribute names `y.f()` reads through a module-scope from-import y that names an in-tree submodule — the
+// names whose module-scope bindings pythonSubmoduleAttrProven asks of the submodule (nameBinds holds only the names asked for)
+inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult& ing, const HashMap<std::string, PythonSubmoduleBind>& submodules )
+{
+    HashMap<std::string, char> names;
+    std::string                key;
+    for( const Reference& r : ing.references )
+    {
+        if( r.lang == Lang::Python && r.recv == RecvKind::NamedVar && !r.recvVar.empty() && !r.calleeName.empty() )
+        {
+            key.clear();  Narrower::appendUint( key, r.fileId );  key.push_back( '#' );  key.append( r.recvVar );
+            const auto it = submodules.find( key );
+            if( it != submodules.end() && it->second.anySub )
+            {
+                names.try_emplace( r.calleeName, '\0' );
+            }
+        }
+    }
+    return names;
+}
+
 inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
                                                     const HashMap<std::string, char>& moduleNames,
                                                     const HashMap<std::string, char>& pythonModuleRebind )
@@ -2667,7 +2672,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     }
     t.importFiles  = buildPythonImportFiles( ing, fileIndex, memo );
     t.scopes.starTargets = buildPythonStarTargets( ing, fileIndex, memo );
-    t.scopes.nameBinds   = buildPythonNameBinds( ing );
+    t.scopes.nameBinds   = buildPythonNameBinds( ing, pythonSubmoduleCalleeNames( ing, t.submodules ) );
     return t;
 }
 
@@ -7661,6 +7666,28 @@ inline bool pythonEndpointBindsOnlyByClass( const ExternalVetoTables& v, std::ui
     const std::vector<PythonNameBind>* binds = pythonModuleBindsOf( v, f, name );
     return binds != nullptr && std::ranges::count_if( *binds, []( const PythonNameBind& b ) { return b.scope == kNoNode; } ) == 1
         && std::ranges::none_of( *binds, []( const PythonNameBind& b ) { return b.scope == kNoNode && b.isImport; } ) && !pythonStarMayBind( v, f, name );
+}
+
+// PY-MOD-CALL-SITES: may `y.f()` read submodule file `sub`'s own module-scope f? Not when nothing proved the binding (kNoFile), when
+// the module may write its namespace dynamically (`globals()` / `setattr`, kPythonDynamicWrite: any name may be rebound), or when f's
+// def sits under an `if` / `try` / `with` / loop (kPythonCondDefPrefix: it may not run, and the other branch may bind f otherwise —
+// `json_bytes = partial(...)` — or leave it to a module `__getattr__`), or when the module star-imports another (an accelerator's
+// `from _elementtree import *` rebinds f, in which order is not read), or when the def or class is not f's ONLY module-scope binding
+// there (pythonEndpointBindsOnlyByClass: a later `f = g`, `from _speed import f` under try, `from ._impl import f`, `del f`, a second
+// def or class all withhold). An unconditional def answers before any `__getattr__` (PEP 562). `key` is the caller's reused buffer.
+inline bool pythonSubmoduleAttrProven( const ExternalVetoTables& v, std::uint32_t sub, std::string_view f, std::string& key )
+{
+    if( sub == kNoFile )
+    {
+        return false;
+    }
+    const auto marked = [ & ]( std::string_view a, std::string_view b )
+    {
+        key.clear();  Narrower::appendUint( key, sub );  key.push_back( '#' );  key.append( a ).append( b );
+        return v.pythonModuleRebind.contains( key );
+    };
+    const bool star = sub < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ sub ].empty();   // `from _c import *` may rebind f
+    return !star && !marked( kPythonDynamicWrite, {} ) && !marked( kPythonCondDefPrefix, f ) && pythonEndpointBindsOnlyByClass( v, sub, f );
 }
 
 inline constexpr int kPythonReexportHops = 4;   // member-import hops provenBasesOf follows (a package re-exporting a re-export)
