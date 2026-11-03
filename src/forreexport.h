@@ -49,10 +49,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -1544,7 +1546,7 @@ inline bool forShortKeyOn()
 inline constexpr std::string_view kShortKeyLegend =
     "<!-- shortkey: the task names X, the route read it as a name (name-exact) and no definition resolved (from=sentence: the route read "
     "the task as words, X is its one code-shaped name and no definition of X resolved); the ladder below says what "
-    "does exist, each rung named, none of it a definition of X unless exact=1. rungs= the rungs run, in order. "
+    "the index holds, each rung named, none of it a definition of X unless exact=1. rungs= the rungs run, in order. "
     "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove every segment of Q (q_by=scope: its owner path; file: "
     "its file stem or path tail, never for a member; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own "
     "`import * as Q`; path: its file path names Q but an `import * as Q` binds Q to another module; dir: only directories on its path; "
@@ -1772,6 +1774,7 @@ inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_
 // or an interior `_`: `ChunkPtr`, `max_len`; a plain capitalised word, `Python`, `Utils`, `Column`, is English as often as code, the
 // same reading the name-exact route makes). A bare word that is a segment of the qualified spelling beside it (`getX … Owner.getX`)
 // is that name. Spans break on every byte that is not an identifier byte, `$`, `.` or `:` (`--defs=ColumnPtr` holds `ColumnPtr`).
+// A span whose last segment is a file or host suffix names a file or host, so none of its words is a name (`CMakeLists.txt`).
 inline std::string_view sentenceName( std::string_view task )
 {
     const auto spanByte = []( char c ) { return namesplit::isIdentChar( c ) || c == '$' || c == '.' || c == ':'; };
@@ -1802,6 +1805,10 @@ inline std::string_view sentenceName( std::string_view task )
             addOnce( quals, tok );
             continue;
         }
+        if( !segs.empty() && lit_detail::isFileOrHostSuffix( segs.back() ) )   // a file or host name (`CMakeLists.txt`, `HttpClient.cpp`): no word of it is a name
+        {
+            continue;
+        }
         for( std::size_t w = 0; w < tok.size(); )   // the words of a span that is no qualified name
         {
             std::size_t e = w;
@@ -1828,45 +1835,69 @@ inline std::string_view sentenceName( std::string_view task )
     return quals.empty() ? words.front() : quals.front();
 }
 
-// A qualified spelling that names a FILE of the tree, not a definition: a file's basename (`build.ninja`) or a module path whose
+// A qualified spelling that names a FILE of the tree, not a definition: a file's basename (`build.ninja`), a module path whose
 // segments are the file's directories and stem (`http.server` for Lib/http/server.py, `pkg.sub` for pkg/sub/__init__.py or
-// pkg/sub/index.ts).
-inline bool sentenceNameIsFile( const IngestResult& ing, std::string_view x, const std::vector<std::string_view>& segs )
+// pkg/sub/index.ts), or one down to a dotted stem (`app.module` for src/app/app.module.ts, `feature.user.service` for
+// lib/feature/user.service.ts). A dotted X that exists at the root (`go.mod`, `meson.build`: files the index does not hold) is a
+// file too: one stat, `root` "" skips it.
+inline bool sentenceNameIsFile( const IngestResult& ing, std::string_view x, const std::vector<std::string_view>& segs, std::string_view root )
 {
-    std::string mod;
+    std::string mod, dotted;
     for( const std::string_view g : segs )
     {
         mod.append( mod.empty() ? "" : "/" ).append( g );
+        dotted.append( dotted.empty() ? "" : "." ).append( g );
     }
     const auto atSegment = []( std::string_view path, std::string_view tail ) { return path.ends_with( tail ) && ( path.size() == tail.size() || path[ path.size() - tail.size() - 1 ] == '/' ); };
+    // `tail` (segments joined by `.`) ends `path` at a `/` or `.` boundary, a `/` of the path matching a `.` of the tail
+    const auto atDottedSegment = []( std::string_view path, std::string_view tail )
+    {
+        if( path.size() < tail.size() )
+        {
+            return false;
+        }
+        const std::size_t off = path.size() - tail.size();
+        for( std::size_t i = 0; i < tail.size(); ++i )
+        {
+            if( path[ off + i ] != tail[ i ] && !( path[ off + i ] == '/' && tail[ i ] == '.' ) )
+            {
+                return false;
+            }
+        }
+        return off == 0 || path[ off - 1 ] == '/' || path[ off - 1 ] == '.';
+    };
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        const std::string_view rel   = rootRelPath( ing, f );
-        const std::size_t      slash = rel.rfind( '/' );
-        const std::string_view base  = rel.substr( slash == std::string_view::npos ? 0 : slash + 1 );
-        const std::size_t      dot   = base.find( '.' );
-        const std::string_view stem  = rel.substr( 0, rel.size() - base.size() + ( dot == std::string_view::npos ? base.size() : dot ) );
-        const bool             pkg   = base.starts_with( "__init__." ) || base.starts_with( "index." ) || base.starts_with( "mod." );
-        if( base == x || atSegment( stem, mod ) || ( pkg && slash != std::string_view::npos && atSegment( rel.substr( 0, slash ), mod ) ) )
+        const std::string_view rel     = rootRelPath( ing, f );
+        const std::size_t      slash   = rel.rfind( '/' );
+        const std::string_view base    = rel.substr( slash == std::string_view::npos ? 0 : slash + 1 );
+        const std::size_t      dot     = base.find( '.' );
+        const std::size_t      lastDot = base.rfind( '.' );
+        const std::string_view stem    = rel.substr( 0, rel.size() - base.size() + ( dot == std::string_view::npos ? base.size() : dot ) );
+        const std::string_view stemAll = rel.substr( 0, rel.size() - base.size() + ( lastDot == std::string_view::npos ? base.size() : lastDot ) );
+        const bool             pkg     = base.starts_with( "__init__." ) || base.starts_with( "index." ) || base.starts_with( "mod." );
+        if( base == x || atSegment( stem, mod ) || ( lastDot != dot && atDottedSegment( stemAll, dotted ) ) ||
+            ( pkg && slash != std::string_view::npos && atSegment( rel.substr( 0, slash ), mod ) ) )
         {
             return true;
         }
     }
-    return false;
+    std::error_code ec;
+    return !root.empty() && x.find( ':' ) == std::string_view::npos && std::filesystem::is_regular_file( std::filesystem::path( root ) / x, ec );
 }
 
 // The sentence's name resolved to no definition: a bare X names no symbol in the index (one that exists is the route's to rank, not
 // the ladder's); a qualified X has no definition the answer printed that proves its qualifier fully (provenLeafDefs, the leaf
 // rung's own rule: a served same-leaf decoy does not resolve it). A qualified X that names a file (sentenceNameIsFile) is no
 // definition to resolve: the ladder would list same-leaf strangers.
-inline bool sentenceNameUnresolved( const IngestResult& ing, std::string_view x, const std::vector<NodeId>& served )
+inline bool sentenceNameUnresolved( const IngestResult& ing, std::string_view x, const std::vector<NodeId>& served, std::string_view root )
 {
     const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( x );
     if( segs.empty() )
     {
         return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.name == x; } );
     }
-    if( sentenceNameIsFile( ing, x, segs ) )
+    if( sentenceNameIsFile( ing, x, segs, root ) )
     {
         return false;
     }
@@ -1979,7 +2010,11 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     if( x.empty() && a.served != nullptr && forShortKeyOn() )
     {
         x            = sentenceName( a.task );
-        fromSentence = !x.empty() && sentenceNameUnresolved( ing, x, *a.served );
+        fromSentence = !x.empty() && sentenceNameUnresolved( ing, x, *a.served, a.rootArg );
+        if( !fromSentence )   // a sentence name that resolved, or names a file, is no route name: the bare-name branch must not take it
+        {
+            x = {};
+        }
     }
     // `this.X` / `self.X` is a member access, not a qualified name: no ladder keyed on text no definition can carry
     if( x.empty() || !( a.noDefinitionServed || fromSentence ) || !forShortKeyOn() || x.starts_with( "this." ) || x.starts_with( "self." ) )
@@ -2007,7 +2042,9 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     };
     if( a.held )
     {
-        out = "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run; next= runs it without the budget --><shortkey held=\"budget\"";
+        out = fromSentence ? "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run; next= runs it without the budget; "
+                             "from=sentence: the route read the task as words and X is its one code-shaped name, unresolved --><shortkey held=\"budget\""
+                           : "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run; next= runs it without the budget --><shortkey held=\"budget\"";
         attr( "of", x );
         out.append( fromSentence ? " from=\"sentence\"" : "" );
         return out.append( nextAttrXml( nextFlag( "--for=", x ) ) ).append( "/>" );
