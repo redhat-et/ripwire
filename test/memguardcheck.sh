@@ -366,28 +366,196 @@ else
 fi
 
 # (B6) MCP: a soft stop answers with the envelope disclosure, and every answer from that partial index keeps it
-#      WHICH files survive crawl:30 is the filesystem's readdir order (recursive_directory_iterator, no sort before the
-#      stop): APFS keeps a/f02.c, ext4's hashed order can keep it or not (a simulation over random orders keeps it
-#      ~37 % of the time). find_symbol of a name outside the kept files is a JSON-RPC ERROR, which has no
-#      result._memory_stop at all (CI 40671724898 and #458 runs: B6b "_memory_stop=''" on ubuntu only). So the
-#      per-answer assertions below use verbs whose answer is a RESULT on ANY partial index (grep, an empty match is
-#      still an envelope), and the find_symbol probe is asserted only on the shape it actually returned.
-printf '%s\n' \
-    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
-    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_02\"}}}" \
-    "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$FX\",\"symbol\":\"a_02\"}}}" \
-    | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6.out"
+#      WHICH files survive crawl:30 used to be the filesystem's readdir order (recursive_directory_iterator, no sort
+#      before the stop): APFS kept a/f02.c, ext4's hashed order could drop it (a simulation over random orders kept it
+#      ~37 % of the time), and find_symbol of a name outside the kept files was a JSON-RPC ERROR with no
+#      result._memory_stop at all (CI 40671724898 and #458 runs: B6b "_memory_stop=''" on ubuntu only). The crawl now
+#      walks in byte order of file names (SortedDirWalk), so the kept set is the same on every filesystem, and EVERY
+#      answer from a cut index — a result or a not-found/refusal error — carries the partial-index sentence.
+#      Kept set at crawl:30 (pre-order; the 30th entry is the one the seam stops AT, so 29 are kept): a, a/f00..f17
+#      (entries 1-19), b, b/f00..f08 (20-29).
+cut_req(){   # $1 = id, $2 = tool, $3 = arguments JSON object
+    printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}\n' "$1" "$2" "$3"
+}
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 grep "{\"path\":\"$FX\",\"pattern\":\"a_02\"}"
+  cut_req 4 find_symbol "{\"path\":\"$FX\",\"symbol\":\"a_02\"}"
+  cut_req 5 grep "{\"path\":\"$FX\",\"pattern\":\"b_08\"}"
+  cut_req 6 grep "{\"path\":\"$FX\",\"pattern\":\"b_09\"}"
+  cut_req 7 find_symbol "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 8 find_referencing_symbols "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 9 impact "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 10 uses "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 11 mentions "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 12 owners "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 13 slice "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 14 path_between "{\"path\":\"$FX\",\"from\":\"d_17\",\"to\":\"a_00\"}"
+  cut_req 15 connect "{\"path\":\"$FX\",\"symbols\":[\"d_17\",\"c_17\"]}"
+  cut_req 16 find_symbol "{\"path\":\"$FX\",\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6.out"
 ms2="$( mcp_field "$TMP/b6.out" 2 _memory_stop )"; ms3="$( mcp_field "$TMP/b6.out" 3 _memory_stop )"
 case "$ms2" in *"memory guard"*crawl*64M*) ok "(B6) MCP grep under a crawl stop carries _memory_stop";; *) no "(B6) id=2 _memory_stop='${ms2:0:200}' resp: $( head -c 300 "$TMP/b6.out" )";; esac
 case "$ms3" in *"memory guard"*) ok "(B6b) the next answer from the same partial index still carries it";; *) no "(B6b) id=3 _memory_stop='${ms3:0:200}' resp: $( grep '"id":3' "$TMP/b6.out" | head -c 300 )";; esac
-# (B6b2) a third verb on the same index: when the symbol is inside the kept files the answer is a result and must carry
-#        the disclosure; when it is outside them the answer is a not-found ERROR, whose shape (no envelope) is not what
-#        this arm pins — said on a NOTE line, not a PASS, so a reader sees which shape ran
-if [ -n "$( mcp_field "$TMP/b6.out" 4 error )" ]; then
-    printf '  NOTE  (B6b2) find_symbol a_02 fell outside the kept files here (readdir order): a not-found error, no envelope to check\n'
+# (B6b2) a third verb on the same index. a_02 is inside the kept set on EVERY filesystem, so this is always a result
+ms4="$( mcp_field "$TMP/b6.out" 4 _memory_stop )"
+case "$ms4" in *"memory guard"*) ok "(B6b2) find_symbol a_02 (inside the kept files) is a result and carries _memory_stop";; *) no "(B6b2) id=4 error='$( mcp_field "$TMP/b6.out" 4 error )' _memory_stop='${ms4:0:200}'";; esac
+# (B6d) the kept set is the SAME on every filesystem: b_08 (entry 29) is in, b_09 (entry 30, where the seam stops) is out
+hits5="$( mcp_field "$TMP/b6.out" 5 text | grep -oE '"files":[0-9]+' | head -1 )"; hits6="$( mcp_field "$TMP/b6.out" 6 text | grep -oE '"files":[0-9]+' | head -1 )"
+if [ "$hits5" = '"files":1' ] && [ "$hits6" = '"files":0' ]; then
+    ok "(B6d) crawl:30 keeps the 29 entries before the stop in file-name order (b_08 in, b_09 out), whatever the readdir order"
 else
-    ms4="$( mcp_field "$TMP/b6.out" 4 _memory_stop )"
-    case "$ms4" in *"memory guard"*) ok "(B6b2) find_symbol from the same partial index still carries it";; *) no "(B6b2) id=4 _memory_stop='${ms4:0:200}'";; esac
+    no "(B6d) b_08 $hits5 (want 1), b_09 $hits6 (want 0) — the crawl is not walking in name order"
+fi
+# (B6e) an ABSENCE answered from a cut index is never unqualified: d_17 is outside the kept files, so each verb answers
+#       not-found (an error), and every one of those errors names the partial index, the count it covers and the override
+nfbad=""
+for id in 7 8 9 10 11 12 13 14 15 16; do
+    em="$( mcp_field "$TMP/b6.out" $id error )"
+    case "$em" in
+        *"is partial"*"not proof of absence"*"memory guard stopped the crawl"*"covers "*" files"*"max-memory"*) ;;
+        *) nfbad="$nfbad id=$id:'${em:0:160}'" ;;
+    esac
+done
+if [ -z "$nfbad" ]; then
+    ok "(B6e) 10 not-found / refusal errors from the cut index (find_symbol, refs, impact, uses, mentions, owners, slice, path_between, connect, an unknown name) each name the partial index, its file count and the override"
+else
+    no "(B6e) errors without the disclosure:$nfbad"
+fi
+# (B6e2) the error is still the not-found it was (the disclosure is appended, nothing replaced): the echo and the code survive
+case "$( mcp_field "$TMP/b6.out" 7 error )" in "symbol not found: 'd_17'"*) ok "(B6e2) the not-found keeps its own wording ahead of the disclosure";; *) no "(B6e2) id=7: $( mcp_field "$TMP/b6.out" 7 error | head -c 200 )";; esac
+# (B6e3) the words "memory guard" in ECHOED caller text are not a disclosure (CR 4419328423): a not-found for a symbol literally
+#        named "memory guard" still takes the partial-index clause (the suppression keys on the shared override sentence, which
+#        every guard sentence ends with, not on the two words)
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"path\":\"$FX\",\"symbol\":\"memory guard\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6e3.out"
+em="$( mcp_field "$TMP/b6e3.out" 3 error )"
+case "$em" in
+    "symbol not found: 'memory guard'"*"is partial"*"not proof of absence"*"covers "*" files"*"max-memory"*) ok "(B6e3) an echoed 'memory guard' in the not-found does not suppress the partial-index clause";;
+    *) no "(B6e3) id=3 error='${em:0:240}'";;
+esac
+# (B6f) near miss: a request for ANOTHER, whole index must not inherit the earlier index's cut. $HOMEDIR/proj has 1 file, so
+#       the same crawl:30 seam never fires there; its not-found carries no memory sentence
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"path\":\"$HOMEDIR/proj\",\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6f.out"
+em="$( mcp_field "$TMP/b6f.out" 3 error )"
+case "$em" in
+    "") no "(B6f) the whole index answered a result, expected a not-found: $( grep '"id":3' "$TMP/b6f.out" | head -c 200 )";;
+    *"memory guard"*|*"partial"*) no "(B6f) a whole index's not-found carries the other index's cut: '${em:0:200}'";;
+    *) ok "(B6f) a not-found from a WHOLE index (another root, same server) carries no memory sentence";;
+esac
+# (B6f2) near miss: an error raised before ANY index is read, for a root that is not the cut one (an unknown field on a
+#        request for $HOMEDIR/proj while the cut $FX is the resident index), says nothing about the guard
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"path\":\"$HOMEDIR/proj\",\"symbol\":\"hp\",\"bogus_field\":1}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6f2.out"
+em="$( mcp_field "$TMP/b6f2.out" 3 error )"
+case "$em" in
+    "unknown field"*) case "$em" in *"memory guard"*|*"partial"*) no "(B6f2) a usage error for another root carries the cut index's sentence: '${em:0:200}'";; *) ok "(B6f2) a usage error for a root that is not the cut one carries no memory sentence";; esac;;
+    *) no "(B6f2) id=3 error='${em:0:200}'";;
+esac
+# (B6i) a multi-root `paths` workspace over one cut root and one whole root is a cut index (the merged stop): its not-found
+#       carries the sentence; a LATER request for the whole root alone (a different index) does not
+FX2="$TMP/fx2"; mkdir -p "$FX2"; printf 'int hp2( void ) { return 1; }\n' >"$FX2/p.c"
+{ cut_req 2 grep "{\"paths\":[\"$FX\",\"$FX2\"],\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"paths\":[\"$FX\",\"$FX2\"],\"symbol\":\"zzz_nope\"}"
+  cut_req 4 find_symbol "{\"paths\":[\"$FX2\"],\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6i.out"
+em3="$( mcp_field "$TMP/b6i.out" 3 error )"; em4="$( mcp_field "$TMP/b6i.out" 4 error )"
+case "$em3" in
+    *"is partial"*"memory guard stopped the crawl"*) case "$em4" in "symbol not found"*) case "$em4" in *"memory guard"*|*"partial"*) no "(B6i) the whole root alone inherits the workspace's cut: '${em4:0:200}'";; *) ok "(B6i) a cut workspace's not-found carries the sentence; the whole root alone, asked next, does not";; esac;; *) no "(B6i) id=4 error='${em4:0:200}'";; esac;;
+    *) no "(B6i) id=3 error='${em3:0:240}'";;
+esac
+# (B6j) a `batch` sub-query's not-found is an ok="0" err= INSIDE a result, not a JSON-RPC error — it is the same
+#       absence from the same cut index, so it carries the same partial-index clause; the same batch on an uncut server does not
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 batch "{\"path\":\"$FX\",\"queries\":[\"callers: d_17\",\"callers: a_02\"]}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6j.out"
+bt="$( mcp_field "$TMP/b6j.out" 3 text )"
+case "$bt" in
+    *'ok="0" err="symbol not found'*)
+        case "$bt" in
+            *'ok="0" err="symbol not found'*"is partial"*"not proof of absence"*"covers "*" files"*"max-memory"*) ok "(B6j) a batch sub-query's not-found from the cut index carries the partial-index clause";;
+            *) no "(B6j) batch err= without the clause: $( printf '%s' "$bt" | grep -o '<q [^>]*ok="0"[^>]*>' | head -c 300 )";;
+        esac;;
+    *) no "(B6j) id=3 expected an ok=0 sub-query: $( printf '%s' "$bt" | head -c 300 )";;
+esac
+{ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"batch\",\"arguments\":{\"path\":\"$FX\",\"queries\":[\"callers: zzz_nope\"]}}}"; } \
+    | mcp_call "$TMP" >"$TMP/b6j2.out"
+bt="$( mcp_field "$TMP/b6j2.out" 2 text )"
+case "$bt" in
+    *'ok="0" err="symbol not found'*) case "$bt" in *"memory guard"*|*"partial"*) no "(B6j2) an uncut batch not-found mentions the guard";; *) ok "(B6j2) near miss: an uncut server's batch not-found is plain";; esac;;
+    *) no "(B6j2) id=2 expected an ok=0 sub-query: $( printf '%s' "$bt" | head -c 300 )";;
+esac
+# (B6k) the FIRST request, the one that builds the cut index, is not the exception: its not-found carries the same shared clause,
+#       not only the older "the memory guard stopped an ingest this request ran" sentence (find_symbol, edit_check, quality_delta)
+fkbad=""
+for spec in 'find_symbol|{"path":"'"$FX"'","symbol":"d_17"}' 'edit_check|{"path":"'"$FX"'","symbol":"d_17"}' 'quality_delta|{"path":"'"$FX"'"}'; do
+    tool="${spec%%|*}"; args="${spec#*|}"
+    cut_req 2 "$tool" "$args" | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6k.out"
+    em="$( mcp_field "$TMP/b6k.out" 2 error )"
+    case "$em" in
+        *"is partial"*"not proof of absence"*"covers "*" files"*"max-memory"*) ;;
+        *) fkbad="$fkbad $tool:'${em:0:200}'" ;;
+    esac
+done
+if [ -z "$fkbad" ]; then
+    ok "(B6k) the first request's error (find_symbol, edit_check, quality_delta) carries the shared partial-index clause"
+else
+    no "(B6k) first-request errors without the clause:$fkbad"
+fi
+# (B6k2) near miss: edit_check's own cut ingest is one REQUEST's fact — the next request, for a whole root, is plain
+{ cut_req 2 edit_check "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 3 find_symbol "{\"path\":\"$HOMEDIR/proj\",\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6k2.out"
+em2="$( mcp_field "$TMP/b6k2.out" 2 error )"; em3="$( mcp_field "$TMP/b6k2.out" 3 error )"
+case "$em2" in
+    *"is partial"*)
+        case "$em3" in
+            "symbol not found"*) case "$em3" in *"memory guard"*|*"partial"*) no "(B6k2) the next request inherits the edit_check ingest's cut: '${em3:0:200}'";; *) ok "(B6k2) near miss: the request after a cut edit_check, for a whole root, carries no memory sentence";; esac;;
+            *) no "(B6k2) id=3 error='${em3:0:200}'";;
+        esac;;
+    *) no "(B6k2) id=2 error='${em2:0:200}'";;
+esac
+# (B6l) a grep from a cut index never says "complete":true in its payload — a hit absent from it may sit in the files that were
+#       never read (a_01: inside the kept set; b_09: outside it); the uncut twin keeps the claim
+cc="$( mcp_field "$TMP/b6.out" 2 text; mcp_field "$TMP/b6.out" 6 text )"
+case "$cc" in
+    *'"files"'*) case "$cc" in *'"complete":true'*) no "(B6l) a cut index's grep payload claims complete:true";; *) ok "(B6l) a grep payload from a cut index (a_01 inside the kept set, b_09 outside) never claims complete:true";; esac;;
+    *) no "(B6l) no grep payload read: $( printf '%s' "$cc" | head -c 200 )";;
+esac
+printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    | mcp_call "$TMP" >"$TMP/b6l.out"
+case "$( mcp_field "$TMP/b6l.out" 2 text )" in
+    *'"complete":true'*) ok "(B6l2) near miss: the same grep on an uncut index keeps complete:true";;
+    *) no "(B6l2) an uncut grep lost complete:true: $( mcp_field "$TMP/b6l.out" 2 text | head -c 300 )";;
+esac
+# (B6g) near miss: an uncut server's not-found is the plain one
+printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$FX\",\"symbol\":\"zzz_nope\"}}}" \
+    | mcp_call "$TMP" >"$TMP/b6g.out"
+em="$( mcp_field "$TMP/b6g.out" 3 error )"
+case "$em" in
+    "symbol not found"*) case "$em" in *"memory guard"*|*"partial"*) no "(B6g) an uncut not-found mentions the guard: '${em:0:200}'";; *) ok "(B6g) an uncut index's not-found carries no memory sentence";; esac;;
+    *) no "(B6g) id=3 error='${em:0:200}'";;
+esac
+# (B6h) the CLI twin: a not-found-shaped ask against a cut index REFUSES (exit 5, empty stdout, the guard named) instead of
+#       printing a not-found — pinned for a name the cut lost (d_17) and one that never existed
+for sym in d_17 zzz_nope; do
+    run_trip crawl:30 "$FX" --callers=$sym --max-memory=64M --no-cache >"$TMP/b6h.out" 2>"$TMP/b6h.err"; rc=$?
+    if [ "$rc" = 5 ] && [ ! -s "$TMP/b6h.out" ] && grep -q '^ripwire: the memory guard stopped the crawl' "$TMP/b6h.err"; then
+        ok "(B6h) CLI --callers=$sym on a cut index refuses (exit 5, empty stdout) rather than answering not-found"
+    else
+        no "(B6h) $sym rc=$rc stdout=$( head -c 120 "$TMP/b6h.out" ) stderr: $( head -c 200 "$TMP/b6h.err" )"
+    fi
+done
+# (B6h2) the CLI twin of the grep completeness claim: --grep on a cut index refuses too, so no complete="1" is ever printed from one
+run_trip crawl:30 "$FX" --grep=a_01 --max-memory=64M --no-cache >"$TMP/b6h2.out" 2>"$TMP/b6h2.err"; rc=$?
+if [ "$rc" = 5 ] && [ ! -s "$TMP/b6h2.out" ] && ! grep -q 'complete=' "$TMP/b6h2.out"; then
+    ok "(B6h2) CLI --grep=a_01 on a cut index refuses (exit 5, empty stdout): no complete=\"1\" claim"
+else
+    no "(B6h2) rc=$rc stdout=$( head -c 160 "$TMP/b6h2.out" ) stderr: $( head -c 160 "$TMP/b6h2.err" )"
 fi
 printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
     | mcp_call "$TMP" >"$TMP/b6c.out"

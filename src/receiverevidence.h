@@ -87,32 +87,7 @@ struct GoPackagePaths
     }
 };
 
-// The languages where a bare `m()` inside a method is an implicit `this.m()` (or reaches a free/top-level function).
-inline bool implicitReceiverLang( Lang l ) noexcept
-{
-    return l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp || l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby;
-}
-
-// the languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias): a
-// free function is never what `x.f()` calls. JS/TS (an object property may hold one), Kotlin (an extension function is a
-// top-level `fun T.f()`) and C (a function-pointer field) are left out.
-inline bool memberNeverReachesFreeFunction( Lang l ) noexcept
-{
-    return l == Lang::Python || l == Lang::Go || l == Lang::Cpp || l == Lang::Rust || l == Lang::Ruby || l == Lang::Java
-        || l == Lang::CSharp || l == Lang::Swift;
-}
-
-// a call through a module alias (`pkg.F()`) reaches the module's package-level functions only, never a method: Go, where a
-// package qualifier never names a receiver (train 29 call-result-typing, review decision (b): nfpm's `nfpm.Get( … )` beside
-// `( *Config ).Get`). A local spelled like the import hides it before this is asked (graph.h ladderProves).
-inline bool moduleCallReachesFunctionsOnly( Lang l ) noexcept
-{
-    switch( l )
-    {
-        case Lang::Go: return true;
-        default:       return false;
-    }
-}
+// Slice 6c: implicitReceiver, memberNeverReachesFreeFunction, moduleCallReachesFunctionsOnly moved to langFacts(l) in langfacts.h
 
 // (L) the languages whose own receiver rule (Rule 1) answers `self.m()`, so receiver evidence adds only a LOCAL whose class a
 // binding states and the field paths below it or below `self` (ReceiverEvidence::narrowTypedLocal): Rust, whose locals are
@@ -162,14 +137,7 @@ inline WrittenQualifierRule writtenQualifierRuleOf( Lang l ) noexcept
     }
 }
 
-// the languages where `Cls.m()` is a call on the CLASS (a static or an unbound method): C++ spells that `Cls::m()` (a
-// qualifier, the canonical tier's), so a C++/C/Rust receiver spelled like a class is a variable or a member; Ruby's class
-// receivers are its own lookup's question
-inline bool classNameReceiverLang( Lang l ) noexcept
-{
-    return l == Lang::JavaScript || l == Lang::TypeScript || l == Lang::Python || l == Lang::Java || l == Lang::Kotlin
-        || l == Lang::CSharp || l == Lang::Swift;
-}
+// Slice 6c: classNameReceiver moved to langFacts(l) in langfacts.h
 
 // a call written ON a receiver — every language's member shape: Python/C++/Ruby record a RecvKind, the rest memberCall
 inline bool isMemberCallRef( const Reference& r ) noexcept
@@ -2439,6 +2407,36 @@ struct ReceiverEvidence
         return false;
     }
 
+    // lane iface-peel (LangFacts::returnTypedDispatchLet): the local `b` (a CallResult) holds the result of a call whose ONE
+    // proven callee declares `-> &dyn T` / `Box<dyn T>` / `impl T` (`rt`, a ReturnType carrying kDispatchResultBit). The trait
+    // resolves in the CALLEE's file like a written type (noteDispatchWritten's rule) and must be a trait; the local's own
+    // untyped tombstone (same span) then carries it, exactly as `let x: &dyn T` would. False when nothing was typed: no
+    // tombstone, a class of that name, an unresolved or ambiguous trait.
+    bool typeCallResultDispatch( const Binding& b, const Binding& rt )
+    {
+        const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
+        if( it == localType.end() )
+        {
+            return false;
+        }
+        const std::string_view written = rt.importedName;
+        const NodeId trait = types.rustResultClass( rt.fileId, rt.startByte, written.find( "::" ) == std::string_view::npos ? std::string_view{} : written, rt.typeName );
+        if( trait == kNoNode || ing.symbols[ trait ].kind != SymKind::Interface )
+        {
+            return false;
+        }
+        const bool spanned = b.spanEnd > b.spanStart;
+        for( LocalFact& f : it->second )
+        {
+            if( f.start == ( spanned ? b.spanStart : 0u ) && f.end == ( spanned ? b.spanEnd : 0u ) && f.type.empty() && f.iface == kNoNode )
+            {
+                f.iface = trait;
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ── queries ───────────────────────────────────────────────────────────────────────────────────────────────────────
     // the innermost function/method of the same file whose span strictly holds `id`; kNoNode when none
     NodeId enclosingFn( NodeId id ) const { return innermostEnclosingFn( ing, fnsByFile, id ); }
@@ -2594,7 +2592,7 @@ struct ReceiverEvidence
     // outside on-demand import alone, no import at all) names an outside class — never an in-tree namesake
     bool namesClass( const Reference& r, std::string_view root, std::string_view cls ) const
     {
-        return classNameReceiverLang( r.lang ) && classNames.contains( std::string( cls ) ) && !isLocalName( r.fromSymbol, root )
+        return langFacts( r.lang ).classNameReceiver && classNames.contains( std::string( cls ) ) && !isLocalName( r.fromSymbol, root )
             && !( callResultFamilyOf( r.lang ) == CallResultFamily::Jvm && types.jvmHides( r.fileId, r.startByte, root ) );
     }
     // the class owning the caller — the caller's own owner, else the nearest enclosing function's (a closure in a method)
@@ -2861,7 +2859,7 @@ struct ReceiverEvidence
         // Java/C#/Kotlin/Swift (the implicit-receiver languages but C++, whose Rule 2b reads fields, and Ruby, whose fields
         // are @ivars): a bare `field.m()` inside a method is `this.field.m()` — the field the caller's class (or a base)
         // declares, when no parameter or local of that name hides it
-        if( implicitReceiverLang( r.lang ) && r.lang != Lang::Cpp && r.lang != Lang::Ruby && !declaresLocal( r.fromSymbol, root, r.startByte ) )
+        if( langFacts( r.lang ).implicitReceiver && r.lang != Lang::Cpp && r.lang != Lang::Ruby && !declaresLocal( r.fromSymbol, root, r.startByte ) )
         {
             const std::string_view owner = callerClass( r.fromSymbol );
             if( const std::string_view ft = owner.empty() ? std::string_view{} : fieldOf( owner, root ); !ft.empty() )

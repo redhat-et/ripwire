@@ -50,7 +50,7 @@ struct Config
                                                  // default); forces the token requirement even on loopback.
     std::string_view mcpLegend;                  // --mcp-legend=session|inline: the stdio server's legend posture (default session)
     std::string_view mcpTools;                   // --mcp-tools=SPEC: list (and answer) only these MCP tools — names and/or the
-                                                 // core/full profiles, validated against the tool table in main.cpp (mcp.h).
+                                                 // core/no-edit/full profiles, validated against the tool table in main.cpp (mcp.h).
     std::vector<std::string> excludes;           // --exclude=SUBSTR (repeatable): drop matching paths
     RankBy           rankBy          = RankBy::PageRank;   // --rank-by=  (default keeps output unchanged)
     bool             columnar        = false;              // --format=columnar|rows (RESEARCH lever 1): re-serialize the FLAT
@@ -1208,6 +1208,7 @@ inline constexpr char kHelpHead[] =
         "                               importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM,\n"
         "                               emitted as <f via=\"import\" lazy=\"0|1\"> rows (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= —\n"
         "                               files and symbols are different units, and an importer may use a different symbol from that file, or none at all.\n"
+        "                               no_file_edges=\"go\" on the root: SYM's file is in a language this build almost never resolves imports for, so importers= is a floor.\n"
         "                               lazy=\"1\": every one of that importer's edges is written inside a closure — a TS/JS require()/import()\n"
         "                               inside a function body, a Ruby constant receiver or argument inside a method/lambda/block, a Ruby\n"
         "                               autoload or rescue class — not at load time: still a real dependency, weaker than a top-level one\n"
@@ -1311,7 +1312,8 @@ inline constexpr char kHelpHead[] =
         "                               vitest/jest dependency -- never guessed from the .ts/.js extension alone). Spelled RELATIVE to\n"
         "                               the root= the document declares, so it pastes into a shell run from there, and the document\n"
         "                               does not change with where the tree is checked out (a MULTI-ROOT run declares no single root,\n"
-        "                               so it stays absolute). NO run= means NOT DERIVABLE -- never a guessed suite command\n"
+        "                               so it stays absolute). A TS/JS package below root= runs as '(cd <pkg> && <runner> <path>)': a subshell, cd first, then the path\n"
+        "                               relative to that package. NO run= means NOT DERIVABLE -- never a guessed suite command\n"
         "    --grep=STR | --regex=PAT   search for a literal or a regex; every hit comes back with its enclosing symbol\n"
         "                               literal / regex search + enclosing symbol + the matched line. SPAN-TIERED by default (see\n"
         "                               --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses\n"
@@ -1482,6 +1484,9 @@ inline constexpr char kHelpHead[] =
         "                               <health>'s ccd/acd/nccd/shape are computed over dep_files= (files whose language\n"
         "                               has #include/import syntax) not files= (the raw corpus, incl. md/json/toml/yaml,\n"
         "                               which can't participate in the graph) -- --arch's propagation_cost uses the same N.\n"
+        "                               A file in a language this build draws almost no file edges for carries no_file_edges= and, with\n"
+        "                               no edge in or out, no afferent=/instab=/transitive=: unknown, not zero. Every such file is left out of\n"
+        "                               dep_files= and of <health>'s numbers (masked_files=N says how many); with no edge among the rest, no ccd/nccd/shape.\n"
         "                               <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/\n"
         "                               acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser\n"
         "                               version 81 and every one of those numbers moved on a corpus holding them.\n"
@@ -1679,6 +1684,10 @@ inline constexpr char kHelpHead[] =
         "                               enforce layering rules (exit 2 on violation); the Martin Ca/Ce/I/A/D block it emits is a\n"
         "                               design heuristic, not independently outcome-validated (never gates).\n"
         "                               propagation_cost's N is dependency-capable files only, same denominator as --deps <health>.\n"
+        "                               A module holding a file in a language this build draws almost no file edges for (Go, Java, Kotlin,\n"
+        "                               C#, PHP, Swift, Dart, GDScript, Clojure) reads zone=\"unknown\" no_file_edges=LANGS, with ca/ce as\n"
+        "                               floors (absent when no edge was observed) and no I/D/leaf/reachable, so violations= is a floor too.\n"
+        "                               propagation_cost leaves out every such file (masked_files=N says how many) and is absent when no edge is left among the rest.\n"
         "                               Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the\n"
         "                               spelling you passed, so a rules file means the same thing in every checkout\n"
         "    --arch=FILE --baseline     write .ripwire_arch_baseline (accept current debt as baseline), exit 0\n"
@@ -2513,7 +2522,9 @@ inline constexpr char kHelpTail[] =
         "                               renders mermaid natively. Off by default and purely additive: omitted, output is byte-identical.\n"
         "    --export=cc.json[:FILE]    export per-file metrics as CodeCharta cc.json for its 3D city view\n"
         "                               export per-file metrics (loc/symbols/cx/cognitive_cx/fan-in/fan-out/churn) as CodeCharta\n"
-        "                               cc.json (apiVersion 1.3) — write FILE or redirect stdout; feeds a CodeCharta 3D city\n"
+        "                               cc.json (apiVersion 1.3) — write FILE or redirect stdout; feeds a CodeCharta 3D city.\n"
+        "                               A file in a language this build draws almost no file edges for has fan_in/fan_out only when\n"
+        "                               nonzero, and then it is a floor over the resolved edges. An absent one is unknown, not 0.\n"
         "    --batch=FILE               run several lookups in one turn: FILE is newline-delimited `verb:arg` sub-queries\n"
         "                               one-turn context sweep: FILE ('-'=stdin) is newline-delimited `verb:arg` sub-queries\n"
         "                               (for/grep/callers/callees/impact/uses/mentions/analyze/lego/owners/cochange/exemplar,\n"
@@ -2596,7 +2607,9 @@ inline constexpr char kHelpTail[] =
         "                               population, plus unsupported_ext=, excluded_dirs= (SUBTREES --exclude pruned: contents\n"
         "                               UNKNOWN, not zero), pruned_dirs= (SUBTREES this build always prunes by policy — the\n"
         "                               committed noise/vendor/build denylist and any dir holding a CMakeCache.txt — contents\n"
-        "                               likewise UNKNOWN), degraded_parse=, minified_suspect=, extent_suspect_files= (files holding\n"
+        "                               likewise UNKNOWN; each is rowed bytes=0: why=pruned-package when a build-output name\n"
+        "                               (build, dist, out, target, captures) holds its own __init__.py, a real package the denylist\n"
+        "                               removed, else why=pruned-dir; --deps and --arch name the packages), degraded_parse=, minified_suspect=, extent_suspect_files= (files holding\n"
         "                               a definition whose extent/scope failed a containment check; the <h> row says\n"
         "                               why=extent-suspect with extent_suspect_syms=), macro_blanked_files= (files whose\n"
         "                               symbols come from a re-parse with semicolon-less member macro invocations blanked;\n"
@@ -2852,17 +2865,20 @@ inline constexpr char kHelpTail[] =
         "                               by a human and is answered. On the CLI a typed root (`ripwire ~`) is always answered,\n"
         "                               and a run without <dir> prints usage, or that same line from such a directory. Each\n"
         "                               tool call over the --max-memory limit is refused by name; an answer from an index the\n"
-        "                               memory guard cut carries _memory_stop in its envelope.\n"
+        "                               memory guard cut carries _memory_stop in its envelope, and every error from it\n"
+        "                               says so in its message (a not-found included).\n"
         "    --mcp-legend=WHEN          the stdio MCP server's legend posture: session (the default) or inline\n"
         "                               session: the first answer of a session carries its legend inline; later answers list\n"
         "                               rows first, carry each definition only the first time the session meets it, and end\n"
         "                               with <about legend=\"ref\" dict= dictv=/> (the first of them also carries the core).\n"
         "                               inline: every answer keeps its legend until the client reads ripwire://legend-dict.\n"
         "                               legend:\"compact\"/\"full\" on a call keeps that answer inline either way. Stdio only.\n"
-        "    --mcp-tools=LIST           list only these MCP tools (names and/or the core/full profiles, default full).\n"
+        "    --mcp-tools=LIST           list only these MCP tools (names and/or the core/no-edit/full profiles, default full).\n"
         "                               A comma list of tool names and/or profiles, unioned. core = explore, batch, from_trace,\n"
         "                               impact, uses, fetch_body, edit_check, quality_delta (the loop the server's own\n"
-        "                               instructions teach); full = all tools, the default. A client that loads every schema\n"
+        "                               instructions teach); no-edit = every tool but the three edit twins (replace_symbol_body,\n"
+        "                               insert_before_symbol, insert_after_symbol; `ripwire wrap claude` registers it); full = all\n"
+        "                               tools, the default. A client that loads every schema\n"
         "                               at session start pays only for the listed ones. initialize announces the subset;\n"
         "                               calling an unlisted tool is refused with the flag that enables it. The list is not\n"
         "                               access control: batch sub-queries still reach hidden verbs.\n"
@@ -3333,7 +3349,7 @@ inline constexpr ViewFlag kViewFlags[] =
 {
     // server + self-eval inputs
     { "--mcp-token=",   &Config::mcpToken        , EmptyValue::Refuse, "a shared bearer token",                  "--mcp-token=$RIPWIRE_MCP_TOKEN" },
-    { "--mcp-tools=",   &Config::mcpTools        , EmptyValue::Refuse, "tool names and/or a profile (core, full)", "--mcp-tools=core" },
+    { "--mcp-tools=",   &Config::mcpTools        , EmptyValue::Refuse, "tool names and/or a profile (core, no-edit, full)", "--mcp-tools=core" },
     { "--agent=",      &Config::agent           , EmptyValue::Refuse, "codex",                                 "--agent=codex" },   // also accepts claude — see validateAgent
     { "--eval-mined=",  &Config::evalMined       , EmptyValue::Refuse, "a minedpair.jsonl file path",            "--eval-mined=bench/minedpair.jsonl" },
     { "--eval-skills=", &Config::evalSkills      , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-skills=bench/skillroute.tsv" },

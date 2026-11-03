@@ -849,14 +849,20 @@ fi
 # and those are safe BY SHAPE", and pinned the COUNT of readByteSafeLine adoptions at five. Both halves were the
 # trap. Counting adoptions cannot see a survivor (that is trap #10 stated exactly), and the count itself rots
 # the moment a reader is legitimately added — as it did here. The bar is now: no fixed-buffer reader survives
-# ANYWHERE in the file (§9c asserts that from source, comments excluded), and at LEAST the five path readers
-# go through the byte-safe one. A lower bound cannot rot upward; a survivor still fails §9c.
+# ANYWHERE in the file (§9c asserts that from source, comments excluded), and the git-pipe readers go through a
+# BYTE-SAFE reader — of EITHER family, because the git-porcelain-framing lane (test/gitframingcheck.sh) moved
+# the five `--name-only` consumers onto the shared NUL-framed reader forEachGitLogRecord (which reads fields
+# through readNulSafeField), and left the byte-safe LINE reader (readByteSafeLine, behind readWalkLine)
+# carrying gitCommandLines' own output. A lower bound cannot rot upward; a survivor still fails §9c.
 LEFTOVER="$( grep -c 'char line\[ 4096 \]' "$ROOT/src/gitmine.h" || true )"
 SAFEREADERS="$( grep -c 'readByteSafeLine( pipe' "$ROOT/src/gitmine.h" || true )"
+NULREADERS="$( grep -c 'forEachGitLogRecord( root' "$ROOT/src/gitmine.h" || true )"
 [ "${LEFTOVER:-1}" = 0 ] && ok "F6/completeness: no 'char line[ 4096 ]' path reader survives in gitmine.h" \
     || no "F6/completeness: $LEFTOVER fixed-buffer path reader(s) still in gitmine.h — a long path can still be split there"
-[ "${SAFEREADERS:-0}" -ge 5 ] && ok "F6/completeness: all five git-pipe PATH readers go through readByteSafeLine ($SAFEREADERS call sites: gitCommandLines, gitLogFileSets, gitLogNameOnlyRaw, gitFileCommitCountsInDayWindow, gitFileAuthors, + any later adopter)" \
-    || no "F6/completeness: only $SAFEREADERS readByteSafeLine call site(s) in gitmine.h, expected at least the five path readers"
+[ "${SAFEREADERS:-0}" -ge 1 ] && ok "F6/completeness: the line-shaped git-pipe reader keeps its byte-safe core (readByteSafeLine behind readWalkLine, $SAFEREADERS site — gitCommandLines' own output)" \
+    || no "F6/completeness: no readByteSafeLine core site in gitmine.h — a git-pipe line reader lost its byte-safe read"
+[ "${NULREADERS:-0}" -ge 5 ] && ok "F6/completeness: all five git-pipe PATH readers go through the shared byte-safe NUL reader forEachGitLogRecord ($NULREADERS call sites: gitLogFileSets, gitLogNameOnlyRaw, gitFileCommitCountsInDayWindow, gitLogDecayedFileMining, gitFileAuthors, + any later adopter)" \
+    || no "F6/completeness: only $NULREADERS forEachGitLogRecord call site(s) in gitmine.h, expected at least the five path readers"
 
 # ── 9c. G3 — the migration claim is re-derived FROM SOURCE, not read from the comment that makes it ──
 # F6 recorded "every git-pipe reader in this file uses readByteSafeLine"; it was true at one of five. The fix

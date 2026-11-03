@@ -47,6 +47,7 @@ struct CcFileMetrics
     std::uint32_t ccx        = 0;   // Σ cognitive complexity over the file's symbols
     std::uint32_t fanOut     = 0;   // # distinct in-corpus files this file depends on (its #include targets)
     std::uint32_t fanIn      = 0;   // # in-corpus files that depend on this file (afferent coupling)
+    bool          noFileEdgeLang = false; // arch-honest: a language whose imports this build does not resolve to files: a nonzero fan_in/fan_out is a floor, a zero one is unknown, not 0
     std::uint32_t churn      = 0;   // # commits touching this file in the window (0 without git)
 };
 
@@ -121,6 +122,28 @@ inline std::uint32_t childNamed( std::vector<CcNode>& pool, std::uint32_t parent
     pool[ parent ].children.push_back( id );   // NOTE: pool may reallocate; do not hold a CcNode& across this
     return id;
 }
+// One File leaf's attributes. A file in a language this build draws no file edges for (arch-honest) omits a zero fan_in/fan_out, because a city
+// view would draw it as a measured, uncoupled file; a nonzero one is a floor over the resolved edges, which the attribute descriptors say.
+inline void emitCcAttrs( std::FILE* out, const CcFileMetrics& e )
+{
+    if( !e.noFileEdgeLang )
+    {
+        rw::emitTo( out,
+            "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"fan_in\":{},\"fan_out\":{},\"churn\":{}}}",
+            e.loc, e.symbols, e.cx, e.ccx, e.fanIn, e.fanOut, e.churn );
+        return;
+    }
+    rw::emitTo( out, "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{}", e.loc, e.symbols, e.cx, e.ccx );
+    if( e.fanIn > 0 )
+    {
+        rw::emitTo( out, ",\"fan_in\":{}", e.fanIn );
+    }
+    if( e.fanOut > 0 )
+    {
+        rw::emitTo( out, ",\"fan_out\":{}", e.fanOut );
+    }
+    rw::emitTo( out, ",\"churn\":{}}}", e.churn );
+}
 }   // namespace ccdetail
 
 // Build the per-file metrics for every ingested file. `churn` is filled by the caller (it owns the
@@ -161,6 +184,10 @@ inline std::vector<CcFileMetrics> ccComputeMetrics( const IngestResult& ing, con
                 ++m[to].fanIn; // afferent
             }
         }
+    }
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        m[f].noFileEdgeLang = langHasNoFileEdges( langOfPath( ing.files[f] ) );
     }
     return m;
 }
@@ -237,12 +264,9 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     //      captures itself through a reference wrapper is awkward; use an index-driven recursion with a
     //      plain recursive lambda declared as `auto&&` self-parameter. ----------------------------------
     std::string esc;   // reused escape scratch
-    const auto emitAttrs = [ & ]( const CcFileMetrics& e )
-    {
-        rw::emitTo( out,
-            "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"fan_in\":{},\"fan_out\":{},\"churn\":{}}}",
-            e.loc, e.symbols, e.cx, e.ccx, e.fanIn, e.fanOut, e.churn );
-    };
+    const bool anyUnknown = std::any_of( metrics.begin(), metrics.end(), []( const CcFileMetrics& e ) { return e.noFileEdgeLang; } );
+    // Present-only: a tree without such a file keeps the descriptors it always had, byte for byte.
+    const char* const unknownNote = anyUnknown ? "; for a file in a language whose imports this build does not resolve to files, a value is a floor over the resolved edges and an absent one is unknown, not 0" : "";
 
     // recursive emit of one node.
     auto emitNode = [ & ]( auto&& self, std::uint32_t id ) -> void
@@ -254,7 +278,7 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
         if( n.fileId >= 0 )   // File leaf
         {
             rw::emitRaw( out, "\"type\":\"File\"," );
-            emitAttrs( metrics[ std::uint32_t( n.fileId ) ] );
+            emitCcAttrs( out, metrics[ std::uint32_t( n.fileId ) ] );
             rw::emitRaw( out, "}" );
             return;
         }
@@ -284,9 +308,12 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
         "\"loc\":{\"title\":\"Lines of Code\",\"description\":\"Physical line count\",\"direction\":-1},"
         "\"symbols\":{\"title\":\"Symbols\",\"description\":\"Definitions in the file\",\"direction\":-1},"
         "\"cx\":{\"title\":\"Cyclomatic Complexity\",\"description\":\"Sum of per-symbol cyclomatic complexity\",\"direction\":-1},"
-        "\"cognitive_cx\":{\"title\":\"Cognitive Complexity\",\"description\":\"Sum of per-symbol cognitive complexity\",\"direction\":-1},"
-        "\"fan_in\":{\"title\":\"Fan In\",\"description\":\"In-corpus files that depend on this file\",\"direction\":-1},"
-        "\"fan_out\":{\"title\":\"Fan Out\",\"description\":\"In-corpus files this file depends on\",\"direction\":-1},"
+        "\"cognitive_cx\":{\"title\":\"Cognitive Complexity\",\"description\":\"Sum of per-symbol cognitive complexity\",\"direction\":-1}," );
+    rw::emitTo( out,
+        "\"fan_in\":{{\"title\":\"Fan In\",\"description\":\"In-corpus files that depend on this file{}\",\"direction\":-1}},"
+        "\"fan_out\":{{\"title\":\"Fan Out\",\"description\":\"In-corpus files this file depends on{}\",\"direction\":-1}},",
+        unknownNote, unknownNote );
+    rw::emitRaw( out,
         "\"churn\":{\"title\":\"Churn\",\"description\":\"Commits touching this file in the recent window\",\"direction\":-1}"
         "}," );
     rw::emitRaw( out, "\"nodes\":[" );

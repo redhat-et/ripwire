@@ -305,13 +305,9 @@ diffhunks.h	gitDiffHunksVsHead	popen	1	closes	continue-only loop; pclose after i
 docparse.h	openRegularFileStream	fdopen	1	owned	stored straight into pathguard::NoFollowRead, whose destructor fcloses it
 docparse.h	openRegularFileStream	open	1	owned	fdopen'd into NoFollowRead; ::close only when fdopen declined it
 docparse.h	runMarkitdown	popen	1	closes	no exit between popen and pclose
+gitmine.h	forEachGitLogRecord	popen	1	closes	the shared --name-only reader: the walk loop leaves by stream end or the abandon break; one pclose after it, on the only exit past the failed open
 gitmine.h	gitCommandLines	popen	1	closes	status = pclose after the loop; no exit between
-gitmine.h	gitFileAuthors	popen	1	closes	continue-only loop; pclose after it
-gitmine.h	gitFileCommitCountsInDayWindow	popen	1	closes	continue-only loop; pclose after it
-gitmine.h	gitLogDecayedFileMining	popen	1	closes	continue-only loop; pclose after the flush
 infra/os_win32.cpp	system	popen	1	closes	Windows body of os::system (compiled only for Windows): the drain loop has no exit; pclose after it
-gitmine.h	gitLogFileSets	popen	1	closes	continue-only loop; pclose after the flush
-gitmine.h	gitLogNameOnlyRaw	popen	1	closes	continue-only loop; pclose after it
 gitmine.h	popenTrimmed	popen	1	closes	no exit between popen and pclose
 gitoracle.h	loadOracleCache	fopen	1	closes	returns only on a failed open; fclose after the read loop
 gitoracle.h	saveOracleCache	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd

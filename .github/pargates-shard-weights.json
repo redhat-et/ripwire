@@ -502,6 +502,7 @@
 "regexcheck.sh": 28.4,
 "regexguardcheck.sh": 14.8,
 "regexrefusecheck.sh": 4.2,
+"regsitecheck.sh": 10.0,
 "registermacrocheck.sh": 9.1,
 "releaseinstallcheck.sh": 7.9,
 "relevancefloorcheck.sh": 1.1,

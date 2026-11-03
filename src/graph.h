@@ -1789,11 +1789,32 @@ inline void shadowJavaFieldsOntoMethods( const IngestResult& ing, const JavaFiel
     }
 }
 
+// one member's declared type into Rule 2b's field table: same class-name#field-name with different declared types, or one reached
+// through `->` alone (a smart pointer's pointee) → tombstone. A member written as a C++ smart-pointer ALIAS that is in scope at the
+// member (lane iface-peel, resolve.h SmartAliasPeel) records the alias's pointee, reached by `->` alone, exactly as
+// `std::shared_ptr<I>` would. The reader is gated on the MEMBER's language, as the alias records are: a C struct member that
+// spells a C++ alias's name is a C pointer.
+inline void recordMemberTypeFact( HashMap<std::string, FlatRecvType>& table, const std::string& key, const Reference& cr, const SmartAliasPeel& aliases )
+{
+    const bool inStd = fieldTypeWrittenInStd( cr );
+    if( !cr.viaArrow && !inStd && langFacts( cr.lang ).aliasPeelsSmartPointer )
+    {
+        if( const std::optional<FlatRecvType> peeled = aliases.pointeeOf( cr ) )
+        {
+            recordFlatRecvTypeFact( table, key, peeled->type, peeled->writtenQualified, /*arrowOnly=*/true );
+            return;
+        }
+    }
+    recordFlatRecvTypeFact( table, key, inStd ? std::string_view{} : std::string_view( cr.calleeName ), !cr.qualifier.empty(), cr.viaArrow );
+}
+
 inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const HashMap<std::string, char>& classNames )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2d: Rule-2b field-narrow tables" );
     FieldNarrowTables t;
     std::string       key;   // reused "Class#field" / "<fromSymbol>#var" key buffer
+    // lane iface-peel: a member written as a C++ smart-pointer alias in scope there (`Http::FilterSharedPtr handle_;`) is its pointee through `->`
+    const SmartAliasPeel aliasPeel( ing );
     for( const Reference& cr : ing.references )
     {
         if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName.empty() || cr.calleeName.empty() )
@@ -1803,8 +1824,7 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
         key.clear();
         key.append( ing.symbols[ cr.fromSymbol ].name ).push_back( '#' );
         key.append( cr.fieldName );
-        // same class-name#field-name with different declared types, or one reached through `->` alone (a smart pointer's pointee) → tombstone
-        recordFlatRecvTypeFact( t.fieldTypeByClass, key, fieldTypeWrittenInStd( cr ) ? std::string_view{} : std::string_view( cr.calleeName ), !cr.qualifier.empty(), cr.viaArrow );
+        recordMemberTypeFact( t.fieldTypeByClass, key, cr, aliasPeel );
     }
     t.localNameSet.reserve( ing.bindings.size() );
     t.localShadowSpans.reserve( ing.bindings.size() );
@@ -2371,7 +2391,7 @@ inline std::uint32_t pythonIncludeFile( const IngestResult& ing, const Include& 
     {
         return kNoFile;
     }
-    const std::uint32_t f = resolvePreciseInclude( from, inc.target, /*isAngle=*/ false, fileIndex );
+    const std::uint32_t f = inImporterRoot( ing.fileRoot, inc.fileId, resolvePreciseInclude( from, inc.target, /*isAngle=*/ false, fileIndex ) );
     return ( f == kNoFile && inc.target.front() != '.' ) ? memo.resolve( inc.target, fileIndex, inc.fileId ) : f;
 }
 
@@ -2442,7 +2462,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // the module fileId Step-A pins, computed unconditionally (even for a relative spec, where
         // `verdict` below is already 'i' without needing it) — recordImportBindFile wants the REAL file,
         // not just verdict's "cannot leave the package" evidence.
-        const std::uint32_t resolved = resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex );
+        const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
         char verdict = 'x';
         if( b.typeName.front() == '.' )
         {
@@ -2635,6 +2655,14 @@ struct ExternalVeto
             }
         }
         return false;
+    }
+    // A `from m import *` of an INDEXED module in the caller's file binds names no table lists: the veto's "no evidence" is then
+    // not proof, so a decision that must not lose a star-bound name asks this first. A star import of a module outside the tree
+    // (kNoFile) can bind no in-tree def, so it is not evidence here.
+    bool pythonStarImports( const Reference& ref ) const
+    {
+        const auto& stars = tables.pythonScopes.starTargets;
+        return ref.fileId < stars.size() && std::ranges::any_of( stars[ ref.fileId ], []( std::uint32_t t ) { return t != kNoFile; } );
     }
     bool isExternalBound( const Reference& ref ) const
     {
@@ -3588,7 +3616,8 @@ inline std::string_view stdElementType( std::string_view written ) noexcept
 // `std::unique_ptr<ns::List> up; up->size()` (kCppStdArrowTemplates); a `->` through an in-tree class with its own
 // `operator->`, `SP<ns::List>& p; p->size()`, or through a class the tree does not define, `QSharedPointer<ns::List>& p` —
 // their pointee is unrecorded; a `->` through a typedef or using alias whose recorded target is one of those, `typedef
-// std::shared_ptr<ns::List> ListSP; ListSP p; p->size()` (the alias record keeps no template argument, so `typedef
+// std::shared_ptr<ns::List> ListSP; ListSP p; p->size()` (the alias record's target keeps no template argument — a MEMBER
+// written such an alias is typed by its pointee instead, lane iface-peel, resolve.h SmartAliasPeel — so `typedef
 // std::unique_ptr<std::string> StrUP` keeps the hedge too); `HashMap<K, V> m; m.find( k )` reaching UnionFind::find by name,
 // `std::unique_ptr<std::string> p; p->size()`, `std::vector<int>* pv; pv->size()` and `IntVec* p; p->size()` through
 // `typedef std::vector<int> IntVec` do not keep it); ONE element access of a container whose recorded written type is a std
@@ -5543,7 +5572,7 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
         // a backtick mention in prose is not code evidence; a read/write USE-site is recorded only by the rich ingest (--uses,
         // MCP), so reading it here made the same call bind on MCP and decline on the CLI map — evidence must not depend on
         // which ingest ran (FE-B found it through mcpclidiffcheck's stanza on a Python `set().update()` beside a method)
-        if( !r.isDocLink && r.role != RefRole::Read && r.role != RefRole::Write && r.role != RefRole::Subscript )   // a subscript names an operator, and is a call only once proven
+        if( !r.isDocLink && !isDottedStringFact( r ) && !isRegistrarFact( r ) && r.role != RefRole::Read && r.role != RefRole::Write && r.role != RefRole::Subscript )   // a subscript names an operator, and is a call only once proven
         {
             note( r.fileId, r.calleeName );
             note( r.fileId, r.recvVar );
@@ -5552,7 +5581,8 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
     }
     for( const Binding& b : ing.bindings )
     {
-        if( !isReceiverEvidenceKind( b.kind ) && b.kind != LocalBindKind::RubyMainMixin )   // FE-B's receiver evidence is read by ReceiverEvidence alone; a main mixin by --lego alone
+        // FE-B's receiver evidence is read by ReceiverEvidence alone; a main mixin by --lego alone; a re-export by the --for hop rows alone
+        if( !isReceiverEvidenceKind( b.kind ) && b.kind != LocalBindKind::RubyMainMixin && b.kind != LocalBindKind::ReExport )
         {
             noteBindingClasses( gate, fileGated, b );
         }
@@ -6437,9 +6467,10 @@ inline HashMap<std::string, char> rustModuleNames( const IngestResult& ing )
     return names;
 }
 
-// Every `name = "x"` line of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
+// Every `name = "x"` line (or `key = "x"` for another key: the --for re-export rows read `[lib] path`) of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
 // dotted key, an inline table or a multi-line string is not read, which can only miss a name, never invent one).
-inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out )
+inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out,
+                              std::string_view key = "name" )
 {
     bool inSection = false;
     while( !text.empty() )
@@ -6453,11 +6484,11 @@ inline void tomlSectionNames( std::string_view text, std::initializer_list<std::
             inSection = std::ranges::any_of( sections, [ & ]( std::string_view h ) { return line.starts_with( h ); } );
             continue;
         }
-        if( !inSection || !line.starts_with( "name" ) )
+        if( !inSection || !line.starts_with( key ) )
         {
             continue;
         }
-        line.remove_prefix( 4 );
+        line.remove_prefix( key.size() );
         line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
         if( !line.starts_with( '=' ) )
         {
@@ -9031,6 +9062,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 const std::uint32_t ri = rtIt->second;
                 const Binding&      rt = ing.bindings[ ri ];
+                if( ( rt.unwrapDepth & kDispatchResultBit ) != 0 )
+                {
+                    // lane iface-peel: `-> &dyn T` — the local is SOME implementor of T (the dispatch tier reads it); same
+                    // position, no unwrap at the call, and the Rust path qualifier check as for a class result
+                    if( langFacts( cs.lang ).returnTypedDispatchLet && rt.resultIndex == cr.resultIndex && cr.unwrapDepth == 0
+                        && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )
+                    {
+                        recvEv.typeCallResultDispatch( cr, rt );
+                        break;
+                    }
+                    continue;
+                }
                 const bool          match = rt.resultIndex == cr.resultIndex && ( rule2Sink ? rt.unwrapDepth <= 1 : rt.unwrapDepth == cr.unwrapDepth )
                                             && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment );   // Rust T::f(): its T reaches f's class
                 if( !match )
@@ -9098,7 +9141,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             if( recvEv.moduleNames( ref, ch.root, c ) )
             {
-                return !( moduleCallReachesFunctionsOnly( ref.lang ) && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
+                return !( langFacts( ref.lang ).moduleCallReachesFunctionsOnly && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
             }
             if( ref.lang == Lang::Python && ref.recv == RecvKind::NamedVar )
             {
@@ -9112,7 +9155,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner )   // a class-name receiver: the class or a base,
                 && recvEv.onSide( ref, c, /*classSide=*/true );                                                 // its CLASS side
         }
-        if( implicitReceiverLang( ref.lang ) )
+        if( langFacts( ref.lang ).implicitReceiver )
         {
             const std::string_view owner = ownerIsClass( c );
             if( owner.empty() )
@@ -10626,7 +10669,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             nameIds = &rubyReachable;
         }
-        if( !scipPinned && !canonical && !narrowed && it != byName.end() )
+        // Python (LangFacts::externalVetoBeforeRule3): Rule 3 is a name-only narrowing to the caller's imported closure, so it must not
+        // decide a call the Phase 5 veto below refuses: a bare builtin (`dict(...)`, `type(...)`) or an imported stdlib or third-party
+        // name is bound outside the tree whatever namesake an imported file defines. The veto's own conditions, and not in a file with
+        // a star import of an indexed module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding.
+        const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
+                                    && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
+        if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
             const auto rule3 = [ & ]( const rw::SmallVec<NodeId, 2>& ids, std::size_t minCands )
@@ -10638,7 +10687,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 // an implicit receiver's bare call is the same question: the included file's definition must be one the
                 // language's lookup reaches (a free function, the class's own cone) — decided with the ladder's proof below
-                std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || implicitReceiverLang( r.lang ) ) ) ? memberRule3 : cand;
+                std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || langFacts( r.lang ).implicitReceiver ) ) ? memberRule3 : cand;
                 for( NodeId c : rule3Out )
                 {
                     if( langCompatible( symLang[ c ], r.lang ) )
@@ -10888,7 +10937,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // Rust, Ruby, Java, C#, Swift: a function is reached through a member only as a method, or through a module
             // alias, which proves itself above) — JS/TS object properties, Kotlin extensions and C function-pointer fields
             // can hold one, so those keep it. Nothing left: no in-repo definition can answer the call (external=).
-            if( nameOnly && isMemberCallRef( r ) && memberNeverReachesFreeFunction( r.lang ) )
+            if( nameOnly && isMemberCallRef( r ) && langFacts( r.lang ).memberNeverReachesFreeFunction )
             {
                 std::erase_if( cand, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
                 std::erase_if( memberRule3, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
@@ -15126,6 +15175,7 @@ struct ImportTier
     std::uint64_t              importsUnresolved = 0;   // #220 part 1: importers= is a floor while > 0
     std::uint64_t              tsconfigUnread    = 0;   // #220 part 2: configs with an unread extends/references base (tsconfig_unread=)
     bool                       umbrella          = false;   // idea #6: an umbrella header — see impactImportTier
+    std::uint32_t              noFileEdgeLangs   = 0;       // arch-honest: the def files' languages this build draws no file edge for (lintrules.h)
 };
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
@@ -15159,7 +15209,8 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
                + rw::nextAttrXml( t.next, "importers_next" )
                + rw::importsUnresolvedAttrXml( t.importsUnresolved )   // #220: absent at zero; the root's counts_floor covers it
                + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) )   // #220 part 2: likewise
-               + ( t.umbrella ? " importers_umbrella=\"1\"" : "" );                              // idea #6: present-only
+               + ( t.umbrella ? " importers_umbrella=\"1\"" : "" )                               // idea #6: present-only
+               + rw::noFileEdgesAttrXml( t.noFileEdgeLangs );                                   // arch-honest: importers= is a floor for these defs
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
 }
@@ -15198,6 +15249,10 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
 
     ImportTier t;
+    for( const std::uint32_t f : defFiles )
+    {
+        t.noFileEdgeLangs |= f < ing.files.size() ? noFileEdgeLangBit( langOfPath( ing.files[f] ) ) : 0u;
+    }
     std::vector<char>          lazyByFileOrder;   // importersOfFiles' own order (ascending file id) — see below
     std::vector<std::uint32_t> fileFanIn;         // per file: how many files import it — the rank-before-cap weight
     // #220 part 1: the tier's floor concerns it only when a TS/JS import could land on one of its def files — a C++
@@ -15607,13 +15662,14 @@ inline DepHealth dependencyHealth( const std::vector<std::vector<std::uint32_t>>
 // and `--arch`'s propagation_cost (arch.h::dsmPropagationCostCapable) both key off the same
 // dependencyCapableMask(), so the two verbs' N is provably the same denominator.
 struct RestrictedDepHealth { std::uint64_t ccd = 0; double acd = 0, nccd = 0; std::size_t depFileCount = 0; };
-inline RestrictedDepHealth restrictDependencyHealth( const IngestResult& ing, const std::vector<std::uint32_t>& transitive )
+// `mask` is the denominator (lintrules.h dependencyMeasure: dependencyCapableMask minus the no-edge files nothing touches).
+inline RestrictedDepHealth restrictDependencyHealth( const std::vector<char>& mask, const std::vector<std::uint32_t>& transitive )
 {
     RestrictedDepHealth r;
-    const std::size_t F = std::min( transitive.size(), ing.files.size() );
+    const std::size_t F = std::min( transitive.size(), mask.size() );
     for( std::size_t f = 0; f < F; ++f )
     {
-        if( dependencyCapable( langOfPath( ing.files[f] ) ) ) { r.ccd += transitive[f]; ++r.depFileCount; }
+        if( mask[f] ) { r.ccd += transitive[f]; ++r.depFileCount; }
     }
     const double N = double( r.depFileCount );
     r.acd  = r.depFileCount ? double( r.ccd ) / N : 0.0;
@@ -15647,10 +15703,23 @@ inline std::vector<float> diffTeleport( const IngestResult& ing, const std::vect
     return p;
 }
 
+// Is the out-CSR edge at position e a GUESS the answer cannot prove: bound by name alone, a markdown link, a link to a missing anchor, or
+// one arm of a resolver split (prov=3)? The one-implementor edge (via="impl") is NOT one: ifacedispatch.h commits it only when the receiver's
+// interface has exactly one implementor in the tree, and its hop row says so. pathHopHedged (pathpairs.h, the hop-row marks) hedges these
+// plus via="impl"; shortestPathAny's provenOnly walk skips exactly these, so a "proven-only" chain never carries a guessed hop.
+inline bool edgeUnprovenAt( const Graph& g, std::size_t e ) noexcept
+{
+    return ( e < g.outNameOnly.size() && edgeKindByte( g.outNameOnly[ e ] ) != 0 ) || ( e < g.outAnchorMiss.size() && g.outAnchorMiss[ e ] != 0 )
+        || ( e < g.outProv.size() && g.outProv[ e ] == 3u );
+}
+
 // ---- shortest directed call-path (--path=SRC,DST): BFS over out-edges; empty if unreachable -----------
 // Deterministic: out-edges are stored ascending by target id within each source, so BFS expands in a fixed
 // order. Returns the node sequence src..dst inclusive; {src} if src==dst; empty if dst is unreachable.
-inline std::vector<NodeId> shortestPathAny( const Graph& g, const std::vector<NodeId>& srcs, const std::vector<NodeId>& dsts )
+// provenOnly (PATH-ROUTE v2, src/pathroute.h): skip every edge that is a guess (edgeUnprovenAt: by name, markdown link, missing anchor,
+// split arm) — the proven-only search a name-stitched chain is checked against, so route_hedged="proven-preferred" never prints a
+// by-name, link or split hop; the default walks every out-edge, as it always has.
+inline std::vector<NodeId> shortestPathAny( const Graph& g, const std::vector<NodeId>& srcs, const std::vector<NodeId>& dsts, bool provenOnly = false )
 {
     const std::size_t N = g.wOutDeg.size();
     if( srcs.empty() || dsts.empty() )
@@ -15689,7 +15758,7 @@ inline std::vector<NodeId> shortestPathAny( const Graph& g, const std::vector<No
         for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
         {
             const NodeId v = g.outTargets[k];
-            if( seen[v] )
+            if( seen[v] || ( provenOnly && edgeUnprovenAt( g, k ) ) )
             {
                 continue;
             }

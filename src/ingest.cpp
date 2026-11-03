@@ -55,6 +55,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <numeric>
+#include <set>                 // std::set — ingest_valuerefs.h flowTokensOf
 #include <string>
 #include <span>
 #include <string_view>

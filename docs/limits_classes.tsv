@@ -126,6 +126,7 @@ kMinValueNameLen	BOUNDARY
 kNameCandidateCap	OUTPUT
 kNoticeByteCap	OUTPUT
 kOtherDefCap	OUTPUT
+kPathRouteRefuseCandsThreshold	BOUNDARY
 kRadixThreshold	BOUNDARY
 kRegexMaxGroupDepth	BOUNDARY
 kRegexMaxPatternBytes	BOUNDARY

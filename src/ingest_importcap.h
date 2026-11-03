@@ -285,13 +285,15 @@ TSNode importDirectiveOf( DepDialect dialect, TSNode pathNode ) noexcept
 // directive, which name is bound, which text is the target, what importedName records), so that is one normaliser arm per
 // DepDialect below, exactly as importDirectiveOf / normaliseImportSpecifier split @import.path. What does not vary is shared:
 // the reach and depth bound, the statement-byte siting, the empty-name refusals and the record itself. A dialect with no arm
-// emits nothing — no tags.scm but Python's writes these captures today (slice 2b ports one language per PR onto this function).
+// emits nothing — Python's tags.scm writes these captures for imports and the TS/TSX/JS ones for RE-EXPORTS (kind ReExport, lane alias-import);
+// slice 2b ports one language per PR onto this function.
 struct CapturedImportBind
 {
     TSNode           directive {};      // the statement both the bind and its Include are sited at
     std::string_view bound;             // the local name the directive binds
     std::string      target;            // the module (or path) the name comes from
     std::string      importedName;      // the dialect's extra bit (Python: "module", "from:<member>" or empty)
+    LocalBindKind    kind = LocalBindKind::Import;   // what the record IS: an import binding, or (Web) a re-export clause
 };
 
 // Python: `import a.b` binds `a` → module a.b; `import a.b as c` binds c → module a.b; `from m import x [as y]` binds x (or y) → m.
@@ -320,6 +322,28 @@ inline bool pythonImportBindOf( TSNode namesNode, TSNode aliasNode, std::string_
     return true;
 }
 
+// Web (lane alias-import): a RE-EXPORT — `export { a [as b] } from 'm'` (one record per specifier) and `export * from 'm'`. The
+// tags query captures the specifier's `name:` (with its `alias:` when written) or, for a star, the `source:` string itself. The
+// record binds no local name: var = the exported spelling ("*" for a star), typeName = the module, importedName = the name taken
+// from it ("*"), kind = ReExport (model.h). `export * as ns from` names a namespace and is not captured by the query; a
+// string-named specifier (`export { "a b" as c }`) is not an identifier and is refused here.
+inline bool webReexportBindOf( TSNode namesNode, TSNode aliasNode, std::string_view src, CapturedImportBind& out )
+{
+    static constexpr std::string_view kStar = "*";
+    const bool star = kindIs( ts_node_type( namesNode ), "string" );
+    out.directive   = star ? ts_node_parent( namesNode ) : ts_node_parent( ts_node_parent( ts_node_parent( namesNode ) ) );
+    if( ts_node_is_null( out.directive ) || !kindIs( ts_node_type( out.directive ), "export_statement" )   // a capture the query did not
+        || ( !star && !kindIs( ts_node_type( namesNode ), "identifier" ) ) )                                // shape this way is refused
+    {
+        return false;
+    }
+    out.kind         = LocalBindKind::ReExport;
+    out.bound        = star ? kStar : nodeTextOf( ts_node_is_null( aliasNode ) ? namesNode : aliasNode, src );
+    out.importedName = star ? std::string( kStar ) : std::string( nodeTextOf( namesNode, src ) );
+    out.target       = std::string( pattern::stripQuotePair( nodeTextOf( fieldChild( out.directive, NodeField::Source ), src ) ) );
+    return true;
+}
+
 // the shared emitter: the dialect arm reads the clause, then reach and depth apply to bindings as to Includes (a cut or
 // ERROR-wrapped import must not narrow a call), and the record is sited at the STATEMENT byte with empty spans.
 void emitCapturedImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
@@ -329,6 +353,7 @@ void emitCapturedImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t f
     switch( dependencyDialect( lang ) )
     {
         case DepDialect::Python: read = pythonImportBindOf( namesNode, aliasNode, src, c ); break;
+        case DepDialect::Web:    read = webReexportBindOf( namesNode, aliasNode, src, c ); break;   // re-exports only (lane alias-import)
         default:                 break;   // no arm: this dialect's query writes no @import.names (slice 2b adds one per PR)
     }
     if( !read )
@@ -344,7 +369,7 @@ void emitCapturedImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t f
     b.fileId       = fileId;
     b.startByte    = ts_node_start_byte( c.directive );
     b.lang         = lang;
-    b.kind         = LocalBindKind::Import;
+    b.kind         = c.kind;
     b.var.assign( c.bound );
     b.typeName     = std::move( c.target );
     b.importedName = std::move( c.importedName );

@@ -19,11 +19,14 @@
 // element whose children are one array element per field, each carrying comma-joined, XML-escaped values.
 // A consumer round-trips it by zipping the arrays against the path table — same symbol set, re-encoded.
 
+#include "memberowner.h"   // MemberOwners / qualifiedMemberName — the name column spells a member as the XML row does
 #include "model.h"
 #include "serialize.h"   // escapeXml, symTag, refRoleTag
 #include "graph.h"       // isTestedByReach — the tested column reads the test-reach lens (card A6)
 
+#include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -325,6 +328,29 @@ inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing
     }
 }
 
+// The `<name>` column: XML-escaped names (most identifiers never contain a comma, but markdown SECTION symbols and canonical ids
+// CAN (A4-F15) — writeCommaEscaped protects the ',' field separator from a value comma).
+// QUALNAME-1: a member row spells `Owner.name` exactly as its XML twin's n= does (memberowner.h); the owner table is built only when a row
+// can be a member, so a free-function page pays nothing. (columnarcheck's round-trip arm compares the two forms' (name, line) sets.)
+inline void emitNameColumn( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& rows, std::vector<char>& esc )
+{
+    const bool                        anyMember = std::ranges::any_of( rows, [ & ]( NodeId id ) { return memberOwnerPossible( ing.symbols[id] ); } );
+    const std::optional<MemberOwners> owners    = anyMember ? std::optional<MemberOwners>( std::in_place, ing ) : std::nullopt;
+    std::fputs( "<name>", out );
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        const Symbol&          sym   = ing.symbols[rows[i]];
+        const std::string      named = owners ? qualifiedMemberName( *owners, sym ) : sym.name;
+        const std::string_view n     = escapeXml( named, esc );
+        writeCommaEscaped( out, n );
+    }
+    std::fputs( "</name>", out );
+}
+
 // COLUMNAR form of a symbol-row verb (--callers/--callees/--impact/--pr-context symbols). `wrapperTag` is the
 // element name ("callers"), `wrapperAttrs` the already-formatted attribute string ("of=\"X\" count=\"17\"").
 // `rows` are the symbol node ids in the caller's already-sorted order. Emits:
@@ -375,19 +401,7 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
         rw::emitTo( out, "{}", rowPathIdx[i] );
     }
     std::fputs( "</path>", out );
-    // name array (XML-escaped; most identifiers never contain a comma, but markdown SECTION symbols and
-    // canonical ids CAN (A4-F15) — writeCommaEscaped protects the ',' field separator from a value comma).
-    std::fputs( "<name>", out );
-    for( std::size_t i = 0; i < rows.size(); ++i )
-    {
-        if( i )
-        {
-            std::fputc( ',', out );
-        }
-        const std::string_view n = escapeXml( ing.symbols[rows[i]].name, esc );
-        writeCommaEscaped( out, n );
-    }
-    std::fputs( "</name>", out );
+    emitNameColumn( out, ing, rows, esc );
     // line array
     std::fputs( "<line>", out );
     for( std::size_t i = 0; i < rows.size(); ++i )

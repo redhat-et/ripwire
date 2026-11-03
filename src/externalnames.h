@@ -20,8 +20,10 @@
 //     `site` module ran, not part of the language) and the five non-callable constants (True False None
 //     Ellipsis NotImplemented — never in callee position). The exception and warning classes are KEPT: they
 //     are callable (`ValueError(…)`). 141 names. The stdlib MODULE surface (`sys.stdlib_module_names`) is
-//     deliberately NOT a table: a stdlib member only becomes a bare name through an import, and the import
-//     binding decides that by resolution (LocalBindKind::Import), not by list.
+//     NOT a table HERE: a stdlib member only becomes a bare name through an import, and the import binding decides
+//     that by resolution (LocalBindKind::Import), not by list. The one place that list is read is pythonstdlib.h,
+//     for the layout-root fallback of a Python import (resolve.h pythonFallbackRoots), where resolution cannot
+//     decide because a same-named file exists; it never feeds this veto.
 //
 //   kCFamilyStdNames — the ISO C11 §7 library function names by header, plus the C++23 `std::` function
 //     templates a BARE spelling reaches through ADL or a using-directive, by header. Function names only

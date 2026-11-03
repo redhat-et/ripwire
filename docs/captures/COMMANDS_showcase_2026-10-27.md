@@ -3385,7 +3385,7 @@ Input file:
 AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:11977
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:12010
     #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:12018
     #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1754
     #3 0x102e01a44 in main src/main.cpp:4175
@@ -3394,11 +3394,11 @@ AddressSanitizer:DEADLYSIGNAL
 `````
 
 `````
-<ctx schema="ripwire.from-trace/v1" task="&lt;stdin&gt;" next="--slice=@src/graph.h:11977" est_tokens="1967">
+<ctx schema="ripwire.from-trace/v1" task="&lt;stdin&gt;" next="--slice=@src/graph.h:12010" est_tokens="1967">
 <!-- ripwire from-trace schema=ripwire.from-trace/v1: trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included. window: shown= total= capped= (capped=1 cut). est_tokens=: price as emitted (an upper bound under compact). <d r=N>: rank N in this ranking, rows in r= order. <d cx= ccx=>: cyclomatic/cognitive complexity. <d in=N>: N callers in the index (absent: not measured). sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. next=: the one pasteable follow-up. task=: the trace source this bundle maps, verbatim (a file path, stdin, or an MCP label). src=/format=: the trace read and its dominant frame format, python|asan|node|compiler|generic. frame_lines=/parsed=: frame-shaped input lines / those yielding a path:line; the rest matched no format. in_corpus=: parsed frames in indexed files; always suspects= + merged= + unresolved=. suspects=/merged=/unresolved=: frame rows / folded into a claimed symbol / unresolved rows (indexed file, no def). skipped=N: frames outside every root, listed as skipped rows, never ranked. rank=N: frame order, innermost in-corpus first; p= is the trace's own path:line, defs are sigs l=. resolved_by=name|line: bound by the frame's own name, else by the def enclosing its line. innermost=1: the innermost in-corpus frame (rank 1); its full body is served. -->
 <!-- ledger: budget=7500 bytes (allowance 9583 bytes = ceiling + the single-entry overshoot a whole first signature costs) -->
 <trace src="&lt;stdin&gt;" format="asan" frame_lines="5" parsed="4" in_corpus="4" skipped="0" merged="0" unresolved="0" suspects="4">
-<frame rank="1" n="rankGraphTeleport" t="fn" p="src/graph.h:11977" resolved_by="name" innermost="1"/>
+<frame rank="1" n="rankGraphTeleport" t="fn" p="src/graph.h:12010" resolved_by="name" innermost="1"/>
 <frame rank="2" n="rankGraph" t="fn" p="src/graph.h:12018" resolved_by="name"/>
 <frame rank="3" n="runDefaultMap" t="fn" p="src/main.cpp:1754" resolved_by="name"/>
 <frame rank="4" n="main" t="fn" p="src/main.cpp:4175" resolved_by="name"/>
@@ -4354,24 +4354,24 @@ ripwire 0.6.8 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=01b4
 
 # navigate — seeds, claims, slices, shapes
 
-## `./build/ripwire . --at=src/graph.h:11977`
+## `./build/ripwire . --at=src/graph.h:12010`
 
 *Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.*
 
 `````
 <!-- ripwire at schema=ripwire.at/v1: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans. root=: p= relative to it. -->
-<at schema="ripwire.at/v1" p="src/graph.h" l="11977" sym="rankGraphTeleport" chain="1" root=".">
+<at schema="ripwire.at/v1" p="src/graph.h" l="12010" sym="rankGraphTeleport" chain="1" root=".">
 <s n="rankGraphTeleport" t="fn" l="11975" el="12003"/>
 </at>
 `````
 
-## `./build/ripwire . --callers=@src/graph.h:11977`
+## `./build/ripwire . --callers=@src/graph.h:12010`
 
 *The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.*
 
 `````
 <!-- ripwire callers schema=ripwire.callers/v1: 1-hop CALLERS of of= (defs= matched, count= distinct symbols): <s t= n= p=>; hop_tested=/hop_untested=. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. <s sites_at=>: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds. next=: the one pasteable follow-up. -->
-<callers schema="ripwire.callers/v1" of="@src/graph.h:11977" defs="1" count="7" root="." hop_tested="0" hop_untested="7" graph_ambiguous="2980" graph_unresolved="15905" graph_unindexed="275" counts_floor="1" next="--uses=@src/graph.h:11977">
+<callers schema="ripwire.callers/v1" of="@src/graph.h:12010" defs="1" count="7" root="." hop_tested="0" hop_untested="7" graph_ambiguous="2980" graph_unresolved="15905" graph_unindexed="275" counts_floor="1" next="--uses=@src/graph.h:12010">
 <s t="fn" n="getIndex" p="src/mcpindex.h:1184" sites_at="src/mcpindex.h:1288"/>
 <s t="fn" n="rankGraph" p="src/graph.h:12016" sites_at="src/graph.h:12019"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:12662" sites_at="src/graph.h:12713"/>
@@ -5370,14 +5370,14 @@ ripwire: --no-stable is read only by --mcp/--listen (it opts out of the stable o
 **exit code: 4**
 
 `````
-<ctx schema="ripwire.from-trace/v1" task="run-trace: cat <scratch>/aux/asan_trace_now.txt; exit 1" next="--slice=@src/graph.h:11977" est_tokens="2537">
+<ctx schema="ripwire.from-trace/v1" task="run-trace: cat <scratch>/aux/asan_trace_now.txt; exit 1" next="--slice=@src/graph.h:12010" est_tokens="2537">
 <!-- ripwire from-trace schema=ripwire.from-trace/v1: trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included. window: shown= total= capped= (capped=1 cut). est_tokens=: price as emitted (an upper bound under compact). <d r=N>: rank N in this ranking, rows in r= order. <d cx= ccx=>: cyclomatic/cognitive complexity. <d in=N>: N callers in the index (absent: not measured). sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. next=: the one pasteable follow-up. task=: the trace source this bundle maps, verbatim (a file path, stdin, or an MCP label). src=/format=: the trace read and its dominant frame format, python|asan|node|compiler|generic. frame_lines=/parsed=: frame-shaped input lines / those yielding a path:line; the rest matched no format. in_corpus=: parsed frames in indexed files; always suspects= + merged= + unresolved=. suspects=/merged=/unresolved=: frame rows / folded into a claimed symbol / unresolved rows (indexed file, no def). skipped=N: frames outside every root, listed as skipped rows, never ranked. rank=N: frame order, innermost in-corpus first; p= is the trace's own path:line, defs are sigs l=. resolved_by=name|line: bound by the frame's own name, else by the def enclosing its line. innermost=1: the innermost in-corpus frame (rank 1); its full body is served. run exit=: the command's OWN exit code; signal=: the signal that killed it; timed_out=1: the timeout_s= cap did. run duration_ms=: wall clock, MEASURED, not deterministic; timeout_s=: the cap it ran under. run lines=: non-empty captured lines; bytes=: the whole capture; dropped_bytes=: middle bytes the cap dropped. lines view=tail: the last shown= of total= output lines; view=relevant: shown= of relevant= error/frame-shaped ones. lines relevant=N: captured lines that are error-marked or frame-shaped; the relevant view picks from these. -->
 <!-- ledger: budget=7500 bytes (allowance 9583 bytes = ceiling + the single-entry overshoot a whole first signature costs) -->
 <run exit="1" duration_ms="88" timeout_s="600" lines="9" bytes="606"/>
 <lines view="relevant" shown="7" relevant="7" total="9">
 <![CDATA[AddressSanitizer:DEADLYSIGNAL
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:11977
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:12010
     #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:12018
     #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1754
     #3 0x102e01a44 in main src/main.cpp:4175

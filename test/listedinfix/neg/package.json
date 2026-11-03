@@ -1,0 +1,8 @@
+{
+  "name": "n5",
+  "files": [
+    "dist",
+    "!./src/middleware/cors/index.ts",
+    "!./src/middleware/log/index.ts"
+  ]
+}

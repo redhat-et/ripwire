@@ -1,6 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
+#include "langfacts.h"
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -429,9 +430,7 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     {
         return false;
     }
-    const auto ends = [ & ]( std::string_view e )
-    { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
-    return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
+    return endsWithLowerAscii( p, ".sh" ) || endsWithLowerAscii( p, ".bash" ) || endsWithLowerAscii( p, ".zsh" );
 }
 
 // ---- P2.2 (agent-friction round, 2026-08-29): self-registering test/benchmark macros -------------------
@@ -1474,15 +1473,11 @@ inline std::vector<NodeId> pythonDispatchedMethodIds( const IngestResult& ing, c
 // descendants, `#` for the shell/Python/Ruby/Elixir/config family (in the C family `#` opens a PREPROCESSOR
 // directive, which is code — that is why this is per-language and not one union set), `--` for Lua. Markdown
 // and JSON have no comment syntax, so every non-blank line there is content.
-inline bool langUsesHashComment( Lang l ) noexcept
-{
-    return l == Lang::Python || l == Lang::Bash || l == Lang::Ruby || l == Lang::Elixir
-        || l == Lang::Toml   || l == Lang::Yaml || l == Lang::GDScript;
-}
+// Slice 6c: hashComment moved to langFacts(l) in langfacts.h
 
 inline std::uint32_t codeLinesInBody( std::string_view body, Lang lang ) noexcept
 {
-    const bool hash   = langUsesHashComment( lang );
+    const bool hash   = langFacts( lang ).hashComment;
     const bool cLike  = !hash && lang != Lang::Markdown && lang != Lang::Json && lang != Lang::Lua;
     const bool lua    = lang == Lang::Lua;
     std::uint32_t  code    = 0;
@@ -1972,7 +1967,10 @@ inline std::string cacheDirLadder()
     os::stat_t st {};
     if( mkdirRc == 0 || ( os::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == os::getuid() ) )
     {
-        if( os::chmod( d.c_str(), 0700 ) == 0
+        // Win32 chmod propagates inheritable ACLs through the whole cache tree, even when unchanged.
+        // lstat already verifies a protected owner-only DACL; repair only a missing/private-mode mismatch.
+        const bool alreadyOwnerOnly = ( st.st_mode & 0777 ) == 0700;
+        if( ( alreadyOwnerOnly || os::chmod( d.c_str(), 0700 ) == 0 )
             && os::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == os::getuid()
             && ( st.st_mode & 0777 ) == 0700 )
         {
@@ -2440,8 +2438,11 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 46;   // MUST equal ingest.cpp's kCacheVersion (gated); 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 269;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 48;   // MUST equal ingest.cpp's kCacheVersion (gated); 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestParserVerMirror    = 283;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 283 = 2026-10-31 (train 43b: registrar + string-import extraction; above the lane placeholders up to 281, rich 282)
+                                                          // 271 = 2026-10-30 (train 42b: iface-peel alias pointee / dyn-result / template-param
+                                                          //   member records and alias-import ReExport records, placeholders 259, 260, 261; above 41b's 269/270)
                                                           // 269 = 2026-10-29 (train 41b: fn-slot-s2 C/C++ member-pointer / nested-designator /
                                                           //   macro-cast slot extraction, placeholders 257, 259, 260; above train 41's 259/260)
                                                           // 259 = 2026-10-28 (train 41: fn-slot-2 Rust slot records / py-split-marker `?name`,
@@ -3784,7 +3785,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // The producer identity already keeps this build's blobs apart; bumped 22 -> 23 so the history above stays complete.
 // v24 (2026-10-25, train 36) — #228's v23 was the PR's placeholder; renumbered above every live value (main / train 35 / every
 // other ref 22, #437 23). No further shape change.
-constexpr std::uint32_t kQSnapCacheScheme = 24;
+// v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
+// other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
+// dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
+constexpr std::uint32_t kQSnapCacheScheme = 25;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -5073,7 +5077,16 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // newest prefix of the window) as if it were the window, and the key cannot tell that blob from a real read. K51 never
 // stores one, but a blob already on disk would keep serving its silent zero or prefix, with no history_unread=, until HEAD
 // moved. The bump makes every pre-K51 blob a clean miss; the cost is one cold walk per repository.
-constexpr std::uint32_t kQChurnCacheScheme = 3;
+// SCHEME 4 (2026-10-23, the git-porcelain-framing lane): the walk's READER was rebuilt — the line-framed
+// `__C__` marker parse became one NUL-framed reader with a whole-field sentinel and one field of lookahead
+// (test/gitframingcheck.sh). On a repository whose committed paths spell the marker bytes, carry a
+// newline, or sort after a path that does, the OLD reader's stream was corrupted (forged commit headers,
+// swallowed paths), so a blob written by a pre-lane binary would keep serving that corrupted stream to a
+// fixed one until HEAD moved — the same wrong-answer-from-cache as scheme 2, one layer down: there the
+// COMMAND changed under an unchanged key, here the PARSE did. Neither is visible to the key, which is why
+// this bump is manual. On ordinary trees the two readers' streams are byte-identical (the lane's golden
+// arm over owners/hotspots/cochange), so the bump costs those repos one cold walk and changes no answer.
+constexpr std::uint32_t kQChurnCacheScheme = 4;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )

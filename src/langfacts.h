@@ -71,6 +71,19 @@ enum class BaseImportEvidence : std::uint8_t
     JvmImport,      // `import org.ext.Base` / `extends org.ext.Base` of a package the tree does not declare
 };
 
+/// Lane arch-honest: can this language's files carry a file→file edge in this build? Resolved: a directive resolves to an indexed
+/// file (resolve.h includeLangOf has a Step-A), so an absent edge means none was written. Unmeasured: the language has code, and no
+/// sound string→file rule (a Go package path, a Java/Kotlin/C#/PHP namespace, a Swift whole-module import) or no import capture at
+/// all (Dart, GDScript, Clojure), so an absent edge means nothing: its Ca/Ce/I/D/zone are unknown, not zero. NotApplicable: docs and
+/// data, which the dependency verbs exclude by decision (lintrules.h dependencyCapable); a directory of them keeps its row.
+/// Unmeasured is the default, the honest answer for a language that says nothing; test/archhonestcheck.sh (H) pins each row to the index.
+enum class FileEdges : std::uint8_t
+{
+    Unmeasured,
+    Resolved,
+    NotApplicable,
+};
+
 /// #404: which type definitions' --lego method contract (<m>) is read off the method symbols inside the type's own body
 /// (serialize.h legoMethodContractSound). None keeps the rows suppressed and the named verb says so (caveat=).
 enum class LegoContract : std::uint8_t
@@ -110,6 +123,10 @@ struct LangFacts
     /// Elixir: `quote` bodies are inert syntax (an AST being built, not code that runs), so a call candidate inside one is a
     /// declined fact, never an edge (ingest_sidecap.h; the predicate itself lives in ingest_elixir.h).
     bool hasInertQuoteRegions = false;
+
+    /// Not a code language — prose, configuration or data (and no recognised language at all): a bare basename with such an
+    /// extension (`book.toml`, `SUMMARY.md`) named in a --for task is context, never a file anchor (mention.h isCodeExtension).
+    bool notCode = false;
 
     /// C++: defect-shape's whole-tree input is the macro-name set, and a changed C++ file (a .h reads as C++) can only be
     /// judged against the base's whole set. A changed C or Objective-C file does not need it, by today's behaviour
@@ -154,6 +171,10 @@ struct LangFacts
     /// through the host's overrides (quality.h pythonReceiverParameters, pythonDispatchRequests). A separate fact from the hooks.
     bool closureReceiverDispatch = false;
 
+    /// Python: a bare builtin or an import from outside the tree is bound there whatever namesake an imported file defines, so the
+    /// Phase-5 external-name veto (graph.h ExternalVeto) decides a call BEFORE Rule 3 narrows it to that namesake.
+    bool externalVetoBeforeRule3 = false;
+
     /// Kotlin: an `interface` is a class_declaration like a class (queries/kotlin/tags.scm: "both land here as @definition.class"),
     /// so the symbol's kind cannot tell the two apart; shared code that needs an interface (ifacedispatch.h's lambda test) reads a
     /// class of such a language as a possible one.
@@ -177,6 +198,18 @@ struct LangFacts
     /// decides only the closure relation, no symbol or edge). A lambda or a block is anonymous, and a C++ local class's
     /// methods sit inside the class's scope, not directly in the function, so neither is a closure either way.
     bool noNestedNamedFunctions = false;
+
+    /// C++: a `using X = std::shared_ptr<I>;` / `typedef std::unique_ptr<I> X;` alias (the std smart pointers whose `->` reaches
+    /// their first template argument, ingest_relations.h kStdSmartPointers) types a member written X as I for `->` alone, like a
+    /// member written `std::shared_ptr<I>` itself (lane iface-peel; the alias record carries the pointee, graph.h
+    /// buildFieldNarrowTables follows a bounded alias chain). A `.` call on such a member reaches the smart pointer, never I.
+    bool aliasPeelsSmartPointer = false;
+
+    /// Rust: a function whose declared result is a trait object or an opaque type (`&dyn T`, `Box<dyn T>`, `impl T`) types the
+    /// local its call initialises as SOME implementor of T, exactly as a local written `let x: &dyn T` (lane iface-peel; the
+    /// dispatch tier, ifacedispatch.h, then declines the call on it or proves its one implementor). Only through the call's own
+    /// ONE proven edge (graph.h typeCallResults); a by-name callee types nothing, and a generic `-> T` is never read.
+    bool returnTypedDispatchLet = false;
 
     /// Rust: a construction is a call to the type's conventional constructor METHOD (`T::new( … )`), not to the type itself, so
     /// --affected's class-new backstop (testmap.h classNewTestRows) reads a call to this method of a class as building it. Empty =
@@ -251,6 +284,33 @@ struct LangFacts
     /// count it (lane path-hop-body-fix1, review F4: a documented one-line delegator is still thin).
     bool leadingDocstring = false;
 
+    /// The languages where a bare `m()` inside a method is an implicit `this.m()` (or reaches a free/top-level function):
+    /// Java, Kotlin, C#, Swift, C++, Ruby.
+    bool implicitReceiver = false;
+
+    /// The languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias):
+    /// a free function is never what `x.f()` calls. Python, Go, C++, Rust, Ruby, Java, C#, Swift.
+    bool memberNeverReachesFreeFunction = false;
+
+    /// A call through a module alias (`pkg.F()`) reaches the module's package-level functions only, never a method: Go.
+    bool moduleCallReachesFunctionsOnly = false;
+
+    /// The languages where `Cls.m()` is a call on the CLASS (a static or an unbound method):
+    /// JavaScript, TypeScript, Python, Java, Kotlin, C#, Swift.
+    bool classNameReceiver = false;
+
+    /// The languages where `#` opens a line comment (in the C family `#` opens a preprocessor directive):
+    /// Python, Bash, Ruby, Elixir, Toml, Yaml, GDScript.
+    bool hashComment = false;
+
+    /// C, C++, Go: a function's signature is a unit other declarations repeat (a header prototype, a forward declaration, a Go interface
+    /// method), so a signature change reaches those rows in step; fordeclrow.h counts only these languages' function and method rows
+    /// (DECL-ROW). Objective-C is not here: its message selectors are not C signatures.
+    bool signatureRows = false;
+
+    /// Whether this language's files can carry a file→file edge in this build (FileEdges above).
+    FileEdges fileEdges = FileEdges::Unmeasured;
+
     /// C++, Objective-C (every type), Go (interfaces): the --lego method contract is read off the type's own body (LegoContract).
     LegoContract legoContract = LegoContract::None;
 };
@@ -260,39 +320,51 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .memberSeparator = "::",
-      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .legoContract = LegoContract::EveryType },
-    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
-      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true },
+    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
+      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved,
+      .legoContract = LegoContract::EveryType },
+    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
+      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true },
-    { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir, .legoContract = LegoContract::InterfacesOnly },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self" },
-    { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .legoContract = LegoContract::EveryType },
-    { .lang = Lang::Markdown, .linkSections = true },
+      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
+      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true, .legoContract = LegoContract::InterfacesOnly },
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
+      .legoContract = LegoContract::EveryType },
+    { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true },
-    { .lang = Lang::Bash },
+      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
-      .writtenModule = WrittenModuleRule::DirsOnly },
+      .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
-      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self" },
-    { .lang = Lang::Unknown },
-    { .lang = Lang::Json },
-    { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly },
+      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true },
-    { .lang = Lang::Toml },
-    { .lang = Lang::Yaml },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Php, .memberSeparator = "::" },
-    { .lang = Lang::Lua, .dashDashComments = true },
-    { .lang = Lang::Elixir, .hasInertQuoteRegions = true },
+    { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Dart },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
-      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly },
-    { .lang = Lang::GDScript },
+      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .classNameReceiver = true },
+    { .lang = Lang::GDScript, .hashComment = true },
     { .lang = Lang::Clojure },
 } };
 
@@ -311,5 +383,38 @@ inline constexpr LangFacts langFacts( Lang l ) noexcept
 {
     return enumTableAt( kLangFacts, l, LangFacts { .lang = Lang::Unknown } );
 }
+
+// Slice 6c compile-time assertions: verify all 5 columns against the exact original language sets for every Lang.
+static_assert( []() constexpr
+{
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        const Lang l = static_cast<Lang>( i );
+        const bool expectedImplicit = ( l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp ||
+                                        l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby );
+        const bool expectedMemberNeverReachesFree = ( l == Lang::Python || l == Lang::Go || l == Lang::Cpp ||
+                                                     l == Lang::Rust || l == Lang::Ruby || l == Lang::Java ||
+                                                     l == Lang::CSharp || l == Lang::Swift );
+        const bool expectedModuleCallReachesFnsOnly = ( l == Lang::Go );
+        const bool expectedClassNameReceiver = ( l == Lang::JavaScript || l == Lang::TypeScript ||
+                                                l == Lang::Python || l == Lang::Java || l == Lang::Kotlin ||
+                                                l == Lang::CSharp || l == Lang::Swift );
+        const bool expectedHashComment = ( l == Lang::Python || l == Lang::Bash || l == Lang::Ruby ||
+                                           l == Lang::Elixir || l == Lang::Toml || l == Lang::Yaml ||
+                                           l == Lang::GDScript );
+
+        const auto& f = kLangFacts[ i ];
+        if( f.implicitReceiver != expectedImplicit ) return false;
+        if( f.memberNeverReachesFreeFunction != expectedMemberNeverReachesFree ) return false;
+        if( f.moduleCallReachesFunctionsOnly != expectedModuleCallReachesFnsOnly ) return false;
+        if( f.classNameReceiver != expectedClassNameReceiver ) return false;
+        if( f.hashComment != expectedHashComment ) return false;
+    }
+    return true;
+}(), "Slice 6c: all 5 columns in kLangFacts must match the exact original language predicate sets" );
+static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang::Unknown ).memberNeverReachesFreeFunction );
+static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
+static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
+
 
 }   // namespace rw

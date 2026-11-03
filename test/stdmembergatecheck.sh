@@ -225,7 +225,7 @@ check "(W) typedef std::unique_ptr<ns::List> ListUP; ListUP p; p->front()"      
 check "(W) ListUP& p; p->find() (the unique_ptr typedef, a parameter)"                               callees typedefUniqueParam "$LF" '' ''
 check "(W) using ListUsingSP = std::shared_ptr<ns::List>; p->size() — the same rule for using"      callees usingSharedLocal   "$LS" '' ''
 check "(W) using QtListSP = QSharedPointer<ns::List>; p->front() — an alias of an undefined wrapper" callees usingQtAliasLocal  "$LR" '' ''
-check "(W) a field typed by a class-scoped typedef of std::shared_ptr<ns::List>; p_->size()"        callees typedefField       "$LS" '' ''
+check "(W) a field typed by a class-scoped typedef of std::shared_ptr<ns::List>; p_->size() — lane iface-peel: the alias's pointee types the member through '->' (a typed edge, no hedge)" callees typedefField 'wrap/list.h:9:List::size' '' ''
 check "(W) Owner4::Ptr p; p->size() — a class-scoped typedef, a parameter"                           callees classScopedTypedef "$LS" '' ''
 check "(W) accepted cost: typedef std::unique_ptr<std::string> StrUP; p->size() keeps the hedge (the record holds no argument; as using StrPtr)" callees typedefStrUP "$LS" '' ''
 check "(W) near-miss: typedef std::vector<int> IntVec; IntVec v; v.size() stays declined"             callees typedefVecDot      '' 1 'size:1'
