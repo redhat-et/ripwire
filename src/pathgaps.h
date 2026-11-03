@@ -347,7 +347,7 @@ struct PathHintSpelling
 };
 
 // docs-rest fix2 (gate restdocscheck (I)): which endpoint resolved to doc units ONLY (a heading or directive, no code definition;
-// graph.h preferCodeOverDocUnits already took the code when any spelling reaches it). Such an endpoint holds no calls, so a
+// graph.h preferCodeOverDocUnits and dropDocUnitsBesideCode already took the code when any spelling reaches it). Such an endpoint holds no calls, so a
 // reachable="0" answer from it is not a call-graph verdict, and the hint says so instead of "no directed call path".
 inline std::string_view pathDocEndpoints( const IngestResult& ing, std::span<const NodeId> srcDefs, std::span<const NodeId> dstDefs ) noexcept
 {
@@ -1124,7 +1124,7 @@ inline std::string pathNearSinkXml( const IngestResult& ing, const PathNearSink&
 inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefs, bool* glob )
 {
     *glob                   = false;
-    std::vector<NodeId> out = resolveAllByNameQualified( ing, spec, unprovenDefs );
+    std::vector<NodeId> out = dropDocUnitsBesideCode( ing, resolveAllByNameQualified( ing, spec, unprovenDefs ) );
     if( !out.empty() || spec.find( '*' ) == std::string_view::npos || spec.find( ':' ) != std::string_view::npos )
     {
         return out;

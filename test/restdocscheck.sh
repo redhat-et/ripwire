@@ -423,6 +423,7 @@ echo "I. a doc unit spelled like code never hides the code (graph.h preferCodeOv
 # `.. method:: save_base` under `.. class:: Model` is the Scope::name shape; `only_in_docs` has no code at all.
 IX="$TMP/ix"; mkdir -p "$IX/docs" "$IX/src"; printf 'project = "i"\nextensions = []\n' >"$IX/docs/conf.py"
 printf 'def helper():\n    return 1\n\n\nclass Model:\n    def save(self):\n        return self.save_base()\n\n    def save_base(self):\n        return helper()\n\n\ndef run():\n    return Model().save()\n' >"$IX/src/m.py"
+printf '# Notes\n\n## helper\n\nqqmdhelper\n' >"$IX/docs/notes.md"   # I13: a markdown heading spelled like code
 printf 'Model reference\n===============\n\n.. method:: Model.save(force=False)\n\n   Saves qqsaveword.\n\n.. function:: only_in_docs(x)\n\n   No code qqdoconly.\n\n.. class:: Model\n\n   .. method:: save_base()\n\n      Nested qqnested.\n' >"$IX/docs/ref.rst"
 # root VERB: the verb's root element (exit code checked: a crash or an empty answer fails every arm that reads it)
 root(){ o="$( "$BIN" "$IX" --no-cache "$1" 2>/dev/null </dev/null )" || return 1; printf '%s' "$o" | grep -o "<$2 [^>]*>" | head -1 | grep . ; }
@@ -440,4 +441,10 @@ i9="$( root --path=helper,run path )"; arm "I9 twin: a code pair with no path ke
 arm "I10 the doc-only unit still expands" sh -c 'o="$( "$1" "$2" --no-cache --expand=only_in_docs --top-k=0 2>/dev/null </dev/null )" && case "$o" in *qqdoconly*) exit 0;; esac; exit 1' _ "$BIN" "$IX"
 arm "I11 a file:name spelling still picks the nested directive" sh -c 'o="$( "$1" "$2" --no-cache --expand=docs/ref.rst:save_base --top-k=0 2>/dev/null </dev/null )" && case "$o" in *qqnested*) exit 0;; esac; exit 1' _ "$BIN" "$IX"
 
+# I12/I13 (docs-rest CI fix): only a --path ENDPOINT drops the doc units of a mixed list (pathgaps.h dropDocUnitsBesideCode). --callers
+# still lists a directive or heading that shares the code's name as a second def, so a markdown link to it keeps its via=link row
+# (mdsectioncheck), and --path drops a markdown heading as it drops a directive.
+i12="$( root --callers=save_base callers )"; arm "I12 --callers keeps the nested directive beside the code (defs=2, the code's caller counted)" sh -c 'case "$1" in *defs=\"2\"*count=\"1\"*) exit 0;; esac; exit 1' _ "$i12"
+i13="$( root --path=save_base,helper path )"; arm "I13 a markdown heading spelled like the to= code is no second definition (to_defs=1)" sh -c 'case "$1" in *to_defs=\"1\"*reachable=\"1\"*) exit 0;; esac; exit 1' _ "$i13"
+i13c="$( root --callers=helper callers )"; arm "I13b while --callers lists that heading as a second def (defs=2)" sh -c 'case "$1" in *defs=\"2\"*) exit 0;; esac; exit 1' _ "$i13c"
 [ "$fail" = 0 ] && echo "restdocscheck: ALL PASS" || { echo "restdocscheck: FAILED"; exit 1; }

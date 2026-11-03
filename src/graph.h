@@ -14070,18 +14070,14 @@ inline bool isDocUnit( const Symbol& s ) noexcept
 // --callers, --callees and --impact counted 0. When EVERY earlier match is a doc unit, those two tiers run as if nothing had
 // matched, and the code definitions they find replace the doc units. With no code match the doc units stand (--expand of a
 // heading, --callers of a :ref: label; a `docs/x.rst:name` spelling picks the doc unit). A match list that holds code AND doc
-// units keeps the code only: a `.. c:function:: Py_X` directive is not a second definition of Py_X, so it never raises
-// defs= or the "several defs share these names" hint (the Scope::name tier: a nested `.. method:: save` under `.. class:: Model`).
+// units stands as it is here: --callers, --impact and --safe-delete list a markdown heading `## run` beside `def run` as a second
+// def (cross_kind) with its link callers marked via=link (mdsectioncheck). Only a --path ENDPOINT drops the doc units of a mixed
+// list (dropDocUnitsBesideCode, pathgaps.h resolvePathEndpoint): a heading holds no calls, so it is never a path start or end.
 inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std::string_view spec, std::vector<NodeId> found )
 {
     const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
-    if( found.empty() || std::none_of( found.begin(), found.end(), doc ) )
+    if( found.empty() || !std::all_of( found.begin(), found.end(), doc ) )
     {
-        return found;
-    }
-    if( !std::all_of( found.begin(), found.end(), doc ) )
-    {
-        std::erase_if( found, doc );
         return found;
     }
     std::vector<NodeId> code = resolveAllByDottedScope( ing, spec, {} );
@@ -14092,6 +14088,19 @@ inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std:
         std::erase_if( code, doc );
     }
     return code.empty() ? found : code;
+}
+
+// A --path endpoint's matches, code first (docs-rest CI fix; gates restdocscheck (I5, I6), mdsectioncheck): when a name matches code
+// AND doc units, the doc units go, since a `.. method:: save` directive or a `## run` heading is no second place a call path can
+// start or end, and from_defs=/to_defs= count code only. An all-doc or all-code list is returned as it is.
+inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std::vector<NodeId> found )
+{
+    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
+    if( !std::all_of( found.begin(), found.end(), doc ) )
+    {
+        std::erase_if( found, doc );
+    }
+    return found;
 }
 
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
