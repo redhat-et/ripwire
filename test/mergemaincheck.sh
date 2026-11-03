@@ -19,8 +19,24 @@
 #   (N2) a binary-pinned conflict (docs/COMMANDS.md) takes main's side, commits, exits 3, and the REGEN list
 #        is in the merge commit message.
 #   (X)  a crashing scripts/merge_resolve.py (on a merge with count conflicts) is exit 2 ("error"), never 1 ("conflicts left") or 0.
+#   (M4) a side that only re-ran the generator on a marked line yields to a side that reworded it (count regenerated).
+#        Neighbour: a rewording that also adds a non-owned number stays a conflict.
+#   (M5) a rewording that keeps a non-owned number's digits but changes its qualifier ("200+" -> "200", "~210" ->
+#        "210") is a changed figure: it stays a conflict (exit 1), never a silent rewording.
+#   (R2) --regen-after-build re-pins only parity labels the marked merge's two parents pinned differently: a
+#        label both parents agreed on that moves is refused (exit 1, nothing committed, the label named). Twin:
+#        only the conflicted label moves -> exit 0, and the commit message names it. (Stub parity gate + stub BIN.)
+#   (R3) a merge with marks, then a merge without: --regen-after-build still settles the earlier marks (exit 0,
+#        re-pinned), never "nothing to re-record".
+#   (R1) CAPTURE-DICTV-DRIFT: a merge that brings main's newer capture marks it REGEN AFTER BUILD (exit 3, no
+#        conflict needed); --regen-after-build BIN re-records the dictv=/entries= pair from BIN and commits (exit 0).
+#        Crash twin: a binary whose --legend-dict fails gives exit 1 and commits nothing. Needs BIN ($1); SKIP without.
+# The fixture runs the generators WITHOUT docs/counts.tsv (live totals), the shape every branch cut before the
+# counts snapshot has; test/gendocsmergecheck.sh covers merges of branches that have the snapshot.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+case "$BIN" in /*) ;; *) BIN="$ROOT/$BIN" ;; esac
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -39,6 +55,9 @@ mkdir -p "$R/test" || exit 2
 ( cd "$ROOT" && tar cf - src docs bench/capsweep scripts present/deck5_ripwire_build.js README.md test/regression.sh test/lib ) \
     | ( cd "$R" && tar xf - ) || { echo "mergemaincheck: could not copy the tree"; exit 2; }
 for f in "$ROOT"/test/*.sh; do [ -f "$f" ] && [ ! -e "$R/test/${f##*/}" ] && : > "$R/test/${f##*/}"; done
+rm -f "$R/docs/counts.tsv"      # live totals: see the header
+( cd "$R" && python3 docs/gatecount_build.py && python3 docs/limits_build.py && python3 bench/capsweep/capsweep.py emit ) >/dev/null \
+    || { echo "mergemaincheck: the generators failed on the fixture"; exit 2; }
 g(){ git -C "$R" "$@"; }
 g init -q -b base . >/dev/null 2>&1 || g init -q . || exit 2
 g checkout -q -B base 2>/dev/null
@@ -66,7 +85,7 @@ fresh(){   # $1 new branch from $2
     g checkout -q -B "$1" "$2" || { no "fixture: could not branch $1 from $2"; return 1; }
 }
 mm(){ ( cd "$R" && bash scripts/merge_main.sh "$@" ) > "$TMP/out" 2>&1; }
-count(){ sed -n 's/.*loop in `test\/regression\.sh` names \([0-9][0-9]*\)\..*/\1/p' "$R/docs/EVALS.md" | head -1; }
+count(){ sed -n 's/.*loop in `test\/regression\.sh` names \([0-9][0-9]*\)[ .].*/\1/p' "$R/docs/EVALS.md" | head -1; }
 listed(){ grep -qx "    $1 \\\\" "$R/test/regression.sh"; }
 baseCount="$( count )"
 [ -n "$baseCount" ] || { echo "mergemaincheck: could not read the fixture's gate count"; exit 2; }
@@ -171,6 +190,123 @@ mm m1-main; rc=$?
 if [ "$rc" = 2 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && [ -n "$( g diff --name-only --diff-filter=U )" ]; then
     ok "(X) a crashing scripts/merge_resolve.py gives exit 2, commits nothing, and leaves the conflicts in place"
 else no "(X) crashing resolver: rc=$rc (want 2): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+
+# ── (M4) one side only re-ran the generator, the other reworded the marked line (2026-11-02) ─────────
+# The counts-snapshot rewording met every open branch that had regenerated a count on the same line. The
+# side whose change is only a generator-owned number yields to the prose side; the count is then recomputed.
+deckLine(){ grep -n 'stat(s, "[0-9]*", "gate scripts' "$R/present/deck5_ripwire_build.js" | head -1; }
+fresh m4-main base && sed -i.bak -E 's/(stat\(s, "[0-9]+", "gate scripts )/\1(reworded) /' "$R/present/deck5_ripwire_build.js" && rm -f "$R/present/deck5_ripwire_build.js.bak"
+if ! deckLine | grep -q '(reworded)'; then no "(M4) mutation did not take: no deck stat() gate-count line to reword"
+else
+    commitAll "main rewords the deck's gate-count line"
+    fresh m4-lane base && addGate aaalanecheck && commitAll "lane adds a gate (its generator rewrote the count)"
+    mm m4-main; rc=$?
+    if [ "$rc" = 0 ] && deckLine | grep -q "\"$(( baseCount + 1 ))\", \"gate scripts (reworded) " && grep -q '^RESOLVED present/deck5_ripwire_build.js c=' "$TMP/out"; then
+        ok "(M4) a count-only side against a reworded side settles to the rewording with the count regenerated ($(( baseCount + 1 )))"
+    else no "(M4) count-only vs reworded: rc=$rc deck='$( deckLine | cut -c1-90 )': $( grep -E 'deck|merged|STOPPED' "$TMP/out" | tr '\n' ' ' )"; fi
+    # neighbour: the rewording side also changed a non-owned number on the line -> a person decides
+    fresh m4-main2 base && sed -i.bak -E 's/(stat\(s, "[0-9]+", "gate scripts )/\1(reworded 2) /' "$R/present/deck5_ripwire_build.js" && rm -f "$R/present/deck5_ripwire_build.js.bak" && commitAll "main rewords with a number"
+    fresh m4-lane2 base && addGate aaalanecheck && commitAll "lane adds a gate"; head0="$( g rev-parse HEAD )"
+    mm m4-main2; rc=$?
+    if [ "$rc" = 1 ] && grep -q '^UNTOUCHED present/deck5_ripwire_build.js\|^PARTIAL present/deck5_ripwire_build.js' "$TMP/out" && [ "$( g rev-parse HEAD )" = "$head0" ]; then
+        ok "(M4 neighbour) a rewording that also adds a non-owned number stays a conflict (exit 1)"
+    else no "(M4 neighbour) rc=$rc (want 1, deck left): $( grep -E 'deck|merged' "$TMP/out" | tr '\n' ' ' )"; fi
+fi
+
+# ── (M5) a qualifier change on a non-owned number is a changed figure, not a rewording ─────────────────
+# Each shape is "fixed-string anchor|ERE edit". The anchor must be on the fixture's docs/EVALS.md before the edit
+# runs, and sed's own exit is read: a missing anchor or a rejected expression is a FAIL that says which. The ERE
+# spells a literal ')' as [)]: GNU sed -E rejects a bare unmatched ')' (BSD reads it literally), which is how
+# this arm once passed on macOS and failed on Linux CI.
+for m5 in 'says 200+), while the loop|s/says 200[+][)], while the loop/says 200), while the loop/' '  ~210;|s/^  ~210;/  210;/'; do
+    anchor="${m5%%|*}" shape="${m5#*|}"
+    fresh m5-main base || continue
+    if ! grep -qF -- "$anchor" "$R/docs/EVALS.md"; then
+        no "(M5) anchor '$anchor' is not on the fixture's docs/EVALS.md (copied from this tree): the arm needs a new anchor"; continue
+    fi
+    if ! sed -i.bak -E "$shape" "$R/docs/EVALS.md"; then
+        rm -f "$R/docs/EVALS.md.bak"; g checkout -q -- docs/EVALS.md
+        no "(M5) sed rejected the edit '$shape' on the fixture's docs/EVALS.md"; continue
+    fi
+    rm -f "$R/docs/EVALS.md.bak"
+    if g diff --quiet -- docs/EVALS.md; then no "(M5) mutation '$shape' did not take on the fixture's docs/EVALS.md (anchor present)"; continue; fi
+    commitAll "main rewords a qualifier"
+    fresh m5-lane base && addGate aaalanecheck && commitAll "lane adds a gate"; head0="$( g rev-parse HEAD )"
+    mm m5-main; rc=$?
+    if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -q 'docs/EVALS.md' "$TMP/out"; then
+        ok "(M5) a qualifier-only edit ($shape) against a count-only side stays a conflict on docs/EVALS.md (exit 1)"
+    else no "(M5) qualifier edit '$shape': rc=$rc (want 1, nothing committed): $( grep -E 'EVALS|merged' "$TMP/out" | tr '\n' ' ' )"; fi
+done
+
+# ── (R2)/(R3) --regen-after-build: scoped parity re-pin, and marks pending across merges ─────────────
+# A stub parity gate stands in for the merged binary: UPDATE_GOLDEN=1 writes $TRUE_MANIFEST, plain mode compares.
+writeManifest(){ printf 'alpha 0 %s e\nbeta 0 %s e\ngamma 0 ccc e\n' "$1" "$2" > "$3"; }
+printf '#!/bin/sh\necho "stub-bin 0 (built_from=stub)"\n' > "$TMP/stubbin"; chmod +x "$TMP/stubbin"
+fresh r2-base base && writeManifest aaa bbb "$R/test/printf_parity.manifest" \
+    && printf '#!/usr/bin/env bash\nif [ "${UPDATE_GOLDEN:-0}" = 1 ]; then cp "$TRUE_MANIFEST" test/printf_parity.manifest; exit 0; fi\ncmp -s "$TRUE_MANIFEST" test/printf_parity.manifest\n' > "$R/test/printffmtparitycheck.sh" \
+    && commitAll "parity fixture"
+fresh r2-main r2-base && writeManifest a-main bbb "$R/test/printf_parity.manifest" && commitAll "main re-pins alpha"
+fresh r2-lane r2-base && writeManifest a-lane bbb "$R/test/printf_parity.manifest" && commitAll "lane re-pins alpha"
+mm r2-main; rc=$?
+if [ "$rc" != 3 ] || ! g log -1 --format=%B | grep -qx '    test/printf_parity.manifest'; then
+    no "(R2) setup: the alpha conflict did not mark test/printf_parity.manifest (rc=$rc): $( tail -2 "$TMP/out" | tr '\n' ' ' )"
+else
+    head0="$( g rev-parse HEAD )"
+    export TRUE_MANIFEST="$TMP/true.manifest"
+    writeManifest a-true b-true "$TRUE_MANIFEST"          # beta moved too, and both parents pinned beta alike
+    mm --regen-after-build "$TMP/stubbin"; rc=$?
+    if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -qx '    beta' "$TMP/out" && ! grep -qx '    alpha' "$TMP/out"; then
+        ok "(R2) a re-pin that moves a label both parents agreed on (beta) is refused: exit 1, nothing committed, beta named"
+    else no "(R2) unscoped re-pin: rc=$rc (want 1, beta named, nothing committed): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+    g checkout -q -- .
+    writeManifest a-true bbb "$TRUE_MANIFEST"
+    mm --regen-after-build "$TMP/stubbin"; rc=$?
+    if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^ )" = "$head0" ] && g log -1 --format=%B | grep -qx 'parity labels re-pinned: alpha'; then
+        ok "(R2 twin) only the conflicted label moves: exit 0, committed, the message names 'alpha'"
+    else no "(R2 twin) scoped re-pin: rc=$rc (want 0, one commit naming alpha): $( tail -2 "$TMP/out" | tr '\n' ' ' ) | $( g log -1 --format=%B | tail -2 | tr '\n' ' ' )"; fi
+    # (R3) marks, then a merge without marks, then regen
+    fresh r3-lane r2-base && writeManifest a-lane bbb "$R/test/printf_parity.manifest" && commitAll "lane re-pins alpha"
+    mm r2-main; rc1=$?
+    g checkout -q -B r3-main2 r2-main && printf 'more main\n' > "$R/main2.txt" && commitAll "main moves on" && g checkout -q r3-lane
+    mm r3-main2; rc2=$?
+    head1="$( g rev-parse HEAD )"
+    mm --regen-after-build "$TMP/stubbin"; rc=$?
+    if [ "$rc1" = 3 ] && [ "$rc2" = 0 ] && [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^ )" = "$head1" ] && cmp -s "$TRUE_MANIFEST" "$R/test/printf_parity.manifest"; then
+        ok "(R3) marks from an earlier merge survive a later unmarked merge: --regen-after-build re-pins them (exit 0)"
+    else no "(R3) pending marks: merge rc=$rc1/$rc2 (want 3/0), regen rc=$rc (want 0, committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    unset TRUE_MANIFEST
+fi
+
+# ── (R1) CAPTURE-DICTV-DRIFT: main's newer capture is marked, and --regen-after-build re-records it ──
+# Needs a real binary (the merged build): BIN, the gate's argument. A missing binary SKIPs these arms only.
+capOf(){ ls "$R"/docs/captures/COMMANDS_showcase_*.md 2>/dev/null | LC_ALL=C sort | tail -1; }
+pairOf(){ sed -n '/^## .*--legend-dict/,/^## /p' "$1" | grep -oE 'dictv=[0-9a-f]+ entries=[0-9]+' | head -1; }
+if [ ! -x "$BIN" ]; then
+    echo "  SKIP  (R1) no binary at $BIN — the --regen-after-build arms need the merged build"
+elif ! livePair="$( "$BIN" . --legend-dict 2>/dev/null | grep -oE 'dictv=[0-9a-f]+ entries=[0-9]+' | head -1 )" || [ -z "$livePair" ]; then
+    no "(R1) '$BIN . --legend-dict' printed no dictv=/entries= pair (or failed)"
+else
+    cap="$( capOf )"; fake='dictv=0123456789abcdef entries=1'
+    fresh r1-main base && python3 - "$cap" "$( pairOf "$cap" )" "$fake" <<'PY' && commitAll "main's capture records another binary's dictionary"
+import sys; p, old, new = sys.argv[ 1: ]; t = open( p ).read(); open( p, 'w' ).write( t.replace( old, new, 1 ) )
+PY
+    fresh r1-lane base && printf 'lane\n' > "$R/lane.txt" && commitAll "lane work"
+    mm r1-main; rc=$?
+    if [ "$rc" = 3 ] && g log -1 --format=%B | grep -qx "    ${cap#$R/}"; then
+        ok "(R1) a merge that brings main's capture (no conflict) exits 3 and marks ${cap##*/} REGEN AFTER BUILD"
+    else no "(R1) capture from main: rc=$rc (want 3, capture named in the merge message): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+    head0="$( g rev-parse HEAD )"
+    printf '#!/bin/sh\nexit 1\n' > "$TMP/crashbin"; chmod +x "$TMP/crashbin"
+    mm --regen-after-build "$TMP/crashbin"; rc=$?
+    if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && [ "$( pairOf "$cap" )" = "$fake" ]; then
+        ok "(R1 crash) a binary whose --legend-dict fails: exit 1, nothing committed, the capture untouched"
+    else no "(R1 crash) failing binary: rc=$rc (want 1, nothing committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    g checkout -q -- . 2>/dev/null
+    mm --regen-after-build "$BIN"; rc=$?
+    if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^ )" = "$head0" ] && [ "$( pairOf "$cap" )" = "$livePair" ] && ! g grep -qF "$fake" -- docs; then
+        ok "(R1 twin) --regen-after-build re-records $fake -> $livePair from the merged build and commits it (exit 0)"
+    else no "(R1 twin) regen: rc=$rc capture='$( pairOf "$cap" )' (want $livePair, one new commit): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+fi
 
 # ── (N2) exit 3: a binary-pinned file took main's side; the REGEN list is in the merge commit message ──
 fresh n2-main base && printf 'main pin\n' >> "$R/docs/COMMANDS.md" && commitAll "main re-pins"
