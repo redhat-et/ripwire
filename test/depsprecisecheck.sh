@@ -86,7 +86,10 @@ command -v xmllint >/dev/null 2>&1 \
 # worked example lives (src/mcp.h -> src/mcpverbs.h, claimed instab=0.52ish vs recomputed 0.25ish
 # pre-fix) — the small depsprecisefix fixture has no stabledeps violations to check.
 if command -v python3 >/dev/null 2>&1; then
-    "$BIN" "$ROOT" --deps --pack-top-n=1000 --no-cache >"$TMP/deps_self.xml" 2>/dev/null
+    # Every <f> row, not the first 1000 by transitive=: the window's order moves with any change to the cones (truth-fixes:
+    # the Rust containment cut reordered it, and CI's asan leg found no <stabledeps> endpoint left inside it, "nothing
+    # checked"). Membership, not rank, decides which rows the arm can reconcile.
+    "$BIN" "$ROOT" --deps --pack-top-n=100000 --no-cache >"$TMP/deps_self.xml" 2>/dev/null
     if python3 - "$TMP/deps_self.xml" <<'PYEOF'
 import re, sys
 xml = open( sys.argv[1] ).read()
@@ -97,7 +100,7 @@ checked, bad = 0, []
 for m in re.finditer( r'<v from="([^"]*)" to="([^"]*)"[^>]*\bgap="([0-9.]+)"', xml ):
     frm, to, gap = m.group(1), m.group(2), float( m.group(3) )
     if frm not in instab or to not in instab:
-        continue   # outside the --pack-top-n=1000 <f> window — not asserted, not a failure
+        continue   # a file with no <f> row (no include/import directive): not asserted, not a failure
     checked += 1
     recomputed = instab[to] - instab[frm]
     # tolerance is 0.01 (two independently-rounded %.2f values can compound to that much) + a tiny epsilon

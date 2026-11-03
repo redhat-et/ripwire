@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 366 | 128 | 242 | **124** |
+| 367 | 128 | 243 | **124** |
 
 Plus 8 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 366 + 8 is the 374 constants this generator parses out of `src/`.
+are not counted as caps, and 367 + 8 is the 375 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 366 caps are classified
-(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 223 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 367 caps are classified
+(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 224 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -103,7 +103,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 128 files that declare a cap — the 366 caps counted above, and no parameter.
+One table for each of the 128 files that declare a cap — the 367 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -594,6 +594,7 @@ Discloses: `files_capped`, `importers_capped`
 | `kChaConeCap` | `4096` | INDEXING | per-walk discovery cap, unchanged from the per-call walk |
 | `kImpactFileRollupCap` | `20` | — | — |
 | `kImpactTypeRollupBandMax` | `200` | — | — |
+| `kImportTierRollupDirDepth` | `2` | — | — |
 | `kMaxEdges` | `256` | — | total emitted edge cap |
 | `kMaxNodes` | `96` | — | total emitted node cap (§3 size caps) |
 | `kMaxRadius` | `12` | — | — |
