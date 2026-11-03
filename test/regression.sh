@@ -803,6 +803,7 @@ for _g in \
     pyaliascallcheck \
     pyimportlayoutcheck \
     pyimportprecisecheck \
+    pymodcallsitescheck \
     pymodulealiascheck \
     pyshapecheck \
     qackconcurrencycheck \
@@ -908,7 +909,6 @@ for _g in \
     rubysettercheck \
     rubytypedrecvcheck \
     rule3memberguardcheck \
-    pymodcallsitescheck \
     runhintcheck \
     runtracecheck \
     rustanccheck \
