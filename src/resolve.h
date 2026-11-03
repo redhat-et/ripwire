@@ -2363,7 +2363,8 @@ inline std::uint32_t resolveCIncludeRoots( std::string_view dir, std::string_vie
 // never a directive from a non-C includer (a Python `import a.b` or a Go import path never probes the C include roots).
 inline bool isCQuoteRootProbe( const Include& inc, std::string_view includerPath ) noexcept
 {
-    return !inc.isAngle && !inc.isSymbolic && !inc.target.empty() && includeLangOf( includerPath ) == IncludeLang::CFamily;
+    const bool quotePath = !( inc.isAngle || inc.isSymbolic || inc.target.empty() );
+    return quotePath && includeLangOf( includerPath ) == IncludeLang::CFamily;
 }
 
 // The second step for one directive after resolvePreciseInclude missed (kNoFile for anything isCQuoteRootProbe refuses).
