@@ -2141,14 +2141,16 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>752 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>753 gate scripts</b> (counts snapshot 2026-11-03), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **752 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **753 gate scripts** at the counts snapshot 2026-11-03 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
 differential argv harness that runs a reference binary and the candidate over every argument vector
-and requires stdout, stderr and exit code to match on each.
+and requires stdout, stderr and exit code to match on each. The gate count above and the cap inventory in
+§9 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
+numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
 The house rule behind all of it: **write the gate before the code it measures.** A ranking, a token
 estimate and a call graph all look plausible whether or not they are correct.
@@ -2901,7 +2903,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 368 compile-time caps and 8 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-03 the tool had 368 compile-time caps and 8 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.

@@ -304,6 +304,10 @@ jobs:
             printf 'changelog.d/ still holds fragments — fold them (python3 scripts/changelog_assemble.py release %s DATE) before tagging %s:\n%s\n' "$ver" "$tag" "$left" >&2
             exit 1
           fi
+          # The published totals (gate count, cap inventory, LIMITS/TUNING census) are the dated snapshot
+          # docs/counts.tsv; feature PRs leave it alone and a regular gate only bounds its lag. A release states
+          # them exactly: refresh (python3 docs/counts_snapshot.py refresh) in the release commit, or this refuses.
+          python3 docs/counts_snapshot.py check || { echo "docs/counts.tsv is stale — run python3 docs/counts_snapshot.py refresh before tagging $tag" >&2; exit 1; }
           awk -v ver="$ver" '
             $0 ~ "^## \\[" ver "\\]" { on = 1; print; next }
             on && /^## \[/            { exit }

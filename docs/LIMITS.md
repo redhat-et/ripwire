@@ -28,6 +28,11 @@ quantifiers are bounded, yet it is exponential on libstdc++ (and abandoned by li
 a small explicit bound" is safe only when nothing inside the group repeats; it is the same class as
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
+**Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
+file count) is the counts snapshot taken 2026-11-03 (`docs/counts.tsv`), so two open changes that each add a
+cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
+`python3 docs/counts_snapshot.py show` prints today's numbers beside these.
+
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
 | 368 | 128 | 244 | **124** |
@@ -103,7 +108,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 128 files that declare a cap — the 368 caps counted above, and no parameter.
+One table for each file that declares a cap in today's `src/` (the totals above are the dated snapshot), and no parameter.
 
 ### `src/abicheck.h`
 

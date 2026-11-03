@@ -12,6 +12,11 @@ env var — production keeps its `constexpr` and is never patched — then runni
 invocations at the default value and at a probe value. The tunable binary is byte-identical
 to production at defaults; that control is what makes these numbers mean anything.
 
+**The census is a dated snapshot.** The first two columns below and the paragraph after them are
+the counts snapshot taken 2026-11-03 (`docs/counts.tsv`), so two open changes that each add a cap do not
+both rewrite them; the per-cap tables are re-read from `src/` on every run.
+`python3 docs/counts_snapshot.py show` prints today's numbers beside these.
+
 | cap declarations | distinct names | tunable | must stay `constexpr` | move >= 1 invocation | move nothing measurable |
 | --- | --- | --- | --- | --- | --- |
 | 258 | 257 | 112 | 12 | **37** | 75 |
