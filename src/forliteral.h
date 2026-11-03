@@ -84,6 +84,7 @@
 #include "search.h"          // grepCollect / grepEnrich / isBareWordCodePath
 #include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis
 #include "taskroute.h"       // taskroute::identifierRunOf
+#include "siblift.h"         // siblift_detail::dirOf — a path's directory
 #include "subjectanchor.h"   // subject_detail::sourceClassDef / isToolOrVendoredPath — the answer's source-class anchors
 
 #include <algorithm>
@@ -861,26 +862,13 @@ struct AnchorSet
     std::vector<std::string_view> dirs;    // sorted, unique, root-relative
 };
 
-inline std::string_view dirOfPath( std::string_view p ) noexcept
-{
-    const std::size_t slash = p.rfind( '/' );
-    return slash == std::string_view::npos ? std::string_view() : p.substr( 0, slash );
-}
-
-template<typename T>
-inline void sortUnique( std::vector<T>& v )
-{
-    std::sort( v.begin(), v.end() );
-    v.erase( std::unique( v.begin(), v.end() ), v.end() );
-}
-
 inline void addAnchor( const IngestResult& ing, AnchorSet& a, NodeId id )
 {
     if( id < NodeId( ing.symbols.size() ) && subject_detail::sourceClassDef( ing, id ) )
     {
         a.syms.push_back( id );
         a.files.push_back( ing.symbols[id].fileId );
-        a.dirs.push_back( dirOfPath( rootRelPath( ing, ing.symbols[id].fileId ) ) );
+        a.dirs.push_back( siblift_detail::dirOf( rootRelPath( ing, ing.symbols[id].fileId ) ) );
     }
 }
 
@@ -893,9 +881,14 @@ inline AnchorSet anchorSetOf( const IngestResult& ing, std::span<const NodeId> i
     {
         addAnchor( ing, a, id );
     }
-    sortUnique( a.syms );
-    sortUnique( a.files );
-    sortUnique( a.dirs );
+    const auto dedup = []( auto& v )
+    {
+        std::ranges::sort( v );
+        v.erase( std::ranges::unique( v ).begin(), v.end() );
+    };
+    dedup( a.syms );
+    dedup( a.files );
+    dedup( a.dirs );
     return a;
 }
 inline std::vector<NodeId> literalDefsOf( const IngestResult& ing, std::string_view literal )
@@ -941,7 +934,7 @@ inline Prox proxOf( const IngestResult& ing, const AnchorSet& a, const Graph* g,
     {
         return Prox::Near;
     }
-    return std::binary_search( a.dirs.begin(), a.dirs.end(), dirOfPath( p ) ) ? Prox::Dir : Prox::Far;
+    return std::binary_search( a.dirs.begin(), a.dirs.end(), siblift_detail::dirOf( p ) ) ? Prox::Dir : Prox::Far;
 }
 
 struct Site
