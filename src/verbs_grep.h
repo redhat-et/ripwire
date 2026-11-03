@@ -4,6 +4,8 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
+#include "infra/enumcount.h" // rw::enumCountIsExact — kDisclosureWhyCount proved exact beside its enum
+#include <array>             // std::to_array — the reads_skipped= name table, size deduced
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_grep.h — the --grep verb family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -209,12 +211,17 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
 struct GrepCarrierReadsSource
 {
     enum class DisclosureWhy : std::uint8_t { MemoryStop, HardLimit };
+    static constexpr std::size_t kDisclosureWhyCount = std::size_t( DisclosureWhy::HardLimit ) + 1;
     std::optional<DisclosureWhy> stop;   // set by a stopped second ingest: reads= stays unknown and the root names why
     void disclose( DisclosureWhy why ) noexcept { stop = why; }
 };
+static_assert( rw::enumCountIsExact<GrepCarrierReadsSource::DisclosureWhy, GrepCarrierReadsSource::kDisclosureWhyCount>(),
+               "kDisclosureWhyCount must equal the DisclosureWhy count — raise it with the append" );
 
-// The root's reads_skipped= spelling of each stop, indexed by DisclosureWhy (the legends define both).
-inline constexpr std::array<std::string_view, 2> kGrepReadsSkippedName = { "memory_stop", "hard_limit" };
+// The root's reads_skipped= spelling of each stop, indexed by DisclosureWhy (the legends define both). Its size is DEDUCED and
+// asserted against the enum's count, so an appended stop without a spelling is a compile error, never a read past the table.
+inline constexpr auto kGrepReadsSkippedName = std::to_array<std::string_view>( { "memory_stop", "hard_limit" } );
+static_assert( kGrepReadsSkippedName.size() == GrepCarrierReadsSource::kDisclosureWhyCount, "one reads_skipped= spelling per DisclosureWhy" );
 
 struct GrepPageCarriers
 {

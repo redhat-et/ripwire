@@ -508,6 +508,14 @@ inline const char* importersNextLegend( bool on ) noexcept
     return on ? "importers_next= (a cut importer listing only) is the call that lists every importer. " : "";
 }
 
+// IMPACT-ROLLUP (graph.h importTierRollup): said exactly when importers_tests=/importers_dirs= ride, a cut tier in every dialect.
+inline const char* importersRollupLegend( bool on ) noexcept
+{
+    return on ? "importers_tests=/importers_dirs= (a cut importer listing only) are over EVERY importer, shown or not: how many are "
+                "test, bench or fixture files, and the 3 directories (first 2 path segments) holding the most, as dir:count. "
+              : "";
+}
+
 // The columnar form re-serializes the SYMBOL rows as parallel arrays and has no row shape for a second
 // listing, so it carries importers= alone. Said in band rather than left as a shape difference a reader
 // has to notice: a count with no rows beside it otherwise reads as a bug.
