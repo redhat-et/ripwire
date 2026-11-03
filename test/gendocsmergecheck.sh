@@ -121,7 +121,7 @@ out="$( cd "$TMP/fresh" && python3 docs/counts_snapshot.py check 2>&1 )"; rc=$?
 want="gates.scripts $baseGates→$(( baseGates + 2 ))"
 if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "$want"; then ok "(P3) counts_snapshot.py check on the merged tree: exit 1, names $want"
 else no "(P3) counts_snapshot.py check on the merged tree: exit $rc, expected 1 naming '$want'; got: $( printf '%s' "$out" | head -2 )"; fi
-out="$( cd "$TMP/fresh" && COUNTS_TAKEN=2026-11-03 python3 docs/counts_snapshot.py refresh 2>&1 && python3 docs/counts_snapshot.py check 2>&1 )"; rc=$?
+out="$( cd "$TMP/fresh" && COUNTS_TAKEN=2000-01-02 python3 docs/counts_snapshot.py refresh 2>&1 && python3 docs/counts_snapshot.py check 2>&1 )"; rc=$?
 sites="$( grep -c "$(( baseGates + 2 )) gate scripts\|names $(( baseGates + 2 ))\|\"$(( baseGates + 2 ))\"" "$TMP/fresh/README.md" "$TMP/fresh/docs/EVALS.md" "$TMP/fresh/present/deck5_ripwire_build.js" | awk -F: '{ s += $2 } END { print s + 0 }' )"
 if [ "$rc" = 0 ] && [ "$sites" -ge 8 ] && ( cd "$TMP/fresh" && python3 docs/gatecount_build.py --check >/dev/null 2>&1 ); then
     ok "(P3 twin) after refresh: check exits 0 and $sites site lines state $(( baseGates + 2 ))"
@@ -129,10 +129,11 @@ else
     no "(P3 twin) after refresh: exit $rc, $sites site lines state $(( baseGates + 2 )) (want >= 8): $( printf '%s' "$out" | tail -2 )"
 fi
 
-dated="$( cat "$TMP/fresh/README.md" "$TMP/fresh/docs/EVALS.md" "$TMP/fresh/present/deck5_ripwire_build.js" | grep -E '<!-- gatecount -->|// gatecount' | grep -c 'counts snapshot 2026-11-03' )"
-if [ "$dated" -ge 8 ] && grep -q 'counts snapshot 2026-11-03 the tool had [0-9]* compile-time caps' "$TMP/fresh/README.md"; then
-    ok "(P3 date) after refresh: $dated marked site lines and README's cap sentence carry the new date 2026-11-03"
-else no "(P3 date) after refresh: $dated marked site lines carry the new date (want >= 8), cap sentence $( grep -c 'counts snapshot 2026-11-03 the tool' "$TMP/fresh/README.md" )"; fi
+# a date no real snapshot has, so the arm cannot pass on the fixture's own `taken`
+dated="$( cat "$TMP/fresh/README.md" "$TMP/fresh/docs/EVALS.md" "$TMP/fresh/present/deck5_ripwire_build.js" | grep -E '<!-- gatecount -->|// gatecount' | grep -c 'counts snapshot 2000-01-02' )"
+if [ "$dated" -ge 8 ] && grep -q 'counts snapshot 2000-01-02 the tool had [0-9]* compile-time caps' "$TMP/fresh/README.md"; then
+    ok "(P3 date) after refresh: $dated marked site lines and README's cap sentence carry the new date 2000-01-02"
+else no "(P3 date) after refresh: $dated marked site lines carry the new date (want >= 8), cap sentence $( grep -c 'counts snapshot 2000-01-02 the tool' "$TMP/fresh/README.md" )"; fi
 
 # ── (N1) a hand-edited total ─────────────────────────────────────────────────────────────────────────
 cp -R "$M" "$TMP/n1"
