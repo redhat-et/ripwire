@@ -233,6 +233,12 @@ inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Clojur
 // ...and the cache readers validate every cached Lang byte against it, so a stale kLangCount would also refuse
 // the new language's records. The compile-time proof (infra/enumcount.h) makes the append a build error instead.
 static_assert( enumCountIsExact<Lang, kLangCount>(), "kLangCount must name the LAST Lang enumerator — move it with the append" );
+// The documentation language: a Markdown heading, or a reST/Sphinx title, object directive or label (docparse.h, ingest_rest.h) is
+// Lang::Markdown, and no code grammar mints it. The ONE spelling of "is this a doc unit" (test/langidentity: no per-site compares).
+inline constexpr bool isDocLang( Lang l ) noexcept
+{
+    return l == Lang::Markdown;
+}
 
 // short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt|gd|clj").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD

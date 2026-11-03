@@ -1658,7 +1658,23 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             std::string memoryStopNote;   // #350: set by indexStamp when the index answering this request is memory-guard partial
             const auto indexStamp = [ & ]( const std::string& root ) -> std::string
             {
-                const McpIndex& mix = getIndex( root );
+                // F-W1: the stamp is built AFTER the verb's answer is complete, so a rebuild that stops here refuses nothing. A write
+                // verb (an edit, quality_baseline's sidecar) has already written; a verb that answered without the index answered
+                // from its own build. The answer stands, the stamp says the index was not rebuilt, and _memory_stop names the stop.
+                // A verb that needed the index built or used it in its own body first, and a stop there still refuses (the catch below).
+                const McpIndex* built = nullptr;
+                try
+                {
+                    built = &getIndex( root );
+                }
+                catch( const FileGraphStopped& stopped )
+                {
+                    releaseMcpIndexMemory();
+                    memguard::answerStops();
+                    memoryStopNote = memguard::afterAnswerStopLine( "index rebuild after this answer", "the answer (and any write it reports)", stopped.why() );
+                    return "[index: not rebuilt: the include-closure fold stopped; the next call retries]";
+                }
+                const McpIndex& mix = *built;
                 memoryStopNote = mix.ing.memoryStop.isSet() ? memguard::softStopLine( mix.ing ) : std::string();
                 char buf[ 96 ];
                 rw::formatTo( buf, sizeof( buf ), "[index: files={} symbols={} hash={:08x}]",
@@ -2138,7 +2154,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // dispatch chain below, which is what makes room for this.
                 // #350 layer 3: over the memory guard's hard limit, no tool call starts work — the call is refused by
                 // name and the server stays up (a later call, after memory is released, is served). One footprint
-                // reading per tool call; nothing is measured on any other method.
+                // reading per tool call; nothing is measured on any other method. The reading is the LIVE footprint, never a
+                // remembered stop: a fold that stops throws FileGraphStopped, caught at this try's end, so nothing is sticky.
                 // Over the line, the resident index is released first (it is usually most of the footprint) and the
                 // footprint read once more: under the line again, the call proceeds and rebuilds for its own root; still
                 // over, it is refused, and the sentence names what is over: this server (restart it), or the cgroup leaf
@@ -2925,6 +2942,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         resp = errResultMsg( -32602, mcprefuse::unknownVerbRefusal( knownVerbs, name, advertisedCount ) );
                     }
                 }
+            }
+            catch( const FileGraphStopped& stopped )
+            {
+                // A failed build (infra/fileGraphStop.h): the fold stopped at the hard line, or the file graph passed a 32-bit offset, or an
+                // allocation failed inside it. No store was returned, so nothing answered, and nothing is remembered: the half-built index is
+                // released (valid=false, bulk gone) and the next call rebuilds, under the same limit it is checked against again.
+                releaseMcpIndexMemory();
+                memguard::answerStops();
+                DISCLOSE( Diagnostics::answerRefused, "mcp: a call whose file-graph fold stopped is refused with an MCP error naming the stop; the index is released, the next call rebuilds" );
+                resp = errResultMsg( -32000, memguard::hardStopLine( "graph build", {}, stopped.why() ) + "; this call was refused, the index was released and the next call retries the build" );
             }
             catch( ... )
             {

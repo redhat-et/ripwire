@@ -367,15 +367,20 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
 constexpr std::uint32_t kParserVer    = 293;          // bump on any grammar/.scm/extraction change
-                                                      // 293 = 2026-11-03 (lane index-alias-const, PLACEHOLDER above 285-292 taken by #504 #506 #512 #513; rich file tag 294):
+                                                      // 293 = 2026-11-03 (lane index-alias-const, PLACEHOLDER above 285-292 taken by #504 #506 #512 #513; main is at 291/292 after #506's re-bump; rich file tag 294):
                                                       //   C++ `using X = Y` / `namespace L = lib` / function-type and pointer typedefs are definitions (src/aliasdef.h).
                                                       //   kCacheVersion stays 48: no record changes shape (the alias target rides RawDef::bodyByte).
+                                                      // 291 = 2026-11-03 (lane docs-rest #506 re-bump): both sides bumped (lane 287/288, main 289/290), so the merged value
+                                                      //   goes above both; caches built on main at 289 re-index and pick up the reST .txt docs. Rich file tag 292. kCacheVersion stays 48.
                                                       // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
                                                       //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286, merged) and
                                                       //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
                                                       // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
                                                       //   qualifier of more than one segment keeps it whole in Reference::fieldName (ingest_names.h rustWrittenQualifier).
                                                       //   Rich file tag 286. kCacheVersion stays 48: no record changes shape.
+                                                      // 287 = 2026-11-02 (lane docs-rest, #409 reST tier, after #504's 285/286): reST/Sphinx units, and the crawl
+                                                      //   admits declared .txt. Rich file tag 288. kCacheVersion stays 48. Merged over main's 289 (barrel-short-key)
+                                                      //   2026-11-03: the higher value 289 stands for both changes; the train renumbers.
                                                       // 283 = 2026-10-31 (train 43b: lanes registrar (placeholders 273..281), string-import (274, 275) and their extraction: Python registrar facts,
                                                       //   TS/JS provider-record literal marks, Python dotted-string and import-sink facts). Strictly above 281 (rich 282) and every lane value. Rich file tag 284.
                                                       //   kCacheVersion stays 48: no record changes shape.

@@ -1,6 +1,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
+#include <exception>         // std::uncaught_exceptions: the stopped fold's unwind abandons the history walks
 #include <future>            // std::async — the history walk that runs beside the ingest
 
 // main.cpp — ripwire entry point: parse args → ingest → graph → PageRank → minified XML,
@@ -3742,8 +3743,14 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // region and blob_sha always, plus edit_check/tests_to_run unless --no-post-check — so this line names what is
     // in hand and the single call that follows; never a second command. test/receiptpostcheck.sh (12) and
     // test/edithandlehintcheck.sh assert the printed next is the receipt's and RUNS.
+    // F-W1: a post-check whose fold stopped AFTER the write is a gap on the receipt (post_check "not run: ..."), never a
+    // refusal: the file is edited, so this exits 0 like any applied edit and says the check did not run
+    const bool postCheckStopped = outcome.resultJson.find( rw::mcpedit::kPostCheckNotRunKey ) != std::string::npos;
     rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}; next: {}\n",
-                  cfg.noPostCheck ? " (post-check skipped)" : ", edit_check, tests_to_run", outcome.next.c_str() );
+                  cfg.noPostCheck        ? " (post-check skipped)"
+                  : postCheckStopped     ? " (post-check not run: its graph fold stopped, see post_check)"
+                                         : ", edit_check, tests_to_run",
+                  outcome.next.c_str() );
     return 0;
 }
 
@@ -3897,6 +3904,7 @@ static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( con
 }
 
 static int dispatchMain( const rw::Config& cfg, char** argv );
+static int dispatchMainBody( const rw::Config& cfg, char** argv );
 
 // The key for a SHARED root (`r` = the map family, `ctx` = the bundle family) is read off the ANSWER, never off a flag order.
 // The ROOT picks the family: one flag order across both families cannot be right, because verb precedence interleaves them, and
@@ -4340,7 +4348,7 @@ static int memoryStopExit( const rw::IngestResult& ing, const rw::Config& cfg, c
     return 0;
 }
 
-static int dispatchMain( const rw::Config& cfg, char** argv )
+static int dispatchMainBody( const rw::Config& cfg, char** argv )
 {
     using namespace rw;
 
@@ -5277,6 +5285,13 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     const bool needsValueUses = rw::needsValueUses( cfg );   // cli.h — ONE definition, and --doctor's
                                                             // rich_verbs= roster is derived from it
     std::vector<std::future<quality::HistoryWalk>> historyWalks = startHistoryWalks( cfg, multiRoot, ws, root );
+    // Declared after the futures, so it runs before they join: FileGraphStopped unwinds this function, and a join here would
+    // hold the refusal until the log ends (the same wait the refusals below abandon; memguardcheck B21b).
+    struct AbandonWalksOnUnwind
+    {
+        int  uncaught = std::uncaught_exceptions();
+        ~AbandonWalksOnUnwind() { if( std::uncaught_exceptions() > uncaught ) { rw::abandonGitWalks(); } }
+    } abandonWalksOnUnwind;
     IngestResult ing;
     if( multiRoot )
     {
@@ -5396,8 +5411,20 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
-    const Graph       g               = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
-    joinGrepScanPrefetch( grepPhaseWorker );
+    const Graph       g               = [ & ]
+    {
+        try   // a failed build (fileGraphStop.h) unwinds past a joinable worker, which would std::terminate: join it, then let the stop go on
+        {
+            Graph built = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+            joinGrepScanPrefetch( grepPhaseWorker );
+            return built;
+        }
+        catch( ... )
+        {
+            joinGrepScanPrefetch( grepPhaseWorker );
+            throw;
+        }
+    }();
     if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build and the verbs
     {
         DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build — exit 5, one stderr line" );
@@ -5867,4 +5894,22 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     }
 
     return runDefaultMap( dsp );
+}
+
+// A stopped file-graph fold, or an adjacency past its edge limit, FAILED a build (fileGraphStop.h): no store was returned,
+// so no verb below answered from one and none printed. This is the one place that turns that failure into the run's
+// answer for every verb: the one line, exit 5. The backstop's second line is not wanted, so the stops are answered for.
+static int dispatchMain( const rw::Config& cfg, char** argv )
+{
+    try
+    {
+        return dispatchMainBody( cfg, argv );
+    }
+    catch( const rw::FileGraphStopped& stopped )
+    {
+        rw::memguard::answerStops();
+        DISCLOSE( Diagnostics::answerRefused, "main: the file graph's fold stopped, so the build failed — exit 5, one stderr line, nothing printed from a partial store" );
+        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build", {}, stopped.why() ) );
+        return 5;
+    }
 }

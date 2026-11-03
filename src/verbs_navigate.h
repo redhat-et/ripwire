@@ -2854,7 +2854,8 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         const rw::PathGapsXml pthUnreached = path.empty()
             ? rw::pathUnreachedXml( ing, pthGaps, pthSingleRoot, pthRootPrefix,
                                     { "--connect=" + std::string( srcN ) + "," + std::string( dstN ), "--uses/--impact",
-                                      ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" },
+                                      ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "",
+                                      rw::pathDocEndpoints( ing, srcDefs, dstDefs ) },
                                     pthSinkCallers )
             : rw::PathGapsXml{};
         rw::emitTo( stdout, "{}>{}{}{}{}", pthUnreached.rootAttrs, pthUnreached.rows, rw::pathBridgeXml( ing, g, pthBridge, pthSingleRoot, pthRootPrefix ),
@@ -3362,7 +3363,7 @@ inline bool pathEndsWithSegment( std::string_view rel, std::string_view tgt ) no
 }
 
 inline std::size_t impactPathUnresolvedNaming( const rw::IngestResult& ing, std::uint32_t file, const std::vector<std::uint32_t>& importers,
-                                               const std::vector<std::vector<std::uint32_t>>& adj )
+                                               const rw::FileAdjacency& adj )
 {
     const std::string_view       rel = rw::rootRelPath( ing, file );
     std::vector<char>            seen( ing.files.size(), 0 );
@@ -3388,7 +3389,7 @@ int emitImpactPathAnswer( const rw::Config& cfg, const rw::IngestResult& ing, co
                           const std::string& rootAttr )
 {
     using namespace rw;
-    std::vector<std::vector<std::uint32_t>> adj;
+    rw::FileAdjacency adj;
     ImportTier t = impactImportTierOfFiles( ing, std::vector<std::uint32_t>{ sel.file }, &adj );
     t.umbrella   = false;   // the importers ARE the answer to a path: listed, not folded to a count
     sizeImportTier( t, cfg.pageLimit, cfg.impactSym );
