@@ -910,6 +910,7 @@ for _g in \
     rubysettercheck \
     rubytypedrecvcheck \
     rule3memberguardcheck \
+    preludevetocheck \
     runhintcheck \
     runtracecheck \
     rustanccheck \

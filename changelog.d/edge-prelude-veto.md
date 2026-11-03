@@ -1,0 +1,7 @@
+### Fixed — a Rust prelude call or a macro with no in-tree binding no longer binds to a same-named definition
+
+`Ok(x)`, `Err(e)`, `Some(x)` and `drop(x)` with no binding of the name written in the caller's file (a definition there, or a `use` that names it) used to bind to whatever the tree defined under that name: a trait's associated `type Ok;`, a serde serializer's `type Ok = ();`, a function nested in another function. A macro invocation (`assert!`, `json!`, `format!`, `write!`, `panic!`) bound by name to a function, module or type of the same name. Those calls are now counted as calls outside the tree (`external=` in the map header) and carry no edge. A macro invocation binds to an indexed `macro_rules!` of its name, or to a function its file's `use` names (a procedural macro such as `sql!`); a user's own `Ok` type reached through a `use`, a same-file definition, and a local `macro_rules! assert` keep their edges.
+
+Five Rust member names joined the standard-member gate after a hand sample of their unproven calls: `.expect()`, `.into()`, `.join()`, `.lock()` and `.status()` (0 of 40 sampled calls on Zed bound to the right definition; 2 of 20 on Nushell). Such a call with no receiver proof is now declined and counted in `declined_calls=`; a receiver typed as an in-tree class, or an impl's own `self.expect()`, keeps its edge.
+
+Rust macro invocations now carry `role="macro"` instead of `role="call"`; the cache is re-parsed once (parser version 295).

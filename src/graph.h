@@ -733,6 +733,14 @@ inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
     return true;
 }
 
+// The call loop's namespace gate: namespaceCompatible, and EDGE-PRELUDE-VETO's one addition — outside the C family (where a call-shaped
+// macro invocation stays role Call unless retagged) a macro is invoked only by a Macro site (Rust `name!(..)`), so a role Call site never
+// binds to a same-named `macro_rules!`.
+inline bool siteNamespaceCompatible( RefRole role, Lang lang, SymKind kind ) noexcept
+{
+    return namespaceCompatible( role, kind ) && !( kind == SymKind::Macro && role == RefRole::Call && !macroRefLang( lang ) );
+}
+
 // ---- aider-style name-quality prior weights --------------------------------------------------------
 // Aider's battle-tuned repomap biases its PageRank *personalization* vector (never the transition matrix)
 // by cheap name-quality signals: a name defined all over the repo is generic and gets damped; a private-
@@ -1399,7 +1407,10 @@ inline void collapseDeclarationsOfName( const IngestResult& ing, bool multiRoot,
     bool                    anyEvicted = false;
     for( NodeId id : ids )
     {
-        if( isDefinitionNotDeclaration( ing.symbols[ id ] ) || !keyHasDefinition[ keyOf( id ) ] )
+        // EDGE-PRELUDE-VETO: a macro of a language without #define (a Rust `macro_rules!`, which owns no body span) is no prototype of a
+        // same-named function: it stays, so a `name!(..)` site still finds it (it marks no definition either: it evicts nothing)
+        const Symbol& s = ing.symbols[ id ];
+        if( isDefinitionNotDeclaration( s ) || !keyHasDefinition[ keyOf( id ) ] || ( s.kind == SymKind::Macro && !macroRefLang( s.lang ) ) )
         {
             kept.push_back( id );
         }
@@ -9629,7 +9640,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( std::size_t roleIndex = 0; roleIndex < kRefRoleCount; ++roleIndex )
         {
             const RefRole role = static_cast<RefRole>( roleIndex );
-            if( std::all_of( out.ids.begin(), out.ids.end(), [ & ]( NodeId c ) { return namespaceCompatible( role, symKind[ c ] ); } ) )
+            if( std::all_of( out.ids.begin(), out.ids.end(), [ & ]( NodeId c ) { return siteNamespaceCompatible( role, lang, symKind[ c ] ); } ) )
             {
                 out.nsPassRoles |= 1u << roleIndex;
             }
@@ -10005,6 +10016,24 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             continue;
         }
         const auto it = byName.find( r.calleeName );
+        // EDGE-PRELUDE-VETO: a macro invocation binds to a macro, never to a function, module or type by name alone. Its targets: an indexed
+        // macro of the name, or a function the language's written binding proves (a Rust procedural macro, `#[proc_macro] pub fn sql`, reached
+        // through `use sqlez_macros::sql;`). A C-family Macro site names a #define by construction (retagMacroCallReferences); a Rust `assert!`
+        // or `json!` with neither is a std or outside crate's macro: external=, whatever same-named definitions the tree holds.
+        const auto macroDef = [ & ]( NodeId c ) { return symKind[ c ] == SymKind::Macro && langCompatible( symLang[ c ], r.lang ); };
+        const auto procMacroDef = [ & ]( NodeId c )
+        {
+            return symKind[ c ] == SymKind::Function && langCompatible( symLang[ c ], r.lang ) && langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse
+                && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
+        };
+        const bool macroSite     = r.role == RefRole::Macro && it != byName.end();
+        const bool anyMacroDef   = macroSite && std::any_of( it->second.begin(), it->second.end(), macroDef );
+        const bool anyProcMacro  = macroSite && !anyMacroDef && std::any_of( it->second.begin(), it->second.end(), procMacroDef );
+        if( macroSite && !anyMacroDef && !anyProcMacro )
+        {
+            disposition = vetoExternal( r );
+            continue;
+        }
 
         cand.clear();
         tier.clear();
@@ -10224,6 +10253,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 narrowed = true;
             }
+        }
+        // EDGE-PRELUDE-VETO: a macro invocation the grammar spells as one (Rust `name!(..)`, role Macro outside the C family's #define retag)
+        // binds to the indexed macros of its name, every one: a `macro_rules!` is in scope textually or crate-wide by #[macro_export], which
+        // the function-name rules below (FE-A reach, Rule 3's import closure) do not model, so they would drop it for a same-named function.
+        bool macroBound = false;
+        if( !scipPinned && !canonical && r.role == RefRole::Macro && it != byName.end() && !macroRefLang( r.lang ) )
+        {
+            for( NodeId c : it->second )
+            {
+                if( anyMacroDef ? macroDef( c ) : procMacroDef( c ) )   // the indexed macros when there are any, else the procedural ones a `use` names
+                {
+                    cand.push_back( c );
+                }
+            }
+            ASSUME( !cand.empty(), "a Macro site with no macro target of its name left above, counted external=" );
+            narrowed   = true;
+            macroBound = true;   // the namespace gate below would drop a procedural macro (a Function): macroDef / procMacroDef already chose the kinds
         }
         // ── ES named-import binding resolve — the JS/TS twin of the L3 block above, and BEFORE every
         // receiver rule for the same reason: `import { f } from './m.js'` is a name-lookup FACT, so a
@@ -10690,8 +10736,31 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // decide a call the Phase 5 veto below refuses: a bare builtin (`dict(...)`, `type(...)`) or an imported stdlib or third-party
         // name is bound outside the tree whatever namesake an imported file defines. The veto's own conditions, and not in a file with
         // a star import of an indexed module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding.
-        const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
-                                    && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
+        // EDGE-PRELUDE-VETO (LangFacts::preludeCalls): a bare call to a prelude name (Rust `Ok(x)`, `Some(x)`, `drop(x)`) is the prelude's
+        // unless a binding of the name is written: a definition in the caller's file, or one the language's rule3NameProof proves (a Rust
+        // `use` of it or a glob of its module). Then it joins the Phase-5 veto exactly as a Python builtin does: decided before Rule 3,
+        // counted external=. A user's own `Ok` type used through a `use` keeps its edge.
+        const LangFacts& callerFacts = langFacts( r.lang );
+        const bool preludeSite = !callerFacts.preludeCalls.empty() && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
+                                 && r.recv == RecvKind::None && !isMemberCallRef( r ) && bindingTier.empty() && it != byName.end() && callerFacts.isPreludeCall( r.calleeName )
+                                 && !falseEdges.isLocalOfCaller( r )
+                                 && std::none_of( it->second.begin(), it->second.end(), [ & ]( NodeId c )
+                                    {
+                                        if( !langCompatible( symLang[ c ], r.lang ) )
+                                        {
+                                            return false;
+                                        }
+                                        switch( callerFacts.rule3NameProof )
+                                        {
+                                            case Rule3NameProof::RustUse:      return symFileId[ c ] == r.fileId || recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
+                                            case Rule3NameProof::PythonImport: return symFileId[ c ] == r.fileId || externalVeto.importVerdict( r, r.calleeName ) != '\0';
+                                            case Rule3NameProof::None:         return true;   // no written-binding reading: any namesake may be the binding
+                                        }
+                                        return true;
+                                    } );
+        const bool vetoFirstSite = preludeSite
+                                   || ( callerFacts.externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
+                                        && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r ) );
         bool rule3NoProof = false;   // RULE3-MEMBER-GUARD: Rule 3 fired, and nothing the language writes proves its answer
         bool rule3Local   = false;   // ... and the call goes through a local or parameter of the caller: the value held is no definition of the name
         if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
@@ -10762,8 +10831,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // ── Phase 5: the external-name veto — every evidence rule above has missed; refuse the spray when the
         // name or receiver is provably bound outside the tree (isExternalBound above). Role Call only: a Macro
         // site names an indexed #define, which IS in-repo evidence by construction.
-        if( !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty()
-            && it != byName.end() && externalVeto.isExternalBound( r ) )
+        if( preludeSite
+            || ( !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty()
+                 && it != byName.end() && externalVeto.isExternalBound( r ) ) )
         {
             disposition = vetoExternal( r );
             continue;
@@ -10893,12 +10963,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // uniquely a macro by construction); see namespaceCompatible's comment for the derivation and
         // test/nsfiltercheck.sh for the gate that keeps it that way. It is here because it is the seam a
         // future round would edit, and a silent edit is the failure mode the gate exists to catch.
-        if( !cand.empty() && !( candMemo != nullptr && ( candMemo->nsPassRoles >> static_cast<std::uint32_t>( r.role ) & 1u ) != 0 ) )
+        if( !cand.empty() && !macroBound && !( candMemo != nullptr && ( candMemo->nsPassRoles >> static_cast<std::uint32_t>( r.role ) & 1u ) != 0 ) )
         {
             std::size_t keepCount = 0;
             for( std::size_t ci = 0; ci < cand.size(); ++ci )
             {
-                if( namespaceCompatible( r.role, symKind[ cand[ci] ] ) )
+                if( siteNamespaceCompatible( r.role, r.lang, symKind[ cand[ci] ] ) )
                 {
                     cand[ keepCount++ ] = cand[ci];
                 }
