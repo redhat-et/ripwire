@@ -200,24 +200,25 @@ struct AliasTargetText
     std::size_t fullBytes = 0;    // folded size before the cut (== text.size() when not cut)
     std::string next;             // --defs=<last name segment> when the target is a plain (qualified) name; else empty
 };
-// the side-table row of an alias def, or nullptr (model.h AliasTarget: ascending id)
-inline const AliasTarget* aliasTargetOf( const IngestResult& ing, NodeId id ) noexcept
+// where an alias def's written target starts (the side-table row, model.h AliasTarget: ascending id), or 0 when the def has no
+// row or its row falls outside the declaration (0 is never a real start: a start sits past sigStartByte)
+inline std::uint32_t aliasTargetStart( const IngestResult& ing, const Symbol& s ) noexcept
 {
-    return findSortedByField( ing.aliasTargets, &AliasTarget::id, id );
+    const AliasTarget* a = findSortedByField( ing.aliasTargets, &AliasTarget::id, s.id );
+    return a != nullptr && a->start > s.sigStartByte && a->start < s.endByte ? a->start : 0;
 }
 inline bool aliasTargetRow( const IngestResult& ing, const Symbol& s ) noexcept
 {
-    const AliasTarget* a = aliasTargetOf( ing, s.id );
-    return a != nullptr && a->start > s.sigStartByte && a->start < s.endByte;
+    return aliasTargetStart( ing, s ) != 0;
 }
 inline AliasTargetText aliasTargetText( const IngestResult& ing, const Graph& g, const Symbol& s )
 {
     AliasTargetText out;
-    if( !aliasTargetRow( ing, s ) )
+    const std::uint32_t tStart = aliasTargetStart( ing, s );
+    if( tStart == 0 )
     {
         return out;
     }
-    const std::uint32_t tStart = aliasTargetOf( ing, s.id )->start;
     out.has = true;
     std::string        scratch;
     const std::string* file = lexicalScanText( ing, s.fileId, scratch );
