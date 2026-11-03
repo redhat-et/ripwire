@@ -2793,8 +2793,9 @@ std::optional<int> runConnect( const MainDispatch& d );
 
 // MF1-LIT (src/forliteral.h): a task naming a literal (a quoted span, a CONST_SHAPED word, a dotted key, a cued message) gets the literal's byte-exact sites
 // and their owner bodies inside <lit>, just before </ctx>, after every byte of the ordinary answer. `served` is the answer's own
-// body text: a body it already printed is not repeated. XML, the default regime and a single root only.
-inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view rootArg, std::string_view served, std::span<const rw::NodeId> answerIds )
+// body text: a body it already printed is not repeated. `answerIds` (LIT-SITE-DECOY): the answer's shown rows and whole bodies, which order
+// the literal's sites by nearness (none: no site is near, the old order). XML, the default regime and a single root only.
+inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view rootArg, std::string_view served, std::span<const rw::NodeId> answerIds = {} )
 {
     const rw::Config& cfg = d.cfg;
     if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || cfg.tokenBudget > 0 || !rw::forLiteralOn() )
