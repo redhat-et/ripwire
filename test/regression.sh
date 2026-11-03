@@ -955,6 +955,7 @@ for _g in \
     skillevalcheck \
     skillevalsplitcheck \
     skillinstallcheck \
+    skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
     skilltruthcheck \
