@@ -70,6 +70,9 @@ w "$P/app/use_circ.py" 'from . import boot2\n\ndef circ_g(x):\n    return x\n\nd
 # a submodule named like a stdlib module and a builtin-method name: the in-tree file still answers
 w "$P/app/json.py" 'def dumps(x):\n    return x\n'
 w "$P/app/use_json.py" 'from . import json\n\ndef run_json():\n    return json.dumps(1)\n'
+# a second def of setup_a in a sibling module: a file-qualified --callers names only its own callers (CodeRabbit review 5745701293)
+w "$P/app/boot_alt.py" 'def setup_a(x):\n    return x\n'
+w "$P/app/use_alt.py" 'from . import boot_alt\n\ndef run_alt():\n    return boot_alt.setup_a(1)\n'
 # two bindings of one name to two modules: neither is the receiver
 w "$P/app/other.py" 'def two_f(x):\n    return x\n'
 w "$P/app/two.py" 'def two_f(x):\n    return x\n'
@@ -96,7 +99,7 @@ w "$P/dyn/wmod.py" 'def dyn_w(v):\n    return v\nglobals()["dyn_w"] = len\n'
 w "$P/dyn/cmod.py" 'import os\nif os.name == "nt":\n    def dyn_c(v):\n        return v\nelse:\n    dyn_c = len\n'
 w "$P/dyn/smod.py" 'def dyn_s(v):\n    return v\n\ntry:\n    from _speedups import *\nexcept ImportError:\n    pass\n'
 w "$P/other_pkg/dyn3.py" 'def dyn_w(v):\n    return v\n\ndef dyn_c(v):\n    return v\n\ndef dyn_s(v):\n    return v\n'
-w "$P/use_dyn.py" 'from dyn import gmod, wmod, cmod, smod\n\ndef run_dyn():\n    gmod.dyn_f(1)\n    return wmod.dyn_w(1)\n\ndef run_dynw():\n    return wmod.dyn_w(2)\n\ndef run_dync():\n    return cmod.dyn_c(1)\n\ndef run_dyns():\n    return smod.dyn_s(1)\n'
+w "$P/use_dyn.py" 'from dyn import gmod, wmod, cmod, smod\n\ndef run_dyn():\n    return gmod.dyn_f(1)\n\ndef run_dynw():\n    return wmod.dyn_w(2)\n\ndef run_dync():\n    return cmod.dyn_c(1)\n\ndef run_dyns():\n    return smod.dyn_s(1)\n'
 # a package __init__ that re-exports the function: not read through yet (a floor, declined)
 w "$P/reexp/__init__.py" ''
 w "$P/reexp/inner/__init__.py" 'from .impl import re_f\n'
@@ -186,6 +189,8 @@ row M3.notmodule    app/dual.py:dual_f app/use_dual.py run_dual none
 # ---- S pinned by file (the arms above match the caller by name across every def of the callee name)
 row S1.pinned       app/boot.py:setup_a app/use_a.py run_a proven
 row S2.pinned       app/boot.py:setup_b app/use_b.py run_b proven
+row S1.alt          app/boot_alt.py:setup_a app/use_alt.py run_alt proven
+row S1.notalt       app/boot.py:setup_a app/use_alt.py run_alt none
 
 # ---- X: PATH-FROM-UPSTREAM (src/forgraphverb.h applyPathFromUpstreamCut). In `--for=path from A to B`, a caller of A that a new
 # from-import edge reaches (`core.alpha_entry()`) is upstream of the asked path: it never pushes A's own callees past the ranked head's
