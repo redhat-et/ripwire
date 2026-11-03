@@ -175,9 +175,31 @@ unmerged="$( git diff --name-only --diff-filter=U )"
 [ -z "$unmerged" ] || { echo "merge_main: still unmerged: $unmerged" >&2; exit 1; }
 regenerate || { echo "merge_main: a generator or check failed — the merge is left uncommitted; fix and run --continue"; exit 1; }
 # `git add` clears a path's unmerged state whether or not its markers were removed: check the staged text itself.
+# A path whose staged blob is MERGE_HEAD's own is main's text taken whole: whatever marker-shaped line it holds (an RST
+# `=======` underline, test/restdocscheck.sh:77) is main's, not a leftover (MERGE-MAIN-RST-MARKER, 2026-11-03). Only the
+# paths git flagged are looked up, and a path git printed quoted (an odd byte) is not found, so it stays reported.
+markerHits=""
 if git diff --cached --check HEAD | grep -q 'leftover conflict marker'; then
-    git diff --cached --check HEAD | grep 'leftover conflict marker' | sed 's/^/    /' >&2
+    for mp in $( git diff --cached --check HEAD | grep 'leftover conflict marker' | sed 's/:[0-9][0-9]*: leftover conflict marker.*$//' | LC_ALL=C sort -u ); do
+        stagedBlob="$( git rev-parse -q --verify ":$mp" 2>/dev/null )"; mainBlob="$( git rev-parse -q --verify "MERGE_HEAD:$mp" 2>/dev/null )"
+        [ -n "$stagedBlob" ] && [ "$stagedBlob" = "$mainBlob" ] && continue
+        markerHits="$markerHits $mp"
+    done
+fi
+if [ -n "$markerHits" ]; then
+    for mp in $markerHits; do git diff --cached --check HEAD -- "$mp" | grep 'leftover conflict marker' | sed 's/^/    /' >&2; done
     echo "merge_main: conflict markers are still staged (git diff --cached --check HEAD, above) — the merge is left uncommitted; fix, git add, then --continue" >&2
+    exit 1
+fi
+# Both sides bumped kParserVer past the merge base: the merged value must clear both, or a cache one side wrote under
+# that number reads as the other's (MERGE-PARSERVER-CHECK, 2026-11-03). One side bumped, or neither: nothing to check.
+parserVer(){ git show "$1:src/ingest_cache.h" 2>/dev/null | sed -n 's/^constexpr .*kParserVer *= *\([0-9][0-9]*\);.*$/\1/p' | head -1; }
+pvLane="$( parserVer HEAD )"; pvMain="$( parserVer MERGE_HEAD )"; pvOut="$( parserVer "" )"
+pvBaseRef="$( git merge-base HEAD MERGE_HEAD 2>/dev/null )"; pvBase=""   # (an empty ref would read the index)
+[ -n "$pvBaseRef" ] && pvBase="$( parserVer "$pvBaseRef" )"
+if [ -n "$pvLane" ] && [ -n "$pvMain" ] && [ -n "$pvOut" ] && [ -n "$pvBase" ] \
+   && [ "$pvLane" -gt "$pvBase" ] && [ "$pvMain" -gt "$pvBase" ] && { [ "$pvOut" -le "$pvLane" ] || [ "$pvOut" -le "$pvMain" ]; }; then
+    echo "merge_main: both sides bumped kParserVer: lane $pvLane, main $pvMain (merge base $pvBase), the merge has $pvOut — set it above both, e.g. max+2 = $(( (pvLane > pvMain ? pvLane : pvMain) + 2 )) for the rich pair (rich = kParserVer + 1), in src/ingest_cache.h, and update quality.h's kIngestParserVerMirror to match; git add both, then --continue (the merge is left uncommitted)" >&2
     exit 1
 fi
 # main brought a newer or changed showcase capture: its --legend-dict line records main's binary, not the merged one

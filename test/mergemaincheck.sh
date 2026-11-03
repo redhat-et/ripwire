@@ -31,6 +31,12 @@
 #   (R1) CAPTURE-DICTV-DRIFT: a merge that brings main's newer capture marks it REGEN AFTER BUILD (exit 3, no
 #        conflict needed); --regen-after-build BIN re-records the dictv=/entries= pair from BIN and commits (exit 0).
 #        Crash twin: a binary whose --legend-dict fails gives exit 1 and commits nothing. Needs BIN ($1); SKIP without.
+#   (RM) MERGE-MAIN-RST-MARKER: an RST `=======` underline (test/restdocscheck.sh:77) in a file identical to MERGE_HEAD's
+#        is main's text, not a leftover marker: the merge commits (exit 0). Neighbour: a real conflict hunk staged in
+#        another file is still refused (exit 1) and named, the RST file is not; resolved for real it commits.
+#   (PV) MERGE-PARSERVER-CHECK: both sides bumped kParserVer past the merge base -> the merged value must clear both.
+#        Kept main's / kept the lane's / only equal to one side: refused (exit 1, nothing committed, the message names
+#        both numbers). Twin: set above both (max+2, with quality.h's mirror) commits; one side bumped merges (exit 0).
 # The fixture runs the generators WITHOUT docs/counts.tsv (live totals), the shape every branch cut before the
 # counts snapshot has; test/gendocsmergecheck.sh covers merges of branches that have the snapshot.
 set -u
@@ -317,6 +323,76 @@ if [ "$rc" = 3 ] && [ "$( g rev-parse HEAD^2 2>/dev/null )" = "$( g rev-parse n2
    && cmp -s "$R/docs/COMMANDS.md" <( g show n2-main:docs/COMMANDS.md ); then
     ok "(N2) a binary-pinned conflict takes main's side, commits, exits 3, and names the file in the merge commit message"
 else no "(N2) pinned conflict: rc=$rc (want 3, committed, docs/COMMANDS.md in the message): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+
+# ── (RM) an RST underline identical to main's is not a leftover conflict marker ──────────────────────
+# The underline is a line of seven "=" in a file the merge takes from main whole; git's own --check reads it as a
+# conflict marker. Red-first: with the old unconditional check this arm exits 1.
+rstText(){ printf 'Options\n=======\n\nbody\n'; }
+fresh rm-base base && printf 'line one\nline two\n' > "$R/conflict.txt" && mkdir -p "$R/docs/ref" && printf 'old\n' > "$R/docs/ref/rst.txt" && commitAll "plain files"
+fresh rm-main rm-base && rstText > "$R/docs/ref/rst.txt" && commitAll "main adds an RST underline"
+fresh rm-lane rm-base && printf 'lane work\n' > "$R/lane.txt" && commitAll "lane work"
+mm rm-main; rc=$?
+if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse rm-main )" ] && grep -qx '=======' "$R/docs/ref/rst.txt"; then
+    ok "(RM) an RST underline in a file identical to MERGE_HEAD's merges (exit 0, committed)"
+else no "(RM) RST underline: rc=$rc (want 0, committed): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+# neighbour: the same RST file from main AND a real conflict staged with markers in another file -> refused, named
+fresh rm-main2 rm-base && rstText > "$R/docs/ref/rst.txt" && printf 'line one\nmain side\n' > "$R/conflict.txt" && commitAll "main: RST underline and an edit"
+fresh rm-lane2 rm-base && printf 'line one\nlane side\n' > "$R/conflict.txt" && commitAll "lane edits the same line"
+head0="$( g rev-parse HEAD )"
+mm rm-main2; rc=$?
+if [ "$rc" != 1 ] || ! grep -q '^<<<<<<< ' "$R/conflict.txt"; then no "(RM neighbour) setup: a real conflict did not stop the merge (rc=$rc)"
+else
+    g add conflict.txt; mm --continue; rc=$?
+    if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -q 'conflict markers are still staged' "$TMP/out" \
+       && grep -q 'conflict.txt' "$TMP/out" && ! grep -q 'rst.txt' "$TMP/out"; then
+        ok "(RM neighbour) a real staged marker is still refused and named (exit 1); the identical RST file is not reported"
+    else no "(RM neighbour) rc=$rc (want 1, conflict.txt named, rst.txt not): $( tail -4 "$TMP/out" | tr '\n' ' ' )"; fi
+    printf 'line one\nlane side\nmain side\n' > "$R/conflict.txt"; g add conflict.txt; mm --continue; rc=$?
+    if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse rm-main2 )" ]; then
+        ok "(RM neighbour twin) resolved for real, the same merge commits (exit 0)"
+    else no "(RM neighbour twin) rc=$rc: $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+fi
+
+# ── (PV) both sides bumped kParserVer: the merged value must clear both ───────────────────────────────
+pvOf(){ sed -n 's/^constexpr .*kParserVer *= *\([0-9][0-9]*\);.*$/\1/p' "$R/src/ingest_cache.h" | head -1; }
+setPV(){   # $1 number: kParserVer and quality.h's mirror, in the work tree
+    sed -i.bak -e "s/\(constexpr .*kParserVer  *= *\)[0-9][0-9]*;/\1$1;/" "$R/src/ingest_cache.h" \
+        && sed -i.bak -e "s/\(constexpr .*kIngestParserVerMirror  *= *\)[0-9][0-9]*;/\1$1;/" "$R/src/quality.h" \
+        && rm -f "$R/src/ingest_cache.h.bak" "$R/src/quality.h.bak"
+}
+pv0="$( g checkout -q base && pvOf )"
+if ! [ "$pv0" -gt 0 ] 2>/dev/null; then no "(PV) setup: could not read kParserVer from the fixture's src/ingest_cache.h"
+else
+    pvMain=$(( pv0 + 3 )); pvLane=$(( pv0 + 5 ))
+    fresh pv-main base && setPV "$pvMain" && commitAll "main bumps kParserVer"
+    fresh pv-lane base && setPV "$pvLane" && commitAll "lane bumps kParserVer"
+    fresh pv-lane1 base && printf 'lane\n' > "$R/lane.txt" && commitAll "lane does not bump"
+    # the bumps are one line apart on both sides: git stops on src/ingest_cache.h (and quality.h's mirror)
+    for keep in main lane; do
+        fresh pv-t pv-lane; head0="$( g rev-parse HEAD )"
+        mm pv-main; rc=$?
+        if [ "$rc" != 1 ]; then no "(PV $keep) setup: the two bumps did not stop the merge (rc=$rc)"; continue; fi
+        case "$keep" in main) want="$pvMain" ;; *) want="$pvLane" ;; esac
+        g checkout -q "$( [ "$keep" = lane ] && echo pv-lane || echo pv-main )" -- src/ingest_cache.h src/quality.h
+        g add src/ingest_cache.h src/quality.h; mm --continue; rc=$?
+        if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -q "both sides bumped kParserVer: lane $pvLane, main $pvMain" "$TMP/out" \
+           && grep -q "max+2 = $(( pvLane + 2 ))" "$TMP/out"; then
+            ok "(PV $keep) both sides bumped, the merge kept $want: refused (exit 1, nothing committed, lane $pvLane / main $pvMain named)"
+        else no "(PV $keep) kept $want: rc=$rc (want 1, nothing committed, message naming both): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    done
+    # twin: above both -> commits, and the mirror agrees
+    setPV "$(( pvLane + 2 ))"; g add src/ingest_cache.h src/quality.h; mm --continue; rc=$?
+    if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse pv-main )" ] && [ "$( pvOf )" = "$(( pvLane + 2 ))" ]; then
+        ok "(PV twin) kParserVer set above both ($(( pvLane + 2 ))) commits (exit 0)"
+    else no "(PV twin) above both: rc=$rc (want 0, committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    # one side bumped (either way round) merges clean
+    for pair in "pv-lane1 pv-main" "pv-lane pv-lane1"; do
+        set -- $pair; fresh pv-o "$1"; mm "$2"; rc=$?
+        if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse "$2" )" ]; then
+            ok "(PV one side) only $( [ "$2" = pv-main ] && echo main || echo the lane ) bumped: merges (exit 0)"
+        else no "(PV one side) $pair: rc=$rc (want 0): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    done
+fi
 
 [ $fail -eq 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
