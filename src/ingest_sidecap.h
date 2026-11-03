@@ -2043,7 +2043,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // declaration as the signature (ingest_model.h rawDefIsAliasRow); 0 when the target is not a suffix (a typedef).
             std::uint32_t aliasTargetStart = 0;
             AliasShape    aliasShape {};
-            if( isDef && le.lang == Lang::Cpp && defCapSv == "definition.alias" )
+            if( isDef && langFacts( le.lang ).aliasTargetDefs && defCapSv == "definition.alias" )
             {
                 if( cppAliasIsFunctionLocal( roleNode ) )
                 {

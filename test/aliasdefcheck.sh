@@ -91,6 +91,10 @@ case "$r" in *'…" to_capped="1" to_bytes="'*) ok "[RED] --defs=LongAlias: to= 
 # typedef rows keep their old shape: no to= (the target precedes the name)
 defs "$F/c" S2; r=$( row ); if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' "$r" | grep -q ' to='; then ok "typedef S2 is a def with no to= (unchanged shape)"; else no "typedef S2: rc=$drc row=${r:-<none>}"; fi
 
+# [RED] the map's kind clause: a C/C++ alias or functype row reads the C/C++ clause, never the Go named-type one
+( cd "$F/c" && "$BIN" . --no-cache ) > "$TMP/map" 2>/dev/null; mrc=$?
+if [ "$mrc" -eq 0 ] && grep -q 't=alias|functype-in-C/C++' "$TMP/map" && ! grep -q 'a-Go-named-type' "$TMP/map"; then ok "[RED] C++ map: the C/C++ alias clause, no Go clause"; else no "[RED] C++ map clause: rc=$mrc cpp=$( grep -c 'functype-in-C/C++' "$TMP/map" ) go=$( grep -c 'a-Go-named-type' "$TMP/map" )"; fi
+
 # NOT aliases: a function-local alias; `using namespace` and a using-declaration add no definition
 absent(){ # dir name why
     local r; defs "$1" "$2"; r=$( row )

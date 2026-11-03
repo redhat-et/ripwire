@@ -68,13 +68,14 @@ inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 // so it is the owner a top-level statement or an anonymous callback body attributes to. It is a CALLER, never a
 // callee: nothing in any language can name `<file-scope>`, so it takes no in-edge and cannot become a rank hub.
 // NamedType / Alias / FuncType (honesty-small-068) are APPENDED after ModuleScope so no existing kind renumbers. They
-// split the old `@definition.type` → Struct bucket where a grammar's syntax PROVES the type's form, which today is Go
-// alone: `type N string` / `type L[T any] []T` (a defined type over a non-struct, non-interface, non-func form, or over
+// split the old `@definition.type` → Struct bucket where a grammar's syntax PROVES the type's form: Go
+// (and C/C++, below): `type N string` / `type L[T any] []T` (a defined type over a non-struct, non-interface, non-func form, or over
 // another named type) is t="type", `type F func(...)` is t="functype", `type A = B` is t="alias" (a floor: a Go 1.24
 // generic alias `type A[T any] = B` reads t="type", because the grammar gives it no type_alias node). A Go struct or
-// interface keeps t="struct"/t="iface". Every other language's @definition.type capture still maps to Struct (C/C++
-// typedef and enum, TS/Swift/Dart aliases, Java/C#/PHP/GDScript enums, Elixir @type) — a disclosed floor, not a claim
-// that those are structs. The three kinds BEHAVE as Struct did everywhere a predicate reads the kind
+// interface keeps t="struct"/t="iface". Lane index-alias-const adds C/C++ (src/aliasdef.h): `using X = Y` and
+// `namespace L = lib` are t="alias", a typedef of a function or function-pointer type is t="functype". Every other
+// language's @definition.type capture still maps to Struct (any other C/C++ typedef and enum, TS/Swift/Dart aliases,
+// Java/C#/PHP/GDScript enums, Elixir @type) — a disclosed floor, not a claim that those are structs. The three kinds BEHAVE as Struct did everywhere a predicate reads the kind
 // (isStructOrNamedType below), so only the label changes: a label-normalised base-vs-head sample over Go fixtures and
 // 26 argv found no other byte moved (2026-10-04, this lane). Dropping the helper moved nothing on
 // those probes either, so it is a guard for predicates no Go fixture reaches today, not a proven behaviour.
@@ -104,8 +105,8 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Other:     return "other";
         case SymKind::ModuleScope: return "modscope";   // the file's module scope: n="<file-scope>", no body to expand
         case SymKind::NamedType: return "type";     // Go `type N string`: a defined type whose WRITTEN form is not a struct/iface/func literal
-        case SymKind::Alias:     return "alias";    // Go `type A = B`: another name for B
-        case SymKind::FuncType:  return "functype"; // Go `type F func(...)`: a named function type
+        case SymKind::Alias:     return "alias";    // Go `type A = B`, C++ `using A = B` / `namespace A = b`: another name for B
+        case SymKind::FuncType:  return "functype"; // Go `type F func(...)`, C/C++ `typedef void (*F)(int)`: a named function type
     }
     return "other";   // a byte past the enum; a NEW SymKind is a -Werror=switch error above, never a silent "other"
 }

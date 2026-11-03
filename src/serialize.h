@@ -16,6 +16,7 @@
 #include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
+#include "langfacts.h"   // index-alias-const: LangFacts::aliasTargetDefs picks the C/C++ alias clause over the Go named-type one
 #include "resolve.h"     // S6-C: canonicalId() — the `id=` canonical symbol string (shared with the resolver)
 #include "redact.h"      // deterministic secret redaction of emitted body content (opt-out --no-redact)
 #include "docparse.h"     // docparse::detail::readWholeFile — --pack-top-n reads each served file through the one whole-file reader
@@ -2605,6 +2606,13 @@ inline constexpr std::string_view kNamedTypeMapLegend =
     "(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),"
     "alias=type-A=B,functype=type-F-func(...) -->";
 
+// lane index-alias-const: the C/C++ reading of the same two kinds (LangFacts::aliasTargetDefs), appended ONLY when the corpus has
+// such a row, under the same byte-identity rule; a Go-only corpus keeps the Go clause above byte for byte. Every other C/C++
+// typedef (struct, enum, scalar) still reads t=struct.
+inline constexpr std::string_view kCppAliasMapLegend =
+    "<!-- t=alias|functype-in-C/C++:alias=using-X=Y(also-templated-or-class-scope)or-namespace-L=lib(--defs=X-prints-its-written-target-as-to=),"
+    "functype=a-typedef-of-a-function-or-function-pointer-type(typedef-void(*F)(int));other-typedefs-read-t=struct -->";
+
 // EXTENT HONESTY (src/extentsuspect.h, gate test/extentcheck.sh) — the ONE reading of extent_suspect= on every ROW
 // surface: the map's <s>, a bundle's <d> and <b>. Written only into a document that carries the attribute, right
 // where the reader meets it, so a corpus with nothing flagged stays byte-identical. The map adds the header count
@@ -3308,11 +3316,17 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- c:via=impl:the-one-implementor-in-the-tree-of-the-receiver's-interface/trait/abstract-type-owns-the-callee(an-outside-or-macro-made-one-may-exist) -->";
     }
-    // honesty-small-068: the Go named-type kinds' clause, under the same absent-at-zero rule as modscope's above.
-    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& sym )
-                     { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; } ) )
+    // honesty-small-068: the Go named-type kinds' clause, under the same absent-at-zero rule as modscope's above; index-alias-const:
+    // a C/C++ alias or function-type row (LangFacts::aliasTargetDefs) reads its own clause, so neither language's row is
+    // explained by the other's
+    const auto namedTypeKind = []( const Symbol& sym ) { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; };
+    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [&]( const Symbol& sym ) { return namedTypeKind( sym ) && !langFacts( sym.lang ).aliasTargetDefs; } ) )
     {
         legend += kNamedTypeMapLegend;
+    }
+    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [&]( const Symbol& sym ) { return namedTypeKind( sym ) && langFacts( sym.lang ).aliasTargetDefs; } ) )
+    {
+        legend += kCppAliasMapLegend;
     }
 
     std::size_t extentSuspectTotal = 0;

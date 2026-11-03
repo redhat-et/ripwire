@@ -47,8 +47,9 @@ inline AliasShape aliasShapeOf( Lang lang, TSNode decl ) noexcept
         return {};
     }
     const char* t = ts_node_type( decl );
-    if( lang == Lang::Cpp )
+    switch( lang )
     {
+    case Lang::Cpp:
         if( kindIs( t, "alias_declaration" ) || kindIs( t, "type_definition" ) )
         {
             const TSNode ty = fieldChild( decl, NodeField::Type );
@@ -61,8 +62,9 @@ inline AliasShape aliasShapeOf( Lang lang, TSNode decl ) noexcept
             return ts_node_is_null( target ) ? AliasShape{} : AliasShape{ AliasForm::NamespaceAlias, target };
         }
         return {};
+    default:
+        return {};   // every other language: no arm yet (TS-CONST-DEFS is the carded TypeScript one)
     }
-    return {};   // every other language: no arm yet (TS-CONST-DEFS is the carded TypeScript one)
 }
 
 // A C++ alias written inside a function body or lambda is a local name, not a definition (the local-const rule).

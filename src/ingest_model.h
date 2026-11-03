@@ -97,7 +97,7 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
 // which has no body field of its own)
 inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
 {
-    return d.lang == Lang::Cpp && d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
+    return langFacts( d.lang ).aliasTargetDefs && d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
 }
 
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
