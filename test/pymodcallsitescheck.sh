@@ -8,6 +8,7 @@
 # Fixtures are built at runtime. usage: bash test/pymodcallsitescheck.sh [BIN]   (BIN falls back to RIPWIRE_BIN, then build/ripwire)
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/lib/clean-env.sh"   # a gate that builds a repo must not inherit GIT_DIR/GIT_WORK_TREE (gitenvhermeticcheck D)
 BIN=${1:-${RIPWIRE_BIN:-$HERE/../build/ripwire}}
 case "$BIN" in /*) ;; *) BIN=$PWD/$BIN ;; esac
 echo "pymodcallsitescheck: BIN=$BIN"
