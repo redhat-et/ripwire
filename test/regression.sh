@@ -809,6 +809,7 @@ for _g in \
     pyaliascallcheck \
     pyimportlayoutcheck \
     pyimportprecisecheck \
+    pymodcallsitescheck \
     pymodulealiascheck \
     pyshapecheck \
     qackconcurrencycheck \

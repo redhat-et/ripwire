@@ -21,7 +21,10 @@
 #include "pathgaps.h"    // resolvePathEndpoint — the --path resolver
 #include "serialize.h"   // escapeXml
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -222,6 +225,138 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     out += o.nameTestHops > 0 ? " name_test_hops=\"" + std::to_string( o.nameTestHops ) + "\"" : "";
     out += o.held ? "/>" : ">";
     return out;
+}
+
+// PATH-FROM-UPSTREAM (PY-MOD-CALL-SITES fix 1): in a task that asks `path from A to B` (parseGraphSubjectPathFrom: a path question,
+// not one that also asks for callers), a caller of A is UPSTREAM of the asked path — the question starts at A. Such a row may still
+// rank, but never ahead of the path's own rows: every ranked caller of A (a resolved call edge, not a by-name one) that A does not itself
+// reach is scored below every other positive score, its own order kept. "Reach" is A's whole forward closure over resolved edges, up
+// to kPathFromReachMaxNodes: any row on a path out of A is in it, so a chain row that calls back to A (recursion, an eval loop, a
+// tree walker) at any depth stays (rv-py-mod2 MF6). B itself never moves, wherever it sits (it is asked for even when no resolved edge
+// joins it to A). So a new call edge INTO A (a module-level `management.execute_from_command_line()` bound for the first time) cannot
+// push a hop under A past the ranked head's cap. A is read as the FROM slot's first candidate the qualified resolver finds, B likewise
+// (B need not name a symbol); no parse, no candidate, or no caller ranked → nothing moves (byte-identical). Returns how many rows moved,
+// or kPathFromReachCapped when A's reach passed kPathFromReachMaxNodes (nothing moved, path_from_capped=1 in the note); the caller
+// discloses either.
+inline constexpr std::size_t kPathFromReachMaxNodes = 4096;   // runaway guard on A's forward walk; past it every caller of A stays where it ranked
+inline constexpr std::uint32_t kPathFromReachCapped = UINT32_MAX;   // applyPathFromUpstreamCut's answer when that guard stopped the walk
+inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Graph& g, std::string_view task, std::vector<float>& lensRank )
+{
+    std::vector<std::string>       toCands;
+    const std::vector<std::string> fromCands = parseGraphSubjectPathFrom( task, &toCands );
+    const std::size_t              n         = ing.symbols.size();
+    if( fromCands.empty() || lensRank.size() != n || g.outOff.size() != n + 1 )
+    {
+        return 0;
+    }
+    std::vector<NodeId> from;
+    for( const std::string& cand : fromCands )
+    {
+        from = resolveAllByNameQualified( ing, cand );
+        if( !from.empty() )
+        {
+            break;
+        }
+    }
+    if( from.empty() )
+    {
+        return 0;
+    }
+    std::ranges::sort( from );   // binary_search below
+    std::vector<NodeId> to;
+    for( const std::string& cand : toCands )
+    {
+        to = resolveAllByNameQualified( ing, cand );
+        if( !to.empty() )
+        {
+            break;
+        }
+    }
+    const auto proven = [ & ]( std::size_t e ) { return g.outNameOnly.empty() || g.outNameOnly[ e ] == 0; };
+    // A's forward reach (A included): a caller of A inside it is on a cycle through A, so on the path; B is marked as if reached
+    std::vector<char>   reach( n, 0 );
+    std::vector<NodeId> frontier = from;
+    std::size_t         seen     = 0;
+    for( NodeId f : from )
+    {
+        reach[ f ] = 1;
+        ++seen;
+    }
+    while( !frontier.empty() )
+    {
+        const NodeId u = frontier.back();
+        frontier.pop_back();
+        for( std::size_t e = g.outOff[ u ]; e < g.outOff[ u + 1 ]; ++e )
+        {
+            const NodeId v = g.outTargets[ e ];
+            if( v < n && reach[ v ] == 0 && proven( e ) )
+            {
+                if( ++seen > kPathFromReachMaxNodes )
+                {
+                    return kPathFromReachCapped;   // too wide to tell on-path from upstream: nothing moves, and the note says so
+                }
+                reach[ v ] = 1;
+                frontier.push_back( v );
+            }
+        }
+    }
+    for( NodeId b : to )
+    {
+        if( b < n )
+        {
+            reach[ b ] = 1;   // B is asked for: never moved, even when no resolved edge joins it to A
+        }
+    }
+    std::vector<NodeId> upstream;
+    float               floorScore = 0.0f;   // the lowest positive score of every row that stays
+    for( NodeId u = 0; u < n; ++u )
+    {
+        if( !( lensRank[ u ] > 0.0f ) )
+        {
+            continue;
+        }
+        bool callsFrom = false;
+        if( reach[ u ] == 0 )
+        {
+            for( std::size_t e = g.outOff[ u ]; e < g.outOff[ u + 1 ] && !callsFrom; ++e )
+            {
+                callsFrom = proven( e ) && std::ranges::binary_search( from, g.outTargets[ e ] );
+            }
+        }
+        if( callsFrom )
+        {
+            upstream.push_back( u );
+        }
+        else if( floorScore == 0.0f || lensRank[ u ] < floorScore )
+        {
+            floorScore = lensRank[ u ];
+        }
+    }
+    if( upstream.empty() || floorScore == 0.0f )
+    {
+        return 0;
+    }
+    float top = 0.0f;
+    for( NodeId u : upstream )
+    {
+        top = std::max( top, lensRank[ u ] );
+    }
+    // scaled into (0, floorScore / 2]: below every staying row, their own order kept
+    for( NodeId u : upstream )
+    {
+        lensRank[ u ] = floorScore * 0.5f * ( lensRank[ u ] / top );
+    }
+    return std::uint32_t( upstream.size() );
+}
+
+// the header note applyPathFromUpstreamCut's count rides in (the CLI --for and the MCP `for` twin print the same words)
+inline std::string pathFromUpstreamNote( std::uint32_t moved )
+{
+    if( moved == kPathFromReachCapped )
+    {
+        return std::format( " [path from: the from endpoint reaches over {} symbols, path_from_capped=1: its callers were not moved]", kPathFromReachMaxNodes );
+    }
+    return std::format( " [path from: {} caller{} of the from endpoint scored below the path's own rows]", moved, moved == 1 ? "" : "s" );
 }
 
 inline constexpr std::string_view kGraphSubjectCloseXml = "</graph_verb>";

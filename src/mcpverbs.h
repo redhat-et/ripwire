@@ -2558,6 +2558,13 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             mentionNote += fileSubjectNote( moved );
         }
     }
+    if( !noRoute )   // PATH-FROM-UPSTREAM: the CLI twin's rule (forgraphverb.h)
+    {
+        if( const std::uint32_t moved = applyPathFromUpstreamCut( ing, ix.g, task, lensRank ); moved > 0 )
+        {
+            mentionNote += pathFromUpstreamNote( moved );
+        }
+    }
 
     // B3 (co-change prior boost) — OPT-IN, EXPERIMENTAL, same contract as CLI --cochange-boost: files that
     // historically change WITH the top-ranked files promote their best symbols into the lower bundle (never
@@ -4952,6 +4959,13 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
         if( const std::uint32_t moved = applyFileSubjectLift( ing, task, lr.rank ); moved > 0 )
         {
             lr.mentionNote += fileSubjectNote( moved );
+        }
+    }
+    if( !noRoute )   // PATH-FROM-UPSTREAM: the CLI twin's rule (forgraphverb.h)
+    {
+        if( const std::uint32_t moved = applyPathFromUpstreamCut( ing, g, task, lr.rank ); moved > 0 )
+        {
+            lr.mentionNote += pathFromUpstreamNote( moved );
         }
     }
     if( !noRoute && std::getenv( "RIPWIRE_COCHANGE" ) && hasEnclosingGitRepo( root ) )
