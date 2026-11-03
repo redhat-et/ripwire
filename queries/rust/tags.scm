@@ -113,5 +113,8 @@
     function: (generic_function
         function: (identifier) @name)) @reference.call
 
+; EDGE-PRELUDE-VETO: a macro invocation (`assert!`, `json!`, `format!`) is captured as @reference.macro, so the reference carries
+; RefRole::Macro: it binds only to an indexed `macro_rules!` of that name (graph.h namespaceCompatible), never to a function, module
+; or type that shares the name, and with no indexed macro it is a call outside the tree (external=).
 (macro_invocation
-    macro: (identifier) @name) @reference.call
+    macro: (identifier) @name) @reference.macro

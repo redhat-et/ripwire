@@ -366,10 +366,16 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 293;          // bump on any grammar/.scm/extraction change
-                                                      // 293 = 2026-11-03 (lane index-alias-const, PLACEHOLDER above 285-292 taken by #504 #506 #512 #513; main is at 291/292 after #506's re-bump; rich file tag 294):
-                                                      //   C++ `using X = Y` / `namespace L = lib` / function-type and pointer typedefs are definitions (src/aliasdef.h).
-                                                      //   kCacheVersion stays 48: no record changes shape (the alias target rides RawDef::bodyByte).
+constexpr std::uint32_t kParserVer    = 299;          // bump on any grammar/.scm/extraction change
+                                                      // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
+                                                      //   so the merged value goes above both. Rich file tag 300. kCacheVersion stays 48.
+                                                      // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage
+                                                      //   (textual scope, graph.h rustMacroScopeOf). Rich file tag 298. kCacheVersion unchanged.
+                                                      // 295 = 2026-11-03 (lane edge-prelude-veto): a Rust macro invocation is captured @reference.macro (role Macro,
+                                                      //   queries/rust/tags.scm), no longer @reference.call. Rich file tag 296. kCacheVersion unchanged.
+                                                      // 293 = 2026-11-03 (lane index-alias-const): C++ `using X = Y` / `namespace L = lib` / function-type and pointer
+                                                      //   typedefs are definitions (src/aliasdef.h). kCacheVersion stays 48: no record changes shape (the alias target
+                                                      //   rides RawDef::bodyByte). Rich file tag 294.
                                                       // 291 = 2026-11-03 (lane docs-rest #506 re-bump): both sides bumped (lane 287/288, main 289/290), so the merged value
                                                       //   goes above both; caches built on main at 289 re-index and pick up the reST .txt docs. Rich file tag 292. kCacheVersion stays 48.
                                                       // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`

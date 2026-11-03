@@ -798,6 +798,7 @@ for _g in \
     prcontextcheck \
     prconvergecheck \
     precedencecheck \
+    preludevetocheck \
     preproccondcheck \
     preprocdeadscalecheck \
     prmaskanchorcheck \
@@ -809,6 +810,7 @@ for _g in \
     pyaliascallcheck \
     pyimportlayoutcheck \
     pyimportprecisecheck \
+    pymodcallsitescheck \
     pymodulealiascheck \
     pyshapecheck \
     qackconcurrencycheck \
