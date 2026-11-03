@@ -585,6 +585,7 @@ for _g in \
     helpbudgetcheck \
     hermesinstallcheck \
     historyoraclecheck \
+    historywalkcheck \
     honestlexcheck \
     hookcheck \
     hop1check \

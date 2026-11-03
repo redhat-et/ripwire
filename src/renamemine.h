@@ -126,6 +126,7 @@ struct RenameHarvest
     bool                         ok         = false;
     bool                         truncated  = false;  // a walk bound was hit ⇒ candidates= is a FLOOR
     bool                         nonGitRoot = false;
+    const char*                  whyNone = "probe-failed";   // the `r=` of a harvest with no answer: probe-failed, not-a-git-repo or partial-clone (`log -p` not started)
     // The DISCLOSE sink for the walk's degrades: no answer reads probed="0", a partial one truncated="1".
     enum class DisclosureWhy : std::uint8_t
     {
@@ -315,6 +316,15 @@ inline RenameHarvest mineRenamePairs( const std::string& root )
     if( !quality::gitRepoHasHistory( root ) )
     {
         harvest.nonGitRoot = true;
+        harvest.whyNone    = "not-a-git-repo";
+        return harvest;
+    }
+
+    // F1 (HISTORY-WALK-HANG): `log -p` on a partial clone parses the whole promisor pack before it fails; not started, probed="0" r="partial-clone".
+    if( gitIsPartialClone( root ) )
+    {
+        harvest.whyNone = "partial-clone";
+        DISCLOSE( harvest, RenameHarvest::DisclosureWhy::WalkNotStarted, "renamemine: partial clone - git log -p not started, the calibration corpus is empty" );
         return harvest;
     }
 
@@ -747,7 +757,7 @@ inline int writeNamingCalibrationReport( const IngestResult& ing, const std::str
     if( !report.harvest.ok )
     {
         rw::emitTo( stdout, "<naming-calibration probed=\"0\" r=\"{}\"{}/>",
-                     report.harvest.nonGitRoot ? "not-a-git-repo" : "probe-failed", atStamp.c_str() );
+                     report.harvest.whyNone, atStamp.c_str() );
         return 0;
     }
 
