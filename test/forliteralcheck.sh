@@ -51,7 +51,8 @@
 #   N1 [train 42b T-3] an <x> excerpt line over 200 bytes is cut on a UTF-8 boundary with cut="1" (a 48.9 KB minified body); twin: none
 #   D1-D7 (lane LIT-SITE-DECOY; RED on base 6bae81c6 where [P], fixture built at runtime): sites ordered by nearness to the answer (its rows and bodies,
 #          the literal's source definitions: file, directory, one call); capped blocks cut the far sites and far tables (lit_cut=, legend, next=);
-#          a static/ copy is no row beside product sites; twins: a static-only literal, an uncapped block, an unanchored single-table block
+#          an uncapped block is only reordered (D5b); a static/ copy is no row beside product sites; twins: a static-only literal, an uncapped
+#          block's rows, an unanchored single-table block, a cut that moved no row (D8: no lit_cut)
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -1477,7 +1478,16 @@ struct CoreSettings {
 int worker_slots(const CoreSettings& s) { return s.slots; }
 int queue_depth() { return 16; }
 int min_rows() { return 1; }
+int near_knob() { return 1; }
 CC
+cat > "$DF/src/core/knobtable.cpp" <<'CC'
+static std::unordered_map<std::string, int> coreKnobs = {
+    {"near_knob", 3},
+    {"core_knob", 4},
+};
+CC
+{ for i in $( seq 1 40 ); do printf 'int near_reader_%s() { return getSetting("near_knob"); }\n' "$i"; done; } > "$DF/src/core/near.cpp"
+printf 'int far_one() { return getSetting("near_knob"); }\n' > "$DF/zzz/far/one.cpp"
 cat > "$DF/src/core/defaults.cpp" <<'CC'
 int slotsDefault() {
     return lookupSetting("worker_slots");
@@ -1542,10 +1552,13 @@ if has "$L" 'src="46" shown="3" capped="1"' && has "$L" 'lit_cut="43"' && [ "$n_
 else no "D2 cap: far rows=$n_far $( grep -o '<lit [^>]*>' <<<"$L" )"; fi
 # D3 [P] the next-call line: the lit_cut legend names next= as the call that lists every site, and that call prints the cut ones
 G="$( cd "$DF" && "$BIN" "$DF" --no-cache --grep=worker_slots </dev/null 2>/dev/null )"
-nleg="$( grep -o 'lit_cut=N: N read sites not rows' <<<"$A" | wc -l | tr -d ' ' )"
+nleg="$( grep -o 'lit_cut=N sites not rows' <<<"$A" | wc -l | tr -d ' ' )"
+FL="$( cd "$DF" && "$BIN" "$DF" --no-cache '--for=worker_slots default' --legend=full </dev/null 2>/dev/null )"
 if [ "$nleg" = "1" ] && has "$L" 'next="--grep=worker_slots"' && has "$G" 'src/fuzz/gen/session.cpp' && has "$G" 'aaa/scripts/ci_jobs.py' && has "$G" 'zzz/far/readers.cpp'; then
     ok "D3 [P] lit_cut legend once; next= --grep=worker_slots lists the cut sites (fuzz table, CI script, far readers)"
 else no "D3 next line: legend x$nleg; grep ${#G} B"; fi
+if has "$FL" 'lit_cut=N (printed when the cut moved a row): N read sites not rows' && ! has "$FL" 'lit_cut=N sites not rows'; then ok "D3b [P] --legend=full carries the long lit_cut clause, not the compact one"
+else no "D3b full legend: $( grep -o '<!-- ripwire for lit: [a-z ]*' <<<"$FL" | tr '\n' '|' )"; fi
 # D4 [P] a vendored/generated copy (static/) is no row beside a product site, even when every site fits
 Q="$( lits <<<"$( dq 'queue_depth default' )" )"
 if has "$Q" 's="queue_depth" shape="table"' && ! has "$Q" 'static/js/pool.js' && has "$Q" 'lit_cut="1"'; then ok "D4 [P] the static/ copy is cut beside the product sites (lit_cut=1)"
@@ -1558,12 +1571,21 @@ Q="$( lits <<<"$( dq 'min_rows default' )" )"
 if has "$Q" '<ls p="src/core/settings.cpp" l="4"' && has "$Q" '<ls p="src/fuzz/gen/session.cpp" l="3"' && ! has "$Q" 'lit_cut=' && ! has "$Q" 'read sites not rows'; then
     ok "D5 [G] all sites fit: both tables listed, no lit_cut, no cut legend"
 else no "D5 uncapped twin: $( rows <<<"$Q" | tr '\n' ' ' )"; fi
+# D5b [P] the order when every site fits: the table row near the answer's anchor (settings.cpp, beside settings.h's min_rows) before the far fuzz table row
+if [ "$( rows <<<"$Q" | head -2 | tr '\n' ' ' )" = "src/core/settings.cpp:4 src/fuzz/gen/session.cpp:3 " ]; then ok "D5b [P] uncapped: the near table row is listed before the far one"
+else no "D5b uncapped order: $( rows <<<"$Q" | tr '\n' ' ' )"; fi
 # D6 [G] twin: nothing stands near the answer (far_knob is defined only in a test file) and one table: the capped block is the old one, no cut
 Q="$( lits <<<"$( dq 'far_knob default' )" )"
 want="$( { echo zzz/far/knobs.cpp:2; for i in $( seq 1 31 ); do echo "zzz/far/readers.cpp:$i"; done; } | tr '\n' ' ' )"
 if has "$Q" 's="far_knob" shape="table"' && has "$Q" 'shown="32" capped="1"' && ! has "$Q" 'lit_cut=' && [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "$want" ]; then
     ok "D6 [G] no anchor near and one table: the old 32 rows in the old order (the table row, then readers.cpp 1-31), no lit_cut"
 else no "D6 unanchored twin: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -3 | tr '\n' ' ' )"; fi
+# D8 [G] twin: the cut moved no row (the one far site stands past the 32 rows in the old order too): no lit_cut, no cut legend, the old rows
+A8="$( dq 'near_knob default' )"; Q="$( lits <<<"$A8" )"
+want="$( { echo src/core/knobtable.cpp:2; for i in $( seq 1 31 ); do echo "src/core/near.cpp:$i"; done; } | tr '\n' ' ' )"
+if has "$Q" 'shown="32" capped="1"' && ! has "$Q" 'lit_cut=' && ! has "$A8" 'sites not rows' && [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "$want" ]; then
+    ok "D8 [G] a cut that moved no row is not said: the old 32 rows, no lit_cut, no cut legend"
+else no "D8 silent cut: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -3 | tr '\n' ' ' )"; fi
 # D7 [P] several tables, none near the answer, sites over the rows: the home table (the file holding most of the literal's sites) stays, the other table's row is cut
 Q="$( lits <<<"$( dq 'home_knob default' )" )"
 if has "$Q" '<ls p="src/home/knobs.cpp" l="2"' && ! has "$Q" '<ls p="zzz/t1/aux.cpp"' && has "$Q" 'lit_cut="1"'; then ok "D7 [P] two tables, none near: the home table file stays, the other table row is cut (lit_cut=1)"

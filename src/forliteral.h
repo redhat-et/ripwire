@@ -181,12 +181,18 @@ inline constexpr std::string_view kForLiteralTableLegend =
     "word, counted, never rows. A cut on a row boundary says capped=1. -->";
 static_assert( kForLiteralTableLegend.find( "--", 4 ) == kForLiteralTableLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
-// present only with lit_cut= (LIT-SITE-DECOY), so the bytes of a block that cuts nothing do not move
+// present only with lit_cut= (LIT-SITE-DECOY), so the bytes of a block whose cut moved no row do not change; the compact form rides the default
+// --legend=compact posture, the long one --legend=full
 inline constexpr std::string_view kForLiteralCutLegend =
     "<!-- ripwire for lit: rows near the answer first: a site in a file or directory of its rows, bodies or the literal's own definitions, or one call "
-    "from them. lit_cut=N: N read sites not rows: in a CI, vendored or generated path beside product sites, or, when the sites do not all fit, far from "
-    "the answer, or a row of another table than the one near it (with no table near it: the one whose file holds the most sites); next= lists every site. -->";
-static_assert( kForLiteralCutLegend.find( "--", 4 ) == kForLiteralCutLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+    "from them. lit_cut=N (printed when the cut moved a row): N read sites not rows: in a CI, vendored or generated path beside product sites, or, when "
+    "the sites do not all fit, far from the answer, or a row of another table than the one near it (with no table near it: the one whose file holds the "
+    "most sites); next= lists every site. -->";
+inline constexpr std::string_view kForCompactLiteralCutLegend =
+    "<!-- ripwire for lit: near rows first (a file or dir of the answer or the literal's defs, or one call away); lit_cut=N sites not rows: far ones "
+    "when not all fit, another table, CI or vendored copies; next= lists all. -->";
+static_assert( kForLiteralCutLegend.find( "--", 4 ) == kForLiteralCutLegend.size() - 3 && kForCompactLiteralCutLegend.find( "--", 4 ) == kForCompactLiteralCutLegend.size() - 3,
+               "the only double hyphen in a legend comment is its closing" );
 
 inline bool forLiteralOn()
 {
@@ -2250,6 +2256,24 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                           const auto key = [ & ]( std::size_t i ) { return std::pair{ cut.tier[i], rankOf( i ) }; };
                           return key( a ) < key( b );
                       } );
+    // lit_cut= is said when the cut moved a row: a cut site the old order (rankOf alone) would have listed; otherwise capped= already says it
+    bool cutMovedRow = false;
+    if( cut.count > 0 )
+    {
+        std::vector<std::size_t> old( order.size() );
+        for( std::size_t i = 0; i < old.size(); ++i )
+        {
+            old[i] = i;
+        }
+        std::stable_sort( old.begin(), old.end(), [ & ]( std::size_t a, std::size_t b ) { return rankOf( a ) < rankOf( b ); } );
+        std::vector<char> oldRegistration( old.size(), 0 );   // the old pick, registration slots and all (pickRows below, on the old order)
+        for( std::size_t i = 0; policy.reserve > 0 && i < old.size(); ++i )
+        {
+            oldRegistration[i] = lit_detail::registrationMark( ing, rows[old[i]], enriched[old[i]].enclosingId, enriched[old[i]].text, lit.text );
+        }
+        const std::vector<std::size_t> oldPick = lit_detail::pickRows( oldRegistration, policy.rows, policy.reserve );
+        cutMovedRow = std::any_of( oldPick.begin(), oldPick.end(), [ & ]( std::size_t p ) { return cut.tier[old[p]] == lit_detail::kCutTier; } );
+    }
     std::erase_if( order, [ & ]( std::size_t i ) { return cut.tier[i] == lit_detail::kCutTier; } );
     std::vector<char> registration( order.size(), 0 );   // by rank position: a quoted key outside any function (shape=dotted)
     for( std::size_t i = 0; policy.reserve > 0 && i < order.size(); ++i )
@@ -2402,9 +2426,9 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
         x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
     }
-    if( cut.count > 0 && !limits.cutLegendAbove )
+    if( cutMovedRow && !limits.cutLegendAbove )
     {
-        x += kForLiteralCutLegend;   // present only with lit_cut=, so a block that cuts nothing keeps its bytes
+        x += compactLegend ? kForCompactLiteralCutLegend : kForLiteralCutLegend;   // present only with lit_cut=
         out.cutLegend = true;
     }
     x += "<lit s=\"";
@@ -2421,7 +2445,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     x += longerHits > 0 ? " longer=\"" + std::to_string( longerHits ) + "\"" : std::string();
     x += lit.frag ? " frag=\"1\"" : "";
     x += lit.tryNo > 1 ? " try=\"" + std::to_string( lit.tryNo ) + "\"" : std::string();
-    x += cut.count > 0 ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
+    x += cutMovedRow ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
     x += " comment=\"" + std::to_string( commentHits ) + "\" test=\"" + std::to_string( testHits ) + "\" doc=\"" + std::to_string( docHits ) + "\"";
     if( !collected.cleanScan() || anyUnclassified )
     {
