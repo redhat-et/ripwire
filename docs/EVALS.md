@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 753 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 753 gate scripts (counts snapshot 2026-11-03) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5888,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **753 gate scripts**, all of which exist on disk. <!-- gatecount -->
+(**753 gate scripts** at the counts snapshot 2026-11-03; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5897,8 +5897,10 @@ verification fits in one sitting. It does not modify `regression.sh`.
 so the list cannot rot.
 
 **The number itself is generated — never edit it.** The count above, and every other place this
-repository publishes it, is written by `python3 docs/gatecount_build.py` from that loop and gated by
-`test/gatecountcheck.sh`, the same way `docs/COMMANDS.md` and `docs/LIMITS.md` are build products of
+repository publishes it, is written by `python3 docs/gatecount_build.py` and gated by
+`test/gatecountcheck.sh` — since 2026-11-02 from the dated counts snapshot `docs/counts.tsv`, which
+`python3 docs/counts_snapshot.py refresh` re-takes from that loop (in train PRs and release commits),
+`check --max-drift` keeps within 10 gates of it on every PR and `release.yml` requires exact — the same way `docs/COMMANDS.md` and `docs/LIMITS.md` are build products of
 `--help` and of `src/`. It was hand-written at eight sites until 2026-09-10, and the failure that ended
 that was not a typo: two lanes that each add one gate both write N+1, git auto-merges the **identical**
 text clean, and the tree then publishes N+1 against a loop of N+2. Every check in the tree stays green
@@ -5909,7 +5911,8 @@ and serialised every gate-adding lane. Each published site now carries a marker 
 generator refuses the tree rather than leave it behind. `test/manifestcheck.sh`'s derived-vs-stated arms
 are kept as the post-hoc catch: the generator is how the sites are *written*, manifestcheck is what
 notices if one was written some other way. After adding a gate — or after any rebase that moved the
-loop — the whole merge recipe is: union the `for _g in …` sets, run the generator, done.
+loop — the whole merge recipe is: union the `for _g in …` sets, run the generator, done; the published
+count stays at the snapshot's (and so does not conflict) until the next refresh moves it.
 
 ### The TOML config-key tier — shape coverage, and the ceiling that was declined
 
@@ -7005,11 +7008,13 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 753. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 753 at the counts snapshot 2026-11-03. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
-  written by hand anywhere: `docs/gatecount_build.py` derives it from the loop and rewrites every
-  published site, `test/gatecountcheck.sh` fails if any of them drifts, and `test/manifestcheck.sh`
-  still asserts this very number against the loop's actual length as the post-hoc catch.
+  written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
+  (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites
+  every published site from the snapshot, `test/gatecountcheck.sh` fails if any site disagrees with
+  it, and `python3 docs/counts_snapshot.py check` asserts the snapshot against the loop's actual
+  length at every refresh and in the release workflow (within 10 gates on every PR: `check --max-drift`).
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
   point-in-time snapshot. Quote the floor, not the snapshot.
 - **"~70% fewer bytes" for `--pack-signatures`**, unqualified. See §5 — quote the root-neutralised

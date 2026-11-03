@@ -122,7 +122,8 @@ def write( p, t ):
 MUT = os.path.join( TMP, "pinned" )
 shutil.copytree( os.path.join( ROOT, "src" ), os.path.join( MUT, "src" ) )
 os.makedirs( os.path.join( MUT, "docs" ) )
-for f in ( "limits_build.py", "LIMITS.md", "limits_classes.tsv", "EVALS.md" ):
+# counts.tsv + counts_snapshot.py: the real LIMITS.md states its totals from the dated snapshot (since 2026-11-02)
+for f in ( "limits_build.py", "LIMITS.md", "limits_classes.tsv", "EVALS.md", "counts.tsv", "counts_snapshot.py" ):
     if os.path.exists( os.path.join( ROOT, "docs", f ) ):
         shutil.copy( os.path.join( ROOT, "docs", f ), os.path.join( MUT, "docs", f ) )
 GEN, DOC, TSV = ( os.path.join( MUT, "docs", f ) for f in ( "limits_build.py", "LIMITS.md", "limits_classes.tsv" ) )
