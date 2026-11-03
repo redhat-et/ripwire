@@ -2635,7 +2635,7 @@ std::optional<int> runDefs( const MainDispatch& d )
     }
     if( anyAlias )
     {
-        legend += "to= an alias's written target (C++ using X = Y or namespace L = lib, a TS const set to a name, member chain or require/import), "
+        legend += "to= an alias's written target (C++ using X = Y or namespace L = lib), "
                   "whitespace folded; to_bytes=N: the target is N bytes and to= is cut (ellipsis); to_next= the defs call for the target: Owner::leaf when that binds, else the last name segment (it may list namesakes); to_unread=1: "
                   "the file could not be read. ";
     }

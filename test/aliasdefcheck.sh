@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# aliasdefcheck.sh — INDEX-ALIAS-CONST gate: C++ alias forms and TS alias/table-shaped module consts are definitions whose written
-# target the defs verb prints (to= / to_next=); the near misses stay out and the TS ones are COUNTED (consts_skipped=).
+# aliasdefcheck.sh — INDEX-ALIAS-CONST gate: C++ alias forms (`using X = Y`, templated and class-scope `using`, `namespace L = lib`,
+# function-type and pointer typedefs) are definitions whose written target the defs verb prints (to= / to_next=); the near misses
+# stay out. TypeScript module consts stay as they are on main (the TS arm is carded, TS-CONST-DEFS): the TS arms here pin that.
 #
-# WHY: `--defs=ColumnPtr` found 0 on ClickHouse although `using ColumnPtr = COW<IColumn>::Ptr;` sits in IColumn_fwd.h, and TS
-# module tables (`const forEachChildTable = {…}`, `export const optionDeclarations = [...]`) were no definitions at all, so a
-# name-exact route had nothing to land on. src/aliasdef.h is the one reader (C++ node kinds; the TS value ALLOWLIST).
+# WHY: `--defs=ColumnPtr` found 0 on ClickHouse although `using ColumnPtr = COW<IColumn>::Ptr;` sits in IColumn_fwd.h, so a
+# name-exact route had nothing to land on. src/aliasdef.h is the one reader (C++ node kinds, one arm per language).
 #
-# RED-BEFORE-FIX: every [RED] arm fails on the base binary (main 824847bd; recorded in reports/index-alias-const.md).
+# RED-BEFORE-FIX: every [RED] arm fails on the base binary (main 824847bd; recorded in reports/index-alias-const.md); the
+# unmarked arms hold on base and head alike (each negative has a positive twin in the same fixture).
 # Fixtures are built at runtime (nothing under a .gitignored path). Every arm reads a command whose exit code it checks.
 #
 # Usage: test/aliasdefcheck.sh [BIN]      (BIN falls back to RIPWIRE_BIN, then build/ripwire)
@@ -22,7 +23,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 if [ ! -x "$BIN" ]; then echo "  FAIL  no binary at $BIN"; exit 1; fi
 
-F="$TMP/fx"; mkdir -p "$F/c" "$F/t" "$F/m"
+F="$TMP/fx"; mkdir -p "$F/c" "$F/t"
 cat > "$F/c/alias.h" <<'EOF'
 namespace lib { struct Real { void run(); }; template <class T> struct COW { using Ptr = T*; }; }
 struct IColumn {};
@@ -58,14 +59,6 @@ export const greeting = "hello";
 export const emptyBag = {};
 const SCREAMING_ALIAS = m.thing;
 EOF
-printf 'export const make = () => 1;\nexport const makeCast = ((a: number) => a) as Fn;\nexport const Sub = Base.extend(\x27Sub\x27, {});\n' > "$F/t/other.ts"
-printf 'declare const ambientThing: number;\nexport declare const ambientVersion: string;\n' > "$F/t/decl.d.ts"
-# a minified TS bundle: module consts of alias shape, no whitespace to speak of (counted, never indexed)
-python3 -c "
-import sys
-body=';'.join('const minA%d=minB.c%d' % (i,i) for i in range(400))
-open(sys.argv[1],'w').write('const minB={c0:1};'+body+';\n')" "$F/m/bundle.ts"
-
 defs(){ # defs ROOTDIR NAME -> the answer body in $TMP/rows (legend stripped); rc in $drc (never in a subshell)
     ( cd "$1" && "$BIN" . --no-cache --defs="$2" ) > "$TMP/out" 2> "$TMP/err"; drc=$?
     sed 's/.*<defs /<defs /' "$TMP/out" > "$TMP/rows"
@@ -104,53 +97,27 @@ defs "$F/c" Real; n=$( grep -oE '<name q="Real" defs="[0-9]+"' "$TMP/rows" | gre
 if [ "$drc" -eq 0 ] && [ "${n:-x}" = "1" ]; then ok "using lib::Real; adds no second Real (defs=1)"; else no "using-declaration: rc=$drc defs=${n:-<none>}"; fi
 absent "$F/c" lib "using namespace lib; is no definition of lib"
 
-# [RED] TS alias- and table-shaped module consts (positives) and their targets
-check_ts(){ # name to= (empty: a table, no to=)
-    local r; defs "$F/t" "$1"; r=$( row )
-    if [ "$drc" -ne 0 ] || [ -z "$r" ]; then no "[RED] TS --defs=$1 rc=$drc row=${r:-<none>}"; return; fi
-    if [ -n "$2" ]; then case "$r" in *" to=\"$2\""*) ok "[RED] TS --defs=$1 to=$2";; *) no "[RED] TS --defs=$1: want to=\"$2\", got $r";; esac
-    else case "$r" in *" to="*) no "TS table $1 carries to=: $r";; *) ok "[RED] TS table --defs=$1 (no to=)";; esac; fi
-}
-check_ts aliasIdent  'm'
-check_ts aliasMember 'm.inner.leaf'
-check_ts loaded      'require(&apos;./other&apos;)'
-check_ts lazyMod     'import(&apos;./other&apos;)'
-check_ts shape       ''
-check_ts handlers    ''
-check_ts list        ''
-check_ts SCREAMING_ALIAS 'm.thing'
-# TS near misses: not definitions
-absent "$F/t" destructA  "a destructuring const"
-absent "$F/t" counter    "a module let"
-absent "$F/t" localConst "a function-local const"
-absent "$F/t" called     "a call-valued const"
-absent "$F/t" notLoader  "a seven-letter callee that is not require (a call)"
-absent "$F/t" greeting   "a string const"
-absent "$F/t" emptyBag   "an empty object const"
-absent "$F/t" ambientThing "a .d.ts declare const"
-absent "$F/m" minA7      "a const in a minified-suspect file"
-
-# [RED] the skipped TS consts are COUNTED: called, notLoader, greeting, emptyBag (4) — not the arrow const, the cast arrow or the class factory
-# in other.ts, which other patterns index (a function, a function, a class); the minified file's 401 module consts
-sk(){ ( cd "$1" && "$BIN" . --no-cache --skipped ) > "$TMP/sk" 2> "$TMP/skerr"; src=$?; v=$( grep -oE 'consts_skipped="[0-9]+"' "$TMP/sk" | head -1 ); }
-sk "$F/t"; if [ "$src" -eq 0 ] && [ "$v" = 'consts_skipped="4"' ]; then ok "[RED] --skipped consts_skipped=\"4\" (two calls, string, empty object)"; else no "consts_skipped on the TS fixture: rc=$src got '${v:-<absent>}'"; fi
-sk "$F/m"; if [ "$src" -eq 0 ] && [ "$v" = 'consts_skipped="401"' ]; then ok "[RED] minified bundle: consts_skipped=\"401\""; else no "minified bundle: rc=$src got '${v:-<absent>}'"; fi
-sk "$F/c"; if [ "$src" -eq 0 ] && [ -z "$v" ]; then ok "C++ fixture: consts_skipped absent at zero"; else no "C++ fixture: rc=$src consts_skipped='${v}'"; fi
+# TypeScript module consts are NOT definitions here (as on main): neither alias- nor table-shaped values, nor the near misses
+for n in aliasIdent aliasMember loaded lazyMod shape handlers list destructA counter localConst called notLoader greeting emptyBag ambientThing; do
+    absent "$F/t" "$n" "TS const (TS arm carded)"
+done
+# a SCREAMING const stays a def exactly as on main: no to= (the alias target rides C++ rows only)
+defs "$F/t" SCREAMING_ALIAS; r=$( row )
+if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' "$r" | grep -q ' to'; then ok "TS SCREAMING const: a def with no to= (unchanged)"; else no "TS SCREAMING const: rc=$drc row=${r:-<none>}"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    if xmllint --noout "$TMP/sk" 2>/dev/null; then ok "the --skipped answer carrying the clause is well-formed"; else no "--skipped answer not well-formed"; fi
     ( cd "$F/c" && "$BIN" . --no-cache --defs=ColumnPtr ) > "$TMP/x" 2>/dev/null
     if [ $? -eq 0 ] && xmllint --noout "$TMP/x" 2>/dev/null; then ok "the --defs answer carrying to= is well-formed"; else no "--defs to= answer not well-formed or failed"; fi
 else
     echo "  SKIP  xmllint arms (xmllint not on PATH)"
 fi
 
-# a pathological 10 MB single-line TS file: never hangs (skipped by the crawl's size ceiling), and the run says so
+# a pathological 10 MB single-line C++ header beside an alias: never hangs (skipped by the crawl's size ceiling), the alias is indexed
 mkdir -p "$F/big"; python3 -c "
 import sys
-open(sys.argv[1],'w').write('export const big = [' + ','.join(['x']*5_000_000) + '];\n')" "$F/big/huge.ts"
-printf 'export const keep = other.thing;\n' > "$F/big/small.ts"
-( cd "$F/big" && "$BIN" . --no-cache --defs=keep ) > "$TMP/big" 2>&1; brc=$?
-if [ "$brc" -eq 0 ] && grep -q 'to="other.thing"' "$TMP/big"; then ok "10 MB one-line file beside an alias: the run finishes and indexes the alias"; else no "10 MB file: rc=$brc"; fi
+open(sys.argv[1],'w').write('int big[] = {' + ','.join(['0']*5_000_000) + '};\n')" "$F/big/huge.h"
+printf 'namespace other { struct Thing {}; }\nusing Keep = other::Thing;\n' > "$F/big/small.h"
+( cd "$F/big" && "$BIN" . --no-cache --defs=Keep ) > "$TMP/big" 2>&1; brc=$?
+if [ "$brc" -eq 0 ] && grep -q 'to="other::Thing"' "$TMP/big"; then ok "[RED] 10 MB one-line header beside an alias: the run finishes and indexes the alias"; else no "10 MB file: rc=$brc"; fi
 
 echo "aliasdefcheck: $( [ "$fail" -eq 0 ] && echo PASS || echo FAIL )"
 exit "$fail"

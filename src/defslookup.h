@@ -187,8 +187,7 @@ inline DefLookup lookupDefs( const IngestResult& ing, const Graph& g, std::strin
 // keeps only what the next step needs: sel=, p=, class=, decl_only=.
 // INDEX-ALIAS-CONST: an alias definition's written target, read from [AliasTarget::start, endByte) — the tags pass records where the
 // target starts exactly when the target ends the declaration (ingest_sidecap.h, src/aliasdef.h, model.h AliasTarget): C++ `using X = Y;` and
-// `namespace L = lib;`, a TS const whose value is an identifier, member chain or require/import of a literal. Every other row
-// (a typedef, whose target precedes its name; a table const; any def with a real body) has no to=. `unread` when the file
+// `namespace L = lib;`. Every other row (a typedef, whose target precedes its name; any def with a real body) has no to=. `unread` when the file
 // could not be read: never an empty target. Whitespace runs fold to one space; past kAliasTargetCap the text is cut on a
 // UTF-8 boundary with an ellipsis and `fullBytes` names the uncut size.
 inline constexpr std::size_t kAliasTargetCap = 160;   // a runaway guard: real alias targets are tens of bytes

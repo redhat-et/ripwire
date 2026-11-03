@@ -980,11 +980,9 @@ struct Symbol
 static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
-// The byte span of the function whose body binds a function-local def's name (Symbol::fnLocal). A call site inside
-// [start, end) of the def's own file can name the def; any other site cannot (graph.h reachableByName).
 // INDEX-ALIAS-CONST (src/aliasdef.h): where an alias definition's WRITTEN TARGET starts, when the target ends the declaration —
-// C++ `using X = Y;` / `namespace L = lib;`, a TS const whose value is a name, member chain or require/import of a literal. The
-// target is [start, Symbol::endByte) less a trailing `;`. One row per such def, ascending id (8 bytes a row, no string): the
+// C++ `using X = Y;` / `namespace L = lib;` (a TS arm is carded,
+// TS-CONST-DEFS). The target is [start, Symbol::endByte) less a trailing `;`. One row per such def, ascending id (8 bytes a row, no string): the
 // def's own signature stays the whole declaration, so every sig/body consumer reads an alias row exactly as it reads a typedef.
 struct AliasTarget
 {
@@ -992,6 +990,8 @@ struct AliasTarget
     std::uint32_t start = 0;
 };
 
+// The byte span of the function whose body binds a function-local def's name (Symbol::fnLocal). A call site inside
+// [start, end) of the def's own file can name the def; any other site cannot (graph.h reachableByName).
 struct FnLocalScope
 {
     NodeId        id    = kNoNode;
@@ -2113,8 +2113,6 @@ struct FileHealth
                                       // errBytes above always describe the parse extraction actually read.
     std::uint32_t useBoundsBlanked = 0;   // its Rust layer (src/rustusebounds.h): precise-capturing use<..> bounds
                                           // blanked for the ADOPTED parse; 0 ⇒ the first parse was kept
-    std::uint32_t constsSkipped = 0;      // INDEX-ALIAS-CONST: TS module-level consts whose value is outside the allowlist
-                                          // (src/aliasdef.h) — counted, not indexed; --health consts_skipped=
 };
 
 // Output of ingestion. Deterministic: files sorted lexicographically, symbol ids assigned

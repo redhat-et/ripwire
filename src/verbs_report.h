@@ -2145,7 +2145,6 @@ struct SkipHealthReport
     std::size_t                    extentSuspectFiles = 0;   // extent honesty: files holding >= 1 flagged definition
     std::size_t                    macroBlankedFiles  = 0;   // member-macro re-parse: files whose symbols come from a re-parse
     std::size_t                    useBoundsBlankedFiles = 0;   // its Rust layer: files re-parsed with use<..> bounds blanked
-    std::size_t                    constsSkipped = 0;   // INDEX-ALIAS-CONST: TS module-level consts outside the value allowlist, summed
 };
 
 // §L1 — classify every indexed file's recorded health against the two disclosure thresholds.
@@ -2198,7 +2197,6 @@ SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
         out.minified += minified ? 1u : 0u;
         out.macroBlankedFiles += blanked ? 1u : 0u;
         out.useBoundsBlankedFiles += useBlank ? 1u : 0u;
-        out.constsSkipped += h.constsSkipped;
         if( degraded || minified || suspect > 0 || blanked || useBlank )
         {
             out.findings.push_back( { f, degraded, minified, suspect, h.macroBlanked, h.useBoundsBlanked } );
@@ -2302,7 +2300,7 @@ std::string healthWhyList( const SkipHealthFinding& hr )
 std::string skippedHealthRootAttrs( const SkipHealthReport& health )
 {
     return rw::countAttrXmlOrEmpty( "extent_suspect_files", health.extentSuspectFiles ) + rw::countAttrXmlOrEmpty( "macro_blanked_files", health.macroBlankedFiles )
-         + rw::countAttrXmlOrEmpty( "use_bounds_blanked_files", health.useBoundsBlankedFiles ) + rw::countAttrXmlOrEmpty( "consts_skipped", health.constsSkipped );
+         + rw::countAttrXmlOrEmpty( "use_bounds_blanked_files", health.useBoundsBlankedFiles );
 }
 
 // extent honesty + member-macro re-parse — each reading rides ONLY a report that carries its rows, so a corpus with
@@ -2323,12 +2321,6 @@ void writeSkippedHealthLegends( rw::XmlWriter& w, const SkipHealthReport& health
     if( health.useBoundsBlankedFiles > 0 )
     {
         w.write( kUseBoundsBlankedSkippedLegend );
-    }
-    if( health.constsSkipped > 0 )
-    {
-        w.write( "<!-- consts_skipped= on the root: TypeScript module-level consts NOT indexed as definitions because their value is not"
-                 " alias- or table-shaped (a name, a member chain, require or import of a literal, a non-empty object or array"
-                 " literal), or their file looks minified; a SCREAMING_SNAKE name is indexed whatever its value. The grep verb finds them. -->" );
     }
 }
 

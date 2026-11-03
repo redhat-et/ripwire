@@ -1869,7 +1869,6 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
         return;
     }
 
-    std::optional<bool> tsMinified;   // INDEX-ALIAS-CONST: the file's minified-suspect verdict, computed on its first gated TS const
     const std::size_t firstDefOfFile = defs.size();   // member-variable round: foldFieldDefs' window (below)
     const std::size_t firstRefOfFile = refs.size();   // #72 follow-up: dropPreprocDead's window (below)
     const std::size_t firstBindOfFile = binds.size();
@@ -2039,11 +2038,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // assignments — in one drop decision (see dropGatedCapture for the per-class rationale and why
             // none of this can live in the query as a #match?/#eq? predicate).
             // INDEX-ALIAS-CONST (src/aliasdef.h, the one alias reader): a C++ alias form is a definition unless it is
-            // function-local; a TS module-level const the SCREAMING gate drops is KEPT when its value is alias- or
-            // table-shaped (the allowlist), and every other one is COUNTED (consts_skipped=, --health), never indexed.
-            // aliasTargetStart: where the written target starts when it ENDS the declaration (--defs to=); it rides the RawDef's
-            // bodyByte to the model, which moves it to IngestResult::aliasTargets and keeps the whole declaration as the
-            // signature (ingest_model.h rawDefIsAliasRow); 0 when the target is not a suffix (a typedef).
+            // function-local. aliasTargetStart: where the written target starts when it ENDS the declaration (--defs to=); it
+            // rides the RawDef's bodyByte to the model, which moves it to IngestResult::aliasTargets and keeps the whole
+            // declaration as the signature (ingest_model.h rawDefIsAliasRow); 0 when the target is not a suffix (a typedef).
             std::uint32_t aliasTargetStart = 0;
             AliasShape    aliasShape {};
             if( isDef && le.lang == Lang::Cpp && defCapSv == "definition.alias" )
@@ -2052,32 +2049,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 {
                     continue;
                 }
-                aliasShape = aliasShapeOf( Lang::Cpp, roleNode, src );
+                aliasShape = aliasShapeOf( Lang::Cpp, roleNode );
             }
-            const bool tsModuleConst = isDef && le.lang == Lang::TypeScript && defCapSv == "definition.constant";
             if( isDef && dropGatedCapture( defCapSv, le.lang, nameTxt, nameNode, roleNode, src ) )
             {
-                if( !tsModuleConst )
-                {
-                    continue;
-                }
-                if( !tsMinified.has_value() )
-                {
-                    tsMinified = aliasSourceLooksMinified( src, kHealthWsSampleBytes, kMinifiedMinBytes, kMinifiedWsPerMille );
-                }
-                aliasShape = *tsMinified ? AliasShape{} : aliasShapeOf( Lang::TypeScript, ts_node_parent( nameNode ), src );
-                if( aliasShape.form == AliasForm::None )
-                {
-                    // counted only when no other pattern indexes the name: a function value is a function def, a class factory a class
-                    shortfall.constsSkipped += tsConstValueIndexedElsewhere( ts_node_parent( nameNode ) ) || !ts_node_is_null( jsClassFactoryReceiver( nameNode, src ) ) ? 0u : 1u;
-                    continue;
-                }
+                continue;
             }
-            else if( tsModuleConst )
-            {
-                aliasShape = aliasShapeOf( Lang::TypeScript, ts_node_parent( nameNode ), src );   // a SCREAMING const: same target rule
-            }
-            if( aliasShape.form == AliasForm::TypeAlias || aliasShape.form == AliasForm::NamespaceAlias || aliasShape.form == AliasForm::ValueAlias )
+            if( aliasShape.form != AliasForm::None )
             {
                 const std::uint32_t tEnd = ts_node_end_byte( aliasShape.target );
                 std::uint32_t       e    = ts_node_end_byte( roleNode );

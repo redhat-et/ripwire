@@ -93,12 +93,11 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
 //     C++ functions carry Lang::ObjC too, but a C++ overload set inside a .mm is out of this fixture's scope
 //     and the same key limitation applies — so we restrict to the observed ObjC node shapes by language and
 //     rely on the byte-identical + langcheck gates. Never manufactures a symbol the tags query didn't capture.
-// INDEX-ALIAS-CONST: a RawDef whose bodyByte carries its alias target's start (ingest_sidecap.h sets it only on these two shapes:
-// a C++ alias row, and a TS module const with an alias-shaped value — no TS const has a body field of its own)
+// INDEX-ALIAS-CONST: a RawDef whose bodyByte carries its alias target's start (ingest_sidecap.h sets it only on a C++ alias row,
+// which has no body field of its own)
 inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
 {
-    const bool shape = ( d.lang == Lang::Cpp && d.kind == SymKind::Alias ) || ( d.lang == Lang::TypeScript && d.kind == SymKind::Var );
-    return shape && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
+    return d.lang == Lang::Cpp && d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
 }
 
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
