@@ -32,6 +32,11 @@
 #   (D)  the drift bound (the staleness rule, docs/counts_snapshot.py MAX_DRIFT): `check --max-drift` exits 0 on
 #        THIS tree; on the fixture it exits 0 at the merged tree's drift of 2 gates, 1 once gates drift by 11
 #        or caps by 21, and non-zero when a generator crashes. (Dr) release.yml runs the exact `check`.
+#   (S)  no tracked *.sh (or extensionless sh/bash script) has an unbraced `$name` directly followed by a
+#        non-ASCII byte outside a comment line: macOS bash 3.2 reads the byte as part of the name and `set -u`
+#        kills the gate ("baseGates→: unbound variable", this gate's own CI red on macOS). Twins: a fixture
+#        with one such line is caught (exactly that line), its braced and commented forms are not, and a
+#        failing scan (unreadable file) is a FAIL, never a clean result.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 fail=0
@@ -118,7 +123,7 @@ else no "(P2) gate registry on the merged tree FAILED: $( printf '%s' "$out" | h
 # ── (P3) the snapshot says it lags, and refresh makes it exact ──────────────────────────────────────
 cp -R "$M" "$TMP/fresh"
 out="$( cd "$TMP/fresh" && python3 docs/counts_snapshot.py check 2>&1 )"; rc=$?
-want="gates.scripts $baseGates→$(( baseGates + 2 ))"
+want="gates.scripts ${baseGates}→$(( baseGates + 2 ))"
 if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "$want"; then ok "(P3) counts_snapshot.py check on the merged tree: exit 1, names $want"
 else no "(P3) counts_snapshot.py check on the merged tree: exit $rc, expected 1 naming '$want'; got: $( printf '%s' "$out" | head -2 )"; fi
 out="$( cd "$TMP/fresh" && COUNTS_TAKEN=2000-01-02 python3 docs/counts_snapshot.py refresh 2>&1 && python3 docs/counts_snapshot.py check 2>&1 )"; rc=$?
@@ -258,6 +263,41 @@ else no "(D crash) check --max-drift passed with a crashing generator"; fi
 if [ -f "$ROOT/.github/workflows/release.yml" ] && grep -qE '^[[:space:]]*python3 docs/counts_snapshot\.py check[[:space:]]*(\|\||$)' "$ROOT/.github/workflows/release.yml"; then
     ok "(Dr) .github/workflows/release.yml runs the exact counts_snapshot.py check before publishing"
 else no "(Dr) .github/workflows/release.yml does not run 'python3 docs/counts_snapshot.py check' (the release refusal of a stale snapshot)"; fi
+
+# ── (S) unbraced `$name` + non-ASCII byte: bash 3.2 (macOS) reads the byte into the name ─────────────────
+# scanShell FILE...: prints FILE:LINE:text for each hit outside a comment line; exit 0 hits, 1 none, 2 error.
+scanShell(){
+    local hits rc
+    hits="$( LC_ALL=C grep -nHE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~[:space:]]' "$@" )"; rc=$?
+    [ "$rc" -gt 1 ] && return 2
+    hits="$( printf '%s\n' "$hits" | LC_ALL=C grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' | LC_ALL=C grep -v '^$' )"
+    [ -n "$hits" ] || return 1
+    printf '%s\n' "$hits"; return 0
+}
+sfx="$TMP/s"; mkdir -p "$sfx"
+arr="$( printf '\342\206\222' )"   # the arrow, built from octal so this file never holds the pattern it bans
+printf '%s\n' 'set -u' 'n=1' "a=\"x \$n${arr}y\"" "b=\"x \${n}${arr}y\"" "# c=\"x \$n${arr}y\" in a comment" > "$sfx/bad.sh"
+out="$( scanShell "$sfx/bad.sh" )"; rc=$?
+if [ "$rc" = 0 ] && [ "$( printf '%s\n' "$out" | wc -l | tr -d ' ' )" = 1 ] && printf '%s' "$out" | grep -q ':3:a='; then
+    ok "(S twin) the fixture's one unbraced \$n-then-arrow line is caught; its braced and commented forms are not"
+else no "(S twin) fixture scan: exit $rc, expected 0 with exactly line 3: $out"; fi
+scanShell "$sfx/no-such-file.sh" >/dev/null 2>&1; rc=$?
+if [ "$rc" = 2 ]; then ok "(S twin) a scan that cannot read its file exits 2, never a clean result"
+else no "(S twin) a scan of a missing file exited $rc, expected 2"; fi
+shl="$TMP/shfiles"
+if ( cd "$ROOT" && git ls-files '*.sh' && git grep -lE '^#!/(usr/)?bin/(env )?(ba)?sh' -- . ':!*.sh' ':!*.md' ) > "$shl" 2>"$TMP/shl.err"; then
+    nsh="$( LC_ALL=C sort -u "$shl" | grep -c . )"
+    if [ "$nsh" -lt 100 ]; then no "(S) only $nsh tracked shell files listed (want >= 100): the listing is broken"
+    else
+        LC_ALL=C sort -u "$shl" > "$TMP/shl.sorted"
+        # read the list into the positional parameters through a loop (bash 3.2: no mapfile)
+        set --; while IFS= read -r f; do set -- "$@" "$f"; done < "$TMP/shl.sorted"
+        out="$( cd "$ROOT" && scanShell "$@" )"; rc=$?; set --
+        if [ "$rc" = 1 ]; then ok "(S) $nsh tracked shell scripts: no unbraced \$name directly followed by a non-ASCII byte"
+        elif [ "$rc" = 0 ]; then no "(S) unbraced \$name before a non-ASCII byte (bash 3.2 reads it into the name; write \${name}): $( printf '%s' "$out" | head -5 )"
+        else no "(S) the shell scan failed (exit $rc) over $nsh files"; fi
+    fi
+else no "(S) could not list the tracked shell scripts: $( head -2 "$TMP/shl.err" )"; fi
 
 [ $fail -eq 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
