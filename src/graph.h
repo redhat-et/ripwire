@@ -7310,6 +7310,56 @@ inline bool rustFnIsProcMacro( std::string_view text, std::uint32_t start )
     return false;
 }
 
+// EDGE-PRELUDE-VETO: the `use` statements of one .rs file, joined (`use a::{b, c};use d::e;`), for rustUseTextNames: a procedural macro's
+// `use` is often spelled through a crate whose root is a Cargo `[lib] path` (zed's `use sqlez_macros::sql;` into src/sqlez_macros.rs),
+// which rustRule3Proves does not map. A bare statement scan like rustCrateAliases: a `use` inside a macro body is read too.
+inline std::string rustUseStatements( std::string_view text )
+{
+    std::string out;
+    while( !text.empty() )
+    {
+        const std::size_t end  = text.find( '\n' );
+        std::string_view  line = text.substr( 0, end );
+        text = end == std::string_view::npos ? std::string_view() : text.substr( end + 1 );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( "pub" ) )
+        {
+            line.remove_prefix( std::min( line.find( ' ' ), line.size() ) );   // `pub ` / `pub(crate) `
+            line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
+        }
+        if( !line.starts_with( "use " ) )
+        {
+            continue;
+        }
+        out.append( line );
+        while( out.find( ';', out.rfind( "use " ) ) == std::string::npos && !text.empty() )   // a statement spanning lines
+        {
+            const std::size_t e2 = text.find( '\n' );
+            out.append( text.substr( 0, e2 ) );
+            text = e2 == std::string_view::npos ? std::string_view() : text.substr( e2 + 1 );
+        }
+        out.push_back( '\n' );
+    }
+    return out;
+}
+// Does a `use` statement of `uses` (rustUseStatements) end a path in `name` (`use m::sql;`, `use m::{sql};`, `use db::{sqlez_macros::sql, X};`),
+// not merely pass through a module of that name (`use sql::X;`)?
+inline bool rustUseTextNames( std::string_view uses, std::string_view name )
+{
+    const auto isIdent = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    for( std::size_t at = uses.find( name ); at != std::string_view::npos; at = uses.find( name, at + 1 ) )
+    {
+        const std::size_t after = at + name.size();
+        const bool leaf = after >= uses.size() || ( !isIdent( uses[ after ] ) && uses.substr( after ).find_first_not_of( " \t" ) != std::string_view::npos
+                                                     && uses[ after + uses.substr( after ).find_first_not_of( " \t" ) ] != ':' );
+        if( at >= 1 && !isIdent( uses[ at - 1 ] ) && leaf )   // a whole segment that is no path head (`m::sql;`, `{sql, X}`)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Rust base clause table values: the head of the `use` is DECIDED outside the tree ('\0') or UNDECIDED ('u').
 inline constexpr char kRustUseUndecided = 'u';
 
@@ -10145,6 +10195,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     RustMacroScopeCache macroScopes;   // EDGE-PRELUDE-VETO: a non-exported Rust macro file's textual scope, read once when a site asks
+    HashMap<std::uint32_t, std::string> rustUseText;   // EDGE-PRELUDE-VETO: a caller file's `use` statements (rustUseStatements), read once
     HashMap<NodeId, bool> procMacroMemo;   // EDGE-PRELUDE-VETO: does a Rust function candidate of a `name!(..)` site carry #[proc_macro]
     for( siteIndex = 0; siteIndex < ing.references.size(); ++siteIndex )
     {
@@ -10220,10 +10271,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             return at->second;
         };
+        const auto useNames = [ & ]()
+        {
+            auto [ at, fresh ] = rustUseText.try_emplace( r.fileId );
+            if( const std::optional<std::string> text = fresh ? docparse::detail::readWholeFile( diskPath( ing, r.fileId ) ) : std::nullopt )
+            {
+                at->second = rustUseStatements( *text );
+            }
+            return rustUseTextNames( at->second, r.calleeName );
+        };
         const auto procMacroDef = [ & ]( NodeId c )
         {
             return symKind[ c ] == SymKind::Function && langCompatible( symLang[ c ], r.lang ) && langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse
-                && ownerIsClass( c ).empty() && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) && isProcMacro( c );
+                && ownerIsClass( c ).empty() && isProcMacro( c ) && ( recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) || useNames() );
         };
         const bool macroSite     = r.role == RefRole::Macro && it != byName.end();
         const bool anyMacroDef   = macroSite && std::any_of( it->second.begin(), it->second.end(), macroDef );

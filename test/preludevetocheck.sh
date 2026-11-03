@@ -148,6 +148,21 @@ row S2.self        "$R" callees Parser::parse src/parser.rs Parser::expect prese
 attr D1.external   "$R" map     -   external 8
 attr D2.declined   "$R" callers Parser::expect declined_calls 1
 
+# ---- K6: a procedural macro in a workspace crate whose root is a Cargo `[lib] path` (zed's sqlez_macros): `use m::sql;` binds `sql!`;
+# a caller with no `use` of it binds nothing (the name alone is no proof)
+W=$T/ws
+w "$W/Cargo.toml" '[workspace]\nmembers = ["crates/m", "crates/d"]\n'
+w "$W/crates/m/Cargo.toml" '[package]\nname = "m"\nversion = "0.1.0"\n[lib]\nproc-macro = true\npath = "src/m.rs"\n'
+w "$W/crates/m/src/m.rs" '#[proc_macro]\npub fn sql(t: u32) -> u32 { t }\n'
+w "$W/crates/d/Cargo.toml" '[package]\nname = "d"\nversion = "0.1.0"\n[dependencies]\nm = { path = "../m" }\n'
+w "$W/crates/d/src/f.rs" 'use m::sql;\nfn f7() { sql!(1); }\n'
+w "$W/crates/d/src/lib.rs" 'use m::{sql};\npub mod e;\npub mod f;\npub fn helper() {}\nfn f6() { sql!(1); helper(); }\n'
+w "$W/crates/d/src/e.rs" 'use crate::helper;\nfn g6() { sql!(1); helper(); }\n'
+row K6.libpath     "$W" callees f7  crates/m/src/m.rs sql     present
+row K6.braced      "$W" callees f6  crates/m/src/m.rs sql     present
+row K6.nouse       "$W" callees g6  crates/m/src/m.rs sql     none
+row K6.twin        "$W" callees g6  crates/d/src/lib.rs helper proven
+
 # ---- polyglot: Python's and C's builtin vetoes are their own Phase-5 rows; a bound or same-file namesake keeps its edge there
 X=$T/poly
 w "$X/py/a.py" 'def Ok(x):\n    return x\n'
