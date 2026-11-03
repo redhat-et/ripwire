@@ -214,9 +214,22 @@ else
 fi
 
 # ── (M5) a qualifier change on a non-owned number is a changed figure, not a rewording ─────────────────
-for shape in 's/says 200[+]), while the loop/says 200), while the loop/' 's/^  ~210;/  210;/'; do
-    fresh m5-main base && sed -i.bak -E "$shape" "$R/docs/EVALS.md" && rm -f "$R/docs/EVALS.md.bak"
-    if g diff --quiet -- docs/EVALS.md; then no "(M5) mutation '$shape' did not take on the fixture's docs/EVALS.md"; continue; fi
+# Each shape is "fixed-string anchor|ERE edit". The anchor must be on the fixture's docs/EVALS.md before the edit
+# runs, and sed's own exit is read: a missing anchor or a rejected expression is a FAIL that says which. The ERE
+# spells a literal ')' as [)]: GNU sed -E rejects a bare unmatched ')' (BSD reads it literally), which is how
+# this arm once passed on macOS and failed on Linux CI.
+for m5 in 'says 200+), while the loop|s/says 200[+][)], while the loop/says 200), while the loop/' '  ~210;|s/^  ~210;/  210;/'; do
+    anchor="${m5%%|*}" shape="${m5#*|}"
+    fresh m5-main base || continue
+    if ! grep -qF -- "$anchor" "$R/docs/EVALS.md"; then
+        no "(M5) anchor '$anchor' is not on the fixture's docs/EVALS.md (copied from this tree): the arm needs a new anchor"; continue
+    fi
+    if ! sed -i.bak -E "$shape" "$R/docs/EVALS.md"; then
+        rm -f "$R/docs/EVALS.md.bak"; g checkout -q -- docs/EVALS.md
+        no "(M5) sed rejected the edit '$shape' on the fixture's docs/EVALS.md"; continue
+    fi
+    rm -f "$R/docs/EVALS.md.bak"
+    if g diff --quiet -- docs/EVALS.md; then no "(M5) mutation '$shape' did not take on the fixture's docs/EVALS.md (anchor present)"; continue; fi
     commitAll "main rewords a qualifier"
     fresh m5-lane base && addGate aaalanecheck && commitAll "lane adds a gate"; head0="$( g rev-parse HEAD )"
     mm m5-main; rc=$?
