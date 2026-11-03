@@ -53,6 +53,7 @@ let counter = 0;
 counter = counter + 1;
 function g() { const localConst = m.inner; return localConst; }
 export const called = m.make();
+export const notLoader = resolve('./other');
 export const greeting = "hello";
 export const emptyBag = {};
 const SCREAMING_ALIAS = m.thing;
@@ -123,15 +124,16 @@ absent "$F/t" destructA  "a destructuring const"
 absent "$F/t" counter    "a module let"
 absent "$F/t" localConst "a function-local const"
 absent "$F/t" called     "a call-valued const"
+absent "$F/t" notLoader  "a seven-letter callee that is not require (a call)"
 absent "$F/t" greeting   "a string const"
 absent "$F/t" emptyBag   "an empty object const"
 absent "$F/t" ambientThing "a .d.ts declare const"
 absent "$F/m" minA7      "a const in a minified-suspect file"
 
-# [RED] the skipped TS consts are COUNTED: called, greeting, emptyBag (3) — not the arrow const, the cast arrow or the class factory
+# [RED] the skipped TS consts are COUNTED: called, notLoader, greeting, emptyBag (4) — not the arrow const, the cast arrow or the class factory
 # in other.ts, which other patterns index (a function, a function, a class); the minified file's 401 module consts
 sk(){ ( cd "$1" && "$BIN" . --no-cache --skipped ) > "$TMP/sk" 2> "$TMP/skerr"; src=$?; v=$( grep -oE 'consts_skipped="[0-9]+"' "$TMP/sk" | head -1 ); }
-sk "$F/t"; if [ "$src" -eq 0 ] && [ "$v" = 'consts_skipped="3"' ]; then ok "[RED] --skipped consts_skipped=\"3\" (call, string, empty object)"; else no "consts_skipped on the TS fixture: rc=$src got '${v:-<absent>}'"; fi
+sk "$F/t"; if [ "$src" -eq 0 ] && [ "$v" = 'consts_skipped="4"' ]; then ok "[RED] --skipped consts_skipped=\"4\" (two calls, string, empty object)"; else no "consts_skipped on the TS fixture: rc=$src got '${v:-<absent>}'"; fi
 sk "$F/m"; if [ "$src" -eq 0 ] && [ "$v" = 'consts_skipped="401"' ]; then ok "[RED] minified bundle: consts_skipped=\"401\""; else no "minified bundle: rc=$src got '${v:-<absent>}'"; fi
 sk "$F/c"; if [ "$src" -eq 0 ] && [ -z "$v" ]; then ok "C++ fixture: consts_skipped absent at zero"; else no "C++ fixture: rc=$src consts_skipped='${v}'"; fi
 if command -v xmllint >/dev/null 2>&1; then
