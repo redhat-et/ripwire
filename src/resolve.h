@@ -7635,10 +7635,15 @@ struct Narrower
     // `minCands` (default 2): the smallest set this rule reads. graph.h passes 1 for the set a call can reach BY NAME
     // after function-local defs were set aside (reachableByName) — there a lone survivor is not "already
     // unambiguous": the name is shared with the set-aside defs, and only import evidence may pick it.
+    //
+    // `includerDirOnly` (EXTQUAL-FIX1): read fileIncludes, the includer-directory closure, instead of rule3Includes. A MEMBER
+    // call passes true: its Rule 3 tier is a hedge across every class of the chosen file, so a header only the include-root
+    // probe reaches (Envoy envoy/server/filter_config.h, three factory classes) spread `factory->f()` over all three where main declined.
     bool rule3IncludeFile( const rw::SmallVec<NodeId, 2>& cands, std::uint32_t callerFileId,
-                           std::vector<NodeId>& out, std::size_t minCands = 2 ) const
+                           std::vector<NodeId>& out, std::size_t minCands = 2, bool includerDirOnly = false ) const
     {
-        if( rule3Includes.empty( callerFileId ) )
+        const rw::FileSetStore& closure = includerDirOnly ? fileIncludes : rule3Includes;
+        if( closure.empty( callerFileId ) )
         {
             return false; // no per-file include set, or the caller includes nothing → no narrow
         }
@@ -7648,7 +7653,7 @@ struct Narrower
         }
 
         // A candidate in the caller's OWN file short-circuits the whole rule.
-        const auto includes = [ & ]( std::uint32_t f ) noexcept { return rule3Includes.contains( callerFileId, f ); };
+        const auto includes = [ & ]( std::uint32_t f ) noexcept { return closure.contains( callerFileId, f ); };
 
         std::uint32_t chosenFile = 0xFFFFFFFFu;   // the single included file that holds candidate(s), or sentinel
         bool          multiFile  = false;         // ≥2 distinct included files hold candidates → ambiguous → bail
@@ -7714,7 +7719,8 @@ struct Rule3FileMemo
 
     // == narrower.rule3IncludeFile( cands, callerFileId, out ): true iff it narrowed (then `out` holds the survivors);
     // false leaves `out` untouched.
-    bool narrow( const Narrower& narrower, const rw::SmallVec<NodeId, 2>& cands, std::uint32_t callerFileId, std::vector<NodeId>& out )
+    // `includerDirOnly` is rule3IncludeFile's: one memo instance answers one closure (graph.h keeps one per closure)
+    bool narrow( const Narrower& narrower, const rw::SmallVec<NodeId, 2>& cands, std::uint32_t callerFileId, std::vector<NodeId>& out, bool includerDirOnly = false )
     {
         if( callerFileId != fileId )
         {
@@ -7726,7 +7732,7 @@ struct Rule3FileMemo
         Answer&    ans           = it->second;
         if( fresh )
         {
-            ans.fired = narrower.rule3IncludeFile( cands, callerFileId, out );
+            ans.fired = narrower.rule3IncludeFile( cands, callerFileId, out, 2, includerDirOnly );
             if( ans.fired )
             {
                 ans.begin = static_cast<std::uint32_t>( pool.size() );

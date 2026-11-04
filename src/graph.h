@@ -1332,12 +1332,30 @@ inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference
     const auto isFunctionLikeKind = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
     // CPP-EXTQUAL-VETO: a call whose own qualifier segment names std (`std::format`, `std::__1::move`) names a member of the namespace
     // itself, so a candidate scoped by a class std holds (`template <> struct formatter<absl::Status, char>`'s `format`) is no answer
+    // — every segment of the candidate's scope names std (`std`, `std::__1`), so a member of `template <> struct
+    // std::formatter<X, char>` written outside namespace std (scope `std::formatter<X, char>`) is none either (EXTQUAL-FIX1)
     const bool    namespaceMember = namesStd( r.qualifier );
+    const auto    scopeNamesStd   = [ & ]( std::string_view sc )
+    {
+        for( std::size_t at = 0;; )
+        {
+            const std::size_t end = sc.find( "::", at );
+            if( !namesStd( sc.substr( at, end == std::string_view::npos ? std::string_view::npos : end - at ) ) )
+            {
+                return false;
+            }
+            if( end == std::string_view::npos )
+            {
+                return true;
+            }
+            at = end + 2;
+        }
+    };
     std::size_t keepCount = 0;
     for( std::size_t ci = 0; ci < cand.size(); ++ci )
     {
         const Symbol& sym       = ing.symbols[ cand[ ci ] ];
-        const bool    scopeIsStd = ( sym.scopeRootsStd && !namespaceMember ) || namesStd( sym.scope ) || sym.scope.starts_with( "std::" );
+        const bool    scopeIsStd = namespaceMember ? scopeNamesStd( sym.scope ) : ( sym.scopeRootsStd || namesStd( sym.scope ) || sym.scope.starts_with( "std::" ) );
         const bool    bodyOk    = !isFunctionLikeKind( sym.kind ) || isDefinitionNotDeclaration( sym );
         if( scopeIsStd && bodyOk )
         {
@@ -1367,11 +1385,17 @@ inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference
 // still answers `ns::f()` for an indexed f), a forward declaration, an alias of a std type (`using SystemTime =
 // std::chrono::time_point<…>` names std's members). A std-rooted call is not this table's: keepStdQualifiedCandidates reads
 // each candidate's own scope, and a `std::f` names a member of std itself, never of a class the tree specializes there
-// (std::format is no `formatter<…>::format`). A template parameter (`T::make()`) is no name the tree defines: its Rule 3
-// pick is hedged too, the honest reading of a dependent call.
+// (std::format is no `formatter<…>::format`). A template parameter (`T::make()`) is read by its spelling: hedged when no in-tree
+// class, alias or namespace shares the name, but bound unhedged when one does (`Base`, `Impl`, `Traits`) — FLOOR: the qualifier
+// record does not say the name is a template parameter of the enclosing template. A bare call (`make(3)`) the caller's own file
+// pulled in by a using-declaration of a foreign name (`using ext::make;`) is that name's (foreignUsing). Known gaps, carded: a
+// using-directive (`using namespace ext;`, recorded by no reference), and a foreign ROOT over an in-tree inner segment
+// (`ext::ns::make`: the qualifier is the immediate segment only), and a namespace alias of an in-tree namespace (hedged, see below).
 struct CppQualifierScopes
 {
-    HashMap<std::string, char> names;   // every name above; empty when the tree holds no C-family symbol (then nothing is foreign)
+    HashMap<std::string, char> names;          // every name above
+    HashMap<std::string, char> foreignUsing;   // "<fileId>#<name>": a file's using-declaration of `name` from a foreign qualifier
+    bool                       cFamily = false;   // the tree holds a C/C++/ObjC symbol; without one nothing is foreign
 
     // the qualifier's own segment with any `<…>` dropped (`Foo<int>` → `Foo`)
     static std::string_view bare( std::string_view q ) noexcept { return namesplit::stripTemplateArgs( q ); }
@@ -1384,8 +1408,15 @@ struct CppQualifierScopes
             return false;
         }
         // a std-rooted call is keepStdQualifiedCandidates' (it reads the candidate's own scope, the proof Rule 3 lacks), never this table's
-        return !r.qualifierRootsStd && !names.empty() && !names.contains( std::string( bare( r.qualifier ) ) );
+        return !r.qualifierRootsStd && cFamily && !names.contains( std::string( bare( r.qualifier ) ) );
     }
+
+    // true ⇒ a bare C++/ObjC call whose own file declared `using Q::name;` with Q foreign: Rule 3 proves nothing about it either
+    bool foreignByUsing( const Reference& r ) const
+    {
+        return !foreignUsing.empty() && r.qualifier.empty() && langFacts( r.lang ).qualifierNamesScope && foreignUsing.contains( usingKey( r.fileId, r.calleeName ) );
+    }
+    static std::string usingKey( std::uint32_t fileId, std::string_view name ) { return std::to_string( fileId ) + '#' + std::string( name ); }
 };
 
 // each `::`-separated segment of a written C++ name outside `<…>`, its own template arguments dropped: `A::B<x::y>::C` → A, B, C
@@ -1412,11 +1443,13 @@ inline void forEachCppScopeSegment( std::string_view scope, Fn&& fn )
 
 // true ⇒ symbol s can name a scope a C/C++ qualifier refers to: C, C++, ObjC symbols only (the include-closure languages). An
 // explicit specialization (`template <> struct formatter<X, char>`) and its members reopen a namespace, defining nothing in it; a
-// bodyless function proves nothing either (a call the parser read as a declaration under a macro spells one)
+// bodyless function proves nothing either (a call the parser read as a declaration under a macro spells one), and neither does a
+// bodyless class, struct or interface (a forward declaration `class External;` names a class the tree may never define)
 inline bool cppSymbolIsScopeEvidence( const Symbol& s )
 {
-    const bool bodylessFunction = ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && !isDefinitionNotDeclaration( s );
-    return langFacts( s.lang ).transitiveIncludes && s.name.find( '<' ) == std::string::npos && s.scope.find( '<' ) == std::string::npos && !bodylessFunction;
+    const bool bodyKind = s.kind == SymKind::Function || s.kind == SymKind::Method || s.kind == SymKind::Class || s.kind == SymKind::Interface || isStructOrNamedType( s.kind );
+    const bool bodyless = bodyKind && !isDefinitionNotDeclaration( s );
+    return langFacts( s.lang ).transitiveIncludes && s.name.find( '<' ) == std::string::npos && s.scope.find( '<' ) == std::string::npos && !bodyless;
 }
 
 inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
@@ -1426,6 +1459,7 @@ inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
     const auto add = [ & ]( std::string_view n ) { t.names.try_emplace( std::string( n ), char( 1 ) ); };
     for( const Symbol& s : ing.symbols )
     {
+        t.cFamily = t.cFamily || langFacts( s.lang ).transitiveIncludes;
         if( !cppSymbolIsScopeEvidence( s ) )
         {
             continue;
@@ -1441,9 +1475,13 @@ inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
     // namespace, so this is where `namespace Principals { class MtlsAuthenticatedMatcher { … } }` is read; a function-local
     // declaration proves nothing. FLOOR: the path drops a class's template arguments (cppClassNameText), so a data member of an
     // explicit specialization would read its namespace as defined; none records one on the corpus (test/cppextqualcheck.sh's
-    // `namespace ext { template <> struct Box<int> { Part part_; }; }` leaves ext foreign). Then the aliases, twice (an alias of an alias is one more hop): an
-    // alias record (ingest_relations.h captureTypeAlias: recvVar the alias, calleeName the class its target names) counts when
-    // that class is a name above and the target is not written in std (`using SystemTime = std::chrono::time_point<…>`).
+    // `namespace ext { template <> struct Box<int> { Part part_; }; }` leaves ext foreign; an ALIAS declared inside one does read
+    // its namespace as defined, since memberRoot drops the specialization's arguments). Then the aliases, to a fixpoint (an alias of
+    // an alias is one more hop, in any order): an alias record (ingest_relations.h captureTypeAlias: recvVar the alias, calleeName
+    // the class its target names, qualifier the target's written scope) counts when that class is a name above, the written scope
+    // is empty or one too (`using ExternalMap = vendor::Map;` beside an in-tree Map stays foreign), and the target is not written in
+    // std (`using SystemTime = std::chrono::time_point<…>`). Known gap, carded: a namespace alias (`namespace M = mine;`) reaches
+    // no record read here, so `M::make()` reads foreign and takes the hedge.
     std::vector<const Reference*> aliases;
     for( const Reference& r : ing.references )
     {
@@ -1467,17 +1505,84 @@ inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
             aliases.push_back( &r );
         }
     }
-    for( int pass = 0; pass < 2; ++pass )
+    const auto known = [ & ]( std::string_view n ) { return t.names.contains( std::string( CppQualifierScopes::bare( n ) ) ); };
+    for( bool grew = true; grew; )   // a fixpoint: each pass adds at least one name or stops, so it ends within aliases.size() + 1 passes
     {
+        grew            = false;
+        const auto take = [ & ]( std::string_view alias, bool targetKnown )
+        {
+            if( targetKnown && !known( alias ) )
+            {
+                add( alias );
+                grew = true;
+            }
+        };
         for( const Reference* r : aliases )
         {
-            if( t.names.contains( std::string( CppQualifierScopes::bare( r->calleeName ) ) ) )
-            {
-                add( r->recvVar );
-            }
+            take( r->recvVar, known( r->calleeName ) && ( r->qualifier.empty() || known( r->qualifier ) ) );
+        }
+    }
+    // the using-declarations of a foreign name (`using ext::make;`, queries/cpp/tags.scm → an Import reference, qualifier the
+    // immediate scope): a bare `make(3)` in that file names ext's make. `using std::swap;` is std's (the ADL idiom), never this table's.
+    for( const Reference& r : ing.references )
+    {
+        if( r.role == RefRole::Import && !r.qualifierRootsStd && r.qualifier != "std" && t.foreign( r ) )
+        {
+            t.foreignUsing.try_emplace( CppQualifierScopes::usingKey( r.fileId, r.calleeName ), char( 1 ) );
         }
     }
     return t;
+}
+
+// EXTQUAL-FIX1 (F3): a C-family free function whose one file holds both a bodyless prototype and a body of it — the shape of a
+// preprocessor alternative (htop generic/Demangle.h: `#ifdef HAVE_LIBIBERTY char* Demangle_demangle(…); #else static inline char*
+// Demangle_demangle(…) { return NULL; } #endif`). Marks each such body in `altBody`, read before the decl/def collapse evicts the
+// prototype; true ⇒ it marked one. O(k log k) per name, nothing allocated for a name without a prototype.
+inline bool markPreprocessorAlternatives( const IngestResult& ing, const rw::SmallVec<NodeId, 2>& ids, std::vector<bool>& altBody )
+{
+    const auto cFunction = [ & ]( NodeId id ) { const Symbol& s = ing.symbols[ id ]; return s.kind == SymKind::Function && langFacts( s.lang ).transitiveIncludes; };
+    rw::SmallVec<std::uint32_t, 2> protoFiles;
+    for( const NodeId id : ids )
+    {
+        if( cFunction( id ) && !isDefinitionNotDeclaration( ing.symbols[ id ] ) )
+        {
+            protoFiles.push_back( ing.symbols[ id ].fileId );
+        }
+    }
+    if( protoFiles.empty() || ids.size() < 2 )
+    {
+        return false;
+    }
+    std::sort( protoFiles.begin(), protoFiles.end() );
+    bool marked = false;
+    for( const NodeId id : ids )
+    {
+        if( cFunction( id ) && isDefinitionNotDeclaration( ing.symbols[ id ] ) && std::binary_search( protoFiles.begin(), protoFiles.end(), ing.symbols[ id ].fileId ) )
+        {
+            altBody[ id ] = true;
+            marked        = true;
+        }
+    }
+    return marked;
+}
+
+// true ⇒ Rule 3 picked such a body (`picked`) while another file defines the function with a body (`all`, the list Rule 3 read):
+// Rule 3 never counts a .c file as included, so the header's `#else` stub would win over the real definition, and which
+// alternative the build compiles is no include fact. Rule 3 then decides nothing; the call keeps main's ladder (a split).
+template <class Ids>
+inline bool rule3PicksPreprocessorAlternative( const IngestResult& ing, const std::vector<bool>& altBody, const std::vector<NodeId>& picked, const Ids& all )
+{
+    const auto alt = std::find_if( picked.begin(), picked.end(), [ & ]( NodeId c ) { return altBody[ c ]; } );
+    if( alt == picked.end() )
+    {
+        return false;
+    }
+    const std::uint32_t file = ing.symbols[ *alt ].fileId;
+    return std::any_of( all.begin(), all.end(), [ & ]( NodeId c )
+    {
+        const Symbol& s = ing.symbols[ c ];
+        return s.fileId != file && s.kind == SymKind::Function && isDefinitionNotDeclaration( s );
+    } );
 }
 
 // The decl/def collapse FAMILY of a language (collapseDeclarationsOfName below): a definition evicts a declaration only
@@ -9384,12 +9489,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // B2.2 minimum arity: read every declaration's minimum BEFORE the collapse below folds declarations away.
     const std::vector<std::uint16_t> paramsMinOf = paramsMinAcrossDeclarations( ing, byName );
 
+    std::vector<bool> rule3AltBody( N, false );   // EXTQUAL-FIX1: a C-family function body beside its own prototype in one file (markPreprocessorAlternatives)
+    bool              rule3AltAny = false;
     // decl/def collapse (adversarial-review #1) — collapseDeclarationsOfName carries the rule, its per-root and per-family
     // keys, and why a Kotlin body never evicts a Java declaration (or the reverse).
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/1e: decl/def collapse" );
         for( auto& [ name, ids ] : byName )
         {
+            rule3AltAny = markPreprocessorAlternatives( ing, ids, rule3AltBody ) || rule3AltAny;   // before the collapse evicts the prototype
             collapseDeclarationsOfName( ing, multiRoot, ids );
         }
     }
@@ -9684,6 +9792,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::uint64_t, char> anchorMissEdges; // (from<<32|to) a link whose slug named no heading, so the target is the file node.
     std::vector<NodeId>      rule3Out;   // reused Rule-3 output buffer (candidates from the single included file)
     Rule3FileMemo            rule3Memo;  // Rule 3's answer per (caller file, byName entry): one walk per name per file, not per call
+    Rule3FileMemo            rule3MemoMember;   // the same for a member call, which reads the includer-directory closure (EXTQUAL-FIX1)
     std::string              qkey;       // reused "qualifier::name" buffer for the E#4 canonical lookup (no per-ref alloc)
     std::vector<std::size_t> locShare;   // reused per-candidate localityRank memo (computed once per tier, below)
 
@@ -11698,22 +11807,28 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
-            const auto rule3 = [ & ]( const rw::SmallVec<NodeId, 2>& ids, std::size_t minCands )
+            // EXTQUAL-FIX1: a member call's Rule 3 reads the includer-directory closure (rule3IncludeFile's includerDirOnly), and a
+            // pick that lands on one preprocessor alternative of a free function the tree defines elsewhere decides nothing (rule3AltBody)
+            const bool memberCall = isMemberCallRef( r );
+            const auto rule3      = [ & ]( const rw::SmallVec<NodeId, 2>& ids, std::size_t minCands )
             {
-                return ( &ids == &it->second && minCands == 2 ) ? rule3Memo.narrow( narrower, ids, r.fileId, rule3Out )
-                                                                 : narrower.rule3IncludeFile( ids, r.fileId, rule3Out, minCands );
+                const bool fired = ( &ids == &it->second && minCands == 2 ) ? ( memberCall ? rule3MemoMember : rule3Memo ).narrow( narrower, ids, r.fileId, rule3Out, memberCall )
+                                                                            : narrower.rule3IncludeFile( ids, r.fileId, rule3Out, minCands, memberCall );
+                return fired && !( rule3AltAny && rule3PicksPreprocessorAlternative( ing, rule3AltBody, rule3Out, ids ) );
             };
             if( rule3( *nameIds, localsYield ? 1u : 2u ) || ( localsYield && rule3( *baseIds, 2u ) ) )
             {
                 // an implicit receiver's bare call is the same question: the included file's definition must be one the
                 // language's lookup reaches (a free function, the class's own cone) — decided with the ladder's proof below
-                const bool memberSide = hedgeEligible && ( isMemberCallRef( r ) || langFacts( r.lang ).implicitReceiver );
+                // ... unless the caller's file declared `using Q::name;` with Q foreign: then the bare call names Q's, never a member
+                const bool usingForeign = cppQualScopes.foreignByUsing( r );
+                const bool memberSide   = hedgeEligible && ( isMemberCallRef( r ) || langFacts( r.lang ).implicitReceiver ) && !usingForeign;
                 // RULE3-MEMBER-GUARD: where the language writes what a name is bound to, Rule 3 is no proof without that writing (langfacts.h
                 // rule3NameProof): the candidates it proves decide the call; with none the call takes the ladder's name-only path, hedged.
                 const Rule3NameProof nameProof = ( !memberSide && r.role == RefRole::Call && !scipPinned ) ? langFacts( r.lang ).rule3NameProof : Rule3NameProof::None;
                 // CPP-EXTQUAL-VETO (a): a qualifier the tree never defines (`absl::`, `fmt::` in a tree that reopens fmt only to
                 // specialize) makes Rule 3's included-file pick no proof: it is taken hedged, never bound unhedged (CppQualifierScopes)
-                const bool foreignQualifier = !memberSide && cppQualScopes.foreign( r );
+                const bool foreignQualifier = !memberSide && ( cppQualScopes.foreign( r ) || usingForeign );
                 rule3Foreign                = foreignQualifier;
                 const auto           nameProves = [ & ]( NodeId c )
                 {
