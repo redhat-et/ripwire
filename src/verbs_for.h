@@ -255,6 +255,14 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             out.mentionNote += fileSubjectNote( moved );
         }
     }
+    // PATH-FROM-UPSTREAM (forgraphverb.h): `path from A to B` — a caller of A never outranks the path's own rows. Routed path only.
+    if( !cfg.noRoute )
+    {
+        if( const std::uint32_t moved = applyPathFromUpstreamCut( ing, g, task, lensRank ); moved > 0 )
+        {
+            out.mentionNote += pathFromUpstreamNote( moved );
+        }
+    }
 
     // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the
     // strongest query-relevant same-directory siblings of the top-ranked files into the slot ladder. INERT

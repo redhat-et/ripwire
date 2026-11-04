@@ -302,6 +302,7 @@ for _g in \
     agentsurfacecheck \
     agenttablecheck \
     aiderbytescheck \
+    aliasdefcheck \
     anchorbodycheck \
     anchorcheck \
     archcheck \
@@ -403,6 +404,7 @@ for _g in \
     cpptmplscopecheck \
     crashsweepcheck \
     crawlescapecheck \
+    crootincludecheck \
     crossdirincludecheck \
     crossrefcheck \
     crossrefdegradecheck \
@@ -632,6 +634,7 @@ for _g in \
     langcensuscheck \
     langcheck \
     langidentitycheck \
+    largeallocpeakcheck \
     layerquerycheck \
     layoutcheck \
     lb3namecheck \
@@ -809,6 +812,7 @@ for _g in \
     pyaliascallcheck \
     pyimportlayoutcheck \
     pyimportprecisecheck \
+    pymodcallsitescheck \
     pymodulealiascheck \
     pyshapecheck \
     qackconcurrencycheck \
@@ -955,6 +959,7 @@ for _g in \
     skillevalcheck \
     skillevalsplitcheck \
     skillinstallcheck \
+    skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
     skilltruthcheck \

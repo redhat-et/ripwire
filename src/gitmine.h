@@ -9,6 +9,7 @@
 // per-commit changed-file sets, and the co-change (logical-coupling) core. popen-based; no git library.
 
 #include "model.h"
+#include "infra/tablelookup.h"   // findSortedByField — the ownership table is ascending by fileId
 #include "graph.h"               // resolveIncludeAdj — for the "surprising" (changes together, no transitive static dep) flag
 #include "mention.h"             // mention_detail::baseNameOf — the SAME "basename of a path" primitive binstale.h/docdrift.h reuse
 #include "lintrules.h"           // §A9.3: langOfPath / dependencyCapable — the SAME predicate <health dep_files=> uses
@@ -3029,9 +3030,7 @@ inline std::vector<FileOwnership> gitFileAuthors(
 // fileId (see the tail of gitFileAuthors), so this binary-searches. Pure: no git, no I/O.
 inline const FileOwnership* ownershipForFile( const std::vector<FileOwnership>& all, std::uint32_t fileId )
 {
-    const auto it = std::lower_bound( all.begin(), all.end(), fileId,
-                                      []( const FileOwnership& o, std::uint32_t id ) { return o.fileId < id; } );
-    return ( it != all.end() && it->fileId == fileId ) ? &*it : nullptr;
+    return findSortedByField( all, &FileOwnership::fileId, fileId );
 }
 
 // ─── static #include coupling (shared by BOTH cochange paths) ─────────────────────────────────────

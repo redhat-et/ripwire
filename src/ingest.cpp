@@ -22,6 +22,7 @@
 #include "infra/ownedfile.h"   // rw::OwnedFile — readFile/readFilePrefix own their stream, so no return path skips the close
 #include "infra/statclock.h"   // rw::saturatingNanoseconds — statSizeTimes' stat timestamps without signed overflow past 2262
 #include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
+#include "aliasdef.h"         // INDEX-ALIAS-CONST: the one alias reader (C++ alias forms; a TS arm is carded, TS-CONST-DEFS)
 #include "langfacts.h"        // langFacts(l): the per-language facts the ingest sections read instead of a Lang:: compare
 #include "didyoumean.h"        // octocode F3: boundedEditDistance/nearestNameByEditDistance — the ONE near-miss
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings

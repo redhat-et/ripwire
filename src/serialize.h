@@ -16,6 +16,7 @@
 #include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
+#include "langfacts.h"   // index-alias-const: LangFacts::aliasTargetDefs picks the C++ alias clause over the Go named-type one
 #include "resolve.h"     // S6-C: canonicalId() — the `id=` canonical symbol string (shared with the resolver)
 #include "redact.h"      // deterministic secret redaction of emitted body content (opt-out --no-redact)
 #include "docparse.h"     // docparse::detail::readWholeFile — --pack-top-n reads each served file through the one whole-file reader
@@ -277,10 +278,11 @@ inline const char* multiRootTableLegend( bool multiRoot ) noexcept
 // `git grep -c 'xmlCommentText(' -- src/` (excluding this definition) and FAILS if it disagrees with the
 // count on the CALL-SITES line below, so the next divergence is a red gate rather than a stale sentence.
 //
-//   CALL-SITES: 16
+//   CALL-SITES: 17
 //     main.cpp     --for task echo · --exemplar request note · --query route note
 //                  · --run-trace command echo (runTraceLegendComment)                   (4)
 //     packtask.h   task · mention · co-change-boost · doc-mention notes                 (4)
+//                  · path-from upstream-callers note (PATH-FROM-UPSTREAM)                (1)
 //                  · siblift · expand lift notes (2026-09-10 lift disclosure)             (2)
 //                  · W2-K restated body-omission marker name echo                       (1)
 //     mcpverbs.h   for/pack-task task · exemplar request note                           (2)
@@ -2614,6 +2616,15 @@ inline constexpr std::string_view kNamedTypeMapLegend =
     "(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),"
     "alias=type-A=B,functype=type-F-func(...) -->";
 
+// lane index-alias-const: the C++ reading of the same two kinds (LangFacts::aliasTargetDefs), appended ONLY when the corpus has
+// such a row, under the same byte-identity rule; a Go-only corpus keeps the Go clause above byte for byte. Every other C++
+// typedef (struct, enum, scalar) still reads t=struct. A `.h` reads as C++, so a C header's typedefs take this clause; a `.c`
+// file reads with the C grammar, whose query this lane leaves alone (card C-FUNCTYPE-QUERY). The text sits inside an XML
+// comment, which may not hold two hyphens in a row: the flag is spelled defs=X (aliasdefcheck parses the map as XML).
+inline constexpr std::string_view kCppAliasMapLegend =
+    "<!-- t=alias|functype-in-C++-and-.h:alias=using-X=Y(also-templated-or-class-scope)or-namespace-L=lib(defs=X-prints-its-written-target-as-to=),"
+    "functype=a-typedef-of-a-function-or-function-pointer-type(typedef-void(*F)(int));other-typedefs-read-t=struct -->";
+
 // EXTENT HONESTY (src/extentsuspect.h, gate test/extentcheck.sh) — the ONE reading of extent_suspect= on every ROW
 // surface: the map's <s>, a bundle's <d> and <b>. Written only into a document that carries the attribute, right
 // where the reader meets it, so a corpus with nothing flagged stays byte-identical. The map adds the header count
@@ -2851,6 +2862,26 @@ inline std::string buildMemoryStopAttr( const IngestResult& ing, bool json )
          + ( m.parseCut ? " memory_parsed=" + std::to_string( m.parsedFiles ) : std::string() )
          + " memory_limit=" + limit
          + ( m.byPressure ? " memory_pressure=1" : "" );
+}
+
+// The overshoot (memguard.h "the overshoot"): the run's memory peak went over the limit between two of the guard's readings,
+// and the run finished and answered. memory_peak= is the peak, memory_limit= the limit it passed, spelled as the max-memory
+// value that raises it (left to buildMemoryStopAttr when a stop already carries it). Absent on every run that stayed under
+// its limit, so every normal run is byte-identical. XML header-comment and JSON spellings.
+inline std::string buildMemoryPeakAttr( const IngestResult& ing, bool json )
+{
+    const std::uint64_t peak = memguard::runPeakOverLimit();
+    if( peak == 0 )
+    {
+        return {};
+    }
+    const std::string peakText  = memguard::limitSpelling( peak );
+    const std::string limitText = ing.memoryStop.isSet() ? std::string() : memguard::limitSpelling( memguard::limits().hardBytes );
+    if( json )
+    {
+        return "\"memory_peak\":\"" + peakText + "\"," + ( limitText.empty() ? std::string() : "\"memory_limit\":\"" + limitText + "\"," );
+    }
+    return " memory_peak=" + peakText + ( limitText.empty() ? std::string() : " memory_limit=" + limitText );
 }
 
 // The per-symbol honesty counters (graph.h ambOut / unresolvedOut / locPinOut) reach both map dialects as
@@ -3317,11 +3348,17 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- c:via=impl:the-one-implementor-in-the-tree-of-the-receiver's-interface/trait/abstract-type-owns-the-callee(an-outside-or-macro-made-one-may-exist) -->";
     }
-    // honesty-small-068: the Go named-type kinds' clause, under the same absent-at-zero rule as modscope's above.
-    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& sym )
-                     { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; } ) )
+    // honesty-small-068: the Go named-type kinds' clause, under the same absent-at-zero rule as modscope's above; index-alias-const:
+    // a C++ (and .h) alias or function-type row (LangFacts::aliasTargetDefs) reads its own clause, so neither language's row is
+    // explained by the other's
+    const auto namedTypeKind = []( const Symbol& sym ) { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; };
+    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [&]( const Symbol& sym ) { return namedTypeKind( sym ) && !langFacts( sym.lang ).aliasTargetDefs; } ) )
     {
         legend += kNamedTypeMapLegend;
+    }
+    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [&]( const Symbol& sym ) { return namedTypeKind( sym ) && langFacts( sym.lang ).aliasTargetDefs; } ) )
+    {
+        legend += kCppAliasMapLegend;
     }
 
     std::size_t extentSuspectTotal = 0;
@@ -3514,7 +3551,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
     const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
-    const std::string memoryAttr    = buildMemoryStopAttr( ing, false );      // #350, empty unless the memory guard stopped the ingest
+    const std::string memoryAttr    = buildMemoryStopAttr( ing, false ) + buildMemoryPeakAttr( ing, false );   // #350, empty unless the memory guard stopped the ingest or the peak passed the limit
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -10748,6 +10785,8 @@ struct JsonMapHeader
     bool                             isEstModelled      = false;   // MapEstimate: "est_measured":false, absent when measured
     DataSectionsCut                  dataSectionsCut    = {};      // the code-first pick's swaps: "data_sections_cut":N + "next", absent at N=0
     std::size_t                      stemCut            = 0;       // MAP-STEM: "stem_cut":N, the XML stem_cut=, absent at N=0
+    std::string_view                 memoryPeakJson     = {};      // buildMemoryPeakAttr( ing, true ), read ONCE per serializeJson call (the
+                                                                   // peak reading only rises and the seam counts calls); kept last, the struct is filled positionally
 };
 
 // §B1.2: the PROVENANCE stamp — the JSON half of the XML `<r at= rank_by= window=>` attributes. Without it
@@ -10922,6 +10961,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         w.write( hdr );
     }
     w.write( buildMemoryStopAttr( h.ing, true ) );   // #350, JSON lane: empty unless the memory guard stopped the ingest
+    w.write( h.memoryPeakJson );   // the overshoot: empty unless the peak went over the limit (read once by the caller)
 
     // §SEC1, JSON lane: the crawl-boundary refusal must reach --json/MCP consumers too, by the same argument
     // skipped_oversize= makes one paragraph up — the audience most likely to be a model is the one least able
@@ -11198,7 +11238,9 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     }
 
     // ONE header emitter, used by the degrade write, the size probe and the real write, so the three can
-    // never disagree on the header's shape.
+    // never disagree on the header's shape. The peak attribute is read here once for all three: a second reading may
+    // pass the limit the first did not, and the probe would then have priced a shorter header than the one written.
+    const std::string memoryPeakJson = buildMemoryPeakAttr( ing, true );
     std::string esc;
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
@@ -11206,7 +11248,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
                                                     unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls, declinedTotal,
                                                     extentSuspectTotal, macroBlankedFileCount( ing ), ing.crawlSkips.nestRefusedFiles,
-                                                    estimate.isModelled, dataSecCut, stemPick.cut } );
+                                                    estimate.isModelled, dataSecCut, stemPick.cut, memoryPeakJson } );
         hw.write( ",\"r\":[" );
     };
 

@@ -429,5 +429,49 @@ PY
 [ $? = 0 ] && ok 'ARM D: budgeted-bundle pages obey est_tokens<=budget; past-the-end is shown="0" capped="1" has_more="0"' \
                || no 'ARM D: the per-page budget contract (upstream issue #294) does not hold — see FAIL lines above'
 
+# ── ARM E (#520, the budget ruling 2026-11-03: complete answers in efficient bytes; cutting the answer is the wrong lever) ──
+# When the ONE-ROW floor still exceeds an explicit budget, the page sheds the row's OPTIONAL attributes (cx= ccx= layer= the
+# row's next=, then sc=) and says so (attrs_shed="1", defined in its legend) — it never drops the row and never drops what
+# names the answer. Red on the pre-shed binary (est_tokens > 800 with the row's attributes intact). The twin at a budget
+# the page fits carries no attrs_shed= and its row, minus exactly the shed attributes, IS the shed row (nothing else moved).
+echo "=== ARM E: an over-budget one-row floor sheds optional row attributes, never the answer ==="
+"$BIN" "$ROOT" --for="rank symbols" --token-budget=800  --limit=3 --offset=0 >"$TMP/e_shed" 2>/dev/null
+"$BIN" "$ROOT" --for="rank symbols" --token-budget=4000 --limit=3 --offset=0 >"$TMP/e_fit"  2>/dev/null
+python3 - "$TMP" <<'PY'
+import os, re, sys, xml.etree.ElementTree as ET
+tmp = sys.argv[1]; problems = []
+SHED = ("cx", "ccx", "layer", "next", "sc")
+def load(name):
+    raw = open(os.path.join(tmp, name), encoding="utf-8", errors="replace").read()
+    try: return ET.fromstring(raw), raw
+    except ET.ParseError as e: problems.append(f"{name}: not parseable XML ({e})"); return None, raw
+shed, shed_raw = load("e_shed"); fit, fit_raw = load("e_fit")
+if shed is not None and fit is not None:
+    est = int(shed.get("est_tokens", "0"))
+    print(f"  INFO  shed page est_tokens={est} budget=800 margin={800 - est}  bytes={len(shed_raw.encode())}")
+    if est > 800: problems.append(f"e_shed: est_tokens={est} > 800 — the one-row floor did not shed its optional attributes")
+    if shed.get("over_ceiling") is not None and est <= 800: problems.append("e_shed: over_ceiling= on a page that fits")
+    srows = shed.findall(".//d"); frows = fit.findall(".//d")
+    if len(srows) != 1: problems.append(f"e_shed: {len(srows)} rows — the floor serves exactly ONE row, never zero")
+    if not frows: problems.append("e_fit: no rows on the twin that fits")
+    if fit.get("attrs_shed") is not None: problems.append("e_fit: attrs_shed= on a page that fits (the shed must not run)")
+    if srows and frows:
+        s, f = srows[0].attrib, frows[0].attrib
+        shed_any = any(k in f and k not in s for k in SHED)
+        if shed_any and shed.get("attrs_shed") != "1": problems.append("e_shed: attributes were shed but attrs_shed=\"1\" is absent")
+        if shed.get("attrs_shed") == "1" and "attrs_shed=" not in shed_raw.split("-->", 1)[0]:
+            problems.append("e_shed: attrs_shed= is not defined in the page's own legend")
+        for k in ("n", "p", "l", "r", "t"):
+            if f.get(k) != s.get(k): problems.append(f"e_shed: identifying attribute {k}= differs: fit={f.get(k)!r} shed={s.get(k)!r}")
+        if (srows[0].text or "") != (frows[0].text or ""): problems.append("e_shed: the row's signature text changed")
+        expect = {k: v for k, v in f.items() if k not in SHED or k in s}
+        if expect != dict(s): problems.append(f"e_shed: the row is not the twin's row minus shed attributes: fit={dict(f)} shed={dict(s)}")
+        print(f"  INFO  answer row n={s.get('n')} p={s.get('p')} l={s.get('l')}; shed: {[k for k in SHED if k in f and k not in s]}")
+for p in problems: print("  FAIL  " + p)
+sys.exit(1 if problems else 0)
+PY
+[ $? = 0 ] && ok 'ARM E: the over-budget floor fits by shedding optional row attributes (attrs_shed="1"); the answer row and its identity stay' \
+               || no 'ARM E: the one-row floor exceeds the budget or lost its answer — see FAIL lines above'
+
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES — see above"; exit 1
