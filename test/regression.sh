@@ -831,6 +831,7 @@ for _g in \
     qsnapcachecheck \
     qsnapprefetchcheck \
     qsnapproducercheck \
+    qualendpointcheck \
     qualifiedresolvecheck \
     qualitycheck \
     qualitycrosslangcheck \

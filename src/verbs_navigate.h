@@ -2951,8 +2951,10 @@ std::optional<int> runConnect( const MainDispatch& d )
         static_assert( rw::kConnectRadiusMax == int( rw::connectcfg::kMaxRadius ),
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
         // 0.6.6 D1: a many-definition name is searched from the definition that JOINS (graph.h joinTerminalPicks)
-        const std::string cnAmbiguous = rw::joinTerminalPicks( ing, g, specs, terminals, std::uint32_t( cfg.connectRadius ) );
-        rw::packConnect( stdout, ing, g, rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnUnprovenDefs, cnAmbiguous );
+        std::vector<std::pair<NodeId, std::size_t>> cnQualifiedDefs;   // XF-QUALIFIED-ENDPOINTS: defs= of a qualified terminal = its searched set
+        const std::string cnAmbiguous = rw::joinTerminalPicks( ing, g, specs, terminals, std::uint32_t( cfg.connectRadius ), &cnQualifiedDefs );
+        rw::packConnect( stdout, ing, g, rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnUnprovenDefs, cnAmbiguous,
+                         cnQualifiedDefs );
         return 0;
     }
     return std::nullopt;
