@@ -400,6 +400,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::GDScript, .hashComment = true },
     { .lang = Lang::Clojure },
+    { .lang = Lang::Proto, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
 } };
 
 /// The index of the first row that is not at its own Lang index, or the table size when every row is.

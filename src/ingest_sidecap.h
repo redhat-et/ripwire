@@ -1185,6 +1185,7 @@ inline constexpr ExtractFamily kExtractFamilyByLang[] = {
     ExtractFamily::JvmDotNet,        // Kotlin
     ExtractFamily::Scripting,        // GDScript
     ExtractFamily::Scripting,        // Clojure
+    ExtractFamily::DocsData,         // Proto
 };
 static_assert( std::size( kExtractFamilyByLang ) == kLangCount, "one profile family row per Lang, in enumerator order" );
 static_assert( kExtractFamilyByLang[ std::size_t( Lang::Kotlin ) ] == ExtractFamily::JvmDotNet && kExtractFamilyByLang[ std::size_t( Lang::C ) ] == ExtractFamily::CFamily,
@@ -2272,6 +2273,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 // body — 24x at 16 000 (test/childwalkscalecheck.sh, arm B35)
                 body = firstChildOfKind( defNode, /*namedOnly=*/false,
                                          { "compound_statement", "function_body", "block", "implementation_definition", "class_body", "enum_class_body" } );
+            }
+
+            // Proto (PROTO-INDEX): the grammar names no `body:` field. A message's or enum's body is its *_body child; a service's,
+            // an rpc's option block's and a oneof's body starts at its `{` token (an rpc ending in `;` has none).
+            if( ts_node_is_null( body ) && le.lang == Lang::Proto )
+            {
+                body = firstChildOfKind( defNode, /*namedOnly=*/false, { "message_body", "enum_body", "{" } );
             }
 
             // Dart's body is a SIBLING of the signature, so neither defBodyNodeOf nor the climb above can

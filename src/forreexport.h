@@ -47,6 +47,7 @@
 #include "serialize.h"           // escapeXml
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -1560,6 +1561,15 @@ inline constexpr std::string_view kShortKeyLegend =
     "held=lit: the lit block lists this key. total= all matches, 6 shown; floor=1: the scan stopped early, counts are floors. "
     "d n= t= p= l=: a definition row; ld p= l= shape=: a line row; b: the exact leaf's body (the expand shape; cut past 8192 bytes "
     "with truncated=1 lines= next=). next= the call that continues. The block is not in est_tokens -->";
+// PROTO-INDEX: emitted after kShortKeyLegend only on an answer whose ladder ran the gen rung, so every other answer keeps its bytes.
+inline constexpr std::string_view kShortKeyGenLegend =
+    "<!-- shortkey gen: rung n=gen: X is the name generated code gives a Protocol Buffers definition; path= the generated path read "
+    "(from X itself or a literal row: `use a::b::Leaf as X`, `from m_pb2 import Leaf as X`, `X = pkg.Outer_Leaf`), paths= the distinct "
+    "paths read; kept= the .proto definitions (message, enum, oneof, service, rpc, enum value) whose name is the path's leaf and whose "
+    "owner is the segment before it, both compared without case or underscores (prost `outer_msg::Leaf`, Go and C++ `OuterMsg_Leaf`), "
+    "a top-level one when no owner matches; via=name: a link by name only, never a proven edge (the generated module is not in the "
+    "index); cands=N several; b: the one kept definition's body. Enum values in a generator's renamed spelling (prost `Add` for "
+    "`ADD`, Go `Outer_ADD`) and package segments are not matched -->";
 
 namespace shortkey_detail
 {
@@ -2048,6 +2058,220 @@ inline std::vector<ShortKeyDeclLine> shortKeyDeclLines( const IngestResult& ing,
     return decl;
 }
 
+// PROTO-INDEX gen rung. A name compared the way protobuf generators respell it: no case, no underscores.
+inline std::string genNorm( std::string_view s )
+{
+    std::string out;
+    out.reserve( s.size() );
+    for( const char c : s )
+    {
+        if( c != '_' )
+        {
+            out.push_back( static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ) );
+        }
+    }
+    return out;
+}
+// The identifier ending just before `end` in line ("" when none) and its start.
+inline std::string_view genIdentBefore( std::string_view line, std::size_t end, std::size_t& start )
+{
+    start = end;
+    while( start > 0 && namesplit::isIdentChar( line[ start - 1 ] ) )
+    {
+        --start;
+    }
+    return line.substr( start, end - start );
+}
+// A path separator (`::` or one `.`) ending just before `end`: its start, or npos.
+inline std::size_t genSepBefore( std::string_view line, std::size_t end )
+{
+    if( end >= 2 && line.substr( end - 2, 2 ) == "::" )
+    {
+        return end - 2;
+    }
+    return end >= 1 && line[ end - 1 ] == '.' && ( end < 2 || line[ end - 2 ] != '.' ) ? end - 1 : std::string_view::npos;
+}
+// A nested name as Go and C++ generators write it: `Outer_Leaf` (each part capitalised) becomes Outer, Leaf in place.
+inline void genSplitNested( std::vector<std::string>& segs )
+{
+    if( !segs.empty() && std::isupper( static_cast<unsigned char>( segs.back().front() ) ) && segs.back().find( '_' ) != std::string::npos )
+    {
+        const std::string        last = segs.back();
+        std::vector<std::string> parts;
+        std::size_t              a    = 0;
+        for( std::size_t u = last.find( '_' ); u != std::string::npos; u = last.find( '_', u + 1 ) )
+        {
+            if( u + 1 < last.size() && std::isupper( static_cast<unsigned char>( last[ u + 1 ] ) ) && u > a )
+            {
+                parts.push_back( last.substr( a, u - a ) );
+                a = u + 1;
+            }
+        }
+        parts.push_back( last.substr( a ) );
+        // the outer part is a CamelCase message name (a SCREAMING_CASE constant `MAX_SIZE` is no nested name)
+        if( parts.size() > 1 && std::ranges::any_of( parts.front(), []( char c ) { return std::islower( static_cast<unsigned char>( c ) ) != 0; } ) &&
+            std::ranges::all_of( parts, []( const std::string& q ) { return !q.empty() && std::isupper( static_cast<unsigned char>( q.front() ) ); } ) )
+        {
+            segs.pop_back();
+            segs.insert( segs.end(), parts.begin(), parts.end() );
+        }
+    }
+}
+// The generated path a declaration line gives key, leaf last: `use a::b::{C, Leaf as key}` / `use a::b::Leaf as key` (Rust),
+// `from a.b import Leaf as key` (Python), `import { Leaf as key } from` (TS: no module path), `key = a.b.Leaf` /
+// `using key = a::Leaf` / `type key = pb.Leaf` (an alias). A Go or C++ nested name `Outer_Leaf` splits into Outer, Leaf.
+// Empty when the line holds none of these shapes.
+inline std::vector<std::string> genPathOf( std::string_view line, std::string_view key )
+{
+    std::vector<std::string> segs;
+    const auto isWordAt = [ & ]( std::size_t at, std::size_t n )
+    {
+        return ( at == 0 || !namesplit::isIdentChar( line[ at - 1 ] ) ) && ( at + n >= line.size() || !namesplit::isIdentChar( line[ at + n ] ) );
+    };
+    const auto skipLeft = [ & ]( std::size_t at )
+    {
+        while( at > 0 && ( line[ at - 1 ] == ' ' || line[ at - 1 ] == '\t' ) )
+        {
+            --at;
+        }
+        return at;
+    };
+    for( std::size_t at = line.find( key ); at != std::string_view::npos && segs.empty(); at = line.find( key, at + 1 ) )
+    {
+        if( !isWordAt( at, key.size() ) )
+        {
+            continue;
+        }
+        std::size_t       st   = 0;
+        const std::size_t asAt = skipLeft( at );
+        if( asAt >= 2 && line.substr( asAt - 2, 2 ) == "as" && ( asAt == 2 || !namesplit::isIdentChar( line[ asAt - 3 ] ) ) )
+        {   // `Leaf as key`: the leaf, then the qualifier chain to its left (through one `{ … ,` group)
+            const std::string_view leaf = genIdentBefore( line, skipLeft( asAt - 2 ), st );
+            if( leaf.empty() )
+            {
+                continue;
+            }
+            segs.emplace_back( leaf );
+            std::size_t cur = st;
+            if( const std::size_t brace = line.rfind( '{', cur ); brace != std::string_view::npos && line.substr( brace, cur - brace ).find( '}' ) == std::string_view::npos &&
+                line.substr( brace + 1, cur - brace - 1 ).find_first_not_of( " \t,_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" ) == std::string_view::npos )
+            {
+                cur = skipLeft( brace );
+            }
+            for( std::size_t sep = genSepBefore( line, cur ); sep != std::string_view::npos; sep = genSepBefore( line, cur ) )
+            {
+                const std::string_view seg = genIdentBefore( line, sep, st );
+                if( seg.empty() )
+                {
+                    break;
+                }
+                segs.insert( segs.begin(), std::string( seg ) );
+                cur = st;
+            }
+            // Python `from a.b import Leaf as key`: the module path is the qualifier
+            if( const std::size_t from = line.find( "from " ), imp = line.find( " import " ); segs.size() == 1 && from != std::string_view::npos && imp != std::string_view::npos && from < imp )
+            {
+                const std::string_view mod = line.substr( from + 5, imp - from - 5 );
+                std::size_t            a   = 0;
+                for( std::size_t dot = mod.find( '.' ); ; dot = mod.find( '.', a ) )
+                {
+                    const std::string_view part = mod.substr( a, dot == std::string_view::npos ? std::string_view::npos : dot - a );
+                    if( !part.empty() && std::ranges::all_of( part, []( char c ) { return namesplit::isIdentChar( c ); } ) )
+                    {
+                        segs.insert( segs.end() - 1, std::string( part ) );
+                    }
+                    if( dot == std::string_view::npos )
+                    {
+                        break;
+                    }
+                    a = dot + 1;
+                }
+            }
+            continue;
+        }
+        // `key = a.b.Leaf` (an alias or a constant): the written path after `=`
+        std::size_t eq = at + key.size();
+        while( eq < line.size() && ( line[ eq ] == ' ' || line[ eq ] == '\t' ) )
+        {
+            ++eq;
+        }
+        if( eq >= line.size() || line[ eq ] != '=' || line.substr( eq, 2 ) == "==" )
+        {
+            continue;
+        }
+        std::size_t p = eq + 1;
+        while( p < line.size() && ( line[ p ] == ' ' || line[ p ] == '\t' ) )
+        {
+            ++p;
+        }
+        for( std::size_t a = p;; )
+        {
+            std::size_t b = a;
+            while( b < line.size() && namesplit::isIdentChar( line[ b ] ) )
+            {
+                ++b;
+            }
+            if( b == a )
+            {
+                break;
+            }
+            segs.emplace_back( line.substr( a, b - a ) );
+            if( line.substr( b, 2 ) == "::" )
+            {
+                a = b + 2;
+            }
+            else if( b < line.size() && line[ b ] == '.' )
+            {
+                a = b + 1;
+            }
+            else
+            {
+                if( b < line.size() && line[ b ] != ';' && line[ b ] != ' ' && line[ b ] != '\t' )
+                {
+                    segs.clear();   // a call, an index, a template: not a written path
+                }
+                break;
+            }
+        }
+        if( segs.size() < 2 )   // a bare `key = Leaf` names no generated module
+        {
+            segs.clear();
+        }
+    }
+    genSplitNested( segs );
+    return segs;
+}
+// The .proto definitions a generated path names, by name only: leaf equal (genNorm), owner = the segment before the leaf equal to the
+// definition's scope; when no scoped definition matches, the top-level ones named leaf. Sorted by file then line.
+inline std::vector<const Symbol*> genProtoDefs( const IngestResult& ing, const std::vector<std::string>& segs )
+{
+    std::vector<const Symbol*> scoped, top;
+    if( segs.empty() )
+    {
+        return scoped;
+    }
+    const std::string leaf  = genNorm( segs.back() );
+    const std::string owner = segs.size() >= 2 ? genNorm( segs[ segs.size() - 2 ] ) : std::string();
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.lang != Lang::Proto || genNorm( s.name ) != leaf )
+        {
+            continue;
+        }
+        if( s.scope.empty() )
+        {
+            top.push_back( &s );
+        }
+        else if( !owner.empty() && genNorm( s.scope ) == owner )
+        {
+            scoped.push_back( &s );
+        }
+    }
+    std::vector<const Symbol*>& kept = scoped.empty() ? top : scoped;
+    std::ranges::stable_sort( kept, [ & ]( const Symbol* l, const Symbol* r ) { return rowBefore( ing, l, r ); } );
+    return std::move( kept );
+}
+
 }   // namespace shortkey_detail
 
 struct ShortKeyArgs
@@ -2113,6 +2337,27 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
         return out.append( nextAttrXml( nextFlag( "--for=", x ) ) ).append( "/>" );
     }
     std::string rungs, body, next;
+    // PROTO-INDEX: the generated paths the gen rung reads (X itself when qualified or `Outer_Leaf`, then each literal row's target)
+    std::vector<std::vector<std::string>> genPaths;
+    const auto addGenPath = [ & ]( std::vector<std::string> p )
+    {
+        if( !p.empty() && std::ranges::find( genPaths, p ) == genPaths.end() )
+        {
+            genPaths.push_back( std::move( p ) );
+        }
+    };
+    {
+        std::vector<std::string> own( segs.begin(), segs.end() );
+        if( own.empty() )
+        {
+            own.emplace_back( x );
+        }
+        genSplitNested( own );   // `Outer_Leaf` is a path; a bare name stays one segment and reads as none
+        if( own.size() > 1 )
+        {
+            addGenPath( std::move( own ) );
+        }
+    }
     // rung 1: the leaf, proven by its qualifier
     bool exact = false;
     if( !segs.empty() )
@@ -2201,6 +2446,13 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             num( "total", decl.size() );
             num( "shown", std::min( decl.size(), kShortKeyRows ) );
             out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
+            for( const ShortKeyDeclLine& d : decl )
+            {
+                if( d.shape == "import-as" || d.shape == "using" || d.shape == "type" || d.shape == "typedef" || d.shape == "const" || d.shape == "assign" )
+                {
+                    addGenPath( genPathOf( d.h->text, key ) );
+                }
+            }
             for( std::size_t i = 0; i < decl.size() && i < kShortKeyRows; ++i )
             {
                 const GrepHit& h = *decl[ i ].h;
@@ -2226,7 +2478,61 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             next = nextFlag( "--grep=", key );
         }
     }
-    std::string head = std::string( kShortKeyLegend ).append( "<shortkey" );
+    // rung 4 (PROTO-INDEX): the generated paths, linked by name to .proto definitions; run only when the index holds one
+    const bool genRan = !exact && !genPaths.empty() && std::ranges::any_of( ing.symbols, []( const Symbol& s ) { return s.lang == Lang::Proto; } );
+    if( genRan )
+    {
+        rungs.append( rungs.empty() ? "" : "," ).append( "gen" );
+        std::vector<const Symbol*> kept;
+        std::string                firstPath;
+        for( const std::vector<std::string>& p : genPaths )
+        {
+            const std::vector<const Symbol*> named = genProtoDefs( ing, p );
+            if( !named.empty() && firstPath.empty() )
+            {
+                for( const std::string& seg : p )
+                {
+                    firstPath.append( firstPath.empty() ? "" : "::" ).append( seg );
+                }
+            }
+            for( const Symbol* d : named )
+            {
+                if( std::ranges::find( kept, d ) == kept.end() )
+                {
+                    kept.push_back( d );
+                }
+            }
+        }
+        out.append( "<rung n=\"gen\"" );
+        attr( "key", genPaths.front().back() );
+        if( !firstPath.empty() )
+        {
+            attr( "path", firstPath );
+        }
+        num( "paths", genPaths.size() );
+        num( "kept", kept.size() );
+        out.append( " via=\"name\"" );
+        if( kept.size() > 1 )
+        {
+            num( "cands", kept.size() );
+        }
+        out.append( " exact=\"0\">" );
+        for( std::size_t i = 0; i < kept.size() && i < kShortKeyRows; ++i )
+        {
+            defRow( *kept[ i ], {} );
+        }
+        out.append( "</rung>" );
+        if( kept.size() == 1 )   // the one name-linked definition: its body, hedged by the rung's via=name
+        {
+            const Symbol& s = *kept.front();
+            if( std::optional<std::string> b = renderBodyElement( ing, NodeId( &s - ing.symbols.data() ), kShortKeyBodyBytes, /*compress=*/false, a.redact, a.rootArg, nullptr ) )
+            {
+                out.append( *b );
+            }
+            next = nextFlag( "--expand=", std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::to_string( s.line ) + ":" + s.name );
+        }
+    }
+    std::string head = std::string( kShortKeyLegend ).append( genRan ? kShortKeyGenLegend : std::string_view() ).append( "<shortkey" );
     std::swap( out, head );
     attr( "of", x );
     out.append( fromSentence ? " from=\"sentence\" found=\"0\"" : " found=\"0\"" );

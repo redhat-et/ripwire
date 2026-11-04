@@ -366,7 +366,9 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 299;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 302;          // bump on any grammar/.scm/extraction change
+                                                      // 302 = 2026-11-04 (lane proto-index, PLACEHOLDER — the train renumbers; RECV-XFILE and #530 hold 301):
+                                                      //   .proto files are indexed (Lang::Proto, queries/proto/tags.scm). Rich file tag 303. kCacheVersion stays 48.
                                                       // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
                                                       //   so the merged value goes above both. Rich file tag 300. kCacheVersion stays 48.
                                                       // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage
