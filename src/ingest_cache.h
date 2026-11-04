@@ -371,11 +371,10 @@ constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 301;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 304;          // bump on any grammar/.scm/extraction change
                                                       // 301 = 2026-11-04 (#478 gap 2, PLACEHOLDER: the train renumbers; above main's 299/300, rich file tag 302;
                                                       //   test/pyimportprecisecheck.sh): `import a.b as c` records the Include target `a.b`, not the aliased_import span
-                                                      //   `a.b as c` no resolver could find. kCacheVersion stays 48: no record changes shape.
-                                                      // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
+                                                      //   `a.b as c` no resolver could find. kCacheVersion stays 48: no record changes shape.                                                      // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
                                                       //   so the merged value goes above both. Rich file tag 300. kCacheVersion stays 48.
                                                       // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage
                                                       //   (textual scope, graph.h rustMacroScopeOf). Rich file tag 298. kCacheVersion unchanged.

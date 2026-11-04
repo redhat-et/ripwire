@@ -2470,7 +2470,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
             if( kind == SymKind::Class || isStructOrNamedType( kind ) || kind == SymKind::Interface )
             {
-                captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
+                // #446: a language on the bases-as-captures port reads its bases through the
+                // @reference.base reader above (LangFacts::basesAsCaptures; C++ is the first). The
+                // others keep the walk; C++'s own walk survives for captureSpecializationHeader.
+                if( !langFacts( le.lang ).basesAsCaptures )
+                {
+                    captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
+                }
                 if( defCapSv == "definition.classfactory" )               // lane lego-transitive (M2): the factory's receiver is the base
                 {
                     emitBaseRef( jsClassFactoryReceiver( nameNode, src ), fileId, le.lang, src, refs, defNode );
@@ -2530,6 +2536,16 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 if( refCapSv == "reference.mixin" )
                 {
                     emitCapturedRubyMixinBase( roleNode, nameNode, fileId, le.lang, src, refs );
+                    continue;
+                }
+
+                // #446: a @reference.base capture is a base-clause type on the class-def path —
+                // queries/<lang>/tags.scm names the clause's type node, so the capture IS the language
+                // gate. The clause's parent is the class node (emitBaseRef's `self`), the same pairing
+                // the captureBases walk passed; C++ is the first language on this capture.
+                if( refCapSv == "reference.base" )
+                {
+                    emitBaseRef( nameNode, fileId, le.lang, src, refs, ts_node_parent( roleNode ) );
                     continue;
                 }
 
