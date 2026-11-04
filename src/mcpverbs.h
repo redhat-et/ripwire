@@ -4373,20 +4373,38 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             if( withSigs )
             {
                 sigShown = steiner;
+                std::sort( sigShown.begin(), sigShown.end() );   // a leg-dropped union need not list its joins in id order
+            }
+            // two rows that would read alike (homeassistant-08: f="get" t="async_handle" twice) print the definitions they join:
+            // one sort of the group's rows by their printed names, then one scan of each run of alike rows (no per-row rescan)
+            std::vector<std::uint8_t> needFpTp( edges.size(), 0 );   // bit 1 = fp=, bit 2 = tp=
+            if( hops.on && edges.size() > 1 )
+            {
+                std::vector<std::size_t> byName( edges.size() );
+                for( std::size_t k = 0; k < edges.size(); ++k ) { byName[k] = k; }
+                const auto names = [ & ]( std::size_t k ) { return std::pair<std::string_view, std::string_view>( ing.symbols[ edges[k].from ].name, ing.symbols[ edges[k].to ].name ); };
+                std::sort( byName.begin(), byName.end(), [ & ]( std::size_t a, std::size_t b ) { return names( a ) != names( b ) ? names( a ) < names( b ) : a < b; } );
+                for( std::size_t lo = 0, hi = 0; lo < byName.size(); lo = hi )
+                {
+                    hi = lo + 1;
+                    while( hi < byName.size() && names( byName[hi] ) == names( byName[lo] ) ) { ++hi; }
+                    bool fromsDiffer = false, tosDiffer = false;
+                    for( std::size_t k = lo + 1; k < hi; ++k )
+                    {
+                        fromsDiffer = fromsDiffer || edges[ byName[k] ].from != edges[ byName[lo] ].from;
+                        tosDiffer   = tosDiffer || edges[ byName[k] ].to != edges[ byName[lo] ].to;
+                    }
+                    for( std::size_t k = lo; k < hi && hi - lo > 1; ++k )
+                    {
+                        needFpTp[ byName[k] ] = std::uint8_t( ( fromsDiffer ? 1 : 0 ) | ( tosDiffer ? 2 : 0 ) );
+                    }
+                }
             }
             for( const ConnectEdge& e : edges )
             {
-                // two rows that would read alike (homeassistant-08: f="get" t="async_handle" twice) print the definitions they join
-                bool fpNeeded = false, tpNeeded = false;
-                for( const ConnectEdge& o : edges )
-                {
-                    if( ( o.from != e.from || o.to != e.to ) && ing.symbols[ o.from ].name == ing.symbols[ e.from ].name
-                        && ing.symbols[ o.to ].name == ing.symbols[ e.to ].name )
-                    {
-                        fpNeeded = fpNeeded || o.from != e.from;
-                        tpNeeded = tpNeeded || o.to != e.to;
-                    }
-                }
+                const std::size_t ei       = std::size_t( &e - edges.data() );
+                const bool        fpNeeded = ( needFpTp[ ei ] & 1 ) != 0;
+                const bool        tpNeeded = ( needFpTp[ ei ] & 2 ) != 0;
                 payload.append( "<e f=\"" ).append( ex( ing.symbols[ e.from ].name ) )
                        .append( "\" t=\"" ).append( ex( ing.symbols[ e.to ].name ) ).append( "\"" )
                        .append( viaEdgeAttr( edgeNameOnly( g, e.from, e.to ), edgeIsLink( g, e.from, e.to ) ) )
@@ -4400,11 +4418,12 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                 }
                 if( const HopRecord* rec = hops.on ? hops.find( e.from, e.to ) : nullptr )
                 {
-                    const bool withSig = std::find( sigShown.begin(), sigShown.end(), e.to ) == sigShown.end();
+                    const auto at      = std::lower_bound( sigShown.begin(), sigShown.end(), e.to );
+                    const bool withSig = at == sigShown.end() || *at != e.to;
                     payload.append( hopAttrsXml( ing, *rec, hopShed, withSig, !rootArg.empty(), rootPrefix ) );
                     if( withSig && hopShed == HopShed::Full && !rec->sig.empty() )
                     {
-                        sigShown.push_back( e.to );
+                        sigShown.insert( at, e.to );
                     }
                 }
                 payload.append( "/>" );
