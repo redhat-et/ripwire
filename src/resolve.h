@@ -5266,7 +5266,7 @@ public:
             if( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface )
             {
                 siteKey( s.fileId, s.line, s.name );
-                if( byName_.find( s.name ) != byName_.end() && sites.find( key ) == sites.end() )
+                if( byName_.find( s.name ) != byName_.end() && sites.find( key ) == sites.end() && !aliasDeclarationSymbol( s, ing, textOf, text ) )
                 {
                     realClass_.try_emplace( s.name, '\0' );
                 }
@@ -5332,6 +5332,32 @@ public:
 
 private:
     enum class Kind : std::uint8_t { Pointer, Plain, Refused };
+
+    // INDEX-ALIAS-CONST (lane index-alias-const, CI fix): a definition that only NAMES a type is no real class, even where it
+    // records no alias record (emitTypeAlias records only a plain alias of a named class): a C++ `using X = int;` /
+    // `namespace L = lib;` (t="alias"), a function-type typedef (t="functype"), and a pointer typedef `typedef Bar* Ptr;`
+    // (t="struct", its declaration starts with `typedef`). Before the lane none of these was a symbol, so the real-class guard
+    // never saw them; counting one refused every same-named smart alias repo-wide (ifacepeelcheck B1e: scope2.h's
+    // `typedef Bar* Ptr;` silenced HoldX::Ptr / HoldY::Ptr). `text` / `textOf` cache the file last read (the caller's pair).
+    static bool aliasDeclarationSymbol( const Symbol& s, const IngestResult& ing, std::uint32_t& textOf, std::string& text )
+    {
+        if( s.kind == SymKind::Alias || s.kind == SymKind::FuncType )
+        {
+            return true;
+        }
+        if( s.kind != SymKind::Struct )
+        {
+            return false;
+        }
+        if( textOf != s.fileId )
+        {
+            text   = readConfigBytes( diskPath( ing, s.fileId ) );   // capped at 1 MiB: past it the symbol reads as a real class (no peel)
+            textOf = s.fileId;
+        }
+        constexpr std::string_view kw = "typedef";
+        return s.sigStartByte + kw.size() < text.size() && std::string_view( text ).substr( s.sigStartByte, kw.size() ) == kw
+               && !namesplit::isIdentChar( text[ s.sigStartByte + kw.size() ] );
+    }
 
     // a declaration's lexical scope (model.h kAnonScopeElement), read from its record's memberRoot
     struct Scope

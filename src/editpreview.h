@@ -206,6 +206,10 @@ inline IngestResult previewMerge( const IngestResult& ing, std::uint32_t fileId,
     for( const FnLocalScope& f : ing.fnLocalScopes ) { if( f.id < lo ) { out.fnLocalScopes.push_back( f ); } }
     for( FnLocalScope f : one.fnLocalScopes )         { f.id = NodeId( lo + f.id ); out.fnLocalScopes.push_back( f ); }
     for( FnLocalScope f : ing.fnLocalScopes )         { if( f.id >= hi ) { f.id = shift( f.id ); out.fnLocalScopes.push_back( f ); } }
+    // the alias-target side table (model.h AliasTarget): the same seam, the same ascending-id rule
+    for( const AliasTarget& a : ing.aliasTargets ) { if( a.id < lo ) { out.aliasTargets.push_back( a ); } }
+    for( AliasTarget a : one.aliasTargets )         { a.id = NodeId( lo + a.id ); out.aliasTargets.push_back( a ); }
+    for( AliasTarget a : ing.aliasTargets )         { if( a.id >= hi ) { a.id = shift( a.id ); out.aliasTargets.push_back( a ); } }
 
     // The field SIDE TABLE keeps its own index space (a FieldId, never a NodeId), so it is spliced by the
     // same (fileId, …) ordering and its ids are simply re-indexed.

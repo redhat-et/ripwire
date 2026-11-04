@@ -2539,7 +2539,7 @@ std::optional<int> runDefs( const MainDispatch& d )
     const MemberOwners owners( ing );
     const bool         singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
     std::vector<char>  esc;
-    bool               anyProvenMiss = false, anyCut = false, anyMissing = false, anyBodyless = false, anyUnproven = false, anyData = false;
+    bool               anyProvenMiss = false, anyCut = false, anyMissing = false, anyBodyless = false, anyUnproven = false, anyData = false, anyAlias = false;
     std::string        body;
     for( const DefLookup& L : looks )
     {
@@ -2603,7 +2603,8 @@ std::optional<int> runDefs( const MainDispatch& d )
             }
             else
             {
-                defRowXml( body, ing, L, r, owners, /*compact=*/false );
+                defRowXml( body, ing, L, r, owners, /*compact=*/false, /*aliasTarget=*/true );
+                anyAlias = anyAlias || aliasTargetRow( ing, ing.symbols[ r.rep ] );
             }
         }
         body += cfg.json ? "]}" : "</name>";
@@ -2631,6 +2632,12 @@ std::optional<int> runDefs( const MainDispatch& d )
     if( anyBodyless )
     {
         legend += "decl_only=1: no body: an interface or trait contract, or a declaration no listed definition ties to. ";
+    }
+    if( anyAlias )
+    {
+        legend += "to= an alias's written target (C++ using X = Y or namespace L = lib), "
+                  "whitespace folded, comments dropped; to_capped=1 to_bytes=N: the target is N bytes and to= is cut (ellipsis); to_next= the defs call for the target: Owner::leaf when that binds, else the last name segment (it may list namesakes); to_unread=1: "
+                  "the file could not be read. ";
     }
     if( anyCut )
     {

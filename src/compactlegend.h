@@ -1510,6 +1510,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "r", "r=N: the row's GLOBAL candidate rank across pages (continuation rows keep theirs; pages merge without duplicate r)", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
     { "at", "at=: the git index this page answered from; a continuation whose at= differs was served by a different index", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
     { "reason", "reason=: the render degraded and the sigs block was lost (named), not hidden", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
+    { "attrs_shed", "attrs_shed=1: the row's optional attributes were dropped to fit the budget", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
     { "shared_symbols", "shared_symbols=/union_symbols=: ids two or more partitions name / ids any partition names", false, "ctx-partitions", MapHeaderRead::No, {}, "pack-task" },   // also defines union_symbols=
     { "core_overlap", "core_overlap=: share of the core surface a partition reaches anyway", false, "ctx-partitions", MapHeaderRead::No, {}, "pack-task" },
     // from-trace: src/tracelocus.h (renderTraceBlock, buildTraceHeader via ctxRootOpen, the budget_tokens attr)
