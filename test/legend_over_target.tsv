@@ -8,3 +8,4 @@
 # First rows 2026-11-02 (docs-rest): the tail-order clause on ripwire.for/v1 and loop.
 ripwire.for/v1	tail-code-first	61	<tail	t order: code files first	docs-rest: the --for tail lists code files before doc files on a code question over an index with a doc unit; the legend says the order it uses (forpage.h tailOrdersCodeFirst)
 loop	tail-code-first	61	<tail	t order: code files first	docs-rest: the loop's --for answer carries the tail-order clause (fixture indexes notes.md); same clause as ripwire.for/v1
+ripwire.connect/v1	defs-spelling	155	 defs="	spellings that pick one def share a row	XF-QUALIFIED-ENDPOINTS fix 1 (rv-pr528 SF-2): a qualified terminal counts only the definitions its spelling matched, so the t defs= clause must say which count it is (bare name vs owner/file) and that spellings folded on one def print the widest; the old wording was false for qualified terminals (+155 B)

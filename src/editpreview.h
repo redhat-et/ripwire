@@ -462,7 +462,10 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     // differently from the answer it predicts would be worth nothing (test/editpreviewcheck.sh compares
     // the two documents).
     oc.xml = editCheckBundleText( merged, mg, root, maxFileBytes, excludes, groups[0].focusNode, ni, true,
-                                   EditCheckPage{ pageLimit, pageOffset }, previewUnprovenDefs, /*notesDegraded=*/false,
+                                   // XF-QUALIFIED-ENDPOINTS fix 1 (SF-1): the selector narrows the overload set exactly as the post-hoc
+                                   // answer does (editCheckOwnerNarrowed). It moves no rows_next= bytes: verdictOnly stays false, and
+                                   // only the verdict-only answer (never taken on a preview) spells rows_next= from page.selector.
+                                   EditCheckPage{ pageLimit, pageOffset, /*verdictOnly=*/false, selector }, previewUnprovenDefs, /*notesDegraded=*/false,
                                    EditCheckSpliced{ newBytes, fsym.fileId, true } );   // the merged spans index the spliced bytes
     // E3 (terminality round A, 2026-09-05): the CURRENT span an apply would replace, as the bytes are on disk, so
     // the Read an agent makes before an edit "to see what I am about to overwrite" is already in the preview.

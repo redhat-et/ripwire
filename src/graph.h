@@ -18125,11 +18125,14 @@ inline bool selectorIsBareName( std::string_view spec ) noexcept
 }
 
 // What joinTerminalPicks hands packConnect: the tied names (ambiguous_terminal=, "" when none) and, per terminal whose spec is
-// not a bare name, (its pick, the definitions its spelling searched).
+// not a bare name, (its pick, the definitions its spelling searched). Fix 1 (NIT-1 / CodeRabbit): several specs can pick ONE
+// node (`--connect=useAlpha,run,Alpha.run`) and print ONE <t> row, so every spec's count is kept (barePicks for the bare ones)
+// and the row prints the WIDEST count any of its spellings searched (packConnect terminalDefCount): a bare spec's whole-name count wins.
 struct ConnectPicks
 {
     std::string                                 ambiguous;
     std::vector<std::pair<NodeId, std::size_t>> qualifiedDefs;
+    std::vector<NodeId>                         barePicks;
 };
 
 template<class SpecList>
@@ -18150,6 +18153,10 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
         if( !selectorIsBareName( std::string_view( specs[ i ] ) ) )
         {
             out.qualifiedDefs.emplace_back( picks[ i ], defsPerTerminal[ i ].size() );
+        }
+        else
+        {
+            out.barePicks.push_back( picks[ i ] );
         }
     }
     std::string& ambiguous = out.ambiguous;

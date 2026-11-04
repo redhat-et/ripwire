@@ -4110,7 +4110,8 @@ inline constexpr char kConnectHeader[] =
     " edges=, groups=) is a FLOOR, never a total; read a zero as \"none found\", never as \"none exists\"."
     " graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls"
     " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
-    " defs= on a terminal row = that NAME has N definitions; every one is scored and the one reaching the most other"
+    " defs= on a terminal row = the N definitions that terminal's spelling matched (all of a bare name's; only those a qualified"
+    " Owner::m / Owner.m / ns.fn / file:name names; spellings that pick one definition share a row and print the widest); every one is scored and the one reaching the most other"
     " terminals within radius= (fewest hops) is used, else the tower front (most specific kind, leading language, lowest id; a C/C++ declaration without a body yields to the"
     " definition of its scope); ambiguous_terminal= on the root names terminals whose pick tied with another equally-joining"
     " definition. Qualify with file:name to pick another. Steiner rows never carry it."
@@ -4164,14 +4165,20 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
 {
     const std::string_view ambiguousTerminals = picks.ambiguous;
     // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
-    // name reports every definition of the name, as before
+    // name reports every definition of the name, as before. Specs folded onto one node print the widest of their counts.
     const auto terminalDefCount = [ & ]( NodeId t ) -> std::size_t
     {
+        if( std::find( picks.barePicks.begin(), picks.barePicks.end(), t ) != picks.barePicks.end() )
+        {
+            return definitionCountOfName( ing, t );
+        }
+        std::size_t widest = 0;
+        bool        qualified = false;
         for( const auto& [ node, defs ] : picks.qualifiedDefs )
         {
-            if( node == t ) { return defs; }
+            if( node == t ) { widest = std::max( widest, defs ); qualified = true; }
         }
-        return definitionCountOfName( ing, t );
+        return qualified ? widest : definitionCountOfName( ing, t );
     };
     std::vector<char> escBuf;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, escBuf ) ); };
