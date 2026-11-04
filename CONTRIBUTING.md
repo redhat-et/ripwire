@@ -300,7 +300,7 @@ A change is rejected — automatically — if any of these is true:
 
 - its test binary exits non-zero;
 - stderr matches `^==[0-9]+==\s*(ERROR|WARNING)` (AddressSanitizer) or `runtime error:` (UBSan);
-- the CSR property test fails;
+- the CSR property test fails (`test/csrpagerankcheck.sh`);
 - the determinism gate fails.
 
 ### The failure mode that keeps coming back: an arm that cannot fail
