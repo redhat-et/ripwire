@@ -150,6 +150,15 @@ pub async fn get(s: &Store) -> Result<u32, String> {
     Ok(v)
 }
 X
+# text hazards: a minified 6 KB line, a CRLF file, a credential-shaped argument (built at runtime: ripwirepubliccheck)
+python3 - "$F" <<'PY'
+import sys
+d = sys.argv[1]
+open(d + "/ts/min.ts", "w").write("import { util } from \"./app\"; export function mm(): string { " + "let a = 1; " * 600 + "return util.join(\"x\", \"y\"); }\n")
+open(d + "/c/crlf.c", "wb").write(b"int leaf( int a, int b );\r\nint cr( int n )\r\n{\r\n\treturn leaf( n,\r\n\t             3 );\r\n}\r\n")
+key = "AKIA" + "Q" * 4 + "7" * 12
+open(d + "/c/key.c", "w").write("int leaf( int a, int b );\nint keyed( const char* k );\nint usekey( void ) { return leaf( keyed( \"%s\" ), 1 ); }\n" % key)
+PY
 # (8) a 40-hop chain over 4 files: f0 -> f1 -> ... -> f40
 python3 - "$F/chain" <<'PY'
 import sys
@@ -185,6 +194,9 @@ CMDS=(
   "ts_path|ts|--path=serve,join"
   "go_path|go|--path=Loop,MatchItem"
   "rs_path|rs|--path=get,load"
+  "min_path|ts|--path=mm,join"
+  "crlf_path|c|--path=cr,leaf"
+  "key_path|c|--path=usekey,leaf"
 )
 for spec in "${CMDS[@]}"; do
   IFS='|' read -r name dir arg <<< "$spec"
@@ -266,7 +278,7 @@ def row(t, n):   # the --path hop row naming n
     return next((r for r in rows(t, "s") if (' n="%s"' % n) in r), "")
 
 # (1) identity, with its positive twin
-names = ["c_path", "c_macro", "c_far", "c_conn", "cpp_path", "py_path", "pyd_conn", "ts_path", "go_path", "rs_path", "self_path", "self_conn"]
+names = ["c_path", "c_macro", "c_far", "c_conn", "cpp_path", "py_path", "pyd_conn", "ts_path", "go_path", "rs_path", "min_path", "crlf_path", "key_path", "self_path", "self_conn"]
 for n in names:
     if ran(n) and ran(n + ".off"):
         check(strip(rd(n)) == strip(rd(n + ".off")), "(1) %s: the answer minus the hop attributes is the kill-switch answer byte for byte" % n)
@@ -297,6 +309,15 @@ check('site="m.go:11" call="return t.resultMerger.pattern.MatchItem(&quot;x&quot
 t = rd("rs_path")
 check('site="lib.rs:11" call="let v: u32 = s.load(&quot;k&quot;).await?;" sig="pub async fn load&lt;T&gt;(&amp;self, key: &amp;str) -&gt; Result&lt;T, String&gt; where T: Default,"' in row(t, "Store::load"),
       "(2) Rust .await? call; impl sig with generics and a where clause on following lines")
+
+# text hazards
+t = row(rd("min_path"), "join")
+m = re.search(r' call="([^"]*)"', t)
+check(bool(m) and m.group(1).startswith("\u2026") and "util.join(&quot;x&quot;" in m.group(1) and len(m.group(1).replace("&quot;", '"').encode()) <= 120 + 3,
+      "(2) a 6 KB minified line: call= is a marked window around the call, <= 120 bytes (%s)" % (m.group(1)[:50] if m else "no call="))
+check('site="crlf.c:4" call="return leaf( n, 3 );"' in row(rd("crlf_path"), "leaf"), "(2) CRLF file: the call joined across lines, no CR left")
+t = row(rd("key_path"), "leaf")
+check('[REDACTED:aws-key]' in t and ("AKIA" + "Q" * 4 + "7" * 12) not in rd("key_path"), "(2) a credential-shaped argument in call= is redacted")
 
 # (3) unread / edited / blanked, each with the positive twin above (c_path / c_far print call= and sig=)
 for n, why in (("c_unread", "unreadable"), ("c_edited", "edited since the crawl")):

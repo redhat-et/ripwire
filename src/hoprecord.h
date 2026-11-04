@@ -50,6 +50,7 @@ namespace rw
 inline constexpr std::size_t   kHopCallMaxBytes  = 120;   // call= cap (U+2026 marks a cut)
 inline constexpr std::size_t   kHopCallMaxLines  = 3;     // a call whose arguments continue joins up to this many lines
 inline constexpr std::size_t   kHopSigMaxBytes   = 160;   // sig= cap on a hop (cleanSig's own 240 cap applies first)
+inline constexpr std::size_t   kHopWindowBytes   = 512;   // source bytes read before the callee name (twice that after): a minified line costs a window
 inline constexpr std::uint32_t kHopNoRef         = UINT32_MAX;
 
 // The kill switch (like RIPWIRE_NO_HOP_BODY): set, no hop attribute and no hop disclosure prints, byte for byte the
@@ -224,6 +225,18 @@ inline CallText callText( FileTextCache& files, const Reference& r, std::string_
     {
         ++begin;
     }
+    // a minified or generated line: read a bounded window around the name, never the whole line (the cut below is marked)
+    bool leadCut = false;
+    if( namePos - begin > kHopWindowBytes )
+    {
+        begin = namePos - kHopWindowBytes;
+        while( begin < namePos && ( static_cast<unsigned char>( ( *src )[ begin ] ) & 0xC0 ) == 0x80 )
+        {
+            ++begin;
+        }
+        leadCut = true;
+    }
+    endAt = std::min( endAt, namePos + 2 * kHopWindowBytes );
     // collapse whitespace (tabs, CR, LF, runs) to one space; remember where the name lands in the collapsed text
     std::string flat;
     flat.reserve( endAt - begin );
@@ -255,6 +268,11 @@ inline CallText callText( FileTextCache& files, const Reference& r, std::string_
     if( depthOf( namePos, endAt ) > 0 )
     {
         flat += " \xE2\x80\xA6";   // the arguments run past kHopCallMaxLines: the cut is marked, never silent
+    }
+    if( leadCut )
+    {
+        flat.insert( 0, "\xE2\x80\xA6" );
+        flatName += 3;
     }
     // the name past the cut: start the window ~40 bytes before it (on a codepoint boundary), marked with a leading U+2026
     if( flatName + name.size() > kHopCallMaxBytes - 10 && flatName > 40 )

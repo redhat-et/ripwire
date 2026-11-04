@@ -585,6 +585,21 @@ The three write verbs — `replace_symbol_body`, `insert_before_symbol` and `ins
 staleness hash, symlink refusal, mode preservation and atomic-write transaction. CLI is the preferred
 zero-standing-schema path; MCP is the warm-index alternative.
 
+### hops — one hop record for every edge an answer prints
+
+`src/hoprecord.h` is THE hop record: the rule every verb that prints a call edge reads, so a fix to it
+shows up on every such verb at once. `--path` hop rows and `--connect` `<e>` rows (CLI and MCP) print
+it today. For the edges an answer will print, `hopFacts()` makes one pass over the reference table
+(never one scan per hop), reads each file once through the shared reader `src/filetext.h`
+(`FileTextCache`, which also says when a file could not be read or changed since indexing), and keeps
+per edge the call site in the caller (`site=`, a name match like `sites_at=`, with `sites=N` when the
+caller has more), the call's text (`call=`) and the callee's signature (`sig=`, `cleanSig`). One
+renderer, `hopAttrsXml()`, prints them at a shed level: under a budget `sig=` goes first, then
+`call=`, then `site=`, before anything the answer printed without them. Text that cannot be read or no
+longer spells the callee is withheld and counted on the root (`hop_unread=`, `hop_notext=`), never
+guessed; an edge no call names prints no site (`hop_nosite=`). A new edge-printing verb, or a stored
+per-edge site, goes through this file, not a second copy beside it.
+
 ---
 
 ## 2. Data model
