@@ -2602,22 +2602,29 @@ struct ReceiverEvidence
     }
     // the call `r` committed ONE evidenced target `callee`, whose declared result is `rt`: record the class it states, when some
     // member call's receiver is this call (a RecvCall names it). A second committed answer that disagrees leaves none.
-    void noteCallReturn( const Reference& r, NodeId callee, const Binding& rt )
+    // (true: it stated a class)
+    bool noteCallReturn( const Reference& r, NodeId callee, const Binding& rt )
     {
         if( rt.unwrapDepth != 0 || ( rt.resultIndex != 0 && rt.resultIndex != kWholeResult ) )
         {
-            return;   // a Result/Option layer, a smart pointer's pointee, a tuple position: not the value a `.m()` reads
+            return false;   // a Result/Option layer, a smart pointer's pointee, a tuple position: not the value a `.m()` reads
         }
         const NodeId cls = types.statedResultClass( rt, ing.symbols[ callee ].lang );
         if( cls == kNoNode )
         {
-            return;
+            return false;
         }
         const auto [ it, fresh ] = callResultProofs.try_emplace( callKey( r.fileId, r.startByte, r.calleeName ), ReceiverProof{ cls, ReceiverProofKind::ReturnType, callee } );
         if( !fresh && it->second.cls != cls )
         {
             it->second.cls = kNoNode;
         }
+        return true;
+    }
+    // the call `r`'s result states no ONE class (an overload target that states none)
+    void dropCallReturn( const Reference& r )
+    {
+        callResultProofs.try_emplace( callKey( r.fileId, r.startByte, r.calleeName ) ).first->second = ReceiverProof{};
     }
     // the proof of member call `r`'s receiver when that receiver is a call whose result a stated return type names (nullptr: none)
     const ReceiverProof* receiverProofOf( const Reference& r ) const

@@ -9826,22 +9826,25 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     };
     // RECV-XFILE: the call `r` (reference `site`) committed ONE evidenced target `callee`: what its declared result states, for
     // the member call whose receiver it is (ReceiverEvidence::noteCallReturn)
-    const auto noteReceiverResult = [ & ]( const Reference& r, NodeId callee, std::size_t site )
+    // (true: it stated a class)
+    const auto noteReceiverResult = [ & ]( const Reference& r, NodeId callee, std::size_t site ) -> bool
     {
         if( !recvEv.hasRecvCalls() )
         {
-            return;
+            return false;
         }
         const Symbol& cs             = ing.symbols[ callee ];
         const auto    [ rtLo, rtHi ] = recordsAt( returnTypesAt, ( std::uint64_t( cs.fileId ) << 32 ) | cs.sigStartByte );
         if( rtLo == rtHi || sharesCallKey( site ) )
         {
-            return;
+            return false;
         }
+        bool stated = false;
         for( auto rtIt = rtLo; rtIt != rtHi; ++rtIt )
         {
-            recvEv.noteCallReturn( r, callee, ing.bindings[ rtIt->second ] );
+            stated = recvEv.noteCallReturn( r, callee, ing.bindings[ rtIt->second ] ) || stated;
         }
+        return stated;
     };
     HashMap<std::uint64_t, char> nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
     HashMap<std::uint64_t, char> provenEdges;     // … and of an edge some call bound WITH evidence: a proven site wins the merged row
@@ -12619,6 +12622,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     }
                     noteReceiverResult( r, to, siteIndex );   // RECV-XFILE: a chained member call's receiver reads it
                 }
+            }
+        }
+        // RECV-XFILE: an evidenced call split across overloads (`ProcessList & getProcessList()` and its `const` twin) still
+        // states ONE class when every target declares it; a target that states none, or another class, leaves no proof
+        else if( recvEv.hasRecvCalls() && nReal > 1 && evidenced && !nameOnly && !bindingPinned && !subscript && !ifaceImpl )
+        {
+            bool all = true;
+            for( NodeId to : tier )
+            {
+                all = all && to != r.fromSymbol && noteReceiverResult( r, to, siteIndex );
+            }
+            if( !all )
+            {
+                recvEv.dropCallReturn( r );
             }
         }
         if( r.forwarded )

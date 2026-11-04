@@ -57,8 +57,8 @@ w "$C/col.h" '#pragma once\nclass Column {\npublic:\n    void insert(int v);\n};
 w "$C/col.cpp" '#include "col.h"\nvoid Column::insert(int v) {}\n'
 w "$C/box.h" '#pragma once\nnamespace a { class Box { public: void insert(int v); }; }\nnamespace b { class Box { public: void insert(int v); }; }\n'
 w "$C/box.cpp" '#include "box.h"\nvoid a::Box::insert(int v) {}\nvoid b::Box::insert(int v) {}\n'
-w "$C/ctx.h" '#pragma once\n#include "proc.h"\n#include "box.h"\nclass Context {\npublic:\n    ProcessList & getProcessList();\n    static Context & instance();\n    a::Box & getBox();\n};\n'
-w "$C/ctx.cpp" '#include "ctx.h"\nProcessList & Context::getProcessList() { static ProcessList p; return p; }\nContext & Context::instance() { static Context c; return c; }\na::Box & Context::getBox() { static a::Box b; return b; }\n'
+w "$C/ctx.h" '#pragma once\n#include "proc.h"\n#include "box.h"\nclass Context {\npublic:\n    ProcessList & getProcessList();\n    const ProcessList & getProcessList() const;\n    static Context & instance();\n    a::Box & getBox();\n};\n'
+w "$C/ctx.cpp" '#include "ctx.h"\nProcessList & Context::getProcessList() { static ProcessList p; return p; }\nconst ProcessList & Context::getProcessList() const { static ProcessList p; return p; }\nContext & Context::instance() { static Context c; return c; }\na::Box & Context::getBox() { static a::Box b; return b; }\n'
 w "$C/use.cpp" '#include "ctx.h"\n#include "col.h"\nvoid runArrow(Context * c) { c->getProcessList().insert(1); }\nvoid runStatic() { Context::instance().getProcessList().insert(2); }\nvoid runLocal(Context * c) { auto & pl = c->getProcessList(); pl.insert(3); }\nvoid runUnknown(Context * c) { c->notInTree().insert(4); }\nvoid runSize2(Context * c) { c->getBox().insert(5); }\nvoid runCol(Column & k) { k.insert(6); }\n'
 row C1.ret      "$C" callees runArrow   proc.cpp insert proven
 row C1.not      "$C" callees runArrow   col.cpp  insert none
