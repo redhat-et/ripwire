@@ -2695,23 +2695,9 @@ inline void appendSites( std::string& out, const IngestResult& ing, const ExtraF
     }
 }
 
-// `tag` and `path`: --dead-code's exported group prints the same row as <e n= t= p= l=> (its rows span files); the table's <u> has no p=.
-inline void appendRow( std::string& out, const IngestResult& ing, const ExtraFiles& extra, const Row& r, std::string_view verdict, std::vector<char>& esc,
-                       std::string_view tag = "u", std::string_view path = {} )
+// A row's evidence after its v=: shared by the table's <u> rows and --dead-code's exported <e> rows, so the two read alike.
+inline void appendRowEvidence( std::string& out, const IngestResult& ing, const ExtraFiles& extra, const Row& r, std::string_view verdict, std::vector<char>& esc )
 {
-    const Symbol& s = ing.symbols[r.defs.front()];
-    out += '<';
-    out += tag;
-    out += " n=\"";
-    out += escapeXml( r.name, esc );
-    out += "\" t=\"";
-    out += symTag( s.kind );
-    if( !path.empty() )
-    {
-        out += "\" p=\"";
-        out += escapeXml( path, esc );
-    }
-    out += std::format( "\" l=\"{}\" v=\"{}\"", s.line, verdict );
     if( r.defs.size() > 1 )
     {
         out += std::format( " defs=\"{}\"", r.defs.size() );
@@ -2740,6 +2726,17 @@ inline void appendRow( std::string& out, const IngestResult& ing, const ExtraFil
         appendSites( out, ing, extra, verdict == "test-only" ? std::span<const Site>( r.testAt ) : std::span<const Site>( r.at ), esc );
     }
     out += "/>";
+}
+
+inline void appendRow( std::string& out, const IngestResult& ing, const ExtraFiles& extra, const Row& r, std::string_view verdict, std::vector<char>& esc )
+{
+    const Symbol& s = ing.symbols[r.defs.front()];
+    out += "<u n=\"";
+    out += escapeXml( r.name, esc );
+    out += "\" t=\"";
+    out += symTag( s.kind );
+    out += std::format( "\" l=\"{}\" v=\"{}\"", s.line, verdict );
+    appendRowEvidence( out, ing, extra, r, verdict, esc );
 }
 
 inline std::string renderFileTable( const IngestResult& ing, const Graph& g, const FileTable& t, const ExtraFiles& extra, std::vector<char>& esc )
@@ -2962,11 +2959,6 @@ inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const 
 // non-test caller reaches (the exported group, linkage="exported"). Public is this table's isPublicDef, so code outside the tree may
 // call them: zero means none found in this tree, never unused. Each row carries this table's verdict and why=, so a name a string,
 // registry, decorator, __all__ or re-export holds reads v=unknown with the reason, never as a bare candidate.
-inline bool testCaller( const IngestResult& ing, NodeId caller ) noexcept
-{
-    return isTestSymbol( ing, caller ) || isTestLikePath( rootRelPath( ing, ing.symbols[caller].fileId ) );
-}
-
 inline bool noNonTestCaller( const IngestResult& ing, const Graph& g, NodeId id ) noexcept
 {
     const std::uint32_t* ro = g.inEdges.rowOffsets();
@@ -2978,7 +2970,8 @@ inline bool noNonTestCaller( const IngestResult& ing, const Graph& g, NodeId id 
     for( std::uint32_t k = ro[id]; k < ro[id + 1]; ++k )
     {
         const NodeId caller = ci[k];
-        if( caller != id && caller < ing.symbols.size() && !testCaller( ing, caller ) )
+        // a test caller as the table's own graph pass counts one (tests=): the shared test rule or a test-support tree
+        if( caller != id && caller < ing.symbols.size() && !isTestSymbol( ing, caller ) && !isTestLikePath( rootRelPath( ing, ing.symbols[caller].fileId ) ) )
         {
             return false;
         }
@@ -2986,10 +2979,10 @@ inline bool noNonTestCaller( const IngestResult& ing, const Graph& g, NodeId id 
     return true;
 }
 
-// a free function with a body in library code: the shape --dead-code's own rows have, before linkage
+// the shape --dead-code's own rows have (quality::deadCodeEligibleKind: a free function with a body, outside headers), in library code
 inline bool exportedCandidateShape( const IngestResult& ing, const Symbol& s ) noexcept
 {
-    return s.kind == SymKind::Function && !isMemberDef( s ) && s.sigEndByte < s.endByte && !testCaller( ing, s.id );
+    return quality::deadCodeEligibleKind( ing, s ) && !isMemberDef( s ) && !isTestLikePath( rootRelPath( ing, s.fileId ) ) && !isTestSymbol( ing, s.id );
 }
 
 struct ExportedGroup

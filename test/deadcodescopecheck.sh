@@ -9,7 +9,7 @@
 # A5 C++ extern def listed, static def stays a <d> row (count=1), string-named def labelled; A6 bare --dead-code carries no group
 # (byte-identical shape); A7 the group is the last child, after d/to rows; A8 legend: compact reads linkage=, full carries the
 # clause, and neither appears without the group; A9 second page has no group; A10 a filter whose files hold no such function
-# prints no group; A11 files cap disclosed (files= of files_total=); A12 well-formed XML.
+# prints no group; A11 files cap (files= of files_total=) and row cap (shown= of total=, capped=1) disclosed; A12 well-formed XML.
 # Optional: RIPWIRE_BASE_BIN=<main binary> adds A13: with the group (and its legend clause) removed the answer is byte-identical.
 #   RIPWIRE_BIN=build/ripwire bash test/deadcodescopecheck.sh     # red on a pre-DEAD-CODE-SCOPE binary (A1, A4, A5, A11)
 set -u
@@ -19,7 +19,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; return 0; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "deadcodescopecheck: BIN=$BIN"
 
@@ -132,6 +132,7 @@ static int lone_static(int x)
 }
 C
 for i in 1 2 3 4 5 6 7; do printf 'def lonely_%s(x):\n    return x\n' "$i" > "$F/many/m$i.py"; done
+mkdir -p "$F/wide"; for i in $( seq 1 101 ); do printf 'def wide_%s(x):\n    return x\n\n' "$i"; done > "$F/wide/w.py"
 
 runin(){ local dir="$1"; shift; ( cd "$dir" || exit 1; "$BIN" "$dir" --no-cache "$@" 2>/dev/null ); }
 run(){ runin "$F" "$@"; }
@@ -193,6 +194,10 @@ chk "A10 static-only file" --dead-code=cc/only_static.cpp && ST="$CHK" || ST="<e
 if printf '%s' "$ST" | grep -q '<exported'; then no "A10 a group on a file with no public free function"; else ok "A10 no public candidate, no group (byte-identical)"; fi
 chk "A11 seven files" --dead-code=many && MANY="$CHK" || MANY=""
 if group "$MANY" | grep -q 'files="6" files_total="7"' && group "$MANY" | grep -q 'total="6" shown="6"'; then ok "A11 files cap disclosed: files=6 of files_total=7"; else no "A11 cap not disclosed: $( group "$MANY" )"; fi
+
+chk "A11 101 rows" --dead-code=wide && WIDE="$CHK" || WIDE=""
+if group "$WIDE" | grep -q 'total="101" shown="100" files="1" files_total="1" capped="1"' && [ "$( printf '%s' "$WIDE" | grep -o '<e n=' | wc -l | tr -d ' ' )" = 100 ]; then ok "A11 row cap disclosed: shown=100 of total=101, capped=1"; else no "A11 row cap: $( group "$WIDE" )"; fi
+if group "$PY" | grep -q 'capped='; then no "A11 capped= on an uncut group"; else ok "A11 capped= is present-only"; fi
 
 # ── A12 well-formed ───────────────────────────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then

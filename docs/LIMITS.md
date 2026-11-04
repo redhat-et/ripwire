@@ -1393,3 +1393,11 @@ Discloses: `capped`, `importers_capped`, `to_capped`
 | --- | --- | --- | --- |
 | `kEvidenceCap` | `20` | OUTPUT | — |
 
+### `src/verbs_quality.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kDeadExportedRowsShown` | `100` | — | exported rows printed (shown= capped=1; total= stays whole) |
+
