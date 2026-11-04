@@ -1577,14 +1577,17 @@ inline bool markPreprocessorAlternatives( const IngestResult& ing, const rw::Sma
     return marked;
 }
 
-// true ⇒ Rule 3 picked such a body (`picked`) while another file defines the function with a body (`all`, the list Rule 3 read):
-// Rule 3 never counts a .c file as included, so the header's `#else` stub would win over the real definition, and which
-// alternative the build compiles is no include fact. Rule 3 then decides nothing; the call keeps main's ladder (a split).
+// true ⇒ Rule 3 picked such a body (`picked`) in a header only the include-root probe reaches from the caller, while another file
+// defines the function with a body (`all`, the list Rule 3 read): Rule 3 never counts a .c file as included, so the header's
+// `#else` stub would win over the real definition, and which alternative the build compiles is no include fact. Rule 3 then
+// decides nothing; the call keeps main's ladder (a split). FLOOR: a header in the includer's own directory keeps main's pin
+// (htop Vector.h's `#else` Vector_get / Vector_size: 97 sites would turn into splits) until an answer check measures that move.
 template <class Ids>
-inline bool rule3PicksPreprocessorAlternative( const IngestResult& ing, const std::vector<bool>& altBody, const std::vector<NodeId>& picked, const Ids& all )
+inline bool rule3PicksPreprocessorAlternative( const IngestResult& ing, const std::vector<bool>& altBody, const rw::FileSetStore& includerClosure, std::uint32_t callerFile,
+                                               const std::vector<NodeId>& picked, const Ids& all )
 {
     const auto alt = std::find_if( picked.begin(), picked.end(), [ & ]( NodeId c ) { return altBody[ c ]; } );
-    if( alt == picked.end() )
+    if( alt == picked.end() || includerClosure.contains( callerFile, ing.symbols[ *alt ].fileId ) )
     {
         return false;
     }
@@ -11820,7 +11823,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 const bool fired = ( &ids == &it->second && minCands == 2 ) ? ( memberCall ? rule3MemoMember : rule3Memo ).narrow( narrower, ids, r.fileId, rule3Out, memberCall )
                                                                             : narrower.rule3IncludeFile( ids, r.fileId, rule3Out, minCands, memberCall );
-                return fired && !( rule3AltAny && rule3PicksPreprocessorAlternative( ing, rule3AltBody, rule3Out, ids ) );
+                return fired && !( rule3AltAny && rule3PicksPreprocessorAlternative( ing, rule3AltBody, fileIncludes, r.fileId, rule3Out, ids ) );
             };
             if( rule3( *nameIds, localsYield ? 1u : 2u ) || ( localsYield && rule3( *baseIds, 2u ) ) )
             {
