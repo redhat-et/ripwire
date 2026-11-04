@@ -28,6 +28,7 @@
 #include "elixir_resolve.h"   // elixirBaseName — an Elixir callee spells name/N in the index, name in the source
 #include "filetext.h"      // FileTextCache — one read per file per answer
 #include "graph.h"
+#include "memberowner.h"   // MemberOwners — a TS/JS method's owner (no stored scope) for the owner-qualified pick
 #include "model.h"
 #include "redact.h"        // redactSecrets — call text is emitted source text (a credential seam, like cleanSig)
 #include "sarif.h"         // rootRelativeUri — site= in the row's own path dialect
@@ -83,6 +84,16 @@ enum class HopGap : std::uint8_t
     None,
     Unread,   // the file could not be read, or it changed since indexing
     NoText,   // the site's text does not spell the callee (macro-expanded, generated)
+    Redacted, // the callee's name sits in or against a redacted span: no call text can print without a cut through it
+};
+
+// How site= was picked among the caller's calls of the callee's name (the tiebreak: a call whose written qualifier is the
+// callee's owner, then a call whose argument count the callee accepts; the review's S1). Present-only on the row.
+enum class HopSiteBy : std::uint8_t
+{
+    Decided,   // one such line, or the tiebreak picked one
+    Tie,       // site_by="first": several lines fit equally and the caller also calls a namesake; site= is the first (no guess)
+    NoFit,     // site_by="nofit": no such line's argument count fits the callee; site= is the first name match
 };
 
 struct HopRecord
@@ -96,13 +107,14 @@ struct HopRecord
     std::string   sig;                   // callee signature, unescaped; "" = not printed (see sigGap)
     HopGap        callGap = HopGap::None;
     HopGap        sigGap  = HopGap::None;
+    HopSiteBy     siteBy  = HopSiteBy::Decided;
 };
 
 struct HopFacts
 {
     bool                   on = false;   // false: the kill switch, or nothing wanted — renders nothing
     std::vector<HopRecord> recs;         // sorted by (from, to)
-    std::size_t            nosite = 0, unread = 0, notext = 0;
+    std::size_t            nosite = 0, unread = 0, notext = 0, redacted = 0;
     std::size_t            referenceScans = 0, filesRead = 0;   // arm 8: one scan per answer
 
     const HopRecord* find( NodeId from, NodeId to ) const noexcept
@@ -111,7 +123,7 @@ struct HopFacts
                                           []( const HopRecord& r, const std::pair<NodeId, NodeId>& k ) { return r.from != k.first ? r.from < k.first : r.to < k.second; } );
         return it != recs.end() && it->from == from && it->to == to ? &*it : nullptr;
     }
-    bool                   anySite = false, anySites = false, anyCall = false, anySig = false;   // set once, by hopFacts' slice pass
+    bool                   anySite = false, anySites = false, anyCall = false, anySig = false, anyTie = false, anyNoFit = false;   // set once, by hopFacts' slice pass
 };
 
 namespace hopdetail
@@ -155,15 +167,63 @@ inline std::size_t findWord( std::string_view text, std::size_t from, std::size_
     return at;
 }
 
-// The call text of one site: from its line's first non-blank byte, joined across up to kHopCallMaxLines lines while the
-// call's parentheses are open, whitespace runs collapsed, redacted, then cut at kHopCallMaxBytes on a codepoint boundary
-// (a callee name past the cut moves the window so the name stays in view). Gap set when no honest text exists.
+// A byte a credential shape can hold (redact.h kRedactRules: [A-Za-z0-9_\-+/=.]). A cut between two of them can split a
+// token, and the half without its prefix no rule recognises, so every cut below lands on a run boundary instead.
+inline bool tokenByte( char c ) noexcept
+{
+    const unsigned char u = static_cast<unsigned char>( c );
+    return ( u >= '0' && u <= '9' ) || ( u >= 'a' && u <= 'z' ) || ( u >= 'A' && u <= 'Z' ) || c == '_' || c == '-' || c == '+' || c == '/' || c == '='
+           || c == '.';
+}
+
+// Move cut `c` in `t` off a run of token bytes: forward to the run's end (a leading cut), backward to its start (a trailing
+// cut), never past `limit` (the callee name's start or end: the name prints whatever run it sits in). Token bytes are ASCII,
+// so the result is a codepoint boundary whenever `c` was. O(c - limit), never O(text): it is applied to a whole file's
+// cached text too.
+inline std::size_t unsplitRun( std::string_view t, std::size_t c, bool forward, std::size_t limit ) noexcept
+{
+    while( ( forward ? c < limit : c > limit ) && c > 0 && c < t.size() && tokenByte( t[ c - 1 ] ) && tokenByte( t[c] ) )
+    {
+        c = forward ? c + 1 : c - 1;
+    }
+    return c;
+}
+
+// unsplitRun on redacted text (a call window, at most a few KB): first out of a redaction span (the kept prefix, U+2026,
+// [REDACTED:kind]) the cut would split, then off a token run; the caller clamps the result to the name.
+inline std::size_t unsplitCut( std::string_view t, std::size_t c, bool forward, std::size_t limit ) noexcept
+{
+    static constexpr std::string_view kMark = "\xE2\x80\xA6[REDACTED:";
+    for( std::size_t at = t.find( kMark ); at != std::string_view::npos && at < c; at = t.find( kMark, at + 1 ) )
+    {
+        std::size_t s = at;
+        while( s > 0 && tokenByte( t[ s - 1 ] ) )
+        {
+            --s;
+        }
+        const std::size_t close = t.find( ']', at );
+        const std::size_t e     = close == std::string_view::npos ? t.size() : close + 1;
+        if( s < c && c < e )
+        {
+            c = forward ? e : s;
+            break;
+        }
+    }
+    return unsplitRun( t, c, forward, limit );
+}
+
+// The call text of one site: from its line's first non-blank byte (or, when the site sits on the caller's own one-line
+// definition, from the end of the caller's signature: the agent has that row already), joined across up to
+// kHopCallMaxLines lines while the call's parentheses are open, whitespace runs collapsed, REDACTED, and only then cut
+// at kHopCallMaxBytes (a callee name past the cut moves the window so the name stays in view). Every cut — the bounded
+// window on a long line, the move to the name, the cap — lands off a token run and off a redaction span, so a credential
+// a cut would split prints whole-redacted or not at all (CR lens 4; the review's M1). Gap set when no honest text exists.
 struct CallText
 {
     std::string text;
     HopGap      gap = HopGap::None;
 };
-inline CallText callText( FileTextCache& files, const Reference& r, std::string_view name, RedactCounts* redact )
+inline CallText callText( FileTextCache& files, const Reference& r, std::string_view name, const Symbol& caller, RedactCounts* redact )
 {
     CallText out;
     const std::string* src = files.text( r.fileId );
@@ -218,22 +278,44 @@ inline CallText callText( FileTextCache& files, const Reference& r, std::string_
         return out;
     }
     std::size_t begin = lineAt;
+    // a one-line caller (`int top( int n ) { return mid( n ); }`): its signature is the row above, so the text starts at
+    // the statement after it (past an opening `{`, `:` or `=>`), never echoing the caller's own head
+    if( caller.fileId == r.fileId && caller.line == r.line && caller.sigEndByte > lineAt && caller.sigEndByte <= namePos )
+    {
+        begin = caller.sigEndByte;
+        for( bool more = true; more && begin < namePos; )
+        {
+            const std::string_view at = std::string_view( *src ).substr( begin, namePos - begin );
+            const std::size_t      n  = at.starts_with( "=>" ) ? 2 : at[0] == ' ' || at[0] == '\t' || at[0] == '{' || at[0] == ':' ? 1 : 0;
+            begin += n;
+            more = n > 0;
+        }
+    }
     while( begin < r.startByte && ( ( *src )[ begin ] == ' ' || ( *src )[ begin ] == '\t' ) )
     {
         ++begin;
     }
-    // a minified or generated line: read a bounded window around the name, never the whole line (the cut below is marked)
+    // a minified or generated line: read a bounded window around the name, never the whole line (the cuts are marked);
+    // both window edges move off a token run, so the redaction below sees every token it prints whole
     bool leadCut = false;
     if( namePos - begin > kHopWindowBytes )
     {
-        begin = namePos - kHopWindowBytes;
+        begin = unsplitRun( *src, namePos - kHopWindowBytes, /*forward=*/true, namePos );
+        begin = std::min( begin, namePos );
         while( begin < namePos && ( static_cast<unsigned char>( ( *src )[ begin ] ) & 0xC0 ) == 0x80 )
         {
             ++begin;
         }
         leadCut = true;
     }
-    endAt = std::min( endAt, namePos + 2 * kHopWindowBytes );
+    if( endAt > namePos + 2 * kHopWindowBytes )
+    {
+        endAt = std::max( unsplitRun( *src, namePos + 2 * kHopWindowBytes, /*forward=*/false, namePos + name.size() ), namePos + name.size() );
+        while( endAt > namePos + name.size() && ( static_cast<unsigned char>( ( *src )[ endAt ] ) & 0xC0 ) == 0x80 )
+        {
+            --endAt;
+        }
+    }
     // collapse whitespace (tabs, CR, LF, runs) to one space; remember where the name lands in the collapsed text
     std::string flat;
     flat.reserve( endAt - begin );
@@ -266,27 +348,77 @@ inline CallText callText( FileTextCache& files, const Reference& r, std::string_
     {
         flat += " \xE2\x80\xA6";   // the arguments run past kHopCallMaxLines: the cut is marked, never silent
     }
-    if( leadCut )
+    // REDACT the widest text first, then cut it. The name's place in the redacted text: the text before it and the text from
+    // it redact to the whole's halves exactly when no redaction crosses the name; otherwise the name sits in or against a
+    // redacted span (or a credential keyword gates a token across it) and no honest call text exists — withheld, counted.
+    if( redact != nullptr )
     {
-        flat.insert( 0, "\xE2\x80\xA6" );
-        flatName += 3;
+        // The keyword-gated rule (a long run on a line that assigns token=/secret=/…) reads the run's whole source line. The
+        // window drops part of the line (a long line's far bytes, a one-line caller's head), so a keyword there still gates
+        // the window: the redaction reads it with a gate prefix, stripped after (the prefix itself is never redacted).
+        static constexpr std::string_view kGate = "token= ";
+        const std::size_t                 lastEnd = lineEnd( lastLn );
+        const bool gateOutside = ( begin > lineAt && redactdetail::lineNamesCredential( std::string_view( *src ).substr( lineAt, begin - lineAt ) ) )
+                                 || ( endAt < lastEnd && redactdetail::lineNamesCredential( std::string_view( *src ).substr( endAt, lastEnd - endAt ) ) );
+        const auto redactGated = [ & ]( std::string_view in, std::string& res, RedactCounts& counts )
+        {
+            if( !gateOutside )
+            {
+                return redactSecrets( in, res, counts );
+            }
+            const bool any = redactSecrets( std::string( kGate ) + std::string( in ), res, counts );
+            ASSUME( std::string_view( res ).starts_with( kGate ), "the gate prefix is too short for any rule and ends in a space" );
+            res.erase( 0, kGate.size() );
+            return any;
+        };
+        std::string whole;
+        if( redactGated( flat, whole, *redact ) )
+        {
+            RedactCounts scratch;   // the split check's tally is not the answer's (the whole was counted once, above)
+            std::string  pre, post;
+            (void)redactGated( std::string_view( flat ).substr( 0, flatName ), pre, scratch );
+            (void)redactGated( std::string_view( flat ).substr( flatName ), post, scratch );
+            if( pre.size() + post.size() != whole.size() || whole.compare( 0, pre.size(), pre ) != 0 || whole.compare( pre.size(), post.size(), post ) != 0
+                || !std::string_view( post ).starts_with( name ) )
+            {
+                out.gap = HopGap::Redacted;
+                return out;
+            }
+            flatName = pre.size();
+            flat     = std::move( whole );
+        }
     }
-    // the name past the cut: start the window ~40 bytes before it (on a codepoint boundary), marked with a leading U+2026
-    if( flatName + name.size() > kHopCallMaxBytes - 10 && flatName > 40 )
+    // the name past the cap: start ~40 bytes before it, off any token run or redaction span, marked with a leading U+2026
+    std::string lead = leadCut ? "\xE2\x80\xA6" : "";
+    if( lead.size() + flatName + name.size() > kHopCallMaxBytes - 10 && flatName > 40 )
     {
-        std::size_t from = flatName - 40;
-        while( from < flat.size() && ( static_cast<unsigned char>( flat[ from ] ) & 0xC0 ) == 0x80 )
+        std::size_t from = std::min( unsplitCut( flat, flatName - 40, /*forward=*/true, flatName ), flatName );
+        while( from < flatName && ( static_cast<unsigned char>( flat[ from ] ) & 0xC0 ) == 0x80 )
         {
             ++from;
         }
-        flat = "\xE2\x80\xA6" + flat.substr( from );
+        flat.erase( 0, from );
+        flatName -= from;
+        lead = "\xE2\x80\xA6";
     }
-    std::string redacted;
-    if( redact != nullptr && redactSecrets( flat, redacted, *redact ) )
+    flat.insert( 0, lead );
+    flatName += lead.size();
+    // the cap: back to a codepoint boundary, then off any token run or redaction span — never before the name's end
+    if( flat.size() > kHopCallMaxBytes )
     {
-        flat = std::move( redacted );   // before the cap, so a secret straddling it cannot survive as a prefix (cleanSig's order)
+        std::size_t cut = kHopCallMaxBytes;
+        while( cut > 0 && ( static_cast<unsigned char>( flat[ cut ] ) & 0xC0 ) == 0x80 )
+        {
+            --cut;
+        }
+        cut = std::max( unsplitCut( flat, cut, /*forward=*/false, flatName + name.size() ), std::min( flatName + name.size(), flat.size() ) );
+        flat.resize( cut );
+        while( !flat.empty() && flat.back() == ' ' )
+        {
+            flat.pop_back();
+        }
+        flat += "\xE2\x80\xA6";
     }
-    truncateUtf8WithEllipsis( flat, kHopCallMaxBytes );
     out.text = std::move( flat );
     return out;
 }
@@ -312,10 +444,19 @@ inline CallText calleeSig( FileTextCache& files, const Symbol& s, RedactCounts* 
     return out;
 }
 
-// The callee's owner as a call would qualify it (`A` for scope "ns::A"), "" when it has none.
-inline std::string_view ownerLeaf( const Symbol& s ) noexcept
+// The callee's owner as a call would qualify it (`A` for scope "ns::A"; a TS/JS method's enclosing class, which the index
+// stores as no scope: memberowner.h containment, built at the first such callee), "" when it has none.
+inline std::string_view ownerLeaf( const IngestResult& ing, const Symbol& s, std::optional<MemberOwners>& owners )
 {
-    return lastSegment( s.scope );
+    if( !s.scope.empty() )
+    {
+        return lastSegment( s.scope );
+    }
+    if( !memberOwnerPossible( s ) )
+    {
+        return {};
+    }
+    return lastSegment( ( owners ? *owners : owners.emplace( ing ) ).ownerOf( s ) );
 }
 
 }   // namespace hopdetail
@@ -356,21 +497,55 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
     {
         tests.emplace_back( ing, ing.symbols[ w.to ], std::span<const NodeId>( &w.to, 1 ) );
     }
-    std::vector<std::uint32_t>                                     best( wanted.size(), kHopNoRef );
-    std::vector<std::vector<std::pair<std::uint32_t, std::uint32_t>>> siteLines( wanted.size() );   // (file, line) per edge
-    const auto        score = [ & ]( std::size_t k, const Reference& r ) -> std::tuple<int, std::uint32_t, std::uint32_t, std::uint32_t>
+    // The arity half of the tiebreak: can the edge's callee accept this call's argument count? The --edit-check rule
+    // (editCheckArityAccepts): an uncounted call, a variadic/defaulted callee or an implicit receiver always fits. A C-family
+    // callee whose declaration may carry defaults is read (editCheckMinArity) only for a call passing FEWER arguments than
+    // it takes, once per edge, lazily: most edges never pay it.
+    EditCheckSpliced                     noSplice{};
+    std::optional<EditCheckSources>      declSources;
+    std::vector<std::int32_t>            minArity( wanted.size(), -1 );   // -1 = not read yet
+    std::vector<NodeId>                  untiedScratch;
+    const auto                           fits = [ & ]( std::size_t k, const Reference& r ) -> bool
     {
-        const std::string_view owner = hopdetail::ownerLeaf( ing.symbols[ wanted[k].to ] );
-        const bool ownerMatch = !owner.empty() && ( r.qualifier == owner || r.recvVar == owner || r.memberRoot == owner );
-        return { ownerMatch ? 0 : 1, r.fileId, r.line, r.startByte };
+        const Symbol& callee = ing.symbols[ wanted[k].to ];
+        if( !r.argCountKnown || callee.arityExact == 0 || editCheckImplicitReceiver( callee ) || r.argCount == callee.params )
+        {
+            return true;
+        }
+        if( r.argCount > callee.params || !langCompatible( callee.lang, Lang::C ) )
+        {
+            return false;
+        }
+        if( minArity[k] < 0 )
+        {
+            minArity[k] = editCheckMinArity( ing, declSources ? *declSources : declSources.emplace( ing, noSplice ), wanted[k].to, untiedScratch );
+        }
+        return std::uint32_t( minArity[k] ) <= r.argCount;
     };
+    // the owner a qualified call spells, once per edge (never per reference)
+    std::optional<MemberOwners>   memberOwners;
+    std::vector<std::string_view> owners( wanted.size() );
+    for( std::size_t k = 0; k < wanted.size(); ++k )
+    {
+        owners[k] = hopdetail::ownerLeaf( ing, ing.symbols[ wanted[k].to ], memberOwners );
+    }
+    // a candidate's rank: an arity misfit last, then a call qualified by the callee's owner first; ties go to file/line order
+    struct Cand
+    {
+        std::uint32_t file, line, byte, ref;
+        std::uint8_t  rank;   // bit 1: the arity misfits, bit 0: no owner qualifier
+    };
+    std::vector<std::vector<Cand>> cands( wanted.size() );
     ++out.referenceScans;   // (2)
     for( std::uint32_t refIndex = 0; refIndex < ing.references.size(); ++refIndex )
     {
         const Reference& r = ing.references[ refIndex ];
+        if( r.fromSymbol >= callerSel.size() || !callerSel[ r.fromSymbol ] )
+        {
+            continue;   // the cheap caller-bit test first: it rejects nearly every reference of a large index
+        }
         // a macro invocation is a hop the graph prints too (viamacro -> WRAP): its site is the invocation, same filter otherwise
-        const bool site = callSiteCounts( r, refIndex, g.keptForwards, /*macroToo=*/true );
-        if( r.fromSymbol >= callerSel.size() || !callerSel[ r.fromSymbol ] || !site )
+        if( !callSiteCounts( r, refIndex, g.keptForwards, /*macroToo=*/true ) )
         {
             continue;
         }
@@ -382,23 +557,44 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
             {
                 continue;
             }
-            siteLines[k].emplace_back( r.fileId, r.line );
-            if( best[k] == kHopNoRef || score( k, r ) < score( k, ing.references[ best[k] ] ) )
-            {
-                best[k] = refIndex;
-            }
+            const std::string_view owner      = owners[k];
+            const bool             ownerMatch = !owner.empty() && ( r.qualifier == owner || r.recvVar == owner || r.memberRoot == owner );
+            cands[k].push_back( { r.fileId, r.line, r.startByte, refIndex, std::uint8_t( ( fits( k, r ) ? 0 : 2 ) | ( ownerMatch ? 0 : 1 ) ) } );
         }
     }
-    for( std::size_t k = 0; k < wanted.size(); ++k )   // (3) the files the text slices read, each once
+    for( std::size_t k = 0; k < wanted.size(); ++k )   // (3) the pick, then the files the text slices read, each once
     {
-        std::sort( siteLines[k].begin(), siteLines[k].end() );   // two calls on one line are one site (sites_at='s rule)
-        out.recs[k].nSites = std::uint32_t( std::unique( siteLines[k].begin(), siteLines[k].end() ) - siteLines[k].begin() );
-        out.recs[k].ref    = best[k];
+        std::vector<Cand>& c = cands[k];
+        std::sort( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return std::tie( a.rank, a.file, a.line, a.byte, a.ref ) < std::tie( b.rank, b.file, b.line, b.byte, b.ref ); } );
+        if( !c.empty() )
+        {
+            out.recs[k].ref = c.front().ref;
+            // the lines tied with the pick (its rank, another line): two calls on one line are one site (sites_at='s rule)
+            std::size_t tiedLines = 1;
+            for( std::size_t i = 1; i < c.size() && c[i].rank == c.front().rank; ++i )
+            {
+                tiedLines += c[i].file != c[ i - 1 ].file || c[i].line != c[ i - 1 ].line ? 1 : 0;
+            }
+            // a tie misleads only when the caller has another edge to a callee of the same name (A::get beside B::get): with
+            // one such callee every tied line calls it, as far as the graph knows, so the first is as good as any
+            bool namesake = false;
+            if( tiedLines > 1 && wanted[k].from + 1 < g.outOff.size() )
+            {
+                const std::string_view leaf = hopdetail::leafName( ing.symbols[ wanted[k].to ] );
+                for( std::uint32_t e = g.outOff[ wanted[k].from ]; e < g.outOff[ wanted[k].from + 1 ] && !namesake; ++e )
+                {
+                    namesake = g.outTargets[e] != wanted[k].to && hopdetail::leafName( ing.symbols[ g.outTargets[e] ] ) == leaf;
+                }
+            }
+            out.recs[k].siteBy = ( c.front().rank & 2 ) != 0 ? HopSiteBy::NoFit : namesake ? HopSiteBy::Tie : HopSiteBy::Decided;
+        }
+        std::sort( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return std::tie( a.file, a.line ) < std::tie( b.file, b.line ); } );
+        out.recs[k].nSites = std::uint32_t( std::unique( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return a.file == b.file && a.line == b.line; } ) - c.begin() );
         if( out.recs[k].full )
         {
-            if( best[k] != kHopNoRef )
+            if( out.recs[k].ref != kHopNoRef )
             {
-                (void)files.text( ing.references[ best[k] ].fileId );
+                (void)files.text( ing.references[ out.recs[k].ref ].fileId );
             }
             (void)files.text( ing.symbols[ wanted[k].to ].fileId );
         }
@@ -409,23 +605,32 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
         if( rec.ref == kHopNoRef )
         {
             ++out.nosite;
-            continue;
         }
-        out.anySite  = true;
-        out.anySites = out.anySites || rec.nSites > 1;
+        else
+        {
+            out.anySite  = true;
+            out.anySites = out.anySites || rec.nSites > 1;
+            out.anyTie   = out.anyTie || rec.siteBy == HopSiteBy::Tie;
+            out.anyNoFit = out.anyNoFit || rec.siteBy == HopSiteBy::NoFit;
+        }
         if( !rec.full )
         {
             continue;
         }
-        const Symbol&            callee = ing.symbols[ rec.to ];
-        const hopdetail::CallText ct    = hopdetail::callText( files, ing.references[ rec.ref ], hopdetail::leafName( callee ), redact );
-        const hopdetail::CallText st    = hopdetail::calleeSig( files, callee, redact );
-        rec.call    = ct.text;
-        rec.callGap = ct.gap;
-        rec.sig     = st.text;
-        rec.sigGap  = st.gap;
+        const Symbol& callee = ing.symbols[ rec.to ];
+        // sig= prints for every full edge, a site or not (the review's S3): the agent's read of the callee does not depend on the call
+        const hopdetail::CallText st = hopdetail::calleeSig( files, callee, redact );
+        rec.sig    = st.text;
+        rec.sigGap = st.gap;
+        if( rec.ref != kHopNoRef )
+        {
+            const hopdetail::CallText ct = hopdetail::callText( files, ing.references[ rec.ref ], hopdetail::leafName( callee ), ing.symbols[ rec.from ], redact );
+            rec.call    = ct.text;
+            rec.callGap = ct.gap;
+        }
         out.unread += rec.callGap == HopGap::Unread || rec.sigGap == HopGap::Unread ? 1 : 0;
         out.notext += rec.callGap == HopGap::NoText ? 1 : 0;
+        out.redacted += rec.callGap == HopGap::Redacted ? 1 : 0;
         out.anyCall = out.anyCall || !rec.call.empty();
         out.anySig  = out.anySig || !rec.sig.empty();
     }
@@ -440,17 +645,25 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
 // signature on another row (a --connect join <s sig=>, an earlier <e> to the same callee).
 inline std::string hopAttrsXml( const IngestResult& ing, const HopRecord& rec, HopShed shed, bool withSig, bool singleRoot, std::string_view rootPrefix )
 {
-    if( rec.ref == kHopNoRef || shed == HopShed::Off )
+    if( shed == HopShed::Off )
     {
         return {};
     }
-    std::vector<char>      esc;
-    const Reference&       r   = ing.references[ rec.ref ];
-    const std::string_view rp  = singleRoot ? sarif::rootRelativeUri( ing.files[ r.fileId ], rootPrefix ) : std::string_view( ing.files[ r.fileId ] );
-    std::string            out = " site=\"" + std::string( escapeXml( rp, esc ) ) + ":" + std::to_string( r.line ) + "\"";
-    if( rec.nSites > 1 )
+    std::vector<char> esc;
+    std::string       out;
+    if( rec.ref != kHopNoRef )   // no site (hop_nosite=): the row still carries the callee's sig= when it prints in full
     {
-        out += " sites=\"" + std::to_string( rec.nSites ) + "\"";
+        const Reference&       r  = ing.references[ rec.ref ];
+        const std::string_view rp = singleRoot ? sarif::rootRelativeUri( ing.files[ r.fileId ], rootPrefix ) : std::string_view( ing.files[ r.fileId ] );
+        out = " site=\"" + std::string( escapeXml( rp, esc ) ) + ":" + std::to_string( r.line ) + "\"";
+        if( rec.nSites > 1 )
+        {
+            out += " sites=\"" + std::to_string( rec.nSites ) + "\"";
+        }
+        if( rec.siteBy != HopSiteBy::Decided )
+        {
+            out += rec.siteBy == HopSiteBy::Tie ? " site_by=\"first\"" : " site_by=\"nofit\"";
+        }
     }
     if( shed < HopShed::SiteOnly && !rec.call.empty() )
     {
@@ -570,6 +783,7 @@ inline std::string hopRootAttrsXml( const HopFacts& f, HopShed shed = HopShed::F
     if( f.nosite > 0 ) { out += " hop_nosite=\"" + std::to_string( f.nosite ) + "\""; }
     if( f.unread > 0 ) { out += " hop_unread=\"" + std::to_string( f.unread ) + "\""; }
     if( f.notext > 0 ) { out += " hop_notext=\"" + std::to_string( f.notext ) + "\""; }
+    if( f.redacted > 0 ) { out += " hop_redacted=\"" + std::to_string( f.redacted ) + "\""; }
     if( shed != HopShed::Full && ( f.anyCall || f.anySig ) )
     {
         out += shed == HopShed::NoSig ? " hop_shed=\"sig\"" : " hop_shed=\"sig,call\"";
@@ -592,16 +806,24 @@ inline std::string hopLegend( const HopFacts& f, std::string_view row, HopShed s
     }
     if( f.anySite )
     {
-        out += r + " site=file:line: a call (or macro invocation) in the hop's caller whose callee name is this hop's callee (one whose written owner is the callee's first); "
+        out += r + " site=file:line: a call (or macro invocation) in the hop's caller whose callee name is this hop's callee (one whose written owner is the callee's first, one whose argument count the callee rejects last); "
                "matched by name, not proof that this call is the one the edge binds. ";
     }
     if( f.anySites )
     {
         out += r + " sites=N: the caller calls that name on N lines; site= is one of them. ";
     }
+    if( f.anyTie )
+    {
+        out += r + " site_by=first: the caller also calls another callee of that name and several lines fit equally (written owner, argument count); site= is the first, not a guess. ";
+    }
+    if( f.anyNoFit )
+    {
+        out += r + " site_by=nofit: no such line passes an argument count the callee accepts; site= is the first name match. ";
+    }
     if( f.anyCall && shed < HopShed::SiteOnly )
     {
-        out += r + " call=: that call's text from its line start, whitespace collapsed, joined up to 3 lines while its parentheses are open, at most 120 bytes (U+2026 marks either cut). ";
+        out += r + " call=: that call's text from its line start (past the caller's own head on a one-line caller), whitespace collapsed, joined up to 3 lines while its parentheses are open, at most 120 bytes (U+2026 marks either cut). ";
     }
     if( f.anySig && shed < HopShed::NoSig )
     {
@@ -622,6 +844,10 @@ inline std::string hopLegend( const HopFacts& f, std::string_view row, HopShed s
     if( f.notext > 0 )
     {
         out += "hop_notext=N: call= withheld on N hops whose site text does not spell the callee (a macro-expanded or generated call). ";
+    }
+    if( f.redacted > 0 )
+    {
+        out += "hop_redacted=N: call= withheld on N hops whose callee name sits in or against a redacted credential. ";
     }
     if( shed != HopShed::Full && ( f.anyCall || f.anySig ) )
     {

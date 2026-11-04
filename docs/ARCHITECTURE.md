@@ -592,11 +592,14 @@ shows up on every such verb at once. `--path` hop rows and `--connect` `<e>` row
 it today. For the edges an answer will print, `hopFacts()` makes one pass over the reference table
 (never one scan per hop), reads each file once through the shared reader `src/filetext.h`
 (`FileTextCache`, which also says when a file could not be read or changed since indexing), and keeps
-per edge the call site in the caller (`site=`, a name match like `sites_at=`, with `sites=N` when the
-caller has more), the call's text (`call=`) and the callee's signature (`sig=`, `cleanSig`). One
+per edge the call site in the caller (`site=`, a name match like `sites_at=`, the owner-qualified call
+first and an argument-count misfit last, with `sites=N` when the caller has more and `site_by=` when the
+pick is a tie or a misfit), the call's text (`call=`, redacted before any cut) and the callee's
+signature (`sig=`, `cleanSig`, printed on a hop with no site too). One
 renderer, `hopAttrsXml()`, prints them at a shed level: under a budget `sig=` goes first, then
 `call=`, then `site=`, before anything the answer printed without them. Text that cannot be read or no
-longer spells the callee is withheld and counted on the root (`hop_unread=`, `hop_notext=`), never
+longer spells the callee, or whose callee name sits in a redaction, is withheld and counted on the root
+(`hop_unread=`, `hop_notext=`, `hop_redacted=`), never
 guessed; an edge no call names prints no site (`hop_nosite=`). A new edge-printing verb, or a stored
 per-edge site, goes through this file, not a second copy beside it.
 
