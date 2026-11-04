@@ -713,10 +713,29 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         evidenceOut->nameMask.assign( S * evidenceWords, 0u );
     }
 
-    // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text
+    // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text.
+    // CALLEE-TEXT-MONOTONE: the callee field adds term frequency and NO document length (a BM25F field with
+    // b = 0). A callee name that does not match the query used to grow dl and so LOWER its caller's score: a
+    // correct new edge cost the caller rank (ha-03: HueLight.async_turn_off fell under two rows when
+    // self.bridge.async_request_call bound). With no dl from this field, an out-edge can only raise its
+    // caller's score (when its name carries a query term) or leave it unchanged. Each name is tokenized ONCE
+    // (1a); the edge loop (1b) reuses the target's sparse name hits instead of re-tokenizing it per edge.
+    std::vector<std::uint32_t> nameHitOff( S + 1, 0 );
+    std::vector<std::pair<std::uint32_t, int>> nameHits;   // (match row, unit-weight tf) of each symbol's NAME
     for( std::size_t i = 0; i < S; ++i )
     {
         scanField( i, ing.symbols[i].name, kwName );
+        {
+            const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
+            for( std::size_t m = 0; m < matchCount; ++m )
+            {
+                if( nameRow[m] > 0 )
+                {
+                    nameHits.emplace_back( std::uint32_t( m ), nameRow[m] / kwName );
+                }
+            }
+            nameHitOff[i + 1] = std::uint32_t( nameHits.size() );
+        }
         if( evidenceOut )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
@@ -737,9 +756,17 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 nameDf[m] += nameRow[m] > 0 ? 1 : 0;
             }
         }
+    }
+    for( std::size_t i = 0; i < S; ++i )   // 1b: callee field, tf only (see above), from the 1a snapshot
+    {
+        int* const tfRow = tfFlat.data() + i * matchCount;
         for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
         {
-            scanField( i, ing.symbols[ outTargets[e] ].name, kwCallee );
+            const std::size_t t = std::size_t( outTargets[e] );
+            for( std::uint32_t h = nameHitOff[t]; h < nameHitOff[t + 1]; ++h )
+            {
+                tfRow[ nameHits[h].first ] += nameHits[h].second * kwCallee;
+            }
         }
     }
 

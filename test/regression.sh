@@ -343,6 +343,7 @@ for _g in \
     cacheoffsetcheck \
     cachereservecheck \
     cachesplitcheck \
+    calleetextmonocheck \
     callerscheck \
     callformcheck \
     callsrankordercheck \
