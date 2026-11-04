@@ -1222,6 +1222,25 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& c
     return true;
 }
 
+// true ⇒ every `::`-separated segment of a C++ scope passes `pred` (`std::__1` under "names std"); an empty scope has one empty segment
+template <class Pred>
+inline bool everyScopeSegment( std::string_view scope, Pred&& pred )
+{
+    for( std::size_t at = 0;; )
+    {
+        const std::size_t end = scope.find( "::", at );
+        if( !pred( scope.substr( at, end == std::string_view::npos ? std::string_view::npos : end - at ) ) )
+        {
+            return false;
+        }
+        if( end == std::string_view::npos )
+        {
+            return true;
+        }
+        at = end + 2;
+    }
+}
+
 // The std::-QUALIFIED C++ call scope guard — the C-family sibling of keepRustQualifiedCandidates, and far
 // narrower than it.
 //
@@ -1335,27 +1354,11 @@ inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference
     // — every segment of the candidate's scope names std (`std`, `std::__1`), so a member of `template <> struct
     // std::formatter<X, char>` written outside namespace std (scope `std::formatter<X, char>`) is none either (EXTQUAL-FIX1)
     const bool    namespaceMember = namesStd( r.qualifier );
-    const auto    scopeNamesStd   = [ & ]( std::string_view sc )
-    {
-        for( std::size_t at = 0;; )
-        {
-            const std::size_t end = sc.find( "::", at );
-            if( !namesStd( sc.substr( at, end == std::string_view::npos ? std::string_view::npos : end - at ) ) )
-            {
-                return false;
-            }
-            if( end == std::string_view::npos )
-            {
-                return true;
-            }
-            at = end + 2;
-        }
-    };
     std::size_t keepCount = 0;
     for( std::size_t ci = 0; ci < cand.size(); ++ci )
     {
         const Symbol& sym       = ing.symbols[ cand[ ci ] ];
-        const bool    scopeIsStd = namespaceMember ? scopeNamesStd( sym.scope ) : ( sym.scopeRootsStd || namesStd( sym.scope ) || sym.scope.starts_with( "std::" ) );
+        const bool    scopeIsStd = namespaceMember ? everyScopeSegment( sym.scope, namesStd ) : ( sym.scopeRootsStd || namesStd( sym.scope ) || sym.scope.starts_with( "std::" ) );
         const bool    bodyOk    = !isFunctionLikeKind( sym.kind ) || isDefinitionNotDeclaration( sym );
         if( scopeIsStd && bodyOk )
         {
@@ -1370,6 +1373,12 @@ inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference
                            [ & ]( NodeId id ) { return !isFunctionLikeKind( ing.symbols[ id ].kind ) || isDefinitionNotDeclaration( ing.symbols[ id ] ); } ),
              "keepStdQualifiedCandidates must never leave a bodyless std function/method declaration as a survivor" );
     return keepCount != 0;
+}
+
+// "<fileId>#<name>": a per-file name key (JS import tables, CppQualifierScopes::foreignUsing)
+inline std::string jsImportKey( std::uint32_t fileId, std::string_view name )
+{
+    return std::to_string( fileId ) + "#" + std::string( name );
 }
 
 // CPP-EXTQUAL-VETO (a): the names a C/C++ call qualifier can name INSIDE the tree. A call written `Q::f()` whose canonical tier
@@ -1414,9 +1423,8 @@ struct CppQualifierScopes
     // true ⇒ a bare C++/ObjC call whose own file declared `using Q::name;` with Q foreign: Rule 3 proves nothing about it either
     bool foreignByUsing( const Reference& r ) const
     {
-        return !foreignUsing.empty() && r.qualifier.empty() && langFacts( r.lang ).qualifierNamesScope && foreignUsing.contains( usingKey( r.fileId, r.calleeName ) );
+        return !foreignUsing.empty() && r.qualifier.empty() && langFacts( r.lang ).qualifierNamesScope && foreignUsing.contains( jsImportKey( r.fileId, r.calleeName ) );
     }
-    static std::string usingKey( std::uint32_t fileId, std::string_view name ) { return std::to_string( fileId ) + '#' + std::string( name ); }
 };
 
 // each `::`-separated segment of a written C++ name outside `<…>`, its own template arguments dropped: `A::B<x::y>::C` → A, B, C
@@ -1528,16 +1536,19 @@ inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
     {
         if( r.role == RefRole::Import && !r.qualifierRootsStd && r.qualifier != "std" && t.foreign( r ) )
         {
-            t.foreignUsing.try_emplace( CppQualifierScopes::usingKey( r.fileId, r.calleeName ), char( 1 ) );
+            t.foreignUsing.try_emplace( jsImportKey( r.fileId, r.calleeName ), char( 1 ) );
         }
     }
     return t;
 }
 
-// EXTQUAL-FIX1 (F3): a C-family free function whose one file holds both a bodyless prototype and a body of it — the shape of a
-// preprocessor alternative (htop generic/Demangle.h: `#ifdef HAVE_LIBIBERTY char* Demangle_demangle(…); #else static inline char*
-// Demangle_demangle(…) { return NULL; } #endif`). Marks each such body in `altBody`, read before the decl/def collapse evicts the
-// prototype; true ⇒ it marked one. O(k log k) per name, nothing allocated for a name without a prototype.
+// EXTQUAL-FIX1 (F3): a C-family free function whose one file holds both a bodyless prototype and a STATIC body of it — the shape
+// of a preprocessor alternative (htop generic/Demangle.h: `#ifdef HAVE_LIBIBERTY char* Demangle_demangle(…); #else static inline
+// char* Demangle_demangle(…) { return NULL; } #endif`): an external prototype and an internal-linkage body of one name cannot
+// share a translation unit, so they sit in exclusive branches. A non-static body beside a prototype is an overload or the
+// definition itself (Envoy status_after_file_error.h: `statusAfterFileError(int);` beside a template overload with a body) and
+// is not marked. Marks each such body in `altBody`, read before the decl/def collapse evicts the prototype; true ⇒ it marked one.
+// O(k log k) per name, nothing allocated for a name without a prototype.
 inline bool markPreprocessorAlternatives( const IngestResult& ing, const rw::SmallVec<NodeId, 2>& ids, std::vector<bool>& altBody )
 {
     const auto cFunction = [ & ]( NodeId id ) { const Symbol& s = ing.symbols[ id ]; return s.kind == SymKind::Function && langFacts( s.lang ).transitiveIncludes; };
@@ -1557,7 +1568,7 @@ inline bool markPreprocessorAlternatives( const IngestResult& ing, const rw::Sma
     bool marked = false;
     for( const NodeId id : ids )
     {
-        if( cFunction( id ) && isDefinitionNotDeclaration( ing.symbols[ id ] ) && std::binary_search( protoFiles.begin(), protoFiles.end(), ing.symbols[ id ].fileId ) )
+        if( cFunction( id ) && ing.symbols[ id ].internalLinkage && isDefinitionNotDeclaration( ing.symbols[ id ] ) && std::binary_search( protoFiles.begin(), protoFiles.end(), ing.symbols[ id ].fileId ) )
         {
             altBody[ id ] = true;
             marked        = true;
@@ -3261,11 +3272,6 @@ struct JsImportTables
     HashMap<std::string, std::vector<VarSpan>> rebinds;   // FC3: "<fileId>#name" → JsRebind spans (model.h): a call there is undecided
     HashMap<std::string, std::vector<VarSpan>> pinnedRebinds;   // FC3: the rebinds whose declaration already bound a value: a MEMBER call through the name has no receiver at all there (jsMemberRootWritten)
 };
-
-inline std::string jsImportKey( std::uint32_t fileId, std::string_view name )
-{
-    return std::to_string( fileId ) + "#" + std::string( name );
-}
 
 // FC3: is this BARE call made through a name WRITTEN after its declaration, at a byte that declaration's scope holds
 // (`Eng = Foo; new Eng()`)? Such a call is undecided: the name no longer names what it was declared as.
