@@ -198,6 +198,8 @@ export function runTransforms(n: number[]) { return transformNodes(n); }
 X
 nat "$TSN" 'adding an argument to transformNodes: which ones break?' runTransforms "ts name mid-sentence"
 nat "$GO" 'If I change proxy.NewProxier, what breaks?' createProxier "go qualified, conditional frame"
+nat "$GO" 'I want to pass a new parameter into proxy.NewProxier from createProxier; what needs to change?' createProxier "go prepositions are frame"
+nat "$TSN" 'adding an argument between emit and transformNodes: which functions are in the way?' runTransforms "ts between is frame"
 # no dependents cue: a sentence that does not ask who uses the function reads as before (a lead, defined, a value question)
 for q in 'how does prepare_setup_platform work?' 'where is prepare_setup_platform defined?' 'how prepare_setup_platform reaches first_caller' 'default prepare_setup_platform and first_caller for Go and Rust buffers'; do
     A="$( ask "$NAT" "$q" )"; hasnt "$A" 'by="subject"' "SC no cue ($q): no callers"; has "$A" '<ctx ' "SC no cue ($q): an answer printed (twin)"

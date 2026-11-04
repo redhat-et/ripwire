@@ -144,8 +144,8 @@ inline bool isQuestionLead( std::string_view w )
 // new parameter to f; what is affected?", "who calls f and would break if its signature changed?". Such a sentence asks exactly what
 // "f new parameter" asks. Two closed word lists, no code names. A dependents cue asks who uses the function (change, add, affected,
 // breaks, depends, calls, used, update, modify); without one a sentence is not asking for callers ("how does f reach g", "default
-// x and y for buffers"), so it reads as before. Task frame words are the cues plus question leads, pronouns, helpers and
-// conjunctions ("I need to", "what would that"); the plain-word bound counts the other words only. Only <callers by="subject"> reads
+// x and y for buffers"), so it reads as before. Task frame words are the cues plus question leads, pronouns, helpers, conjunctions
+// and prepositions ("I need to", "what would that", "into"); the plain-word bound counts the other words only. Only <callers by="subject"> reads
 // this; the flip keeps `descriptive`, so a sentence never trades a map for a name-exact route.
 inline bool isDependentsCue( std::string_view w )
 {
@@ -164,7 +164,9 @@ inline bool isTaskFrameWord( std::string_view w )
                                             "had", "did", "done", "would", "could", "might", "must", "may", "shall", "need", "needs",
                                             "want", "wants", "wanted", "and", "or", "if", "then", "so", "but", "else", "also", "whom",
                                             "whose", "anything", "something", "everything", "define", "defines", "defined", "use", "using",
-                                            "work", "works", "worked", "working" } );
+                                            "work", "works", "worked", "working", "from", "into", "onto", "between", "about", "by", "at",
+                                            "as", "through", "via", "within", "across", "after", "before", "during", "up", "down", "out",
+                                            "toward", "towards" } );
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
