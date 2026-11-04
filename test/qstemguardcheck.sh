@@ -14,7 +14,7 @@ BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/qstemguard.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 FAIL=0
-ok(){ echo "  PASS  $1"; return 0; }
+ok(){ echo "  PASS  $1" || { FAIL=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; FAIL=1; }
 mkdir -p "$TMP/xdg"
 # run OUT ARGS... : runs the binary with a private cache home; red (and the file emptied) on a nonzero exit or no output
@@ -116,9 +116,8 @@ check_a(){ local lang="$1" q="$2" target="$3"
     runq "$TMP/a_$lang.on" "$q" default "$A/$lang" || return
     runq "$TMP/a_$lang.off" "$q" 0 "$A/$lang" || return
     local on off; on=$(rank "$TMP/a_$lang.on" "$target"); off=$(rank "$TMP/a_$lang.off" "$target")
-    [ "$on" -le 3 ] && ok "(a-$lang) default: '$q' reaches $target at r=$on" || no "(a-$lang) default: $target r=$on for '$q' (want <= 3)"
-    [ "$off" -gt 3 ] && ok "(a-$lang-ctl) RIPWIRE_QSTEM=0: $target r=$off (the stem, not ambient rank, did the work)" \
-                     || no "(a-$lang-ctl) RIPWIRE_QSTEM=0: $target already r=$off — fixture no longer proves the stem"
+    if [ "$on" -le 3 ]; then ok "(a-$lang) default: '$q' reaches $target at r=$on"; else no "(a-$lang) default: $target r=$on for '$q' (want <= 3)"; fi
+    if [ "$off" -gt 3 ]; then ok "(a-$lang-ctl) RIPWIRE_QSTEM=0: $target r=$off (the stem, not ambient rank, did the work)"; else no "(a-$lang-ctl) RIPWIRE_QSTEM=0: $target already r=$off — fixture no longer proves the stem"; fi
 }
 check_a py  "which sensors keep platform modules cleanly" sensor_registry
 check_a ts  "where are queued messages handled cleanly" handleSignal
@@ -152,11 +151,9 @@ check_b(){ local lang="$1" target="$2" decoy="$3" q="where is the event handled"
     runq "$TMP/b_$lang.on" "$q" default "$B/$lang" || return
     runq "$TMP/b_$lang.off" "$q" 0 "$B/$lang" || return
     local t d t0; t=$(rank "$TMP/b_$lang.on" "$target"); d=$(rank "$TMP/b_$lang.on" "$decoy"); t0=$(rank "$TMP/b_$lang.off" "$target")
-    [ "$t0" -eq 1 ] && ok "(b-$lang-twin) RIPWIRE_QSTEM=0: exact hit $target is r=1 (the fixture's exact ranking)" \
-                    || no "(b-$lang-twin) RIPWIRE_QSTEM=0: $target r=$t0, want 1 — fixture broken"
-    [ "$t" -eq 1 ] && ok "(b-$lang) default: exact hit $target stays r=1" || no "(b-$lang) default: $target r=$t — a stem-only body hit outranked it"
-    [ "$d" -ne 999 ] && [ "$d" -gt "$t" ] && ok "(b-$lang) default: body-stem decoy $decoy present (r=$d) and below the exact hit" \
-                     || no "(b-$lang) default: decoy $decoy r=$d vs exact r=$t (want present and below)"
+    if [ "$t0" -eq 1 ]; then ok "(b-$lang-twin) RIPWIRE_QSTEM=0: exact hit $target is r=1 (the fixture's exact ranking)"; else no "(b-$lang-twin) RIPWIRE_QSTEM=0: $target r=$t0, want 1 — fixture broken"; fi
+    if [ "$t" -eq 1 ]; then ok "(b-$lang) default: exact hit $target stays r=1"; else no "(b-$lang) default: $target r=$t — a stem-only body hit outranked it"; fi
+    if [ "$d" -ne 999 ] && [ "$d" -gt "$t" ]; then ok "(b-$lang) default: body-stem decoy $decoy present (r=$d) and below the exact hit"; else no "(b-$lang) default: decoy $decoy r=$d vs exact r=$t (want present and below)"; fi
 }
 check_b py mark_handled dispatch_event
 check_b ts markHandled dispatchEvent
@@ -179,17 +176,16 @@ EOF
 Q_C="how does loader.cpp report errors while parsing"
 runq "$TMP/c.on" "$Q_C" default "$C" && runq "$TMP/c.off" "$Q_C" 0 "$C" && {
     on=$(file_in_top "$TMP/c.on" "src/loader.cpp" 3); off=$(file_in_top "$TMP/c.off" "src/loader.cpp" 3)
-    [ "$off" -ge 3 ] && ok "(c-twin) RIPWIRE_QSTEM=0: loader.cpp holds $off of the top-3" || no "(c-twin) RIPWIRE_QSTEM=0: loader.cpp holds $off of top-3, want 3 — fixture broken"
-    [ "$on" -ge 3 ] && ok "(c) default: loader.cpp keeps $on of the top-3" || no "(c) default: loader.cpp holds $on of top-3 — body stem mass displaced the subject file"
+    if [ "$off" -ge 3 ]; then ok "(c-twin) RIPWIRE_QSTEM=0: loader.cpp holds $off of the top-3"; else no "(c-twin) RIPWIRE_QSTEM=0: loader.cpp holds $off of top-3, want 3 — fixture broken"; fi
+    if [ "$on" -ge 3 ]; then ok "(c) default: loader.cpp keeps $on of the top-3"; else no "(c) default: loader.cpp holds $on of top-3 — body stem mass displaced the subject file"; fi
     w=$(file_in_top "$TMP/c.on" "src/worker" 50)
-    [ "$w" -ge 1 ] && ok "(c) default: the worker files are still candidates ($w rows), only ranked below" || no "(c) default: worker files vanished entirely (want present below)"
+    if [ "$w" -ge 1 ]; then ok "(c) default: the worker files are still candidates ($w rows), only ranked below"; else no "(c) default: worker files vanished entirely (want present below)"; fi
 }
 
 # ── (d) postings parity with the stemmer on (default) ─────────────────────────────────────────────────────────
 run "$TMP/d_warm.xml" "$BIN" "$A/py" --for="which sensors keep platform modules cleanly" \
  && run "$TMP/d_scan.xml" "$BIN" "$A/py" --for="which sensors keep platform modules cleanly" --no-cache && {
-    cmp -s "$TMP/d_warm.xml" "$TMP/d_scan.xml" && ok "(d) parity: scan and persisted-stats answers byte-identical, stemmer on" \
-                                             || no "(d) parity: branches diverge with the stemmer on"; }
+    if cmp -s "$TMP/d_warm.xml" "$TMP/d_scan.xml"; then ok "(d) parity: scan and persisted-stats answers byte-identical, stemmer on"; else no "(d) parity: branches diverge with the stemmer on"; fi; }
 
-[ "$FAIL" -eq 0 ] && echo "qstemguardcheck: ALL PASS" || echo "qstemguardcheck: FAILURES"
+if [ "$FAIL" -eq 0 ]; then echo "qstemguardcheck: ALL PASS"; else echo "qstemguardcheck: FAILURES"; fi
 exit "$FAIL"
