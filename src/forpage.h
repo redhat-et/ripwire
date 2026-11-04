@@ -751,8 +751,9 @@ inline std::string forHdrRowsXml( const IngestResult& ing, const std::vector<For
 //      kForFileTailShownCap; each `<t p=… sym=…/>` with the file's top symbols by lens rank (tail-sym, train 30: the page
 //      row's own top[], so a rank row and a page row of one file name the same symbols). H2H-Graft lane 2: a row the ranked
 //      head did not show lands here.
-//   2. PAGE rows (FOLD C): page 0 of `--for=TASK --limit=40` (computeForFilePage, the same ranking and term evidence),
-//      minus the files already listed above, each with sym= (its top symbols by lens rank). The measured arm M4 appended
+//   2. PAGE rows (FOLD C): the first kForFileTailPageWalk rows of the file page (computeForFilePage, the same ranking and term
+//      evidence; FOR-TAIL-WIDE 2026-11-04: 4 pages, it was page 0 of `--for=TASK --limit=40`), minus the files already listed
+//      above; a row from page 0 with sym= (its top symbols by lens rank), a later row p= only. The measured arm M4 appended
 //      this page to the answer: 6 of 6 predicted rows reached an R0-missing item; the rank rows stay because two graded rows
 //      (textual-13/14) reach their item only through them, and M4 kept them too.
 // total= every positive-score file (the page's total=); a cut tail's next= is the page from the first page row it did not
@@ -892,22 +893,26 @@ inline void fileTailRankRows( FileTail& out, std::vector<char>& listed, const In
     }
 }
 
-// 2. the page rows: page 0 of the file page, minus the files already listed, each with its sym= names.
-//    CODE FIRST (`docs` non-null): the walk covers the page's first kForFileTailPageRows CODE rows, so a doc row never takes a
-//    code row's place. A doc row within the plain walk's window (the first kForFileTailPageRows page rows, a Sphinx .txt page
+// 2. the page rows: the file page's first kForFileTailPageWalk rows (FOR-TAIL-WIDE: 4 pages; it was page 0), minus the files
+//    already listed, in the page's own order. sym= rides a row from page 0 (page index < kForFileTailPageRows, the old cut);
+//    a row past it prints p= only, so the 3 extra pages cost about a third of a full row each (R-ladder Stage 0: path 21-43 B
+//    of a 71-94 B row).
+//    CODE FIRST (`docs` non-null): the walk covers the page's first kForFileTailPageWalk CODE rows, so a doc row never takes a
+//    code row's place. A doc row within the plain walk's window (the first kForFileTailPageWalk page rows, a Sphinx .txt page
 //    not counted: those pages arrived after the window was tuned, and at most kForFileTailSphinxTxtRows of them in all, counted
 //    in docs->total) goes to `docs`; one past it is left out and pageSkip marks the first such row, so next= continues no
 //    later than there.
 inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const IngestResult& ing, const ForFilePage& page, std::string_view rootArg,
                               FileTail* docs = nullptr )
 {
+    static_assert( kForFileTailPageWalk >= kForFileTailPageRows, "the tail walks at least the page its sym= rows come from" );
     out.total    = page.rows.size();
-    out.pageSeen = std::min( page.rows.size(), kForFileTailPageRows );
+    out.pageSeen = std::min( page.rows.size(), kForFileTailPageWalk );
     std::size_t codeSeen = 0, windowSeen = 0;   // window: page rows met, a Sphinx .txt page not counted (rank rows' rule)
-    for( std::size_t r = 0; r < page.rows.size() && ( docs != nullptr ? codeSeen < kForFileTailPageRows : r < out.pageSeen ); ++r )
+    for( std::size_t r = 0; r < page.rows.size() && ( docs != nullptr ? codeSeen < kForFileTailPageWalk : r < out.pageSeen ); ++r )
     {
         const ForFileRow&  row = page.rows[r];
-        const TailRowAdmit a   = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageRows );
+        const TailRowAdmit a   = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageWalk );
         codeSeen += a.isDoc ? 0 : 1;
         out.pageSeen = std::max( out.pageSeen, r + 1 );
         if( row.fileId >= listed.size() || listed[ row.fileId ] )
@@ -919,7 +924,8 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
             out.pageSkip = std::min( out.pageSkip, r );
             continue;
         }
-        listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, rootArg ), forFileRowSymNames( ing, row ), r + 1 );
+        listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, rootArg ),
+                     r < kForFileTailPageRows ? forFileRowSymNames( ing, row ) : std::string(), r + 1 );
     }
 }
 
@@ -1051,18 +1057,27 @@ inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
 
 // The explicit-budget fill (reserve first, forbudget-soft round C): the FEWEST rows whose rendered size reaches
 // `shareBytes` — the tail keeps at least its share, so its last row may cross it — or every collected row. `render`
-// is the dialect's renderer at a row count. Deterministic; at most kForFileTailShownCap + kForFileTailPageRows + 1 renders.
+// is the dialect's renderer at a row count. Deterministic. FOR-TAIL-WIDE: a binary search, about log2(rows) + 1 renders (the
+// linear scan rendered every prefix: quadratic once the walk grew to 4 pages). Valid because every count below paths.size()
+// is a cut tail (shown < paths.size() <= total, so next= rides each), whose size grows with each row: a row adds at least
+// `<t p=""/>` (9 B), next='s offset moves by at most a digit or two.
 template< class Render >
 inline std::size_t fileTailShownToFill( const FileTail& t, std::size_t shareBytes, const Render& render )
 {
-    for( std::size_t shown = 0; shown < t.paths.size(); ++shown )
+    std::size_t lo = 0, hi = t.paths.size();   // the answer lies in [lo, hi]; hi = every row when no cut prefix reaches the share
+    while( lo < hi )
     {
-        if( render( shown ).size() >= shareBytes )
+        const std::size_t mid = lo + ( hi - lo ) / 2;
+        if( render( mid ).size() >= shareBytes )
         {
-            return shown;
+            hi = mid;
+        }
+        else
+        {
+            lo = mid + 1;
         }
     }
-    return t.paths.size();
+    return lo;
 }
 
 }   // namespace rw

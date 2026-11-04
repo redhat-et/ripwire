@@ -886,7 +886,7 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
          + std::string( presentOnlyClause( p.foldFollowPresent, compact, rw::kForCompactFoldFollowLegend, rw::kForFoldFollowLegend ) );
 }
 inline constexpr std::string_view kForCompactLegendTail =
-    "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
+    "; t p= file outside sigs (weaker; rank rows, then the file page's first 160 rows), t sym= its top symbols (rank rows and page rows 1-40 only; a pointer, not the answer), r= rank (gap = trimmed)";
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 // The tail-order clause (serialize.h kForFileTailCodeFirstLegend): rides with the tail clause, only where the order applies
 // (forpage.h tailOrdersCodeFirst: a code question over an index that holds a doc unit).
@@ -4404,7 +4404,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
         }
 
-        // ── DEEP-TAIL d2: render the file-grain tail (FOLD C: page 0 of the file page; serialize.h kForFileTailShownCap / kForFileTailPageRows) ──
+        // ── DEEP-TAIL d2: render the file-grain tail (FOLD C: the file page's first rows; serialize.h kForFileTailShownCap / kForFileTailPageWalk) ──
         // Rendered after the bodies decision. Default regime: the full 40 rows ride on top — the sigs and the bodies are
         // byte-identical to a tail-less bundle by construction (nothing above charges these bytes). A soft target: the tail is
         // the last trailing section, funded from what the rows AT THE CUT and the sections before it left (reserve first).

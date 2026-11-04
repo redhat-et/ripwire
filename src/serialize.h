@@ -1112,7 +1112,9 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 // before the fold (arm M4, the page appended to the answer): 6 of 6 predicted rows reached an R0-missing item, none lost
 // one. The model and its renderers live in forpage.h (they need the page's ranking and its next= composer); the constants
 // and the legend stay here, where the --for header reads them.
-//   • DEFAULT regime: kForFileTailShownCap rank rows + kForFileTailPageRows page rows; the bytes ride ON TOP of the
+//   • DEFAULT regime: kForFileTailShownCap rank rows + the page rows among the file page's first kForFileTailPageWalk
+//     (FOR-TAIL-WIDE, 2026-11-04: 4 pages, not 1; R-ladder: 6 of 7 items the raised page recovered sat at file-page rank
+//     57-177), sym= on the rank rows and page rows 1..kForFileTailPageRows only; the bytes ride ON TOP of the
 //     sig/body budgets and are measured into est_tokens.
 //   • EXPLICIT --token-budget (a soft target): the tail is a trailing section funded first at its share — the
 //     bytes left once the rows at the target cut and the sections before it are paid (runForLens) — and fills
@@ -1120,6 +1122,7 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 //     empty shell `<tail total="NNNNN" shown="0" capped="1"></tail>`.
 inline constexpr std::size_t kForFileTailShownCap     = 24;   // the rank rows (deep-tail d2): files outside the shown head
 inline constexpr std::size_t kForFileTailPageRows     = 40;   // FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault)
+inline constexpr std::size_t kForFileTailPageWalk     = 160;  // FOR-TAIL-WIDE: page rows the tail walks (4 pages); rows past kForFileTailPageRows print p= only
 inline constexpr std::size_t kForFileTailShellReserve = 48;
 inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h)
 
@@ -1129,9 +1132,9 @@ inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail
 // it rides inside an XML comment where "--" is ill-formed (G4).
 inline constexpr std::string_view kForFileTailLegend =
     "; tail: file-grain rows, WEAKER evidence than the ranked rows: first the positive-score files NOT among the "
-    "shown sigs rows, the files of trimmed rows first, best-symbol rank order; then the file page's first 40 rows "
+    "shown sigs rows, the files of trimmed rows first, best-symbol rank order; then the file page's first 160 rows "
     "not listed above, file-first (the IDF share of the query's subtokens its top 8 symbols cover); "
-    "sym= its top symbols by lens rank (a pointer, not the answer); "
+    "sym= its top symbols by lens rank, on the rank rows and page rows 1-40 only (a pointer, not the answer); "
     "total=every positive-score file, shown=printed, capped=1 when they differ, next= the page from its first unprinted row. "
     "r= on a ranked row is its 1-based rank in this lens ranking, rows in r= order, p= the file (a gap = a budget-trimmed row)";
 // docs-rest CI fix 2: the order the tail really uses on a CODE question (filter.h taskAsksForDocText false; forpage.h
