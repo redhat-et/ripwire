@@ -421,6 +421,7 @@ cli.h|never dropped|2
 cli.h|never suppressed|1
 cli.h|prints even at 0|1
 compactlegend.h|never dropped|1
+forpage.h|never dropped|1
 handoff.h|never dropped|1
 ingest_astquery.h|never suppressed|1
 landingplan.h|always printed|1
@@ -633,6 +634,40 @@ fi
 grep -q 'verified rows are never dropped' "$TMP/zhb.xml" \
     && ok "(Z2i) presence guard: the default posture still prints the clause under test" \
     || no "(Z2i) presence guard: the default --handoff legend no longer prints the never-dropped clause"
+
+# ── (Z2j) --for page attrs_shed= — "the row itself is never dropped" (forpage.h, #520's attribute shed) ──
+# The claim is about what the shed may not take, so the probe has to make the shed fire: a --for page whose ONE-ROW
+# floor exceeds an explicit --token-budget. The fixture's only answer row carries a very long sc= (twelve nested
+# namespaces), so the shed's scope rung can bring the page under budget even in the full legend, which is where the
+# clause is printed (the compact reading of attrs_shed= does not restate it). The budget is derived from the same
+# page's own price at --token-budget=9999 (where it fits unshed), so it does not depend on $TMP's path length: 40 tokens
+# under that price is inside the shed's ~95-token window (measured: 955 unshed, 859 shed on the 7c851ba77 build).
+ZSH="$TMP/shedsb"; mkdir -p "$ZSH"
+{
+  printf 'namespace %s {\n' "$( i=0; s=''; while [ "$i" -lt 12 ]; do s="$s${s:+::}shedprobe_namespace_level_$( printf '%02d' "$i" )"; i=$(( i + 1 )); done; printf '%s' "$s" )"
+  echo 'int shed_probe_target( int a ) { return a + 1; }'
+  echo 'int shed_probe_caller( int a ) { return shed_probe_target( a ); }'
+  echo '}'
+} > "$ZSH/probe.cpp"
+"$BIN" "$ZSH" --for="shed probe target" --token-budget=9999 --limit=1 --offset=0 --legend=full --no-cache > "$TMP/zsh_fit.xml" 2>/dev/null
+zShFitEst="$( grep -o '<sigs [^>]*>' "$TMP/zsh_fit.xml" | head -1 | sed -n 's/.* est_tokens="\([0-9]*\)".*/\1/p' )"
+zShBudget=$(( ${zShFitEst:-0} - 40 ))
+"$BIN" "$ZSH" --for="shed probe target" --token-budget="$zShBudget" --limit=1 --offset=0 --legend=full --no-cache > "$TMP/zsh.xml" 2>/dev/null
+zShRoot="$( grep -o '<sigs [^>]*>' "$TMP/zsh.xml" | head -1 )"
+zShRows="$( grep -o '<d [^>]*>' "$TMP/zsh.xml" )"
+zShN="$( printf '%s' "$zShRows" | grep -c '<d ' )"
+if [ -z "$zShFitEst" ] || [ "$zShBudget" -le 0 ] || [ -z "$zShRoot" ]; then
+    no "(Z2j) presence guard: --for produced no candidate page on the shed fixture — the probe is inert"
+elif ! printf '%s' "$zShRoot" | grep -q 'attrs_shed="1"'; then
+    no "(Z2j) presence guard: --token-budget=$zShBudget (page price $zShFitEst) did not make the shed fire (no attrs_shed=\"1\") — the probe proves nothing"
+elif [ "$zShN" = "1" ] && printf '%s' "$zShRows" | grep ' n="shed_probe_target"' | grep ' p="probe.cpp"' | grep -q ' l="[0-9]'; then
+    ok "(Z2j) --for page: the shed fired (attrs_shed=\"1\" at budget $zShBudget) and the answer row still ships with n= p= l=, as its legend promises"
+else
+    no "(Z2j) --for page DROPPED the answer row (or what names it) while shedding ($zShN rows) — its legend says the row itself is never dropped"
+fi
+grep -q 'the row itself is never dropped' "$TMP/zsh.xml" \
+    && ok "(Z2j) presence guard: the shed page's full legend still prints the clause under test" \
+    || no "(Z2j) presence guard: the shed page no longer prints the 'the row itself is never dropped' clause"
 
 [ "$fail" = "0" ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES PRESENT"; exit 1
