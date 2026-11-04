@@ -147,26 +147,52 @@ inline bool isQuestionLead( std::string_view w )
 // x and y for buffers"), so it reads as before. Task frame words are the cues plus question leads, pronouns, helpers, conjunctions
 // and prepositions ("I need to", "what would that", "into"); the plain-word bound counts the other words only. Only <callers by="subject"> reads
 // this; the flip keeps `descriptive`, so a sentence never trades a map for a name-exact route.
+// The two closed lists, one table: `cue` marks a dependents cue (also a frame word); the rest only frame the question.
+struct TaskFrameWord
+{
+    std::string_view word;
+    bool             cue;
+};
+inline constexpr TaskFrameWord kTaskFrameWords[] = {
+    { "change", true }, { "changes", true }, { "changed", true }, { "changing", true }, { "add", true }, { "adds", true }, { "added", true },
+    { "adding", true }, { "affect", true }, { "affects", true }, { "affected", true }, { "affecting", true }, { "break", true }, { "breaks", true },
+    { "broke", true }, { "broken", true }, { "breaking", true }, { "depend", true }, { "depends", true }, { "depended", true }, { "depending", true },
+    { "dependent", true }, { "dependents", true }, { "update", true }, { "updates", true }, { "updated", true }, { "updating", true }, { "modify", true },
+    { "modifies", true }, { "modified", true }, { "modifying", true }, { "call", true }, { "calls", true }, { "called", true }, { "calling", true },
+    { "caller", true }, { "callers", true }, { "used", true }, { "uses", true },
+    { "i", false }, { "we", false }, { "you", false }, { "me", false }, { "my", false }, { "our", false }, { "it", false }, { "its", false }, { "it's", false },
+    { "they", false }, { "them", false }, { "their", false }, { "this", false }, { "that", false }, { "these", false }, { "those", false }, { "there", false },
+    { "here", false }, { "am", false }, { "be", false }, { "been", false }, { "being", false }, { "was", false }, { "were", false }, { "has", false },
+    { "have", false }, { "had", false }, { "did", false }, { "done", false }, { "would", false }, { "could", false }, { "might", false }, { "must", false },
+    { "may", false }, { "shall", false }, { "need", false }, { "needs", false }, { "want", false }, { "wants", false }, { "wanted", false }, { "and", false },
+    { "or", false }, { "if", false }, { "then", false }, { "so", false }, { "but", false }, { "else", false }, { "also", false }, { "whom", false },
+    { "whose", false }, { "anything", false }, { "something", false }, { "everything", false }, { "define", false }, { "defines", false },
+    { "defined", false }, { "use", false }, { "using", false }, { "work", false }, { "works", false }, { "worked", false }, { "working", false },
+    { "from", false }, { "into", false }, { "onto", false }, { "between", false }, { "about", false }, { "by", false }, { "at", false }, { "as", false },
+    { "through", false }, { "via", false }, { "within", false }, { "across", false }, { "after", false }, { "before", false }, { "during", false },
+    { "up", false }, { "down", false }, { "out", false }, { "toward", false }, { "towards", false } };
+
+// the table row of `w` (case-folded, leading quote or bracket trimmed), or null
+inline const TaskFrameWord* taskFrameRow( std::string_view w )
+{
+    while( !w.empty() && std::string_view( "`'\"([{" ).find( w.front() ) != std::string_view::npos )
+    {
+        w.remove_prefix( 1 );
+    }
+    const std::string lw = routeLower( w );
+    const auto        at = std::ranges::find( kTaskFrameWords, std::string_view( lw ), &TaskFrameWord::word );
+    return at == std::end( kTaskFrameWords ) ? nullptr : &*at;
+}
+
 inline bool isDependentsCue( std::string_view w )
 {
-    return detail::graphSubjectWordIs( w, { "change", "changes", "changed", "changing", "add", "adds", "added", "adding", "affect", "affects",
-                                            "affected", "affecting", "break", "breaks", "broke", "broken", "breaking", "depend", "depends",
-                                            "depended", "depending", "dependent", "dependents", "update", "updates", "updated", "updating",
-                                            "modify", "modifies", "modified", "modifying", "call", "calls", "called", "calling", "caller",
-                                            "callers", "used", "uses" } );
+    const TaskFrameWord* row = taskFrameRow( w );
+    return row != nullptr && row->cue;
 }
 
 inline bool isTaskFrameWord( std::string_view w )
 {
-    return isQuestionLead( w ) || isDependentsCue( w )
-        || detail::graphSubjectWordIs( w, { "i", "we", "you", "me", "my", "our", "it", "its", "it's", "they", "them", "their", "this", "that",
-                                            "these", "those", "there", "here", "am", "be", "been", "being", "was", "were", "has", "have",
-                                            "had", "did", "done", "would", "could", "might", "must", "may", "shall", "need", "needs",
-                                            "want", "wants", "wanted", "and", "or", "if", "then", "so", "but", "else", "also", "whom",
-                                            "whose", "anything", "something", "everything", "define", "defines", "defined", "use", "using",
-                                            "work", "works", "worked", "working", "from", "into", "onto", "between", "about", "by", "at",
-                                            "as", "through", "via", "within", "across", "after", "before", "during", "up", "down", "out",
-                                            "toward", "towards" } );
+    return isQuestionLead( w ) || taskFrameRow( w ) != nullptr;
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
@@ -274,6 +300,13 @@ inline bool sortSubjectWords( const std::vector<std::string_view>& words, Subjec
     }
     return true;
 }
+// a sentence that asks what depends on its symbol, with few plain words beside the task frame
+inline bool asksDependents( const std::vector<std::string>& dropped )
+{
+    const auto cue   = []( const std::string& w ) { return isDependentsCue( w ); };
+    const auto plain = []( const std::string& w ) { return !isTaskFrameWord( w ); };
+    return std::ranges::any_of( dropped, cue ) && std::size_t( std::ranges::count_if( dropped, plain ) ) <= kSubjectMaxPlainWords;
+}
 }   // namespace subject_detail
 
 inline SubjectReading subjectReading( const IngestResult& ing, std::string_view task )
@@ -321,9 +354,7 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
     }
     r.names       = keptRaw.size();
     r.descriptive = !isQuestionLead( words.front() ) && r.dropped.size() <= kSubjectMaxPlainWords;
-    r.framed      = r.descriptive
-            || ( std::ranges::any_of( r.dropped, []( const std::string& w ) { return isDependentsCue( w ); } )
-                 && std::size_t( std::ranges::count_if( r.dropped, []( const std::string& w ) { return !isTaskFrameWord( w ); } ) ) <= kSubjectMaxPlainWords );
+    r.framed      = r.descriptive || subject_detail::asksDependents( r.dropped );
     return r;
 }
 
