@@ -127,6 +127,14 @@ Discloses: `loops_capped`
 | `kMaxLoopsModeled` | `20000` | — | — |
 | `kQueryBudget` | `50000` | — | — |
 
+### `src/aliashop.h`
+
+Discloses: `alias_depth_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kAliasHopDepth` | `4` | — | hops past the asked alias (a runaway guard; real chains are 1-3) |
+
 ### `src/atoms.h`
 
 Discloses: `count_capped`
@@ -405,6 +413,14 @@ Discloses: `capped`, `hosts_capped`
 | `kMaxFamily` | `64` | INDEXING | gates one flip may light — an alias fan-out past this is a table, not a switch |
 | `kMaxFlipRows` | `25` | OUTPUT | per emitted list; a DEFAULT --limit=N raises and --detail lifts |
 | `kMaxNearMisses` | `5` | OUTPUT | "did you mean" suggestions on an unknown gate name; --limit=N raises it |
+
+### `src/foraliashop.h`
+
+Discloses: `capped`, `depth_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kAliasHopSigBytes` | `240` | — | a declaration's text is cut here (cut="1"); a runaway guard |
 
 ### `src/forcallerhop.h`
 
