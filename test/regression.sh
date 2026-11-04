@@ -832,6 +832,7 @@ for _g in \
     qsnapcachecheck \
     qsnapprefetchcheck \
     qsnapproducercheck \
+    qstemguardcheck \
     qualifiedresolvecheck \
     qualitycheck \
     qualitycrosslangcheck \

@@ -1,0 +1,3 @@
+### Changed — inflected question words reach the names that carry their stem
+
+A question that says "sensors", "handled" or "parsing" now reaches the symbols named `sensor…`, `handle…` and `parse…`: the query-side stemmer ships on, for every lexically ranked answer (`--for`, `--recall`, `--exemplar` and the MCP twins). A stem variant counts only where it appears in a symbol's NAME; it no longer borrows doc-comment or body text, so a symbol whose body merely calls `update()` does not outrank one whose name says the word the question used, and a file the question names keeps its candidates. Corpus-common variants are still discarded by the existing document-frequency guard. `RIPWIRE_QSTEM=0` turns the stemmer off.

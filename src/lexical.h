@@ -526,8 +526,11 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // ONE shared table drives the scan branch, the persisted-stats branch, and every field pass —
     // parity by construction (test/postingscheck.sh; armed arm in test/lb3namecheck.sh). A variant
     // string already claimed by an earlier token (or equal to any exact token) is dropped, first-wins,
-    // so a doc token maps to exactly one row in either branch. RIPWIRE_QSTEM=1 arms it; the shipped
-    // default stays OFF until the LB-3 acceptance verdict (scratchpad lb3/preregistration.md) lands.
+    // so a doc token maps to exactly one row in either branch. QSTEM-GUARDED (2026-11-04) ships it ON:
+    // RIPWIRE_QSTEM=0 is the off switch. A variant's evidence is its NAME-field hits only (see pass 1): the
+    // unguarded fold also carried doc/body mass, and on the 60's natural wordings that mass let symbols whose
+    // bodies merely use the stem ("would need updating" -> every update* body) outrank exact hits and take the
+    // bodies budget (5 practice rows lost an item that way; name-only evidence lost none). Gate: test/qstemguardcheck.sh.
     struct LexMatchTok
     {
         std::string   tok;
@@ -541,7 +544,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     }
     {
         const char* qstemEnv = std::getenv( "RIPWIRE_QSTEM" );
-        const bool  qstemOn  = qstemEnv != nullptr && *qstemEnv == '1';
+        const bool  qstemOn  = qstemEnv == nullptr || std::string_view( qstemEnv ) != "0";   // default ON; =0 disarms
         // derived variants are CANDIDATES first: admission into the match table happens only after the
         // IDF guard below — the guard sees the deduped candidate set, never the user's exact tokens
         std::vector<LexMatchTok> stemCandidates;
@@ -713,10 +716,27 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         evidenceOut->nameMask.assign( S * evidenceWords, 0u );
     }
 
+    // QSTEM-GUARDED: a stem variant's EVIDENCE is its NAME-FIELD hits only, captured here (pass 1, before the callee,
+    // path, doc and body fields add to the same provisional column). Sparse, in doc order: a variant names few symbols.
+    struct VariantNameHit
+    {
+        std::uint32_t doc;
+        std::uint32_t v;
+        int           tf;
+    };
+    const std::size_t           variantColumns = matchCount - uniqueCount;
+    std::vector<VariantNameHit> variantNameHits;
     // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text
     for( std::size_t i = 0; i < S; ++i )
     {
         scanField( i, ing.symbols[i].name, kwName );
+        for( std::size_t v = 0; v < variantColumns; ++v )
+        {
+            if( const int tf = tfFlat[ i * matchCount + uniqueCount + v ]; tf > 0 )
+            {
+                variantNameHits.push_back( { std::uint32_t( i ), std::uint32_t( v ), tf } );
+            }
+        }
         if( evidenceOut )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
@@ -1091,9 +1111,16 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             for( std::size_t v = 0; v < variantCount; ++v )
             {
-                rw::emitTo( stderr, "qstem-guard: \"{}\" df={} cap={} {}\n",
+                const std::uint32_t u        = matchToks[ uniqueCount + v ].u;
+                std::size_t         exactAll = 0;
+                for( std::size_t i = 0; i < S; ++i )
+                {
+                    exactAll += tfFlat[ i * matchCount + u ] > 0 ? 1 : 0;
+                }
+                rw::emitTo( stderr, "qstem-guard: \"{}\" df={} cap={} {} exact=\"{}\" exactAll={} exactName={} varName={}\n",
                               matchToks[ uniqueCount + v ].tok.c_str(), dfVariant[v], variantCap,
-                              dfVariant[v] <= variantCap ? "admitted" : "rejected" );
+                              dfVariant[v] <= variantCap ? "admitted" : "rejected", uniqueToks[u].c_str(), exactAll,
+                              marginArmed ? nameDf[u] : -1, marginArmed ? nameDf[ uniqueCount + v ] : -1 );
             }
         }
         std::vector<int> tfFolded( S * uniqueCount, 0 );
@@ -1105,12 +1132,12 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             {
                 dst[u] = src[u];
             }
-            for( std::size_t v = 0; v < variantCount; ++v )
+        }
+        for( const VariantNameHit& hit : variantNameHits )   // QSTEM-GUARDED: only the NAME-field hits fold
+        {
+            if( dfVariant[ hit.v ] <= variantCap )
             {
-                if( dfVariant[v] <= variantCap )
-                {
-                    dst[ matchToks[ uniqueCount + v ].u ] += src[ uniqueCount + v ];
-                }
+                tfFolded[ std::size_t( hit.doc ) * uniqueCount + matchToks[ uniqueCount + hit.v ].u ] += hit.tf;
             }
         }
         tfFlat = std::move( tfFolded );
@@ -1119,7 +1146,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             // fold nameDf the SAME way tf just folded, so the margin test below sees one row per unique
             // token on either arm. A doc carrying both the exact token and an admitted variant in its
             // name is counted twice, so a folded nameDf is a CEILING, not a count — stated rather than
-            // hidden. It matters only when RIPWIRE_QSTEM is also armed, which ships off.
+            // hidden. It matters only when the stemmer is armed (the default; RIPWIRE_QSTEM=0 disarms it).
             for( std::size_t v = 0; v < variantCount; ++v )
             {
                 if( dfVariant[v] <= variantCap )
