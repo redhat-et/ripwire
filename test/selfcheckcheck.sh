@@ -230,9 +230,16 @@ def blank( text, segs ):
                 if out[ x ] != "\n": out[ x ] = " " if k == "comment" else "_"
     return "".join( out )
 
+TWINDOW = 10   # lines of code after a promise that the (T) arm reads; invocations() hands exactly that window as `ahead`
+
 def invocations( text, names ):
-    """Yield (name, line, argtext, before, after, rawarg) for every CODE invocation, #define bodies excluded, multi-line
-    aware. argtext has string/char/comment text blanked (same length); rawarg is the same span of the original text."""
+    """Yield (name, line, argtext, before, after, rawarg, ahead) for every CODE invocation, #define bodies excluded, multi-line
+    aware. argtext has string/char/comment text blanked (same length); rawarg is the same span of the original text.
+    before / after / ahead are BOUNDED windows, never the whole rest of the file (a regex over `code[ :start ]` per site was
+    O(file) each, quadratic, and was most of this gate's wall time on a 1 MB header): `before` is the code just ahead of the
+    invocation with the trailing run of whitespace, `!` and `(` already dropped (its last 12 characters are all the VALIDATE
+    context test reads); `after` is the 4 characters following the invocation's `)` once leading whitespace and `)` are
+    dropped (the VALIDATE test reads two); `ahead` is the code after the `)` up to the end of its 10th line."""
     code = blank( text, lex( text ) )
     for m in re.finditer( r"(?<![A-Za-z0-9_])(" + "|".join( sorted( names, key = len, reverse = True ) ) + r")(?![A-Za-z0-9_])", code ):
         ls = code.rfind( "\n", 0, m.start() ) + 1
@@ -253,7 +260,19 @@ def invocations( text, names ):
                 depth -= 1
                 if depth == 0: break
             e += 1
-        yield ( m.group( 1 ), text.count( "\n", 0, m.start() ) + 1, code[ j + 1:e ], code[ :m.start() ], code[ e + 1: ], text[ j + 1:e ] )
+        bk = m.start()
+        while bk > 0 and ( code[ bk - 1 ].isspace() or code[ bk - 1 ] in "!(" ): bk -= 1
+        ak = e + 1
+        while ak < len( code ) and ( code[ ak ].isspace() or code[ ak ] == ")" ): ak += 1
+        ahead_end = len( code ); nl = 0; pos = e + 1
+        while nl < TWINDOW:
+            q = code.find( "\n", pos )
+            if q < 0: break
+            nl += 1
+            if nl == TWINDOW: ahead_end = q; break
+            pos = q + 1
+        yield ( m.group( 1 ), text.count( "\n", 0, m.start() ) + 1, code[ j + 1:e ], code[ max( 0, bk - 12 ):bk ], code[ ak:ak + 4 ],
+                text[ j + 1:e ], code[ e + 1:ahead_end ] )
 
 def raw_args( blanked, raw ):
     """Split RAW argument text at the top-level commas of its BLANKED twin (a comma inside a literal is not a split)."""
@@ -305,7 +324,7 @@ def tokenBoundaryContains( win, candidate ):
         start = idx + 1
 
 def scan_code( rel, text, findings, counts, ratchet = True, contract_tu = False ):
-    for name, ln, arg, before, after, raw in invocations( text, NOEFFECT | { "VALIDATE", "DISCLOSE" } ):
+    for name, ln, arg, before, after, raw, ahead in invocations( text, NOEFFECT | { "VALIDATE", "DISCLOSE" } ):
         where = "%s:%d" % ( rel, ln )
         if name == "DISCLOSE":
             argc = 0 if not arg.strip() else len( [ a for a in top_args( arg ) if a.strip() ] )
@@ -391,8 +410,7 @@ def scan_code( rel, text, findings, counts, ratchet = True, contract_tu = False 
             if not toplevel_bool and oppos > 0:
                 lhs = whole[ :oppos ]; rhs = whole[ oppos + 2: ]
                 if lhs and rhs and re.search( r"[A-Za-z_]", lhs ) and re.search( r"[A-Za-z_]", rhs ):
-                    TWINDOW = 10
-                    win_text = "\n".join( after.split( "\n" )[ :TWINDOW ] )
+                    win_text = ahead
                     # ASSUMED_THEN_TESTED_FUNCTION_BOUND: stop the window at the first `}` that closes BELOW
                     # the promise's own scope (a balanced nested block — an `if`/`for` that opens and closes
                     # within the window — does not trip this; only a brace that closes an ENCLOSING scope,
