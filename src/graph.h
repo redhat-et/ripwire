@@ -9348,6 +9348,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // `forCallNarrow`: a Ruby constant read off a VALUE position (an argument, a rescue class — parser version 93)
     // is a dependency of the file but not import evidence for a bare call, so it never enters this set. --deps,
     // --impact's importer tier and the lazy-pair count read the same records through the default path and keep it.
+    // C-ROOT-INCLUDE: the same flag keeps C/C++ quote includes at the includer's directory here (no include-root probe),
+    // so the file graph gains the root edges and this narrow does not — resolve.h kCallNarrowReadsCIncludeRoots.
     auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, /*lazyPairsOut=*/nullptr, /*forCallNarrow=*/true );
     const rw::FileSetStore fileIncludes = transitiveIncludeSet( includeAdj );
     const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
@@ -14021,6 +14023,8 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 // those, and a hit is by construction a hit on one of them (re-checked against `isDecl` anyway, so the
 // function is sound without trusting each language's internals). The pass is O(ing.includes) byte lookups
 // for the candidate-file filter, plus one resolve per include OF a candidate file.
+// One exception: a C/C++ quote include that misses its own directory is proven at the include roots over the whole corpus
+// (proveCandidatesAtIncludeRoots below), because the roots' two guards need every path, not only the declaration files.
 //
 // WHAT DOES NOT PROVE — all of it in the under-count direction, and none of it silent, because the caller's
 // residue count covers every drop: a Rust `use crate::…` (no crate root is mined here — resolvePreciseInclude's
@@ -14029,6 +14033,61 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 // include that escapes its own root on disk or resolves through a tsconfig/go.mod alias. Each of those needs
 // a whole-corpus pass this seam deliberately does not take.
 //
+// C-ROOT-INCLUDE, rule 2's root step: a C/C++ quote include the includer-directory step missed is proven at the include roots by
+// the FILE GRAPH's own rule (resolve.h resolveCIncludeRoots), read over the WHOLE corpus, not over the declaration-only index.
+// The declaration-only index cannot hold either of that rule's guards (review of #524, F1): a sibling header that declares
+// nothing is absent from it, so "the includer's directory wins" would be bypassed, and a second root holding the same name is
+// absent too, so an ambiguous name would look unique. Both would prove a definition the file graph draws no edge for.
+// COST — the index holds only the corpus files whose basename some pending target ends in (every key the resolver probes for
+// those targets ends in that basename, so the index answers each of its lookups exactly as the whole-corpus index does), and
+// the include-root directories. One pass over the file list, run only when a C quote include of a candidate file missed its
+// own directory; never the whole-corpus include resolve the COST note above rules out.
+inline void proveCandidatesAtIncludeRoots( const IngestResult& ing, const std::vector<char>& isDecl,
+                                           const std::vector<std::uint32_t>& pending, const WsIncludeCtx* ws, std::vector<char>& proven )
+{
+    const auto baseName = []( std::string_view p ) noexcept
+    {
+        const std::size_t cut = p.rfind( '/' );
+        return cut == std::string_view::npos ? p : p.substr( cut + 1 );
+    };
+    HashMap<std::string, char> wantedNames;
+    for( const std::uint32_t i : pending )
+    {
+        wantedNames.try_emplace( std::string( baseName( ing.includes[ i ].target ) ), char( 1 ) );
+    }
+    HashMap<std::string, std::uint32_t> probeIndex;
+    CIncludeBaseDirs                    baseDirs;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string key = lexicalNormalize( rootRelPath( ing, f ) );   // keyed as buildPreciseIncludeAdj keys its index
+        addCIncludeBaseDirsOf( key, baseDirs );
+        if( wantedNames.contains( std::string( baseName( key ) ) ) )
+        {
+            probeIndex.emplace( key, f );
+        }
+    }
+    for( const std::uint32_t i : pending )
+    {
+        const Include&         inc  = ing.includes[ i ];
+        const std::string_view from = rootRelPath( ing, inc.fileId );
+        if( proven[ inc.fileId ] != 0 )
+        {
+            continue;
+        }
+        // The file graph's two steps, in its order: the includer's own directory first (a sibling that declares nothing still
+        // wins, and then proves nothing), then the roots, unique or nothing.
+        std::uint32_t to = resolvePreciseInclude( from, inc.target, inc.isAngle, probeIndex, {}, false, ws, inc.fileId, nullptr );
+        if( to == kNoFile )
+        {
+            to = resolveCQuoteAtRoots( inc, from, probeIndex, baseDirs, ws, nullptr );
+        }
+        if( to != kNoFile && to < isDecl.size() && isDecl[ to ] != 0 )
+        {
+            proven[ inc.fileId ] = char( 1 );
+        }
+    }
+}
+
 // RULE 2, the scan, split out of the proof below so the bolted-on resolver call does not inflate its
 // complexity (the same reason #63 split declToDefFollowThrough out of resolveAllByNameQualified). Marks
 // every still-unproven `isCand` file whose own #include directives resolve to an `isDecl` file. All three
@@ -14063,8 +14122,10 @@ inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std:
         ws               = &wsCtx;
     }
 
-    for( const Include& inc : ing.includes )
+    std::vector<std::uint32_t> rootPending;   // C-ROOT-INCLUDE: C quote includes the includer-directory step missed
+    for( std::uint32_t i = 0; i < ing.includes.size(); ++i )
     {
+        const Include& inc = ing.includes[ i ];
         // Skipped: a symbolic Ruby constant (it resolves through its own corpus-wide definition index, never
         // as a path), an include from a file that holds no candidate, and one whose file is already proven.
         const bool worthResolving = !inc.isSymbolic && inc.fileId < isCand.size()
@@ -14079,6 +14140,14 @@ inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std:
         {
             proven[ inc.fileId ] = char( 1 );
         }
+        else if( to == kNoFile && isCQuoteRootProbe( inc, rootRelPath( ing, inc.fileId ) ) )
+        {
+            rootPending.push_back( i );
+        }
+    }
+    if( !rootPending.empty() )
+    {
+        proveCandidatesAtIncludeRoots( ing, isDecl, rootPending, ws, proven );
     }
 }
 
@@ -16596,12 +16665,16 @@ inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::v
     }
     std::vector<char>          lazyByFileOrder;   // importersOfFiles' own order (ascending file id) — see below
     std::vector<std::uint32_t> fileFanIn;         // per file: how many files import it — the rank-before-cap weight
-    // #220 part 1: the tier's floor concerns it only when a TS/JS import could land on one of its def files — a C++
-    // symbol's importers cannot hide behind a TS alias, so its answer neither pays for the count nor carries it.
+    // #220 part 1: the tier's floor concerns it only when an import that resolved to nothing could land on one of its def
+    // files: a TS/JS import (an unread alias), or (C-ROOT-INCLUDE) a C/C++ quote include whose name two include roots both
+    // hold. Any other symbol's importers cannot hide behind either, so its answer neither pays for the count nor carries it.
     const bool tsTarget = std::any_of( defFiles.begin(), defFiles.end(), [ & ]( std::uint32_t f )
                                        { return f < ing.files.size() && tsimport::couldBeTsImportTarget( ing.files[f] ); } );
+    const bool cTarget  = std::any_of( defFiles.begin(), defFiles.end(), [ & ]( std::uint32_t f )
+                                       { return f < ing.files.size() && includeLangOf( rootRelPath( ing, f ) ) == IncludeLang::CFamily; } );
     TsImportExtras tsExtras;
-    t.files          = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, tsTarget ? &t.importsUnresolved : nullptr, tsTarget ? &tsExtras : nullptr, adjOut );
+    t.files          = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, ( tsTarget || cTarget ) ? &t.importsUnresolved : nullptr,
+                                         tsTarget ? &tsExtras : nullptr, adjOut );
     t.tsconfigUnread = tsExtras.extendsUnread;
 
     // t.files is about to be RESORTED into tier/path order; lazyByFileOrder must move WITH each entry, not

@@ -403,6 +403,7 @@ for _g in \
     cpptmplscopecheck \
     crashsweepcheck \
     crawlescapecheck \
+    crootincludecheck \
     crossdirincludecheck \
     crossrefcheck \
     crossrefdegradecheck \

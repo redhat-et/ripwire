@@ -621,18 +621,32 @@ else
 fi
 # (o) Envoy's envoy/registry/registry.h: 580 files include it by an include-root path the index does not resolve, and the
 # path answer read importers="0" bare. unresolved_naming= counts the files whose directive target is a suffix of the
-# path yet did not land on it; a target that only shares the basename (other/reg.h) is not counted.
+# path yet did not land on it; a target that only shares the basename (other/reg.h) is not counted. Since C-ROOT-INCLUDE
+# a quote include that misses its own directory probes the tree root and an existing root include/ or src/ base, so
+# c2's "inc/proj/reg.h" lands (importers=1, c2 in import_reach) and only c1's "proj/reg.h" stays unresolved: inc/ is no
+# root base. The twin (o2) keeps unresolved_naming=2 exercised: two directives name peer/pr.h and neither lands.
 mkdir -p "$PH/inc/proj" "$PH/src/c"; printf 'int reg_fn(void);\n' > "$PH/inc/proj/reg.h"
 printf '#include "proj/reg.h"\nint c1(void) { return reg_fn(); }\n' > "$PH/src/c/c1.c"
 printf '#include "inc/proj/reg.h"\nint c2(void) { return reg_fn(); }\n' > "$PH/src/c/c2.c"
 printf '#include "other/reg.h"\nint c3(void) { return 0; }\n' > "$PH/src/c/c3.c"
 pi inc/proj/reg.h; R="$( proot )"
-if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="inc/proj/reg.h" importers="0" shown_importers="0" importers_capped="0" unresolved_naming="2"' \
-   && printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
-    ok "path (o): importers=0 on a file two directives name by an unknown include root carries unresolved_naming=2 and its legend"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="inc/proj/reg.h" importers="1" shown_importers="1" importers_capped="0" unresolved_naming="1"' \
+   && printf '%s' "$PO" | grep -q '<f via="import" p="src/c/c2.c"' && printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
+    ok "path (o): the root-relative include lands (importers=1, src/c/c2.c), the one directive by an unknown root carries unresolved_naming=1 and its legend"
 else no "path (o) rc=$PRC: $R"; fi
 pi inc/proj/reg.h --json
-if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"importers":0,.*"unresolved_naming":2'; then ok "path (o): --json carries unresolved_naming"; else no "path (o) json rc=$PRC: $( printf '%s' "$PO" | head -c 300 )"; fi
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"importers":1,.*"unresolved_naming":1,.*"import_reach":\[{"via":"import","p":"src/c/c2.c"'; then ok "path (o): --json carries unresolved_naming and c2 in import_reach"; else no "path (o) json rc=$PRC: $( printf '%s' "$PO" | head -c 300 )"; fi
+# (o2) the twin: inc/peer/pr.h, named "peer/pr.h" by two files whose directory, tree root and src/ base hold no peer/,
+# answers importers=0 unresolved_naming=2 (the count stays per directive, not capped at 1).
+mkdir -p "$PH/inc/peer" "$PH/src/d"; printf 'int pr_fn(void);\n' > "$PH/inc/peer/pr.h"
+for k in 1 2; do printf '#include "peer/pr.h"\nint d%d(void) { return pr_fn(); }\n' "$k" > "$PH/src/d/d$k.c"; done
+pi inc/peer/pr.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="inc/peer/pr.h" importers="0" shown_importers="0" importers_capped="0" unresolved_naming="2"' \
+   && printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
+    ok "path (o2): importers=0 on a file two directives name by an unknown include root carries unresolved_naming=2 and its legend"
+else no "path (o2) rc=$PRC: $R"; fi
+pi inc/peer/pr.h --json
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"importers":0,.*"unresolved_naming":2'; then ok "path (o2): --json carries unresolved_naming=2"; else no "path (o2) json rc=$PRC: $( printf '%s' "$PO" | head -c 300 )"; fi
 pi lib/core.h; R="$( proot )"
 if [ "$PRC" = 0 ] && [ -n "$R" ] && ! printf '%s' "$R" | grep -q 'unresolved_naming=' && ! printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
     ok "path (o): a fully resolved file has no unresolved_naming= and no legend sentence (present-only)"
