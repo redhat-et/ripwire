@@ -25,7 +25,7 @@
 //     fits the single-anchor allowance, a caller (flipServesBodyAndCallers). rankQuery carries the name; route= says dropped:.
 //   * everything else, a refused flip included: the route is chooseForRanker's for the whole subject (CONFIDENCE-ANCHOR's note aside). A conceptual
 //     route whose descriptive subject names a symbol gains <callers by="subject"> on top (verbs_for.h); nothing is taken. For that
-//     block alone a sentence's task frame (isTaskFrameWord: question leads, "I need to", change/add/affected/breaks) is not prose.
+//     block alone a sentence that asks what depends on the symbol (isDependentsCue) does not count its task frame as prose.
 
 #include "filter.h"            // isTestSymbol, pathTierOf
 #include "forcallerhop.h"      // forCallerHopTargets — the ONE-function test a flip needs (its callers are served)
@@ -69,7 +69,7 @@ struct SubjectReading
     std::size_t                     names       = 0;       // identifier-syntax words in the subject (the words `reduced` keeps)
     bool                            sourceDef   = false;   // one exact symbol has a source-class definition
     bool                            descriptive = false;   // no question lead, and few enough plain words: not prose
-    bool                            framed      = false;   // few enough plain words once the task frame is set aside (callers only)
+    bool                            framed      = false;   // descriptive, or asks what depends on it with few plain words beside the frame
 };
 
 // What a --for or MCP route uses: the route, and the query the ranker and the mention anchor read.
@@ -140,25 +140,31 @@ inline bool isQuestionLead( std::string_view w )
     return detail::graphSubjectWordIs( w, { "which", "where", "how", "what", "why", "who", "when", "does", "do", "is", "are", "can", "should", "will" } );
 }
 
-// SUBJECT-CALLERS-NATURAL. The words that frame a task around a subject rather than describe it: a question lead anywhere, a
-// pronoun or helper ("I need to", "what would that"), a conjunction, and the change verbs a question about one function uses ("add",
-// "change", "affected", "breaks", "depends", "calls", "defined"). A closed list of function words and task verbs, no code names: a
-// sentence that names ONE function and only frames it ("I want to add a new parameter to f; what is affected?") is as much about f
-// as "f new parameter". The reading counts the other words only, and only <callers by="subject"> reads it; the flip keeps
-// `descriptive`, so a sentence never trades a map for a name-exact route.
+// SUBJECT-CALLERS-NATURAL. A sentence can name ONE function and only frame a question about what depends on it: "I want to add a
+// new parameter to f; what is affected?", "who calls f and would break if its signature changed?". Such a sentence asks exactly what
+// "f new parameter" asks. Two closed word lists, no code names. A dependents cue asks who uses the function (change, add, affected,
+// breaks, depends, calls, used, update, modify); without one a sentence is not asking for callers ("how does f reach g", "default
+// x and y for buffers"), so it reads as before. Task frame words are the cues plus question leads, pronouns, helpers and
+// conjunctions ("I need to", "what would that"); the plain-word bound counts the other words only. Only <callers by="subject"> reads
+// this; the flip keeps `descriptive`, so a sentence never trades a map for a name-exact route.
+inline bool isDependentsCue( std::string_view w )
+{
+    return detail::graphSubjectWordIs( w, { "change", "changes", "changed", "changing", "add", "adds", "added", "adding", "affect", "affects",
+                                            "affected", "affecting", "break", "breaks", "broke", "broken", "breaking", "depend", "depends",
+                                            "depended", "depending", "dependent", "dependents", "update", "updates", "updated", "updating",
+                                            "modify", "modifies", "modified", "modifying", "call", "calls", "called", "calling", "caller",
+                                            "callers", "used", "uses" } );
+}
+
 inline bool isTaskFrameWord( std::string_view w )
 {
-    return isQuestionLead( w )
+    return isQuestionLead( w ) || isDependentsCue( w )
         || detail::graphSubjectWordIs( w, { "i", "we", "you", "me", "my", "our", "it", "its", "it's", "they", "them", "their", "this", "that",
                                             "these", "those", "there", "here", "am", "be", "been", "being", "was", "were", "has", "have",
                                             "had", "did", "done", "would", "could", "might", "must", "may", "shall", "need", "needs",
                                             "want", "wants", "wanted", "and", "or", "if", "then", "so", "but", "else", "also", "whom",
-                                            "whose", "anything", "something", "everything", "change", "changes", "changed",
-                                            "changing", "add", "adds", "added", "adding", "affect", "affects", "affected", "affecting",
-                                            "break", "breaks", "broke", "broken", "breaking", "depend", "depends", "depended",
-                                            "depending", "update", "updates", "updated", "updating", "modify", "modifies", "modified",
-                                            "modifying", "call", "calls", "called", "calling", "define", "defines", "defined",
-                                            "use", "uses", "used", "using", "work", "works", "worked", "working" } );
+                                            "whose", "anything", "something", "everything", "define", "defines", "defined", "use", "using",
+                                            "work", "works", "worked", "working" } );
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
@@ -314,7 +320,8 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
     r.names       = keptRaw.size();
     r.descriptive = !isQuestionLead( words.front() ) && r.dropped.size() <= kSubjectMaxPlainWords;
     r.framed      = r.descriptive
-            || std::size_t( std::ranges::count_if( r.dropped, []( const std::string& w ) { return !isTaskFrameWord( w ); } ) ) <= kSubjectMaxPlainWords;
+            || ( std::ranges::any_of( r.dropped, []( const std::string& w ) { return isDependentsCue( w ); } )
+                 && std::size_t( std::ranges::count_if( r.dropped, []( const std::string& w ) { return !isTaskFrameWord( w ); } ) ) <= kSubjectMaxPlainWords );
     return r;
 }
 

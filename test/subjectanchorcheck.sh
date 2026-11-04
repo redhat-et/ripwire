@@ -3,7 +3,8 @@
 #   A1-A5  per language, a plain word beside an exact symbol stops being an anchor: the route prints dropped:, <callers> is back
 #   B      a route DECLINED for a word routes on the symbol
 #   C      a prose tail keeps the conceptual answer, byte for byte, and <callers by="subject"> rides on top
-#   SC     SUBJECT-CALLERS-NATURAL: a framed sentence naming one function gets its callers; the route and the rest are unchanged
+#   SC     SUBJECT-CALLERS-NATURAL: a sentence naming one function and asking what depends on it gets its callers; the route and
+#          the rest are unchanged; no dependents cue (a lead, "defined", "reaches") reads as before
 #   N1-N8  near misses: namesake flood, symbol only in tests, question, graph form, join, plain-only subject, too many plain words, no word to drop
 #   D      dotted beats bare; a polyglot name splits and carries no row until a qualifier places it
 #   H      confidence: an anchor served from a test, doc or data file reads low; a source definition keeps it
@@ -148,11 +149,8 @@ A="$( ask "$PY" 'helper_only_tests zznope sturdy' )"
 hasnt "$A" 'by="subject"' "N2 test-only: a symbol only in tests lifts no callers onto a conceptual route"
 A="$( ask "$PY" 'where is prepare_setup_platform new' )"
 has "$( route "$A" )" 'dropped: new(1-defs)' "N3 question: a plain-word anchor goes on a question too"
-# SUBJECT-CALLERS-NATURAL: a question lead frames the subject, so the callers ride; the route itself is not flipped by it
-A="$( ask "$PY" 'where prepare_setup_platform zznope sturdy' )"; has "$A" 'by="subject"' "N3 question lead: the callers ride (a lead is task frame)"
-hasnt "$( route "$A" )" 'dropped:' "N3 question lead: no flip"
-A="$( ask "$PY" 'where prepare_setup_platform zznope sturdy alpha beta gamma' )"; hasnt "$A" 'by="subject"' "N3 question lead with five plain words: no callers lifted"
-has "$A" '<ctx ' "N3 five plain words: an answer printed (twin)"
+A="$( ask "$PY" 'where prepare_setup_platform zznope sturdy' )"; hasnt "$A" 'by="subject"' "N3 question lead: no callers lifted"
+has "$A" '<ctx ' "N3 question lead: an answer printed (twin)"
 A="$( ask "$PY" 'path from first_caller to prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N4 graph form: no reading"
 hasnt "$A" 'by="subject"' "N4 graph form: no subject callers"
 A="$( ask "$PY" 'first_caller + prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N5 join of two symbols: no reading"
@@ -200,6 +198,10 @@ export function runTransforms(n: number[]) { return transformNodes(n); }
 X
 nat "$TSN" 'adding an argument to transformNodes: which ones break?' runTransforms "ts name mid-sentence"
 nat "$GO" 'If I change proxy.NewProxier, what breaks?' createProxier "go qualified, conditional frame"
+# no dependents cue: a sentence that does not ask who uses the function reads as before (a lead, defined, a value question)
+for q in 'how does prepare_setup_platform work?' 'where is prepare_setup_platform defined?' 'how prepare_setup_platform reaches first_caller' 'default prepare_setup_platform and first_caller for Go and Rust buffers'; do
+    A="$( ask "$NAT" "$q" )"; hasnt "$A" 'by="subject"' "SC no cue ($q): no callers"; has "$A" '<ctx ' "SC no cue ($q): an answer printed (twin)"
+done
 # negative twins: plain words past the bound still refuse, a frame word never counts toward a name, no function no block
 A="$( ask "$NAT" 'I want prepare_setup_platform to log retry timing metrics somewhere useful please' )"
 hasnt "$A" 'by="subject"' "SC prose past the bound (frame aside): no callers"; has "$A" '<ctx ' "SC prose past the bound: an answer printed (twin)"
