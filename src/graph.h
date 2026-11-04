@@ -1241,6 +1241,18 @@ inline bool everyScopeSegment( std::string_view scope, Pred&& pred )
     }
 }
 
+// keepStdQualifiedCandidates' candidate test: a namespace-member call (`std::f`) needs every scope segment to name std; any other
+// std-rooted call takes a candidate whose scope is std-rooted (full chain, immediate scope, or the written `std::` prefix)
+template <class NamesStd>
+inline bool cppCandidateScopeIsStd( const Symbol& sym, bool namespaceMember, NamesStd&& namesStd )
+{
+    if( namespaceMember )
+    {
+        return everyScopeSegment( sym.scope, namesStd );
+    }
+    return sym.scopeRootsStd || namesStd( sym.scope ) || sym.scope.starts_with( "std::" );
+}
+
 // The std::-QUALIFIED C++ call scope guard — the C-family sibling of keepRustQualifiedCandidates, and far
 // narrower than it.
 //
@@ -1358,7 +1370,7 @@ inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference
     for( std::size_t ci = 0; ci < cand.size(); ++ci )
     {
         const Symbol& sym       = ing.symbols[ cand[ ci ] ];
-        const bool    scopeIsStd = namespaceMember ? everyScopeSegment( sym.scope, namesStd ) : ( sym.scopeRootsStd || namesStd( sym.scope ) || sym.scope.starts_with( "std::" ) );
+        const bool    scopeIsStd = cppCandidateScopeIsStd( sym, namespaceMember, namesStd );
         const bool    bodyOk    = !isFunctionLikeKind( sym.kind ) || isDefinitionNotDeclaration( sym );
         if( scopeIsStd && bodyOk )
         {
