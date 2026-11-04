@@ -399,6 +399,7 @@ for _g in \
     coplintcheck \
     countfloorcheck \
     cppbenchcheck \
+    cppextqualcheck \
     cppoperatorcheck \
     cppqualcheck \
     cpptmplscopecheck \
