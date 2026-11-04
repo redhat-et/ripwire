@@ -2277,6 +2277,107 @@ inline std::uint32_t inImporterRoot( const std::vector<std::uint32_t>& fileRoot,
     return fileRoot[ hit ] == fileRoot[ importerFileId ] ? hit : kNoFile;
 }
 
+// C-ROOT-INCLUDE: the include roots a quote `#include "a/b.h"` is probed at once the includer's own directory missed, with no build
+// file read: the repo root (Envoy, htop, tmux: the -I every build passes), each `include/` directory beside the includer's
+// directory or an ancestor (the shared module-root rule, moduleRootCandidates; C has no module unit), then `src/` at the root.
+// Order never decides: the hit must be unique. Each base is a shape a build file in the corpus passes as -I (repo root: Envoy Bazel, htop automake, tmux -iquote;
+// `include/`: waybar meson, cpython Modules/_hacl; root `src/`: ninja's fuzzer build); `source/` and `lib/` bound nothing. One tier: unique across the roots or nothing, and an in-tree name that two
+// roots both hold is counted in `ambiguousOut` (a dropped edge the verbs disclose), never guessed by probe order.
+// THE SEAM — the file graph reads the roots, the call narrow does not (yet). Every dependency view (--deps, --arch, Ca/Ce,
+// cycles, --impact importers, the health line) reads these edges. buildGraph's call narrow (fileIncludes → rule3IncludeFile,
+// and Graph::importAdj for the by-name hedge) builds its adjacency with forCallNarrow=true and keeps the includer-directory
+// resolution, because on Envoy the root edges let Rule 3 bind ~2,060 more call sites unhedged, about 300 of them wrong: an
+// external-qualified (`std::format`, `absl::Span`) or member call bound by include evidence to an in-tree namesake.
+// RE-COUPLE CONDITION: when CPP-EXTQUAL-VETO lands (an external-namespace-qualified call never binds an in-tree namesake by
+// include evidence; a member call on a typed local keeps the via="name" hedge), flip this to true and retarget
+// test/crootincludecheck.sh R9 to the bound arm. Nothing else reads it.
+inline constexpr bool kCallNarrowReadsCIncludeRoots = false;
+
+// The include-root DIRECTORIES the tree holds: every directory named `include` or `src` that contains an indexed file, keyed
+// the way the file index keys paths (so a labeled multi-root key carries its label). A base the tree does not hold is never
+// probed: a compiler cannot resolve through a missing directory, and the lexical join would otherwise turn
+// `include/../a.h` (no `include/` anywhere) into `a.h` (review of #524, F2). The repo root needs no entry: it always exists.
+using CIncludeBaseDirs = HashMap<std::string, char>;
+inline void addCIncludeBaseDirsOf( std::string_view key, CIncludeBaseDirs& out )
+{
+    for( std::size_t slash = key.find( '/' ); slash != std::string_view::npos; slash = key.find( '/', slash + 1 ) )
+    {
+        const std::string_view dir  = key.substr( 0, slash );
+        const std::size_t      cut  = dir.rfind( '/' );
+        const std::string_view last = cut == std::string_view::npos ? dir : dir.substr( cut + 1 );
+        if( last == "include" || last == "src" )
+        {
+            out.try_emplace( std::string( dir ), char( 1 ) );
+        }
+    }
+}
+
+// The probe bases, in the order cIncludeRootBases lists them. The root `src/` base is a KNOB, on (knob census: C-ROOT-SRC-BASE).
+// It is the widest net for a bare name, since a miss anywhere in the tree is tried there, and it earned 3 edges in the whole
+// measured corpus (ninja's fuzzer build); measure it on a src-layout tree with sub-projects before the table run.
+inline constexpr bool kCIncludeRootSrcBase = true;
+inline std::vector<std::string> cIncludeRootBases( std::string_view dir )
+{
+    std::vector<std::string> bases{ std::string() };
+    for( std::string& r : moduleRootCandidates( dir, []( std::string_view ) noexcept { return false; }, "include" ) )
+    {
+        bases.push_back( std::move( r ) );
+    }
+    if( kCIncludeRootSrcBase )
+    {
+        bases.emplace_back( "src" );
+    }
+    return bases;
+}
+
+inline std::uint32_t resolveCIncludeRoots( std::string_view dir, std::string_view target, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                           const CIncludeBaseDirs& baseDirs, const WsIncludeCtx* ws, std::uint32_t includerFileId,
+                                           std::uint64_t* ambiguousOut )
+{
+    std::uint32_t hit = kNoFile;
+    for( const std::string& base : cIncludeRootBases( dir ) )
+    {
+        if( !base.empty() && !baseDirs.contains( base ) )
+        {
+            continue;   // F2: a base directory the tree does not hold resolves nothing
+        }
+        const std::uint32_t f = joinNormalizeLookup( base, target, fileIndex, ws, includerFileId );
+        if( f == kNoFile || f == hit )
+        {
+            continue;   // a miss, or two bases that normalize onto the same file (`include/../a.h` and `src/../a.h`): one root
+        }
+        if( hit != kNoFile )
+        {
+            if( ambiguousOut != nullptr )
+            {
+                ++*ambiguousOut;
+            }
+            return kNoFile;
+        }
+        hit = f;
+    }
+    return hit;
+}
+
+// Does the root step apply to this directive? A C/C++ QUOTE include only: never an angle one, never a symbolic record, and
+// never a directive from a non-C includer (a Python `import a.b` or a Go import path never probes the C include roots).
+inline bool isCQuoteRootProbe( const Include& inc, std::string_view includerPath ) noexcept
+{
+    const bool quotePath = !( inc.isAngle || inc.isSymbolic || inc.target.empty() );
+    return quotePath && includeLangOf( includerPath ) == IncludeLang::CFamily;
+}
+
+// The second step for one directive after resolvePreciseInclude missed (kNoFile for anything isCQuoteRootProbe refuses).
+inline std::uint32_t resolveCQuoteAtRoots( const Include& inc, std::string_view includerPath, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                           const CIncludeBaseDirs& baseDirs, const WsIncludeCtx* ws, std::uint64_t* ambiguousOut )
+{
+    if( !isCQuoteRootProbe( inc, includerPath ) )
+    {
+        return kNoFile;
+    }
+    return resolveCIncludeRoots( includerDir( includerPath ), inc.target, fileIndex, baseDirs, ws, inc.fileId, ambiguousOut );
+}
+
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on
 // the INCLUDER's language (its file extension). `fileIndex` maps each canonical `ing.files` path → its
 // fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust);
@@ -2284,7 +2385,8 @@ inline std::uint32_t inImporterRoot( const std::vector<std::uint32_t>& fileRoot,
 // do not build one — an Elixir target then simply stays unresolved, never guessed). Returns the
 // fileId on a UNIQUE precise hit, else kNoFile (unresolved → contributes nothing; NEVER a basename
 // fallback, NEVER a guess).
-//   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit.
+//   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit. The include
+//     roots are a second step a caller adds on a miss (resolveCQuoteAtRoots below; the call narrow does not — see the seam).
 //   * C-family angle `<x.h>` (isAngle==true): external without a build system ⇒ kNoFile (never matched).
 //   * Python / TS / Rust / Bash / Ruby / Lua / Elixir: their per-language Step-A above (unique-or-degrade).
 //   * Go / Swift / Other: DEFERRED / no path ⇒ kNoFile (contributes nothing — honest).
@@ -4479,10 +4581,12 @@ inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap
 // keeps them, but they are not import evidence for a bare call: `notify(Dev::Config)` beside `record.update!` says
 // nothing about `record`, and buildGraph's narrow bound 1,017 discourse call sites on that reading, 19 of 20
 // sampled wrong (PR #139 review). Only buildGraph's fileIncludes passes true; the default keeps every consumer
-// byte-identical.
+// byte-identical. It also keeps a C/C++ quote include at the includer's directory (no include-root probe) unless
+// kCallNarrowReadsCIncludeRoots — the C-ROOT-INCLUDE seam, decoupled until CPP-EXTQUAL-VETO lands.
 // `importsUnresolvedOut` (#220 part 1): optional, default nullptr — when non-null it receives how many TS/JS bare
 // import directives drew no edge although they name something in this tree (tsimport::ImportResolver's
-// InRepoUnresolved verdict). Counted in DIRECTIVES, lazy ones included, so the dedup=true and dedup=false builds
+// InRepoUnresolved verdict), plus the C/C++ quote includes two include roots both hold (resolveCIncludeRoots: no edge,
+// never a guess by probe order). Counted in DIRECTIVES, lazy ones included, so the dedup=true and dedup=false builds
 // agree on it.
 // #220 part 2: every caller now gets the EDGES — a bare TS/JS specifier the relative branch left unresolved is handed
 // to tsimport::ImportResolver (built on the first such specifier, so a tree without one reads no config file), and
@@ -4524,9 +4628,15 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     // agree. Pure + deterministic (no I/O). Multi-root keeps its labeled keys: rootRelPath is the identity there.
     HashMap<std::string, std::uint32_t> fileIndex;
     fileIndex.reserve( F );
+    const bool       cIncludeRoots = !forCallNarrow || kCallNarrowReadsCIncludeRoots;   // C-ROOT-INCLUDE: the seam (see that constant)
+    CIncludeBaseDirs cBaseDirs;                                                          // F2: the include-root directories the tree holds
     for( std::uint32_t f = 0; f < F; ++f )
     {
-        fileIndex.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
+        const auto placed = fileIndex.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
+        if( cIncludeRoots )
+        {
+            addCIncludeBaseDirsOf( placed.first->first, cBaseDirs );
+        }
     }
 
     // ── Multi-root workspace context (§3.1): built ONLY for a merged workspace ingest — nullptr on every
@@ -4654,6 +4764,10 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         }
         std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle,
                                                    fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex );
+        if( to == kNoFile && cIncludeRoots )
+        {
+            to = resolveCQuoteAtRoots( inc, rootRelPath( ing, inc.fileId ), fileIndex, cBaseDirs, ws, importsUnresolvedOut );
+        }
         if( to == kNoFile && tsimport::isBareTsSpecifier( rootRelPath( ing, inc.fileId ), inc.target ) )
         {
             to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );

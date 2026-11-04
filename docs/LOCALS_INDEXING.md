@@ -50,7 +50,7 @@ Explicitly out of scope: `naming-predicate`/`naming-setter` (need a known return
 transferable to a local) and `naming-confusable`/`naming-uninformative` (corpus-scale — folding
 locals in risks exactly the blow-up this design avoids).
 
-**MVP scope is C/C++ (ObjC/ObjC++ fast-follow), not all 14 languages.** C-family has the highest
+**MVP scope is C/C++ (ObjC/ObjC++ fast-follow), not every supported language.** C-family has the highest
 locals/function ratio in the survey (5–15 per function, against roughly 3:1 for Python and 0.2–0.8
 for Go/Rust), and the `large-function`/`deep-nesting` gate Phase 2 extends is *already* C-family-only
 — so this extends shipped code instead of building a new cross-language subsystem. Go and Swift need

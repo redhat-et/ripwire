@@ -386,7 +386,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // #220 part 1: the FILE graph's gauge (graphlegend.h importsUnresolvedAttrXml), absent at zero, on the --deps/--arch/
     // --impact roots and the MCP impact twin. What it means for the numbers is the reading BESIDE it, never this row:
     // graph_partial= on --deps/--arch (next row), counts_floor= on --impact (its own row above; importers= only rises).
-    { "imports_unresolved", "imports_unresolved=N: N TS/JS imports naming this tree (alias, workspace or imports entry; assets never) drew no edge" },
+    { "imports_unresolved", "imports_unresolved=N: N TS/JS imports naming this tree (alias, workspace or imports entry; assets never) or C/C++ quote includes two include roots hold drew no edge" },
     // Its reading on --deps/--arch, the same sentence both full legends carry (graphlegend.h kGraphPartialAttrXml): not a
     // floor, because a missing edge can merge two cycles into one and moves a ratio either way.
     { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },
@@ -604,6 +604,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "memory_parsed",     "memory_parsed=K: the parse claimed the first K slots of its work order (uncached files, then cached, then grammarless, each largest first; path order when no grammar-bearing file needed a fresh parse, every one an ingest-cache hit); a slot may reuse cached facts or fail to read; later files carry no symbols", false, {}, MapHeaderRead::Only },
     { "memory_limit",      "memory_limit=NM: the guard's limit, spelled as the max-memory value that raises it", false, {}, MapHeaderRead::Only },
     { "memory_pressure",   "memory_pressure=1: OS memory pressure stopped it, not the limit", false, {}, MapHeaderRead::Only },
+    { "memory_peak",       "memory_peak=NM: this run's memory peak went over the memory_limit= value between the guard's readings; the run finished and answered, the overshoot itself cut nothing (beside memory_stop= the map is still that stop's floor of the tree), and the limit is a rule of thumb against running out of memory", false, {}, MapHeaderRead::Only },
     { "unindexed",         "unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most)", false, {}, MapHeaderRead::Only },
     { "unindexed_exts",    "unindexed_exts=E: E such extensions in all, the list cut", false, {}, MapHeaderRead::Only },
     { "escaped_root",      "escaped_root=K: K files refused: a symlink led out of the root", false, {}, MapHeaderRead::Only },
