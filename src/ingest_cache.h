@@ -150,7 +150,8 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
+constexpr std::uint32_t kCacheVersion = 49;           // 49: lane recv-xfile's LocalBindKind RecvCall (appended; readBind's kind bound moves).
+                                                      // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
                                                       //    moves; its placeholder 47), strictly above main 46 and that placeholder; no other
                                                       //    train-42b lane changed a record format.
                                                       // 46: train 40 — lane js-def-naming's LocalBindKind JsObjectLiteral (appended; its placeholder 45),
@@ -366,7 +367,11 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 299;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 301;          // bump on any grammar/.scm/extraction change
+                                                      // 301 = 2026-11-04 (lane recv-xfile): RecvCall records (a member call whose receiver is a call: C++, Python,
+                                                      //   TS); C++ ReturnType records on every C++ function (no longer behind CallResultFamily::Cpp); Python
+                                                      //   ReturnType / CallResult records, a `@property`'s return annotation and a `self.x = param` field's
+                                                      //   parameter annotation as MemberType. Rich file tag 302. kCacheVersion 49.
                                                       // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
                                                       //   so the merged value goes above both. Rich file tag 300. kCacheVersion stays 48.
                                                       // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage

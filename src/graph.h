@@ -9809,7 +9809,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     continue;
                 }
-                const NodeId cls = recvEv.types.resultClassOf( rt, cs.lang );
+                // RECV-XFILE: a Python local by the one class of the name; a C++ local stays off with its family (fix round 6: the
+                // macro traps of test/receiverevidencecheck.sh (L) need the scope reading) — only a chained receiver reads C++ results
+                const NodeId cls = r.lang == Lang::Python ? recvEv.types.statedResultClass( rt, cs.lang ) : recvEv.types.resultClassOf( rt, cs.lang );
                 if( cls != kNoNode && rule2Sink )
                 {
                     typeRule2CallResult( cr, ri, rt.unwrapDepth == 1 );
@@ -9820,6 +9822,25 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 break;
             }
+        }
+    };
+    // RECV-XFILE: the call `r` (reference `site`) committed ONE evidenced target `callee`: what its declared result states, for
+    // the member call whose receiver it is (ReceiverEvidence::noteCallReturn)
+    const auto noteReceiverResult = [ & ]( const Reference& r, NodeId callee, std::size_t site )
+    {
+        if( !recvEv.hasRecvCalls() )
+        {
+            return;
+        }
+        const Symbol& cs             = ing.symbols[ callee ];
+        const auto    [ rtLo, rtHi ] = recordsAt( returnTypesAt, ( std::uint64_t( cs.fileId ) << 32 ) | cs.sigStartByte );
+        if( rtLo == rtHi || sharesCallKey( site ) )
+        {
+            return;
+        }
+        for( auto rtIt = rtLo; rtIt != rtHi; ++rtIt )
+        {
+            recvEv.noteCallReturn( r, callee, ing.bindings[ rtIt->second ] );
         }
     };
     HashMap<std::uint64_t, char> nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
@@ -10675,8 +10696,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::uint32_t, std::string> rustUseText;   // EDGE-PRELUDE-VETO: a caller file's `use` statements (rustUseStatements), read once
     HashMap<NodeId, bool> procMacroMemo;   // EDGE-PRELUDE-VETO: does a Rust function candidate of a `name!(..)` site carry #[proc_macro]
     HashMap<NodeId, bool> preludeBindMemo;   // EDGE-PRELUDE-VETO: can a bare call name this namesake of a prelude name (preludeSite)
-    for( siteIndex = 0; siteIndex < ing.references.size(); ++siteIndex )
+    // RECV-XFILE: a chain's inner call is walked before its outer call (ReceiverEvidence::chainSiteOrder); else index order
+    const std::vector<std::uint32_t> siteOrder = recvEv.chainSiteOrder();
+    for( std::size_t walk = 0; walk < ing.references.size(); ++walk )
     {
+        siteIndex = siteOrder.empty() ? walk : siteOrder[ walk ];
         const Reference& site = ing.references[ siteIndex ];
         // An element access is a call only where its receiver's class is proven (subscriptOperatorProven above); the
         // rest of the loop reads it as that call.
@@ -11242,6 +11266,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             cand.clear();
             return true;
         };
+        // RECV-XFILE: a C++ receiver that is a call whose committed target states its class takes Rule 2's answer for that class
+        if( r.lang == Lang::Cpp && !scipPinned && !canonical && !narrowed )
+        {
+            if( const ReceiverEvidence::ReceiverProof* proof = recvEv.receiverProofOf( r ); proof != nullptr )
+            {
+                narrowed = narrowTo( narrower.rule2StatedRecvType( r, ing.symbols[ proof->cls ].name, classIds, chaUp ), r, cand ) || narrower.forgetClaim();
+            }
+        }
         if( !scipPinned && !canonical && !narrowed && writtenRoot != JsWrittenRoot::Pinned )
         {
             narrowed = narrowTo( narrower.rule2RecvVarType( r, classIds, chaUp ), r, cand ) || narrower.forgetClaim();
@@ -11288,6 +11320,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
             narrowed = !cand.empty() && !kotlinScopeUndo();
+        }
+        // RECV-XFILE (receiverevidence.h receiverProofOf): a receiver that is itself a call whose committed target STATES its
+        // result class (`c->getList().insert()`, `p.get_app().post()`) reaches that class's member — the one class, or nothing
+        if( r.lang != Lang::Cpp && !scipPinned && !canonical && !narrowed && recvEv.narrowCallReceiver( r ) )
+        {
+            for( NodeId c : recvEv.found )
+            {
+                if( langCompatible( ing.symbols[ c ].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                {
+                    cand.push_back( c );
+                }
+            }
+            narrowed = !cand.empty();
         }
         // lane L6 (ifacedispatch.h): the receiver's recorded type is an interface, a trait or a class declaring the callee with
         // no body — C++ through class identity's dispatch split (Rule 2 on a local or parameter, Rule 2b's field), every other
@@ -12562,13 +12607,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // target is the caller) types nothing: a floor.
         // A Rust module path (`model::load()`) is a qualifier the canonical tier cannot place but the crate layout can.
         const bool evidenced = scipPinned || canonical || narrowed || importPinned || languageLookupProved || ( hedgeEligible && !nameOnly );
-        if( !callResultAt.empty() && nReal == 1 && !nameOnly && !splitPick && !bindingPinned && !subscript && !ifaceImpl )   // L6: one implementor in the tree types nothing
+        if( ( !callResultAt.empty() || recvEv.hasRecvCalls() ) && nReal == 1 && !nameOnly && !splitPick && !bindingPinned && !subscript && !ifaceImpl )   // L6: one implementor in the tree types nothing
         {
             for( NodeId to : tier )
             {
                 if( to != r.fromSymbol && ( evidenced || recvEv.types.rustQualifierReaches( r, to ) ) && ( !finalSegmentType || qualifiedReceiverResolves( r, to ) ) )
                 {
-                    typeCallResults( r, to, siteIndex );
+                    if( !callResultAt.empty() )
+                    {
+                        typeCallResults( r, to, siteIndex );
+                    }
+                    noteReceiverResult( r, to, siteIndex );   // RECV-XFILE: a chained member call's receiver reads it
                 }
             }
         }
@@ -12578,6 +12627,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         disposition = CallDisposition::Bound;
     }
+    std::sort( g.keptForwards.begin(), g.keptForwards.end() );   // RECV-XFILE: siteOrder may walk a chain's inner call early
     std::sort( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() );   // grouped by caller: stdMemberCallsMadeBy's equal_range
     // A reference that left the loop naming no disposition is a resolver bug behind a correct-looking map: the
     // edges are right and the census's conservation line is not. Every plain build says so, census or not.

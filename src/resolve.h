@@ -6888,6 +6888,22 @@ struct Narrower
     // true iff THIS reference's Rule 2 answer was a class-identity CLAIM (an inherited body or an interface dispatch split)
     // that survived the caller's language/root filter — a type fact, which the ladder keeps whole instead of trimming it by
     // file locality. forgetClaim: the caller's filter emptied Rule 2's answer; false, to close `narrowed = narrowTo( … ) || …`.
+    // RECV-XFILE: Rule 2's answer for a receiver whose class a call result STATES (receiverevidence.h receiverProofOf, which
+    // proved `cls` the one in-tree class of its name) — the same "Class::name" lookup and class-identity narrow a typed local takes
+    const rw::SmallVec<NodeId, 2>* rule2StatedRecvType( const Reference& r, std::string_view cls, const ClassIdentity& ids, const ChaUpNames& chaUp ) const
+    {
+        identity.forgetClaim();
+        keyScope.clear();
+        keyScope.append( cls ).append( "::" ).append( r.calleeName );
+        const auto it = canonByName.find( keyScope );
+        const rw::SmallVec<NodeId, 2>* const own = ( it == canonByName.end() || it->second.size() == 0 ) ? nullptr : &it->second;
+        if( ids.classesByName.empty() || !extent::inSet( extent::kHeadRuleLangs, r.lang ) )
+        {
+            return own;
+        }
+        return identity.narrow( r, WrittenType{ cls, {} }, own, ids, chaUp );
+    }
+
     bool identityClaimFor( const Reference& r ) const noexcept
     {
         return identity.claimFor( r );

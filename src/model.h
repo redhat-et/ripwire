@@ -1651,14 +1651,24 @@ enum class LocalBindKind : std::uint8_t
     // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
     // filters by kind). APPENDED (cache u8).
     ReExport,
+    // RECV-XFILE (test/recvxfilecheck.sh): a member call whose IMMEDIATE receiver is another call — C++ `c->getList().insert()`,
+    // `T::instance().get()`, Python `p.get_app().post()`, TS `app.getRouter().match()`. startByte = the OUTER call's start (its
+    // Reference's own, which the inner call shares), var = the outer callee's name, typeName = the inner callee's name. It states
+    // the shape only: graph.h types the receiver from the inner call's committed target (ReceiverEvidence::receiverProofOf).
+    // fromSymbol as any binding's; spans {0,0}. Read by ReceiverEvidence alone (isReceiverEvidenceKind). APPENDED (cache u8).
+    RecvCall,
 };
+// RECV-XFILE: a MemberType whose class is stated through a parameter annotation (`self._app = app`, `app: App`) or a property's
+// return annotation carries this unwrapDepth (a MemberType has no unwrap): ReceiverEvidence records it only when ONE in-tree class
+// of the language has the name (receiverevidence.h build)
+inline constexpr std::uint8_t kMemberTypeAnnotated = 1;
 // fix round 4: the TypeAlias rows that bind a spelling with no alias target (model.h LocalBindKind::TypeAlias, typeName)
 inline constexpr std::string_view kTypeBindForward  = "forward";
 inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ReExport ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RecvCall ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two
@@ -1670,7 +1680,8 @@ inline bool isReceiverEvidenceKind( LocalBindKind k ) noexcept
     // those: one run CallResult .. ImplBlock
     static_assert( std::uint8_t( LocalBindKind::StaticMember ) - std::uint8_t( LocalBindKind::RecvType ) == 4, "FE-B's five receiver-evidence kinds stay one run" );
     static_assert( std::uint8_t( LocalBindKind::ImplBlock ) - std::uint8_t( LocalBindKind::CallResult ) == 8, "the call-result, in-place, dispatch and impl-block kinds stay one run" );
-    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock );
+    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock )
+        || k == LocalBindKind::RecvCall;   // RECV-XFILE: a chained call's receiver shape, never a name bound in its scope
 }
 // The language family whose call results take a callee's declared result type (train 29 call-result typing), ONE row read
 // by ingest (which records CallResult / ReturnType / TypeImport) and by graph.h (where the type resolves, and which

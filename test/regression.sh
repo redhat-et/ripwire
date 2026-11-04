@@ -872,6 +872,7 @@ for _g in \
     receiverevidencecheck \
     receiverfixescheck \
     recentscopecheck \
+    recvxfilecheck \
     redactcheck \
     redactfixcheck \
     reexportcheck \

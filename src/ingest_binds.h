@@ -4436,6 +4436,10 @@ inline TSNode calleeNameNode( TSNode call )
         {
             fn = fieldChild( fn, NodeField::Property );
         }
+        else if( kindIs( t, "attribute" ) )                                          // Python `x.m` (RECV-XFILE)
+        {
+            fn = fieldChild( fn, NodeField::Attribute );
+        }
         else if( kindIs( t, "navigation_expression" ) && ts_node_named_child_count( fn ) == 2 )   // Kotlin `X.m`: its suffix
         {
             const TSNode suffix = ts_node_named_child( fn, 1 );
@@ -7160,13 +7164,131 @@ inline std::string_view pySelfFieldType( const BindCtx& cx, TSNode ann, TSNode r
     return value;
 }
 
+// ── RECV-XFILE (test/recvxfilecheck.sh): what a receiver's class is STATED as, one file away ─────────────────────────────────
+// A member call whose immediate receiver is another call (model.h LocalBindKind::RecvCall): C++ `c->getList().insert()`, Python
+// `p.get_app().post()`, TS `app.getRouter().match()`. The record states the shape; graph.h types the receiver from the inner call's
+// committed target and its declared result (ReceiverEvidence::receiverProofOf). spanStart carries the INNER call's start byte.
+inline void captureRecvCall( BindCtx& cx, TSNode n, const char* t )
+{
+    const bool cpp = cx.lang == Lang::Cpp, py = cx.lang == Lang::Python, ts = cx.lang == Lang::TypeScript;
+    const std::string_view callKind = py ? "call" : "call_expression";
+    if( !( cpp || py || ts ) || std::string_view( t ) != callKind )
+    {
+        return;
+    }
+    const TSNode fn = fieldChild( n, NodeField::Function );
+    if( ts_node_is_null( fn ) )
+    {
+        return;
+    }
+    const char* ft  = ts_node_type( fn );
+    TSNode      obj = cpp && kindIs( ft, "field_expression" ) ? fieldChild( fn, NodeField::Argument )
+                    : py && kindIs( ft, "attribute" )        ? fieldChild( fn, NodeField::Object )
+                    : ts && kindIs( ft, "member_expression" ) ? fieldChild( fn, NodeField::Object )
+                                                              : TSNode{};
+    for( int guard = 0; guard < 8 && !ts_node_is_null( obj ) && kindIs( ts_node_type( obj ), "parenthesized_expression" ) && ts_node_named_child_count( obj ) == 1; ++guard )
+    {
+        obj = ts_node_named_child( obj, 0 );
+    }
+    if( ts_node_is_null( obj ) || std::string_view( ts_node_type( obj ) ) != callKind )
+    {
+        return;
+    }
+    const TSNode outer = calleeNameNode( n );
+    const TSNode inner = calleeNameNode( obj );
+    if( ts_node_is_null( outer ) || ts_node_is_null( inner ) )
+    {
+        return;
+    }
+    cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( n ), .lang = cx.lang, .kind = LocalBindKind::RecvCall,
+                                  .spanStart = ts_node_start_byte( obj ), .var = std::string( nodeTextOf( outer, cx.src ) ),
+                                  .typeName = std::string( nodeTextOf( inner, cx.src ) ) } );
+}
+
+// Python: the class a parameter of the function enclosing `at` is annotated with, by the parameter's name ("" none): the field
+// `self._app = app` takes `app: App`'s class. A name the body rebinds first is still the parameter's here: a floor, disclosed.
+inline std::string_view pyParamClass( const BindCtx& cx, TSNode at, std::string_view name, std::string_view& whole )
+{
+    whole = {};
+    const TSNode fn = ancestorOfKind( at, { "function_definition", "lambda", "class_definition" } );
+    if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "function_definition" ) )
+    {
+        return {};
+    }
+    const TSNode params = fieldChild( fn, NodeField::Parameters );
+    const std::uint32_t count = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params );
+    for( std::uint32_t i = 0; i < count; ++i )
+    {
+        const TSNode p = ts_node_named_child( params, i );
+        if( !kindIs( ts_node_type( p ), "typed_parameter" ) && !kindIs( ts_node_type( p ), "typed_default_parameter" ) )
+        {
+            continue;
+        }
+        TSNode pn = fieldChild( p, NodeField::Name );
+        if( ts_node_is_null( pn ) && ts_node_named_child_count( p ) > 0 )
+        {
+            pn = ts_node_named_child( p, 0 );
+        }
+        if( !ts_node_is_null( pn ) && kindIs( ts_node_type( pn ), "identifier" ) && nodeTextOf( pn, cx.src ) == name )
+        {
+            return writtenClass( cx, pyOptionalInner( fieldChild( p, NodeField::Type ), cx.src ), ts_node_start_byte( p ), &whole );
+        }
+    }
+    return {};
+}
+
+// Python: a function's `-> T` (ReturnType, position 0) and, on a `@property` / `@cached_property`, the property's class as the
+// owner's MemberType (`pilot.app.post()` reads Pilot#app). Sited at the annotation, inside the function: its owner is the class.
+inline void capturePythonReturnType( BindCtx& cx, TSNode fn )
+{
+    const TSNode ret = fieldChild( fn, NodeField::ReturnType );
+    if( ts_node_is_null( ret ) )
+    {
+        return;
+    }
+    std::string_view       whole;
+    const std::string_view cls = writtenClass( cx, pyOptionalInner( ret, cx.src ), ts_node_start_byte( ret ), &whole );
+    pushReturnType( cx, ts_node_start_byte( fn ), 0, cls, whole, 0 );
+    const TSNode parent = ts_node_parent( fn );
+    if( cls.empty() || ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "decorated_definition" ) )
+    {
+        return;
+    }
+    bool property = false;
+    const std::uint32_t count = ts_node_named_child_count( parent );
+    for( std::uint32_t i = 0; i < count; ++i )
+    {
+        const TSNode d = ts_node_named_child( parent, i );
+        if( kindIs( ts_node_type( d ), "decorator" ) )
+        {
+            const std::string_view text = nodeTextOf( d, cx.src );
+            property = property || text == "@property" || text == "@cached_property" || text == "@functools.cached_property";
+        }
+    }
+    const TSNode name = fieldChild( fn, NodeField::Name );
+    if( property && !ts_node_is_null( name ) )
+    {
+        const std::size_t before = cx.binds->size();
+        pushEvidenceBind( cx, LocalBindKind::MemberType, nodeTextOf( name, cx.src ), cls, whole, ts_node_start_byte( ret ), false );
+        if( cx.binds->size() == before + 1 )
+        {
+            cx.binds->back().unwrapDepth = kMemberTypeAnnotated;
+        }
+    }
+}
+
 inline void captureReceiverEvidence( BindCtx& cx, TSNode n, const char* t )
 {
     const Lang             lang = cx.lang;
     const std::string_view src  = cx.src;
     const std::uint32_t    at   = ts_node_start_byte( n );
+    captureRecvCall( cx, n, t );   // RECV-XFILE
     if( lang == Lang::Python )
     {
+        if( kindIs( t, "function_definition" ) )
+        {
+            capturePythonReturnType( cx, n );   // RECV-XFILE
+        }
         if( kindIs( t, "typed_parameter" ) || kindIs( t, "typed_default_parameter" ) )
         {
             TSNode name = fieldChild( n, NodeField::Name );
@@ -7211,6 +7333,10 @@ inline void captureReceiverEvidence( BindCtx& cx, TSNode n, const char* t )
                 return;
             }
             const char* lt = ts_node_type( lhs );
+            if( kindIs( lt, "identifier" ) && ts_node_is_null( fieldChild( n, NodeField::Type ) ) && !ts_node_is_null( rhs ) && kindIs( ts_node_type( rhs ), "call" ) )
+            {
+                pushCallResult( cx, lhs, rhs, 0, 0, BindSite{ at, 0u, 0u } );   // RECV-XFILE: `a = p.get_app()` takes get_app's `-> App`
+            }
             if( kindIs( lt, "identifier" ) && !ts_node_is_null( fieldChild( n, NodeField::Type ) ) )
             {
                 std::string_view       whole;   // `x: mod.T = …`: as a typed parameter's
@@ -7239,8 +7365,19 @@ inline void captureReceiverEvidence( BindCtx& cx, TSNode n, const char* t )
                 if( !ts_node_is_null( obj ) && !ts_node_is_null( attr ) && kindIs( ts_node_type( obj ), "identifier" ) && nodeTextOf( obj, src ) == "self" )
                 {
                     std::string_view       whole;
-                    const std::string_view type = pySelfFieldType( cx, fieldChild( n, NodeField::Type ), rhs, at, whole );
+                    std::string_view type = pySelfFieldType( cx, fieldChild( n, NodeField::Type ), rhs, at, whole );
+                    bool annotated = false;
+                    if( type.empty() && !ts_node_is_null( rhs ) && kindIs( ts_node_type( rhs ), "identifier" ) )
+                    {
+                        type      = pyParamClass( cx, n, nodeTextOf( rhs, src ), whole );   // RECV-XFILE: `self._app = app`, `app: App`
+                        annotated = !type.empty();
+                    }
+                    const std::size_t before = cx.binds->size();
                     pushEvidenceBind( cx, LocalBindKind::MemberType, nodeTextOf( attr, src ), type, type.empty() ? std::string_view{} : whole, at, false );
+                    if( annotated && cx.binds->size() == before + 1 )
+                    {
+                        cx.binds->back().unwrapDepth = kMemberTypeAnnotated;
+                    }
                 }
             }
         }
@@ -7417,7 +7554,8 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
         }
     }
     // (L) a C++ function's declared result (a definition, or a declaration such as a header's prototype)
-    if( callResultFamilyOf( lang ) == CallResultFamily::Cpp && ( kindIs( t, "function_definition" ) || kindIs( t, "declaration" ) || kindIs( t, "field_declaration" ) ) )
+    // RECV-XFILE: every C++ function records it (graph.h reads it only for a class unique by name: CallResultTypes::statedResultClass)
+    if( ( callResultFamilyOf( lang ) == CallResultFamily::Cpp || lang == Lang::Cpp ) && ( kindIs( t, "function_definition" ) || kindIs( t, "declaration" ) || kindIs( t, "field_declaration" ) ) )
     {
         captureCppReturnType( cx, n );
     }

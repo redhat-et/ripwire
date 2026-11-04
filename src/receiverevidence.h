@@ -17,8 +17,13 @@
 //      definition in the module a receiver alias names. A call left with no proven candidate is NAME-ONLY: its rows
 //      are kept, marked via="name" on every surface (graph.h Graph::outNameOnly), never dropped and never proven.
 //
-// What it does NOT do: infer a function's return type (`s = self.get_screen(); s.refresh()`), follow a property, or type
-// a value that crossed a call boundary. Those receivers stay name-only — the honest answer, not a guess.
+// RECV-XFILE (test/recvxfilecheck.sh) adds what the source STATES one file away: a receiver that is a call (`c->getList().insert()`)
+// takes the inner call's committed target's declared return type (receiverProofOf, the one proof a hop record carries); a Python
+// local initialised from a call takes it too (by the ONE class of that name: CallResultTypes::statedResultClass; a C++ local stays
+// off with its family);
+// a Python `@property`'s return annotation and a field assigned from an annotated parameter are stated field types.
+// What it does NOT do: infer a return type nobody wrote, read an interface or trait object with several implementors, or type
+// a closure parameter or a class-valued attribute. Those receivers stay name-only — the honest answer, not a guess.
 
 #include "infra/sortutil.h"   // svLess: the explicit byte order the operatorResult sort takes (portablebuildcheck #6)
 #include "langfacts.h"   // langFacts(l).overloadsWithoutArity — overloadedAbove's language column
@@ -1973,6 +1978,31 @@ struct CallResultTypes
         }
     }
 
+    // RECV-XFILE: the class a ReturnType states, for every language a receiver proof reads — the family's own resolver
+    // (resultClassOf) where the family types call results; C++ (its family is off: a macro can hide a scope) and Python (no
+    // family) only by the ONE in-tree class of that name in the language: C++ class identity, a Python class-like. A qualified
+    // written result there, a name two classes share, or none: kNoNode. Size-1 by name tree-wide, never a scope guess.
+    NodeId statedResultClass( const Binding& rt, Lang lang ) const
+    {
+        if( callResultFamilyOf( lang ) != CallResultFamily::None )
+        {
+            return resultClassOf( rt, lang );
+        }
+        if( !rt.importedName.empty() )
+        {
+            return kNoNode;
+        }
+        if( lang == Lang::Cpp )
+        {
+            return classIds != nullptr ? onlyCppClass( rt.typeName ) : kNoNode;
+        }
+        if( lang == Lang::Python )
+        {
+            return onlyClass( rt.typeName, CallResultFamily::None, [ & ]( NodeId c ) { return ing.symbols[ c ].lang == Lang::Python; } );
+        }
+        return kNoNode;
+    }
+
     // the in-tree class-likes of `cls`'s language sharing its name (cls included)
     std::size_t sameNamedClasses( NodeId cls ) const
     {
@@ -2030,6 +2060,23 @@ struct ReceiverEvidence
                                                                                     //   graph.h tombstones Rule 2's varType entry too
     HashMap<std::string, std::uint32_t>                   callResultDecls;          // "<scope>#var" → its CallResult records (typeCallResult)
     CallResultTypes                                       types;                    // (L) fix round 1: a declared result type's ONE class
+    // RECV-XFILE (test/recvxfilecheck.sh): ONE receiver proof for a member call whose receiver is another call — the class the
+    // inner call's committed target STATES as its declared result, the kind of statement and the symbol that states it (its
+    // definition line is where the type is written), so a hop record can print how the hop is proven (IDEAS_LIST 20).
+    enum class ReceiverProofKind : std::uint8_t { None, ReturnType };
+    struct ReceiverProof
+    {
+        NodeId            cls      = kNoNode;   // the ONE class the receiver is (kNoNode: two committed results disagree)
+        ReceiverProofKind kind     = ReceiverProofKind::None;
+        NodeId            statedBy = kNoNode;   // the callee whose declared result states it
+    };
+    struct RecvCallShape
+    {
+        std::string   inner;            // the inner callee's name ("": two records share the outer key — a tombstone)
+        std::uint32_t innerStart = 0;   // the inner call's start byte
+    };
+    HashMap<std::string, RecvCallShape>                   recvCalls;                // "<file>:<outer start>#<outer name>" → its receiver call (RecvCall)
+    HashMap<std::string, ReceiverProof>                   callResultProofs;         // "<file>:<call start>#<callee name>" → what its result is
 
     ReceiverEvidence( const IngestResult& i, const HashMap<std::string, std::vector<std::string>>& up, const HashMap<std::string, char>& classes )
         : ing( i ), chaUp( up ), classNames( classes ), types( i ) {}
@@ -2257,7 +2304,13 @@ struct ReceiverEvidence
             }
             else if( b.kind == LocalBindKind::MemberType && !b.var.empty() )
             {
-                noteMemberType( b, b.typeName );
+                // RECV-XFILE: a class stated through a parameter or property annotation (kMemberTypeAnnotated) is read by NAME,
+                // so it is recorded only when ONE in-tree class of the language has that name — `self._app` typed `App` beside a
+                // test's `class App(Widget)` records nothing, as before
+                if( b.unwrapDepth != kMemberTypeAnnotated || uniqueClassName( b.typeName, ing.symbols[ b.fromSymbol ].lang ) )
+                {
+                    noteMemberType( b, b.typeName );
+                }
             }
             else if( b.kind == LocalBindKind::MethodAlias && !b.var.empty() )
             {
@@ -2341,6 +2394,15 @@ struct ReceiverEvidence
     void noteCallResultFacts( const Binding& b )
     {
         types.noteImport( b );
+        if( b.kind == LocalBindKind::RecvCall && !b.var.empty() && !b.typeName.empty() )
+        {
+            const auto [ it, fresh ] = recvCalls.try_emplace( callKey( b.fileId, b.startByte, b.var ), RecvCallShape{ b.typeName, b.spanStart } );
+            if( !fresh && ( it->second.inner != b.typeName || it->second.innerStart != b.spanStart ) )
+            {
+                it->second.inner.clear();   // `a.f().m().m()`: two calls share the outer key, so neither receiver is known
+            }
+            return;
+        }
         if( b.kind == LocalBindKind::CallResult && b.fromSymbol < ing.symbols.size() && !b.var.empty() )
         {
             ++callResultDecls[ keyOf( factScope( b ), '#', b.var ) ];
@@ -2521,6 +2583,147 @@ struct ReceiverEvidence
     // that guess is replaced — but an unspanned record has no span to tell two declarations apart, so only when this is the
     // function's ONLY call-initialised binding of the name (callResultDecls): sibling blocks' `const c = a.make()` / `const c
     // = b.make()` type neither. False when nothing was replaced.
+    // RECV-XFILE: the key both RecvCall tables share — one call by its file, start byte and callee name
+    const std::string& callKey( std::uint32_t fileId, std::uint32_t start, std::string_view name ) const
+    {
+        key.assign( std::to_string( fileId ) );
+        key.push_back( ':' );
+        key.append( std::to_string( start ) );
+        key.push_back( '#' );
+        key.append( name );
+        return key;
+    }
+    bool hasRecvCalls() const noexcept { return !recvCalls.empty(); }
+    // does exactly ONE in-tree class-like of language `l` carry the name `type`
+    bool uniqueClassName( std::string_view type, Lang l ) const
+    {
+        return types.onlyClass( type, CallResultFamily::None, [ & ]( NodeId c ) { return ing.symbols[ c ].lang == l; } ) != kNoNode
+            || types.onlyClass( type, callResultFamilyOf( l ), [ & ]( NodeId c ) { return ing.symbols[ c ].lang == l; } ) != kNoNode;
+    }
+    // the call `r` committed ONE evidenced target `callee`, whose declared result is `rt`: record the class it states, when some
+    // member call's receiver is this call (a RecvCall names it). A second committed answer that disagrees leaves none.
+    void noteCallReturn( const Reference& r, NodeId callee, const Binding& rt )
+    {
+        if( rt.unwrapDepth != 0 || ( rt.resultIndex != 0 && rt.resultIndex != kWholeResult ) )
+        {
+            return;   // a Result/Option layer, a smart pointer's pointee, a tuple position: not the value a `.m()` reads
+        }
+        const NodeId cls = types.statedResultClass( rt, ing.symbols[ callee ].lang );
+        if( cls == kNoNode )
+        {
+            return;
+        }
+        const auto [ it, fresh ] = callResultProofs.try_emplace( callKey( r.fileId, r.startByte, r.calleeName ), ReceiverProof{ cls, ReceiverProofKind::ReturnType, callee } );
+        if( !fresh && it->second.cls != cls )
+        {
+            it->second.cls = kNoNode;
+        }
+    }
+    // the proof of member call `r`'s receiver when that receiver is a call whose result a stated return type names (nullptr: none)
+    const ReceiverProof* receiverProofOf( const Reference& r ) const
+    {
+        if( !active || recvCalls.empty() || !r.qualifier.empty() || r.fromSymbol >= ing.symbols.size() )
+        {
+            return nullptr;
+        }
+        const bool shape = ( ( r.lang == Lang::Cpp || r.lang == Lang::Python ) && r.recv == RecvKind::FieldOfVar && r.recvVar.empty() )
+                        || ( r.lang == Lang::TypeScript && r.memberCall && r.memberRoot.empty() && r.memberPath.empty() && r.memberCtor.empty() );
+        if( !shape )
+        {
+            return nullptr;
+        }
+        const auto rc = recvCalls.find( callKey( r.fileId, r.startByte, r.calleeName ) );
+        if( rc == recvCalls.end() || rc->second.inner.empty() || ( rc->second.innerStart == r.startByte && rc->second.inner == r.calleeName ) )
+        {
+            return nullptr;
+        }
+        const auto pr = callResultProofs.find( callKey( r.fileId, rc->second.innerStart, rc->second.inner ) );
+        return pr == callResultProofs.end() || pr->second.cls == kNoNode ? nullptr : &pr->second;
+    }
+    // RECV-XFILE: the order graph.h's resolve loop walks the references in — their own, except that the inner call of a chain
+    // (a RecvCall's receiver) is walked right before its outer call when it came after it, so the outer reads the inner's committed
+    // result. Empty: no chain needs it (walk in index order). An inner key two call references share moves nothing.
+    std::vector<std::uint32_t> chainSiteOrder() const
+    {
+        std::vector<std::uint32_t> order;
+        if( recvCalls.empty() )
+        {
+            return order;
+        }
+        const std::size_t N = ing.references.size();
+        HashMap<std::string, std::uint32_t> innerSite;   // an inner call's key → its reference (UINT32_MAX: two share it)
+        for( const auto& [ k, shape ] : recvCalls )
+        {
+            if( !shape.inner.empty() )
+            {
+                const std::size_t colon = k.find( ':' );   // "<file>:" prefixes both keys
+                innerSite.try_emplace( k.substr( 0, colon + 1 ) + std::to_string( shape.innerStart ) + "#" + shape.inner, kNoSite );
+            }
+        }
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            const Reference& r = ing.references[ i ];
+            if( r.role != RefRole::Call )
+            {
+                continue;
+            }
+            if( const auto it = innerSite.find( callKey( r.fileId, r.startByte, r.calleeName ) ); it != innerSite.end() )
+            {
+                it->second = it->second == kNoSite ? std::uint32_t( i ) : kTwoSites;
+            }
+        }
+        std::vector<char> placed( N, 0 );
+        std::vector<std::uint32_t> pending;
+        bool moved = false;
+        order.reserve( N );
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            // the chain below site i, innermost last: each outer's inner call, while it sits later and is not yet walked
+            pending.clear();
+            std::uint32_t at = std::uint32_t( i );
+            for( int depth = 0; depth < 64 && !placed[ at ]; ++depth )
+            {
+                pending.push_back( at );
+                const Reference& r = ing.references[ at ];
+                const auto rc = r.role == RefRole::Call ? recvCalls.find( callKey( r.fileId, r.startByte, r.calleeName ) ) : recvCalls.end();
+                if( rc == recvCalls.end() || rc->second.inner.empty() )
+                {
+                    break;
+                }
+                const auto in = innerSite.find( callKey( r.fileId, rc->second.innerStart, rc->second.inner ) );
+                if( in == innerSite.end() || in->second >= kTwoSites || in->second <= at || placed[ in->second ] )
+                {
+                    break;
+                }
+                at = in->second;
+                moved = true;
+            }
+            for( auto it = pending.rbegin(); it != pending.rend(); ++it )
+            {
+                if( !placed[ *it ] )
+                {
+                    placed[ *it ] = 1;
+                    order.push_back( *it );
+                }
+            }
+        }
+        if( !moved )
+        {
+            order.clear();
+        }
+        return order;
+    }
+    static constexpr std::uint32_t kNoSite   = 0xFFFFFFFFu;
+    static constexpr std::uint32_t kTwoSites = 0xFFFFFFFEu;
+
+    // RESOLVE (RECV-XFILE): a member call on a call result whose class is stated reaches that class's member (bases included),
+    // in `found`; false when no proof, or the class answers no such member
+    bool narrowCallReceiver( const Reference& r ) const
+    {
+        const ReceiverProof* p = receiverProofOf( r );
+        return p != nullptr && methodOf( ing.symbols[ p->cls ].name, r.calleeName, false, p->cls );
+    }
+
     bool typeCallResult( const Binding& b, std::string_view cls, NodeId id )
     {
         const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
