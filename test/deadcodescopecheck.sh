@@ -10,8 +10,12 @@
 # (byte-identical shape); A7 the group is the last child, after d/to rows; A8 legend: compact reads linkage=, full carries the
 # clause, and neither appears without the group; A9 second page has no group; A10 a filter whose files hold no such function
 # prints no group; A11 files cap (files= of files_total=) and row cap (shown= of total=, capped=1) disclosed; A12 well-formed XML.
-# Optional: RIPWIRE_BASE_BIN=<main binary> adds A13: with the group (and its legend clause) removed the answer is byte-identical.
-#   RIPWIRE_BIN=build/ripwire bash test/deadcodescopecheck.sh     # red on a pre-DEAD-CODE-SCOPE binary (A1, A4, A5, A11)
+# A13: with the group (and its legend clause) removed the answer is byte-identical to a pinned pre-group answer (and, with
+# RIPWIRE_BASE_BIN=<main binary>, to that binary live). A9b the second page's full legend has no exported clause; A14 a static
+# overload leaves its uncalled extern sibling to the group; A15 files with no exported function take no place under the files cap;
+# A16 unseen= carries unseen_by=; A17 a group whose every verdict the indexed files fix skips the unindexed walk (extra="skipped")
+# with the --for table's verdict.
+#   RIPWIRE_BIN=build/ripwire bash test/deadcodescopecheck.sh     # red on a pre-DEAD-CODE-SCOPE binary (A1, A4, A5, A11); on 197dc256e (A9b, A14-A17)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -131,6 +135,19 @@ static int lone_static(int x)
     return x;
 }
 C
+cat > "$F/cc/over.cpp" <<'C'
+static int ov(int x)
+{
+    return x;
+}
+int ov(double x)
+{
+    return int(x) + 1;
+}
+C
+mkdir -p "$F/tsdir"; for i in 1 2 3 4 5 6; do printf 'function hidden%s(): number {\n    return %s;\n}\n' "$i" "$i" > "$F/tsdir/a$i.ts"; done
+printf 'export function shownZ(): number {\n    return 1;\n}\n' > "$F/tsdir/z.ts"
+mkdir -p "$F/settle"; printf 'NAMES = ["named_only"]\n\n\ndef named_only(x):\n    return x\n' > "$F/settle/s.py"
 for i in 1 2 3 4 5 6 7; do printf 'def lonely_%s(x):\n    return x\n' "$i" > "$F/many/m$i.py"; done
 mkdir -p "$F/wide"; for i in $( seq 1 101 ); do printf 'def wide_%s(x):\n    return x\n\n' "$i"; done > "$F/wide/w.py"
 
@@ -153,9 +170,8 @@ for n in used_fn _private_unused method_unused; do
 done
 for pair in listed_in_all:string registered:value handler:framework; do
     n="${pair%%:*}"; w="${pair##*:}"; row="$( erow "$PY" "$n" )"
-    if [ -z "$row" ]; then ok "A3 $n not listed"
-    elif printf '%s' "$row" | grep -q 'v="unknown"' && printf '%s' "$row" | grep -q "why=\"[^\"]*$w"; then ok "A3 $n labelled v=unknown why=$w"
-    else no "A3 $n listed without its why=$w: $row"; fi
+    if [ -n "$row" ] && printf '%s' "$row" | grep -q 'v="unknown"' && printf '%s' "$row" | grep -q "why=\"[^\"]*$w"; then ok "A3 $n labelled v=unknown why=$w"
+    else no "A3 $n has no row labelled v=unknown why=$w: $row"; fi
 done
 if printf '%s' "$PY" | grep -q '<dead-code [^>]*count="0"'; then ok "A1 count= unchanged (exported rows are not in count=)"; else no "A1 count= is not 0"; fi
 
@@ -163,7 +179,7 @@ if printf '%s' "$PY" | grep -q '<dead-code [^>]*count="0"'; then ok "A1 count= u
 chk "A4 ts run" --dead-code=web/path.ts && TS="$CHK" || TS=""
 if erow "$TS" unusedTs | grep -q 'v="unused"'; then ok "A4 exported unusedTs listed v=unused"; else no "A4 unusedTs: $( erow "$TS" unusedTs )"; fi
 row="$( erow "$TS" reexported )"
-if [ -z "$row" ] || printf '%s' "$row" | grep -q 'why="[^"]*import'; then ok "A4 a re-exported def is not listed or reads why=import"; else no "A4 reexported unlabelled: $row"; fi
+if [ -z "$row" ] || { printf '%s' "$row" | grep -q 'v="unknown"' && printf '%s' "$row" | grep -q 'why="[^"]*import'; }; then ok "A4 a re-exported def is not listed or reads v=unknown why=import"; else no "A4 reexported unlabelled: $row"; fi
 if [ -n "$( erow "$TS" localOnly )" ]; then no "A4 a non-exported def listed as exported"; else ok "A4 a non-exported def is not in the exported group"; fi
 if [ -n "$( erow "$TS" usedTs )" ]; then no "A4 usedTs (a caller) listed"; else ok "A4 a called export is not listed"; fi
 
@@ -173,7 +189,7 @@ if erow "$CC" exported_dead | grep -q 'v="unused"'; then ok "A5 extern exported_
 if printf '%s' "$CC" | grep -q '<d n="internal_dead"' && printf '%s' "$CC" | grep -q '<dead-code [^>]*count="1"'; then ok "A5 static internal_dead stays a <d> row, count=1"; else no "A5 internal_dead is not the one <d> row"; fi
 if [ -n "$( erow "$CC" internal_dead )" ]; then no "A5 internal_dead also in the exported group"; else ok "A5 a <d> row is not repeated as <e>"; fi
 row="$( erow "$CC" by_string )"
-if [ -z "$row" ] || printf '%s' "$row" | grep -q 'why="[^"]*string'; then ok "A5 a string-named def is not listed or reads why=string"; else no "A5 by_string unlabelled: $row"; fi
+if [ -z "$row" ] || { printf '%s' "$row" | grep -q 'v="unknown"' && printf '%s' "$row" | grep -q 'why="[^"]*string'; }; then ok "A5 a string-named def is not listed or reads v=unknown why=string"; else no "A5 by_string unlabelled: $row"; fi
 if [ -n "$( erow "$CC" exported_used )" ]; then no "A5 exported_used (a caller) listed"; else ok "A5 a called extern def is not listed"; fi
 
 # ── A6/A7/A8 shape and legend ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -190,6 +206,8 @@ if printf '%s' "$FULLB" | grep -q 'PUBLIC free functions'; then no "A8 the claus
 # ── A9/A10/A11 paging, empty filter, files cap ────────────────────────────────────────────────────────────────────────────
 chk "A9 page 2" --dead-code=pkg/net.py --limit=1 --offset=1 && P2="$CHK" || P2="<exported"
 if printf '%s' "$P2" | grep -q '<exported'; then no "A9 the group repeats past the first page"; else ok "A9 the group rides the first page only"; fi
+P2F="$( run --dead-code=pkg/net.py --legend=full --limit=1 --offset=1 )"
+if printf '%s' "$P2F" | grep -q 'PUBLIC free functions'; then no "A9b the second page's full legend carries the exported clause with no group"; else ok "A9b the second page computes no group and its legend carries no clause for one"; fi
 chk "A10 static-only file" --dead-code=cc/only_static.cpp && ST="$CHK" || ST="<exported"
 if printf '%s' "$ST" | grep -q '<exported'; then no "A10 a group on a file with no public free function"; else ok "A10 no public candidate, no group (byte-identical)"; fi
 chk "A11 seven files" --dead-code=many && MANY="$CHK" || MANY=""
@@ -198,6 +216,24 @@ if group "$MANY" | grep -q 'files="6" files_total="7"' && group "$MANY" | grep -
 chk "A11 101 rows" --dead-code=wide && WIDE="$CHK" || WIDE=""
 if group "$WIDE" | grep -q 'total="101" shown="100" files="1" files_total="1" capped="1"' && [ "$( printf '%s' "$WIDE" | grep -o '<e n=' | wc -l | tr -d ' ' )" = 100 ]; then ok "A11 row cap disclosed: shown=100 of total=101, capped=1"; else no "A11 row cap: $( group "$WIDE" )"; fi
 if group "$PY" | grep -q 'capped='; then no "A11 capped= on an uncut group"; else ok "A11 capped= is present-only"; fi
+
+# ── A14-A17 review fixes: per-def overloads, the files cap counts public files, unseen_by=, the settled walk skip ────────────────
+chk "A14 overloads" --dead-code=cc/over.cpp && OV="$CHK" || OV=""
+if printf '%s' "$OV" | grep -q '<d n="ov"' && erow "$OV" ov | grep -q 'l="5"'; then ok "A14 a static overload is a <d> row and its uncalled extern sibling an <e> row (l=5)"; else no "A14 overload: $( erow "$OV" ov ) / $( printf '%s' "$OV" | grep -o '<d n="ov"[^>]*>' )"; fi
+chk "A15 public-only cap" --dead-code=tsdir && TD="$CHK" || TD=""
+if group "$TD" | grep -q 'files="1" files_total="1"' && [ -n "$( erow "$TD" shownZ )" ]; then ok "A15 files that hold no exported function take no place under the cap"; else no "A15 cap: $( group "$TD" )"; fi
+chk "A17 settled" --dead-code=settle/s.py && SE="$CHK" || SE=""
+FORV="$( run "--for=unused functions in settle/s.py" | grep -o '<u n="named_only"[^>]*>' | grep -o ' v="[^"]*"' )"
+if group "$SE" | grep -q 'extra="skipped"' && erow "$SE" named_only | grep -q 'v="unknown" why="[^"]*string'; then ok "A17 a settled group skips the unindexed walk and says so (extra=skipped)"; else no "A17 skip: $( group "$SE" ) $( erow "$SE" named_only )"; fi
+if [ -n "$FORV" ] && erow "$SE" named_only | grep -q -- "$FORV"; then ok "A17 the skipped walk keeps the --for table's verdict ($FORV)"; else no "A17 verdict differs from --for: '$FORV' vs $( erow "$SE" named_only )"; fi
+if group "$PY" | grep -q 'extra='; then no "A17 extra= on a group whose walk ran (unused_fn is unsettled)"; else ok "A17 extra= is present-only"; fi
+if [ "$( id -u )" != 0 ]; then
+    U="$TMP/unseen"; mkdir -p "$U"; printf 'def lone(x):\n    return x\n' > "$U/u.py"; printf 'lone\n' > "$U/secret.txt"; chmod 000 "$U/secret.txt"
+    UN="$( runin "$U" --dead-code=u.py )"; chmod 600 "$U/secret.txt"
+    if group "$UN" | grep -q 'unseen="1" unseen_by="size=0,total=0,files=0,read=1,walk=0"'; then ok "A16 unseen= carries unseen_by= with its cause"; else no "A16 unseen_by: $( group "$UN" )"; fi
+else
+    echo "  SKIP  A16 running as root: an unreadable file cannot be made"
+fi
 
 # ── A12 well-formed ───────────────────────────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
@@ -208,9 +244,21 @@ else
     echo "  SKIP  A12 xmllint absent"
 fi
 
-# ── A13 optional: byte-identical to the base binary once the group is removed ─────────────────────────────────────────────
+# ── A13: with the group and the comments removed, the answer is byte-identical to the pre-group answer ──────────────────────
+# Pinned from the pre-DEAD-CODE-SCOPE main binary (7c851ba77) on this fixture, so CI checks it with no base binary; root= is the fixture.
+strip(){ python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<exported .*?</exported>","",s,flags=re.S); print(re.sub(r"<!--.*?-->","",s,flags=re.S))'; }
+pinned(){ case "$1" in
+  --dead-code=pkg/net.py) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="pkg/net.py" next="--for=&apos;unused functions in pkg/net.py&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
+  --dead-code=cc/lib.cpp) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="1" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="cc/lib.cpp" next="--for=&apos;unused functions in cc/lib.cpp&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/></dead-code>' ;;
+  --dead-code=web/path.ts) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="web/path.ts" next="--for=&apos;unused functions in web/path.ts&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
+  --dead-code) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="3" evidence="internal-linkage+zero-callers" register-macro-excluded="0" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/><d n="lone_static" t="fn" p="cc/only_static.cpp" l="1"/><d n="ov" t="fn" p="cc/over.cpp" l="1"/></dead-code>' ;;
+esac; }
+for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do
+    a="$( run $args | strip | sed "s|root=\"$F\"|root=\"@F@\"|" )"
+    if [ "$a" = "$( pinned "$args" )" ]; then ok "A13 $args: root and rows byte-identical to the pinned pre-group answer"; else no "A13 $args differs from the pinned answer beyond the group: $a"; fi
+done
+# Optional: RIPWIRE_BASE_BIN=<a main binary> also compares live against it.
 if [ -n "${RIPWIRE_BASE_BIN:-}" ] && [ -x "${RIPWIRE_BASE_BIN}" ]; then
-    strip(){ python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<exported .*?</exported>","",s,flags=re.S); print(re.sub(r"<!--.*?-->","",s,flags=re.S))'; }
     for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do
         a="$( run $args | strip )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip )"
         if [ "$a" = "$b" ]; then ok "A13 $args: root and rows byte-identical to base"; else no "A13 $args differs from base beyond the group"; fi

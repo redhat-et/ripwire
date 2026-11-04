@@ -48,6 +48,7 @@
 #include "filter.h" // isTestPath, isTestSymbol
 #include "forfilepage.h" // resolveFileAnchors, FileAnchor, filepage::fileDefsInLineOrder, trimWordPunct
 #include "infra/namesplit.h" // isIdentChar
+#include "infra/ownedfile.h" // OwnedFile: readTextUnlessBinary's one open
 #include "graph.h" // Graph, edgeNameOnly, declinedCallsNaming, graphCountFloorAttrXml
 #include "langfacts.h" // langFacts(l).hashComment
 #include "lexical.h" // splitRouteWords, routeLower
@@ -63,9 +64,11 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -892,10 +895,31 @@ public:
     // rows_ is sorted by name, so names_ is too
     void scanFile( std::uint32_t fileId, std::string_view path, std::string_view src, bool manifest )
     {
+        scanFiles( std::span<NameScan>( this, 1 ), first2_, single_, fileId, path, src, manifest );
+    }
+
+    // Every table's filter in one: a word that passes no table's two-byte filter is looked up in none (scanFiles' union filter).
+    void orFilterInto( std::vector<std::uint8_t>& first2, std::array<std::uint8_t, 256>& single ) const
+    {
+        for( std::size_t k = 0; k < first2.size() && k < first2_.size(); ++k )
+        {
+            first2[k] = std::uint8_t( first2[k] | first2_[k] );
+        }
+        for( std::size_t k = 0; k < single.size(); ++k )
+        {
+            single[k] = std::uint8_t( single[k] | single_[k] );
+        }
+    }
+
+    // One tokenizer pass over a file for every table: the per-file facts, the line and comment tracking and the word, string and paste
+    // lexing are the same for each table, so they run once; each table still sees its own imports, shapes and row hits, in its own order.
+    // `first2`/`single` is the union of the tables' filters (one table: its own).
+    static void scanFiles( std::span<NameScan> scans, const std::vector<std::uint8_t>& first2, const std::array<std::uint8_t, 256>& single, std::uint32_t fileId,
+                           std::string_view path, std::string_view src, bool manifest )
+    {
         const bool isTest = !manifest && isTestLikePath( path );
         const bool isDoc = !manifest && isDocPath( path );
-        const bool isTarget = !manifest && std::ranges::contains( targets_, fileId );
-        if( isDoc )
+        if( isDoc || scans.empty() )
         {
             return; // a doc naming a function is no use of it
         }
@@ -903,13 +927,17 @@ public:
         const Lang pathLang = langOfPath( path );
         const bool hashComments = langFacts( pathLang ).hashComment;
         const bool commentsKnown = !std::ranges::contains( kNoLanguage, pathLang ); // an unknown language has no comment line: `//` is an operator in some, `#` code in others
-        if( !manifest && syntax_ != ModuleSyntax::None )
+        const auto isTargetOf = [&]( const NameScan& scan ) { return !manifest && std::ranges::contains( scan.targets_, fileId ); };
+        for( NameScan& scan : scans )
         {
-            noteImports( fileId, path, src, isTest, hashComments, isTarget );
-        }
-        if( !manifest )
-        {
-            noteLanguageShapes( path, src, isTest, isTarget );
+            if( !manifest && scan.syntax_ != ModuleSyntax::None )
+            {
+                scan.noteImports( fileId, path, src, isTest, hashComments, isTargetOf( scan ) );
+            }
+            if( !manifest )
+            {
+                scan.noteLanguageShapes( path, src, isTest, isTargetOf( scan ) );
+            }
         }
         std::size_t lineStart = 0;
         std::uint32_t lineNo = 1;
@@ -923,28 +951,36 @@ public:
         // one candidate word at byte `at`: a row name makes a hit unless the line is a comment or the def's own line
         const auto look = [&]( std::string_view w, std::size_t at )
         {
-            if( ( w.size() == 1 ? single_[static_cast<unsigned char>( w[0] )] == 0 : first2_[key2( w[0], w[1] )] == 0 ) )
+            const std::size_t k2 = w.size() == 1 ? 0 : key2( w[0], w[1] );
+            if( ( w.size() == 1 ? single[static_cast<unsigned char>( w[0] )] == 0 : first2[k2] == 0 ) )
             {
                 return;
             }
-            Row* r = find( w );
-            if( r == nullptr )
+            for( NameScan& scan : scans )
             {
-                return;
-            }
-            if( !lineRead )
-            {
-                commentLine = commentsKnown && isCommentLine( src, lineStart, hashComments );
-                lineRead = true;
-            }
-            const std::uint64_t here = ( std::uint64_t( fileId ) << 32 ) | lineNo;
-            if( !commentLine && !( !manifest && std::ranges::binary_search( r->ownLines, here ) ) )
-            {
-                hit( *r, fileId, lineNo, lineText(), at - lineStart, isTest, isTarget, cFamily, manifest );
-            }
-            else if( commentLine && manifest )
-            {
-                hit( *r, fileId, lineNo, lineText(), at - lineStart, isTest, isTarget, cFamily, manifest );
+                if( ( w.size() == 1 ? scan.single_[static_cast<unsigned char>( w[0] )] == 0 : scan.first2_[k2] == 0 ) )
+                {
+                    continue;
+                }
+                Row* r = scan.find( w );
+                if( r == nullptr )
+                {
+                    continue;
+                }
+                if( !lineRead )
+                {
+                    commentLine = commentsKnown && isCommentLine( src, lineStart, hashComments );
+                    lineRead = true;
+                }
+                const std::uint64_t here = ( std::uint64_t( fileId ) << 32 ) | lineNo;
+                if( !commentLine && !( !manifest && std::ranges::binary_search( r->ownLines, here ) ) )
+                {
+                    scan.hit( *r, fileId, lineNo, lineText(), at - lineStart, isTest, isTargetOf( scan ), cFamily, manifest );
+                }
+                else if( commentLine && manifest )
+                {
+                    scan.hit( *r, fileId, lineNo, lineText(), at - lineStart, isTest, isTargetOf( scan ), cFamily, manifest );
+                }
             }
         };
         for( std::size_t i = 0; i < src.size(); )
@@ -962,12 +998,20 @@ public:
             {
                 if( ( c == '"' || c == '\'' || c == '`' ) && !isTest )
                 {
-                    i = quoted( i, src, fileId, lineNo );
+                    std::size_t next = i + 1;
+                    for( NameScan& scan : scans )
+                    {
+                        next = scan.quoted( i, src, fileId, lineNo ); // where the literal ends is the source's, the same for every table
+                    }
+                    i = next;
                     continue;
                 }
                 if( c == '#' && !hashComments && i + 1 < src.size() && src[i + 1] == '#' && !isTest )
                 {
-                    pasted( i, src );
+                    for( NameScan& scan : scans )
+                    {
+                        scan.pasted( i, src );
+                    }
                 }
                 ++i;
                 continue;
@@ -982,7 +1026,10 @@ public:
             const std::string_view word = src.substr( i, e - i );
             if( word.size() >= 6 && !isTest && !manifest )
             {
-                noteHook( word, e, src );
+                for( NameScan& scan : scans )
+                {
+                    scan.noteHook( word, e, src );
+                }
             }
             look( word, i );
             if( high )
@@ -2075,6 +2122,34 @@ inline std::optional<std::string> readText( const std::string& path )
     return docparse::detail::readWholeFile( path );
 }
 
+// An unindexed file in ONE open: binstale::looksBinary's sniff (a NUL in the first 8000 bytes) on the first bytes read, then the whole file
+// as readText reads it. binary: a NUL was found and nothing more is read; bytes nullopt otherwise: it could not be opened or read in full.
+struct SniffedText
+{
+    std::optional<std::string> bytes;
+    bool binary = false;
+};
+inline SniffedText readTextUnlessBinary( const std::string& path )
+{
+    OwnedFile fp = openOwnedFile( path.c_str(), "rb" );
+    if( !fp )
+    {
+        return {};
+    }
+    std::array<char, 8000> head; // binstale::looksBinary's window
+    const std::size_t n = std::fread( head.data(), 1, head.size(), fp.file );
+    if( std::memchr( head.data(), '\0', n ) != nullptr )
+    {
+        return { std::nullopt, true };
+    }
+    std::optional<std::string> out = docparse::detail::readAllOfStream( fp.file );
+    if( !fp.close() )
+    {
+        return {};
+    }
+    return { std::move( out ), false };
+}
+
 // A `[lib]` table header on its own line (comments and spacing allowed): `[lib]`, `[ lib ]`.
 inline bool cargoHasLib( std::string_view toml ) noexcept
 {
@@ -2252,21 +2327,25 @@ inline void walkUnindexed( const IngestResult& ing, ExtraFiles& st, Visit&& visi
             st.miss( UnseenBy::NoRead );
             continue;
         }
-        if( size == 0 || binstale::looksBinary( it->path().string() ) ) // a binary holds no caller a text scan could read, whatever its size
+        if( size == 0 )
         {
             continue;
         }
-        if( size > kForUnusedExtraFileBytes )
+        // a binary holds no caller a text scan could read, whatever its size: a file over a cap is only sniffed, any other is read once
+        if( size > kForUnusedExtraFileBytes || bytes + size > kForUnusedExtraBytes )
         {
-            st.miss( UnseenBy::BigFile );
+            if( !binstale::looksBinary( it->path().string() ) )
+            {
+                st.miss( size > kForUnusedExtraFileBytes ? UnseenBy::BigFile : UnseenBy::OverTotal );
+            }
             continue;
         }
-        if( bytes + size > kForUnusedExtraBytes )
+        const SniffedText sniffed = readTextUnlessBinary( it->path().string() );
+        if( sniffed.binary )
         {
-            st.miss( UnseenBy::OverTotal );
             continue;
         }
-        const std::optional<std::string> data = readText( it->path().string() );
+        const std::optional<std::string>& data = sniffed.bytes;
         if( !data )
         {
             st.miss( UnseenBy::NoRead );
@@ -2431,6 +2510,25 @@ inline std::vector<std::string_view> defaultExportedNames( std::string_view src 
     return out;
 }
 
+// The names a TS/JS file exports by an export list or a re-export (`export { a, b as c }`), sorted: isPublicDef's `jsExports`.
+inline std::vector<std::string_view> jsExportsOf( const IngestResult& ing, std::uint32_t f )
+{
+    std::vector<std::string_view> jsExports;
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::JsExport && b.fileId == f )
+        {
+            jsExports.push_back( b.var );
+            if( !b.importedName.empty() )
+            {
+                jsExports.push_back( b.importedName );
+            }
+        }
+    }
+    std::ranges::sort( jsExports, sortutil::svLess );
+    return jsExports;
+}
+
 inline FileTable buildFileTable( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::uint32_t f )
 {
     FileTable table;
@@ -2446,19 +2544,7 @@ inline FileTable buildFileTable( const IngestResult& ing, const Graph& g, const 
         defs.insert( defs.end(), more.begin(), more.end() );
     }
 
-    std::vector<std::string_view> jsExports;
-    for( const Binding& b : ing.bindings )
-    {
-        if( b.kind == LocalBindKind::JsExport && b.fileId == f )
-        {
-            jsExports.push_back( b.var );
-            if( !b.importedName.empty() )
-            {
-                jsExports.push_back( b.importedName );
-            }
-        }
-    }
-    std::ranges::sort( jsExports, sortutil::svLess );
+    const std::vector<std::string_view> jsExports = jsExportsOf( ing, f );
 
     const std::string_view rel = rootRelPath( ing, f );
     const std::string disk = diskPath( ing, f );
@@ -2798,9 +2884,29 @@ struct Classified
 {
     std::vector<FileTable> tables;
     ExtraFiles extra;
+    bool walkSkipped = false; // settledSkipsWalk: every row's verdict was fixed after the indexed files, so no unindexed file was read
 };
 
-inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::span<const std::uint32_t> files )
+// the shape --dead-code's own rows have (quality::deadCodeEligibleKind: a free function with a body, outside headers), in library code
+inline bool exportedCandidateShape( const IngestResult& ing, const Symbol& s ) noexcept
+{
+    return quality::deadCodeEligibleKind( ing, s ) && !isMemberDef( s ) && !isTestLikePath( rootRelPath( ing, s.fileId ) ) && !isTestSymbol( ing, s.id );
+}
+
+// A row more text cannot move: a graph caller made it used, or it already holds a why= (only ever OR-ed, and any why reads unknown), or a
+// code or import word that the pass after the scan turns into why=name / why=import. Counts and at= sites could still grow; the verdict cannot.
+inline bool verdictSettled( const Row& r ) noexcept
+{
+    return r.outPlain > 0 || r.top || r.viaFile || r.why != 0 || r.text > 0 || r.imports > 0;
+}
+
+// `held(fileId)`: the bytes of an indexed file the caller already holds (nullptr: not held, read it here). Only a non-empty held copy is
+// used, so an unreadable file still reads as unread here. `settledSkipsWalk` (--dead-code's group, never the --for table): when every row
+// the group could print (a listed public free-function row of a served language) is verdictSettled after the indexed files, or sits in a library file
+// (why=api), the unindexed walk is skipped and walkSkipped says so. The other rows cannot move a settled one: chainWithinFile makes a row used only from graph callers, and gives
+// why=in-file only to a row with no why yet; hedgeOwnersOfMembers only adds a why.
+template<class Held>
+inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::span<const std::uint32_t> files, Held&& held, bool settledSkipsWalk = false )
 {
     Classified c;
     std::vector<FileTable>& tables = c.tables;
@@ -2816,6 +2922,11 @@ inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const 
     std::vector<std::uint32_t> starIds;
     std::vector<NameScan> scans;
     scans.reserve( tables.size() );
+    // every indexed file's module stem and import syntax, once for all tables (the same-stem lists below)
+    std::vector<std::string> stemOf;
+    std::vector<ModuleSyntax> syntaxOf;
+    const auto syntaxOfLang = []( Lang l ) { return std::ranges::contains( kPythonLangs, l ) ? ModuleSyntax::Python : std::ranges::contains( kJsFamilyLangs, l ) ? ModuleSyntax::Js
+                                                                                                                                                              : ModuleSyntax::None; };
     for( FileTable& table : tables )
     {
         std::vector<std::string> modules;
@@ -2826,16 +2937,23 @@ inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const 
             stems.push_back( moduleStem( rootRelPath( ing, pf ) ) );
         }
         const Lang lang = table.rows.empty() ? Lang::Unknown : ing.symbols[table.rows.front().defs.front()].lang;
-        const ModuleSyntax syntax = std::ranges::contains( kPythonLangs, lang ) ? ModuleSyntax::Python : std::ranges::contains( kJsFamilyLangs, lang ) ? ModuleSyntax::Js
-                                                                                                                                                       : ModuleSyntax::None;
+        const ModuleSyntax syntax = syntaxOfLang( lang );
         std::vector<std::string> sameStem;
         if( syntax != ModuleSyntax::None )
         {
+            if( stemOf.empty() && !ing.files.empty() )
+            {
+                stemOf.reserve( ing.files.size() );
+                syntaxOf.reserve( ing.files.size() );
+                for( std::uint32_t k = 0; k < ing.files.size(); ++k )
+                {
+                    stemOf.push_back( moduleStem( rootRelPath( ing, k ) ) );
+                    syntaxOf.push_back( syntaxOfLang( langOfPath( rootRelPath( ing, k ) ) ) );
+                }
+            }
             for( std::uint32_t k = 0; k < ing.files.size(); ++k )
             {
-                const Lang kl = langOfPath( rootRelPath( ing, k ) );
-                const bool sameSyntax = syntax == ModuleSyntax::Python ? std::ranges::contains( kPythonLangs, kl ) : std::ranges::contains( kJsFamilyLangs, kl );
-                if( sameSyntax && !std::ranges::contains( table.pair, k ) && std::ranges::contains( stems, moduleStem( rootRelPath( ing, k ) ) ) )
+                if( syntaxOf[k] == syntax && !std::ranges::contains( table.pair, k ) && std::ranges::contains( stems, stemOf[k] ) )
                 {
                     sameStem.push_back( withoutExt( rootRelPath( ing, k ) ) );
                 }
@@ -2853,12 +2971,16 @@ inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const 
         }
         scans.back().setHeaderNames( std::move( headers ) );
     }
+    // the union of the tables' word filters: one tokenizer pass per file serves every table (NameScan::scanFiles)
+    std::vector<std::uint8_t> first2( 1u << 16, 0 );
+    std::array<std::uint8_t, 256> single {};
+    for( const NameScan& scan : scans )
+    {
+        scan.orFilterInto( first2, single );
+    }
     const auto scanAll = [&]( std::uint32_t id, std::string_view rel, std::string_view bytes )
     {
-        for( NameScan& scan : scans )
-        {
-            scan.scanFile( id, rel, bytes, false );
-        }
+        NameScan::scanFiles( scans, first2, single, id, rel, bytes, false );
         if( !isTestLikePath( rel ) )
         {
             collectStarLines( bytes, id, starTexts, starIds );
@@ -2866,29 +2988,42 @@ inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const 
     };
     for( std::uint32_t k = 0; k < ing.files.size(); ++k )
     {
-        const std::optional<std::string> bytes = readText( diskPath( ing, k ) );
-        if( !bytes )
+        const std::string* bytes = held( k );
+        std::optional<std::string> read;
+        if( bytes == nullptr || bytes->empty() )
         {
-            extra.miss( UnseenBy::NoRead ); // an indexed file that cannot be read may hold a caller
-            continue;
+            read = readText( diskPath( ing, k ) );
+            if( !read )
+            {
+                extra.miss( UnseenBy::NoRead ); // an indexed file that cannot be read may hold a caller
+                continue;
+            }
+            bytes = &*read;
         }
         scanAll( k, rootRelPath( ing, k ), *bytes );
     }
-    walkUnindexed( ing, extra, [&]( const std::string& rel, const std::string& bytes )
-                   {
-        extra.paths.push_back( rel );
-        scanAll( std::uint32_t( ing.files.size() + extra.paths.size() - 1 ), rel, bytes ); } );
-    for( std::size_t t = 0; t < tables.size(); ++t )
+    // The build and package files above each table's file, read once (the walk's skip test below and the pass after it share them):
+    // a packaged Python module or a published JS one is a library, so every row of it gets why=api whatever the walk finds.
+    std::map<std::string, std::optional<std::string>, std::less<>> manifestBytes;
+    const auto manifestOf = [&]( const std::string& m ) -> const std::optional<std::string>&
     {
-        FileTable& table = tables[t];
+        auto mb = manifestBytes.find( m );
+        if( mb == manifestBytes.end() )
+        {
+            mb = manifestBytes.emplace( m, readText( m ) ).first;
+        }
+        return mb->second;
+    };
+    const auto fileLangOf = [&]( const FileTable& table ) { return table.rows.empty() ? Lang::Unknown : ing.symbols[table.rows.front().defs.front()].lang; };
+    const auto libraryOf = [&]( const FileTable& table )
+    {
         bool pyPackaged = false;
         bool jsPublished = false;
         bool sawPackageJson = false;
         for( const std::string& m : manifestsAbove( diskPath( ing, table.file ), rootRelPath( ing, table.file ) ) )
         {
-            if( const std::optional<std::string> bytes = readText( m ); bytes )
+            if( const std::optional<std::string>& bytes = manifestOf( m ); bytes )
             {
-                scans[t].scanFile( table.file, m, *bytes, true );
                 if( m.ends_with( "/pyproject.toml" ) )
                 {
                     pyPackaged = pyPackaged || pyprojectBuilds( *bytes );
@@ -2904,11 +3039,37 @@ inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const 
                 }
             }
         }
+        const Lang fileLang = fileLangOf( table );
+        return ( std::ranges::contains( kPythonLangs, fileLang ) && pyPackaged && !pythonModulePrivate( rootRelPath( ing, table.file ) ) ) || ( std::ranges::contains( kJsFamilyLangs, fileLang ) && jsPublished );
+    };
+    c.walkSkipped = settledSkipsWalk && std::ranges::all_of( tables, [&]( const FileTable& t )
+                                                             {
+                                                                 const auto printable = [&]( const Row& r )
+                                                                 { return r.listed && r.isPublic && std::ranges::any_of( r.defs, [&]( NodeId id ) { return ing.symbols[id].fileId == t.file && exportedCandidateShape( ing, ing.symbols[id] ); } ); };
+                                                                 return !t.servedLanguage || libraryOf( t ) || std::ranges::all_of( t.rows, [&]( const Row& r ) { return !printable( r ) || verdictSettled( r ); } );
+                                                             } );
+    if( !c.walkSkipped )
+    {
+        walkUnindexed( ing, extra, [&]( const std::string& rel, const std::string& bytes )
+                       {
+            extra.paths.push_back( rel );
+            scanAll( std::uint32_t( ing.files.size() + extra.paths.size() - 1 ), rel, bytes ); } );
+    }
+    for( std::size_t t = 0; t < tables.size(); ++t )
+    {
+        FileTable& table = tables[t];
+        for( const std::string& m : manifestsAbove( diskPath( ing, table.file ), rootRelPath( ing, table.file ) ) )
+        {
+            if( const std::optional<std::string>& bytes = manifestOf( m ); bytes )
+            {
+                scans[t].scanFile( table.file, m, *bytes, true ); // a name in a manifest: why=manifest
+            }
+        }
         scans[t].finish();
-        const Lang fileLang = table.rows.empty() ? Lang::Unknown : ing.symbols[table.rows.front().defs.front()].lang;
+        const Lang fileLang = fileLangOf( table );
         const bool pyOrJs = std::ranges::contains( kPythonLangs, fileLang ) || std::ranges::contains( kJsFamilyLangs, fileLang );
         const bool barrel = fileIsStarExported( rootRelPath( ing, table.file ), fileLang, table.file, starTexts, starIds );
-        const bool library = ( std::ranges::contains( kPythonLangs, fileLang ) && pyPackaged && !pythonModulePrivate( rootRelPath( ing, table.file ) ) ) || ( std::ranges::contains( kJsFamilyLangs, fileLang ) && jsPublished );
+        const bool library = libraryOf( table );
         // a header no file of the tree includes is there for an outside includer (a root-level library header), or dead as a whole
         const bool lonelyHeader = quality::isHeaderPath( rootRelPath( ing, table.file ) ) && !scans[t].headerIncluded();
         // `p.Lookup(name)` in a plugin host: an exported def of a `package main` is a plugin symbol a computed name may reach
@@ -2955,6 +3116,11 @@ inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const 
     return c;
 }
 
+inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::span<const std::uint32_t> files )
+{
+    return classifyFiles( ing, g, vri, files, []( std::uint32_t ) -> const std::string* { return nullptr; } );
+}
+
 // DEAD-CODE-SCOPE: --dead-code=PATH lists, after its internal-linkage rows, the PUBLIC free functions of the filtered files that no
 // non-test caller reaches (the exported group, linkage="exported"). Public is this table's isPublicDef, so code outside the tree may
 // call them: zero means none found in this tree, never unused. Each row carries this table's verdict and why=, so a name a string,
@@ -2979,22 +3145,23 @@ inline bool noNonTestCaller( const IngestResult& ing, const Graph& g, NodeId id 
     return true;
 }
 
-// the shape --dead-code's own rows have (quality::deadCodeEligibleKind: a free function with a body, outside headers), in library code
-inline bool exportedCandidateShape( const IngestResult& ing, const Symbol& s ) noexcept
+struct ExportedRow
 {
-    return quality::deadCodeEligibleKind( ing, s ) && !isMemberDef( s ) && !isTestLikePath( rootRelPath( ing, s.fileId ) ) && !isTestSymbol( ing, s.id );
-}
+    int rank = 0; // verdictRank: unused, test-only, file-only, unknown
+    const Row* row = nullptr;
+    NodeId def = 0; // the def the row's p= and l= name: the row's first def, or its first in-file def a d/to row does not already list
+};
 
 struct ExportedGroup
 {
     Classified classified;
-    std::vector<std::pair<int, const Row*>> rows; // (verdict rank, row): unused, test-only, file-only, unknown; then path, line
+    std::vector<ExportedRow> rows; // by rank, then path, line
 };
 
-template<class Skip>
-inline ExportedGroup collectExportedGroup( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::span<const std::uint32_t> files, Skip&& skip )
+template<class Skip, class Held>
+inline ExportedGroup collectExportedGroup( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::span<const std::uint32_t> files, Skip&& skip, Held&& held )
 {
-    ExportedGroup out{ classifyFiles( ing, g, vri, files ), {} };
+    ExportedGroup out{ classifyFiles( ing, g, vri, files, held, true ), {} };
     for( const FileTable& t : out.classified.tables )
     {
         if( !t.servedLanguage )
@@ -3008,22 +3175,23 @@ inline ExportedGroup collectExportedGroup( const IngestResult& ing, const Graph&
                 continue;
             }
             const auto inFile = [&]( NodeId id ) { return ing.symbols[id].fileId == t.file; };
-            const bool shaped = std::ranges::any_of( r.defs, [&]( NodeId id ) { return inFile( id ) && exportedCandidateShape( ing, ing.symbols[id] ); } );
+            // per def: an overload a d or to row already lists (a `static f(int)`) leaves its uncalled public sibling (`f(double)`) to this group
+            const auto open = [&]( NodeId id ) { return inFile( id ) && exportedCandidateShape( ing, ing.symbols[id] ) && !skip( id ); };
+            const auto firstOpen = std::ranges::find_if( r.defs, open );
             const bool reached = std::ranges::any_of( r.defs, [&]( NodeId id ) { return !noNonTestCaller( ing, g, id ); } );
-            const bool listedAlready = std::ranges::any_of( r.defs, skip );
             const std::string_view v = verdictOf( r );
-            if( !shaped || reached || listedAlready || v == "used" )
+            if( firstOpen == r.defs.end() || reached || v == "used" )
             {
                 continue;
             }
-            out.rows.emplace_back( verdictRank( v ), &r );
+            out.rows.push_back( { verdictRank( v ), &r, skip( r.defs.front() ) ? *firstOpen : r.defs.front() } );
         }
     }
     std::ranges::stable_sort( out.rows, [&]( const auto& a, const auto& b )
                               {
-        if( a.first != b.first ) { return a.first < b.first; }
-        const Symbol& x = ing.symbols[a.second->defs.front()];
-        const Symbol& y = ing.symbols[b.second->defs.front()];
+        if( a.rank != b.rank ) { return a.rank < b.rank; }
+        const Symbol& x = ing.symbols[a.def];
+        const Symbol& y = ing.symbols[b.def];
         const std::string_view px = rootRelPath( ing, x.fileId );
         const std::string_view py = rootRelPath( ing, y.fileId );
         return px != py ? px < py : x.line < y.line; } );

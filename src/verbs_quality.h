@@ -2679,7 +2679,7 @@ inline constexpr std::size_t kDeadExportedFiles     = rw::kForUnusedDirFiles;   
 inline constexpr std::size_t kDeadExportedRowsShown = 100; // exported rows printed (shown= capped=1; total= stays whole)
 inline constexpr std::string_view kDeadExportedLegend =
     "<exported linkage=\"exported\"> (absent with no filter, or when no filtered file holds one): PUBLIC free functions of the filtered "
-    "files with no non-test caller found in the indexed tree, as <e n= t= p= l= v=> rows after the d and to rows; not dead and not in count=. "
+    "files with no non-test caller in the graph, as <e n= t= p= l= v=> rows after the d and to rows; not dead and not in count=. "
     "linkage=\"exported\": the name is visible outside its file (no static, no leading underscore; a TS/JS export, a Go capital, a Rust pub), "
     "so code outside this tree may call it, and zero means none found here, never unused. evidence=\"no-non-test-caller\": every caller "
     "the graph holds is a test, or there is none. v=unused: the name appears in no text file under the root outside its own definition, "
@@ -2690,27 +2690,41 @@ inline constexpr std::string_view kDeadExportedLegend =
     "declined, built-name a built string could name it, dispatch, members, manifest, in-file, unimported its module is imported by no file, "
     "unseen a file could not be read. tests= text= str= imp= same= count test, code, string, import and same-file words; defs= an overload "
     "set; at= sites to read. total= rows found, shown= printed (first page only), capped=1 rows were cut; files= files read of files_total= filtered files holding "
-    "a non-internal free function no non-test caller reaches (the first by path; the verdict pass may still drop its rows, so total=0 can follow); unseen=N text files that could not be read. ";
+    "a non-internal free function no non-test caller reaches (the first by path; the verdict pass may still drop its rows, so total=0 can follow); unseen=N is a floor on text files not read, unseen_by= names the cap or failure behind each (size, total, files, read, walk); "
+    "extra=\"skipped\": every verdict was fixed by the indexed files, so the unindexed text files were not read (the counts and at= sites are floors). ";
 
-// The filtered files that hold a free function with no non-test caller and no internal-linkage mark, the first kDeadExportedFiles by
-// path; total counts them all. `matches` is the verb's --dead-code=DIR filter, `staticLinkage` its `static` reading.
+// The filtered files that hold a PUBLIC free function (the table's isPublicDef) with no non-test caller and no internal-linkage mark, the
+// first kDeadExportedFiles by path; total counts them all. `matches` is the verb's --dead-code=DIR filter, `staticLinkage` its `static`
+// reading, `sourceOf` the verb's cached bytes of a file: a file it could not read gives no linkage evidence, so none of its functions is
+// called exported (the group's unseen= still counts it, from classifyFiles' own read).
 struct DeadExportedFiles
 {
     std::vector<std::uint32_t> files;
     std::size_t                total = 0;
 };
 
-template<class Matches, class StaticLinkage>
-inline DeadExportedFiles deadExportedFiles( const rw::IngestResult& ing, const rw::Graph& g, const Matches& matches, const StaticLinkage& staticLinkage )
+template<class Matches, class StaticLinkage, class SourceOf>
+inline DeadExportedFiles deadExportedFiles( const rw::IngestResult& ing, const rw::Graph& g, const Matches& matches, const StaticLinkage& staticLinkage, const SourceOf& sourceOf )
 {
     using namespace rw;
     DeadExportedFiles out;
     std::vector<char> holds( ing.files.size(), 0 );
+    std::uint32_t                 jsFile = ~std::uint32_t( 0 );
+    std::vector<std::string_view> jsExports;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.fileId < holds.size() && holds[ s.fileId ] == 0 && unusedfile::exportedCandidateShape( ing, s ) && matches( ing.files[ s.fileId ] ) && !staticLinkage( s )
-            && !quality::underscorePrivateDef( rootRelPath( ing, s.fileId ), s ) && unusedfile::noNonTestCaller( ing, g, s.id ) )
+        if( s.fileId < holds.size() && holds[ s.fileId ] == 0 && unusedfile::exportedCandidateShape( ing, s ) && matches( ing.files[ s.fileId ] ) && !sourceOf( s.fileId ).empty()
+            && !staticLinkage( s ) && !quality::underscorePrivateDef( rootRelPath( ing, s.fileId ), s ) && unusedfile::noNonTestCaller( ing, g, s.id ) )
         {
+            if( jsFile != s.fileId )
+            {
+                jsFile    = s.fileId;
+                jsExports = unusedfile::jsExportsOf( ing, s.fileId );
+            }
+            if( !unusedfile::isPublicDef( ing, s, sourceOf( s.fileId ), jsExports, nullptr ) )
+            {
+                continue; // a TS function no export names: the group would print no row for it, so its file takes no place under the cap
+            }
             holds[ s.fileId ] = 1;
             out.files.push_back( s.fileId );
         }
@@ -2736,16 +2750,26 @@ inline std::string deadExportedGroupXml( const rw::IngestResult& ing, const rw::
     {
         out += " capped=\"1\"";
     }
-    if( exported.classified.extra.unseen() > 0 )
+    if( exported.classified.walkSkipped )
     {
-        out += std::format( " unseen=\"{}\"", exported.classified.extra.unseen() );
+        out += " extra=\"skipped\"";
+    }
+    if( const unusedfile::ExtraFiles& extra = exported.classified.extra; extra.unseen() > 0 )
+    {
+        // a floor: the --for table's own unseen_by= names each cause (a cap, an unreadable file, a failed walk)
+        out += std::format( " unseen=\"{}\" unseen_by=\"", extra.unseen() );
+        for( std::size_t k = 0; k < unusedfile::kUnseenByWords.size(); ++k )
+        {
+            out += std::format( "{}{}={}", k == 0 ? "" : ",", unusedfile::kUnseenByWords[ k ], extra.by[ k ] );
+        }
+        out += '"';
     }
     out += '>';
     std::vector<char> esc;
     for( std::size_t k = 0; k < shown; ++k )
     {
-        const unusedfile::Row& r = *exported.rows[ k ].second;
-        const Symbol&          s = ing.symbols[ r.defs.front() ];
+        const unusedfile::Row& r = *exported.rows[ k ].row;
+        const Symbol&          s = ing.symbols[ exported.rows[ k ].def ];
         const std::string_view rp = singleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) : std::string_view( ing.files[ s.fileId ] );
         const std::string_view verdict = unusedfile::verdictOf( r );
         out += "<e n=\"";
@@ -3145,18 +3169,19 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             {
                 continue; // may be instantiated by external TUs
             }
+            // optional path filter: directory prefix, trailing component, or the whole path. Tested before the `static` read below, so a
+            // filtered run reads only the filtered files (the filter has no side effect, and nothing between the two counted).
+            if( !dirFilter.empty() && !filterMatchesPath( ing.files[s.fileId] ) )
+            {
+                continue;
+            }
+
             // D1 TESTONLY-DEAD: Python's module-private convention is internal-interface evidence for the test-only rows
             // ONLY; a zero-caller row (count=) still needs the `static` token, exactly as before.
             const bool staticLinkage = hasStaticToken( s );
             if( !staticLinkage && !quality::underscorePrivateDef( rootRelPath( ing, s.fileId ), s ) )
             {
                 continue; // external linkage may be an entry point/API
-            }
-
-            // optional path filter: directory prefix, trailing component, or the whole path
-            if( !dirFilter.empty() && !filterMatchesPath( ing.files[s.fileId] ) )
-            {
-                continue;
             }
 
             // in-degree == 0 → no call in the indexed tree reaches this symbol
@@ -3209,10 +3234,14 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         // rows, as the exported group (forunused.h collectExportedGroup: the --for table's verdicts, so a name a string, registry,
         // decorator or re-export holds reads v=unknown why=). Files are the first kDeadExportedFiles by path that hold such a
         // function; files_total= counts them all. Absent with no filter or no such file, so those answers are byte-identical.
-        const auto [ exportedFiles, exportedFilesTotal ] = dirFilter.empty() ? DeadExportedFiles{} : deadExportedFiles( ing, g, filterMatchesPath, hasStaticToken );
+        // First page only: the page offset is fixed for the verb, so a later page computes no group and its legend carries no clause for one.
+        const bool wantExported = !dirFilter.empty() && cfg.pageOffset == 0;
+        const auto [ exportedFiles, exportedFilesTotal ] = !wantExported ? DeadExportedFiles{} : deadExportedFiles( ing, g, filterMatchesPath, hasStaticToken, sourceFor );
         const auto listedAsRow = [ & ]( NodeId id ) { return std::ranges::contains( candidates, id ) || std::ranges::contains( testOnly, id ); };
+        // the verb's own reads of the filtered files serve the group's text pass (classifyFiles reads only the rest)
+        const auto heldSource = [ & ]( std::uint32_t f ) -> const std::string* { return f < sourceLoaded.size() && sourceLoaded[ f ] != 0 ? &sourceByFile[ f ] : nullptr; };
         const rw::unusedfile::ExportedGroup exported = exportedFiles.empty() ? rw::unusedfile::ExportedGroup{}
-                                                                             : rw::unusedfile::collectExportedGroup( ing, g, dcVri, exportedFiles, listedAsRow );
+                                                                             : rw::unusedfile::collectExportedGroup( ing, g, dcVri, exportedFiles, listedAsRow, heldSource );
 
         rw::emitTo( stdout, "<!-- ripwire dead-code: source functions with internal linkage and no caller found in the indexed tree — a name-based "
                      "graph reading, not a confidence judgement (dynamic dispatch, reflection and macro-generated callers are invisible to it). "
@@ -3297,7 +3326,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         {
             emitDeadCodeRow( ing, testOnly[ testOnlyIndex ], "to", qvSingleRoot, qvRootPrefix, dcEsc );
         }
-        if( !exportedFiles.empty() && cfg.pageOffset == 0 )   // first page only, like the to rows
+        if( !exportedFiles.empty() )   // first page only (wantExported), like the to rows
         {
             rw::emitRaw( stdout, deadExportedGroupXml( ing, exported, exportedFiles.size(), exportedFilesTotal, qvSingleRoot, qvRootPrefix ).c_str() );
         }
