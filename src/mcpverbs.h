@@ -4160,14 +4160,14 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                                            // argument serialize() takes — see its comment.
                                                            // Shared by CLI --connect and the MCP connect verb.
                          std::size_t unprovenDefs = 0,     // H1: the terminals' decl→def residue, SUMMED by the caller
-                         std::string_view ambiguousTerminals = {},    // 0.6.6 D1: joinTerminalPicks' tied names, "" when none
-                         std::span<const std::pair<NodeId, std::size_t>> qualifiedDefs = {} )   // XF-QUALIFIED-ENDPOINTS: joinTerminalPicks' out-param
+                         const ConnectPicks& picks = ConnectPicks{} )   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
 {
+    const std::string_view ambiguousTerminals = picks.ambiguous;
     // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
     // name reports every definition of the name, as before
     const auto terminalDefCount = [ & ]( NodeId t ) -> std::size_t
     {
-        for( const auto& [ node, defs ] : qualifiedDefs )
+        for( const auto& [ node, defs ] : picks.qualifiedDefs )
         {
             if( node == t ) { return defs; }
         }
@@ -4470,15 +4470,14 @@ inline std::string connectText( const std::string& root, const std::vector<std::
         unprovenDefs += termUnprovenDefs;
     }
 
-    std::vector<std::pair<NodeId, std::size_t>> qualifiedDefs;
-    const std::string   ambiguous = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius, &qualifiedDefs );   // 0.6.6 D1: the CLI's pick, same call
+    const ConnectPicks  picks = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
     const ConnectResult res = connectSubgraph( g, terminals, radius );
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
     if( !mem ) { err = "internal error"; return {}; }
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),
-                 unprovenDefs, ambiguous, qualifiedDefs );
+                 unprovenDefs, picks );
     std::optional<std::string> answer = mcpAnswerText( stream );
     if( !answer )
     {

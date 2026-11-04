@@ -18112,23 +18112,28 @@ inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vecto
 // call re-reads every spec's full definition set (the same resolver, so `file:name` narrows it exactly as before),
 // lets chooseJoiningTerminals move a many-definition pick onto the definition that joins, and returns the names whose
 // pick tied with another equally-joining definition, comma-joined in spec order ("" when none) — the root's
-// ambiguous_terminal= attribute. Specs whose name has one definition cost nothing and never move.
+// ambiguous_terminal= attribute (ConnectPicks::ambiguous), with each non-bare spec's searched count (ConnectPicks::qualifiedDefs).
+// Specs whose name has one definition cost nothing and never move.
 // XF-QUALIFIED-ENDPOINTS: a terminal spelled with an owner, module or file (`ProcessList::insert`, `AuthPhase.async_handle`,
 // `ns.make`, `file:name`, `@file:line`) searched ONLY the definitions that spelling resolves to, so its defs= is that count,
 // not the bare name's (`defs="645"` on a `--connect=InterpreterFactory::get` terminal read as "the qualifier was dropped").
 // A bare name (a lone identifier; a JS/TS `#private` name is one) keeps the bare-name count byte-identically.
 inline bool selectorIsBareName( std::string_view spec ) noexcept
 {
-    if( spec.empty() || spec.front() == '@' || spec.find( ':' ) != std::string_view::npos || spec.find( '/' ) != std::string_view::npos )
-    {
-        return spec.empty();
-    }
-    return spec.find_first_of( ".#", 1 ) == std::string_view::npos;
+    return !spec.empty() && spec.front() != '@' && spec.find_first_of( ":/" ) == std::string_view::npos
+        && spec.find_first_of( ".#", 1 ) == std::string_view::npos;
 }
 
+// What joinTerminalPicks hands packConnect: the tied names (ambiguous_terminal=, "" when none) and, per terminal whose spec is
+// not a bare name, (its pick, the definitions its spelling searched).
+struct ConnectPicks
+{
+    std::string                                 ambiguous;
+    std::vector<std::pair<NodeId, std::size_t>> qualifiedDefs;
+};
+
 template<class SpecList>
-inline std::string joinTerminalPicks( const IngestResult& ing, const Graph& g, const SpecList& specs, std::vector<NodeId>& picks, std::uint32_t radius,
-                                      std::vector<std::pair<NodeId, std::size_t>>* qualifiedDefsOut = nullptr )   // (pick, defs searched) per non-bare spec
+inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, const SpecList& specs, std::vector<NodeId>& picks, std::uint32_t radius )
 {
     EXPECTS( specs.size() == picks.size() );
     std::vector<std::vector<NodeId>> defsPerTerminal;
@@ -18139,14 +18144,15 @@ inline std::string joinTerminalPicks( const IngestResult& ing, const Graph& g, c
     }
     std::vector<std::uint32_t> tied;
     chooseJoiningTerminals( g, defsPerTerminal, picks, tied, radius );
-    for( std::size_t i = 0; qualifiedDefsOut != nullptr && i < picks.size(); ++i )
+    ConnectPicks out;
+    for( std::size_t i = 0; i < picks.size(); ++i )
     {
         if( !selectorIsBareName( std::string_view( specs[ i ] ) ) )
         {
-            qualifiedDefsOut->emplace_back( picks[ i ], defsPerTerminal[ i ].size() );
+            out.qualifiedDefs.emplace_back( picks[ i ], defsPerTerminal[ i ].size() );
         }
     }
-    std::string ambiguous;
+    std::string& ambiguous = out.ambiguous;
     for( std::size_t i = 0; i < picks.size(); ++i )
     {
         if( tied[ i ] > 1 && picks[ i ] < ing.symbols.size() )
@@ -18158,7 +18164,7 @@ inline std::string joinTerminalPicks( const IngestResult& ing, const Graph& g, c
             ambiguous += ing.symbols[ picks[ i ] ].name;
         }
     }
-    return ambiguous;
+    return out;
 }
 
 // ---- community detection (--communities): one level of Louvain local-moving on the UNDIRECTED projection
