@@ -265,15 +265,15 @@ else no "(D1) y_->F lost its element: [$( hop "$TMP/d1y" )]"; fi
 # D1e (fix round recv-fix0, the leak's sibling shape): an ARROW-chained expression receiver `hp->get()->F` (Hold::get states
 # `Cch*`) is a receiver of its own; the task's `x_->F` (bound to Dsk::F, never declined) gets no element on either the expression
 # site or y_'s, while y_->F, written, keeps its element. Red on the pre-fix lane head bb3835b4b (call="F" element, shown="2").
-run "$F/recvexpr" --callees=L::Load --legend=full >"$TMP/d1ep"
+run "$F/recvexpr" --callees=Job::Run --legend=full >"$TMP/d1ep"
 if [ "$( grep -o '<dc n="F"[^>]*gate="iface"[^>]*cand="rc.cc:2 rc.cc:3"' "$TMP/d1ep" | wc -l | tr -d ' ' )" = "2" ] && grep -q '<s t="method" n="Dsk::F" p="rc.cc:4"/>' "$TMP/d1ep"; then
     ok "(D1epre) y_->F and hp->get()->F are iface-declined at Cch; x_->F is proven to Dsk::F"
 else no "(D1epre) the recvexpr fixture's premise failed (expected two iface-declined F at Cch and Dsk::F proven)"; fi
-run "$F/recvexpr" "--for=L::Load x_->F" >"$TMP/d1e"
+run "$F/recvexpr" "--for=Job::Run x_->F" >"$TMP/d1e"
 if [ -s "$TMP/d1e" ] && grep -q 'route="name-exact' "$TMP/d1e" && [ -z "$( hop "$TMP/d1e" )" ] && ! has "$( cat "$TMP/d1e" )" 'k * 3'; then
     ok "(D1e) x_->F (proven): the expression receiver hp->get()->F's declined call is not answered"
 else no "(D1e) x_->F answered an expression receiver's declined call (or left name-exact): [$( hop "$TMP/d1e" )]"; fi
-run "$F/recvexpr" "--for=L::Load y_->F" >"$TMP/d1ey"
+run "$F/recvexpr" "--for=Job::Run y_->F" >"$TMP/d1ey"
 if has "$( hop "$TMP/d1ey" )" 'call="y_-&gt;F"' && has "$( hop "$TMP/d1ey" )" 'n="Lru::F"' && has "$( hop "$TMP/d1ey" )" 'n="Arc::F"'; then ok "(D1e) twin: the written receiver y_->F keeps its element (Lru::F, Arc::F)"
 else no "(D1e) y_->F lost its element on recvexpr: [$( hop "$TMP/d1ey" )]"; fi
 run "$F/dumpfs" "--for=Builder::Run disk_->ReadFile" >"$TMP/d2"
