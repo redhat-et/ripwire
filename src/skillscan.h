@@ -506,16 +506,7 @@ inline bool isAllDigits( std::string_view s ) noexcept
 // Whether `option` (as written) is one of a prefix's value-taking options.
 inline bool takesValue( std::string_view valueOptions, std::string_view option ) noexcept
 {
-    for( std::size_t begin = 0; begin < valueOptions.size(); )
-    {
-        const std::size_t end = std::min( valueOptions.find( ' ', begin ), valueOptions.size() );
-        if( valueOptions.substr( begin, end - begin ) == option )
-        {
-            return true;
-        }
-        begin = end + 1;
-    }
-    return false;
+    return namesplit::anyField( valueOptions, " ", /*visitTrailingEmpty=*/false, [ & ]( std::string_view o ) { return o == option; } );
 }
 
 struct NetFlow

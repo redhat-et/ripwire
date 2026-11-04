@@ -23,6 +23,8 @@
 #include "cppscopechain.h" // EditCheckBraceLexer — the namespaces and classes around a declaration (C++ records no namespace body)
 #include "defslookup.h"    // aliasTargetText / aliasTargetRow — the written target, as --defs to= prints it
 #include "graph.h"         // resolveAllByNameQualified
+#include "infra/hashutil.h" // packPair — the (file, byte) chain key
+#include "infra/namesplit.h" // isIdentChar / anyField — the shared identifier byte class and field splitter
 #include "langfacts.h"     // LangFacts::aliasTargetDefs — the languages whose alias rows record a target
 #include "lexical.h"       // lexicalScanText — the reverse walk reads each alias file once
 #include "mapinventory.h"  // isInventoryCodeSymbol
@@ -64,9 +66,10 @@ struct AliasHopChain
 namespace aliashop_detail
 {
 
+// an identifier byte of a written C++ target: the shared ASCII class plus `$` (a GNU identifier byte)
 inline bool identByte( char c ) noexcept
 {
-    return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' || c == '$';
+    return namesplit::isIdentChar( c ) || c == '$';
 }
 
 // The head name of a written target (template arguments dropped: `COW<IColumn>::Ptr` -> COW::Ptr) and the identifier chains of
@@ -232,16 +235,7 @@ inline bool cxxSourceFile( std::string_view path ) noexcept
 // Is `seg` one whole `::` segment of the scope path `sc`?
 inline bool scopeHasSegment( std::string_view sc, std::string_view seg )
 {
-    for( std::size_t from = 0; from <= sc.size(); )
-    {
-        const std::size_t cut = std::min( sc.find( "::", from ), sc.size() );
-        if( sc.substr( from, cut - from ) == seg )
-        {
-            return true;
-        }
-        from = cut + 2;
-    }
-    return false;
+    return namesplit::anyField( sc, "::", /*visitTrailingEmpty=*/true, [ & ]( std::string_view s ) { return s == seg; } );
 }
 
 // The per-answer caches the binds share: each file's lexical scope chains (cppscopechain.h's brace lexer; C++ records no namespace
@@ -249,28 +243,19 @@ inline bool scopeHasSegment( std::string_view sc, std::string_view seg )
 struct BindCache
 {
     HashMap<std::string, char>                       isNamespace;
-    HashMap<std::uint64_t, std::vector<std::string>> chains;   // (file << 32 | byte) -> the namespaces and classes around it
+    HashMap<std::uint64_t, std::vector<std::string>> chains;   // hashutil::packPair( file, byte ) -> the namespaces and classes around it
     HashMap<std::uint64_t, char>                     unknown;  // the keys whose file could not be read or did not balance
 };
-inline std::uint64_t chainKey( std::uint32_t file, std::uint32_t at ) noexcept
-{
-    return ( std::uint64_t( file ) << 32 ) | at;
-}
 
 // `a::b::c` -> a, b, c appended to `out` ("" adds nothing)
 template <class Seg>
 inline void appendScopeSegments( std::string_view q, std::vector<Seg>& out )
 {
-    for( std::string_view rest = q; !rest.empty(); )
-    {
-        const std::size_t sep = rest.find( "::" );
-        out.emplace_back( rest.substr( 0, sep ) );
-        if( sep == std::string_view::npos )
-        {
-            break;
-        }
-        rest.remove_prefix( sep + 2 );
-    }
+    namesplit::anyField( q, "::", /*visitTrailingEmpty=*/false, [ & ]( std::string_view s )
+                         {
+                             out.emplace_back( s );
+                             return false;
+                         } );
 }
 
 // The lexical chains at the declaration starts of `ids`, read ONE pass per file (hoisting: a --uses answer's thousands of sites
@@ -280,7 +265,7 @@ inline void appendScopeSegments( std::string_view q, std::vector<Seg>& out )
 // which leaves a proof unproven (hedged), never invents one.
 inline void primeChains( const IngestResult& ing, std::vector<std::pair<std::uint32_t, std::uint32_t>> want, BindCache& cache )
 {
-    std::erase_if( want, [ & ]( const auto& fa ) { return cache.chains.find( chainKey( fa.first, fa.second ) ) != cache.chains.end(); } );
+    std::erase_if( want, [ & ]( const auto& fa ) { return cache.chains.find( hashutil::packPair( fa.first, fa.second ) ) != cache.chains.end(); } );
     std::ranges::sort( want );
     want.erase( std::unique( want.begin(), want.end() ), want.end() );
     std::string scratch;
@@ -305,7 +290,7 @@ inline void primeChains( const IngestResult& ing, std::vector<std::pair<std::uin
         }
         for( std::size_t k = from; k < to; ++k )
         {
-            const std::uint64_t key = chainKey( want[ k ].first, want[ k ].second );
+            const std::uint64_t key = hashutil::packPair( want[ k ].first, want[ k ].second );
             if( !got[ k - from ] )
             {
                 cache.unknown.try_emplace( key, '\1' );
@@ -323,11 +308,11 @@ inline void primeChains( const IngestResult& ing, std::vector<std::pair<std::uin
 // Returns false when the file's chain is unknown (unreadable, or braces a macro may open): `out` is then the scope's word alone.
 inline bool enclosingPath( const IngestResult& ing, const Symbol& s, BindCache& cache, std::vector<std::string>& out )
 {
-    auto at = cache.chains.find( chainKey( s.fileId, s.sigStartByte ) );
+    auto at = cache.chains.find( hashutil::packPair( s.fileId, s.sigStartByte ) );
     if( at == cache.chains.end() )
     {
         primeChains( ing, { { s.fileId, s.sigStartByte } }, cache );
-        at = cache.chains.find( chainKey( s.fileId, s.sigStartByte ) );
+        at = cache.chains.find( hashutil::packPair( s.fileId, s.sigStartByte ) );
     }
     out = at->second;
     std::vector<std::string_view> owner;
@@ -346,7 +331,7 @@ inline bool enclosingPath( const IngestResult& ing, const Symbol& s, BindCache& 
         }
     }
     out.insert( out.end(), owner.begin() + std::ptrdiff_t( overlap ), owner.end() );
-    return cache.unknown.find( chainKey( s.fileId, s.sigStartByte ) ) == cache.unknown.end();
+    return cache.unknown.find( hashutil::packPair( s.fileId, s.sigStartByte ) ) == cache.unknown.end();
 }
 
 template <class A, class B>
