@@ -199,7 +199,9 @@ PROBE="$( run "$FIX" --callees=probePath --no-cache )"
 # ambiguous 1 -> 0: that split was the corpus's only guess. external 2 -> 12: the ten refused std-qualified SITES
 # (takeTwice 2, takeRooted, takeInline, flipTwice 2, flipRooted, stopHere, rotate, clearHost) join the two
 # Phase-5 refusals (bareMove, bridgeMove). unresolved stays 0: that gauge means "defined in-repo but lang-filtered".
-printf '%s' "$MAP" | grep -qE 'files=13 symbols=35 edges=6 shown=35 est_tokens=[0-9]+ ambiguous=0 unresolved=0 external=12 ' \
+# symbols 35 -> 36 (lane index-alias-const): alias.cpp's `namespace fs = vendor::fsimpl;` is a definition (t="alias"); it is the
+# corpus's one alias form (`using namespace std;` in unqualified.cpp is a directive, no def), and no edge moves.
+printf '%s' "$MAP" | grep -qE 'files=13 symbols=36 edges=6 shown=36 est_tokens=[0-9]+ ambiguous=0 unresolved=0 external=12 ' \
     && ok "fixture header: edges=6 ambiguous=0 unresolved=0 external=12 (was edges=15 ambiguous=1 external=2)" \
     || no "fixture header wrong: $( printf '%s' "$MAP" | grep -oE 'files=13 [^-]*' | head -1 )"
 [ "$( grep -c $'^C\texternal\t' "$TMP/c.tsv" )" = 12 ] \

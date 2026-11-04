@@ -196,5 +196,25 @@ mkdir -p "$F/e/cpp"; printf 'template <class T> struct Ptr { T* p; };\nstruct Wi
 ( cd "$F/e" && "$BIN" . --no-cache --for="what does WidgetRef expand to? the defs lookup is empty" ) > "$TMP/e" 2>/dev/null; erc=$?
 if [ "$erc" -eq 0 ] && grep -q '<ld p="cpp/h.h" l="4" shape="using" in="Holder::Holder">' "$TMP/e"; then ok "[R4] class-scope using: the literal row's in= names its class"; else no "[R4] class-scope using in=: rc=$erc $( grep -oE '<ld [^>]*>' "$TMP/e" | head -1 )"; fi
 
+# [CI] (red on 267c65d9e; ifacepeelcheck B1e) a definition that only NAMES a type is no real class: a pointer typedef, a
+# function-type typedef or a `using X = int;` of a smart alias's name elsewhere must not refuse that alias's peel (resolve.h
+# SmartAliasPeel::aliasDeclarationSymbol). Each fixture's member written `Ptr` reaches its own class's shared_ptr<KxI>: the call
+# declines gate="iface" over the two overrides, never three by-name rows.
+for shape in 'typedef Bar* Ptr;' 'typedef int (*Ptr)(int);' 'using Ptr = int;'; do
+    d="$TMP/peel/$( printf '%s' "$shape" | cksum | cut -d' ' -f1 )"; mkdir -p "$d"
+    { printf '#include <memory>\nclass KxI { public: virtual ~KxI() = default; virtual int kick(int x) = 0; };\n'
+      printf 'class KxI1 : public KxI { public: int kick(int x) override { return x; } };\n'
+      printf 'class KxI2 : public KxI { public: int kick(int x) override { return x + 1; } };\n'
+      printf 'class KyC { public: int kick(int x) { return x; } };\n'
+      printf 'struct HoldX { using Ptr = std::shared_ptr<KxI>; int goX(int x) { return p_->kick(x); } Ptr p_; };\n'
+      printf 'namespace other { struct Bar { int kick(int x) { return x; } }; %s }\n' "$shape"; } > "$d/a.h"
+    ( cd "$d" && "$BIN" . --no-cache --callees=a.h::HoldX::goX ) > "$TMP/peel.out" 2>/dev/null; prc=$?
+    if [ "$prc" -eq 0 ] && grep -q '<dc n="kick"[^>]*cands="2" via="declined" gate="iface"' "$TMP/peel.out" && ! grep -q 'via="name"' "$TMP/peel.out"; then
+        ok "[CI] smart alias Ptr beside \`$shape\`: still declines gate=iface"
+    else
+        no "[CI] smart alias Ptr beside \`$shape\`: rc=$prc $( sed 's/^<!--.*-->//' "$TMP/peel.out" | head -c 400 )"
+    fi
+done
+
 echo "aliasdefcheck: $( [ "$fail" -eq 0 ] && echo PASS || echo FAIL )"
 exit "$fail"
