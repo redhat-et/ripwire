@@ -676,7 +676,7 @@ inline void emitPathPairs( std::FILE* out, const IngestResult& ing, const Graph&
         {
             const std::span<const NodeId>       rows   = std::span<const NodeId>( p.chain ).first( p.joins > 0 ? p.joinRow + 1 : p.chain.size() );
             const std::vector<std::string_view> owners = pathHopOwners( ing, rows );
-            emitPathHopRows( out, ing, g, rows, owners, singleRoot, rootPrefix, hops, i == 0 ? HopShed::Full : HopShed::SiteOnly );   // HOP-CONTEXT-1: pair 1 full
+            emitPathHopRows( out, ing, g, rows, owners, PathRowView{ singleRoot, rootPrefix, hops, i == 0 ? HopShed::Full : HopShed::SiteOnly } );   // HOP-CONTEXT-1: pair 1 full
         }
         emitRaw( out, "</pair>" );
     }
@@ -706,7 +706,7 @@ inline void emitPathAnswerRows( std::FILE* out, const IngestResult& ing, const G
         emitPathPairs( out, ing, g, pp, singleRoot, rootPrefix, hops );
         return;
     }
-    emitPathHopRows( out, ing, g, path, owners, singleRoot, rootPrefix, hops, HopShed::Full );
+    emitPathHopRows( out, ing, g, path, owners, PathRowView{ singleRoot, rootPrefix, hops, HopShed::Full } );
 }
 
 // HOP-CONTEXT-1: the edges emitPathAnswerRows prints, in the shape it prints them (pair 1 and today's single path in full,
@@ -740,8 +740,7 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
 // The one call both --path transports make: the answer's hop facts, before its root is written (the root carries the disclosures).
 inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact )
 {
-    FileTextCache files( ing );
-    return hopFacts( ing, g, pathHopWants( pp, path ), redact, files );
+    return hopFacts( ing, g, pathHopWants( pp, path ), redact );   // the overload that owns one reader for the answer
 }
 
 // What the answer's hop rows carry, for the legend: today's path, or every printed chain when pairs are listed — the CLI and

@@ -110,10 +110,7 @@ struct HopFacts
                                           []( const HopRecord& r, const std::pair<NodeId, NodeId>& k ) { return r.from != k.first ? r.from < k.first : r.to < k.second; } );
         return it != recs.end() && it->from == from && it->to == to ? &*it : nullptr;
     }
-    bool anySite() const noexcept { return std::any_of( recs.begin(), recs.end(), []( const HopRecord& r ) { return r.ref != kHopNoRef; } ); }
-    bool anySites() const noexcept { return std::any_of( recs.begin(), recs.end(), []( const HopRecord& r ) { return r.nSites > 1; } ); }
-    bool anyCall() const noexcept { return std::any_of( recs.begin(), recs.end(), []( const HopRecord& r ) { return !r.call.empty(); } ); }
-    bool anySig() const noexcept { return std::any_of( recs.begin(), recs.end(), []( const HopRecord& r ) { return !r.sig.empty(); } ); }
+    bool                   anySite = false, anySites = false, anyCall = false, anySig = false;   // set once, by hopFacts' slice pass
 };
 
 namespace hopdetail
@@ -125,10 +122,9 @@ inline bool identByte( char c ) noexcept
     return u >= 0x80 || ( u >= '0' && u <= '9' ) || ( u >= 'a' && u <= 'z' ) || ( u >= 'A' && u <= 'Z' ) || c == '_' || c == '$';
 }
 
-// The source spelling of a callee's name: the leaf segment (an index name may carry an owner), Elixir's /N dropped.
-inline std::string_view leafName( const Symbol& s ) noexcept
+// The last segment of a qualified spelling (`A` for "ns::A", `m` for "pkg.T#m"): the text after the final ::, . or #.
+inline std::string_view lastSegment( std::string_view n ) noexcept
 {
-    std::string_view n = s.lang == Lang::Elixir ? elixirBaseName( s.name ) : std::string_view( s.name );
     for( const std::string_view sep : { std::string_view( "::" ), std::string_view( "." ), std::string_view( "#" ) } )
     {
         if( const std::size_t at = n.rfind( sep ); at != std::string_view::npos && at + sep.size() < n.size() )
@@ -139,23 +135,23 @@ inline std::string_view leafName( const Symbol& s ) noexcept
     return n;
 }
 
+// The source spelling of a callee's name: the leaf segment (an index name may carry an owner), Elixir's /N dropped.
+inline std::string_view leafName( const Symbol& s ) noexcept
+{
+    return lastSegment( editCheckContractId( s.name, s ) );   // Elixir's /N dropped (the one Lang:: compare, editcheck.h)
+}
+
 // The first whole-word occurrence of `name` in text[from, to), npos when none.
 inline std::size_t findWord( std::string_view text, std::size_t from, std::size_t to, std::string_view name ) noexcept
 {
-    if( name.empty() )
+    const std::string_view hay  = text.substr( 0, std::min( to, text.size() ) );   // a match must end by `to`
+    const auto             edge = [ & ]( std::size_t before, std::size_t after ) { return ( before == 0 || !identByte( text[ before - 1 ] ) ) && ( after >= text.size() || !identByte( text[ after ] ) ); };
+    std::size_t            at   = name.empty() ? std::string_view::npos : hay.find( name, from );
+    while( at != std::string_view::npos && !edge( at, at + name.size() ) )
     {
-        return std::string_view::npos;
+        at = hay.find( name, at + 1 );
     }
-    for( std::size_t at = text.find( name, from ); at != std::string_view::npos && at + name.size() <= to; at = text.find( name, at + 1 ) )
-    {
-        const bool leftOk  = at == 0 || !identByte( text[ at - 1 ] );
-        const bool rightOk = at + name.size() >= text.size() || !identByte( text[ at + name.size() ] );
-        if( leftOk && rightOk )
-        {
-            return at;
-        }
-    }
-    return std::string_view::npos;
+    return at;
 }
 
 // The call text of one site: from its line's first non-blank byte, joined across up to kHopCallMaxLines lines while the
@@ -318,16 +314,7 @@ inline CallText calleeSig( FileTextCache& files, const Symbol& s, RedactCounts* 
 // The callee's owner as a call would qualify it (`A` for scope "ns::A"), "" when it has none.
 inline std::string_view ownerLeaf( const Symbol& s ) noexcept
 {
-    std::string_view sc = s.scope;
-    if( const std::size_t at = sc.rfind( "::" ); at != std::string_view::npos )
-    {
-        sc = sc.substr( at + 2 );
-    }
-    if( const std::size_t at = sc.rfind( '.' ); at != std::string_view::npos )
-    {
-        sc = sc.substr( at + 1 );
-    }
-    return sc;
+    return lastSegment( s.scope );
 }
 
 }   // namespace hopdetail
@@ -380,7 +367,7 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
         const Reference& r = ing.references[ refIndex ];
         // a macro invocation is a hop the graph prints too (viamacro -> WRAP): its site is the invocation, same filter otherwise
         const bool site = callSiteCounts( r, refIndex, g.keptForwards )
-                       || ( r.role == RefRole::Macro && !r.isDocLink && r.lang != Lang::Markdown && forwardCounts( r, refIndex, g.keptForwards ) );
+                       || ( r.role == RefRole::Macro && refTextCounts( r, refIndex, g.keptForwards ) );
         if( r.fromSymbol >= callerSel.size() || !callerSel[ r.fromSymbol ] || !site )
         {
             continue;
@@ -422,6 +409,8 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
             ++out.nosite;
             continue;
         }
+        out.anySite  = true;
+        out.anySites = out.anySites || rec.nSites > 1;
         if( !rec.full )
         {
             continue;
@@ -435,12 +424,21 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
         rec.sigGap  = st.gap;
         out.unread += rec.callGap == HopGap::Unread || rec.sigGap == HopGap::Unread ? 1 : 0;
         out.notext += rec.callGap == HopGap::NoText ? 1 : 0;
+        out.anyCall = out.anyCall || !rec.call.empty();
+        out.anySig  = out.anySig || !rec.sig.empty();
     }
     if( std::getenv( "RIPWIRE_HOP_STATS" ) != nullptr )
     {
         emitTo( stderr, "ripwire: hop facts: edges={} reference_scans={} files_read={}\n", out.recs.size(), out.referenceScans, out.filesRead );
     }
     return out;
+}
+
+// The same provider with a reader of its own, for a verb that reads no other file for the answer.
+inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<HopWant> wanted, RedactCounts* redact )
+{
+    FileTextCache files( ing );
+    return hopFacts( ing, g, std::move( wanted ), redact, files );
 }
 
 // THE renderer: one hop's attributes at a shed level. `withSig` false when the answer already prints the callee's
@@ -470,6 +468,98 @@ inline std::string hopAttrsXml( const IngestResult& ing, const HopRecord& rec, H
     return out;
 }
 
+// --connect: the callee sigs a group already shows (its join rows' sig=, when sigs print), sorted for hopEdgeXml's lookup.
+inline std::vector<NodeId> hopSigShown( std::span<const NodeId> joins, bool withSigs )
+{
+    std::vector<NodeId> shown;
+    if( withSigs )
+    {
+        shown.assign( joins.begin(), joins.end() );
+        std::sort( shown.begin(), shown.end() );   // a leg-dropped union need not list its joins in id order
+    }
+    return shown;
+}
+
+// --connect: rows that would read alike (homeassistant-08: f="get" t="async_handle" twice) print the definitions they join.
+// One sort of the rows by printed names, one scan per run of alike rows. Bit 1 = fp= (the froms differ), bit 2 = tp=.
+template <class Edge>
+std::vector<std::uint8_t> hopAlikeRows( const IngestResult& ing, std::span<const Edge> edges )
+{
+    std::vector<std::uint8_t> need( edges.size(), 0 );
+    std::vector<std::size_t>  byName( edges.size() );
+    for( std::size_t k = 0; k < edges.size(); ++k )
+    {
+        byName[k] = k;
+    }
+    const auto names = [ & ]( std::size_t k ) { return std::pair<std::string_view, std::string_view>( ing.symbols[ edges[k].from ].name, ing.symbols[ edges[k].to ].name ); };
+    std::sort( byName.begin(), byName.end(), [ & ]( std::size_t a, std::size_t b ) { return names( a ) != names( b ) ? names( a ) < names( b ) : a < b; } );
+    for( std::size_t lo = 0, hi = 0; lo < byName.size(); lo = hi )
+    {
+        hi = lo + 1;
+        bool fromsDiffer = false, tosDiffer = false;
+        for( ; hi < byName.size() && names( byName[hi] ) == names( byName[lo] ); ++hi )
+        {
+            fromsDiffer = fromsDiffer || edges[ byName[hi] ].from != edges[ byName[lo] ].from;
+            tosDiffer   = tosDiffer || edges[ byName[hi] ].to != edges[ byName[lo] ].to;
+        }
+        for( std::size_t k = lo; k < hi && hi - lo > 1; ++k )
+        {
+            need[ byName[k] ] = std::uint8_t( ( fromsDiffer ? 1 : 0 ) | ( tosDiffer ? 2 : 0 ) );
+        }
+    }
+    return need;
+}
+
+// --connect: one <e> row's hop attributes — fp=/tp= when it reads alike, then site=/call=/sig= at the shed level, the callee's
+// sig= once per group (`sigShown` grows as rows print it). `endpointRows` is set when fp=/tp= printed (its legend clause rides).
+inline std::string hopEdgeXml( const IngestResult& ing, const HopFacts& hops, NodeId from, NodeId to, std::uint8_t alike, HopShed shed,
+                               std::vector<NodeId>& sigShown, bool singleRoot, std::string_view rootPrefix, bool& endpointRows )
+{
+    std::string out;
+    if( !hops.on )
+    {
+        return out;
+    }
+    std::vector<char> esc;
+    const auto        defAt = [ & ]( const char* key, NodeId n )
+    {
+        const Symbol&          s  = ing.symbols[n];
+        const std::string_view rp = singleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+        out.append( key ).append( std::string( escapeXml( rp, esc ) ) ).append( ":" ).append( std::to_string( s.line ) ).append( "\"" );
+    };
+    if( ( alike & 1 ) != 0 ) { defAt( " fp=\"", from ); }
+    if( ( alike & 2 ) != 0 ) { defAt( " tp=\"", to ); }
+    endpointRows = endpointRows || alike != 0;
+    if( const HopRecord* rec = hops.find( from, to ) )
+    {
+        const auto at      = std::lower_bound( sigShown.begin(), sigShown.end(), to );
+        const bool withSig = at == sigShown.end() || *at != to;
+        out += hopAttrsXml( ing, *rec, shed, withSig, singleRoot, rootPrefix );
+        if( withSig && shed == HopShed::Full && !rec->sig.empty() )
+        {
+            sigShown.insert( at, to );
+        }
+    }
+    return out;
+}
+
+// --connect --max-tokens: advance the hop shed one step (sig=, then call=, then site=); false when nothing is left to shed.
+// The hop attributes take their own allowance and never displace what the answer printed before them (COMMON no-displacement).
+inline bool hopShedNext( const HopFacts& hops, HopShed& shed ) noexcept
+{
+    if( hops.on && shed < HopShed::SiteOnly && ( hops.anyCall || hops.anySig ) )
+    {
+        shed = shed == HopShed::Full ? HopShed::NoSig : HopShed::SiteOnly;
+        return true;
+    }
+    if( hops.on && shed != HopShed::Off && hops.anySite )
+    {
+        shed = HopShed::Off;
+        return true;
+    }
+    return false;
+}
+
 // The root's disclosures, present-only: hops with no site, texts withheld, and the shed level a budget reached.
 inline std::string hopRootAttrsXml( const HopFacts& f, HopShed shed = HopShed::Full )
 {
@@ -479,13 +569,13 @@ inline std::string hopRootAttrsXml( const HopFacts& f, HopShed shed = HopShed::F
     }
     if( shed == HopShed::Off )
     {
-        return f.anySite() ? " hop_shed=\"sig,call,site\"" : std::string();
+        return f.anySite ? " hop_shed=\"sig,call,site\"" : std::string();
     }
     std::string out;
     if( f.nosite > 0 ) { out += " hop_nosite=\"" + std::to_string( f.nosite ) + "\""; }
     if( f.unread > 0 ) { out += " hop_unread=\"" + std::to_string( f.unread ) + "\""; }
     if( f.notext > 0 ) { out += " hop_notext=\"" + std::to_string( f.notext ) + "\""; }
-    if( shed != HopShed::Full && ( f.anyCall() || f.anySig() ) )
+    if( shed != HopShed::Full && ( f.anyCall || f.anySig ) )
     {
         out += shed == HopShed::NoSig ? " hop_shed=\"sig\"" : " hop_shed=\"sig,call\"";
     }
@@ -503,22 +593,22 @@ inline std::string hopLegend( const HopFacts& f, std::string_view row, HopShed s
     const std::string r( row );
     if( shed == HopShed::Off )
     {
-        return f.anySite() ? "hop_shed=: hop attributes max_tokens shed first (sig, call, site). " : std::string();
+        return f.anySite ? "hop_shed=: hop attributes max_tokens shed first (sig, call, site). " : std::string();
     }
-    if( f.anySite() )
+    if( f.anySite )
     {
         out += r + " site=file:line: a call (or macro invocation) in the hop's caller whose callee name is this hop's callee (one whose written owner is the callee's first); "
                "matched by name, not proof that this call is the one the edge binds. ";
     }
-    if( f.anySites() )
+    if( f.anySites )
     {
         out += r + " sites=N: the caller calls that name on N lines; site= is one of them. ";
     }
-    if( f.anyCall() && shed < HopShed::SiteOnly )
+    if( f.anyCall && shed < HopShed::SiteOnly )
     {
         out += r + " call=: that call's text from its line start, whitespace collapsed, joined up to 3 lines while its parentheses are open, at most 120 bytes (U+2026 marks either cut). ";
     }
-    if( f.anySig() && shed < HopShed::NoSig )
+    if( f.anySig && shed < HopShed::NoSig )
     {
         out += r + " sig=: the callee's declaration signature, cut at 160 bytes. ";
     }
@@ -538,7 +628,7 @@ inline std::string hopLegend( const HopFacts& f, std::string_view row, HopShed s
     {
         out += "hop_notext=N: call= withheld on N hops whose site text does not spell the callee (a macro-expanded or generated call). ";
     }
-    if( shed != HopShed::Full && ( f.anyCall() || f.anySig() ) )
+    if( shed != HopShed::Full && ( f.anyCall || f.anySig ) )
     {
         out += "hop_shed=: hop attributes max_tokens shed first (sig, call, site). ";
     }

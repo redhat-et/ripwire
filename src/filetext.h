@@ -15,6 +15,7 @@
 // on rehash, which the lambdas' `return contents.emplace(...)->second` relied on not happening).
 
 #include "model.h"
+#include "infra/ownedfile.h"   // OwnedFile — the stream is owned before any other line runs
 
 #include <cstdint>
 #include <cstdio>
@@ -96,17 +97,17 @@ private:
         if( fid < ing_.files.size() )
         {
             ++reads_;
-            if( std::FILE* in = std::fopen( diskPath( ing_, fid ).c_str(), "rb" ) )
+            if( OwnedFile in = openOwnedFile( diskPath( ing_, fid ).c_str(), "rb" ) )
             {
                 char        b[ 4096 ];
                 std::size_t n = 0;
                 bool        err = false;
-                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+                while( ( n = std::fread( b, 1, sizeof( b ), in.file ) ) > 0 )
                 {
                     e->text.append( b, n );
                 }
-                err = std::ferror( in ) != 0;
-                std::fclose( in );
+                err = std::ferror( in.file ) != 0;
+                err = !in.close() || err;
                 e->ok = !err;
                 if( err )
                 {
