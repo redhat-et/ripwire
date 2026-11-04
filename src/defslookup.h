@@ -17,12 +17,14 @@
 #include "defattrib.h"     // DefGroups, defGroupsOf — the ONE definition-group rule
 #include "filter.h"        // isTestSymbol, pathTierOf (via pathDefInTests)
 #include "graph.h"         // resolveAllByNameQualified — the shared resolver
+#include "lexical.h"       // lexicalScanText — an alias row's written target (to=) is read from its file
 #include "mapinventory.h"  // isInventoryCodeSymbol — a data Section (doc heading, JSON/YAML key) is no code definition
 #include "memberowner.h"   // MemberOwners, qualifiedMemberName — n= as every row spells it
 #include "model.h"
 #include "nextverb.h"      // nextFlag / nextAttrXml
 #include "pathpairs.h"     // pathDefInTests — the one test-path rule --path's twins use
 #include "serialize.h"     // escapeXml / jsonStr / symTag
+#include "infra/tablelookup.h"  // findSortedByField — the alias-target side table is ascending by id
 
 #include <algorithm>
 #include <cstdint>
@@ -184,7 +186,197 @@ inline DefLookup lookupDefs( const IngestResult& ing, const Graph& g, std::strin
 
 // One definition row: <d n= t= p= sel= [sel_proven="0"] lang= class= in= [bodyless="1"]/>. `compact` (the --path alternatives)
 // keeps only what the next step needs: sel=, p=, class=, decl_only=.
-inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact )
+// INDEX-ALIAS-CONST: an alias definition's written target, read from [AliasTarget::start, endByte) — the tags pass records where the
+// target starts exactly when the target ends the declaration (ingest_sidecap.h, src/aliasdef.h, model.h AliasTarget): C++ `using X = Y;` and
+// `namespace L = lib;`. Every other row (a typedef, whose target precedes its name; any def with a real body) has no to=. `unread` when the file
+// could not be read: never an empty target. Whitespace runs fold to one space and a comment reads as whitespace; past kAliasTargetCap the text is cut on a
+// UTF-8 boundary with an ellipsis, to_capped="1" says so and `fullBytes` (to_bytes=) names the uncut size.
+inline constexpr std::size_t kAliasTargetCap = 160;   // a runaway guard: real alias targets are tens of bytes
+struct AliasTargetText
+{
+    bool        has    = false;   // this row is an alias row whose target is a suffix
+    bool        unread = false;   // it is, and its file could not be read
+    std::string text;             // folded, possibly cut
+    std::size_t fullBytes = 0;    // folded size before the cut (== text.size() when not cut)
+    std::string next;             // --defs=<last name segment> when the target is a plain (qualified) name; else empty
+};
+// where an alias def's written target starts (the side-table row, model.h AliasTarget: ascending id), or 0 when the def has no
+// row or its row falls outside the declaration (0 is never a real start: a start sits past sigStartByte)
+inline std::uint32_t aliasTargetStart( const IngestResult& ing, const Symbol& s ) noexcept
+{
+    const AliasTarget* a = findSortedByField( ing.aliasTargets, &AliasTarget::id, s.id );
+    return a != nullptr && a->start > s.sigStartByte && a->start < s.endByte ? a->start : 0;
+}
+inline bool aliasTargetRow( const IngestResult& ing, const Symbol& s ) noexcept
+{
+    return aliasTargetStart( ing, s ) != 0;
+}
+inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s )
+{
+    AliasTargetText out;
+    const std::uint32_t tStart = aliasTargetStart( ing, s );
+    if( tStart == 0 )
+    {
+        return out;
+    }
+    out.has = true;
+    std::string        scratch;
+    const std::string* file = lexicalScanText( ing, s.fileId, scratch );
+    if( file == nullptr || s.endByte > file->size() )
+    {
+        out.unread = true;
+        return out;
+    }
+    const std::string_view raw = std::string_view( *file ).substr( tStart, s.endByte - tStart );
+    bool                   space = false;
+    for( std::size_t i = 0; i < raw.size(); ++i )
+    {
+        const char c = raw[i];
+        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
+        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
+        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
+        {
+            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
+            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
+            space                 = !out.text.empty();
+            continue;
+        }
+        const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+        if( ws )
+        {
+            space = !out.text.empty();
+            continue;
+        }
+        if( space )
+        {
+            out.text += ' ';
+            space = false;
+        }
+        out.text += c;
+        if( c == '"' )
+        {
+            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
+            {
+                out.text += raw[i];
+                if( raw[i] == '\\' && i + 1 < raw.size() )
+                {
+                    out.text += raw[ ++i ];
+                }
+            }
+            if( i < raw.size() )
+            {
+                out.text += '"';
+            }
+        }
+    }
+    while( !out.text.empty() && ( out.text.back() == ';' || out.text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
+    {
+        out.text.pop_back();
+    }
+    out.fullBytes = out.text.size();
+    // the target's own definition: a plain identifier chain once template arguments are dropped (`COW<IColumn>::Ptr` -> COW::Ptr)
+    std::string name;
+    int         depth = 0;
+    bool        plain = !out.text.empty();
+    for( const char c : out.text )
+    {
+        if( c == '<' )
+        {
+            ++depth;
+            continue;
+        }
+        if( c == '>' )
+        {
+            depth = depth > 0 ? depth - 1 : 0;
+            continue;
+        }
+        if( depth > 0 )
+        {
+            continue;
+        }
+        const bool ident = ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' || c == '$' || c == ':' || c == '.';
+        if( !ident )
+        {
+            plain = false;
+            break;
+        }
+        name += c;
+    }
+    // the next call: `Owner::leaf` when that spelling binds a definition (the defs verb's own lookup decides), else the LAST
+    // segment alone — a namespace qualifier binds no owner there (`lib::Real` refuses where `Real` binds), so the leaf call may
+    // list namesakes and its rows tell them apart
+    const std::size_t cut  = name.find_last_of( ":." );
+    const std::string leaf = cut == std::string::npos ? name : name.substr( cut + 1 );
+    if( plain && depth == 0 && !leaf.empty() && !( leaf[0] >= '0' && leaf[0] <= '9' ) )
+    {
+        std::string spell = leaf;
+        if( cut != std::string::npos && cut > 0 )
+        {
+            const std::size_t ownerEnd   = name[ cut ] == ':' ? cut - 1 : cut;   // `A::b` ends its owner before the `::`
+            const std::size_t ownerStart = name.find_last_of( ":.", ownerEnd > 0 ? ownerEnd - 1 : 0 );
+            const std::string owner      = name.substr( ownerStart == std::string::npos ? 0 : ownerStart + 1, ownerEnd - ( ownerStart == std::string::npos ? 0 : ownerStart + 1 ) );
+            const std::string twoSeg     = owner + "::" + leaf;
+            // the defs verb's own match set (lookupDefs' first two steps), without its per-call row work: one resolve per alias row
+            const auto binds = [ & ]( std::string_view spec )
+            {
+                const std::vector<NodeId> m = resolveAllByNameQualified( ing, spec );
+                return std::ranges::any_of( m, [ & ]( NodeId n ) { return isInventoryCodeSymbol( ing.symbols[n] ); } );
+            };
+            if( !owner.empty() && binds( twoSeg ) )
+            {
+                spell = twoSeg;
+            }
+        }
+        out.next = nextFlag( "--defs=", spell );
+    }
+    truncateUtf8WithEllipsis( out.text, kAliasTargetCap );
+    return out;
+}
+inline void aliasTargetAttrsXml( std::string& out, const AliasTargetText& a )
+{
+    if( !a.has )
+    {
+        return;
+    }
+    std::vector<char> esc;
+    if( a.unread )
+    {
+        out += " to_unread=\"1\"";
+        return;
+    }
+    out += " to=\"" + std::string( escapeXml( a.text, esc ) ) + "\"";
+    if( a.fullBytes > kAliasTargetCap )
+    {
+        out += " to_capped=\"1\" to_bytes=\"" + std::to_string( a.fullBytes ) + "\"";
+    }
+    if( !a.next.empty() )
+    {
+        out += " to_next=\"" + std::string( escapeXml( a.next, esc ) ) + "\"";
+    }
+}
+inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
+{
+    if( !a.has )
+    {
+        return;
+    }
+    if( a.unread )
+    {
+        out += ",\"to_unread\":1";
+        return;
+    }
+    out += ",\"to\":\"" + jsonStr( a.text ) + "\"";
+    if( a.fullBytes > kAliasTargetCap )
+    {
+        out += ",\"to_capped\":1,\"to_bytes\":" + std::to_string( a.fullBytes );
+    }
+    if( !a.next.empty() )
+    {
+        out += ",\"to_next\":\"" + jsonStr( a.next ) + "\"";
+    }
+}
+
+inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false )
 {
     std::vector<char> esc;
     const Symbol&     s = ing.symbols[ r.rep ];
@@ -212,6 +404,10 @@ inline void defRowXml( std::string& out, const IngestResult& ing, const DefLooku
     {
         out += " decl_only=\"1\"";   // compact too: a header declaration of the bound definition is no second definition
     }
+    if( aliasTarget )
+    {
+        aliasTargetAttrsXml( out, aliasTargetText( ing, s ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
+    }
     out += "/>";
 }
 
@@ -230,6 +426,7 @@ inline void defRowJson( std::string& out, const IngestResult& ing, const DefLook
     {
         out += ",\"decl_only\":1";
     }
+    aliasTargetAttrsJson( out, aliasTargetText( ing, s ) );
     out += "}";
 }
 

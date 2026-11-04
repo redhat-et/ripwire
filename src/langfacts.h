@@ -219,6 +219,13 @@ struct LangFacts
     /// buildFieldNarrowTables follows a bounded alias chain). A `.` call on such a member reaches the smart pointer, never I.
     bool aliasPeelsSmartPointer = false;
 
+    /// C++ (and every `.h`, which reads as C++; a `.c` file reads with the C grammar and its own query, untouched here, card
+    /// C-FUNCTYPE-QUERY): a `using X = Y;` / `namespace L = lib;` definition (tags @definition.alias) records
+    /// where its written target starts (src/aliasdef.h, model.h AliasTarget; the defs verb prints it as to=), and one written
+    /// inside a function body or lambda is a local name, no definition. Go's `type A = B` is @definition.alias too and records
+    /// none (lane index-alias-const).
+    bool aliasTargetDefs = false;
+
     /// Rust: a function whose declared result is a trait object or an opaque type (`&dyn T`, `Box<dyn T>`, `impl T`) types the
     /// local its call initialises as SOME implementor of T, exactly as a local written `let x: &dyn T` (lane iface-peel; the
     /// dispatch tier, ifacedispatch.h, then declines the call on it or proves its one implementor). Only through the call's own
@@ -344,7 +351,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,

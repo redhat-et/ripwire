@@ -8,4 +8,4 @@ static/global forms and existing binding behaviour are preserved. The known alia
 As with the Python capture move (#382), containers beyond depth 256 without a deeper import no longer
 make a file `extract-partial` or prevent whole-cache reuse. A nonempty import beyond the bound still
 discloses the cut and is not captured. `csharpcheck` arms C6/C7 pin the boundary and the new mechanism.
-Parser tag 299 (rich 300) invalidates the old extraction cache; main's record format (48) is unchanged.
+Parser tag 301 (rich 302) invalidates the old extraction cache; main's record format (48) is unchanged.

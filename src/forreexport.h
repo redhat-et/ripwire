@@ -36,6 +36,7 @@
 // is never taken twice on one path).
 // RIPWIRE_NO_REEXPORT_HOPS (any value) turns it off.
 
+#include "defslookup.h"          // aliasTargetRow — an alias row (model.h AliasTarget) is another name, not the definition a sentence asks for
 #include "depdialect.h"          // dependencyDialect — the Web dialect is the unit the ReExport records are written per
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
 #include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
@@ -52,6 +53,7 @@
 #include <filesystem>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -1886,16 +1888,18 @@ inline bool sentenceNameIsFile( const IngestResult& ing, std::string_view x, con
     return !root.empty() && x.find( ':' ) == std::string_view::npos && std::filesystem::is_regular_file( std::filesystem::path( root ) / x, ec );
 }
 
-// The sentence's name resolved to no definition: a bare X names no symbol in the index (one that exists is the route's to rank, not
-// the ladder's); a qualified X has no definition the answer printed that proves its qualifier fully (provenLeafDefs, the leaf
-// rung's own rule: a served same-leaf decoy does not resolve it). A qualified X that names a file (sentenceNameIsFile) is no
-// definition to resolve: the ladder would list same-leaf strangers.
+// The sentence's name resolved to no definition: a bare X names no symbol in the index other than alias rows (one that exists is the
+// route's to rank, not the ladder's; INDEX-ALIAS-CONST: a C++ `using X = Y;` / `namespace X = y;` row, defslookup.h aliasTargetRow, is
+// another name the words route does not anchor on, so a name with only alias rows keeps the ladder and its literal rung prints the
+// `using` lines; a name-exact route lands on the alias rows themselves); a qualified X has no definition the answer printed that
+// proves its qualifier fully (provenLeafDefs, the leaf rung's own rule: a served same-leaf decoy does not resolve it). A qualified X
+// that names a file (sentenceNameIsFile) is no definition to resolve: the ladder would list same-leaf strangers.
 inline bool sentenceNameUnresolved( const IngestResult& ing, std::string_view x, const std::vector<NodeId>& served, std::string_view root )
 {
     const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( x );
     if( segs.empty() )
     {
-        return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.name == x; } );
+        return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.name == x && !aliasTargetRow( ing, s ); } );
     }
     if( sentenceNameIsFile( ing, x, segs, root ) )
     {
@@ -1983,6 +1987,65 @@ inline std::string_view declShape( std::string_view line, std::string_view k )
         }
     }
     return {};
+}
+
+// The literal rung's rows: every declaration-shaped line of the key, those with an in= owner after those without (stable).
+// in=: the enclosing definition, never the key's own alias row (INDEX-ALIAS-CONST: a `using X = Y;` line encloses itself):
+// then the next definition out, spelt as grep's breadcrumb (`struct Holder { using X = Y; };` keeps main's in="Holder::Holder"),
+// or none at namespace scope.
+struct ShortKeyDeclLine
+{
+    const GrepHit*   h;
+    std::string_view shape;
+    std::string      in;
+    const Symbol*    self  = nullptr;   // the key's own alias row the line sits in
+    const Symbol*    outer = nullptr;   // the innermost definition around that alias row
+};
+// One pass over the symbols finds the owner of every line that sits in the key's own alias row (the file-scope owner is no
+// definition to name; modscope rows are appended out of file order, so the pass is linear, not a file range).
+inline void shortKeyAliasRowOwners( const IngestResult& ing, std::vector<ShortKeyDeclLine>& decl )
+{
+    std::vector<ShortKeyDeclLine*> selfs;   // the few lines inside the key's own alias rows
+    for( ShortKeyDeclLine& d : decl )
+    {
+        if( d.self != nullptr )
+        {
+            selfs.push_back( &d );
+        }
+    }
+    for( const Symbol& o : selfs.empty() ? std::span<const Symbol>() : std::span<const Symbol>( ing.symbols ) )
+    {
+        const auto around = [ & ]( const ShortKeyDeclLine& d )
+        {
+            const Symbol& a = *d.self;
+            return &o != &a && o.kind != SymKind::ModuleScope && o.fileId == a.fileId && o.sigStartByte <= a.sigStartByte && a.endByte <= o.endByte &&
+                   ( d.outer == nullptr || o.sigStartByte > d.outer->sigStartByte );
+        };
+        for( ShortKeyDeclLine* d : selfs )
+        {
+            d->outer = around( *d ) ? &o : d->outer;
+        }
+    }
+    for( ShortKeyDeclLine* d : selfs )
+    {
+        d->in = d->outer == nullptr ? std::string() : d->outer->scope.empty() ? d->outer->name : d->outer->scope + "::" + d->outer->name;
+    }
+}
+inline std::vector<ShortKeyDeclLine> shortKeyDeclLines( const IngestResult& ing, std::string_view key, const std::vector<GrepHit>& lines )
+{
+    std::vector<ShortKeyDeclLine> decl;
+    for( const GrepHit& h : lines )
+    {
+        if( const std::string_view shape = declShape( h.text, key ); !shape.empty() )
+        {
+            const Symbol* e    = h.enclosingId < ing.symbols.size() ? &ing.symbols[ h.enclosingId ] : nullptr;
+            const bool    self = e != nullptr && e->name == key && aliasTargetRow( ing, *e );
+            decl.push_back( ShortKeyDeclLine{ &h, shape, self ? std::string() : h.enclosing, self ? e : nullptr } );
+        }
+    }
+    shortKeyAliasRowOwners( ing, decl );
+    std::ranges::stable_sort( decl, []( const ShortKeyDeclLine& l, const ShortKeyDeclLine& r ) { return l.in.empty() && !r.in.empty(); } );
+    return decl;
 }
 
 }   // namespace shortkey_detail
@@ -2134,28 +2197,20 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             std::vector<GrepRawHit>       src;
             std::copy_if( got.raw.begin(), got.raw.end(), std::back_inserter( src ), [ & ]( const GrepRawHit& h ) { return pathTierOf( rootRelPath( ing, h.fileId ) ) == PathTier::Source; } );
             const std::vector<GrepHit>    lines = grepEnrich( ing, src );
-            std::vector<std::pair<const GrepHit*, std::string_view>> decl;
-            for( const GrepHit& h : lines )
-            {
-                if( const std::string_view shape = declShape( h.text, key ); !shape.empty() )
-                {
-                    decl.emplace_back( &h, shape );
-                }
-            }
-            std::ranges::stable_sort( decl, []( const auto& l, const auto& r ) { return l.first->enclosing.empty() && !r.first->enclosing.empty(); } );
+            const std::vector<ShortKeyDeclLine> decl = shortKeyDeclLines( ing, key, lines );
             num( "total", decl.size() );
             num( "shown", std::min( decl.size(), kShortKeyRows ) );
             out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
             for( std::size_t i = 0; i < decl.size() && i < kShortKeyRows; ++i )
             {
-                const GrepHit& h = *decl[ i ].first;
+                const GrepHit& h = *decl[ i ].h;
                 out.append( "<ld" );
                 attr( "p", rootRelPath( ing, h.fileId ) );
                 num( "l", h.line );
-                attr( "shape", decl[ i ].second );
-                if( !h.enclosing.empty() )
+                attr( "shape", decl[ i ].shape );
+                if( !decl[ i ].in.empty() )
                 {
-                    attr( "in", h.enclosing );
+                    attr( "in", decl[ i ].in );
                 }
                 std::string text( h.text.substr( std::min( h.text.find_first_not_of( " \t" ), h.text.size() ) ) );
                 redactInPlace( text, a.redact );

@@ -302,6 +302,7 @@ for _g in \
     agentsurfacecheck \
     agenttablecheck \
     aiderbytescheck \
+    aliasdefcheck \
     anchorbodycheck \
     anchorcheck \
     archcheck \

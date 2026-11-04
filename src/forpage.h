@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <numeric>
+#include <span>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -196,6 +197,54 @@ struct ForCandidatePageReq
     int                    pageLimit   = 0;
     int                    pageOffset  = 0;
 };
+
+// ── THE ATTRIBUTE SHED (#520, the budget ruling 2026-11-03: "the goal is complete answers in efficient bytes and
+// cutting answers is most often counter productive") ─────────────────────────────────────────────────────────────
+// A page that still exceeds an explicit --token-budget at its ONE-ROW floor sheds the row's OPTIONAL attributes
+// instead of cutting the answer: the row and what identifies it (n= l= p= the kind and the signature text, r=) always
+// ship. Two rungs, the cheapest first, stopping at the first that fits: the metrics, the layer and the row's own
+// follow-up, then the enclosing scope (p= l= n= still name the definition; the full id loses only its sc:: middle).
+// When neither fits, the unshed page ships with over_ceiling="1": a shed that still misses the budget only trades
+// attributes for a legend clause.
+// The compact legend is built from the attributes present, so each shed attribute takes its clause with it.
+inline constexpr std::string_view kForPageShedRungMetrics[] = { "cx", "ccx", "layer", "next" };
+inline constexpr std::string_view kForPageShedRungScope[]   = { "cx", "ccx", "layer", "next", "sc" };
+inline constexpr std::string_view kForPageShedAttr          = " attrs_shed=\"1\"";
+inline constexpr std::string_view kForPageShedLegend =
+    " attrs_shed= 1 when the one-row floor still exceeded budget_tokens, so the row's optional attributes"
+    " (cx= ccx= layer= its next=, then sc=) were dropped; the row itself is never dropped";
+
+// Drop the named attributes from every element open tag in `rows` (the page's row block: no CDATA, attribute values
+// escaped, so a quote always closes a value). Text between tags is copied verbatim.
+inline void shedRowAttrs( std::string& rows, std::span<const std::string_view> names )
+{
+    std::string       out;
+    out.reserve( rows.size() );
+    const std::size_t n = rows.size();
+    std::size_t       i = 0;
+    while( i < n )
+    {
+        const std::size_t lt = rows.find( '<', i );
+        if( lt == std::string::npos ) { out.append( rows, i, n - i ); break; }
+        out.append( rows, i, lt - i );
+        std::size_t j = lt + 1;
+        while( j < n && rows[ j ] != ' ' && rows[ j ] != '>' && rows[ j ] != '/' ) { ++j; }
+        out.append( rows, lt, j - lt );
+        // the attribute list: ` name="value"` repeated; anything else ends it and is copied as text
+        while( j < n && rows[ j ] == ' ' )
+        {
+            const std::size_t eq = rows.find( '=', j );
+            if( eq == std::string::npos || eq + 1 >= n || rows[ eq + 1 ] != '"' ) { break; }
+            const std::size_t close = rows.find( '"', eq + 2 );
+            if( close == std::string::npos ) { break; }
+            const std::string_view name( rows.data() + j + 1, eq - j - 1 );
+            if( std::find( names.begin(), names.end(), name ) == names.end() ) { out.append( rows, j, close + 1 - j ); }
+            j = close + 1;
+        }
+        i = j;
+    }
+    rows = std::move( out );
+}
 
 inline std::string forCandidatePageDoc( const rw::IngestResult& ing, const std::vector<float>& lensRank,
                                         const rw::AdaptiveCut& forCut, const ForCandidatePageReq& p )
@@ -454,11 +503,38 @@ inline std::string forCandidatePageDoc( const rw::IngestResult& ing, const std::
     {
         applyCompactDialect( pageOut, "candidate-page" );
     }
+    const auto emittedEst = [ & ]() {
+        return rootUnsignedAttr( std::string_view( pageOut ).substr( pageOut.find( '<' ), pageOut.find( '>' ) + 1 ), "est_tokens" );
+    };
+    // THE ATTRIBUTE SHED (see kForPageShedRungMetrics): only past the one-row floor of an explicit budget, judged on the
+    // bytes this dialect emits — a page that fits never reaches it and stays byte-identical.
+    if( tokenBudget > 0 && kept == 1 && emittedEst() > tokenBudget )
+    {
+        // a shed that cannot reach the budget is not byte-efficient (the full legend's clause can outweigh what it drops):
+        // then the unshed page ships, over_ceiling="1" as before — never a page that sheds and still misses
+        std::string unshed = pageOut;
+        bool        fits   = false;
+        std::string legendShed = legend;
+        legendShed.insert( legendShed.size() - std::string_view( " -->" ).size(), kForPageShedLegend );
+        for( const std::span<const std::string_view> rung : { std::span<const std::string_view>( kForPageShedRungMetrics ),
+                                                              std::span<const std::string_view>( kForPageShedRungScope ) } )
+        {
+            std::string rowsShed = rowsNow;
+            shedRowAttrs( rowsShed, rung );
+            h = buildHead( kept, nextNow, kForPageShedAttr );
+            std::tie( t, est ) = buildTail( h, legendShed, rowsShed, /*overCeiling=*/false, nextNow );
+            if( est > tokenBudget ) { std::tie( t, est ) = buildTail( h, legendShed, rowsShed, /*overCeiling=*/true, nextNow ); }
+            pageOut = h + t + legendShed + rowsShed;
+            if( compactLegend ) { applyCompactDialect( pageOut, "candidate-page" ); }
+            if( emittedEst() <= tokenBudget ) { fits = true; break; }
+        }
+        if( !fits ) { pageOut = std::move( unshed ); }
+    }
     // the stderr notice reads the FINAL page: est_tokens straight off the emitted root, so the
     // line can never contradict the document (the full-dialect trim numbers used to).
     if( tokenBudget > 0 )
     {
-        const std::size_t finalEst = rootUnsignedAttr( std::string_view( pageOut ).substr( pageOut.find( '<' ), pageOut.find( '>' ) + 1 ), "est_tokens" );
+        const std::size_t finalEst = emittedEst();
         if( finalEst > tokenBudget && pageOut.find( " over_ceiling=\"1\"" ) != std::string::npos )
         {
             rw::emitTo( stderr, "ripwire: for-page est_tokens={} exceeds the stated budget={} — the window cannot fit; "

@@ -2037,9 +2037,38 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // uninitialized C++ shape, which needs the captured declaration node), JS export/prototype
             // assignments — in one drop decision (see dropGatedCapture for the per-class rationale and why
             // none of this can live in the query as a #match?/#eq? predicate).
+            // INDEX-ALIAS-CONST (src/aliasdef.h, the one alias reader): a C++ alias form is a definition unless it is
+            // function-local. aliasTargetStart: where the written target starts when it ENDS the declaration (--defs to=); it
+            // rides the RawDef's bodyByte to the model, which moves it to IngestResult::aliasTargets and keeps the whole
+            // declaration as the signature (ingest_model.h rawDefIsAliasRow); 0 when the target is not a suffix (a typedef).
+            std::uint32_t aliasTargetStart = 0;
+            AliasShape    aliasShape {};
+            if( isDef && langFacts( le.lang ).aliasTargetDefs && defCapSv == "definition.alias" )
+            {
+                if( insideFunctionBody( roleNode ) )   // ingest_relations.h: a function-local alias is a local name (the local-const rule)
+                {
+                    continue;
+                }
+                aliasShape = aliasShapeOf( Lang::Cpp, roleNode );
+            }
             if( isDef && dropGatedCapture( defCapSv, le.lang, nameTxt, nameNode, roleNode, src ) )
             {
                 continue;
+            }
+            if( aliasShape.form != AliasForm::None )
+            {
+                // the target is a suffix when every child after it is the `;` or a comment (`using X = Y /* c */ ;` keeps its
+                // target; the printer drops the comment, defslookup.h aliasTargetText); one cursor walk (infra/tschildren.h)
+                const std::uint32_t tEnd   = ts_node_end_byte( aliasShape.target );
+                bool                suffix = true;   // only `using`/namespace alias rows reach here (a typedef capture is never definition.alias)
+                ChildCursor         cursor( roleNode );
+                forEachChild( roleNode, cursor.cur, [ & ]( TSNode c )
+                              {
+                                  const char* k = ts_node_type( c );
+                                  suffix = ts_node_start_byte( c ) < tEnd || kindIs( k, ";" ) || kindIs( k, "comment" );
+                                  return suffix;
+                              } );
+                aliasTargetStart  = suffix ? ts_node_start_byte( aliasShape.target ) : 0u;
             }
 
             if( le.lang == Lang::Elixir && !elixirKeepCapture( roleNode, nameNode, isDef, kind, src ) )
@@ -2262,6 +2291,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.endByte   = spanThroughBody ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
+            if( d.bodyByte == 0 && aliasTargetStart > d.startByte && aliasTargetStart < d.endByte )
+            {
+                d.bodyByte = aliasTargetStart;   // INDEX-ALIAS-CONST: the transport only (ingest_model.h rawDefIsAliasRow)
+            }
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
             // LB-E: for a testmacroblock the body SIBLING is where the code lives — complexityOf walks
             // INSIDE its root node, so handing it defNode (the bare macro statement) would count nothing.

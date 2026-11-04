@@ -31,6 +31,7 @@
 #include "defattrib.h"   // DefGroups — of_def on a multi-definition answer
 #include "filter.h"      // pathTierIndexOver / compareTierThenPath — the served order's tier-then-path file key
 #include "graph.h"       // Graph::declinedSite*, DeclinedSiteKind, kNoDeclinedList
+#include "infra/tablelookup.h"  // findSortedByField — declinedSiteBound is ascending by site
 #include "model.h"
 #include "nextverb.h"    // nextFlag — dc_next= pastes as one argv element
 #include "valuerefs.h"   // VrRender / vrPath — the rows' path spelling; escapeXml / jsonStr through serialize.h
@@ -126,9 +127,8 @@ inline std::pair<std::size_t, std::vector<std::uint32_t>> declinedCallsAndSites(
 // lane L6: the generic bound record `site` was typed through (Graph::declinedSiteBound, record order), "" when none
 inline std::string_view declinedSiteBoundOf( const Graph& g, std::uint32_t site )
 {
-    const auto it = std::lower_bound( g.declinedSiteBound.begin(), g.declinedSiteBound.end(), site,
-                                      []( const std::pair<std::uint32_t, std::string>& b, std::uint32_t k ) { return b.first < k; } );
-    return it != g.declinedSiteBound.end() && it->first == site ? std::string_view( it->second ) : std::string_view();
+    const auto* b = findSortedByField( g.declinedSiteBound, &std::pair<std::uint32_t, std::string>::first, site );
+    return b != nullptr ? std::string_view( b->second ) : std::string_view();
 }
 
 // One row's facts, surface-neutral: every dialect below spells these and nothing else.
