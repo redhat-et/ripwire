@@ -41,6 +41,8 @@
 #   S4 [P] MCP for: est_tokens prices the element
 #
 #   D1 [P] fix round 2: a task receiver bound by name (never declined) does not answer another receiver's declined call (fixture recvbound)
+#   D1e [P] recv-fix0: a site whose receiver is an expression (`hp->get()->F`, `h.get().F`, typed by the call's stated result) is a
+#          receiver of its own: the task's `x_->F` gets no element from it; y_->F keeps its own (fixture recvexpr)
 #   D2 [P] a non-test-file double named by tests and an uncalled helper stays demoted (fixture dumpfs)
 #   F-A [P] an impl built only in an OS-run C/C++ entry (WinMain, wWinMain, DllMain, wmain, _tmain) stays shown; twin: a
 #       non-entry name keeps D2's demotion (fixture osentry, entry name written at run time)
@@ -74,7 +76,7 @@ cd "$ROOT"
 F="test/fordispatchhopfix"
 [ -f "$F/cpp/loader.cc" ] && [ -f "$F/cpp1/tests/loader_test.cc" ] && [ -f "$F/rs/src/pick.rs" ] && [ -f "$F/cppwrap/cached.cc" ] && [ -f "$F/ladder/main.py" ] \
     && [ -f "$F/factory/pg_store.cc" ] && [ -f "$F/double/loader_test.cc" ] && [ -f "$F/recv/loader.cc" ] && [ -f "$F/initm/loader.cc" ] \
-    && [ -f "$F/ts/src/loader.ts" ] && [ -f "$F/alltest/tests/fakes.cc" ] && [ -f "$F/recvbound/rc.cc" ] && [ -f "$F/dumpfs/src/test.cc" ] && [ -f "$F/osentry/src/disk.cc" ] && [ -f "$F/cutmcp/src/zmain.cc" ] || { echo "fixture $F missing"; exit 2; }
+    && [ -f "$F/ts/src/loader.ts" ] && [ -f "$F/alltest/tests/fakes.cc" ] && [ -f "$F/recvbound/rc.cc" ] && [ -f "$F/recvexpr/rc.cc" ] && [ -f "$F/dumpfs/src/test.cc" ] && [ -f "$F/osentry/src/disk.cc" ] && [ -f "$F/cutmcp/src/zmain.cc" ] || { echo "fixture $F missing"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -245,8 +247,13 @@ verdict $? "(S3pre) the all-doubles fixture IS iface-declined (the demotion, not
 
 # ── D1 / D2 (fix round 2: rv-mf1nx-delta) ─────────────────────────────────────────────────────────────────────────────────────────
 run "$F/recvbound" --callees=L::Load --legend=full >"$TMP/d1p"
-if [ "$( grep -o '<dc n="F"[^>]*gate="iface"' "$TMP/d1p" | wc -l | tr -d ' ' )" = "1" ]; then ok "(D1pre) only y_->F is iface-declined; x_->F and h.get().F are bound by name"
-else no "(D1pre) the recvbound fixture's premise failed (expected exactly one iface-declined F)"; fi
+# PREMISE MOVED (lane recv-xfile, IDEAS 19): `h.get()` states its result `Cch&`, so h.get().F is now typed at the interface Cch and
+# iface-declined with y_->F's list (main bound it by name to Dsk/Net/Lru). x_->F stays bound by name. The leak this premise exposed
+# (an expression receiver answering the task's `x_->F`) is pinned by D1 below and by the D1e twins.
+if [ "$( grep -o '<dc n="F"[^>]*gate="iface"[^>]*cand="rc.cc:5 tests/arc_test.cc:2"' "$TMP/d1p" | wc -l | tr -d ' ' )" = "2" ] \
+    && [ "$( grep -o '<dc n="F"[^>]*gate="iface"' "$TMP/d1p" | wc -l | tr -d ' ' )" = "2" ] && grep -q '<s t="method" n="Dsk::F"' "$TMP/d1p"; then
+    ok "(D1pre) y_->F and h.get().F are iface-declined at Cch (one list); x_->F is bound by name (Dsk::F a callee)"
+else no "(D1pre) the recvbound fixture's premise failed (expected y_->F and h.get().F iface-declined at Cch, x_->F bound)"; fi
 for tk in "this->x_->F" "x_->F"; do
     run "$F/recvbound" "--for=L::Load $tk" >"$TMP/d1"
     if [ -s "$TMP/d1" ] && [ -z "$( hop "$TMP/d1" )" ] && ! has "$( cat "$TMP/d1" )" 'k * 3' && ! grep -q '; dispatch call=' "$TMP/d1"; then ok "(D1) $tk (bound by name, never declined): another receiver's declined y_->F is not answered, no wrong body"
@@ -255,6 +262,20 @@ done
 run "$F/recvbound" "--for=L::Load y_->F" >"$TMP/d1y"
 if has "$( hop "$TMP/d1y" )" 'call="y_-&gt;F"' && has "$( hop "$TMP/d1y" )" 'n="Lru::F"'; then ok "(D1) the declined receiver y_->F is still answered"
 else no "(D1) y_->F lost its element: [$( hop "$TMP/d1y" )]"; fi
+# D1e (fix round recv-fix0, the leak's sibling shape): an ARROW-chained expression receiver `hp->get()->F` (Hold::get states
+# `Cch*`) is a receiver of its own; the task's `x_->F` (bound to Dsk::F, never declined) gets no element on either the expression
+# site or y_'s, while y_->F, written, keeps its element. Red on the pre-fix lane head bb3835b4b (call="F" element, shown="2").
+run "$F/recvexpr" --callees=L::Load --legend=full >"$TMP/d1ep"
+if [ "$( grep -o '<dc n="F"[^>]*gate="iface"[^>]*cand="rc.cc:2 rc.cc:3"' "$TMP/d1ep" | wc -l | tr -d ' ' )" = "2" ] && grep -q '<s t="method" n="Dsk::F" p="rc.cc:4"/>' "$TMP/d1ep"; then
+    ok "(D1epre) y_->F and hp->get()->F are iface-declined at Cch; x_->F is proven to Dsk::F"
+else no "(D1epre) the recvexpr fixture's premise failed (expected two iface-declined F at Cch and Dsk::F proven)"; fi
+run "$F/recvexpr" "--for=L::Load x_->F" >"$TMP/d1e"
+if [ -s "$TMP/d1e" ] && grep -q 'route="name-exact' "$TMP/d1e" && [ -z "$( hop "$TMP/d1e" )" ] && ! has "$( cat "$TMP/d1e" )" 'k * 3'; then
+    ok "(D1e) x_->F (proven): the expression receiver hp->get()->F's declined call is not answered"
+else no "(D1e) x_->F answered an expression receiver's declined call (or left name-exact): [$( hop "$TMP/d1e" )]"; fi
+run "$F/recvexpr" "--for=L::Load y_->F" >"$TMP/d1ey"
+if has "$( hop "$TMP/d1ey" )" 'call="y_-&gt;F"' && has "$( hop "$TMP/d1ey" )" 'n="Lru::F"' && has "$( hop "$TMP/d1ey" )" 'n="Arc::F"'; then ok "(D1e) twin: the written receiver y_->F keeps its element (Lru::F, Arc::F)"
+else no "(D1e) y_->F lost its element on recvexpr: [$( hop "$TMP/d1ey" )]"; fi
 run "$F/dumpfs" "--for=Builder::Run disk_->ReadFile" >"$TMP/d2"
 HD2="$( hop "$TMP/d2" )"
 if has "$HD2" 'cands="2" shown="1" test="1"' && has "$HD2" 'n="RealDisk::ReadFile"' && ! has "$HD2" 'VirtualFS' && has "$HD2" 'p * 7 + 1'; then

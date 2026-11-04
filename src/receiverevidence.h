@@ -2084,6 +2084,15 @@ struct ReceiverEvidence
     {
         return k == SymKind::Method || k == SymKind::Function;
     }
+    // A member call whose receiver is no identifier chain (`h.get().F()`, `p.get_app().post()`, `f().m()`): C++ / Python stamp a
+    // rich receiver FieldOfVar with no var, TS / JS / Go / Rust a member call with no root, path or construction. Such a call has a
+    // receiver of its own that no written identifier names (receiverProofOf types it; the --for dispatch hop never lends it to a task
+    // that wrote another receiver, fordispatchhop.h).
+    static bool receiverIsExpression( const Reference& r ) noexcept
+    {
+        return ( r.recv == RecvKind::FieldOfVar && r.recvVar.empty() )
+            || ( r.memberCall && r.memberRoot.empty() && r.memberPath.empty() && r.memberCtor.empty() );
+    }
     const std::string& keyOf( std::uint32_t id, char sep, std::string_view name ) const
     {
         key.clear();
@@ -2628,10 +2637,7 @@ struct ReceiverEvidence
         {
             return nullptr;
         }
-        // the receiver is no identifier chain: C++ / Python stamp a rich receiver FieldOfVar with no var, TS a member call with no root
-        const bool shape = ( r.recv == RecvKind::FieldOfVar && r.recvVar.empty() )
-                        || ( r.memberCall && r.memberRoot.empty() && r.memberPath.empty() && r.memberCtor.empty() );
-        if( langFacts( r.lang ).recvCallProof == RecvCallProof::None || !shape )
+        if( langFacts( r.lang ).recvCallProof == RecvCallProof::None || !receiverIsExpression( r ) )
         {
             return nullptr;
         }

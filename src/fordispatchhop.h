@@ -289,7 +289,7 @@ inline DispatchCands splitDispatchCands( const IngestResult& ing, const Graph& g
 // by a callable body candidate, whose called name the task names as a call and which is not the caller's own name. Per called
 // name: a task token that writes a receiver (`cache_->Fetch`) picks the site(s) with that receiver, and when none has it the
 // site is answered only if every same-name site carries the SAME candidate list (never another receiver's list), and a site that
-// names a different receiver of its own is never the asked call's answer; a token with no
+// names a different receiver of its own (an identifier, or an expression such as `h.get()`) is never the asked call's answer; a token with no
 // receiver keeps every same-name site, one per distinct list. At most kForDispatchSites, in the declined rows' served order.
 inline std::vector<std::uint32_t> forDispatchSites( const IngestResult& ing, const Graph& g, std::span<const NodeId> bodyCandidates, std::string_view task )
 {
@@ -341,12 +341,13 @@ inline std::vector<std::uint32_t> forDispatchSites( const IngestResult& ing, con
     {
         const Reference& r = ing.references[ g.declinedSiteRef[ site ] ];
         if( wroteRecv( r.calleeName ) && !exactRecv( site )
-            && ( !dispatch_detail::lastIdent( r.recvVar ).empty()
+            && ( !dispatch_detail::lastIdent( r.recvVar ).empty() || ReceiverEvidence::receiverIsExpression( r )
                  || std::ranges::any_of( eligible, [ & ]( std::uint32_t o ) { return sameName( o, site ) && ( exactRecv( o ) || !sameList( o, site ) ); } ) ) )
         {
             // the asked receiver is not this site's: a site that names its own (different) receiver is another call, even when no other
-            // site is left (the asked `x_->F` was bound by name, never declined); a site with no receiver recorded (TS parameter, Rust)
-            // cannot be told apart from one with another list
+            // site is left (the asked `x_->F` was bound by name, never declined), and so does a site whose receiver is an expression
+            // (`h.get().F`, typed by the call's stated result); a site with no receiver recorded (TS parameter, Rust) cannot be told
+            // apart from one with another list
             continue;
         }
         if( std::ranges::any_of( kept, [ & ]( std::uint32_t k ) { return sameName( k, site ) && sameList( k, site ); } ) )
