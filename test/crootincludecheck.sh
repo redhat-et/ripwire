@@ -15,12 +15,11 @@
 #   R7 unproven      t/q.c          "q.h"             → no edge: only source/q.h and lib/q.h hold it
 #   R8 escape        sub/e.c        "../../out.h"     → no edge above the crawl root, though a root out.h exists (a missing
 #                    sub/include/ must not turn the escape into `out.h`)
-#   R9 decoupled     sub/deep/main.c calls helper(): "core/x.h" and "alt/x.h" both define it, main.c includes only
-#                    core/x.h by its root path. The FILE graph has the edge main.c → core/x.h, and the call graph is
-#                    main's: --callers=helper still declines the call between the two namesakes (count="0",
-#                    via="declined"). The call narrow keeps the includer-directory resolution until CPP-EXTQUAL-VETO
-#                    lands (resolve.h kCallNarrowReadsCIncludeRoots); this arm goes red if the root probe leaks into it,
-#                    and is the arm to retarget (bound to core/x.h alone) when the two are re-coupled.
+#   R9 coupled       sub/deep/main.c calls helper(): "core/x.h" and "alt/x.h" both define it, main.c includes only
+#                    core/x.h by its root path. The FILE graph has the edge main.c → core/x.h, and Rule 3 reads it too
+#                    (resolve.h kCallNarrowReadsCIncludeRoots, re-coupled by CPP-EXTQUAL-VETO): --callers=helper binds the
+#                    call to core/x.h's helper alone, unhedged, where main 2047f95f declined it between the two namesakes.
+#                    test/cppextqualcheck.sh holds the vetoes that make the coupling safe.
 #   R10 non-C        a Python file importing `core.x` is untouched (the rule is the C-family branch only)
 #   R11 no suffix    t/u.c          "y.hpp"           → no edge: only app/include/util/y.hpp ends with it (unique-suffix
 #                    matching is not this rule; card C-SUFFIX-INCLUDE)
@@ -144,11 +143,11 @@ if noedge_from sub/s.c; then ok "R6 angle <string.h> and <core/x.h> stay unresol
 if noedge_from t/q.c; then ok "R7 unproven roots: source/q.h and lib/q.h never bind \"q.h\""; else no "R7 an unproven root bound"; fi
 if noedge_from sub/e.c; then ok "R8 a ../ escape above the crawl root stays unresolved"; else no "R8 escape bound a file"; fi
 if edge sub/deep/main.c core/x.h; then ok "R9 file graph: sub/deep/main.c → core/x.h (the root include)"; else no "R9 file edge main.c → core/x.h missing"; fi
-if grep -q '<callers schema="ripwire.callers/v1" of="helper" defs="3" count="0" ' "$TMP/callers.out" \
-   && grep -qE '<dc in="main_fn" p="sub/deep/main.c:2" cands="2" via="declined"' "$TMP/callers.out" \
-   && ! grep -qE '<s t="fn" n="main_fn"' "$TMP/callers.out"; then
-  ok "R9 call graph unchanged from main: main.c's helper() is declined between the two namesakes (root edges stay out of the call narrow)"
-else no "R9 the root include reached the call narrow: main.c's helper() is no longer declined"; sed -n '1,20p' "$TMP/callers.out" | sed 's/<!--.*-->//' | head -c 1200; echo; fi
+if grep -q '<callers schema="ripwire.callers/v1" of="helper" defs="3" count="1" ' "$TMP/callers.out" \
+   && grep -qE '<s t="fn" n="main_fn" p="sub/deep/main.c:2" of_def="2"' "$TMP/callers.out" \
+   && ! grep -qE '<s t="fn" n="main_fn"[^>]*(via=|prov=)' "$TMP/callers.out" && ! grep -q 'via="declined"' "$TMP/callers.out"; then
+  ok "R9 call graph: main.c's helper() binds core/x.h's helper alone, unhedged — Rule 3 reads the root include (main declined it)"
+else no "R9 main.c's helper() is not bound to core/x.h alone through the root include"; sed -n '1,20p' "$TMP/callers.out" | sed 's/<!--.*-->//' | head -c 1200; echo; fi
 if edge py/use.py core/x.py; then ok "R10 Python import core.x unchanged (resolves by its own rule)"; else no "R10 Python import edge changed"; fi
 
 if noedge_from t/u.c; then ok "R11 a unique suffix (\"y.hpp\" → app/include/util/y.hpp) draws no edge"; else no "R11 a suffix match bound a file"; fi

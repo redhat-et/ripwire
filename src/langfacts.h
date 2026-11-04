@@ -350,6 +350,10 @@ struct LangFacts
     /// TypeScript, JavaScript, Rust, Swift, Kotlin: a bare `{` assigned or returned inside a function body is an object literal (a
     /// call's options or a value), a block or a closure, never a table; in Python (a dict), C, C++, Java, Go it can hold data (forliteral.h).
     bool localBraceNotData = false;
+
+    /// C++, Objective-C: a call's `Q::` qualifier names a namespace or class some definition holds, so an included file's namesake
+    /// proves nothing about `Q::f()` when the tree defines no Q (graph.h CppQualifierScopes, CPP-EXTQUAL-VETO).
+    bool qualifierNamesScope = false;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -364,7 +368,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .recvCallProof = RecvCallProof::Rule2, .callNode = "call_expression", .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true },
     { .lang = Lang::Python, .recvCallProof = RecvCallProof::Evidence, .callNode = "call", .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true },
@@ -377,7 +381,8 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
+      .qualifierNamesScope = true },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
