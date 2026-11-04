@@ -2584,11 +2584,8 @@ struct ReceiverEvidence
     // RECV-XFILE: the key both RecvCall tables share — one call by its file, start byte and callee name
     const std::string& callKey( std::uint32_t fileId, std::uint32_t start, std::string_view name ) const
     {
-        key.assign( std::to_string( fileId ) );
-        key.push_back( ':' );
-        key.append( std::to_string( start ) );
-        key.push_back( '#' );
-        key.append( name );
+        keyOf( start, '#', name );
+        key.insert( 0, std::to_string( fileId ) + ':' );
         return key;
     }
     bool hasRecvCalls() const noexcept { return !recvCalls.empty(); }
