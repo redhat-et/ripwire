@@ -70,6 +70,7 @@
 // call is a statement, never a row; every row needs an opener the allowlist proves (classifyOpener). Hits stand on word edges.
 
 #include "infra/namesplit.h" // isIdentChar
+#include "infra/sortutil.h"  // svLess — AnchorSet::dirs sort and search in byte order, never through operator<
 #include "filter.h"          // pathTierOf — source / test / doc, the reader's tier
 #include "layout.h"          // layout::lineOf — a byte offset's line
 #include "hopbody.h"         // renderBodyElement — the --expand body element, no callee rows; pythonDocstringQuote
@@ -893,7 +894,8 @@ inline AnchorSet anchorSetOf( const IngestResult& ing, std::span<const NodeId> i
     };
     dedup( a.syms );
     dedup( a.files );
-    dedup( a.dirs );
+    std::ranges::sort( a.dirs, sortutil::svLess );   // portablebuildcheck #6b: never the default sv comparator
+    a.dirs.erase( std::ranges::unique( a.dirs ).begin(), a.dirs.end() );
     const auto* ro = g != nullptr ? g->inEdges.rowOffsets() : nullptr;
     for( const NodeId s : a.syms )
     {
@@ -980,7 +982,7 @@ inline Prox proxOf( const IngestResult& ing, const AnchorSet& a, const Graph* g,
     {
         return Prox::Near;
     }
-    return std::binary_search( a.dirs.begin(), a.dirs.end(), siblift_detail::dirOf( p ) ) ? Prox::Dir : Prox::Far;
+    return std::binary_search( a.dirs.begin(), a.dirs.end(), siblift_detail::dirOf( p ), sortutil::svLess ) ? Prox::Dir : Prox::Far;
 }
 
 struct Site
