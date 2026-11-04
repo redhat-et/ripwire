@@ -172,27 +172,25 @@ inline constexpr TaskFrameWord kTaskFrameWords[] = {
     { "through", false }, { "via", false }, { "within", false }, { "across", false }, { "after", false }, { "before", false }, { "during", false },
     { "up", false }, { "down", false }, { "out", false }, { "toward", false }, { "towards", false } };
 
-// the table row of `w` (case-folded, leading quote or bracket trimmed), or null
-inline const TaskFrameWord* taskFrameRow( std::string_view w )
+// is the word (a subject word, already trimmed by graphSubjectTrimWord) in the table, and is it a cue?
+enum class FrameClass : std::uint8_t
 {
-    while( !w.empty() && std::string_view( "`'\"([{" ).find( w.front() ) != std::string_view::npos )
-    {
-        w.remove_prefix( 1 );
-    }
+    None,
+    Frame,
+    Cue
+};
+inline FrameClass taskFrameClass( std::string_view w )
+{
     const std::string lw = routeLower( w );
     const auto        at = std::ranges::find( kTaskFrameWords, std::string_view( lw ), &TaskFrameWord::word );
-    return at == std::end( kTaskFrameWords ) ? nullptr : &*at;
+    return at == std::end( kTaskFrameWords ) ? FrameClass::None : at->cue ? FrameClass::Cue : FrameClass::Frame;
 }
 
-inline bool isDependentsCue( std::string_view w )
-{
-    const TaskFrameWord* row = taskFrameRow( w );
-    return row != nullptr && row->cue;
-}
+inline bool isDependentsCue( std::string_view w ) { return taskFrameClass( w ) == FrameClass::Cue; }
 
 inline bool isTaskFrameWord( std::string_view w )
 {
-    return isQuestionLead( w ) || taskFrameRow( w ) != nullptr;
+    return isQuestionLead( w ) || taskFrameClass( w ) != FrameClass::None;
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
