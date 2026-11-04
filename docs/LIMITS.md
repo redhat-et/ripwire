@@ -260,10 +260,11 @@ Discloses: **none**
 
 ### `src/defslookup.h`
 
-Discloses: **none**
+Discloses: `to_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kAliasTargetCap` | `160` | — | a runaway guard: real alias targets are tens of bytes |
 | `kDefsNamesMax` | `16` | — | — |
 
 ### `src/degradedscan.h`
@@ -1386,7 +1387,7 @@ Discloses: `capped`, `count_capped`, `ellipsis_capped`, `findings_capped`, `hits
 
 ### `src/verbs_navigate.h`
 
-Discloses: `capped`, `importers_capped`
+Discloses: `capped`, `importers_capped`, `to_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

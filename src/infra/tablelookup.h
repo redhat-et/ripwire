@@ -16,6 +16,7 @@
 // storage beats any lookup structure at this size and keeps the call constant-foldable. Do not
 // "optimize" this into a hash without a measurement showing one of these tables grew enough to matter.
 
+#include <algorithm>
 #include <cstddef>
 #include <iterator>
 #include <string_view>
@@ -59,6 +60,16 @@ constexpr std::size_t findIndexByField( const Table& rows, Key Row::*field, cons
         }
     }
     return std::size( rows );
+}
+
+// The SORTED twin, for a runtime vector kept ascending by one integer field (a side table keyed by id): binary search,
+// a pointer or nullptr. Three side tables shared this lower_bound-then-compare body (--quality-delta flagged the third,
+// INDEX-ALIAS-CONST's alias-target table, as a clone of declinedsites.h's bound table and gitmine.h's ownership table).
+template< typename Table, typename Row, typename Key, typename Wanted >
+inline const Row* findSortedByField( const Table& rows, Key Row::*field, const Wanted& wanted ) noexcept
+{
+    const auto it = std::lower_bound( std::begin( rows ), std::end( rows ), wanted, [field]( const Row& r, const Wanted& w ) { return r.*field < w; } );
+    return it != std::end( rows ) && ( *it ).*field == wanted ? &*it : nullptr;
 }
 
 }   // namespace rw

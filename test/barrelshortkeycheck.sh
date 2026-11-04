@@ -26,12 +26,14 @@
 #   B2  `Wrong.formatDate`: q_unmatched="1" exact="0" (the same-leaf rows, hedged), never exact="1"; next="--defs=formatDate".
 #   B3  `Fmt3.formatDate`: a TS method (no stored owner scope) proven by the class's line span: kept="1" q_by="scope" fmt3.ts.
 #   B4  `Utils.parseInput`: two definitions both published under Utils: kept="2" cands="2" exact="0" (hedged, never exact).
-#   B5  C++ `WidgetPtr` (a `using` alias the index does not store): substring row getWidgetPtrCount, literal row shape="using"
-#       cpp/fwd.h:4; a commented-out `// using WidgetPtr = …` line is never a row; next="--grep=WidgetPtr". `GadgetRef` (a
-#       function-pointer typedef; a plain `typedef T X;` is now an indexed definition): shape="typedef".
+#   B5  C++ `GizmoPtr` (a function-local `using` alias the index does not store): substring row getGizmoPtrCount, literal row
+#       shape="using" cpp/fwd.h:11 in="useGizmo"; next="--grep=GizmoPtr". `GadgetRef` (an array typedef; a plain `typedef T X;` and,
+#       since INDEX-ALIAS-CONST, a function-type or pointer typedef are indexed definitions): shape="typedef". B5c (INDEX-ALIAS-CONST)
+#       a file-scope `using WidgetPtr = …` IS a definition now: the name-exact route serves its row (t="alias"), no <shortkey> [RED on main].
 #   B6  Rust `ExprKind` (`use … as ExprKind`): literal row shape="import-as".
 #   B7  a CONST-shaped key with no definition: the literal rung says held="lit" (the <lit> block lists it), no ld rows.
 #   B8  every <shortkey> carries next=; a resolved name-exact route (`getWidgetPtrCount`) prints no <shortkey> (absence twin of B5).
+#       A commented-out `// using WidgetPtr = …` line is never a literal row (D2).
 #   B9  --token-budget: <shortkey held="budget"> with next=, no rungs; --json, --format=candidates: no block (a non-empty
 #       answer); RIPWIRE_NO_SHORT_KEY=1 removes exactly the block.
 #   C1  (fix round 1, MF1) a DIRECTORY on the path is a hedged proof, never exact: `utils.formatDate` with src/utils/legacy/old.ts
@@ -72,6 +74,9 @@
 #       qualified name whose fully proven definition the answer already printed (`Utils.formatDate`: resolved, no ladder), and a
 #       qualified spelling that is a module path (`utils.date` for src/utils/date.ts: it names a file, not a definition);
 #       D9 every sentence shortkey carries next=. D6 also: the held marker's legend defines from=.
+#       D2 and D6 (INDEX-ALIAS-CONST round 3): WidgetPtr's only definition is a `using` alias row; the words route does not anchor
+#       on it, so the name stays unresolved for the sentence ladder and the literal rung prints the `using` line [RED on the lane
+#       head before round 3]. Twin D15: `Gear` has an alias row AND a struct definition: resolved, no <shortkey> (base and head).
 #   D10-D14 (fix round 1) D10 a name ending the sentence with a period (`Wrong.formatDate.`) still fires; no <shortkey> for D11 a
 #       known-suffix file name (`config.yaml`), D12 a module path whose words answer printed no signature row (`pkg.emptymod`, an
 #       empty `__init__.py`; the sentence and the one-token task), D13 a file name with a camel stem (`CMakeLists.txt`), while a file
@@ -156,8 +161,9 @@ printf 'export function formatDate(x: string): string {\n  return x;\n}\n' >"$S/
 for i in 1 2 3 4 5; do
     printf 'export class Fmt%s {\n  formatDate(v: number): string {\n    return "x" + v;\n  }\n  parseInput(v: string): string {\n    return v;\n  }\n}\n' "$i" >"$S/src/legacy/fmt$i.ts"
 done
-printf '#pragma once\ntemplate <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nusing WidgetPtr = Ptr<Widget>;\nint getWidgetPtrCount();\ntypedef void (*GadgetRef)(int);\n// using WidgetPtr = OldPtr<Widget>;\nint useLimit() { return clamp(MAX_WIDGET_COUNT); }\n' >"$S/cpp/fwd.h"
-printf '#include "fwd.h"\nint getWidgetPtrCount() { return 1; }\n' >"$S/cpp/fwd.cpp"
+printf '#pragma once\ntemplate <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nusing WidgetPtr = Ptr<Widget>;\nint getWidgetPtrCount();\ntypedef int GadgetRef[4];\n// using WidgetPtr = OldPtr<Widget>;\nint useLimit() { return clamp(MAX_WIDGET_COUNT); }\nint getGizmoPtrCount();\ninline void useGizmo() {\n    using GizmoPtr = Ptr<Widget>;\n    GizmoPtr g{}; (void)g;\n}\nusing Gear = Ptr<Widget>;\n' >"$S/cpp/fwd.h"
+printf '#include "fwd.h"\nint getWidgetPtrCount() { return 1; }\nint getGizmoPtrCount() { return 2; }\n' >"$S/cpp/fwd.cpp"
+printf 'namespace gears { struct Gear { int teeth; }; }\n' >"$S/cpp/gear.h"
 printf '[package]\nname = "rs"\nversion = "0.1.0"\n' >"$S/rs/Cargo.toml"
 printf 'pub mod pb { pub enum Kind { A } }\nuse crate::pb::Kind as ExprKind;\npub fn f(_k: ExprKind) {}\n' >"$S/rs/src/lib.rs"
 
@@ -182,11 +188,13 @@ run "$S" "$TMP/b4.xml" "--for=Utils.parseInput" && {
 skhas   "$TMP/b4.xml" "B4 two proven: hedged cands=2"               'kept="2" of="7" exact="0" cands="2">'
 skhasnt "$TMP/b4.xml" "B4 never exact"                              'exact="1"'
 }
-run "$S" "$TMP/b5.xml" "--for=WidgetPtr" && {
-skhas   "$TMP/b5.xml" "B5 substring rung"                           '<d n="getWidgetPtrCount" t="fn" p="cpp/fwd.cpp" l="2"/>'
-skhas   "$TMP/b5.xml" "B5 literal using row"                        '<ld p="cpp/fwd.h" l="4" shape="using"><![CDATA[using WidgetPtr = Ptr<Widget>;]]></ld>'
-skhasnt "$TMP/b5.xml" "B5 a commented-out declaration is no row"    'l="7"'
-skhas   "$TMP/b5.xml" "B5 next= greps the key"                      'next="--grep=WidgetPtr"'
+run "$S" "$TMP/b5.xml" "--for=GizmoPtr" && {
+skhas   "$TMP/b5.xml" "B5 substring rung"                           '<d n="getGizmoPtrCount" t="fn" p="cpp/fwd.cpp" l="3"/>'
+skhas   "$TMP/b5.xml" "B5 literal using row (function-local)"      '<ld p="cpp/fwd.h" l="11" shape="using" in="useGizmo"><![CDATA[using GizmoPtr = Ptr<Widget>;]]></ld>'
+skhas   "$TMP/b5.xml" "B5 next= greps the key"                      'next="--grep=GizmoPtr"'
+}
+run "$S" "$TMP/b5c.xml" "--for=WidgetPtr" && {
+if grep -q 't="alias"' "$TMP/b5c.xml" && grep -q 'p="cpp/fwd.h"' "$TMP/b5c.xml" && ! grep -q '<shortkey' "$TMP/b5c.xml"; then ok "B5c a file-scope using alias resolves name-exact: its row, no shortkey"; else no "B5c a file-scope using alias resolves name-exact: its row, no shortkey"; fi
 }
 run "$S" "$TMP/b5b.xml" "--for=GadgetRef" && skhas "$TMP/b5b.xml" "B5 typedef shape" '<ld p="cpp/fwd.h" l="6" shape="typedef">'
 run "$S" "$TMP/b6.xml" "--for=ExprKind" && skhas "$TMP/b6.xml" "B6 Rust use … as row" '<ld p="rs/src/lib.rs" l="2" shape="import-as">'
@@ -201,15 +209,15 @@ for f in "$TMP"/b*.xml; do
 done
 if [ "$nsk" -ge 8 ] && [ "$nsk" = "$nnext" ]; then ok "B8 every shortkey carries next= ($nnext of $nsk)"; else no "B8 shortkeys with next= $nnext of $nsk (want all, at least 8)"; fi
 run "$S" "$TMP/b8.xml" "--for=getWidgetPtrCount" && { if grep -q '<shortkey' "$TMP/b8.xml"; then no "B8 a resolved name-exact route prints no shortkey"; else ok "B8 a resolved name-exact route prints no shortkey"; fi; }
-run "$S" "$TMP/b9.xml" "--for=WidgetPtr" --token-budget=2000 && {
-if grep -q '<shortkey held="budget" of="WidgetPtr" next="--for=WidgetPtr"/>' "$TMP/b9.xml" && ! grep -q '<rung ' "$TMP/b9.xml"; then ok "B9 token budget: held marker, no rungs"; else no "B9 token budget: held marker, no rungs"; fi
+run "$S" "$TMP/b9.xml" "--for=GizmoPtr" --token-budget=2000 && {
+if grep -q '<shortkey held="budget" of="GizmoPtr" next="--for=GizmoPtr"/>' "$TMP/b9.xml" && ! grep -q '<rung ' "$TMP/b9.xml"; then ok "B9 token budget: held marker, no rungs"; else no "B9 token budget: held marker, no rungs"; fi
 }
-run "$S" "$TMP/b9.json" --json "--for=WidgetPtr" && { if grep -q 'shortkey' "$TMP/b9.json"; then no "B9 --json carries no block"; else ok "B9 --json carries no block"; fi; }
+run "$S" "$TMP/b9.json" --json "--for=GizmoPtr" && { if grep -q 'shortkey' "$TMP/b9.json"; then no "B9 --json carries no block"; else ok "B9 --json carries no block"; fi; }
 for fmt in --format=candidates; do
-    ( cd "$S" || exit 1; HOME="$TMP" "$BIN" "$S" --no-cache "$fmt" "--for=WidgetPtr" </dev/null 2>/dev/null ) >"$TMP/b9f.out"; frc=$?
+    ( cd "$S" || exit 1; HOME="$TMP" "$BIN" "$S" --no-cache "$fmt" "--for=GizmoPtr" </dev/null 2>/dev/null ) >"$TMP/b9f.out"; frc=$?
     if [ "$frc" -eq 0 ] && [ -s "$TMP/b9f.out" ] && ! grep -q 'shortkey' "$TMP/b9f.out"; then ok "B9 $fmt carries no block"; else no "B9 $fmt carries no block (rc=$frc)"; fi
 done
-( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=WidgetPtr" </dev/null 2>/dev/null ) >"$TMP/b9off.xml"
+( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=GizmoPtr" </dev/null 2>/dev/null ) >"$TMP/b9off.xml"
 python3 - "$TMP/b5.xml" "$TMP/b9off.xml" <<'PY'
 import re, sys
 on, off = (open(p).read() for p in sys.argv[1:3])
@@ -377,6 +385,7 @@ skhas   "$TMP/d2.xml" "D2 sentence substring rung"                    '<d n="get
 skhas   "$TMP/d2.xml" "D2 sentence literal using row"                 '<ld p="cpp/fwd.h" l="4" shape="using"><![CDATA[using WidgetPtr = Ptr<Widget>;]]></ld>'
 skhasnt "$TMP/d2.xml" "D2 sentence: a commented-out declaration is no row" 'l="7"'
 }
+run "$S" "$TMP/d15.xml" "--for=definition of Gear, the name lookup is empty" && skhasnt "$TMP/d15.xml" "D15 an alias row beside a struct definition: resolved, no ladder" '<shortkey'
 run "$S" "$TMP/d1b.xml" "--for=what is \`Wrong::formatDate\` here? the lookup is empty" && \
 skhas   "$TMP/d1b.xml" "D1 sentence, a backquoted :: qualifier"     '<shortkey of="Wrong::formatDate" from="sentence" found="0" rungs="leaf,substring,literal"'
 run "$S" "$TMP/d3.xml" "--for=where does ExprKind come from? --defs finds nothing" && skhas "$TMP/d3.xml" "D3 sentence literal import-as row" '<ld p="rs/src/lib.rs" l="2" shape="import-as">'

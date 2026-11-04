@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-03, lane index-alias-const (base main 824847bd, merged over main 6bae81c6 at 291/292; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 289 -> 293 (rich 294; above 285-292 taken by #504 #506 #512 #513): C++ alias forms are definitions
+#   (src/aliasdef.h); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 (no record changes shape) and kQSnapCacheScheme
+#   stays 25: no watched quality.h function moved.
 # 2026-11-03, lane docs-rest re-bump (#506, base main dfd26fc1): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: kParserVer 289 -> 291
 #   (rich 292): both sides bumped (the lane's reST tier 287/288, main's namespace re-export 289/290), so the merged value goes above both and
 #   a cache built on main at 289 re-indexes the reST .txt docs. quality.h's kIngestParserVerMirror with it. kCacheVersion 48 and
