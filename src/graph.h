@@ -1246,12 +1246,12 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& c
 // between (`std::ranges::contains`, `std::__1::ranges::contains`). The three IMMEDIATE-scope tests are kept
 // as a floor alongside `scopeRootsStd`, never replaced by it: they still catch a def whose enclosing-chain
 // walk cannot run (ObjC++'s stated floor below) the same way they always did. The call side is symmetric:
-// `namesStd(r.qualifier)` is #134's original IMMEDIATE-qualifier test (`std::move`, `::std::move` and
+// `cppSegmentNamesStd(r.qualifier)` is #134's original IMMEDIATE-qualifier test (`std::move`, `::std::move` and
 // `std::__1::move` arrive as "std", "std" and "__1"), widened by Reference::qualifierRootsStd, which reads
 // the call's ENTIRE written chain (ingest_names.h cppQualifiedChainRootsStd) so `std::ranges::move` — whose
 // IMMEDIATE qualifier is "ranges", indistinguishable at that field alone from a user's own
 // `mylib::ranges::move` — is still recognised as std-rooted. The two tests can never disagree on a
-// 1-segment call (there the qualifier IS the chain root), so `qualifierRootsStd || namesStd(...)` is
+// 1-segment call (there the qualifier IS the chain root), so `qualifierRootsStd || cppSegmentNamesStd(...)` is
 // strictly WIDER than #134's original rule, never narrower — no call #134 caught stops being caught here.
 //
 // #150 K3 — A STD-ROOTED DECLARATION WITH NO BODY refuses too (`isDefinitionNotDeclaration`), not just a
@@ -1299,6 +1299,15 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& c
 // (whatever produced its candidates), and a std-rooted call is filtered by std-rootedness regardless of how
 // its candidates were found. A SCIP-pinned site cannot reach here with candidates in any case (the overlay
 // fills `tier`, never `cand`), and the FFI binding tier is Python/JS/TS-only.
+// One segment that names namespace std: `std` itself, or a standard library's inline ABI namespace
+// (externalnames.h kStdInlineNamespaceNames — its sortedness static_assert is what makes this search valid).
+inline bool cppSegmentNamesStd( std::string_view segment )
+{
+    return segment == "std"
+        || std::binary_search( std::begin( externalnames::kStdInlineNamespaceNames ), std::end( externalnames::kStdInlineNamespaceNames ),
+                               segment, rw::sortutil::svLess );
+}
+
 inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference& r, std::vector<NodeId>& cand )
 {
     const bool cppFamilyRef = r.lang == Lang::Cpp || r.lang == Lang::ObjC;
@@ -1306,15 +1315,7 @@ inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference
     {
         return true; // guard does not apply
     }
-    // One segment that names namespace std: `std` itself, or a standard library's inline ABI namespace
-    // (externalnames.h kStdInlineNamespaceNames — its sortedness static_assert is what makes this search valid).
-    const auto namesStd = []( std::string_view segment ) -> bool
-    {
-        return segment == "std"
-            || std::binary_search( std::begin( externalnames::kStdInlineNamespaceNames ), std::end( externalnames::kStdInlineNamespaceNames ),
-                                   segment, rw::sortutil::svLess );
-    };
-    if( !r.qualifierRootsStd && !namesStd( r.qualifier ) )
+    if( !r.qualifierRootsStd && !cppSegmentNamesStd( r.qualifier ) )
     {
         return true; // any other qualifier keeps the unchanged ladder — see WHY ONLY `std` above
     }
@@ -1332,13 +1333,12 @@ inline bool keepStdQualifiedCandidates( const IngestResult& ing, const Reference
     const auto isFunctionLikeKind = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
     // CPP-EXTQUAL-VETO: a call whose own qualifier segment names std (`std::format`, `std::__1::move`) names a member of the namespace
     // itself, so a candidate scoped by a class std holds (`template <> struct formatter<absl::Status, char>`'s `format`) is no answer
-    const bool    namespaceMember = namesStd( r.qualifier );
+    const bool    namespaceMember = cppSegmentNamesStd( r.qualifier );
     std::size_t keepCount = 0;
     for( std::size_t ci = 0; ci < cand.size(); ++ci )
     {
         const Symbol& sym       = ing.symbols[ cand[ ci ] ];
-        const bool    scopeIsStd = namespaceMember ? ( namesStd( sym.scope ) || sym.scope.starts_with( "std::" ) )
-                                                   : ( sym.scopeRootsStd || namesStd( sym.scope ) || sym.scope.starts_with( "std::" ) );
+        const bool    scopeIsStd = ( sym.scopeRootsStd && !namespaceMember ) || cppSegmentNamesStd( sym.scope ) || sym.scope.starts_with( "std::" );
         const bool    bodyOk    = !isFunctionLikeKind( sym.kind ) || isDefinitionNotDeclaration( sym );
         if( scopeIsStd && bodyOk )
         {
@@ -1380,7 +1380,7 @@ struct CppQualifierScopes
     // true ⇒ a C++/ObjC call qualified by a name the tree never defines: Rule 3 proves nothing about it
     bool foreign( const Reference& r ) const
     {
-        if( r.qualifier.empty() || ( r.lang != Lang::Cpp && r.lang != Lang::ObjC ) )
+        if( r.qualifier.empty() || !langFacts( r.lang ).qualifierNamesScope )
         {
             return false;
         }
@@ -1411,6 +1411,15 @@ inline void forEachCppScopeSegment( std::string_view scope, Fn&& fn )
     }
 }
 
+// true ⇒ symbol s can name a scope a C/C++ qualifier refers to: C, C++, ObjC symbols only (the include-closure languages). An
+// explicit specialization (`template <> struct formatter<X, char>`) and its members reopen a namespace, defining nothing in it; a
+// bodyless function proves nothing either (a call the parser read as a declaration under a macro spells one)
+inline bool cppSymbolIsScopeEvidence( const Symbol& s )
+{
+    const bool bodylessFunction = ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && !isDefinitionNotDeclaration( s );
+    return langFacts( s.lang ).transitiveIncludes && s.name.find( '<' ) == std::string::npos && s.scope.find( '<' ) == std::string::npos && !bodylessFunction;
+}
+
 inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/1q: C++ qualifier scopes (CPP-EXTQUAL-VETO)" );
@@ -1418,10 +1427,7 @@ inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
     const auto add = [ & ]( std::string_view n ) { t.names.try_emplace( std::string( n ), char( 1 ) ); };
     for( const Symbol& s : ing.symbols )
     {
-        // an explicit specialization (`template <> struct formatter<X, char>`) and its members reopen a namespace, defining nothing in
-        // it; a bodyless function proves nothing either (a call the parser read as a declaration under a macro spells one)
-        if( ( s.lang != Lang::Cpp && s.lang != Lang::C && s.lang != Lang::ObjC ) || s.name.find( '<' ) != std::string::npos
-            || s.scope.find( '<' ) != std::string::npos || ( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && !isDefinitionNotDeclaration( s ) ) )
+        if( !cppSymbolIsScopeEvidence( s ) )
         {
             continue;
         }
@@ -1442,7 +1448,7 @@ inline CppQualifierScopes buildCppQualifierScopes( const IngestResult& ing )
     std::vector<const Reference*> aliases;
     for( const Reference& r : ing.references )
     {
-        if( !r.isCompose || ( r.lang != Lang::Cpp && r.lang != Lang::ObjC ) )
+        if( !r.isCompose || !langFacts( r.lang ).qualifierNamesScope )
         {
             continue;
         }
@@ -11689,6 +11695,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                         && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r ) );
         bool rule3NoProof = false;   // RULE3-MEMBER-GUARD: Rule 3 fired, and nothing the language writes proves its answer
         bool rule3Local   = false;   // ... and the call goes through a local or parameter of the caller: the value held is no definition of the name
+        bool rule3Foreign = false;   // ... and CPP-EXTQUAL-VETO (a) took the proof away: the call's qualifier is no name the tree defines
         if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
@@ -11708,6 +11715,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 // CPP-EXTQUAL-VETO (a): a qualifier the tree never defines (`absl::`, `fmt::` in a tree that reopens fmt only to
                 // specialize) makes Rule 3's included-file pick no proof: it is taken hedged, never bound unhedged (CppQualifierScopes)
                 const bool foreignQualifier = !memberSide && cppQualScopes.foreign( r );
+                rule3Foreign                = foreignQualifier;
                 const auto           nameProves = [ & ]( NodeId c )
                 {
                     switch( nameProof )
@@ -11914,8 +11922,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( rule3NoProof && !r.qualifier.empty() )
         {
             // the path as written from its root (`crate::far::helper`, never `far::helper`): a module named by a longer path is no unknown root.
-            // A C++ call reaches here only through CPP-EXTQUAL-VETO (a): its qualifier is foreign, and the hedge is its whole answer.
-            if( r.lang == Lang::Rust )
+            // A call CPP-EXTQUAL-VETO (a) sent here has a foreign C++ qualifier, and the hedge is its whole answer.
+            if( !rule3Foreign )
             {
                 std::string path = std::string( rustWrittenQualifierOf( r ) ) + "::" + r.calleeName;
                 if( recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, path ) && !recvEv.types.rustRootNamesTreePackage( r.fileId, r.startByte, path ) )
