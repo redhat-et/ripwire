@@ -843,15 +843,11 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
 // (model.h forwardCounts, `--uses`' own filter: `keptForwards` is Graph::keptForwards).
 // THE call-site filter (--uses' own): a call reference that is a site to open. Shared by forEachCallSite and the hop record
 // (hoprecord.h hopFacts), so the two site passes cannot disagree about which references are call sites.
-// A reference written in code (not a doc link, not Markdown) whose forward counts: the half of the filter a macro
-// invocation (hoprecord.h) shares with a call.
-inline bool refTextCounts( const Reference& r, std::uint32_t refIndex, std::span<const std::uint32_t> keptForwards ) noexcept
+// `macroToo`: a macro invocation counts as a site as well (the hop record, hoprecord.h — a C macro the edge calls through).
+inline bool callSiteCounts( const Reference& r, std::uint32_t refIndex, std::span<const std::uint32_t> keptForwards, bool macroToo = false ) noexcept
 {
-    return !r.isDocLink && r.lang != Lang::Markdown && forwardCounts( r, refIndex, keptForwards );
-}
-inline bool callSiteCounts( const Reference& r, std::uint32_t refIndex, std::span<const std::uint32_t> keptForwards ) noexcept
-{
-    return r.role == RefRole::Call && !r.isCompose && refTextCounts( r, refIndex, keptForwards );
+    const bool callForm = ( r.role == RefRole::Call && !r.isCompose ) || ( macroToo && r.role == RefRole::Macro );
+    return callForm && !r.isDocLink && r.lang != Lang::Markdown && forwardCounts( r, refIndex, keptForwards );
 }
 
 template <class OnSite>

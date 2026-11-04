@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -325,8 +326,10 @@ inline std::string_view ownerLeaf( const Symbol& s ) noexcept
 //       equal_range of the sorted keys, usually 1-2) test the callee name; a hit keeps the best site and counts lines;
 //   (3) per distinct file of a chosen site or callee: one read (FileTextCache);
 //   (4) per edge: slice the cached text — no file read, no reference scan, no name lookup.
-inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<HopWant> wanted, RedactCounts* redact, FileTextCache& files )
+inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<HopWant> wanted, RedactCounts* redact, FileTextCache* shared = nullptr )
 {
+    std::optional<FileTextCache> own;   // a verb that reads no other file for the answer lends no reader: one is made here
+    FileTextCache&               files = shared != nullptr ? *shared : own.emplace( ing );
     HopFacts out;
     if( !hopContextOn() || wanted.empty() )
     {
@@ -366,8 +369,7 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
     {
         const Reference& r = ing.references[ refIndex ];
         // a macro invocation is a hop the graph prints too (viamacro -> WRAP): its site is the invocation, same filter otherwise
-        const bool site = callSiteCounts( r, refIndex, g.keptForwards )
-                       || ( r.role == RefRole::Macro && refTextCounts( r, refIndex, g.keptForwards ) );
+        const bool site = callSiteCounts( r, refIndex, g.keptForwards, /*macroToo=*/true );
         if( r.fromSymbol >= callerSel.size() || !callerSel[ r.fromSymbol ] || !site )
         {
             continue;
@@ -432,13 +434,6 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
         emitTo( stderr, "ripwire: hop facts: edges={} reference_scans={} files_read={}\n", out.recs.size(), out.referenceScans, out.filesRead );
     }
     return out;
-}
-
-// The same provider with a reader of its own, for a verb that reads no other file for the answer.
-inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<HopWant> wanted, RedactCounts* redact )
-{
-    FileTextCache files( ing );
-    return hopFacts( ing, g, std::move( wanted ), redact, files );
 }
 
 // THE renderer: one hop's attributes at a shed level. `withSig` false when the answer already prints the callee's

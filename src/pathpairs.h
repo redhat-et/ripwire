@@ -740,7 +740,7 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
 // The one call both --path transports make: the answer's hop facts, before its root is written (the root carries the disclosures).
 inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact )
 {
-    return hopFacts( ing, g, pathHopWants( pp, path ), redact );   // the overload that owns one reader for the answer
+    return hopFacts( ing, g, pathHopWants( pp, path ), redact );   // no reader lent: hopFacts makes one for the answer
 }
 
 // What the answer's hop rows carry, for the legend: today's path, or every printed chain when pairs are listed — the CLI and

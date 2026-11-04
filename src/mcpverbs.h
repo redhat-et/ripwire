@@ -4249,7 +4249,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             }
         }
     }
-    const HopFacts hops = hopFacts( ing, g, std::move( hopWant ), redact, files );
+    const HopFacts hops = hopFacts( ing, g, std::move( hopWant ), redact, &files );
 
     // one <t>/<s>/<e> writer set appending to a payload string (built BEFORE the root so est_tokens is honest).
     const auto symAttr = [ & ]( std::string& p, const char* tag, NodeId id )
