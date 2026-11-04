@@ -841,6 +841,13 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
 // rule; a widely-shared name has hundreds of caller rows). Duplicate (node,line) pairs collapse: this is a
 // set of LINES TO OPEN, so two calls on one line are one site. A FORWARDED call counts only where buildGraph kept it
 // (model.h forwardCounts, `--uses`' own filter: `keptForwards` is Graph::keptForwards).
+// THE call-site filter (--uses' own): a call reference that is a site to open. Shared by forEachCallSite and the hop record
+// (hoprecord.h hopFacts), so the two site passes cannot disagree about which references are call sites.
+inline bool callSiteCounts( const Reference& r, std::uint32_t refIndex, std::span<const std::uint32_t> keptForwards ) noexcept
+{
+    return r.role == RefRole::Call && !r.isCompose && !r.isDocLink && r.lang != Lang::Markdown && forwardCounts( r, refIndex, keptForwards );
+}
+
 template <class OnSite>
 inline void forEachCallSite( const IngestResult& ing, CallSiteCalleeTest& callee, std::span<const char> callerSelected,
                              std::span<const std::uint32_t> keptForwards, OnSite&& onSite )
@@ -848,7 +855,7 @@ inline void forEachCallSite( const IngestResult& ing, CallSiteCalleeTest& callee
     for( std::uint32_t refIndex = 0; refIndex < ing.references.size(); ++refIndex )
     {
         const Reference& r = ing.references[refIndex];
-        if( r.role != RefRole::Call || r.isCompose || r.isDocLink || r.lang == Lang::Markdown || !forwardCounts( r, refIndex, keptForwards ) )
+        if( !callSiteCounts( r, refIndex, keptForwards ) )
         {
             continue;
         }
