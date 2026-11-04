@@ -143,8 +143,9 @@ inline bool isQuestionLead( std::string_view w )
 // SUBJECT-CALLERS-NATURAL. A sentence can name ONE function and only frame a question about what depends on it: "I want to add a
 // new parameter to f; what is affected?", "who calls f and would break if its signature changed?". Such a sentence asks exactly what
 // "f new parameter" asks. Two closed word lists, no code names. A dependents cue asks who uses the function (change, add, affected,
-// breaks, depends, calls, used, update, modify); without one a sentence is not asking for callers ("how does f reach g", "default
-// x and y for buffers"), so it reads as before. Task frame words are the cues plus question leads, pronouns, helpers, conjunctions
+// breaks, depends, calls, used, update, modify, invokes, references, rename, exercise), in its dependents sense only (asksDependents);
+// without one a sentence is not asking for callers ("how does f reach g", "default x and y for buffers"), so it reads as before. The
+// sentence names ONE function: with two, the block would guess which one the cue governs. Task frame words are the cues plus question leads, pronouns, helpers, conjunctions
 // and prepositions ("I need to", "what would that", "into"); the plain-word bound counts the other words only. Only <callers by="subject"> reads
 // this; the flip keeps `descriptive`, so a sentence never trades a map for a name-exact route.
 // The two closed lists, one table: `cue` marks a dependents cue (also a frame word); the rest only frame the question.
@@ -159,7 +160,9 @@ inline constexpr TaskFrameWord kTaskFrameWords[] = {
     { "broke", true }, { "broken", true }, { "breaking", true }, { "depend", true }, { "depends", true }, { "depended", true }, { "depending", true },
     { "dependent", true }, { "dependents", true }, { "update", true }, { "updates", true }, { "updated", true }, { "updating", true }, { "modify", true },
     { "modifies", true }, { "modified", true }, { "modifying", true }, { "call", true }, { "calls", true }, { "called", true }, { "calling", true },
-    { "caller", true }, { "callers", true }, { "used", true }, { "uses", true },
+    { "caller", true }, { "callers", true }, { "used", true }, { "uses", true }, { "invoke", true }, { "invokes", true }, { "invoked", true },
+    { "invoking", true }, { "references", true }, { "referenced", true }, { "referencing", true }, { "rename", true }, { "renames", true },
+    { "renamed", true }, { "renaming", true }, { "exercise", true }, { "exercises", true }, { "exercised", true }, { "exercising", true },
     { "i", false }, { "we", false }, { "you", false }, { "me", false }, { "my", false }, { "our", false }, { "it", false }, { "its", false }, { "it's", false },
     { "they", false }, { "them", false }, { "their", false }, { "this", false }, { "that", false }, { "these", false }, { "those", false }, { "there", false },
     { "here", false }, { "am", false }, { "be", false }, { "been", false }, { "being", false }, { "was", false }, { "were", false }, { "has", false },
@@ -191,6 +194,28 @@ inline bool isDependentsCue( std::string_view w ) { return taskFrameClass( w ) =
 inline bool isTaskFrameWord( std::string_view w )
 {
     return isQuestionLead( w ) || taskFrameClass( w ) != FrameClass::None;
+}
+
+// A cue word in a sentence names a dependent only in the dependents sense. Closed lists, read beside the cue (SCN-FIX1):
+//   * a dependents NOUN (callers, dependents) always asks for them;
+//   * the callee shape asks what the function itself does, so no verb cue counts: an auxiliary right before the name ("what does f
+//     depend on / modify / use", "where does f make API calls") or the name as the subject of a verb cue ("f calls", "f uses");
+//   * "used to <verb>" is a purpose; "API calls", "make calls" are a noun; a negated cue ("I changed nothing in f") asks nothing;
+//   * "using" is a means ("build it using f") except after a form of be ("who is using f").
+inline bool isDependentsNoun( std::string_view w ) { return detail::graphSubjectWordIs( w, { "caller", "callers", "dependent", "dependents" } ); }
+inline bool isCalleeAux( std::string_view w ) { return detail::graphSubjectWordIs( w, { "does", "do", "did", "doesn't", "don't", "didn't" } ); }
+inline bool isAgentCue( std::string_view w )
+{
+    return detail::graphSubjectWordIs( w, { "calls", "uses", "depends", "modifies", "updates", "affects", "adds", "invokes", "references", "exercises", "renames" } );
+}
+inline bool isCallNounModifier( std::string_view w )
+{
+    return detail::graphSubjectWordIs( w, { "api", "apis", "http", "https", "rpc", "grpc", "network", "remote", "external", "system", "database", "db", "sql",
+                                            "rest", "make", "makes", "made", "making" } );
+}
+inline bool isNegation( std::string_view w )
+{
+    return detail::graphSubjectWordIs( w, { "not", "never", "no", "nothing", "none", "without", "didn't", "don't", "doesn't", "haven't", "hasn't", "won't" } );
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
@@ -298,12 +323,44 @@ inline bool sortSubjectWords( const std::vector<std::string_view>& words, Subjec
     }
     return true;
 }
-// a sentence that asks what depends on its symbol, with few plain words beside the task frame
-inline bool asksDependents( const std::vector<std::string>& dropped )
+// a sentence that names ONE function (each mention the same spelling) and asks what depends on it, with few plain words beside the
+// task frame. Two names fire for none: the block would have to guess which one the cue governs ("when f changes, who calls g?").
+inline bool asksDependents( const std::vector<std::string_view>& words, const std::vector<std::string>& dropped )
 {
-    const auto cue   = []( const std::string& w ) { return isDependentsCue( w ); };
+    std::vector<std::string_view> text;   // trimmed words, sentence order
+    std::string_view              name;
+    bool                          callee = false;
+    for( const std::string_view w : words )
+    {
+        text.push_back( detail::graphSubjectTrimWord( w ).text );
+    }
+    for( std::size_t k = 0; k < text.size(); ++k )
+    {
+        if( isRouteStopword( routeLower( text[k] ) ) || !hasNameSyntax( text[k] ) )
+        {
+            continue;
+        }
+        if( !name.empty() && name != text[k] )
+        {
+            return false;
+        }
+        name   = text[k];
+        callee = callee || ( k > 0 && isCalleeAux( text[k - 1] ) ) || ( k + 1 < text.size() && isAgentCue( text[k + 1] ) );
+    }
+    bool cue = false;
+    for( std::size_t k = 0; k < text.size() && !cue; ++k )
+    {
+        const std::string_view prev = k > 0 ? text[k - 1] : std::string_view();
+        const std::string_view next = k + 1 < text.size() ? text[k + 1] : std::string_view();
+        const bool             verb = isDependentsCue( text[k] ) && !isDependentsNoun( text[k] );
+        const bool             sense = isDependentsNoun( text[k] )
+            || ( verb && !callee && !( detail::graphSubjectWordIs( text[k], { "used" } ) && detail::graphSubjectWordIs( next, { "to" } ) )
+                 && !( detail::graphSubjectWordIs( text[k], { "call", "calls" } ) && isCallNounModifier( prev ) ) )
+            || ( !callee && detail::graphSubjectWordIs( text[k], { "using" } ) && detail::graphSubjectWordIs( prev, { "is", "are", "was", "were", "who's", "what's" } ) );
+        cue = sense && !isNegation( prev ) && !isNegation( next );
+    }
     const auto plain = []( const std::string& w ) { return !isTaskFrameWord( w ); };
-    return std::ranges::any_of( dropped, cue ) && std::size_t( std::ranges::count_if( dropped, plain ) ) <= kSubjectMaxPlainWords;
+    return cue && !name.empty() && std::size_t( std::ranges::count_if( dropped, plain ) ) <= kSubjectMaxPlainWords;
 }
 }   // namespace subject_detail
 
@@ -352,7 +409,7 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
     }
     r.names       = keptRaw.size();
     r.descriptive = !isQuestionLead( words.front() ) && r.dropped.size() <= kSubjectMaxPlainWords;
-    r.framed      = r.descriptive || subject_detail::asksDependents( r.dropped );
+    r.framed      = r.descriptive || subject_detail::asksDependents( words, r.dropped );
     return r;
 }
 
