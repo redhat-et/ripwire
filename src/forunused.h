@@ -2695,13 +2695,22 @@ inline void appendSites( std::string& out, const IngestResult& ing, const ExtraF
     }
 }
 
-inline void appendRow( std::string& out, const IngestResult& ing, const ExtraFiles& extra, const Row& r, std::string_view verdict, std::vector<char>& esc )
+// `tag` and `path`: --dead-code's exported group prints the same row as <e n= t= p= l=> (its rows span files); the table's <u> has no p=.
+inline void appendRow( std::string& out, const IngestResult& ing, const ExtraFiles& extra, const Row& r, std::string_view verdict, std::vector<char>& esc,
+                       std::string_view tag = "u", std::string_view path = {} )
 {
     const Symbol& s = ing.symbols[r.defs.front()];
-    out += "<u n=\"";
+    out += '<';
+    out += tag;
+    out += " n=\"";
     out += escapeXml( r.name, esc );
     out += "\" t=\"";
     out += symTag( s.kind );
+    if( !path.empty() )
+    {
+        out += "\" p=\"";
+        out += escapeXml( path, esc );
+    }
     out += std::format( "\" l=\"{}\" v=\"{}\"", s.line, verdict );
     if( r.defs.size() > 1 )
     {
@@ -2785,53 +2794,20 @@ inline std::string renderFileTable( const IngestResult& ing, const Graph& g, con
     return out;
 }
 
-} // namespace unusedfile
-
-// The block: "" unless the subject carries a cue and names a file or a directory.
-inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g, std::string_view task )
+// The evidence for the public and private defs of `files`: one table per file, then ONE pass over every text file under the root.
+// renderForUnusedTable prints it as the --for table; --dead-code=PATH reads the same rows for its exported group (verbs_quality.h),
+// so both verbs say the same thing about one def.
+struct Classified
 {
-    using namespace unusedfile;
-    if( !subjectAsksUnused( task ) )
-    {
-        return {};
-    }
-    const std::vector<FileAnchor> anchors = resolveFileAnchors( ing, task );
-    std::vector<std::uint32_t> files;
-    std::string nameList;
-    std::vector<char> esc;
-    std::size_t dirTotal = 0;
-    for( const FileAnchor& a : anchors )
-    {
-        if( a.picksOne() || a.kind == 'd' )
-        {
-            for( const std::uint32_t f : a.files )
-            {
-                if( !std::ranges::contains( files, f ) && ( files.size() < kForUnusedDirFiles ) )
-                {
-                    files.push_back( f );
-                }
-            }
-            dirTotal = std::max<std::size_t>( dirTotal, a.total );
-        }
-        else
-        {
-            nameList += std::format( "<unused_names s=\"{}\" total=\"{}\">", std::string( escapeXml( a.token, esc ) ), a.total );
-            for( const std::uint32_t f : a.files )
-            {
-                nameList += "<f p=\"";
-                nameList += escapeXml( rootRelPath( ing, f ), esc );
-                nameList += "\"/>";
-            }
-            nameList += "</unused_names>";
-        }
-    }
-    if( files.empty() )
-    {
-        return nameList;
-    }
-
-    const ValueRefIndex vri( ing );
     std::vector<FileTable> tables;
+    ExtraFiles extra;
+};
+
+inline Classified classifyFiles( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::span<const std::uint32_t> files )
+{
+    Classified c;
+    std::vector<FileTable>& tables = c.tables;
+    ExtraFiles& extra = c.extra;
     tables.reserve( files.size() );
     for( const std::uint32_t f : files )
     {
@@ -2841,7 +2817,6 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
     // The one pass over the tree: each file read once, whatever the number of tables.
     std::vector<std::string> starTexts;
     std::vector<std::uint32_t> starIds;
-    ExtraFiles extra;
     std::vector<NameScan> scans;
     scans.reserve( tables.size() );
     for( FileTable& table : tables )
@@ -2980,6 +2955,137 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
         hedgeOwnersOfMembers( table.rows );
         chainWithinFile( ing, g, table );
     }
+    return c;
+}
+
+// DEAD-CODE-SCOPE: --dead-code=PATH lists, after its internal-linkage rows, the PUBLIC free functions of the filtered files that no
+// non-test caller reaches (the exported group, linkage="exported"). Public is this table's isPublicDef, so code outside the tree may
+// call them: zero means none found in this tree, never unused. Each row carries this table's verdict and why=, so a name a string,
+// registry, decorator, __all__ or re-export holds reads v=unknown with the reason, never as a bare candidate.
+inline bool testCaller( const IngestResult& ing, NodeId caller ) noexcept
+{
+    return isTestSymbol( ing, caller ) || isTestLikePath( rootRelPath( ing, ing.symbols[caller].fileId ) );
+}
+
+inline bool noNonTestCaller( const IngestResult& ing, const Graph& g, NodeId id ) noexcept
+{
+    const std::uint32_t* ro = g.inEdges.rowOffsets();
+    const std::uint32_t* ci = g.inEdges.colIndices();
+    if( ro == nullptr || ci == nullptr || id >= ing.symbols.size() )
+    {
+        return true;
+    }
+    for( std::uint32_t k = ro[id]; k < ro[id + 1]; ++k )
+    {
+        const NodeId caller = ci[k];
+        if( caller != id && caller < ing.symbols.size() && !testCaller( ing, caller ) )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// a free function with a body in library code: the shape --dead-code's own rows have, before linkage
+inline bool exportedCandidateShape( const IngestResult& ing, const Symbol& s ) noexcept
+{
+    return s.kind == SymKind::Function && !isMemberDef( s ) && s.sigEndByte < s.endByte && !testCaller( ing, s.id );
+}
+
+struct ExportedGroup
+{
+    Classified classified;
+    std::vector<std::pair<int, const Row*>> rows; // (verdict rank, row): unused, test-only, file-only, unknown; then path, line
+};
+
+template<class Skip>
+inline ExportedGroup collectExportedGroup( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::span<const std::uint32_t> files, Skip&& skip )
+{
+    ExportedGroup out{ classifyFiles( ing, g, vri, files ), {} };
+    for( const FileTable& t : out.classified.tables )
+    {
+        if( !t.servedLanguage )
+        {
+            continue; // no verdicts for this language: the row would carry no evidence
+        }
+        for( const Row& r : t.rows )
+        {
+            if( !r.listed || !r.isPublic )
+            {
+                continue;
+            }
+            const auto inFile = [&]( NodeId id ) { return ing.symbols[id].fileId == t.file; };
+            const bool shaped = std::ranges::any_of( r.defs, [&]( NodeId id ) { return inFile( id ) && exportedCandidateShape( ing, ing.symbols[id] ); } );
+            const bool reached = std::ranges::any_of( r.defs, [&]( NodeId id ) { return !noNonTestCaller( ing, g, id ); } );
+            const bool listedAlready = std::ranges::any_of( r.defs, skip );
+            const std::string_view v = verdictOf( r );
+            if( !shaped || reached || listedAlready || v == "used" )
+            {
+                continue;
+            }
+            out.rows.emplace_back( verdictRank( v ), &r );
+        }
+    }
+    std::ranges::stable_sort( out.rows, [&]( const auto& a, const auto& b )
+                              {
+        if( a.first != b.first ) { return a.first < b.first; }
+        const Symbol& x = ing.symbols[a.second->defs.front()];
+        const Symbol& y = ing.symbols[b.second->defs.front()];
+        const std::string_view px = rootRelPath( ing, x.fileId );
+        const std::string_view py = rootRelPath( ing, y.fileId );
+        return px != py ? px < py : x.line < y.line; } );
+    return out;
+}
+
+} // namespace unusedfile
+
+// The block: "" unless the subject carries a cue and names a file or a directory.
+inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g, std::string_view task )
+{
+    using namespace unusedfile;
+    if( !subjectAsksUnused( task ) )
+    {
+        return {};
+    }
+    const std::vector<FileAnchor> anchors = resolveFileAnchors( ing, task );
+    std::vector<std::uint32_t> files;
+    std::string nameList;
+    std::vector<char> esc;
+    std::size_t dirTotal = 0;
+    for( const FileAnchor& a : anchors )
+    {
+        if( a.picksOne() || a.kind == 'd' )
+        {
+            for( const std::uint32_t f : a.files )
+            {
+                if( !std::ranges::contains( files, f ) && ( files.size() < kForUnusedDirFiles ) )
+                {
+                    files.push_back( f );
+                }
+            }
+            dirTotal = std::max<std::size_t>( dirTotal, a.total );
+        }
+        else
+        {
+            nameList += std::format( "<unused_names s=\"{}\" total=\"{}\">", std::string( escapeXml( a.token, esc ) ), a.total );
+            for( const std::uint32_t f : a.files )
+            {
+                nameList += "<f p=\"";
+                nameList += escapeXml( rootRelPath( ing, f ), esc );
+                nameList += "\"/>";
+            }
+            nameList += "</unused_names>";
+        }
+    }
+    if( files.empty() )
+    {
+        return nameList;
+    }
+
+    const ValueRefIndex vri( ing );
+    const Classified classified = classifyFiles( ing, g, vri, files );
+    const std::vector<FileTable>& tables = classified.tables;
+    const ExtraFiles& extra = classified.extra;
 
     std::string out = nameList;
     for( const FileTable& table : tables )
