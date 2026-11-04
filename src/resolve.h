@@ -2283,15 +2283,15 @@ inline std::uint32_t inImporterRoot( const std::vector<std::uint32_t>& fileRoot,
 // Order never decides: the hit must be unique. Each base is a shape a build file in the corpus passes as -I (repo root: Envoy Bazel, htop automake, tmux -iquote;
 // `include/`: waybar meson, cpython Modules/_hacl; root `src/`: ninja's fuzzer build); `source/` and `lib/` bound nothing. One tier: unique across the roots or nothing, and an in-tree name that two
 // roots both hold is counted in `ambiguousOut` (a dropped edge the verbs disclose), never guessed by probe order.
-// THE SEAM — the file graph reads the roots, the call narrow does not (yet). Every dependency view (--deps, --arch, Ca/Ce,
-// cycles, --impact importers, the health line) reads these edges. buildGraph's call narrow (fileIncludes → rule3IncludeFile,
-// and Graph::importAdj for the by-name hedge) builds its adjacency with forCallNarrow=true and keeps the includer-directory
-// resolution, because on Envoy the root edges let Rule 3 bind ~2,060 more call sites unhedged, about 300 of them wrong: an
-// external-qualified (`std::format`, `absl::Span`) or member call bound by include evidence to an in-tree namesake.
-// RE-COUPLE CONDITION: when CPP-EXTQUAL-VETO lands (an external-namespace-qualified call never binds an in-tree namesake by
-// include evidence; a member call on a typed local keeps the via="name" hedge), flip this to true and retarget
-// test/crootincludecheck.sh R9 to the bound arm. Nothing else reads it.
-inline constexpr bool kCallNarrowReadsCIncludeRoots = false;
+// THE SEAM — every dependency view (--deps, --arch, Ca/Ce, cycles, --impact importers, the health line) reads these edges. The
+// call narrow reads them in ONE place, Rule 3 (rule3IncludeFile), through its own closure (buildPreciseIncludeAdjWithContext's
+// `rootNarrowOut`), under CPP-EXTQUAL-VETO's two vetoes: a call qualified by a name the tree never defines (`absl::Span`,
+// `std::format` where the tree reopens std only to specialize) takes Rule 3's answer as a via="name" hedge (graph.h
+// CppQualifierScopes), and a member call's receiver typing (Rule 2, class identity, the ladder's proof, Graph::importAdj) keeps
+// the includer-directory closure, so a typed-receiver member call keeps its existing via="name" hedge. Coupled with neither
+// veto, the root edges let Rule 3 bind ~2,060 Envoy call sites more unhedged, about 300 of them wrong (reports/c-root-include.md).
+// false restores the decoupled build: no call-narrow rule reads a root edge.
+inline constexpr bool kCallNarrowReadsCIncludeRoots = true;
 
 // The include-root DIRECTORIES the tree holds: every directory named `include` or `src` that contains an indexed file, keyed
 // the way the file index keys paths (so a labeled multi-root key carries its label). A base the tree does not hold is never
@@ -4581,8 +4581,10 @@ inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap
 // keeps them, but they are not import evidence for a bare call: `notify(Dev::Config)` beside `record.update!` says
 // nothing about `record`, and buildGraph's narrow bound 1,017 discourse call sites on that reading, 19 of 20
 // sampled wrong (PR #139 review). Only buildGraph's fileIncludes passes true; the default keeps every consumer
-// byte-identical. It also keeps a C/C++ quote include at the includer's directory (no include-root probe) unless
-// kCallNarrowReadsCIncludeRoots — the C-ROOT-INCLUDE seam, decoupled until CPP-EXTQUAL-VETO lands.
+// byte-identical. It also keeps a C/C++ quote include at the includer's directory (no include-root probe) in the adjacency
+// it returns. `rootNarrowOut` (CPP-EXTQUAL-VETO, read only with forCallNarrow): when non-null, the root probe runs too, and
+// when it draws any edge, *rootNarrowOut receives the returned edges PLUS those — Rule 3's adjacency (kCallNarrowReadsCIncludeRoots).
+// Left untouched when the probe drew nothing (a tree with no C/C++ root include), so the caller reuses the one closure.
 // `importsUnresolvedOut` (#220 part 1): optional, default nullptr — when non-null it receives how many TS/JS bare
 // import directives drew no edge although they name something in this tree (tsimport::ImportResolver's
 // InRepoUnresolved verdict), plus the C/C++ quote includes two include roots both hold (resolveCIncludeRoots: no edge,
@@ -4596,7 +4598,8 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
                                                                        HashMap<std::uint64_t, char>* lazyPairsOut = nullptr,
                                                                        bool forCallNarrow = false,
                                                                        std::uint64_t* importsUnresolvedOut = nullptr,
-                                                                       TsImportExtras* extrasOut = nullptr )
+                                                                       TsImportExtras* extrasOut = nullptr,
+                                                                       rw::FileAdjacency* rootNarrowOut = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2a: precise include adjacency (resolve.h)" );
     const std::uint32_t F = std::uint32_t( ing.files.size() );
@@ -4628,7 +4631,8 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     // agree. Pure + deterministic (no I/O). Multi-root keeps its labeled keys: rootRelPath is the identity there.
     HashMap<std::string, std::uint32_t> fileIndex;
     fileIndex.reserve( F );
-    const bool       cIncludeRoots = !forCallNarrow || kCallNarrowReadsCIncludeRoots;   // C-ROOT-INCLUDE: the seam (see that constant)
+    const bool       cIncludeRoots = !forCallNarrow || rootNarrowOut != nullptr;   // C-ROOT-INCLUDE: the seam (see kCallNarrowReadsCIncludeRoots)
+    std::vector<std::uint32_t> rootFrom, rootTo;   // forCallNarrow: the edges only the root probe drew, kept out of the returned adjacency
     CIncludeBaseDirs cBaseDirs;                                                          // F2: the include-root directories the tree holds
     for( std::uint32_t f = 0; f < F; ++f )
     {
@@ -4767,6 +4771,12 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         if( to == kNoFile && cIncludeRoots )
         {
             to = resolveCQuoteAtRoots( inc, rootRelPath( ing, inc.fileId ), fileIndex, cBaseDirs, ws, importsUnresolvedOut );
+            if( forCallNarrow && to != kNoFile && to != inc.fileId )
+            {
+                rootFrom.push_back( inc.fileId );   // Rule 3's edge only (rootNarrowOut); every other call-narrow reader keeps the includer directory
+                rootTo.push_back( to );
+                continue;
+            }
         }
         if( to == kNoFile && tsimport::isBareTsSpecifier( rootRelPath( ing, inc.fileId ), inc.target ) )
         {
@@ -4786,6 +4796,13 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     if( extrasOut != nullptr )
     {
         *extrasOut = TsImportExtras{ extrasOut->declarationOnly, tsResolver ? tsResolver->extendsUnread() : 0 };
+    }
+    if( rootNarrowOut != nullptr && !rootFrom.empty() )
+    {
+        std::vector<std::uint32_t> allFrom( edgeFrom ), allTo( edgeTo );
+        allFrom.insert( allFrom.end(), rootFrom.begin(), rootFrom.end() );
+        allTo.insert( allTo.end(), rootTo.begin(), rootTo.end() );
+        *rootNarrowOut = rw::FileAdjacency::fromEdges( F, allFrom, allTo, dedup );
     }
     return { rw::FileAdjacency::fromEdges( F, edgeFrom, edgeTo, dedup ), std::move( wsCtx ) };
 }
@@ -6725,6 +6742,9 @@ struct Narrower
     // include/import edges, so Rule 3 simply never fires (degrades to the unchanged ladder). A read-only seam:
     // buildGraph owns the rw::FileSetStore (infra/fileSetStore.h), the Narrower only reads it.
     const rw::FileSetStore&                              fileIncludes;
+    // CPP-EXTQUAL-VETO: the set Rule 3 ALONE reads — fileIncludes plus the C/C++ include-root edges (resolve.h
+    // kCallNarrowReadsCIncludeRoots), or fileIncludes itself when the tree has none. Rule 2's class identity keeps fileIncludes.
+    const rw::FileSetStore&                              rule3Includes;
     // per-symbol fileId (view into ing.symbols' fileIds), so Rule 3 can group candidate defs by their file
     // without a reference to the whole IngestResult. buildGraph owns the backing vector.
     const std::vector<std::uint32_t>&                    symFileId;
@@ -6748,8 +6768,10 @@ struct Narrower
                        const ScopedRecvDecls&                               scoped,
                        const rw::FileSetStore&                              incl,
                        const std::vector<std::uint32_t>&                    symFile,
-                       const HashMap<std::string, std::vector<std::string>>& reexports ) noexcept
-        : canonByName( canon ), varType( vt ), scopedDecls( scoped ), fileIncludes( incl ), symFileId( symFile ), usingReexports( reexports ),
+                       const HashMap<std::string, std::vector<std::string>>& reexports,
+                       const rw::FileSetStore*                              rule3Incl = nullptr ) noexcept
+        : canonByName( canon ), varType( vt ), scopedDecls( scoped ), fileIncludes( incl ), rule3Includes( rule3Incl != nullptr ? *rule3Incl : incl ),
+          symFileId( symFile ), usingReexports( reexports ),
           identity( canon, incl, symFile ) {}
 
     // append base-10 `n` to `dst` without an intermediate std::to_string allocation (matches to_string bytes).
@@ -7616,7 +7638,7 @@ struct Narrower
     bool rule3IncludeFile( const rw::SmallVec<NodeId, 2>& cands, std::uint32_t callerFileId,
                            std::vector<NodeId>& out, std::size_t minCands = 2 ) const
     {
-        if( fileIncludes.empty( callerFileId ) )
+        if( rule3Includes.empty( callerFileId ) )
         {
             return false; // no per-file include set, or the caller includes nothing → no narrow
         }
@@ -7626,7 +7648,7 @@ struct Narrower
         }
 
         // A candidate in the caller's OWN file short-circuits the whole rule.
-        const auto includes = [ & ]( std::uint32_t f ) noexcept { return fileIncludes.contains( callerFileId, f ); };
+        const auto includes = [ & ]( std::uint32_t f ) noexcept { return rule3Includes.contains( callerFileId, f ); };
 
         std::uint32_t chosenFile = 0xFFFFFFFFu;   // the single included file that holds candidate(s), or sentinel
         bool          multiFile  = false;         // ≥2 distinct included files hold candidates → ambiguous → bail
