@@ -7170,9 +7170,8 @@ inline std::string_view pySelfFieldType( const BindCtx& cx, TSNode ann, TSNode r
 // committed target and its declared result (ReceiverEvidence::receiverProofOf). spanStart carries the INNER call's start byte.
 inline void captureRecvCall( BindCtx& cx, TSNode n, const char* t )
 {
-    const bool cpp = cx.lang == Lang::Cpp, py = cx.lang == Lang::Python, ts = cx.lang == Lang::TypeScript;
-    const std::string_view callKind = py ? "call" : "call_expression";
-    if( !( cpp || py || ts ) || std::string_view( t ) != callKind )
+    const std::string_view callKind = langFacts( cx.lang ).callNode;   // "" for a language with no receiver proof
+    if( langFacts( cx.lang ).recvCallProof == RecvCallProof::None || callKind.empty() || std::string_view( t ) != callKind )
     {
         return;
     }
@@ -7182,10 +7181,9 @@ inline void captureRecvCall( BindCtx& cx, TSNode n, const char* t )
         return;
     }
     const char* ft  = ts_node_type( fn );
-    TSNode      obj = cpp && kindIs( ft, "field_expression" ) ? fieldChild( fn, NodeField::Argument )
-                    : py && kindIs( ft, "attribute" )        ? fieldChild( fn, NodeField::Object )
-                    : ts && kindIs( ft, "member_expression" ) ? fieldChild( fn, NodeField::Object )
-                                                              : TSNode{};
+    TSNode      obj = kindIs( ft, "field_expression" )                                    ? fieldChild( fn, NodeField::Argument )   // C++
+                    : kindIs( ft, "attribute" ) || kindIs( ft, "member_expression" ) ? fieldChild( fn, NodeField::Object )     // Python, TS
+                                                                                     : TSNode{};
     for( int guard = 0; guard < 8 && !ts_node_is_null( obj ) && kindIs( ts_node_type( obj ), "parenthesized_expression" ) && ts_node_named_child_count( obj ) == 1; ++guard )
     {
         obj = ts_node_named_child( obj, 0 );
@@ -7555,7 +7553,7 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
     }
     // (L) a C++ function's declared result (a definition, or a declaration such as a header's prototype)
     // RECV-XFILE: every C++ function records it (graph.h reads it only for a class unique by name: CallResultTypes::statedResultClass)
-    if( ( callResultFamilyOf( lang ) == CallResultFamily::Cpp || lang == Lang::Cpp ) && ( kindIs( t, "function_definition" ) || kindIs( t, "declaration" ) || kindIs( t, "field_declaration" ) ) )
+    if( ( callResultFamilyOf( lang ) == CallResultFamily::Cpp || langFacts( lang ).recvCallProof == RecvCallProof::Rule2 ) && ( kindIs( t, "function_definition" ) || kindIs( t, "declaration" ) || kindIs( t, "field_declaration" ) ) )
     {
         captureCppReturnType( cx, n );
     }

@@ -88,9 +88,20 @@ enum class FileEdges : std::uint8_t
 enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
 
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
+// RECV-XFILE: which receiver rule reads a call-result receiver (LangFacts::recvCallProof)
+enum class RecvCallProof : std::uint8_t { None, Rule2, Evidence };
+
 struct LangFacts
 {
     Must<Lang> lang;   // the row's own key — the order check below proves row i is Lang(i)
+
+    /// RECV-XFILE (test/recvxfilecheck.sh): a member call whose receiver is another call (`c->getList().insert()`) takes the class
+    /// the inner call's committed target declares as its result (ReceiverEvidence::receiverProofOf). Rule2: C++, through Rule 2's
+    /// class identity (resolve.h rule2StatedRecvType), its result read by the ONE class of the name; Evidence: ReceiverEvidence's
+    /// member lookup — Python (the one class of the name; its locals typed from call results too) and TypeScript (its family's
+    /// resolver). `callNode` is the grammar's call node. None: no record, no proof.
+    RecvCallProof recvCallProof = RecvCallProof::None;
+    std::string_view callNode = {};
 
     /// TypeScript: a bodyless function, or a bodyless method that is not an interface / abstract / ambient contract, is an OVERLOAD
     /// SIGNATURE: the language requires the implementation to follow it in the same declaration list, so it joins that implementation
@@ -351,13 +362,13 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .recvCallProof = RecvCallProof::Rule2, .callNode = "call_expression", .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
+    { .lang = Lang::Python, .recvCallProof = RecvCallProof::Evidence, .callNode = "call", .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true },
-    { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
+    { .lang = Lang::TypeScript, .recvCallProof = RecvCallProof::Evidence, .callNode = "call_expression", .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,

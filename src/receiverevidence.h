@@ -1992,13 +1992,11 @@ struct CallResultTypes
         {
             return kNoNode;
         }
-        if( lang == Lang::Cpp )
+        switch( langFacts( lang ).recvCallProof )
         {
-            return classIds != nullptr ? onlyCppClass( rt.typeName ) : kNoNode;
-        }
-        if( lang == Lang::Python )
-        {
-            return onlyClass( rt.typeName, CallResultFamily::None, [ & ]( NodeId c ) { return ing.symbols[ c ].lang == Lang::Python; } );
+            case RecvCallProof::Rule2:    return classIds != nullptr ? onlyCppClass( rt.typeName ) : kNoNode;   // C++ class identity
+            case RecvCallProof::Evidence: return onlyClass( rt.typeName, CallResultFamily::None, [ & ]( NodeId c ) { return ing.symbols[ c ].lang == lang; } );
+            case RecvCallProof::None:     return kNoNode;
         }
         return kNoNode;
     }
@@ -2633,9 +2631,10 @@ struct ReceiverEvidence
         {
             return nullptr;
         }
-        const bool shape = ( ( r.lang == Lang::Cpp || r.lang == Lang::Python ) && r.recv == RecvKind::FieldOfVar && r.recvVar.empty() )
-                        || ( r.lang == Lang::TypeScript && r.memberCall && r.memberRoot.empty() && r.memberPath.empty() && r.memberCtor.empty() );
-        if( !shape )
+        // the receiver is no identifier chain: C++ / Python stamp a rich receiver FieldOfVar with no var, TS a member call with no root
+        const bool shape = ( r.recv == RecvKind::FieldOfVar && r.recvVar.empty() )
+                        || ( r.memberCall && r.memberRoot.empty() && r.memberPath.empty() && r.memberCtor.empty() );
+        if( langFacts( r.lang ).recvCallProof == RecvCallProof::None || !shape )
         {
             return nullptr;
         }

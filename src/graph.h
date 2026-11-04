@@ -9811,7 +9811,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 // RECV-XFILE: a Python local by the one class of the name; a C++ local stays off with its family (fix round 6: the
                 // macro traps of test/receiverevidencecheck.sh (L) need the scope reading) — only a chained receiver reads C++ results
-                const NodeId cls = r.lang == Lang::Python ? recvEv.types.statedResultClass( rt, cs.lang ) : recvEv.types.resultClassOf( rt, cs.lang );
+                const NodeId cls = langFacts( r.lang ).recvCallProof == RecvCallProof::Evidence ? recvEv.types.statedResultClass( rt, cs.lang )
+                                                                                              : recvEv.types.resultClassOf( rt, cs.lang );
                 if( cls != kNoNode && rule2Sink )
                 {
                     typeRule2CallResult( cr, ri, rt.unwrapDepth == 1 );
@@ -11270,7 +11271,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             return true;
         };
         // RECV-XFILE: a C++ receiver that is a call whose committed target states its class takes Rule 2's answer for that class
-        if( r.lang == Lang::Cpp && !scipPinned && !canonical && !narrowed )
+        if( langFacts( r.lang ).recvCallProof == RecvCallProof::Rule2 && !scipPinned && !canonical && !narrowed )
         {
             if( const ReceiverEvidence::ReceiverProof* proof = recvEv.receiverProofOf( r ); proof != nullptr )
             {
@@ -11326,7 +11327,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         // RECV-XFILE (receiverevidence.h receiverProofOf): a receiver that is itself a call whose committed target STATES its
         // result class (`c->getList().insert()`, `p.get_app().post()`) reaches that class's member — the one class, or nothing
-        if( r.lang != Lang::Cpp && !scipPinned && !canonical && !narrowed && recvEv.narrowCallReceiver( r ) )
+        if( langFacts( r.lang ).recvCallProof == RecvCallProof::Evidence && !scipPinned && !canonical && !narrowed && recvEv.narrowCallReceiver( r ) )
         {
             for( NodeId c : recvEv.found )
             {
