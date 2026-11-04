@@ -431,7 +431,8 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
 - **Never `ASSUME( false )` (or an `EXPECTS`/`ENSURES` of false) on a degrade path.** In release the assert
   compiles away and the optimizer deletes the fallback behind it — that is a real shipped-bug shape, not a
   hypothetical. Guard, don't assert.
-- Throw only at the `operator new` seam. A throw escaping a worker thread is `std::terminate`, so
+- Throw only at the `operator new` seam and for `rw::FileGraphStopped`, a failed file-graph build
+  (`src/infra/fileGraphStop.h`), which `test/hazardpatterncheck.sh` (B2) registers. A throw escaping a worker thread is `std::terminate`, so
   wrap thread bodies in `try { … } catch( ... ) { … }`.
 - **Avoid exception handling. Where a throw is unavoidable, RAII is what makes the code exception-safe:
   cleanup belongs in a destructor, never in a `catch`.** A handler that releases a resource has to know
@@ -485,6 +486,10 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
 - Two standing caveats: hash-map **iteration order must never reach output** (sort first, or use an
   ordered container); and `unordered_dense` invalidates references on insert (values live in one
   vector), so never hold a `T&` into it across an insert.
+
+**The global allocator.** On macOS `operator new` of 256 KiB or more goes through mmap and munmap
+(`src/largealloc.cpp`, the one file that replaces it, with the reason, the alternatives measured and what it does
+not route). So never `free()` what `new` returned, and read a macOS peak knowing a big array is returned at delete.
 
 ### Adding a language: common stays common
 

@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-04, PR #420 (#358 slice 1a), merge main 2047f95f: RE-DERIVED ONCE with UPDATE_GOLDEN=1.
+#   kParserVer and kIngestParserVerMirror 297 -> 299 (rich 300), above both parents; main extraction/quality functions retained.
+#   C# capture, dependency/binding behaviour and alias gap unchanged. Cache format 48 and qsnap scheme 25 stay as on main.
 # 2026-11-03, PR #420 (#358 slice 1a), merge main dfd26fc1 into 2c132dd0: RE-DERIVED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 289 -> 291 (rich 292, above main 289/290), quality.h's kIngestParserVerMirror with it.
 #   C# using directives retain the shared capture path and the alias known-gap; main's Web namespace re-export facts are retained.
@@ -42,6 +45,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   Watched text: kParserVer 285 -> 287 (rich 288, above main 285/286), quality.h's kIngestParserVerMirror with it.
 #   C# using directives move to @import.path; import-free deep containers retain whole-cache eligibility. Alias/edge facts unchanged.
 #   kCacheVersion stays 48 and kQSnapCacheScheme stays 25: main's record format and quality semantics are retained.
+# 2026-11-03, lane docs-rest re-bump (#506, base main dfd26fc1): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: kParserVer 289 -> 291
+#   (rich 292): both sides bumped (the lane's reST tier 287/288, main's namespace re-export 289/290), so the merged value goes above both and
+#   a cache built on main at 289 re-indexes the reST .txt docs. quality.h's kIngestParserVerMirror with it. kCacheVersion 48 and
+#   kQSnapCacheScheme stay: no record changes shape and no watched quality.h function moved. Supersedes the 2026-11-03 NOT-re-pinned entry below.
 # 2026-11-02, lane rule3-member-guard fix 4 (base main 00a16550; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 283 -> 285 (rich 286; 284 is 283's rich tag): a Rust path call whose qualifier has more than one segment keeps
 #   it whole in Reference::fieldName; quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:
@@ -50,6 +57,12 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   kParserVer 285 -> 289 (rich 290; above RULE3's 285/286 and DOCS-REST's 287/288): the TS/TSX/JS tags queries capture `export * as ns from`
 #   as a namespace re-export. quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24: no record
 #   changes shape and no watched quality.h function moved.
+# 2026-11-02, lane docs-rest fix2 (merged over #504): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 285 -> 287 (rich 288): the reST/Sphinx
+#   tier and the declared .txt crawl; quality.h's kIngestParserVerMirror with it. kCacheVersion 48 and kQSnapCacheScheme 24 stay: no record
+#   changes shape, and a document unit is no input to dead sets or clone groups.
+# 2026-11-03, lane docs-rest merged over main dfd26fc1 (barrel-short-key's 289): NOT re-pinned; main's pin holds. kParserVer keeps the higher
+#   value 289 for both the reST tier (287) and the namespace re-export (289), so the watched text equals main's; quality.h's mirror with it.
+#   kCacheVersion 48, kQSnapCacheScheme 24 stay.
 # 2026-10-31, train 43b (lanes registrar, string-import, self-hook, decl-row merged onto main 65210e86): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the
 #   composed tree (main's pin and the registrar / string-import branch pins conflicted). Watched text: kParserVer 271 -> 283 (rich 284; above the
 #   lane placeholders up to 281, rich 282), quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:

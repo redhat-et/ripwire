@@ -23,6 +23,8 @@
 //          became a hard stop after the ingest instead of a partial answer.
 //   hard   at the limit itself, checked between phases (main.cpp; --quality-delta=A..B, which dispatches before main()'s
 //          ingest, between its own: verbs_quality.h refPairOverHardLimit) and before each MCP tool call: no partial answer.
+//          It reads the footprint at that moment, so a run whose memory PEAKED above the limit and was given back before the
+//          reading finishes; it is not stopped, and says so (the overshoot section below).
 //          The range form alone answers PART of the question instead (qd-memory-degrade): a stop in either commit's full
 //          tree — or a projection that says the target phase will not fit (projectTargetPhase) — releases the full trees
 //          and re-asks from both commits' CHANGED FILES the kinds those files decide, naming every kind it skipped
@@ -57,7 +59,8 @@
 // parse:N count per INGEST (each ingest's own Watch). Three more for the range form (test/qddegradecheck.sh): project:N —
 // the Nth target-phase projection reads "does not fit"; ingest:N — the Nth ingest of the process stops its crawl at its
 // first entry (a stop in ONE chosen ingest, e.g. the target's after the base fit); peak:N — the Nth post-answer peak
-// reading reads as over the limit.
+// reading reads as over the limit; fold:N — the Nth include-closure fold of the process (buildGraph's is the first, the one
+// `--deps` and `--arch=FILE` run again the second) stops at its first component (test/propcostcheck.sh).
 //
 // REPEATABILITY. A crawl stop keeps what the walk had seen, then sorts it. A parse stop keeps the first K slots of the
 // parse ORDER (cache misses, then cache hits, then grammarless files, each largest first, then fileId — or plain fileId
@@ -68,14 +71,18 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <iterator>
 #include <string>
 #include <string_view>
 
 #include "infra/Diagnostics.h"   // VALIDATE — the environment is external input
+#include "infra/fileGraphStop.h"  // FileGraphStopped: a stopped file-graph fold fails the build
+#include "infra/fileSetStore.h"   // guardedFileClosure: the fold asks this guard whether to go on
 #include "infra/os.h"            // rw::os::mem_footprint / mem_physical / mem_cgroup_max / mem_cgroup_unreclaimable / mem_pressure
 #include "model.h"               // MemoryStop — the disclosure sink
 
@@ -163,6 +170,8 @@ enum class TripAt : std::uint8_t
     Project,    // project:N  — the Nth target-phase projection (projectTargetPhase) reads as "does not fit"
     Ingest,     // ingest:N   — the Nth ingest of the process stops its crawl at its first entry (a crawl stop)
     Peak,       // peak:N     — the Nth post-answer peak reading (peakOverLimit) reads as over the limit
+    Fold,       // fold:N     — the Nth fold of the process (buildGraph's is the first) reads as over the hard limit at its first component
+    FoldFrom,   // foldfrom:N — the Nth fold and every one after it: a degrade path's own fold stops too (the range form's changed files)
 };
 struct TestTrip
 {
@@ -179,7 +188,7 @@ inline TripAt tripAtFor( std::string_view phase ) noexcept
     } kPhases[] = {
         { "crawl", TripAt::Crawl }, { "pressure", TripAt::Pressure }, { "parse", TripAt::Parse },
         { "request", TripAt::Request }, { "hard", TripAt::Hard }, { "eager", TripAt::Eager },
-        { "project", TripAt::Project }, { "ingest", TripAt::Ingest }, { "peak", TripAt::Peak },
+        { "project", TripAt::Project }, { "ingest", TripAt::Ingest }, { "peak", TripAt::Peak }, { "fold", TripAt::Fold }, { "foldfrom", TripAt::FoldFrom },
     };
     for( const auto& p : kPhases )
     {
@@ -237,6 +246,7 @@ struct SeamCounters
     std::atomic<std::uint64_t> requests{ 0 };
     std::atomic<std::uint64_t> projections{ 0 };
     std::atomic<std::uint64_t> peaks{ 0 };
+    std::atomic<std::uint64_t> folds{ 0 };
 };
 inline SeamCounters& seamCounters() noexcept
 {
@@ -418,6 +428,70 @@ inline bool requestSeamTrips()
     return seamCallTrips( TripAt::Request, seamCounters().requests, /*laterToo=*/true );
 }
 
+// ── the file graph's fold ─────────────────────────────────────────────────────────────────────────────────────
+// The closure fold (infra/fileSetStore.h) runs inside buildGraph, and again for --deps and --arch=FILE, where the hard line
+// between phases cannot see it. It asks this every kFoldCheckComponents components or 4 MiB of payload: one footprint reading,
+// the same test as overHardLimit. A stop makes guardedFileClosure throw FileGraphStopped (fileGraphStop.h): nothing is
+// answered from the partial store, and nothing is remembered once the build that stopped has been abandoned.
+inline bool foldShouldStop() noexcept
+{
+    const Limits& l = limits();
+    if( l.hardBytes == 0 )
+    {
+        return false;
+    }
+    const std::uint64_t footprint = measuredFootprint();
+    return footprint != 0 && footprint >= l.hardBytes;
+}
+
+// fold:N, the seam: the Nth fold of the process (buildGraph's is the first, the --deps / --arch=FILE one the second) reads as
+// over the hard limit at its first component. Additive: the real reading still applies to every fold.
+inline bool foldSeamStop() noexcept { return true; }
+
+// RIPWIRE_TEST_FILESET_CHUNK_BITS forces the chunk size of EVERY fold (buildGraph's and the second one on --deps and
+// --arch=FILE), so the multi-chunk read paths run on repos too small to reach them: no real row crosses a 16-bit chunk below
+// 65,536 files. An answer never depends on it; a bad value is no knob at all.
+inline std::uint32_t testChunkBits() noexcept
+{
+    static const std::uint32_t bits = []() noexcept -> std::uint32_t
+    {
+        const char* forced = std::getenv( "RIPWIRE_TEST_FILESET_CHUNK_BITS" );
+        if( forced == nullptr )
+        {
+            return 0;
+        }
+        std::uint32_t value = 0;
+        const char*   end   = forced + std::char_traits<char>::length( forced );
+        const auto    got   = std::from_chars( forced, end, value );
+        return got.ec == std::errc() && got.ptr == end && value >= 1 && value <= 16 ? value : 0;
+    }();
+    return bits;
+}
+
+// buildFileClosure under the guard. On a stop the store is partial, so it is never returned: FileGraphStopped is thrown, and
+// the build that asked for the fold fails. Every caller of the fold goes through this, so none can forget to look.
+inline FileSetStore guardedFileClosure( const FileAdjacency& adj )
+{
+    FileClosureStats st;
+    FileClosureOptions opts;
+    opts.chunkBits  = testChunkBits();
+    opts.stats      = &st;
+    opts.shouldStop = &foldShouldStop;
+    const TripAt seamAt = testTrip().at;
+    const std::uint64_t seamFold = seamAt == TripAt::Fold || seamAt == TripAt::FoldFrom ? seamCounters().folds.fetch_add( 1, std::memory_order_relaxed ) + 1 : 0;
+    if( seamFold != 0 && ( seamFold == testTrip().index || ( seamAt == TripAt::FoldFrom && seamFold > testTrip().index ) ) )
+    {
+        opts.shouldStop = &foldSeamStop;
+        opts.checkEvery = 1;
+    }
+    FileSetStore store = buildFileClosure( adj, opts );
+    if( st.stop != FileGraphStop::None )
+    {
+        throw FileGraphStopped( st.stop );
+    }
+    return store;
+}
+
 // ── the range form's projection and peak (qd-memory-degrade) ───────────────────────────────────────────────
 // --quality-delta=A..B scores the base commit and releases it before the target is materialized (#387). The target
 // phase then holds the base snapshot, the full target tree and computeDelta's passes; on the measured repositories its
@@ -477,23 +551,29 @@ inline std::uint64_t replayLimitBytes( std::uint64_t needBytes, std::uint64_t in
     const std::uint64_t ceiling = std::uint64_t( SIZE_MAX ) / kMiB * kMiB;
     return std::min( want, ceiling );
 }
+#if defined( RIPWIRE_LARGE_ALLOC_LINKED )
+inline constexpr bool kDisclosePeakOnThisBuild = true;
+#else
+inline constexpr bool kDisclosePeakOnThisBuild = false;
+#endif
 // The peak after the answer was computed, when it went over the limit (or the peak:N seam says so), else 0. computeDelta
 // runs after the last hard-line reading, so a full answer can finish over --max-memory (rv-pr391 N1: 1.09-1.11x); this
 // is the reading that SAYS so instead of answering silently over it. It never changes the exit code.
-inline std::uint64_t peakOverLimit()
+inline std::uint64_t peakOverLimitWith( bool realReading, bool seamLaterToo )
 {
     const std::uint64_t limit = limits().hardBytes;
     if( limit == 0 )
     {
         return 0;
     }
-    std::uint64_t peak = os::mem_footprint_peak();
-    if( seamCallTrips( TripAt::Peak, seamCounters().peaks, /*laterToo=*/false ) )
+    std::uint64_t peak = realReading ? os::mem_footprint_peak() : 0;
+    if( seamCallTrips( TripAt::Peak, seamCounters().peaks, seamLaterToo ) )
     {
         peak = std::max( peak, limit + kMiB );   // the seam: the reading says over, whatever the real peak was
     }
     return peak > limit ? peak : 0;
 }
+inline std::uint64_t peakOverLimit() { return peakOverLimitWith( true, false ); }
 // ── the backstop: a stop nobody answered for ────────────────────────────────────────────────────────────
 // ingest() counts every stop it discloses; the caller that decides what the partial ingest may answer (main.cpp's
 // memoryStopExit) marks every stop so far as answered for. A CLI run that ends with a stop nobody answered for — an
@@ -504,6 +584,7 @@ struct StopCounts
 {
     std::atomic<std::uint32_t> recorded{ 0 };
     std::atomic<std::uint32_t> answered{ 0 };
+    std::atomic<bool>          peakSaid{ false };   // an emitter already told the reader about the overshoot (main() need not)
 };
 inline StopCounts& stopCounts() noexcept
 {
@@ -538,11 +619,46 @@ inline std::string_view limitSourceClause() noexcept
 
 // the hard stop's one line: nothing was built that could answer. `also` is said between the limit and the verdict — the
 // range form's "the changed files were not tried" / "were cut too" — and is empty everywhere else (the line keeps its bytes).
-inline std::string hardStopLine( std::string_view where, std::string_view also = {} )
+inline std::string hardStopLine( std::string_view where, std::string_view also = {}, FileGraphStop why = FileGraphStop::None )
 {
+    switch( why )   // a file-graph stop reads as over the line, and says its own cause
+    {
+    case FileGraphStop::Capacity:
+        return "the file graph passed a 32-bit offset during the include-closure fold (more than 4 Gi payload words or edges); stopped cleanly without an answer — pass a smaller root";
+    case FileGraphStop::AllocFailure:
+        return "an allocation failed during the include-closure fold (" + std::string( where ) + "); stopped cleanly without an answer — " + std::string( kOverride );
+    case FileGraphStop::MemoryLimit:
+        where = "include-closure fold";
+        break;
+    case FileGraphStop::None:
+        break;
+    }
     std::string line = "memory limit reached during the ";
     line.append( where ).append( " (limit " ).append( limitSpelling( limits().hardBytes ) ).append( ", " ).append( limitSourceClause() ).append( "); " );
     return line.append( also ).append( "stopped cleanly without an answer — " ).append( kOverride );
+}
+
+// F-W1: a fold that stops AFTER the call's answer or write is complete (an edit's post-check, the envelope's index stamp)
+// refuses nothing: what is done `stands`, and this line names the gap. Never "without an answer" — there is one.
+inline std::string afterAnswerStopLine( std::string_view rebuild, std::string_view stands, FileGraphStop why )
+{
+    std::string line = "the ";
+    line.append( rebuild ).append( " stopped in the include-closure fold (" );
+    switch( why )
+    {
+    case FileGraphStop::Capacity:
+        line.append( "the file graph passed a 32-bit offset" );
+        break;
+    case FileGraphStop::AllocFailure:
+        line.append( "an allocation failed" );
+        break;
+    case FileGraphStop::MemoryLimit:
+    case FileGraphStop::None:
+        line.append( "memory limit " ).append( limitSpelling( limits().hardBytes ) ).append( ", " ).append( limitSourceClause() );
+        break;
+    }
+    line.append( "); " ).append( stands ).append( " stands, the index was released and the next call retries the build — " );
+    return line.append( why == FileGraphStop::Capacity ? std::string_view( "pass a smaller root" ) : kOverride );
 }
 
 // which line a soft stop crossed, spelled against the limit that sets it (a soft stop is never the limit itself)
@@ -592,6 +708,51 @@ inline std::string softStopLine( const IngestResult& ing )
 inline std::string partialAbsenceLine( const IngestResult& ing )
 {
     return "the index this server holds is partial, so a not-found or empty answer from it is not proof of absence — " + softStopLine( ing );
+}
+
+// ── the overshoot: a run that finished over its limit says so ─────────────────────────────────────────────────
+// The hard line reads the CURRENT footprint between phases. A block the allocator returned to the OS before the next
+// reading (src/largealloc.cpp, macOS) is gone from that reading, so a run can peak above the limit, pass every reading,
+// and finish. Owner decision 2026-11-01: that is DISCLOSED, not enforced. The peak is os::mem_footprint_peak; the run
+// names it and the limit on every path the guard's other messages use: one stderr line on the CLI (any verb), memory_peak=
+// in the default map's header, `_memory_peak` in the MCP envelope. Builds that link the route read the real peak
+// (RIPWIRE_LARGE_ALLOC_LINKED, CMakeLists.txt); on any other build the real reading is off here — the hard line already
+// held there as before — and only the test seam (peak:N, the Nth and every later reading) can make it speak.
+
+// the peak when it went over the limit, else 0: the real reading only on a build that routes, the seam on every build
+inline std::uint64_t runPeakOverLimit() { return peakOverLimitWith( kDisclosePeakOnThisBuild, /*seamLaterToo=*/true ); }
+
+// the peak line: the run finished (and answered, unless `outcome` says otherwise), by how far it went over, and what the
+// limit is for
+inline std::string peakOverLine( std::uint64_t peak, std::string_view outcome = "the run finished and answered" )
+{
+    return std::format( "memory peak {} went over the {} limit ({}), and {}: the guard reads the limit between "
+                        "phases, and by then this run had given that memory back. The limit is a rule of thumb that keeps the machine from "
+                        "running out of memory, not an exact line — {}",
+                        limitSpelling( peak ), limitSpelling( limits().hardBytes ), limitSourceClause(), outcome, kOverride );
+}
+
+// the MCP envelope's `_memory_peak`: the sentence when this server's peak has risen over the limit since the last time it
+// said so (the peak never falls, so saying it on every answer would repeat one fact), else empty. An error response says it
+// too, in its message, with `outcome` naming what that request did instead of answering.
+inline std::string peakNoteOnIncrease( std::string_view outcome = "the run finished and answered" )
+{
+    static std::atomic<std::uint64_t> announced{ 0 };
+    const std::uint64_t peak = runPeakOverLimit();
+    if( peak == 0 )
+    {
+        return {};
+    }
+    const std::uint64_t mib  = ( peak + kMiB - 1 ) / kMiB;
+    std::uint64_t       seen = announced.load( std::memory_order_relaxed );
+    while( mib > seen )
+    {
+        if( announced.compare_exchange_weak( seen, mib, std::memory_order_relaxed ) )
+        {
+            return peakOverLine( peak, outcome );
+        }
+    }
+    return {};
 }
 
 }   // namespace rw::memguard

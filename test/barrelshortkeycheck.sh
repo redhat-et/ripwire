@@ -63,6 +63,20 @@
 #   C9  the literal rung's shapes type (Python `type X =`), define (`#define x 4`), const (a local `const x =`, in= its function)
 #       and assign (`x = 3` at column 0, Lua); the row cap (8 lines: total="8" shown="6", 6 rows); the exact leaf's body cut
 #       (truncated="1" past 8192 bytes); floor="1" when a file the scan must read is unreadable (SKIP when chmod cannot hide it).
+#   D1-D9 (lane short-key-sentence) a SENTENCE around exactly one code-shaped name the index cannot resolve reaches the same ladder,
+#       marked from="sentence": D1 leaf (`Wrong.formatDate`, and a backquoted `Wrong::formatDate?`: q_unmatched, never exact), D2 substring + literal using (`WidgetPtr`),
+#       D3 literal import-as (`ExprKind`), D4 CONST held=lit (`MAX_WIDGET_COUNT`), D5 a bare leaf beside its own qualified spelling
+#       is one name, D6 the held marker under --token-budget, D7 the off switch. Near-miss twins print no <shortkey>: D8 two names
+#       (`WidgetPtr` and `ExprKind`), a name that resolves (`getWidgetPtrCount`), a plain capitalised word (`Widget`), no code word,
+#       a file name (`index.ts`), a version and an abbreviation (`3.15`, `e.g.`), a qualified and a bare name together, and a
+#       qualified name whose fully proven definition the answer already printed (`Utils.formatDate`: resolved, no ladder), and a
+#       qualified spelling that is a module path (`utils.date` for src/utils/date.ts: it names a file, not a definition);
+#       D9 every sentence shortkey carries next=. D6 also: the held marker's legend defines from=.
+#   D10-D14 (fix round 1) D10 a name ending the sentence with a period (`Wrong.formatDate.`) still fires; no <shortkey> for D11 a
+#       known-suffix file name (`config.yaml`), D12 a module path whose words answer printed no signature row (`pkg.emptymod`, an
+#       empty `__init__.py`; the sentence and the one-token task), D13 a file name with a camel stem (`CMakeLists.txt`), while a file
+#       path beside the one name (`in src/net/HttpClient.cpp, … ChunkPtr`) leaves ChunkPtr the name, D14 a root file the index does
+#       not hold (`go.mod`), a dotted basename (`app.module` for web/app.module.ts) and a module path to one (`feature.user.service`).
 # Every arm reads an answer whose run exited 0 and printed a <ctx root: a crash or an empty answer is a FAIL, never an absence pass.
 #
 # Usage: bash test/barrelshortkeycheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
@@ -350,6 +364,67 @@ else
     if [ "$c9e" -ne 0 ] || sk "$TMP/c9e.xml" | grep -qF 'floor='; then no "C9 a clean scan prints no floor= (or its run failed)"; else ok "C9 a clean scan prints no floor="; fi
 fi
 chmod 644 "$L/src/f3.ts"
+
+# ── D: a sentence around one unresolved code-shaped name (lane short-key-sentence) ──────────────────────────────────────────────
+run "$S" "$TMP/d1.xml" "--for=where does Wrong.formatDate come from, the lookup is empty" && {
+skhas   "$TMP/d1.xml" "D1 sentence: the ladder runs, from=sentence"  '<shortkey of="Wrong.formatDate" from="sentence" found="0" rungs="leaf,substring,literal"'
+skhas   "$TMP/d1.xml" "D1 sentence leaf rung: q_unmatched, exact=0"   'kept="0" of="7" exact="0" q_unmatched="1">'
+skhasnt "$TMP/d1.xml" "D1 sentence leaf rung: never exact"            'exact="1"'
+}
+run "$S" "$TMP/d2.xml" "--for=definition of WidgetPtr, the name lookup is empty" && {
+skhas   "$TMP/d2.xml" "D2 sentence: from=sentence"                    '<shortkey of="WidgetPtr" from="sentence" found="0" rungs="substring,literal" next="--grep=WidgetPtr">'
+skhas   "$TMP/d2.xml" "D2 sentence substring rung"                    '<d n="getWidgetPtrCount" t="fn" p="cpp/fwd.cpp" l="2"/>'
+skhas   "$TMP/d2.xml" "D2 sentence literal using row"                 '<ld p="cpp/fwd.h" l="4" shape="using"><![CDATA[using WidgetPtr = Ptr<Widget>;]]></ld>'
+skhasnt "$TMP/d2.xml" "D2 sentence: a commented-out declaration is no row" 'l="7"'
+}
+run "$S" "$TMP/d1b.xml" "--for=what is \`Wrong::formatDate\` here? the lookup is empty" && \
+skhas   "$TMP/d1b.xml" "D1 sentence, a backquoted :: qualifier"     '<shortkey of="Wrong::formatDate" from="sentence" found="0" rungs="leaf,substring,literal"'
+run "$S" "$TMP/d3.xml" "--for=where does ExprKind come from? --defs finds nothing" && skhas "$TMP/d3.xml" "D3 sentence literal import-as row" '<ld p="rs/src/lib.rs" l="2" shape="import-as">'
+run "$S" "$TMP/d4.xml" "--for=why is the lookup of MAX_WIDGET_COUNT empty" && skhas "$TMP/d4.xml" "D4 sentence CONST key: held=lit" '<rung n="literal" key="MAX_WIDGET_COUNT" held="lit" exact="0"/>'
+run "$S" "$TMP/d5.xml" "--for=where is formatDate defined, it is used as Wrong.formatDate" && skhas "$TMP/d5.xml" "D5 a bare leaf beside its qualified spelling is one name" '<shortkey of="Wrong.formatDate" from="sentence"'
+run "$S" "$TMP/d6.xml" "--for=definition of WidgetPtr, the name lookup is empty" --token-budget=2000 && {
+if grep -q '<shortkey held="budget" of="WidgetPtr" from="sentence" next="--for=WidgetPtr"/>' "$TMP/d6.xml" && ! grep -q '<rung ' "$TMP/d6.xml"; then ok "D6 sentence under a token budget: held marker"; else no "D6 sentence under a token budget: held marker"; fi
+if grep -q 'from=sentence: the route read the task as words' "$TMP/d6.xml"; then ok "D6 the held marker's legend defines from="; else no "D6 the held marker's legend defines from="; fi
+}
+( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=definition of WidgetPtr, the name lookup is empty" </dev/null 2>/dev/null ) >"$TMP/d7.xml"; d7rc=$?
+if [ "$d7rc" -eq 0 ] && grep -q '<ctx ' "$TMP/d7.xml" && ! grep -q '<shortkey' "$TMP/d7.xml"; then ok "D7 the off switch removes the sentence ladder"; else no "D7 the off switch removes the sentence ladder (rc=$d7rc)"; fi
+d8=0
+for q in "definition of WidgetPtr and ExprKind, the name lookup is empty" "definition of getWidgetPtrCount, the name lookup is empty" \
+         "where is the Widget struct used in the headers" "how does this fixture handle pointers" "what does index.ts export for the lookup" \
+         "in version 3.15 e.g. the lookup of widgets is empty" "the lookup of Wrong.formatDate and WidgetPtr is empty" \
+         "where does Utils.formatDate come from, the lookup is empty" "where is utils.date imported in this tree"; do
+    d8=$(( d8 + 1 ))
+    run "$S" "$TMP/d8-$d8.xml" "--for=$q" && { if grep -q '<shortkey' "$TMP/d8-$d8.xml"; then no "D8 near miss prints no shortkey: $q"; else ok "D8 near miss prints no shortkey: $q"; fi; }
+done
+nsk=0; nnext=0
+for f in "$TMP"/d[1-5].xml "$TMP"/d1b.xml; do
+    c=$( grep -c '<shortkey of=' "$f" ); nsk=$(( nsk + c ))
+    n=$( grep -o '<shortkey of="[^"]*" from="sentence" found="0" rungs="[^"]*" next="--' "$f" | wc -l | tr -d ' ' ); nnext=$(( nnext + n ))
+done
+if [ "$nsk" -ge 6 ] && [ "$nsk" = "$nnext" ]; then ok "D9 every sentence shortkey carries next= ($nnext of $nsk)"; else no "D9 sentence shortkeys with next= $nnext of $nsk (want all, at least 6)"; fi
+run "$S" "$TMP/d10.xml" "--for=the lookup is empty for Wrong.formatDate." && skhas "$TMP/d10.xml" "D10 a name that ends the sentence with a period is still the name" '<shortkey of="Wrong.formatDate" from="sentence" found="0"'
+run "$S" "$TMP/d11.xml" "--for=what does config.yaml set for the lookup" && skhasnt "$TMP/d11.xml" "D11 a known-suffix file name (config.yaml) is no qualified name" '<shortkey'
+
+# ── fixture P: file names and module paths in a sentence (lane short-key-sentence, fix round 1) ─────────────────────────────────
+P="$TMP/p"; mkdir -p "$P/pkg/emptymod" "$P/src" "$P/web" "$P/lib/feature"
+: >"$P/pkg/emptymod/__init__.py"
+printf 'X = 1\n' >"$P/pkg/emptymod/notes.py"
+printf 'from pkg.emptymod import notes\n\ndef main():\n    return notes.X\n' >"$P/src/main.py"
+printf 'cmake_minimum_required(VERSION 3.20)\nproject(p)\n' >"$P/CMakeLists.txt"
+printf 'module example.com/p\n\ngo 1.21\n' >"$P/go.mod"
+printf 'export class AppModule {\n  boot(): number {\n    return 1;\n  }\n}\n' >"$P/web/app.module.ts"
+printf 'export class UserService {\n  find(): number {\n    return 2;\n  }\n}\n' >"$P/lib/feature/user.service.ts"
+# D12 a module path the words route serves no signature row for: the bare-name branch must not take the sentence's name
+run "$P" "$TMP/d12.xml" "--for=where does pkg.emptymod come from" && skhasnt "$TMP/d12.xml" "D12 a module path on an empty-sigs words answer: no shortkey" '<shortkey'
+run "$P" "$TMP/d12b.xml" "--for=pkg.emptymod" && skhasnt "$TMP/d12b.xml" "D12 the one-token module path: no shortkey" '<shortkey'
+# D13 a span ending in a file suffix is a file name, never a word (CMakeLists.txt), and leaves the real name the only one
+run "$P" "$TMP/d13.xml" "--for=why is CMakeLists.txt asking for cmake 3.20" && skhasnt "$TMP/d13.xml" "D13 a file name with a camel stem: no shortkey" '<shortkey'
+run "$P" "$TMP/d13b.xml" "--for=in src/net/HttpClient.cpp, where is ChunkPtr defined" && skhas "$TMP/d13b.xml" "D13 a file path beside the name: the ladder for the name" '<shortkey of="ChunkPtr" from="sentence" found="0" rungs="substring,literal" next="--grep=ChunkPtr">'
+# D14 a dotted spelling that is a file of the tree: an unindexed one at the root (go.mod), a dotted basename (app.module.ts),
+# a module path down to a dotted basename (feature.user.service)
+run "$P" "$TMP/d14.xml" "--for=why does go.mod pin github.com/x/y to an old version" && skhasnt "$TMP/d14.xml" "D14 a root file the index does not hold (go.mod): no shortkey" '<shortkey'
+run "$P" "$TMP/d14b.xml" "--for=where is app.module imported" && skhasnt "$TMP/d14b.xml" "D14 a dotted basename (app.module.ts): no shortkey" '<shortkey'
+run "$P" "$TMP/d14c.xml" "--for=why does feature.user.service fail to load" && skhasnt "$TMP/d14c.xml" "D14 a module path to a dotted basename: no shortkey" '<shortkey'
 
 if [ "$fail" = 0 ]; then echo "barrelshortkeycheck: PASS"; else echo "barrelshortkeycheck: FAIL"; fi
 exit "$fail"

@@ -2450,8 +2450,12 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 48;   // MUST equal ingest.cpp's kCacheVersion (gated); 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 291;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 299;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 299 = 2026-11-04 (PR #420: C# shared import capture, above main 297/298; rich 300)
+                                                          // 297 = 2026-11-03 (lane edge-prelude-veto fix: a Rust macro_rules' textual-scope bit)
+                                                         // 291 = 2026-11-03 (lane docs-rest #506 re-bump above main's 289/290; rich 292)
                                                          // 285 = 2026-11-02 (lane rule3-member-guard fix 4, placeholder: a Rust path call's whole written qualifier)
+                                                         // 287 = 2026-11-02 (lane docs-rest: the reST/Sphinx tier, after #504's 285/286; merged under main's 289, the train renumbers)
                                                           // 283 = 2026-10-31 (train 43b: registrar + string-import extraction; above the lane placeholders up to 281, rich 282)
                                                           // 271 = 2026-10-30 (train 42b: iface-peel alias pointee / dyn-result / template-param
                                                           //   member records and alias-import ReExport records, placeholders 259, 260, 261; above 41b's 269/270)
@@ -4564,7 +4568,9 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     { DISCLOSE( "quality: HEAD tree ingested empty — falling back to run --quality-baseline first" ); return { Snapshot{}, false }; }
     // #350: a HEAD tree the memory guard cut is never scored and never persisted as the qsnap — a partial floor would
     // be served as complete by every later run. The no-snapshot path leaves the stop UNANSWERED, so the CLI backstop
-    // exits 5 with its line and the MCP envelope carries _memory_stop (memguard.h).
+    // exits 5 with its line and the MCP envelope carries _memory_stop (memguard.h). A stopped FOLD below is a failed build:
+    // buildGraph throws FileGraphStopped, which skips the scoring and the qsnap write, and reaches the surface's own catch
+    // (dispatchMain: exit 5; the MCP envelope: a refusal; the prefetch worker: dropped, nothing written).
     if( headIng.memoryStop.isSet() )
     {
         return { Snapshot{}, false };
@@ -4622,6 +4628,7 @@ struct RefTree
     std::string  root;      // the materialized temp root — empty until this call succeeds
     IngestResult ing;
     Graph        g;
+    FileGraphStop graphStop = FileGraphStop::None;   // set when buildGraph's fold stopped: OverHardLimit with no graph
 };
 
 // `tag` MUST differ between the two sides of a pair. materializeCommitTree spells its temp root
@@ -4669,7 +4676,15 @@ inline RefTreeLoad loadRefTree( const std::string& repoRoot, const std::string& 
     {
         return RefTreeLoad::OverHardLimit;
     }
-    out.g    = buildGraph( out.ing, nullptr );
+    try
+    {
+        out.g = buildGraph( out.ing, nullptr );
+    }
+    catch( const FileGraphStopped& stopped )   // a failed build: no graph, so nothing is scored; the range form records the phase and degrades
+    {
+        out.graphStop = stopped.why();
+        return RefTreeLoad::OverHardLimit;
+    }
     out.root = tmpRoot;
     return RefTreeLoad::Loaded;
 }
@@ -4979,7 +4994,15 @@ inline RefTreeLoad loadRefSubset( const std::string& repoRoot, const std::string
     {
         return RefTreeLoad::OverHardLimit;
     }
-    out.g    = buildGraph( out.ing, nullptr );
+    try
+    {
+        out.g = buildGraph( out.ing, nullptr );
+    }
+    catch( const FileGraphStopped& stopped )   // a failed build: no graph, so nothing is scored; the range form records the phase and degrades
+    {
+        out.graphStop = stopped.why();
+        return RefTreeLoad::OverHardLimit;
+    }
     out.root = tmpRoot;
     return RefTreeLoad::Loaded;
 }

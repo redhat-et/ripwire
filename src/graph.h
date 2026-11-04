@@ -28,6 +28,7 @@
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
 #include "clones.h"              // scanCodeTokens / CodeScanOptions — BuiltinMethodGate::namedBeyondDefinition's code-token count
 #include "infra/mdslug.h"        // mdSlugOf — bindMarkdownLinks matches a link slug to a heading
+#include "restlinks.h"           // bindRestLink — a reST :ref: or :doc:`/root` link, whose target no path spells
 #include "infra/namesplit.h"     // isIdentChar — identifierRunCount, the identifier runs inside a string annotation
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "cppscopechain.h"       // EditCheckBraceLexer / editCheckWrittenQualifier — the written-spelling tier's C/C++ full chain
@@ -156,7 +157,7 @@ struct Graph
     // lane ind4b: the precise import adjacency (file → the files its imports resolve to, forCallNarrow), kept past buildGraph
     // for the by-name hedge's rule 2b (pathgaps.h NamesakeRule). Moved in at the end of buildGraph; not cached. (Rule 2c
     // reads implementors + implementorBound above: the per-file base binding.)
-    std::vector<std::vector<std::uint32_t>> importAdj;
+    rw::FileAdjacency importAdj;
     std::size_t                externalCalls = 0;   // Phase 5 (docs/EVALS.md "Phase 5"): call sites the external-name
                                                      // VETO refused — a bare name or receiver provably bound OUTSIDE the
                                                      // indexed tree (a builtin/stdlib name with no in-repo evidence, an
@@ -731,6 +732,14 @@ inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
         }
     }
     return true;
+}
+
+// The call loop's namespace gate: namespaceCompatible, and EDGE-PRELUDE-VETO's one addition — in a language that invokes a macro only by a
+// site spelled as one (LangFacts::bangMacros: Rust `name!(..)`, role Macro), a role Call site never binds to a same-named `macro_rules!`.
+// A Clojure `defmacro` is invoked as `(name ..)`, a Call site, and the C family's call-shaped #define stays role Call unless retagged: both keep it.
+inline bool siteNamespaceCompatible( RefRole role, Lang lang, SymKind kind ) noexcept
+{
+    return namespaceCompatible( role, kind ) && !( kind == SymKind::Macro && role == RefRole::Call && langFacts( lang ).bangMacros );
 }
 
 // ---- aider-style name-quality prior weights --------------------------------------------------------
@@ -1399,7 +1408,10 @@ inline void collapseDeclarationsOfName( const IngestResult& ing, bool multiRoot,
     bool                    anyEvicted = false;
     for( NodeId id : ids )
     {
-        if( isDefinitionNotDeclaration( ing.symbols[ id ] ) || !keyHasDefinition[ keyOf( id ) ] )
+        // EDGE-PRELUDE-VETO: a macro of a language without #define (a Rust `macro_rules!`, which owns no body span) is no prototype of a
+        // same-named function: it stays, so a `name!(..)` site still finds it (it marks no definition either: it evicts nothing)
+        const Symbol& s = ing.symbols[ id ];
+        if( isDefinitionNotDeclaration( s ) || !keyHasDefinition[ keyOf( id ) ] || ( s.kind == SymKind::Macro && !macroRefLang( s.lang ) ) )
         {
             kept.push_back( id );
         }
@@ -2088,6 +2100,7 @@ struct PythonScopeFacts
                                                                      //   only for names a Python class's base clause starts with or is looked up under
     std::vector<std::vector<std::uint32_t>>           starTargets;   // Python fileId → the file each `from m import *` names (kNoFile:
                                                                      //   unresolved) — a star import binds names no table lists
+    std::vector<std::vector<std::uint32_t>>           starBytes;     // parallel to starTargets: each star statement's byte in its file
 };
 
 struct ExternalVetoTables
@@ -2102,6 +2115,9 @@ struct ExternalVetoTables
     HashMap<std::string, char>          pythonModuleRebind;
     PythonScopeFacts                    pythonScopes;
     HashMap<std::string, char>          freeName;
+    HashMap<std::string, std::uint32_t> submoduleBindFile;  // PY-MOD-CALL-SITES: "<fileId>#y" → the SUBMODULE file `from p import x [as y]`
+                                                            //   binds y to (p/x.py or p/x/__init__.py); kNoFile = a from-import of y names
+                                                            //   an in-tree submodule but nothing proves y is it (finalizePythonSubmoduleBinds)
 };
 
 // issue #287: populate ExternalVetoTables::importBindFile for ONE Python Import binding — split out of
@@ -2299,10 +2315,13 @@ inline NodeId pythonBindScope( const IngestResult& ing, const Binding& b ) noexc
 // PythonScopeFacts::nameBinds: every binding of a name a Python class's base clause starts with (the bare base, else its
 // qualifier) or is looked up under (addPythonLookupNames), per file and scope. buildPythonModuleRebindVetoes keeps only the module-scope facts; the base-name rule (pythonBaseNameProven)
 // needs the scoped ones too, because a class statement resolves its base in ITS lexical scope chain, not the module's.
-inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing )
+inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing, HashMap<std::string, char> wanted = {} )
 {
     HashMap<std::string, std::vector<PythonNameBind>> binds;
-    HashMap<std::string, char>                        wanted = pythonBaseClauseNames( ing );
+    for( auto& [ name, c ] : pythonBaseClauseNames( ing ) )
+    {
+        wanted.try_emplace( name, c );
+    }
     addPythonLookupNames( ing, wanted );
     std::string                                       key;
     for( const Binding& b : ing.bindings )
@@ -2324,8 +2343,21 @@ inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( c
 // `moduleNames` are the views buildExternalVetoTables' own (pre-existing, unmoved) setup loop already
 // built; `pythonModuleRebind` is buildPythonModuleRebindVetoes' result, consulted by recordImportBindFile
 // before it ever populates `importBindFile` for a rebound name.
+// PY-MOD-CALL-SITES: one name's from-import facts while buildPythonImportVetoes runs: the submodule file every from-import of it names
+// (kNoFile once two disagree, or one names no submodule), whether ANY names one, the package file (`p/__init__.py`, kNoFile: a
+// namespace package) whose own binding of `member` would win over the submodule, and that member's name in the package
+struct PythonSubmoduleBind
+{
+    std::uint32_t file   = kNoFile;
+    std::uint32_t pkg    = kNoFile;
+    bool          anySub = false;
+    std::string   member;
+    std::uint32_t firstByte = UINT32_MAX;   // the earliest module-scope from-import of the name: a star import after it may rebind it
+};
+
 struct PythonImportVetoes
 {
+    HashMap<std::string, PythonSubmoduleBind> submodules;
     HashMap<std::string, char>              importBind;
     HashMap<std::string, std::uint32_t>     importBindFile;
     HashMap<std::string, std::uint32_t>     memberImportFile;
@@ -2382,6 +2414,146 @@ inline void recordMemberImportFile( const Binding& b, std::uint32_t resolved, co
     }
 }
 
+// PY-MOD-CALL-SITES: `from p import x [as y]` binds y to p's SUBMODULE x when p is a package directory holding x.py or x/__init__.py
+// (Python's import system loads p.x when p's own namespace does not bind x: finalizePythonSubmoduleBinds checks that part). The package
+// directory is read without a corpus scan: a relative p from the importer's own directory (one level up per extra dot), an absolute p
+// from the ONE file memberImportFile already resolved for it, when that file is a package's __init__.py (a module m.py has no
+// submodules). Every from-import of y is recorded, a non-submodule one as kNoFile, so a name bound twice never reads as one module.
+inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std::uint32_t moduleFile, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                 std::string& key, HashMap<std::string, PythonSubmoduleBind>& out )
+{
+    if( b.importedName == "module" || b.typeName.empty() || b.var.empty() || b.var == "*" || pythonBindScope( ing, b ) != kNoNode )
+    {
+        return;   // a function-local from-import binds a local (hasLocal), not the module-level name: it neither proves nor contests y
+    }
+    const std::string_view member = b.importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() )
+                                                                                       : std::string_view( b.var );
+    std::string dir;
+    bool        ok = true;
+    if( b.typeName.front() == '.' )
+    {
+        std::string_view       spec = b.typeName;
+        std::string_view       at   = includerDir( rootRelPath( ing, b.fileId ) );
+        spec.remove_prefix( 1 );
+        while( ok && !spec.empty() && spec.front() == '.' )
+        {
+            ok = !at.empty();   // `from .. import x` above the tree's root names nothing in it
+            at = includerDir( at );
+            spec.remove_prefix( 1 );
+        }
+        dir.assign( at );
+        for( std::size_t pos = 0; ok && !spec.empty(); )
+        {
+            const std::size_t dot = spec.find( '.', pos );
+            const std::string_view seg = spec.substr( pos, dot == std::string_view::npos ? std::string_view::npos : dot - pos );
+            ok = !seg.empty();
+            if( !dir.empty() ) { dir.push_back( '/' ); }
+            dir.append( seg );
+            if( dot == std::string_view::npos ) { break; }
+            pos = dot + 1;
+        }
+    }
+    else
+    {
+        const std::string_view path = moduleFile == kNoFile ? std::string_view{} : rootRelPath( ing, moduleFile );
+        ok = path == "__init__.py" || path.ends_with( "/__init__.py" );
+        dir.assign( includerDir( path ) );
+    }
+    std::uint32_t sub = kNoFile;
+    std::uint32_t pkg = kNoFile;
+    if( ok )
+    {
+        const auto look = [ & ]( std::string_view tail )
+        {
+            std::string p = dir;
+            if( !p.empty() ) { p.push_back( '/' ); }
+            p.append( tail );
+            const auto it = fileIndex.find( lexicalNormalize( p ) );
+            return it == fileIndex.end() ? kNoFile : inImporterRoot( ing.fileRoot, b.fileId, it->second );
+        };
+        // Python's FileFinder tries the package directory before the module file: p/y/__init__.py wins over p/y.py
+        sub = look( std::string( member ).append( "/__init__.py" ) );
+        sub = sub != kNoFile ? sub : look( std::string( member ).append( ".py" ) );
+        pkg = look( "__init__.py" );
+    }
+    key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
+    const auto [ it, fresh ] = out.try_emplace( key, PythonSubmoduleBind{ sub, pkg, sub != kNoFile, sub != kNoFile ? std::string( member ) : std::string{}, b.startByte } );
+    if( !fresh )
+    {
+        it->second.firstByte = std::min( it->second.firstByte, b.startByte );
+        if( it->second.file != sub || it->second.pkg != pkg )
+        {
+            it->second.file = kNoFile;   // two from-imports of y that disagree, or one that names no submodule: y is not one module
+        }
+        it->second.anySub = it->second.anySub || sub != kNoFile;
+    }
+}
+
+// PY-MOD-CALL-SITES: ExternalVetoTables::submoduleBindFile from the recorded from-imports — only names some from-import binds to an
+// in-tree submodule. The submodule is y's module only when nothing else may bind y: no module-scope rebinding of y in the importer
+// (pythonModuleRebind), no `import m as y` naming another file (that entry is poisoned too: the name is bound to two modules), and the
+// package's own namespace does not bind x — no def, class, assignment or global of x there, no import of x that names another file
+// than the submodule, no star import, no module `__getattr__` (it answers `from p import x` before the submodule loads) and no
+// `globals()` / `setattr` write. Anything else records kNoFile: the call is declined and counted, never picked.
+inline bool pythonStarMayBind( const ExternalVetoTables& v, std::uint32_t f, std::string_view name, std::uint32_t fromByte = 0 );
+
+inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBind>& pending, ExternalVetoTables& t )
+{
+    std::string pk;
+    const auto  mk     = [ & ]( std::uint32_t f, std::string_view name ) -> const std::string&
+    {
+        pk.clear();  Narrower::appendUint( pk, f );  pk.push_back( '#' );  pk.append( name );
+        return pk;
+    };
+    const auto marked = [ & ]( std::uint32_t f, std::string_view name ) { return t.pythonModuleRebind.contains( mk( f, name ) ); };
+    for( auto& [ key, sb ] : pending )
+    {
+        if( !sb.anySub )
+        {
+            continue;
+        }
+        std::uint32_t file = sb.file;
+        const std::size_t hash = key.find( '#' );
+        const std::uint32_t importer = std::uint32_t( std::strtoul( key.c_str(), nullptr, 10 ) );
+        // MF5 (rv-py-mod2): a star import in the importer AFTER the from-import may rebind y (`from p.other import *` defining y).
+        // MF7 (rv-py-mod3): an earlier star is skipped only when every from-import of y runs: one under an `if`/`try`/`with`/loop at
+        // module scope (kPythonCondImportPrefix) may not, and then the earlier star's binding is the one that stands, so every star counts.
+        const std::string_view y        = std::string_view( key ).substr( hash + 1 );
+        const bool             condFrom = marked( importer, std::string{ kPythonCondImportPrefix }.append( y ) );
+        if( t.pythonModuleRebind.contains( key ) || pythonStarMayBind( t, importer, y, condFrom ? 0 : sb.firstByte + 1 ) )
+        {
+            file = kNoFile;
+        }
+        if( const auto mit = t.importBindFile.find( key ); mit != t.importBindFile.end() && mit->second != file )
+        {
+            mit->second = kNoFile;   // `import a as y` and `from p import y` in one file: y names two modules
+            file        = kNoFile;
+        }
+        if( file != kNoFile && sb.pkg != kNoFile )
+        {
+            const std::uint32_t p = sb.pkg;
+            bool mayBind = marked( p, sb.member ) || marked( p, kPythonDynamicBind ) || marked( p, kPythonDynamicWrite )
+                        || ( p < t.pythonScopes.starTargets.size() && !t.pythonScopes.starTargets[ p ].empty() );
+            if( !mayBind )
+            {
+                const auto own = t.importBindFile.find( mk( p, sb.member ) );
+                mayBind = own != t.importBindFile.end() && own->second != file;
+            }
+            if( !mayBind )
+            {
+                // the package's module-scope from-import of x must name this submodule too (a function-local one binds no package attribute)
+                const auto own = pending.find( mk( p, sb.member ) );
+                mayBind = own != pending.end() && own->second.file != file;
+            }
+            if( mayBind )
+            {
+                file = kNoFile;
+            }
+        }
+        t.submoduleBindFile.emplace( key, file );
+    }
+}
+
 // the file a Python import directive names — Step-A, else the memoized suffix match; kNoFile for a non-Python includer or no match
 inline std::uint32_t pythonIncludeFile( const IngestResult& ing, const Include& inc, const HashMap<std::string, std::uint32_t>& fileIndex,
                                         PythonSuffixMemo& memo )
@@ -2416,11 +2588,11 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonImportFiles( const Ing
     return files;
 }
 
-// Python fileId → the file each `from m import *` of it names (kNoFile: the module is not in the tree), unsorted. The capture records a
+// Python fileId → the file each `from m import *` of it names (kNoFile: the module is not in the tree), unsorted, and each such
+// statement's byte (PythonScopeFacts::starTargets / starBytes; nameBinds is left empty). The capture records a
 // statement's names as Import bindings at the statement's byte and one Include there; a statement with an Include and no Import binding
 // bound no name — a star import (or an import the capture could not read, which is no better evidence).
-inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                                                       PythonSuffixMemo& memo )
+inline PythonScopeFacts buildPythonStarTargets( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex, PythonSuffixMemo& memo )
 {
     std::vector<std::uint64_t> named;   // ( fileId << 32 | statement byte ) of every import statement that bound a name
     for( const Binding& b : ing.bindings )
@@ -2431,7 +2603,9 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const Ing
         }
     }
     std::sort( named.begin(), named.end() );
-    std::vector<std::vector<std::uint32_t>> stars( ing.files.size() );
+    PythonScopeFacts out;   // starTargets and starBytes; the caller fills nameBinds
+    out.starTargets.assign( ing.files.size(), {} );
+    out.starBytes.assign( ing.files.size(), {} );
     for( const Include& inc : ing.includes )
     {
         const std::string_view from = inc.fileId < ing.files.size() ? rootRelPath( ing, inc.fileId ) : std::string_view{};
@@ -2440,9 +2614,65 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const Ing
         {
             continue;
         }
-        stars[ inc.fileId ].push_back( pythonIncludeFile( ing, inc, fileIndex, memo ) );
+        out.starTargets[ inc.fileId ].push_back( pythonIncludeFile( ing, inc, fileIndex, memo ) );
+        out.starBytes[ inc.fileId ].push_back( inc.byte );
     }
-    return stars;
+    return out;
+}
+
+// buildPythonImportVetoes: 'i' an in-repo module (a relative import cannot leave the package, or Step-A pinned the file), 'u' unknown
+// (the head names an indexed module), 'x' external.
+inline char pythonImportVerdict( const Binding& b, std::uint32_t resolved, const HashMap<std::string, char>& moduleNames )
+{
+    if( b.typeName.front() == '.' || resolved != kNoFile )
+    {
+        return 'i';
+    }
+    const std::size_t dot = b.typeName.find( '.' );
+    const std::string head( dot == std::string::npos ? std::string_view( b.typeName ) : std::string_view( b.typeName ).substr( 0, dot ) );
+    return moduleNames.find( head ) != moduleNames.end() ? 'u' : 'x';
+}
+
+// PY-MOD-CALL-SITES: the module file an absolute `from pkg import y` names (recordSubmoduleBind's moduleFile) — Step-A's file, else the
+// memoized suffix match; kNoFile for `import pkg.y` (importedName "module") and for a relative spec (recordSubmoduleBind derives the
+// package directory from the importer path instead).
+inline std::uint32_t pythonFromImportModuleFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                 PythonSuffixMemo& memo )
+{
+    if( b.importedName == "module" || b.typeName.front() == '.' )
+    {
+        return kNoFile;
+    }
+    return resolved != kNoFile ? resolved : memo.resolve( b.typeName, fileIndex, b.fileId );
+}
+
+// PY-MOD-CALL-SITES: the attribute names `y.f()` reads through a module-scope from-import y that names an in-tree submodule — the
+// names whose module-scope bindings pythonSubmoduleAttrProven asks of the submodule (nameBinds holds only the names asked for) — and
+// every such y, which finalizePythonSubmoduleBinds asks of the importer's star targets
+inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult& ing, const HashMap<std::string, PythonSubmoduleBind>& submodules )
+{
+    HashMap<std::string, char> names;
+    std::string                key;
+    for( const Reference& r : ing.references )
+    {
+        if( r.recv == RecvKind::NamedVar && !r.recvVar.empty() && !r.calleeName.empty() )
+        {
+            key.clear();  Narrower::appendUint( key, r.fileId );  key.push_back( '#' );  key.append( r.recvVar );
+            const auto it = submodules.find( key );   // keyed by Python import bindings only: a hit is a Python file
+            if( it != submodules.end() && it->second.anySub )
+            {
+                names.try_emplace( r.calleeName, '\0' );
+            }
+        }
+    }
+    for( const auto& [ k, sb ] : submodules )
+    {
+        if( sb.anySub )
+        {
+            names.try_emplace( k.substr( k.find( '#' ) + 1 ), '\0' );   // y itself: a star import in the importer may bind it (pythonStarMayBind)
+        }
+    }
+    return names;
 }
 
 inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
@@ -2463,27 +2693,11 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // `verdict` below is already 'i' without needing it) — recordImportBindFile wants the REAL file,
         // not just verdict's "cannot leave the package" evidence.
         const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
-        char verdict = 'x';
-        if( b.typeName.front() == '.' )
-        {
-            verdict = 'i';   // a relative import cannot leave the package
-        }
-        else if( resolved != kNoFile )
-        {
-            verdict = 'i';
-        }
-        else
-        {
-            const std::size_t dot = b.typeName.find( '.' );
-            const std::string head( dot == std::string::npos ? std::string_view( b.typeName ) : std::string_view( b.typeName ).substr( 0, dot ) );
-            if( moduleNames.find( head ) != moduleNames.end() )
-            {
-                verdict = 'u';
-            }
-        }
+        const char verdict = pythonImportVerdict( b, resolved, moduleNames );
         recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile,
                               ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
         recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
+        recordSubmoduleBind( ing, b, pythonFromImportModuleFile( b, resolved, fileIndex, memo ), fileIndex, key, t.submodules );
         key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
         const auto [ it, inserted ] = t.importBind.try_emplace( key, verdict );
         if( !inserted && it->second == 'x' && verdict != 'x' )
@@ -2492,8 +2706,8 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         }
     }
     t.importFiles  = buildPythonImportFiles( ing, fileIndex, memo );
-    t.scopes.starTargets = buildPythonStarTargets( ing, fileIndex, memo );
-    t.scopes.nameBinds   = buildPythonNameBinds( ing );
+    t.scopes             = buildPythonStarTargets( ing, fileIndex, memo );
+    t.scopes.nameBinds   = buildPythonNameBinds( ing, pythonSubmoduleCalleeNames( ing, t.submodules ) );
     return t;
 }
 
@@ -2565,6 +2779,7 @@ inline ExternalVetoTables buildExternalVetoTables( const IngestResult& ing )
         t.memberImportFile    = std::move( iv.memberImportFile );
         t.importFiles         = std::move( iv.importFiles );
         t.pythonScopes        = std::move( iv.scopes );
+        finalizePythonSubmoduleBinds( iv.submodules, t );
     }
     for( const Symbol& sy : ing.symbols )
     {
@@ -3304,7 +3519,7 @@ struct BuiltinMethodGate
     const IngestResult&                            ing;
     const ExternalVeto&                            veto;          // hasLocal / importVerdict: Python module receivers
     const ExternalVetoTables&                      vetoTables;    // importBindFile: an `import m` binding's module file
-    const std::vector<std::vector<std::uint32_t>>& directIncludes;   // caller file → the files it imports/requires directly
+    const rw::FileAdjacency& directIncludes;   // caller file → the files it imports/requires directly
     const JsImportTables&                          jsImports;     // an ES import binding of the called name in the caller's file
     HashMap<std::string, std::uint32_t>            classId;       // every class-like definition NAME in the corpus → a dense id
     std::vector<std::string>                       className;     // dense id → name (ChaConeMemo::contains takes a std::string)
@@ -3532,7 +3747,7 @@ struct BuiltinMethodGate
         }
         if( r.fileId < directIncludes.size() )
         {
-            const std::vector<std::uint32_t>& inc = directIncludes[ r.fileId ];
+            const std::span<const std::uint32_t> inc = directIncludes[ r.fileId ];
             if( std::find( inc.begin(), inc.end(), target.fileId ) != inc.end() )
             {
                 return Verdict::Admit;
@@ -5667,7 +5882,7 @@ inline std::vector<RubyMainMixinRow> rubyMainObjectMixins( const IngestResult& i
 }
 
 inline BuiltinMethodGate buildBuiltinMethodGate( const IngestResult& ing, const ExternalVeto& veto, const ExternalVetoTables& vetoTables,
-                                                 const std::vector<std::vector<std::uint32_t>>& directIncludes, const JsImportTables& jsImports )
+                                                 const rw::FileAdjacency& directIncludes, const JsImportTables& jsImports )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2j: builtin-method name gate" );
     BuiltinMethodGate gate{ ing, veto, vetoTables, directIncludes, jsImports, {}, {}, {}, {}, {}, {}, {}, {}, {}, false };
@@ -5773,7 +5988,7 @@ struct FalseEdgeRules
     const HashMap<std::string, char>&           classNames;
     const ExternalVeto&                         veto;         // hasLocal / importVerdict (Python, C): the Phase-5 evidence, reused
     const ExternalVetoTables&                   vetoTables;   // importBindFile: the file a Python `from m import x` names
-    const std::vector<std::vector<std::uint32_t>>& directIncludes;   // caller file → the files it imports directly (a star import)
+    const rw::FileAdjacency& directIncludes;   // caller file → the files it imports directly (a star import)
     HashMap<std::string, Alias>                 alias;        // "<fileId>#name" → ModuleAlias (JS/TS and Go)
     HashMap<std::string, char>                  bound;        // "<fileId>#name" → any import/alias binding of that name (JS/TS)
     HashMap<std::string, std::vector<VarSpan>>  shadows;      // "<fileId>#name" → JsShadow spans
@@ -6001,10 +6216,10 @@ struct FalseEdgeRules
             }
             // the module itself, or one re-export hop (`from .base import reverse` in a package __init__)
             const std::uint32_t                    module   = mf->second;
-            const std::vector<std::uint32_t>* const reexport = module < directIncludes.size() ? &directIncludes[ module ] : nullptr;
+            const std::span<const std::uint32_t>   reexport = module < directIncludes.size() ? directIncludes[ module ] : std::span<const std::uint32_t>();
             const auto fromModule = [ & ]( const Symbol& s )
             {
-                return s.fileId == module || ( reexport != nullptr && std::find( reexport->begin(), reexport->end(), s.fileId ) != reexport->end() );
+                return s.fileId == module || std::find( reexport.begin(), reexport.end(), s.fileId ) != reexport.end();
             };
             if( keepOnly( r, kept, fromModule ) == 0 )
             {
@@ -6013,9 +6228,9 @@ struct FalseEdgeRules
             }
             return Verdict::Narrow;
         }
-        const std::vector<std::uint32_t>* direct  = r.fileId < directIncludes.size() ? &directIncludes[ r.fileId ] : nullptr;
-        const std::vector<std::uint32_t>* imports = r.fileId < vetoTables.importFiles.size() ? &vetoTables.importFiles[ r.fileId ] : nullptr;
-        const auto in = []( const std::vector<std::uint32_t>* files, std::uint32_t f ) { return files != nullptr && std::find( files->begin(), files->end(), f ) != files->end(); };
+        const std::span<const std::uint32_t> direct  = r.fileId < directIncludes.size() ? directIncludes[ r.fileId ] : std::span<const std::uint32_t>();
+        const std::span<const std::uint32_t> imports = r.fileId < vetoTables.importFiles.size() ? std::span<const std::uint32_t>( vetoTables.importFiles[ r.fileId ] ) : std::span<const std::uint32_t>();
+        const auto in = []( const std::span<const std::uint32_t> files, std::uint32_t f ) { return std::find( files.begin(), files.end(), f ) != files.end(); };
         const std::size_t visible = keepOnly( r, kept, [ & ]( const Symbol& s )
         {
             if( localDefOutOfReach( ing, s.id, r ) )
@@ -7125,6 +7340,472 @@ inline std::string_view rustFileAlias( const IngestResult& ing, std::uint32_t f,
     return hit == at->second.end() ? std::string_view() : std::string_view( hit->second );
 }
 
+// EDGE-PRELUDE-VETO, MACRO SCOPE: where a `macro_rules!` without #[macro_export] (Symbol::internalLinkage on a Rust macro) is in scope.
+// Such a macro is TEXTUAL: a call names it only in the file that defines it and in that file's child modules (a `mod x;` file under
+// the module's directory: `src/a.rs` owns `src/a/`, a `lib.rs` / `main.rs` / `mod.rs` owns its own directory, and so does a crate root a
+// Cargo.toml names by `[lib] path` or `[[bin]] path`, e.g. `src/g.rs`). `#[macro_use]` on
+// the `mod` that declares the macro's module keeps its macros in scope after it, so the scope widens to the parent module's, and on up
+// while each parent is itself declared `#[macro_use]`. Source order inside a module is not read (a call above the definition binds), nor
+// a `#[path]` module (its calls lose the edge, counted external=: card MACRO-PATH-ATTR); the scope is a set of files and directory prefixes,
+// read once per macro file (one parent file read per level).
+struct RustMacroScope
+{
+    std::vector<std::string> files;   // identity paths of the files whose whole text sees the macro
+    std::vector<std::string> dirs;    // identity directory prefixes (no trailing '/') whose files are child modules in scope
+    std::vector<std::string> others;  // under a crate root's directory, the files of the package's OTHER crates: `src/bin/`, the
+                                      // `main.rs` beside a `lib.rs` (or the `lib.rs` beside a `main.rs`) and another manifest-named root
+                                      // there (`[lib] path` beside `[[bin]] path`); a directory prefix or one file
+    bool holds( std::string_view path ) const
+    {
+        const auto under = [ & ]( const std::string& d ) { return d.empty() || ( path.size() > d.size() && path.starts_with( d ) && path[ d.size() ] == '/' ); };   // "": the top level owns all
+        return std::ranges::find( files, path ) != files.end()
+            || ( std::ranges::any_of( dirs, under ) && std::ranges::none_of( others, [ & ]( const std::string& o ) { return path == o || under( o ); } ) );
+    }
+};
+struct RustMacroScopeCache
+{
+    HashMap<std::uint32_t, RustMacroScope> scopes;          // per macro file
+    HashMap<std::string, char>             manifestRoots;   // identity paths of the crate roots a Cargo.toml names (`[lib] path`, `[[bin]] path`)
+    HashMap<std::string, char>             libMainFiles;    // identity paths of the tree's `lib.rs` / `main.rs` files
+    bool                                   rootsRead = false;
+};
+
+// `text` with Rust comments (`//`, nested `/* */`) and string literals ("…" with escapes, spanning lines) blanked to spaces, line breaks and
+// offsets kept: the text scans below read code only. A char literal (`'"'`, `'\''`) is stepped over; a lifetime (`'a`) is not one.
+// A raw string (`r#"…"#`) is read as a plain one: a `"#` inside it can end the blanking early, which only lets a scan read more text.
+inline std::string rustBlankCommentsAndStrings( std::string_view text )
+{
+    std::string       out( text );
+    const std::size_t n     = text.size();
+    const auto        blank = [ & ]( std::size_t from, std::size_t to )
+    {
+        for( std::size_t k = from; k < to && k < n; ++k )
+        {
+            out[ k ] = out[ k ] == '\n' ? '\n' : ' ';
+        }
+    };
+    for( std::size_t i = 0; i < n; )
+    {
+        const char c    = text[ i ];
+        const char next = i + 1 < n ? text[ i + 1 ] : '\0';
+        std::size_t j   = i + 1;
+        if( c == '/' && next == '/' )
+        {
+            j = std::min( text.find( '\n', i ), n );
+            blank( i, j );
+        }
+        else if( c == '/' && next == '*' )
+        {
+            int depth = 1;
+            for( j = i + 2; j < n && depth > 0; )
+            {
+                const char d = j + 1 < n ? text[ j + 1 ] : '\0';
+                depth += text[ j ] == '/' && d == '*' ? 1 : ( text[ j ] == '*' && d == '/' ? -1 : 0 );
+                j += ( ( text[ j ] == '/' && d == '*' ) || ( text[ j ] == '*' && d == '/' ) ) ? 2 : 1;
+            }
+            blank( i, j );
+        }
+        else if( c == '"' )
+        {
+            while( j < n && text[ j ] != '"' )
+            {
+                j += text[ j ] == '\\' ? 2 : 1;
+            }
+            j = std::min( j + 1, n );
+            blank( i, j );
+        }
+        else if( c == '\'' && i + 2 < n && text[ i + 2 ] == '\'' )
+        {
+            j = i + 3;   // 'x'
+        }
+        else if( c == '\'' && next == '\\' )
+        {
+            const std::size_t close = i + 3 < n ? text.find( '\'', i + 3 ) : std::string_view::npos;   // '\n', '\'', '\u{..}'
+            j                       = close == std::string_view::npos ? n : close + 1;
+        }
+        i = j;
+    }
+    return out;
+}
+
+// The crate roots this tree's Cargo.toml files name by `[lib] path` / `[[bin]] path` (zed's `path = "src/sqlez_macros.rs"`), as identity paths,
+// read once (RustMacroScopeCache::manifestRoots). A bare line scan (tomlSectionNames): a dotted key or inline table is not read, so a root can
+// only be missed (its macros then bind in fewer files), never invented.
+inline const HashMap<std::string, char>& rustManifestRoots( const IngestResult& ing, RustMacroScopeCache& cache )
+{
+    if( cache.rootsRead )
+    {
+        return cache.manifestRoots;
+    }
+    cache.rootsRead = true;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view ident = ing.files[ f ];
+        if( ident == "lib.rs" || ident == "main.rs" || ident.ends_with( "/lib.rs" ) || ident.ends_with( "/main.rs" ) )
+        {
+            cache.libMainFiles.try_emplace( std::string( ident ), '\0' );
+        }
+        if( ident != "Cargo.toml" && !ident.ends_with( "/Cargo.toml" ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, f ) );
+        if( !text )
+        {
+            continue;
+        }
+        std::vector<std::string> paths;
+        tomlSectionNames( *text, { "[lib]", "[[bin]]" }, paths, "path" );
+        for( const std::string& p : paths )
+        {
+            // the manifest's directory exactly as the identity path spells it (a root given as `T//x` keeps its `//`), the written path normalized;
+            // a path that leaves the package (`../shared/b.rs`) resolves against the manifest's directory: `crates/b/../shared/b.rs` is `crates/shared/b.rs`
+            // (each leading `../` pops one directory of the manifest's own, so its spelling, `//` included, stays as the identity path has it)
+            std::string      dir  = std::string( ident.substr( 0, ident.size() - 10 ) );
+            std::string_view rest = p;
+            while( rest.starts_with( "../" ) && !dir.empty() )
+            {
+                dir.pop_back();
+                dir.resize( dir.rfind( '/' ) + 1 );   // npos + 1 == 0: the top level
+                rest.remove_prefix( 3 );
+            }
+            const std::string norm = lexicalNormalize( rest );
+            if( !norm.empty() )
+            {
+                cache.manifestRoots.try_emplace( dir + norm, '\0' );
+            }
+        }
+    }
+    return cache.manifestRoots;
+}
+
+// Does `text` declare `mod name` under `#[macro_use]` (`#[macro_use] mod name;`, `#[macro_use]\npub(crate) mod name {`, other attributes
+// between)? A text scan of the code: a spelling inside a comment or string is blanked first (rustBlankCommentsAndStrings).
+inline bool rustDeclaresMacroUseMod( std::string_view source, std::string_view name )
+{
+    const std::string      code = rustBlankCommentsAndStrings( source );
+    const std::string_view text = code;
+    constexpr std::string_view kMark = "#[macro_use]";
+    const auto skipSpace = [ & ]( std::size_t at ) { return std::min( text.find_first_not_of( " \t\r\n", at ), text.size() ); };
+    const auto isIdent   = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    for( std::size_t hit = text.find( kMark ); hit != std::string_view::npos; hit = text.find( kMark, hit + 1 ) )
+    {
+        std::size_t at = skipSpace( hit + kMark.size() );
+        while( text.substr( at ).starts_with( "#[" ) )   // another attribute of the same item
+        {
+            const std::size_t close = text.find( ']', at );
+            at = close == std::string_view::npos ? text.size() : skipSpace( close + 1 );
+        }
+        if( text.substr( at ).starts_with( "pub" ) && ( at + 3 >= text.size() || !isIdent( text[ at + 3 ] ) ) )
+        {
+            at = skipSpace( at + 3 );
+            if( text.substr( at ).starts_with( "(" ) )
+            {
+                const std::size_t close = text.find( ')', at );
+                at = close == std::string_view::npos ? text.size() : skipSpace( close + 1 );
+            }
+        }
+        if( !text.substr( at ).starts_with( "mod" ) || at + 3 >= text.size() || isIdent( text[ at + 3 ] ) )
+        {
+            continue;
+        }
+        at = skipSpace( at + 3 );
+        if( text.substr( at ).starts_with( name ) && ( at + name.size() >= text.size() || !isIdent( text[ at + name.size() ] ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The module names `source` declares (`mod x;`, `pub(crate) mod x {`), in order: a text scan of the code (comments and strings blanked first).
+inline std::vector<std::string> rustDeclaredModNames( std::string_view source )
+{
+    const std::string code    = rustBlankCommentsAndStrings( source );
+    const auto        isIdent = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    std::vector<std::string> names;
+    for( std::size_t hit = code.find( "mod" ); hit != std::string::npos; hit = code.find( "mod", hit + 3 ) )
+    {
+        const std::size_t from = std::min( code.find_first_not_of( " \t\r\n", hit + 3 ), code.size() );
+        std::size_t       to   = from;
+        while( to < code.size() && isIdent( code[ to ] ) )
+        {
+            ++to;
+        }
+        const std::size_t after = std::min( code.find_first_not_of( " \t\r\n", to ), code.size() );
+        if( ( hit == 0 || !isIdent( code[ hit - 1 ] ) ) && from > hit + 3 && to > from && after < code.size() && ( code[ after ] == ';' || code[ after ] == '{' ) )
+        {
+            names.push_back( code.substr( from, to - from ) );
+        }
+    }
+    return names;
+}
+
+// The scope of the non-exported macros file `m` defines (RustMacroScope), built once per file.
+inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uint32_t m, RustMacroScopeCache& cache )
+{
+    auto [ at, fresh ] = cache.scopes.try_emplace( m );
+    if( !fresh )
+    {
+        return at->second;
+    }
+    RustMacroScope&                   scope = at->second;
+    const HashMap<std::string, char>& roots = rustManifestRoots( ing, cache );
+    std::string     ident = ing.files[ m ];
+    std::string     disk  = diskPath( ing, m );
+    for( int level = 0; level < 64; ++level )   // a module tree deeper than 64 levels stops widening: the scope only narrows, so binds fewer
+    {
+        const auto split = []( const std::string& p )
+        {
+            const std::size_t slash = p.rfind( '/' );
+            return slash == std::string::npos ? std::pair{ std::string(), p } : std::pair{ p.substr( 0, slash ), p.substr( slash + 1 ) };
+        };
+        const auto [ identDir, base ] = split( ident );
+        const std::string diskDir     = split( disk ).first;
+        const std::string stem        = base.ends_with( ".rs" ) ? base.substr( 0, base.size() - 3 ) : base;
+        const bool        manifestRoot = roots.contains( ident );   // a `[lib] path` / `[[bin]] path` crate root owns its directory like lib.rs
+        const bool        dirOwner    = stem == "mod" || stem == "lib" || stem == "main" || manifestRoot;
+        scope.files.push_back( ident );
+        scope.dirs.push_back( dirOwner ? identDir : ( identDir.empty() ? stem : identDir + "/" + stem ) );
+        if( stem == "lib" || stem == "main" || manifestRoot )
+        {
+            const auto in = [ & ]( std::string_view f ) { return identDir.empty() ? std::string( f ) : identDir + "/" + std::string( f ); };
+            scope.others.push_back( in( "bin" ) );   // each src/bin/*.rs is a crate of its own
+            scope.others.push_back( in( stem == "main" ? "lib.rs" : "main.rs" ) );
+            // MACRO-MANIFEST-SIBLINGS: a directory this root shares with another crate root (another manifest-named root there, a main.rs or
+            // lib.rs beside a manifest-named root, or the other auto bins beside a root in a `bin` directory) holds that crate's modules
+            // too, so the root owns only the modules it declares there. A plain lib.rs beside a main.rs keeps the whole directory.
+            bool shared = split( identDir ).second == "bin" || ( manifestRoot && stem != "lib" && stem != "main" && ( cache.libMainFiles.contains( in( "main.rs" ) ) || cache.libMainFiles.contains( in( "lib.rs" ) ) ) );
+            for( const auto& [ root, unused ] : roots )
+            {
+                if( root != ident && split( root ).first == identDir && !root.ends_with( "/lib.rs" ) && !root.ends_with( "/main.rs" ) && root != "lib.rs" && root != "main.rs" )
+                {
+                    scope.others.push_back( root );
+                    shared = true;
+                }
+            }
+            if( shared )
+            {
+                scope.dirs.pop_back();
+                const std::optional<std::string> text = docparse::detail::readWholeFile( disk );
+                for( const std::string& name : text ? rustDeclaredModNames( *text ) : std::vector<std::string>() )
+                {
+                    scope.files.push_back( in( name + ".rs" ) );
+                    scope.dirs.push_back( in( name ) );
+                }
+            }
+        }
+        if( stem == "lib" || stem == "main" || manifestRoot || ( stem == "mod" && identDir.empty() ) )
+        {
+            break;   // a crate root (or a bare top-level mod.rs): no parent module to widen into
+        }
+        // The module's name and the directory its parent module owns.
+        const std::string modName      = stem == "mod" ? split( identDir ).second : stem;
+        const std::string parentIdent  = stem == "mod" ? split( identDir ).first : identDir;
+        const std::string parentDisk   = stem == "mod" ? split( diskDir ).first : diskDir;
+        const auto        join         = []( const std::string& d, std::string_view f ) { return d.empty() ? std::string( f ) : d + "/" + std::string( f ); };
+        bool              widened      = false;
+        std::vector<std::string> parentFiles = { "lib.rs", "main.rs", "mod.rs", "" };
+        for( const auto& [ root, unused ] : roots )   // a manifest-named root in the parent's directory (`src/g.rs` declaring `#[macro_use] mod m;`)
+        {
+            const auto [ rootDir, rootBase ] = split( root );
+            if( rootDir == parentIdent )
+            {
+                parentFiles.push_back( rootBase );
+            }
+        }
+        for( const std::string_view parentFile : parentFiles )
+        {
+            // "" = the 2018 layout's `parent.rs` beside the `parent/` directory
+            const std::string pIdent = parentFile.empty() ? parentIdent + ".rs" : join( parentIdent, parentFile );
+            const std::string pDisk  = parentFile.empty() ? parentDisk + ".rs" : join( parentDisk, parentFile );
+            if( parentFile.empty() && parentIdent.empty() )
+            {
+                continue;
+            }
+            const std::optional<std::string> text = docparse::detail::readWholeFile( pDisk );
+            if( text && rustDeclaresMacroUseMod( *text, modName ) )
+            {
+                ident   = pIdent;
+                disk    = pDisk;
+                widened = true;
+                break;
+            }
+        }
+        if( !widened )
+        {
+            break;
+        }
+    }
+    return scope;
+}
+
+// EDGE-PRELUDE-VETO: does the function whose item starts at `start` of `text` carry `#[proc_macro]` (the one attribute that makes a function
+// a `name!(..)` macro)? Its attribute run is the lines from `start` down to the item line and right above `start`: attributes, comments and
+// blank lines; each scan stops at the first other line. A text scan of the run's code, read off disk at graph time (no extraction bit: Symbol
+// has no free bit): comments and strings are blanked first, so a `#[proc_macro]` inside a `/* */` block is no attribute.
+inline bool rustFnIsProcMacro( std::string_view source, std::uint32_t start )
+{
+    const std::string      code = rustBlankCommentsAndStrings( source );
+    const std::string_view text = code;
+    const auto isProcMacroAttr = []( std::string_view line )
+    {
+        std::string_view inner = line.substr( 2, line.find( ']' ) == std::string_view::npos ? std::string_view::npos : line.find( ']' ) - 2 );
+        inner.remove_prefix( std::min( inner.find_first_not_of( " \t" ), inner.size() ) );
+        return inner.substr( 0, std::min( inner.find_last_not_of( " \t" ) + 1, inner.size() ) ) == "proc_macro";
+    };
+    // The def's start may already include its doc comments and attributes (the Rust extent takes the run): read forward to the item line
+    for( std::size_t at = std::min<std::size_t>( start, text.size() ); at < text.size(); )
+    {
+        const std::size_t nl   = text.find( '\n', at );
+        std::string_view  line = text.substr( at, nl == std::string_view::npos ? std::string_view::npos : nl - at );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( "#[" ) && isProcMacroAttr( line ) )
+        {
+            return true;
+        }
+        if( !line.empty() && !line.starts_with( "#[" ) && !line.starts_with( "//" ) )
+        {
+            break;   // the item's own line
+        }
+        if( nl == std::string_view::npos )
+        {
+            break;
+        }
+        at = nl + 1;
+    }
+    std::size_t end = std::min<std::size_t>( start, text.size() );
+    while( end > 0 )
+    {
+        const std::size_t      nl   = text.rfind( '\n', end - 1 );
+        const std::size_t      from = nl == std::string_view::npos ? 0 : nl + 1;
+        std::string_view       line = text.substr( from, end - from );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( "#[" ) )
+        {
+            if( isProcMacroAttr( line ) )
+            {
+                return true;
+            }
+        }
+        else if( !line.empty() && !line.starts_with( "//" ) && !line.starts_with( "*" ) && !line.starts_with( "/*" ) )
+        {
+            return false;   // the line before the run: the attribute run ended without #[proc_macro]
+        }
+        if( nl == std::string_view::npos )
+        {
+            break;
+        }
+        end = nl;
+    }
+    return false;
+}
+
+// EDGE-PRELUDE-VETO: the `use` statements of one .rs file, joined (`use a::{b, c};use d::e;`), for rustUseTextNames: a procedural macro's
+// `use` is often spelled through a crate whose root is a Cargo `[lib] path` (zed's `use sqlez_macros::sql;` into src/sqlez_macros.rs),
+// which rustRule3Proves does not map. A bare statement scan like rustCrateAliases: a `use` inside a macro body is read too.
+inline std::string rustUseStatements( std::string_view text )
+{
+    std::string out;
+    while( !text.empty() )
+    {
+        const std::size_t end  = text.find( '\n' );
+        std::string_view  line = text.substr( 0, end );
+        text = end == std::string_view::npos ? std::string_view() : text.substr( end + 1 );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( "pub" ) )
+        {
+            line.remove_prefix( std::min( line.find( ' ' ), line.size() ) );   // `pub ` / `pub(crate) `
+            line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
+        }
+        if( !line.starts_with( "use " ) )
+        {
+            continue;
+        }
+        out.append( line );
+        while( out.find( ';', out.rfind( "use " ) ) == std::string::npos && !text.empty() )   // a statement spanning lines
+        {
+            const std::size_t e2 = text.find( '\n' );
+            out.append( text.substr( 0, e2 ) );
+            text = e2 == std::string_view::npos ? std::string_view() : text.substr( e2 + 1 );
+        }
+        out.push_back( '\n' );
+    }
+    return out;
+}
+// Does a `use` statement of `uses` (rustUseStatements) end a path in `name` (`use m::sql;`, `use m::{sql};`, `use db::{sqlez_macros::sql, X};`),
+// not merely pass through a module of that name (`use sql::X;`)?
+inline bool rustUseTextNames( std::string_view uses, std::string_view name )
+{
+    const auto isIdent = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    for( std::size_t at = uses.find( name ); at != std::string_view::npos; at = uses.find( name, at + 1 ) )
+    {
+        const std::size_t after = at + name.size();
+        const bool leaf = after >= uses.size() || ( !isIdent( uses[ after ] ) && uses.substr( after ).find_first_not_of( " \t" ) != std::string_view::npos
+                                                     && uses[ after + uses.substr( after ).find_first_not_of( " \t" ) ] != ':' );
+        if( at >= 1 && !isIdent( uses[ at - 1 ] ) && leaf )   // a whole segment that is no path head (`m::sql;`, `{sql, X}`)
+        {
+            // a rename binds the alias, not the name: `m::sql as q` names no `sql` (`sql as sql` does), and the alias of `m::other as sql`
+            // is no item called `sql`
+            std::string_view rest = uses.substr( after );
+            rest.remove_prefix( std::min( rest.find_first_not_of( " \t" ), rest.size() ) );
+            std::string_view before = uses.substr( 0, at );
+            before.remove_suffix( before.size() - std::min( before.find_last_not_of( " \t" ) + 1, before.size() ) );
+            const bool aliasSlot = before.ends_with( "as" ) && ( before.size() == 2 || !isIdent( before[ before.size() - 3 ] ) );
+            if( rest.starts_with( "as" ) && rest.size() > 2 && !isIdent( rest[ 2 ] ) )
+            {
+                rest.remove_prefix( 2 );
+                rest.remove_prefix( std::min( rest.find_first_not_of( " \t" ), rest.size() ) );
+                if( !( rest.starts_with( name ) && ( rest.size() == name.size() || !isIdent( rest[ name.size() ] ) ) ) )
+                {
+                    continue;
+                }
+            }
+            else if( aliasSlot )
+            {
+                continue;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+// EDGE-PRELUDE-VETO: is the type item named `name` in [from, to) of `source` a TUPLE struct (`struct Ok(T);`, `pub struct Some<T>(pub T)`), the
+// one type definition a bare call `Ok(x)` constructs? An enum, a union, a unit or braced struct and a `type` alias (an associated
+// `type Ok = ();`) are not: a call cannot name them, so they never cancel the prelude veto. Comments and strings are blanked first.
+inline bool rustItemIsTupleStruct( std::string_view source, std::uint32_t from, std::uint32_t to, std::string_view name )
+{
+    const std::string code    = rustBlankCommentsAndStrings( source.substr( 0, std::min<std::size_t>( to, source.size() ) ) );
+    const auto        isIdent = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    const auto        skip    = [ & ]( std::size_t at ) { return std::min( code.find_first_not_of( " \t\r\n", at ), code.size() ); };
+    for( std::size_t kw = code.find( "struct", from ); kw != std::string::npos; kw = code.find( "struct", kw + 1 ) )
+    {
+        std::size_t at = skip( kw + 6 );
+        if( ( kw > 0 && isIdent( code[ kw - 1 ] ) ) || at == kw + 6 || std::string_view( code ).substr( at, name.size() ) != name
+            || ( at + name.size() < code.size() && isIdent( code[ at + name.size() ] ) ) )
+        {
+            continue;
+        }
+        at = skip( at + name.size() );
+        if( at < code.size() && code[ at ] == '<' )   // generics: skip to the matching '>'
+        {
+            int depth = 0;
+            for( ; at < code.size(); ++at )
+            {
+                depth += code[ at ] == '<' ? 1 : ( code[ at ] == '>' && code[ at - 1 ] != '-' ? -1 : 0 );
+                if( depth == 0 )
+                {
+                    break;
+                }
+            }
+            at = skip( at + 1 );
+        }
+        return at < code.size() && code[ at ] == '(';
+    }
+    return false;
+}
+
 // Rust base clause table values: the head of the `use` is DECIDED outside the tree ('\0') or UNDECIDED ('u').
 inline constexpr char kRustUseUndecided = 'u';
 
@@ -7211,7 +7892,7 @@ inline void collectRustOutsideUses( const IngestResult& ing, FalseEdgeRules& rul
 }
 
 inline FalseEdgeRules buildFalseEdgeRules( const IngestResult& ing, const HashMap<std::string, char>& classNames, const ExternalVeto& veto,
-                                           const ExternalVetoTables& vetoTables, const std::vector<std::vector<std::uint32_t>>& directIncludes )
+                                           const ExternalVetoTables& vetoTables, const rw::FileAdjacency& directIncludes )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: FE-A false-edge rules" );
     FalseEdgeRules rules{ ing, classNames, veto, vetoTables, directIncludes };
@@ -7285,8 +7966,8 @@ struct BaseEvidenceTables
     const IngestResult&                     ing;
     const ExternalVetoTables&               extVeto;       // Python `from m import X` / `import m as q` → m's one file
     const JsImportTables&                   jsImports;     // JS/TS named import → the definition it pins
-    const std::vector<std::vector<NodeId>>& fileIncludes;  // C-family: the transitive, path-precise include set (sorted)
-    const std::vector<std::vector<std::uint32_t>>& includeAdj;   // every language: the files a file's imports resolve to
+    const rw::FileSetStore& fileIncludes;  // C-family: the transitive, path-precise include set (sorted)
+    const rw::FileAdjacency& includeAdj;   // every language: the files a file's imports resolve to
     const std::vector<std::uint32_t>&       fileDir;       // file → interned directory id
     const ReceiverEvidence*                 recvEv;        // JS/TS: a CommonJS require alias's module (moduleNames)
     const HashMap<std::string, char>*       rustOutsideUse;   // Rust: "<fileId>#X" a `use` of an outside path binds (crate-dir aware)
@@ -7432,18 +8113,24 @@ inline const std::vector<PythonNameBind>* pythonModuleBindsOf( const ExternalVet
     return it == v.pythonScopes.nameBinds.end() ? nullptr : &it->second;
 }
 
-// can `from m import *` (any of file `f`'s) bind `name`? A star target outside the tree could bind anything; one inside can bind
-// what its own module scope binds (a def, class, assignment or import of the name) or, when it star-imports itself, anything.
-// Unknown answers yes (no walk past one level, no __all__ read).
-inline bool pythonStarMayBind( const ExternalVetoTables& v, std::uint32_t f, std::string_view name )
+// can `from m import *` (any of file `f`'s, or with `fromByte` > 0 only those at or after that byte) bind `name`? A star target outside
+// the tree could bind anything; one inside can bind what its own module scope binds (a def, class, assignment or import of the name) or,
+// when it star-imports itself, anything. Unknown answers yes (no walk past one level, no __all__ read).
+inline bool pythonStarMayBind( const ExternalVetoTables& v, std::uint32_t f, std::string_view name, std::uint32_t fromByte )
 {
     if( f >= v.pythonScopes.starTargets.size() )
     {
         return false;
     }
     std::string key;
-    for( std::uint32_t target : v.pythonScopes.starTargets[ f ] )
+    const std::vector<std::uint32_t>& targets = v.pythonScopes.starTargets[ f ];
+    for( std::size_t i = 0; i < targets.size(); ++i )
     {
+        const std::uint32_t target = targets[ i ];
+        if( fromByte > 0 && f < v.pythonScopes.starBytes.size() && i < v.pythonScopes.starBytes[ f ].size() && v.pythonScopes.starBytes[ f ][ i ] < fromByte )
+        {
+            continue;   // a star statement before the binding being judged: the later binding wins at run time
+        }
         if( target == kNoFile || ( target < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ target ].empty() ) )
         {
             return true;
@@ -7486,6 +8173,28 @@ inline bool pythonEndpointBindsOnlyByClass( const ExternalVetoTables& v, std::ui
     const std::vector<PythonNameBind>* binds = pythonModuleBindsOf( v, f, name );
     return binds != nullptr && std::ranges::count_if( *binds, []( const PythonNameBind& b ) { return b.scope == kNoNode; } ) == 1
         && std::ranges::none_of( *binds, []( const PythonNameBind& b ) { return b.scope == kNoNode && b.isImport; } ) && !pythonStarMayBind( v, f, name );
+}
+
+// PY-MOD-CALL-SITES: may `y.f()` read submodule file `sub`'s own module-scope f? Not when nothing proved the binding (kNoFile), when
+// the module may write its namespace dynamically (`globals()` / `setattr`, kPythonDynamicWrite: any name may be rebound), or when f's
+// def sits under an `if` / `try` / `with` / loop (kPythonCondDefPrefix: it may not run, and the other branch may bind f otherwise —
+// `json_bytes = partial(...)` — or leave it to a module `__getattr__`), or when the module star-imports another (an accelerator's
+// `from _elementtree import *` rebinds f, in which order is not read), or when the def or class is not f's ONLY module-scope binding
+// there (pythonEndpointBindsOnlyByClass: a later `f = g`, `from _speed import f` under try, `from ._impl import f`, `del f`, a second
+// def or class all withhold). An unconditional def answers before any `__getattr__` (PEP 562). `key` is the caller's reused buffer.
+inline bool pythonSubmoduleAttrProven( const ExternalVetoTables& v, std::uint32_t sub, std::string_view f, std::string& key )
+{
+    if( sub == kNoFile )
+    {
+        return false;
+    }
+    const auto marked = [ & ]( std::string_view a, std::string_view b )
+    {
+        key.clear();  Narrower::appendUint( key, sub );  key.push_back( '#' );  key.append( a ).append( b );
+        return v.pythonModuleRebind.contains( key );
+    };
+    const bool star = sub < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ sub ].empty();   // `from _c import *` may rebind f
+    return !star && !marked( kPythonDynamicWrite, {} ) && !marked( kPythonCondDefPrefix, f ) && pythonEndpointBindsOnlyByClass( v, sub, f );
 }
 
 inline constexpr int kPythonReexportHops = 4;   // member-import hops provenBasesOf follows (a package re-exporting a re-export)
@@ -7827,10 +8536,9 @@ inline void includedBases( const BaseEvidenceTables& t, const Reference& r, cons
 {
     if( r.lang == Lang::Cpp || r.lang == Lang::C || r.lang == Lang::ObjC )
     {
-        const std::vector<NodeId>* inc = r.fileId < t.fileIncludes.size() ? &t.fileIncludes[ r.fileId ] : nullptr;
         for( NodeId c : cand )
         {
-            if( inc != nullptr && std::binary_search( inc->begin(), inc->end(), NodeId( t.ing.symbols[ c ].fileId ) ) )
+            if( t.fileIncludes.contains( r.fileId, t.ing.symbols[ c ].fileId ) )
             {
                 out.push_back( c );
             }
@@ -8150,8 +8858,7 @@ inline std::uint8_t markdownLinkBit( const HashMap<std::uint64_t, char>& linkEdg
 
 // The file node is the Section extractMarkdown builds with bodyByte 0 over [0, size). assignSymbols then
 // leaves sigStart 0 and sigEnd == endByte == the file span (widest is that span, measured over the file's
-// own sections). A 0,0 span is a ModuleScope, never this node. Same predicate recall.h uses. A heading
-// matches it only when the whole file is that one heading line.
+// own sections). A 0,0 span is a ModuleScope, never this node. Same predicate recall.h uses. A heading matches it only when the whole file is that one heading line.
 inline bool isMarkdownFileNode( const Symbol& sym, std::uint32_t widestEnd ) noexcept
 {
     return sym.sigStartByte == 0 && sym.sigEndByte >= sym.endByte && sym.endByte >= widestEnd;
@@ -8203,7 +8910,7 @@ inline MdLinkIndex buildMdLinkIndex( const IngestResult& ing )
     MdLinkIndex ix;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) )
+        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) || ing.files[ f ].ends_with( ".rst" ) || ing.files[ f ].ends_with( ".txt" ) )
         {
             ix.fileByPath.try_emplace( lexicalNormalize( ing.files[ f ] ), f );
         }
@@ -8321,11 +9028,13 @@ inline MdLinkPins bindMarkdownLinks( const IngestResult& ing )
     out.pin.assign( ing.references.size(), kNoNode );
     out.slugMiss.assign( ing.references.size(), 0 );
     const MdLinkIndex ix = buildMdLinkIndex( ing );
+    const RestLinkIndex rest = buildRestLinkIndex( ing );
     for( std::size_t i = 0; i < ing.references.size(); ++i )
     {
         const Reference& r = ing.references[ i ];
         if( isMarkdownLinkRef( r ) && r.fileId < ing.files.size() )
         {
+            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath, out.pin[ i ] ) ) { continue; }
             const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath, ing.crawlRoot );
             out.pin[ i ]      = t.id;
             out.slugMiss[ i ] = t.slugMiss ? 1 : 0;
@@ -8634,13 +9343,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // (Diagnostics.h / arch.h / a.h …) can no longer manufacture a wrong narrow. An include that cannot
     // be path-resolved contributes NOTHING (it is simply absent) → it can never CAUSE a narrow → the
     // resolver degrades to the name-based fallback ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
-    // Deterministic: a pure function of the sorted ing.files + ing.includes; each set is sorted+deduped
-    // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold).
+    // Deterministic: a pure function of the sorted ing.files + ing.includes, so its membership answers are
+    // order-stable (warm == cold).
     // `forCallNarrow`: a Ruby constant read off a VALUE position (an argument, a rescue class — parser version 93)
     // is a dependency of the file but not import evidence for a bare call, so it never enters this set. --deps,
     // --impact's importer tier and the lazy-pair count read the same records through the default path and keep it.
+    // C-ROOT-INCLUDE: the same flag keeps C/C++ quote includes at the includer's directory here (no include-root probe),
+    // so the file graph gains the root edges and this narrow does not — resolve.h kCallNarrowReadsCIncludeRoots.
     auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, /*lazyPairsOut=*/nullptr, /*forCallNarrow=*/true );
-    std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( includeAdj );
+    const rw::FileSetStore fileIncludes = transitiveIncludeSet( includeAdj );
     const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
@@ -8782,6 +9493,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::uint64_t, EdgeAcc> acc;
     acc.reserve( ing.references.size() );        // start past the 4-bucket / 0.8-load rehash cascade
     std::vector<NodeId>      cand, tier;
+    std::vector<NodeId>      modAttrNamesakes;   // PY-MOD-CALL-SITES: an unproven module attribute's candidates, reused
     HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>> declinedListsByHash;   // tier-3 declines: list hash → list numbers (internDeclinedList)
     declinedListsByHash.reserve( 4096 );
     // Every decline site goes through here: the caller's count (declinedOut, the header's declined=), the candidate list
@@ -9194,7 +9906,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             return !localDefOutOfReach( ing, c, ref );
         }
-        if( ref.fileId < fileIncludes.size() && std::binary_search( fileIncludes[ ref.fileId ].begin(), fileIncludes[ ref.fileId ].end(), symFileId[ c ] ) )
+        if( fileIncludes.contains( ref.fileId, symFileId[ c ] ) )
         {
             return true;
         }
@@ -9372,7 +10084,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const auto visible = [ & ]( std::uint32_t i )
         {
             const std::uint32_t f = ing.bindings[ i ].fileId;
-            return f == ref.fileId || ( ref.fileId < fileIncludes.size() && std::binary_search( fileIncludes[ ref.fileId ].begin(), fileIncludes[ ref.fileId ].end(), f ) );
+            return f == ref.fileId || fileIncludes.contains( ref.fileId, f );
         };
         const bool anyVisible = std::any_of( nit->second.begin(), nit->second.end(), visible );
         for( const std::uint32_t i : nit->second )
@@ -9629,7 +10341,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( std::size_t roleIndex = 0; roleIndex < kRefRoleCount; ++roleIndex )
         {
             const RefRole role = static_cast<RefRole>( roleIndex );
-            if( std::all_of( out.ids.begin(), out.ids.end(), [ & ]( NodeId c ) { return namespaceCompatible( role, symKind[ c ] ); } ) )
+            if( std::all_of( out.ids.begin(), out.ids.end(), [ & ]( NodeId c ) { return siteNamespaceCompatible( role, lang, symKind[ c ] ); } ) )
             {
                 out.nsPassRoles |= 1u << roleIndex;
             }
@@ -9959,6 +10671,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             break;
         }
     }
+    RustMacroScopeCache macroScopes;   // EDGE-PRELUDE-VETO: a non-exported Rust macro file's textual scope, read once when a site asks
+    HashMap<std::uint32_t, std::string> rustUseText;   // EDGE-PRELUDE-VETO: a caller file's `use` statements (rustUseStatements), read once
+    HashMap<NodeId, bool> procMacroMemo;   // EDGE-PRELUDE-VETO: does a Rust function candidate of a `name!(..)` site carry #[proc_macro]
+    HashMap<NodeId, bool> preludeBindMemo;   // EDGE-PRELUDE-VETO: can a bare call name this namesake of a prelude name (preludeSite)
     for( siteIndex = 0; siteIndex < ing.references.size(); ++siteIndex )
     {
         const Reference& site = ing.references[ siteIndex ];
@@ -10005,6 +10721,58 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             continue;
         }
         const auto it = byName.find( r.calleeName );
+        // EDGE-PRELUDE-VETO: a macro invocation binds to a macro, never to a function, module or type by name alone. Its targets: an indexed
+        // macro of the name, or a function the language's written binding proves (a Rust procedural macro, `#[proc_macro] pub fn sql`, reached
+        // through `use sqlez_macros::sql;`). A C-family Macro site names a #define by construction (retagMacroCallReferences); a Rust `assert!`
+        // or `json!` with neither is a std or outside crate's macro: external=, whatever same-named definitions the tree holds. A macro name
+        // with NO in-tree definition at all takes the Undefined disposition below, as a call of an undefined name does (site A's honesty note:
+        // a name the tree never defines is not counted as a refused in-tree candidate).
+        // A Rust `macro_rules!` without #[macro_export] (internalLinkage) is textual: it binds a site in its own file, a child module of it
+        // or, through `#[macro_use] mod`, its parent's (rustMacroScopeOf), or one a `use` names (a `pub(crate) use m;` re-export).
+        const auto macroDef = [ & ]( NodeId c )
+        {
+            return symKind[ c ] == SymKind::Macro && langCompatible( symLang[ c ], r.lang )
+                && ( ing.symbols[ c ].internalLinkage == 0 || macroRefLang( symLang[ c ] ) || symFileId[ c ] == r.fileId
+                     || rustMacroScopeOf( ing, symFileId[ c ], macroScopes ).holds( ing.files[ r.fileId ] )
+                     || ( langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) ) );
+        };
+        // A procedural macro is a function that carries #[proc_macro] (a nested `fn assert` a glob `use` reaches is no macro: zed +110 before
+        // this test), read once per candidate (procMacroMemo).
+        const auto isProcMacro = [ & ]( NodeId c )
+        {
+            auto [ at, fresh ] = procMacroMemo.try_emplace( c, false );
+            if( fresh )
+            {
+                const Symbol& s = ing.symbols[ c ];
+                if( const std::optional<std::string> text = s.fnLocal == 0 ? docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ) : std::nullopt )
+                {
+                    at->second = rustFnIsProcMacro( *text, s.sigStartByte );
+                }
+            }
+            return at->second;
+        };
+        const auto useNames = [ & ]()
+        {
+            auto [ at, fresh ] = rustUseText.try_emplace( r.fileId );
+            if( const std::optional<std::string> text = fresh ? docparse::detail::readWholeFile( diskPath( ing, r.fileId ) ) : std::nullopt )
+            {
+                at->second = rustUseStatements( *text );
+            }
+            return rustUseTextNames( at->second, r.calleeName );
+        };
+        const auto procMacroDef = [ & ]( NodeId c )
+        {
+            return symKind[ c ] == SymKind::Function && langCompatible( symLang[ c ], r.lang ) && langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse
+                && ownerIsClass( c ).empty() && isProcMacro( c ) && ( recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) || useNames() );
+        };
+        const bool macroSite     = r.role == RefRole::Macro && it != byName.end();
+        const bool anyMacroDef   = macroSite && std::any_of( it->second.begin(), it->second.end(), macroDef );
+        const bool anyProcMacro  = macroSite && !anyMacroDef && std::any_of( it->second.begin(), it->second.end(), procMacroDef );
+        if( macroSite && !anyMacroDef && !anyProcMacro )
+        {
+            disposition = vetoExternal( r );
+            continue;
+        }
 
         cand.clear();
         tier.clear();
@@ -10224,6 +10992,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 narrowed = true;
             }
+        }
+        // EDGE-PRELUDE-VETO: a macro invocation the grammar spells as one (Rust `name!(..)`, role Macro outside the C family's #define retag)
+        // binds to the indexed macros of its name, every one: a `macro_rules!` is in scope textually or crate-wide by #[macro_export], which
+        // the function-name rules below (FE-A reach, Rule 3's import closure) do not model, so they would drop it for a same-named function.
+        bool macroBound = false;
+        if( !scipPinned && !canonical && r.role == RefRole::Macro && it != byName.end() && !macroRefLang( r.lang ) )
+        {
+            for( NodeId c : it->second )
+            {
+                if( anyMacroDef ? macroDef( c ) : procMacroDef( c ) )   // the indexed macros when there are any, else the procedural ones a `use` names
+                {
+                    cand.push_back( c );
+                }
+            }
+            ASSUME( !cand.empty(), "a Macro site with no macro target of its name left above, counted external=" );
+            narrowed   = true;
+            macroBound = true;   // the namespace gate below would drop a procedural macro (a Function): macroDef / procMacroDef already chose the kinds
         }
         // ── ES named-import binding resolve — the JS/TS twin of the L3 block above, and BEFORE every
         // receiver rule for the same reason: `import { f } from './m.js'` is a name-lookup FACT, so a
@@ -10592,12 +11377,43 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // inlined against `extVeto.importBindFile` directly (the `bindKey` buffer the A4-R5 ctypes-handle
         // gate above already reuses) rather than a THIRD `ExternalVeto` accessor beside hasLocal/importVerdict
         // — that shape read as a clone of both (--quality-delta), being the same two lines a third time.
+        bool modAttrUnproven = false;   // PY-MOD-CALL-SITES: `y.f()` through a from-imported submodule y that Rule 2d could not prove
         if( !scipPinned && !canonical && !narrowed && it != byName.end()
             && r.lang == Lang::Python && r.recv == RecvKind::NamedVar && !r.recvVar.empty()
             && !externalVeto.hasLocal( r, r.recvVar ) )
         {
             bindKey.clear();  Narrower::appendUint( bindKey, r.fileId );  bindKey.push_back( '#' );  bindKey.append( r.recvVar );
-            if( const auto ait = extVeto.importBindFile.find( bindKey ); ait != extVeto.importBindFile.end() && ait->second != kNoFile )
+            // PY-MOD-CALL-SITES: else `from p import y` naming p's submodule y (ExternalVetoTables::submoduleBindFile) — the same narrow.
+            // A site it cannot prove (unproven binding, a dynamic namespace in the submodule, none or two module-scope defs there) keeps
+            // the ladder; only where the ladder would read the module attribute as no in-tree def (external=) is it declined instead
+            const auto ait = extVeto.importBindFile.find( bindKey );
+            const auto sit = ait == extVeto.importBindFile.end() || ait->second == kNoFile ? extVeto.submoduleBindFile.find( bindKey ) : extVeto.submoduleBindFile.end();
+            const bool fromSub = sit != extVeto.submoduleBindFile.end();
+            if( fromSub && !narrowed && pythonSubmoduleAttrProven( extVeto, sit->second, r.calleeName, bindKey ) )
+            {
+                NodeId      only  = kNoNode;
+                std::size_t found = 0;
+                for( NodeId c : it->second )
+                {
+                    // module scope only (no enclosing def or class by span): a method or nested def named f is no attribute of the module
+                    if( langCompatible( symLang[ c ], r.lang ) && symFileId[ c ] == sit->second
+                        && ( ing.symbols[ c ].kind == SymKind::Function || ing.symbols[ c ].kind == SymKind::Class ) && pythonClassScopeChain( ing, c ).empty() )
+                    {
+                        only = c;
+                        if( ++found > 1 )
+                        {
+                            break;   // two module-scope defs of f: which one binds last is not read here
+                        }
+                    }
+                }
+                if( found == 1 )
+                {
+                    cand.push_back( only );
+                    narrowed = true;
+                }
+            }
+            modAttrUnproven = fromSub && !narrowed;
+            if( ait != extVeto.importBindFile.end() && ait->second != kNoFile )
             {
                 const std::uint32_t aliasFile = ait->second;
                 NodeId              only      = kNoNode;
@@ -10690,8 +11506,55 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // decide a call the Phase 5 veto below refuses: a bare builtin (`dict(...)`, `type(...)`) or an imported stdlib or third-party
         // name is bound outside the tree whatever namesake an imported file defines. The veto's own conditions, and not in a file with
         // a star import of an indexed module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding.
-        const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
-                                    && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
+        // EDGE-PRELUDE-VETO (LangFacts::preludeCalls): a bare call to a prelude name (Rust `Ok(x)`, `Some(x)`, `drop(x)`) is the prelude's
+        // unless a binding of the name is written: a definition in the caller's file, or one the language's rule3NameProof proves (a Rust
+        // `use` of it or a glob of its module). Then it joins the Phase-5 veto exactly as a Python builtin does: decided before Rule 3,
+        // counted external=. A user's own `Ok` type used through a `use` keeps its edge.
+        // Only a namesake a bare call can NAME is such a binding (preludeBinding): no associated item (an impl's `type Ok = ();`, a trait's
+        // `type Err`: ownerIsClass), no function local to another fn (arena.rs's nested `unsafe fn drop<T>`, reached by `use super::*;`:
+        // localDefOutOfReach), and a function or a tuple struct, never a type alias, enum or braced struct (rustItemIsTupleStruct).
+        const LangFacts& callerFacts = langFacts( r.lang );
+        const auto       preludeBinding = [ & ]( NodeId c )
+        {
+            auto [ at, fresh ] = preludeBindMemo.try_emplace( c, false );
+            if( fresh && ownerIsClass( c ).empty() )
+            {
+                const Symbol& s = ing.symbols[ c ];
+                if( s.kind == SymKind::Function )
+                {
+                    at->second = true;
+                }
+                else if( isStructOrNamedType( s.kind ) || s.kind == SymKind::Class )
+                {
+                    if( const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ) )
+                    {
+                        at->second = rustItemIsTupleStruct( *text, s.sigStartByte, s.endByte, s.name );
+                    }
+                }
+            }
+            return at->second && !localDefOutOfReach( ing, c, r );   // a nested fn binds only inside the fn that holds it
+        };
+        const bool preludeSite = !callerFacts.preludeCalls.empty() && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
+                                 && r.recv == RecvKind::None && !isMemberCallRef( r ) && bindingTier.empty() && it != byName.end() && callerFacts.isPreludeCall( r.calleeName )
+                                 && !falseEdges.isLocalOfCaller( r )
+                                 && std::none_of( it->second.begin(), it->second.end(), [ & ]( NodeId c )
+                                    {
+                                        if( !langCompatible( symLang[ c ], r.lang ) )
+                                        {
+                                            return false;
+                                        }
+                                        switch( callerFacts.rule3NameProof )
+                                        {
+                                            case Rule3NameProof::RustUse:
+                                                return preludeBinding( c ) && ( symFileId[ c ] == r.fileId || recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) );
+                                            case Rule3NameProof::PythonImport: return symFileId[ c ] == r.fileId || externalVeto.importVerdict( r, r.calleeName ) != '\0';
+                                            case Rule3NameProof::None:         return true;   // no written-binding reading: any namesake may be the binding
+                                        }
+                                        return true;
+                                    } );
+        const bool vetoFirstSite = preludeSite
+                                   || ( callerFacts.externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
+                                        && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r ) );
         bool rule3NoProof = false;   // RULE3-MEMBER-GUARD: Rule 3 fired, and nothing the language writes proves its answer
         bool rule3Local   = false;   // ... and the call goes through a local or parameter of the caller: the value held is no definition of the name
         if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
@@ -10762,8 +11625,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // ── Phase 5: the external-name veto — every evidence rule above has missed; refuse the spray when the
         // name or receiver is provably bound outside the tree (isExternalBound above). Role Call only: a Macro
         // site names an indexed #define, which IS in-repo evidence by construction.
-        if( !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty()
-            && it != byName.end() && externalVeto.isExternalBound( r ) )
+        if( preludeSite
+            || ( !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty()
+                 && it != byName.end() && externalVeto.isExternalBound( r ) ) )
         {
             disposition = vetoExternal( r );
             continue;
@@ -10830,12 +11694,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         {
                             continue;
                         }
-                        if( r.fileId >= fileIncludes.size() )
-                        {
-                            continue;
-                        }
-                        const std::vector<NodeId>& inc = fileIncludes[ r.fileId ];
-                        if( std::binary_search( inc.begin(), inc.end(), symFileId[c] ) )
+                        if( fileIncludes.contains( r.fileId, symFileId[c] ) )
                         {
                             cand.push_back( c );
                         }
@@ -10893,12 +11752,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // uniquely a macro by construction); see namespaceCompatible's comment for the derivation and
         // test/nsfiltercheck.sh for the gate that keeps it that way. It is here because it is the seam a
         // future round would edit, and a silent edit is the failure mode the gate exists to catch.
-        if( !cand.empty() && !( candMemo != nullptr && ( candMemo->nsPassRoles >> static_cast<std::uint32_t>( r.role ) & 1u ) != 0 ) )
+        if( !cand.empty() && !macroBound && !( candMemo != nullptr && ( candMemo->nsPassRoles >> static_cast<std::uint32_t>( r.role ) & 1u ) != 0 ) )
         {
             std::size_t keepCount = 0;
             for( std::size_t ci = 0; ci < cand.size(); ++ci )
             {
-                if( namespaceCompatible( r.role, symKind[ cand[ci] ] ) )
+                if( siteNamespaceCompatible( r.role, r.lang, symKind[ cand[ci] ] ) )
                 {
                     cand[ keepCount++ ] = cand[ci];
                 }
@@ -11025,8 +11884,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // can hold one, so those keep it. Nothing left: no in-repo definition can answer the call (external=).
             if( nameOnly && isMemberCallRef( r ) && langFacts( r.lang ).memberNeverReachesFreeFunction )
             {
+                if( modAttrUnproven )
+                {
+                    modAttrNamesakes.assign( cand.begin(), cand.end() );   // the module attribute's namesakes, kept for the decline below
+                }
                 std::erase_if( cand, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
                 std::erase_if( memberRule3, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
+                if( cand.empty() && modAttrUnproven && !modAttrNamesakes.empty() )
+                {
+                    // PY-MOD-CALL-SITES: `y.f()` through a from-imported submodule y is a module attribute, which a free function
+                    // can be: not provably outside the tree, only unproven, so it is declined and counted (declined=)
+                    recordDecline( r, std::span<const NodeId>( modAttrNamesakes.data(), modAttrNamesakes.size() ), DeclinedSiteKind::Ladder );
+                    disposition = CallDisposition::Declined;
+                    continue;
+                }
                 if( cand.empty() )
                 {
                     disposition = vetoExternal( r );
@@ -13152,6 +14023,8 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 // those, and a hit is by construction a hit on one of them (re-checked against `isDecl` anyway, so the
 // function is sound without trusting each language's internals). The pass is O(ing.includes) byte lookups
 // for the candidate-file filter, plus one resolve per include OF a candidate file.
+// One exception: a C/C++ quote include that misses its own directory is proven at the include roots over the whole corpus
+// (proveCandidatesAtIncludeRoots below), because the roots' two guards need every path, not only the declaration files.
 //
 // WHAT DOES NOT PROVE — all of it in the under-count direction, and none of it silent, because the caller's
 // residue count covers every drop: a Rust `use crate::…` (no crate root is mined here — resolvePreciseInclude's
@@ -13160,6 +14033,61 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 // include that escapes its own root on disk or resolves through a tsconfig/go.mod alias. Each of those needs
 // a whole-corpus pass this seam deliberately does not take.
 //
+// C-ROOT-INCLUDE, rule 2's root step: a C/C++ quote include the includer-directory step missed is proven at the include roots by
+// the FILE GRAPH's own rule (resolve.h resolveCIncludeRoots), read over the WHOLE corpus, not over the declaration-only index.
+// The declaration-only index cannot hold either of that rule's guards (review of #524, F1): a sibling header that declares
+// nothing is absent from it, so "the includer's directory wins" would be bypassed, and a second root holding the same name is
+// absent too, so an ambiguous name would look unique. Both would prove a definition the file graph draws no edge for.
+// COST — the index holds only the corpus files whose basename some pending target ends in (every key the resolver probes for
+// those targets ends in that basename, so the index answers each of its lookups exactly as the whole-corpus index does), and
+// the include-root directories. One pass over the file list, run only when a C quote include of a candidate file missed its
+// own directory; never the whole-corpus include resolve the COST note above rules out.
+inline void proveCandidatesAtIncludeRoots( const IngestResult& ing, const std::vector<char>& isDecl,
+                                           const std::vector<std::uint32_t>& pending, const WsIncludeCtx* ws, std::vector<char>& proven )
+{
+    const auto baseName = []( std::string_view p ) noexcept
+    {
+        const std::size_t cut = p.rfind( '/' );
+        return cut == std::string_view::npos ? p : p.substr( cut + 1 );
+    };
+    HashMap<std::string, char> wantedNames;
+    for( const std::uint32_t i : pending )
+    {
+        wantedNames.try_emplace( std::string( baseName( ing.includes[ i ].target ) ), char( 1 ) );
+    }
+    HashMap<std::string, std::uint32_t> probeIndex;
+    CIncludeBaseDirs                    baseDirs;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string key = lexicalNormalize( rootRelPath( ing, f ) );   // keyed as buildPreciseIncludeAdj keys its index
+        addCIncludeBaseDirsOf( key, baseDirs );
+        if( wantedNames.contains( std::string( baseName( key ) ) ) )
+        {
+            probeIndex.emplace( key, f );
+        }
+    }
+    for( const std::uint32_t i : pending )
+    {
+        const Include&         inc  = ing.includes[ i ];
+        const std::string_view from = rootRelPath( ing, inc.fileId );
+        if( proven[ inc.fileId ] != 0 )
+        {
+            continue;
+        }
+        // The file graph's two steps, in its order: the includer's own directory first (a sibling that declares nothing still
+        // wins, and then proves nothing), then the roots, unique or nothing.
+        std::uint32_t to = resolvePreciseInclude( from, inc.target, inc.isAngle, probeIndex, {}, false, ws, inc.fileId, nullptr );
+        if( to == kNoFile )
+        {
+            to = resolveCQuoteAtRoots( inc, from, probeIndex, baseDirs, ws, nullptr );
+        }
+        if( to != kNoFile && to < isDecl.size() && isDecl[ to ] != 0 )
+        {
+            proven[ inc.fileId ] = char( 1 );
+        }
+    }
+}
+
 // RULE 2, the scan, split out of the proof below so the bolted-on resolver call does not inflate its
 // complexity (the same reason #63 split declToDefFollowThrough out of resolveAllByNameQualified). Marks
 // every still-unproven `isCand` file whose own #include directives resolve to an `isDecl` file. All three
@@ -13194,8 +14122,10 @@ inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std:
         ws               = &wsCtx;
     }
 
-    for( const Include& inc : ing.includes )
+    std::vector<std::uint32_t> rootPending;   // C-ROOT-INCLUDE: C quote includes the includer-directory step missed
+    for( std::uint32_t i = 0; i < ing.includes.size(); ++i )
     {
+        const Include& inc = ing.includes[ i ];
         // Skipped: a symbolic Ruby constant (it resolves through its own corpus-wide definition index, never
         // as a path), an include from a file that holds no candidate, and one whose file is already proven.
         const bool worthResolving = !inc.isSymbolic && inc.fileId < isCand.size()
@@ -13210,6 +14140,14 @@ inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std:
         {
             proven[ inc.fileId ] = char( 1 );
         }
+        else if( to == kNoFile && isCQuoteRootProbe( inc, rootRelPath( ing, inc.fileId ) ) )
+        {
+            rootPending.push_back( i );
+        }
+    }
+    if( !rootPending.empty() )
+    {
+        proveCandidatesAtIncludeRoots( ing, isDecl, rootPending, ws, proven );
     }
 }
 
@@ -14054,6 +14992,53 @@ inline std::vector<NodeId> resolveAllByDefLine( const IngestResult& ing, std::st
     return { seed.chain.back() };
 }
 
+// A documentation unit: a Markdown heading, or a reST title, object directive or label (docparse.h, ingest_rest.h). Every one is
+// Lang::Markdown; no code grammar mints that language.
+inline bool isDocUnit( const Symbol& s ) noexcept
+{
+    return isDocLang( s.lang );
+}
+
+// CODE BEFORE A DOC UNIT OF THE SAME SPELLING (docs-rest fix2; gate restdocscheck (I)). A reST object directive names its unit as
+// the page writes the object (`.. method:: Model.save` is a unit named `Model.save`), so the name tier matched that heading, and
+// the dotted-scope and written-spelling tiers, which run only on an empty result, never reached the code: --path answered
+// reachable=0 "no directed call path" from docs/ref/models/instances.txt:446 where the code walks 5 hops from base.py:847, and
+// --callers, --callees and --impact counted 0. When EVERY earlier match is a doc unit, those two tiers run as if nothing had
+// matched, and the code definitions they find replace the doc units. With no code match the doc units stand (--expand of a
+// heading, --callers of a :ref: label; a `docs/x.rst:name` spelling picks the doc unit). A match list that holds code AND doc
+// units stands as it is here: --callers, --impact and --safe-delete list a markdown heading `## run` beside `def run` as a second
+// def (cross_kind) with its link callers marked via=link (mdsectioncheck). Only a --path ENDPOINT drops the doc units of a mixed
+// list (dropDocUnitsBesideCode, pathgaps.h resolvePathEndpoint): a heading holds no calls, so it is never a path start or end.
+inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std::string_view spec, std::vector<NodeId> found )
+{
+    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
+    if( found.empty() || !std::all_of( found.begin(), found.end(), doc ) )
+    {
+        return found;
+    }
+    std::vector<NodeId> code = resolveAllByDottedScope( ing, spec, {} );
+    std::erase_if( code, doc );
+    if( code.empty() )
+    {
+        code = resolveAllByWrittenSpelling( ing, spec, {} );
+        std::erase_if( code, doc );
+    }
+    return code.empty() ? found : code;
+}
+
+// A --path endpoint's matches, code first (docs-rest CI fix; gates restdocscheck (I5, I6), mdsectioncheck): when a name matches code
+// AND doc units, the doc units go, since a `.. method:: save` directive or a `## run` heading is no second place a call path can
+// start or end, and from_defs=/to_defs= count code only. An all-doc or all-code list is returned as it is.
+inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std::vector<NodeId> found )
+{
+    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
+    if( !std::all_of( found.begin(), found.end(), doc ) )
+    {
+        std::erase_if( found, doc );
+    }
+    return found;
+}
+
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
 // on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
 // bare name), so a reader never has to ask whether the number is stale.
@@ -14088,7 +15073,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
         std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, spec );   // Scope::name tier — see its contract
         if( !byScope.empty() )
         {
-            return byScope;
+            return preferCodeOverDocUnits( ing, spec, std::move( byScope ) );
         }
     }
 
@@ -14109,8 +15094,10 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
     declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );
     out = applyNameTower( ing, std::move( out ) );   // the tower orders the name/file tier (task C); the early tiers above stay as-is
+    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );   // a doc heading spelled like code never hides the code
     out = resolveAllByDottedScope( ing, spec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
     out = resolveAllByWrittenSpelling( ing, spec, std::move( out ) );   // the source's own spelling, only when still empty
+    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );        // the dotted tier reads the Scope::name tier: same rule
     return resolveAllByDefLine( ing, spec, std::move( out ) );            // a printed p= (`file:LINE`), last, only when still empty
 }
 
@@ -15036,7 +16023,7 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // with graph_partial="1", absent at zero, so a tree without one stays byte-identical; graphlegend.h states the rule).
 struct StructuralIncludeAdj
 {
-    std::vector<std::vector<std::uint32_t>> adj;               // UN-deduped occurrences, minus the all-lazy pairs
+    rw::FileAdjacency                       adj;               // UN-deduped occurrences, minus the all-lazy pairs
     std::vector<std::uint32_t>              lazyEdgesByFile;   // distinct (f, to) pairs left out, per f
     std::uint64_t                           lazyEdges = 0;     // Σ lazyEdgesByFile
     std::uint64_t                           importsUnresolved = 0;   // #220: in-repo TS/JS directives with no edge
@@ -15060,15 +16047,13 @@ inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing
     // two pairs (parser version 93, test/rubyargcheck.sh service.rb, where three spellings of one file's classes
     // are interleaved with two other files). One scratch vector, reused across files; sort + unique is the count.
     std::vector<std::uint32_t> dropped;
-    for( std::uint32_t f = 0; f < out.adj.size(); ++f )
+    out.adj.retainRows( [ & ]( const std::uint32_t f, const std::span<std::uint32_t> outs )
     {
-        std::vector<std::uint32_t>& outs = out.adj[f];
-        std::uint32_t               kept = 0;
+        std::size_t kept = 0;
         dropped.clear();
-        for( std::uint32_t j = 0; j < outs.size(); ++j )
+        for( const std::uint32_t to : outs )
         {
-            const std::uint32_t to  = outs[j];
-            const auto          it  = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
+            const auto it = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
             if( it != lazyPairs.end() && it->second != 0 )
             {
                 dropped.push_back( to );
@@ -15076,15 +16061,15 @@ inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing
             }
             outs[kept++] = to;
         }
-        outs.resize( kept );
         std::sort( dropped.begin(), dropped.end() );
         out.lazyEdgesByFile[f] = static_cast<std::uint32_t>( std::unique( dropped.begin(), dropped.end() ) - dropped.begin() );
         out.lazyEdges += out.lazyEdgesByFile[f];
-    }
+        return kept;
+    } );
     return out;
 }
 
-inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestResult& ing )
+inline rw::FileAdjacency resolveIncludeAdj( const IngestResult& ing )
 {
     return resolveStructuralIncludeAdj( ing ).adj;
 }
@@ -15122,11 +16107,11 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
 // P's `x.rs`, the wrong file for those two (card RUST-MOD-RESOLVE), and that edge is cut like any other declaration.
 struct ContainmentCut
 {
-    std::vector<std::vector<std::uint32_t>> adj;     // the adjacency minus the containment pairs, filled only when pairs > 0
-    std::uint64_t                           pairs = 0;   // DISTINCT (parent, child) pairs left out
+    rw::FileAdjacency adj;         // the adjacency minus the containment pairs, filled only when pairs > 0
+    std::uint64_t     pairs = 0;   // DISTINCT (parent, child) pairs left out
 
     // The adjacency the cycle and health numbers walk: `full` itself when nothing was cut (no copy, byte-identical).
-    const std::vector<std::vector<std::uint32_t>>& of( const std::vector<std::vector<std::uint32_t>>& full ) const noexcept
+    const rw::FileAdjacency& of( const rw::FileAdjacency& full ) const noexcept
     {
         return pairs > 0 ? adj : full;
     }
@@ -15175,7 +16160,7 @@ struct RustModDecl
     bool             used  = false;
 };
 
-inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::FileAdjacency& adj )
 {
     ContainmentCut cut;
     const std::uint32_t F = std::uint32_t( std::min( adj.size(), ing.files.size() ) );
@@ -15249,7 +16234,7 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::ve
     std::sort( declaredNames.begin(), declaredNames.end(), sortutil::svLess );
     declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
 
-    cut.adj = adj;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>>      cutPairs;   // (parent, child) to drop: parents ascending (decls' order), children sorted
     std::vector<std::pair<std::uint32_t, const RustModDecl*>> cand;   // one scratch row, reused: (child, its declaration) per occurrence
     std::vector<std::uint32_t>                                drop;   // the distinct children cut from one parent, sorted
     for( std::size_t i = 0; i < decls.size(); )
@@ -15291,7 +16276,7 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::ve
             const auto it = std::find_if( names.begin(), names.end(), [ & ]( const RustModDecl& d ) { return d.name == name; } );
             return it == names.end() ? nullptr : &*it;
         };
-        std::vector<std::uint32_t>& outs = cut.adj[p];
+        const std::span<const std::uint32_t> outs = adj[p];
         cand.clear();
         for( const std::uint32_t g : outs )
         {
@@ -15319,17 +16304,34 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::ve
             }
             a = b;
         }
-        if( !drop.empty() )
+        for( const std::uint32_t g : drop )
         {
-            std::erase_if( outs, [ & ]( std::uint32_t g ) { return std::binary_search( drop.begin(), drop.end(), g ); } );
-            cut.pairs += drop.size();
+            cutPairs.emplace_back( p, g );
         }
+        cut.pairs += drop.size();
         i = j;
     }
-    if( cut.pairs == 0 )
+    if( cut.pairs > 0 )   // one copy, then each parent's row shrinks in place (FileAdjacency::retainRows: rows only shrink)
     {
-        cut.adj.clear();
-        cut.adj.shrink_to_fit();
+        cut.adj       = adj;
+        std::size_t k = 0;   // cutPairs cursor: rows arrive in file order, the same order cutPairs' parents are in
+        cut.adj.retainRows( [ & ]( std::uint32_t f, std::span<std::uint32_t> row ) -> std::size_t
+                            {
+                                if( k >= cutPairs.size() || cutPairs[k].first != f )
+                                {
+                                    return row.size();
+                                }
+                                std::size_t e = k;
+                                while( e < cutPairs.size() && cutPairs[e].first == f )
+                                {
+                                    ++e;
+                                }
+                                const auto first = cutPairs.begin() + std::ptrdiff_t( k ), last = cutPairs.begin() + std::ptrdiff_t( e );
+                                k                = e;
+                                const auto keep  = std::remove_if( row.begin(), row.end(), [ & ]( std::uint32_t g )
+                                                                   { return std::binary_search( first, last, std::make_pair( f, g ) ); } );
+                                return std::size_t( keep - row.begin() );
+                            } );
     }
     return cut;
 }
@@ -15378,7 +16380,7 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::ve
 // return require("./ChunkGraph"); }`) is exactly a def file whose own body imports another def file.
 struct ImporterScan { bool found; bool allLazy; };
 
-inline ImporterScan scanImporterEdges( std::uint32_t f, const std::vector<std::uint32_t>& toList, const std::vector<char>& isDef,
+inline ImporterScan scanImporterEdges( std::uint32_t f, const std::span<const std::uint32_t> toList, const std::vector<char>& isDef,
                                        std::uint32_t F, const HashMap<std::uint64_t, char>* lazyPairs ) noexcept
 {
     ImporterScan r{ false, true };   // allLazy is vacuously true until the first def edge is seen
@@ -15412,7 +16414,7 @@ inline ImporterScan scanImporterEdges( std::uint32_t f, const std::vector<std::u
 // cut-fix C: per FILE, how many distinct files import it — the deduped adjacency's in-degree, the file-granular
 // twin of navRelevanceWeight, which the import tier ranks its importers by before its cap. `adj` must be the
 // dedup=true adjacency, so each (importer, imported) pair counts once; self-edges never count.
-inline void countFileImporters( const std::vector<std::vector<std::uint32_t>>& adj, std::uint32_t F, std::vector<std::uint32_t>& out )
+inline void countFileImporters( const rw::FileAdjacency& adj, std::uint32_t F, std::vector<std::uint32_t>& out )
 {
     out.assign( F, 0u );
     for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
@@ -15433,7 +16435,7 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
                                                      std::vector<std::uint32_t>* fileFanInOut = nullptr,
                                                      std::uint64_t* importsUnresolvedOut = nullptr,
                                                      TsImportExtras* tsExtrasOut = nullptr,
-                                                     std::vector<std::vector<std::uint32_t>>* adjOut = nullptr )
+                                                     rw::FileAdjacency* adjOut = nullptr )
 {
     std::vector<std::uint32_t> importers;
     if( lazyOut != nullptr )
@@ -15458,7 +16460,7 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
     // dedup=true: this is a MEMBERSHIP question ("does this file import a def file"), not an
     // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
     HashMap<std::uint64_t, char>  lazyPairs;
-    std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut, tsExtrasOut );
+    rw::FileAdjacency adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut, tsExtrasOut );
     // No `isDef[f]` pre-filter here (barrel-exclusion lane): a def file is not skipped wholesale, because
     // it may ALSO be a genuine importer of a DIFFERENT def file (the barrel-getter shape — see
     // scanImporterEdges' own comment). The narrower, correct exclusion — f is never its own importer — is
@@ -15654,7 +16656,7 @@ inline bool importTierIsUmbrella( const IngestResult& ing, std::size_t importerC
 // path selector names (verbs_navigate.h runImpact). `defFiles` sorted and unique.
 // `adjOut` (IMPACT-PATH): optional, the deduped file->file adjacency the tier was read from (importersOfFiles).
 inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles,
-                                           std::vector<std::vector<std::uint32_t>>* adjOut = nullptr )
+                                           rw::FileAdjacency* adjOut = nullptr )
 {
     ImportTier t;
     for( const std::uint32_t f : defFiles )
@@ -15663,12 +16665,16 @@ inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::v
     }
     std::vector<char>          lazyByFileOrder;   // importersOfFiles' own order (ascending file id) — see below
     std::vector<std::uint32_t> fileFanIn;         // per file: how many files import it — the rank-before-cap weight
-    // #220 part 1: the tier's floor concerns it only when a TS/JS import could land on one of its def files — a C++
-    // symbol's importers cannot hide behind a TS alias, so its answer neither pays for the count nor carries it.
+    // #220 part 1: the tier's floor concerns it only when an import that resolved to nothing could land on one of its def
+    // files: a TS/JS import (an unread alias), or (C-ROOT-INCLUDE) a C/C++ quote include whose name two include roots both
+    // hold. Any other symbol's importers cannot hide behind either, so its answer neither pays for the count nor carries it.
     const bool tsTarget = std::any_of( defFiles.begin(), defFiles.end(), [ & ]( std::uint32_t f )
                                        { return f < ing.files.size() && tsimport::couldBeTsImportTarget( ing.files[f] ); } );
+    const bool cTarget  = std::any_of( defFiles.begin(), defFiles.end(), [ & ]( std::uint32_t f )
+                                       { return f < ing.files.size() && includeLangOf( rootRelPath( ing, f ) ) == IncludeLang::CFamily; } );
     TsImportExtras tsExtras;
-    t.files          = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, tsTarget ? &t.importsUnresolved : nullptr, tsTarget ? &tsExtras : nullptr, adjOut );
+    t.files          = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, ( tsTarget || cTarget ) ? &t.importsUnresolved : nullptr,
+                                         tsTarget ? &tsExtras : nullptr, adjOut );
     t.tsconfigUnread = tsExtras.extendsUnread;
 
     // t.files is about to be RESORTED into tier/path order; lazyByFileOrder must move WITH each entry, not
@@ -15964,7 +16970,7 @@ inline bool impactRollupHedged( const ImpactFileRollup& r ) noexcept
 
 // Tarjan SCC on the file→file graph → cycles (SCCs with >1 node). Cyclic physical dependencies are
 // Lakos's cardinal sin: a cycle must be compiled/tested/reused as one unit. Iterative (no stack risk).
-inline std::vector<std::vector<std::uint32_t>> sccCycles( const std::vector<std::vector<std::uint32_t>>& adj )
+inline std::vector<std::vector<std::uint32_t>> sccCycles( const rw::FileAdjacency& adj )
 {
     const std::uint32_t F = std::uint32_t( adj.size() );
     std::vector<std::int32_t>               idx( F, -1 ), low( F, 0 );
@@ -16046,34 +17052,18 @@ inline std::vector<std::vector<std::uint32_t>> sortCyclesLargestFirst( std::vect
 // EVIDENCE NOTE: mechanistically plausible for build cost, but no independent outcome-based study
 // validates NCCD as a defect/maintenance predictor — design heuristic, not proof.
 struct DepHealth { std::vector<std::uint32_t> transitive; std::uint64_t ccd = 0; double acd = 0, nccd = 0; };
-inline DepHealth dependencyHealth( const std::vector<std::vector<std::uint32_t>>& adj )
+inline DepHealth dependencyHealth( const rw::FileAdjacency& adj )
 {
     const std::uint32_t F = std::uint32_t( adj.size() );
     DepHealth h;
     h.transitive.assign( F, 0 );
-    std::vector<std::uint32_t> seenEpoch( F, 0 );
-    std::vector<std::uint32_t> stack;
-    stack.reserve( F );
-    std::uint32_t              epoch = 1;
+    PROFILE_SCOPE_DESCRIBE( "--deps/2nd include-closure fold (dependencyHealth)" );
+    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop throws FileGraphStopped: no partial store is returned
     for( std::uint32_t s = 0; s < F; ++s )
     {
-        stack.clear();  stack.push_back( s );  seenEpoch[s] = epoch;
-        std::uint32_t reached = 0;
-        while( !stack.empty() )
-        {
-            const std::uint32_t v = stack.back();  stack.pop_back();  ++reached;
-            for( std::uint32_t w : adj[v] )
-            {
-                if( seenEpoch[w] != epoch )
-                {
-                    seenEpoch[w] = epoch;
-                    stack.push_back( w );
-                }
-            }
-        }
+        const std::uint32_t reached = closure.setSize( s ) + 1;
         h.transitive[s] = reached;   // includes self (Lakos convention)
         h.ccd += reached;
-        ++epoch;
     }
     h.acd  = F ? double( h.ccd ) / double( F ) : 0.0;
     const double btree = F > 1 ? ( double( F + 1 ) * std::log2( double( F + 1 ) ) - double( F ) ) : 1.0;

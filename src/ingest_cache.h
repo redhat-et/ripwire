@@ -366,16 +366,24 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 291;          // bump on any grammar/.scm/extraction change
-                                                      // 291 = 2026-11-03 (#358 slice 1a, PR #420, merge main dfd26fc1): C# using directives move to shared
-                                                      //   @import.path captures; import-free deep containers no longer disclose a cut or lose whole-cache eligibility.
-                                                      //   Alias/edge facts unchanged. Above main 289 (rich 290); rich file tag 292. kCacheVersion stays 48.
+constexpr std::uint32_t kParserVer    = 299;          // bump on any grammar/.scm/extraction change
+                                                      // 299 = 2026-11-04 (#358 slice 1a, PR #420, merge main 2047f95f): C# using directives use shared @import.path.
+                                                      //   Import-free deep containers retain whole-cache eligibility; alias/edge facts unchanged. Above main 297/298; rich tag 300.
+                                                      // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage
+                                                      //   (textual scope, graph.h rustMacroScopeOf). Rich file tag 298. kCacheVersion unchanged.
+                                                      // 295 = 2026-11-03 (lane edge-prelude-veto): a Rust macro invocation is captured @reference.macro (role Macro,
+                                                      //   queries/rust/tags.scm), no longer @reference.call. Rich file tag 296. kCacheVersion unchanged.
+                                                      // 291 = 2026-11-03 (lane docs-rest #506 re-bump): both sides bumped (lane 287/288, main 289/290), so the merged value
+                                                      //   goes above both; caches built on main at 289 re-index and pick up the reST .txt docs. Rich file tag 292. kCacheVersion stays 48.
                                                       // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
                                                       //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286, merged) and
                                                       //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
                                                       // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
                                                       //   qualifier of more than one segment keeps it whole in Reference::fieldName (ingest_names.h rustWrittenQualifier).
                                                       //   Rich file tag 286. kCacheVersion stays 48: no record changes shape.
+                                                      // 287 = 2026-11-02 (lane docs-rest, #409 reST tier, after #504's 285/286): reST/Sphinx units, and the crawl
+                                                      //   admits declared .txt. Rich file tag 288. kCacheVersion stays 48. Merged over main's 289 (barrel-short-key)
+                                                      //   2026-11-03: the higher value 289 stands for both changes; the train renumbers.
                                                       // 283 = 2026-10-31 (train 43b: lanes registrar (placeholders 273..281), string-import (274, 275) and their extraction: Python registrar facts,
                                                       //   TS/JS provider-record literal marks, Python dotted-string and import-sink facts). Strictly above 281 (rich 282) and every lane value. Rich file tag 284.
                                                       //   kCacheVersion stays 48: no record changes shape.

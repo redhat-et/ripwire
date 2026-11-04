@@ -792,7 +792,7 @@ static void computeGrammarDisclosure( const IngestResult& ing, const std::vector
                     continue;
                 }
                 const std::string ext = lowerExtensionOf( diskPath( ing, std::uint32_t( fileId ) ) );
-                const LangEntry*  fle = lookupLang( ext );
+                const LangEntry*  fle = lookupLangOfCrawledFile( ext );
                 if( fle == nullptr || fle->grammar == nullptr )
                 {
                     continue;
@@ -873,7 +873,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
         {
             const std::string ext = lowerExtensionOf( diskPath( ing, std::uint32_t( fileId ) ) );
             anyCHeader = anyCHeader || ext == ".h";
-            const LangEntry* le = lookupLang( ext );
+            const LangEntry* le = lookupLangOfCrawledFile( ext );
             if( le == nullptr || le->grammar == nullptr )
             {
                 continue;
@@ -1100,7 +1100,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     }
                     const std::string& path = diskPath( ing, std::uint32_t( fileId ) );   // multi-root: labeled ing.files → on-disk path
                     const std::string ext = lowerExtensionOf( path );
-                    const LangEntry* le = lookupLang( ext );
+                    const LangEntry* le = lookupLangOfCrawledFile( ext );
                     if( le == nullptr )
                     {
                         continue;
@@ -1430,7 +1430,7 @@ PatternFileCensus eligiblePatternFiles( const IngestResult& ing, const pattern::
             continue;
         }
         const std::string ext = lowerExtensionOf( diskPath( ing, std::uint32_t( fileId ) ) );
-        const LangEntry*  le  = lookupLang( ext );
+        const LangEntry*  le  = lookupLangOfCrawledFile( ext );
         if( le == nullptr || le->grammar == nullptr )
         {
             continue;

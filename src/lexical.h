@@ -101,6 +101,7 @@ struct LexTermEvidence
     std::vector<std::uint64_t> anyMask;    // symbolCount × maskWords
     std::size_t                maskWords   = 0;
     std::size_t                symbolCount = 0;
+    std::size_t                statsCount  = 0;   // the symbols the corpus statistics count (symbolCount less lexicalScoresTiered's statsOut)
 
     // input blow-up disclosure (dedupeQueryTerms / kMaxUniqueQueryTerms): terms.size() is the KEPT unique
     // term count; termsSeenTotal is every distinct term the query actually contained. Equal unless the
@@ -112,12 +113,12 @@ struct LexTermEvidence
     const std::uint64_t* anyMaskOf( std::size_t sym ) const noexcept { return anyMask.data() + sym * maskWords; }
     static bool          hasBit( const std::uint64_t* mask, std::size_t u ) noexcept { return ( mask[ u / 64 ] >> ( u % 64 ) ) & 1u; }
 
-    // BM25's own idf for term u over `symbolCount` symbols — the exact expression both scoring branches use,
+    // BM25's own idf for term u over the `statsCount` symbols the statistics count — the exact expression both scoring branches use,
     // so an absent term (df 0) weighs as the rarest possible term and never as nothing.
     double idf( std::size_t u ) const noexcept
     {
         const double n = double( df[u] );
-        return std::log( ( double( symbolCount ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+        return std::log( ( double( statsCount ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
     }
 };
 
@@ -474,10 +475,24 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
                                                const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0,
                                                int basenameFieldDefaultW = 0, std::string_view pathRootPrefix = {},
-                                               LexTermEvidence* evidenceOut = nullptr )   // L-W: the term evidence, read back out (see the struct)
+                                               LexTermEvidence* evidenceOut = nullptr,   // L-W: the term evidence, read back out (see the struct)
+                                               const std::vector<char>* statsOut = nullptr )   // units scored but kept OUT of the corpus statistics
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
+    // statsOut (filter.h sphinxTxtStatsExclusion): units SCORED like any other but kept out of the corpus statistics —
+    // the symbol count, every document frequency and the average length. Null: every unit counts, the historical pass.
+    const auto  statsWeight = [ statsOut ]( std::size_t i ) noexcept -> int
+    { return ( statsOut != nullptr && i < statsOut->size() && ( *statsOut )[i] != 0 ) ? 0 : 1; };
+    std::size_t statsS = S;
+    if( statsOut != nullptr )
+    {
+        statsS = 0;
+        for( std::size_t i = 0; i < S; ++i )
+        {
+            statsS += std::size_t( statsWeight( i ) );
+        }
+    }
 
     // query subtokens — occurrence order preserved (BM25 adds one contribution PER occurrence, as before);
     // an empty query scores exactly 0 everywhere (0.0 survives the Section down-weight unchanged)
@@ -489,6 +504,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             *evidenceOut             = LexTermEvidence{};
             evidenceOut->symbolCount = S;
+            evidenceOut->statsCount  = S;
         }
         return std::vector<float>( S, 0.f );
     }
@@ -1124,15 +1140,17 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         evidenceOut->df.assign( uniqueCount, 0u );
         evidenceOut->anyMask.assign( S * evidenceWords, 0u );
         evidenceOut->symbolCount = S;
+        evidenceOut->statsCount  = statsS;
         for( std::size_t i = 0; i < S; ++i )
         {
             const int* const row   = tfFlat.data() + i * uniqueCount;
             std::uint64_t*   words = evidenceOut->anyMask.data() + i * evidenceWords;
+            const int        w     = statsWeight( i );
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
                 if( row[u] > 0 )
                 {
-                    ++evidenceOut->df[u];
+                    evidenceOut->df[u] += std::uint32_t( w );
                     words[ u / 64 ] |= std::uint64_t( 1 ) << ( u % 64 );
                 }
             }
@@ -1178,15 +1196,16 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         for( std::size_t i = 0; i < S; ++i )
         {
             const int* const tfRow = tfFlat.data() + i * uniqueCount;
+            const int        w     = statsWeight( i );
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
-                dfMargin[u] += tfRow[u] > 0 ? 1 : 0;
+                dfMargin[u] += tfRow[u] > 0 ? w : 0;
             }
         }
         // "separates" at k bits: idf_u >= k*ln2  ⇔  (S-n+0.5)/(n+0.5) + 1 >= 2^k  ⇔  n <= (S+0.5)/2^k - 0.5,
         // which at k = 1 is exactly n <= S/2. Evaluated in doubles from integer inputs, so it is a pure
         // function of (S, n, k) and cannot vary run to run.
-        const double separationCut = ( double( S ) + 0.5 ) / std::exp2( double( marginBits ) ) - 0.5;
+        const double separationCut = ( double( statsS ) + 0.5 ) / std::exp2( double( marginBits ) ) - 0.5;
         std::vector<char> suppressible( uniqueCount, 0 );
         std::size_t       presentCount = 0, survivorCount = 0;
         for( std::size_t u = 0; u < uniqueCount; ++u )
@@ -1231,7 +1250,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     }
                 }
                 rw::emitTo( stderr, "term-margin: \"{}\" df={}/{} nameDf={} bits={} {}\n",
-                              uniqueToks[u].c_str(), dfMargin[u], S, nameDf[u], marginBits, verdict );
+                              uniqueToks[u].c_str(), dfMargin[u], statsS, nameDf[u], marginBits, verdict );
             }
             rw::emitTo( stderr, "term-margin: {} present, {} survive, suppression {}\n",
                           presentCount, survivorCount, applySuppression ? "applied" : "withheld (sole-anchor)" );
@@ -1240,12 +1259,24 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
     // corpus stats — avgdl accumulates in the SAME doc order as before (identical doubles); dfreq[u] =
     // number of docs containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it)
-    double avgdl = 0;
-    for( int d : dl )
+    // statsOut: the counted units' average (the same doc order: identical doubles when every unit counts) scores the
+    // counted units; an OUT unit scores against the whole corpus (avgdlAll, S, its df plus dfOut), as with no statsOut.
+    double avgdl = 0, avgdlAll = 0;
+    for( std::size_t i = 0; i < S; ++i )
     {
-        avgdl += d;
+        avgdl += statsWeight( i ) != 0 ? dl[i] : 0;
+        avgdlAll += dl[i];
     }
-    avgdl /= double( S ? S : 1 );
+    avgdl /= double( statsS ? statsS : 1 );
+    avgdlAll /= double( S ? S : 1 );
+    std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
+    const auto       countOut = [ & ]( const int* tfRow )
+    {
+        for( std::size_t u = 0; u < uniqueCount; ++u )
+        {
+            dfOut[u] += tfRow[u] > 0 ? 1 : 0;
+        }
+    };
 
     const Bm25Params    bm25Params = resolveBm25Params();       // A4: the ONE definition — see above
     const double        k1 = bm25Params.k1, b = bm25Params.b;
@@ -1266,11 +1297,16 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             const int* tfRow = tfFlat.data() + i * uniqueCount;
             bool       any   = false;
+            const int  w     = statsWeight( i );
+            if( w == 0 )
+            {
+                countOut( tfRow );
+            }
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
                 if( tfRow[u] > 0 )
                 {
-                    ++dfreq[u];
+                    dfreq[u] += w;
                     if( tfRow[u] > tfMaxOf[u] )
                     {
                         tfMaxOf[u] = tfRow[u];
@@ -1309,13 +1345,16 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
-                if( dfreq[u] == 0 || termKept[u] == 0 )
+                if( dfreq[u] + dfOut[u] == 0 || termKept[u] == 0 )
                 {
                     continue; // never contributes anywhere — a suppressed term's cap stays 0, and a cap of
                               // 0 bounds a contribution of 0, so the MaxScore proof below is unchanged
                 }
                 const int    n    = dfreq[u];
-                const double idf  = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+                const int    nAll = n + dfOut[u];   // an OUT unit's idf: the larger of the two bounds the contribution
+                const double idfIn  = n > 0 ? std::log( ( double( statsS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 ) : 0.0;
+                const double idfAll = dfOut[u] > 0 ? std::log( ( double( S ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
+                const double idf  = std::max( idfIn, idfAll );
                 const double T    = double( tfMaxOf[u] );
                 const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
                 capOcc[u]         = cap1 * double( occCount[u] );
@@ -1349,6 +1388,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
 
             // exact score — the IDENTICAL expressions, in the IDENTICAL order, as the exhaustive branch
+            const bool   outI = statsWeight( i ) == 0;
+            const double Si   = outI ? double( S ) : double( statsS );
+            const double avgI = outI ? avgdlAll : avgdl;
             double sc = 0;
             for( std::size_t qi = 0; qi < qToks.size(); ++qi )
             {
@@ -1362,9 +1404,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 {
                     continue; // termKept is all-1 disarmed, so this reads as the historical `tf == 0`
                 }
-                const int    n   = dfreq[u];
-                const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-                sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
+                const int    n   = dfreq[u] + ( outI ? dfOut[u] : 0 );
+                const double idf = std::log( ( Si - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+                sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgI > 0 ? avgI : 1.0 ) ) );
             }
             if( ing.symbols[i].kind == SymKind::Section )
             {
@@ -1399,17 +1441,25 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     std::vector<int> dfreq( uniqueCount, 0 );
     for( std::size_t i = 0; i < S; ++i )
     {
+        const int w = statsWeight( i );
+        if( w == 0 )
+        {
+            countOut( tfFlat.data() + i * uniqueCount );
+        }
         for( std::size_t u = 0; u < uniqueCount; ++u )
         {
             if( tfFlat[i * uniqueCount + u] > 0 )
             {
-                ++dfreq[u];
+                dfreq[u] += w;
             }
         }
     }
 
     for( std::size_t i = 0; i < S; ++i )
     {
+        const bool   outI = statsWeight( i ) == 0;
+        const double Si   = outI ? double( S ) : double( statsS );
+        const double avgI = outI ? avgdlAll : avgdl;
         double sc = 0;
         for( std::size_t qi = 0; qi < qToks.size(); ++qi )
         {
@@ -1423,9 +1473,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             {
                 continue; // old: docs[i].find( qt ) == end — termKept is all-1 disarmed, so this is that
             }
-            const int    n   = dfreq[u];
-            const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-            sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
+            const int    n   = dfreq[u] + ( outI ? dfOut[u] : 0 );
+            const double idf = std::log( ( Si - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+            sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgI > 0 ? avgI : 1.0 ) ) );
         }
         // Markdown headings (sec) compete on name-match with code; down-weight so a doc stays FINDABLE but
         // code wins when both match — fixes prose swamping retrieval in doc-heavy repos (review finding #4).
@@ -2450,6 +2500,67 @@ inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
         }
     }
     return std::nullopt;
+}
+
+// is w[0..i) a lead-in a path question may open with: nothing, or `trace|show|explain` / `what is`, then an optional `the`, then an
+// optional `call|code|execution` (`trace the call path from`, `what is the execution path from`, `path from`)? (S7, rv-py-mod2)
+inline bool graphSubjectPathLeadIn( std::span<const std::string_view> w )
+{
+    std::size_t k = 0;
+    if( k < w.size() && detail::graphSubjectWordIs( w[k], { "trace", "show", "explain" } ) )
+    {
+        ++k;
+    }
+    else if( k + 1 < w.size() && detail::graphSubjectWordIs( w[k], { "what" } ) && detail::graphSubjectWordIs( w[k + 1], { "is" } ) )
+    {
+        k += 2;
+    }
+    k += k < w.size() && detail::graphSubjectWordIs( w[k], { "the" } ) ? 1 : 0;
+    k += k < w.size() && detail::graphSubjectWordIs( w[k], { "call", "code", "execution" } ) ? 1 : 0;
+    return k == w.size();
+}
+
+// the FROM slot of `path from A to B` alone (applyPathFromUpstreamCut): A's candidates even when B names no symbol (`to the migrate
+// command's handle`), which parseGraphSubject refuses as a whole; `toCands`, when given, gets B's (often none). Empty unless the task IS a
+// path question: `path from` opens it (graphSubjectPathLeadIn: `trace the call path from`, `what is the path from`), and it does not also
+// ask for callers (`who calls` / `callers of`, whose rows the rule would move: S7, rv-py-mod2). `strip the directory path from a_start()
+// to ...` is not one.
+inline std::vector<std::string> parseGraphSubjectPathFrom( std::string_view task, std::vector<std::string>* toCands = nullptr )
+{
+    const std::vector<std::string_view> w = splitRouteWords( task );
+    for( std::size_t i = 0; i + 1 < w.size(); ++i )
+    {
+        if( ( detail::graphSubjectWordIs( w[i], { "who" } ) && detail::graphSubjectWordIs( w[i + 1], { "calls" } ) )
+            || ( detail::graphSubjectWordIs( w[i], { "caller", "callers" } ) && detail::graphSubjectWordIs( w[i + 1], { "of" } ) ) )
+        {
+            return {};
+        }
+    }
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        if( detail::graphSubjectWordIs( w[i], { "path" } ) && routeLower( w[i + 1] ) == "from" )
+        {
+            if( !graphSubjectPathLeadIn( std::span<const std::string_view>( w.data(), i ) ) )
+            {
+                return {};
+            }
+            for( std::size_t k = i + 3; k + 1 < w.size(); ++k )
+            {
+                if( routeLower( w[k] ) == "to" )
+                {
+                    std::string span;
+                    if( toCands != nullptr )
+                    {
+                        std::string toSpan;
+                        *toCands = detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + k + 1, w.size() - k - 1 ), toSpan );
+                    }
+                    return detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + i + 2, k - i - 2 ), span );
+                }
+            }
+            return {};
+        }
+    }
+    return {};
 }
 
 inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )

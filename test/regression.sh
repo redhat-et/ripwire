@@ -403,6 +403,7 @@ for _g in \
     cpptmplscopecheck \
     crashsweepcheck \
     crawlescapecheck \
+    crootincludecheck \
     crossdirincludecheck \
     crossrefcheck \
     crossrefdegradecheck \
@@ -500,6 +501,7 @@ for _g in \
     fieldusescheck \
     filerootcheck \
     fileselectorrefusecheck \
+    filesetcheck \
     fillordercheck \
     fixedbufsweep \
     flagscheck \
@@ -631,6 +633,7 @@ for _g in \
     langcensuscheck \
     langcheck \
     langidentitycheck \
+    largeallocpeakcheck \
     layerquerycheck \
     layoutcheck \
     lb3namecheck \
@@ -796,6 +799,7 @@ for _g in \
     prcontextcheck \
     prconvergecheck \
     precedencecheck \
+    preludevetocheck \
     preproccondcheck \
     preprocdeadscalecheck \
     prmaskanchorcheck \
@@ -807,6 +811,7 @@ for _g in \
     pyaliascallcheck \
     pyimportlayoutcheck \
     pyimportprecisecheck \
+    pymodcallsitescheck \
     pymodulealiascheck \
     pyshapecheck \
     qackconcurrencycheck \
@@ -881,6 +886,7 @@ for _g in \
     reportcheck \
     resolvecheck \
     resolverhonestycheck \
+    restdocscheck \
     retrievalqualitycheck \
     reusefirstworkflowcheck \
     ripwirepubliccheck \
@@ -952,6 +958,7 @@ for _g in \
     skillevalcheck \
     skillevalsplitcheck \
     skillinstallcheck \
+    skilllangdriftcheck \
     skillroutingjudgedcheck \
     skillscanreadcheck \
     skilltruthcheck \

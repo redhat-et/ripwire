@@ -104,10 +104,12 @@ These aren't a "moment" you land in; they're reflexes you carry into every momen
 
 ## Wrong tool for the job
 
-ripwire parses **C++, C, ObjC/ObjC++, Metal (MSL), C#, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go,
-Rust, Swift; JSON (config keys)** — nothing else. A repo in another language (PHP, Kotlin, ...) gets a silently thin or
-empty map, not an error — don't mistake that for
-"nothing here." Reach for plain `rg` + reads instead. And ripwire maps *structure*, not build/link state — a
+`ripwire --help` (its **Languages** line) is the source of truth for what gets parsed; it grows, so trust it over any copy.
+Today: C-family (C, C++, ObjC/ObjC++, Metal, CUDA), Python, TypeScript, JavaScript, Java, Kotlin, C#, Go, Rust, Swift,
+Ruby, PHP, Lua, Elixir, Dart, Clojure, GDScript, Bash; JSON/TOML/YAML (config keys); Markdown (headings are sections).
+A repo in a language not on that line (Haskell, OCaml, Scala, Zig, ...) gets an empty map whose header names the skipped
+extensions (`unindexed=`) — don't mistake that for "nothing here"; reach for plain `rg` + reads instead. Supported
+languages are not "thin": try the map first. And ripwire maps *structure*, not build/link state — a
 build failure or a linker error is the compiler's/linker's question, not ripwire's; it can still tell you
 *where* the broken symbol lives (`--grep`/`--callers`), just not why the toolchain rejected it.
 

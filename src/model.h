@@ -232,6 +232,12 @@ inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Clojur
 // ...and the cache readers validate every cached Lang byte against it, so a stale kLangCount would also refuse
 // the new language's records. The compile-time proof (infra/enumcount.h) makes the append a build error instead.
 static_assert( enumCountIsExact<Lang, kLangCount>(), "kLangCount must name the LAST Lang enumerator — move it with the append" );
+// The documentation language: a Markdown heading, or a reST/Sphinx title, object directive or label (docparse.h, ingest_rest.h) is
+// Lang::Markdown, and no code grammar mints it. The ONE spelling of "is this a doc unit" (test/langidentity: no per-site compares).
+inline constexpr bool isDocLang( Lang l ) noexcept
+{
+    return l == Lang::Markdown;
+}
 
 // short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt|gd|clj").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
@@ -905,6 +911,8 @@ struct Symbol
     // cache record, so kParserVer gates it like every other extracted fact. 0 (the SAFE state) means "no internal
     // linkage found", so a grammar that never sets it keeps today's gather. Shares testScope's byte as a bit-field:
     // Symbol has no pad byte left (the static_assert below holds unchanged).
+    // RUST (EDGE-PRELUDE-VETO): on a `macro_rules!` the same bit means NO #[macro_export]: the macro is textually scoped (its file, child
+    // modules, a `#[macro_use] mod` parent's: graph.h rustMacroScopeOf), so a `name!(..)` elsewhere does not bind it.
     std::uint8_t  internalLinkage : 1 = 0;
     // STD-ROOTED SCOPE (#150, C++ only): 1 ⇒ walking this def's FULL enclosing-owner chain out to the
     // translation unit, the OUTERMOST namespace found is literally `std` — i.e. this def genuinely lives
@@ -1755,6 +1763,10 @@ struct RubyMainMixinRow
 // (`?f`). No identifier starts with it, so no name lookup ever matches the record; graph.h pythonRenamedImportPin reads it as "f may
 // be unbound", the case where a module `__getattr__` (PEP 562, consulted only for names the module lacks) answers instead.
 inline constexpr std::string_view kPythonCondDefPrefix = "?";
+// MF7 (PY-MOD-CALL-SITES): a Python from-import at MODULE scope inside a compound statement (it may not run) files a VarDecl `?:y`
+// per name y it binds. No identifier starts with `?` or `:`, so no name lookup and no kPythonCondDefPrefix probe (`?f`) matches it;
+// graph.h finalizePythonSubmoduleBinds reads it as "this from-import of y may not run": a star import before it may be what binds y.
+inline constexpr std::string_view kPythonCondImportPrefix = "?:";
 // A Python lambda parameter or comprehension target `K` files a VarDecl spelled `~K` at the lambda / comprehension (its enclosing def's
 // scope, else module scope). No identifier starts with it, so no name lookup ever matches the record; src/regindex.h reads it as "K is
 // another variable here" (a registrar key named like a lambda parameter is not the key).

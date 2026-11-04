@@ -91,7 +91,16 @@ int main( int argc, char** argv )
 
     // ── (d) transitive closure over the 3-file chain a.h -> b.h -> c.h ───────────────────────────
     const auto adj   = buildPreciseIncludeAdj( ing );
-    const auto trans = transitiveIncludeSet( adj );
+    const auto rowsOfStore = []( const rw::FileSetStore& store )
+    {
+        std::vector<std::vector<NodeId>> rows( store.fileCount() );
+        for( std::uint32_t f = 0; f < store.fileCount(); ++f )
+        {
+            store.forEach( f, [ & ]( const std::uint32_t id ) { rows[f].push_back( id ); } );
+        }
+        return rows;
+    };
+    const auto trans = rowsOfStore( transitiveIncludeSet( adj ) );
     const auto has   = []( const std::vector<NodeId>& v, std::uint32_t x )
     { for( NodeId n : v ) { if( n == x ) { return true; } } return false; };
 
@@ -173,7 +182,7 @@ int main( int argc, char** argv )
             std::sort( synth[i].begin(), synth[i].end() );
             synth[i].erase( std::unique( synth[i].begin(), synth[i].end() ), synth[i].end() );
         }
-        const auto got = transitiveIncludeSet( synth );
+        const auto got = rowsOfStore( rw::buildFileClosure( synth ) );
 
         bool bigEnough = false, matches = true, sortedAll = true, uniqueAll = true;
         std::size_t maxClosure = 0;
@@ -214,7 +223,7 @@ int main( int argc, char** argv )
     }
 
     // ── determinism: build the set twice, identical ──────────────────────────────────────────────
-    const auto trans2 = transitiveIncludeSet( buildPreciseIncludeAdj( ing ) );
+    const auto trans2 = rowsOfStore( transitiveIncludeSet( buildPreciseIncludeAdj( ing ) ) );
     bool identical = ( trans.size() == trans2.size() );
     for( std::size_t f = 0; identical && f < trans.size(); ++f )
     {

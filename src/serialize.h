@@ -277,10 +277,11 @@ inline const char* multiRootTableLegend( bool multiRoot ) noexcept
 // `git grep -c 'xmlCommentText(' -- src/` (excluding this definition) and FAILS if it disagrees with the
 // count on the CALL-SITES line below, so the next divergence is a red gate rather than a stale sentence.
 //
-//   CALL-SITES: 16
+//   CALL-SITES: 17
 //     main.cpp     --for task echo · --exemplar request note · --query route note
 //                  · --run-trace command echo (runTraceLegendComment)                   (4)
 //     packtask.h   task · mention · co-change-boost · doc-mention notes                 (4)
+//                  · path-from upstream-callers note (PATH-FROM-UPSTREAM)                (1)
 //                  · siblift · expand lift notes (2026-09-10 lift disclosure)             (2)
 //                  · W2-K restated body-omission marker name echo                       (1)
 //     mcpverbs.h   for/pack-task task · exemplar request note                           (2)
@@ -1119,6 +1120,7 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 inline constexpr std::size_t kForFileTailShownCap     = 24;   // the rank rows (deep-tail d2): files outside the shown head
 inline constexpr std::size_t kForFileTailPageRows     = 40;   // FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault)
 inline constexpr std::size_t kForFileTailShellReserve = 48;
+inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h)
 
 // The legend clause defining BOTH deep-tail surfaces (the r= rank fact and the <tail> element) — a named
 // constant, shared by the CLI --for header and the MCP `for` twin, so the sigs-budget exemption in each
@@ -1131,6 +1133,14 @@ inline constexpr std::string_view kForFileTailLegend =
     "sym= its top symbols by lens rank (a pointer, not the answer); "
     "total=every positive-score file, shown=printed, capped=1 when they differ, next= the page from its first unprinted row. "
     "r= on a ranked row is its 1-based rank in this lens ranking, rows in r= order, p= the file (a gap = a budget-trimmed row)";
+// docs-rest CI fix 2: the order the tail really uses on a CODE question (filter.h taskAsksForDocText false; forpage.h
+// computeFileTail): every code row of both parts, then the doc rows. Present-only beside kForFileTailLegend, where that order
+// applies (forpage.h tailOrdersCodeFirst: a code question over an index holding a doc unit); a question asking for doc text keeps
+// the plain interleaved walk, and an index with no doc unit has no doc row to move, so neither carries it.
+// Sigs-charge-exempt with the clause it qualifies. No "--" (it rides inside an XML comment).
+inline constexpr std::string_view kForFileTailCodeFirstLegend =
+    "; tail order on this code question: every code file of both parts first, each part in the order above, then the doc "
+    "files (.md, .rst, a Sphinx .txt page) in that order";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,
@@ -2844,6 +2854,26 @@ inline std::string buildMemoryStopAttr( const IngestResult& ing, bool json )
          + ( m.byPressure ? " memory_pressure=1" : "" );
 }
 
+// The overshoot (memguard.h "the overshoot"): the run's memory peak went over the limit between two of the guard's readings,
+// and the run finished and answered. memory_peak= is the peak, memory_limit= the limit it passed, spelled as the max-memory
+// value that raises it (left to buildMemoryStopAttr when a stop already carries it). Absent on every run that stayed under
+// its limit, so every normal run is byte-identical. XML header-comment and JSON spellings.
+inline std::string buildMemoryPeakAttr( const IngestResult& ing, bool json )
+{
+    const std::uint64_t peak = memguard::runPeakOverLimit();
+    if( peak == 0 )
+    {
+        return {};
+    }
+    const std::string peakText  = memguard::limitSpelling( peak );
+    const std::string limitText = ing.memoryStop.isSet() ? std::string() : memguard::limitSpelling( memguard::limits().hardBytes );
+    if( json )
+    {
+        return "\"memory_peak\":\"" + peakText + "\"," + ( limitText.empty() ? std::string() : "\"memory_limit\":\"" + limitText + "\"," );
+    }
+    return " memory_peak=" + peakText + ( limitText.empty() ? std::string() : " memory_limit=" + limitText );
+}
+
 // The per-symbol honesty counters (graph.h ambOut / unresolvedOut / locPinOut) reach both map dialects as
 // NULLABLE vectors — nullptr ⇒ never measured (a pure sizing pass). These two are the only ways the emitters
 // read them, so "an absent counter reads as zero" is stated once instead of in six hand-rolled chains.
@@ -3505,7 +3535,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
     const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
-    const std::string memoryAttr    = buildMemoryStopAttr( ing, false );      // #350, empty unless the memory guard stopped the ingest
+    const std::string memoryAttr    = buildMemoryStopAttr( ing, false ) + buildMemoryPeakAttr( ing, false );   // #350, empty unless the memory guard stopped the ingest or the peak passed the limit
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -10040,7 +10070,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 // directory name: test/, tests/, bench/) AND every file that depends on it is a test path (isTestPath) — both
 // by path, nothing is parsed. A production file under test/ (src/*.cpp includes ../test/lib/hooks.h) therefore
 // stays ranked. `adj` is the same file→file graph the afferent counts come from; the result is indexed by file id.
-inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const rw::FileAdjacency& adj )
 {
     const std::uint32_t       F = std::uint32_t( ing.files.size() );
     std::vector<std::uint8_t> prodDependent( F, 0 );
@@ -10100,14 +10130,14 @@ inline std::vector<std::uint32_t> depsGodfileRows( const IngestResult& ing, cons
 struct DepsCycleView
 {
     const std::vector<std::vector<std::uint32_t>>& cycles;
-    const std::vector<std::vector<std::uint32_t>>* adj              = nullptr;
+    const rw::FileAdjacency*                       adj              = nullptr;
     std::uint64_t                                  containmentEdges = 0;
 };
 
 inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       const DepsCycleView& cycleView,
                       const std::vector<std::uint32_t>& transitive, const std::vector<std::uint32_t>& afferent,
-                      const std::vector<std::vector<std::uint32_t>>& adj,
+                      const rw::FileAdjacency& adj,
                       std::uint64_t ccd, double acd, double nccd,
                       // parser version 83: the lazy pairs the load-time structure leaves out — per file (a row's
                       // lazy_edges=, written only when > 0) and in total (<health lazy_edges=>, same rule). See
@@ -10128,7 +10158,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
 {
     const std::size_t F = ing.files.size();
     const std::vector<std::vector<std::uint32_t>>& cycles           = cycleView.cycles;
-    const std::vector<std::vector<std::uint32_t>>& cutAdj           = cycleView.adj != nullptr ? *cycleView.adj : adj;
+    const rw::FileAdjacency&                       cutAdj           = cycleView.adj != nullptr ? *cycleView.adj : adj;
     const std::uint64_t                            containmentEdges = cycleView.containmentEdges;
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
@@ -10739,6 +10769,8 @@ struct JsonMapHeader
     bool                             isEstModelled      = false;   // MapEstimate: "est_measured":false, absent when measured
     DataSectionsCut                  dataSectionsCut    = {};      // the code-first pick's swaps: "data_sections_cut":N + "next", absent at N=0
     std::size_t                      stemCut            = 0;       // MAP-STEM: "stem_cut":N, the XML stem_cut=, absent at N=0
+    std::string_view                 memoryPeakJson     = {};      // buildMemoryPeakAttr( ing, true ), read ONCE per serializeJson call (the
+                                                                   // peak reading only rises and the seam counts calls); kept last, the struct is filled positionally
 };
 
 // §B1.2: the PROVENANCE stamp — the JSON half of the XML `<r at= rank_by= window=>` attributes. Without it
@@ -10913,6 +10945,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         w.write( hdr );
     }
     w.write( buildMemoryStopAttr( h.ing, true ) );   // #350, JSON lane: empty unless the memory guard stopped the ingest
+    w.write( h.memoryPeakJson );   // the overshoot: empty unless the peak went over the limit (read once by the caller)
 
     // §SEC1, JSON lane: the crawl-boundary refusal must reach --json/MCP consumers too, by the same argument
     // skipped_oversize= makes one paragraph up — the audience most likely to be a model is the one least able
@@ -11189,7 +11222,9 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     }
 
     // ONE header emitter, used by the degrade write, the size probe and the real write, so the three can
-    // never disagree on the header's shape.
+    // never disagree on the header's shape. The peak attribute is read here once for all three: a second reading may
+    // pass the limit the first did not, and the probe would then have priced a shorter header than the one written.
+    const std::string memoryPeakJson = buildMemoryPeakAttr( ing, true );
     std::string esc;
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
@@ -11197,7 +11232,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
                                                     unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls, declinedTotal,
                                                     extentSuspectTotal, macroBlankedFileCount( ing ), ing.crawlSkips.nestRefusedFiles,
-                                                    estimate.isModelled, dataSecCut, stemPick.cut } );
+                                                    estimate.isModelled, dataSecCut, stemPick.cut, memoryPeakJson } );
         hw.write( ",\"r\":[" );
     };
 

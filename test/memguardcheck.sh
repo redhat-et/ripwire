@@ -584,8 +584,8 @@ else
     no "(B7c) no answer to id=4"
 fi
 
-# (B8) the REAL reading (no seam): a fixture whose parsed facts alone sit far over 64M (80 files x 1500 small functions;
-#      unguarded peak 150-185M), so the hard line after the ingest fires on its own reading.
+# (B8) the REAL reading (no seam): a fixture whose parsed facts alone sit far over 64M (160 files x 1500 small functions),
+#      so the hard line after the ingest fires on its own reading.
 # (B8b) the seam is ADDITIVE: a trip that never fires (crawl:999999999) does not switch the real guard off — the same
 #      run under that seam still ends on the real hard line.
 #   0.6.6 (#364): both arms used to run on this repo's src/, whose footprint AT THE HARD LINE (not its peak: 72-93M on a
@@ -596,6 +596,9 @@ fi
 #   off". The run is not guarded per allocation: a sub-five-second transient over the limit between phase readings is the
 #   documented contract, so this was the gate's assumption, not a product gap. On $EG both runs measured rc 5 with the
 #   ingest line 40/40 (with and without the seam; 3/4/10/16 workers; foreground and taskpolicy -b; 0.7-4.7 s).
+#   Since largealloc.cpp (macOS) the freed blocks no longer carry the reading: 80 big files peak at 134M and sat on the line
+#   (6 of 12 graph-build line, 4 ingest line, 2 complete under `taskpolicy -b`), so the fixture doubled to 160, and any real
+#   line counts: either hard line, or the time-gated parse stop on a slow host, which discloses itself.
 EG="$TMP/eg"; mkdir -p "$EG"
 python3 - "$EG" <<'PY2'
 import os, sys
@@ -605,27 +608,130 @@ for d in "abcdefgh":
     for f in range( 40 ):
         open( os.path.join( root, d, "f%02d.c" % f ), "w" ).write( "int %s_%d(int x){ return x; }\n" % ( d, f ) )
 os.makedirs( os.path.join( root, "z" ), exist_ok=True )
-for f in range( 80 ):
-    open( os.path.join( root, "z", "big%02d.c" % f ), "w" ).write(
+for f in range( 160 ):
+    open( os.path.join( root, "z", "big%03d.c" % f ), "w" ).write(
         "".join( "int z%d_%d(int x){ return x>0 ? z%d_%d(x-1)+%d : %d; }\n" % ( f, k, f, ( k + 1 ) % 1500, k, k ) for k in range( 1500 ) ) )
 PY2
+b8real(){ # rc out err: a real line fired. A hard line, or on a slow host the time-gated parse stop, which discloses itself
+    { [ "$1" = 5 ] && grep -Eq '^ripwire: memory limit reached during the (ingest|graph build)' "$3" && [ ! -s "$2" ]; } \
+        || { [ "$1" = 0 ] && grep -q 'memory_stop=' "$2"; }
+}
 b8why(){ printf 'rc=%s memory_stop=%s stdout=%sB stderr: %s' "$1" "$( grep -oE 'memory_stop=[a-z]+' "$2" | head -1 | cut -d= -f2 )" "$( wc -c < "$2" | tr -d ' ' )" "$( grep '^ripwire:' "$3" | head -c 200 )"; }
 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8.out" 2>"$TMP/b8.err"; rc=$?
-if [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$TMP/b8.err" && [ ! -s "$TMP/b8.out" ]; then
-    ok "(B8) a real footprint over --max-memory=64M (no seam): exit 5 with the ingest line"
+if b8real "$rc" "$TMP/b8.out" "$TMP/b8.err"; then
+    ok "(B8) a real footprint over --max-memory=64M (no seam): a real line stopped the run"
 else
     no "(B8) $( b8why "$rc" "$TMP/b8.out" "$TMP/b8.err" )"
 fi
 RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8b.out" 2>"$TMP/b8b.err"; rc=$?
-# B8b asks one thing: is the REAL guard still on under a never-firing seam. A time-gated soft stop is the real guard too
-# (macOS CI leg, 2026-11-02: rc 0, memory_stop=crawl in the answer, "the memory guard stopped the parse" on stderr), so it
-# passes; a run with no memory_stop and no guard line, the disabled-guard shape, still fails.
-if [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$TMP/b8b.err" && [ ! -s "$TMP/b8b.out" ]; then
-    ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 still exits 5 with the ingest line)"
-elif [ "$rc" = 0 ] && grep -qE 'memory_stop=[a-z]+' "$TMP/b8b.out" && grep -q '^ripwire: the memory guard stopped' "$TMP/b8b.err"; then
-    ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 ended on the real guard's disclosed soft stop)"
+# B8b asks one thing: is the REAL guard still on under a never-firing seam. A real line (ingest or graph build) passes; a
+# time-gated soft stop is the real guard too (macOS CI leg, 2026-11-02: rc 0, memory_stop=crawl in the answer, "the memory
+# guard stopped the parse" on stderr), so it passes when it says so on stderr; a run with no memory_stop and no guard line,
+# the disabled-guard shape, still fails.
+if b8real "$rc" "$TMP/b8b.out" "$TMP/b8b.err" && { [ "$rc" = 5 ] || grep -q '^ripwire: the memory guard stopped' "$TMP/b8b.err"; }; then
+    ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 still stops on a real line)"
 else
     no "(B8b) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8b.out" "$TMP/b8b.err" )"
+fi
+# (B8s, B8bs) the STRICT twins of the two arms above (PROCESS rule 4: a loosened arm keeps its old form). The macOS route
+#      (largealloc.cpp) is what made B8/B8b accept a time-gated soft stop; with RIPWIRE_TEST_LARGEALLOC=off the allocator is
+#      the base one on every OS (the variable is read only by that file), so the old assertion must hold exactly: exit 5,
+#      the ingest line, an empty stdout. A hard line that stopped working would fail here even on a slow host.
+b8strict(){ # rc out err
+    [ "$1" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$3" && [ ! -s "$2" ]
+}
+RIPWIRE_TEST_LARGEALLOC=off "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8s.out" 2>"$TMP/b8s.err"; rc=$?
+if b8strict "$rc" "$TMP/b8s.out" "$TMP/b8s.err"; then
+    ok "(B8s) with the large-block route off: a real footprint over --max-memory=64M exits 5 with the ingest line"
+else
+    no "(B8s) $( b8why "$rc" "$TMP/b8s.out" "$TMP/b8s.err" )"
+fi
+RIPWIRE_TEST_LARGEALLOC=off RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8bs.out" 2>"$TMP/b8bs.err"; rc=$?
+if b8strict "$rc" "$TMP/b8bs.out" "$TMP/b8bs.err"; then
+    ok "(B8bs) with the route off, crawl:999999999 still exits 5 with the ingest line"
+else
+    no "(B8bs) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8bs.out" "$TMP/b8bs.err" )"
+fi
+
+# (B8c) THE OVERSHOOT is disclosed on every path the guard's other messages use (owner 2026-11-01: a run that finishes over
+#       its cap is not stopped, it says so). peak:1 makes the post-run peak reading read over the limit on every OS; the
+#       real band (macOS route) is largeallocpeakcheck.sh arm D. A normal run says nothing.
+peakline='memory peak 65M went over the 64M limit (from --max-memory), and the run finished and answered'
+peakwhy='rule of thumb that keeps the machine from running out of memory, not an exact line'
+"$BIN" "$FX" --no-cache --max-memory=64M >"$TMP/b8c0.out" 2>"$TMP/b8c0.err"; rc0=$?
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M >"$TMP/b8c.out" 2>"$TMP/b8c.err"; rc=$?
+if [ "$rc0" = 0 ] && ! grep -q 'memory peak\|memory_peak' "$TMP/b8c0.out" "$TMP/b8c0.err"; then
+    ok "(B8c) a run under its limit says nothing about a peak"
+else
+    no "(B8c) rc=$rc0 a normal run mentions a peak: $( grep -h 'memory peak\|memory_peak' "$TMP/b8c0.out" "$TMP/b8c0.err" | head -c 200 )"
+fi
+if [ "$rc" = 0 ] && grep -qF "ripwire: $peakline" "$TMP/b8c.err" && grep -qF "$peakwhy" "$TMP/b8c.err" \
+   && grep -q 'raise it with --max-memory=' "$TMP/b8c.err" && [ "$( grep -c '^ripwire: memory peak' "$TMP/b8c.err" )" = 1 ]; then
+    ok "(B8c) an overshoot: one stderr line with the peak, the limit, what the limit is for, and the override"
+else
+    no "(B8c) rc=$rc stderr: $( head -c 400 "$TMP/b8c.err" )"
+fi
+hdr="$( grep -oE '<!-- files=[^>]*-->' "$TMP/b8c.out" | head -1 )"
+if case "$hdr" in *" memory_peak=65M memory_limit=64M"*) true;; *) false;; esac && [ "$( printf '%s' "$hdr" | grep -o 'memory_limit=' | wc -l | tr -d ' ' )" = 1 ] \
+   && ! printf '%s' "$hdr" | grep -q 'memory_stop='; then
+    ok "(B8c) the default map's header carries memory_peak= and memory_limit= once, and no memory_stop="
+else
+    no "(B8c) header: $hdr"
+fi
+if perl -ne 'print $1 if /^(<!-- ripwire map.*?-->)/' "$TMP/b8c.out" | grep -q 'memory_peak='; then
+    ok "(B8c) the legend defines memory_peak= when it rides"
+else
+    no "(B8c) the legend lacks memory_peak="
+fi
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M --grep=a_01 >"$TMP/b8c2.out" 2>"$TMP/b8c2.err"; rc=$?
+if [ "$rc" = 0 ] && grep -qF "ripwire: $peakline" "$TMP/b8c2.err" && ! grep -q 'memory_peak' "$TMP/b8c2.out"; then
+    ok "(B8c) a verb with no header (--grep) says it on stderr only"
+else
+    no "(B8c) --grep rc=$rc stderr: $( head -c 300 "$TMP/b8c2.err" )"
+fi
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c3.out" 2>/dev/null; rc=$?
+if [ "$rc" = 0 ] && grep -q '"memory_peak":"65M","memory_limit":"64M"' "$TMP/b8c3.out"; then
+    ok "(B8c) the JSON map header carries memory_peak and memory_limit"
+else
+    no "(B8c) --json rc=$rc: $( head -c 300 "$TMP/b8c3.out" )"
+fi
+printf '%s\n' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    | RIPWIRE_TEST_MEMGUARD=peak:1 mcp_call "$TMP" --max-memory=64M >"$TMP/b8c4.out"
+mp="$( mcp_field "$TMP/b8c4.out" 2 _memory_peak )"
+case "$mp" in "$peakline"*"$peakwhy"*) ok "(B8c) MCP: the first answer carries _memory_peak with the same sentence";;
+    *) no "(B8c) MCP id=2 _memory_peak='${mp:0:300}'";; esac
+if [ -z "$( mcp_field "$TMP/b8c4.out" 3 _memory_peak )" ]; then
+    ok "(B8c) MCP: the next answer, at the same peak, does not repeat it"
+else
+    no "(B8c) MCP id=3 repeats _memory_peak"
+fi
+# an error built after the index (a not-found) may be a client's last call: it says the peak too, and the next answer does not
+# repeat it (red on 19d60eaa: the error said nothing and only a later success carried it)
+printf '%s\n' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"mentions\",\"arguments\":{\"path\":\"$FX\",\"symbol\":\"no_such_sym\"}}}" \
+    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    | RIPWIRE_TEST_MEMGUARD=peak:1 mcp_call "$TMP" --max-memory=64M >"$TMP/b8c5.out"
+me="$( mcp_field "$TMP/b8c5.out" 2 error )"
+case "$me" in *"symbol not found"*"; memory peak 65M went over the 64M limit (from --max-memory), and this request finished with the error above"*"$peakwhy"*)
+    if [ -z "$( mcp_field "$TMP/b8c5.out" 3 _memory_peak )" ]; then
+        ok "(B8c) MCP: an error after the index says the peak in its message, and the next answer does not repeat it"
+    else
+        no "(B8c) MCP: the answer after the error repeats _memory_peak"
+    fi ;;
+    *) no "(B8c) MCP error id=2 lacks the peak: '${me:0:300}'" ;; esac
+# the JSON header reads the peak once for the size probe and the real write: at peak:2 (the second reading over) the header
+# either lacks memory_peak or its est_tokens priced it (red on 19d60eaa: memory_peak written, est_tokens of the shorter probe)
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c6a.out" 2>/dev/null
+RIPWIRE_TEST_MEMGUARD=peak:2 "$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c6b.out" 2>/dev/null
+"$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c6c.out" 2>/dev/null
+est(){ grep -oE '"est_tokens":[0-9]+' "$1" | head -1; }
+if grep -q '"memory_peak"' "$TMP/b8c6b.out"; then want="$( est "$TMP/b8c6a.out" )"; else want="$( est "$TMP/b8c6c.out" )"; fi
+if [ -n "$want" ] && [ "$( est "$TMP/b8c6b.out" )" = "$want" ]; then
+    ok "(B8c) --json at peak:2: est_tokens prices the header actually written ($want)"
+else
+    no "(B8c) --json at peak:2: $( est "$TMP/b8c6b.out" ) against $want, memory_peak $( grep -c '"memory_peak"' "$TMP/b8c6b.out" )"
 fi
 
 # (B9) the pressure path: a pressure stop is disclosed as such, and a pressure stop with nothing built says pressure
@@ -740,6 +846,25 @@ elif [ "$rc" = 5 ] && grep -q '^ripwire: .*cannot answer from a partial index' "
 else
     no "(B21) rc=$rc elapsed=${el}s stream-finished-before-return=$( [ -e "$SHIM/log-done" ] && echo yes || echo no ) (the shim's log streams for 6 s; a join waits it out) stderr: $( grep '^ripwire:' "$TMP/b21.err" | head -c 200 )"
 fi
+# (B21b) the same for a stopped include-closure fold: FileGraphStopped unwinds dispatchMainBody, whose historyWalks future joins
+#        on the way, so the walk must be abandoned before that destructor runs, not in dispatchMain's catch after it.
+#        Same shim, same verdict: the refusal returned while the stream had not finished. Neighbour: --metrics starts the walk too.
+#        The fixture has include edges and is a git repo: a fold over no edge never reaches the seam, and an rc=0 here is a FAIL.
+FXB="$TMP/b21bfx"; cp -R "$ROOT/test/filegraphstopfix" "$FXB"
+( cd "$FXB" && git init -q && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm init ) || no "(B21b) premise: the fixture repo did not build"
+for b21verb in --for=helper --metrics; do
+    rm -f "$SHIM/log-served" "$SHIM/log-done"; mkdir -p "$TMP/b21btmp$b21verb"
+    t0=$( date +%s )
+    PATH="$SHIM:$PATH" TMPDIR="$TMP/b21btmp$b21verb" run_trip fold:1 "$FXB" --no-cache "$b21verb" >"$TMP/b21b.out" 2>"$TMP/b21b.err"; rc=$?
+    el=$(( $( date +%s ) - t0 ))
+    if [ ! -e "$SHIM/log-served" ]; then
+        no "(B21b) $b21verb premise: the shim never served a git log --name-only (rc=$rc)"
+    elif [ "$rc" = 5 ] && [ ! -s "$TMP/b21b.out" ] && grep -q '^ripwire: .*include-closure fold' "$TMP/b21b.err" && [ ! -e "$SHIM/log-done" ]; then
+        ok "(B21b) $b21verb over a stopped fold refuses in ${el}s while the shim's log still streams: the walk is abandoned, not joined"
+    else
+        no "(B21b) $b21verb rc=$rc elapsed=${el}s stream-finished-before-return=$( [ -e "$SHIM/log-done" ] && echo yes || echo no ) stderr: $( grep '^ripwire:' "$TMP/b21b.err" | head -c 200 )"
+    fi
+done
 # (B16) --query --format=candidates is a report verb, so it refuses a partial index like the rest (pinned: its
 #       <candidates> root has no header to carry the cut)
 run_trip parse:10 "$FX" --no-cache --query=d_17 --format=candidates >"$TMP/b16.out" 2>"$TMP/b16.err"; rc=$?

@@ -105,6 +105,9 @@ COLD_FILES = (
     ( "src/ingest_docs.h",
       "markdown / notebook / html / csv extraction, per doc file. 4.8 ms of an ~88 ms warm run and 0.07% cold — the same order as the build-model sorts D1 dismisses "
       "on arithmetic. The LoadClobbered cluster in extractMarkdown (447) is real, just cheap. Revisit if the doc pass grows." ),
+    ( "src/ingest_rest.h",
+      "the reST line scan, per doc file, the sibling of the markdown extraction above and dismissed on the same measurement. "
+      "A flat pass with no parse under it. Revisit if a docs-heavy tree shows it." ),
     ( "src/ingest_docpass.h",
       "the driver of the doc extraction above, dismissed on the same measurement. Beware its FIRST warm run after a cold one, which costs ~30 ms rather than ~5: "
       "that is first-touch, not steady state, and it takes three repeats to see. A single run would have put this file in the hot set." ),
@@ -140,6 +143,8 @@ COLD_FILES = (
       "BECAUSE it is thousands of cold functions — volume here measures function count, not heat. Its verbs_*.h sections are cold for the same reason." ),
     ( "src/tsprobe.cpp",
       "the ripwire_probe binary. Not linked into ripwire at all, so nothing in it runs when the tool runs." ),
+    ( "src/largealloc.cpp",
+      "macOS operator new and delete; a block under 256 KiB pays one compare, and the mmap route is called a few thousand times a run" ),
     ( "src/alloccount.cpp",
       "the RIPWIRE_ALLOC_COUNT operator new/delete replacement: absent from every shipped build and from every gate by construction — see the honesty note at the "
       "top of the file." ),
