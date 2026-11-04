@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -202,20 +203,18 @@ inline bool isTaskFrameWord( std::string_view w )
 //     depend on / modify / use", "where does f make API calls") or the name as the subject of a verb cue ("f calls", "f uses");
 //   * "used to <verb>" is a purpose; "API calls", "make calls" are a noun; a negated cue ("I changed nothing in f") asks nothing;
 //   * "using" is a means ("build it using f") except after a form of be ("who is using f").
-inline bool isDependentsNoun( std::string_view w ) { return detail::graphSubjectWordIs( w, { "caller", "callers", "dependent", "dependents" } ); }
-inline bool isCalleeAux( std::string_view w ) { return detail::graphSubjectWordIs( w, { "does", "do", "did", "doesn't", "don't", "didn't" } ); }
-inline bool isAgentCue( std::string_view w )
+inline constexpr std::string_view kDependentsNouns[] = { "caller", "callers", "dependent", "dependents" };
+inline constexpr std::string_view kCalleeAux[]       = { "does", "do", "did", "doesn't", "don't", "didn't" };
+inline constexpr std::string_view kAgentCues[]       = { "calls", "uses", "depends", "modifies", "updates", "affects", "adds", "invokes", "references", "exercises", "renames" };
+inline constexpr std::string_view kCallNounModifiers[] = { "api", "apis", "http", "https", "rpc", "grpc", "network", "remote", "external", "system", "database", "db",
+                                                           "sql", "rest", "make", "makes", "made", "making" };
+inline constexpr std::string_view kNegations[]  = { "not", "never", "no", "nothing", "none", "without", "didn't", "don't", "doesn't", "haven't", "hasn't", "won't" };
+inline constexpr std::string_view kBeForms[]    = { "is", "are", "was", "were", "who's", "what's" };
+// is the (trimmed) word, case-folded, in the closed list?
+inline bool wordIn( std::string_view w, std::span<const std::string_view> list )
 {
-    return detail::graphSubjectWordIs( w, { "calls", "uses", "depends", "modifies", "updates", "affects", "adds", "invokes", "references", "exercises", "renames" } );
-}
-inline bool isCallNounModifier( std::string_view w )
-{
-    return detail::graphSubjectWordIs( w, { "api", "apis", "http", "https", "rpc", "grpc", "network", "remote", "external", "system", "database", "db", "sql",
-                                            "rest", "make", "makes", "made", "making" } );
-}
-inline bool isNegation( std::string_view w )
-{
-    return detail::graphSubjectWordIs( w, { "not", "never", "no", "nothing", "none", "without", "didn't", "don't", "doesn't", "haven't", "hasn't", "won't" } );
+    const std::string lw = routeLower( w );
+    return std::ranges::find( list, std::string_view( lw ) ) != list.end();
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
@@ -323,6 +322,32 @@ inline bool sortSubjectWords( const std::vector<std::string_view>& words, Subjec
     }
     return true;
 }
+// the cue at text[k] asks what depends on the sentence's function (the senses listed above kDependentsNouns)
+inline bool cueInDependentsSense( const std::vector<std::string_view>& text, std::size_t k, bool callee )
+{
+    const std::string_view w    = text[k];
+    const std::string_view prev = k > 0 ? text[k - 1] : std::string_view();
+    const std::string_view next = k + 1 < text.size() ? text[k + 1] : std::string_view();
+    if( wordIn( prev, kNegations ) || wordIn( next, kNegations ) )
+    {
+        return false;
+    }
+    if( wordIn( w, kDependentsNouns ) )
+    {
+        return true;
+    }
+    if( callee )
+    {
+        return false;
+    }
+    if( detail::graphSubjectWordIs( w, { "using" } ) )
+    {
+        return wordIn( prev, kBeForms );
+    }
+    const bool purpose = detail::graphSubjectWordIs( w, { "used" } ) && detail::graphSubjectWordIs( next, { "to" } );
+    const bool noun    = detail::graphSubjectWordIs( w, { "call", "calls" } ) && wordIn( prev, kCallNounModifiers );
+    return isDependentsCue( w ) && !purpose && !noun;
+}
 // a sentence that names ONE function (each mention the same spelling) and asks what depends on it, with few plain words beside the
 // task frame. Two names fire for none: the block would have to guess which one the cue governs ("when f changes, who calls g?").
 inline bool asksDependents( const std::vector<std::string_view>& words, const std::vector<std::string>& dropped )
@@ -345,19 +370,12 @@ inline bool asksDependents( const std::vector<std::string_view>& words, const st
             return false;
         }
         name   = text[k];
-        callee = callee || ( k > 0 && isCalleeAux( text[k - 1] ) ) || ( k + 1 < text.size() && isAgentCue( text[k + 1] ) );
+        callee = callee || ( k > 0 && wordIn( text[k - 1], kCalleeAux ) ) || ( k + 1 < text.size() && wordIn( text[k + 1], kAgentCues ) );
     }
     bool cue = false;
     for( std::size_t k = 0; k < text.size() && !cue; ++k )
     {
-        const std::string_view prev = k > 0 ? text[k - 1] : std::string_view();
-        const std::string_view next = k + 1 < text.size() ? text[k + 1] : std::string_view();
-        const bool             verb = isDependentsCue( text[k] ) && !isDependentsNoun( text[k] );
-        const bool             sense = isDependentsNoun( text[k] )
-            || ( verb && !callee && !( detail::graphSubjectWordIs( text[k], { "used" } ) && detail::graphSubjectWordIs( next, { "to" } ) )
-                 && !( detail::graphSubjectWordIs( text[k], { "call", "calls" } ) && isCallNounModifier( prev ) ) )
-            || ( !callee && detail::graphSubjectWordIs( text[k], { "using" } ) && detail::graphSubjectWordIs( prev, { "is", "are", "was", "were", "who's", "what's" } ) );
-        cue = sense && !isNegation( prev ) && !isNegation( next );
+        cue = cueInDependentsSense( text, k, callee );
     }
     const auto plain = []( const std::string& w ) { return !isTaskFrameWord( w ); };
     return cue && !name.empty() && std::size_t( std::ranges::count_if( dropped, plain ) ) <= kSubjectMaxPlainWords;
