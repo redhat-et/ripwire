@@ -724,17 +724,16 @@ inline std::vector<char> usesChosenCallers( const rw::IngestResult& ing, const r
 }
 
 // ONE use-site row: (file, line, role, enclosing canonical id). File scope ⇒ `in` empty.
-struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; rw::NodeId viaAlias = rw::kNoNode; };   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight; viaAlias: the alias the site is written as (XF-ALIAS-HOP), kNoNode for a direct site
+struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; rw::NodeId viaAlias = rw::kNoNode; bool aliasHedged = false; };   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight; viaAlias: the alias the site is written as (XF-ALIAS-HOP), kNoNode for a direct site
 
 // XF-ALIAS-HOP (aliashop.h AliasReach): the use-sites written as an alias whose chain reaches one of `defs` (`ColumnPtr` for
 // IColumn), each marked with the alias, ranked as the direct sites are and kept AFTER them (the direct rows keep their order and
-// bytes). A site inside a reached alias's own declaration is the chain itself, not a use. `namesakes`: definitions sharing a listed
-// alias's name that reach none of `defs` (their sites are name-matched with the rest: a hedge the root discloses).
+// bytes). A site inside a reached alias's own declaration is the chain itself, not a use. M1: a site counts only when the alias in
+// scope there (the innermost same-named definition visible from it) is one that reaches `defs`; the rest are kept last, hedged.
 struct AliasUseSites
 {
-    std::vector<UseSite> sites;
-    std::size_t          namesakes = 0;
-    std::size_t          unread    = 0;
+    std::vector<UseSite> sites;   // the proven sites, then the hedged ones (aliasHedged)
+    rw::AliasUsesFacts   facts;
 };
 inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs, std::string_view rootForId );
 
@@ -842,16 +841,17 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
 {
     using namespace rw;
     AliasUseSites out;
-    const AliasReach reach( ing, std::vector<NodeId>( defs.begin(), defs.end() ) );   // once per answer, never per site
-    out.unread = reach.unread;
+    AliasReach reach( ing, std::vector<NodeId>( defs.begin(), defs.end() ) );   // once per answer, never per site
+    out.facts.unread = reach.unread;
+    out.facts.capped = reach.capped;
     if( reach.empty() )
     {
         return out;
     }
-    std::vector<char> isReached( ing.symbols.size(), 0 );
+    std::vector<char> isReached( ing.symbols.size(), 0 );   // 1 reached, 2 reached through a hop bound by name only
     for( const AliasReach::Row& r : reach.rows )
     {
-        isReached[ r.alias ] = 1;
+        isReached[ r.alias ] = r.hedged ? 2 : 1;
     }
     std::vector<std::string_view> names;   // distinct alias names, first reached alias id order
     std::vector<NodeId>           nameAlias;
@@ -864,33 +864,121 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
             nameAlias.push_back( r.alias );
         }
     }
+    // every definition of each name (reached or not) with its enclosing path: what a site's scope test picks from
+    struct NameDef
+    {
+        NodeId                   id;
+        std::vector<std::string> path;
+    };
+    std::vector<std::vector<NameDef>> named( names.size() );
+    {
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> at;
+        for( const std::string_view n : names )
+        {
+            for( const NodeId d : resolveAllByName( ing, n ) )
+            {
+                at.emplace_back( ing.symbols[ d ].fileId, ing.symbols[ d ].sigStartByte );
+            }
+        }
+        aliashop_detail::primeChains( ing, std::move( at ), reach.cache );
+    }
     for( std::size_t k = 0; k < names.size(); ++k )
     {
         for( const NodeId d : resolveAllByName( ing, names[ k ] ) )
         {
-            out.namesakes += ( ing.symbols[ d ].name == names[ k ] && !isReached[ d ] ) ? 1 : 0;
+            if( ing.symbols[ d ].name != names[ k ] )
+            {
+                continue;
+            }
+            out.facts.namesakes += isReached[ d ] ? 0 : 1;
+            NameDef nd{ d, {} };
+            aliashop_detail::enclosingPath( ing, ing.symbols[ d ], reach.cache, nd.path );
+            named[ k ].push_back( std::move( nd ) );
         }
     }
     // ONE pass over the references for every alias name (sorted for the scan's binary search), then each site is told its alias
-    std::vector<std::pair<std::string_view, NodeId>> byName;
+    std::vector<std::pair<std::string_view, std::size_t>> byName;
     for( std::size_t k = 0; k < names.size(); ++k )
     {
-        byName.emplace_back( names[ k ], nameAlias[ k ] );
+        byName.emplace_back( names[ k ], k );
     }
     std::ranges::sort( byName );
     std::vector<std::string_view> sorted;
-    std::vector<NodeId>           tags;
-    for( const auto& [ n, id ] : byName )
+    std::vector<NodeId>           tags;   // the name's index rides as the tag: the site's own alias is picked below
+    for( const auto& [ n, k ] : byName )
     {
         sorted.push_back( n );
-        tags.push_back( id );
+        tags.push_back( NodeId( k ) );
     }
     UsesSelector aSel{};
     auto [ got, callsOfName ] = collectUseSites( ing, aSel, std::span<const char>{}, rootForId, {}, nullptr, g.keptForwards, {}, sorted, tags );
     (void)callsOfName;
     std::erase_if( got, [ & ]( const UseSite& u ) { return u.from < isReached.size() && isReached[ u.from ]; } );
     rankUseSites( ing, g, got );
+    std::vector<UseSite>     hedged;
+    std::vector<std::string> here;
+    {   // every enclosing symbol's chain, one pass per file (hoisting)
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> at;
+        for( const UseSite& u : got )
+        {
+            if( u.from < ing.symbols.size() )
+            {
+                at.emplace_back( ing.symbols[ u.from ].fileId, ing.symbols[ u.from ].sigStartByte );
+            }
+        }
+        aliashop_detail::primeChains( ing, std::move( at ), reach.cache );
+    }
     for( UseSite& u : got )
+    {
+        const std::size_t k = std::size_t( u.viaAlias );
+        if( k >= names.size() )
+        {
+            continue;
+        }
+        // the site's own scope: its enclosing symbol's path (a type's own name included: its members see it); unknown at file scope
+        const bool known = u.from < ing.symbols.size();
+        if( known )
+        {
+            const Symbol& f = ing.symbols[ u.from ];
+            aliashop_detail::enclosingPath( ing, f, reach.cache, here );
+            if( f.kind != SymKind::Method && f.kind != SymKind::Function )
+            {
+                here.push_back( f.name );
+            }
+        }
+        // the innermost visible definition of the name: a source file's own definitions are visible only in it
+        const NameDef* pick  = nullptr;
+        bool           tie   = false;
+        for( const NameDef& nd : named[ k ] )
+        {
+            const Symbol& d = ing.symbols[ nd.id ];
+            if( d.fileId != u.fileId && aliashop_detail::cxxSourceFile( ing.files[ d.fileId ] ) )
+            {
+                continue;
+            }
+            const bool visible = known ? aliashop_detail::pathStartsWith( here, nd.path ) : ( d.fileId == u.fileId || nd.path.empty() );
+            if( !visible )
+            {
+                continue;
+            }
+            if( pick == nullptr || nd.path.size() > pick->path.size() )
+            {
+                pick = &nd;
+                tie  = false;
+            }
+            else if( nd.path.size() == pick->path.size() && ( isReached[ nd.id ] != 0 ) != ( isReached[ pick->id ] != 0 ) )
+            {
+                tie = true;   // a reaching and a non-reaching definition equally near: which one the site means is unknown
+            }
+        }
+        const bool proven = pick != nullptr && !tie && isReached[ pick->id ] == 1;
+        u.viaAlias        = proven ? pick->id : nameAlias[ k ];
+        u.aliasHedged     = !proven;
+        ( proven ? out.sites : hedged ).push_back( std::move( u ) );
+    }
+    out.facts.viaAlias = out.sites.size();
+    out.facts.hedged   = hedged.size();
+    for( UseSite& u : hedged )
     {
         out.sites.push_back( std::move( u ) );
     }
@@ -983,7 +1071,7 @@ std::optional<int> runUses( const MainDispatch& d )
         // selector narrows by resolution, which an alias spelling has none of)
         const AliasUseSites usAlias = ( sel.fileQualified || sel.scopeNarrowed ) ? AliasUseSites{}
                                                                                  : collectAliasUseSites( ing, g, defs, usSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{} );
-        const std::size_t usViaAlias = usAlias.sites.size();
+        const std::size_t usHedged   = usAlias.facts.hedged;   // M1: listed last, never in count=
         if( !cfg.columnar )   // the columnar dialect has no column for the alias: it counts them on its root (alias_sites_held=) instead
         {
             sites.insert( sites.end(), usAlias.sites.begin(), usAlias.sites.end() );
@@ -1048,7 +1136,7 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::declinedLiteralCallsLegend( usDeclinedLiteralCalls > 0 )
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
-                       + rw::aliasUsesLegend( usViaAlias > 0 || usAlias.unread > 0 ) ).c_str(),   // XF-ALIAS-HOP: exactly when a site is written through an alias
+                       + rw::aliasUsesLegend( usAlias.facts ) ).c_str(),   // XF-ALIAS-HOP: exactly when a site is written through an alias
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -1075,19 +1163,19 @@ std::optional<int> runUses( const MainDispatch& d )
                                    + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
                                    + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g )   // §H4 §3.4
                                    + rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } )   // the depth cut that makes count= a floor; absent when none
-                                   + rw::aliasUsesAttrXml( usViaAlias, usAlias.namesakes, usAlias.unread, /*held=*/true );
+                                   + rw::aliasUsesAttrXml( usAlias.facts, /*columnar=*/true );
             emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
             return 0;
         }
 
         rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}>",
-                     ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(),
+                     ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size() - usHedged,
                      rw::declinedLiteralCallsAttrXml( usDeclinedLiteralCalls ).c_str(),
                      rw::unprovenDefsAttrXml( usUnprovenDefs ).c_str(),   // H1: beside the count it qualifies; absent at zero
                      selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::graphCountFloorAttrXml( g ).c_str(),
                      rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } ).c_str(),   // the depth cut that makes count= a floor; absent when none
-                     rw::aliasUsesAttrXml( usViaAlias, usAlias.namesakes, usAlias.unread, /*held=*/false ).c_str() );   // XF-ALIAS-HOP; absent when no alias reaches   // the depth cut that makes count= a floor; absent when none
+                     rw::aliasUsesAttrXml( usAlias.facts, /*columnar=*/false ).c_str() );   // XF-ALIAS-HOP; absent when no alias reaches
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
@@ -1104,7 +1192,7 @@ std::optional<int> runUses( const MainDispatch& d )
             }
             if( u.viaAlias != kNoNode )   // XF-ALIAS-HOP: written as an alias whose chain reaches the definition
             {
-                rw::emitTo( stdout, " via=\"alias\" alias=\"{}\"", ex( ing.symbols[ u.viaAlias ].name ).c_str() );
+                rw::emitTo( stdout, " via=\"alias\" alias=\"{}\"{}", ex( ing.symbols[ u.viaAlias ].name ).c_str(), u.aliasHedged ? " hedge=\"name\"" : "" );
             }
             rw::emitTo( stdout, "/>" );
         }

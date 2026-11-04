@@ -110,7 +110,8 @@ if run "$C" "$TMP/f4" --for=External; then
 fi
 # 5. a cycle ends the walk and says so
 if run "$C" "$TMP/f5" --for=LoopA; then
-  has "$TMP/f5" 'cycle="1"' && ok "[RED] cycle: cycle=1 disclosed" || no "[RED] cycle: no cycle=1"
+  # on the element, never a bare attribute the legend also spells (fix round 1, M2: the legend matched a mutant's answer)
+  grep -qE '<chain [^>]*cycle="1"' "$TMP/f5" && ok "[RED] cycle: cycle=1 on the chain element" || no "[RED] cycle: no cycle=1 on the chain"
 fi
 # 6. an alias in another namespace and file reaches DB::IColumn
 if run "$C" "$TMP/f6" --for=ColumnRef; then
@@ -159,9 +160,88 @@ printf 'pub struct Real;\npub type RealAlias = Real;\npub fn go(_r: RealAlias) {
 if run "$R" "$TMP/r1" --for=RealAlias; then
   has "$TMP/r1" '<aliases' && no "Rust type alias: a block without a recorded target" || ok "Rust type alias: no block (no target recorded; card follow-on)"
 fi
+# ── fix round 1 (reports/rv-xf-alias-hop.md M1, M2, S1, S2, S5) ── here [RED] = fails on the lane's first head cae02ce48
+# (tmp/alias-fix1/disp.md records it); [MUT] = holds on cae02ce48 and fails on a named mutant (seen guard off, qualifier ignored)
+# 13. two namespaces each with `using Ptr` (review fixture, no macro): a site counts for the alias in scope there, the other is hedged
+Q="$TMP/ns"; mkdir -p "$Q/src"
+cat > "$Q/src/a.h" <<'EOF2'
+namespace A { class Foo { public: int fa() { return 1; } }; using Ptr = Foo; }
+namespace B { class Bar { public: int fb() { return 2; } }; using Ptr = Bar; }
+namespace N1 { class Widget { public: void w1() {} }; }
+namespace N2 { class Widget { public: void w2() {} }; }
+namespace N1 { using WP = Widget; }
+using WQ = N2::Widget;
+using L1 = L2; using L2 = L3; using L3 = L1;
+using D1 = D2; using D2 = D3; using D3 = D4; using D4 = D5; using D5 = D6; using D6 = A::Foo;
+EOF2
+cat > "$Q/src/u.cpp" <<'EOF2'
+#include "a.h"
+namespace B { int useB2(Ptr p) { return p.fb(); } }
+namespace A { int useA2(Ptr p) { return p.fa(); } }
+namespace N2 { void n2fn() {} }
+void useD1(D1 d) { (void)d; }
+EOF2
+if run "$Q" "$TMP/q1" --uses=Foo; then
+  grep -qE '<u role="type" p="src/u.cpp:3" in_id="src/u.cpp::A::useA2" via="alias" alias="Ptr"/>' "$TMP/q1" && ok "namesake: A::useA2 is a proven use of Foo (positive twin)" || no "namesake: A::useA2 missing or hedged"
+  grep -qE 'in_id="src/u.cpp::B::useB2" via="alias" alias="Ptr"/>' "$TMP/q1" && no "[RED] namesake: B::useB2 (B::Ptr names Bar) counted as a use of Foo" || ok "[RED] namesake: B::useB2 is not a proven use of Foo"
+  grep -qE 'in_id="src/u.cpp::B::useB2" via="alias" alias="Ptr" hedge="name"/>' "$TMP/q1" && ok "[RED] namesake: B::useB2 listed hedge=name" || no "[RED] namesake: no hedged B::useB2 row"
+  grep -qE '<uses [^>]*count="3"[^>]* alias_hedged="1"' "$TMP/q1" && ok "[RED] namesake: count= leaves the hedged row out, alias_hedged=1" || no "[RED] namesake: count=/alias_hedged= wrong"
+  grep -qE '<uses [^>]* alias_depth_capped="1"' "$TMP/q1" && ok "[RED] depth cap: alias_depth_capped=1 on the uses root (D6..D1)" || no "[RED] depth cap: no alias_depth_capped on the root"
+  grep -qE 'hedge="name"[^ ]*: the (alias )?site' "$TMP/q1" && ok "[RED] namesake: hedge= is legend-defined" || no "[RED] namesake: hedge= legend clause missing"
+fi
+if run "$Q" "$TMP/q2" --uses=Bar; then
+  grep -qE 'in_id="src/u.cpp::B::useB2" via="alias" alias="Ptr"/>' "$TMP/q2" && ok "namesake: B::useB2 is a proven use of Bar (positive twin)" || no "namesake: B::useB2 missing under Bar"
+  grep -qE 'in_id="src/u.cpp::A::useA2" via="alias" alias="Ptr"/>' "$TMP/q2" && no "[RED] namesake: A::useA2 counted as a use of Bar" || ok "[RED] namesake: A::useA2 is not a proven use of Bar"
+  has "$TMP/q2" 'alias_depth_capped' && no "depth cap: alias_depth_capped printed without a cut" || ok "depth cap: no alias_depth_capped without a cut (twin)"
+fi
+# 14. a class qualifier: a class's scope is its own name, so the namespace is read off the braces
+if run "$Q" "$TMP/q3" --for=WQ; then
+  grep -qE '<h n="Widget" t="cls" p="src/a.h" l="4" d="1" via="alias" members="1" m="w2">' "$TMP/q3" && ok "[RED] qualifier: N2::Widget binds the N2 class, proven, its own member only" || no "[RED] qualifier: N2::Widget row wrong"
+  grep -qE '<h n="Widget" [^>]*l="3"' "$TMP/q3" && no "[RED] qualifier: N1::Widget bound for N2::Widget" || ok "[RED] qualifier: N1::Widget not bound (a free function in N2 does not merge them)"
+  has "$TMP/q3" '<leaf n="N2::Widget"/>' && no "qualifier: a false leaf" || ok "qualifier: no leaf for an in-tree class"
+fi
+if run "$Q" "$TMP/q4" --for=WP; then
+  grep -qE '<h n="Widget" t="cls" p="src/a.h" l="3" [^>]*members="1" m="w1">' "$TMP/q4" && ! grep -qE '<h n="Widget" [^>]*l="4"' "$TMP/q4" && ok "[RED] unqualified: N1::WP = Widget binds N1::Widget only" || no "[RED] unqualified: WP bound the wrong Widget"
+fi
+# 15. cycle and depth on the element (the mutant arms: seen guard off, qualifier ignored)
+if run "$Q" "$TMP/q5" --for=L1; then
+  grep -qE '<chain of="L1" [^>]*cycle="1"' "$TMP/q5" && [ "$( grep -o '<h n="L2"' "$TMP/q5" | wc -l | tr -d ' ' )" = 1 ] && ok "[MUT] cycle: L1 -> L2 -> L3 stops once, cycle=1" || no "[MUT] cycle: L1 chain repeats or lacks cycle=1"
+  grep -qE '<chain [^>]*depth_capped="1"' "$TMP/q5" && no "cycle: depth_capped on a 3-cycle" || ok "cycle: no depth_capped on a 3-cycle (twin)"
+fi
+if run "$Q" "$TMP/q6" --for=D1; then
+  grep -qE '<chain of="D1" [^>]*depth_capped="1"' "$TMP/q6" && grep -qF '<h n="D5" t="alias" p="src/a.h" l="8" d="4"' "$TMP/q6" && ! has "$TMP/q6" '<h n="D6"' && ok "[MUT] depth: D1..D5 at d=4, depth_capped=1, D6 not walked" || no "[MUT] depth: cap wrong"
+fi
+# 16. an unreadable chain: the bind is hedged, never a plain leaf (S1)
+M="$TMP/mac"; mkdir -p "$M/src"
+# braces that do not balance (`#if` / `#else` each open the namespace): the chain is unknown; a scope-like macro alone on its
+# line (DECL_PTR) is not enough to drop it (the twin in $Q above has none, arm 14)
+{ printf '#define DECL_PTR(T) typedef T T##Hold;\nDECL_PTR(Foo)\n#if defined(OLD)\nnamespace Z {\n#else\nnamespace Z {\n#endif\n}\n'; cat "$Q/src/a.h"; } > "$M/src/a.h"
+cp "$Q/src/u.cpp" "$M/src/u.cpp"
+if run "$M" "$TMP/m1" --for=WQ; then
+  grep -qE '<h n="Widget" [^>]*bound="name"' "$TMP/m1" && ok "[RED] unknown chain: N2::Widget bound by name, hedged" || no "[RED] unknown chain: no bound=name row"
+  has "$TMP/m1" '<leaf n="N2::Widget"/>' && no "unknown chain: a false leaf" || ok "unknown chain: no leaf for an in-tree class (twin)"
+  has "$TMP/m1" 'bound="name": the written' && ok "[RED] unknown chain: bound= is legend-defined" || no "[RED] unknown chain: bound= legend clause missing"
+fi
+# 16b. positive twin: a scope-like macro alone on its line with balanced braces keeps the chain, so N2::Widget is proven
+P="$TMP/mac2"; mkdir -p "$P/src"
+{ printf '#define DECL_PTR(T) typedef T T##Hold;\nDECL_PTR(Foo)\n'; cat "$Q/src/a.h"; } > "$P/src/a.h"; cp "$Q/src/u.cpp" "$P/src/u.cpp"
+if run "$P" "$TMP/m2" --for=WQ; then
+  grep -qE '<h n="Widget" t="cls" p="src/a.h" l="6" d="1" via="alias" members="1" m="w2">' "$TMP/m2" && ok "[RED] balanced braces beside a macro: N2::Widget proven" || no "[RED] balanced braces beside a macro: not proven"
+fi
+# 17. the block's legend names only what it prints (S5) and --max-tokens sheds m= first, disclosed
+if run "$C" "$TMP/l1" --for=ColumnPtr; then
+  has "$TMP/l1" 'cycle="1": a definition' && no "[RED] legend: a cycle clause without a cycle" || ok "[RED] legend: no cycle clause on an acyclic chain"
+  has "$TMP/l1" 'unread="1": its file' && no "[RED] legend: an unread clause with nothing unread" || ok "[RED] legend: no unread clause"
+  has "$TMP/f5" 'cycle="1": a definition' && ok "legend: the cycle clause rides when a chain has one (twin)" || no "legend: cycle clause missing on the cyclic chain"
+fi
+if run "$C" "$TMP/l2" --for=ColumnPtr --max-tokens=40000; then
+  grep -qE '<aliases [^>]*shed="m"' "$TMP/l2" && ! grep -qE '<h [^>]* m="' "$TMP/l2" && grep -qE '<h n="IColumn" [^>]*members="2"' "$TMP/l2" && ok "[RED] max-tokens: m= shed, members= kept, shed=m disclosed" || no "[RED] max-tokens: shed wrong"
+  has "$TMP/l2" 'shed=: a max-tokens' && ok "[RED] max-tokens: shed= legend-defined" || no "[RED] max-tokens: shed= legend missing"
+fi
+
 # 12. well-formed
 if command -v xmllint >/dev/null 2>&1; then
-  for f in f1 f2 f3 f5 u1; do xmllint --noout "$TMP/$f" 2>/dev/null && ok "xmllint $f" || no "xmllint $f"; done
+  for f in f1 f2 f3 f5 u1 q1 q3 q5 q6 m1 l1 l2; do xmllint --noout "$TMP/$f" 2>/dev/null && ok "xmllint $f" || no "xmllint $f"; done
 else echo "  SKIP  xmllint not installed (arm 12)"; fi
 
 [ "$fail" -eq 0 ] && { echo "xfaliashopcheck: PASS"; exit 0; }

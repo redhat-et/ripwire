@@ -1278,9 +1278,12 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // uses: src/verbs_navigate.h
     { "count", "count=N: use-site rows in all (a floor)", false, "uses", MapHeaderRead::No, {}, "uses" },
     // XF-ALIAS-HOP (src/aliashop.h AliasReach): the sites written through an alias of of=, present-only
-    { "via", "<u via=\"alias\" alias=A>: the site is written as the alias A, whose written target reaches of= (the head or a template argument, up to 4 alias hops); never a call edge; counted in count=, listed after the direct rows", true, "u", MapHeaderRead::No, "alias", "uses" },
+    { "via", "<u via=\"alias\" alias=A>: the site is written as the alias A, whose written target reaches of= (the head or a template argument, up to 4 alias hops); never a call edge; listed after the direct rows, counted in count= when that A is the one in scope at the site (its file, or a namespace or class enclosing it)", true, "u", MapHeaderRead::No, "alias", "uses" },
+    { "hedge", "<u hedge=\"name\">: the alias site is matched by name only (no reaching alias encloses it, or a namesake does); listed last, in no count=", true, "u", MapHeaderRead::No, {}, "uses" },
+    { "alias_hedged", "alias_hedged=N: N alias sites carry hedge=name (not in count= or via_alias=)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_depth_capped", "alias_depth_capped=1: the alias walk stopped at 4 hops with an alias still to follow (via_alias= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias", "u alias=: the alias definition's name the site is written as (via=alias)", true, "u", MapHeaderRead::No, {}, "uses" },
-    { "via_alias", "via_alias=N: N of the rows are written through an alias (via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "via_alias", "via_alias=N: N of the counted rows are written through an alias in scope (via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_namesakes", "alias_namesakes=K: K definitions share a listed alias's name and reach none of of=; their sites are name-matched in too (a hedge)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_sites_held", "alias_sites_held=N: N sites written through an alias of of= are not in the columnar rows (the XML form lists them, via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_unread", "alias_unread=N: N alias declarations could not be read, so whether they reach of= is unknown (count= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },

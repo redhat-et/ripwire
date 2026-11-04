@@ -20,6 +20,7 @@
 // LangFacts::aliasTargetDefs (C/C++ today). A TS `type X = Y`, a Rust `type X = Y` / `use … as`, a Python `X = Y` module alias
 // record no target yet; they join by recording one (aliasdef.h aliasShapeOf arm), with no change here.
 
+#include "cppscopechain.h" // EditCheckBraceLexer — the namespaces and classes around a declaration (C++ records no namespace body)
 #include "defslookup.h"    // aliasTargetText / aliasTargetRow — the written target, as --defs to= prints it
 #include "graph.h"         // resolveAllByNameQualified
 #include "langfacts.h"     // LangFacts::aliasTargetDefs — the languages whose alias rows record a target
@@ -30,6 +31,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,7 +41,7 @@ namespace rw
 
 inline constexpr std::size_t kAliasHopDepth = 4;   // hops past the asked alias (a runaway guard; real chains are 1-3)
 inline constexpr std::size_t kAliasHopCands = 3;   // definitions kept per target spelling (cands= counts them all)
-static_assert( kAliasHopDepth == 4 && kAliasHopCands == 3, "kAliasHopLegend states both caps: move the sentence with the constants" );
+static_assert( kAliasHopDepth == 4 && kAliasHopCands == 3, "aliasHopLegend states both caps: move the sentence with the constants" );
 
 struct AliasHopStep
 {
@@ -47,6 +49,7 @@ struct AliasHopStep
     std::uint8_t  depth = 0;      // 1 = the asked alias's own target
     bool          arg   = false;  // a template argument of the first hop's target (the pointee), not the head
     std::uint32_t cands = 0;      // definitions the spelling bound (more than kAliasHopCands are counted, not kept)
+    bool          hedged = false; // the spelling's qualifier or lookup could not be proven on the definition (bound="name")
 };
 
 struct AliasHopChain
@@ -241,17 +244,140 @@ inline bool scopeHasSegment( std::string_view sc, std::string_view seg )
     return false;
 }
 
-// The definitions a written spelling binds: the leaf's code definitions whose scope ends with the written qualifier (an owner
-// class or a namespace), bodied before bodyless (a forward declaration `class X;` only when nothing else binds), the alias's own
-// file first, then id order. `types`: only type definitions (a template argument). `std::` / an empty or numeric head: none.
-// The namespace verdict per qualifier segment, read once per answer (the scan is over every symbol's scope).
+// The per-answer caches the binds share: each file's lexical scope chains (cppscopechain.h's brace lexer; C++ records no namespace
+// body in the index: CallResultFamily::Cpp is off), keyed by (file, byte), and the namespace verdict per qualifier segment.
 struct BindCache
 {
-    HashMap<std::string, char> isNamespace;
+    HashMap<std::string, char>                       isNamespace;
+    HashMap<std::uint64_t, std::vector<std::string>> chains;   // (file << 32 | byte) -> the namespaces and classes around it
+    HashMap<std::uint64_t, char>                     unknown;  // the keys whose file could not be read or did not balance
 };
-inline std::vector<NodeId> bindSpelling( const IngestResult& ing, std::string_view spelling, std::uint32_t fromFile, bool types, BindCache& cache )
+inline std::uint64_t chainKey( std::uint32_t file, std::uint32_t at ) noexcept
 {
-    std::vector<NodeId> out;
+    return ( std::uint64_t( file ) << 32 ) | at;
+}
+
+// `a::b::c` -> a, b, c appended to `out` ("" adds nothing)
+template <class Seg>
+inline void appendScopeSegments( std::string_view q, std::vector<Seg>& out )
+{
+    for( std::string_view rest = q; !rest.empty(); )
+    {
+        const std::size_t sep = rest.find( "::" );
+        out.emplace_back( rest.substr( 0, sep ) );
+        if( sep == std::string_view::npos )
+        {
+            break;
+        }
+        rest.remove_prefix( sep + 2 );
+    }
+}
+
+// The lexical chains at the declaration starts of `ids`, read ONE pass per file (hoisting: a --uses answer's thousands of sites
+// share their files' passes). An unreadable file, or one whose braces do not balance (`#if … {` `#else … {`), records an empty
+// chain: the scope alone then speaks for the symbol. A file whose braces balance keeps its chain even beside a scope-like macro
+// (`REGISTER_FUNCTION( X )` alone on its line, all over ClickHouse): an unseen macro-opened namespace only shortens the chain,
+// which leaves a proof unproven (hedged), never invents one.
+inline void primeChains( const IngestResult& ing, std::vector<std::pair<std::uint32_t, std::uint32_t>> want, BindCache& cache )
+{
+    std::erase_if( want, [ & ]( const auto& fa ) { return cache.chains.find( chainKey( fa.first, fa.second ) ) != cache.chains.end(); } );
+    std::ranges::sort( want );
+    want.erase( std::unique( want.begin(), want.end() ), want.end() );
+    std::string scratch;
+    for( std::size_t from = 0; from < want.size(); )
+    {
+        std::size_t to = from;
+        while( to < want.size() && want[ to ].first == want[ from ].first )
+        {
+            ++to;
+        }
+        std::vector<std::size_t> offsets;
+        for( std::size_t k = from; k < to; ++k )
+        {
+            offsets.push_back( want[ k ].second );
+        }
+        std::vector<std::optional<std::vector<std::string>>> got( offsets.size() );
+        if( const std::string* text = lexicalScanText( ing, want[ from ].first, scratch ); text != nullptr )
+        {
+            std::string blanked = *text;
+            editCheckBlankComments( blanked );
+            got = EditCheckBraceLexer( blanked ).chainsAt( offsets, /*allowScopeMacro=*/true );
+        }
+        for( std::size_t k = from; k < to; ++k )
+        {
+            const std::uint64_t key = chainKey( want[ k ].first, want[ k ].second );
+            if( !got[ k - from ] )
+            {
+                cache.unknown.try_emplace( key, '\1' );
+            }
+            cache.chains.try_emplace( key, got[ k - from ].value_or( std::vector<std::string>{} ) );
+        }
+        from = to;
+    }
+}
+
+// The LEXICAL path that encloses `s` (S1: a C++ class's scope is its own name, so its namespace is read off the file's braces,
+// never guessed from another symbol's scope): the namespaces and classes around its declaration, outermost first, then the owner
+// its scope names (`IColumn` for an out-of-line `void IColumn::insert`; a type's own name, the last segment of its scope, is not
+// an owner), the segments the two spell alike merged once (a function's scope `B` inside `namespace B`).
+// Returns false when the file's chain is unknown (unreadable, or braces a macro may open): `out` is then the scope's word alone.
+inline bool enclosingPath( const IngestResult& ing, const Symbol& s, BindCache& cache, std::vector<std::string>& out )
+{
+    auto at = cache.chains.find( chainKey( s.fileId, s.sigStartByte ) );
+    if( at == cache.chains.end() )
+    {
+        primeChains( ing, { { s.fileId, s.sigStartByte } }, cache );
+        at = cache.chains.find( chainKey( s.fileId, s.sigStartByte ) );
+    }
+    out = at->second;
+    std::vector<std::string_view> owner;
+    appendScopeSegments( s.scope, owner );
+    const bool callable = s.kind == SymKind::Method || s.kind == SymKind::Function;
+    if( !callable && !owner.empty() && owner.back() == s.name )
+    {
+        owner.pop_back();
+    }
+    std::size_t overlap = std::min( out.size(), owner.size() );
+    for( ; overlap > 0; --overlap )
+    {
+        if( std::equal( owner.begin(), owner.begin() + std::ptrdiff_t( overlap ), out.end() - std::ptrdiff_t( overlap ) ) )
+        {
+            break;
+        }
+    }
+    out.insert( out.end(), owner.begin() + std::ptrdiff_t( overlap ), owner.end() );
+    return cache.unknown.find( chainKey( s.fileId, s.sigStartByte ) ) == cache.unknown.end();
+}
+
+template <class A, class B>
+inline bool pathEndsWith( const std::vector<A>& path, const std::vector<B>& tail )
+{
+    return tail.size() <= path.size() && std::equal( tail.rbegin(), tail.rend(), path.rbegin(), []( const auto& x, const auto& y ) { return std::string_view( x ) == std::string_view( y ); } );
+}
+template <class A, class B>
+inline bool pathStartsWith( const std::vector<A>& path, const std::vector<B>& head )
+{
+    return head.size() <= path.size() && std::equal( head.begin(), head.end(), path.begin(), []( const auto& x, const auto& y ) { return std::string_view( x ) == std::string_view( y ); } );
+}
+
+// What a written spelling binds. `ids`: the leaf's code definitions the spelling can name, bodied before bodyless (a forward
+// declaration `class X;` only when nothing else binds), the alias's own file first, then id order. `hedged`: the qualifier could
+// not be PROVEN on any of them (bound="name": a namesake may be meant, never a plain leaf that says "binds nothing", S1).
+struct BoundSpelling
+{
+    std::vector<NodeId> ids;
+    bool                hedged = false;
+};
+
+// A QUALIFIED spelling (`N2::Widget`, `COW::Ptr`) binds the definitions whose enclosing path ends with the qualifier, segment by
+// segment; when none does and the qualifier's last segment is a namespace somewhere (a namespace the index has no body for, a
+// macro-opened one), the leaf's definitions bind HEDGED. An UNQUALIFIED spelling binds what C++ lookup finds from the alias's own
+// place: the definitions whose enclosing path is a prefix of the alias's, the innermost first (`N1::WP = Widget` is N1::Widget);
+// none such (a using-directive, a base class's member) binds them all, hedged. `types`: only type definitions (a template
+// argument). `std::` / an empty or numeric head: none.
+inline BoundSpelling bindSpelling( const IngestResult& ing, std::string_view spelling, const Symbol& from, bool types, BindCache& cache )
+{
+    BoundSpelling out;
     if( spelling.empty() || spelling.starts_with( "std::" ) || spelling == "std" || ( spelling[ 0 ] >= '0' && spelling[ 0 ] <= '9' ) )
     {
         return out;
@@ -259,7 +385,7 @@ inline std::vector<NodeId> bindSpelling( const IngestResult& ing, std::string_vi
     const std::size_t      cut  = spelling.rfind( "::" );
     const std::string_view leaf = cut == std::string_view::npos ? spelling : spelling.substr( cut + 2 );
     const std::string_view q    = cut == std::string_view::npos ? std::string_view{} : spelling.substr( 0, cut );
-    std::vector<NodeId>    leafOnly;   // the leaf's definitions whose scope does not end with q
+    std::vector<NodeId>    cands;
     for( const NodeId n : resolveAllByNameQualified( ing, leaf ) )
     {
         const Symbol& s = ing.symbols[ n ];
@@ -275,58 +401,107 @@ inline std::vector<NodeId> bindSpelling( const IngestResult& ing, std::string_vi
         {
             continue;   // a type position names a type, a namespace alias a namespace: never a callable or a value
         }
-        if( scopeEndsWith( s, q ) )
-        {
-            out.push_back( n );
-        }
-        else
-        {
-            leafOnly.push_back( n );
-        }
+        cands.push_back( n );
     }
-    // a NAMESPACE qualifier: a C++ type's scope is its own name (no namespace path), so `DB::IColumn` cannot be checked on the
-    // scope. The qualifier's last segment is a namespace when it names no type definition and some definition's scope has it as a
-    // segment (`DB` on a function's sc=); then the leaf's definitions bind. A template parameter's member (`typename T::Ptr`) has
-    // neither, so it stays a leaf.
-    if( out.empty() && !leafOnly.empty() && !q.empty() )
+    if( cands.empty() )
     {
-        const std::size_t      qc    = q.rfind( "::" );
-        const std::string_view qLast = qc == std::string_view::npos ? q : q.substr( qc + 2 );
-        const bool             isType = std::ranges::any_of( resolveAllByNameQualified( ing, qLast ), [ & ]( NodeId n )
-                                                             {
-                                                                 const Symbol& t = ing.symbols[ n ];
-                                                                 return t.name == qLast && ( t.kind == SymKind::Class || t.kind == SymKind::Interface || isStructOrNamedType( t.kind ) );
-                                                             } );
-        bool isNamespace = false;
-        if( !isType )
+        return out;
+    }
+    {   // the candidates' chains (and the alias's own) in one pass per file
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> at{ { from.fileId, from.sigStartByte } };
+        for( const NodeId n : cands )
         {
-            const auto [ at, fresh ] = cache.isNamespace.try_emplace( std::string( qLast ), '\0' );
+            at.emplace_back( ing.symbols[ n ].fileId, ing.symbols[ n ].sigStartByte );
+        }
+        primeChains( ing, std::move( at ), cache );
+    }
+    std::vector<std::string> path;
+    if( !q.empty() )
+    {
+        std::vector<std::string_view> written;
+        appendScopeSegments( q, written );
+        for( const NodeId n : cands )
+        {
+            enclosingPath( ing, ing.symbols[ n ], cache, path );
+            if( pathEndsWith( path, written ) )
+            {
+                out.ids.push_back( n );
+            }
+        }
+        if( out.ids.empty() )
+        {
+            // not proven on any definition: a qualifier that is a namespace somewhere binds the leaf's definitions HEDGED; one
+            // that names nothing (a template parameter's member `typename T::Ptr`) leaves a leaf
+            const std::string_view qLast = written.back();
+            const auto [ at, fresh ]     = cache.isNamespace.try_emplace( std::string( qLast ), '\0' );
             if( fresh )
             {
-                at->second = std::ranges::any_of( ing.symbols, [ & ]( const Symbol& t ) { return scopeHasSegment( t.scope, qLast ); } ) ? '\1' : '\0';
+                // a type qualifier (`IColumn::Ptr`, Ptr inherited from a base) is no namespace: it stays a leaf
+                const bool isType = std::ranges::any_of( resolveAllByNameQualified( ing, qLast ), [ & ]( NodeId n )
+                                                         {
+                                                             const Symbol& t = ing.symbols[ n ];
+                                                             return t.name == qLast && ( t.kind == SymKind::Class || t.kind == SymKind::Interface || isStructOrNamedType( t.kind ) );
+                                                         } );
+                at->second = !isType && std::ranges::any_of( ing.symbols, [ & ]( const Symbol& t ) { return scopeHasSegment( t.scope, qLast ); } ) ? '\1' : '\0';
             }
-            isNamespace = at->second != '\0';
+            if( at->second != '\0' )
+            {
+                out.ids    = cands;
+                out.hedged = true;
+            }
         }
-        if( isNamespace )
+    }
+    else
+    {
+        std::vector<std::string> here;
+        enclosingPath( ing, from, cache, here );
+        if( !( from.kind == SymKind::Method || from.kind == SymKind::Function ) && !aliasTargetRow( ing, from ) )
         {
-            out = std::move( leafOnly );
+            here.push_back( from.name );   // a type's members see its own scope
         }
+        std::size_t best    = 0;
+        bool        any     = false;
+        bool        unknown = false;   // a kept definition's chain is unknown: its empty path proves no lookup
+        for( const NodeId n : cands )
+        {
+            const bool known = enclosingPath( ing, ing.symbols[ n ], cache, path );
+            if( pathStartsWith( here, path ) )
+            {
+                if( !any || path.size() > best )
+                {
+                    out.ids.clear();
+                    best    = path.size();
+                    unknown = false;
+                }
+                any = true;
+                if( path.size() == best )
+                {
+                    out.ids.push_back( n );
+                    unknown = unknown || !known;
+                }
+            }
+        }
+        if( !any )
+        {
+            out.ids = cands;
+        }
+        out.hedged = !any || unknown;
     }
     // a definition inside another translation unit's source file cannot be what this alias names (`class IColumn` in an example
     // .cpp beside the real one in a header): dropped while another definition remains
-    const auto visible = [ & ]( NodeId n ) { const Symbol& s = ing.symbols[ n ]; return s.fileId == fromFile || !cxxSourceFile( ing.files[ s.fileId ] ); };
-    if( std::ranges::any_of( out, visible ) )
+    const auto visible = [ & ]( NodeId n ) { const Symbol& s = ing.symbols[ n ]; return s.fileId == from.fileId || !cxxSourceFile( ing.files[ s.fileId ] ); };
+    if( std::ranges::any_of( out.ids, visible ) )
     {
-        std::erase_if( out, [ & ]( NodeId n ) { return !visible( n ); } );
+        std::erase_if( out.ids, [ & ]( NodeId n ) { return !visible( n ); } );
     }
     const auto bodied = [ & ]( NodeId n ) { const Symbol& s = ing.symbols[ n ]; return s.endByte > s.sigEndByte || aliasTargetRow( ing, s ); };
-    if( std::ranges::any_of( out, bodied ) )
+    if( std::ranges::any_of( out.ids, bodied ) )
     {
-        std::erase_if( out, [ & ]( NodeId n ) { return !bodied( n ); } );
+        std::erase_if( out.ids, [ & ]( NodeId n ) { return !bodied( n ); } );
     }
-    std::ranges::stable_sort( out, [ & ]( NodeId a, NodeId b )
+    std::ranges::stable_sort( out.ids, [ & ]( NodeId a, NodeId b )
                               {
-                                  const bool fa = ing.symbols[ a ].fileId == fromFile, fb = ing.symbols[ b ].fileId == fromFile;
+                                  const bool fa = ing.symbols[ a ].fileId == from.fileId, fb = ing.symbols[ b ].fileId == from.fileId;
                                   return fa != fb ? fa : a < b;
                               } );
     return out;
@@ -366,7 +541,8 @@ inline AliasHopChain aliasChain( const IngestResult& ing, NodeId alias, aliashop
             {
                 firstArgs = std::move( sp.args );
             }
-            std::vector<NodeId> bound = bindSpelling( ing, sp.head, ing.symbols[ from ].fileId, /*types=*/false, cache );
+            aliashop_detail::BoundSpelling b     = bindSpelling( ing, sp.head, ing.symbols[ from ], /*types=*/false, cache );
+            std::vector<NodeId>&           bound = b.ids;
             if( bound.empty() )
             {
                 if( !sp.head.empty() )
@@ -385,7 +561,7 @@ inline AliasHopChain aliasChain( const IngestResult& ing, NodeId alias, aliashop
                     continue;
                 }
                 seen.push_back( n );
-                c.steps.push_back( { n, std::uint8_t( depth ), false, cands } );
+                c.steps.push_back( { n, std::uint8_t( depth ), false, cands, b.hedged } );
                 if( aliasTargetRow( ing, ing.symbols[ n ] ) )
                 {
                     next.push_back( n );
@@ -396,7 +572,8 @@ inline AliasHopChain aliasChain( const IngestResult& ing, NodeId alias, aliashop
     }
     for( const std::string& a : firstArgs )
     {
-        std::vector<NodeId> bound = bindSpelling( ing, a, ing.symbols[ alias ].fileId, /*types=*/true, cache );
+        aliashop_detail::BoundSpelling b     = bindSpelling( ing, a, ing.symbols[ alias ], /*types=*/true, cache );
+        std::vector<NodeId>&           bound = b.ids;
         if( bound.empty() )
         {
             c.leaves.push_back( a );
@@ -409,7 +586,7 @@ inline AliasHopChain aliasChain( const IngestResult& ing, NodeId alias, aliashop
             if( std::ranges::find( seen, n ) == seen.end() )
             {
                 seen.push_back( n );
-                c.steps.push_back( { n, 1, true, cands } );
+                c.steps.push_back( { n, 1, true, cands, b.hedged } );
             }
         }
     }
@@ -417,37 +594,72 @@ inline AliasHopChain aliasChain( const IngestResult& ing, NodeId alias, aliashop
 }
 
 // The reverse walk: which alias rows reach the definitions `targets` (as head or template argument), transitively. Built once
-// per answer; `names()` / `via()` read it. A pre-filter on the target NAME bytes keeps the walk off the alias rows that cannot
-// name a target (most of them), so the cost is one text read per candidate alias row, not one chain per alias row.
+// per answer; the verb reads `rows`. HOISTING (S6): nothing is read when no target's language records alias targets; a row's
+// target text is folded and kept only when one of its identifiers is a name the walk can ever want (an asked definition's or any
+// alias row's name, known before a byte is read), so the rounds re-test a short list in memory and never re-read a file.
 struct AliasReach
 {
     struct Row
     {
         NodeId alias  = kNoNode;
         NodeId target = kNoNode;   // the asked definition it reaches
+        bool   hedged = false;     // a hop on the way bound by name only (BoundSpelling::hedged): its sites are hedged too
     };
     std::vector<Row> rows;         // alias id order (one row per alias; the first asked target its chain reaches)
-    bool             capped = false;
+    bool             capped = false;   // the rounds stopped at kAliasHopDepth with a row still growing (alias_depth_capped=)
     std::size_t      unread = 0;   // alias rows whose file could not be read (their reach is unknown)
+    aliashop_detail::BindCache cache;   // the namespace paths the binds read, kept for the verb's visibility test
 
     AliasReach( const IngestResult& ing, const std::vector<NodeId>& targets )
     {
-        if( targets.empty() || ing.aliasTargets.empty() )
+        if( targets.empty() || ing.aliasTargets.empty()
+            || std::ranges::none_of( targets, [ & ]( NodeId t ) { return t < ing.symbols.size() && langFacts( ing.symbols[ t ].lang ).aliasTargetDefs; } ) )
         {
             return;
         }
         // what an alias row may name: the asked definitions, then each alias found (an alias of an alias); keyed by name, so a row's
         // identifier tokens are tested by hash, never by a substring search per name
         HashMap<std::string_view, std::vector<NodeId>> want;
+        HashMap<std::string_view, char>                 everWanted;   // the asked names and every alias row's name: the pre-filter
         std::vector<NodeId> standsFor( ing.symbols.size(), kNoNode );   // an asked definition (itself) or an alias reached: what it stands for
+        std::vector<char>   hedgedFor( ing.symbols.size(), 0 );
         for( const NodeId t : targets )
         {
             want[ ing.symbols[ t ].name ].push_back( t );
+            everWanted.try_emplace( ing.symbols[ t ].name, '\1' );
             standsFor[ t ] = t;
         }
-        aliashop_detail::BindCache cache;
-        // every alias row's written target, folded ONCE (one read per file; the rounds below re-test them in memory, never re-read)
-        std::vector<std::string> folded( ing.aliasTargets.size() );
+        for( const AliasTarget& a : ing.aliasTargets )
+        {
+            if( a.id < ing.symbols.size() )
+            {
+                everWanted.try_emplace( ing.symbols[ a.id ].name, '\1' );
+            }
+        }
+        const auto namesWanted = []( std::string_view raw, const auto& set )
+        {
+            for( std::size_t i = 0; i < raw.size(); )
+            {
+                if( !aliashop_detail::identByte( raw[ i ] ) )
+                {
+                    ++i;
+                    continue;
+                }
+                std::size_t e = i;
+                while( e < raw.size() && aliashop_detail::identByte( raw[ e ] ) )
+                {
+                    ++e;
+                }
+                if( set.find( raw.substr( i, e - i ) ) != set.end() )
+                {
+                    return true;
+                }
+                i = e;
+            }
+            return false;
+        };
+        // the candidate rows' written targets, folded ONCE (one read per file; the rounds below re-test them in memory)
+        std::vector<std::pair<std::size_t, std::string>> folded;   // (aliasTargets index, folded target)
         {
             std::uint32_t      textOf = kNoFile;   // the alias rows ascend by id, so by file
             std::string        scratch;
@@ -465,72 +677,58 @@ struct AliasReach
                     text   = lexicalScanText( ing, s.fileId, scratch );
                     textOf = s.fileId;
                 }
-                if( text == nullptr || s.endByte > text->size() )
+                if( text == nullptr || s.endByte > text->size() || a.start > s.endByte )
                 {
                     ++unread;   // could not read is never "reaches none": counted, the verb discloses it
                     continue;
                 }
-                folded[ k ] = foldAliasTarget( std::string_view( *text ).substr( a.start, s.endByte - a.start ) );
+                const std::string_view raw = std::string_view( *text ).substr( a.start, s.endByte - a.start );
+                if( namesWanted( raw, everWanted ) )
+                {
+                    folded.emplace_back( k, foldAliasTarget( raw ) );
+                }
             }
         }
         for( std::size_t round = 0; round < kAliasHopDepth; ++round )
         {
             bool grew = false;
-            for( std::size_t k = 0; k < ing.aliasTargets.size(); ++k )
+            for( const auto& [ k, raw ] : folded )
             {
                 const AliasTarget& a = ing.aliasTargets[ k ];
-                if( folded[ k ].empty() || standsFor[ a.id ] != kNoNode )
+                if( standsFor[ a.id ] != kNoNode || !namesWanted( raw, want ) )
                 {
-                    continue;
+                    continue;   // the cheap test first: no identifier of the target names a wanted definition: no parse, no resolve
                 }
-                const Symbol& s = ing.symbols[ a.id ];
-                // the cheap test first: no identifier of the target names a wanted definition (most rows): no parse, no resolve
-                const std::string_view raw   = folded[ k ];
-                bool                   named = false;
-                for( std::size_t i = 0; i < raw.size() && !named; )
-                {
-                    if( !aliashop_detail::identByte( raw[ i ] ) )
-                    {
-                        ++i;
-                        continue;
-                    }
-                    std::size_t e = i;
-                    while( e < raw.size() && aliashop_detail::identByte( raw[ e ] ) )
-                    {
-                        ++e;
-                    }
-                    named = want.find( raw.substr( i, e - i ) ) != want.end();
-                    i     = e;
-                }
-                if( !named )
-                {
-                    continue;
-                }
+                const Symbol&                         s       = ing.symbols[ a.id ];
                 const aliashop_detail::TargetSpelling sp      = aliashop_detail::parseTarget( raw );
                 NodeId                                reached = kNoNode;
+                bool                                  hedged  = false;
                 const auto probe = [ & ]( std::string_view spelling, bool types )
                 {
-                    for( const NodeId n : aliashop_detail::bindSpelling( ing, spelling, s.fileId, types, cache ) )
+                    const aliashop_detail::BoundSpelling b = aliashop_detail::bindSpelling( ing, spelling, s, types, cache );
+                    for( const NodeId n : b.ids )
                     {
                         const auto w = want.find( ing.symbols[ n ].name );
                         if( w != want.end() && std::ranges::find( w->second, n ) != w->second.end() )
                         {
                             reached = n;
+                            hedged  = b.hedged;
                             return;
                         }
                     }
                 };
                 probe( sp.head, false );
-                for( std::size_t k = 0; reached == kNoNode && k < sp.args.size(); ++k )
+                for( std::size_t j = 0; reached == kNoNode && j < sp.args.size(); ++j )
                 {
-                    probe( sp.args[ k ], true );
+                    probe( sp.args[ j ], true );
                 }
                 if( reached == kNoNode )
                 {
                     continue;
                 }
                 standsFor[ a.id ] = standsFor[ reached ];   // an alias of an alias stands for the asked definition its target stands for
-                rows.push_back( { a.id, standsFor[ a.id ] } );
+                hedgedFor[ a.id ] = char( hedged || hedgedFor[ reached ] != 0 );
+                rows.push_back( { a.id, standsFor[ a.id ], hedgedFor[ a.id ] != 0 } );
                 want[ s.name ].push_back( a.id );
                 grew = true;
             }
@@ -545,31 +743,75 @@ struct AliasReach
     bool empty() const noexcept { return rows.empty(); }
 };
 
-// The uses verb's disclosure of the sites written through an alias (present-only: "" / no attribute when none).
-inline std::string aliasUsesLegend( bool on )
+// The uses verb's disclosure of the sites written through an alias (present-only: each clause only when its attribute is printed).
+struct AliasUsesFacts
 {
-    return on ? "via=\"alias\" alias=A: the site is written as the alias A, whose written target reaches SYM (as the head or a template "
-                "argument, up to 4 alias hops), never a call edge; these rows follow the direct ones and count in count=; via_alias=N such "
-                "rows; alias_namesakes=K: K definitions share a listed alias's name and reach none of SYM (their sites are name-matched in "
-                "too, a hedge); alias_sites_held=N: the columnar form keeps those N sites out of its rows; alias_unread=N: N alias "
-                "declarations could not be read, so their reach is unknown (a floor). These rows are the aliased spellings the role=\"type\" "
-                "sentence above leaves out. "
-              : "";
-}
-inline std::string aliasUsesAttrXml( std::size_t viaAlias, std::size_t namesakes, std::size_t unread, bool held )
+    std::size_t viaAlias  = 0;       // proven alias sites (counted in count=)
+    std::size_t hedged    = 0;       // alias-name sites whose reached alias is not the one in scope there (hedge="name", not counted)
+    std::size_t namesakes = 0;
+    std::size_t unread    = 0;
+    bool        capped    = false;   // the reverse walk stopped at its depth with an alias still to follow
+};
+inline std::string aliasUsesLegend( const AliasUsesFacts& f )
 {
     std::string out;
-    if( viaAlias > 0 )
+    if( f.viaAlias > 0 || f.hedged > 0 )
     {
-        out.append( held ? " alias_sites_held=\"" : " via_alias=\"" ).append( std::to_string( viaAlias ) ).append( "\"" );
+        out += "via=\"alias\" alias=A: the site is written as the alias A, whose written target reaches SYM (as the head or a template "
+               "argument, up to 4 alias hops), never a call edge; these rows follow the direct ones. A row counts in count= and "
+               "via_alias= only when the A that reaches SYM is the one in scope at the site (its file, a namespace or class that "
+               "encloses the site, the innermost such A); ";
     }
-    if( viaAlias > 0 && namesakes > 0 )
+    if( f.hedged > 0 )
     {
-        out.append( " alias_namesakes=\"" ).append( std::to_string( namesakes ) ).append( "\"" );
+        out += "hedge=\"name\": the site's A is matched by name only (no reaching A encloses it, or a namesake A does: alias_hedged=N "
+               "such rows, listed last, never in count=); ";
     }
-    if( unread > 0 )
+    if( f.namesakes > 0 && ( f.viaAlias > 0 || f.hedged > 0 ) )
     {
-        out.append( " alias_unread=\"" ).append( std::to_string( unread ) ).append( "\"" );
+        out += "alias_namesakes=K: K definitions share a listed alias's name and reach none of SYM; ";
+    }
+    if( f.viaAlias > 0 || f.hedged > 0 )
+    {
+        out += "alias_sites_held=N: the columnar form keeps those N sites out of its rows; ";
+    }
+    if( f.unread > 0 )
+    {
+        out += "alias_unread=N: N alias declarations could not be read, so their reach is unknown (a floor); ";
+    }
+    if( f.capped )
+    {
+        out += "alias_depth_capped=\"1\": the alias walk stopped at 4 hops with an alias still to follow (via_alias= a floor); ";
+    }
+    if( !out.empty() )
+    {
+        out += "These rows are the aliased spellings the role=\"type\" sentence above leaves out. ";
+    }
+    return out;
+}
+inline std::string aliasUsesAttrXml( const AliasUsesFacts& f, bool columnar )
+{
+    std::string out;
+    const auto num = [ & ]( std::string_view k, std::size_t v ) { out.append( " " ).append( k ).append( "=\"" ).append( std::to_string( v ) ).append( "\"" ); };
+    if( f.viaAlias > 0 )
+    {
+        num( columnar ? "alias_sites_held" : "via_alias", f.viaAlias );
+    }
+    if( f.hedged > 0 )
+    {
+        num( "alias_hedged", f.hedged );
+    }
+    if( ( f.viaAlias > 0 || f.hedged > 0 ) && f.namesakes > 0 )
+    {
+        num( "alias_namesakes", f.namesakes );
+    }
+    if( f.unread > 0 )
+    {
+        num( "alias_unread", f.unread );
+    }
+    if( f.capped )
+    {
+        out.append( " alias_depth_capped=\"1\"" );
     }
     return out;
 }

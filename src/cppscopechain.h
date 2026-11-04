@@ -152,6 +152,39 @@ public:
         return ( balanced && stack.empty() && !scopeMacro ) ? snapshot : std::nullopt;
     }
 
+    // chainAt for several offsets in ONE pass over the file (XF-ALIAS-HOP: every site of a file at once, never one scan per
+    // site). `sorted` ascends; each answer is what chainAt( offset ) returns (all nullopt when the braces do not balance).
+    // `allowScopeMacro`: keep the chains of a file whose braces balance although a macro may open a scope (the reader then
+    // fails closed by itself: a namespace the braces do not show only shortens the chain, so a qualifier or prefix it would
+    // have proven stays unproven).
+    std::vector<std::optional<std::vector<std::string>>> chainsAt( const std::vector<std::size_t>& sorted, bool allowScopeMacro = false )
+    {
+        std::vector<std::optional<std::vector<std::string>>> out( sorted.size() );
+        std::size_t                                          next = 0;
+        std::size_t                                          i    = 0;
+        askedOffset                                               = sorted.empty() ? 0 : sorted.back();
+        while( i < text.size() && balanced )
+        {
+            while( next < sorted.size() && i >= sorted[ next ] )
+            {
+                out[ next++ ] = current();
+            }
+            i = step( i );
+        }
+        while( balanced && next < sorted.size() )
+        {
+            out[ next++ ] = current();
+        }
+        if( !( balanced && stack.empty() && ( allowScopeMacro || !scopeMacro ) ) )
+        {
+            for( auto& o : out )
+            {
+                o.reset();
+            }
+        }
+        return out;
+    }
+
     // a `using namespace X;` came before the offset asked about: a QUALIFIED definition there (`int S::f`) may name a
     // member of X, so its written chain is not certain (the caller then reads the chain as unknown)
     bool usingDirectiveBefore() const noexcept { return usingBefore; }
