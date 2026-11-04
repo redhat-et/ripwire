@@ -22,6 +22,7 @@
 #include "epmanifest.h"     // ep-manifest: the manifest entry-point groups that register a shown row
 #include "listedin.h"       // manifest-noncode: the build/package/registry manifest lines that list a shown file (creation tasks)
 #include "forreexport.h"    // ALIAS-IMPORT: the re-export hop rows of a definition the task names
+#include "foraliashop.h"    // XF-ALIAS-HOP: an alias row the task names, followed to what it names
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
@@ -4762,6 +4763,14 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                                              .held = cfg.tokenBudget > 0, .redact = redactPtr, .rootArg = flRootArg,
                                                                                              .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
+        }
+        // XF-ALIAS-HOP (foraliashop.h): a printed row the task names is an alias definition: its chain to what it names; "" otherwise.
+        // Its own allowance, outside est_tokens, like the two blocks above. XML only.
+        if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && sigsPreRendered )
+        {
+            const std::string aliasHops = rw::renderForAliasHops( ing, rw::ForAliasHopArgs{ .task = cfg.forTask, .routeNote = routeNoteRaw, .printed = &shownSigIds,
+                                                                                            .held = cfg.tokenBudget > 0 } );
+            std::fwrite( aliasHops.data(), 1, aliasHops.size(), stdout );
         }
         std::vector<rw::NodeId> litAnswerIds = shownSigIds;   // LIT-SITE-DECOY: the answer's rows and whole bodies order the literal's sites
         const std::vector<rw::NodeId> servedWhole = servedAnswerBodies().bodies;

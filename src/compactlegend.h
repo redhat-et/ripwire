@@ -1277,6 +1277,13 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "tests", "tests=/untested=: tests to run (t total) / impacted symbols no test reaches (u total)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     // uses: src/verbs_navigate.h
     { "count", "count=N: use-site rows in all (a floor)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    // XF-ALIAS-HOP (src/aliashop.h AliasReach): the sites written through an alias of of=, present-only
+    { "via", "<u via=\"alias\" alias=A>: the site is written as the alias A, whose written target reaches of= (the head or a template argument, up to 4 alias hops); never a call edge; counted in count=, listed after the direct rows", true, "u", MapHeaderRead::No, "alias", "uses" },
+    { "alias", "u alias=: the alias definition's name the site is written as (via=alias)", true, "u", MapHeaderRead::No, {}, "uses" },
+    { "via_alias", "via_alias=N: N of the rows are written through an alias (via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_namesakes", "alias_namesakes=K: K definitions share a listed alias's name and reach none of of=; their sites are name-matched in too (a hedge)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_sites_held", "alias_sites_held=N: N sites written through an alias of of= are not in the columnar rows (the XML form lists them, via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_unread", "alias_unread=N: N alias declarations could not be read, so whether they reach of= is unknown (count= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "run", "test run=: the command that runs that test file (run_unknown=1: none derivable)", true, "test", MapHeaderRead::No, {}, "pr-context" },
     // …and the fixture states compactlegendcheck (UG) reaches: every XML flag of the universe, every instance.
     // hotspots: src/verbs_report.h (the <hotspots> root emit)

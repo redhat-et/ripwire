@@ -211,6 +211,58 @@ inline bool aliasTargetRow( const IngestResult& ing, const Symbol& s ) noexcept
 {
     return aliasTargetStart( ing, s ) != 0;
 }
+// An alias target's written text, folded the way to= prints it: whitespace runs to one space, a comment as whitespace, a string
+// literal copied whole, a trailing `;` dropped. The one fold: aliasTargetText and the alias walk (aliashop.h) both read it.
+inline std::string foldAliasTarget( std::string_view raw )
+{
+    std::string text;
+    bool        space = false;
+    for( std::size_t i = 0; i < raw.size(); ++i )
+    {
+        const char c = raw[i];
+        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
+        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
+        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
+        {
+            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
+            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
+            space                 = !text.empty();
+            continue;
+        }
+        const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+        if( ws )
+        {
+            space = !text.empty();
+            continue;
+        }
+        if( space )
+        {
+            text += ' ';
+            space = false;
+        }
+        text += c;
+        if( c == '"' )
+        {
+            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
+            {
+                text += raw[i];
+                if( raw[i] == '\\' && i + 1 < raw.size() )
+                {
+                    text += raw[ ++i ];
+                }
+            }
+            if( i < raw.size() )
+            {
+                text += '"';
+            }
+        }
+    }
+    while( !text.empty() && ( text.back() == ';' || text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
+    {
+        text.pop_back();
+    }
+    return text;
+}
 inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s )
 {
     AliasTargetText out;
@@ -228,51 +280,7 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s
         return out;
     }
     const std::string_view raw = std::string_view( *file ).substr( tStart, s.endByte - tStart );
-    bool                   space = false;
-    for( std::size_t i = 0; i < raw.size(); ++i )
-    {
-        const char c = raw[i];
-        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
-        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
-        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
-        {
-            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
-            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
-            space                 = !out.text.empty();
-            continue;
-        }
-        const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-        if( ws )
-        {
-            space = !out.text.empty();
-            continue;
-        }
-        if( space )
-        {
-            out.text += ' ';
-            space = false;
-        }
-        out.text += c;
-        if( c == '"' )
-        {
-            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
-            {
-                out.text += raw[i];
-                if( raw[i] == '\\' && i + 1 < raw.size() )
-                {
-                    out.text += raw[ ++i ];
-                }
-            }
-            if( i < raw.size() )
-            {
-                out.text += '"';
-            }
-        }
-    }
-    while( !out.text.empty() && ( out.text.back() == ';' || out.text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
-    {
-        out.text.pop_back();
-    }
+    out.text                   = foldAliasTarget( raw );
     out.fullBytes = out.text.size();
     // the target's own definition: a plain identifier chain once template arguments are dropped (`COW<IColumn>::Ptr` -> COW::Ptr)
     std::string name;

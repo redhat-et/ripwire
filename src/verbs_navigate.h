@@ -8,6 +8,7 @@
 #include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
+#include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_navigate.h — the navigate family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -723,7 +724,21 @@ inline std::vector<char> usesChosenCallers( const rw::IngestResult& ing, const r
 }
 
 // ONE use-site row: (file, line, role, enclosing canonical id). File scope ⇒ `in` empty.
-struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; };   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight
+struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; rw::NodeId viaAlias = rw::kNoNode; };   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight; viaAlias: the alias the site is written as (XF-ALIAS-HOP), kNoNode for a direct site
+
+// XF-ALIAS-HOP (aliashop.h AliasReach): the use-sites written as an alias whose chain reaches one of `defs` (`ColumnPtr` for
+// IColumn), each marked with the alias, ranked as the direct sites are and kept AFTER them (the direct rows keep their order and
+// bytes). A site inside a reached alias's own declaration is the chain itself, not a use. `namesakes`: definitions sharing a listed
+// alias's name that reach none of `defs` (their sites are name-matched with the rest: a hedge the root discloses).
+struct AliasUseSites
+{
+    std::vector<UseSite> sites;
+    std::size_t          namesakes = 0;
+    std::size_t          unread    = 0;
+};
+inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs, std::string_view rootForId );
+
+
 
 // The literal-receiver filter collectUseSites applies (issue #163 twin): `defs` are the in-repo definitions of the name, `declined`
 // (when set) counts the literal-receiver calls the filter dropped, for the declined_literal_calls= disclosure.
@@ -748,7 +763,8 @@ struct LiteralUseFilter
 inline std::pair<std::vector<UseSite>, std::size_t>
 collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span<const char> isChosenCaller,
                  std::string_view rootForId = {}, std::span<const rw::NodeId> valueDefs = {}, const rw::ValueRefIndex* valueIndex = nullptr,
-                 std::span<const std::uint32_t> keptForwards = {}, LiteralUseFilter literals = {} )
+                 std::span<const std::uint32_t> keptForwards = {}, LiteralUseFilter literals = {}, std::span<const std::string_view> anyOfNames = {},
+                 std::span<const rw::NodeId> anyOfTags = {} )
 {
     using namespace rw;
     std::vector<UseSite> sites;
@@ -765,7 +781,11 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
             continue;
         }
         const bool elixirPath = ( r.lang == Lang::Elixir && !sel.elixirDefs.empty() );
-        if( elixirPath ? !elixirResolver.reachesAny( r, sel.elixirDefs ) : r.calleeName != sel.siteMatchName )
+        // XF-ALIAS-HOP: `anyOfNames` (sorted) matches any of several names in this ONE pass (the alias spellings of a definition)
+        // (`anyOfTags[k]` rides the site that matched anyOfNames[k] as UseSite::viaAlias)
+        const auto nameAt      = anyOfNames.empty() ? anyOfNames.end() : std::ranges::lower_bound( anyOfNames, std::string_view( r.calleeName ) );
+        const bool nameMatches = anyOfNames.empty() ? r.calleeName == sel.siteMatchName : ( nameAt != anyOfNames.end() && *nameAt == r.calleeName );
+        if( elixirPath ? !elixirResolver.reachesAny( r, sel.elixirDefs ) : !nameMatches )
         {
             continue;
         }
@@ -799,7 +819,8 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
         {
             in = canonicalIdForEmit( ing, ing.symbols[ r.fromSymbol ], rootForId );   // M12: root-relative, no leading "./"
         }
-        sites.push_back( { r.fileId, r.line, r.role, std::move( in ), r.fromSymbol } );
+        const std::size_t tagAt = anyOfNames.empty() ? 0 : std::size_t( nameAt - anyOfNames.begin() );
+        sites.push_back( { r.fileId, r.line, r.role, std::move( in ), r.fromSymbol, tagAt < anyOfTags.size() ? anyOfTags[ tagAt ] : rw::kNoNode } );
     }
 
     // LB-G (r10 §5): TIER before path, filter.h's shared key — `--uses=bulk_create` was 207 django rows
@@ -815,6 +836,65 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
 }
         return a.in < b.in; } );
     return { std::move( sites ), callSitesOfName };
+}
+
+inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs, std::string_view rootForId )
+{
+    using namespace rw;
+    AliasUseSites out;
+    const AliasReach reach( ing, std::vector<NodeId>( defs.begin(), defs.end() ) );   // once per answer, never per site
+    out.unread = reach.unread;
+    if( reach.empty() )
+    {
+        return out;
+    }
+    std::vector<char> isReached( ing.symbols.size(), 0 );
+    for( const AliasReach::Row& r : reach.rows )
+    {
+        isReached[ r.alias ] = 1;
+    }
+    std::vector<std::string_view> names;   // distinct alias names, first reached alias id order
+    std::vector<NodeId>           nameAlias;
+    for( const AliasReach::Row& r : reach.rows )
+    {
+        const std::string_view n = ing.symbols[ r.alias ].name;
+        if( std::ranges::find( names, n ) == names.end() )
+        {
+            names.push_back( n );
+            nameAlias.push_back( r.alias );
+        }
+    }
+    for( std::size_t k = 0; k < names.size(); ++k )
+    {
+        for( const NodeId d : resolveAllByName( ing, names[ k ] ) )
+        {
+            out.namesakes += ( ing.symbols[ d ].name == names[ k ] && !isReached[ d ] ) ? 1 : 0;
+        }
+    }
+    // ONE pass over the references for every alias name (sorted for the scan's binary search), then each site is told its alias
+    std::vector<std::pair<std::string_view, NodeId>> byName;
+    for( std::size_t k = 0; k < names.size(); ++k )
+    {
+        byName.emplace_back( names[ k ], nameAlias[ k ] );
+    }
+    std::ranges::sort( byName );
+    std::vector<std::string_view> sorted;
+    std::vector<NodeId>           tags;
+    for( const auto& [ n, id ] : byName )
+    {
+        sorted.push_back( n );
+        tags.push_back( id );
+    }
+    UsesSelector aSel{};
+    auto [ got, callsOfName ] = collectUseSites( ing, aSel, std::span<const char>{}, rootForId, {}, nullptr, g.keptForwards, {}, sorted, tags );
+    (void)callsOfName;
+    std::erase_if( got, [ & ]( const UseSite& u ) { return u.from < isReached.size() && isReached[ u.from ]; } );
+    rankUseSites( ing, g, got );
+    for( UseSite& u : got )
+    {
+        out.sites.push_back( std::move( u ) );
+    }
+    return out;
 }
 
 // §A6b(ii): the refusal for a file: qualifier that names a file defining nothing of that name. Pre-fix --uses
@@ -899,6 +979,15 @@ std::optional<int> runUses( const MainDispatch& d )
                                                            usSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{}, defs, &usVri, g.keptForwards, { literalDefs, &usDeclinedLiteralCalls } );
         const rw::ValueRefIndex::DepthCuts usDepthCut = usVri.depthCutsFor( defs );
         rw::rankUseSites( ing, g, sites );   // cut-fix C: most-depended-on sites first, so the cap drops the lightest
+        // XF-ALIAS-HOP: the sites written through an alias of the definition, after the direct ones (a plain name only: a qualified
+        // selector narrows by resolution, which an alias spelling has none of)
+        const AliasUseSites usAlias = ( sel.fileQualified || sel.scopeNarrowed ) ? AliasUseSites{}
+                                                                                 : collectAliasUseSites( ing, g, defs, usSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{} );
+        const std::size_t usViaAlias = usAlias.sites.size();
+        if( !cfg.columnar )   // the columnar dialect has no column for the alias: it counts them on its root (alias_sites_held=) instead
+        {
+            sites.insert( sites.end(), usAlias.sites.begin(), usAlias.sites.end() );
+        }
 
         // §A6b(ii): a file: qualifier naming a file with NO definition of the name is a WRONG SELECTOR — its
         // three siblings all refuse it, and so does this one now.
@@ -958,7 +1047,8 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::declinedCallsLegendWithGates( usDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 )                                // exactly when it carries declined_calls=
                        + rw::declinedLiteralCallsLegend( usDeclinedLiteralCalls > 0 )
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
-                       + rw::valueRefsDepthLegend( usDepthCut.files > 0 ) ).c_str(),   // exactly when the root carries the depth disclosure
+                       + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
+                       + rw::aliasUsesLegend( usViaAlias > 0 || usAlias.unread > 0 ) ).c_str(),   // XF-ALIAS-HOP: exactly when a site is written through an alias
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -984,18 +1074,20 @@ std::optional<int> runUses( const MainDispatch& d )
                                    + rw::declinedLiteralCallsAttrXml( usDeclinedLiteralCalls )
                                    + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
                                    + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g )   // §H4 §3.4
-                                   + rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } );   // the depth cut that makes count= a floor; absent when none
+                                   + rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } )   // the depth cut that makes count= a floor; absent when none
+                                   + rw::aliasUsesAttrXml( usViaAlias, usAlias.namesakes, usAlias.unread, /*held=*/true );
             emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
             return 0;
         }
 
-        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}>",
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(),
                      rw::declinedLiteralCallsAttrXml( usDeclinedLiteralCalls ).c_str(),
                      rw::unprovenDefsAttrXml( usUnprovenDefs ).c_str(),   // H1: beside the count it qualifies; absent at zero
                      selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::graphCountFloorAttrXml( g ).c_str(),
-                     rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } ).c_str() );   // the depth cut that makes count= a floor; absent when none
+                     rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } ).c_str(),   // the depth cut that makes count= a floor; absent when none
+                     rw::aliasUsesAttrXml( usViaAlias, usAlias.namesakes, usAlias.unread, /*held=*/false ).c_str() );   // XF-ALIAS-HOP; absent when no alias reaches   // the depth cut that makes count= a floor; absent when none
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
@@ -1009,6 +1101,10 @@ std::optional<int> runUses( const MainDispatch& d )
             if( !u.in.empty() )
             {
                 rw::emitTo( stdout, " in_id=\"{}\"", ex( u.in ).c_str() );
+            }
+            if( u.viaAlias != kNoNode )   // XF-ALIAS-HOP: written as an alias whose chain reaches the definition
+            {
+                rw::emitTo( stdout, " via=\"alias\" alias=\"{}\"", ex( ing.symbols[ u.viaAlias ].name ).c_str() );
             }
             rw::emitTo( stdout, "/>" );
         }
