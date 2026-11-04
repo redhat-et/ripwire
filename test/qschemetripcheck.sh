@@ -38,6 +38,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   Watched text: kParserVer 289 -> 293 (rich 294; above 285-292 taken by #504 #506 #512 #513): C++ alias forms are definitions
 #   (src/aliasdef.h); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 (no record changes shape) and kQSnapCacheScheme
 #   stays 25: no watched quality.h function moved.
+# 2026-11-04, lane recv-xfile (base main 50bc05e84; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text:
+#   kParserVer 299 -> 301 (rich 302): RecvCall records, C++ ReturnType on every C++ function, Python ReturnType / CallResult / annotated
+#   MemberType records; kCacheVersion 48 -> 49 (LocalBindKind RecvCall appended). quality.h's mirrors with them. kQSnapCacheScheme stays: no
+#   Snapshot record changes shape and no watched quality.h function moved.
 # 2026-11-03, lane docs-rest re-bump (#506, base main dfd26fc1): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: kParserVer 289 -> 291
 #   (rich 292): both sides bumped (the lane's reST tier 287/288, main's namespace re-export 289/290), so the merged value goes above both and
 #   a cache built on main at 289 re-indexes the reST .txt docs. quality.h's kIngestParserVerMirror with it. kCacheVersion 48 and
