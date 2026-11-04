@@ -2502,6 +2502,67 @@ inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
     return std::nullopt;
 }
 
+// is w[0..i) a lead-in a path question may open with: nothing, or `trace|show|explain` / `what is`, then an optional `the`, then an
+// optional `call|code|execution` (`trace the call path from`, `what is the execution path from`, `path from`)? (S7, rv-py-mod2)
+inline bool graphSubjectPathLeadIn( std::span<const std::string_view> w )
+{
+    std::size_t k = 0;
+    if( k < w.size() && detail::graphSubjectWordIs( w[k], { "trace", "show", "explain" } ) )
+    {
+        ++k;
+    }
+    else if( k + 1 < w.size() && detail::graphSubjectWordIs( w[k], { "what" } ) && detail::graphSubjectWordIs( w[k + 1], { "is" } ) )
+    {
+        k += 2;
+    }
+    k += k < w.size() && detail::graphSubjectWordIs( w[k], { "the" } ) ? 1 : 0;
+    k += k < w.size() && detail::graphSubjectWordIs( w[k], { "call", "code", "execution" } ) ? 1 : 0;
+    return k == w.size();
+}
+
+// the FROM slot of `path from A to B` alone (applyPathFromUpstreamCut): A's candidates even when B names no symbol (`to the migrate
+// command's handle`), which parseGraphSubject refuses as a whole; `toCands`, when given, gets B's (often none). Empty unless the task IS a
+// path question: `path from` opens it (graphSubjectPathLeadIn: `trace the call path from`, `what is the path from`), and it does not also
+// ask for callers (`who calls` / `callers of`, whose rows the rule would move: S7, rv-py-mod2). `strip the directory path from a_start()
+// to ...` is not one.
+inline std::vector<std::string> parseGraphSubjectPathFrom( std::string_view task, std::vector<std::string>* toCands = nullptr )
+{
+    const std::vector<std::string_view> w = splitRouteWords( task );
+    for( std::size_t i = 0; i + 1 < w.size(); ++i )
+    {
+        if( ( detail::graphSubjectWordIs( w[i], { "who" } ) && detail::graphSubjectWordIs( w[i + 1], { "calls" } ) )
+            || ( detail::graphSubjectWordIs( w[i], { "caller", "callers" } ) && detail::graphSubjectWordIs( w[i + 1], { "of" } ) ) )
+        {
+            return {};
+        }
+    }
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        if( detail::graphSubjectWordIs( w[i], { "path" } ) && routeLower( w[i + 1] ) == "from" )
+        {
+            if( !graphSubjectPathLeadIn( std::span<const std::string_view>( w.data(), i ) ) )
+            {
+                return {};
+            }
+            for( std::size_t k = i + 3; k + 1 < w.size(); ++k )
+            {
+                if( routeLower( w[k] ) == "to" )
+                {
+                    std::string span;
+                    if( toCands != nullptr )
+                    {
+                        std::string toSpan;
+                        *toCands = detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + k + 1, w.size() - k - 1 ), toSpan );
+                    }
+                    return detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + i + 2, k - i - 2 ), span );
+                }
+            }
+            return {};
+        }
+    }
+    return {};
+}
+
 inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )
 {
     const std::vector<std::string_view> words = splitRouteWords( query );

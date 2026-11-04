@@ -505,6 +505,7 @@ ingest_docpass.h	runDocPostPass	alert-only	1	FINDING (disclosure lane): a doc po
 mcpindex.h	maybePrefetchHeadSnapshot	silent	1	not an answer path: optional background prefetch of the HEAD snapshot; a request recomputes whatever it did not fill (§2b rule 3)
 REGB1
 cat > "$TMP/reg_b2.tsv" <<'REGB2'
+largealloc.cpp	operator new	1	the operator new seam CONTRIBUTING §3 permits: the replaced operator's own bad_alloc, as the library's would throw
 infra/fileSetStore.h	fromEdges	1	an adjacency past its u32 offset is a failed build, not a partial store (fileGraphStop.h); every surface catches it: main.cpp dispatchMain, mcp.h's envelope, mcpserver.h's warm-up, quality.h loadRefTree
 main.cpp	dispatchMainBody	1	the rethrow after joining the grep prefetch worker, which would std::terminate if unwound joinable; dispatchMain catches it
 mcpindex.h	getIndex	1	the rethrow after releasing the half-built index; mcp.h's request envelope and mcpserver.h's warm-up catch it
@@ -522,6 +523,7 @@ REGC
 cat > "$TMP/reg_d.tsv" <<'REGD'
 REGD
 cat > "$TMP/reg_e.tsv" <<'REGE'
+largealloc.cpp	allocOrNull	malloc	1	the replaced operator new's storage for a block the route does not take, freed by its operator delete
 alloccount.cpp	countedAlloc	malloc	1	the counting allocator's own storage, freed by its operator delete (A/B instrument, never shipped)
 alloccount.cpp	operator new	aligned_alloc	1	the counting allocator's aligned storage, freed by its operator delete (A/B instrument, never shipped)
 infra/dynamic_map.hpp	compact	new	4	the rebuilt pools replace the old ones (delete[] before the swap, owned by ~dynamic_map after it); the two scratch arrays are delete[]d before the return

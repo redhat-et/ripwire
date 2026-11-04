@@ -476,6 +476,14 @@ Discloses: **none**
 | `kForBodyFoldBudgetBytes` | `4000` | — | — |
 | `kForBodyFoldRows` | `3` | — | — |
 
+### `src/forgraphverb.h`
+
+Discloses: `path_from_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kPathFromReachMaxNodes` | `4096` | — | runaway guard on A's forward walk; past it every caller of A stays where it ranked |
+
 ### `src/forliteral.h`
 
 Discloses: `capped`, `lit_capped`
