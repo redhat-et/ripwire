@@ -263,7 +263,8 @@ releases and an unpinned checker reports drift on a tree that was formatted corr
 binary that is not on `PATH` (Homebrew's LLVM is not, on macOS, by default).
 
 **clang-tidy's broad report is advisory, and must stay that way; one narrow subset gates.**
-`.clang-tidy` carries an empty `WarningsAsErrors`, CI runs it with `continue-on-error`, and the config
+`.clang-tidy` carries an empty `WarningsAsErrors`, CI runs it with `continue-on-error` (on the nightly schedule and
+on `workflow_dispatch` only: measured at ~1 h 55 min, it no longer delays every PR), and the config
 is curated down to `bugprone-*` / `clang-analyzer-*` / `performance-*` / `misc-dangling-*` /
 `misc-redundant-expression`. Its default catalogue argues for a different C++ than the data-oriented one
 §3 and G2 mandate — POD and SoA, C arrays, 32-bit handles, `ASSUME` instead of exceptions — so read its

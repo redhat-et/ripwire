@@ -162,6 +162,19 @@ jobs:
   # bugprone-easily-swappable-parameters and 30 bugprone-exception-escape. Every remaining class was read and
   # refused with evidence; the record is in the commit that wrote these numbers. Read it as a to-triage list,
   # not a queue of defects.
+  #
+  # WHERE THE ADVISORY clang-tidy RUNS: on `schedule` (the nightly full matrix against main) and
+  # `workflow_dispatch` only, NOT on push or pull_request. Measured on PR #537's CI: this job took 1 h 57 min,
+  # of which the two GATING clang-tidy/clang-format steps are about 3 min (tidycheck.sh: 17:32:49 to 17:35:38)
+  # and the advisory step is the other ~1 h 55 min (17:35:38 to ~19:30) — one single-threaded clang-tidy
+  # process over five TUs, main.cpp's including the whole header-only program (graph.h alone is 14,470 lines)
+  # under the broad catalogue with clang-analyzer-*'s path-sensitive analysis and a HeaderFilterRegex over
+  # every src/*.h. It is continue-on-error, so it could never fail the check, only delay it, and every PR's
+  # last required check waited on it. Both GATING steps still run on every event, and the job keeps its name
+  # (branch protection may require it). The advisory report now appears in the nightly run's `style` job log
+  # (ci.yml's 05:41 UTC schedule runs the whole job: it has no `if:` and no `needs:`), and a manual dispatch
+  # prints it on demand. The nightly report-failure / report-green jobs are unaffected: the advisory step
+  # still never fails, so it neither opens nor closes the tracking issue.
   style:
     name: style (clang-format gate + advisory clang-tidy)
     runs-on: ubuntu-24.04
@@ -225,7 +238,10 @@ jobs:
       - name: clang-tidy — gate (scripts/tidycheck.sh, the zero-row subset)
         run: CLANG_TIDY=clang-tidy-"$CLANG_VERSION" bash scripts/tidycheck.sh build-tidy
 
-      - name: clang-tidy — ADVISORY, never gates
+      # Nightly (`schedule`) and manual (`workflow_dispatch`) runs only: ~1 h 55 min, advisory, never gates —
+      # see the job comment. Its report is in the nightly run's `style` job log.
+      - name: clang-tidy — ADVISORY, never gates (nightly and workflow_dispatch only)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         continue-on-error: true
         run: |
           clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet \
