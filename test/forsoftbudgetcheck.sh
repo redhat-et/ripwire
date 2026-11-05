@@ -487,7 +487,8 @@ a, ref, T = rb( sys.argv[ 1 ] ), rb( sys.argv[ 2 ] ), int( sys.argv[ 3 ] )
 # round C (owner decision 2026-10-14: RESERVE SECTIONS FIRST): the trailing sections (and the <hdr> rows) are served first
 # and the rows past the target cut fill what they leave of T — the maximality bound is T less the bytes of those sections (U, read
 # off the answer: everything after </sigs> but </ctx>, plus the <hdr> rows before it)
-ans = open( sys.argv[ 1 ] ).read()
+import os as _os0, sys as _sys0; _sys0.path.insert( 0, _os0.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended
+ans = strip_appended( open( sys.argv[ 1 ] ).read() )   # K-LEGEND: the <syms> block / held stub is not reserved from T
 U = ( len( ans.split( '</sigs>', 1 )[ 1 ].encode() ) - len( '</ctx>' ) if '</sigs>' in ans else 0 )
 U += sum( len( h.encode() ) for h in re.findall( r'<hdr [^>]*/>', ans.split( '<sigs', 1 )[ 0 ] ) )
 # the tail size: test/lib/softbudget.py, shared by the five soft-target readers (the FIX1 R1 tail floor)

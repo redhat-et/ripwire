@@ -7,6 +7,14 @@
 import json, re
 
 
+# K-WRONGSYM / K-LEGEND: blocks appended after the ranked answer on their own allowance, outside est_tokens (the <syms> block, or its held
+# stub, each with the legend comment right before it). A soft-target reader leaves them out of the sections it reserves from T.
+APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:.*?-->(?:<syms [^>]*/>|<syms .*?</syms>)", re.S )
+def strip_appended( t ):
+    """The answer text less its appended, unpriced blocks (APPENDED)."""
+    return APPENDED.sub( "", t )
+
+
 def tail_size( t ):
     """Bytes of the answer's tail: XML, the whole <tail>…</tail> element; JSON, the compact "tail" object.
 
