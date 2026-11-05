@@ -41,6 +41,7 @@
 
 #include "editcheck.h"   // editCheckGroupKeys' fold (editCheckDeclFoldTargets) — the C-family declaration identity
 #include "graph.h"
+#include "hoprecord.h"   // HOP-CONTEXT-1: THE hop record — site= call= sig= on every hop row
 #include "langfacts.h"   // langFacts(l).overloadSignatures — the TypeScript overload-signature rule, as a column
 #include "memberowner.h"   // QUALNAME-1: MemberOwners / qualifiedMemberName — the one member-owner rule for every row
 #include "model.h"
@@ -1048,9 +1049,22 @@ inline std::vector<std::string_view> pathHopOwners( const IngestResult& ing, std
 // THE hop rows of a --path answer — the CLI (stdout) and MCP path_between (its memstream) both write through this, so the two
 // transports cannot drift (they were two copies of one loop). Row i's via="name" (FE-B), via="link" and anchor="missing" (a
 // markdown link, #409) and prov="split" (attrib-multidef) read the edge INTO it; the first row is no hop.
-inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Graph& g, std::span<const NodeId> path,
-                             std::span<const std::string_view> owners, bool singleRoot, std::string_view rootPrefix )
+// HOP-CONTEXT-1: row i > 0 also prints the hop record of the edge into it (hoprecord.h hopAttrsXml) at `shed`, when `hops` holds it.
+// How a block of --path rows prints: the path dialect (root-relative under one root) and the hop record at its shed level.
+struct PathRowView
 {
+    bool             singleRoot = false;
+    std::string_view rootPrefix;
+    const HopFacts&  hops;
+    HopShed          shed = HopShed::Full;
+};
+inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Graph& g, std::span<const NodeId> path,
+                             std::span<const std::string_view> owners, const PathRowView& view )
+{
+    const bool             singleRoot = view.singleRoot;
+    const std::string_view rootPrefix = view.rootPrefix;
+    const HopFacts&        hops       = view.hops;
+    const HopShed          shed       = view.shed;
     EXPECTS( owners.size() == path.size(), "owners come from pathHopOwners( ing, path )" );
     std::vector<char> esc;
     for( std::size_t i = 0; i < path.size(); ++i )
@@ -1061,8 +1075,10 @@ inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Grap
         const bool             hop   = i > 0;
         const std::string      mark  = std::string( viaEdgeAttr( hop && edgeNameOnly( g, path[ i - 1 ], path[i] ), hop && edgeIsLink( g, path[ i - 1 ], path[i] ) ) )
                                      + anchorMissAttr( hop && edgeAnchorMiss( g, path[ i - 1 ], path[i] ) );
-        emitTo( out, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}/>", symTag( s.kind ), name, escapeXml( rp, esc ), s.line,
-                mark, splitArmAttrXml( pathHopSplitArm( g, path, i ) ), viaImplAttr( hop && edgeViaImpl( g, path[ i - 1 ], path[i] ) ) );   // lane L6: via="impl"
+        const HopRecord* const rec = hop && hops.on ? hops.find( path[ i - 1 ], path[i] ) : nullptr;
+        const std::string      ctx = rec != nullptr ? hopAttrsXml( ing, *rec, shed, /*withSig=*/true, singleRoot, rootPrefix ) : std::string();
+        emitTo( out, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), name, escapeXml( rp, esc ), s.line,
+                mark, splitArmAttrXml( pathHopSplitArm( g, path, i ) ), viaImplAttr( hop && edgeViaImpl( g, path[ i - 1 ], path[i] ) ), ctx );   // lane L6: via="impl"
     }
 }
 

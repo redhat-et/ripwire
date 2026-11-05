@@ -828,6 +828,29 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "nodes", "nodes=N: symbols printed, terminals plus joins (a floor)", false, "connect", MapHeaderRead::No, {}, "connect" },
     { "radius", "radius=N: undirected hop bound searched (default 6, max 12); raise it with connect-radius=N", false, "connect", MapHeaderRead::No, {}, "connect" },
     { "sig", "s sig=: the join symbol's declaration signature; dropped first when a max_tokens ceiling trims", true, "s", MapHeaderRead::No, {}, "connect" },
+    // HOP-CONTEXT-1 (src/hoprecord.h, THE hop record): the hop attributes on a --connect <e> row and a --path hop <s> row, and their
+    // root disclosures; every one present-only (hopAttrsXml / hopRootAttrsXml print nothing they would not read)
+    { "site", "e site=: a call of t= in f= (arity fit, then owner, first); by name, not proof", true, "e", MapHeaderRead::No, {}, "connect" },
+    { "sites", "e sites=N: N such lines", true, "e", MapHeaderRead::No, {}, "connect" },
+    { "site_by", "e site_by=: first = a namesake callee's lines tie with t='s, site= the first; nofit = no line's arg count fits t=", true, "e", MapHeaderRead::No, {}, "connect" },
+    { "call", "e call=: its text, <=3 lines/120 B, U+2026=cut", true, "e", MapHeaderRead::No, {}, "connect" },
+    { "sig", "e sig=: t='s signature, <=160 B, once per callee", true, "e", MapHeaderRead::No, {}, "connect" },
+    { "fp", "e fp=: the from definition, when two rows of a group would read alike", true, "e", MapHeaderRead::No, {}, "connect" },
+    { "tp", "e tp=: the to definition, when two rows of a group would read alike", true, "e", MapHeaderRead::No, {}, "connect" },
+    { "site", "s site=: a call of this row's name in the row above (arity fit, then owner, first); by name, not proof", true, "s", MapHeaderRead::No, {}, "path" },
+    { "sites", "s sites=N: N such lines", true, "s", MapHeaderRead::No, {}, "path" },
+    { "site_by", "s site_by=: first = a namesake callee's lines tie with this row's, site= the first; nofit = no line's arg count fits this row", true, "s", MapHeaderRead::No, {}, "path" },
+    { "call", "s call=: its text, <=3 lines/120 B, U+2026=cut; pair 1 only", true, "s", MapHeaderRead::No, {}, "path" },
+    { "sig", "s sig=: this row's signature, <=160 B; pair 1 only", true, "s", MapHeaderRead::No, {}, "path" },
+    { "hop_nosite", "hop_nosite=N: N hops whose caller has no call naming the callee (inherit/impl/link, alias, constructor): no site=", false, "path", MapHeaderRead::No, {}, "path" },
+    { "hop_nosite", "hop_nosite=N: N hops whose caller has no call naming the callee (inherit/impl/link, alias, constructor): no site=", false, "connect", MapHeaderRead::No, {}, "connect" },
+    { "hop_unread", "hop_unread=N: call=/sig= withheld on N hops: file unreadable or its length changed since indexing (then site= too)", false, "path", MapHeaderRead::No, {}, "path" },
+    { "hop_unread", "hop_unread=N: call=/sig= withheld on N hops: file unreadable or its length changed since indexing (then site= too)", false, "connect", MapHeaderRead::No, {}, "connect" },
+    { "hop_notext", "hop_notext=N: call= withheld on N hops whose site text does not spell the callee (macro-expanded/generated)", false, "path", MapHeaderRead::No, {}, "path" },
+    { "hop_notext", "hop_notext=N: call= withheld on N hops whose site text does not spell the callee (macro-expanded/generated)", false, "connect", MapHeaderRead::No, {}, "connect" },
+    { "hop_redacted", "hop_redacted=N: call= withheld on N hops whose callee name sits in or against a redacted credential", false, "path", MapHeaderRead::No, {}, "path" },
+    { "hop_redacted", "hop_redacted=N: call= withheld on N hops whose callee name sits in or against a redacted credential", false, "connect", MapHeaderRead::No, {}, "connect" },
+    { "hop_shed", "hop_shed=: hop attributes max_tokens shed first (sig, call, site)", false, "connect", MapHeaderRead::No, {}, "connect" },
     // dead-code: src/verbs_quality.h (the <dead-code> root emit)
     { "evidence", "evidence=: the rule every row met, internal linkage and no caller in the index; verify before deleting", false, "dead-code", MapHeaderRead::No, {}, "dead-code" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols skipped as self-registering test/bench macros (TEST, BENCHMARK...); a floor", false, "dead-code", MapHeaderRead::No, {}, "dead-code" },
@@ -837,6 +860,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "decorated-excluded", "decorated-excluded=N: decorated Python defs skipped (a decorator may register them; wrappers included); a floor", true, "dead-code", MapHeaderRead::No, {}, "dead-code" },
     // D1 TESTONLY-DEAD: present-only — absent at 0, so an answer with no test-only row is byte-identical
     { "test-only", "test-only=N: <to n= t= p= l=> library functions whose every indexed caller is a test; not dead, not in count=; a candidate, not proof: a use only in an unindexed file (an .inc table), a docs page or a name built at run time is invisible, so verify before deleting", true, "dead-code", MapHeaderRead::No, {}, "dead-code" },
+    // DEAD-CODE-SCOPE: present-only — the exported group rides only a filtered answer whose files hold a public free function with
+    // no non-test caller, so every other answer is byte-identical. One term per element; each reading defines its element's attributes.
+    { "linkage", "exported linkage=exported evidence=no-non-test-caller: PUBLIC free functions of the filtered files with no non-test caller in the graph, <e> rows after d/to; not dead, not in count=, code outside the tree may call them (zero means none found here); total= found, shown= printed (capped=1 rows cut), files= read of files_total= filtered files holding a non-internal free function with no non-test caller (first by path; total=0 can follow), unseen=N a floor on text files unread, unseen_by= the cap or failure behind each, extra=skipped verdicts fixed by indexed files so unindexed ones unread (counts, at= are floors)", false, "exported", MapHeaderRead::No, {}, "dead-code" },
+    { "v", "e n= t= p= l= v=unused no mention in any text file under the root outside its def (prose docs not read)|test-only only tests|file-only same-file words only|unknown why= names what may reach it: string (__all__, getattr, a registry key)|value|framework (decorator, hook)|import (re-export)|barrel|api|name|by-name|declined|built-name|dispatch|members|manifest|in-file|unimported|unseen; tests= text= str= imp= same= word counts, defs= overloads, at= sites to read", false, "e", MapHeaderRead::No, {}, "dead-code" },
     // edit-check: src/editcheck.h (the <edit-check> root emit)
     { "defs", "defs=N: overloads at this site (same file, scope, name) folded into one contract; params compared by MAX", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
     // idea #11: present-only — rides only the verdict-only (unchanged, nothing flagged) answer, which prints no c rows
@@ -1276,7 +1303,17 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // test-gate: src/situ.h writeTestGateReport
     { "tests", "tests=/untested=: tests to run (t total) / impacted symbols no test reaches (u total)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     // uses: src/verbs_navigate.h
-    { "count", "count=N: use-site rows in all (a floor)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "count", "count=N: unhedged use-site rows (a floor)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    // XF-ALIAS-HOP (src/aliashop.h AliasReach): the sites written through an alias of of=, present-only
+    { "via", "<u via=\"alias\" alias=A>: the site is written as the alias A, whose written target reaches of= (the head or a template argument, up to 4 alias hops); never a call edge; listed after the direct rows, counted in count= when that A is the one in scope at the site (its file, or a namespace or class enclosing it)", true, "u", MapHeaderRead::No, "alias", "uses" },
+    { "hedge", "<u hedge=\"name\">: the alias site is matched by name only (no reaching alias encloses it, or a namesake does); listed last, in no count=", true, "u", MapHeaderRead::No, {}, "uses" },
+    { "alias_hedged", "alias_hedged=N: N alias sites carry hedge=name (not in count= or via_alias=)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_depth_capped", "alias_depth_capped=1: the alias walk stopped at 4 hops with an alias still to follow (via_alias= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias", "u alias=: the alias definition's name the site is written as (via=alias)", true, "u", MapHeaderRead::No, {}, "uses" },
+    { "via_alias", "via_alias=N: N of the counted rows are written through an alias in scope (via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_namesakes", "alias_namesakes=K: K definitions share a listed alias's name and reach none of of=; their sites are name-matched in too (a hedge)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_sites_held", "alias_sites_held=N: N sites written through an alias of of= are not in the columnar rows (the XML form lists them, via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    { "alias_unread", "alias_unread=N: N alias declarations could not be read, so whether they reach of= is unknown (count= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "run", "test run=: the command that runs that test file (run_unknown=1: none derivable)", true, "test", MapHeaderRead::No, {}, "pr-context" },
     // …and the fixture states compactlegendcheck (UG) reaches: every XML flag of the universe, every instance.
     // hotspots: src/verbs_report.h (the <hotspots> root emit)

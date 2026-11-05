@@ -19,25 +19,25 @@ both rewrite them; the per-cap tables are re-read from `src/` on every run.
 
 | cap declarations | distinct names | tunable | must stay `constexpr` | move >= 1 invocation | move nothing measurable |
 | --- | --- | --- | --- | --- | --- |
-| 265 | 264 | 112 | 12 | **37** | 75 |
+| 266 | 265 | 112 | 12 | **37** | 75 |
 
-The first two columns are not the same number, and the gap is not a rounding: `src/` holds **265 cap
-declarations** under **264 distinct names** (`kRowCap` declared in more than one file). The sweep
+The first two columns are not the same number, and the gap is not a rounding: `src/` holds **266 cap
+declarations** under **265 distinct names** (`kRowCap` declared in more than one file). The sweep
 patches by NAME, so its own population is NAMES and not declarations — and the two columns beside
 those are frozen at the commit named under Provenance while this census is re-read from `src/` on
-every run, which makes them a third population again. Enumerated over the 264 names `src/` declares
-today: **111 tunable**, **12 must stay `constexpr`**, and **141 declared since the sweep was
+every run, which makes them a third population again. Enumerated over the 265 names `src/` declares
+today: **111 tunable**, **12 must stay `constexpr`**, and **142 declared since the sweep was
 prepared, which no measurement has touched** (`kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`,
-`kBaseScopeScanCap`, `kBridgeMaxHops`, `kCallSitesPerRowCap`, +135 more). 111 + 12 + 141 = 264, and
+`kBaseScopeScanCap`, `kBridgeMaxHops`, `kCallSitesPerRowCap`, +136 more). 111 + 12 + 142 = 265, and
 `emit` refuses to render a partition that does not add up. The `tunable` column above reads 112
 rather than 111 because one name the sweep classified is no longer declared in `src/` at all:
-`kSituTestRowsShown`. Quoting "113 of 265" would be wrong in both halves at once, which is the shape
+`kSituTestRowsShown`. Quoting "113 of 266" would be wrong in both halves at once, which is the shape
 of error a generated table exists to prevent.
 
 ## Read this ratio before the tables
 
 **37 of 112 tunable caps move any invocation at all. 75 move nothing measurable.** That is the
-finding, and it says what NOT to do: this is not a 265-cap audit. Most of these constants are
+finding, and it says what NOT to do: this is not a 266-cap audit. Most of these constants are
 inert on real invocations and should be left alone. The work worth doing is the small set below,
 plus the caps that fire SILENTLY — a cap that bites without disclosing is a defect independent of
 whether its value is right, and that fix is both cheaper and larger than any retuning.

@@ -2619,7 +2619,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 else if( name == "path_between" && !path.empty() && !from.empty() && !to.empty() )
                 {
-                    const std::optional<std::string> answer = pathText( path, from, to );
+                    const std::optional<std::string> answer = pathText( path, from, to, redactPtr );
                     const auto pathNotFound = [ & ]
                     {
                         const IngestResult& pIng    = getIndex( path ).ing;
