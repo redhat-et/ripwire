@@ -168,8 +168,8 @@ printf '{"wrshallowkey": [1]}\n' > "$WR/flip.json"
 deepjson "$WR/deep.json"
 if ! command -v python3 >/dev/null 2>&1; then
     printf '  SKIP  (w1-w5) python3 absent: no deep JSON fixture\n'
-elif ! wrrun || [ ! -s "$WRC" ]; then
-    no "(w0) cold run over the refused-file fixture: expected rc=0 and a cache, got rc=$? size=$( wc -c < "$WRC" 2>/dev/null || echo missing )"
+elif ! { wrrun; rc_w00=$?; [ "$rc_w00" -eq 0 ] && [ -s "$WRC" ]; }; then
+    no "(w0) cold run over the refused-file fixture: expected rc=0 and a cache, got rc=$rc_w00 size=$( wc -c < "$WRC" 2>/dev/null || echo missing )"
 else
     wrrun; rc_w0=$?                                    # first warm run: settles any one-time convergence
     s0=$( blobsum )
