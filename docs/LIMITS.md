@@ -656,6 +656,16 @@ Discloses: `capped`
 | `kWrapperFollowDepth` | `2` | — | — |
 | `kWrapperFollowMax` | `3` | — | — |
 
+### `src/hoprecord.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kHopCallMaxBytes` | `120` | — | call= cap (U+2026 marks a cut) |
+| `kHopCallMaxLines` | `3` | — | a call whose arguments continue joins up to this many lines |
+| `kHopSigMaxBytes` | `160` | — | sig= cap on a hop (cleanSig's own 240 cap applies first) |
+
 ### `src/infra/blanktext.h`
 
 Discloses: **none**

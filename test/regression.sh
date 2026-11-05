@@ -596,6 +596,7 @@ for _g in \
     hookcheck \
     hop1check \
     hopbodycheck \
+    hopcontextcheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \
