@@ -371,6 +371,16 @@ Discloses: **none**
 | `kMaxSample` | `80` | INDEXING | — |
 | `kMaxScored` | `4000` | INDEXING | — |
 
+### `src/exemplarfamily.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kExemplarBodyScanMaxLoc` | `4000` | — | a registry or instance candidate longer than this is not read (runaway guard) |
+| `kExemplarMemberRows` | `4` | — | <m> rows printed (typical first); the rest are counted in n= |
+| `kExemplarPhraseWordsMax` | `4` | — | words of X read after the trigger |
+
 ### `src/expand.h`
 
 Discloses: **none**
