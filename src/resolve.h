@@ -101,7 +101,7 @@ inline constexpr std::uint32_t kNoFile = 0xFFFFFFFFu;   // "no repo file" sentin
 // realpath, no I/O — same determinism contract as relForHash. A leading '/' (absolute) is preserved;
 // a trailing '/' is dropped. Empty segments (from `//` or a leading '/') and `.` segments are elided.
 // PATH-NORM: the body writes into a caller's buffer, so a probe loop reuses one allocation instead of returning a
-// fresh string per probe (joinNormalizeLookupTail below: 5.2 M calls on a warm vscode --deps, two heap strings each).
+// fresh string per probe (joinNormalizeLookup below: 5.2 M calls on a warm vscode --deps, two heap strings each).
 // `out` is cleared first and must not alias `path`. Returns false on an escape above the base (out left empty);
 // true otherwise, including the empty result a path that normalizes to its own base yields ("a/.."), which is why
 // the flag exists: lexicalNormalize below folds both into the empty string, as it always has.
@@ -171,8 +171,7 @@ inline bool lexicalNormalizeInto( std::string_view path, std::string& out )
 inline std::string lexicalNormalize( std::string_view path )
 {
     std::string out;
-    lexicalNormalizeInto( path, out );
-    return out;   // empty on an escape, as before
+    return lexicalNormalizeInto( path, out ) ? std::move( out ) : std::string();   // the empty string is this function's escape answer
 }
 
 // ── LEVER B: per-language import Step-A (string → fileId) ────────────────────────────────────────────
@@ -310,9 +309,10 @@ struct WsIncludeCtx
 // `rel + ext` itself, and the join and its normalized copy live in two per-thread buffers that keep their
 // capacity: the probe allocates nothing once they have grown. Same join, same normalization, same lookup,
 // so the answer is the one the allocating version gave.
-inline std::uint32_t joinNormalizeLookupTail( std::string_view baseDir, std::string_view rel, std::string_view relTail,
-                                              const HashMap<std::string, std::uint32_t>& fileIndex,
-                                              const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_view rel,
+                                          const HashMap<std::string, std::uint32_t>& fileIndex,
+                                          const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
+                                          std::string_view relTail = {} )
 {
     // rule 2: anchor a root-relative probe at the includer's own root (labels are never empty).
     std::string_view effBase = baseDir;
@@ -385,13 +385,6 @@ inline std::uint32_t joinNormalizeLookupTail( std::string_view baseDir, std::str
     return ( ait == ws->absIndex.end() ) ? kNoFile : ait->second;
 }
 
-inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_view rel,
-                                          const HashMap<std::string, std::uint32_t>& fileIndex,
-                                          const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
-{
-    return joinNormalizeLookupTail( baseDir, rel, {}, fileIndex, ws, includerFileId );
-}
-
 // PATH-NORM: one join + normalize for a probe LIST, `dir/rel + suffix` over many suffixes (resolveTsImport's 12
 // extensions and index files, probeJsRuntimeSourceExt's source alternates). When the last segment of `rel` is a
 // plain name (not empty, `.` or `..`), normalize(dir/rel + suffix) == normalize(dir/rel) + suffix for every suffix
@@ -399,7 +392,7 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
 // normalizer keeps as written, and an escape is decided by the segments before it, so it stays an escape (every
 // probe misses, as each one did). The base is normalized once and each probe is a copy plus a lookup. Any other
 // `rel` (`.`, `..`, a trailing `/`), or a workspace (rules 1-3 read the includer's root per probe), takes
-// joinNormalizeLookupTail per probe, the old path. One buffer per probe list; nothing per probe.
+// joinNormalizeLookup per probe, the old path. One buffer per probe list; nothing per probe.
 class SuffixProbe
 {
 public:
@@ -426,7 +419,7 @@ public:
     {
         if( !fast_ )
         {
-            return joinNormalizeLookupTail( dir_, rel_, suffix, fileIndex_, ws_, includerFileId_ );
+            return joinNormalizeLookup( dir_, rel_, fileIndex_, ws_, includerFileId_, suffix );
         }
         if( escaped_ )
         {
