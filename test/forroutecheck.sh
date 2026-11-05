@@ -202,7 +202,7 @@ for line in sys.stdin:
     try: d = json.loads( line )
     except Exception: continue
     c = d.get( "result", {} ).get( "content" )
-    if c: print( c[0].get( "text", "" ), end="" )'; }
+    if c: print( __import__( "re" ).sub( r"<!-- (?:ripwire for )?syms:.*?-->(?:<syms .*?</syms>|<syms [^>]*/>)", "", c[0].get( "text", "" ), flags = 16 ), end="" )'; }   # K-WRONGSYM: the <syms> block is last before </ctx>, after the verb block this gate reads
 mcp_call "path from startEntry to leaf_sink" ',"budget_tokens":4100' >"$TMP/b2.xml"
 if [ "$( attr "$TMP/b2.xml" held )" = "budget" ] && grep -q '<graph_verb [^>]*/></ctx>$' "$TMP/b2.xml" && ! grep -q '<path ' "$TMP/b2.xml"
 then ok "(b2) MCP budget_tokens: the same held=\"budget\" tag, no verb body"
@@ -262,7 +262,7 @@ for line in sys.stdin:
     try: d = json.loads( line )
     except Exception: continue
     c = d.get( "result", {} ).get( "content" )
-    if c: print( c[0].get( "text", "" ), end="" )'; }
+    if c: print( __import__( "re" ).sub( r"<!-- (?:ripwire for )?syms:.*?-->(?:<syms .*?</syms>|<syms [^>]*/>)", "", c[0].get( "text", "" ), flags = 16 ), end="" )'; }   # K-WRONGSYM: the <syms> block is last before </ctx>, after the verb block this gate reads
 mcp_for "path from startEntry to leaf_sink" >"$TMP/x1.xml"
 cli_tag="$( grep -o '<graph_verb [^>]*>' "$TMP/p1.xml" )"; mcp_tag="$( grep -o '<graph_verb [^>]*>' "$TMP/x1.xml" )"
 if [ -n "$cli_tag" ] && [ "$cli_tag" = "$mcp_tag" ] && grep -q '<path [^>]*from="startEntry" to="leaf_sink"[^>]* reachable="1" hops="2"' "$TMP/x1.xml" \
