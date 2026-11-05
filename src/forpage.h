@@ -975,6 +975,21 @@ inline TailPageRowFate tailPageRowFate( bool unlisted, const TailRowAdmit& a, bo
     return headFile ? TailPageRowFate::SkipHead : TailPageRowFate::ListWide;
 }
 
+// A file id's byte in a per-file mask; an id past the mask reads as `absent`.
+inline bool tailMaskAt( const std::vector<char>& mask, std::size_t f, bool absent ) noexcept
+{
+    return f < mask.size() ? mask[f] != 0 : absent;
+}
+// What the old walk listed at a row (a row listed above counts as its own): Skip and ListSym.
+inline bool tailFateOldListed( TailPageRowFate fate ) noexcept
+{
+    return fate == TailPageRowFate::Skip || fate == TailPageRowFate::ListSym;
+}
+inline bool tailFateListed( TailPageRowFate fate ) noexcept
+{
+    return fate == TailPageRowFate::ListSym || fate == TailPageRowFate::ListWide;
+}
+
 struct TailPageWalkInputs
 {
     const IngestResult&      ing;
@@ -998,16 +1013,15 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         const TailOldWalk  old = tailOldWalkAt( docs != nullptr, r, codeSeen, windowSeen );
         const TailRowAdmit a      = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageWalk );
         const bool         symRow = a.isDoc ? old.doc : old.code;
-        codeSeen += a.isDoc ? 0 : 1;
+        codeSeen += std::size_t( !a.isDoc );
         out.pageSeen = std::max( out.pageSeen, r + 1 );
-        const TailPageRowFate fate = tailPageRowFate( row.fileId < listed.size() && !listed[ row.fileId ], a, symRow,
-                                                      row.fileId < in.inHead.size() && in.inHead[ row.fileId ] );
-        tailOldWalkCounters( out, old, fate == TailPageRowFate::Skip || fate == TailPageRowFate::ListSym, r );   // what the old walk listed
+        const TailPageRowFate fate = tailPageRowFate( !tailMaskAt( listed, row.fileId, true ), a, symRow, tailMaskAt( in.inHead, row.fileId, false ) );
+        tailOldWalkCounters( out, old, tailFateOldListed( fate ), r );   // what the old walk listed
         if( fate == TailPageRowFate::SkipMarked )
         {
             out.pageSkip = std::min( out.pageSkip, r );
         }
-        else if( fate == TailPageRowFate::ListSym || fate == TailPageRowFate::ListWide )
+        else if( tailFateListed( fate ) )
         {
             listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
                          symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );
