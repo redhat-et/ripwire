@@ -329,6 +329,8 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
             const Symbol& target = ix.ing.symbols[ edit.node ];
             edit.symName = target.name;
             edit.line    = target.line;
+            // not owner-narrowed (XF-QUALIFIED-ENDPOINTS): a plan target resolves as the edit verbs do (mcpedit.h
+            // resolveOneForEdit, the bare name exactly), so a qualified `Alpha.run` never reaches here
             const std::vector<NodeId> overloads = editCheckOverloadSet( ix.ing, ix.g, edit.node );
             EditCheckCalleeTest       callee( ix.ing, target, overloads );
             const auto [ callerIds, callerIncompatible ] = editCheckCallers( ix.ing, ix.g, overloads, callee );
