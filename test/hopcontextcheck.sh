@@ -31,12 +31,18 @@
 #                   inside a redacted run withholds call= (hop_redacted=1)
 #  (10) no site   — a hop with no site still prints the callee's sig= (Python import alias, TS import alias); a one-line
 #                   caller's call= starts at its statement, not its own signature
+#  (11) CodeRabbit #535 — the reader re-checks the crawl root before it opens a file (a file outside it is unreadable, fail
+#                   closed); a file whose length changed since indexing withholds site= too, on a full hop and on a later
+#                   --path pair's site-only hop; the site pick's legend says arity fit, then owner (C++ B::get( 3 ) vs
+#                   get( 1, 2 )); hop_unread='s legend says the check is a length compare; under --max-tokens the --connect
+#                   root counts describe the hops the pass prints (TS import aliases, a leg dropped) and fp=/tp= keep their
+#                   clause at the deepest shed; a withheld call= counts no redaction (MCP path_between and connect stderr)
 #
 # Usage:  test/hopcontextcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire test/hopcontextcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
-unset RIPWIRE_NO_HOP_CONTEXT RIPWIRE_HOP_STATS RIPWIRE_TEST_FILETEXT_UNREAD RIPWIRE_TEST_FILETEXT_EDITED RIPWIRE_TEST_FILETEXT_BLANKED RIPWIRE_NO_HOP_BODY
+unset RIPWIRE_NO_HOP_CONTEXT RIPWIRE_HOP_STATS RIPWIRE_TEST_FILETEXT_UNREAD RIPWIRE_TEST_FILETEXT_EDITED RIPWIRE_TEST_FILETEXT_BLANKED RIPWIRE_TEST_FILETEXT_ROOT RIPWIRE_NO_HOP_BODY
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -46,7 +52,7 @@ SCR="$( mktemp -d -t hopcontextcheck.XXXXXX )" || { echo "mktemp failed"; exit 2
 trap 'rm -rf "$SCR"' EXIT
 export HOME="$SCR"
 F="$SCR/fix"
-mkdir -p "$F/c" "$F/cpp" "$F/py" "$F/ts" "$F/go" "$F/rs" "$F/pyd" "$F/chain" "$F/cpp2" "$F/py2" "$F/qual" "$F/tsq" "$F/tsa" "$F/nf" "$F/sec"
+mkdir -p "$F/c" "$F/cpp" "$F/py" "$F/ts" "$F/go" "$F/rs" "$F/pyd" "$F/chain" "$F/cpp2" "$F/py2" "$F/qual" "$F/tsq" "$F/tsa" "$F/nf" "$F/sec" "$F/om" "$F/ns" "$F/pp"
 
 # ── fixtures (written at runtime) ─────────────────────────────────────────────────────────────────────────────────────
 cat > "$F/c/a.c" <<'X'
@@ -226,6 +232,25 @@ export function t(): number {
 X
 printf 'export function compute(a: number, b: number): number { return a + b; }\n' > "$F/tsa/h.ts"
 printf 'import { compute as calc } from "./h";\nexport function w(): number {\n  return calc(1, 2);\n}\n' > "$F/tsa/w.ts"
+# (11) an owner-qualified call whose argument count misfits vs an unqualified call that fits: the fit wins (arity, then owner)
+cat > "$F/om/m.cpp" <<'X'
+struct B {
+    static int get( int a, int b );
+    int run();
+};
+int B::get( int a, int b ) { return a + b; }
+int B::run() {
+    int x = B::get( 3 );
+    int y = get( 1, 2 );
+    return x + y;
+}
+X
+# (11) two site-less hops (TS import aliases) in one --connect group: a dropped leg drops one of them
+printf 'export function compute(a: number, b: number): number { return a + b; }\nexport function other(a: number): number { return a; }\n' > "$F/ns/h.ts"
+printf 'import { compute as calc, other as oth } from "./h";\nexport function w(): number {\n  return calc(1, 2) + oth(3);\n}\n' > "$F/ns/w.ts"
+# (11) two reaching --path pairs: pair 1 full, pair 2 site only (p2.c)
+printf 'static int sink( int a ) { return a; }\nint src( int n ) {\n  return sink( n );\n}\n' > "$F/pp/p1.c"
+printf 'static int sink( int a ) { return a + 1; }\nstatic int src( int n ) {\n  return sink( n ) + 1;\n}\n' > "$F/pp/p2.c"
 cat > "$F/nf/n.cpp" <<'X'
 struct C { int get( int a, int b, int c ); };
 int C::get( int a, int b, int c ) { return a + b + c; }
@@ -308,6 +333,8 @@ CMDS=(
   "tsq_a|tsq|--path=t,A.make"
   "tsa_alias|tsa|--path=w,compute"
   "nf_path|nf|--path=z,C::get"
+  "om_path|om|--path=B::run,B::get"
+  "pp_path|pp|--path=src,sink"
   "sec4|sec|--path=src4,sink4"
   "sec5|sec|--path=src5,sink5"
   "sec6|sec|--path=src6,sink6"
@@ -333,6 +360,18 @@ run self_conn.off "$ROOT/src" RIPWIRE_NO_HOP_CONTEXT=1 -- --connect=serialize,es
 run c_unread "$F/c" RIPWIRE_TEST_FILETEXT_UNREAD=a.c -- --path=top,leaf
 run c_edited "$F/c" RIPWIRE_TEST_FILETEXT_EDITED=a.c -- --path=top,leaf
 run c_blank "$F/c" RIPWIRE_TEST_FILETEXT_BLANKED=b.c -- --path=far,leaf
+run c_edited.full "$F/c" RIPWIRE_TEST_FILETEXT_EDITED=a.c -- --path=top,leaf --legend=full
+run pp_edit2 "$F/pp" RIPWIRE_TEST_FILETEXT_EDITED=p2.c -- --path=src,sink
+# (11) the crawl root the reader checks moved elsewhere: every indexed file resolves outside it
+run c_root "$F/c" RIPWIRE_TEST_FILETEXT_ROOT="$SCR/elsewhere" -- --path=top,leaf
+run c_root_conn "$F/c" RIPWIRE_TEST_FILETEXT_ROOT="$SCR/elsewhere" -- --connect=top,far,viamacro
+# (11) budget ladders: two site-less hops (a leg drops one), and alike rows (fp=/tp=) down to the deepest shed, full legend
+NS_T=(); t=1700; while [ "$t" -ge 1300 ]; do NS_T+=( "$t" ); t=$(( t - 10 )); done
+for t in "${NS_T[@]}"; do run "ns_shed_$t" "$F/ns" -- --connect=w,compute,other --max-tokens=$t; done
+printf '%s\n' "${NS_T[@]}" > "$O/ns_list"
+PYD_T=(); t=2400; while [ "$t" -ge 1500 ]; do PYD_T+=( "$t" ); t=$(( t - 20 )); done
+for t in "${PYD_T[@]}"; do run "pyd_shed_$t" "$F/pyd" -- --connect=AuthPhase.async_handle,ActiveConnection.async_handle --max-tokens=$t --legend=full; done
+printf '%s\n' "${PYD_T[@]}" > "$O/pyd_list"
 # (4) shed ladder: the same connect at falling ceilings (the full-legend token estimate is what --max-tokens is read against)
 SHED_T=( 100000 )
 t=2000; while [ "$t" -ge 1000 ]; do SHED_T+=( "$t" ); t=$(( t - 10 )); done
@@ -381,6 +420,28 @@ for line in p.stdout.splitlines():
         got[o["id"]] = "".join(c.get("text", "") for c in o.get("result", {}).get("content", []))
 for i, (name, _, _) in enumerate(calls):
     open(O + "/" + name, "w").write(got.get(i + 1, ""))
+    open(O + "/" + name + ".rc", "w").write(str(p.returncode) + "\n")
+PY
+# (11) the redaction tally an MCP request reports on stderr: one server per call, so its stderr is that call's alone
+python3 - "$BIN" "$F" "$O" <<'PY'
+import json, subprocess, sys
+binp, F, O = sys.argv[1:4]
+calls = [("mcpx_sec9_path", "path_between", {"path": F + "/sec", "from": "src9", "to": "sink9"}),
+         ("mcpx_sec9_conn", "connect", {"path": F + "/sec", "symbols": ["src9", "sink9"]}),
+         ("mcpx_sec4_path", "path_between", {"path": F + "/sec", "from": "src4", "to": "sink4"}),
+         ("mcpx_sec4_conn", "connect", {"path": F + "/sec", "symbols": ["src4", "sink4"]})]
+for name, tool, args in calls:
+    reqs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "g", "version": "1"}}},
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}]
+    p = subprocess.run([binp, "--mcp"], input="".join(json.dumps(r) + "\n" for r in reqs), capture_output=True, text=True, timeout=120, cwd=F)
+    text = ""
+    for line in p.stdout.splitlines():
+        try: o = json.loads(line)
+        except ValueError: continue
+        if o.get("id") == 1:
+            text = "".join(c.get("text", "") for c in o.get("result", {}).get("content", []))
+    open(O + "/" + name, "w").write(text)
+    open(O + "/" + name + ".err", "w").write(p.stderr)
     open(O + "/" + name + ".rc", "w").write(str(p.returncode) + "\n")
 PY
 
@@ -463,12 +524,15 @@ t = row(rd("key_path"), "leaf")
 check('[REDACTED:aws-key]' in t and ("AKIA" + "Q" * 4 + "7" * 12) not in rd("key_path"), "(2) a credential-shaped argument in call= is redacted")
 
 # (3) unread / edited / blanked, each with the positive twin above (c_path / c_far print call= and sig=)
-for n, why in (("c_unread", "unreadable"), ("c_edited", "edited since the crawl")):
+for n, why in (("c_unread", "unreadable"), ("c_edited", "edited since the crawl"), ("c_root", "outside the crawl root (11)")):
     if ran(n):
         t = rd(n)
-        check(' hop_unread="2"' in t and ' call="' not in t and ' sig="' not in t and 'site="a.c:12"' in row(t, "mid") and 'site="a.c:7"' in row(t, "leaf"),
-              "(3) a.c %s: call=/sig= withheld on both hops, hop_unread=2, site= kept" % why)
-        check('call=""' not in t and 'sig=""' not in t, "(3) %s: never an empty call=/sig=" % n)
+        # an unreadable file keeps the index's site= (nothing says it moved); a length change withholds it (CodeRabbit #535)
+        keep = n != "c_edited"
+        sites = ('site="a.c:12"' in row(t, "mid") and 'site="a.c:7"' in row(t, "leaf")) if keep else (' site="' not in row(t, "mid") and ' site="' not in row(t, "leaf"))
+        check(' hop_unread="2"' in t and ' call="' not in t and ' sig="' not in t and sites and row(t, "leaf") != "",
+              "(3) a.c %s: call=/sig= withheld on both hops, hop_unread=2, site= %s" % (why, "kept" if keep else "withheld"))
+        check('call=""' not in t and 'sig=""' not in t and 'site=""' not in t, "(3) %s: never an empty call=/sig=/site=" % n)
 if ran("c_blank"):
     t = rd("c_blank")
     check(' hop_notext="1"' in t and ' call="' not in row(t, "leaf") and 'sig="int leaf( int a, int b )"' in row(t, "leaf") and 'site="b.c:2"' in row(t, "leaf"),
@@ -482,8 +546,11 @@ lad = [(k, rd("c_shed_%d" % k)) for k in ceil]
 if all(ran("c_shed_%d" % k) for k in ceil):
     lvl = lambda t: (re.search(r'<connect [^>]*hop_shed="([^"]*)"', t) or re.search(r'$', "")).group(1) if re.search(r'<connect [^>]*hop_shed="', t) else ""
     order = {"": 0, "sig": 1, "sig,call": 2, "sig,call,site": 3}
-    seq = [order[lvl(t)] for _, t in lad]
+    seq = [order[lvl(t)] for _, t in lad if rows(t, "e")]
     check(seq == sorted(seq) and set(seq) == {0, 1, 2, 3}, "(4) falling ceilings walk full -> sig -> sig,call -> sig,call,site, never back (%s)" % sorted(set(seq)))
+    bare = [k for k, t in lad if not rows(t, "e")]
+    check(bool(bare) and all(not re.search(r'<connect [^>]* hop_', t) for k, t in lad if not rows(t, "e")),
+          "(4/11) an answer whose legs all dropped prints no hop_ disclosure (%d such ceilings)" % len(bare))
     full = lad[0][1]
     ne = len(rows(full, "e"))
     jsig = len(re.findall(r'<s [^>]* sig="', full))
@@ -572,6 +639,54 @@ for n, sig in (("py2_alias", 'sig="def compute(a, b):"'), ("tsa_alias", 'sig="fu
         check(sig in r and ' site="' not in r and ' hop_nosite="1"' in t, "(10) %s: no site (an import alias), hop_nosite=1, the callee's sig= still prints" % n)
         leg = "".join(re.findall(r'<!--.*?-->', t, re.S))
         check("sig=" in leg and "hop_nosite=" in leg, "(10) %s: sig= and hop_nosite= are defined in its legend" % n)
+
+# (11) CodeRabbit #535
+if ran("c_root_conn") and ran("c_conn"):
+    t, tw = rd("c_root_conn"), rd("c_conn")
+    check(' call="' not in t and not re.search(r'<s [^>]* sig="', t) and ' hop_unread="' in t and ' call="' in tw and re.search(r'<s [^>]* sig="', tw) is not None,
+          "(11) --connect with every file outside the reader's root: no call=, no join sig=, hop_unread= (twin: c_conn prints both)")
+if ran("pp_path") and ran("pp_edit2"):
+    t, tw = rd("pp_edit2"), rd("pp_path")
+    s2, s2w = [r for r in rows(t, "s") if 'p="p2.c:1"' in r], [r for r in rows(tw, "s") if 'p="p2.c:1"' in r]
+    s1 = [r for r in rows(t, "s") if 'p="p1.c:1"' in r]
+    check(len(s2w) == 1 and 'site="p2.c:3"' in s2w[0] and ' call="' not in s2w[0], "(11) twin: pair 2 of --path=src,sink is a site-only hop (site=p2.c:3)")
+    check(len(s2) == 1 and ' site="' not in s2[0] and ' hop_unread="1"' in t and len(s1) == 1 and 'site="p1.c:3"' in s1[0] and ' call="' in s1[0],
+          "(11) p2.c's length changed: pair 2's site-only hop withholds site= (hop_unread=1); pair 1 keeps site= and call=")
+if ran("c_edited") and ran("c_edited.full"):
+    check("length changed since indexing" in rd("c_edited") and "length changed since indexing" in rd("c_edited.full"),
+          "(11) hop_unread='s legend (compact and full) says the change check is a length compare")
+if ran("om_path") and ran("om_path.full"):
+    t, tf = rd("om_path"), rd("om_path.full")
+    check('site="m.cpp:8"' in row(t, "B::get") and "get( 1, 2 )" in row(t, "B::get"),
+          "(11) the fitting unqualified get( 1, 2 ) is the site, not the owner-qualified misfit B::get( 3 ) (%s)" % row(t, "B::get")[-90:])
+    check("(arity fit, then owner, first)" in t and "argument count the callee accepts first, then one whose written owner" in tf and "owner, then arity" not in t,
+          "(11) the site= legend states the pick's order: arity fit, then owner (compact and full)")
+ns = [(int(k), rd("ns_shed_" + k)) for k in rd("ns_list").split()]
+if ns and all(ran("ns_shed_%d" % k) for k, _ in ns):
+    def nosite(t):
+        m = re.search(r'<connect [^>]* hop_nosite="(\d+)"', t)
+        return int(m.group(1)) if m else 0
+    bad = [k for k, t in ns if nosite(t) != len(rows(t, "e"))]
+    seen = sorted(set(len(rows(t, "e")) for _, t in ns))
+    check(not bad and seen == [0, 1, 2], "(11) --connect --max-tokens: hop_nosite= counts the <e> rows the pass prints (rows seen %s; wrong at %s)" % (seen, bad[:5]))
+else:
+    check(False, "(11) the ns ladder ran")
+pyd = [(int(k), rd("pyd_shed_" + k)) for k in rd("pyd_list").split()]
+if pyd and all(ran("pyd_shed_%d" % k) for k, _ in pyd):
+    leg = lambda t: "".join(re.findall(r'<!--.*?-->', t, re.S))
+    off = [k for k, t in pyd if 'hop_shed="sig,call,site"' in t and ' tp="' in t]
+    bad = [k for k, t in pyd if ' tp="' in t and "fp=/tp=" not in leg(t)]
+    check(bool(off) and not bad, "(11) fp=/tp= keep their legend clause at every shed level, the deepest too (%d deepest-shed answers with tp=; undefined at %s)" % (len(off), bad[:5]))
+else:
+    check(False, "(11) the pyd ladder ran")
+for n in ("mcpx_sec9_path", "mcpx_sec9_conn", "mcpx_sec4_path", "mcpx_sec4_conn"):
+    if ran(n):
+        t, err = rd(n), rd(n + ".err")
+        m = re.search(r'redacted (\d+) secret', err)
+        shown = t.count("[REDACTED")
+        want = 0 if "sec9" in n else 1
+        check(shown == want and (int(m.group(1)) if m else 0) == shown and (want == 0 or ' call="' in t) and (want == 1 or 'hop_redacted="1"' in t),
+              "(11) %s: the stderr tally (%s) equals the redactions printed (%d)" % (n, m.group(0) if m else "none", shown))
 
 # (8) hoisting: one reference scan per answer, each file read once
 for n, edges in (("chain_path", 40), ("chain_conn", 39)):

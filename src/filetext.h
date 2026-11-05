@@ -9,11 +9,14 @@
 // It answers three things the lambdas could not:
 //   * readable or not — `text()` is nullptr when the file could not be opened, so "could not read" is never "empty file";
 //   * changed since indexing — `stale()` compares the read length with the parsed length the index recorded
-//     (FileHealth::fileBytes; 0 = not measured, then nothing is claimed);
+//     (FileHealth::fileBytes; 0 = not measured, then nothing is claimed). A LENGTH compare: the index stores no content
+//     hash, so a same-length edit is not seen here (the CLI indexes in the same run, and the MCP server re-stats every file's
+//     mtime/size/ctime before each request, so only an edit inside one request's window reaches this reader);
 //   * where a line starts — `lineStarts()` is built once per file on first ask, never by rescanning from byte 0 per site.
 // Entries are heap-held, so a reference handed out stays valid while later files are read (ankerl's map moves its values
 // on rehash, which the lambdas' `return contents.emplace(...)->second` relied on not happening).
 
+#include "ingest.h"            // canonicalCrawlRoot / crawlPathStaysInRoot — the crawl's own root boundary, re-checked at read
 #include "model.h"
 #include "infra/ownedfile.h"   // OwnedFile — the stream is owned before any other line runs
 
@@ -22,6 +25,7 @@
 #include <cstdlib>
 #include <string_view>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -97,7 +101,17 @@ private:
         if( fid < ing_.files.size() )
         {
             ++reads_;
-            if( OwnedFile in = openOwnedFile( diskPath( ing_, fid ).c_str(), "rb" ) )
+            // §SEC1 at read time (CodeRabbit #535): the crawl refused a symlink out of the root, but a file replaced by one
+            // after the crawl would be opened here; its resolved path must still sit inside the root, else it is unreadable
+            // (fail closed). Same check, same realpath race as the crawl's own (ingest.h crawlPathStaysInRoot).
+            const std::string& path = diskPath( ing_, fid );
+            const std::string* root = rootRealOf( fid );
+            if( root != nullptr && !crawlPathStaysInRoot( path, *root ) )
+            {
+                testFault( fid, *e );
+                return *cache_.emplace( fid, std::move( e ) ).first->second;
+            }
+            if( OwnedFile in = openOwnedFile( path.c_str(), "rb" ) )
             {
                 char        b[ 4096 ];
                 std::size_t n = 0;
@@ -117,6 +131,29 @@ private:
         }
         testFault( fid, *e );
         return *cache_.emplace( fid, std::move( e ) ).first->second;
+    }
+
+    // The canonical root a file was crawled under: the multi-root merge's own realpath, else the single crawl root resolved
+    // once per answer; nullptr when the index names no root (an ingest built without one): nothing to check against.
+    const std::string* rootRealOf( std::uint32_t fid )
+    {
+        if( !ing_.realPaths.empty() )
+        {
+            return fid < ing_.fileRoot.size() && ing_.fileRoot[ fid ] < ing_.rootReals.size() ? &ing_.rootReals[ ing_.fileRoot[ fid ] ] : nullptr;
+        }
+        if( !rootReal_ )
+        {
+            // test hook (hopcontextcheck arm 11): the root the read is checked against, as if the crawl root were elsewhere, so
+            // every indexed file resolves outside it — the shape of a file swapped for an out-of-root link after the crawl,
+            // which no single-process run can stage (the CLI crawls in the same run; MCP re-stats every file per request)
+            const char* const moved = std::getenv( "RIPWIRE_TEST_FILETEXT_ROOT" );
+            if( moved == nullptr && ing_.crawlRoot.empty() )
+            {
+                return nullptr;
+            }
+            rootReal_ = canonicalCrawlRoot( moved != nullptr ? std::string_view( moved ) : std::string_view( ing_.crawlRoot ) );
+        }
+        return &*rootReal_;
     }
 
     // Test faults (test/hopcontextcheck.sh arm 3; no child process is involved, so a PATH shim cannot reach this read): a file
@@ -151,6 +188,7 @@ private:
     const IngestResult&                          ing_;
     HashMap<std::uint32_t, std::unique_ptr<Entry>> cache_;
     std::size_t                                  reads_ = 0;
+    std::optional<std::string>                   rootReal_;
 };
 
 }   // namespace rw

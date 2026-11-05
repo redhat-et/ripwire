@@ -4249,7 +4249,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             }
         }
     }
-    const HopFacts hops = hopFacts( ing, g, std::move( hopWant ), redact, &files );
+    // deferRedactTally: a hop call=/sig= redaction counts only on the pass whose payload is delivered (hopEdgeXml adds it)
+    const HopFacts hops = hopFacts( ing, g, std::move( hopWant ), redact, &files, /*deferRedactTally=*/true );
 
     // one <t>/<s>/<e> writer set appending to a payload string (built BEFORE the root so est_tokens is honest).
     const auto symAttr = [ & ]( std::string& p, const char* tag, NodeId id )
@@ -4284,6 +4285,12 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
         payload.clear();
         nodeTotal = 0;  edgeTotal = 0;  connectedGroups = 0;
         hopEndpointRows = false;
+        // a discarded pass's redactions (its join sig= and hop call=/sig= texts) come back out of the run's tally (CodeRabbit #535)
+        const std::optional<RedactCounts> redactBefore = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+        // the root's hop counts describe the hops THIS pass prints (a dropped leg's hops are not the answer's)
+        HopTally          hopShown;
+        std::vector<char> hopShownMark( hops.recs.size(), 0 );
+        hopShown.on = hops.on;
 
         // retained-leg mask per group for this pass. One byte per leg, so N=8 is free — rw::svector's inline
         // array shares storage with the 8-byte heap pointer it unions with, and <char,8> is 16 B, the same
@@ -4377,7 +4384,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                        .append( "\" t=\"" ).append( ex( ing.symbols[ e.to ].name ) ).append( "\"" )
                        .append( viaEdgeAttr( edgeNameOnly( g, e.from, e.to ), edgeIsLink( g, e.from, e.to ) ) )
                        .append( anchorMissAttr( edgeAnchorMiss( g, e.from, e.to ) ) );   // FE-B, or via="link"
-                payload.append( hopEdgeXml( ing, hops, e.from, e.to, alike[ std::size_t( &e - edges.data() ) ], hopShed, sigShown, !rootArg.empty(), rootPrefix, hopEndpointRows ) );
+                payload.append( hopEdgeXml( ing, hops, e.from, e.to, alike[ std::size_t( &e - edges.data() ) ], hopShed, sigShown, !rootArg.empty(), rootPrefix, hopEndpointRows,
+                                           redact, &hopShown, &hopShownMark ) );
                 payload.append( "/>" );
             }
             payload.append( "</g>" );
@@ -4404,17 +4412,19 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
         // fit check against --max-tokens (0 = no budget) — over the WHOLE document (§P9.3, see kConnectHeader
         // above): the same estimator that produces the printed est_tokens, so the budget the caller sets and
         // the number the caller reads can never disagree.
-        const std::string hopClause = hopLegend( hops, "e", hopShed, hopEndpointRows );
+        const std::string hopClause = hopLegend( hopShown, "e", hopShed, hopEndpointRows );
         hopLegendXml = hopClause.empty() ? std::string() : "<!-- ripwire connect: " + hopClause + "-->";
-        hopRootXml   = hopRootAttrsXml( hops, hopShed );
+        hopRootXml   = hopRootAttrsXml( hopShown, hopShed );
         const std::size_t est = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() );
         if( maxTokens <= 0 || est <= std::size_t( maxTokens ) )
         {
             break;
         }
-        if( hopShedNext( hops, hopShed ) ) { continue; }   // trim 0: hop sig=, call=, site= — before anything printed before them
-        if( withSigs )                    { withSigs = false;  continue; }   // trim 1: sigs -> name-only
-        if( legsDropped < legOrder.size() ) { ++legsDropped;   continue; }   // trim 2: drop whole legs
+        const std::optional<RedactCounts> redactAfter = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+        const auto discardPass = [ & ] { redactTakeBack( redact, redactBefore, redactAfter ); };   // only a pass another replaces
+        if( hopShedNext( hops, hopShed ) ) { discardPass(); continue; }   // trim 0: hop sig=, call=, site= — before anything printed before them
+        if( withSigs )                    { discardPass(); withSigs = false;  continue; }   // trim 1: sigs -> name-only
+        if( legsDropped < legOrder.size() ) { discardPass(); ++legsDropped;   continue; }   // trim 2: drop whole legs
         break;                                                               // trim 3 does not exist: terminals + <unconnected> stay
     }
 

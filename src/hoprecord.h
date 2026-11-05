@@ -12,12 +12,13 @@
 //   hopRootAttrsXml() / hopLegend() / the compact readings (compactlegend.h) — the disclosures, present-only.
 //
 // Site selection is option A (lane 1): the calls inside the caller whose callee NAME is the edge's callee (the --uses /
-// sites_at= filter, editcheck.h callSiteCounts + CallSiteCalleeTest), a call whose written qualifier is the callee's owner
-// first, then file/line order. It is a name match, not proof that this call is the one the edge binds; the legend says so,
+// sites_at= filter, editcheck.h callSiteCounts + CallSiteCalleeTest), a call whose argument count the callee accepts first,
+// then a call whose written qualifier is the callee's owner, then file/line order. It is a name match, not proof that this call is the one the edge binds; the legend says so,
 // and sites="N" counts the others. Per-edge stored sites (option B, Graph::outSite) are a follow-on.
 //
-// Honesty (CR lens 4): a call= or sig= is never guessed and never printed empty. A file that cannot be read or changed since
-// indexing withholds it (hop_unread=); a site whose text does not spell the callee (a macro-expanded or generated call)
+// Honesty (CR lens 4): a call= or sig= is never guessed and never printed empty. A file that cannot be read, or whose length
+// changed since indexing (FileTextCache::stale: a length compare, no content hash is stored), withholds it (hop_unread=), and a
+// length change withholds site= too; a site whose text does not spell the callee (a macro-expanded or generated call)
 // withholds call= (hop_notext=); an edge with no call naming the callee in its caller (an inherit/impl/link edge, an alias,
 // a constructor reached by another name) prints no site= (hop_nosite=). Under a budget the renderer sheds sig=, then
 // call=, then site= — all before the budget touches anything the answer printed without them (a join sig=, a leg: the hop
@@ -82,13 +83,13 @@ struct HopWant
 enum class HopGap : std::uint8_t
 {
     None,
-    Unread,   // the file could not be read, or it changed since indexing
+    Unread,   // the file could not be read, or its length changed since indexing
     NoText,   // the site's text does not spell the callee (macro-expanded, generated)
     Redacted, // the callee's name sits in or against a redacted span: no call text can print without a cut through it
 };
 
-// How site= was picked among the caller's calls of the callee's name (the tiebreak: a call whose written qualifier is the
-// callee's owner, then a call whose argument count the callee accepts; the review's S1). Present-only on the row.
+// How site= was picked among the caller's calls of the callee's name (the tiebreak: a call whose argument count the callee
+// accepts, then a call whose written qualifier is the callee's owner; the review's S1). Present-only on the row.
 enum class HopSiteBy : std::uint8_t
 {
     Decided,   // one such line, or the tiebreak picked one
@@ -108,13 +109,54 @@ struct HopRecord
     HopGap        callGap = HopGap::None;
     HopGap        sigGap  = HopGap::None;
     HopSiteBy     siteBy  = HopSiteBy::Decided;
+    bool          siteStale = false;     // the site's file was read and its length differs from the indexed one: site= withheld (hop_unread=)
+    RedactCounts  callRx{}, sigRx{};     // the redactions inside call / sig, tallied into the run's count by whoever prints them
 };
 
-struct HopFacts
+// What the root disclosures and the legend read: present-only flags and counts over a set of hops — every hop of the answer
+// (hopFacts), or only the hops a --connect pass printed after a budget dropped legs (CodeRabbit #535: counts over hops the
+// answer no longer prints are not counts of the answer).
+struct HopTally
 {
-    bool                   on = false;   // false: the kill switch, or nothing wanted — renders nothing
+    bool        on = false;   // false: the kill switch, or nothing wanted — renders nothing
+    bool        anySite = false, anySites = false, anyCall = false, anySig = false, anyTie = false, anyNoFit = false;
+    std::size_t nosite = 0, unread = 0, notext = 0, redacted = 0;
+
+    void add( const HopRecord& rec ) noexcept
+    {
+        if( rec.ref == kHopNoRef )
+        {
+            ++nosite;
+        }
+        else if( !rec.siteStale )
+        {
+            anySite  = true;
+            anySites = anySites || rec.nSites > 1;
+            anyTie   = anyTie || rec.siteBy == HopSiteBy::Tie;
+            anyNoFit = anyNoFit || rec.siteBy == HopSiteBy::NoFit;
+        }
+        unread += rec.siteStale || rec.callGap == HopGap::Unread || rec.sigGap == HopGap::Unread ? 1 : 0;
+        notext += rec.callGap == HopGap::NoText ? 1 : 0;
+        redacted += rec.callGap == HopGap::Redacted ? 1 : 0;
+        anyCall = anyCall || !rec.call.empty();
+        anySig  = anySig || !rec.sig.empty();
+    }
+};
+
+inline void addRedactions( RedactCounts* tally, const RedactCounts& rx ) noexcept
+{
+    if( tally != nullptr )
+    {
+        for( std::size_t k = 0; k < tally->byKind.size(); ++k )
+        {
+            tally->byKind[k] += rx.byKind[k];
+        }
+    }
+}
+
+struct HopFacts : HopTally
+{
     std::vector<HopRecord> recs;         // sorted by (from, to)
-    std::size_t            nosite = 0, unread = 0, notext = 0, redacted = 0;
     std::size_t            referenceScans = 0, filesRead = 0;   // arm 8: one scan per answer
 
     const HopRecord* find( NodeId from, NodeId to ) const noexcept
@@ -123,7 +165,6 @@ struct HopFacts
                                           []( const HopRecord& r, const std::pair<NodeId, NodeId>& k ) { return r.from != k.first ? r.from < k.first : r.to < k.second; } );
         return it != recs.end() && it->from == from && it->to == to ? &*it : nullptr;
     }
-    bool                   anySite = false, anySites = false, anyCall = false, anySig = false, anyTie = false, anyNoFit = false;   // set once, by hopFacts' slice pass
 };
 
 namespace hopdetail
@@ -467,7 +508,11 @@ inline std::string_view ownerLeaf( const IngestResult& ing, const Symbol& s, std
 //       equal_range of the sorted keys, usually 1-2) test the callee name; a hit keeps the best site and counts lines;
 //   (3) per distinct file of a chosen site or callee: one read (FileTextCache);
 //   (4) per edge: slice the cached text — no file read, no reference scan, no name lookup.
-inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<HopWant> wanted, RedactCounts* redact, FileTextCache* shared = nullptr )
+//   `deferRedactTally`: the call/sig redactions are kept per record (HopRecord::callRx/sigRx) and NOT added to `redact` here; the
+//   renderer that prints them adds them (hopEdgeXml), so a --connect budget pass that is discarded, or an attribute it sheds,
+//   is never counted (CodeRabbit #535). A --path answer prints every text it computes, so it tallies here.
+inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<HopWant> wanted, RedactCounts* redact, FileTextCache* shared = nullptr,
+                          bool deferRedactTally = false )
 {
     std::optional<FileTextCache> own;   // a verb that reads no other file for the answer lends no reader: one is made here
     FileTextCache&               files = shared != nullptr ? *shared : own.emplace( ing );
@@ -590,49 +635,41 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
         }
         std::sort( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return std::tie( a.file, a.line ) < std::tie( b.file, b.line ); } );
         out.recs[k].nSites = std::uint32_t( std::unique( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return a.file == b.file && a.line == b.line; } ) - c.begin() );
+        if( out.recs[k].ref != kHopNoRef )   // a site-only hop reads its site's file too: a stale line is withheld, never printed
+        {
+            (void)files.text( ing.references[ out.recs[k].ref ].fileId );
+        }
         if( out.recs[k].full )
         {
-            if( out.recs[k].ref != kHopNoRef )
-            {
-                (void)files.text( ing.references[ out.recs[k].ref ].fileId );
-            }
             (void)files.text( ing.symbols[ wanted[k].to ].fileId );
         }
     }
     out.filesRead = files.filesRead();
     for( HopRecord& rec : out.recs )   // (4)
     {
-        if( rec.ref == kHopNoRef )
+        // the stored line of a file whose length changed no longer names the call (CodeRabbit #535): no site=, counted unread
+        rec.siteStale = rec.ref != kHopNoRef && files.stale( ing.references[ rec.ref ].fileId );
+        if( rec.full )
         {
-            ++out.nosite;
+            const Symbol& callee = ing.symbols[ rec.to ];
+            // sig= prints for every full edge, a site or not (the review's S3): the agent's read of the callee does not depend on the call
+            const hopdetail::CallText st = hopdetail::calleeSig( files, callee, redact != nullptr ? &rec.sigRx : nullptr );
+            rec.sig    = st.text;
+            rec.sigGap = st.gap;
+            if( rec.ref != kHopNoRef )
+            {
+                const hopdetail::CallText ct = hopdetail::callText( files, ing.references[ rec.ref ], hopdetail::leafName( callee ), ing.symbols[ rec.from ],
+                                                                    redact != nullptr ? &rec.callRx : nullptr );
+                rec.call    = ct.text;
+                rec.callGap = ct.gap;
+            }
+            if( !deferRedactTally )   // a text withheld (hop_redacted=, hop_notext=) prints no redaction to count
+            {
+                addRedactions( redact, rec.call.empty() ? RedactCounts{} : rec.callRx );
+                addRedactions( redact, rec.sig.empty() ? RedactCounts{} : rec.sigRx );
+            }
         }
-        else
-        {
-            out.anySite  = true;
-            out.anySites = out.anySites || rec.nSites > 1;
-            out.anyTie   = out.anyTie || rec.siteBy == HopSiteBy::Tie;
-            out.anyNoFit = out.anyNoFit || rec.siteBy == HopSiteBy::NoFit;
-        }
-        if( !rec.full )
-        {
-            continue;
-        }
-        const Symbol& callee = ing.symbols[ rec.to ];
-        // sig= prints for every full edge, a site or not (the review's S3): the agent's read of the callee does not depend on the call
-        const hopdetail::CallText st = hopdetail::calleeSig( files, callee, redact );
-        rec.sig    = st.text;
-        rec.sigGap = st.gap;
-        if( rec.ref != kHopNoRef )
-        {
-            const hopdetail::CallText ct = hopdetail::callText( files, ing.references[ rec.ref ], hopdetail::leafName( callee ), ing.symbols[ rec.from ], redact );
-            rec.call    = ct.text;
-            rec.callGap = ct.gap;
-        }
-        out.unread += rec.callGap == HopGap::Unread || rec.sigGap == HopGap::Unread ? 1 : 0;
-        out.notext += rec.callGap == HopGap::NoText ? 1 : 0;
-        out.redacted += rec.callGap == HopGap::Redacted ? 1 : 0;
-        out.anyCall = out.anyCall || !rec.call.empty();
-        out.anySig  = out.anySig || !rec.sig.empty();
+        out.add( rec );
     }
     if( std::getenv( "RIPWIRE_HOP_STATS" ) != nullptr )
     {
@@ -651,7 +688,7 @@ inline std::string hopAttrsXml( const IngestResult& ing, const HopRecord& rec, H
     }
     std::vector<char> esc;
     std::string       out;
-    if( rec.ref != kHopNoRef )   // no site (hop_nosite=): the row still carries the callee's sig= when it prints in full
+    if( rec.ref != kHopNoRef && !rec.siteStale )   // no site (hop_nosite=, or a stale line: hop_unread=): the row still carries sig= in full
     {
         const Reference&       r  = ing.references[ rec.ref ];
         const std::string_view rp = singleRoot ? sarif::rootRelativeUri( ing.files[ r.fileId ], rootPrefix ) : std::string_view( ing.files[ r.fileId ] );
@@ -720,8 +757,11 @@ std::vector<std::uint8_t> hopAlikeRows( const IngestResult& ing, std::span<const
 
 // --connect: one <e> row's hop attributes — fp=/tp= when it reads alike, then site=/call=/sig= at the shed level, the callee's
 // sig= once per group (`sigShown` grows as rows print it). `endpointRows` is set when fp=/tp= printed (its legend clause rides).
+// `redact` (hopFacts ran with deferRedactTally): the redactions inside the call=/sig= this row prints are added to it here, and
+// `shown` (when given) tallies the row's hop for the root disclosures of what this pass printed.
 inline std::string hopEdgeXml( const IngestResult& ing, const HopFacts& hops, NodeId from, NodeId to, std::uint8_t alike, HopShed shed,
-                               std::vector<NodeId>& sigShown, bool singleRoot, std::string_view rootPrefix, bool& endpointRows )
+                               std::vector<NodeId>& sigShown, bool singleRoot, std::string_view rootPrefix, bool& endpointRows,
+                               RedactCounts* redact = nullptr, HopTally* shown = nullptr, std::vector<char>* shownMark = nullptr )
 {
     std::string out;
     if( !hops.on )
@@ -743,9 +783,23 @@ inline std::string hopEdgeXml( const IngestResult& ing, const HopFacts& hops, No
         const auto at      = std::lower_bound( sigShown.begin(), sigShown.end(), to );
         const bool withSig = at == sigShown.end() || *at != to;
         out += hopAttrsXml( ing, *rec, shed, withSig, singleRoot, rootPrefix );
+        if( shed < HopShed::SiteOnly && !rec->call.empty() )
+        {
+            addRedactions( redact, rec->callRx );
+        }
         if( withSig && shed == HopShed::Full && !rec->sig.empty() )
         {
             sigShown.insert( at, to );
+            addRedactions( redact, rec->sigRx );
+        }
+        if( shown != nullptr && shownMark != nullptr )   // an edge printed in two groups is one hop, as in hopFacts' own tally
+        {
+            char& seen = ( *shownMark )[ std::size_t( rec - hops.recs.data() ) ];
+            if( seen == 0 )
+            {
+                seen = 1;
+                shown->add( *rec );
+            }
         }
     }
     return out;
@@ -769,15 +823,15 @@ inline bool hopShedNext( const HopFacts& hops, HopShed& shed ) noexcept
 }
 
 // The root's disclosures, present-only: hops with no site, texts withheld, and the shed level a budget reached.
-inline std::string hopRootAttrsXml( const HopFacts& f, HopShed shed = HopShed::Full )
+inline std::string hopRootAttrsXml( const HopTally& f, HopShed shed = HopShed::Full )
 {
     if( !f.on )
     {
         return {};
     }
-    if( shed == HopShed::Off )
+    if( shed == HopShed::Off )   // over the hops printed: a pass that printed none shed nothing from the answer
     {
-        return f.anySite ? " hop_shed=\"sig,call,site\"" : std::string();
+        return f.anySite || f.anyCall || f.anySig ? " hop_shed=\"sig,call,site\"" : std::string();
     }
     std::string out;
     if( f.nosite > 0 ) { out += " hop_nosite=\"" + std::to_string( f.nosite ) + "\""; }
@@ -792,7 +846,7 @@ inline std::string hopRootAttrsXml( const HopFacts& f, HopShed shed = HopShed::F
 }
 
 // The full dialect's clause (present-only, no "--": it rides inside the verb's own comment). `row` names the element.
-inline std::string hopLegend( const HopFacts& f, std::string_view row, HopShed shed = HopShed::Full, bool endpointRows = false )
+inline std::string hopLegend( const HopTally& f, std::string_view row, HopShed shed = HopShed::Full, bool endpointRows = false )
 {
     if( !f.on )
     {
@@ -800,13 +854,14 @@ inline std::string hopLegend( const HopFacts& f, std::string_view row, HopShed s
     }
     std::string out;
     const std::string r( row );
-    if( shed == HopShed::Off )
+    if( shed == HopShed::Off )   // the fp=/tp= rows still print (they are not shed): their clause stays (CodeRabbit #535)
     {
-        return f.anySite ? "hop_shed=: hop attributes max_tokens shed first (sig, call, site). " : std::string();
+        return ( f.anySite || f.anyCall || f.anySig ? std::string( "hop_shed=: hop attributes max_tokens shed first (sig, call, site). " ) : std::string() )
+               + ( endpointRows ? r + " fp=/tp=: the from/to definition, printed when two rows of a group would read alike. " : std::string() );
     }
     if( f.anySite )
     {
-        out += r + " site=file:line: a call (or macro invocation) in the hop's caller whose callee name is this hop's callee (one whose written owner is the callee's first, one whose argument count the callee rejects last); "
+        out += r + " site=file:line: a call (or macro invocation) in the hop's caller whose callee name is this hop's callee (one whose argument count the callee accepts first, then one whose written owner is the callee's, then file order); "
                "matched by name, not proof that this call is the one the edge binds. ";
     }
     if( f.anySites )
@@ -839,7 +894,7 @@ inline std::string hopLegend( const HopFacts& f, std::string_view row, HopShed s
     }
     if( f.unread > 0 )
     {
-        out += "hop_unread=N: call= or sig= withheld on N hops: the file could not be read or changed since indexing. ";
+        out += "hop_unread=N: call= or sig= withheld on N hops: the file could not be read or its length changed since indexing (then site= too). ";
     }
     if( f.notext > 0 )
     {
