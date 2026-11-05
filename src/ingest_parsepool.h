@@ -346,14 +346,13 @@ struct ParsePoolShared
 };
 
 // WARM-REWRITE: true when the blob's record for a file is exactly the record saveCache would write for it now —
-// same hash and stat triple, same health, and no facts in any of the eight families. Only a factless outcome can
-// match (the caller passes the would-be-written key), so this never reads the facts themselves.
-inline bool blobHoldsFactlessRecord( const FileFacts* rec, std::uint64_t hash, long long sizeBytes, long long mtimeNs, long long ctimeNs,
-                                     const FileHealth& health ) noexcept
+// `expect` carries that record's key (hash, stat triple, health) and no facts, so the record must hold none in any
+// of the eight families.
+inline bool blobHoldsFactlessRecord( const FileFacts* rec, const FileFacts& expect ) noexcept
 {
-    return rec != nullptr && rec->hash == hash && rec->sizeBytes == sizeBytes && rec->mtimeNs == mtimeNs && rec->ctimeNs == ctimeNs
-        && rec->health == health && rec->defs.empty() && rec->refs.empty() && rec->incs.empty() && rec->binds.empty() && rec->ffis.empty()
-        && rec->routeDefs.empty() && rec->routeUses.empty() && rec->constOpens.empty();
+    return rec != nullptr && rec->hash == expect.hash && rec->sizeBytes == expect.sizeBytes && rec->mtimeNs == expect.mtimeNs
+        && rec->ctimeNs == expect.ctimeNs && rec->health == expect.health && rec->defs.empty() && rec->refs.empty() && rec->incs.empty()
+        && rec->binds.empty() && rec->ffis.empty() && rec->routeDefs.empty() && rec->routeUses.empty() && rec->constOpens.empty();
 }
 
 // A cache miss is about to change the blob: mark it dirty and count the file as drift (RIPWIRE_CACHE_STATS reparsed=).
@@ -373,12 +372,17 @@ inline void markMissDirty( ParsePoolShared& sh ) noexcept
 // that held facts, a hash or stat that moved. A file that stops being refused reaches the parse, which dirties.
 inline void noteFactlessMiss( ParsePoolShared& sh, std::size_t fileId, bool nestRefused ) noexcept
 {
-    const IngestFileScan& scan   = sh.scan;
-    const FileFacts*      rec    = sh.cacheCandidateFacts[ fileId ];
-    const bool            same   = nestRefused
-                                 ? blobHoldsFactlessRecord( rec, 0, -1, -1, -1, scan.health[ fileId ] )
-                                 : blobHoldsFactlessRecord( rec, scan.hash[ fileId ], scan.statSize[ fileId ], scan.statMtime[ fileId ],
-                                                            scan.statCtime[ fileId ], scan.health[ fileId ] );
+    const IngestFileScan& scan = sh.scan;
+    FileFacts             expect;   // empty families: no allocation
+    expect.health = scan.health[ fileId ];
+    if( !nestRefused )   // a refused file keeps the default UNKNOWN key (0, -1, -1, -1), as forgetNestRefusalsForCache writes it
+    {
+        expect.hash      = scan.hash[ fileId ];
+        expect.sizeBytes = scan.statSize[ fileId ];
+        expect.mtimeNs   = scan.statMtime[ fileId ];
+        expect.ctimeNs   = scan.statCtime[ fileId ];
+    }
+    const bool same = blobHoldsFactlessRecord( sh.cacheCandidateFacts[ fileId ], expect );
     if( !same )
     {
         markMissDirty( sh );
