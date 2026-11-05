@@ -1659,6 +1659,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "lazy_edges", "f lazy_edges=N: this file's lazy pairs; still in its inc rows, out of afferent=/instab=/transitive=", true, "f", MapHeaderRead::No, {}, "deps" },
     { "size", "cycle size=/cost=: files in that include cycle / size squared, the cycle's share of ccd=", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cost=
     { "cut", "cycle cut=/cutrefs=: SUGGESTED edge to break it (fewest directives) / that edge's directive count; nothing cut", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cutrefs=
+    { "members_capped", "cycle members_capped=1: the cycle has more files than the 12 f rows listed; size= is the whole count", true, "cycle", MapHeaderRead::No, {}, "deps" },
     // pr-context: src/prcontext.h (changed-symbols, cochange partner, owners author); coPairAttr in src/gitmine.h
     { "email", "author email=/share=: a committer of this file / its fraction of the recency-weighted commits", true, "author", MapHeaderRead::No, {}, "pr-context" },   // also defines share=
     { "deg", "partner deg=: of this file's commits in window=, the fraction that partner shares", true, "partner", MapHeaderRead::No, {}, "pr-context" },

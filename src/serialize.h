@@ -10441,9 +10441,16 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                     w.write( "\" cutrefs=\"" );  w.write( std::to_string( bestW ) );  w.write( "\"" );
                 }
             }
+            // #479 item 2: at most kCycleMemberCap member rows; a cut member list says so (size= stays the whole count), an
+            // uncut one is unchanged. The rows kept are the first in SCC order — deterministic, not a ranking.
+            constexpr std::size_t kCycleMemberCap = 12;
+            const std::size_t     capN            = std::min( cycles[c].size(), kCycleMemberCap );
+            if( capN < cycles[c].size() )
+            {
+                w.write( " members_capped=\"1\"" );
+            }
             w.write( ">" );
 
-            const std::size_t capN = cycles[c].size() < 12 ? cycles[c].size() : 12;
             for( std::size_t j = 0; j < capN; ++j )
             { w.write( "<f p=\"" );  w.write( escapeXml( pathRel( cycles[c][j] ), esc ) );  w.write( "\"/>" ); }
             w.write( "</cycle>" );
