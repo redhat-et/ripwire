@@ -2455,7 +2455,7 @@ inline std::string_view mcpPageRankFlags( bool noRoute )
 }
 
 // defined below; forTaskText's FOR-ROUTE-DECLINED block calls them (the path_between / connect twins)
-inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, bool inForBlock = false );
+inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, RedactCounts* redact, bool inForBlock = false );
 inline std::string connectText( const std::string& root, const std::vector<std::string>& symbolSpecs, std::uint32_t radius, std::string& err, RedactCounts* redact );
 inline std::string batchCdata( const std::string& s );   // the callers twin's JSON rides as CDATA
 
@@ -2979,7 +2979,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         GraphSubjectOpen opts;
         if( gsa->form == GraphSubjectForm::Path )
         {
-            verb              = pathText( root, gsa->endpoints[0], gsa->endpoints[1], /*inForBlock=*/true ).value_or( std::string() );
+            verb              = pathText( root, gsa->endpoints[0], gsa->endpoints[1], redact, /*inForBlock=*/true ).value_or( std::string() );
             opts.nameTestHops = graphSubjectNameTestHops( verb );
         }
         else if( gsa->form == GraphSubjectForm::Common )
@@ -3809,7 +3809,7 @@ inline McpAffectedResult affectedText( const std::string& root, std::string_view
 // resolveFocus + shortestPath, exactly as the CLI --path=A,B. Returns the <path>…</path> XML fragment (with
 // reachable="0" hops="0" and no <s> children when B is NOT reachable from A — a valid answer, not an error),
 // or "" (caller → not-found error) when EITHER endpoint fails to resolve.
-inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, bool inForBlock )
+inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, RedactCounts* redact, bool inForBlock )
 {
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
@@ -3882,6 +3882,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     const std::vector<NodeId>& ptBind   = ptChains.bind;
     const NodeId               srcUsed  = ptChains.from;
     const NodeId               dstUsed  = ptChains.to;
+    const HopFacts             ptHops   = pathHopFacts( ing, g, ptPairs, ptRows, redact );   // HOP-CONTEXT-1, as on the CLI
     const PathBridge          ptBridge     = pth.empty() ? pathBridge( ing, g, srcDefs, dstDefs, valueRefIndexOf( ix ), *ptBackHops ) : PathBridge{};      // ix2-slice, as on the CLI
     const std::string         ptSinkCallers = pth.empty() && ptGaps.any() && !dstGlob ? pathSinkCallersSelector( ing, *ptBackHops, dstDefs, to, ptSingleRoot, ptRootPrefix ) : std::string();   // HOP1 #6, as on the CLI
     const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, ptRows );   // TRACE-EP: the CLI's legend marks, by the same call
@@ -3911,7 +3912,8 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                                                            + splitArmLegend( ptHasSplit ) + pathUnboundLegend( !ptBound.from || !ptBound.to )
                                                            + memberOwnerLegend( ptHasOwner ) + memberOwnerContainedLegend( ptMarks.ownerContained ) + std::string( pathPairsLegend( ptPairs ) ) + pathOrderLegend( ptPairs, ptTwin )
                                                            + std::string( pathHopBodiesLegend( !ptHopBodies.empty() ) ) + std::string( pathHopNextLegend( !ptHopNext.empty() ) )
-                                                           + std::string( routeBodyHedgeLegend( ptHopBodyEl.hedged || ptRouteEl.hedged ) ) + std::string( pathRouteLegend( ptRoute ) ) ).c_str(),
+                                                           + std::string( routeBodyHedgeLegend( ptHopBodyEl.hedged || ptRouteEl.hedged ) ) + std::string( pathRouteLegend( ptRoute ) )
+                                                           + hopLegend( ptHops, "s" ) ).c_str(),
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
                   ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
                     + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
@@ -3922,7 +3924,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
                   srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
                   ptRows.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
-                  ( ptRootAttrs + ptRootAttr ).c_str(),
+                  ( ptRootAttrs + hopRootAttrsXml( ptHops ) + ptRootAttr ).c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
     rw::emitTo( mem, "{}{}", countAttrXmlOrEmpty( "to_value_refs", ptToValueRefs.count ),   // absent at zero, as on the CLI
                   valueRefsDepthAttrXml( ing, ptToValueRefs.depthCut, VrRender{ ptSingleRoot, ptRootPrefix } ).c_str() );   // + the depth cut, as the CLI
@@ -3932,7 +3934,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     rw::emitTo( mem, "{}>{}{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
                   pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ),
                   pth.empty() ? pathHandlerRuleXml( ing, ptBackHops->names(), ptHandler, ptSingleRoot, ptRootPrefix ) : std::string() );
-    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
+    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix, ptHops );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
     rw::emitRaw( mem, ptHopBodies.c_str() );      // PATH-HOP-BODY, as on the CLI
     rw::emitRaw( mem, ptRouteEl.xml.c_str() );    // BODY-ON-ROUTE, as on the CLI
     rw::emitRaw( mem, ptAlts.xml.c_str() );   // D2 part 5, as on the CLI
@@ -4116,7 +4118,8 @@ inline constexpr char kConnectHeader[] =
     " edges=, groups=) is a FLOOR, never a total; read a zero as \"none found\", never as \"none exists\"."
     " graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls"
     " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
-    " defs= on a terminal row = that NAME has N definitions; every one is scored and the one reaching the most other"
+    " defs= on a terminal row = the N definitions that terminal's spelling matched (all of a bare name's; only those a qualified"
+    " Owner::m / Owner.m / ns.fn / file:name names; spellings that pick one definition share a row and print the widest); every one is scored and the one reaching the most other"
     " terminals within radius= (fewest hops) is used, else the tower front (most specific kind, leading language, lowest id; a C/C++ declaration without a body yields to the"
     " definition of its scope); ambiguous_terminal= on the root names terminals whose pick tied with another equally-joining"
     " definition. Qualify with file:name to pick another. Steiner rows never carry it."
@@ -4166,8 +4169,25 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                                            // argument serialize() takes — see its comment.
                                                            // Shared by CLI --connect and the MCP connect verb.
                          std::size_t unprovenDefs = 0,     // H1: the terminals' decl→def residue, SUMMED by the caller
-                         std::string_view ambiguousTerminals = {} )   // 0.6.6 D1: joinTerminalPicks' tied names, "" when none
+                         const ConnectPicks& picks = ConnectPicks{} )   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
 {
+    const std::string_view ambiguousTerminals = picks.ambiguous;
+    // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
+    // name reports every definition of the name, as before. Specs folded onto one node print the widest of their counts.
+    const auto terminalDefCount = [ & ]( NodeId t ) -> std::size_t
+    {
+        if( std::find( picks.barePicks.begin(), picks.barePicks.end(), t ) != picks.barePicks.end() )
+        {
+            return definitionCountOfName( ing, t );
+        }
+        std::size_t widest = 0;
+        bool        qualified = false;
+        for( const auto& [ node, defs ] : picks.qualifiedDefs )
+        {
+            if( node == t ) { widest = std::max( widest, defs ); qualified = true; }
+        }
+        return qualified ? widest : definitionCountOfName( ing, t );
+    };
     std::vector<char> escBuf;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, escBuf ) ); };
     const std::string rootPrefix = rootArg.empty() ? std::string() : sarif::rootPrefixOf( rootArg );
@@ -4220,31 +4240,23 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
     const std::uint32_t hubFloor = connectHubFloor( g );
 
-    // per-file content cache for the Steiner sig= attributes (each needed file read at most once).
-    HashMap<std::uint32_t, std::string> contents;
-    const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
+    // the shared per-answer file reader (filetext.h): the Steiner sig= attributes and the hop record read through it, each file once
+    FileTextCache files( ing );
+    // HOP-CONTEXT-1 (src/hoprecord.h): every edge any pass can print (a leg-dropped pass prints a subset of grp.edges,
+    // connectemit::rebuildFromLegs), ONE reference pass, before the trim loop (a trim pass re-renders, it never re-scans)
+    std::vector<HopWant> hopWant;
+    for( const ConnectGroup& grp : res.groups )
     {
-        const auto it = contents.find( fid );
-        if( it != contents.end() )
+        if( grp.terminals.size() > 1 )
         {
-            return it->second;
-        }
-        std::string s;
-        if( fid < ing.files.size() )
-        {
-            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            for( const ConnectEdge& e : grp.edges )
             {
-                char b[4096];
-                std::size_t n;
-                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
-                {
-                    s.append( b, n );
-                }
-                std::fclose( in );
+                hopWant.push_back( HopWant{ e.from, e.to, true } );
             }
         }
-        return contents.emplace( fid, std::move( s ) ).first->second;
-    };
+    }
+    // deferRedactTally: a hop call=/sig= redaction counts only on the pass whose payload is delivered (hopEdgeXml adds it)
+    const HopFacts hops = hopFacts( ing, g, std::move( hopWant ), redact, &files, /*deferRedactTally=*/true );
 
     // one <t>/<s>/<e> writer set appending to a payload string (built BEFORE the root so est_tokens is honest).
     const auto symAttr = [ & ]( std::string& p, const char* tag, NodeId id )
@@ -4268,6 +4280,9 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                { return x.dist != y.dist ? x.dist > y.dist : x.a != y.a ? x.a < y.a : x.b < y.b; } );
 
     bool          withSigs    = true;
+    HopShed       hopShed     = HopShed::Full;   // HOP-CONTEXT-1: hop sig=, hop call=, hop site=, then (as before) the join sigs, the legs
+    bool          hopEndpointRows = false;       // some <e> printed fp=/tp= (its legend clause rides then)
+    std::string   hopLegendXml, hopRootXml;      // charged in the fit check, written below: the same objects
     std::size_t   legsDropped = 0;
     std::string   payload;
     std::uint32_t nodeTotal = 0, edgeTotal = 0, connectedGroups = 0;
@@ -4275,6 +4290,13 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         payload.clear();
         nodeTotal = 0;  edgeTotal = 0;  connectedGroups = 0;
+        hopEndpointRows = false;
+        // a discarded pass's redactions (its join sig= and hop call=/sig= texts) come back out of the run's tally (CodeRabbit #535)
+        const std::optional<RedactCounts> redactBefore = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+        // the root's hop counts describe the hops THIS pass prints (a dropped leg's hops are not the answer's)
+        HopTally          hopShown;
+        std::vector<char> hopShownMark( hops.recs.size(), 0 );
+        hopShown.on = hops.on;
 
         // retained-leg mask per group for this pass. One byte per leg, so N=8 is free — rw::svector's inline
         // array shares storage with the 8-byte heap pointer it unions with, and <char,8> is 16 B, the same
@@ -4327,7 +4349,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                 // name; the Steiner subgraph did not, so `--connect=size,…` was built from one of six `size`
                 // definitions with nothing on the row to say which question was answered. Steiner nodes (the
                 // "s" rows) carry no defs= because nobody selected them — the search found them.
-                const std::size_t terminalDefs = definitionCountOfName( ing, t );
+                const std::size_t terminalDefs = terminalDefCount( t );
                 if( terminalDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( terminalDefs ) ).append( "\"" ); }
                 payload.append( "/>" );
             }
@@ -4351,7 +4373,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                 if( withSigs )
                 {
                     const Symbol&      sy  = ing.symbols[ sN ];
-                    const std::string& src = contentOf( sy.fileId );
+                    const std::string& src = files.contentOf( sy.fileId );
                     if( sy.sigStartByte < sy.sigEndByte && sy.sigEndByte <= src.size() )
                     {
                         payload.append( " sig=\"" ).append( ex( cleanSig( src.data(), sy.sigStartByte, sy.sigEndByte, redact ) ) ).append( "\"" );
@@ -4359,12 +4381,18 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                 }
                 payload.append( "/>" );
             }
+            // HOP-CONTEXT-1: a callee's sig= prints once per group (not where its join row printed it); alike rows print fp=/tp=
+            std::vector<NodeId>             sigShown = hopSigShown( steiner, withSigs );
+            const std::vector<std::uint8_t> alike    = hops.on ? hopAlikeRows( ing, std::span<const ConnectEdge>( edges ) ) : std::vector<std::uint8_t>( edges.size(), 0 );
             for( const ConnectEdge& e : edges )
             {
                 payload.append( "<e f=\"" ).append( ex( ing.symbols[ e.from ].name ) )
                        .append( "\" t=\"" ).append( ex( ing.symbols[ e.to ].name ) ).append( "\"" )
                        .append( viaEdgeAttr( edgeNameOnly( g, e.from, e.to ), edgeIsLink( g, e.from, e.to ) ) )
-                       .append( anchorMissAttr( edgeAnchorMiss( g, e.from, e.to ) ) ).append( "/>" );   // FE-B, or via="link"
+                       .append( anchorMissAttr( edgeAnchorMiss( g, e.from, e.to ) ) );   // FE-B, or via="link"
+                payload.append( hopEdgeXml( ing, hops, e.from, e.to, alike[ std::size_t( &e - edges.data() ) ], hopShed, sigShown, !rootArg.empty(), rootPrefix, hopEndpointRows,
+                                           redact, &hopShown, &hopShownMark ) );
+                payload.append( "/>" );
             }
             payload.append( "</g>" );
         }
@@ -4382,7 +4410,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             // and "no relationship within radius R" is exactly where answering about one of N silently
             // changes the answer. Derived from definitionCountOfName — the same call the <g> arm uses —
             // so the two can never drift into disagreeing about what the name resolved to.
-            const std::size_t loneDefs = definitionCountOfName( ing, grp.terminals[ 0 ] );
+            const std::size_t loneDefs = terminalDefCount( grp.terminals[ 0 ] );
             if( loneDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( loneDefs ) ).append( "\"" ); }
             payload.append( "/></unconnected>" );
         }
@@ -4390,13 +4418,19 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
         // fit check against --max-tokens (0 = no budget) — over the WHOLE document (§P9.3, see kConnectHeader
         // above): the same estimator that produces the printed est_tokens, so the budget the caller sets and
         // the number the caller reads can never disagree.
-        const std::size_t est = connectEstTokens( payload.size(), connectExtraBytes );
+        const std::string hopClause = hopLegend( hopShown, "e", hopShed, hopEndpointRows );
+        hopLegendXml = hopClause.empty() ? std::string() : "<!-- ripwire connect: " + hopClause + "-->";
+        hopRootXml   = hopRootAttrsXml( hopShown, hopShed );
+        const std::size_t est = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() );
         if( maxTokens <= 0 || est <= std::size_t( maxTokens ) )
         {
             break;
         }
-        if( withSigs )                    { withSigs = false;  continue; }   // trim 1: sigs -> name-only
-        if( legsDropped < legOrder.size() ) { ++legsDropped;   continue; }   // trim 2: drop whole legs
+        const std::optional<RedactCounts> redactAfter = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+        const auto discardPass = [ & ] { redactTakeBack( redact, redactBefore, redactAfter ); };   // only a pass another replaces
+        if( hopShedNext( hops, hopShed ) ) { discardPass(); continue; }   // trim 0: hop sig=, call=, site= — before anything printed before them
+        if( withSigs )                    { discardPass(); withSigs = false;  continue; }   // trim 1: sigs -> name-only
+        if( legsDropped < legOrder.size() ) { discardPass(); ++legsDropped;   continue; }   // trim 2: drop whole legs
         break;                                                               // trim 3 does not exist: terminals + <unconnected> stay
     }
 
@@ -4404,7 +4438,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // §P8 vocabulary: `est_tokens="~191"` was the tool's only NON-NUMERIC token estimate — the `~` made
     // `int(...)` throw in the one field whose whole purpose is arithmetic against a budget, and no other
     // verb apologises for an estimate being an estimate. Dropped.
-    std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
+    std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() );
     // H9: the ceiling this bundle was SHAPED against, named on the root. The trim loop above really does
     // drop sigs and then whole legs to fit `maxTokens`, and until this attribute existed the only evidence
     // was `truncated="paths"` — which says something was cut but not what it was cut to. Absent when no
@@ -4425,16 +4459,16 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     const char* const connectOverAttr = connectOver ? " over_ceiling=\"1\"" : "";
     if( connectOver )
     {
-        estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
+        estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
-                connectViaLegend, rootRelPathsLegend( !rootArg.empty() ) );
-    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}>",
+    rw::emitTo( out, "{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
                   connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero
                   connectAmbiguousAttr,          // 0.6.6 D1: absent when no many-definition pick tied
                   estTokens, hubFloor,
-                  rw::cstr( connectCeiling ), connectOverAttr,
+                  rw::cstr( connectCeiling ), connectOverAttr, hopRootXml,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
     std::fwrite( payload.data(), 1, payload.size(), out );
@@ -4465,14 +4499,14 @@ inline std::string connectText( const std::string& root, const std::vector<std::
         unprovenDefs += termUnprovenDefs;
     }
 
-    const std::string   ambiguous = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
+    const ConnectPicks  picks = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
     const ConnectResult res = connectSubgraph( g, terminals, radius );
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
     if( !mem ) { err = "internal error"; return {}; }
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),
-                 unprovenDefs, ambiguous );
+                 unprovenDefs, picks );
     std::optional<std::string> answer = mcpAnswerText( stream );
     if( !answer )
     {
@@ -6325,7 +6359,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "path_between" ) );
         }
-        std::optional<std::string> pathAnswer = pathText( root, from, to );
+        std::optional<std::string> pathAnswer = pathText( root, from, to, redactPtr );
         if( !pathAnswer )
         {
             return bad( "internal error: the path_between answer buffer lost bytes — no answer served" );

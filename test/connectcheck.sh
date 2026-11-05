@@ -57,8 +57,9 @@ if printf '%s' "$OUT" | grep -q '<connect '; then ok "--connect emits a <connect
     && ok "connected triple forms exactly ONE group" || no "expected exactly one <g>: $OUT"
 printf '%s' "$OUT" | grep -q '<s n="orch"[^>]* sig="' \
     && ok "orch is the Steiner <s> node and carries sig=" || no "orch missing as <s> with sig=: $OUT"
-for e in '<e f="orch" t="a"/>' '<e f="orch" t="b"/>' '<e f="b" t="c"/>'; do
-    if printf '%s' "$OUT" | grep -qF "$e"; then ok "edge present: $e"; else no "edge missing: $e in $OUT"; fi
+# HOP-CONTEXT-1: an <e> row may carry the hop record after f= t= (site= call= sig=, test/hopcontextcheck.sh owns them)
+for e in '<e f="orch" t="a"' '<e f="orch" t="b"' '<e f="b" t="c"'; do
+    if printf '%s' "$OUT" | grep -qE "$e( [a-z_]+=\"[^\"]*\")*/>"; then ok "edge present: $e"; else no "edge missing: $e in $OUT"; fi
 done
 [ "$( printf '%s' "$OUT" | grep -o '<e f="' | wc -l | tr -d ' ' )" = "3" ] \
     && ok "exactly 3 edges (no spurious edges)" || no "edge count != 3: $OUT"
@@ -131,8 +132,8 @@ MANY="a,b,c,orch,island,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12"
 
 # ── 8) MUTATION self-tests: the two most plausible bugs MUST trip their assertions ─────────────────────
 # (a) swapped edge direction: transform the good output as the bug would emit it; the exact-attribute grep must FAIL on it.
-MUT_DIR="$( printf '%s' "$OUT" | sed 's/<e f="\([^"]*\)" t="\([^"]*\)"\/>/<e f="\2" t="\1"\/>/g' )"
-if printf '%s' "$MUT_DIR" | grep -qF '<e f="orch" t="a"/>'; then
+MUT_DIR="$( printf '%s' "$OUT" | sed 's/<e f="\([^"]*\)" t="\([^"]*\)"/<e f="\2" t="\1"/g' )"
+if printf '%s' "$MUT_DIR" | grep -qE '<e f="orch" t="a"( [a-z_]+="[^"]*")*/>'; then
     no "mutation self-test (direction): swapped f/t output still passes the direction grep — assertion is decoration"
 else
     ok "mutation self-test (direction): swapped f/t output correctly FAILS the direction assertion"

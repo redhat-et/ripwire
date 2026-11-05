@@ -18,6 +18,7 @@
 
 #include "Diagnostics.h" // ASSUME — the depth invariant below
 
+#include <algorithm>
 #include <cstddef>
 #include <string_view>
 
@@ -163,6 +164,45 @@ inline std::string_view afterLast( std::string_view text, std::string_view sep )
         text.remove_prefix( at + sep.size() );
     }
     return text;
+}
+
+/// Visits the `sep`-separated fields of `text` in order until `stop` returns true, and says whether it did: `a::b` at "::" ->
+/// a, b; an empty field before the first separator or between two is visited. The empty field after a TRAILING separator (and
+/// the one field of "") is visited only with `visitTrailingEmpty`: a scope path's last segment (`a::` -> a, "") is one, a word
+/// list's trailing space ends it. skillscan.h's takesValue and aliashop.h's scope splitters each spelled this loop themselves,
+/// and --quality-delta flags that as a duplication clone (XF-ALIAS-HOP).
+template<class Stop>
+inline bool anyField( std::string_view text, std::string_view sep, bool visitTrailingEmpty, Stop stop )
+{
+    EXPECTS( !sep.empty(), "an empty separator splits nothing" );
+    for( std::size_t from = 0; from < text.size() || ( visitTrailingEmpty && from == text.size() ); )
+    {
+        const std::size_t cut = std::min( text.find( sep, from ), text.size() );
+        if( stop( text.substr( from, cut - from ) ) )
+        {
+            return true;
+        }
+        from = cut + sep.size();
+    }
+    return false;
+}
+
+/// Is `field` one of the `sep`-separated fields of `text` (anyField's fields, the trailing empty one per `visitTrailingEmpty`)?
+inline bool hasField( std::string_view text, std::string_view sep, std::string_view field, bool visitTrailingEmpty )
+{
+    return anyField( text, sep, visitTrailingEmpty, [&]( std::string_view f )
+                     { return f == field; } );
+}
+
+/// The `sep`-separated fields of `text` appended to `out` (anyField's fields, no trailing empty one: `a::b::c` -> a, b, c; ""
+/// adds nothing).
+template<class Out>
+inline void appendFields( std::string_view text, std::string_view sep, Out& out )
+{
+    anyField( text, sep, /*visitTrailingEmpty=*/false, [&]( std::string_view f )
+              {
+                  out.emplace_back( f );
+                  return false; } );
 }
 
 } // namespace namesplit

@@ -503,20 +503,6 @@ inline bool isAllDigits( std::string_view s ) noexcept
     return std::all_of( s.begin(), s.end(), []( char ch ) noexcept { return ch >= '0' && ch <= '9'; } );
 }
 
-// Whether `option` (as written) is one of a prefix's value-taking options.
-inline bool takesValue( std::string_view valueOptions, std::string_view option ) noexcept
-{
-    for( std::size_t begin = 0; begin < valueOptions.size(); )
-    {
-        const std::size_t end = std::min( valueOptions.find( ' ', begin ), valueOptions.size() );
-        if( valueOptions.substr( begin, end - begin ) == option )
-        {
-            return true;
-        }
-        begin = end + 1;
-    }
-    return false;
-}
 
 struct NetFlow
 {
@@ -678,7 +664,7 @@ struct NetFlowScan
                 expectCommand = false;   // `command -v curl` names the tool; nothing runs
                 return true;
             }
-            skipValue = activePrefix != nullptr && takesValue( activePrefix->valueOptions, token );
+            skipValue = activePrefix != nullptr && namesplit::hasField( activePrefix->valueOptions, " ", token, /*visitTrailingEmpty=*/false );
             return true;
         }
         return low.find( '=' ) != std::string_view::npos || isAllDigits( low );
