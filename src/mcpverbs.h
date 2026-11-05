@@ -46,6 +46,7 @@
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
 #include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
+#include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2954,6 +2955,12 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
     }
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms>, read off this answer's own bytes, before </ctx>, not priced; held under budget_tokens
+    if( out.ends_with( "</ctx>" ) )
+    {
+        const std::string syms = renderForFileSyms( ing, ix.g, FileSymsArgs{ .task = task, .answer = std::string_view( out ).substr( 0, out.size() - 6 ), .held = budgetTokens > 0 } );
+        out.insert( out.size() - 6, syms );
+    }
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
     if( out.ends_with( "</ctx>" ) )
     {

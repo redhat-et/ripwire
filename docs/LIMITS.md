@@ -468,6 +468,16 @@ Discloses: `capped`, `bytes_capped`, `dirs_capped`
 | `kForFilePageTopBytes` | `2048` | — | top-level bytes served per file |
 | `kForFilePageTopLines` | `40` | — | top-level lines served per file |
 
+### `src/forfilesyms.h`
+
+Discloses: `callee_capped`, `name_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForFileSymsFiles` | `6` | — | shown files whose symbols are candidates (files= on the block) |
+| `kForFileSymsHeadRows` | `8` | — | head <d> rows whose callees by="callee" reads (head= on the block) |
+| `kForFileSymsRowsPerRule` | `3` | — | rows per rule (name= / callee=, *_total= when cut) |
+
 ### `src/forfold.h`
 
 Discloses: **none**

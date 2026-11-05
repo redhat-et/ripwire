@@ -12,6 +12,7 @@
 #include "forslots.h"   // FOR-SLOTS: slots= on the shown initializer rows of a compact-route answer
 #include "fordottedstring.h" // STRING-IMPORT: the dotted-string literals naming a shown row
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
+#include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -25,6 +26,7 @@
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
+#include <initializer_list>  // appendForFileSyms: the answer parts it reads
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -2833,6 +2835,26 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0 ).c_str() );
 }
 
+// K-WRONGSYM (src/forfilesyms.h): the shown files' unnamed symbols in <syms>, just before </ctx>, read off `parts` (the ordinary
+// answer's bytes in stream order); its own byte allowance, outside est_tokens, so no auto-served body pays for it. XML only, a single
+// root; held under --token-budget / --max-tokens. `buffered` false (the degrade path streamed sigs unbuffered): no block.
+inline void appendForFileSyms( const MainDispatch& d, bool buffered, std::initializer_list<std::string_view> parts )
+{
+    const rw::Config& cfg = d.cfg;
+    if( !buffered || cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() )
+    {
+        return;
+    }
+    std::string answer;
+    for( const std::string_view part : parts )
+    {
+        answer += part;
+    }
+    const std::string syms = rw::renderForFileSyms(
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = answer, .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0, .compactLegend = cfg.legend == "compact" } );
+    std::fwrite( syms.data(), 1, syms.size(), stdout );
+}
+
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
@@ -4777,6 +4799,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
         }
+        // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the ordinary answer's own bytes (the strings streamed above, in stream
+        // order; the degrade path streamed unbuffered sigs and carries no block)
+        appendForFileSyms( d, sigsPreRendered, { headerStr, forHdrXml, filePageXml, unusedXml, sigsStr, legoStr, composeStr, routeStr, tailStr, epManifest.xml,
+                                                 listedIn.xml, callerHop.xml, dispatchHop.xml, selfHookXml, detailSection.xml, autoSection.xml, slot.xml, fold.xml } );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
