@@ -40,6 +40,7 @@
 // not a tuned number: the routing-loop ladder measures them, and a later round moves them with a measured reason.
 
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
+#include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
 #include "filter.h"      // taskAsksAboutDocs — the code-first tail asks the docs reorder's own question
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
 #include "model.h"
@@ -958,6 +959,8 @@ enum class TailPageRowFate : std::uint8_t
     ListSym,
     ListWide
 };
+inline constexpr std::size_t kTailPageRowFateCount = static_cast<std::size_t>( TailPageRowFate::ListWide ) + 1;
+static_assert( enumCountIsExact<TailPageRowFate, kTailPageRowFateCount>(), "kTailPageRowFateCount must name the LAST TailPageRowFate — move it with the append" );
 inline TailPageRowFate tailPageRowFate( bool unlisted, const TailRowAdmit& a, bool symRow, bool headFile ) noexcept
 {
     if( !unlisted )
@@ -983,8 +986,8 @@ inline bool tailMaskAt( const std::vector<char>& mask, std::size_t f, bool absen
 // Per fate, two bits: what the old 40-row walk listed at the row (a row listed above counts as its own: Skip and ListSym) and what
 // this walk lists now (ListSym and ListWide). Indexed by TailPageRowFate: Skip, SkipMarked, SkipHead, ListSym, ListWide.
 inline constexpr std::uint8_t kTailFateOldListed = 1, kTailFateListed = 2;
-inline constexpr std::array<std::uint8_t, 5> kTailFateBits{ kTailFateOldListed, 0, 0, kTailFateOldListed | kTailFateListed, kTailFateListed };
-static_assert( kTailFateBits.size() == std::size_t( TailPageRowFate::ListWide ) + 1, "one entry per TailPageRowFate" );
+inline constexpr std::uint8_t kTailFateBits[] { kTailFateOldListed, 0, 0, kTailFateOldListed | kTailFateListed, kTailFateListed };
+static_assert( std::size( kTailFateBits ) == kTailPageRowFateCount, "kTailFateBits is indexed by TailPageRowFate — one entry per enumerator" );
 
 struct TailPageWalkInputs
 {
