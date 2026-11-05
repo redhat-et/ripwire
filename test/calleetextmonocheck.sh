@@ -21,7 +21,7 @@ case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/calleetextmono.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 FAIL=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { FAIL=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; FAIL=1; }
 mkdir -p "$TMP/xdg"
 QUERY="dim the lamp"
