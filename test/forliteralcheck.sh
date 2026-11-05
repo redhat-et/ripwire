@@ -673,7 +673,10 @@ A="$( tr1 '--for=add a new struct like Filter' )"; L="$( lits <<<"$A" )"
 if has "$L" 's="Filter" shape="table"'; then ok "T7b a plain word after like that the index holds anchors"; else no "T7b no sibling: ${L:0:300}"; fi
 # Near misses [G]
 nomiss(){ local T="$1" W="$2"; local X; X="$( tr1 "--for=$1" )"; if [ -n "$X" ] && ! has "$( lits <<<"$X" )" 'shape="table"' && [ "$X" = "$( trf "--for=$1" )" ]; then ok "$W"; else no "$W: ${#X} B $( lits <<<"$X" | cut -c1-240 )"; fi; }
-nomiss 'where is HashJoinNode used' 'T8 no cue: an identifier alone, no block, byte-identical to the switch off'
+nomiss 'where is max_threads used' 'T8 no cue, an identifier whose only rows are weak (#define X-macro rows): no block, byte-identical to the switch off'
+# T8b [P] G-STORED-B: no cue, but a strong row (a top-level macro row) prints, and only it
+A="$( tr1 '--for=where is HashJoinNode used' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="HashJoinNode" shape="table"' && has "$L" 'tbl="item"' && has "$L" 'weak="'; then ok "T8b no cue: the top-level macro row alone, weak= counts the rest"; else no "T8b strong row: ${L:0:300}"; fi
 nomiss 'register the widget' 'T9 a cue with a stop word and a plain word: no anchor'
 nomiss 'add a new argument to HashJoinNode' 'T9b the word after to in an add-a-new task is the target, no anchor'
 nomiss 'register no_such_symbol_here' 'T10 an identifier-shaped word that is no symbol: no anchor'

@@ -81,6 +81,14 @@
 // (3) Rows of generated and JSON files rank after source rows of the same nearness (isGeneratedOrDataPath), and never hold the home table. A callee's
 // name is no proof the call registers: the row quotes it. (4) A dotted name that finds no site is retried by its last part, which lists quoted-key
 // rows and its definition only (keepTailKeyRows).
+//
+// G-STORED-B (ORCH reports/os5-g-stored-s0.md). A stored subject is bare (`new_boxed_executor for HashJoinNode`, `light.turn_on hue async_turn_on`): no
+// cue word, so the walk above never ran. With no cue the same walk runs on the task's anchors (none: no scan), but lists STRONG rows only (TableCue::
+// StrongRowOnly, lit_detail::isStrongRow): a registration call's argument (reg=), a top-level macro or call row (tbl="item"), a macro-table brace row
+// (a `name! {` or `$macro! {` opener). Weak rows (a dict, list, __all__, #define or const-array table, a site that is no row) are counted in weak=,
+// never listed; none strong, no block. The legend clause rides only on such an answer. The callee vocabulary narrowed with it (rv-reg2-delta D1):
+// `use` is a hook prefix, an adding verb's noun is the name's last word, `reg` is a verb only last or before a noun. The table legend lost the bytes
+// no attribute of the answer needs (D4): the vocabulary list and the rank sentence; the tail= sentence rides only beside a tail=.
 
 #include "infra/namesplit.h" // isIdentChar
 #include "infra/sortutil.h"  // svLess — AnchorSet::dirs sort and search in byte order, never through operator<
@@ -198,12 +206,20 @@ static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size
 inline constexpr std::string_view kForLiteralTableLegend =
     "<!-- ripwire for lit: shape=table a task about a table, registration or new sibling: the identifier it names, one lit per identifier, "
     "after the other shapes found no site. Table rows first: tbl= the line that opens the table (item: a top level macro or call row), read from the text; no tbl= or "
-    "reg= is no claim. reg= instead: the row is an argument of a call named for a registration (register, reg, or add, on, bind with route, command, handler; the "
-    "name, not proof), also inside a longer name, and reg= is that call up to its paren, looked for 4 lines above the site. Generated and JSON files rank after source "
-    "rows of the same nearness. tail=N: a dotted name found no site; its last part lists quoted keys and its definition, N sites not listed. lines=a-b with the lines "
-    "after it. read=N: only the first N source sites of src= in path order were read for a table row. longer= source sites inside a longer "
-    "word, counted, never rows. A cut on a row boundary says capped=1. -->";
+    "reg= is no claim. reg= instead: the row is an argument of a call whose name says it registers (the name, not proof), also inside a longer name, and reg= is that "
+    "call up to its paren, looked for 4 lines and 512 bytes above the site. lines=a-b with the lines after it. read=N: only the first N source sites of src= in path "
+    "order were read for a table row. longer= source sites inside a longer word, counted, never rows. A cut on a row boundary says capped=1. -->";
 static_assert( kForLiteralTableLegend.find( "--", 4 ) == kForLiteralTableLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForRegCallLines == 4 && kForRegCallBytes == 512, "the table legend says how far a registration call is looked for: 4 lines and 512 bytes" );
+// G-STORED-B: present only when the task has no table, registration or handler word (TableCue::StrongRowOnly), with the first element
+inline constexpr std::string_view kForLiteralStrongLegend =
+    "<!-- ripwire for lit: the task has no table or registration word, so only strong rows are listed: a registration call (reg=), a top level macro or "
+    "call row (tbl=item), a macro table row (tbl= a name! opener). weak=N source sites read that are other table rows or no row, not listed. -->";
+static_assert( kForLiteralStrongLegend.find( "--", 4 ) == kForLiteralStrongLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+// rv-reg2-delta D4: present only with tail= (the first element that prints it)
+inline constexpr std::string_view kForLiteralTailLegend =
+    "<!-- ripwire for lit: tail=N: a dotted name found no site; its last part lists quoted keys and its definition, N sites not listed. -->";
+static_assert( kForLiteralTailLegend.find( "--", 4 ) == kForLiteralTailLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
 // present only with lit_cut= (LIT-SITE-DECOY), so the bytes of a block whose cut moved no row do not change; the compact form rides the default
 // --legend=compact posture, the long one --legend=full
@@ -664,13 +680,15 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     return out;
 }
 
-// shape=table: which trigger a task pulled. None: no block. AnySite: a registration, table or compile-time word, or "add a new". TableRowOnly:
-// default/handler, words of many tasks, so the block prints only when a site reads as a table row.
+// shape=table: which trigger a task pulled. AnySite: a registration, table or compile-time word, or "add a new". TableRowOnly: default/handler,
+// words of many tasks, so the block prints only when a site reads as a table row. StrongRowOnly (G-STORED-B): no such word at all (a bare subject,
+// `new_boxed_executor for HashJoinNode`), so only a STRONG row prints: a registration call (reg=), a top-level macro or call row (tbl="item"), a
+// macro-table brace row (a `name! {` / `$macro! {` opener). A dict, list, __all__, #define or const-array row is weak here: counted (weak=), not listed.
 enum class TableCue : std::uint8_t
 {
-    None,
     AnySite,
-    TableRowOnly
+    TableRowOnly,
+    StrongRowOnly
 };
 
 namespace lit_detail
@@ -766,7 +784,7 @@ inline TableCue forTableCueOf( std::string_view task )
 {
     const std::string prose = lit_detail::withoutBackticks( task );
     const std::vector<std::string_view> words = lit_detail::taskWords( prose );
-    TableCue cue = TableCue::None;
+    TableCue cue = TableCue::StrongRowOnly;   // no cue word: the strong rows alone (G-STORED-B)
     std::size_t addAt = SIZE_MAX;
     for( std::size_t i = 0; i < words.size(); ++i )
     {
@@ -876,6 +894,7 @@ struct ForLiteralRender
     bool        noRoom = false;   // shape=table: sites exist, but not one row fit the bytes left
     bool        unread = false;   // shape=table: a table-rows-only anchor with more sites than are read for a row, none of those read a row: unknown, not "no table"
     bool        cutLegend = false;   // this element carries the lit_cut legend
+    bool        tailLegend = false;  // this element carries the tail= legend
 };
 
 // LIT-SITE-DECOY: what the ranked answer above the block stands on, read to order the literal's sites by nearness to it
@@ -2302,6 +2321,24 @@ inline bool keepTailKeyRows( const IngestResult& ing, std::string_view tail, std
     return true;
 }
 
+// G-STORED-B: a STRONG row, the only kind a task with no cue word lists: a registration call's argument (reg=), a top-level macro or call row
+// (tbl="item"), or a row of a macro table (`for_all_params! {`, `$macro! {`). Allowlist: a dict, list, __all__, #define, enum or const-array row is weak.
+inline bool isStrongRow( const Site& r ) noexcept
+{
+    return r.regCall || r.tbl == "item" || ( !r.tbl.empty() && isMacroOpener( openerCode( r.tbl ), /*allowParen=*/false ) );
+}
+
+// drop the ranked rows that are not strong (isStrongRow); the count dropped (said as weak=)
+inline std::size_t dropWeakRows( std::vector<Site>& rows, std::vector<GrepHit>& enriched )
+{
+    std::vector<char> drop( enriched.size(), 0 );
+    for( std::size_t i = 0; i < enriched.size(); ++i )
+    {
+        drop[i] = !isStrongRow( rows[i] );
+    }
+    return dropRows( rows, enriched, drop );
+}
+
 // a table row's tbl= attribute onto its <ls>; the opener is raw source text. No opener, no attribute.
 inline void appendTblAttr( std::string& xml, std::string opener, RedactCounts* redact, std::vector<char>& esc, std::string_view attr = " tbl=\"" )
 {
@@ -2585,6 +2622,8 @@ struct ForLiteralLimits
     bool        tableOnly  = false;      // TableCue::TableRowOnly: no table row, no block
     bool        cutLegendAbove = false;  // an earlier element of the task carries the lit_cut legend
     bool        tailKeysOnly   = false;  // the last part of a dotted name, tried after the name found nothing: only quoted-key rows and its definition are listed
+    bool        strongOnly     = false;  // TableCue::StrongRowOnly: only registration calls, top-level macro/call rows and macro-table rows are listed (weak=)
+    bool        tailLegendAbove = false; // an earlier element of the task carries the tail= legend
 };
 
 // THE BLOCK. `served` = the answer's own bytes after <sigs> (bodies, fold, slot, hops): a body whose <b … l= p= n=> head is in it
@@ -2749,17 +2788,25 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     std::vector<GrepHit> enriched = grepEnrich( ing, std::span<const GrepRawHit>( all ) );
     ASSUME( enriched.size() == all.size(), "grepEnrich returns one row per windowed hit" );
     std::size_t tailDropped = 0;   // limits.tailKeysOnly: sites of the tail that are no quoted key and no definition, not listed
+    std::size_t weakDropped = 0;   // limits.strongOnly: read sites that are no strong row, not listed (weak=)
+    std::size_t readSites   = 0;   // shape=table: the source sites read for a table row (read= when fewer than src=)
     if( policy.tableRows )
     {
         const bool anyMarked = lit_detail::markTableRows( ing, rows, enriched, loadFile, loadedText, longerHits );
         const bool keysOk    = !limits.tailKeysOnly || lit_detail::keepTailKeyRows( ing, lit.text, rows, enriched, tailDropped );
         const bool anyRow    = keysOk && ( limits.tailKeysOnly ? std::any_of( rows.begin(), rows.begin() + std::ptrdiff_t( enriched.size() ), []( const lit_detail::Site& r ) { return !r.tbl.empty(); } ) : anyMarked );
         ranked    = enriched.size();
+        readSites = ranked;
         out.sites = rows.size();
+        if( keysOk && anyRow && limits.strongOnly )
+        {
+            weakDropped = lit_detail::dropWeakRows( rows, enriched );   // G-STORED-B: no cue word, so only the strong rows are listed; the rest is weak=
+            ranked      = enriched.size();
+        }
         if( !keysOk || ranked == 0 || ( !anyRow && limits.tableOnly ) )
         {
             ForLiteralRender none;
-            none.unread = rows.size() > ranked;   // the sites past the cap were not read: the caller says so
+            none.unread = out.sites > readSites;   // the sites past the cap were not read: the caller says so
             return none;
         }
     }
@@ -2977,6 +3024,12 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
         x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
+        x += limits.strongOnly ? kForLiteralStrongLegend : std::string_view();   // the whole task has no cue word: every element of it lists strong rows only
+    }
+    if( tailDropped > 0 && !limits.tailLegendAbove )
+    {
+        x += kForLiteralTailLegend;   // present only with tail= (rv-reg2-delta D4: not on every shape=table answer)
+        out.tailLegend = true;
     }
     if( cutMovedRow && !limits.cutLegendAbove )
     {
@@ -2993,9 +3046,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         x += " capped=\"1\"";
     }
-    x += policy.tableRows && out.sites > ranked ? " read=\"" + std::to_string( ranked ) + "\"" : std::string();
+    x += policy.tableRows && out.sites > readSites ? " read=\"" + std::to_string( readSites ) + "\"" : std::string();
     x += longerHits > 0 ? " longer=\"" + std::to_string( longerHits ) + "\"" : std::string();
     x += tailDropped > 0 ? " tail=\"" + std::to_string( tailDropped ) + "\"" : std::string();
+    x += weakDropped > 0 ? " weak=\"" + std::to_string( weakDropped ) + "\"" : std::string();
     x += lit.frag ? " frag=\"1\"" : "";
     x += lit.tryNo > 1 ? " try=\"" + std::to_string( lit.tryNo ) + "\"" : std::string();
     x += cutMovedRow ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
@@ -3101,7 +3155,8 @@ struct TableWalk
             return TableTry::Empty;
         }
         ++scanned;
-        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm, out.cutLegend, tail };
+        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue != TableCue::AnySite || !anchor.firm, out.cutLegend, tail,
+                                 cue == TableCue::StrongRowOnly, out.tailLegend };
         ForLiteral lit{ word, "table" };
         ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits, anchors );
         if( r.noRoom || r.unread )
@@ -3119,6 +3174,7 @@ struct TableWalk
         out.sites += r.sites;
         out.bodies += r.bodies;
         out.cutLegend = out.cutLegend || r.cutLegend;
+        out.tailLegend = out.tailLegend || r.tailLegend;
         return TableTry::Printed;
     }
 };
@@ -3126,14 +3182,14 @@ struct TableWalk
 // REGISTRAR-2: the second pass of the walk. A dotted anchor (`pydantic.ValidationError`, `light.turn_on`) that printed nothing is tried by its last
 // segment, the name a registration row writes (`'ValidationError': (...)`), unless the task names that segment itself. An identifier-shaped word the
 // index holds no symbol of (a generated type, `HashJoinNode` from a .proto; a key only a macro or a decorator writes) is tried when the cue prints only
-// beside a table row. Both after every anchor of the task, so neither takes an earlier anchor's scan.
+// beside a table row (a row-only or strong-only cue). Both after every anchor of the task, so neither takes an earlier anchor's scan.
 inline std::optional<TableAnchor> lateTableAnchor( const IngestResult& ing, const TableAnchor& a, TableTry tried, TableCue cue, std::span<const TableAnchor> own )
 {
     const std::string_view word = a.text;
     const std::size_t      dot  = word.rfind( '.' );
     if( tried == TableTry::Unkept )
     {
-        const bool unindexed = cue == TableCue::TableRowOnly && !a.quoted && dot == std::string_view::npos && !namesIndexedFile( ing, word ) && lit_detail::isIdentifierShaped( word );
+        const bool unindexed = cue != TableCue::AnySite && !a.quoted && dot == std::string_view::npos && !namesIndexedFile( ing, word ) && lit_detail::isIdentifierShaped( word );
         return unindexed ? std::optional<TableAnchor>( a ) : std::nullopt;
     }
     if( tried != TableTry::Empty || dot == std::string_view::npos || word.find( "::" ) != std::string_view::npos || dot + 1 + kForTableMinAnchor > word.size() )
@@ -3150,13 +3206,13 @@ inline std::optional<TableAnchor> lateTableAnchor( const IngestResult& ing, cons
 inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
                                               RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
 {
-    const TableCue cue = forTableCueOf( task );
-    if( cue == TableCue::None )
-    {
-        return {};
-    }
-    TableWalk walk{ ing, rootArg, served, redact, useMemo, compactLegend, anchors, cue, {} };
     const std::vector<TableAnchor> own = forTableAnchorsOf( task );
+    if( own.empty() )
+    {
+        return {};   // no backticked span and no identifier-shaped word: nothing to scan (a bare-prose task costs no scan)
+    }
+    const TableCue cue = forTableCueOf( task );
+    TableWalk walk{ ing, rootArg, served, redact, useMemo, compactLegend, anchors, cue, {} };
     std::vector<std::pair<TableAnchor, bool>> later;   // (anchor, unindexed)
     for( const TableAnchor& anchor : own )
     {

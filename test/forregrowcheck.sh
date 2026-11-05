@@ -32,7 +32,13 @@
 #          N14 [P] a paren in a string opens nothing
 #   N11 [P] F3 a dotted anchor's common tail with only an unquoted table row prints no block; R16 [G] the quoted-key tail (koa-02) prints; R17 [P] one tail once
 #   N12 [P] `is not defined` / `was not declared` (error messages) are no cue; R18 [G] the same word without the negation anchors
-#   L1 [P] legend: F4 (generated rank after source rows), F5 (no tbl= or reg= is no claim), the 4-line reach
+#   L1 [P] legend: F5 (no tbl= or reg= is no claim), the 4-line and 512-byte reach; L2 [P] D4: no vocabulary list, rank sentence or tail= sentence without tail=
+#   G-STORED-B (forliteral-3 commit 1; [P] = red on 2562d9931): a task with NO cue word lists strong rows only. S1-S6 [P] a bare subject reaches a Rust
+#   top-level macro row (and the unindexed late try), a Python register call, a Go and a TS call registration, a Rust macro-table row; S7 [P] a weak dict
+#   row beside a strong one is counted in weak=, not listed; S8 [P] the legend clause (compact and full). N16-N21 [G] weak-only rows (TS object key,
+#   Python dict, __all__, #define X-macro), no-call shapes (C++ init list, Rust enum variant, a call not named for a registration), no identifier
+#   word: byte-identical. N3 moved to a weak-only anchor (get_states now has strong rows). D1a-d [P] useRouter(, addCommandLineOption(, reg_value(,
+#   reg_field( are no registration; D1e-f [G] addEventHandler(, reg_handler( stay.
 #
 # Usage:  bash test/forregrowcheck.sh [BIN]   (BIN is $1, else RIPWIRE_BIN, else build/ripwire). Exits non-zero on any failure.
 
@@ -318,6 +324,49 @@ export const limits = {
   other_limit: 2,
 }
 TS
+# G-STORED-B fixtures: a bare subject (no cue word) beside strong and weak rows, and the D1 vocabulary neighbours (rv-reg2-delta)
+mkdir -p "$RF/gsb"
+cat > "$RF/gsb/mixed.py" <<'PY'
+MIXED = {
+    "mixed_anchor_fn": 1,
+    "other_mixed": 2,
+}
+
+
+def setup(r):
+    r.register(mixed_anchor_fn)
+
+
+def mixed_anchor_fn():
+    return 1
+PY
+cat > "$RF/gsb/exports.py" <<'PY'
+__all__ = [
+    "exported_weak_fn",
+    "other_export",
+]
+
+
+def exported_weak_fn():
+    return 1
+PY
+cat > "$RF/gsb/opcodes.h" <<'CC'
+#define OPCODE_LIST(X) \
+    X(op_weak_marker, 1) \
+    X(op_other_marker, 2)
+int op_weak_marker(void);
+CC
+cat > "$RF/gsb/vocab.js" <<'JS'
+useRouter(ur_marker_a)
+parser.addCommandLineOption(acl_marker_a)
+emitter.addEventHandler(aeh_marker_a)
+JS
+cat > "$RF/gsb/vocab2.py" <<'PY'
+def regs(dev):
+    reg_value(rv_marker_a)
+    reg_field(rf_marker_a, 3)
+    reg_handler(rh_marker_a)
+PY
 call(){ ( cd "$RF" || exit 1; "$BIN" "$RF" --no-cache "$@" </dev/null 2>/dev/null ); }
 offc(){ ( cd "$RF" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$RF" --no-cache "$@" </dev/null 2>/dev/null ); }
 lits(){ python3 -I -c 'import sys,re;s=sys.stdin.read();print("".join(re.findall(r"<lit [^>]*>.*?</lit>",s,re.S)))'; }
@@ -375,9 +424,10 @@ nomiss(){ local X; X="$( call "--for=$1" )"; local rc=$?
     if [ "$rc" -eq 0 ] && [ -n "$X" ] && ! has "$( lits <<<"$X" )" 'shape="table"' && [ "$X" = "$( offc "--for=$1" )" ]; then ok "$2"; else no "$2: rc=$rc ${#X} B $( lits <<<"$X" | cut -c1-300 )"; fi; }
 nomiss 'Where is EventRecorder defined and who implements it?' 'N1 [G] a definition named like a handler is no registration call (kubernetes-01 shape)'
 nomiss 'where is agg_target handled' 'N2 [G] a call not named for a registration (aggregate, regex_compile): no row'
-nomiss 'where is get_states used' 'N3a [G] no cue word: byte-identical'
-nomiss 'what does get_states get' 'N3b [G] get without to: byte-identical'
-nomiss 'get_states turned off' 'N3c [G] turned without into: byte-identical'
+# N3 (G-STORED-B): a task with no cue now prints STRONG rows only; max_part_size_marker has a weak row (a TS object key) alone, which a row-only cue prints
+nomiss 'where is max_part_size_marker used' 'N3a [G] no cue word, only a weak row: byte-identical'
+nomiss 'what does max_part_size_marker get' 'N3b [G] get without to is no cue: the weak row stays silent, byte-identical'
+nomiss 'max_part_size_marker turned off' 'N3c [G] turned without into is no cue: byte-identical'
 nomiss 'where is closed_anchor handled' 'N4 [G] a registration call closed on an earlier line holds no later anchor'
 nomiss 'where is no_such_key_here defined' 'N5 [G] an identifier the index lacks, with no site: no block, no claim'
 nomiss 'where is generated_only_key defined' 'N6 [G] an identifier the index lacks whose only site is no row: no block'
@@ -431,8 +481,46 @@ nomiss 'error: max_part_size_marker was not declared in this scope' 'N12b [P] `w
 if ask 'where is max_part_size_marker defined'; then L="$( rowsof )"; if has "$L" 'max_part_size_marker: 1'; then ok "R18 [G] the same word without the negation still anchors"; else no "R18 defined: ${L:0:300}"; fi; else no "R18 call failed rc=$RC"; fi
 # the legend: F4 (rank wording), F5 (no tbl= or reg= is no claim), the read-back reach, tail=
 if ask 'Where is barrier_interval_ms defined and what reads it?'; then
-    if has "$A" 'no tbl= or reg= is no claim' && has "$A" 'rank after source rows' && ! has "$A" 'rank last' && has "$A" '4 lines'; then ok "L1 [P] the table legend: no tbl= or reg= is no claim, generated rank after source rows, the 4-line reach"; else no "L1 legend wording"; fi
+    if has "$A" 'no tbl= or reg= is no claim' && ! has "$A" 'rank last' && has "$A" '4 lines' && has "$A" '512 bytes'; then ok "L1 [P] the table legend: no tbl= or reg= is no claim, the 4-line and 512-byte reach"; else no "L1 legend wording"; fi
+    # D4 (rv-reg2-delta): no vocabulary list, no ranking sentence, the tail= sentence only beside a tail= (this answer prints none)
+    if ! has "$A" 'bind with route' && ! has "$A" 'Generated and JSON files' && ! has "$A" 'tail=N'; then ok "L2 [P] D4: the table legend carries no vocabulary list, no rank sentence, no tail= sentence without a tail="; else no "L2 extraneous legend bytes"; fi
 else no "L1 call failed rc=$RC"; fi
+# ── G-STORED-B (reports/os5-g-stored-s0.md): a bare subject with no cue word prints STRONG rows only ─────────────────────────────────────────
+# strong = a registration call (reg=), a top-level macro or call row (tbl="item"), a macro-table brace row (tbl= a `name! {` or `$macro! {` opener)
+strong(){ if ask "$1"; then L="$( lits <<<"$A" )"; local want; local okk=1
+    for want in "${@:3}"; do has "$L" "$want" || okk=0; done
+    if [ "$okk" = 1 ]; then ok "$2"; else no "$2: ${L:0:500}"; fi; else no "$2: call failed rc=$RC"; fi; }
+strong 'new_boxed_executor for HashJoinNode' 'S1 [P] Rust bare subject: the top-level macro row (rw-03 stored shape)' 's="HashJoinNode" shape="table"' 'tbl="item"' 'impl_body!(HashJoin(HashJoinNode)'
+strong 'ProtoOnlyNode executor' 'S2 [P] Rust bare subject, a name the index lacks: its macro row (the late unindexed try)' 's="ProtoOnlyNode" shape="table"' 'impl_body!(Probe(ProtoOnlyNode)'
+strong 'light.turn_on hue async_turn_on' 'S3 [P] Python bare subject: the register call over three lines (ha-03 stored shape)' 's="async_turn_on" shape="table"' 'reg="component.async_register_entity_service("'
+strong 'pods_log_route kubelet' 'S4 [P] Go bare subject: a call registration' 's="pods_log_route" shape="table"' 'reg="r.RegisterHandler("'
+strong 'open_panel extension' 'S5 [P] TypeScript bare subject: registerCommand' 's="open_panel" shape="table"' 'reg="commands.registerCommand("'
+strong 'barrier_interval_ms system param' 'S6 [P] Rust bare subject: the macro-table brace row' 's="barrier_interval_ms" shape="table"' 'tbl="$macro! {"'
+# S7 [P]: one anchor with a strong and a weak row: the registration prints, the dict row does not, weak= counts it
+if ask 'mixed_anchor_fn setup'; then L="$( lits <<<"$A" )"
+    if has "$L" 'reg="r.register("' && ! has "$L" 'tbl="MIXED = {"' && has "$L" 'weak="2"' && has "$A" 'weak='; then ok "S7 [P] strong rows only: the registration prints, the dict row and the def line are counted in weak="; else no "S7 mixed: ${L:0:500}"; fi
+else no "S7 call failed rc=$RC"; fi
+# S8 [P]: the legend says why only those rows print, beside the block that prints them (compact and full)
+if ask 'mixed_anchor_fn setup'; then if has "$A" 'no table or registration word'; then ok "S8a [P] compact answer: the no-cue clause is in the legend"; else no "S8a no-cue legend missing"; fi; else no "S8a call failed rc=$RC"; fi
+FULL="$( call '--for=mixed_anchor_fn setup' --legend=full )"
+if [ -n "$FULL" ] && has "$FULL" 'no table or registration word' && has "$FULL" 'weak='; then ok "S8b [P] full legend: the no-cue clause and weak="; else no "S8b full legend: ${#FULL} B"; fi
+# N16-N20 [G]: a bare subject whose only rows are weak, or that are no row at all: no block, byte-identical to the switch off
+nomiss 'max_part_size_marker limits' 'N16 [G] bare subject, only a TS object key row (weak): byte-identical'
+nomiss 'shared_handler_key core' 'N17 [G] bare subject, only a Python dict row (weak): byte-identical'
+nomiss 'exported_weak_fn exports' 'N18 [G] bare subject, only an __all__ list row (weak): byte-identical'
+nomiss 'op_weak_marker opcode' 'N19 [G] bare subject, only a #define X-macro row (weak): byte-identical'
+nomiss 'init_marker_a runner' 'N20a [G] bare subject in a C++ member-initializer list (no call): byte-identical'
+nomiss 'VariantOptsMarker request' 'N20b [G] bare subject in a Rust enum tuple variant (no call): byte-identical'
+nomiss 'agg_target aggregation' 'N20c [G] bare subject in calls not named for a registration: byte-identical'
+nomiss 'how does the light turn on' 'N21 [G] no identifier-shaped word: byte-identical, nothing scanned'
+# D1 (rv-reg2-delta): the vocabulary. `use` is a hook prefix, not an adding verb; the noun of an adding verb is the name's last word; `reg` is a verb
+# only as the last word or right before a noun (`async_reg`, `reg_handler`), never `reg_value`. Twins stay rows.
+nomiss 'Where is `ur_marker_a` defined?' 'D1a [P] useRouter( is a React hook call, no registration'
+nomiss 'Where is `acl_marker_a` defined?' 'D1b [P] addCommandLineOption( adds an option: the noun is not the last word'
+nomiss 'Where is `rv_marker_a` defined?' 'D1c [P] reg_value( reads a hardware register: reg as a noun'
+nomiss 'Where is `rf_marker_a` defined?' 'D1d [P] reg_field( : reg as a noun'
+if q aeh_marker_a; then L="$( rowsof )"; if has "$L" 'reg="emitter.addEventHandler("'; then ok "D1e [G] addEventHandler( (noun last) stays a registration"; else no "D1e addEventHandler: ${L:0:300}"; fi; else no "D1e call failed rc=$RC"; fi
+if q rh_marker_a; then L="$( rowsof )"; if has "$L" 'reg="reg_handler("'; then ok "D1f [G] reg_handler( (reg before a noun) stays a registration"; else no "D1f reg_handler: ${L:0:300}"; fi; else no "D1f call failed rc=$RC"; fi
 # X1 [G]
 A1="$( call '--for=Where is barrier_interval_ms defined and what reads it?' )"; A2="$( call '--for=Where is barrier_interval_ms defined and what reads it?' )"
 if [ -n "$A1" ] && [ "$A1" = "$A2" ]; then ok "X1a determinism"; else no "X1a two runs differ or empty"; fi
