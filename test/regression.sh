@@ -416,6 +416,7 @@ for _g in \
     danglingwarncheck \
     dartcheck \
     deadcheck \
+    deadcodescopecheck \
     deadfiltercheck \
     deadprecisioncheck \
     deckcheck \
