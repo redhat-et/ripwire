@@ -104,7 +104,8 @@ row U5.untyped  "$S" callees tUntyped   router.ts match notproven
 # the lexical ranker's callee-name field, so a caller's --for score is exactly what it was with the call declined (ha-03: a correct
 # HueLight.async_turn_off -> HueBridge.async_request_call edge lowered its caller by BM25 length normalisation). Each shape is written
 # twice: E states the class (the edge binds), N misspells it with the same token count (the call declines, as on main). The two
-# corpora differ only in that one identifier, so the caller's <cand> row must be byte-identical. Q*.edge proves the edge exists in E
+# corpora differ only in that one identifier, so the caller's <cand> row must be byte-identical. An edge the name ladder drew before
+# (the method is the one definition of its name: Q.pyuniq) stays in the field: the row is again the misspelled build's. Q*.edge proves the edge exists in E
 # (and not in N); QP proves a PLAIN edge (no receiver record) still feeds the callee field: its caller's score moves when it binds.
 # A crashed run, an empty answer or a missing row is `missing`, which fails every arm.
 QUERY="turn off the light"
@@ -121,7 +122,7 @@ quiet() {
     local a b
     a=$( cand "$2" "$4" ); b=$( cand "$3" "$4" )
     case "$a$b" in *missing*) echo "  FAIL $1: a scored row is missing (E=[$a] N=[$b])"; fail=1; return;; esac
-    if [ "$a" = "$b" ]; then echo "  PASS $1: $4's rank/score row is the declined build's ($a)"
+    if [ "$a" = "$b" ]; then echo "  PASS $1: $4's rank/score row is the misspelled build's ($a)"
     else echo "  FAIL $1: $4's rank/score row moved with the receiver-proven edge (E=[$a] N=[$b])"; fail=1; fi
 }
 # qwrite DIR LANG CLS: the shape LANG, with the class name its stated type writes = CLS (E: the real class; N: a same-length misspelling)
@@ -163,6 +164,13 @@ for spec in "pyfield HueBridge HueBridgf hue/bridge.py async_request_call" "pylo
     row "Q.$lang.noedge" "$QN" callees async_turn_off "$defp" "$callee" none
     quiet "Q.$lang.rank" "$QE" "$QN" async_turn_off
 done
+# Q.pyuniq (neighbour shape): the stated class's method is the ONE definition of the name, so the name ladder alone drew this edge
+# before (hedged): the callee field keeps it, and the caller's row is again the misspelled build's (where the edge is the hedge)
+qwrite "$T/q-pyuniq-E" pyfield HueBridge; qwrite "$T/q-pyuniq-N" pyfield HueBridgf
+rm -f "$T/q-pyuniq-E/zone/bridge.py" "$T/q-pyuniq-N/zone/bridge.py"
+row Q.pyuniq.edge  "$T/q-pyuniq-E" callees async_turn_off hue/bridge.py async_request_call proven
+row Q.pyuniq.hedge "$T/q-pyuniq-N" callees async_turn_off hue/bridge.py async_request_call name
+quiet Q.pyuniq.rank "$T/q-pyuniq-E" "$T/q-pyuniq-N" async_turn_off
 # QP: a plain edge (an import-bound module function, no receiver record) still feeds the callee field — its name carries a query
 # term, so binding it moves the caller's score (the twin's definition is a same-length sibling name the call does not bind)
 for v in widget gadget; do

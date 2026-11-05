@@ -9764,7 +9764,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // accumulate per (from,to): summed per-ref confidence + an integer ref count (key = from<<32|to).
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
-    // nLane (RECV-C): of those refs, the ones a RECV-XFILE receiver record alone decided — nLane == nref ⇒ Graph::lexOutTargets omits it
+    // nLane (RECV-C): of those refs, the ones a RECV-XFILE receiver record alone decided, to a target the name ladder would not have
+    // reached (ladderReaches) — nLane == nref ⇒ Graph::lexOutTargets omits the edge
     struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint32_t nLane = 0; };
     HashMap<std::uint64_t, EdgeAcc> acc;
     acc.reserve( ing.references.size() );        // start past the 4-bucket / 0.8-load rehash cascade
@@ -10981,6 +10982,38 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<NodeId, bool> preludeBindMemo;   // EDGE-PRELUDE-VETO: can a bare call name this namesake of a prelude name (preludeSite)
     // RECV-XFILE: a chain's inner call is walked before its outer call (ReceiverEvidence::chainSiteOrder); else index order
     const std::vector<std::uint32_t> siteOrder = recvEv.chainSiteOrder();
+    // RECV-C: would the name ladder alone (without RECV-XFILE's records) have drawn the edge `r` → `to`? Yes when `to` is the one
+    // in-language definition of the name in reach, one in the caller's file, or (none there) one in its directory: the edge was
+    // there before, so the lexical callee field keeps it. A Rule 3 include-file pick is not modelled: such an edge leaves the
+    // field (a floor, counted in Graph::lexQuietEdges).
+    const auto ladderReaches = [ & ]( const Reference& r, NodeId to ) -> bool
+    {
+        const auto it = byName.find( r.calleeName );
+        if( it == byName.end() )
+        {
+            return false;
+        }
+        std::size_t         n = 0;
+        bool                anyInFile = false, hit = false, hitInFile = false, hitInDir = false;
+        const std::uint32_t rdir = fileDir[ r.fileId ];
+        for( NodeId c : it->second )
+        {
+            if( c == r.fromSymbol || !langCompatible( ing.symbols[ c ].lang, r.lang ) || !sameRoot( c, r.fileId ) )
+            {
+                continue;
+            }
+            ++n;
+            const bool inFile = symFileId[ c ] == r.fileId;
+            anyInFile         = anyInFile || inFile;
+            if( c == to )
+            {
+                hit       = true;
+                hitInFile = inFile;
+                hitInDir  = fileDir[ symFileId[ c ] ] == rdir;
+            }
+        }
+        return hit && ( n == 1 || hitInFile || ( !anyInFile && hitInDir ) );
+    };
     for( std::size_t walk = 0; walk < ing.references.size(); ++walk )
     {
         siteIndex = siteOrder.empty() ? walk : siteOrder[ walk ];
@@ -12868,7 +12901,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             EdgeAcc& e = acc[ ekey ];
             e.confSum += classic( to ) ? base : 0.f;
             e.nref    += 1;
-            e.nLane   += laneEdge ? 1u : 0u;
+            e.nLane   += ( laneEdge && !ladderReaches( r, to ) ) ? 1u : 0u;
             if( splitPick )
             {
                 splitEdges[ekey] = 1;   // C1: remember (from,to) for prov="split" — every arm of the split, never a subset
