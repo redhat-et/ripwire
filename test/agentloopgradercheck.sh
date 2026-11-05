@@ -145,6 +145,49 @@ else
     ok "RETIRED rows are excluded from grading"
 fi
 
+# ── 5b. a row wider than the schema is refused, like a wrong header (#492) ──────────────────────────
+# zip() over the 13 columns would keep the first 13 cells of a 14-cell row and drop the 14th without a
+# word. Each bank is the clean bank with one row changed, so a refusal can only come from that row.
+# The surplus cell carries a sentinel, so the arms can tell "refused" from "loaded and dropped it".
+audit(){ python3 "$GRADER" --instances "$1" --audit >"$2" 2>&1; }
+wide_row(){ head -1 "$TMP/clean.tsv"; grep -E "^$1	" "$FIX/instances.tsv" | sed 's/$/	SURPLUS_SENTINEL/'; }
+[ "$( awk -F'\t' 'NR==2 { print NF }' "$TMP/clean.tsv" )" = 13 ] || no "the clean bank's first row is not 13 cells wide; the width arms below test nothing"
+wide_row F01 >"$TMP/wide.tsv"
+wide_row F12 >"$TMP/wideretired.tsv"
+{ head -1 "$TMP/clean.tsv"; tail -n +2 "$TMP/clean.tsv" | cut -f1-12; } >"$TMP/short.tsv"
+grep -q 'SURPLUS_SENTINEL' "$TMP/wide.tsv"        || no "the wide bank was not built (no sentinel cell in it)"
+grep -q 'SURPLUS_SENTINEL' "$TMP/wideretired.tsv" || no "the wide RETIRED bank was not built (no sentinel cell in it)"
+[ "$( awk -F'\t' 'NR==2 { print NF }' "$TMP/short.tsv" )" = 12 ] || no "the short bank's first row is not 12 cells wide"
+[ "$( awk -F'\t' 'NR==2 { print NF }' "$TMP/wide.tsv" )" = 14 ] || no "the wide bank's row is not 14 cells wide"
+audit "$TMP/wide.tsv" "$TMP/wide.out"; rc=$?
+if [ "$rc" != 0 ] && grep -q 'has 14 cells, the graded-TSV schema has 13' "$TMP/wide.out" && ! grep -q 'Traceback' "$TMP/wide.out"; then
+    ok "a 14-cell row under the 13-column header is refused by name (exit $rc), never truncated"
+else
+    no "a 14-cell row was accepted (exit $rc) — its 14th cell would be dropped silently:"
+    head -5 "$TMP/wide.out"
+fi
+audit "$TMP/wideretired.tsv" "$TMP/wideretired.out"; rc=$?
+if [ "$rc" != 0 ] && grep -q "row 'F12' has 14 cells" "$TMP/wideretired.out" && ! grep -q 'Traceback' "$TMP/wideretired.out"; then
+    ok "a 14-cell RETIRED row refuses the bank too (the file is malformed whatever the row's status)"
+else
+    no "a 14-cell RETIRED row was accepted (exit $rc)"
+    head -5 "$TMP/wideretired.out"
+fi
+audit "$TMP/clean.tsv" "$TMP/cleanaudit.out"; rc=$?
+if [ "$rc" = 0 ] && grep -q 'F01' "$TMP/cleanaudit.out"; then
+    ok "the same bank with 13-cell rows still loads (control for the refusal above)"
+else
+    no "the 13-cell control bank did not load (exit $rc)"
+    head -5 "$TMP/cleanaudit.out"
+fi
+audit "$TMP/short.tsv" "$TMP/short.out"; rc=$?
+if [ "$rc" = 0 ] && grep -q 'F01' "$TMP/short.out"; then
+    ok "a row short of trailing cells still loads, padded (the width check refuses surplus only)"
+else
+    no "a row with 12 of 13 cells was refused (exit $rc) — the width check must refuse surplus cells only"
+    head -5 "$TMP/short.out"
+fi
+
 # ── 6. contract checks that need no fixture run ─────────────────────────────────────────────────────
 python3 - "$ROOT" >"$TMP/contract.txt" 2>&1 <<'PY'
 import pathlib, sys
