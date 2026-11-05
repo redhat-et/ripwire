@@ -980,15 +980,11 @@ inline bool tailMaskAt( const std::vector<char>& mask, std::size_t f, bool absen
 {
     return f < mask.size() ? mask[f] != 0 : absent;
 }
-// What the old walk listed at a row (a row listed above counts as its own): Skip and ListSym.
-inline bool tailFateOldListed( TailPageRowFate fate ) noexcept
-{
-    return fate == TailPageRowFate::Skip || fate == TailPageRowFate::ListSym;
-}
-inline bool tailFateListed( TailPageRowFate fate ) noexcept
-{
-    return fate == TailPageRowFate::ListSym || fate == TailPageRowFate::ListWide;
-}
+// Per fate, two bits: what the old 40-row walk listed at the row (a row listed above counts as its own: Skip and ListSym) and what
+// this walk lists now (ListSym and ListWide). Indexed by TailPageRowFate: Skip, SkipMarked, SkipHead, ListSym, ListWide.
+inline constexpr std::uint8_t kTailFateOldListed = 1, kTailFateListed = 2;
+inline constexpr std::array<std::uint8_t, 5> kTailFateBits{ kTailFateOldListed, 0, 0, kTailFateOldListed | kTailFateListed, kTailFateListed };
+static_assert( kTailFateBits.size() == std::size_t( TailPageRowFate::ListWide ) + 1, "one entry per TailPageRowFate" );
 
 struct TailPageWalkInputs
 {
@@ -1016,12 +1012,13 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         codeSeen += std::size_t( !a.isDoc );
         out.pageSeen = std::max( out.pageSeen, r + 1 );
         const TailPageRowFate fate = tailPageRowFate( !tailMaskAt( listed, row.fileId, true ), a, symRow, tailMaskAt( in.inHead, row.fileId, false ) );
-        tailOldWalkCounters( out, old, tailFateOldListed( fate ), r );   // what the old walk listed
+        const std::uint8_t bits = kTailFateBits[ std::size_t( fate ) ];
+        tailOldWalkCounters( out, old, ( bits & kTailFateOldListed ) != 0, r );   // what the old walk listed
         if( fate == TailPageRowFate::SkipMarked )
         {
             out.pageSkip = std::min( out.pageSkip, r );
         }
-        else if( tailFateListed( fate ) )
+        else if( ( bits & kTailFateListed ) != 0 )
         {
             listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
                          symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );

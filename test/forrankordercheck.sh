@@ -255,6 +255,12 @@ page = sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\" sym=\"[^\"]
 for pat, was in ( ( r"; tail: [^\]]*?budget-trimmed row\)", 391 ), ( r"; t p= file outside sigs \(weaker\)[^;]*?r= rank \(gap = trimmed\)", 57 ) ):
     lm = re.search( pat, s )                         # …and the growth of the clause that now defines them (full 391 B / compact 57 B before)
     page += max( 0, len( lm.group( 0 ).encode() ) - was ) if lm else 0
+# FOR-TAIL-WIDE: the tail walks the file page past row 40, so it prints path-only rows (`<t p=\"…\"/>`, no sym=), the tail p_only= count
+# and the walk clause (full or compact); like the sym= page rows above, none of it is answer body the band reads
+page += sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\"/>", s ) )
+page += sum( len( x.encode() ) for x in re.findall( r" p_only=\"[0-9]+\"", s ) )
+for pat in ( r"; tail walk: .*?p_only= counts them", r"; t page rows go on to file-page row 160.*?p_only= counts them" ):
+    lm = re.search( pat, s ); page += len( lm.group( 0 ).encode() ) if lm else 0
 print( past + page + ( max( 0, len( h.group( 0 ).encode() ) - 1000 ) if h else 0 ) )' )"
     pct="$( python3 -c "print( '%+.2f' % ( ( $now - $past - $base ) * 100.0 / $base ) )" )"
     printf '    q%-2d %-28s %5d → %5d - past-target/hops %5d (%s%%)  %s\n' "$i" "'$q'" "$base" "$now" "$past" "$pct" "$marker"
