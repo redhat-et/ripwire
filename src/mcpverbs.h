@@ -45,6 +45,7 @@
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
 #include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
+#include "fordocbody.h"     // FOR-DOC-BODY: the `for` verb's doc sections (the CLI twin's renderer)
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
@@ -2102,6 +2103,7 @@ struct McpForAssembly
 {
     std::optional<std::string> doc;   // nullopt: the answer buffer lost bytes (internal error)
     rw::SigsCutReport          cut;
+    ForDocBodyPick             docPick;   // FOR-DOC-BODY: read off the rows and tail this pass printed (fordocbody.h)
 };
 struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by reference; all outlive the call
 {
@@ -2214,6 +2216,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // R2-AF (round 2, S4): first rows inside the root, right after the legend (forHdrRowsXml); rendered before the rows so the
     // round C refill below prices them
     const std::string mcpHdrXml = forHdrRowsXml( ing, mcpForHdrRows, flRootArg );   // forpage.h: the CLI twin's one render
+    ForDocBodyPick          mcpDocPick;    // FOR-DOC-BODY: set beside the tail below
     std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail's rank rows exclude these files
     // round C: the render is named so a soft target can narrow its rows past the cut once the sections are served (below); the
     // redaction tally around it is snapshotted so a second render replaces this one's count instead of adding to it
@@ -2414,6 +2417,8 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
         const FileTail    mcpTail = computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
+        mcpDocPick = pickForDocBody( ing, task, mcpShownIds, [ & ]
+                                    { return computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, /*rankOrder=*/true ); }, flRootArg );
     }
     std::fwrite( mcpSlot.xml.data(), 1, mcpSlot.xml.size(), mem );   // for-body-slot: "" when no body rides
     rw::emitRaw( mem, "</ctx>" );
@@ -2440,7 +2445,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // reading — BEFORE pricing, so est_tokens= prices the bytes served, and after the sigs budget, so the rows are unchanged.
     closeRosterGaps( out );
     mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
-    return McpForAssembly{ std::move( out ), mcpSigsCut };
+    return McpForAssembly{ std::move( out ), mcpSigsCut, std::move( mcpDocPick ) };
 }
 
 // #362 review round 4, follow-up (quality bar): the twins' B2 rank-flags fragment, named once -
@@ -2958,6 +2963,11 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
+    }
+    // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, not priced; held under budget_tokens, as there
+    if( out.ends_with( "</ctx>" ) )
+    {
+        out.insert( out.size() - 6, renderForDocBodyXml( ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg, /*held=*/budgetTokens > 0 ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)

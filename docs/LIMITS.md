@@ -458,6 +458,15 @@ Discloses: `capped`
 | `kForDispatchCtorRows` | `4` | — | constructor-caller rows per call |
 | `kForDispatchHopRows` | `8` | — | candidate rows per call |
 
+### `src/fordocbody.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForDocBodyFiles` | `3` | — | doc files whose sections are served (first shown first) |
+| `kForDocBodyTriggerRows` | `10` | — | file-tail <t> files the trigger reads (the first ones in rank order) |
+
 ### `src/fordottedstring.h`
 
 Discloses: `rows_capped`

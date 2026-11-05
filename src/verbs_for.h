@@ -11,6 +11,7 @@
 #include "formembers.h" // member-names: mem= on the shown owner rows of a compact-route answer
 #include "forslots.h"   // FOR-SLOTS: slots= on the shown initializer rows of a compact-route answer
 #include "fordottedstring.h" // STRING-IMPORT: the dotted-string literals naming a shown row
+#include "fordocbody.h"   // FOR-DOC-BODY: a prose task's top-ranked doc sections, before </ctx>
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
@@ -484,6 +485,8 @@ struct ForLensJsonInputs
     std::string_view                  task;
     int                               packTopN;
     std::string_view                  rankFlags;   // forRankShapingFlags( cfg ), owned by the caller for the call's duration
+    // FOR-DOC-BODY: the graph the doc sections are scored on (fordocbody.h, the "doc_body" key) — REQUIRED like fileTail above
+    const rw::Graph*                  graph;
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -1883,6 +1886,16 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
     rw::emitTo( out, ",\"capped\":{},\"est_tokens\":{},\"sigs\":", sigsCappedKey ? "true" : "false", estTokens );
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
+    // FOR-DOC-BODY (fordocbody.h): the XML twin's <doc_body>, after "sigs" and outside est_tokens; "" unless it fires
+    if( const rw::ForDocBodyPick docPick = rw::pickForDocBody( in.ing, in.task, jsonShownIds, [ & ]
+        { return rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, /*rankOrder=*/true ); }, in.rootArg ); docPick.fires && !docPick.fileIds.empty() )
+    {
+        const bool        held    = in.tokenBudget > 0;
+        const std::string docBody = rw::forDocBodyJson( in.ing,
+                                                        held ? rw::ForDocBody{} : rw::buildForDocBody( in.ing, in.graph->outOff, in.graph->outTargets, in.task, docPick, in.redact, in.rootArg ),
+                                                        docPick, in.task, in.rootArg, held );
+        std::fwrite( docBody.data(), 1, docBody.size(), out );
+    }
     std::fputs( "}", out );
     return 0;
 }
@@ -3616,7 +3629,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
                                                                    &forFileTail, &lr.evidence, d.notesDegraded, forDocsAfterCode, forHeadRR, cfg.forTask,
-                                                                   cfg.packTopN, forRankShapingFlags( cfg ) } );
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -4786,6 +4799,16 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
+        }
+        // FOR-DOC-BODY (fordocbody.h): a prose task whose first <t> rows are doc files gets the top-ranked sections of the first doc files
+        // shown, last before </ctx>: its own allowance, outside est_tokens; "" otherwise. Held (files named, next=) under a token budget or a body ceiling.
+        if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && sigsPreRendered )
+        {
+            const rw::ForDocBodyPick docPick = rw::pickForDocBody( ing, cfg.forTask, shownSigIds, [ & ]
+            { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg );
+            const std::string        docBody = rw::renderForDocBodyXml( ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg,
+                                                                        /*held=*/cfg.tokenBudget > 0 || forBodyCeiling );
+            std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
 
         rw::emitRaw( stdout, "</ctx>" );

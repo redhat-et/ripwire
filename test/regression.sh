@@ -528,6 +528,7 @@ for _g in \
     fordeclrowcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
+    fordocbodycheck \
     forfileanchorcheck \
     forhdrshapecheck \
     forheadrrcheck \

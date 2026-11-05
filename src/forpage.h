@@ -932,8 +932,9 @@ inline bool tailOrdersCodeFirst( const IngestResult& ing, std::string_view task 
         && std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s ) noexcept { return isDocLang( s.lang ); } );
 }
 
+// `rankOrder`: the plain interleaved walk whatever the task (FOR-DOC-BODY's trigger reads the files in rank order: fordocbody.h).
 inline FileTail computeFileTail( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& ev,
-                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task )
+                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task, bool rankOrder = false )
 {
     FileTail          out;
     std::vector<char> listed( ing.files.size(), 0 );
@@ -943,7 +944,7 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     // they follow every code row, in their own allowance (the default regime prints every collected row; an explicit budget
     // fills code rows first). A docs question keeps the plain interleaved walk, byte-identical.
     FileTail  docRows;
-    FileTail* docs = taskAsksForDocText( task ) ? nullptr : &docRows;
+    FileTail* docs = rankOrder || taskAsksForDocText( task ) ? nullptr : &docRows;
     fileTailRankRows( out, listed, ing, rank, page, headIds, rootArg, docs );
     fileTailPageRows( out, listed, ing, page, rootArg, docs );
     for( std::size_t i = 0; i < docRows.paths.size(); ++i )
