@@ -980,6 +980,8 @@ namespace mcpedit
     inline std::string editCheckReceiptJson( const IngestResult& ing, const Graph& g, const std::string& root,
                                              NodeId focus, const std::string& pathRel )
     {
+        // XF-QUALIFIED-ENDPOINTS: not owner-narrowed (editcheck.h editCheckOwnerNarrowed) because no write verb takes a
+        // qualified target: resolveOneForEdit matches the bare name exactly, so `Alpha.run` is refused "not found" upstream.
         const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
         const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, kDefaultMaxFileBytes, {}, focus, overloadNodes );
         EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes );
