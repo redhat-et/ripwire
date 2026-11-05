@@ -458,4 +458,38 @@ else
     no "#478 gap 1 rule 3: the member edge changed call binding or the run failed (rc=$rc): $( sed 's/<!--[^>]*-->//' "$TMP/pb.callees" )"
 fi
 
+# #533 review: the importer each member edge resolves TO, not only the counts — `--impact=FILE` lists a file's importers, so a
+# swap of wide.py's pkg/mod.py edge with multi.py's pkg/ma.py edge (same afferent=, same cones) fails here.
+imp(){ "$BIN" "$1" --impact="$2" --no-cache --legend=compact 2>/dev/null | grep -oE '<f via="[^"]*" p="[^"]*"' | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '; }
+IW="$( imp "$PB" pkg/mod.py )"; IM="$( imp "$PB" pkg/ma.py )"
+if [ "$IW" = "wide.py " ] && [ "$IM" = "multi.py " ]; then
+    ok '#478 gap 1 targets: pkg/mod.py is imported by wide.py alone, pkg/ma.py by multi.py alone'
+else no "#478 gap 1 targets: pkg/mod.py <- [$IW], pkg/ma.py <- [$IM]"; fi
+# #533 review: the member lookup is confined to the package that resolved. Python reads `from pkg import m` as pkg's own m, so:
+#   - pkg resolved to <D>/__init__.py → only <D>/m.py or <D>/m/__init__.py; a different root's pkg/m.py is never the member
+#     (app/pkg/fromuser.py: `from pkg import helper` names app/pkg/__init__.py's def, NOT pkg/helper.py);
+#   - pkg resolved to a plain module (util.py beside a util/ directory) → the module wins at import time: no member edge;
+#   - the confined probe still finds the member it should (app/pkg/user2.py → app/pkg/real.py, with a pkg/real.py namesake).
+# And two shapes the member edge must survive: an import under `if TYPE_CHECKING:` and one inside try/except ImportError.
+PC="$TMP/pyconfine"; mkdir -p "$PC/app/pkg" "$PC/pkg" "$PC/util" "$PC/pkg2"
+printf 'def helper():\n    return 1\n' >"$PC/app/pkg/__init__.py"
+printf 'from pkg import helper\n' >"$PC/app/pkg/fromuser.py"
+printf 'from pkg import real\n' >"$PC/app/pkg/user2.py"
+: >"$PC/pkg/__init__.py"; : >"$PC/pkg2/__init__.py"
+for f in app/pkg/real pkg/helper pkg/real util util/x pkg2/tcmod pkg2/trymod; do printf 'def pyc_leaf():\n    return 1\n' >"$PC/$f.py"; done
+printf 'from util import x\n' >"$PC/utiluser.py"
+printf 'from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from pkg2 import tcmod\n' >"$PC/tc.py"
+printf 'try:\n    from pkg2 import trymod\nexcept ImportError:\n    trymod = None\n' >"$PC/tryimp.py"
+CH="$( imp "$PC" pkg/helper.py )"; CU="$( imp "$PC" util/x.py )"; CR="$( imp "$PC" app/pkg/real.py )"; CR2="$( imp "$PC" pkg/real.py )"
+if [ "$CH" = "" ] && [ "$CU" = "" ]; then
+    ok '#533 confine: no member edge from another root (pkg/helper.py) or through a plain module (util.py beside util/x.py)'
+else no "#533 confine: pkg/helper.py <- [$CH], util/x.py <- [$CU] (both must be empty)"; fi
+if [ "$CR" = "app/pkg/user2.py " ] && [ "$CR2" = "" ]; then
+    ok '#533 confine twin: the resolved package'"'"'s own member is found (app/pkg/real.py), its other-root namesake is not'
+else no "#533 confine twin: app/pkg/real.py <- [$CR], pkg/real.py <- [$CR2]"; fi
+CT="$( imp "$PC" pkg2/tcmod.py )"; CY="$( imp "$PC" pkg2/trymod.py )"
+if [ "$CT" = "tc.py " ] && [ "$CY" = "tryimp.py " ]; then
+    ok '#478 gap 1 shapes: a member import under `if TYPE_CHECKING:` and inside try/except ImportError keeps its edge'
+else no "#478 gap 1 shapes: pkg2/tcmod.py <- [$CT], pkg2/trymod.py <- [$CY]"; fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
