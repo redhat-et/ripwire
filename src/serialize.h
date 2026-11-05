@@ -1144,7 +1144,7 @@ inline constexpr std::string_view kForFileTailLegend =
 // Sigs-charge-exempt with the clause it qualifies. No "--" (it rides inside an XML comment).
 inline constexpr std::string_view kForFileTailCodeFirstLegend =
     "; tail order on this code question: every code file of both parts first, each part in the order above, then the doc "
-    "files (.md, .rst, a Sphinx .txt page) in that order";
+    "files (.md, .rst, a Sphinx .txt page) in that order; page rows 1-40 (sym=) are the first 40 code rows and the doc rows among them";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,

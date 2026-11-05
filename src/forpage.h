@@ -894,7 +894,8 @@ inline void fileTailRankRows( FileTail& out, std::vector<char>& listed, const In
 }
 
 // 2. the page rows: the file page's first kForFileTailPageWalk rows (FOR-TAIL-WIDE: 4 pages; it was page 0), minus the files
-//    already listed, in the page's own order. sym= rides a row from page 0 (page index < kForFileTailPageRows, the old cut);
+//    already listed, in the page's own order. sym= rides a row the old 40-row walk listed (the old cut: page index <
+//    kForFileTailPageRows; code first, the page's first kForFileTailPageRows CODE rows and the doc rows within that window);
 //    a row past it prints p= only, so the 3 extra pages cost about a third of a full row each (R-ladder Stage 0: path 21-43 B
 //    of a 71-94 B row).
 //    CODE FIRST (`docs` non-null): the walk covers the page's first kForFileTailPageWalk CODE rows, so a doc row never takes a
@@ -912,7 +913,13 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
     for( std::size_t r = 0; r < page.rows.size() && ( docs != nullptr ? codeSeen < kForFileTailPageWalk : r < out.pageSeen ); ++r )
     {
         const ForFileRow&  row = page.rows[r];
-        const TailRowAdmit a   = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageWalk );
+        // the old cut (page 0): the row the 40-row walk listed. Plain walk: page index < 40. Code first: a code row among the
+        // page's first 40 CODE rows, a doc row met while fewer than 40 window rows were walked (the same counters, read before
+        // this row counts; a Sphinx .txt page's own cap is in a.inWindow either way)
+        const bool         oldCut = docs == nullptr ? r < kForFileTailPageRows : codeSeen < kForFileTailPageRows;
+        const bool         oldWin = windowSeen < kForFileTailPageRows;
+        const TailRowAdmit a      = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageWalk );
+        const bool         symRow = a.isDoc ? oldWin : oldCut;
         codeSeen += a.isDoc ? 0 : 1;
         out.pageSeen = std::max( out.pageSeen, r + 1 );
         if( row.fileId >= listed.size() || listed[ row.fileId ] )
@@ -925,7 +932,7 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
             continue;
         }
         listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, rootArg ),
-                     r < kForFileTailPageRows ? forFileRowSymNames( ing, row ) : std::string(), r + 1 );
+                     symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1 );
     }
 }
 

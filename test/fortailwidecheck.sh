@@ -19,6 +19,9 @@
 #   5  JSON:     "tail".files is the XML rows in order; "sym" is "" exactly where the XML row has no sym=
 #   6  budget:   under --token-budget the tail is a prefix of the default tail and still carries capped=1 and next=
 #   7  legend:   the tail clause names the 160-row walk and the sym= scope (present with every tail)
+#   8  code first: code and markdown files interleaved, a code question: doc rows follow every code row; sym= sheds past the
+#                old walk's cut, which counts CODE rows (a code row within the first 40 code rows keeps sym= even past page
+#                index 40, the positive twin), and doc rows keep sym= within page index 40 only
 #
 # Usage: test/fortailwidecheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -48,6 +51,22 @@ S="$TMP/small"; mkdir -p "$S"
 for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
     printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return 1\n' "$n" > "$S/s$n.py"
 done
+# fixture D: code and markdown files interleaved in the page, a code question: the code-first walk (docs after code)
+DD="$TMP/docs"; mkdir -p "$DD"
+FILL="$( k=1; while [ $k -le 120 ]; do printf '    zzq_%s = %s\n' $k $k; k=$(( k + 1 )); done )"
+i=0
+while [ $i -lt 150 ]; do   # 10 code files cover the query tightly, 50 cover it with a long body (they rank under the docs), the rest
+    n=$( printf '%03d' $i )   # cover two of its three words; 75 markdown pages cover it
+    if [ $i -lt 10 ]; then
+        printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return 1\n' "$n" > "$DD/c$n.py"
+    elif [ $i -lt 60 ]; then
+        { printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n' "$n"; printf '%s\n' "$FILL"; printf '    return 1\n'; } > "$DD/c$n.py"
+    else
+        printf 'def widget_frobnicate_%s():\n    return 1\n' "$n" > "$DD/c$n.py"
+    fi
+    [ $(( i % 2 )) -eq 0 ] && printf '# Widget frobnicate helper %s\n\nThe widget frobnicate helper %s notes.\n' "$n" "$n" > "$DD/a$n.md"
+    i=$(( i + 1 ))
+done
 Q="widget frobnicate helper"
 
 run() {   # run DIR OUTFILE ARGS... -> rc file beside the output; HOME/TMPDIR private, cwd = the fixture
@@ -62,6 +81,8 @@ run "$W" "$TMP/w.json"  "--for=$Q" --json
 run "$W" "$TMP/w.bud"   "--for=$Q" --token-budget=3000
 run "$S" "$TMP/s.xml"   "--for=$Q"
 run "$S" "$TMP/s.page"  "--for=$Q" --limit=100000
+run "$DD" "$TMP/d.xml"  "--for=$Q"
+run "$DD" "$TMP/d.page" "--for=$Q" --limit=100000
 
 python3 - "$TMP" <<'PY'
 import html, json, re, sys
@@ -86,7 +107,7 @@ def split(rows, page, walk):
         if [p for p, _ in rows[k:]] == [p for p, _ in page[:walk] if p not in R]:
             return k
     return None
-rcs = {n: load(n) for n in ("w.xml", "w.page", "w.json", "w.bud", "s.xml", "s.page")}
+rcs = {n: load(n) for n in ("w.xml", "w.page", "w.json", "w.bud", "s.xml", "s.page", "d.xml", "d.page")}
 for n, (rc, txt) in rcs.items():
     say(rc == "0" and len(txt) > 200, f"{n}: exit 0 and a non-empty answer (rc={rc}, {len(txt)} B)")
 wt, page = tail_of(rcs["w.xml"][1]), page_of(rcs["w.page"][1])
@@ -124,6 +145,24 @@ say(jt.get("sym") == [s or "" for _, s in wt["rows"]] and "" in (jt.get("sym") o
 bt = tail_of(rcs["w.bud"][1])
 say(bt is not None and 0 < len(bt["rows"]) < len(wt["rows"]) and [p for p, _ in bt["rows"]] == [p for p, _ in wt["rows"][:len(bt["rows"])]] and bt["capped"] == "1" and "--limit=40" in bt["next"],
     f"6 budget: the --token-budget tail is a non-empty strict prefix with capped=1 and next= ({0 if bt is None else len(bt['rows'])} rows)")
+dt, dpage = tail_of(rcs["d.xml"][1]), page_of(rcs["d.page"][1])
+if dt is None:
+    say(False, "8 code first: the docs fixture has a <tail>")
+else:
+    isdoc = lambda p: p.endswith(".md")
+    code = [p for p, _ in dpage if not isdoc(p)]; crank = {p: k for k, p in enumerate(code)}; drank = {p: k for k, (p, _) in enumerate(dpage)}
+    rows = dt["rows"]; k8 = 0
+    while k8 < len(rows) and k8 < 24 and rows[k8][1] is not None and not isdoc(rows[k8][0]): k8 += 1   # rank rows lead, all with sym=
+    crow = [(p, s) for p, s in rows[k8:] if not isdoc(p)]; drow = [(p, s) for p, s in rows if isdoc(p)]
+    firstdoc = next((j for j, (p, _) in enumerate(rows) if isdoc(p)), len(rows))
+    say(len(drow) > 0 and all(isdoc(p) for p, _ in rows[firstdoc:]), f"8 code first: {len(drow)} doc rows, all after every code row")
+    late = [(p, s) for p, s in crow if crank[p] >= 40]; early = [(p, s) for p, s in crow if crank[p] < 40 and drank[p] >= 40]
+    say(len(late) > 0 and all(s is None for _, s in late), f"8 code first: {len(late)} code rows past the page's first 40 code rows carry no sym=")
+    say(len(early) > 0 and all(s for _, s in early), f"8 code first (twin): {len(early)} code rows within the first 40 code rows but past page index 40 keep sym=")
+    dl = [(p, s) for p, s in drow if drank[p] >= 40]; de = [(p, s) for p, s in drow if drank[p] < 40]
+    dls = sum(1 for _, s in dl if s)   # a doc the rank walk listed (at most kForFileTailShownCap of them) keeps its rank row's sym=
+    say(len(de) > 0 and all(s for _, s in de), f"8 code first (twin): {len(de)} doc rows within page index 40 keep sym=")
+    say(len(dl) - dls > 0 and dls <= 24, f"8 code first: doc rows past page index 40: {len(dl) - dls} without sym=, {dls} with it (rank-walk docs, <= 24)")
 lg = rcs["w.xml"][1]
 say("first 160 rows" in lg and "page rows 1-40 only" in lg, "7 legend: the tail clause (default dialect) names the 160-row walk and the sym= scope")
 print("fortailwidecheck:", "PASS" if fails == 0 else f"FAIL ({fails})")
