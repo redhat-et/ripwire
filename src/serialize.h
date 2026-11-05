@@ -1132,9 +1132,9 @@ inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail
 // it rides inside an XML comment where "--" is ill-formed (G4).
 inline constexpr std::string_view kForFileTailLegend =
     "; tail: file-grain rows, WEAKER evidence than the ranked rows: first the positive-score files NOT among the "
-    "shown sigs rows, the files of trimmed rows first, best-symbol rank order; then the file page's first 160 rows "
+    "shown sigs rows, the files of trimmed rows first, best-symbol rank order; then the file page's first 40 rows "
     "not listed above, file-first (the IDF share of the query's subtokens its top 8 symbols cover); "
-    "sym= its top symbols by lens rank, on the rank rows and page rows 1-40 only (a pointer, not the answer); "
+    "sym= its top symbols by lens rank (a pointer, not the answer); "
     "total=every positive-score file, shown=printed, capped=1 when they differ, next= the page from its first unprinted row. "
     "r= on a ranked row is its 1-based rank in this lens ranking, rows in r= order, p= the file (a gap = a budget-trimmed row)";
 // docs-rest CI fix 2: the order the tail really uses on a CODE question (filter.h taskAsksForDocText false; forpage.h
@@ -1144,7 +1144,14 @@ inline constexpr std::string_view kForFileTailLegend =
 // Sigs-charge-exempt with the clause it qualifies. No "--" (it rides inside an XML comment).
 inline constexpr std::string_view kForFileTailCodeFirstLegend =
     "; tail order on this code question: every code file of both parts first, each part in the order above, then the doc "
-    "files (.md, .rst, a Sphinx .txt page) in that order; page rows 1-40 (sym=) are the first 40 code rows and the doc rows among them";
+    "files (.md, .rst, a Sphinx .txt page) in that order";
+// FOR-TAIL-WIDE (2026-11-04): the page rows go on past page 0 to the file page's first kForFileTailPageWalk rows, p= only past the
+// old cut. Present-only: rides beside kForFileTailLegend when the file page holds more rows than page 0 (forpage.h
+// fileTailWalksPastPage0), so an answer whose tail ends inside page 0 keeps its bytes. Sigs-charge-exempt with the clause it
+// qualifies. No "--" (it rides inside an XML comment).
+inline constexpr std::string_view kForFileTailWideLegend =
+    "; tail walk: the page rows go on to the file page's first 160 rows; a page row past page 0 (on a code question: past its "
+    "first 40 code rows, or a doc row past its first 40 rows) prints p= only, no sym=";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,

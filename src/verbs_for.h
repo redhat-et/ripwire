@@ -612,6 +612,7 @@ struct ForLensHeaderParts
                                             // under a target with its next= — and the slot clause defines it (present-only)
     bool             splitPresent = false;   // attrib-multidef Q1: may a <calls><c> row carry prov="split"? viaPresent's twin
     bool             tailCodeFirst = false;  // docs-rest: the tail orders code files first (forpage.h tailOrdersCodeFirst)
+    bool             tailWide = false;       // FOR-TAIL-WIDE: the tail's page walk goes past page 0 (forpage.h fileTailWalksPastPage0)
                                             // question over the same ids (serialize.h splitArmsOutAny); set after construction
     bool             hopsCallsNextPresent = false; // body-fold rider: a ranked <hops> row's cut <calls> carries next= (set after the
                                             // hops render, cleared with the section)
@@ -886,8 +887,19 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
          + std::string( presentOnlyClause( p.foldFollowPresent, compact, rw::kForCompactFoldFollowLegend, rw::kForFoldFollowLegend ) );
 }
 inline constexpr std::string_view kForCompactLegendTail =
-    "; t p= file outside sigs (weaker; rank rows, then the file page's first 160 rows), t sym= its top symbols (rank rows and page rows 1-40 only; a pointer, not the answer), r= rank (gap = trimmed)";
-inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question; sym= page rows 1-40 = the first 40 code rows and docs among them)";
+    "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
+inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
+inline constexpr std::string_view kForCompactLegendTailWide =
+    "; t page rows go on to file-page row 160; past page 0 (code question: past 40 code rows, a doc past row 40) p= only";
+// FOR-TAIL-WIDE (serialize.h kForFileTailWideLegend): rides with the tail clause, only when the walk goes past page 0
+inline std::string_view tailWideLegend( const ForLensHeaderParts& p, bool compact )
+{
+    if( !p.tailLegend || !p.tailWide )
+    {
+        return {};
+    }
+    return compact ? kForCompactLegendTailWide : rw::kForFileTailWideLegend;
+}
 // The tail-order clause (serialize.h kForFileTailCodeFirstLegend): rides with the tail clause, only where the order applies
 // (forpage.h tailOrdersCodeFirst: a code question over an index that holds a doc unit).
 inline std::string_view tailCodeFirstLegend( const ForLensHeaderParts& p, bool compact )
@@ -1017,6 +1029,7 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     const struct { bool on; std::string_view clause; } kPresentOnly[] = {
         { p.tailLegend, kForCompactLegendTail },
         { !tailCodeFirstLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailCodeFirst },   // docs-rest: the tail's order
+        { !tailWideLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailWide },   // FOR-TAIL-WIDE: the walk past page 0
         { p.hdrLegend, kForCompactLegendHdr },
         { p.composePresent, kForCompactLegendCompose },  { p.legoPresent, kForCompactLegendLego },
         { p.layerPresent, kForCompactLegendLayer },
@@ -1164,6 +1177,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     {
         h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
         h.append( tailCodeFirstLegend( p, /*compact=*/false ) );   // docs-rest: the order a code question's tail uses
+        h.append( tailWideLegend( p, /*compact=*/false ) );   // FOR-TAIL-WIDE: present-only, the walk past page 0
     }
     if( p.hdrLegend )
     {
@@ -3436,6 +3450,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                         forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent,
                                         ownerPlan.any(), forViaByOwnerOnly, slotOwner.any() };
         headerParts.tailCodeFirst = rw::tailOrdersCodeFirst( ing, cfg.forTask );   // docs-rest: the tail-order clause rides only here
+        headerParts.tailWide      = rw::fileTailWalksPastPage0( ing, lensRank );   // FOR-TAIL-WIDE: the walk-past-page-0 clause rides only here
         headerParts.splitPresent = forSplitPresent;   // attrib-multidef Q1 (a trailing member: the aggregate above keeps its order)
         // body-fold (forfold.h): the bodies of the top ranked rows, appended — decided here because the header's fold clause reads it.
         // The compact route's XML answer in the DEFAULT regime only: an explicit --token-budget is a size the caller named (that
@@ -3743,7 +3758,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
         const std::size_t tailLegendEmitted    = ( compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size() )
-                                               + tailCodeFirstLegend( headerParts, compactLegendOn ).size();
+                                               + tailCodeFirstLegend( headerParts, compactLegendOn ).size()
+                                               + tailWideLegend( headerParts, compactLegendOn ).size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -3815,7 +3831,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::size_t fullHeaderBytes = fullHeader.size();
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
-                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + idRouteParts.bytes()
+                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + tailWideLegend( fullParts, false ).size() + idRouteParts.bytes()
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u )
                                               + ownerLegendExemptBytes( headerParts, /*compact=*/false )
                                               + bodySlotLegend( headerParts, /*compact=*/false ).size()

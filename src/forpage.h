@@ -945,6 +945,30 @@ inline bool tailOrdersCodeFirst( const IngestResult& ing, std::string_view task 
         && std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s ) noexcept { return isDocLang( s.lang ); } );
 }
 
+// FOR-TAIL-WIDE: does the tail's page walk go past page 0 — i.e. does the file page (every file holding a positive-score symbol)
+// hold more than kForFileTailPageRows rows? The present-only test of kForFileTailWideLegend: a tail of a page that fits page 0
+// lists exactly the rows the 40-row walk listed, every one with sym=, so its answer keeps its bytes. One pass over the ranking,
+// stopping at the first file past page 0.
+inline bool fileTailWalksPastPage0( const IngestResult& ing, const std::vector<float>& rank )
+{
+    std::vector<char> seen( ing.files.size(), 0 );
+    std::size_t       files = 0;
+    const std::size_t S     = std::min( ing.symbols.size(), rank.size() );
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        const std::uint32_t f = ing.symbols[i].fileId;
+        if( rank[i] > 0.0f && f < seen.size() && !seen[f] )
+        {
+            seen[f] = 1;
+            if( ++files > kForFileTailPageRows )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 inline FileTail computeFileTail( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& ev,
                                  const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task )
 {

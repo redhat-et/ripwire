@@ -15,10 +15,12 @@
 #   3  sym:      no page row at page index >= 40 carries sym=  (absence)  /  every rank row and page row < 40 carries the
 #                page row's own sym=  (positive twin)
 #   4  no cut:   a fixture with fewer files than one page: capped=0, no next=, every row with sym=, and the tail element is
-#                byte-identical to the one rebuilt from the page (rank rows + page rows, all with sym=)
+#                byte-identical to the one rebuilt from the page (rank rows + page rows, all with sym=); with arm 7's absence,
+#                such an answer is byte-identical to the 40-row walk's
 #   5  JSON:     "tail".files is the XML rows in order; "sym" is "" exactly where the XML row has no sym=
 #   6  budget:   under --token-budget the tail is a prefix of the default tail and still carries capped=1 and next=
-#   7  legend:   the tail clause names the 160-row walk and the sym= scope (present with every tail)
+#   7  legend:   the walk clause (kForFileTailWideLegend / its compact twin) rides the wide answer and not the one whose page
+#                fits page 0, in both dialects
 #   8  code first: code and markdown files interleaved, a code question: doc rows follow every code row; sym= sheds past the
 #                old walk's cut, which counts CODE rows (a code row within the first 40 code rows keeps sym= even past page
 #                index 40, the positive twin), and doc rows keep sym= within page index 40 only
@@ -81,6 +83,8 @@ run "$W" "$TMP/w.json"  "--for=$Q" --json
 run "$W" "$TMP/w.bud"   "--for=$Q" --token-budget=3000
 run "$S" "$TMP/s.xml"   "--for=$Q"
 run "$S" "$TMP/s.page"  "--for=$Q" --limit=100000
+run "$W" "$TMP/w.full"  "--for=$Q" --legend=full
+run "$S" "$TMP/s.full"  "--for=$Q" --legend=full
 run "$DD" "$TMP/d.xml"  "--for=$Q"
 run "$DD" "$TMP/d.page" "--for=$Q" --limit=100000
 
@@ -107,7 +111,7 @@ def split(rows, page, walk):
         if [p for p, _ in rows[k:]] == [p for p, _ in page[:walk] if p not in R]:
             return k
     return None
-rcs = {n: load(n) for n in ("w.xml", "w.page", "w.json", "w.bud", "s.xml", "s.page", "d.xml", "d.page")}
+rcs = {n: load(n) for n in ("w.xml", "w.page", "w.json", "w.bud", "s.xml", "s.page", "d.xml", "d.page", "w.full", "s.full")}
 for n, (rc, txt) in rcs.items():
     say(rc == "0" and len(txt) > 200, f"{n}: exit 0 and a non-empty answer (rc={rc}, {len(txt)} B)")
 wt, page = tail_of(rcs["w.xml"][1]), page_of(rcs["w.page"][1])
@@ -164,7 +168,10 @@ else:
     say(len(de) > 0 and all(s for _, s in de), f"8 code first (twin): {len(de)} doc rows within page index 40 keep sym=")
     say(len(dl) - dls > 0 and dls <= 24, f"8 code first: doc rows past page index 40: {len(dl) - dls} without sym=, {dls} with it (rank-walk docs, <= 24)")
 lg = rcs["w.xml"][1]
-say("first 160 rows" in lg and "page rows 1-40 only" in lg, "7 legend: the tail clause (default dialect) names the 160-row walk and the sym= scope")
+say("t page rows go on to file-page row 160" in lg, "7 legend: the wide answer's compact legend carries the walk clause (present)")
+say("file-page row 160" not in rcs["s.xml"][1] and "tail walk:" not in rcs["s.xml"][1], "7 legend: the no-cut answer (page fits page 0) carries no walk clause (absent)")
+say("tail walk: the page rows go on to the file page's first 160 rows" in rcs["w.full"][1] and "tail walk:" not in rcs["s.full"][1],
+    "7 legend: --legend=full carries the full walk clause on the wide answer only")
 print("fortailwidecheck:", "PASS" if fails == 0 else f"FAIL ({fails})")
 sys.exit(1 if fails else 0)
 PY
