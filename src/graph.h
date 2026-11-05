@@ -89,6 +89,15 @@ struct Graph
                                             // The high bit on a 2 marks anchor="missing" for the map writer. Empty ⇒ every edge is a plain call.
     std::vector<std::uint8_t>  outAnchorMiss; // parallel to outTargets — 1 = that link edge named a heading the file does not have, so the
                                             // target is the file node. Empty ⇒ no such edge. A link with no slug stays 0.
+    // RECV-C (card 19 option C): the out-edge CSR the LEXICAL ranker reads for its callee-name field (lexical.h). An edge whose every
+    // site a RECV-XFILE receiver record alone proved (receiverProofOf, an annotated field, a local typed by a stated result) feeds
+    // callers / callees / paths but not that text, so a caller's lexical score is what it was with the call declined. Empty ⇒ no
+    // such edge: the accessors return outOff / outTargets. lexQuietEdges = how many were left out.
+    std::vector<std::uint32_t> lexOff;
+    std::vector<NodeId>        lexTargets;
+    std::size_t                lexQuietEdges = 0;
+    const std::vector<std::uint32_t>& lexOutOff() const noexcept { return lexOff.empty() ? outOff : lexOff; }
+    const std::vector<NodeId>&        lexOutTargets() const noexcept { return lexOff.empty() ? outTargets : lexTargets; }
     std::size_t                scipDocsSeen = 0;   // # SCIP documents consumed (0 unless --scip); honesty summary
     std::size_t                scipEdgesPinned = 0;   // # (from,to) edges the SCIP index pinned; honesty summary
     std::vector<std::vector<NodeId>> implementors;   // base-class id → derived class ids (inheritance/Lego view)
@@ -9755,7 +9764,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // accumulate per (from,to): summed per-ref confidence + an integer ref count (key = from<<32|to).
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
-    struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; };
+    // nLane (RECV-C): of those refs, the ones a RECV-XFILE receiver record alone decided — nLane == nref ⇒ Graph::lexOutTargets omits it
+    struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint32_t nLane = 0; };
     HashMap<std::uint64_t, EdgeAcc> acc;
     acc.reserve( ing.references.size() );        // start past the 4-bucket / 0.8-load rehash cascade
     std::vector<NodeId>      cand, tier;
@@ -10033,7 +10043,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     };
     // the call `r` (reference `site`) committed ONE proven edge to `callee`: type every local its result binds (by position
     // and unwrap depth) with the class the callee's declared type resolves to
-    const auto typeCallResults = [ & ]( const Reference& r, NodeId callee, std::size_t site )
+    // RECV-C: `laneSite` = a RECV-XFILE record alone proved the call, so what its result types is such a record too (LocalFact::lane)
+    const auto typeCallResults = [ & ]( const Reference& r, NodeId callee, std::size_t site, bool laneSite )
     {
         const auto [ crLo, crHi ] = recordsAt( callResultAt, ( std::uint64_t( r.fileId ) << 32 ) | r.startByte );
         if( crLo == crHi )
@@ -10086,7 +10097,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 else if( cls != kNoNode )
                 {
-                    recvEv.typeCallResult( cr, ing.symbols[ cls ].name, cls );
+                    // a language with no call-result family types this local only through statedResultClass, RECV-XFILE's rule
+                    recvEv.typeCallResult( cr, ing.symbols[ cls ].name, cls, laneSite || callResultFamilyOf( cs.lang ) == CallResultFamily::None );
                 }
                 break;
             }
@@ -11257,6 +11269,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // keeps role="call": it IS a real call; only the RESOLUTION came from the binding — the same trust
         // level as Rule 2 receiver narrowing.
         bool narrowed = false;
+        // RECV-C: a receiver rule decided this site through a record only RECV-XFILE reads (receiverProofOf, an annotated field, a
+        // local typed by a stated result: ReceiverEvidence::laneRead) — the edge it commits stays out of the lexical callee field
+        bool laneOnlySite = false;
         // TS/JS literal receivers (issue #163): only names that really are members of the literal's
         // built-in type leave the ladder. Bind a scope-matched polyfill first (JS `Foo.prototype.NAME`,
         // TS has no protomethod capture); else External if the name exists in-repo, Undefined if it
@@ -11542,7 +11557,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             if( const ReceiverEvidence::ReceiverProof* proof = recvEv.receiverProofOf( r ); proof != nullptr )
             {
-                narrowed = narrowTo( narrower.rule2StatedRecvType( r, ing.symbols[ proof->cls ].name, classIds, chaUp ), r, cand ) || narrower.forgetClaim();
+                narrowed     = narrowTo( narrower.rule2StatedRecvType( r, ing.symbols[ proof->cls ].name, classIds, chaUp ), r, cand ) || narrower.forgetClaim();
+                laneOnlySite = narrowed;
             }
         }
         if( !scipPinned && !canonical && !narrowed && writtenRoot != JsWrittenRoot::Pinned )
@@ -11581,6 +11597,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // FE-B receiver evidence (receiverevidence.h, point 1): a receiver whose class the source states — `this`/`super`
         // in a class, a typed parameter or local, a constructed receiver, a class-name receiver, a chain of stated field
         // classes, Python's `feed = parser.feed` — resolves to that class's member or the shallowest base defining it.
+        recvEv.laneRead = false;
         if( !scipPinned && !canonical && !narrowed && writtenRoot != JsWrittenRoot::Pinned && recvEv.narrow( r, writtenRoot == JsWrittenRoot::None ) )
         {
             for( NodeId c : recvEv.found )
@@ -11590,7 +11607,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     cand.push_back( c );
                 }
             }
-            narrowed = !cand.empty() && !kotlinScopeUndo();
+            narrowed     = !cand.empty() && !kotlinScopeUndo();
+            laneOnlySite = narrowed && recvEv.laneRead;
         }
         // RECV-XFILE (receiverevidence.h receiverProofOf): a receiver that is itself a call whose committed target STATES its
         // result class (`c->getList().insert()`, `p.get_app().post()`) reaches that class's member — the one class, or nothing
@@ -11603,7 +11621,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     cand.push_back( c );
                 }
             }
-            narrowed = !cand.empty();
+            narrowed     = !cand.empty();
+            laneOnlySite = narrowed;
         }
         // lane L6 (ifacedispatch.h): the receiver's recorded type is an interface, a trait or a class declaring the callee with
         // no body — C++ through class identity's dispatch split (Rule 2 on a local or parameter, Rule 2b's field), every other
@@ -11611,6 +11630,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // reached through proven edges only, is the edge (via="impl"); otherwise the call declines with exactly that list
         // (gate="iface"). A Rust standard-member name (`clone`, `iter`) on a trait object stays with the std gate below.
         bool ifaceImpl = false;
+        recvEv.laneRead = false;   // RECV-C: the dispatch receiver below may read an annotated field
         if( !scipPinned && !canonical && ( !narrowed || narrower.identityDispatchClaimFor( r ) ) )
         {
             ifaceCand.clear();
@@ -11652,8 +11672,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( ifaceCand.size() == 1 && proven && !cppSplit )   // C++ one subclass: class identity's own proven edge, as before
             {
                 cand.assign( 1, ifaceCand.front() );
-                narrowed  = true;
-                ifaceImpl = true;
+                narrowed     = true;
+                ifaceImpl    = true;
+                laneOnlySite = laneOnlySite || recvEv.laneRead;
             }
             // TS-FIELD-SELF: one unproven candidate (a structural language's floor) behind a stated field declines too — the name tiers
             // would bind whatever else shares the name in the caller's directory (kysely `this.#compiler.compileQuery` → a sibling
@@ -12836,6 +12857,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // commits is prov="final-segment" (resolve.h finalSegmentTypeAt, fieldFinalSegmentAt); never a class-identity CLAIM, whose one class was verified
         const bool  finalSegmentType = ( ( receiverTypeNarrowed || censusCone ) && !identityClaim && narrower.finalSegmentTypeAt( r ) )
                                     || ( fieldTypeNarrowed && narrower.fieldFinalSegmentAt( r, ing.symbols[ r.fromSymbol ].scope, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } ) );
+        const bool laneEdge = laneOnlySite && narrowed && !nameOnly;   // RECV-C: a later rung that undid the narrow is main's answer
         for( NodeId to : tier )
         {
             if( to == r.fromSymbol )
@@ -12846,6 +12868,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             EdgeAcc& e = acc[ ekey ];
             e.confSum += classic( to ) ? base : 0.f;
             e.nref    += 1;
+            e.nLane   += laneEdge ? 1u : 0u;
             if( splitPick )
             {
                 splitEdges[ekey] = 1;   // C1: remember (from,to) for prov="split" — every arm of the split, never a subset
@@ -12901,7 +12924,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     if( !callResultAt.empty() )
                     {
-                        typeCallResults( r, to, siteIndex );
+                        typeCallResults( r, to, siteIndex, laneEdge );
                     }
                     noteReceiverResult( r, to, siteIndex );   // RECV-XFILE: a chained member call's receiver reads it
                 }
@@ -12944,9 +12967,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
     // flatten + cap + sort by (from, to) — deterministic regardless of map order
-    struct E { NodeId from, to; float w; };
+    struct E { NodeId from, to; float w; bool lexQuiet; };   // lexQuiet (RECV-C): every ref of it was a RECV-XFILE-only proof
     std::vector<E> edges;
     edges.reserve( acc.size() );
+    std::size_t nLexQuiet = 0;
     for( const auto& [ k, e ] : acc )
     {
         float w = ( e.confSum / float( e.nref ) ) * std::sqrt( float( e.nref ) );   // confidence·√num_refs
@@ -12954,7 +12978,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             w = 8.f;
         }
-        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w } );
+        const bool quiet = e.nLane == e.nref;
+        nLexQuiet += quiet ? 1u : 0u;
+        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w, quiet } );
     }
     std::vector<E> edgeScratch;
     sortutil::radixSortByFromTo( edges, edgeScratch );
@@ -13043,6 +13069,26 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
 
+    // RECV-C: the lexical ranker's callee CSR — the out-edges less the lexQuiet ones, built only when one exists (else the
+    // accessors return outOff/outTargets): 4 B per kept edge + 4 B per symbol, in the same (from, to) order
+    if( nLexQuiet > 0 )
+    {
+        g.lexOff.assign( N + 1, 0 );
+        g.lexTargets.reserve( edges.size() - nLexQuiet );
+        for( const E& e : edges )
+        {
+            if( !e.lexQuiet )
+            {
+                ++g.lexOff[ e.from + 1 ];
+                g.lexTargets.push_back( e.to );
+            }
+        }
+        for( std::size_t i = 0; i < N; ++i )
+        {
+            g.lexOff[ i + 1 ] += g.lexOff[ i ];
+        }
+    }
+    g.lexQuietEdges = nLexQuiet;
     // in-edge CSR (row = target) for PageRank
     std::vector<std::uint32_t> inDeg( N, 0 );
     for( const E& e : edges )

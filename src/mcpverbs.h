@@ -1571,7 +1571,7 @@ inline std::string recallText( const std::string& root, const std::string& task,
     // docs (markdown) only; R-R root-relative separators AND root-relative path ranking — both from this
     // one rootArg, exactly as the CLI derives its own. Empty for a multi-root index, whose ing.files
     // already hold the labelled root-relative spelling.
-    return recallFor( ix.ing, ix.g.outOff, ix.g.outTargets, task, k, maxTokens, redact,
+    return recallFor( ix.ing, ix.g.lexOutOff(), ix.g.lexOutTargets(), task, k, maxTokens, redact,
                       ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view() ).text;
 }
 
@@ -2511,11 +2511,11 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::vector<char>* mcpStatsOutPtr = mcpStatsOut.empty() ? nullptr : &mcpStatsOut;
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
                                        ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
-                                       : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
+                                       : lexicalScoresTiered( ing, ix.g.lexOutOff(), ix.g.lexOutTargets(), task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
                                                               0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
     if( rc.which == LexMode::NameExact )
     {
-        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
+        lexicalScoresTiered( ing, ix.g.lexOutOff(), ix.g.lexOutTargets(), rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
     }
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
@@ -4931,7 +4931,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
     const std::vector<float>  docNoiseMul = !noRoute ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};   // the CLI twin's lift order
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
-                                                       : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul,
+                                                       : lexicalScoresTiered( ing, g.lexOutOff(), g.lexOutTargets(), task, 0, &ifaceExact, &tierMul,
                                                                               0, 0, {}, &lr.evidence );
     // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
     lr.routeNote = routeNoteOf( rc, shape, noRoute );   // row 6: the route CODE, ONE producer (filter.h)

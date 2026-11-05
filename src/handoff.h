@@ -354,7 +354,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     const std::string recallQuery = branch + " " + subject;
     if( !recallQuery.empty() && recallQuery != " " )
     {
-        const std::vector<float> score = lexicalScores( ing, g.outOff, g.outTargets, recallQuery );
+        const std::vector<float> score = lexicalScores( ing, g.lexOutOff(), g.lexOutTargets(), recallQuery );
         std::vector<std::pair<float, std::uint32_t>> best;   // (max symbol score, fileId) per document file
         std::vector<float> fileBest( ing.files.size(), 0.f );
         for( std::size_t i = 0; i < ing.symbols.size(); ++i )

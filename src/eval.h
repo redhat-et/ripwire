@@ -737,7 +737,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     {
         // (a) NAME query
         {
-            const std::vector<float> sub = lexicalScores( ing, g.outOff, g.outTargets, sm.name );
+            const std::vector<float> sub = lexicalScores( ing, g.lexOutOff(), g.lexOutTargets(), sm.name );
             const std::vector<float> ex  = lexicalScoresNameExact( ing, sm.name );
             const std::vector<float> an  = anchoredLexicalRank( g, sub );
             const RouteChoice        rc  = chooseForRanker( ing, sm.name );
@@ -753,7 +753,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
         }
         // (b) DOC-PHRASE query
         {
-            const std::vector<float> sub = lexicalScores( ing, g.outOff, g.outTargets, sm.phrase );
+            const std::vector<float> sub = lexicalScores( ing, g.lexOutOff(), g.lexOutTargets(), sm.phrase );
             const std::vector<float> ex  = lexicalScoresNameExact( ing, sm.phrase );
             const std::vector<float> an  = anchoredLexicalRank( g, sub );
             const RouteChoice        rc  = chooseForRanker( ing, sm.phrase );
@@ -1136,7 +1136,7 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
         // see the block comment above. Computed once, scored into both rows (never a drifted second impl).
         const RouteChoice        rc   = chooseForRanker( ing, p.query );
         const std::vector<float> base = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExact( ing, p.query )
-                                                                            : lexicalScores( ing, g.outOff, g.outTargets, p.query );
+                                                                            : lexicalScores( ing, g.lexOutOff(), g.lexOutTargets(), p.query );
         const std::vector<float> forFileScore = maxPoolToFiles( ing, base, F );
         addMinedRow( forA[idx],   rankFiles( forFileScore ), gold, goldTotal );
         addMinedRow( queryA[idx], rankFiles( forFileScore ), gold, goldTotal );

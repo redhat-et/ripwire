@@ -2037,6 +2037,7 @@ struct ReceiverEvidence
         NodeId        cls   = kNoNode;   // (L) fix round 1: the ONE in-tree class `type` resolved to (kNoNode: the name alone)
         NodeId        iface = kNoNode;   // lane L6: a binding typed only as SOME implementor of this trait (type stays "")
         std::string   bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise
+        bool          lane  = false;     // RECV-C: typed only by a record RECV-XFILE reads (laneMemberKeys' rule, for a local)
         bool operator==( const LocalFact& ) const = default;
     };
     HashMap<std::string, std::vector<LocalFact>>          localType;       // "<fromSymbol>#var" → its bindings
@@ -2075,6 +2076,12 @@ struct ReceiverEvidence
     };
     HashMap<std::string, RecvCallShape>                   recvCalls;                // "<file>:<outer start>#<outer name>" → its receiver call (RecvCall)
     HashMap<std::string, ReceiverProof>                   callResultProofs;         // "<file>:<call start>#<callee name>" → what its result is
+    // RECV-C (card 19 option C): the "Class#field" memberType keys whose class ONLY an annotation RECV-XFILE reads states
+    // (kMemberTypeAnnotated). A receiver proven through one, or through a LocalFact::lane local, is evidence the lexical ranker
+    // does not read: laneRead says a reader consulted such a record, and graph.h, which clears it before each receiver rule,
+    // marks the edge that rule commits (Graph::lexOutTargets leaves it out of the callee-name field).
+    HashMap<std::string, char>                            laneMemberKeys;
+    mutable bool                                          laneRead = false;
 
     ReceiverEvidence( const IngestResult& i, const HashMap<std::string, std::vector<std::string>>& up, const HashMap<std::string, char>& classes )
         : ing( i ), chaUp( up ), classNames( classes ), types( i ) {}
@@ -2424,7 +2431,17 @@ struct ReceiverEvidence
         {
             return;
         }
-        tombstoneInsert( memberType, typeKey( owner, "#", b.var ), type );
+        const std::string k( typeKey( owner, "#", b.var ) );
+        // RECV-C: an annotated record is new evidence only where no other record states the field; any other record makes it old
+        if( b.unwrapDepth != kMemberTypeAnnotated )
+        {
+            laneMemberKeys.erase( k );
+        }
+        else if( !memberType.contains( k ) )
+        {
+            laneMemberKeys.try_emplace( k, char( 1 ) );
+        }
+        tombstoneInsert( memberType, k, type );
         if( b.isFromAssignment && !type.empty() )
         {
             addBase( owner, type );
@@ -2733,7 +2750,8 @@ struct ReceiverEvidence
         return p != nullptr && methodOf( ing.symbols[ p->cls ].name, r.calleeName, false, p->cls );
     }
 
-    bool typeCallResult( const Binding& b, std::string_view cls, NodeId id )
+    // RECV-C: `lane` = the typing is a RECV-XFILE record's (LocalFact::lane)
+    bool typeCallResult( const Binding& b, std::string_view cls, NodeId id, bool lane )
     {
         const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
         if( it == localType.end() || cls.empty() )
@@ -2747,6 +2765,7 @@ struct ReceiverEvidence
             {
                 f.type.assign( cls );
                 f.cls = id;
+                f.lane = lane;
                 return true;
             }
         }
@@ -2757,6 +2776,7 @@ struct ReceiverEvidence
             {
                 f.type.assign( cls );
                 f.cls = id;
+                f.lane = lane;
                 return true;
             }
         }
@@ -2866,6 +2886,13 @@ struct ReceiverEvidence
                 innerSplit = true;
             }
         }
+        // RECV-C: an answer some RECV-XFILE-typed fact took part in is new evidence (laneRead); on main that fact was untyped
+        bool lane = false;
+        for( const LocalFact& f : it->second )
+        {
+            lane = lane || ( f.lane && ( f.end == 0 || ( inner != nullptr && f.start == inner->start && f.end == inner->end ) ) );
+        }
+        laneRead = laneRead || ( lane && ( inner != nullptr || whole.has_value() ) );
         if( inner == nullptr )
         {
             return whole;
@@ -3130,6 +3157,7 @@ struct ReceiverEvidence
                 if( const auto it = memberType.find( typeKey( t, "#", field ) ); it != memberType.end() )
                 {
                     fieldType = it->second;   // "" = tombstone: unknown
+                    laneRead  = laneRead || ( !laneMemberKeys.empty() && laneMemberKeys.contains( key ) );   // RECV-C
                     return true;
                 }
             }

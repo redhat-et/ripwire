@@ -225,7 +225,7 @@ inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::s
     // TASK path: rank lexically, then sort the eligible symbols by (score DESC, id ASC) — a byte-stable
     // total order, so both the top-1 pick and the confidence window below are deterministic.
     pick.fromTask = true;
-    const std::vector<float> lensRank = lexicalScores( ing, g.outOff, g.outTargets, kindOrTask );
+    const std::vector<float> lensRank = lexicalScores( ing, g.lexOutOff(), g.lexOutTargets(), kindOrTask );
     std::vector<std::pair<float, NodeId>> ranked;
     ranked.reserve( ing.symbols.size() );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )

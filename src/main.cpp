@@ -1825,7 +1825,7 @@ int runDefaultMap( const MainDispatch& d )
         {
             const RouteChoice rc = chooseForRanker( ing, cfg.query );
             rank = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, cfg.query, &tierMul )
-                                                      : lexicalScoresTiered( ing, g.outOff, g.outTargets, cfg.query, 0, nullptr, &tierMul );
+                                                      : lexicalScoresTiered( ing, g.lexOutOff(), g.lexOutTargets(), cfg.query, 0, nullptr, &tierMul );
             // §B4 (capture-audit-4) — the SEVENTH comment-echo site, and the only one W3FIX M3 missed. It
             // hand-rolled the std::unique dash collapse that xmlCommentText's header names as the pattern it
             // replaced, and scrubbed NEITHER control bytes nor invalid UTF-8 — while RouteChoice::reason
@@ -1842,7 +1842,7 @@ int runDefaultMap( const MainDispatch& d )
         }
         else
         {
-            rank = lexicalScoresTiered( ing, g.outOff, g.outTargets, cfg.query, 0, nullptr, &tierMul );
+            rank = lexicalScoresTiered( ing, g.lexOutOff(), g.lexOutTargets(), cfg.query, 0, nullptr, &tierMul );
         }
     }
     else if( cfg.mapDiff )

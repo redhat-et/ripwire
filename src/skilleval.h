@@ -786,7 +786,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             const RouteChoice        rc   = chooseForRanker( ing, row.prompt );
             const std::vector<float> base = ( rc.which == LexMode::NameExact )
                                           ? lexicalScoresNameExact( ing, row.prompt )
-                                          : lexicalScores( ing, g.outOff, g.outTargets, row.prompt );
+                                          : lexicalScores( ing, g.lexOutOff(), g.lexOutTargets(), row.prompt );
             const std::vector<float> fileScore = maxPoolToFiles( ing, base, fileCount );
             std::vector<double>      pooled( skillCount, 0.0 );
             for( std::uint32_t f = 0; f < fileCount; ++f )

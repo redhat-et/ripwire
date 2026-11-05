@@ -177,7 +177,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     if( routeOn )
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
-                                                           : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
+                                                           : lexicalScoresTiered( ing, g.lexOutOff(), g.lexOutTargets(), task, forPruneK, ifaceExactPtr, &tierMul,
                                                                                   0, 0, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
         {
@@ -185,7 +185,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
             // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
             // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
+            lexicalScoresTiered( ing, g.lexOutOff(), g.lexOutTargets(), rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
         }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
@@ -204,7 +204,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     }
     else
     {
-        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
+        lensRank = lexicalScoresTiered( ing, g.lexOutOff(), g.lexOutTargets(), task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
     }
 
     // input blow-up guard disclosure (lexical.h kMaxUniqueQueryTerms/dedupeQueryTerms): a task string with
@@ -4968,7 +4968,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // drift apart again (gate: test/recallparitycheck.sh).
         // F4: --token-budget's GATING ceiling travels to the header too, so both ceilings this run applied are
         // named where an attribute reader finds them (it used to live only in the withheld prose and stderr).
-        const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, recallMaxTokens,
+        const RecallBundle       bundle = recallFor( ing, g.lexOutOff(), g.lexOutTargets(), cfg.recall, recallK, recallMaxTokens,
                                                      redactPtr, recallRootArg,     // docs only; R-R
                                                      cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u );
 

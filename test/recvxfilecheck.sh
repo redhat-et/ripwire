@@ -99,5 +99,83 @@ row S2.field    "$S" callees tField     router.ts match proven
 row S3.local    "$S" callees tLocal     router.ts match proven
 row U5.untyped  "$S" callees tUntyped   router.ts match notproven
 
+
+# ---- Q (RECV-C, card 19 option C): an edge whose ONLY evidence is a receiver record this card added feeds --callees/--callers but NOT
+# the lexical ranker's callee-name field, so a caller's --for score is exactly what it was with the call declined (ha-03: a correct
+# HueLight.async_turn_off -> HueBridge.async_request_call edge lowered its caller by BM25 length normalisation). Each shape is written
+# twice: E states the class (the edge binds), N misspells it with the same token count (the call declines, as on main). The two
+# corpora differ only in that one identifier, so the caller's <cand> row must be byte-identical. Q*.edge proves the edge exists in E
+# (and not in N); QP proves a PLAIN edge (no receiver record) still feeds the callee field: its caller's score moves when it binds.
+# A crashed run, an empty answer or a missing row is `missing`, which fails every arm.
+QUERY="turn off the light"
+# cand ROOT NAME -> the <cand> row of NAME under --for="$QUERY" --format=candidates (r= s= n= id= ...), or `missing`
+cand() {
+    local out rc
+    out=$( cd "$1" && "$BIN" "$1" --for="$QUERY" --format=candidates --no-cache </dev/null 2>/dev/null )
+    rc=$?
+    if [ "$rc" != 0 ]; then echo "missing(rc=$rc)"; return; fi
+    printf '%s' "$out" | tr '<' '\n' | grep -E "^cand r=\"[0-9]+\" s=\"[^\"]*\" n=\"$2\" " | head -1 | grep . || echo "missing(no row)"
+}
+# quiet ID E N NAME: the caller NAME's row is present and byte-identical between E and N
+quiet() {
+    local a b
+    a=$( cand "$2" "$4" ); b=$( cand "$3" "$4" )
+    case "$a$b" in *missing*) echo "  FAIL $1: a scored row is missing (E=[$a] N=[$b])"; fail=1; return;; esac
+    if [ "$a" = "$b" ]; then echo "  PASS $1: $4's rank/score row is the declined build's ($a)"
+    else echo "  FAIL $1: $4's rank/score row moved with the receiver-proven edge (E=[$a] N=[$b])"; fail=1; fi
+}
+# qwrite DIR LANG CLS: the shape LANG, with the class name its stated type writes = CLS (E: the real class; N: a same-length misspelling)
+qwrite() {
+    local d=$1 lang=$2 c=$3 i
+    case "$lang" in
+    pyfield)   # the ha-03 shape: a field assigned from an annotated parameter; the two bridges sit outside the caller's reach
+        w "$d/hue/bridge.py" 'class HueBridge:\n    def async_request_call(self, task):\n        return task\n'
+        w "$d/zone/bridge.py" 'class ZoneBridge:\n    def async_request_call(self, task):\n        return task\n'
+        w "$d/lights/light.py" "class HueLight:\n    def __init__(self, bridge: $c):\n        self.bridge = bridge\n\n    def async_turn_off(self, transition):\n        level = transition + 1\n        self.bridge.async_request_call(level)\n        return level\n\n    def async_turn_dim(self, transition):\n        level = transition + 1\n        other = level + 2\n        return other\n"
+        ;;
+    pylocal)   # sibling: a local initialised from a call whose return annotation states the class (CallResultTypes::statedResultClass)
+        w "$d/hue/bridge.py" 'class HueBridge:\n    def async_request_call(self, task):\n        return task\n'
+        w "$d/zone/bridge.py" 'class ZoneBridge:\n    def async_request_call(self, task):\n        return task\n'
+        w "$d/lights/light.py" "class HueLight:\n    def get_hub(self) -> $c:\n        return self.hub\n\n    def async_turn_off(self, transition):\n        level = transition + 1\n        hub = self.get_hub()\n        hub.async_request_call(level)\n        return level\n"
+        ;;
+    ts)        # the TS twin: a chained receiver typed by the inner call's declared result (receiverProofOf)
+        w "$d/hue/hrouter.ts" 'export class HueRouter {\n    async_request_call(task: number): number {\n        return task;\n    }\n}\n'
+        w "$d/zone/router.ts" 'export class ZoneRouter {\n    async_request_call(task: number): number {\n        return task;\n    }\n}\n'
+        w "$d/hue/router.ts" "import { HueRouter } from './hrouter';\n\nexport class HueHub {\n    getRouter(): $c {\n        return new HueRouter();\n    }\n}\n"
+        w "$d/lights/light.ts" 'export class HueLight {\n    async_turn_off(hub: HueHub, transition: number): number {\n        const level = transition + 1;\n        hub.getRouter().async_request_call(level);\n        return level;\n    }\n}\n'
+        ;;
+    cpp)       # C++: a chained receiver through Rule 2's class identity (rule2StatedRecvType)
+        w "$d/hue/router.h" '#pragma once\nstruct HueRouter\n{\n    int asyncRequestCall(int task) { return task; }\n};\n'
+        w "$d/zone/router.h" '#pragma once\nstruct ZoneRouter\n{\n    int asyncRequestCall(int task) { return task; }\n};\n'
+        w "$d/hue/hub.h" "#pragma once\nstruct HueRouter;\nstruct HueHub\n{\n    HueRouter* r;\n    $c & getRouter() { return *r; }\n};\n"
+        w "$d/lights/light.cpp" '#include "../hue/hub.h"\nint async_turn_off(HueHub* hub, int transition)\n{\n    int level = transition + 1;\n    hub->getRouter().asyncRequestCall(level);\n    return level;\n}\n'
+        ;;
+    esac
+    for i in 1 2 3 4 5 6; do w "$d/filler/f$i.py" "def filler_step_$i(value):\n    return value * $i\n"; done
+}
+echo "== Q: receiver-proven edges stay out of the lexical callee field"
+for spec in "pyfield HueBridge HueBridgf hue/bridge.py async_request_call" "pylocal HueBridge HueBridgf hue/bridge.py async_request_call" \
+            "ts HueRouter HueRoutex hue/hrouter.ts async_request_call" "cpp HueRouter HueRoutex hue/router.h asyncRequestCall"; do
+    read -r lang real miss defp callee <<< "$spec"
+    QE=$T/q-$lang-E; QN=$T/q-$lang-N
+    qwrite "$QE" "$lang" "$real"; qwrite "$QN" "$lang" "$miss"
+    row "Q.$lang.edge"  "$QE" callees async_turn_off "$defp" "$callee" proven
+    row "Q.$lang.noedge" "$QN" callees async_turn_off "$defp" "$callee" none
+    quiet "Q.$lang.rank" "$QE" "$QN" async_turn_off
+done
+# QP: a plain edge (an import-bound module function, no receiver record) still feeds the callee field — its name carries a query
+# term, so binding it moves the caller's score (the twin's definition is a same-length sibling name the call does not bind)
+for v in widget gadget; do
+    w "$T/qp-$v/lights/util.py" "def zz_light_$v(value):\n    return value\n"
+    w "$T/qp-$v/lights/light.py" 'from lights.util import zz_light_widget\n\n\ndef async_turn_off(transition):\n    level = transition + 1\n    zz_light_widget(level)\n    return level\n'
+done
+row QP.edge "$T/qp-widget" callees async_turn_off lights/util.py zz_light_widget proven
+qa=$( cand "$T/qp-widget" async_turn_off ); qb=$( cand "$T/qp-gadget" async_turn_off )
+case "$qa$qb" in
+    *missing*) echo "  FAIL QP.moves: a scored row is missing (bound=[$qa] unbound=[$qb])"; fail=1 ;;
+    *) if [ "$qa" != "$qb" ]; then echo "  PASS QP.moves: a plain callee still reaches the lexical callee field"
+       else echo "  FAIL QP.moves: binding a plain query-matching callee left the caller's row unchanged ([$qa]): the callee field is gone"; fail=1; fi ;;
+esac
+
 [ "$fail" = 0 ] && echo "recvxfilecheck: PASS" || echo "recvxfilecheck: FAIL"
 exit "$fail"
