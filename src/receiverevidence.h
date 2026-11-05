@@ -3413,7 +3413,7 @@ struct ReceiverEvidence
     {
         std::string_view source;            // the alias's import path, as the file wrote it
         std::string      joined;            // a relative specifier joined onto the caller's directory; "" otherwise
-        bool             relative = false;  // a JS/TS `./` or `../` specifier (Go keeps its own rule)
+        bool             relative = false;  // a `./` or `../` specifier (Go keeps its own rule)
     };
     std::optional<ModuleRoot> moduleRootOf( const Reference& r, std::string_view root ) const
     {
@@ -3424,11 +3424,12 @@ struct ReceiverEvidence
         }
         ModuleRoot m;
         m.source = it->second;
-        if( r.lang == Lang::Go || ( !m.source.starts_with( "./" ) && !m.source.starts_with( "../" ) ) )
+        if( !m.source.starts_with( "./" ) && !m.source.starts_with( "../" ) )
         {
-            return m;
+            return m;   // a package specifier (or a Go import path, which moduleRootNames reads as written)
         }
-        // join the caller's directory with the relative specifier, then compare without the extension (or /index)
+        // join the caller's directory with the relative specifier, then compare without the extension (or /index);
+        // moduleRootNames answers Go before it reads this
         m.relative = true;
         std::vector<std::string_view> parts;
         const auto push = [ & ]( std::string_view p )
