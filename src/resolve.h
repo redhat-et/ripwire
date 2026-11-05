@@ -632,11 +632,27 @@ inline std::vector<PythonMemberSite> pythonFromImportMembers( const IngestResult
     return sites;
 }
 
-// the distinct member files one Python from-import Include reaches, in binding order; never the includer itself
-inline void pythonMemberFiles( const IngestResult& ing, const std::vector<PythonMemberSite>& sites, const Include& inc,
+// the distinct member files one Python from-import Include reaches, in binding order; never the includer itself. `pkgFile` is the
+// file the statement's own Include resolved to (kNoFile = none), and it confines the lookup the way Python's import does (#533):
+//   * <D>/__init__.py → the member is pkg's own: only <D>/<member>.py or <D>/<member>/__init__.py (unique-or-degrade), never
+//     another root's pkg/<member>.py, which Python never loads for this statement;
+//   * a plain module (util.py) → no member edge: the module wins at import time, and a util/x.py beside it is not util.x;
+//   * nothing (a namespace package, an ambiguous root) → the full tiered probe of `<module>.<member>`, as `import pkg.mod` would.
+inline void pythonMemberFiles( const IngestResult& ing, const std::vector<PythonMemberSite>& sites, const Include& inc, std::uint32_t pkgFile,
                                const HashMap<std::string, std::uint32_t>& fileIndex, const WsIncludeCtx* ws, std::vector<std::uint32_t>& out )
 {
     out.clear();
+    std::string_view pkgDir;   // set iff the package resolved to <D>/__init__.py
+    if( pkgFile != kNoFile )
+    {
+        const std::string_view pkgPath = rootRelPath( ing, pkgFile );
+        if( pkgPath != "__init__.py" && !pkgPath.ends_with( "/__init__.py" ) )
+        {
+            return;   // a plain module: see above
+        }
+        pkgDir = includerDir( pkgPath );
+    }
+    const std::string_view includerPath = rootRelPath( ing, inc.fileId );
     const auto [ lo, hi ] = std::equal_range( sites.begin(), sites.end(), PythonMemberSite{ inc.fileId, inc.byte, 0 },
                                               []( const PythonMemberSite& a, const PythonMemberSite& b ) { return std::tie( a.fileId, a.byte ) < std::tie( b.fileId, b.byte ); } );
     std::string module;
@@ -649,13 +665,27 @@ inline void pythonMemberFiles( const IngestResult& ing, const std::vector<Python
         }
         const std::string_view member = b.importedName.starts_with( kPythonFromMemberMark )
                                             ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() ) : std::string_view( b.var );
-        module.assign( inc.target );
-        if( module.back() != '.' )
+        std::uint32_t to = kNoFile;
+        if( pkgFile != kNoFile )
         {
-            module.push_back( '.' );
+            module.assign( member );
+            module.append( ".py" );
+            const std::uint32_t asModule = joinNormalizeLookup( pkgDir, module, fileIndex, ws, inc.fileId );
+            module.assign( member );
+            module.append( "/__init__.py" );
+            const std::uint32_t asPackage = joinNormalizeLookup( pkgDir, module, fileIndex, ws, inc.fileId );
+            to = ( asModule == kNoFile ) ? asPackage : ( asPackage == kNoFile || asPackage == asModule ) ? asModule : kNoFile;   // unique-or-degrade
         }
-        module.append( member );
-        const std::uint32_t to = resolvePythonImport( rootRelPath( ing, inc.fileId ), module, fileIndex, ws, inc.fileId );
+        else
+        {
+            module.assign( inc.target );
+            if( module.back() != '.' )
+            {
+                module.push_back( '.' );
+            }
+            module.append( member );
+            to = resolvePythonImport( includerPath, module, fileIndex, ws, inc.fileId );
+        }
         if( to != kNoFile && to != inc.fileId && std::find( out.begin(), out.end(), to ) == out.end() )
         {
             out.push_back( to );
@@ -4865,9 +4895,9 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         {
             continue;
         }
-        // #478 gap 1: the submodules a from-import's members name — read even when the package itself did not resolve (a
-        // namespace package has no __init__.py). Left out of the call narrow (memberSites is empty there): see its note above.
-        pythonMemberFiles( ing, memberSites, inc, fileIndex, ws, memberFiles );
+        // #478 gap 1: the submodules a from-import's members name, confined to the package `to` resolved to (kNoFile — a
+        // namespace package has no __init__.py — keeps the full probe; a self-resolve, `from . import x` in an __init__.py, confines too). Left out of the call narrow (memberSites is empty there): see its note above.
+        pythonMemberFiles( ing, memberSites, inc, to, fileIndex, ws, memberFiles );
         for( const std::uint32_t m : memberFiles )
         {
             edgeFrom.push_back( inc.fileId );
