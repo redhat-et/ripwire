@@ -1045,6 +1045,7 @@ for _g in \
     wrapverbscheck \
     writetargetcheck \
     writtenspellingcheck \
+    xfaliashopcheck \
     xmlwellformed \
     yamllangcheck \
     zonecheck \
