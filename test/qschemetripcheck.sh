@@ -34,6 +34,20 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-04, PR #420 (#358 slice 1a), merge main 50bc05e8 (#520): RE-DERIVED ONCE with UPDATE_GOLDEN=1.
+#   Both parents used parser 299/rich 300 for different extraction changes: re-bump parser and mirror to 301 (rich 302).
+#   Retain main C++ alias definitions and all watched quality functions; C# alias bindings remain deferred. Format 48 / qsnap scheme 25 stay.
+# 2026-11-04, PR #420 (#358 slice 1a), merge main 2047f95f: RE-DERIVED ONCE with UPDATE_GOLDEN=1.
+#   kParserVer and kIngestParserVerMirror 297 -> 299 (rich 300), above both parents; main extraction/quality functions retained.
+#   C# capture, dependency/binding behaviour and alias gap unchanged. Cache format 48 and qsnap scheme 25 stay as on main.
+# 2026-11-03, PR #420 (#358 slice 1a), merge main dfd26fc1 into 2c132dd0: RE-DERIVED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 289 -> 291 (rich 292, above main 289/290), quality.h's kIngestParserVerMirror with it.
+#   C# using directives retain the shared capture path and the alias known-gap; main's Web namespace re-export facts are retained.
+#   kCacheVersion stays 48 and kQSnapCacheScheme stays 25: no record layout or watched quality function changes in this slice.
+# 2026-11-03, PR #420 (#358 slice 1a), merge main 85d2277f into b3d11a37: RE-DERIVED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 285 -> 287 (rich 288, above main 285/286), quality.h's kIngestParserVerMirror with it.
+#   C# using directives move to @import.path; import-free deep containers retain whole-cache eligibility. Alias/edge facts unchanged.
+#   kCacheVersion stays 48 and kQSnapCacheScheme stays 25: main's record format and quality semantics are retained.
 # 2026-11-03, lane index-alias-const (base main 824847bd, merged over main 6bae81c6 at 291/292; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 289 -> 293 (rich 294; above 285-292 taken by #504 #506 #512 #513): C++ alias forms are definitions
 #   (src/aliasdef.h); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 (no record changes shape) and kQSnapCacheScheme

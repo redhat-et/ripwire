@@ -366,7 +366,9 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 299;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 301;          // bump on any grammar/.scm/extraction change
+                                                      // 301 = 2026-11-04 (PR #420, merge main 50bc05e8): C# shared @import.path, above both parents at 299/300.
+                                                      //   Rich tag 302; dependency/binding behaviour and alias gap unchanged. Main C++ alias definitions retained.
                                                       // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
                                                       //   so the merged value goes above both. Rich file tag 300. kCacheVersion stays 48.
                                                       // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage

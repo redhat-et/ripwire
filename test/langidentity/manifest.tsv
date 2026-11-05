@@ -28,6 +28,7 @@ rb	test/rubyconstfix
 rb	test/rubyrecvfix
 cs	test/csharpfix
 cs	test/csharpcondfix
+cs	test/csharpimportcapfix
 php	test/phpfix
 lua	test/luafix
 lua	test/luarequirefix
