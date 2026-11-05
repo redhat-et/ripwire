@@ -270,6 +270,13 @@ is curated down to `bugprone-*` / `clang-analyzer-*` / `performance-*` / `misc-d
 §3 and G2 mandate — POD and SoA, C arrays, 32-bit handles, `ASSUME` instead of exceptions — so read its
 output as a to-triage list, never as a queue of defects.
 
+The nightly report is acted on, not just logged: `scripts/tidyadvisory_diff.py` diffs it against
+`.clang-tidy-baseline.txt` (one row per finding: file, check and the trimmed source line, so unrelated edits do
+not churn it), and the nightly's `tidy-advisory-report` job keeps ONE issue (label `clang-tidy-advisory`) listing
+the rows that are new. Fix a row and delete it from the baseline, or accept it and leave it there; regenerate from the
+run's `tidy-advisory` artifact (`tidy-advisory-baseline-candidate.txt`). It never gates and never touches the issue
+when clang-tidy crashed or the report is empty.
+
 The exception is `scripts/tidycheck.sh`, a separate CI step with `--warnings-as-errors='*'`. It runs
 only checks whose every finding is a silently wrong answer and that sat at **zero rows** on the five CI
 TUs when admitted (0.6.3, clang-tidy 22; `bugprone-use-after-move` had one row, brought to zero by a

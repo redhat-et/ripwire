@@ -59,7 +59,7 @@ on:
     - cron: "41 5 * * *"   # 05:41 UTC daily
 
 permissions:
-  contents: read   # least privilege at the top; only report-failure/report-green below widen, and only for themselves
+  contents: read   # least privilege at the top; only report-failure/report-green/tidy-advisory-report below widen, and only for themselves
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -174,7 +174,9 @@ jobs:
   # (branch protection may require it). The advisory report now appears in the nightly run's `style` job log
   # (ci.yml's 05:41 UTC schedule runs the whole job: it has no `if:` and no `needs:`), and a manual dispatch
   # prints it on demand. The nightly report-failure / report-green jobs are unaffected: the advisory step
-  # still never fails, so it neither opens nor closes the tracking issue.
+  # still never fails, so it neither opens nor closes their tracking issue. The advisory output is acted on
+  # instead: scripts/tidyadvisory_diff.py diffs it against .clang-tidy-baseline.txt and the tidy-advisory-report
+  # job below keeps ONE issue (label clang-tidy-advisory) listing the NEW rows.
   style:
     name: style (clang-format gate + advisory clang-tidy)
     runs-on: ubuntu-24.04
@@ -238,14 +240,129 @@ jobs:
       - name: clang-tidy — gate (scripts/tidycheck.sh, the zero-row subset)
         run: CLANG_TIDY=clang-tidy-"$CLANG_VERSION" bash scripts/tidycheck.sh build-tidy
 
+      # GATING, a second long: the parser behind the nightly advisory diff below (dedupe across TUs, ANSI, the anchor, a
+      # compile error is not a finding). It reads no repo state, so it runs on every event and keeps that parser honest
+      # between nightlies, when nothing else would exercise it.
+      - name: tidyadvisory_diff.py — selftest (the advisory diff's parser)
+        run: python3 scripts/tidyadvisory_diff.py --selftest
+
       # Nightly (`schedule`) and manual (`workflow_dispatch`) runs only: ~1 h 55 min, advisory, never gates —
-      # see the job comment. Its report is in the nightly run's `style` job log.
+      # see the job comment. The report goes to the job log AND to tidy-advisory.txt (with clang-tidy's exit status in
+      # tidy-advisory.rc, so a crashed run is not read as a clean one) for the diff step below.
       - name: clang-tidy — ADVISORY, never gates (nightly and workflow_dispatch only)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         continue-on-error: true
         run: |
+          rc=0
           clang-tidy-"$CLANG_VERSION" -p build-tidy --quiet \
-            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp
+            src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp \
+            >tidy-advisory.txt 2>&1 || rc=$?
+          echo "$rc" > tidy-advisory.rc
+          cat tidy-advisory.txt
+          exit "$rc"
+
+      # ADVISORY too, and also never gates: scripts/tidyadvisory_diff.py compares the report with .clang-tidy-baseline.txt
+      # (key = file + check + the trimmed source line, no line numbers), prints the NEW and GONE rows, and writes the
+      # tracking-issue body, the status line and a baseline candidate. It exits 0 whatever it finds. Runs even when the
+      # advisory step above failed, so status=tool-failed / noinput is on the record instead of a silent skip.
+      - name: clang-tidy — ADVISORY diff against .clang-tidy-baseline.txt (nightly and workflow_dispatch only)
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        continue-on-error: true
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 scripts/tidyadvisory_diff.py --report tidy-advisory.txt --rc tidy-advisory.rc \
+            --baseline .clang-tidy-baseline.txt --root "$GITHUB_WORKSPACE" \
+            --normalized-out tidy-advisory-baseline-candidate.txt --issue-body tidy-advisory-issue.md \
+            --status-out tidy-advisory.status --run-url "$RUN_URL" --sha "$GITHUB_SHA" \
+            --note "run $GITHUB_RUN_ID at $GITHUB_SHA ($GITHUB_EVENT_NAME), clang-tidy $CLANG_VERSION, deduplicated across translation units" \
+            | tee tidy-advisory-diff.txt
+
+      # The report, the diff, the baseline candidate and the issue body: the tracking-issue job below reads status and
+      # body from here (it needs no checkout and no toolchain), and a maintainer regenerates .clang-tidy-baseline.txt
+      # from tidy-advisory-baseline-candidate.txt. A workflow_dispatch run on a branch yields the same artifact.
+      - name: clang-tidy — upload the advisory report and diff (nightly and workflow_dispatch only)
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidy-advisory
+          path: |
+            tidy-advisory.txt
+            tidy-advisory.rc
+            tidy-advisory.status
+            tidy-advisory-diff.txt
+            tidy-advisory-baseline-candidate.txt
+            tidy-advisory-issue.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ─── tidy-advisory-report: ONE tracking issue for the advisory clang-tidy's NEW findings (nightly only) ─────
+  #
+  # Turns the advisory report into action: when the nightly `style` job's diff finds rows that are not in
+  # .clang-tidy-baseline.txt, this job opens (or updates the body of) ONE issue labelled clang-tidy-advisory listing
+  # them by check with file:line and how to regenerate the baseline; a run with no NEW rows comments on and closes it.
+  # It acts ONLY on status=ok: a crashed clang-tidy, a missing report, a missing baseline or an empty report against a
+  # non-empty baseline leaves the issue untouched and says why in a ::warning:: annotation (a GONE list from a crashed
+  # run is not evidence). Only `schedule` against main reports, as report-failure does: a workflow_dispatch run
+  # prints the diff and uploads the artifact for whoever dispatched it. The job is continue-on-error and is NOT in
+  # report-failure/report-green's `needs`: the advisory signal never reddens or greens the nightly tracking issue.
+  # Its issues: write is the same single widening report-failure holds (test/g1configcheck.sh [reportperms]).
+  tidy-advisory-report:
+    name: tidy-advisory-report (open or update the advisory clang-tidy tracking issue)
+    needs: [style]
+    if: ${{ !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: tidy-advisory
+          path: tidy
+
+      - name: Open or update the "clang-tidy-advisory" issue, or close it when no NEW rows remain
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          label=clang-tidy-advisory
+          title="Advisory clang-tidy: new findings not in .clang-tidy-baseline.txt"
+          st=tidy/tidy-advisory.status
+          if [ ! -f "$st" ]; then
+            echo "::warning::no tidy-advisory.status in the artifact (the style job did not reach the diff step); the tracking issue is left untouched"
+            exit 0
+          fi
+          status="$( sed -n 's/^status=//p' "$st" )"
+          new="$( sed -n 's/^new=//p' "$st" )"
+          if [ "$status" != ok ]; then
+            echo "::warning::advisory clang-tidy diff status=$status (not ok); the tracking issue is left untouched. See the style job's diff step"
+            exit 0
+          fi
+          case "$new" in ''|*[!0-9]*) echo "::warning::unreadable new= in $st; the tracking issue is left untouched"; exit 0 ;; esac
+          if ! gh api "repos/$REPO/labels/$label" --silent 2>/dev/null; then
+            gh label create "$label" --repo "$REPO" --color FBCA04 \
+              --description "Nightly advisory clang-tidy found rows not in .clang-tidy-baseline.txt; opened and closed by .github/workflows/ci.yml only"
+          fi
+          open="$( gh issue list --repo "$REPO" --label "$label" --state open --json number --jq '.[0].number // empty' )"
+          if [ "$new" -gt 0 ]; then
+            if [ ! -s tidy/tidy-advisory-issue.md ]; then
+              echo "::warning::new=$new but tidy-advisory-issue.md is missing or empty; the tracking issue is left untouched"
+              exit 0
+            fi
+            if [ -n "$open" ]; then
+              gh issue edit "$open" --repo "$REPO" --title "$title" --body-file tidy/tidy-advisory-issue.md
+            else
+              gh issue create --repo "$REPO" --title "$title" --label "$label" --body-file tidy/tidy-advisory-issue.md
+            fi
+          elif [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$REPO" --body "No NEW advisory clang-tidy rows against .clang-tidy-baseline.txt in $RUN_URL; closing."
+            gh issue close "$open" --repo "$REPO"
+          else
+            echo "no NEW rows and no open $label issue; nothing to do"
+          fi
 
   release:
     needs: plan
