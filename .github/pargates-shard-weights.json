@@ -460,6 +460,7 @@
 "qsnapcachecheck.sh": 22.8,
 "qsnapprefetchcheck.sh": 56.7,
 "qsnapproducercheck.sh": 5.2,
+"qualendpointcheck.sh": 4.0,
 "qualifiedresolvecheck.sh": 3.0,
 "qualitycheck.sh": 18.1,
 "qualitycrosslangcheck.sh": 2.8,
