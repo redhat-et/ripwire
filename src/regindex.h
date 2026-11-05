@@ -55,6 +55,7 @@
 #include "serialize.h"         // escapeXml
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -772,6 +773,43 @@ inline bool sharesWord( std::string_view key, const std::vector<std::string>& wo
     {
         return sub.size() >= 3 && std::ranges::any_of( words, [ & ]( const std::string& w ) { return normWord( w ) == sub; } );
     } );
+}
+// REGISTRAR-2 (forliteral.h shape=table): a callee NAMED for a registration, the registrar family's one name vocabulary. The last
+// segment of a callee chain (`component.async_register_entity_service`, `decorators.websocket_command`, `r.add_route`) split on `_` and
+// on lower-to-upper case changes; true when one word is `reg`, starts with `regist` (register, registry, registration), or is route,
+// routes, router, command, commands, handler or handlers. Allowlist by word, never a substring: `aggregate`, `regex`, `handle` and
+// `run` are no registration. A name is no proof the call registers; the shape=table row that reads it says what it is.
+inline bool isRegistrationCallee( std::string_view callee ) noexcept
+{
+    static constexpr std::array<std::string_view, 7> kWords{ "route", "routes", "router", "command", "commands", "handler", "handlers" };
+    const std::size_t sep = callee.find_last_of( ".:" );
+    const std::string_view name = sep == std::string_view::npos ? callee : callee.substr( sep + 1 );
+    std::array<char, 32> word{};
+    std::size_t          n = 0;
+    const auto           wordIs = [ & ]()
+    {
+        const std::string_view w( word.data(), n );
+        return w == "reg" || w.starts_with( "regist" ) || std::find( kWords.begin(), kWords.end(), w ) != kWords.end();
+    };
+    for( std::size_t i = 0; i <= name.size(); ++i )
+    {
+        const char c     = i < name.size() ? name[i] : '_';
+        const bool upper = c >= 'A' && c <= 'Z';
+        const bool split = c == '_' || ( upper && i > 0 && name[i - 1] >= 'a' && name[i - 1] <= 'z' );
+        if( split && n > 0 )
+        {
+            if( wordIs() )
+            {
+                return true;
+            }
+            n = 0;
+        }
+        if( c != '_' && n < word.size() )
+        {
+            word[n++] = upper ? static_cast<char>( c - 'A' + 'a' ) : c;
+        }
+    }
+    return false;
 }
 }   // namespace reg_detail
 

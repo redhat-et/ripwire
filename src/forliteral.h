@@ -68,6 +68,15 @@
 // cap, or with no room left, is counted by <lit_capped>, never dropped. A row whose line reads as a table row (lit_detail::tableRowOf) ranks first
 // and carries tbl= (the line that opens the table, "item" at top level) and the lines after it: the members beside it. Inside a function body a
 // call is a statement, never a row; every row needs an opener the allowlist proves (classifyOpener). Hits stand on word edges.
+//
+// REGISTRAR-2 (reports/registrar-2.md; ORCH Stage 0: 5 rows of 380 gain, 0 lose). A registration is a table with one row per call: the same block
+// reads more of them, present-only, three ways. (1) Trigger: defined/declared, build/builds/built, handled, turned into and get(s) to are
+// TableRowOnly cues (kForTableSiteCues), so they print only beside a table row. (2) A site no table holds is a row when it is an argument of a call
+// NAMED for a registration (registrationCallOf, the name vocabulary in regindex.h reg_detail::isRegistrationCallee): a Python decorator
+// `@websocket_command({...: "get_states"})`, `component.async_register_entity_service(SERVICE_TURN_ON, None, "async_turn_on")` over several lines,
+// `async_reg(hass, handle_get_states)` (a hit inside a longer name is a row only here); in a function body too; reg= (not tbl=: no table opener) is the callee's line up to its
+// paren. The top-level Rust macro row and the macro-table brace row were rows already (T2, T5); the cue was what the Stage 0 rows lacked.
+// (3) Rows of generated and JSON files rank last (isGeneratedOrDataPath). A callee's name is no proof the call registers: the row quotes it.
 
 #include "infra/namesplit.h" // isIdentChar
 #include "infra/sortutil.h"  // svLess — AnchorSet::dirs sort and search in byte order, never through operator<
@@ -81,6 +90,7 @@
 #include "receiverevidence.h"   // ReceiverEvidence::callableKind
 #include "resolve.h"       // tsimport::isAssetSpecifier — an asset extension is no key segment
 #include "redact.h"          // redactInPlace — raw source text is redacted before it is emitted
+#include "regindex.h"        // reg_detail::isRegistrationCallee — the registrar family's callee vocabulary (REGISTRAR-2 rows)
 #include "sarif.h"           // rootPrefixOf / rootRelativeUri
 #include "search.h"          // grepCollect / grepEnrich / isBareWordCodePath
 #include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis
@@ -138,6 +148,8 @@ inline constexpr std::size_t kForTableOpenerLines     = 2000;   // the line that
 inline constexpr std::size_t kForTableOpenerBytes     = 80;     // tbl= text
 inline constexpr std::size_t kForTableMinAnchor       = 3;      // a shorter word is no anchor
 inline constexpr std::size_t kForTableMaxAnchor       = 60;     // a longer backticked span is no anchor
+inline constexpr std::size_t kForRegCallLines         = 4;      // shape=table: a registration call's open paren is looked for this many lines above a site
+inline constexpr std::size_t kForRegCallBytes         = 512;    // ...and this many bytes
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
 // text rides --legend=full. Both name every attribute the element prints.
@@ -180,7 +192,8 @@ static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size
 inline constexpr std::string_view kForLiteralTableLegend =
     "<!-- ripwire for lit: shape=table a task about a table, registration or new sibling: the identifier it names, one lit per identifier, "
     "after the other shapes found no site. Table rows first: tbl= the line that opens the table (item: a top level macro or call row), read from the text; no tbl= is no "
-    "claim. lines=a-b with the lines after it. read=N: only the first N source sites of src= in path order were read for a table row. longer= source sites inside a longer "
+    "claim. reg= instead: the row is an argument of a call named for a registration (reg, register, route, command, handler; the name, not proof), also inside "
+    "a longer name, and reg= is that call up to its paren. Generated and JSON files rank last. lines=a-b with the lines after it. read=N: only the first N source sites of src= in path order were read for a table row. longer= source sites inside a longer "
     "word, counted, never rows. A cut on a row boundary says capped=1. -->";
 static_assert( kForLiteralTableLegend.find( "--", 4 ) == kForLiteralTableLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
@@ -658,6 +671,10 @@ inline constexpr auto kForTableRegistrationCues = std::to_array<std::string_view
     { "register", "registers", "registered", "registering", "registration", "registrations", "registry", "registries", "registrar", "registrars", "table", "tables",
       "compile-time" } );
 inline constexpr std::array<std::string_view, 4> kForTableValueCues{ "default", "defaults", "handler", "handlers" };
+// REGISTRAR-2: where a registered thing is defined, built or handled (`Where is barrier_interval_ms defined`, `How does new_boxed_executor build an
+// executor for HashJoinNode`, `where is it handled`), and the two-word forms `turned into`, `get(s) to`: words of many tasks, so like the value cues
+// they print only beside a table row or a registration call. Only the words the gold-blind Stage 0 rule fired on (reports/registrar-2.md); no more.
+inline constexpr std::array<std::string_view, 6> kForTableSiteCues{ "defined", "declared", "build", "builds", "built", "handled" };
 inline constexpr std::array<std::string_view, 3> kForTableExemplarLeads{ "like", "alongside", "following" };
 
 // the task with every backticked span blanked (a cue inside code quotes is code, not the task's word)
@@ -721,6 +738,16 @@ inline bool isTableAnchorSpan( std::string_view w ) noexcept
     return bytesOk && ( dot == std::string_view::npos || !isFileOrHostSuffix( w.substr( dot + 1 ) ) );
 }
 
+// REGISTRAR-2: words[i] is a site cue: one of kForTableSiteCues, or the first word of `turned into` / `get(s) to`
+inline bool isSiteCueAt( std::span<const std::string_view> words, std::size_t i )
+{
+    static constexpr std::array<std::string_view, 1> kTurned{ "turned" }, kInto{ "into" }, kTo{ "to" };
+    static constexpr std::array<std::string_view, 2> kGet{ "get", "gets" };
+    const std::string_view w    = stripWordPunct( words[i] );
+    const std::string_view next = i + 1 < words.size() ? stripWordPunct( words[i + 1] ) : std::string_view();
+    return wordIsOneOf( w, std::span<const std::string_view>( kForTableSiteCues ) ) || ( wordIsOneOf( w, kTurned ) && wordIsOneOf( next, kInto ) )
+           || ( wordIsOneOf( w, kGet ) && wordIsOneOf( next, kTo ) );
+}
 }   // namespace lit_detail
 
 // the trigger of shape=table, read from the task's own words outside code quotes
@@ -750,7 +777,7 @@ inline TableCue forTableCueOf( std::string_view task )
         {
             return TableCue::AnySite;
         }
-        if( lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForTableValueCues ) ) )
+        if( lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForTableValueCues ) ) || lit_detail::isSiteCueAt( words, i ) )
         {
             cue = TableCue::TableRowOnly;
         }
@@ -991,6 +1018,8 @@ struct Site
     char       k = '?';   // 's' string, 'c' code, '?' unclassified
     bool       quotedKey = false;   // shape=dotted: quotes delimit the key on both sides (`'files.autoSave'`), not a mention inside a sentence
     std::string tbl;                // shape=table: the line that opens the table this site is a row of ("item" at top level); "" = not a table row
+    bool        longer = false;     // shape=table: the hit sits inside a longer name; a row only as a registration call's argument (registrationCallOf)
+    bool        regCall = false;    // shape=table: tbl holds a registration call's callee (registrationCallOf), printed as reg=, not as a table opener
 };
 
 // LIT-SITE-DECOY: the sort tier of each ranked site (0 a near or kept table row, 1 another table row, 2 a near site, 3 a far one) or kCutTier
@@ -1444,6 +1473,7 @@ inline bool isDataWrapperValue( std::string_view v ) noexcept
 // `name! {`, `name![`, `a::name!{`: a macro invocation with a data bracket. `name!(`, the shape of `assert_eq!(` and `println!(`, only when allowParen
 inline bool isMacroOpener( std::string_view v, bool allowParen ) noexcept
 {
+    v = v.starts_with( '$' ) ? v.substr( 1 ) : v;   // REGISTRAR-2: `$macro! {` inside a macro_rules arm, the table a `for_all_params!(m)` hands its rows to
     const std::size_t bang = v.find( '!' );
     if( bang == std::string_view::npos || bang == 0 || !std::all_of( v.begin(), v.begin() + std::ptrdiff_t( bang ), []( char c ) { return namesplit::isIdentChar( c ) || c == ':'; } ) )
     {
@@ -1813,6 +1843,16 @@ inline bool isSecondaryPath( std::string_view p ) noexcept
     return false;
 }
 
+// REGISTRAR-2: a generated or data file (filter.h isDemoOrGeneratedPath, a `.json` file, a `zz_generated`, `_generated.`, `.generated.` or `.pb.`
+// file name): its table rows rank after the source's, as a docs or examples path does (isSecondaryPath). Ranked last, never dropped.
+inline bool isGeneratedOrDataPath( std::string_view p ) noexcept
+{
+    const std::size_t      slash = p.rfind( '/' );
+    const std::string_view base  = slash == std::string_view::npos ? p : p.substr( slash + 1 );
+    return isDemoOrGeneratedPath( p ) || base.ends_with( ".json" ) || base.starts_with( "zz_generated" ) || base.find( "_generated." ) != std::string_view::npos
+           || base.find( ".generated." ) != std::string_view::npos || base.find( ".pb." ) != std::string_view::npos;
+}
+
 // The table this source line is a row of, or "": a row of an allowed shape, a sibling of the same shape at its indent, and an opener the allowlist proves
 // (classifyOpener); or a macro row at top level (a Rust `name!(`, an ALLCAPS callee, outside any function), which is a registration with no sibling needed; or a call row at top level with
 // a sibling ("item"). The owner the parser found makes this stricter, never looser: inside a function a call is a statement, never a row (`log_info("x");` twice is two statements,
@@ -1866,7 +1906,101 @@ inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bo
     return opener.kind == OpenerKind::Transparent ? std::string( "item" ) : opener.text;
 }
 
-// shape=table: read each ranked site for a table row; true when one is
+// REGISTRAR-2: the open paren at `paren` is a registration call that opens its line: the callee chain right before it (`a.b.name`, an `@` before
+// it for a decorator, only blanks before that) is named for a registration. Its line up to the paren, or nothing.
+inline std::optional<std::string_view> registrationOpenerAt( std::string_view text, std::size_t paren ) noexcept
+{
+    std::size_t b = paren;
+    while( b > 0 && ( namesplit::isIdentChar( text[b - 1] ) || text[b - 1] == '.' ) )
+    {
+        --b;
+    }
+    const std::string_view callee = text.substr( b, paren - b );
+    std::size_t ls = b > 0 && text[b - 1] == '@' ? b - 1 : b;
+    while( ls > 0 && ( text[ls - 1] == ' ' || text[ls - 1] == '\t' ) )
+    {
+        --ls;
+    }
+    const bool opensLine = ls == 0 || text[ls - 1] == '\n';
+    if( !opensLine || callee.empty() || std::isalpha( static_cast<unsigned char>( callee.front() ) ) == 0 || !reg_detail::isRegistrationCallee( callee ) )
+    {
+        return std::nullopt;
+    }
+    return trimWs( text.substr( ls, paren + 1 - ls ) );
+}
+
+// REGISTRAR-2: the registration call whose arguments hold the hit at `at`, or "": walking back at most kForRegCallLines lines and kForRegCallBytes
+// bytes (never past a `;`), each '(' left open before the hit is a call the hit is an argument of, innermost first; the first whose callee chain
+// (`a.b.name`, an optional `@` for a decorator) opens its line and is named for a registration (reg_detail::isRegistrationCallee) is the row's
+// opener: its line up to that '('. A definition (`func NewHandler(`, `def register(`) is no call: a keyword stands before the name. Parens in
+// strings and comments are not told apart (a floor on recall, never a claim the text does not hold: the callee is quoted from the line).
+inline std::string registrationCallOf( std::string_view text, std::size_t at )
+{
+    if( at > text.size() )
+    {
+        return {};
+    }
+    const std::size_t floorAt = at > kForRegCallBytes ? at - kForRegCallBytes : 0;
+    std::size_t depth = 0, lines = 0;
+    for( std::size_t i = at; i > floorAt; --i )
+    {
+        const char c = text[i - 1];
+        if( c == ';' || ( c == '\n' && ++lines > kForRegCallLines ) )
+        {
+            return {};
+        }
+        if( c == ')' )
+        {
+            ++depth;
+            continue;
+        }
+        if( c != '(' )
+        {
+            continue;
+        }
+        if( depth > 0 )
+        {
+            --depth;
+            continue;
+        }
+        if( std::optional<std::string_view> opener = registrationOpenerAt( text, i - 1 ) )
+        {
+            return std::string( *opener );
+        }
+    }
+    return {};
+}
+
+// REGISTRAR-2: the name holding the hit at `at` is a whole argument of a call: the identifier run around it stands between `(` or `,` and `,` or `)`
+// (`async_reg(hass, handle_get_states)`), never a callee (`async_get_turn_on_trigger(x)`) or a member of a chain (`self._turn_on.async_register(`)
+inline bool isArgumentName( std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    if( at > text.size() || n > text.size() - at )
+    {
+        return false;
+    }
+    std::size_t b = at, e = at + n;
+    while( b > 0 && namesplit::isIdentChar( text[b - 1] ) )
+    {
+        --b;
+    }
+    while( e < text.size() && namesplit::isIdentChar( text[e] ) )
+    {
+        ++e;
+    }
+    while( b > 0 && ( text[b - 1] == ' ' || text[b - 1] == '\t' || text[b - 1] == '\n' ) )
+    {
+        --b;
+    }
+    while( e < text.size() && ( text[e] == ' ' || text[e] == '\t' || text[e] == '\n' || text[e] == '\r' ) )
+    {
+        ++e;
+    }
+    return b > 0 && ( text[b - 1] == '(' || text[b - 1] == ',' ) && e < text.size() && ( text[e] == ',' || text[e] == ')' );
+}
+
+// shape=table: read each ranked site for a table row; true when one is. A site that is no row of a table may be an argument of a registration
+// call (registrationCallOf), anywhere: in a function body too, and a hit inside a longer name (`handle_get_states`) only so.
 template<typename LoadFile>
 inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, const std::vector<GrepHit>& enriched, LoadFile&& loadFile, const std::string& loadedText )
 {
@@ -1875,20 +2009,25 @@ inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, con
     {
         loadFile( rows[i].raw.fileId );
         const bool callableOwner = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        rows[i].tbl = tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner, bracketReadingOf( langOfPath( ing.files[rows[i].raw.fileId] ) ) );
+        rows[i].tbl = rows[i].longer ? std::string() : tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner, bracketReadingOf( langOfPath( ing.files[rows[i].raw.fileId] ) ) );
+        if( rows[i].tbl.empty() )
+        {
+            rows[i].tbl     = registrationCallOf( loadedText, rows[i].raw.byteOffset );
+            rows[i].regCall = !rows[i].tbl.empty();
+        }
         any         = any || !rows[i].tbl.empty();
     }
     return any;
 }
 
 // a table row's tbl= attribute onto its <ls>; the opener is raw source text. No opener, no attribute.
-inline void appendTblAttr( std::string& xml, std::string opener, RedactCounts* redact, std::vector<char>& esc )
+inline void appendTblAttr( std::string& xml, std::string opener, RedactCounts* redact, std::vector<char>& esc, std::string_view attr = " tbl=\"" )
 {
     if( !opener.empty() )
     {
         redactInPlace( opener, redact );
         truncateUtf8WithEllipsis( opener, kForTableOpenerBytes );
-        xml.append( " tbl=\"" ).append( escapeXml( opener, esc ) ).push_back( '"' );
+        xml.append( attr ).append( escapeXml( opener, esc ) ).push_back( '"' );
     }
 }
 
@@ -2220,7 +2359,8 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 loadFile( r.fileId );
                 keyHit = lit_detail::literalHitAt( policy.boundary, loadedText, r.byteOffset, lit.text.size() );
-                if( keyHit.longer )
+                if( keyHit.longer
+                    && !( policy.tableRows && lit_detail::isArgumentName( loadedText, r.byteOffset, lit.text.size() ) && !lit_detail::registrationCallOf( loadedText, r.byteOffset ).empty() ) )
                 {
                     ++longerHits;
                     continue;
@@ -2230,7 +2370,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 srcFiles.push_back( r.fileId );
             }
-            src.push_back( lit_detail::Site{ r, '?', keyHit.quoted } );
+            src.push_back( lit_detail::Site{ r, '?', keyHit.quoted, {}, keyHit.longer } );
         }
     }
     std::vector<std::string> tierPaths;
@@ -2299,6 +2439,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             if( lines.back().raw.fileId == r.raw.fileId && lines.back().raw.line == r.raw.line )
             {
                 lines.back().quotedKey = lines.back().quotedKey || r.quotedKey;
+                lines.back().longer    = lines.back().longer && r.longer;   // one whole-word hit makes the line a whole-word site
             }
         }
         rows = std::move( lines );
@@ -2333,7 +2474,8 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     const auto rankOf = [ & ]( std::size_t i )
     {
         const bool callable = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        return ( policy.tableRows && lit_detail::isSecondaryPath( rootRelPath( ing, rows[i].raw.fileId ) ) ? 6 : 0 ) + ( policy.tableRows && rows[i].tbl.empty() ? 12 : 0 ) + ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable != policy.tableRows ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
+        const std::string_view path = rootRelPath( ing, rows[i].raw.fileId );
+        return ( policy.tableRows && ( lit_detail::isSecondaryPath( path ) || lit_detail::isGeneratedOrDataPath( path ) ) ? 6 : 0 ) + ( policy.tableRows && rows[i].tbl.empty() ? 12 : 0 ) + ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable != policy.tableRows ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
     };
     // LIT-SITE-DECOY: nearness to the answer above the block (its rows and bodies, and the literal's own definitions) orders the sites and,
     // when they do not all fit, cuts the far ones (lit_cut=). A CI, vendored or generated copy is never a row beside a product site.
@@ -2494,7 +2636,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         redactInPlace( line, redact );   // CR 4423843223: the matched line is raw source text; redact before the cut
         lit_detail::cutAround( line, needle, kForLiteralLineBytes );
         const bool callableOwner = h.enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind );
-        lit_detail::appendTblAttr( rowsXml, rows[i].tbl, redact, esc );
+        lit_detail::appendTblAttr( rowsXml, rows[i].tbl, redact, esc, rows[i].regCall ? std::string_view( " reg=\"" ) : std::string_view( " tbl=\"" ) );
         if( ( policy.tableRows ? !rows[i].tbl.empty() : rows[i].k == 's' && !callableOwner ) && contextRows < policy.contextRows )
         {
             // a string site outside any function (a table entry, an error-code map): the lines after it hold what it builds
@@ -2616,36 +2758,43 @@ inline bool forTableAnchorKeeps( const IngestResult& ing, std::string_view word,
     return tail.size() >= kForTableMinAnchor && std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == tail; } );
 }
 
-// shape=table, the last try: every kept anchor with a site prints its own <lit>, all under one byte cap. `capped` = what the earlier shapes
-// left unscanned, which stays said. An anchor the cap left out is counted the way a literal past the scan cap is.
-inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
-                                              RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
+// shape=table: the walk over a task's anchors, one try each, under the caps on work done (scans: an anchor with no site costs one too; elements printed;
+// one byte cap). An anchor past a cap is counted (skipped), never dropped.
+enum class TableTry : std::uint8_t
 {
-    ForLiteralRender out;
-    const TableCue cue = forTableCueOf( task );
-    if( cue == TableCue::None )
-    {
-        return out;
-    }
-    std::size_t printed = 0, scanned = 0, skipped = 0, used = 0;
-    std::string firstSkipped;
-    const auto skip = [ & ]( const std::string& word )
+    Unkept,   // not an anchor here: a file's name, or a word the index holds no symbol of
+    Empty,    // tried: no element (no site, no row, or past a cap)
+    Printed
+};
+struct TableWalk
+{
+    const IngestResult& ing;
+    std::string_view    rootArg, served;
+    RedactCounts*       redact;
+    bool                useMemo, compactLegend;
+    const LitAnchors&   anchors;
+    TableCue            cue;
+    ForLiteralRender    out;
+    std::size_t         printed = 0, scanned = 0, skipped = 0, used = 0;
+    std::string         firstSkipped;
+
+    void skip( const std::string& word )
     {
         ++skipped;
         firstSkipped = firstSkipped.empty() ? word : firstSkipped;
-    };
-    for( const TableAnchor& anchor : forTableAnchorsOf( task ) )
+    }
+    // `late`: an anchor the index holds no symbol of, tried on the cue's row-only reading alone
+    TableTry tryAnchor( const TableAnchor& anchor, bool late )
     {
         const std::string& word = anchor.text;
-        if( namesIndexedFile( ing, word ) || !forTableAnchorKeeps( ing, word, anchor.quoted ) )
+        if( namesIndexedFile( ing, word ) || ( !late && !forTableAnchorKeeps( ing, word, anchor.quoted ) ) )
         {
-            continue;
+            return TableTry::Unkept;
         }
-        // the caps are on work done: scans (an anchor with no site costs one too) and elements printed. An anchor past either is counted, never dropped.
         if( printed >= kForTableAnchors || scanned >= kForLiteralCandidates || used + kForTableElementBytes >= kForTableByteCap )
         {
             skip( word );
-            continue;
+            return TableTry::Empty;
         }
         ++scanned;
         ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm, out.cutLegend };
@@ -2654,11 +2803,11 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
         if( r.noRoom || r.unread )
         {
             skip( word );   // scanned, and counted once more as skipped: it printed nothing
-            continue;
+            return TableTry::Empty;
         }
         if( r.xml.empty() )
         {
-            continue;
+            return TableTry::Empty;
         }
         ++printed;
         used += r.xml.size() - r.xml.find( "<lit " );   // element bytes: the legend comments before the first are not
@@ -2666,11 +2815,62 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
         out.sites += r.sites;
         out.bodies += r.bodies;
         out.cutLegend = out.cutLegend || r.cutLegend;
+        return TableTry::Printed;
     }
-    if( skipped > 0 )
+};
+
+// REGISTRAR-2: the second pass of the walk. A dotted anchor (`pydantic.ValidationError`, `light.turn_on`) that printed nothing is tried by its last
+// segment, the name a registration row writes (`'ValidationError': (...)`), unless the task names that segment itself. An identifier-shaped word the
+// index holds no symbol of (a generated type, `HashJoinNode` from a .proto; a key only a macro or a decorator writes) is tried when the cue prints only
+// beside a table row. Both after every anchor of the task, so neither takes an earlier anchor's scan.
+inline std::optional<TableAnchor> lateTableAnchor( const IngestResult& ing, const TableAnchor& a, TableTry tried, TableCue cue, std::span<const TableAnchor> own )
+{
+    const std::string_view word = a.text;
+    const std::size_t      dot  = word.rfind( '.' );
+    if( tried == TableTry::Unkept )
     {
-        out.xml += std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scanned ) + "\" skipped=\"" + std::to_string( skipped )
-                   + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>";
+        const bool unindexed = cue == TableCue::TableRowOnly && !a.quoted && dot == std::string_view::npos && !namesIndexedFile( ing, word ) && lit_detail::isIdentifierShaped( word );
+        return unindexed ? std::optional<TableAnchor>( a ) : std::nullopt;
+    }
+    if( tried != TableTry::Empty || dot == std::string_view::npos || word.find( "::" ) != std::string_view::npos || dot + 1 + kForTableMinAnchor > word.size() )
+    {
+        return std::nullopt;
+    }
+    const std::string_view tail = word.substr( dot + 1 );
+    const bool named = std::any_of( own.begin(), own.end(), [ & ]( const TableAnchor& o ) { return o.text == tail; } );
+    return named ? std::nullopt : std::optional<TableAnchor>( TableAnchor{ std::string( tail ), a.quoted, a.firm } );
+}
+
+// shape=table, the last try: every kept anchor with a site prints its own <lit>, all under one byte cap. `capped` = what the earlier shapes
+// left unscanned, which stays said. An anchor the cap left out is counted the way a literal past the scan cap is.
+inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
+                                              RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
+{
+    const TableCue cue = forTableCueOf( task );
+    if( cue == TableCue::None )
+    {
+        return {};
+    }
+    TableWalk walk{ ing, rootArg, served, redact, useMemo, compactLegend, anchors, cue, {} };
+    const std::vector<TableAnchor> own = forTableAnchorsOf( task );
+    std::vector<std::pair<TableAnchor, bool>> later;   // (anchor, unindexed)
+    for( const TableAnchor& anchor : own )
+    {
+        const TableTry tried = walk.tryAnchor( anchor, false );
+        if( std::optional<TableAnchor> l = lateTableAnchor( ing, anchor, tried, cue, own ) )
+        {
+            later.emplace_back( std::move( *l ), tried == TableTry::Unkept );
+        }
+    }
+    for( const auto& [anchor, unindexed] : later )
+    {
+        walk.tryAnchor( anchor, unindexed );
+    }
+    ForLiteralRender out = std::move( walk.out );
+    if( walk.skipped > 0 )
+    {
+        out.xml += std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( walk.scanned ) + "\" skipped=\"" + std::to_string( walk.skipped )
+                   + "\"" + nextAttrXml( nextFlag( "--grep=", walk.firstSkipped ) ) + "/>";
     }
     return out;
 }
