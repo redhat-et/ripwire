@@ -948,6 +948,33 @@ inline void tailOldWalkCounters( FileTail& out, const TailOldWalk& old, bool old
 //    not counted: those pages arrived after the window was tuned, and at most kForFileTailSphinxTxtRows of them in all, counted
 //    in docs->total) goes to `docs`; one past it is left out and pageSkip marks the first such row, so next= continues no
 //    later than there.
+// One walked page row's fate: listed above -> Skip; a doc row past every window -> SkipMarked (next= continues no later than it);
+// a widened row naming a file the head shows -> SkipHead (review F4); else listed, with sym= when the old walk lists it.
+enum class TailPageRowFate : std::uint8_t
+{
+    Skip,
+    SkipMarked,
+    SkipHead,
+    ListSym,
+    ListWide
+};
+inline TailPageRowFate tailPageRowFate( bool unlisted, const TailRowAdmit& a, bool symRow, bool headFile ) noexcept
+{
+    if( !unlisted )
+    {
+        return TailPageRowFate::Skip;
+    }
+    if( !a.inWindow )
+    {
+        return TailPageRowFate::SkipMarked;
+    }
+    if( symRow )
+    {
+        return TailPageRowFate::ListSym;
+    }
+    return headFile ? TailPageRowFate::SkipHead : TailPageRowFate::ListWide;
+}
+
 struct TailPageWalkInputs
 {
     const IngestResult&      ing;
@@ -973,23 +1000,18 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         const bool         symRow = a.isDoc ? old.doc : old.code;
         codeSeen += a.isDoc ? 0 : 1;
         out.pageSeen = std::max( out.pageSeen, r + 1 );
-        const bool listedAbove = row.fileId >= listed.size() || listed[ row.fileId ];
-        tailOldWalkCounters( out, old, listedAbove || ( a.inWindow && symRow ), r );
-        if( listedAbove )
-        {
-            continue;
-        }
-        if( a.inWindow && !symRow && row.fileId < in.inHead.size() && in.inHead[ row.fileId ] )
-        {
-            continue;   // review F4: a widened row naming a file the head shows
-        }
-        if( !a.inWindow )
+        const TailPageRowFate fate = tailPageRowFate( row.fileId < listed.size() && !listed[ row.fileId ], a, symRow,
+                                                      row.fileId < in.inHead.size() && in.inHead[ row.fileId ] );
+        tailOldWalkCounters( out, old, fate == TailPageRowFate::Skip || fate == TailPageRowFate::ListSym, r );   // what the old walk listed
+        if( fate == TailPageRowFate::SkipMarked )
         {
             out.pageSkip = std::min( out.pageSkip, r );
-            continue;
         }
-        listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
-                     symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );
+        else if( fate == TailPageRowFate::ListSym || fate == TailPageRowFate::ListWide )
+        {
+            listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
+                         symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );
+        }
     }
 }
 
