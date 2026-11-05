@@ -171,7 +171,7 @@ inline std::string_view afterLast( std::string_view text, std::string_view sep )
 /// the one field of "") is visited only with `visitTrailingEmpty`: a scope path's last segment (`a::` -> a, "") is one, a word
 /// list's trailing space ends it. skillscan.h's takesValue and aliashop.h's scope splitters each spelled this loop themselves,
 /// and --quality-delta flags that as a duplication clone (XF-ALIAS-HOP).
-template <class Stop>
+template<class Stop>
 inline bool anyField( std::string_view text, std::string_view sep, bool visitTrailingEmpty, Stop stop )
 {
     EXPECTS( !sep.empty(), "an empty separator splits nothing" );
@@ -190,19 +190,19 @@ inline bool anyField( std::string_view text, std::string_view sep, bool visitTra
 /// Is `field` one of the `sep`-separated fields of `text` (anyField's fields, the trailing empty one per `visitTrailingEmpty`)?
 inline bool hasField( std::string_view text, std::string_view sep, std::string_view field, bool visitTrailingEmpty )
 {
-    return anyField( text, sep, visitTrailingEmpty, [ & ]( std::string_view f ) { return f == field; } );
+    return anyField( text, sep, visitTrailingEmpty, [&]( std::string_view f )
+                     { return f == field; } );
 }
 
 /// The `sep`-separated fields of `text` appended to `out` (anyField's fields, no trailing empty one: `a::b::c` -> a, b, c; ""
 /// adds nothing).
-template <class Out>
+template<class Out>
 inline void appendFields( std::string_view text, std::string_view sep, Out& out )
 {
-    anyField( text, sep, /*visitTrailingEmpty=*/false, [ & ]( std::string_view f )
+    anyField( text, sep, /*visitTrailingEmpty=*/false, [&]( std::string_view f )
               {
                   out.emplace_back( f );
-                  return false;
-              } );
+                  return false; } );
 }
 
 } // namespace namesplit
