@@ -890,7 +890,8 @@ inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
-    "; t page rows go on to file-page row 160; past page 0 (code question: past 40 code rows, a doc past row 40) p= only";
+    "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
+    "past 40 code rows, a doc past row 40) p= only, listed last, head files skipped; p_only= counts them";
 // FOR-TAIL-WIDE (serialize.h kForFileTailWideLegend): rides with the tail clause, only when the walk goes past page 0
 inline std::string_view tailWideLegend( const ForLensHeaderParts& p, bool compact )
 {
@@ -1582,7 +1583,7 @@ inline void forLensJsonSoftRefill( const PackSigs& packSigs, const ForLensJsonIn
     // the tail at its RESERVE: its share, capped at the head-scoped tail's whole stanza (the same at every N; the XML twin's
     // rule) — not its filled bytes nor the cut-scoped tail's size, both of which step with N: rows stay monotone in N
     const std::size_t  tailBytes = std::min( forLensJsonTailShare( in.tokenBudget, b.bundleBytes, b.fixedBytes, cutRows ),
-                                             forLensJsonTailStanza( *in.fileTail, 0, 0 ).size() );
+                                             forLensJsonTailStanza( rw::fileTailOldWalk( *in.fileTail ), 0, 0 ).size() );   // FOR-TAIL-WIDE F1: the old walk's part
     const std::size_t  rowDrop   = rw::forSoftRowDropFill( b.bundleBytes, tailBytes );
     if( rowDrop >= b.firstRowDrop )
     {
@@ -4443,13 +4444,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( forSoftTarget && sigsPreRendered && forSigsCut.pastTarget > 0 )
         {
             // the tail is charged at its RESERVE — its share, capped at the whole render of the head-scoped tail (forFileTail: the
-            // rows outside the 40-row surface, the same at every N) — not at its filled bytes nor at the cut-scoped tail's size:
+            // rows outside the 40-row surface, the same at every N; FOR-TAIL-WIDE review F1: the part the old 40-row walk lists,
+            // rebuilt byte for byte, so the widened rows fill the tail's own share and never narrow <sigs>) — not at its filled
+            // bytes nor at the cut-scoped tail's size:
             // both step with N (a whole row at a time, as a file moves between the rank rows and the page rows), and
             // the rows past the cut would then fall as N grows. With this reserve the rows are monotone in N.
             std::vector<char> tailEsc;
             const std::size_t tailReserve    = std::min( std::max<std::size_t>( bundleBudget > tailSpentBytes ? bundleBudget - tailSpentBytes : 0u,
                                                                                 rw::kForFileTailShellReserve ),
-                                                         rw::renderFileTailXml( forFileTail, forFileTail.paths.size(), tailEsc ).size() );
+                                                         rw::renderFileTailXml( rw::fileTailOldWalk( forFileTail ), forFileTail.oldRows, tailEsc ).size() );
             const std::size_t sectionsServed = forHdrXml.size() + legoStr.size() + composeStr.size() + routeStr.size() + graphSection.xml.size()
                                              + autoSection.xml.size() + slot.xml.size() + tailReserve;   // not the --detail bodies (above)
             const std::size_t rowDropFill    = rw::forSoftRowDropFill( bundleBudget, sectionsServed );

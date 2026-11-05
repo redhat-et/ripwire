@@ -1149,9 +1149,15 @@ inline constexpr std::string_view kForFileTailCodeFirstLegend =
 // old cut. Present-only: rides beside kForFileTailLegend when the file page holds more rows than page 0 (forpage.h
 // fileTailWalksPastPage0), so an answer whose tail ends inside page 0 keeps its bytes. Sigs-charge-exempt with the clause it
 // qualifies. No "--" (it rides inside an XML comment).
+// Fix round 1 (review F2-F5, CodeRabbit 4476426219): a code question walks 160 CODE rows (doc rows within the first 160 ride
+// beside them), the p=-only rows come after every row with sym=, a file the head shows is not listed past the old cut, and
+// p_only= counts the shown p=-only rows.
 inline constexpr std::string_view kForFileTailWideLegend =
-    "; tail walk: the page rows go on to the file page's first 160 rows; a page row past page 0 (on a code question: past its "
-    "first 40 code rows, or a doc row past its first 40 rows) prints p= only, no sym=";
+    "; tail walk: the page rows go on to the file page's first 160 rows (a code question: its first 160 code rows, plus the "
+    "doc rows within its first 160 rows); a row past page 0 (a code question: past its first 40 code rows, a doc past row 40) "
+    "prints p= only, after every row with sym=, and skips files the head shows; p_only= counts them";
+// The JSON twin of that clause's p_only= (the JSON answer carries no legend): "p_only_why" beside "p_only" (forpage.h)
+inline constexpr std::string_view kForFileTailPathOnlyWhy = "rows past page 0 of the file page print the path only (sym empty)";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,

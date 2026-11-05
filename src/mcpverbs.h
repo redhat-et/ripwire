@@ -2411,7 +2411,10 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // from budget_tokens but <lego>/<compose>), and a cut tail carries the page after its last row as next=.
     {
         std::vector<char> tailEsc;
-        const FileTail    mcpTail = computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
+        // FOR-TAIL-WIDE (review F8): this twin has no tail fill, so under budget_tokens it serves the old 40-row walk's tail (its
+        // pre-widening size, byte for byte; a cut tail's next= continues the page) and the widened rows only without a budget
+        const FileTail    mcpTail = in.budgetTokens > 0 ? fileTailOldWalk( computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task ) )
+                                                        : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
     }
@@ -2820,7 +2823,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::string_view mcpBundleLegend   = mcpSlotOwner.any() ? rw::kMcpForBundleSigsOwnerLegend : rw::kMcpForBundleSigsLegend;
     const std::string_view mcpBodySlotLegend = mcpSlotOwner.any() ? rw::kForBodySlotLegend : std::string_view();
     const std::string_view mcpTailCodeFirstLegend = tailOrdersCodeFirst( ing, task ) ? rw::kForFileTailCodeFirstLegend : std::string_view();   // the CLI twin's clause
-    const std::string_view mcpTailWideLegend = fileTailWalksPastPage0( ing, lensRank ) ? rw::kForFileTailWideLegend : std::string_view();   // FOR-TAIL-WIDE, the CLI twin's
+    // FOR-TAIL-WIDE, the CLI twin's clause; absent under budget_tokens, where this twin serves the old 40-row walk's tail (below)
+    const std::string_view mcpTailWideLegend = budgetTokens == 0 && fileTailWalksPastPage0( ing, lensRank ) ? rw::kForFileTailWideLegend : std::string_view();
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + termsCapNote + mentionNote + boostNote + docMentionNote + floorNote
                           + std::string( rw::kMcpForBuildingBlocksLegend )
