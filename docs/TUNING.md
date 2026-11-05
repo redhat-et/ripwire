@@ -27,12 +27,12 @@ patches by NAME, so its own population is NAMES and not declarations — and the
 those are frozen at the commit named under Provenance while this census is re-read from `src/` on
 every run, which makes them a third population again. Enumerated over the 265 names `src/` declares
 today: **111 tunable**, **12 must stay `constexpr`**, and **142 declared since the sweep was
-prepared, which no measurement has touched** (`kAliasHopDepth`, `kAliasPeelDepth`,
-`kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, `kBridgeMaxHops`, +136 more). 111 + 12 +
-142 = 265, and `emit` refuses to render a partition that does not add up. The `tunable` column above
-reads 112 rather than 111 because one name the sweep classified is no longer declared in `src/` at
-all: `kSituTestRowsShown`. Quoting "113 of 266" would be wrong in both halves at once, which is the
-shape of error a generated table exists to prevent.
+prepared, which no measurement has touched** (`kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`,
+`kBaseScopeScanCap`, `kBridgeMaxHops`, `kCallSitesPerRowCap`, +136 more). 111 + 12 + 142 = 265, and
+`emit` refuses to render a partition that does not add up. The `tunable` column above reads 112
+rather than 111 because one name the sweep classified is no longer declared in `src/` at all:
+`kSituTestRowsShown`. Quoting "113 of 266" would be wrong in both halves at once, which is the shape
+of error a generated table exists to prevent.
 
 ## Read this ratio before the tables
 

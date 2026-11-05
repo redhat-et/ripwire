@@ -416,6 +416,7 @@ for _g in \
     danglingwarncheck \
     dartcheck \
     deadcheck \
+    deadcodescopecheck \
     deadfiltercheck \
     deadprecisioncheck \
     deckcheck \
@@ -595,6 +596,7 @@ for _g in \
     hookcheck \
     hop1check \
     hopbodycheck \
+    hopcontextcheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \
