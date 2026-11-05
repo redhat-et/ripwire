@@ -894,11 +894,7 @@ inline constexpr std::string_view kForCompactLegendTailWide =
 // FOR-TAIL-WIDE (serialize.h kForFileTailWideLegend): rides with the tail clause, only when the walk goes past page 0
 inline std::string_view tailWideLegend( const ForLensHeaderParts& p, bool compact )
 {
-    if( !p.tailLegend || !p.tailWide )
-    {
-        return {};
-    }
-    return compact ? kForCompactLegendTailWide : rw::kForFileTailWideLegend;
+    return presentOnlyClause( p.tailLegend && p.tailWide, compact, kForCompactLegendTailWide, rw::kForFileTailWideLegend );
 }
 // The tail-order clause (serialize.h kForFileTailCodeFirstLegend): rides with the tail clause, only where the order applies
 // (forpage.h tailOrdersCodeFirst: a code question over an index that holds a doc unit).

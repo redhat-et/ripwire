@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <numeric>
+#include <ranges>
 #include <span>
 #include <cstdint>
 #include <string>
@@ -893,6 +894,25 @@ inline void fileTailRankRows( FileTail& out, std::vector<char>& listed, const In
     }
 }
 
+// Does the page walk still have a row to read? Plain: while r is inside the walked window; code first: until kForFileTailPageWalk
+// CODE rows were met (doc rows ride their own allowance).
+inline bool tailPageWalkOpen( bool codeFirst, std::size_t r, std::size_t pageSeen, std::size_t codeSeen ) noexcept
+{
+    return codeFirst ? codeSeen < kForFileTailPageWalk : r < pageSeen;
+}
+
+// What the old 40-row walk (page 0) would have listed at this row: `code` for a code row (plain walk: page index < 40; code first:
+// among the first 40 CODE rows), `doc` for a doc row (a window row met while fewer than 40 were walked). Both read BEFORE the row
+// counts, off the same counters admitTailRow advances.
+struct TailOldWalk
+{
+    bool code = false, doc = false;
+};
+inline TailOldWalk tailOldWalkAt( bool codeFirst, std::size_t r, std::size_t codeSeen, std::size_t windowSeen ) noexcept
+{
+    return { ( codeFirst ? codeSeen : r ) < kForFileTailPageRows, windowSeen < kForFileTailPageRows };
+}
+
 // 2. the page rows: the file page's first kForFileTailPageWalk rows (FOR-TAIL-WIDE: 4 pages; it was page 0), minus the files
 //    already listed, in the page's own order. sym= rides a row the old 40-row walk listed (the old cut: page index <
 //    kForFileTailPageRows; code first, the page's first kForFileTailPageRows CODE rows and the doc rows within that window);
@@ -910,16 +930,13 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
     out.total    = page.rows.size();
     out.pageSeen = std::min( page.rows.size(), kForFileTailPageWalk );
     std::size_t codeSeen = 0, windowSeen = 0;   // window: page rows met, a Sphinx .txt page not counted (rank rows' rule)
-    for( std::size_t r = 0; r < page.rows.size() && ( docs != nullptr ? codeSeen < kForFileTailPageWalk : r < out.pageSeen ); ++r )
+    for( std::size_t r = 0; r < page.rows.size() && tailPageWalkOpen( docs != nullptr, r, out.pageSeen, codeSeen ); ++r )
     {
         const ForFileRow&  row = page.rows[r];
-        // the old cut (page 0): the row the 40-row walk listed. Plain walk: page index < 40. Code first: a code row among the
-        // page's first 40 CODE rows, a doc row met while fewer than 40 window rows were walked (the same counters, read before
-        // this row counts; a Sphinx .txt page's own cap is in a.inWindow either way)
-        const bool         oldCut = docs == nullptr ? r < kForFileTailPageRows : codeSeen < kForFileTailPageRows;
-        const bool         oldWin = windowSeen < kForFileTailPageRows;
+        // the old cut (page 0): the row the 40-row walk listed (a Sphinx .txt page's own cap is in a.inWindow either way)
+        const TailOldWalk  old = tailOldWalkAt( docs != nullptr, r, codeSeen, windowSeen );
         const TailRowAdmit a      = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageWalk );
-        const bool         symRow = a.isDoc ? oldWin : oldCut;
+        const bool         symRow = a.isDoc ? old.doc : old.code;
         codeSeen += a.isDoc ? 0 : 1;
         out.pageSeen = std::max( out.pageSeen, r + 1 );
         if( row.fileId >= listed.size() || listed[ row.fileId ] )
@@ -1095,20 +1112,8 @@ inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
 template< class Render >
 inline std::size_t fileTailShownToFill( const FileTail& t, std::size_t shareBytes, const Render& render )
 {
-    std::size_t lo = 0, hi = t.paths.size();   // the answer lies in [lo, hi]; hi = every row when no cut prefix reaches the share
-    while( lo < hi )
-    {
-        const std::size_t mid = lo + ( hi - lo ) / 2;
-        if( render( mid ).size() >= shareBytes )
-        {
-            hi = mid;
-        }
-        else
-        {
-            lo = mid + 1;
-        }
-    }
-    return lo;
+    const auto counts = std::views::iota( std::size_t{ 0 }, t.paths.size() );   // every row count below "every collected row"
+    return std::size_t( std::ranges::partition_point( counts, [ & ]( std::size_t n ) { return render( n ).size() < shareBytes; } ) - counts.begin() );
 }
 
 }   // namespace rw
