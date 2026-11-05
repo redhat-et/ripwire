@@ -190,6 +190,29 @@ monotonic_check()
 }
 monotonic_check
 
+# ── LADDER-HOIST: a module alias is the CALL's fact, never a neighbour call's ────────────────────
+# The by-name ladder reads each call's require() alias once (graph.h LadderRefFacts) and tests it per
+# candidate. Three calls through three aliases in one tree, `run` defined in both modules: each call must
+# be proven by its OWN alias (a fact kept across calls proves b.run() as lib/a.js's run). The third caller
+# sits one directory down (`../lib/b`): the joined path is per caller directory, not per specifier.
+LH="$TMP/ladderhoist"; mkdir -p "$LH/lib" "$LH/sub"
+printf 'function run() { return 1; }\nmodule.exports = { run };\n' >"$LH/lib/a.js"
+printf 'function run() { return 2; }\nmodule.exports = { run };\n' >"$LH/lib/b.js"
+printf "const a = require('./lib/a');\nconst b = require('./lib/b');\nfunction viaA() { return a.run(); }\nfunction viaB() { return b.run(); }\nmodule.exports = { viaA, viaB };\n" >"$LH/app.js"
+printf "const b = require('../lib/b');\nfunction viaUp() { return b.run(); }\nmodule.exports = { viaUp };\n" >"$LH/sub/up.js"
+lh_binds(){  # $1 caller  $2 the one callee path it must bind  $3 the decoy it must not
+  local rc; "$BIN" "$LH" --callees="$1" --no-cache >"$TMP/lh.$1.out" 2>"$TMP/lh.$1.err"; rc=$?
+  if [ "$rc" -ne 0 ]; then no "ladder-hoist $1: ripwire rc=$rc"; cat "$TMP/lh.$1.err"; return; fi
+  if grep -q "p=\"$2\"" "$TMP/lh.$1.out" && ! grep -q "p=\"$3\"" "$TMP/lh.$1.out"; then
+    ok "ladder-hoist $1 → $2 by its own alias (not $3)"
+  else
+    no "ladder-hoist $1 did not bind $2 alone"; cat "$TMP/lh.$1.out"
+  fi
+}
+lh_binds viaA  'lib/a.js:1' 'lib/b.js:1'
+lh_binds viaB  'lib/b.js:1' 'lib/a.js:1'
+lh_binds viaUp 'lib/b.js:1' 'lib/a.js:1'
+
 bash "$ROOT/test/lib/jsimportalias.sh" "$BIN" || fail=1
 bash "$ROOT/test/lib/jsimportfacts.sh" "$BIN" || fail=1
 bash "$ROOT/test/lib/jsdefaultimport.sh" "$BIN" || fail=1
