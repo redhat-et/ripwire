@@ -238,6 +238,80 @@ int main( int argc, char** argv )
     check( lexicalNormalize( "../x.h" ).empty(),            "lexicalNormalize `../x.h` (escape) → empty" );
     check( lexicalNormalize( "./a//b/./c.h" ) == "a/b/c.h", "lexicalNormalize normalizes ./a//b/./c.h → a/b/c.h" );
 
+    // ── PATH-NORM: SuffixProbe (one normalization per probe list) against the per-probe join ──────
+    // The oracle is joinNormalizeLookupTail, the path every probe took before. Directories and specifiers
+    // cover a plain last segment (the fast path), '.', '..', a trailing '/', an empty directory, an escape
+    // above the base, '...' (a plain name), an absolute directory, and suffixes from none to '/index.tsx'.
+    {
+        HashMap<std::string, std::uint32_t> idx;
+        const char* const keys[] = { "a/util.ts", "a/util/index.ts", "a/b/c.ts", "c.ts", "index.ts", "a/index.ts", "a/b/index.tsx",
+                                     "x/....ts", "/abs/a/util.ts", "util.d.ts", "a/b.js", "a/util.mjs" };
+        for( std::uint32_t k = 0; k < std::size( keys ); ++k ) { idx.emplace( keys[k], k ); }
+        const char* const dirs[]  = { "", "a", "a/b", "a/b/c", "x", "/abs/a" };
+        const char* const rels[]  = { "./util", "./b/c", "../c", "../../c", "../../../c", ".", "..", "./", "../", "./b/..", "./b/.",
+                                      "...", "./...", "util", "./b", "../a/util", "./util/" };
+        const char* const sufs[]  = { "", ".ts", ".tsx", ".d.ts", ".js", ".mjs", "/index.ts", "/index.tsx" };
+        bool agree = true;
+        std::size_t compared = 0, hits = 0;
+        for( const char* d : dirs )
+        {
+            for( const char* r : rels )
+            {
+                SuffixProbe probe( d, r, idx, nullptr, kNoFile );
+                for( const char* x : sufs )
+                {
+                    const std::uint32_t want = joinNormalizeLookupTail( d, r, x, idx, nullptr, kNoFile );
+                    const std::uint32_t have = probe( x );
+                    ++compared;
+                    hits += ( want != kNoFile ) ? 1 : 0;
+                    if( want != have )
+                    {
+                        agree = false;
+                        std::printf( "  INFO  SuffixProbe dir=\"%s\" rel=\"%s\" suffix=\"%s\": %u, per-probe join %u\n", d, r, x, have, want );
+                    }
+                }
+            }
+        }
+        std::printf( "  INFO  SuffixProbe compared %zu probes, %zu of them hits\n", compared, hits );
+        check( hits >= 20, "SuffixProbe arm is NON-VACUOUS: at least 20 probes hit a file" );
+        check( compared == std::size( dirs ) * std::size( rels ) * std::size( sufs ), "SuffixProbe arm ran every probe" );
+        check( agree, "SuffixProbe gives the per-probe join's answer on every directory x specifier x suffix" );
+    }
+
+    // ── PATH-NORM: TsImportMemo lives for ONE adjacency build ────────────────────────────────────
+    // Two hand-built ingests in one process. In the first, a/x.ts's './util' lands on a/util.ts (fileId 0); in the
+    // second there is no a/util.ts and fileId 0 is a/w.ts, so a memo kept across builds would hand a/x.ts the stale
+    // id 0 and draw a/x.ts → a/w.ts. Same specifier in two directories in the first ingest: b/y.ts must land on
+    // b/util.ts, never on a/util.ts.
+    {
+        const auto tsIngest = []( std::vector<std::string> files, std::vector<std::pair<std::uint32_t, std::string>> imports )
+        {
+            IngestResult r;
+            r.files = std::move( files );
+            for( auto& [ from, spec ] : imports )
+            {
+                Include inc;
+                inc.fileId = from;
+                inc.target = spec;
+                r.includes.push_back( std::move( inc ) );
+            }
+            return r;
+        };
+        const auto rowOf = []( const rw::FileAdjacency& adj, std::uint32_t f )
+        {
+            std::vector<std::uint32_t> row;
+            for( const std::uint32_t g : adj[f] ) { row.push_back( g ); }
+            return row;
+        };
+        const IngestResult first  = tsIngest( { "a/util.ts", "a/x.ts", "b/util.ts", "b/y.ts" }, { { 1, "./util" }, { 3, "./util" } } );
+        const IngestResult second = tsIngest( { "a/w.ts", "a/x.ts", "z/q.ts" }, { { 1, "./util" } } );
+        const rw::FileAdjacency adj1 = buildPreciseIncludeAdj( first );
+        const rw::FileAdjacency adj2 = buildPreciseIncludeAdj( second );
+        check( rowOf( adj1, 1 ) == std::vector<std::uint32_t>{ 0 }, "memo: a/x.ts './util' → a/util.ts" );
+        check( rowOf( adj1, 3 ) == std::vector<std::uint32_t>{ 2 }, "memo: b/y.ts './util' → b/util.ts (the directory is in the key)" );
+        check( rowOf( adj2, 1 ).empty(), "memo: a second ingest with no a/util.ts draws no edge from a/x.ts (the memo is per build)" );
+    }
+
     if( g_fail ) { std::printf( "UNIT FAIL\n" ); return 1; }
     std::printf( "UNIT ALL PASS\n" );
     return 0;

@@ -3406,7 +3406,7 @@ inline std::pair<std::uint32_t, bool> resolveJsNamedImportFile( std::string_view
     // iff the source tier found nothing) and folds in this exact/literal probe as its seed, so a tree
     // carrying BOTH a literal `module` file and a source/declaration alternate still degrades to ambiguous
     // exactly as it did before this shared out.
-    const std::uint32_t seedHit = joinNormalizeLookup( includerDir( importer ), std::string( module ), files, workspace, importerFileId );
+    const std::uint32_t seedHit = joinNormalizeLookup( includerDir( importer ), module, files, workspace, importerFileId );
     return probeJsRuntimeSourceExt( includerDir( importer ), module, *runtimeExt, files, workspace, importerFileId, seedHit );
 }
 
