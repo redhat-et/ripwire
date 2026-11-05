@@ -5,8 +5,9 @@
 #
 # ARMS (each language: Python, TypeScript, Go, C++, Rust, Ruby; one generated shape — 80 `integration_check_NN` functions, each calling a
 # helper directly and a member of its own Store type through a parameter, so the head's later rows have callees no hop names)
-#   (a1) by="name" rows: name="3" and name_capped="1" name_total= the candidates (the cap is disclosed), each p=file:line and no body
-#   (a2) by="callee" rows: callee= rows shown; a direct call is evidence-bound (no via=), and in Python and TypeScript the
+#   (a1) by="name" rows: three, and name_total= the candidates (the cap is disclosed; the constants 3 rows, 6 files, 8 head rows live in the
+#        legend, so no name=/callee=/*_capped=/head= attribute prints), each p=file:line and no body
+#   (a2) by="callee" rows: a direct call is evidence-bound (no via=), and in Python and TypeScript the
 #        parameter's member call is bound by name alone and says via="name"
 #   (q1) a member row is Scope.name in its language's spelling (`.` Python/TS/Go, `::` C++/Rust, `#` Ruby)
 #   (ns1) Python: namesakes of two head rows (same names, a test file) are the only callers of a shown-file function: by="callee" via="name"
@@ -16,6 +17,16 @@
 #   (l1) every attribute the block prints (<syms> and each <y>, the core p= n= aside) is defined `name=` in the legend comment right
 #        before it (the legendcoveragecheck predicate): the compact legend on the CLI rows, the full one on x1 (MCP); (h1) the held stub's
 #        own legend defines held= and next=
+#   (m1) M1, the dedupe reads the bytes the run emitted: a task that fires the literal-anchor block (the textual-03 shape: a function the
+#        <lit> body calls was offered as unnamed) offers none of its names; twin: with RIPWIRE_NO_LITERAL_ANCHOR=1 the same names are offered
+#   (m2) M1, a name is a token of the answer with its sigil: TypeScript `Router.#addRoute` (the hono-11 shape), JS `$addRoute`, Ruby `add_route?`
+#        are shown rows and are not offered again; twin: an unshown sigil-spelled member is offered
+#        (a sigil-spelled helper only the <lit> body names: TypeScript `#isValidAnimationLevel`, Ruby `animation_level_valid?`, with the same twin)
+#   (m3) the same dedupe over --with-graph and a graph_verb block (every block before <syms> is read)
+#   (s2) a C++ header declaration and its out-of-line definition are one row (the definition's p=), no n= repeats
+#        (and the C shape: api.h declarations, api.c definitions)
+#   (s1) a row in a test file says test="1"; no row of a source file does
+#   (u1) a run that cannot buffer its bytes prints <syms held="uncaptured"/> and says so on stderr (non-NDEBUG flavour: SKIP otherwise)
 #   (n1) present-only: a one-function tree has no candidate and prints no block (twin: a1 fires on the same binary)
 #   (h1) --token-budget holds the block: <syms held="budget" next=...>, no rows; (j1) --json carries no block
 #   (x1) MCP `for`: the block (one renderer), read off the MCP answer's own bytes: a1, d1 and w1 hold on it
@@ -64,6 +75,30 @@ w( "rb", "checks.rb", "\n".join( f"class Store{i:02d}\n  def warm_entry_{i:02d}(
 w( "pyns", "checks.py", open( os.path.join( T, "py", "checks.py" ) ).read() + "\n\ndef namesake_target(x):\n    return x\n" )
 w( "pyns/tests", "elsewhere.py", "from checks import namesake_target\n\n\ndef integration_check_05(x):\n    return namesake_target(x)\n\n\n"
                                "def integration_check_06(x):\n    return namesake_target(x)\n" )
+# M1 / S1 / S2 / constants shapes (the generators mirror reports/rv-k.md's repros: textual-03 literal block, hono-11 `#private`, C++ decl+def)
+w( "lit", "constants.py", 'import os\n\nTEXTUAL_ANIMATIONS = "TEXTUAL_ANIMATIONS"\n\n\ndef _is_valid_animation_level(value):\n    return value in ("none", "basic", "full")\n\n\n'
+                           'def _get_animation_level():\n    value = os.environ.get(TEXTUAL_ANIMATIONS, "full")\n    if _is_valid_animation_level(value):\n        return value\n    return "full"\n' )
+w( "lit", "other.py", 'import os\n\n\ndef read_flag():\n    return os.environ.get("TEXTUAL_ANIMATIONS", "")\n' )
+# the same literal shape with a sigil-spelled helper only the <lit> body names (a TypeScript #private method, a Ruby predicate): not a shown row, so only the token spelling hides it
+w( "tslit", "constants.ts", 'export const TEXTUAL_ANIMATIONS = "TEXTUAL_ANIMATIONS";\n\nexport class AnimationConfig {\n  #isValidAnimationLevel(value: string): boolean {\n    return value === "none" || value === "full";\n  }\n\n'
+                            '  getAnimationLevel(): string {\n    const value = process.env[TEXTUAL_ANIMATIONS] ?? "full";\n    if (this.#isValidAnimationLevel(value)) {\n      return value;\n    }\n    return "full";\n  }\n}\n' )
+w( "tslit", "other.ts", 'export function readFlag(): string {\n  return process.env["TEXTUAL_ANIMATIONS"] ?? "";\n}\n' )
+w( "rblit", "constants.rb", 'TEXTUAL_ANIMATIONS = "TEXTUAL_ANIMATIONS"\n\nclass AnimationConfig\n  def animation_level_valid?(value)\n    %w[none full].include?(value)\n  end\n\n'
+                            '  def animation_level\n    value = ENV.fetch(TEXTUAL_ANIMATIONS, "full")\n    return value if animation_level_valid?(value)\n    "full"\n  end\nend\n' )
+w( "rblit", "other.rb", 'def read_flag\n  ENV["TEXTUAL_ANIMATIONS"].to_s\nend\n' )
+M = range( 1, 41 )
+w( "tssig", "router.ts", "export class Router {\n  private routes: string[] = [];\n  add(path: string): void {\n    this.#addRoute(path);\n  }\n  #addRoute(path: string): void {\n    this.routes.push(path);\n  }\n}\n"
+   + "".join( f"class Step{i:02d} {{\n  #routeStep{i:02d}(path: string): string {{\n    return path;\n  }}\n}}\n" for i in M ) )
+w( "jssig", "ed.js", "function $addRoute(x) {\n  return x;\n}\nfunction addRoute(x) {\n  return $addRoute(x);\n}\n" + "".join( f"function $routeStep{i:02d}(x) {{\n  return x;\n}}\n" for i in M ) )
+w( "rbsig", "router.rb", "class Router\n  def add_route?(x)\n    !x.nil?\n  end\n\n  def add_route(x)\n    add_route?(x)\n  end\nend\n"
+   + "".join( f"\nclass Step{i:02d}\n  def route_step_{i:02d}?(x)\n    x\n  end\nend\n" for i in M ) )
+w( "cppdecl", "ver.h", "#pragma once\nstruct Plan {\n" + "".join( f"  bool EdgeWanted{i:02d}(int x);\n" for i in M ) + "};\n" + "".join( f"int ParseVersion{i:02d}(const char* s);\n" for i in M ) )
+w( "cppdecl", "ver.cc", '#include "ver.h"\n' + "".join( f"bool Plan::EdgeWanted{i:02d}(int x) {{ return x > {i}; }}\n" for i in M ) + "".join( f"int ParseVersion{i:02d}(const char* s) {{ return s[0] - {i}; }}\n" for i in M ) )
+w( "pyt/tests", "test_checks.py", "\n".join( f"def test_integration_check_{i:02d}(x):\n    assert x\n\n" for i in N ) )
+w( "chdr", "api.h", "#pragma once\n" + "".join( f"int find_home_{i:02d}(void);\n" for i in M ) )
+w( "chdr", "api.c", '#include "api.h"\n' + "".join( f"int find_home_{i:02d}(void) {{ return {i}; }}\n" for i in M ) )
+for f in range( 1, 9 ):
+    w( "wide", f"m{f}.py", "".join( f"def route_table_{f}_{i:02d}(x):\n    return x\n\n\n" for i in range( 1, 30 ) ) )
 w( "one", "solo.py", "def integration_check(x):\n    return x\n" )
 PY
 
@@ -81,15 +116,19 @@ legend, blk = m.group( 1 ), m.group( 2 )
 openTag = re.match( r'<syms [^>]*>', blk ).group( 0 )
 rows = [ dict( re.findall( r'(\w+)="([^"]*)"', r ) ) for r in re.findall( r'<y [^>]*/>', blk ) ]
 byName = [ r for r in rows if r.get( "by" ) == "name" ]; byCallee = [ r for r in rows if r.get( "by" ) == "callee" ]
-total = re.search( r' name_capped="1" name_total="(\d+)"', openTag )
-say( len( byName ) == 3 and ' name="3"' in openTag and total is not None and int( total.group( 1 ) ) > 3
+total = re.search( r' name_total="(\d+)"', openTag )
+say( len( byName ) == 3 and total is not None and int( total.group( 1 ) ) > 3
      and all( re.search( r':\d+$', r["p"] ) for r in byName ), "a1", "by=name rows %d, open %s" % ( len( byName ), openTag ) )
+# (c1) the constants (3 rows per rule, 6 files, 8 head rows) are in the legend: no count of what the rows show, no *_capped, head= only below 8
+tagAttrs = dict( re.findall( r'(\w+)="([^"]*)"', openTag ) )
+say( not ( set( tagAttrs ) - { "files", "files_total", "head", "name_total", "callee_total" } ) and tagAttrs.get( "head", "0" ) != "8"
+     and ( "files" not in tagAttrs or int( tagAttrs["files"] ) < 6 ), "c1", "open tag prints only what differs from the legend's constants: %s" % openTag )
 direct = [ r for r in byCallee if "via" not in r and re.search( r'helper', r["n"], re.I ) ]
 member = [ r for r in byCallee if re.search( r'warm', r["n"], re.I ) ]
 named  = [ r for r in member if r.get( "via" ) == "name" ]
 wantVia = lang in ( "py", "ts" )
 if lang != "pyns":
-  say( len( byCallee ) >= 1 and ( ' callee="%d"' % len( byCallee ) ) in openTag and len( direct ) >= 1 and ( not wantVia or len( named ) >= 1 ),
+  say( len( byCallee ) >= 1 and len( direct ) >= 1 and ( not wantVia or len( named ) >= 1 ),
      "a2", "callee rows %s" % [ ( r["n"], r.get( "via" ) ) for r in byCallee ] )
 sep = { "cpp": "::", "rs": "::", "rb": "#" }.get( lang, "." )
 if lang == "pyns":
@@ -98,8 +137,11 @@ if lang == "pyns":
 elif lang != "mcp":
   say( len( member ) >= 1 and all( re.fullmatch( r'Store\d\d' + re.escape( sep ) + r'\w+', r["n"] ) for r in member ), "q1", "member rows %s" % [ r["n"] for r in member ] )
 rest = s[ : m.start() ] + s[ m.end(): ]
-words = set( re.findall( r'\w+', rest ) )
-leaked = [ r["n"] for r in rows if re.split( r'::|\.|#', r["n"] )[ -1 ] in words ]
+words = set( re.findall( r'[#$@~]?\w+[?!]?', rest ) ) | set( re.findall( r'\w+', rest ) )
+def leafOf( n ):
+    leaf = re.split( r'::|\.', n )[ -1 ]
+    return leaf.split( "#" )[ -1 ] if "#" in leaf[ 1: ] else leaf      # Ruby Scope#name; a leading # is TypeScript's private mark
+leaked = [ r["n"] for r in rows if leafOf( r["n"] ) in words ]
 say( not leaked, "d1", "rows named elsewhere in the answer: %s" % leaked )
 mask = lambda t: re.sub( r' at="[^"]*"| est_tokens="\d+"', '', t )
 say( mask( rest ) == mask( off ) and len( off ) > 0, "e1", "answer minus block vs RIPWIRE_NO_FILE_SYMS=1 (%d vs %d bytes)" % ( len( rest ), len( off ) ) )
@@ -108,6 +150,7 @@ try:
 except Exception as exc:
     wf = False
 say( wf and "--" not in legend[ 4 : -3 ] and s.count( "<syms " ) == 1, "w1", "well formed, legend without a double hyphen, one block" )
+say( not any( "test" in r for r in rows ), "t1", "no row of a source file says test=" )
 attrs = sorted( { a for t in re.findall( r'<(?:syms|y) [^>]*>', blk ) for a in re.findall( r'(\w+)="', t ) } - { "p", "n" } )
 undef = [ a for a in attrs if not re.search( r'(?<![\w:.-])' + a + r'\s*=', legend ) ]
 say( attrs and not undef, "l1", "the legend defines every block attribute %s (undefined: %s)" % ( attrs, undef ) )
@@ -123,6 +166,75 @@ for lang in py ts go cpp rs rb pyns; do
     case "$line" in PASS*) ok "${line#PASS }";; *) no "${line#FAIL }";; esac
   done <"$TMP/$lang.res"
 done
+
+# ── (m1)(m2)(m3)(s1)(s2)(c1): the dedupe reads every emitted byte; sigil spellings; decl+def; test mark; constants stay in the legend
+cat > "$TMP/lead.py" <<'PY'
+import re, sys
+path, mode = sys.argv[1], sys.argv[2]
+s = open( path, encoding = "utf8" ).read()
+def say( good, arm, text ): print( ( "PASS" if good else "FAIL" ), "(%s) %s: %s" % ( arm, mode, text ) )
+m = re.search( r'<!-- syms:.*?--><syms ([^>]*)>(.*?)</syms>', s, re.S )
+rows = [ dict( re.findall( r'(\w+)="([^"]*)"', r ) ) for r in re.findall( r'<y [^>]*/>', m.group( 2 ) ) ] if m else []
+tag = dict( re.findall( r'(\w+)="([^"]*)"', m.group( 1 ) ) ) if m else {}
+rest = s[ : m.start() ] + s[ m.end(): ] if m else s
+words = set( re.findall( r'[#$@~]?\w+[?!]?', rest ) ) | set( re.findall( r'\w+', rest ) )
+def leafOf( n ):
+    leaf = re.split( r'::|\.', n )[ -1 ]
+    return leaf.split( "#" )[ -1 ] if "#" in leaf[ 1: ] else leaf
+leaked = [ r["n"] for r in rows if leafOf( r["n"] ) in words ]
+if mode.startswith( "lit-off" ):          # the twin: with the literal block off, the names the block carries are offered
+    say( m is not None and any( leafOf( r["n"] ) in ( "_is_valid_animation_level", "_get_animation_level", "#isValidAnimationLevel", "animation_level_valid?" ) for r in rows ), "m1", "twin: %s" % [ r["n"] for r in rows ] )
+elif mode in ( "lit", "tslit", "rblit" ):
+    say( "<lit " in s and not leaked, "m1", "the literal-anchor block fires and none of its names is offered again (rows %s, leaked %s)" % ( [ r["n"] for r in rows ], leaked ) )
+elif mode in ( "ts", "js", "rb" ):
+    shown = { "ts": "#addRoute", "js": "$addRoute", "rb": "add_route?" }[ mode ] in s.split( "<syms" )[ 0 ]
+    sig = [ r["n"] for r in rows if { "ts": leafOf( r["n"] ).startswith( "#" ), "js": leafOf( r["n"] ).startswith( "$" ), "rb": leafOf( r["n"] ).endswith( "?" ) }[ mode ] ]
+    say( shown and m is not None and not leaked and len( sig ) >= 1, "m2", "the shown sigil-spelled member is not offered again (leaked %s); an unshown one is (%s)" % ( leaked, sig[ :2 ] ) )
+elif mode == "graph" or mode == "callers":
+    twin = "flowchart" in s if mode == "graph" else "<graph_verb" in s
+    say( twin and m is not None and not leaked, "m3", "the %s block fired and no row repeats a name it carries (leaked %s)" % ( mode, leaked ) )
+elif mode == "cppdecl":
+    ns = [ r["n"] for r in rows ]
+    say( len( rows ) == 3 and len( set( ns ) ) == 3 and all( r["p"].startswith( "ver.cc:" ) for r in rows ) and int( tag.get( "name_total", "0" ) ) == 40,
+         "s2", "a declaration and its definition are one row, the definition's: %s total %s" % ( [ ( r["n"], r["p"] ) for r in rows ], tag.get( "name_total" ) ) )
+elif mode == "chdr":
+    ns = [ r["n"] for r in rows ]
+    say( len( rows ) >= 2 and len( set( ns ) ) == len( ns ) and all( r["p"].startswith( "api.c:" ) for r in rows ),
+         "s2", "a C declaration and its definition are one row, the definition's: %s" % [ ( r["n"], r["p"] ) for r in rows ] )
+elif mode == "pyt":
+    say( len( rows ) >= 1 and all( r.get( "test" ) == "1" for r in rows ), "s1", "every row of a test file says test=\"1\": %s" % rows )
+elif mode == "wide":
+    say( m is not None and "files" not in tag and "head" not in tag and int( tag.get( "files_total", "0" ) ) > 6, "c1", "six files and eight head rows are the legend's constants; files_total= names the cut: %s" % tag )
+PY
+fxrun(){ local mode="$1" d="$2" tsk="$3"; shift 3; run "$d" "--for=$tsk" "$@" >"$TMP/fx.$mode.xml" 2>/dev/null; python3 "$TMP/lead.py" "$TMP/fx.$mode.xml" "$mode" >"$TMP/fx.$mode.res" 2>&1 || { no "($mode) lead.py crashed: $( head -c 300 "$TMP/fx.$mode.res" )"; return; }
+  [ -s "$TMP/fx.$mode.res" ] || { no "($mode) lead.py printed nothing"; return; }
+  while IFS= read -r line; do case "$line" in PASS*) ok "${line#PASS }";; *) no "${line#FAIL }";; esac; done <"$TMP/fx.$mode.res"; }
+fxrun lit lit TEXTUAL_ANIMATIONS
+RIPWIRE_NO_LITERAL_ANCHOR=1 fxrun lit-off lit TEXTUAL_ANIMATIONS
+fxrun tslit tslit TEXTUAL_ANIMATIONS
+RIPWIRE_NO_LITERAL_ANCHOR=1 fxrun lit-off-ts tslit TEXTUAL_ANIMATIONS
+fxrun rblit rblit TEXTUAL_ANIMATIONS
+RIPWIRE_NO_LITERAL_ANCHOR=1 fxrun lit-off-rb rblit TEXTUAL_ANIMATIONS
+fxrun ts tssig 'how does the router add a route'
+fxrun js jssig 'how does the router add a route'
+fxrun rb rbsig 'how does the router add a route'
+fxrun graph py 'why does the integration check fail' --with-graph
+fxrun callers py 'callers of _helper_05 integration check'
+fxrun cppdecl cppdecl 'parse the version and check the edge wanted'
+fxrun chdr chdr 'find home 07 and 08'
+fxrun pyt pyt 'why does the integration check fail'
+fxrun wide wide 'route table'
+
+# (u1) a run that cannot buffer its bytes: RIPWIRE_FAULT_CHARGE_BUFFER=1 (the est_tokens family's switch, non-NDEBUG flavour only)
+( cd "$TMP/py" && RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" "$TMP/py" --no-cache "--for=$TASK" >"$TMP/u1.xml" 2>"$TMP/u1.err" </dev/null ); rc=$?
+if grep -aq 'could not buffer the answer' "$TMP/u1.err"; then
+  if [ "$rc" = 0 ] && grep -aq '<syms held="uncaptured"/></ctx>$' "$TMP/u1.xml" && ! grep -aq '<y ' "$TMP/u1.xml" && grep -aq 'held="uncaptured"' "$TMP/u1.xml" \
+     && grep -aqE '<!-- ripwire for syms: held="budget"[^>]*held="uncaptured"[^>]*-->' "$TMP/u1.xml"; then ok "(u1) an unbufferable run prints <syms held=\"uncaptured\"/> with its legend, no rows, exit 0"; else no "(u1) rc=$rc: $( grep -ao '<syms.*' "$TMP/u1.xml" | head -c 300 )"; fi
+elif ! grep -aq 'open_memstream failed' "$TMP/u1.err"; then
+  echo "  SKIP  (u1) the fault switch is absent on this flavour (NDEBUG): the uncaptured stub is not exercised"
+else
+  no "(u1) the fault switch was live but the capture did not report: $( head -c 300 "$TMP/u1.err" )"
+fi
 
 run one "--for=$TASK" >"$TMP/one.xml"; rc=$?
 if [ "$rc" = 0 ] && grep -q '</ctx>$' "$TMP/one.xml" && ! grep -q '<syms' "$TMP/one.xml"; then ok "(n1) present-only: a one-function tree prints no block"; else no "(n1) rc=$rc: $( grep -o '<syms.*' "$TMP/one.xml" | head -c 300 )"; fi

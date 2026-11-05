@@ -26,7 +26,6 @@
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
-#include <initializer_list>  // appendForFileSyms: the answer parts it reads
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -2835,23 +2834,101 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0 ).c_str() );
 }
 
-// K-WRONGSYM (src/forfilesyms.h): the shown files' unnamed symbols in <syms>, just before </ctx>, read off `parts` (the ordinary
-// answer's bytes in stream order); its own byte allowance, outside est_tokens, so no auto-served body pays for it. XML only, a single
-// root; held under --token-budget / --max-tokens. `buffered` false (the degrade path streamed sigs unbuffered): no block.
-inline void appendForFileSyms( const MainDispatch& d, bool buffered, std::initializer_list<std::string_view> parts )
+// K-WRONGSYM (src/forfilesyms.h): the shown files' unnamed symbols in <syms>, just before </ctx>, read off THE BYTES THE RUN EMITTED: the
+// --for lens writes its answer to stdout through a capture from the root tag to this call, and the block is rendered from what was
+// captured, so a section or trailing block added later cannot fall out of a hand-kept list. The block has its own byte allowance, outside
+// est_tokens, so no auto-served body pays for it. XML only, a single root; held under --token-budget / --max-tokens; a run that could not
+// buffer its bytes prints `<syms held="uncaptured"/>` and says so on stderr.
+inline bool forFileSymsWanted( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
-    if( !buffered || cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() )
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() );
+}
+
+// stdout pointed at an anonymous file for the lifetime of the object (the dup2 capture runWithCompactLegend and the graph_verb block use):
+// finish() restores stdout and returns every byte written meanwhile; the destructor restores it on any other exit. Inactive when not wanted.
+class StdoutCapture
+{
+public:
+    explicit StdoutCapture( bool wanted ) : wanted_( wanted )
+    {
+        if( !wanted )
+        {
+            return;
+        }
+        std::fflush( stdout );
+        file_  = rw::isChargeBufferFaultInjected() ? nullptr : std::tmpfile();   // the est_tokens family's fault switch: no buffer to capture into
+        saved_ = file_ != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
+        if( file_ == nullptr || saved_ < 0 || rw::os::dup2( rw::os::fileno( file_ ), STDOUT_FILENO ) < 0 )
+        {
+            release();
+            return;
+        }
+        active_ = true;
+    }
+    StdoutCapture( const StdoutCapture& ) = delete;
+    StdoutCapture& operator=( const StdoutCapture& ) = delete;
+    ~StdoutCapture()
+    {
+        if( active_ )
+        {
+            (void)finish();
+        }
+    }
+    bool wanted() const noexcept { return wanted_; }
+    // The captured bytes (stdout restored); nullopt when nothing was captured (not wanted, or the buffer could not be set up).
+    std::optional<std::string> finish()
+    {
+        if( !active_ )
+        {
+            return std::nullopt;
+        }
+        active_ = false;
+        std::fflush( stdout );
+        rw::os::dup2( saved_, STDOUT_FILENO );
+        std::string doc;
+        std::rewind( file_ );
+        char buf[ 65536 ];
+        for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), file_ ) ) > 0; )
+        {
+            doc.append( buf, got );
+        }
+        release();
+        return doc;
+    }
+
+private:
+    void release() noexcept
+    {
+        if( saved_ >= 0 ) { rw::os::close( saved_ ); }
+        if( file_ != nullptr ) { std::fclose( file_ ); }
+        saved_ = -1;
+        file_  = nullptr;
+    }
+    bool       wanted_ = false, active_ = false;
+    std::FILE* file_   = nullptr;
+    int        saved_  = -1;
+};
+
+inline void appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+{
+    if( !capture.wanted() )
     {
         return;
     }
-    std::string answer;
-    for( const std::string_view part : parts )
+    const rw::Config&                cfg     = d.cfg;
+    const std::optional<std::string> emitted = capture.finish();
+    if( emitted )
     {
-        answer += part;
+        std::fwrite( emitted->data(), 1, emitted->size(), stdout );   // the answer, to the real stdout, byte for byte
+    }
+    else
+    {
+        rw::emitTo( stderr, "ripwire: --for: could not buffer the answer's bytes — the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const std::string syms = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = answer, .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0, .compactLegend = cfg.legend == "compact" } );
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = emitted ? std::string_view( *emitted ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
+                                      .compactLegend = cfg.legend == "compact", .uncaptured = !emitted } );
     std::fwrite( syms.data(), 1, syms.size(), stdout );
 }
 
@@ -4665,6 +4742,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // rows now (owner decision 2026-10-14), so the header — every legend clause and the verbatim task echo — always ships.
         headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
 
+        StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         // R2-AF (round 2, S4): first rows inside the root, right after the legend — see forHdrRows above.
         // The SAME string every sum above charged (rendered once, beside forHdrRows) — "" when there is no row.
@@ -4799,10 +4877,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
         }
-        // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the ordinary answer's own bytes (the strings streamed above, in stream
-        // order; the degrade path streamed unbuffered sigs and carries no block)
-        appendForFileSyms( d, sigsPreRendered, { headerStr, forHdrXml, filePageXml, unusedXml, sigsStr, legoStr, composeStr, routeStr, tailStr, epManifest.xml,
-                                                 listedIn.xml, callerHop.xml, dispatchHop.xml, selfHookXml, detailSection.xml, autoSection.xml, slot.xml, fold.xml } );
+        // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
+        appendForFileSyms( d, forAnswerBytes );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );

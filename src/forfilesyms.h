@@ -5,8 +5,13 @@
 // ordinary answer. (CLI src/verbs_for.h appendForFileSyms, MCP `for` src/mcpverbs.h forTaskText — one renderer.)
 //
 // WHICH FILES. The answer's own shown files: the distinct p= of its <d>, <b> and <t> rows in answer order, the first
-// kForFileSymsFiles. A candidate is an indexed definition of one of them (no doc heading or data key, no module scope, no field;
-// a function-local def counts: TypeScript's checker.ts holds its API inside one function) whose NAME is not already a word anywhere in the answer (it is shown, called in a shown body, or echoed).
+// kForFileSymsFiles. THE ANSWER IS THE BYTES AS EMITTED: the CLI hands the renderer everything the run wrote before this block (every
+// section and every trailing block: decl rows, graph_verb, re-exports, the short-key ladder, the literal anchor, dotted strings, --with-graph),
+// the MCP surface its whole document, so a block added later cannot drift out of a hand-kept list. A candidate is an indexed definition of one of
+// the files (no doc heading or data key, no module scope, no field; a function-local def counts: TypeScript's checker.ts holds its API inside
+// one function) that the answer does not name: its NAME is not a token of the answer (identifier runs, with the `#`/`$`/`@`/`~` before and the
+// `?`/`!` after, since a stored name keeps them; any other spelling is searched for in the text), and no shown row stands on its (file, line).
+// A C/C++ header declaration and its definition elsewhere are one candidate (the definition).
 // TWO RULES, each row says which picked it (by=):
 //   by="name"   its name's subtokens share a word with the task (identifier split, light stem, stopwords out); most shared first.
 //   by="callee" a definition NAMED like a head row (the first kForFileSymsHeadRows <d> rows, any file) calls, in the index's graph,
@@ -15,18 +20,22 @@
 //               rows' spellings (graphlegend.h): plain only when the shown row itself calls this very definition over an evidence-bound
 //               edge; prov="split" when that call is one arm of a split; via="name" otherwise (a namesake's call, a call to a namesake
 //               of it, or one bound by name alone).
-// Ties: fan-in (graph callers) desc, then shown-file order, then name. kForFileSymsRowsPerRule rows per rule (a runaway cap: name= /
-// callee= count the rows shown; name_capped="1" name_total= / callee_capped="1" callee_total= when the cap cut them; every printed attribute is
-// in kForFileSymsAttrs, which both legends must define, static_assert). A name both rules pick prints
-// once, as by="name".
+// Ties: fan-in (graph callers) desc, then shown-file order, then name. kForFileSymsRowsPerRule rows per rule (a runaway cap). The constants
+// (6 files, 8 head rows, 3 rows per rule) are in the legends, so the open tag prints files= / head= only when fewer were read and
+// name_total= / callee_total= / files_total= only when a cap cut; every printed attribute is in kForFileSymsAttrs, which both legends must
+// define (static_assert). A row in a test or fixture file or scope carries test="1" (a lead, ranked like any other). A name both rules pick
+// prints once, as by="name".
 // PRESENT-ONLY: no candidate scores, no block. A token budget holds it (held="budget", next= the same --for call without the
-// budget; the stub carries its own short legend). The block is outside est_tokens, after every byte of the ordinary answer: no auto-served body pays for it.
+// budget; the stub carries its own short legend), and so does a CLI run that could not buffer its bytes (held="uncaptured"). The block is outside
+// est_tokens, after every byte of the ordinary answer: no auto-served body pays for it. XML only: --json, columnar, --candidates and multi-root answers carry none.
+#include "filter.h" // isTestSymbol — the test/fixture mark on a row
 #include "infra/namesplit.h" // namesplit::isIdentChar — the one identifier-byte test
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / outProv / inEdges, edgeKindByte, kEdgeName
 #include "lexical.h" // subtokens — the one identifier splitter
 #include "memberowner.h" // MemberOwners, qualifiedMemberName — the Scope.name spelling every row kind shares
 #include "model.h"
 #include "nextverb.h" // nextFlag / nextAttrXml
+#include "quality.h" // isHeaderPath — a C/C++ declaration lives in a header
 #include "serialize.h" // escapeXml
 
 #include <algorithm>
@@ -37,17 +46,19 @@
 #include <cstdint>
 #include <cstdlib>
 #include <format>
+#include <map>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 namespace rw
 {
 // Runaway guards and reading scope (knob census ADDENDUM 2026-11-05, lane k-wrongsym); each is said on the block or in its legend.
-inline constexpr std::size_t kForFileSymsFiles = 6; // shown files whose symbols are candidates (files= on the block)
-inline constexpr std::size_t kForFileSymsHeadRows = 8; // head <d> rows whose callees by="callee" reads (head= on the block)
-inline constexpr std::size_t kForFileSymsRowsPerRule = 3; // rows per rule (name= / callee=, *_total= when cut)
+inline constexpr std::size_t kForFileSymsFiles = 6; // shown files whose symbols are candidates (files_total= when more were shown)
+inline constexpr std::size_t kForFileSymsHeadRows = 8; // head <d> rows whose callees by="callee" reads (head= when fewer)
+inline constexpr std::size_t kForFileSymsRowsPerRule = 3; // rows per rule (name_total= / callee_total= when cut)
 
 inline bool forFileSymsOn()
 {
@@ -55,23 +66,22 @@ inline bool forFileSymsOn()
 }
 
 inline constexpr std::string_view kForFileSymsLegend =
-    "<!-- ripwire for syms: symbols of the answer's first files= shown files that it does not name, one <y> row each (p=file:line, n= the owner-qualified name; no body, the expand verb serves one): "
-    "by=\"name\" its name shares a task word, by=\"callee\" a definition named like one of the first head= <d> rows calls one named like it (via=\"name\": "
+    "<!-- ripwire for syms: leads to read, not the answer. Symbols of the answer's first 6 shown files that it does not name, one <y> row each (p=file:line, n= the owner-qualified name; test=\"1\": a test or fixture symbol; no body, the expand verb serves one): "
+    "by=\"name\" its name shares a task word, by=\"callee\" a definition named like one of the first 8 <d> rows calls one named like it (via=\"name\": "
     "no evidence-bound call from the shown row to this definition, only a namesake's call, a call to a namesake or one bound by name alone; prov=\"split\": one arm of a split call); "
-    "name= callee= the rows each rule shows; when a cap cut them, name_capped=\"1\" name_total= and callee_capped=\"1\" callee_total= the candidates, files_capped=\"1\" files_total= the shown files; "
+    "three rows per rule: name_total= and callee_total= the candidates when a rule had more, files_total= the shown files when more than 6; files= head= the files or <d> rows read when fewer than 6 or 8; "
     "not in est_tokens -->";
 inline constexpr std::string_view kForFileSymsLegendCompact =
-    "<!-- syms: unnamed symbols of the first files= shown files, y p=file:line n=Owner.name; by=name task word, by=callee a head= <d> row or its namesake calls it or its namesake (via=name: "
-    "by name alone; prov=split: one arm of a split call); name= callee= rows per rule; name_capped=1 name_total= callee_capped=1 callee_total= files_capped=1 files_total= when cut; not in est_tokens -->";
+    "<!-- syms: leads, not the answer: first 6 shown files' symbols it lacks, p=file:line n=Owner.name; by=name task word, by=callee a head <d> row calls it "
+    "(via=name name-only, prov=split one arm); test=1 test code; name_total= callee_total= files_total= cut by the 3-row, 6-file cap; files= head= if under 6, 8 -->";
 // The held stub's own legend (both dialects): the reader meets held= and next= beside the tag, not in the block legend it replaces.
 inline constexpr std::string_view kForFileSymsHeldLegend =
     "<!-- ripwire for syms: held=\"budget\": a token budget is set, so the symbol rows of the shown files are not printed; next= repeats this call "
-    "without the budget, which prints them; not in est_tokens -->";
+    "without the budget, which prints them; held=\"uncaptured\": the answer's own bytes could not be buffered to read, so no rows are printed; not in est_tokens -->";
 
 // Every attribute <syms> and its <y> rows can print (blockXml's count() names and its row hedges; p= n= are the core row keys), and the
 // held stub's: each legend that rides beside them spells it `name=` (the legendcoveragecheck predicate), checked at compile time.
-inline constexpr std::array<std::string_view, 13> kForFileSymsAttrs { "files", "files_capped", "files_total", "head", "name", "name_capped",
-                                                                      "name_total", "callee", "callee_capped", "callee_total", "by", "via", "prov" };
+inline constexpr std::array<std::string_view, 9> kForFileSymsAttrs { "files", "files_total", "head", "name_total", "callee_total", "by", "via", "prov", "test" };
 inline constexpr std::array<std::string_view, 2> kForFileSymsHeldAttrs { "held", "next" };
 template<std::size_t N>
 consteval bool legendDefinesAll( std::string_view legend, const std::array<std::string_view, N>& attrs )
@@ -93,6 +103,7 @@ consteval bool legendDefinesAll( std::string_view legend, const std::array<std::
     }
     return true;
 }
+static_assert( kForFileSymsFiles == 6 && kForFileSymsHeadRows == 8 && kForFileSymsRowsPerRule == 3, "the legends spell these constants; <syms> prints an attribute only when it differs" );
 static_assert( legendDefinesAll( kForFileSymsLegend, kForFileSymsAttrs ), "kForFileSymsLegend must spell every <syms> attribute as name=" );
 static_assert( legendDefinesAll( kForFileSymsLegendCompact, kForFileSymsAttrs ), "kForFileSymsLegendCompact must spell every <syms> attribute as name=" );
 static_assert( legendDefinesAll( kForFileSymsHeldLegend, kForFileSymsHeldAttrs ), "kForFileSymsHeldLegend must spell held= and next=" );
@@ -158,28 +169,72 @@ inline std::size_t sharedWords( const std::vector<std::string>& a, const std::ve
 }
 
 
-// Every whole word of the answer (markup, legend, bodies and all), sorted unique: a candidate whose name is one is already named.
-inline std::vector<std::string_view> answerWords( std::string_view text )
+// The spellings a name can take in the answer, sorted unique: every identifier run, plus the run with the sigil byte before it (TypeScript
+// `#priv`, JS `$name`, `@x`, `~Dtor`) and the `?`/`!` byte after it (Ruby `valid?`), since the stored name keeps them.
+inline constexpr std::string_view kNameSigils = "#$@~"; // the byte a stored name may start with
+inline constexpr std::string_view kNameSuffixes = "?!"; // ...and end with
+// The identifier run [i, j) of `text` and its sigil/suffix variants, as views into the text.
+inline void pushRunVariants( std::vector<std::string_view>& out, std::string_view text, std::size_t i, std::size_t j )
+{
+    const std::size_t from = i > 0 && kNameSigils.contains( text[i - 1] ) ? i - 1 : i;
+    const std::size_t to = j < text.size() && kNameSuffixes.contains( text[j] ) ? j + 1 : j;
+    for( const std::size_t f : { i, from } )
+    {
+        for( const std::size_t t : { j, to } )
+        {
+            out.push_back( text.substr( f, t - f ) );
+        }
+    }
+}
+inline std::vector<std::string_view> answerTokens( std::string_view text )
 {
     std::vector<std::string_view> out;
-    for( std::size_t i = 0; i < text.size(); )
+    for( std::size_t i = 0, j = 0; i < text.size(); i = std::max( i + 1, j ) )
     {
         if( !namesplit::isIdentChar( text[i] ) )
         {
-            ++i;
             continue;
         }
-        std::size_t j = i;
-        while( j < text.size() && namesplit::isIdentChar( text[j] ) )
+        for( j = i; j < text.size() && namesplit::isIdentChar( text[j] ); ++j )
         {
-            ++j;
         }
-        out.push_back( text.substr( i, j - i ) );
-        i = j;
+        pushRunVariants( out, text, i, j );
     }
     std::ranges::sort( out );
     out.erase( std::unique( out.begin(), out.end() ), out.end() );
     return out;
+}
+
+// A name shaped sigil? + identifier + suffix? is looked up among the tokens; any other spelling (`operator==`, `a$b`) is searched for in the text
+// itself (raw, then XML-escaped, as the answer prints attributes), with identifier boundaries at its identifier ends.
+inline bool isTokenName( std::string_view n ) noexcept
+{
+    n.remove_prefix( !n.empty() && kNameSigils.contains( n.front() ) ? 1 : 0 );
+    n.remove_suffix( !n.empty() && kNameSuffixes.contains( n.back() ) ? 1 : 0 );
+    return !n.empty() && std::ranges::all_of( n, namesplit::isIdentChar );
+}
+inline bool spelledIn( std::string_view text, std::string_view name )
+{
+    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
+    {
+        const std::size_t end = at + name.size();
+        const bool pre = at == 0 || !( namesplit::isIdentChar( text[at - 1] ) && namesplit::isIdentChar( name.front() ) );
+        const bool suf = end == text.size() || !( namesplit::isIdentChar( text[end] ) && namesplit::isIdentChar( name.back() ) );
+        if( pre && suf )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+inline bool nameInAnswer( const std::vector<std::string_view>& tokens, std::string_view text, std::string_view name )
+{
+    if( isTokenName( name ) )
+    {
+        return std::ranges::binary_search( tokens, name );
+    }
+    std::vector<char> esc;
+    return !name.empty() && ( spelledIn( text, name ) || spelledIn( text, escapeXml( name, esc ) ) );
 }
 
 // The five XML entities the answer escapes, decoded (a name like `operator<` or a path with `&`).
@@ -282,25 +337,49 @@ inline std::vector<ShownRow> shownRows( std::string_view text )
 }
 
 // The file id a row's p= names: the index path itself, else the one file it is a whole-segment suffix of (or that is one of it).
-inline std::uint32_t fileOfPath( const IngestResult& ing, std::string_view p )
+// One lookup per answer: the exact paths hash once, and each distinct path is resolved once (a suffix match scans the files, memoized).
+class FileLookup
 {
-    std::uint32_t hit = UINT32_MAX, suffixHits = 0;
-    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+public:
+    explicit FileLookup( const IngestResult& ing ) : ing_( ing ) {}
+    std::uint32_t of( std::string_view p )
     {
-        const std::string_view q = rootRelPath( ing, f );
-        if( q == p )
+        if( const auto hit = memo_.find( p ); hit != memo_.end() )
         {
-            return f;
+            return hit->second;
         }
-        const bool suffix = ( q.size() > p.size() && q.ends_with( p ) && q[q.size() - p.size() - 1] == '/' ) || ( p.size() > q.size() && p.ends_with( q ) && p[p.size() - q.size() - 1] == '/' );
-        if( suffix )
+        if( exact_.empty() )
         {
-            hit = f;
-            ++suffixHits;
+            exact_.reserve( ing_.files.size() );
+            for( std::uint32_t f = 0; f < ing_.files.size(); ++f )
+            {
+                exact_.emplace( rootRelPath( ing_, f ), f ); // the first file of a spelling wins
+            }
         }
+        const auto exact = exact_.find( p );
+        const std::uint32_t id = exact != exact_.end() ? exact->second : suffixMatch( p );
+        memo_.emplace( std::string( p ), id );
+        return id;
     }
-    return suffixHits == 1 ? hit : UINT32_MAX;
-}
+
+private:
+    // The one file `p` is a whole-segment suffix of (or that is a suffix of it); none or several: UINT32_MAX.
+    std::uint32_t suffixMatch( std::string_view p ) const
+    {
+        std::uint32_t id = UINT32_MAX, hits = 0;
+        for( std::uint32_t f = 0; f < ing_.files.size(); ++f )
+        {
+            const std::string_view q = rootRelPath( ing_, f );
+            const bool suffix = ( q.size() > p.size() && q.ends_with( p ) && q[q.size() - p.size() - 1] == '/' ) || ( p.size() > q.size() && p.ends_with( q ) && p[p.size() - q.size() - 1] == '/' );
+            id = suffix ? f : id;
+            hits += suffix ? 1u : 0u;
+        }
+        return hits == 1 ? id : UINT32_MAX;
+    }
+    const IngestResult& ing_;
+    std::unordered_map<std::string_view, std::uint32_t> exact_;
+    std::map<std::string, std::uint32_t, std::less<>> memo_;
+};
 
 inline std::string_view leafName( std::string_view n )
 {
@@ -343,10 +422,35 @@ struct Head
     std::vector<NodeId> ids;
     std::size_t rows = 0;
 };
+// A head row's definition: the symbol of its file at its line by its leaf name.
+struct HeadWant
+{
+    std::uint32_t file, line;
+    std::string_view leaf;
+    bool found;
+};
+// ONE pass over the symbols finds all (at most 8) head rows' definitions.
+inline std::vector<NodeId> headIds( const IngestResult& ing, std::vector<HeadWant>& wants )
+{
+    std::vector<NodeId> ids;
+    for( const Symbol& s : ing.symbols )
+    {
+        for( HeadWant& w : wants )
+        {
+            if( !w.found && s.fileId == w.file && s.line == w.line && s.name == w.leaf )
+            {
+                w.found = true;
+                ids.push_back( s.id );
+            }
+        }
+    }
+    return ids;
+}
 inline Head headOf( const IngestResult& ing, const std::vector<ShownRow>& rows, const std::vector<std::uint32_t>& rowFile )
 {
     static_assert( kForFileSymsHeadRows <= 8, "Cand::headMask holds one bit per head name" );
     Head out;
+    std::vector<HeadWant> wants;
     for( std::size_t i = 0; i < rows.size() && out.rows < kForFileSymsHeadRows; ++i )
     {
         if( rows[i].kind != 'd' || rows[i].name.empty() )
@@ -359,19 +463,12 @@ inline Head headOf( const IngestResult& ing, const std::vector<ShownRow>& rows, 
         {
             out.names.emplace_back( leaf );
         }
-        if( rowFile[i] == UINT32_MAX )
+        if( rowFile[i] != UINT32_MAX )
         {
-            continue;
-        }
-        for( const Symbol& s : ing.symbols ) // one row's lookup; the head is 8 rows
-        {
-            if( s.fileId == rowFile[i] && s.line == rows[i].line && s.name == leaf )
-            {
-                out.ids.push_back( s.id );
-                break;
-            }
+            wants.push_back( HeadWant { rowFile[i], rows[i].line, leaf, false } );
         }
     }
+    out.ids = headIds( ing, wants );
     return out;
 }
 
@@ -385,56 +482,58 @@ inline bool candidateKind( const Symbol& s ) noexcept
 namespace filesyms_detail
 {
 // The answer's first kForFileSymsFiles distinct shown paths as file ids (UINT32_MAX: a path the index does not hold), in answer
-// order, and each row's file id (a head <d> row past the window still maps, for its callees).
+// order, each row's file id (every row maps: the shown places below read them all), and the (file, line) of every shown row.
 struct ShownFiles
 {
     std::vector<std::uint32_t> files;
     std::vector<std::uint32_t> rowFile;
+    std::vector<std::uint64_t> shownAt; // sorted: (file << 32 | line) of each shown row the index holds
     std::size_t pathsShown = 0; // distinct shown paths, the window's total
 };
 inline ShownFiles shownFiles( const IngestResult& ing, const std::vector<ShownRow>& rows )
 {
     ShownFiles out;
-    std::vector<std::string_view> paths; // parallel to out.files
+    FileLookup lookup( ing );
+    std::vector<std::string_view> paths; // distinct, in answer order
     out.rowFile.assign( rows.size(), UINT32_MAX );
     for( std::size_t i = 0; i < rows.size(); ++i )
     {
         const std::string_view p = rows[i].path;
-        const auto at = std::ranges::find( paths, p );
-        if( at != paths.end() )
+        out.rowFile[i] = lookup.of( p );
+        if( out.rowFile[i] != UINT32_MAX && rows[i].line > 0 )
         {
-            out.rowFile[i] = out.files[std::size_t( at - paths.begin() )];
+            out.shownAt.push_back( ( std::uint64_t( out.rowFile[i] ) << 32 ) | rows[i].line );
+        }
+        if( std::ranges::contains( paths, p ) )
+        {
             continue;
         }
-        ++out.pathsShown;
-        if( paths.size() < kForFileSymsFiles )
+        paths.push_back( p );
+        if( out.files.size() < kForFileSymsFiles )
         {
-            paths.push_back( p );
-            out.files.push_back( fileOfPath( ing, p ) );
-            out.rowFile[i] = out.files.back();
-        }
-        else if( rows[i].kind == 'd' )
-        {
-            out.rowFile[i] = fileOfPath( ing, p );
+            out.files.push_back( out.rowFile[i] );
         }
     }
+    out.pathsShown = paths.size();
+    std::ranges::sort( out.shownAt );
     return out;
 }
 
-// The candidates in id order: definitions of the shown files whose name is no word of the answer, each with its task-word score.
-inline std::vector<Cand> collectCands( const IngestResult& ing, const std::vector<std::uint32_t>& files, std::string_view answer, std::string_view task )
+// The candidates in id order: definitions of the shown files whose name is no word of the answer and which no shown row stands on,
+// each with its task-word score.
+inline std::vector<Cand> collectCands( const IngestResult& ing, const ShownFiles& sf, std::string_view answer, std::string_view task )
 {
-    const std::vector<std::string_view> words = answerWords( answer );
+    const std::vector<std::string_view> tokens = answerTokens( answer );
     const std::vector<std::string> taskWords = matchWords( task );
     std::vector<Cand> cands;
     for( const Symbol& s : ing.symbols )
     {
-        const auto at = std::ranges::find( files, s.fileId );
-        if( at == files.end() || !candidateKind( s ) || std::ranges::binary_search( words, std::string_view( s.name ) ) )
+        const auto at = std::ranges::find( sf.files, s.fileId );
+        if( at == sf.files.end() || !candidateKind( s ) || std::ranges::binary_search( sf.shownAt, ( std::uint64_t( s.fileId ) << 32 ) | s.line ) || nameInAnswer( tokens, answer, s.name ) )
         {
             continue;
         }
-        cands.push_back( Cand { .id = s.id, .fileRank = std::size_t( at - files.begin() ), .byName = sharedWords( taskWords, matchWords( s.name ) ) } );
+        cands.push_back( Cand { .id = s.id, .fileRank = std::size_t( at - sf.files.begin() ), .byName = sharedWords( taskWords, matchWords( s.name ) ) } );
     }
     return cands;
 }
@@ -482,37 +581,77 @@ inline void creditCallees( const IngestResult& ing, const Graph& g, const Head& 
     }
 }
 
+// `from` folds into `into`: one function to look at, so its head callers (bits OR-ed: one head calling both spellings is one caller) and
+// call hedges count for the row that stays.
+inline void foldInto( Cand& into, const Cand& from )
+{
+    into.headMask = std::uint8_t( into.headMask | from.headMask );
+    into.byCallee = std::size_t( std::popcount( into.headMask ) );
+    into.anyPlain = into.anyPlain || from.anyPlain;
+    into.anySplit = into.anySplit || from.anySplit;
+}
+
+// Groups `cands` by `key`, ordered inside a group by `rank`, and folds each candidate that `canFold(leader, c)` accepts into its group's first
+// row (the leader); the others stay.
+template<class Key, class Rank, class CanFold>
+inline void foldByKey( std::vector<Cand>& cands, Key key, Rank rank, CanFold canFold )
+{
+    std::ranges::sort( cands, [&]( const Cand& a, const Cand& b )
+                       { return std::tuple( key( a ), rank( a ) ) < std::tuple( key( b ), rank( b ) ); } );
+    std::vector<Cand> kept;
+    std::size_t leader = 0;
+    for( const Cand& c : cands )
+    {
+        const bool inGroup = !kept.empty() && key( kept[leader] ) == key( c );
+        if( inGroup && canFold( kept[leader], c ) )
+        {
+            foldInto( kept[leader], c );
+            continue;
+        }
+        leader = inGroup ? leader : kept.size();
+        kept.push_back( c );
+    }
+    cands = std::move( kept );
+}
+
+// The symbol's (scope, name) as views.
+inline std::tuple<std::string_view, std::string_view> scopeName( const IngestResult& ing, const Cand& c )
+{
+    const Symbol& s = ing.symbols[c.id];
+    return std::tuple( std::string_view( s.scope ), std::string_view( s.name ) );
+}
+
 // One row per (file, scope, name): an overload set, a member's in-class declaration and its out-of-line definition, or a re-opened
-// definition name one place to look. The kept row is the one with the most head callers (head bits OR-ed: one head calling both
-// spellings is one caller), else the lowest id.
+// definition name one place to look. The kept row is the one with the most head callers, else the lowest id.
 inline void dedupeCands( const IngestResult& ing, std::vector<Cand>& cands )
 {
     for( Cand& c : cands )
     {
         c.byCallee = std::size_t( std::popcount( c.headMask ) );
     }
-    const auto key = [&]( const Cand& c )
-    {
-        const Symbol& s = ing.symbols[c.id];
-        return std::tuple( s.fileId, std::string_view( s.scope ), std::string_view( s.name ) );
-    };
-    std::ranges::sort( cands, [&]( const Cand& a, const Cand& b )
-                       { return std::tuple( key( a ), b.byCallee, a.id ) < std::tuple( key( b ), a.byCallee, b.id ); } );
-    std::vector<Cand> kept;
-    for( const Cand& c : cands )
-    {
-        if( kept.empty() || key( kept.back() ) != key( c ) )
-        {
-            kept.push_back( c );
-            continue;
-        }
-        Cand& k = kept.back();
-        k.headMask = std::uint8_t( k.headMask | c.headMask );
-        k.byCallee = std::size_t( std::popcount( k.headMask ) );
-        k.anyPlain = k.anyPlain || c.anyPlain;
-        k.anySplit = k.anySplit || c.anySplit;
-    }
-    cands = std::move( kept );
+    foldByKey(
+        cands, [&]( const Cand& c )
+        { return std::tuple( ing.symbols[c.id].fileId, scopeName( ing, c ) ); }, []( const Cand& c )
+        { return std::tuple( SIZE_MAX - c.byCallee, c.id ); }, []( const Cand&, const Cand& )
+        { return true; } );
+}
+
+// A C/C++ declaration in a header (no body) and the definition of the same (scope, name) in another file are one function to look at: the
+// declaration folds into the definition, which keeps the row. A name with no definition among the candidates keeps its declaration (the
+// definition is not in the shown files); same-named definitions in sibling files stay apart.
+inline bool bodylessHeaderDecl( const IngestResult& ing, const Symbol& s )
+{
+    return s.sigEndByte >= s.endByte && quality::isHeaderPath( rootRelPath( ing, s.fileId ) ); // .h/.hpp/.hh/.hxx: C-family headers, read as C++ or C
+}
+inline void collapseDeclarations( const IngestResult& ing, std::vector<Cand>& cands )
+{
+    const auto decl = [&]( const Cand& c )
+    { return bodylessHeaderDecl( ing, ing.symbols[c.id] ); };
+    foldByKey(
+        cands, [&]( const Cand& c )
+        { return scopeName( ing, c ); }, [&]( const Cand& c )
+        { return std::tuple( decl( c ), c.id ); }, [&]( const Cand& leader, const Cand& c )
+        { return decl( c ) && !decl( leader ); } );
 }
 
 struct Picks
@@ -566,16 +705,15 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     const MemberOwners owners( ing );
     std::vector<char> esc;
     std::string out( compactLegend ? kForFileSymsLegendCompact : kForFileSymsLegend );
-    const auto count = [&]( std::string_view attr, std::size_t shown, std::size_t total )
-    {
-        out += shown == 0 ? std::string() : std::format( " {}=\"{}\"", attr, shown );
-        out += total > shown ? std::format( " {}_capped=\"1\" {}_total=\"{}\"", attr, attr, total ) : std::string();
-    };
+    // Constants live in the legend (6 files read, 8 head rows, 3 rows per rule): an attribute prints only when it differs or says a cap cut.
+    const auto attr = [&]( std::string_view name, std::size_t value, bool print )
+    { out += print ? std::format( " {}=\"{}\"", name, value ) : std::string(); };
     out += "<syms";
-    count( "files", sf.files.size(), sf.pathsShown );
-    count( "head", head.rows, 0 );
-    count( "name", picks.byName.size(), picks.nameTotal );
-    count( "callee", picks.byCallee.size(), picks.calleeTotal );
+    attr( "files", sf.files.size(), sf.files.size() != kForFileSymsFiles );
+    attr( "files_total", sf.pathsShown, sf.pathsShown > sf.files.size() );
+    attr( "head", head.rows, head.rows != kForFileSymsHeadRows );
+    attr( "name_total", picks.nameTotal, picks.nameTotal > picks.byName.size() );
+    attr( "callee_total", picks.calleeTotal, picks.calleeTotal > picks.byCallee.size() );
     out += ">";
     const auto row = [&]( const Cand& c, bool callee )
     {
@@ -587,6 +725,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
         out += callee ? "\" by=\"callee\"" : "\" by=\"name\"";
         out += !callee || c.anyPlain ? "" : c.anySplit ? " prov=\"split\""
                                                        : " via=\"name\"";
+        out += isTestSymbol( ing, c.id ) ? " test=\"1\"" : "";
         out += "/>";
     };
     for( const Cand* c : picks.byName )
@@ -604,15 +743,24 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
 struct FileSymsArgs
 {
     std::string_view task; // the --for task
-    std::string_view answer; // the ordinary answer's text, before </ctx>
+    std::string_view answer; // the answer's text exactly as emitted, before </ctx> (every block that streamed before this one)
     bool held = false; // a token budget: the tag names the call, no rows
     bool compactLegend = false;
+    bool uncaptured = false; // the CLI could not buffer the emitted bytes: the tag says so, no rows (`answer` is empty)
 };
 // The block for one answer: "" when no candidate scores.
 inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, const FileSymsArgs& a )
 {
     namespace fd = filesyms_detail;
-    if( !forFileSymsOn() || a.task.empty() || a.answer.empty() )
+    if( !forFileSymsOn() || a.task.empty() )
+    {
+        return {};
+    }
+    if( a.uncaptured )
+    {
+        return std::string( kForFileSymsHeldLegend ) + "<syms held=\"uncaptured\"/>";
+    }
+    if( a.answer.empty() )
     {
         return {};
     }
@@ -623,9 +771,10 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
         return {};
     }
     const fd::Head head = fd::headOf( ing, rows, sf.rowFile );
-    std::vector<fd::Cand> cands = fd::collectCands( ing, sf.files, a.answer, a.task );
+    std::vector<fd::Cand> cands = fd::collectCands( ing, sf, a.answer, a.task );
     fd::creditCallees( ing, g, head, cands );
     fd::dedupeCands( ing, cands );
+    fd::collapseDeclarations( ing, cands );
     const fd::Picks picks = fd::pickRows( ing, g, cands );
     if( picks.byName.empty() && picks.byCallee.empty() )
     {
