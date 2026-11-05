@@ -774,22 +774,36 @@ inline bool sharesWord( std::string_view key, const std::vector<std::string>& wo
         return sub.size() >= 3 && std::ranges::any_of( words, [ & ]( const std::string& w ) { return normWord( w ) == sub; } );
     } );
 }
-// REGISTRAR-2 (forliteral.h shape=table): a callee NAMED for a registration, the registrar family's one name vocabulary. The last
-// segment of a callee chain (`component.async_register_entity_service`, `decorators.websocket_command`, `r.add_route`) split on `_` and
-// on lower-to-upper case changes; true when one word is `reg`, starts with `regist` (register, registry, registration), or is route,
-// routes, router, command, commands, handler or handlers. Allowlist by word, never a substring: `aggregate`, `regex`, `handle` and
-// `run` are no registration. A name is no proof the call registers; the shape=table row that reads it says what it is.
-inline bool isRegistrationCallee( std::string_view callee ) noexcept
+// REGISTRAR-2 (forliteral.h shape=table): a callee that SAYS it registers, the registrar family's one name vocabulary. The last segment of a
+// callee chain (`component.async_register_entity_service`, `decorators.websocket_command`, `r.add_route`) split on `_` and on lower-to-upper
+// case changes into words. An allowlist of three shapes, never a substring and never a noun alone (REG2-FIX1, rv-reg2 F2):
+//   (A) a registration verb word (`register`, `registers`, `reg`) and no access word (`read`, `write`, `get`, `set`, `peek`, `poke`, `load`, `store`,
+//       `dump`): `async_register_entity_service`, `registerCommand`, `async_reg`; not `write_reg`, `reg_read`, `get_registry`, `is_registered`;
+//   (B) an adding verb word (`add`, `on`, `use`, `install`, `bind`, `map`, `connect`, `subscribe`, `mount`, `attach`) and, after it, a noun word
+//       (`route(s)`, `router`, `command(s)`, `handler(s)`): `add_route`, `addEventHandler`, `on_command`; not `get_handler`, `run_command`,
+//       `logging.FileHandler`, `ParseCommandLine`, `handler`;
+//   (C) a decorator (`@x.websocket_command(`, `@app.route(`, `@click.command(`) whose name holds a noun word.
+// A name is no proof the call registers; the shape=table row that reads it says what it is.
+inline bool isRegistrationCallee( std::string_view callee, bool decorator = false ) noexcept
 {
-    static constexpr std::array<std::string_view, 7> kWords{ "route", "routes", "router", "command", "commands", "handler", "handlers" };
+    static constexpr std::array<std::string_view, 3>  kRegVerbs{ "register", "registers", "reg" };
+    static constexpr std::array<std::string_view, 10> kAddVerbs{ "add", "on", "use", "install", "bind", "map", "connect", "subscribe", "mount", "attach" };
+    static constexpr std::array<std::string_view, 7>  kNouns{ "route", "routes", "router", "command", "commands", "handler", "handlers" };
+    static constexpr std::array<std::string_view, 9>  kAccess{ "read", "write", "get", "set", "peek", "poke", "load", "store", "dump" };
+    const auto in = []( const auto& list, std::string_view w ) { return std::find( list.begin(), list.end(), w ) != list.end(); };
     const std::size_t sep = callee.find_last_of( ".:" );
     const std::string_view name = sep == std::string_view::npos ? callee : callee.substr( sep + 1 );
+    bool        regVerb = false, access = false, noun = false, addThenNoun = false, adding = false;
     std::array<char, 32> word{};
     std::size_t          n = 0;
-    const auto           wordIs = [ & ]()
+    const auto           take = [ & ]()
     {
         const std::string_view w( word.data(), n );
-        return w == "reg" || w.starts_with( "regist" ) || std::find( kWords.begin(), kWords.end(), w ) != kWords.end();
+        regVerb     = regVerb || in( kRegVerbs, w );
+        access      = access || in( kAccess, w );
+        noun        = noun || in( kNouns, w );
+        addThenNoun = addThenNoun || ( adding && in( kNouns, w ) );
+        adding      = adding || in( kAddVerbs, w );
     };
     for( std::size_t i = 0; i <= name.size(); ++i )
     {
@@ -798,10 +812,7 @@ inline bool isRegistrationCallee( std::string_view callee ) noexcept
         const bool split = c == '_' || ( upper && i > 0 && name[i - 1] >= 'a' && name[i - 1] <= 'z' );
         if( split && n > 0 )
         {
-            if( wordIs() )
-            {
-                return true;
-            }
+            take();
             n = 0;
         }
         if( c != '_' && n < word.size() )
@@ -809,7 +820,7 @@ inline bool isRegistrationCallee( std::string_view callee ) noexcept
             word[n++] = upper ? static_cast<char>( c - 'A' + 'a' ) : c;
         }
     }
-    return false;
+    return ( regVerb && !access ) || addThenNoun || ( decorator && noun );
 }
 }   // namespace reg_detail
 

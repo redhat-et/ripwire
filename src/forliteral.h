@@ -70,13 +70,17 @@
 // call is a statement, never a row; every row needs an opener the allowlist proves (classifyOpener). Hits stand on word edges.
 //
 // REGISTRAR-2 (reports/registrar-2.md; ORCH Stage 0: 5 rows of 380 gain, 0 lose). A registration is a table with one row per call: the same block
-// reads more of them, present-only, three ways. (1) Trigger: defined/declared, build/builds/built, handled, turned into and get(s) to are
-// TableRowOnly cues (kForTableSiteCues), so they print only beside a table row. (2) A site no table holds is a row when it is an argument of a call
-// NAMED for a registration (registrationCallOf, the name vocabulary in regindex.h reg_detail::isRegistrationCallee): a Python decorator
-// `@websocket_command({...: "get_states"})`, `component.async_register_entity_service(SERVICE_TURN_ON, None, "async_turn_on")` over several lines,
-// `async_reg(hass, handle_get_states)` (a hit inside a longer name is a row only here); in a function body too; reg= (not tbl=: no table opener) is the callee's line up to its
-// paren. The top-level Rust macro row and the macro-table brace row were rows already (T2, T5); the cue was what the Stage 0 rows lacked.
-// (3) Rows of generated and JSON files rank last (isGeneratedOrDataPath). A callee's name is no proof the call registers: the row quotes it.
+// reads more of them, present-only, three ways. (1) Trigger: defined/declared (not after not/never: an error message), build/builds/built, handled,
+// turned into and get(s) to are TableRowOnly cues (kForTableSiteCues), so they print only beside a table row. (2) A site no table holds is a row
+// when it is an argument of a call that SAYS it registers (registrationCallOf; the name allowlist is regindex.h reg_detail::isRegistrationCallee: a
+// register verb, or an adding verb before route/command/handler, or a decorator's noun): a Python decorator `@websocket_command({...: "get_states"})`,
+// `component.async_register_entity_service(SERVICE_TURN_ON, None, "async_turn_on")` over several lines, `async_reg(hass, handle_get_states)` (a hit
+// inside a longer name is a row only here); in a function body too; reg= (not tbl=: no table opener) is the callee's line up to its paren. Not a call:
+// a declaration of the same name (a constructor, a method, a GNU-style definition), a member of a type, a member-initializer list, a closure body.
+// The top-level Rust macro row and the macro-table brace row were rows already (T2, T5); the cue was what the Stage 0 rows lacked.
+// (3) Rows of generated and JSON files rank after source rows of the same nearness (isGeneratedOrDataPath), and never hold the home table. A callee's
+// name is no proof the call registers: the row quotes it. (4) A dotted name that finds no site is retried by its last part, which lists quoted-key
+// rows and its definition only (keepTailKeyRows).
 
 #include "infra/namesplit.h" // isIdentChar
 #include "infra/sortutil.h"  // svLess — AnchorSet::dirs sort and search in byte order, never through operator<
@@ -150,6 +154,8 @@ inline constexpr std::size_t kForTableMinAnchor       = 3;      // a shorter wor
 inline constexpr std::size_t kForTableMaxAnchor       = 60;     // a longer backticked span is no anchor
 inline constexpr std::size_t kForRegCallLines         = 4;      // shape=table: a registration call's open paren is looked for this many lines above a site
 inline constexpr std::size_t kForRegCallBytes         = 512;    // ...and this many bytes
+inline constexpr std::size_t kForRegLineHits          = 8;      // shape=table: later hits on one line kept to try as a registration argument (the first is the site)
+inline constexpr std::size_t kForRegIdentBytes        = 128;    // shape=table: an identifier run longer than this around a hit is no argument name (a blob, not a name)
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
 // text rides --legend=full. Both name every attribute the element prints.
@@ -191,9 +197,11 @@ static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size
 // present only with shape=table (the first of its elements), so the bytes of every other fire do not move
 inline constexpr std::string_view kForLiteralTableLegend =
     "<!-- ripwire for lit: shape=table a task about a table, registration or new sibling: the identifier it names, one lit per identifier, "
-    "after the other shapes found no site. Table rows first: tbl= the line that opens the table (item: a top level macro or call row), read from the text; no tbl= is no "
-    "claim. reg= instead: the row is an argument of a call named for a registration (reg, register, route, command, handler; the name, not proof), also inside "
-    "a longer name, and reg= is that call up to its paren. Generated and JSON files rank last. lines=a-b with the lines after it. read=N: only the first N source sites of src= in path order were read for a table row. longer= source sites inside a longer "
+    "after the other shapes found no site. Table rows first: tbl= the line that opens the table (item: a top level macro or call row), read from the text; no tbl= or "
+    "reg= is no claim. reg= instead: the row is an argument of a call named for a registration (register, reg, or add, on, bind with route, command, handler; the "
+    "name, not proof), also inside a longer name, and reg= is that call up to its paren, looked for 4 lines above the site. Generated and JSON files rank after source "
+    "rows of the same nearness. tail=N: a dotted name found no site; its last part lists quoted keys and its definition, N sites not listed. lines=a-b with the lines "
+    "after it. read=N: only the first N source sites of src= in path order were read for a table row. longer= source sites inside a longer "
     "word, counted, never rows. A cut on a row boundary says capped=1. -->";
 static_assert( kForLiteralTableLegend.find( "--", 4 ) == kForLiteralTableLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
@@ -738,14 +746,17 @@ inline bool isTableAnchorSpan( std::string_view w ) noexcept
     return bytesOk && ( dot == std::string_view::npos || !isFileOrHostSuffix( w.substr( dot + 1 ) ) );
 }
 
-// REGISTRAR-2: words[i] is a site cue: one of kForTableSiteCues, or the first word of `turned into` / `get(s) to`
+// REGISTRAR-2: words[i] is a site cue: one of kForTableSiteCues (not right after a negation: `is not defined`), or the first word of `turned into` / `get(s) to`
 inline bool isSiteCueAt( std::span<const std::string_view> words, std::size_t i )
 {
     static constexpr std::array<std::string_view, 1> kTurned{ "turned" }, kInto{ "into" }, kTo{ "to" };
     static constexpr std::array<std::string_view, 2> kGet{ "get", "gets" };
+    static constexpr std::array<std::string_view, 6> kNegators{ "not", "never", "isn't", "wasn't", "aren't", "weren't" };
     const std::string_view w    = stripWordPunct( words[i] );
     const std::string_view next = i + 1 < words.size() ? stripWordPunct( words[i + 1] ) : std::string_view();
-    return wordIsOneOf( w, std::span<const std::string_view>( kForTableSiteCues ) ) || ( wordIsOneOf( w, kTurned ) && wordIsOneOf( next, kInto ) )
+    // `name x is not defined`, `x was not declared in this scope`: an error message quoting the word, no question about a definition (REG2-FIX1)
+    const bool negated = i > 0 && wordIsOneOf( stripWordPunct( words[i - 1] ), std::span<const std::string_view>( kNegators ) );
+    return ( wordIsOneOf( w, std::span<const std::string_view>( kForTableSiteCues ) ) && !negated ) || ( wordIsOneOf( w, kTurned ) && wordIsOneOf( next, kInto ) )
            || ( wordIsOneOf( w, kGet ) && wordIsOneOf( next, kTo ) );
 }
 }   // namespace lit_detail
@@ -1020,6 +1031,7 @@ struct Site
     std::string tbl;                // shape=table: the line that opens the table this site is a row of ("item" at top level); "" = not a table row
     bool        longer = false;     // shape=table: the hit sits inside a longer name; a row only as a registration call's argument (registrationCallOf)
     bool        regCall = false;    // shape=table: tbl holds a registration call's callee (registrationCallOf), printed as reg=, not as a table opener
+    std::vector<std::uint32_t> more;   // shape=table: the byte offsets of the later hits on this line (the first is raw.byteOffset), at most kForRegLineHits
 };
 
 // LIT-SITE-DECOY: the sort tier of each ranked site (0 a near or kept table row, 1 another table row, 2 a near site, 3 a far one) or kCutTier
@@ -1037,9 +1049,20 @@ inline bool declaresTable( std::string_view opener ) noexcept
     return lintdetail::ltrim( opener ).starts_with( "#define" );
 }
 
+// REGISTRAR-2: a generated or data file (filter.h isDemoOrGeneratedPath, a `.json` file, a `zz_generated`, `_generated.`, `.generated.` or `.pb.`
+// file name): its table rows rank after the source's, as a docs or examples path does (isSecondaryPath). Ranked last, never dropped.
+inline bool isGeneratedOrDataPath( std::string_view p ) noexcept
+{
+    const std::size_t      slash = p.rfind( '/' );
+    const std::string_view base  = slash == std::string_view::npos ? p : p.substr( slash + 1 );
+    return isDemoOrGeneratedPath( p ) || base.ends_with( ".json" ) || base.starts_with( "zz_generated" ) || base.find( "_generated." ) != std::string_view::npos
+           || base.find( ".generated." ) != std::string_view::npos || base.find( ".pb." ) != std::string_view::npos;
+}
+
 // the home table, when several table files hold the literal and none of their rows stands near the answer: the file with the most table rows of
 // the literal; on a tie, the one that declares it (declaresTable); then the one with the most of its sites outside any function (the declaration
-// text: doc strings, a registration; a reader in a function body does not count). A tie past these: no home (nothing is cut by it).
+// text: doc strings, a registration; a reader in a function body does not count). A tie past these: no home (nothing is cut by it). A generated or
+// data file (isGeneratedOrDataPath) holds no home.
 inline std::uint32_t homeTableFile( const IngestResult& ing, const std::vector<Site>& rows, const std::vector<GrepHit>& enriched, const std::vector<Prox>& prox )
 {
     struct Cand
@@ -1051,9 +1074,9 @@ inline std::uint32_t homeTableFile( const IngestResult& ing, const std::vector<S
     std::vector<Cand> cands;
     for( std::size_t i = 0; i < enriched.size(); ++i )
     {
-        if( rows[i].tbl.empty() || prox[i] == Prox::Off )
+        if( rows[i].tbl.empty() || prox[i] == Prox::Off || isGeneratedOrDataPath( rootRelPath( ing, rows[i].raw.fileId ) ) )
         {
-            continue;
+            continue;   // a generated or data file is never the home table (REG2-FIX1, CodeRabbit 4478248365): its rows only rank after the source's
         }
         const auto at = std::ranges::find( cands, rows[i].raw.fileId, &Cand::file );
         Cand& c = at != cands.end() ? *at : cands.emplace_back( Cand{ rows[i].raw.fileId } );
@@ -1310,6 +1333,7 @@ inline KeyHit literalHitAt( LitBoundary boundary, std::string_view text, std::si
     }
     KeyHit h;
     h.longer = boundary == LitBoundary::Word && !wordBounded( text, at, n );
+    h.quoted = boundary == LitBoundary::Word && keyHitAt( text, at, n ).quoted;   // shape=table's dotted-tail retry lists quoted keys only
     return h;
 }
 
@@ -1843,16 +1867,6 @@ inline bool isSecondaryPath( std::string_view p ) noexcept
     return false;
 }
 
-// REGISTRAR-2: a generated or data file (filter.h isDemoOrGeneratedPath, a `.json` file, a `zz_generated`, `_generated.`, `.generated.` or `.pb.`
-// file name): its table rows rank after the source's, as a docs or examples path does (isSecondaryPath). Ranked last, never dropped.
-inline bool isGeneratedOrDataPath( std::string_view p ) noexcept
-{
-    const std::size_t      slash = p.rfind( '/' );
-    const std::string_view base  = slash == std::string_view::npos ? p : p.substr( slash + 1 );
-    return isDemoOrGeneratedPath( p ) || base.ends_with( ".json" ) || base.starts_with( "zz_generated" ) || base.find( "_generated." ) != std::string_view::npos
-           || base.find( ".generated." ) != std::string_view::npos || base.find( ".pb." ) != std::string_view::npos;
-}
-
 // The table this source line is a row of, or "": a row of an allowed shape, a sibling of the same shape at its indent, and an opener the allowlist proves
 // (classifyOpener); or a macro row at top level (a Rust `name!(`, an ALLCAPS callee, outside any function), which is a registration with no sibling needed; or a call row at top level with
 // a sibling ("item"). The owner the parser found makes this stricter, never looser: inside a function a call is a statement, never a row (`log_info("x");` twice is two statements,
@@ -1906,64 +1920,248 @@ inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bo
     return opener.kind == OpenerKind::Transparent ? std::string( "item" ) : opener.text;
 }
 
-// REGISTRAR-2: the open paren at `paren` is a registration call that opens its line: the callee chain right before it (`a.b.name`, an `@` before
-// it for a decorator, only blanks before that) is named for a registration. Its line up to the paren, or nothing.
-inline std::optional<std::string_view> registrationOpenerAt( std::string_view text, std::size_t paren ) noexcept
+// REGISTRAR-2: where a hit stands, for telling a call's argument from a declaration. Built once per file (lang flags) and per hit (the enclosing symbol).
+struct RegHitCtx
 {
-    std::size_t b = paren;
-    while( b > 0 && ( namesplit::isIdentChar( text[b - 1] ) || text[b - 1] == '.' ) )
+    std::string_view enclosingName;           // the symbol whose span holds the hit ("" = none): a call named like it is its own signature
+    bool             enclosedByType = false;  // that symbol is a class, struct, interface or named type: a call-shaped line in its body is a member, not a call
+    bool             cFamily        = false;  // C, C++, Objective-C: a `: a_(x),` member-initializer list looks like calls
+    bool             rust           = false;  // `'` opens a char literal or a lifetime
+    bool             hashComments   = false;  // `#` starts a comment (Python, Ruby, shell, YAML, TOML, Elixir, GDScript)
+};
+inline RegHitCtx regLangCtxOf( Lang lang ) noexcept
+{
+    RegHitCtx c;
+    switch( lang )
     {
-        --b;
+        case Lang::Cpp: case Lang::C: case Lang::ObjC: c.cFamily = true; break;
+        case Lang::Rust: c.rust = true; break;
+        case Lang::Python: case Lang::Ruby: case Lang::Bash: case Lang::Yaml: case Lang::Toml: case Lang::Elixir: case Lang::GDScript: c.hashComments = true; break;
+        default: break;
     }
-    const std::string_view callee = text.substr( b, paren - b );
-    std::size_t ls = b > 0 && text[b - 1] == '@' ? b - 1 : b;
+    return c;
+}
+
+// REGISTRAR-2: the open paren at `paren` is a registration call that opens its line: the callee chain right before it (`a.b.name` or `a::b::name`, blanks
+// allowed before the paren, an `@` before the chain for a decorator, only blanks before that) is named for a registration. Its line up to the paren,
+// or nothing. Not a call, whatever its name (REG2-FIX1, rv-reg2 F1): (a) the callee is the name of the symbol the hit sits in (its own signature:
+// `CommandRunner(const BuildConfig& c);`, `Registry::RegisterHandler(Handler h)`, a JS method `registerHandler(h) {`); (b) the hit sits in the body
+// of a type, outside a decorator (a Rust enum's tuple variant, a TypeScript interface member); (c) in C and C++, the line follows a `:` or `,`
+// (a member-initializer list).
+inline std::optional<std::string_view> registrationOpenerAt( std::string_view text, std::size_t paren, const RegHitCtx& ctx = {} ) noexcept
+{
+    std::size_t e = paren;
+    while( e > 0 && ( text[e - 1] == ' ' || text[e - 1] == '\t' ) )
+    {
+        --e;   // `register_handler (x)`
+    }
+    std::size_t b = e;
+    while( b > 0 )
+    {
+        if( namesplit::isIdentChar( text[b - 1] ) || text[b - 1] == '.' )
+        {
+            --b;
+        }
+        else if( text[b - 1] == ':' && b > 1 && text[b - 2] == ':' )
+        {
+            b -= 2;   // `registry::register_handler(`
+        }
+        else
+        {
+            break;
+        }
+    }
+    const std::string_view callee = text.substr( b, e - b );
+    const bool decorator = b > 0 && text[b - 1] == '@';
+    std::size_t ls = decorator ? b - 1 : b;
     while( ls > 0 && ( text[ls - 1] == ' ' || text[ls - 1] == '\t' ) )
     {
         --ls;
     }
     const bool opensLine = ls == 0 || text[ls - 1] == '\n';
-    if( !opensLine || callee.empty() || std::isalpha( static_cast<unsigned char>( callee.front() ) ) == 0 || !reg_detail::isRegistrationCallee( callee ) )
+    if( !opensLine || callee.empty() || ( std::isalpha( static_cast<unsigned char>( callee.front() ) ) == 0 && callee.front() != '_' )
+        || !reg_detail::isRegistrationCallee( callee, decorator ) )
     {
         return std::nullopt;
+    }
+    const std::size_t      sep  = callee.find_last_of( ".:" );
+    const std::string_view last = sep == std::string_view::npos ? callee : callee.substr( sep + 1 );
+    if( ( !ctx.enclosingName.empty() && last == ctx.enclosingName ) || ( ctx.enclosedByType && !decorator ) )
+    {
+        return std::nullopt;
+    }
+    if( ctx.cFamily )
+    {
+        std::size_t p = ls;
+        while( p > 0 && ( text[p - 1] == ' ' || text[p - 1] == '\t' || text[p - 1] == '\n' || text[p - 1] == '\r' ) )
+        {
+            --p;
+        }
+        if( p > 0 && ( text[p - 1] == ',' || ( text[p - 1] == ':' && !( p > 1 && text[p - 2] == ':' ) ) ) )
+        {
+            return std::nullopt;
+        }
     }
     return trimWs( text.substr( ls, paren + 1 - ls ) );
 }
 
-// REGISTRAR-2: the registration call whose arguments hold the hit at `at`, or "": walking back at most kForRegCallLines lines and kForRegCallBytes
-// bytes (never past a `;`), each '(' left open before the hit is a call the hit is an argument of, innermost first; the first whose callee chain
-// (`a.b.name`, an optional `@` for a decorator) opens its line and is named for a registration (reg_detail::isRegistrationCallee) is the row's
-// opener: its line up to that '('. A definition (`func NewHandler(`, `def register(`) is no call: a keyword stands before the name. Parens in
-// strings and comments are not told apart (a floor on recall, never a claim the text does not hold: the callee is quoted from the line).
-inline std::string registrationCallOf( std::string_view text, std::size_t at )
+// a `{` that opens a block body (a function, an arrow function, a closure), not a dict, an object or a struct literal: the byte before it, past
+// blanks and newlines, is `)` (`function (a) {`, `func(w, r) {`), the `>` of `=>` or `->`, or a Rust closure's `|`
+inline bool opensBlockBody( std::string_view text, std::size_t brace ) noexcept
+{
+    std::size_t p = brace;
+    while( p > 0 && ( text[p - 1] == ' ' || text[p - 1] == '\t' || text[p - 1] == '\n' || text[p - 1] == '\r' ) )
+    {
+        --p;
+    }
+    if( p == 0 )
+    {
+        return false;
+    }
+    const char c = text[p - 1];
+    return c == ')' || c == '|' || ( c == '>' && p > 1 && ( text[p - 2] == '=' || text[p - 2] == '-' ) );
+}
+
+// the call parens and braces still open where the window of `registrationCallOf` ends, read forward from a line start: strings, char literals and
+// comments are skipped (a `(` inside one opens nothing), `;` ends the statement (every open paren before it is closed)
+struct RegScan
+{
+    struct Open
+    {
+        std::size_t pos;
+        char        c;
+    };
+    std::vector<Open> open;
+    char              quote = 0;       // the quote byte of the string being read, or 0
+    bool              triple = false;  // a triple-quoted string (Python): it ends at the next triple, not at a newline
+    bool              lineComment = false, blockComment = false;
+
+    // a `'` that opens a char literal (`'('`, `'\n'`) and not a Rust lifetime (`'a`)
+    static bool isCharLiteral( std::string_view text, std::size_t i ) noexcept
+    {
+        return i + 2 < text.size() && ( text[i + 1] == '\\' || text[i + 2] == '\'' );
+    }
+    void closeTo( char opener )
+    {
+        const auto at = std::find_if( open.rbegin(), open.rend(), [ & ]( const Open& o ) { return o.c == opener; } );
+        if( at != open.rend() )
+        {
+            open.erase( ( at + 1 ).base(), open.end() );
+        }
+    }
+    void step( std::string_view text, std::size_t& i, std::size_t end, const RegHitCtx& ctx )
+    {
+        const char c = text[i];
+        if( lineComment )
+        {
+            lineComment = c != '\n';
+            return;
+        }
+        if( blockComment )
+        {
+            if( c == '*' && i + 1 < end && text[i + 1] == '/' )
+            {
+                blockComment = false;
+                ++i;
+            }
+            return;
+        }
+        if( quote != 0 )
+        {
+            if( c == '\\' )
+            {
+                ++i;
+            }
+            else if( triple )
+            {
+                if( c == quote && i + 2 < end && text[i + 1] == quote && text[i + 2] == quote )
+                {
+                    quote = 0;
+                    i += 2;
+                }
+            }
+            else if( c == quote || ( c == '\n' && quote != '`' ) )
+            {
+                quote = 0;
+            }
+            return;
+        }
+        switch( c )
+        {
+            case '"': case '\'': case '`':
+                if( c == '\'' && ctx.rust && !isCharLiteral( text, i ) )
+                {
+                    return;   // a lifetime
+                }
+                quote  = c;
+                triple = c != '`' && i + 2 < end && text[i + 1] == c && text[i + 2] == c;
+                i += triple ? 2 : 0;
+                return;
+            case '#':
+                lineComment = ctx.hashComments && ( i == 0 || text[i - 1] == ' ' || text[i - 1] == '\t' || text[i - 1] == '\n' );
+                return;
+            case '/':
+                if( !ctx.hashComments && i + 1 < end && text[i + 1] == '/' )
+                {
+                    lineComment = true;
+                }
+                else if( !ctx.hashComments && i + 1 < end && text[i + 1] == '*' )
+                {
+                    blockComment = true;
+                    ++i;
+                }
+                return;
+            case ';': open.clear(); return;
+            case '(': case '{': open.push_back( Open{ i, c } ); return;
+            case ')': closeTo( '(' ); return;
+            case '}': closeTo( '{' ); return;
+            default: return;
+        }
+    }
+};
+
+// REGISTRAR-2: the registration call whose arguments hold the hit at `at`, or "": the text from at most kForRegCallLines lines and kForRegCallBytes
+// bytes above the hit (from a line start, after the last `;`) is read forward; each '(' left open is a call the hit is an argument of, innermost
+// first; the first whose callee chain opens its line and is named for a registration (registrationOpenerAt) is the row's opener: its line up to
+// that '('. The walk ends at an open `{` that starts a block body (opensBlockBody: a closure's statements are not the arguments of the call that
+// holds the closure). A definition (`func NewHandler(`, `def register(`) is no call: a keyword stands before the name. Parens in strings and
+// comments are skipped (RegScan). A call opened above the window is not found: the row's absence is no claim (the table legend says how far it reads).
+inline std::string registrationCallOf( std::string_view text, std::size_t at, const RegHitCtx& ctx = {} )
 {
     if( at > text.size() )
     {
         return {};
     }
-    const std::size_t floorAt = at > kForRegCallBytes ? at - kForRegCallBytes : 0;
-    std::size_t depth = 0, lines = 0;
-    for( std::size_t i = at; i > floorAt; --i )
+    std::size_t start = at > kForRegCallBytes ? at - kForRegCallBytes : 0;
+    for( std::size_t i = at, lines = 0; i > start; --i )
     {
-        const char c = text[i - 1];
-        if( c == ';' || ( c == '\n' && ++lines > kForRegCallLines ) )
+        if( text[i - 1] == '\n' && ++lines > kForRegCallLines )
         {
-            return {};
+            start = i;
+            break;
         }
-        if( c == ')' )
+    }
+    if( start > 0 && text[start - 1] != '\n' )
+    {
+        const std::size_t nl = text.find( '\n', start );
+        start = nl == std::string_view::npos ? at : nl + 1;   // read from a line start: a string's quote state is unknown mid-line
+    }
+    RegScan scan;
+    for( std::size_t i = start; i < at; ++i )
+    {
+        scan.step( text, i, at, ctx );
+    }
+    for( std::size_t k = scan.open.size(); k-- > 0; )
+    {
+        if( scan.open[k].c == '{' )
         {
-            ++depth;
+            if( opensBlockBody( text, scan.open[k].pos ) )
+            {
+                return {};
+            }
             continue;
         }
-        if( c != '(' )
-        {
-            continue;
-        }
-        if( depth > 0 )
-        {
-            --depth;
-            continue;
-        }
-        if( std::optional<std::string_view> opener = registrationOpenerAt( text, i - 1 ) )
+        if( std::optional<std::string_view> opener = registrationOpenerAt( text, scan.open[k].pos, ctx ) )
         {
             return std::string( *opener );
         }
@@ -1972,7 +2170,9 @@ inline std::string registrationCallOf( std::string_view text, std::size_t at )
 }
 
 // REGISTRAR-2: the name holding the hit at `at` is a whole argument of a call: the identifier run around it stands between `(` or `,` and `,` or `)`
-// (`async_reg(hass, handle_get_states)`), never a callee (`async_get_turn_on_trigger(x)`) or a member of a chain (`self._turn_on.async_register(`)
+// (`async_reg(hass, handle_get_states)`), never a callee (`async_get_turn_on_trigger(x)`) or a member of a chain (`self._turn_on.async_register(`).
+// An identifier run longer than kForRegIdentBytes either side is a blob, not a name: no argument, and the walk stays bounded however often a short
+// anchor repeats inside it.
 inline bool isArgumentName( std::string_view text, std::size_t at, std::size_t n ) noexcept
 {
     if( at > text.size() || n > text.size() - at )
@@ -1982,13 +2182,21 @@ inline bool isArgumentName( std::string_view text, std::size_t at, std::size_t n
     std::size_t b = at, e = at + n;
     while( b > 0 && namesplit::isIdentChar( text[b - 1] ) )
     {
+        if( at - b >= kForRegIdentBytes )
+        {
+            return false;
+        }
         --b;
     }
     while( e < text.size() && namesplit::isIdentChar( text[e] ) )
     {
+        if( e - ( at + n ) >= kForRegIdentBytes )
+        {
+            return false;
+        }
         ++e;
     }
-    while( b > 0 && ( text[b - 1] == ' ' || text[b - 1] == '\t' || text[b - 1] == '\n' ) )
+    while( b > 0 && ( text[b - 1] == ' ' || text[b - 1] == '\t' || text[b - 1] == '\n' || text[b - 1] == '\r' ) )
     {
         --b;
     }
@@ -1999,25 +2207,99 @@ inline bool isArgumentName( std::string_view text, std::size_t at, std::size_t n
     return b > 0 && ( text[b - 1] == '(' || text[b - 1] == ',' ) && e < text.size() && ( text[e] == ',' || text[e] == ')' );
 }
 
-// shape=table: read each ranked site for a table row; true when one is. A site that is no row of a table may be an argument of a registration
-// call (registrationCallOf), anywhere: in a function body too, and a hit inside a longer name (`handle_get_states`) only so.
-template<typename LoadFile>
-inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, const std::vector<GrepHit>& enriched, LoadFile&& loadFile, const std::string& loadedText )
+// remove the ranked rows flagged in `drop` (parallel to `enriched`, and to the first rows of `rows`); the count removed
+inline std::size_t dropRows( std::vector<Site>& rows, std::vector<GrepHit>& enriched, const std::vector<char>& drop )
 {
-    bool any = false;
+    std::size_t out = 0, n = 0;
+    for( std::size_t i = 0; i < enriched.size(); ++i )
+    {
+        if( drop[i] == 0 )
+        {
+            if( out != i )
+            {
+                rows[out]     = std::move( rows[i] );
+                enriched[out] = std::move( enriched[i] );
+            }
+            ++out;
+        }
+        else
+        {
+            ++n;
+        }
+    }
+    if( n > 0 )
+    {
+        rows.erase( rows.begin() + std::ptrdiff_t( out ), rows.begin() + std::ptrdiff_t( enriched.size() ) );
+        enriched.resize( out );
+    }
+    return n;
+}
+
+// the symbol kinds whose body holds members, not statements
+inline bool isTypeKind( SymKind k ) noexcept
+{
+    static constexpr std::array<SymKind, 4> kTypeBodyKinds{ SymKind::Class, SymKind::Struct, SymKind::Interface, SymKind::NamedType };
+    return std::find( kTypeBodyKinds.begin(), kTypeBodyKinds.end(), k ) != kTypeBodyKinds.end();
+}
+
+// shape=table: read each ranked site for a table row; true when one is. A site that is no row of a table may be an argument of a registration
+// call (registrationCallOf, tried at every hit of its line), anywhere: in a function body too, and a hit inside a longer name (`handle_get_states`)
+// only so. A site of a longer name that is no such argument is dropped from `rows` and `enriched` (counted in `longerDropped`, said as longer=).
+template<typename LoadFile>
+inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, std::vector<GrepHit>& enriched, LoadFile&& loadFile, const std::string& loadedText,
+                           std::size_t& longerDropped )
+{
+    bool              any = false;
+    std::vector<char> drop( enriched.size(), 0 );
     for( std::size_t i = 0; i < enriched.size(); ++i )
     {
         loadFile( rows[i].raw.fileId );
-        const bool callableOwner = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        rows[i].tbl = rows[i].longer ? std::string() : tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner, bracketReadingOf( langOfPath( ing.files[rows[i].raw.fileId] ) ) );
+        const NodeId     owner         = enriched[i].enclosingId;
+        const bool       callableOwner = owner != kNoNode && ReceiverEvidence::callableKind( ing.symbols[owner].kind );
+        const Lang       lang          = langOfPath( ing.files[rows[i].raw.fileId] );
+        rows[i].tbl = rows[i].longer ? std::string() : tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner, bracketReadingOf( lang ) );
         if( rows[i].tbl.empty() )
         {
-            rows[i].tbl     = registrationCallOf( loadedText, rows[i].raw.byteOffset );
+            RegHitCtx ctx = regLangCtxOf( lang );
+            if( owner != kNoNode )
+            {
+                ctx.enclosingName  = ing.symbols[owner].name;
+                ctx.enclosedByType = isTypeKind( ing.symbols[owner].kind );
+            }
+            rows[i].tbl = registrationCallOf( loadedText, rows[i].raw.byteOffset, ctx );
+            for( std::size_t m = 0; rows[i].tbl.empty() && m < rows[i].more.size(); ++m )
+            {
+                rows[i].tbl = registrationCallOf( loadedText, rows[i].more[m], ctx );
+            }
             rows[i].regCall = !rows[i].tbl.empty();
+            drop[i]         = rows[i].longer && rows[i].tbl.empty();
         }
-        any         = any || !rows[i].tbl.empty();
+        any = any || !rows[i].tbl.empty();
     }
+    longerDropped += dropRows( rows, enriched, drop );
     return any;
+}
+
+// REG2-FIX1 (rv-reg2 F3): the last part of a dotted name (`editor.mode` -> `mode`), tried after the name itself found nothing, lists only the rows where it is
+// a quoted key (`'ValidationError': (...)`, `.method('redirect')`) and the tail's own definition: any other site of a common word is a mention, not the thing
+// the task named. False when no site is a quoted key (nothing is listed). `dropped` counts the sites left out (said as tail=).
+inline bool keepTailKeyRows( const IngestResult& ing, std::string_view tail, std::vector<Site>& rows, std::vector<GrepHit>& enriched, std::size_t& dropped )
+{
+    std::vector<char> drop( enriched.size(), 0 );
+    bool              anyKey = false;
+    for( std::size_t i = 0; i < enriched.size(); ++i )
+    {
+        const NodeId owner = enriched[i].enclosingId;
+        const bool   def   = owner != kNoNode && ing.symbols[owner].name == tail && ing.symbols[owner].line == enriched[i].line;
+        anyKey             = anyKey || rows[i].quotedKey;
+        drop[i]            = !( rows[i].quotedKey || def );
+    }
+    if( !anyKey )
+    {
+        return false;
+    }
+    dropped += dropRows( rows, enriched, drop );
+    return true;
 }
 
 // a table row's tbl= attribute onto its <ls>; the opener is raw source text. No opener, no attribute.
@@ -2302,6 +2584,7 @@ struct ForLiteralLimits
     bool        withLegend = true;       // only the first element of a task carries the legend comments
     bool        tableOnly  = false;      // TableCue::TableRowOnly: no table row, no block
     bool        cutLegendAbove = false;  // an earlier element of the task carries the lit_cut legend
+    bool        tailKeysOnly   = false;  // the last part of a dotted name, tried after the name found nothing: only quoted-key rows and its definition are listed
 };
 
 // THE BLOCK. `served` = the answer's own bytes after <sigs> (bodies, fold, slot, hops): a body whose <b … l= p= n=> head is in it
@@ -2360,7 +2643,8 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                 loadFile( r.fileId );
                 keyHit = lit_detail::literalHitAt( policy.boundary, loadedText, r.byteOffset, lit.text.size() );
                 if( keyHit.longer
-                    && !( policy.tableRows && lit_detail::isArgumentName( loadedText, r.byteOffset, lit.text.size() ) && !lit_detail::registrationCallOf( loadedText, r.byteOffset ).empty() ) )
+                    && !( policy.tableRows && lit_detail::isArgumentName( loadedText, r.byteOffset, lit.text.size() )
+                          && !lit_detail::registrationCallOf( loadedText, r.byteOffset, lit_detail::regLangCtxOf( langOfPath( ing.files[r.fileId] ) ) ).empty() ) )
                 {
                     ++longerHits;
                     continue;
@@ -2432,9 +2716,13 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 lines.push_back( r );
             }
-            else if( r.k == 's' )
+            else
             {
-                lines.back().k = 's';
+                lines.back().k = r.k == 's' ? 's' : lines.back().k;
+                if( policy.tableRows && lines.back().more.size() < kForRegLineHits )
+                {
+                    lines.back().more.push_back( r.raw.byteOffset );   // a later hit of the line may be the registration's argument (`h.register(h)`)
+                }
             }
             if( lines.back().raw.fileId == r.raw.fileId && lines.back().raw.line == r.raw.line )
             {
@@ -2453,30 +2741,44 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         return out;   // no source site: nothing to anchor on (test/doc/comment counts alone answer nothing; measured as noise, ld2-django-09)
     }
-    const std::size_t ranked = std::min( rows.size(), policy.rankedRows );
+    std::size_t ranked = std::min( rows.size(), policy.rankedRows );
     for( std::size_t i = 0; i < ranked; ++i )
     {
         all.push_back( rows[i].raw );
     }
     std::vector<GrepHit> enriched = grepEnrich( ing, std::span<const GrepRawHit>( all ) );
     ASSUME( enriched.size() == all.size(), "grepEnrich returns one row per windowed hit" );
-    if( policy.tableRows && !lit_detail::markTableRows( ing, rows, enriched, loadFile, loadedText ) && limits.tableOnly )
+    std::size_t tailDropped = 0;   // limits.tailKeysOnly: sites of the tail that are no quoted key and no definition, not listed
+    if( policy.tableRows )
     {
-        ForLiteralRender none;
-        none.unread = rows.size() > ranked;   // the sites past the cap were not read: the caller says so
-        return none;
+        const bool anyMarked = lit_detail::markTableRows( ing, rows, enriched, loadFile, loadedText, longerHits );
+        const bool keysOk    = !limits.tailKeysOnly || lit_detail::keepTailKeyRows( ing, lit.text, rows, enriched, tailDropped );
+        const bool anyRow    = keysOk && ( limits.tailKeysOnly ? std::any_of( rows.begin(), rows.begin() + std::ptrdiff_t( enriched.size() ), []( const lit_detail::Site& r ) { return !r.tbl.empty(); } ) : anyMarked );
+        ranked    = enriched.size();
+        out.sites = rows.size();
+        if( !keysOk || ranked == 0 || ( !anyRow && limits.tableOnly ) )
+        {
+            ForLiteralRender none;
+            none.unread = rows.size() > ranked;   // the sites past the cap were not read: the caller says so
+            return none;
+        }
     }
     std::vector<std::size_t> order( enriched.size() );
     for( std::size_t i = 0; i < order.size(); ++i )
     {
         order[i] = i;
     }
-    const auto rankOf = [ & ]( std::size_t i )
+    const auto rankSite = [ & ]( std::size_t i )
     {
         const bool callable = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
         const std::string_view path = rootRelPath( ing, rows[i].raw.fileId );
         return ( policy.tableRows && ( lit_detail::isSecondaryPath( path ) || lit_detail::isGeneratedOrDataPath( path ) ) ? 6 : 0 ) + ( policy.tableRows && rows[i].tbl.empty() ? 12 : 0 ) + ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable != policy.tableRows ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
     };
+    std::vector<int> rank( enriched.size() );   // hoisted out of the comparators: each site's path scans run once (rv-reg2 F7)
+    for( std::size_t i = 0; i < rank.size(); ++i )
+    {
+        rank[i] = rankSite( i );
+    }
     // LIT-SITE-DECOY: nearness to the answer above the block (its rows and bodies, and the literal's own definitions) orders the sites and,
     // when they do not all fit, cuts the far ones (lit_cut=). A CI, vendored or generated copy is never a row beside a product site.
     // the registrations the reserve keeps (pickRows: kForLiteralRegistrationRows quoted keys outside any function, property keys first, in rank
@@ -2491,7 +2793,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             const char m = lit_detail::registrationMark( ing, rows[i], enriched[i].enclosingId, enriched[i].text, lit.text );
             if( m > 0 )
             {
-                marked.emplace_back( -int( m ) * 1000 + rankOf( i ), i );
+                marked.emplace_back( -int( m ) * 1000 + rank[i], i );
             }
         }
         std::ranges::stable_sort( marked, {}, &std::pair<int, std::size_t>::first );
@@ -2503,10 +2805,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     const lit_detail::SiteCut cut = lit_detail::cutSites( ing, anchors, lit.text, rows, enriched, reserved, policy.tableRows, rows.size() > policy.rows );
     std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b )
                       {
-                          const auto key = [ & ]( std::size_t i ) { return std::pair{ cut.tier[i], rankOf( i ) }; };
+                          const auto key = [ & ]( std::size_t i ) { return std::pair{ cut.tier[i], rank[i] }; };
                           return key( a ) < key( b );
                       } );
-    // lit_cut= is said when the cut moved a row: a cut site the old order (rankOf alone) would have listed; otherwise capped= already says it
+    // lit_cut= is said when the cut moved a row: a cut site the old order (rank alone) would have listed; otherwise capped= already says it
     bool cutMovedRow = false;
     if( cut.count > 0 )
     {
@@ -2515,7 +2817,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         {
             old[i] = i;
         }
-        std::stable_sort( old.begin(), old.end(), [ & ]( std::size_t a, std::size_t b ) { return rankOf( a ) < rankOf( b ); } );
+        std::stable_sort( old.begin(), old.end(), [ & ]( std::size_t a, std::size_t b ) { return rank[a] < rank[b]; } );
         std::vector<char> oldRegistration( old.size(), 0 );   // the old pick, registration slots and all (pickRows below, on the old order)
         for( std::size_t i = 0; policy.reserve > 0 && i < old.size(); ++i )
         {
@@ -2693,6 +2995,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     }
     x += policy.tableRows && out.sites > ranked ? " read=\"" + std::to_string( ranked ) + "\"" : std::string();
     x += longerHits > 0 ? " longer=\"" + std::to_string( longerHits ) + "\"" : std::string();
+    x += tailDropped > 0 ? " tail=\"" + std::to_string( tailDropped ) + "\"" : std::string();
     x += lit.frag ? " frag=\"1\"" : "";
     x += lit.tryNo > 1 ? " try=\"" + std::to_string( lit.tryNo ) + "\"" : std::string();
     x += cutMovedRow ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
@@ -2783,8 +3086,9 @@ struct TableWalk
         ++skipped;
         firstSkipped = firstSkipped.empty() ? word : firstSkipped;
     }
-    // `late`: an anchor the index holds no symbol of, tried on the cue's row-only reading alone
-    TableTry tryAnchor( const TableAnchor& anchor, bool late )
+    // `late`: an anchor the index holds no symbol of, tried on the cue's row-only reading alone. `tail`: the last part of a dotted name (lateTableAnchor),
+    // which lists only quoted-key rows and its definition
+    TableTry tryAnchor( const TableAnchor& anchor, bool late, bool tail = false )
     {
         const std::string& word = anchor.text;
         if( namesIndexedFile( ing, word ) || ( !late && !forTableAnchorKeeps( ing, word, anchor.quoted ) ) )
@@ -2797,7 +3101,7 @@ struct TableWalk
             return TableTry::Empty;
         }
         ++scanned;
-        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm, out.cutLegend };
+        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm, out.cutLegend, tail };
         ForLiteral lit{ word, "table" };
         ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits, anchors );
         if( r.noRoom || r.unread )
@@ -2857,14 +3161,15 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
     for( const TableAnchor& anchor : own )
     {
         const TableTry tried = walk.tryAnchor( anchor, false );
-        if( std::optional<TableAnchor> l = lateTableAnchor( ing, anchor, tried, cue, own ) )
+        std::optional<TableAnchor> l = lateTableAnchor( ing, anchor, tried, cue, own );
+        if( l && std::none_of( later.begin(), later.end(), [ & ]( const auto& e ) { return e.first.text == l->text; } ) )   // `a.k` and `b.k` retry `k` once
         {
             later.emplace_back( std::move( *l ), tried == TableTry::Unkept );
         }
     }
     for( const auto& [anchor, unindexed] : later )
     {
-        walk.tryAnchor( anchor, unindexed );
+        walk.tryAnchor( anchor, unindexed, /*tail=*/!unindexed );
     }
     ForLiteralRender out = std::move( walk.out );
     if( walk.skipped > 0 )
