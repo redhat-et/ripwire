@@ -24,7 +24,8 @@
 //     (the CLI --for default bundle) and only where that answer has them: one function with a source definition, a real body that
 //     fits the single-anchor allowance, a caller (flipServesBodyAndCallers). rankQuery carries the name; route= says dropped:.
 //   * everything else, a refused flip included: the route is chooseForRanker's for the whole subject (CONFIDENCE-ANCHOR's note aside). A conceptual
-//     route whose descriptive subject names a symbol gains <callers by="subject"> on top (verbs_for.h); nothing is taken.
+//     route whose descriptive subject names a symbol gains <callers by="subject"> on top (verbs_for.h); nothing is taken. For that
+//     block alone a sentence that asks what depends on the symbol (isDependentsCue) does not count its task frame as prose.
 
 #include "filter.h"            // isTestSymbol, pathTierOf
 #include "forcallerhop.h"      // forCallerHopTargets — the ONE-function test a flip needs (its callers are served)
@@ -40,6 +41,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -68,6 +70,7 @@ struct SubjectReading
     std::size_t                     names       = 0;       // identifier-syntax words in the subject (the words `reduced` keeps)
     bool                            sourceDef   = false;   // one exact symbol has a source-class definition
     bool                            descriptive = false;   // no question lead, and few enough plain words: not prose
+    bool                            framed      = false;   // descriptive, or asks what depends on it with few plain words beside the frame
 };
 
 // What a --for or MCP route uses: the route, and the query the ranker and the mention anchor read.
@@ -136,6 +139,82 @@ inline bool hasNameSyntax( std::string_view w ) noexcept
 inline bool isQuestionLead( std::string_view w )
 {
     return detail::graphSubjectWordIs( w, { "which", "where", "how", "what", "why", "who", "when", "does", "do", "is", "are", "can", "should", "will" } );
+}
+
+// SUBJECT-CALLERS-NATURAL. A sentence can name ONE function and only frame a question about what depends on it: "I want to add a
+// new parameter to f; what is affected?", "who calls f and would break if its signature changed?". Such a sentence asks exactly what
+// "f new parameter" asks. Two closed word lists, no code names. A dependents cue asks who uses the function (change, add, affected,
+// breaks, depends, calls, used, update, modify, invokes, references, rename, exercise), in its dependents sense only (asksDependents);
+// without one a sentence is not asking for callers ("how does f reach g", "default x and y for buffers"), so it reads as before. The
+// sentence names ONE function: with two, the block would guess which one the cue governs. Task frame words are the cues plus question leads, pronouns, helpers, conjunctions
+// and prepositions ("I need to", "what would that", "into"); the plain-word bound counts the other words only. Only <callers by="subject"> reads
+// this; the flip keeps `descriptive`, so a sentence never trades a map for a name-exact route.
+// The two closed lists, one table: `cue` marks a dependents cue (also a frame word); the rest only frame the question.
+struct TaskFrameWord
+{
+    std::string_view word;
+    bool             cue;
+};
+inline constexpr TaskFrameWord kTaskFrameWords[] = {
+    { "change", true }, { "changes", true }, { "changed", true }, { "changing", true }, { "add", true }, { "adds", true }, { "added", true },
+    { "adding", true }, { "affect", true }, { "affects", true }, { "affected", true }, { "affecting", true }, { "break", true }, { "breaks", true },
+    { "broke", true }, { "broken", true }, { "breaking", true }, { "depend", true }, { "depends", true }, { "depended", true }, { "depending", true },
+    { "dependent", true }, { "dependents", true }, { "update", true }, { "updates", true }, { "updated", true }, { "updating", true }, { "modify", true },
+    { "modifies", true }, { "modified", true }, { "modifying", true }, { "call", true }, { "calls", true }, { "called", true }, { "calling", true },
+    { "caller", true }, { "callers", true }, { "used", true }, { "uses", true }, { "invoke", true }, { "invokes", true }, { "invoked", true },
+    { "invoking", true }, { "references", true }, { "referenced", true }, { "referencing", true }, { "rename", true }, { "renames", true },
+    { "renamed", true }, { "renaming", true }, { "exercise", true }, { "exercises", true }, { "exercised", true }, { "exercising", true },
+    { "i", false }, { "we", false }, { "you", false }, { "me", false }, { "my", false }, { "our", false }, { "it", false }, { "its", false }, { "it's", false },
+    { "they", false }, { "them", false }, { "their", false }, { "this", false }, { "that", false }, { "these", false }, { "those", false }, { "there", false },
+    { "here", false }, { "am", false }, { "be", false }, { "been", false }, { "being", false }, { "was", false }, { "were", false }, { "has", false },
+    { "have", false }, { "had", false }, { "did", false }, { "done", false }, { "would", false }, { "could", false }, { "might", false }, { "must", false },
+    { "may", false }, { "shall", false }, { "need", false }, { "needs", false }, { "want", false }, { "wants", false }, { "wanted", false }, { "and", false },
+    { "or", false }, { "if", false }, { "then", false }, { "so", false }, { "but", false }, { "else", false }, { "also", false }, { "whom", false },
+    { "whose", false }, { "anything", false }, { "something", false }, { "everything", false }, { "define", false }, { "defines", false },
+    { "defined", false }, { "use", false }, { "using", false }, { "work", false }, { "works", false }, { "worked", false }, { "working", false },
+    { "from", false }, { "into", false }, { "onto", false }, { "between", false }, { "about", false }, { "by", false }, { "at", false }, { "as", false },
+    { "through", false }, { "via", false }, { "within", false }, { "across", false }, { "after", false }, { "before", false }, { "during", false },
+    { "up", false }, { "down", false }, { "out", false }, { "toward", false }, { "towards", false } };
+
+// is the word (a subject word, already trimmed by graphSubjectTrimWord) in the table, and is it a cue?
+enum class FrameClass : std::uint8_t
+{
+    None,
+    Frame,
+    Cue
+};
+inline FrameClass taskFrameClass( std::string_view w )
+{
+    const std::string lw = routeLower( w );
+    const auto        at = std::ranges::find( kTaskFrameWords, std::string_view( lw ), &TaskFrameWord::word );
+    return at == std::end( kTaskFrameWords ) ? FrameClass::None : at->cue ? FrameClass::Cue : FrameClass::Frame;
+}
+
+inline bool isDependentsCue( std::string_view w ) { return taskFrameClass( w ) == FrameClass::Cue; }
+
+inline bool isTaskFrameWord( std::string_view w )
+{
+    return isQuestionLead( w ) || taskFrameClass( w ) != FrameClass::None;
+}
+
+// A cue word in a sentence names a dependent only in the dependents sense. Closed lists, read beside the cue (SCN-FIX1):
+//   * a dependents NOUN (callers, dependents) always asks for them;
+//   * the callee shape asks what the function itself does, so no verb cue counts: an auxiliary right before the name ("what does f
+//     depend on / modify / use", "where does f make API calls") or the name as the subject of a verb cue ("f calls", "f uses");
+//   * "used to <verb>" is a purpose; "API calls", "make calls" are a noun; a negated cue ("I changed nothing in f") asks nothing;
+//   * "using" is a means ("build it using f") except after a form of be ("who is using f").
+inline constexpr std::string_view kDependentsNouns[] = { "caller", "callers", "dependent", "dependents" };
+inline constexpr std::string_view kCalleeAux[]       = { "does", "do", "did", "doesn't", "don't", "didn't" };
+inline constexpr std::string_view kAgentCues[]       = { "calls", "uses", "depends", "modifies", "updates", "affects", "adds", "invokes", "references", "exercises", "renames" };
+inline constexpr std::string_view kCallNounModifiers[] = { "api", "apis", "http", "https", "rpc", "grpc", "network", "remote", "external", "system", "database", "db",
+                                                           "sql", "rest", "make", "makes", "made", "making" };
+inline constexpr std::string_view kNegations[]  = { "not", "never", "no", "nothing", "none", "without", "didn't", "don't", "doesn't", "haven't", "hasn't", "won't" };
+inline constexpr std::string_view kBeForms[]    = { "is", "are", "was", "were", "who's", "what's" };
+// is the (trimmed) word, case-folded, in the closed list?
+inline bool wordIn( std::string_view w, std::span<const std::string_view> list )
+{
+    const std::string lw = routeLower( w );
+    return std::ranges::find( list, std::string_view( lw ) ) != list.end();
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
@@ -243,6 +322,64 @@ inline bool sortSubjectWords( const std::vector<std::string_view>& words, Subjec
     }
     return true;
 }
+// the cue at text[k] asks what depends on the sentence's function (the senses listed above kDependentsNouns)
+inline bool cueInDependentsSense( const std::vector<std::string_view>& text, std::size_t k, bool callee )
+{
+    const std::string_view w    = text[k];
+    const std::string_view prev = k > 0 ? text[k - 1] : std::string_view();
+    const std::string_view next = k + 1 < text.size() ? text[k + 1] : std::string_view();
+    if( wordIn( prev, kNegations ) || wordIn( next, kNegations ) )
+    {
+        return false;
+    }
+    if( wordIn( w, kDependentsNouns ) )
+    {
+        return true;
+    }
+    if( callee )
+    {
+        return false;
+    }
+    if( detail::graphSubjectWordIs( w, { "using" } ) )
+    {
+        return wordIn( prev, kBeForms );
+    }
+    const bool purpose = detail::graphSubjectWordIs( w, { "used" } ) && detail::graphSubjectWordIs( next, { "to" } );
+    const bool noun    = detail::graphSubjectWordIs( w, { "call", "calls" } ) && wordIn( prev, kCallNounModifiers );
+    return isDependentsCue( w ) && !purpose && !noun;
+}
+// a sentence that names ONE function (each mention the same spelling) and asks what depends on it, with few plain words beside the
+// task frame. Two names fire for none: the block would have to guess which one the cue governs ("when f changes, who calls g?").
+inline bool asksDependents( const std::vector<std::string_view>& words, const std::vector<std::string>& dropped )
+{
+    std::vector<std::string_view> text;   // trimmed words, sentence order
+    std::string_view              name;
+    bool                          callee = false;
+    for( const std::string_view w : words )
+    {
+        text.push_back( detail::graphSubjectTrimWord( w ).text );
+    }
+    for( std::size_t k = 0; k < text.size(); ++k )
+    {
+        if( isRouteStopword( routeLower( text[k] ) ) || !hasNameSyntax( text[k] ) )
+        {
+            continue;
+        }
+        if( !name.empty() && name != text[k] )
+        {
+            return false;
+        }
+        name   = text[k];
+        callee = callee || ( k > 0 && wordIn( text[k - 1], kCalleeAux ) ) || ( k + 1 < text.size() && wordIn( text[k + 1], kAgentCues ) );
+    }
+    bool cue = false;
+    for( std::size_t k = 0; k < text.size() && !cue; ++k )
+    {
+        cue = cueInDependentsSense( text, k, callee );
+    }
+    const auto plain = []( const std::string& w ) { return !isTaskFrameWord( w ); };
+    return cue && !name.empty() && std::size_t( std::ranges::count_if( dropped, plain ) ) <= kSubjectMaxPlainWords;
+}
 }   // namespace subject_detail
 
 inline SubjectReading subjectReading( const IngestResult& ing, std::string_view task )
@@ -290,6 +427,7 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
     }
     r.names       = keptRaw.size();
     r.descriptive = !isQuestionLead( words.front() ) && r.dropped.size() <= kSubjectMaxPlainWords;
+    r.framed      = r.descriptive || subject_detail::asksDependents( words, r.dropped );
     return r;
 }
 
@@ -515,7 +653,8 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
             return out;
         }
     }
-    if( lift && out.route.which != LexMode::NameExact )
+    // SUBJECT-CALLERS-NATURAL: the callers ride on a framed sentence too ("who calls f", "I need to change f; what depends on it?")
+    if( reading.framed && reading.sourceDef && out.route.which != LexMode::NameExact )
     {
         // the source-class definitions only: a CI or vendored copy of the name is not a second function to split the callers over
         for( SubjectExactSymbol& e : reading.exact )
