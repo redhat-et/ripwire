@@ -9,6 +9,7 @@
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
+#include "infra/sortutil.h"   // svLess: the explicit byte order the alias-name table is sorted and binary-searched by (portablebuildcheck #6)
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_navigate.h — the navigate family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -764,7 +765,7 @@ inline SiteNameMatch matchSiteName( const UsesSelector& sel, std::string_view ca
     {
         return { callee == sel.siteMatchName, sel.anyOfTags.empty() ? rw::kNoNode : sel.anyOfTags[ 0 ] };
     }
-    const auto        at = std::ranges::lower_bound( sel.anyOfNames, callee );
+    const auto        at = std::ranges::lower_bound( sel.anyOfNames, callee, rw::sortutil::svLess );   // byte order, not the default string_view <
     const std::size_t k  = std::size_t( at - sel.anyOfNames.begin() );
     return { at != sel.anyOfNames.end() && *at == callee, k < sel.anyOfTags.size() ? sel.anyOfTags[ k ] : rw::kNoNode };
 }
@@ -928,7 +929,8 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
     {
         byName.emplace_back( names[ k ], k );
     }
-    std::ranges::sort( byName );
+    std::ranges::sort( byName, []( const std::pair<std::string_view, std::size_t>& a, const std::pair<std::string_view, std::size_t>& b )
+                       { return a.first != b.first ? rw::sortutil::svLess( a.first, b.first ) : a.second < b.second; } );
     std::vector<std::string_view> sorted;
     std::vector<NodeId>           tags;   // the name's index rides as the tag: the site's own alias is picked below
     for( const auto& [ n, k ] : byName )

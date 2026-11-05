@@ -234,9 +234,15 @@ if run "$C" "$TMP/l1" --for=ColumnPtr; then
   if has "$TMP/l1" 'unread="1": its file'; then no "[RED] legend: an unread clause with nothing unread"; else ok "[RED] legend: no unread clause"; fi
   if has "$TMP/f5" 'cycle="1": a definition'; then ok "legend: the cycle clause rides when a chain has one (twin)"; else no "legend: cycle clause missing on the cyclic chain"; fi
 fi
-if run "$C" "$TMP/l2" --for=ColumnPtr --max-tokens=40000; then
-  if grep -qE '<aliases [^>]*shed="m"' "$TMP/l2" && ! grep -qE '<h [^>]* m="' "$TMP/l2" && grep -qE '<h n="IColumn" [^>]*members="2"' "$TMP/l2"; then ok "[RED] max-tokens: m= shed, members= kept, shed=m disclosed"; else no "[RED] max-tokens: shed wrong"; fi
-  if has "$TMP/l2" 'shed=: a max-tokens'; then ok "[RED] max-tokens: shed= legend-defined"; else no "[RED] max-tokens: shed= legend missing"; fi
+# shed= follows the --for body ceiling (--max-tokens WITH --detail=N), the kShapingVerbs carve-out: a bare --max-tokens is noticed as ignored
+# ("nothing was dropped"), so the bare run must print the block whole and byte-identical to the run without the flag (shapingflagcheck (A) 22 sites)
+if run "$C" "$TMP/l2" --for=ColumnPtr --max-tokens=40000 --detail=1; then
+  if grep -qE '<aliases [^>]*shed="m"' "$TMP/l2" && ! grep -qE '<h [^>]* m="' "$TMP/l2" && grep -qE '<h n="IColumn" [^>]*members="2"' "$TMP/l2"; then ok "[RED] max-tokens + detail: m= shed, members= kept, shed=m disclosed"; else no "[RED] max-tokens + detail: shed wrong"; fi
+  if has "$TMP/l2" 'shed=: a max-tokens'; then ok "[RED] max-tokens + detail: shed= legend-defined"; else no "[RED] max-tokens + detail: shed= legend missing"; fi
+fi
+if run "$C" "$TMP/l3" --for=ColumnPtr --max-tokens=40000; then
+  if grep -qE '<aliases [^>]*shed=' "$TMP/l3" || ! grep -qE '<h [^>]* m="' "$TMP/l3"; then no "[RED] bare --max-tokens: the alias block shed under a flag the notice says --for ignores"; else ok "[RED] bare --max-tokens: the alias block prints whole (the notice's 'nothing was dropped' holds)"; fi
+  if ! grep -q 'is not read by --for' "$TMP/l3.err"; then no "[RED] bare --max-tokens: the ignore notice is missing"; else ok "bare --max-tokens: the ignore notice rides"; fi
 fi
 
 # ── CodeRabbit round on #537 (tmp/card12-cr/disp.md) ── here [RED] = fails on 26bf91a3b (the head CodeRabbit read)

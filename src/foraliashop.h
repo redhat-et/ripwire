@@ -117,7 +117,7 @@ struct ForAliasHopArgs
     std::string_view           routeNote;
     const std::vector<NodeId>* printed = nullptr;   // the answer's printed definition rows, in answer order
     bool                       held    = false;     // a token budget is set
-    bool                       shed    = false;     // --max-tokens is set: m= and the leaf-only chains are left out first (S5)
+    bool                       shed    = false;     // the --for body ceiling is set (--max-tokens with --detail=N): m= and the leaf-only chains are left out first (S5)
     RedactCounts*              redact  = nullptr;   // the run's redaction tally (nullptr under --no-redact): the block prints source text
 };
 

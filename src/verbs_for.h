@@ -4765,11 +4765,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }
         // XF-ALIAS-HOP (foraliashop.h): a printed row the task names is an alias definition: its chain to what it names; "" otherwise.
-        // Its own allowance, outside est_tokens, like the two blocks above. XML only.
+        // Its own allowance, outside est_tokens, like the two blocks above. XML only. shed= follows forBodyCeiling (--max-tokens WITH --detail=N), the
+        // kShapingVerbs carve-out: a bare --max-tokens on --for is noticed as ignored ("nothing was dropped"), so the block must not shed under it.
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && sigsPreRendered )
         {
             const std::string aliasHops = rw::renderForAliasHops( ing, rw::ForAliasHopArgs{ .task = cfg.forTask, .routeNote = routeNoteRaw, .printed = &shownSigIds,
-                                                                                            .held = cfg.tokenBudget > 0, .shed = cfg.maxTokens > 0, .redact = redactPtr } );
+                                                                                            .held = cfg.tokenBudget > 0, .shed = forBodyCeiling, .redact = redactPtr } );
             std::fwrite( aliasHops.data(), 1, aliasHops.size(), stdout );
         }
         std::vector<rw::NodeId> litAnswerIds = shownSigIds;   // LIT-SITE-DECOY: the answer's rows and whole bodies order the literal's sites
