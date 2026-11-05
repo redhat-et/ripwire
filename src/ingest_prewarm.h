@@ -140,7 +140,8 @@ inline void collectExtractPartials( const IngestFileScan& scan, IngestResult& re
 // refusal — its stderr note and its --skipped row — vanished from every warm run (kotlincheck §12's warm arm caught it).
 // The record is written as UNKNOWN instead: hash 0 and the stat gate's own -1 "not captured" triple, so the next run
 // re-reads the file, re-refuses it and re-rows it. Called on the save path only, after the pool has joined; nothing
-// reads these slots afterwards. The price is a cache rewrite on each warm run of a tree that holds a refused file.
+// reads these slots afterwards. The price is a re-read and re-refusal on each warm run, not a cache rewrite: the parse pool
+// leaves the blob clean when it already holds this UNKNOWN record (ingest_parsepool.h noteFactlessMiss).
 inline void forgetNestRefusalsForCache( IngestFileScan& scan ) noexcept
 {
     for( std::size_t fileId = 0; fileId < scan.nestRefusedBytes.size(); ++fileId )
