@@ -399,6 +399,7 @@ for _g in \
     coplintcheck \
     countfloorcheck \
     cppbenchcheck \
+    cppextqualcheck \
     cppoperatorcheck \
     cppqualcheck \
     cpptmplscopecheck \
@@ -415,6 +416,7 @@ for _g in \
     danglingwarncheck \
     dartcheck \
     deadcheck \
+    deadcodescopecheck \
     deadfiltercheck \
     deadprecisioncheck \
     deckcheck \

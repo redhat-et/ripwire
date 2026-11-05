@@ -3,6 +3,9 @@
 #   A1-A5  per language, a plain word beside an exact symbol stops being an anchor: the route prints dropped:, <callers> is back
 #   B      a route DECLINED for a word routes on the symbol
 #   C      a prose tail keeps the conceptual answer, byte for byte, and <callers by="subject"> rides on top
+#   SC     SUBJECT-CALLERS-NATURAL: a sentence naming one function and asking what depends on it gets its callers; the route and
+#          the rest are unchanged; no dependents cue (a lead, "defined", "reaches") reads as before; nor does a cue in another sense
+#          (callee shape, "API calls", "used to", negated) or a sentence naming two functions
 #   N1-N8  near misses: namesake flood, symbol only in tests, question, graph form, join, plain-only subject, too many plain words, no word to drop
 #   D      dotted beats bare; a polyglot name splits and carries no row until a qualifier places it
 #   H      confidence: an anchor served from a test, doc or data file reads low; a source definition keeps it
@@ -148,6 +151,7 @@ hasnt "$A" 'by="subject"' "N2 test-only: a symbol only in tests lifts no callers
 A="$( ask "$PY" 'where is prepare_setup_platform new' )"
 has "$( route "$A" )" 'dropped: new(1-defs)' "N3 question: a plain-word anchor goes on a question too"
 A="$( ask "$PY" 'where prepare_setup_platform zznope sturdy' )"; hasnt "$A" 'by="subject"' "N3 question lead: no callers lifted"
+has "$A" '<ctx ' "N3 question lead: an answer printed (twin)"
 A="$( ask "$PY" 'path from first_caller to prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N4 graph form: no reading"
 hasnt "$A" 'by="subject"' "N4 graph form: no subject callers"
 A="$( ask "$PY" 'first_caller + prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N5 join of two symbols: no reading"
@@ -158,6 +162,85 @@ hasnt "$A" 'by="subject"' "N7 prose past the plain-word bound: no reading"
 A="$( ask "$PY" 'prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N8 bare symbol: nothing to drop"
 printf 'def lonely_function(x):\n    return x\n' > "$PY/app/lonely.py"
 A="$( ask "$PY" 'lonely_function zznope sturdy' )"; hasnt "$A" 'by="subject"' "N9 no callers: no element, never a bare total=0"
+# ── SUBJECT-CALLERS-NATURAL: a sentence that names ONE function and frames it gets that function's callers, route unchanged ──
+# the task frame (question leads, "I need to", change/add/affected/breaks/depends/calls/defined) is not counted as plain words
+nat(){ # $1 root $2 subject $3 caller row $4 label: callers ride, no flip, and the answer minus the block equals the no-hop answer
+    local A; A="$( ask "$1" "$2" )"
+    has "$A" '<callers by="subject"' "SC $4: callers ride by subject"
+    has "$( blk "$A" )" "$3" "SC $4: the caller row"
+    hasnt "$( route "$A" )" 'dropped:' "SC $4: the route is not flipped"
+    if python3 - "$A" "$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null </dev/null )" <<'X'
+import re,sys
+a,b=sys.argv[1:3]
+m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)
+a=re.sub(r'<callers by="subject".*?</callers>','',a,flags=re.S)
+ca=re.sub(r'<!--.*?-->','',m(a),flags=re.S); cb=re.sub(r'<!--.*?-->','',m(b),flags=re.S)
+sys.exit(0 if ca==cb and cb.strip() else 1)
+X
+    then ok "SC $4: the rest of the answer is byte-identical"; else no "SC $4: the block displaced something (or no answer)"; fi
+}
+NAT="$TMP/nat"; mkdir -p "$NAT/app"
+cat > "$NAT/app/setup.py" <<'X'
+def prepare_setup_platform(hass, name):
+    return name
+
+def first_caller(hass):
+    return prepare_setup_platform(hass, "a")
+X
+nat "$NAT" 'I want to add a new parameter to prepare_setup_platform; what is affected?' first_caller "py I want to add"
+nat "$NAT" 'I need to change how prepare_setup_platform works; what depends on it?' first_caller "py I need to change"
+nat "$NAT" 'Where is prepare_setup_platform defined and who calls it?' first_caller "py where defined, who calls"
+nat "$NAT" 'what calls prepare_setup_platform and would need updating if its signature grew?' first_caller "py what calls"
+# neighbour shapes: another language, the name not after the lead, a qualified spelling
+TSN="$TMP/tsn"; mkdir -p "$TSN/src"
+cat > "$TSN/src/transformer.ts" <<'X'
+export function transformNodes(nodes: number[]): number[] { return nodes; }
+export function runTransforms(n: number[]) { return transformNodes(n); }
+X
+nat "$TSN" 'adding an argument to transformNodes: which ones break?' runTransforms "ts name mid-sentence"
+nat "$GO" 'If I change proxy.NewProxier, what breaks?' createProxier "go qualified, conditional frame"
+nat "$GO" 'I want to pass a new parameter into proxy.NewProxier from the config; what needs to change?' createProxier "go prepositions are frame"
+nat "$TSN" 'adding an argument between emit and transformNodes: which functions are in the way?' runTransforms "ts between is frame"
+# no dependents cue: a sentence that does not ask who uses the function reads as before (a lead, defined, a value question)
+for q in 'how does prepare_setup_platform work?' 'where is prepare_setup_platform defined?' 'how prepare_setup_platform reaches first_caller' 'default prepare_setup_platform and first_caller for Go and Rust buffers'; do
+    A="$( ask "$NAT" "$q" )"; hasnt "$A" 'by="subject"' "SC no cue ($q): no callers"; has "$A" '<ctx ' "SC no cue ($q): an answer printed (twin)"
+done
+# negative twins: plain words past the bound still refuse, a frame word never counts toward a name, no function no block
+A="$( ask "$NAT" 'I want prepare_setup_platform to log retry timing metrics somewhere useful please' )"
+hasnt "$A" 'by="subject"' "SC prose past the bound (frame aside): no callers"; has "$A" '<ctx ' "SC prose past the bound: an answer printed (twin)"
+A="$( ask "$NAT" 'I need to change how it works; what depends on it?' )"
+hasnt "$A" 'by="subject"' "SC frame words only, no name: no callers"; has "$A" '<ctx ' "SC frame words only: an answer printed (twin)"
+# SCN-FIX1 pins. Each cue alone (deleting it from the table turns its arm red), a capitalised cue on a non-descriptive sentence (the
+# table is read case-folded), and the plain-word bound from both sides (4 fires, 5 does not; the CodeRabbit cue-past-the-bound case)
+nat "$NAT" 'Adding a new keyword argument to prepare_setup_platform: what would I need to fix?' first_caller "py capitalised cue (Adding)"
+nat "$NAT" 'who uses prepare_setup_platform?' first_caller "py uses alone"
+nat "$NAT" 'where is prepare_setup_platform used today?' first_caller "py used alone"
+nat "$NAT" 'what depends on prepare_setup_platform today?' first_caller "py depends alone"
+nat "$NAT" 'what is affected if prepare_setup_platform gains a flag?' first_caller "py affected alone"
+nat "$NAT" 'if I modify prepare_setup_platform, what else?' first_caller "py modify alone"
+nat "$NAT" 'which code would need updating if prepare_setup_platform grows an argument?' first_caller "py updating alone"
+nat "$NAT" 'what broke after prepare_setup_platform moved?' first_caller "py broke alone"
+nat "$NAT" 'I need to change prepare_setup_platform to log retry timing metrics; what depends on it?' first_caller "py cue, 4 plain words (the bound)"
+A="$( ask "$NAT" 'I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?' )"
+hasnt "$A" 'by="subject"' "SC cue, 5 plain words (past the bound): no callers"; has "$A" '<ctx ' "SC cue past the bound: an answer printed (twin)"
+# the cues added by SCN-FIX1, each with a twin in a sense that is not "who depends on it" (the function's own action)
+nat "$NAT" 'who invokes prepare_setup_platform?' first_caller "py invokes"
+nat "$NAT" 'who references prepare_setup_platform?' first_caller "py references"
+nat "$NAT" 'what would I have to touch to rename prepare_setup_platform?' first_caller "py rename"
+nat "$NAT" 'which tests exercise prepare_setup_platform?' first_caller "py tests exercise (plain callers)"
+nat "$NAT" 'who is using prepare_setup_platform?' first_caller "py is using"
+# no block: the callee shape (what the function itself does), a noun or purpose sense, a negated mention, two named functions
+printf 'def other_helper(hass):\n    return hass\n' > "$NAT/app/other.py"
+for q in 'what does prepare_setup_platform depend on?' 'what state does prepare_setup_platform modify?' \
+         'which functions does prepare_setup_platform use internally and what do they update?' 'where does prepare_setup_platform make API calls?' \
+         'what is prepare_setup_platform used to do, compared with captures?' 'I changed nothing in prepare_setup_platform; where is the 404 fallback decided?' \
+         'When prepare_setup_platform changes, who calls other_helper?' 'what does prepare_setup_platform invoke?' \
+         'which config keys does prepare_setup_platform reference?' 'how does prepare_setup_platform rename the field?' \
+         'which code paths does prepare_setup_platform exercise?' 'how would I build a platform using prepare_setup_platform here?'; do
+    A="$( ask "$NAT" "$q" )"; hasnt "$A" 'by="subject"' "SC not a dependents sense ($q): no callers"; has "$A" '<ctx ' "SC not a dependents sense ($q): an answer printed (twin)"
+done
+A="$( ask "$GO" 'I want to pass a new parameter into proxy.NewProxier from createProxier; what needs to change?' )"
+hasnt "$A" 'by="subject"' "SC go two names in a sentence: no callers (no guess)"; has "$A" '<ctx ' "SC go two names: an answer printed (twin)"
 # two exact symbols: no ONE anchor, so no flip: the whole subject's route stands (both names anchored, and the word with them)
 A="$( ask "$PY" 'first_caller second_caller new' )"; R="$( route "$A" )"
 has "$R" 'first_caller(' "T two exact: first anchored"; has "$R" 'second_caller(' "T two exact: second anchored"; hasnt "$R" 'dropped:' "T two exact: nothing dropped (no set flip)"
