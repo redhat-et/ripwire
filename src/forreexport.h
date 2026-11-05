@@ -186,15 +186,8 @@ inline std::string joinPath( const std::vector<std::string>& mods, std::string_v
 
 inline std::vector<std::string> splitColons( std::string_view path )
 {
-    std::vector<std::string> out;
-    path.remove_prefix( path.starts_with( "::" ) ? 2 : 0 );
-    for( std::size_t at = 0; at <= path.size(); )
-    {
-        const std::size_t end = std::min( path.find( "::", at ), path.size() );
-        out.emplace_back( path.substr( at, end - at ) );
-        at = end + 2;
-    }
-    return out;
+    const std::vector<std::string_view> segs = rustPathSegments( path );   // resolve.h
+    return { segs.begin(), segs.end() };
 }
 
 // ── Rust: crates, module paths, `use` paths ─────────────────────────────────────────────────────────────────────────────────

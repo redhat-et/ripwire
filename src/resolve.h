@@ -894,148 +894,9 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
 }
 
-// ── Rust Step-A — SOUND (mod x; sound; use crate::… sound-by-degrade). The captured target is either
-// `mod:x` (a body-less `mod x;` declaration, B0) or a `use` path (`crate::a::b`, `super::x`, `self::y::Z`).
-//   * `mod:x` → `x.rs` OR `x/mod.rs` RELATIVE to the includer's directory (Rust's module-file rule); exactly
-//     one exists → unique or degrade. Fully sound.
-//   * `use crate::a::b` → crate root (`src/`, from an `src/lib.rs`/`src/main.rs` presence) + `a/b` → probe
-//     `src/a/b.rs`, `src/a/b/mod.rs`, `src/a.rs` (b as an item in module a). `super::`/`self::` resolve
-//     relative-to-file. Resolve IFF exactly ONE hits, else degrade (which trailing segments are modules vs
-//     items is not decidable source-only — degrade keeps it sound).
-inline std::uint32_t resolveRustImport( std::string_view includerPath, std::string_view target,
-                                        const HashMap<std::string, std::uint32_t>& fileIndex,
-                                        std::string_view crateRootDir, bool hasCrateRoot,
-                                        const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
-{
-    if( target.empty() )
-    {
-        return kNoFile;
-    }
-    const std::string_view dir = includerDir( includerPath );
-
-    std::uint32_t hit = kNoFile;
-    const auto probe = [ & ]( std::string_view base, const std::string& rel )
-    {
-        const std::uint32_t f = joinNormalizeLookup( base, rel, fileIndex, ws, includerFileId );
-        if( f == kNoFile )
-        {
-            return;
-        }
-        if( hit == kNoFile )
-        {
-            hit = f;
-        }
-        else if( f != hit )
-        {
-            hit = kNoFile - 1;
-        }
-    };
-
-    // `mod x;` (body-less module-file declaration) → `x.rs` / `x/mod.rs` relative-to-includer.
-    if( target.rfind( "mod:", 0 ) == 0 )
-    {
-        const std::string_view mod = target.substr( 4 );
-        if( mod.empty() || mod.find( ':' ) != std::string_view::npos )
-        {
-            return kNoFile;
-        }
-        probe( dir, std::string( mod ) + ".rs" );
-        probe( dir, std::string( mod ) + "/mod.rs" );
-        return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
-    }
-
-    // `use …` — split the `::`-path into head + trailing segments. Only crate-anchored / relative uses
-    // (`crate::`, `super::`, `self::`) map to a repo path; a bare `use std::…` / external crate does not.
-    // A brace group (`crate::{a, b}`) never resolves to one file → degrade (the `{`/`,` guard).
-    if( target.find_first_of( "{}, " ) != std::string_view::npos )
-    {
-        return kNoFile;
-    }
-
-    // split on `::` into segments.
-    std::vector<std::string_view> seg;
-    {
-        std::size_t i = 0;
-        while( i < target.size() )
-        {
-            std::size_t j = target.find( "::", i );
-            if( j == std::string_view::npos )
-            {
-                j = target.size();
-            }
-            seg.push_back( target.substr( i, j - i ) );
-            i = ( j < target.size() ) ? j + 2 : j;
-        }
-    }
-    if( seg.empty() )
-    {
-        return kNoFile;
-    }
-
-    // Determine the anchor + the path segments AFTER it.
-    std::string           base;      // directory to resolve relative to
-    std::size_t           first = 0; // index of the first path segment after the anchor
-    if( seg[0] == "crate" )
-    {
-        if( !hasCrateRoot )
-        {
-            return kNoFile; // workspace member w/o a locatable crate root → degrade
-        }
-        base  = std::string( crateRootDir );
-        first = 1;
-    }
-    else if( seg[0] == "self" )  { base = std::string( dir ); first = 1; }
-    else if( seg[0] == "super" ) { base = std::string( dir ) + "/.."; first = 1; }
-    else
-    {
-        return kNoFile; // `std::…` / external crate / bare → external → unresolved
-    }
-
-    // path segments after the anchor (drop the final item candidate variants).
-    std::vector<std::string_view> path( seg.begin() + std::ptrdiff_t( first ), seg.end() );
-    if( path.empty() )
-    {
-        return kNoFile;
-    }
-
-    // build `a/b` from all-but-last, and `a` from all-but-two, for the module-vs-item degrade-safe probe.
-    const auto joinSegs = [ & ]( std::size_t upto ) -> std::string
-    {
-        std::string p;
-        for( std::size_t k = 0; k < upto; ++k )
-        {
-            if( k )
-            {
-                p.push_back( '/' );
-            }
-            p.append( path[k] );
-        }
-        return p;
-    };
-
-    // full path as a module: `a/b.rs`, `a/b/mod.rs` (last segment is a module); and `a.rs` with b an item.
-    const std::string full = joinSegs( path.size() );                       // a/b
-    probe( base, full + ".rs" );
-    probe( base, full + "/mod.rs" );
-    if( path.size() >= 2 )
-    {
-        const std::string parent = joinSegs( path.size() - 1 );             // a  (b is an item in module a)
-        probe( base, parent + ".rs" );
-        probe( base, parent + "/mod.rs" );
-    }
-    return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
-}
-
-// ── Cross-root config-file import evidence (§3.2, decided 2026-07-11) ─────────────────────────────────
-// tsconfig.json `compilerOptions.paths` aliases + go.mod `replace` directives that point at a SIBLING
-// workspace root admit cross-root import resolution — the SAME evidence-only posture as includes
-// (unique-or-degrade, never name-based). Config bytes are read (workspace-only, in canonical root order)
-// by buildPreciseIncludeAdj; parsing is a PURE function of those bytes, so the merged graph stays
-// deterministic (a warm==cold re-run reads identical config bytes ⇒ identical aliases ⇒ identical edges).
-// On a single-root run NONE of this fires (buildPreciseIncludeAdj builds no WsIncludeCtx) — byte-identical.
-
 // Read a config file's bytes (small text file; capped). Empty on any open/size/read failure — the caller
-// treats an empty result as "no config" (no aliases contributed). Workspace-only; not on any hot path.
+// treats an empty result as "no config" (no aliases contributed); the Rust crate roots read an empty manifest as unreadable.
+// Once per config file, never on a hot path.
 inline std::string readConfigBytes( const std::string& path )
 {
     std::string out;
@@ -1056,6 +917,570 @@ inline std::string readConfigBytes( const std::string& path )
     std::fclose( f );
     return out;
 }
+
+// (Moved from graph.h for the Rust crate roots below; graph.h includes this header.) Every `name = "x"` line (or `key = "x"` for another key: the --for re-export rows read `[lib] path`) of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
+// dotted key, an inline table or a multi-line string is not read, which can only miss a name, never invent one).
+inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out,
+                              std::string_view key = "name" )
+{
+    bool inSection = false;
+    while( !text.empty() )
+    {
+        const std::size_t end  = text.find( '\n' );
+        std::string_view  line = text.substr( 0, end );
+        text = end == std::string_view::npos ? std::string_view() : text.substr( end + 1 );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( '[' ) )
+        {
+            inSection = std::ranges::any_of( sections, [ & ]( std::string_view h ) { return line.starts_with( h ); } );
+            continue;
+        }
+        if( !inSection || !line.starts_with( key ) )
+        {
+            continue;
+        }
+        line.remove_prefix( key.size() );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
+        if( !line.starts_with( '=' ) )
+        {
+            continue;
+        }
+        line.remove_prefix( 1 );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
+        if( line.size() < 2 || ( line.front() != '"' && line.front() != '\'' ) )
+        {
+            continue;
+        }
+        const std::size_t close = line.find( line.front(), 1 );
+        if( close != std::string_view::npos && close > 1 )
+        {
+            out.emplace_back( line.substr( 1, close - 1 ) );
+        }
+    }
+}
+
+// ── Rust Step-A — SOUND (mod x; sound; use crate::… sound-by-degrade). The captured target is either
+// `mod:x` (a body-less `mod x;` declaration, B0) or a `use` path (`crate::a::b`, `super::x`, `self::y::Z`).
+// RUST-ROOTS-A (reports/rust-use-check.md): every rule reads the INCLUDER's own module, by Rust's module-file rule.
+//   * A file's MODULE DIRECTORY (rustModuleDir) holds its child modules: a `mod.rs` or a crate root owns its own directory,
+//     any other `a.rs` is module `a`, whose children live in `a/` (Rust 2018). `mod:x` → `x.rs` OR `x/mod.rs` there (F2:
+//     `mod b;` in `src/a.rs` is `src/a/b.rs`, and `src/b.rs` only when neither `src/a/b.rs` nor `src/a/b/mod.rs` exists: the
+//     `#[path]` shape); `self::` is that directory; each `super::` climbs one
+//     module (F3: `super::` in `src/a/x.rs` is module `a` = `src/a`, not `src/`), never above the crate root.
+//   * `use crate::a::b` → the includer's OWN crate root directory (F1, RustCrateRoots: the nearest Cargo.toml's target the
+//     file belongs to, `[lib] path` / `[[bin]] path` honoured), never another crate's.
+//   * TWO TIERS, unique-or-degrade inside each, never across: the full path as a module file (`a/b.rs`, `a/b/mod.rs`)
+//     first; only when neither exists, the parent module's file (`a.rs`, `a/mod.rs`: b an item in module a; for a one-segment
+//     `super::x`, the parent module's own file). Which trailing segment is a module is not decidable source-only, but a file
+//     at the full path IS that module, so it is the dependency (SUBMODULE); the parent stays the lower tier.
+//   * A brace group (`crate::a::{b, c as d, self}`) is flattened by flattenRustUseTree and each member resolves on its own
+//     (resolveRustUseTree); an `as` rename resolves the path it renames. resolveRustImport itself still takes one path.
+
+// The directory a Rust file's child modules live in (its `mod x;` / `self::` base). `isCrateRoot` = the file is a crate
+// root known from its manifest (`src/bin/x.rs`, `[lib] path = "src/gpui.rs"`); `lib.rs`, `main.rs` and `mod.rs` own their
+// directory by name.
+inline std::string rustModuleDir( std::string_view path, bool isCrateRoot )
+{
+    const std::string_view dir  = includerDir( path );
+    std::string_view       stem = dir.empty() ? path : path.substr( dir.size() + 1 );
+    if( stem.ends_with( ".rs" ) )
+    {
+        stem.remove_suffix( 3 );
+    }
+    if( isCrateRoot || stem == "mod" || stem == "lib" || stem == "main" )
+    {
+        return std::string( dir );
+    }
+    return dir.empty() ? std::string( stem ) : std::string( dir ) + "/" + std::string( stem );
+}
+
+// Per-file Rust crate roots (F1): which crate a `.rs` file is compiled in, read from the nearest Cargo.toml above it.
+// A manifest's targets: `[lib] path` (default `src/lib.rs`), `src/main.rs`, each `[[bin]] path`, `build.rs`, and Cargo's
+// auto-discovered directories `src/bin/`, `tests/`, `examples/`, `benches/` (each file there a root; `<dir>/<name>/main.rs` a
+// root whose sub-files are its modules). A file belongs to the target whose root directory is the longest prefix of its path.
+// No manifest above the file: the nearest ancestor directory holding `lib.rs`/`main.rs`. A manifest that cannot be read, or
+// a file no target covers: no root (`crate::` degrades), never another crate's root. Contiguous: one u32 + one byte per file.
+struct RustCrateRoots
+{
+    std::vector<std::string>   dirs;     // distinct crate-root directories ("" = the tree root)
+    std::vector<std::uint32_t> dirOf;    // file -> index into dirs; kNoFile = no crate root (crate:: degrades)
+    std::vector<char>          isRoot;   // file -> 1 when the file is itself a crate root (it owns its directory)
+
+    [[nodiscard]] bool empty() const noexcept { return dirOf.empty(); }
+};
+
+inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex )
+{
+    RustCrateRoots rr;
+    const auto     F = std::uint32_t( ing.files.size() );
+    struct Manifest
+    {
+        std::vector<std::string> roots;            // explicit root files: [lib] path, src/main.rs, [[bin]] path, build.rs
+        bool                     unreadable = false;
+    };
+    HashMap<std::string, std::uint32_t> manifestAt;   // directory with its trailing '/' ("" = the tree root) -> manifests index
+    std::vector<Manifest>               manifests;
+    bool                                anyRs = false;
+    const auto has = [ & ]( const std::string& p ) { return fileIndex.contains( p ); };
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        const std::string_view rel = rootRelPath( ing, f );
+        anyRs = anyRs || rel.ends_with( ".rs" );
+        if( rel != "Cargo.toml" && !rel.ends_with( "/Cargo.toml" ) )
+        {
+            continue;
+        }
+        const std::string mdir = std::string( rel.substr( 0, rel.size() - 10 ) );
+        const std::string text = readConfigBytes( diskPath( ing, f ) );
+        Manifest          m;
+        m.unreadable = text.empty();   // an unreadable (or empty) manifest names no target we can trust: its files degrade
+        if( !m.unreadable )
+        {
+            std::vector<std::string> lib, bins, build;
+            tomlSectionNames( text, { "[lib]" }, lib, "path" );
+            tomlSectionNames( text, { "[[bin]]" }, bins, "path" );
+            tomlSectionNames( text, { "[package]" }, build, "build" );
+            const auto add = [ & ]( std::string_view written )
+            {
+                if( std::string p = lexicalNormalize( mdir + std::string( written ) ); !p.empty() && has( p ) )
+                {
+                    m.roots.push_back( std::move( p ) );
+                }
+            };
+            add( lib.empty() ? std::string_view( "src/lib.rs" ) : std::string_view( lib.front() ) );
+            add( "src/main.rs" );
+            for( const std::string& b : bins )
+            {
+                add( b );
+            }
+            add( build.empty() ? std::string_view( "build.rs" ) : std::string_view( build.front() ) );
+        }
+        manifestAt.try_emplace( mdir, std::uint32_t( manifests.size() ) );
+        manifests.push_back( std::move( m ) );
+    }
+    if( !anyRs )
+    {
+        return rr;
+    }
+    HashMap<std::string, std::uint32_t> dirId;
+    const auto internDir = [ & ]( std::string_view d ) -> std::uint32_t
+    {
+        const auto [ it, fresh ] = dirId.try_emplace( std::string( d ), std::uint32_t( rr.dirs.size() ) );
+        if( fresh )
+        {
+            rr.dirs.emplace_back( d );
+        }
+        return it->second;
+    };
+    rr.dirOf.assign( F, kNoFile );
+    rr.isRoot.assign( F, 0 );
+    std::string probe;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        const std::string_view rel = rootRelPath( ing, f );
+        if( !rel.ends_with( ".rs" ) )
+        {
+            continue;
+        }
+        // the nearest manifest above the file
+        const Manifest*  m    = nullptr;
+        std::string_view mdir;
+        for( std::size_t slash = rel.rfind( '/' );; slash = rel.rfind( '/', slash - 1 ) )
+        {
+            mdir = slash == std::string_view::npos ? std::string_view() : rel.substr( 0, slash + 1 );
+            if( const auto it = manifestAt.find( std::string( mdir ) ); it != manifestAt.end() )
+            {
+                m = &manifests[ it->second ];
+                break;
+            }
+            if( slash == std::string_view::npos || slash == 0 )
+            {
+                break;
+            }
+        }
+        if( m == nullptr )   // no manifest: the nearest ancestor directory holding lib.rs / main.rs
+        {
+            for( std::string_view d = includerDir( rel );; d = includerDir( d ) )
+            {
+                const std::string pre = d.empty() ? std::string() : std::string( d ) + "/";
+                if( has( pre + "lib.rs" ) || has( pre + "main.rs" ) )
+                {
+                    rr.dirOf[ f ]  = internDir( d );
+                    rr.isRoot[ f ] = rel == pre + "lib.rs" || rel == pre + "main.rs";
+                    break;
+                }
+                if( d.empty() )
+                {
+                    break;
+                }
+            }
+            continue;
+        }
+        if( m->unreadable )
+        {
+            continue;
+        }
+        if( std::ranges::find( m->roots, rel ) != m->roots.end() )
+        {
+            rr.dirOf[ f ]  = internDir( includerDir( rel ) );
+            rr.isRoot[ f ] = 1;
+            continue;
+        }
+        const std::string_view rest = rel.substr( mdir.size() );
+        bool                   auto_ = false;
+        for( const std::string_view a : { std::string_view( "src/bin/" ), std::string_view( "tests/" ), std::string_view( "examples/" ),
+                                          std::string_view( "benches/" ) } )
+        {
+            if( !rest.starts_with( a ) )
+            {
+                continue;
+            }
+            auto_                     = true;
+            const std::string_view sub = rest.substr( a.size() );
+            const std::size_t      sl  = sub.find( '/' );
+            std::string            autoDir( rel.substr( 0, mdir.size() + a.size() - 1 ) );
+            if( sl == std::string_view::npos )   // `tests/x.rs`: its own crate root
+            {
+                rr.dirOf[ f ]  = internDir( autoDir );
+                rr.isRoot[ f ] = 1;
+                break;
+            }
+            probe = autoDir + "/" + std::string( sub.substr( 0, sl ) );
+            if( has( probe + "/main.rs" ) )   // `src/bin/x/main.rs` and its modules
+            {
+                rr.dirOf[ f ]  = internDir( probe );
+                rr.isRoot[ f ] = sub.substr( sl + 1 ) == "main.rs";
+            }
+            else   // `tests/common/mod.rs`: a module of a root in the directory
+            {
+                rr.dirOf[ f ] = internDir( autoDir );
+            }
+            break;
+        }
+        if( auto_ )
+        {
+            continue;
+        }
+        std::size_t best = std::string_view::npos;   // the target whose root directory is the longest prefix of the file's path
+        for( const std::string& r : m->roots )
+        {
+            const std::string_view d = includerDir( r );
+            if( ( d.empty() || ( rel.size() > d.size() && rel.starts_with( d ) && rel[ d.size() ] == '/' ) )
+                && ( best == std::string_view::npos || d.size() > best ) )
+            {
+                best          = d.size();
+                rr.dirOf[ f ] = internDir( d );
+            }
+        }
+    }
+    return rr;
+}
+
+// Flattens a Rust `use` tree into its leaf paths, appended to `out`: `crate::a::{b, c::{d, self}, e as f, *}` → `crate::a::b`,
+// `crate::a::c::d`, `crate::a::c`, `crate::a::e`, `crate::a::*`. An `as` rename keeps the path it renames. False on a shape it does
+// not read (unbalanced braces, a leaf that is not one path), and then `out` gets nothing from this tree.
+inline bool flattenRustUseTree( std::string_view tree, const std::string& prefix, std::vector<std::string>& out )
+{
+    const auto trim = []( std::string_view s )
+    {
+        s.remove_prefix( std::min( s.find_first_not_of( " \t\r\n" ), s.size() ) );
+        s.remove_suffix( s.size() - std::min( s.size(), s.find_last_not_of( " \t\r\n" ) + 1 ) );
+        return s;
+    };
+    const auto join = [ & ]( std::string_view tail )
+    {
+        return prefix.empty() ? std::string( tail ) : prefix + "::" + std::string( tail );
+    };
+    tree = trim( tree );
+    const std::size_t open = tree.find( '{' );
+    if( open == std::string_view::npos )
+    {
+        if( tree.find_first_of( "}," ) != std::string_view::npos )
+        {
+            return false;
+        }
+        std::string_view       path = tree;
+        const std::size_t      ws   = tree.find_first_of( " \t\r\n" );
+        if( ws != std::string_view::npos )   // `p as q` → p; anything else with a space is not read
+        {
+            const std::string_view tail = trim( tree.substr( ws ) );
+            if( !tail.starts_with( "as" ) || tail.size() < 3 || std::string_view( " \t\r\n" ).find( tail[ 2 ] ) == std::string_view::npos
+                || trim( tail.substr( 2 ) ).find_first_of( " \t\r\n" ) != std::string_view::npos )
+            {
+                return false;
+            }
+            path = tree.substr( 0, ws );
+        }
+        if( path.empty() || ( path == "self" && prefix.empty() ) )
+        {
+            return false;
+        }
+        out.push_back( path == "self" ? prefix : join( path ) );
+        return true;
+    }
+    if( tree.back() != '}' )
+    {
+        return false;
+    }
+    std::string_view head = trim( tree.substr( 0, open ) );
+    if( head.ends_with( "::" ) )
+    {
+        head.remove_suffix( 2 );
+    }
+    else if( !head.empty() )
+    {
+        return false;
+    }
+    const std::string      inner  = head.empty() ? prefix : join( head );
+    const std::string_view body   = tree.substr( open + 1, tree.size() - open - 2 );
+    int                    depth  = 0;
+    std::size_t            start  = 0;
+    bool                   ok     = true;
+    for( std::size_t i = 0; i <= body.size() && ok; ++i )
+    {
+        const char c = i < body.size() ? body[ i ] : ',';
+        depth += c == '{' ? 1 : c == '}' ? -1 : 0;
+        if( depth < 0 )
+        {
+            return false;
+        }
+        if( c == ',' && depth == 0 )
+        {
+            if( const std::string_view member = trim( body.substr( start, i - start ) ); !member.empty() )   // a trailing comma
+            {
+                ok = flattenRustUseTree( member, inner, out );
+            }
+            start = i + 1;
+        }
+    }
+    return ok && depth == 0;
+}
+
+// One unique-or-degrade probe set: every candidate file folds into `hit`; a second DISTINCT file makes it ambiguous.
+struct RustProbe
+{
+    const HashMap<std::string, std::uint32_t>& fileIndex;
+    const WsIncludeCtx*                        ws;
+    std::uint32_t                              includerFileId;
+    std::uint32_t                              hit = kNoFile;
+
+    void operator()( std::string_view base, const std::string& rel )
+    {
+        const std::uint32_t f = joinNormalizeLookup( base, rel, fileIndex, ws, includerFileId );
+        if( f == kNoFile )
+        {
+            return;
+        }
+        hit = hit == kNoFile || hit == f ? f : kNoFile - 1;   // a second distinct file → ambiguous
+    }
+    [[nodiscard]] bool          any() const noexcept { return hit != kNoFile; }
+    [[nodiscard]] std::uint32_t result() const noexcept { return hit == kNoFile - 1 ? kNoFile : hit; }
+};
+
+// The anchor of a `use` path: the directory of the module it names and the index of the first segment after it.
+// `crate` → the includer's crate root; `self` → the includer's module directory; each leading `super` climbs one module,
+// never above the crate root (a crate root, `lib.rs` or `main.rs`, has no parent). ok=false: not an in-tree anchor.
+struct RustAnchor
+{
+    std::string base;
+    std::size_t first       = 1;
+    bool        atCrateRoot = false;
+    bool        ok          = false;
+};
+
+inline RustAnchor rustUseAnchor( std::string_view includerPath, std::span<const std::string_view> seg, std::string_view crateRootDir,
+                                 bool hasCrateRoot, bool includerIsCrateRoot, const std::string& modDir )
+{
+    RustAnchor a;
+    if( seg[0] == "crate" )
+    {
+        a.base        = std::string( crateRootDir );
+        a.atCrateRoot = true;
+        a.ok          = hasCrateRoot;   // no locatable crate root for this file → degrade
+        return a;
+    }
+    if( seg[0] == "self" )
+    {
+        a.base = modDir;
+        a.ok   = true;
+        return a;
+    }
+    if( seg[0] != "super" )
+    {
+        return a;   // `std::…` / external crate / bare → unresolved
+    }
+    const std::string_view dir  = includerDir( includerPath );
+    const std::string_view name = includerPath.substr( dir.empty() ? 0 : dir.size() + 1 );
+    a.base                      = modDir;
+    bool atRoot                 = includerIsCrateRoot || name == "lib.rs" || name == "main.rs" || ( hasCrateRoot && a.base == crateRootDir );
+    for( a.first = 0; a.first < seg.size() && seg[ a.first ] == "super"; ++a.first )
+    {
+        if( atRoot || a.base.empty() )
+        {
+            return a;
+        }
+        a.base = std::string( includerDir( a.base ) );
+        atRoot = hasCrateRoot && a.base == crateRootDir;
+    }
+    a.atCrateRoot = atRoot;
+    a.ok          = true;
+    return a;
+}
+
+// A Rust path split on `::` (`::a::b` reads as `a::b`; `a::` ends in an empty segment). Never empty.
+inline std::vector<std::string_view> rustPathSegments( std::string_view path )
+{
+    std::vector<std::string_view> out;
+    path.remove_prefix( path.starts_with( "::" ) ? 2 : 0 );
+    for( std::size_t at = 0; at <= path.size(); )
+    {
+        const std::size_t end = std::min( path.find( "::", at ), path.size() );
+        out.push_back( path.substr( at, end - at ) );
+        at = end + 2;
+    }
+    return out;
+}
+
+inline std::uint32_t resolveRustImport( std::string_view includerPath, std::string_view target,
+                                        const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        std::string_view crateRootDir, bool hasCrateRoot,
+                                        const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
+                                        bool includerIsCrateRoot = false )
+{
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
+    RustProbe         probe{ fileIndex, ws, includerFileId };
+    const std::string modDir = rustModuleDir( includerPath, includerIsCrateRoot );
+
+    // `mod x;` (body-less module-file declaration) → `x.rs` / `x/mod.rs` in the includer's MODULE directory (F2); the
+    // includer's own directory only when the module directory holds neither, which is where `#[path = "x.rs"] mod x;`
+    // points (the attribute is not captured; nushell lex.rs): without it that file could not be this module.
+    if( target.starts_with( "mod:" ) )
+    {
+        const std::string mod( target.substr( 4 ) );
+        if( mod.empty() || mod.find( ':' ) != std::string::npos )
+        {
+            return kNoFile;
+        }
+        for( const std::string_view dir : { std::string_view( modDir ), includerDir( includerPath ) } )
+        {
+            if( !probe.any() )
+            {
+                probe( dir, mod + ".rs" );
+                probe( dir, mod + "/mod.rs" );
+            }
+        }
+        return probe.result();
+    }
+
+    // `use …` — one path. A brace group never reaches here as one file (resolveRustUseTree flattens it first); an `as`
+    // rename resolves the path it renames.
+    if( target.find_first_of( "{}," ) != std::string_view::npos )
+    {
+        return kNoFile;
+    }
+    if( target.find_first_of( " \t\r\n" ) != std::string_view::npos )
+    {
+        std::vector<std::string> one;
+        return flattenRustUseTree( target, std::string(), one ) && one.size() == 1
+                 ? resolveRustImport( includerPath, one.front(), fileIndex, crateRootDir, hasCrateRoot, ws, includerFileId, includerIsCrateRoot )
+                 : kNoFile;
+    }
+    const std::vector<std::string_view> seg    = rustPathSegments( target );
+    const RustAnchor                    anchor = rustUseAnchor( includerPath, seg, crateRootDir, hasCrateRoot, includerIsCrateRoot, modDir );
+    if( !anchor.ok )
+    {
+        return kNoFile;
+    }
+    // the segments after the anchor (a second anchor mid-path, `a::self`, `a::super`, is not read).
+    const std::span<const std::string_view> path = std::span( seg ).subspan( anchor.first );
+    if( path.empty() || std::ranges::any_of( path, []( std::string_view s ) { return s == "super" || s == "self" || s == "crate" || s.empty(); } ) )
+    {
+        return kNoFile;
+    }
+    const auto joinSegs = [ & ]( std::size_t upto )
+    {
+        std::string p;
+        for( std::size_t k = 0; k < upto; ++k )
+        {
+            p.append( k ? "/" : "" ).append( path[k] );
+        }
+        return p;
+    };
+
+    // tier 1: the full path as a module file (`a/b.rs`, `a/b/mod.rs`) — unique-or-degrade, and it decides when anything hits.
+    const std::string full = joinSegs( path.size() );
+    probe( anchor.base, full + ".rs" );
+    probe( anchor.base, full + "/mod.rs" );
+    if( probe.any() )
+    {
+        return probe.result();
+    }
+    // tier 2: the parent module's file (`a.rs`, `a/mod.rs`: b an item of module a; for `super::x`, the parent's own file).
+    if( path.size() >= 2 )
+    {
+        const std::string parent = joinSegs( path.size() - 1 );
+        probe( anchor.base, parent + ".rs" );
+        probe( anchor.base, parent + "/mod.rs" );
+    }
+    else if( seg[0] == "super" && !anchor.atCrateRoot && !anchor.base.empty() )
+    {
+        const std::string_view up = includerDir( anchor.base );
+        probe( up, std::string( std::string_view( anchor.base ).substr( up.empty() ? 0 : up.size() + 1 ) ) + ".rs" );
+        probe( anchor.base, "mod.rs" );
+    }
+    return probe.result();
+}
+
+// The call narrow (forCallNarrow) does NOT read brace-group members: Rule 3 admits a member call's namesakes from every imported
+// file by name, so a group's new file edges turned two declined calls into name-only edges (receiverevidencecheck callresult/rust
+// use_try, ifacedispatchcheck n_rs_no_impl). The --deps / --arch / --impact file graph reads them; the narrow keeps the
+// pre-RUST-ROOTS-A degrade for groups until Rule 3 stops pinning without receiver evidence (card RULE3-MEMBER-GUARD).
+inline constexpr bool kCallNarrowReadsRustUseTrees = false;
+
+// Every file a Rust `use` / `mod` directive resolves to, appended to `out` (distinct, in member order): a brace group
+// resolves each member (resolveRustImport per leaf path), so `use crate::{a, b::C}` draws an edge to each module it names.
+// A tree flattenRustUseTree cannot read draws nothing; `expandGroups=false` keeps a group unresolved (the call narrow's seam,
+// kCallNarrowReadsRustUseTrees).
+inline void resolveRustUseTree( std::string_view includerPath, std::string_view target, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                std::string_view crateRootDir, bool hasCrateRoot, bool includerIsCrateRoot, const WsIncludeCtx* ws,
+                                std::uint32_t includerFileId, std::vector<std::uint32_t>& out, bool expandGroups = true )
+{
+    if( target.find( '{' ) == std::string_view::npos || !expandGroups )
+    {
+        if( const std::uint32_t f = resolveRustImport( includerPath, target, fileIndex, crateRootDir, hasCrateRoot, ws, includerFileId, includerIsCrateRoot );
+            f != kNoFile )
+        {
+            out.push_back( f );
+        }
+        return;
+    }
+    std::vector<std::string> leaves;
+    if( !flattenRustUseTree( target, std::string(), leaves ) )
+    {
+        return;
+    }
+    const std::size_t from = out.size();
+    for( const std::string& leaf : leaves )
+    {
+        const std::uint32_t f = resolveRustImport( includerPath, leaf, fileIndex, crateRootDir, hasCrateRoot, ws, includerFileId, includerIsCrateRoot );
+        if( f != kNoFile && std::find( out.begin() + std::ptrdiff_t( from ), out.end(), f ) == out.end() )
+        {
+            out.push_back( f );
+        }
+    }
+}
+
+// ── Cross-root config-file import evidence (§3.2, decided 2026-07-11) ─────────────────────────────────
+// tsconfig.json `compilerOptions.paths` aliases + go.mod `replace` directives that point at a SIBLING
+// workspace root admit cross-root import resolution — the SAME evidence-only posture as includes
+// (unique-or-degrade, never name-based). Config bytes are read (workspace-only, in canonical root order)
+// by buildPreciseIncludeAdj; parsing is a PURE function of those bytes, so the merged graph stays
+// deterministic (a warm==cold re-run reads identical config bytes ⇒ identical aliases ⇒ identical edges).
+// On a single-root run NONE of this fires (buildPreciseIncludeAdj builds no WsIncludeCtx) — byte-identical.
+
 
 // is `abs` inside (or equal to) `root`? Used to KEEP only aliases whose destination ESCAPES their own root
 // (a cross-root alias) — an intra-root alias stays external exactly as a bare specifier is single-root.
@@ -4691,35 +5116,11 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         ws = &wsCtx;
     }
 
-    // Rust crate root: the directory holding `src/lib.rs` or `src/main.rs` (the `crate::` anchor). We take
-    // the FIRST such file in the sorted list (deterministic); its dir is the crate root. Absent (workspace
-    // member) ⇒ hasCrateRoot=false ⇒ `use crate::…` degrades. A pure scan of the sorted files (no I/O).
-    // Multi-root: ONE crate root PER root — `crate::` must never anchor in another repo.
-    std::string_view crateRootDir;
-    bool             hasCrateRoot = false;
-    std::vector<std::string_view> crateRootByRoot;
-    std::vector<char>             hasCrateByRoot;
-    if( isWorkspace )
-    {
-        crateRootByRoot.assign( ing.rootLabels.size(), {} );
-        hasCrateByRoot.assign( ing.rootLabels.size(), 0 );
-    }
-    for( std::uint32_t f = 0; f < F; ++f )
-    {
-        const std::string_view p = rootRelPath( ing, f );
-        const bool isLib  = ( p == "lib.rs"  || ( p.size() >= 7 && p.substr( p.size() - 7 ) == "/lib.rs"  ) );
-        const bool isMain = ( p == "main.rs" || ( p.size() >= 8 && p.substr( p.size() - 8 ) == "/main.rs" ) );
-        if( !( isLib || isMain ) )
-        {
-            continue;
-        }
-        if( isWorkspace )
-        {
-            const std::uint32_t r = ing.fileRoot[ f ];
-            if( !hasCrateByRoot[ r ] ) { crateRootByRoot[ r ] = includerDir( p ); hasCrateByRoot[ r ] = 1; }
-        }
-        else if( !hasCrateRoot ) { crateRootDir = includerDir( p ); hasCrateRoot = true; }
-    }
+    // Rust crate roots, PER FILE (RUST-ROOTS-A F1): `crate::` anchors at the crate the includer is compiled in (its nearest
+    // Cargo.toml's target), never the first lib.rs of the tree; multi-root needs nothing extra, since a root's labeled paths
+    // never reach another root's manifest. Empty when the tree holds no `.rs` file.
+    const RustCrateRoots rustRoots = buildRustCrateRoots( ing, fileIndex );
+    std::vector<std::uint32_t> rustTo;   // one directive's resolved files (a brace group may name several), reused
 
     const HashMap<std::string, std::uint32_t> elixirModules = buildElixirModuleIndex( ing );
     const HashMap<std::string, std::uint32_t>* moduleIndex = elixirModules.empty() ? nullptr : &elixirModules;
@@ -4758,16 +5159,29 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
             }
             continue;
         }
-        std::string_view crd    = crateRootDir;
-        bool             hasCrd = hasCrateRoot;
-        if( isWorkspace )
+        if( !rustRoots.empty() && includeLangOf( rootRelPath( ing, inc.fileId ) ) == IncludeLang::Rust )
         {
-            const std::uint32_t r = ing.fileRoot[ inc.fileId ];
-            crd    = crateRootByRoot[ r ];
-            hasCrd = hasCrateByRoot[ r ] != 0;
+            const std::uint32_t rd = rustRoots.dirOf[ inc.fileId ];
+            rustTo.clear();
+            resolveRustUseTree( rootRelPath( ing, inc.fileId ), inc.target, fileIndex, rd == kNoFile ? std::string_view() : std::string_view( rustRoots.dirs[ rd ] ),
+                                rd != kNoFile, rustRoots.isRoot[ inc.fileId ] != 0, ws, inc.fileId, rustTo, !forCallNarrow || kCallNarrowReadsRustUseTrees );
+            for( const std::uint32_t to : rustTo )
+            {
+                if( to == inc.fileId )
+                {
+                    continue; // self-include → contributes nothing
+                }
+                edgeFrom.push_back( inc.fileId );
+                edgeTo.push_back( to );
+                if( lazyPairsOut != nullptr )
+                {
+                    recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+                }
+            }
+            continue;
         }
         std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle,
-                                                   fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex );
+                                                   fileIndex, {}, false, ws, inc.fileId, moduleIndex );
         if( to == kNoFile && cIncludeRoots )
         {
             to = resolveCQuoteAtRoots( inc, rootRelPath( ing, inc.fileId ), fileIndex, cBaseDirs, ws, importsUnresolvedOut );

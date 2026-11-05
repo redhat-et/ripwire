@@ -550,18 +550,17 @@ private:
             {
                 return At{ Reach::File, false, r.fileId };
             }
-            return fileAt( r.fileId, modFile ? "self::" + CallResultTypes::joinModule( rest, name ) : "self::" + CallResultTypes::joinModule( CallResultTypes::joinModule( stem, rest ), name ), r.fileId );
+            return fileAt( r.fileId, "self::" + CallResultTypes::joinModule( rest, name ), r.fileId );   // resolveRustImport reads self as this file's module
         }
         if( modFile )   // super of a mod.rs: its directory's parent module (a crate root has none)
         {
             return stem != "mod" || rest.empty() ? At{ Reach::None } : fileAt( r.fileId, "super::" + CallResultTypes::joinModule( rest, name ), r.fileId );
         }
-        if( rest.empty() )   // `super::x` in d/s.rs: x in module d (d.rs or d/mod.rs)
+        if( rest.empty() && dir.empty() )   // `super::x` in a top-level s.rs: no parent module this path names
         {
-            const std::string_view up = dir.substr( dir.rfind( '/' ) == std::string_view::npos ? 0 : dir.rfind( '/' ) + 1 );
-            return up.empty() ? At{ Reach::None } : fileAt( r.fileId, "super::" + CallResultTypes::joinModule( up, name ), r.fileId );
+            return At{ Reach::None };
         }
-        return fileAt( r.fileId, "self::" + CallResultTypes::joinModule( rest, name ), r.fileId );   // super::a::x in d/s.rs: d/a…
+        return fileAt( r.fileId, "super::" + CallResultTypes::joinModule( rest, name ), r.fileId );   // super in d/s.rs is module d (resolveRustImport, F3)
     }
 
     const IngestResult*                          m_ing = nullptr;

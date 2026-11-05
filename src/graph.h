@@ -6954,47 +6954,6 @@ inline HashMap<std::string, char> rustModuleNames( const IngestResult& ing )
     return names;
 }
 
-// Every `name = "x"` line (or `key = "x"` for another key: the --for re-export rows read `[lib] path`) of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
-// dotted key, an inline table or a multi-line string is not read, which can only miss a name, never invent one).
-inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out,
-                              std::string_view key = "name" )
-{
-    bool inSection = false;
-    while( !text.empty() )
-    {
-        const std::size_t end  = text.find( '\n' );
-        std::string_view  line = text.substr( 0, end );
-        text = end == std::string_view::npos ? std::string_view() : text.substr( end + 1 );
-        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
-        if( line.starts_with( '[' ) )
-        {
-            inSection = std::ranges::any_of( sections, [ & ]( std::string_view h ) { return line.starts_with( h ); } );
-            continue;
-        }
-        if( !inSection || !line.starts_with( key ) )
-        {
-            continue;
-        }
-        line.remove_prefix( key.size() );
-        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
-        if( !line.starts_with( '=' ) )
-        {
-            continue;
-        }
-        line.remove_prefix( 1 );
-        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
-        if( line.size() < 2 || ( line.front() != '"' && line.front() != '\'' ) )
-        {
-            continue;
-        }
-        const std::size_t close = line.find( line.front(), 1 );
-        if( close != std::string_view::npos && close > 1 )
-        {
-            out.emplace_back( line.substr( 1, close - 1 ) );
-        }
-    }
-}
-
 // The TOML key or quoted string at the front of `s` (`"a-b"`, `'a'` or a bare `a-b`, which stops at whitespace, `=` or `.`), consumed from `s`.
 inline std::string_view tomlTakeKey( std::string_view& s )
 {
@@ -16378,9 +16337,9 @@ inline rw::FileAdjacency resolveIncludeAdj( const IngestResult& ing )
 //       (zed: gpui.rs, theme.rs). Declared is read by NAME, so a namesake declared elsewhere makes a root read as a
 //       module, which only cuts less;
 //   (2) every occurrence of the edge in P's row (the adjacency is un-deduped: one per directive) was drawn by one of P's
-//       `mod x;` declarations. resolve.h resolveRustImport resolves `mod:x` in the INCLUDER's directory, which is the
-//       module directory only for a `mod.rs` or a crate root, so a declaration draws this edge only there; anywhere else
-//       every occurrence came from a `use` (`crate::a::b::…`) and the pair is kept (card RUST-MOD-RESOLVE);
+//       `mod x;` declarations. resolve.h resolveRustImport resolves `mod:x` in P's module directory (rustModuleDir, with the
+//       manifest's crate roots: RUST-ROOTS-A F2), so a declaration draws this edge only where that directory is the one rule
+//       (1) read; where the two disagree (a root only one of them knows) every occurrence came from a `use` and the pair is kept;
 //   (3) no other directive of P names the child at its head (`x`, `x::…`, `self::x…`, resolved or not: a relative
 //       `use x::Thing;` resolves to no file today), and no reference written in P is qualified by it (`x::go()`, the
 //       immediate qualifier: Reference::qualifier). Any namesake reads as a use, which only cuts less.
@@ -16403,15 +16362,10 @@ struct ContainmentCut
 // names this file's stem, so it is a module file, not a crate root.
 inline std::string rustChildModuleDir( std::string_view path, const std::vector<std::string_view>& declaredNames )
 {
-    const std::string_view dir   = includerDir( path );
-    std::string_view       stem  = dir.empty() ? path : path.substr( dir.size() + 1 );
-    stem                         = stem.substr( 0, stem.size() - 3 );   // ".rs", checked by the caller
-    const bool root = stem == "lib" || stem == "main" || !std::binary_search( declaredNames.begin(), declaredNames.end(), stem, sortutil::svLess );
-    if( stem == "mod" || root )
-    {
-        return std::string( dir );
-    }
-    return dir.empty() ? std::string( stem ) : std::string( dir ) + "/" + std::string( stem );
+    const std::string_view dir  = includerDir( path );
+    std::string_view       stem = dir.empty() ? path : path.substr( dir.size() + 1 );
+    stem                        = stem.substr( 0, stem.size() - 3 );   // ".rs", checked by the caller
+    return rustModuleDir( path, !std::binary_search( declaredNames.begin(), declaredNames.end(), stem, sortutil::svLess ) );   // declared by no `mod`: a root
 }
 
 inline bool isRustSourcePath( std::string_view path ) noexcept
@@ -16516,6 +16470,14 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
     std::sort( declaredNames.begin(), declaredNames.end(), sortutil::svLess );
     declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
 
+    // rule (2) reads the resolver's own `mod:` base, which knows a manifest's crate roots (`[lib] path`, src/bin/*.rs)
+    HashMap<std::string, std::uint32_t> rsIndex;
+    rsIndex.reserve( F );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        rsIndex.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
+    }
+    const RustCrateRoots rustRoots = buildRustCrateRoots( ing, rsIndex );
     std::vector<std::pair<std::uint32_t, std::uint32_t>>      cutPairs;   // (parent, child) to drop: parents ascending (decls' order), children sorted
     std::vector<std::pair<std::uint32_t, const RustModDecl*>> cand;   // one scratch row, reused: (child, its declaration) per occurrence
     std::vector<std::uint32_t>                                drop;   // the distinct children cut from one parent, sorted
@@ -16529,7 +16491,20 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
         }
         const std::string_view pPath    = rootRelPath( ing, p );
         const std::string      childDir = rustChildModuleDir( pPath, declaredNames );
-        const bool             declDraws = childDir == includerDir( pPath );   // rule (2): resolveRustImport's `mod:` base
+        // rule (2): resolveRustImport's `mod:` base is P's module directory, or P's own directory when the module directory
+        // holds neither x.rs nor x/mod.rs (its #[path] tier), which declaresAt checks per name
+        const std::string      modDir    = rustModuleDir( pPath, !rustRoots.empty() && rustRoots.isRoot[ p ] != 0 );
+        const bool             viaOwnDir = childDir != modDir && childDir == includerDir( pPath );
+        const bool             declDraws = childDir == modDir || viaOwnDir;
+        const auto declaresAt = [ & ]( std::string_view name )   // the declaration drew this child (not the module-directory file)
+        {
+            if( !viaOwnDir )
+            {
+                return true;
+            }
+            const std::string stem = modDir.empty() ? std::string( name ) : modDir + "/" + std::string( name );
+            return !rsIndex.contains( stem + ".rs" ) && !rsIndex.contains( stem + "/mod.rs" );
+        };
         const auto             names    = std::span( decls ).subspan( i, j - i );
         // The declaration naming g by the module-file rule, or nullptr (rule (1)).
         const auto declOf = [ & ]( std::uint32_t g ) -> const RustModDecl*
@@ -16580,7 +16555,7 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
                 ++b;
             }
             const RustModDecl& d = *cand[a].second;
-            if( declDraws && !d.used && b - a <= d.count )   // rules (2) and (3): every occurrence is the declaration's
+            if( declDraws && declaresAt( d.name ) && !d.used && b - a <= d.count )   // rules (2) and (3): every occurrence is the declaration's
             {
                 drop.push_back( cand[a].first );
             }

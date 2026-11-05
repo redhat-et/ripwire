@@ -926,6 +926,7 @@ for _g in \
     rustanccheck \
     rustimportprecisecheck \
     rustqualcheck \
+    rustrootscheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
