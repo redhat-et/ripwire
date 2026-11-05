@@ -187,5 +187,23 @@ inline bool anyField( std::string_view text, std::string_view sep, bool visitTra
     return false;
 }
 
+/// Is `field` one of the `sep`-separated fields of `text` (anyField's fields, the trailing empty one per `visitTrailingEmpty`)?
+inline bool hasField( std::string_view text, std::string_view sep, std::string_view field, bool visitTrailingEmpty )
+{
+    return anyField( text, sep, visitTrailingEmpty, [ & ]( std::string_view f ) { return f == field; } );
+}
+
+/// The `sep`-separated fields of `text` appended to `out` (anyField's fields, no trailing empty one: `a::b::c` -> a, b, c; ""
+/// adds nothing).
+template <class Out>
+inline void appendFields( std::string_view text, std::string_view sep, Out& out )
+{
+    anyField( text, sep, /*visitTrailingEmpty=*/false, [ & ]( std::string_view f )
+              {
+                  out.emplace_back( f );
+                  return false;
+              } );
+}
+
 } // namespace namesplit
 } // namespace rw

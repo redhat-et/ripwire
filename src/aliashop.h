@@ -232,12 +232,6 @@ inline bool cxxSourceFile( std::string_view path ) noexcept
     return false;
 }
 
-// Is `seg` one whole `::` segment of the scope path `sc`?
-inline bool scopeHasSegment( std::string_view sc, std::string_view seg )
-{
-    return namesplit::anyField( sc, "::", /*visitTrailingEmpty=*/true, [ & ]( std::string_view s ) { return s == seg; } );
-}
-
 // The per-answer caches the binds share: each file's lexical scope chains (cppscopechain.h's brace lexer; C++ records no namespace
 // body in the index: CallResultFamily::Cpp is off), keyed by (file, byte), and the namespace verdict per qualifier segment.
 struct BindCache
@@ -246,17 +240,6 @@ struct BindCache
     HashMap<std::uint64_t, std::vector<std::string>> chains;   // hashutil::packPair( file, byte ) -> the namespaces and classes around it
     HashMap<std::uint64_t, char>                     unknown;  // the keys whose file could not be read or did not balance
 };
-
-// `a::b::c` -> a, b, c appended to `out` ("" adds nothing)
-template <class Seg>
-inline void appendScopeSegments( std::string_view q, std::vector<Seg>& out )
-{
-    namesplit::anyField( q, "::", /*visitTrailingEmpty=*/false, [ & ]( std::string_view s )
-                         {
-                             out.emplace_back( s );
-                             return false;
-                         } );
-}
 
 // The lexical chains at the declaration starts of `ids`, read ONE pass per file (hoisting: a --uses answer's thousands of sites
 // share their files' passes). An unreadable file, or one whose braces do not balance (`#if … {` `#else … {`), records an empty
@@ -316,7 +299,7 @@ inline bool enclosingPath( const IngestResult& ing, const Symbol& s, BindCache& 
     }
     out = at->second;
     std::vector<std::string_view> owner;
-    appendScopeSegments( s.scope, owner );
+    namesplit::appendFields( s.scope, "::", owner );   // `a::b::c` -> a, b, c ("" adds nothing)
     const bool callable = s.kind == SymKind::Method || s.kind == SymKind::Function;
     if( !callable && !owner.empty() && owner.back() == s.name )
     {
@@ -404,7 +387,7 @@ inline BoundSpelling bindSpelling( const IngestResult& ing, std::string_view spe
     if( !q.empty() )
     {
         std::vector<std::string_view> written;
-        appendScopeSegments( q, written );
+        namesplit::appendFields( q, "::", written );
         for( const NodeId n : cands )
         {
             enclosingPath( ing, ing.symbols[ n ], cache, path );
@@ -427,7 +410,7 @@ inline BoundSpelling bindSpelling( const IngestResult& ing, std::string_view spe
                                                              const Symbol& t = ing.symbols[ n ];
                                                              return t.name == qLast && ( t.kind == SymKind::Class || t.kind == SymKind::Interface || isStructOrNamedType( t.kind ) );
                                                          } );
-                at->second = !isType && std::ranges::any_of( ing.symbols, [ & ]( const Symbol& t ) { return scopeHasSegment( t.scope, qLast ); } ) ? '\1' : '\0';
+                at->second = !isType && std::ranges::any_of( ing.symbols, [ & ]( const Symbol& t ) { return namesplit::hasField( t.scope, "::", qLast, /*visitTrailingEmpty=*/true ); } ) ? '\1' : '\0';
             }
             if( at->second != '\0' )
             {
