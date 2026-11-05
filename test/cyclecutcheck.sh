@@ -174,6 +174,29 @@ else no "cycles (e) rc=$R21: $( printf '%s' "$C21" | grep -oE '<cycles[^>]*>' )"
 if [ "$R20" = 0 ] && printf '%s' "$C20" | grep -q '<cycles>' && [ "$( printf '%s' "$C20" | grep -oE '<cycle size=' | wc -l | tr -d ' ' )" = 20 ]; then
     ok "cycles (e) twin: 20 cycles, all listed, a bare <cycles> (no cut to disclose)"
 else no "cycles (e) twin rc=$R20: $( printf '%s' "$C20" | grep -oE '<cycles[^>]*>' )"; fi
+# (f) #479 item 2: a cycle lists at most 12 member files, and a cut member list says so. A 14-file ring prints size=14 with
+#     12 <f> rows and members_capped="1"; a 12-file ring prints all 12 and no members_capped (no cut to disclose). The
+#     attribute is defined in the answer's own compact legend.
+mkring(){ # $1 dir  $2 files in one include ring r0.h -> r1.h -> ... -> r(N-1).h -> r0.h
+    mkdir -p "$1"; local i=0
+    while [ "$i" -lt "$2" ]; do printf '#include "r%d.h"\nint r%d(void);\n' $(( ( i + 1 ) % $2 )) "$i" > "$1/r$i.h"; i=$(( i + 1 )); done
+}
+mkring "$SH/ring14" 14; mkring "$SH/ring12" 12
+deps "$SH/ring14" --legend=compact; C14="$DOUT"; R14=$DRC
+deps "$SH/ring12" --legend=compact; C12="$DOUT"; R12=$DRC
+CY14="$( printf '%s' "$C14" | grep -oE '<cycle [^>]*>.*</cycle>' )"
+CY12="$( printf '%s' "$C12" | grep -oE '<cycle [^>]*>.*</cycle>' )"
+if [ "$R14" = 0 ] && printf '%s' "$CY14" | grep -qE '^<cycle size="14" [^>]*members_capped="1"' \
+   && [ "$( printf '%s' "$CY14" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ]; then
+    ok "cycles (f): a 14-file cycle lists 12 members under <cycle size=14 … members_capped=1>"
+else no "cycles (f) rc=$R14: $( printf '%s' "$CY14" | grep -oE '^<cycle [^>]*>' ) members=$( printf '%s' "$CY14" | grep -oE '<f p=' | wc -l | tr -d ' ' )"; fi
+if [ "$R12" = 0 ] && printf '%s' "$CY12" | grep -qE '^<cycle size="12" ' && ! printf '%s' "$CY12" | grep -q 'members_capped' \
+   && [ "$( printf '%s' "$CY12" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ]; then
+    ok "cycles (f) twin: a 12-file cycle lists all 12 members, no members_capped"
+else no "cycles (f) twin rc=$R12: $( printf '%s' "$CY12" | grep -oE '^<cycle [^>]*>' )"; fi
+if [ "$R14" = 0 ] && printf '%s' "$C14" | grep -q 'members_capped=1:'; then
+    ok "cycles (f) legend: the compact legend defines members_capped="
+else no "cycles (f) legend: no members_capped= definition in the answer's compact legend"; fi
 
 # ── 10) RUST-MOD-DECL: a `mod x;` parent-to-child pair is containment, not a cycle ──────────────────────────────────
 # Rust: the parent declares `mod x;`, the child `use super::…`/`use crate::…` back: every pair reads as a 2-cycle
