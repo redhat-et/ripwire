@@ -10105,7 +10105,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 else if( cls != kNoNode )
                 {
                     // a language with no call-result family types this local only through statedResultClass, RECV-XFILE's rule
-                    recvEv.typeCallResult( cr, ing.symbols[ cls ].name, cls, laneSite || callResultFamilyOf( cs.lang ) == CallResultFamily::None );
+                    recvEv.typeCallResult( cr, cls, laneSite || callResultFamilyOf( cs.lang ) == CallResultFamily::None );
                 }
                 break;
             }

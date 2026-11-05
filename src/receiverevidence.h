@@ -2750,10 +2750,11 @@ struct ReceiverEvidence
         return p != nullptr && methodOf( ing.symbols[ p->cls ].name, r.calleeName, false, p->cls );
     }
 
-    // RECV-C: `lane` = the typing is a RECV-XFILE record's (LocalFact::lane)
-    bool typeCallResult( const Binding& b, std::string_view cls, NodeId id, bool lane )
+    // RECV-C: `lane` = the typing is a RECV-XFILE record's (LocalFact::lane); the class is `id`, typed by its own name
+    bool typeCallResult( const Binding& b, NodeId id, bool lane )
     {
         const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
+        const std::string_view cls = ing.symbols[ id ].name;
         if( it == localType.end() || cls.empty() )
         {
             return false;
@@ -2855,6 +2856,23 @@ struct ReceiverEvidence
         seen.bound = f.bound;
         return seen;
     }
+    // RECV-C: an answer some RECV-XFILE-typed fact took part in is new evidence (laneRead); on main that fact was untyped.
+    // `facts` = the var's bindings, `inner` = the one whose span holds the site (null: none), `answered` = seenLocal gave a type
+    void noteLaneRead( const std::vector<LocalFact>& facts, const LocalFact* inner, bool answered ) const
+    {
+        if( !answered )
+        {
+            return;
+        }
+        for( const LocalFact& f : facts )
+        {
+            if( f.lane && ( f.end == 0 || ( inner != nullptr && f.start == inner->start && f.end == inner->end ) ) )
+            {
+                laneRead = true;
+                return;
+            }
+        }
+    }
     std::optional<SeenLocal> seenLocal( NodeId scope, std::string_view var, std::uint32_t site ) const
     {
         const auto it = localType.find( keyOf( scope, '#', var ) );
@@ -2886,13 +2904,7 @@ struct ReceiverEvidence
                 innerSplit = true;
             }
         }
-        // RECV-C: an answer some RECV-XFILE-typed fact took part in is new evidence (laneRead); on main that fact was untyped
-        bool lane = false;
-        for( const LocalFact& f : it->second )
-        {
-            lane = lane || ( f.lane && ( f.end == 0 || ( inner != nullptr && f.start == inner->start && f.end == inner->end ) ) );
-        }
-        laneRead = laneRead || ( lane && ( inner != nullptr || whole.has_value() ) );
+        noteLaneRead( it->second, inner, inner != nullptr || whole.has_value() );
         if( inner == nullptr )
         {
             return whole;
