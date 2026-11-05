@@ -650,9 +650,9 @@ elif [ -z "$EOC" ]; then ok "(P3) MCP explore budget_tokens=300: no over_ceiling
 else no "(P3) MCP explore budget_tokens=300: over_ceiling='$EOC'"; fi
 
 # ── ROUND C (owner decisions 2026-10-14) ─────────────────────────────────────────────────────────────────────
-# FOLD C: the default answer's <tail> carries the file page's first page (`--for=TASK --limit=40`): after the rank rows
-# (the positive-score files outside the shown sigs rows; sym= too since tail-sym, train 30), the page's first 40 rows not
-# already listed, each with sym=; total= every positive-score file (the page's total=); a cut tail's next= is the page from its first unprinted page row.
+# FOLD C: the default answer's <tail> carries the file page's first rows (`--for=TASK --limit=160`, FOR-TAIL-WIDE: four
+# pages): after the rank rows (the positive-score files outside the shown sigs rows; sym= too since tail-sym, train 30), the
+# page's first 160 rows not already listed, each with sym= on the old walk's first 40 rows and path-only past them; total= every positive-score file (the page's total=); a cut tail's next= is the page from its first unprinted page row.
 # RESERVE SECTIONS FIRST: under an explicit --token-budget the trailing sections (<hops>, <lego>, <compose>, the tail) keep at
 # least the share the retired hard ceiling gave them, and the rows past its cut fill what they leave of T (ST above reads T - U).
 cat > "$TMP/tail.py" <<'PY'
@@ -696,7 +696,7 @@ PY
 # (C1) the default answer's tail: rank rows outside the shown head, then page 0 of the file page, sym= equal
 if python3 "$TMP/tail.py" "$TMP/def.xml" attrs > "$TMP/c1.attrs"; then
     read -r C1T C1S C1C C1N < "$TMP/c1.attrs"
-    "$BIN" "$CORPUS" --for="$Q" --limit=40 "$CF" 2>/dev/null > "$TMP/c1.pagexml"
+    "$BIN" "$CORPUS" --for="$Q" --limit=160 "$CF" 2>/dev/null > "$TMP/c1.pagexml"
     python3 "$TMP/tail.py" "$TMP/def.xml" rank "$TMP/c1.pagexml" > "$TMP/c1.rank"; python3 "$TMP/tail.py" "$TMP/def.xml" page "$TMP/c1.pagexml" > "$TMP/c1.page"
     python3 "$TMP/page.py" "$TMP/c1.rank" < "$TMP/c1.pagexml" > "$TMP/c1.want"
     C1PT="$( head -1 "$TMP/c1.want" | sed 's/total=//' )"; sed -i.bak '1d' "$TMP/c1.want"
@@ -706,9 +706,19 @@ head = set( re.findall( r'<d [^>]*?\bp="([^"]*)"', open( sys.argv[ 1 ] ).read() 
 print( sum( 1 for p in open( sys.argv[ 2 ] ).read().split( "\n" ) if p in head ) )
 PY
 )"
-    if [ -s "$TMP/c1.page" ] && cmp -s "$TMP/c1.page" "$TMP/c1.want" && [ "$C1T" = "$C1PT" ] && [ "$C1DUP" = 0 ] && [ "$( lines "$TMP/c1.rank" )" -le 24 ] \
+    # FOR-TAIL-WIDE: a tail page row is the page's row (same path, same order); its sym= is the page's own or absent (path-only past the old
+    # 40-row walk, pinned by fortailwidecheck arm 3); the first row always names its sym=
+    C1PV="$( python3 - "$TMP/c1.page" "$TMP/c1.want" <<'PY'
+import sys
+t = [ l.rstrip( "\n" ).split( "\t" ) for l in open( sys.argv[ 1 ] ) if l.strip( "\n" ) ]
+w = [ l.rstrip( "\n" ).split( "\t" ) for l in open( sys.argv[ 2 ] ) if l.strip( "\n" ) ]
+ok = len( t ) == len( w ) and len( t ) > 0 and all( a[ 0 ] == b[ 0 ] and ( len( a ) < 2 or not a[ 1 ] or a[ 1 ] == b[ 1 ] ) for a, b in zip( t, w ) ) and len( t[ 0 ] ) > 1 and t[ 0 ][ 1 ]
+print( "OK" if ok else "BAD" )
+PY
+)"
+    if [ -s "$TMP/c1.page" ] && [ "$C1PV" = OK ] && [ "$C1T" = "$C1PT" ] && [ "$C1DUP" = 0 ] && [ "$( lines "$TMP/c1.rank" )" -le 24 ] \
        && ! grep -q SPLIT-FAIL "$TMP/c1.rank"; then
-        ok "(C1) default tail: $( lines "$TMP/c1.rank" ) rank rows outside the head, then the page's first rows ($( lines "$TMP/c1.page" ), sym= equal); total=$C1T == the page's"
+        ok "(C1) default tail: $( lines "$TMP/c1.rank" ) rank rows outside the head, then the page's first 160 rows not listed ($( lines "$TMP/c1.page" ), sym= equal or absent); total=$C1T == the page's"
     else
         no "(C1) default tail: page rows $( lines "$TMP/c1.page" ) vs the page's $( lines "$TMP/c1.want" ), total=$C1T vs page $C1PT, $C1DUP rank row(s) in the head"
     fi

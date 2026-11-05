@@ -970,6 +970,8 @@ inline constexpr char kHelpHead[] =
         "                               reason=\"budget\" — four distinct reasons, never collapsed (compact-route = the route\n"
         "                               chose edges, no_candidates = nothing scored, budget = the ceiling was spent, owner = the\n"
         "                               owner body rides).\n"
+        "                               ALIASES: a task name that is a C/C++ alias adds an <aliases> block (its chain to what it\n"
+        "                               names); CLI XML only: MCP for, --json and --format=columnar carry none.\n"
         "                               An explicit --token-budget=N is a soft target: the hop rows, bodies and file tail keep\n"
         "                               the share a hard N left them, <sigs> rows fill the rest by rank; --pack-top-n sets the head\n"
         "                               the target fills. --compress composes: the served bodies (auto/anchor and\n"

@@ -119,7 +119,7 @@ ct_tail="$( grep -oE '<tail [^>]*>' "$CT" | head -1 )"
 ct_ttot="$( printf '%s' "$ct_tail" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 "$BIN" src --for="$CONCTASK" --limit=40 --no-cache >"$TMP/cpage" 2>/dev/null; cp_rc=$?
 cp_tot="$( grep -oE '^<files [^>]*>' "$TMP/cpage" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
-{ printf '%s' "$ct_tail" | grep -qE "capped=\"1\" next=\"--for=&apos;$CONCTASK&apos; --limit=40\">\$" && [ "$cp_rc" -eq 0 ] \
+{ printf '%s' "$ct_tail" | grep -qE "capped=\"1\" next=\"--for=&apos;$CONCTASK&apos; --limit=40\"( p_only=\"[0-9]+\")?>\$" && [ "$cp_rc" -eq 0 ] \
   && [ -n "$cp_tot" ] && [ -n "$ct_ttot" ] && [ "$cp_tot" -ge "$ct_ttot" ] 2>/dev/null; } \
     && ok "#1c compact route, ceiling exhausted: the cut <tail> names the file page (next=), which pages $cp_tot files >= the tail's $ct_ttot" \
     || no "#1c compact route, ceiling exhausted: the cut <tail> has no working next= (tail '$ct_tail', page rc=$cp_rc total='${cp_tot:-none}')"
@@ -130,8 +130,8 @@ if ! printf '%s' "$cd_tail" | grep -q ' capped="1"'; then
     no "#1c default regime premise: the default <tail> is not capped ('$cd_tail') — this arm measures nothing; re-anchor it on a capped tail"
 # FOLD C (forbudget-soft round C; rule 4): the default tail carries page 0 of the file page, so its next= is the page FROM ITS
 # FIRST UNPRINTED PAGE ROW (`--limit=40 --offset=K`); that call must answer with a <files> page whose rows start at K.
-elif cd_off="$( printf '%s' "$cd_tail" | sed -nE "s/.*capped=\"1\" next=\"--for=&apos;$CONCTASK&apos; --limit=40( --offset=([0-9]+))?\">\$/\2/p" )"; \
-     printf '%s' "$cd_tail" | grep -qE "capped=\"1\" next=\"--for=&apos;$CONCTASK&apos; --limit=40( --offset=[0-9]+)?\">\$" && [ "$cp_rc" -eq 0 ] \
+elif cd_off="$( printf '%s' "$cd_tail" | sed -nE "s/.*capped=\"1\" next=\"--for=&apos;$CONCTASK&apos; --limit=40( --offset=([0-9]+))?\"( p_only=\"[0-9]+\")?>\$/\2/p" )"; \
+     printf '%s' "$cd_tail" | grep -qE "capped=\"1\" next=\"--for=&apos;$CONCTASK&apos; --limit=40( --offset=[0-9]+)?\"( p_only=\"[0-9]+\")?>\$" && [ "$cp_rc" -eq 0 ] \
      && [ -n "$cp_tot" ] && [ -n "$cd_ttot" ] && [ "$cp_tot" -ge "$cd_ttot" ] 2>/dev/null \
      && "$BIN" src --for="$CONCTASK" --limit=40 ${cd_off:+--offset=$cd_off} --no-cache 2>/dev/null | grep -qE "^<files [^>]* offset=\"${cd_off:-0}\""; then
     ok "#1c default regime: the capped <tail> carries the file-page next= (D-4; offset=${cd_off:-0}, FOLD C) that answers; the page holds $cp_tot files >= the tail's $cd_ttot"
