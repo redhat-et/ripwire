@@ -13,6 +13,9 @@
 #   (d1) dedupe: no <y> row's name is a word anywhere else in the answer
 #   (e1) the answer with RIPWIRE_NO_FILE_SYMS=1 equals the answer minus the block (legend comment + element), byte for byte
 #   (w1) well formed XML, the block's legend holds no double hyphen, the block is last before </ctx>, one per answer
+#   (l1) every attribute the block prints (<syms> and each <y>, the core p= n= aside) is defined `name=` in the legend comment right
+#        before it (the legendcoveragecheck predicate): the compact legend on the CLI rows, the full one on x1 (MCP); (h1) the held stub's
+#        own legend defines held= and next=
 #   (n1) present-only: a one-function tree has no candidate and prints no block (twin: a1 fires on the same binary)
 #   (h1) --token-budget holds the block: <syms held="budget" next=...>, no rows; (j1) --json carries no block
 #   (x1) MCP `for`: the block (one renderer), read off the MCP answer's own bytes: a1, d1 and w1 hold on it
@@ -105,6 +108,9 @@ try:
 except Exception as exc:
     wf = False
 say( wf and "--" not in legend[ 4 : -3 ] and s.count( "<syms " ) == 1, "w1", "well formed, legend without a double hyphen, one block" )
+attrs = sorted( { a for t in re.findall( r'<(?:syms|y) [^>]*>', blk ) for a in re.findall( r'(\w+)="', t ) } - { "p", "n" } )
+undef = [ a for a in attrs if not re.search( r'(?<![\w:.-])' + a + r'\s*=', legend ) ]
+say( attrs and not undef, "l1", "the legend defines every block attribute %s (undefined: %s)" % ( attrs, undef ) )
 PY
 
 for lang in py ts go cpp rs rb pyns; do
@@ -122,7 +128,8 @@ run one "--for=$TASK" >"$TMP/one.xml"; rc=$?
 if [ "$rc" = 0 ] && grep -q '</ctx>$' "$TMP/one.xml" && ! grep -q '<syms' "$TMP/one.xml"; then ok "(n1) present-only: a one-function tree prints no block"; else no "(n1) rc=$rc: $( grep -o '<syms.*' "$TMP/one.xml" | head -c 300 )"; fi
 
 run py "--for=$TASK" --token-budget=4000 >"$TMP/h1.xml"; rc=$?
-if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for=&apos;$TASK&apos;\"/></ctx>\$" "$TMP/h1.xml" && ! grep -q '<y ' "$TMP/h1.xml"; then ok "(h1) a token budget holds the block: held=\"budget\" next=, no rows"; else no "(h1) rc=$rc: $( grep -o '<syms.*' "$TMP/h1.xml" | head -c 300 )"; fi
+if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for=&apos;$TASK&apos;\"/></ctx>\$" "$TMP/h1.xml" && ! grep -q '<y ' "$TMP/h1.xml" \
+   && grep -qE '<!-- ripwire for syms: held="budget":[^>]* next= [^>]*--><syms held=' "$TMP/h1.xml"; then ok "(h1) a token budget holds the block: held=\"budget\" next=, no rows, its own legend defines held= and next="; else no "(h1) rc=$rc: $( grep -o '<syms.*' "$TMP/h1.xml" | head -c 300 )"; fi
 run py "--for=$TASK" --json >"$TMP/j1.json"; rc=$?
 if [ "$rc" = 0 ] && [ -s "$TMP/j1.json" ] && ! grep -q 'syms' "$TMP/j1.json"; then ok "(j1) --json carries no block"; else no "(j1) rc=$rc json: $( grep -o '.\{40\}syms.\{80\}' "$TMP/j1.json" | head -c 300 )"; fi
 
@@ -134,8 +141,8 @@ for line in sys.stdin:
     if d.get( "id" ) == 1:
         print( d["result"]["content"][0]["text"], end="" )
 ' >"$TMP/x1.xml"
-if [ -s "$TMP/x1.xml" ] && python3 "$TMP/check.py" "$TMP/x1.xml" mcp - >"$TMP/x1.res" 2>&1 && grep -q '^PASS (d1)' "$TMP/x1.res" && grep -q '^PASS (a1)' "$TMP/x1.res" && grep -q '^PASS (w1)' "$TMP/x1.res"
-then ok "(x1) MCP for: the block, its by=name cap and its dedupe against the MCP answer's own words"; else no "(x1) MCP: $( grep -v '^PASS' "$TMP/x1.res" | head -c 400 )"; fi
+if [ -s "$TMP/x1.xml" ] && python3 "$TMP/check.py" "$TMP/x1.xml" mcp - >"$TMP/x1.res" 2>&1 && grep -q '^PASS (d1)' "$TMP/x1.res" && grep -q '^PASS (a1)' "$TMP/x1.res" && grep -q '^PASS (w1)' "$TMP/x1.res" && grep -q '^PASS (l1)' "$TMP/x1.res"
+then ok "(x1) MCP for: the block, its by=name cap, its dedupe against the MCP answer's own words, and the full legend defines its attributes"; else no "(x1) MCP: $( grep -v '^PASS' "$TMP/x1.res" | head -c 400 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"

@@ -16,10 +16,11 @@
 //               edge; prov="split" when that call is one arm of a split; via="name" otherwise (a namesake's call, a call to a namesake
 //               of it, or one bound by name alone).
 // Ties: fan-in (graph callers) desc, then shown-file order, then name. kForFileSymsRowsPerRule rows per rule (a runaway cap: name= /
-// callee= count the rows shown; name_capped="1" name_total= / callee_capped="1" callee_total= when the cap cut them). A name both rules pick prints
+// callee= count the rows shown; name_capped="1" name_total= / callee_capped="1" callee_total= when the cap cut them; every printed attribute is
+// in kForFileSymsAttrs, which both legends must define, static_assert). A name both rules pick prints
 // once, as by="name".
 // PRESENT-ONLY: no candidate scores, no block. A token budget holds it (held="budget", next= the same --for call without the
-// budget). The block is outside est_tokens, after every byte of the ordinary answer: no auto-served body pays for it.
+// budget; the stub carries its own short legend). The block is outside est_tokens, after every byte of the ordinary answer: no auto-served body pays for it.
 #include "infra/namesplit.h" // namesplit::isIdentChar — the one identifier-byte test
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / outProv / inEdges, edgeKindByte, kEdgeName
 #include "lexical.h" // subtokens — the one identifier splitter
@@ -56,11 +57,45 @@ inline bool forFileSymsOn()
 inline constexpr std::string_view kForFileSymsLegend =
     "<!-- ripwire for syms: symbols of the answer's first files= shown files that it does not name, one <y> row each (p=file:line, n= the owner-qualified name; no body, the expand verb serves one): "
     "by=\"name\" its name shares a task word, by=\"callee\" a definition named like one of the first head= <d> rows calls one named like it (via=\"name\": "
-    "no evidence-bound call from the shown row to this definition, only a namesake's call, a call to a namesake or one bound by name alone; prov=\"split\": one arm of a split call); name= callee= rows shown, *_capped=\"1\" *_total= the candidates (files_total= the shown files) when a cap cut them; "
+    "no evidence-bound call from the shown row to this definition, only a namesake's call, a call to a namesake or one bound by name alone; prov=\"split\": one arm of a split call); "
+    "name= callee= the rows each rule shows; when a cap cut them, name_capped=\"1\" name_total= and callee_capped=\"1\" callee_total= the candidates, files_capped=\"1\" files_total= the shown files; "
     "not in est_tokens -->";
 inline constexpr std::string_view kForFileSymsLegendCompact =
     "<!-- syms: unnamed symbols of the first files= shown files, y p=file:line n=Owner.name; by=name task word, by=callee a head= <d> row or its namesake calls it or its namesake (via=name: "
-    "by name alone); *_capped=1 *_total= when cut; not in est_tokens -->";
+    "by name alone; prov=split: one arm of a split call); name= callee= rows per rule; name_capped=1 name_total= callee_capped=1 callee_total= files_capped=1 files_total= when cut; not in est_tokens -->";
+// The held stub's own legend (both dialects): the reader meets held= and next= beside the tag, not in the block legend it replaces.
+inline constexpr std::string_view kForFileSymsHeldLegend =
+    "<!-- ripwire for syms: held=\"budget\": a token budget is set, so the symbol rows of the shown files are not printed; next= repeats this call "
+    "without the budget, which prints them; not in est_tokens -->";
+
+// Every attribute <syms> and its <y> rows can print (blockXml's count() names and its row hedges; p= n= are the core row keys), and the
+// held stub's: each legend that rides beside them spells it `name=` (the legendcoveragecheck predicate), checked at compile time.
+inline constexpr std::array<std::string_view, 13> kForFileSymsAttrs { "files", "files_capped", "files_total", "head", "name", "name_capped",
+                                                                      "name_total", "callee", "callee_capped", "callee_total", "by", "via", "prov" };
+inline constexpr std::array<std::string_view, 2> kForFileSymsHeldAttrs { "held", "next" };
+template<std::size_t N>
+consteval bool legendDefinesAll( std::string_view legend, const std::array<std::string_view, N>& attrs )
+{
+    const auto word = []( char c )
+    { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' || c == ':' || c == '.' || c == '-'; };
+    for( const std::string_view a : attrs )
+    {
+        bool found = false;
+        for( std::size_t at = legend.find( a ); at != std::string_view::npos && !found; at = legend.find( a, at + 1 ) )
+        {
+            const std::size_t end = at + a.size();
+            found = ( at == 0 || !word( legend[at - 1] ) ) && end < legend.size() && legend[end] == '=';
+        }
+        if( !found )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+static_assert( legendDefinesAll( kForFileSymsLegend, kForFileSymsAttrs ), "kForFileSymsLegend must spell every <syms> attribute as name=" );
+static_assert( legendDefinesAll( kForFileSymsLegendCompact, kForFileSymsAttrs ), "kForFileSymsLegendCompact must spell every <syms> attribute as name=" );
+static_assert( legendDefinesAll( kForFileSymsHeldLegend, kForFileSymsHeldAttrs ), "kForFileSymsHeldLegend must spell held= and next=" );
 
 namespace filesyms_detail
 {
@@ -598,7 +633,7 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     }
     if( a.held )
     {
-        return "<syms held=\"budget\"" + nextAttrXml( nextFlag( "--for=", a.task ) ) + "/>";
+        return std::string( kForFileSymsHeldLegend ) + "<syms held=\"budget\"" + nextAttrXml( nextFlag( "--for=", a.task ) ) + "/>";
     }
     return fd::blockXml( ing, sf, head, picks, a.compactLegend );
 }

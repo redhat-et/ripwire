@@ -411,6 +411,26 @@ def legendOf( doc, anyRoot = False ):
     if m2: lead += m2.group( 1 )
     return lead.decode( 'utf-8', 'replace' )
 
+# TRAILING BLOCKS (K-LEGEND, 2026-11-05). A block a verb appends AFTER its ordinary answer — <syms> (forfilesyms.h), <decl_rows>
+# (fordeclrow.h), <graph_verb> (forgraphverb.h) — carries its legend in the comment IMMEDIATELY before its open tag
+# (`<!-- … --><syms`), so the answer before it stays byte-identical with the block off; the reader meets that comment right where
+# the block starts, which is the first screen of the block. legendOf reads only the head, so that comment counts here, for the
+# block's OWN elements only (its open tag through its close tag, or its self-closing tag), on top of the head legend: a comment
+# with anything but whitespace between it and the tag does not count, and a block's comment never defines an attribute outside
+# its block. TRAILING lists the tags; the reader below has no tag of its own (arm T pins all three properties).
+TRAILING = ( b"syms", b"decl_rows", b"graph_verb" )
+TRAIL    = re.compile( rb'<!--(?:(?!-->).)*-->\s*(?=<(?:' + b"|".join( TRAILING ) + rb')[\s/>])', re.S )
+def trailingBlocks( doc ):
+    """-> [ ( start, end, comment ) ]: each known trailing block's byte span (open tag through its close) and the comment just before it."""
+    out = []
+    for m in TRAIL.finditer( doc ):
+        tag  = re.match( rb'<([\w-]+)', doc[ m.end(): ] ).group( 1 )
+        selfClosed = re.match( rb'<' + tag + rb'\b[^>]*/>', doc[ m.end(): ] )
+        close = doc.find( b'</' + tag + b'>', m.end() )
+        end  = m.end() + selfClosed.end() if selfClosed else ( len( doc ) if close < 0 else close + len( tag ) + 3 )
+        out.append( ( m.end(), end, m.group( 0 ).decode( 'utf-8', 'replace' ) ) )
+    return out
+
 # The two predicates. `mentioned` is the generous one (arm A); `defined` is the house definition shape
 # `name=` (arm B). The lookbehind is what makes `defined` mean the attribute rather than a suffix of some
 # other one: it stops `top=` matching inside `of_top=` and `total=` inside `subtotal=`. `mentioned` implies
@@ -418,6 +438,33 @@ def legendOf( doc, anyRoot = False ):
 # name spelled `name=` always contains the name.
 def mentioned( a, legend ): return re.search( r'\b' + re.escape( a ) + r'\b', legend ) is not None
 def defined  ( a, legend ): return re.search( r'(?<![\w:.-])' + re.escape( a ) + r'\s*=', legend ) is not None
+
+# One document -> ( head legend, keys, mentioned-gaps, defined-gaps ). A DEFAULT row reads EVERY instance of every element
+# (rv-r1-L1-2: a rare conditional attribute on the second <c> row, or a row only a detached HEAD prints, escaped a first-instance
+# sample), outside comments and CDATA (blanked to spaces, so byte offsets still place a tag inside or outside a trailing block). The
+# full rows keep the first-instance window their floor was recorded with. Each attribute instance is judged against the legend
+# where it stands: the head legend, or the head legend plus its trailing block's own comment; a key is a gap when any instance's
+# legend fails it.
+def gapsOf( doc, isDefault ):
+    legend  = legendOf( doc, anyRoot = isDefault )
+    blocks  = trailingBlocks( doc )
+    legends = [ legend ] + [ legend + " " + c for _, _, c in blocks ]
+    def legendAt( pos ): return next( ( 1 + b for b, ( lo, hi, _ ) in enumerate( blocks ) if lo <= pos < hi ), 0 )
+    blank = lambda m: b" " * len( m.group( 0 ) )
+    scan  = re.sub( rb'<!--.*?-->', blank, re.sub( rb'<!\[CDATA\[.*?\]\]>', blank, doc, flags = re.S ), flags = re.S ) if isDefault else doc
+    seen, order, where = {}, [], {}
+    for m in ATTR.finditer( scan ):
+        tag = m.group( 1 ).decode()
+        attrs = [ a.decode() for a in re.findall( rb'\s([\w:.-]+)="', m.group( 2 ) ) ]
+        if tag in seen and not isDefault:
+            continue
+        if tag not in seen:
+            seen[ tag ] = [];  order.append( tag )
+        seen[ tag ] += [ a for a in attrs if a not in seen[ tag ] ]
+        for a in attrs: where.setdefault( ( tag, a ), set() ).add( legendAt( m.start() ) )
+    keys = sorted( { f"{tag}@{a}" for tag in order for a in seen[ tag ] if a not in CORE } )
+    gapUnder = lambda k, pred: any( not pred( k.split( '@', 1 )[1], legends[ i ] ) for i in where[ tuple( k.split( '@', 1 ) ) ] )
+    return legend, keys, [ k for k in keys if gapUnder( k, mentioned ) ], [ k for k in keys if gapUnder( k, defined ) ]
 
 # The heaviest calls go first (measured 2026-10-13, dev machine: --pr-context=HEAD~30 ±budget 50-105 s, --quality-delta
 # 12-16 s, --naming-calibration 9 s, --merge-scout / --dmm 5-8 s; everything else <= 5 s). Scheduling only — no verdict.
@@ -432,23 +479,7 @@ for ( name, args ), ( doc, err ) in zip( ROSTER, RESULTS ):
     if not doc.strip():
         silent.append( name );  table.append( ( name, 0, [], [] ) );  continue
     isDefault = name.endswith( "-default" )
-    legend, seen, order = legendOf( doc, anyRoot = isDefault ), {}, []
-    # A DEFAULT row reads EVERY instance of every element (rv-r1-L1-2: a rare conditional attribute on the second <c> row, or
-    # a row only a detached HEAD prints, escaped a first-instance sample), outside comments and CDATA. The full rows keep the
-    # first-instance window their floor was recorded with.
-    scan = re.sub( rb'<!--.*?-->', b'', re.sub( rb'<!\[CDATA\[.*?\]\]>', b'', doc, flags = re.S ), flags = re.S ) if isDefault else doc
-    for m in ATTR.finditer( scan ):
-        tag = m.group( 1 ).decode()
-        attrs = [ a.decode() for a in re.findall( rb'\s([\w:.-]+)="', m.group( 2 ) ) ]
-        if tag in seen:
-            if isDefault:
-                seen[ tag ] += [ a for a in attrs if a not in seen[ tag ] ]
-            continue
-        seen[ tag ] = attrs
-        order.append( tag )
-    keys = sorted( { f"{tag}@{a}" for tag in order for a in seen[ tag ] if a not in CORE } )
-    gm   = [ k for k in keys if not mentioned( k.split( '@', 1 )[1], legend ) ]
-    gd   = [ k for k in keys if not defined  ( k.split( '@', 1 )[1], legend ) ]
+    legend, keys, gm, gd = gapsOf( doc, isDefault )
     for k in keys: emitted.add( f"{name} | {k}" )
     for g in gm:   gapsMentioned.add( f"{name} | {g}" )
     for g in gd:   gapsDefined.add(   f"{name} | {g}" )
@@ -492,6 +523,46 @@ if os.environ.get( "LEGENDCOV_LIST" ):
     for name, lb, gm, gd in table:
         print( f"  {name:20s} legend={lb:5d}B undefined={len(gm):2d} grey={len(gd)-len(gm):2d}  {' '.join(gm)}" )
     print( "  GREY (prose-only, asserted by neither arm): " + " · ".join( sorted( grey ) ) )
+
+# (T) THE TRAILING-BLOCK READER (K-LEGEND), on fixed documents and on a live one, through the same gapsOf the sweep uses. One
+# "PASS|FAIL text" line per property into $TMP/trail.
+def tdoc( mid ): return ( b'<ctx><!-- head: q= a head attribute --><d n="x" q="1"/>' + mid + b'</ctx>' )
+SYM  = b'<syms files="2" name="1"><y p="a.py:1" n="b" by="name"/></syms>'
+GOOD = b'<!-- syms: files= shown files, name= rows, by= the rule -->'
+tl = []
+def tarm( good, text ): tl.append( ( "PASS " if good else "FAIL " ) + text )
+g = gapsOf( tdoc( GOOD + SYM ), True )[ 3 ]
+tarm( g == [], f"(T1) a legend comment right before a trailing block defines its attributes (gaps {g})" )
+g = gapsOf( tdoc( GOOD.replace( b'files=', b'files' ) + SYM ), True )[ 3 ]
+tarm( g == [ "syms@files" ], f"(T2) mutant: that comment loses files= -> syms@files is a gap (gaps {g})" )
+g = gapsOf( tdoc( GOOD + b'<e/>' + SYM ), True )[ 3 ]
+tarm( "syms@files" in g and "y@by" in g, f"(T3) a comment NOT immediately before the block does not count (gaps {g})" )
+g = gapsOf( tdoc( b'<z w="1"/>' + GOOD.replace( b'-->', b'w= -->' ) + SYM ), True )[ 3 ]
+tarm( g == [ "z@w" ], f"(T4) a block's comment defines nothing outside its block (gaps {g})" )
+g = gapsOf( tdoc( b'<!-- syms: held= next= --><syms held="budget" next="x"/>' ), True )[ 3 ]
+tarm( g == [], f"(T5) a self-closed block (the held stub) reads its own comment (gaps {g})" )
+# (T6) live: a DEFAULT --for answer from the roster that carries a trailing block; the first open-tag attribute only its comment
+# defines is cut from that comment, and the same reader must report it
+live = [ ( n, d ) for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if e is None and d and n.endswith( "-default" ) and trailingBlocks( d ) ]
+if not live:
+    tarm( False, "(T6) no default roster answer carries a trailing block: the live mutation has nothing to cut" )
+else:
+    n, d = live[ 0 ]
+    lo, hi, c = trailingBlocks( d )[ 0 ]
+    head  = legendOf( d, anyRoot = True )
+    open_ = re.match( rb'<([\w-]+)((?:\s+[\w:.-]+="[^"]*")*)', d[ lo:hi ] )
+    tag   = open_.group( 1 ).decode()
+    only  = [ a for a in ( x.decode() for x in re.findall( rb'\s([\w:.-]+)="', open_.group( 2 ) ) ) if a not in CORE and not defined( a, head ) ]
+    if not only:
+        tarm( False, f"(T6) {n}: every attribute of <{tag}> is defined by the head legend: nothing to cut" )
+    else:
+        a, cb = only[ 0 ], c.encode()
+        cs    = d.rfind( cb, 0, lo )
+        mut   = d[ :cs ] + re.sub( rb'(?<![\w:.-])' + re.escape( a.encode() ) + rb'\s*=', a.encode() + b' ', cb ) + d[ cs + len( cb ): ]
+        before, after = gapsOf( d, True )[ 3 ], gapsOf( mut, True )[ 3 ]
+        tarm( f"{tag}@{a}" not in before and f"{tag}@{a}" in after,
+              f"(T6) {n}: live <{tag}> defines {a}= in its own comment, and cutting it reds {tag}@{a} (before {before}, after {after})" )
+writeLines( "trail", tl )
 PY
 
 if [ -s "$TMP/pyerr" ]; then no "the sweep itself failed: $( head -c 300 "$TMP/pyerr" )"; echo "$fail" >/dev/null; fi
@@ -542,6 +613,14 @@ elif [ -s "$TMP/defaultgaps" ]; then
     sed 's/^/          /' "$TMP/defaultgaps"
 else
     ok "(G) every attribute the default posture emits is defined in its own legend: $nDefKeys attributes over $nDefRows default rows, no floor"
+fi
+
+# (T) the trailing-block reader (TRAILING BLOCKS above): an adjacent comment defines its own block and nothing else, any other
+#     comment does not count, and a live cut reds. A missing result file is a FAIL, never a pass.
+if [ -s "$TMP/trail" ]; then
+    while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; *) no "${l#FAIL }";; esac; done <"$TMP/trail"
+else
+    no "(T) the trailing-block arms did not run"
 fi
 
 # (C) the one way (A) could pass without the property holding: a roster verb that emits nothing has no
