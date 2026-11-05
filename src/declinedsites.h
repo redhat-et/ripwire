@@ -70,16 +70,13 @@ inline const char* declinedSiteGate( DeclinedSiteKind kind ) noexcept
 // `src/helper/css/index.test.tsx` among the source sites of `--callers=src/router.ts:match`; a test site now follows them.
 // The callers form is then interleaved FILE-FIRST: a stable sort on each site's rank within its file, so rank 0 of every
 // file (in tier-then-path order) precedes rank 1 of any.
-inline void orderDeclinedSites( const IngestResult& ing, const Graph& g, std::vector<std::uint32_t>& sites, bool fileFirst )
+// The served order of call sites, in place, over any site handle `refOf` reads a Reference from; ties within a line keep the
+// handle's own order (operator<), so the order is TOTAL.
+template <class Site, class RefOf>
+inline void orderCallSites( const IngestResult& ing, std::vector<Site>& sites, RefOf refOf, bool fileFirst )
 {
-    const auto refOf = [ & ]( std::uint32_t site ) -> const Reference& { return ing.references[ g.declinedSiteRef[ site ] ]; };
-    for( const std::uint32_t site : sites )
-    {
-        EXPECTS( site < g.declinedSiteRef.size() && g.declinedSiteRef[ site ] < ing.references.size(),
-                 "the records and the references come from the same build (an edit preview rebuilds both)" );
-    }
-    const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, sites, [ & ]( std::uint32_t site ) { return refOf( site ).fileId; } );
-    std::sort( sites.begin(), sites.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, sites, [ & ]( const Site& site ) { return refOf( site ).fileId; } );
+    std::sort( sites.begin(), sites.end(), [ & ]( const Site& a, const Site& b )
     {
         const Reference& ra = refOf( a );
         const Reference& rb = refOf( b );
@@ -101,13 +98,22 @@ inline void orderDeclinedSites( const IngestResult& ing, const Graph& g, std::ve
     std::vector<std::uint32_t> order( sites.size() );
     std::iota( order.begin(), order.end(), 0u );
     std::stable_sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return rankInFile[a] < rankInFile[b]; } );
-    std::vector<std::uint32_t> interleaved;
+    std::vector<Site> interleaved;
     interleaved.reserve( sites.size() );
     for( const std::uint32_t i : order )
     {
         interleaved.push_back( sites[i] );
     }
     sites.swap( interleaved );
+}
+inline void orderDeclinedSites( const IngestResult& ing, const Graph& g, std::vector<std::uint32_t>& sites, bool fileFirst )
+{
+    for( const std::uint32_t site : sites )
+    {
+        EXPECTS( site < g.declinedSiteRef.size() && g.declinedSiteRef[ site ] < ing.references.size(),
+                 "the records and the references come from the same build (an edit preview rebuilds both)" );
+    }
+    orderCallSites( ing, sites, [ & ]( std::uint32_t site ) -> const Reference& { return ing.references[ g.declinedSiteRef[ site ] ]; }, fileFirst );
 }
 
 // One 1-hop answer's declined_calls= and the records behind it, in served order: callers (declinedCallsNaming) the declined
@@ -346,10 +352,14 @@ struct DeclinedSiteCut
     std::size_t shown = 0;
     std::string next;   // "" when nothing was cut
 };
-inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::string_view verbFlag, std::string_view selector, std::size_t rowWindow )
+// `slotTaken` (RECV-ORDER, callhierarchy.h declineSlotBand): the band's slots proven sites hold, which their caller rows print
+// instead, so the <dc> rows fill only the rest (0 rows when they hold every slot).
+inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::string_view verbFlag, std::string_view selector, std::size_t rowWindow,
+                                        std::size_t slotTaken = 0 )
 {
     DeclinedSiteCut cut;
-    const std::size_t cap = pageLimit > 0 ? std::size_t( pageLimit ) : kDeclinedSiteCap;
+    const std::size_t band = pageLimit > 0 ? std::size_t( pageLimit ) : kDeclinedSiteCap;
+    const std::size_t cap  = band - std::min( slotTaken, band );
     cut.shown = std::min( total, cap );
     if( cut.shown < total )
     {
@@ -370,10 +380,10 @@ inline std::string declinedSiteCutAttrXml( const DeclinedSiteCut& cut )
     return " dc_shown=\"" + std::to_string( cut.shown ) + "\" dc_next=\"" + std::string( escapeXml( cut.next, esc ) ) + "\"";
 }
 // The JSON twin of the two root attributes, the same names on the CLI --json and the MCP twins (the attribute-parity rule).
-// A cut prints at least one row (the cap and --limit are >= 1), so dc_shown is never the 0 countFieldOrEmpty leaves out.
+// A cut may print no row (RECV-ORDER: proven sites hold every slot), so dc_shown rides whenever dc_next does, 0 included.
 inline std::string declinedSiteCutKeyJson( const DeclinedSiteCut& cut )
 {
-    return countFieldOrEmpty( "dc_shown", cut.next.empty() ? 0 : cut.shown, /*json=*/true ) + nextFieldJson( cut.next, "dc_next" );
+    return ( cut.next.empty() ? std::string() : ",\"dc_shown\":" + std::to_string( cut.shown ) ) + nextFieldJson( cut.next, "dc_next" );
 }
 
 // What the legend must define, read off the rows an answer prints (graphlegend.h declinedSitesLegend).

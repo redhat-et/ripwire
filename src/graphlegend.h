@@ -873,6 +873,21 @@ inline const char* declinedLiteralCallsLegend( bool on ) noexcept { return on ? 
 inline constexpr const char* kDeclinedIfaceLegend =
     "declined_iface=K (absent when 0) counts declined TypeScript call SITES that share their called name with a method signature with no body in this tree (an interface or abstract member; an overload signature in the same class as its implementation is not one). It matches by NAME only: the receiver's type is not read, so a counted call MAY go through that interface or may be another same-named method (a string's match, say). The resolver does not narrow a call on a TypeScript type annotation, so a call through an interface-typed receiver is declined once the name has two or more definitions: it has no caller row and no share of count=, and declined_calls= may miss it (the bodyless signature can sit outside its candidates). It counts the declined calls that could have meant these definitions (or, for impact, a symbol in the radius) and those sharing the name of a signature among them, each once, so it is NOT a subset of declined_calls= and can exceed it; the uses verb on the called name lists the sites. ";
 inline const char* declinedIfaceLegend( bool on ) noexcept { return on ? kDeclinedIfaceLegend : ""; }
+// ── dc_proven= on the callers answer and find_referencing_symbols (callhierarchy.h declineSlotBand, RECV-ORDER) ──
+inline constexpr const char* kDeclineSlotLegend =
+    "dc_proven=K (absent when 0): the first K rows are callers a receiver record proved at a call site the name alone would have declined. Each keeps the place that site takes in the <dc> rows' file-first order: the page lists those K rows beyond its cap, and the <dc> rows print one fewer site for each such proven site. ";
+inline constexpr const char* kDeclineSlotLegendMcp =
+    "dc_proven: the first K calledBy entries are callers a receiver record proved at a call site the name alone would have declined; each keeps the place that site takes in declined_sites' file-first order, listed beyond the page cap, and declined_sites lists one fewer site for each such proven site. ";
+inline const char* declineSlotLegend( bool on ) noexcept { return on ? kDeclineSlotLegend : ""; }
+inline const char* declineSlotLegendMcp( bool on ) noexcept { return on ? kDeclineSlotLegendMcp : ""; }
+inline std::string declineSlotAttrXml( std::size_t leadRows )
+{
+    return countAttrXmlOrEmpty( "dc_proven", leadRows );
+}
+inline std::string declineSlotKeyJson( std::size_t leadRows )
+{
+    return countFieldOrEmpty( "dc_proven", leadRows, /*json=*/true );
+}
 inline std::string declinedIfaceAttrXml( std::size_t declinedIface )
 {
     return countAttrXmlOrEmpty( "declined_iface", declinedIface );

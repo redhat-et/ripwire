@@ -203,6 +203,12 @@ struct Graph
     // lane L6: the generic bound a gate="iface" record was typed through (`R: Renderer`, the row's bound=), as ( record, text )
     // in record order — only the records that have one (a Rust generic receiver); every other record reads none.
     std::vector<std::pair<std::uint32_t, std::string>> declinedSiteBound;
+    // RECV-ORDER (card 19): the PROVEN call sites the name ladder alone would have DECLINED: a RECV-XFILE receiver record decided
+    // the site (laneOnlySite), and the called name has two or more definitions in reach, none in the caller's file or directory.
+    // One entry per ( target, site ), packed target << 32 | the site's ing.references index, sorted ascending. The callers answers
+    // order these sites with the <dc> sites (callhierarchy.h declineSlotBand), so a caller the record proves keeps the slot its
+    // declined row had. 8 B per such edge site; empty on a tree with none (most), which keeps every callers answer's bytes.
+    std::vector<std::uint64_t> declineSlotSites;
     // 1 for a definition some call the builtin-method name gate DECLINED could have meant (BuiltinMethodGate below); empty
     // on a corpus with no such decline. Read by the dead-code predicate (quality.h isDeadCandidate): a definition a
     // declined `pool.get( k )` could have meant is not provably uncalled, which is what it was before the gate, when
@@ -10986,15 +10992,21 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // in-language definition of the name in reach, one in the caller's file, or (none there) one in its directory: the edge was
     // there before, so the lexical callee field keeps it. A Rule 3 include-file pick is not modelled: such an edge leaves the
     // field (a floor, counted in Graph::lexQuietEdges).
-    const auto ladderReaches = [ & ]( const Reference& r, NodeId to ) -> bool
+    // One scan of the name's in-language definitions in reach, as the ladder's rungs see them: how many, whether one sits in the
+    // caller's file or directory, and where `to` (kNoNode: none) sits.
+    struct LadderReach
     {
-        const auto it = byName.find( r.calleeName );
+        std::size_t n         = 0;
+        bool        anyInFile = false, anyInDir = false, hit = false, hitInFile = false, hitInDir = false;
+    };
+    const auto ladderScan = [ & ]( const Reference& r, NodeId to ) -> LadderReach
+    {
+        LadderReach reach;
+        const auto  it = byName.find( r.calleeName );
         if( it == byName.end() )
         {
-            return false;
+            return reach;
         }
-        std::size_t         n = 0;
-        bool                anyInFile = false, hit = false, hitInFile = false, hitInDir = false;
         const std::uint32_t rdir = fileDir[ r.fileId ];
         for( NodeId c : it->second )
         {
@@ -11002,17 +11014,32 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            ++n;
+            ++reach.n;
             const bool inFile = symFileId[ c ] == r.fileId;
-            anyInFile         = anyInFile || inFile;
+            const bool inDir  = fileDir[ symFileId[ c ] ] == rdir;
+            reach.anyInFile   = reach.anyInFile || inFile;
+            reach.anyInDir    = reach.anyInDir || inDir;
             if( c == to )
             {
-                hit       = true;
-                hitInFile = inFile;
-                hitInDir  = fileDir[ symFileId[ c ] ] == rdir;
+                reach.hit       = true;
+                reach.hitInFile = inFile;
+                reach.hitInDir  = inDir;
             }
         }
-        return hit && ( n == 1 || hitInFile || ( !anyInFile && hitInDir ) );
+        return reach;
+    };
+    const auto ladderReaches = [ & ]( const Reference& r, NodeId to ) -> bool
+    {
+        const LadderReach reach = ladderScan( r, to );
+        return reach.hit && ( reach.n == 1 || reach.hitInFile || ( !reach.anyInFile && reach.hitInDir ) );
+    };
+    // RECV-ORDER: would the name ladder alone have DECLINED the site? Its tier-3 rule: two or more definitions, none in the caller's
+    // file or directory. (A Rule 3 include-file hedge and a unique name a local shadows are not modelled: such a site is not
+    // recorded, so its caller ranks as any proven caller does.)
+    const auto ladderDeclines = [ & ]( const Reference& r ) -> bool
+    {
+        const LadderReach reach = ladderScan( r, kNoNode );
+        return reach.n >= 2 && !reach.anyInFile && !reach.anyInDir;
     };
     for( std::size_t walk = 0; walk < ing.references.size(); ++walk )
     {
@@ -12891,11 +12918,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const bool  finalSegmentType = ( ( receiverTypeNarrowed || censusCone ) && !identityClaim && narrower.finalSegmentTypeAt( r ) )
                                     || ( fieldTypeNarrowed && narrower.fieldFinalSegmentAt( r, ing.symbols[ r.fromSymbol ].scope, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } ) );
         const bool laneEdge = laneOnlySite && narrowed && !nameOnly;   // RECV-C: a later rung that undid the narrow is main's answer
+        // RECV-ORDER (Graph::declineSlotSites): a RECV-XFILE record proved ONE target (its records are size-1 by design; a split the
+        // site commits came through a rule main runs too) where the name ladder alone would have declined
+        const bool slotSite = laneEdge && std::ranges::count_if( tier, [ & ]( NodeId c ) { return c != r.fromSymbol; } ) == 1 && ladderDeclines( r );
         for( NodeId to : tier )
         {
             if( to == r.fromSymbol )
             {
                 continue;
+            }
+            if( slotSite )
+            {
+                g.declineSlotSites.push_back( ( std::uint64_t( to ) << 32 ) | std::uint32_t( siteIndex ) );
             }
             const std::uint64_t ekey = ( std::uint64_t( r.fromSymbol ) << 32 ) | to;
             EdgeAcc& e = acc[ ekey ];
@@ -13122,6 +13156,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     g.lexQuietEdges = nLexQuiet;
+    std::ranges::sort( g.declineSlotSites );   // RECV-ORDER: by target, then site — declineSlotSitesNaming reads one run per target
+    g.declineSlotSites.erase( std::ranges::unique( g.declineSlotSites ).begin(), g.declineSlotSites.end() );
     // in-edge CSR (row = target) for PageRank
     std::vector<std::uint32_t> inDeg( N, 0 );
     for( const E& e : edges )
@@ -19067,6 +19103,24 @@ inline std::vector<std::uint32_t> declinedSitesNaming( const Graph& g, std::span
     }
     ENSURES( sites.size() == callCount, "each stored list counts exactly the calls whose records name it" );
     return sites;
+}
+
+// RECV-ORDER: the ing.references indices of the proven sites the ladder alone would have declined (Graph::declineSlotSites) whose
+// target is one of `targets`, ascending and each once (a site proven to two targets is one call). Empty on a graph with none.
+inline std::vector<std::uint32_t> declineSlotSitesNaming( const Graph& g, std::span<const NodeId> targets )
+{
+    std::vector<std::uint32_t> refs;
+    for( const NodeId t : targets )
+    {
+        const auto first = std::ranges::lower_bound( g.declineSlotSites, std::uint64_t( t ) << 32 );
+        for( auto it = first; it != g.declineSlotSites.end() && NodeId( *it >> 32 ) == t; ++it )
+        {
+            refs.push_back( std::uint32_t( *it & 0xffffffffu ) );
+        }
+    }
+    std::ranges::sort( refs );
+    refs.erase( std::ranges::unique( refs ).begin(), refs.end() );
+    return refs;
 }
 
 // The callees answer's <stdm> line: of the declines `sources` made (declinedCallsMadeBy), the calls named in their

@@ -226,7 +226,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
     rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
                  rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedSiteCutKeyJson( chDcCut )
-                   + rw::declinedIfaceKeyJson( chRows.declinedIface )
+                   + rw::declinedIfaceKeyJson( chRows.declinedIface ) + rw::declineSlotKeyJson( rw::declineSlotLeadRows( chRows, cfg.pageOffset ) )   // RECV-ORDER
                    + rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true ),
                  ( rw::valueRefsCountKeyJson( chRows.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( ing, chRows.valueRefs.depthCut, chVr )
                    + rw::patternDispatchKeyJson( chRows.valueRefs.patternSites.size(), chRows.valueRefs.patternWideSites.size() )   // IX-3: the XML root's pattern counts
@@ -284,7 +284,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // callhierarchy.h owns the resolution, the neighbour union, the bodyless-def count and the
         // tier-then-path order — the MCP twins run the identical call, so the two surfaces cannot disagree
         // about WHICH rows the question has.
-        const CallHierarchyRows   chRows  = rw::callHierarchyRows( ing, g, sym, wantCallers );
+        const CallHierarchyRows   chRows  = rw::callHierarchyRows( ing, g, sym, wantCallers, nullptr, wantCallers ? std::max( cfg.pageLimit, 0 ) : -1 );   // RECV-ORDER: the <dc> band
         // lane ix2-slice (IX-2 P2, src/closures.h): callees only — the functions written inside the matches' bodies, any depth
         const std::vector<NodeId> chClosures = wantCallers ? std::vector<NodeId>{} : rw::ClosureIndex( ing ).closuresOf( chRows.matches );
         const std::vector<NodeId>& matches = chRows.matches;
@@ -336,7 +336,9 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         rw::CallersByteBand chBand = wantCallers ? rw::callersByteBand( ing, matches, result, rw::VrRender{ chSingleRoot, chRootPrefix }, cfg.pageLimit,
                                                                            chTested.testReach, chRows.attr, g.keptForwards )
                                                  : rw::CallersByteBand{};
-        const PageWindow  pw = pageWindow( result.size(), rw::callHierarchyRowCap( cfg.pageLimit, result.size(), chBand.rowBytes ), cfg.pageOffset );
+        // RECV-ORDER (callhierarchy.h declineSlotBand): the first page leads with the callers that hold a <dc> band slot, past its cap
+        const std::size_t chLead = rw::declineSlotLeadRows( chRows, cfg.pageOffset );
+        const PageWindow  pw = pageWindow( result.size(), rw::callHierarchyRowCap( cfg.pageLimit, result.size(), chBand.rowBytes ) + int( chLead ), cfg.pageOffset );
         const bool        chDiscloseCap = ( pw.end - pw.begin ) < result.size();
         // QUALNAME-1: n="Owner.name" on a member row (memberowner.h) — the rows MF1-NX's <callers> block shares; its legend clause
         // rides exactly when a shown row carries an owner.
@@ -371,7 +373,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // lane declined-sites (declinedsites.h): the <dc> rows — the declined call SITES declined_calls= counts, in callhierarchy.h's
         // served order, cut at the default cap (--limit raises it; dc_next= names that call) — computed once for every dialect below.
         const rw::DeclinedSiteCut chDcCut = rw::declinedSiteCut( chRows.declinedSites.size(), cfg.pageLimit, wantCallers ? "--callers=" : "--callees=", sym,
-                                                                 std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ) );
+                                                                 std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ),
+                                                                 chLead > 0 ? chRows.slotSites : 0 );   // RECV-ORDER: the slots the lead rows hold
         const std::vector<rw::DeclinedSiteView> chDc =
             rw::declinedSiteViews( ing, g, std::span<const std::uint32_t>( chRows.declinedSites ).first( chDcCut.shown ), wantCallers, matches, chAttr.groups,
                                    rw::VrRender{ chSingleRoot, chRootPrefix }, cfg.legend == "full" );
@@ -415,6 +418,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                                            !wantCallers && rw::inertDeclinedMadeBy( g, matches ) > 0 )   // exactly when the root carries declined_calls=; the inert sentence only where THESE definitions made an inert quoted site
                            + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( chDc, wantCallers, chDcCut ) ),   // and the <dc> rows, exactly when one rides
                          std::string( rw::declinedIfaceLegend( chRows.declinedIface > 0 ) ) + rw::viaImplLegend( chHasImpl )   // likewise, exactly when declined_iface= / a via="impl" row is there
+                           + rw::declineSlotLegend( chLead > 0 )   // RECV-ORDER: and dc_proven=
                            + rw::stdMemberCallsLegend( chRows.stdCalls.calls > 0 && !cfg.columnar ),   // and when the <stdm> line is (XML only)
                          ( std::string( rw::unprovenDefsLegend( chRows.unprovenDefs > 0 ) )      // H1: likewise, exactly when unproven_defs= is there
                            + rw::crossKindLegend( !chRows.crossKind.empty() )                      // hono-07: likewise for cross_kind=
@@ -451,7 +455,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             : rw::nextAttrXml( chHintCall );
         // The tier-3 declines count= does not include (callhierarchy.h), on every dialect; absent at zero.
         const std::string chDeclinedAttr = rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedSiteCutAttrXml( chDcCut )   // + the <dc> cut, beside the count it cuts
-                                         + rw::declinedIfaceAttrXml( chRows.declinedIface );
+                                         + rw::declinedIfaceAttrXml( chRows.declinedIface ) + rw::declineSlotAttrXml( chLead );   // RECV-ORDER: dc_proven=
         // Reference-as-value round: value_refs= beside count= (never in it), absent at zero; the <vrs> window after the rows.
         const rw::VrRender   chVr { chSingleRoot, chRootPrefix };
         const std::string    chValueRefsAttr = ( rw::valueRefsCountAttrXml( chRows.valueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( ing, chRows.valueRefs.depthCut, chVr )   // + the depth cut that makes it a floor

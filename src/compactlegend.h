@@ -687,6 +687,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "bound",             "dc bound=G: T: a generic receiver bounded by trait T; the candidates are T's implementors', never by name", true, "dc" },
     { "of_def",            "dc of_def=K: the def ix=K making the call; K~d: its candidates include group K, never a claim it calls K", true, "dc" },
     { "dc_shown",          "dc_shown=N: dc rows printed (callers: file-first); dc_next= lists every site" },
+    { "dc_proven",         "dc_proven=K: the first K rows are callers a receiver record proved where the name alone declined; each keeps its site's dc slot (past the page cap)" },
     { "cand",              "dc cand=: the candidate defs as file:line (legend full only); cand_more= how many more", true, "dc" },
     { "fields",            "<of_def> column: each row's def ix=K groups (K~s split label, K~n by name, K~t primary template), space-separated", true, "cols", MapHeaderRead::No, "of_def" },
     { "fields",            "<split> column: 1 where the row's edge to of= carries the resolver's split label (may be another arm's)", true, "cols", MapHeaderRead::No, "split" },

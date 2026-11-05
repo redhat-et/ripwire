@@ -102,6 +102,10 @@ struct CallHierarchyRows
     // lane declined-sites (declinedsites.h): the records behind declinedCalls, in served order (callers file-first, callees
     // file and line) — the <dc> rows, never in `rows` or any count above; uncut, declinedSites.size() == declinedCalls.
     std::vector<std::uint32_t> declinedSites;
+    // RECV-ORDER (declineSlotBand): the callers form's lead rows — callers a receiver record proved at a site the name ladder alone
+    // would have declined, whose site falls in the <dc> band — and the band slots their sites hold. 0 / 0 on every other answer.
+    std::size_t slotRows  = 0;
+    std::size_t slotSites = 0;
 };
 
 // ── CLOSURE BLOCKS (lane ix2-slice, IX-2 P2): what the functions written INSIDE of='s body call ───────────────────────────
@@ -438,8 +442,98 @@ inline std::vector<NodeId> oneHopCallerRows( const IngestResult& ing, const Grap
     return rows;
 }
 
+// RECV-ORDER (card 19): a caller a receiver record PROVED at a site the name ladder alone would have DECLINED (graph.h
+// Graph::declineSlotSites) keeps the slot its declined row had. Its site is ordered WITH the <dc> sites, by their key (tier, path,
+// line, file-first: orderCallSites), and the first `band` entries (--limit, else kDeclinedSiteCap) are the band the <dc> rows print.
+// A proven site inside the band moves its caller to the front of `rows` (band order) and holds its slot, so the <dc> rows print
+// one fewer; the page that leads with them is that much longer (the emitters add slotRows to the first page's cap). The rows
+// a page held before, and the <dc> sites, are unchanged: a declined site that is proven since prints as a caller instead.
+// `declinedSites` is re-ordered to the band's order (the <dc> rows' share of it). No such site: nothing moves, so the bytes hold.
+struct DeclineSlotBand
+{
+    std::vector<NodeId> lead;         // the callers that lead the rows, in band order, each once
+    std::size_t         slotSites = 0;   // the band entries those callers' proven sites hold
+};
+inline DeclineSlotBand declineSlotBand( const IngestResult& ing, const Graph& g, std::span<const NodeId> matches, std::vector<std::uint32_t>& declinedSites,
+                                        int pageLimit )
+{
+    DeclineSlotBand                 out;
+    const std::vector<std::uint32_t> proven = declineSlotSitesNaming( g, matches );
+    if( proven.empty() )
+    {
+        return out;
+    }
+    constexpr std::uint32_t kProven = UINT32_MAX;   // a band entry is ( reference, <dc> record ), kProven for a proven site
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> entries;
+    entries.reserve( declinedSites.size() + proven.size() );
+    for( const std::uint32_t site : declinedSites )
+    {
+        entries.emplace_back( g.declinedSiteRef[ site ], site );
+    }
+    for( const std::uint32_t ref : proven )
+    {
+        EXPECTS( ref < ing.references.size(), "a proven site record and the references come from the same build" );
+        entries.emplace_back( ref, kProven );
+    }
+    orderCallSites( ing, entries, [ & ]( const std::pair<std::uint32_t, std::uint32_t>& e ) -> const Reference& { return ing.references[ e.first ]; },
+                    /*fileFirst=*/true );
+    const std::size_t band = pageLimit > 0 ? std::size_t( pageLimit ) : kDeclinedSiteCap;
+    declinedSites.clear();
+    for( std::size_t i = 0; i < entries.size(); ++i )
+    {
+        if( entries[i].second != kProven )
+        {
+            declinedSites.push_back( entries[i].second );
+            continue;
+        }
+        if( i >= band )
+        {
+            continue;
+        }
+        ++out.slotSites;
+        const NodeId caller = ing.references[ entries[i].first ].fromSymbol;
+        if( std::find( out.lead.begin(), out.lead.end(), caller ) == out.lead.end() )
+        {
+            out.lead.push_back( caller );
+        }
+    }
+    ENSURES( out.lead.size() <= out.slotSites && out.slotSites <= band, "each lead row holds at least one band slot" );
+    return out;
+}
+
+// Moves `lead` (each a row of `rows`) to the front, in lead order; the other rows keep theirs.
+inline void leadRowsFirst( std::vector<NodeId>& rows, std::span<const NodeId> lead )
+{
+    if( lead.empty() )
+    {
+        return;
+    }
+    std::vector<NodeId> leadSorted( lead.begin(), lead.end() );   // one membership probe per row: log(lead), never a lead scan
+    std::ranges::sort( leadSorted );
+    std::vector<NodeId> ordered( lead.begin(), lead.end() );
+    ordered.reserve( rows.size() );
+    for( const NodeId r : rows )
+    {
+        if( !std::ranges::binary_search( leadSorted, r ) )
+        {
+            ordered.push_back( r );
+        }
+    }
+    ENSURES( ordered.size() == rows.size(), "every lead caller is a row (a proven site is an in-edge of a match)" );
+    rows.swap( ordered );
+}
+
+// The lead rows a page at `pageOffset` carries beyond its cap: all of them on the first page, none on a later one (they lead it).
+inline std::size_t declineSlotLeadRows( const CallHierarchyRows& rows, int pageOffset ) noexcept
+{
+    return pageOffset <= 0 ? rows.slotRows : 0;
+}
+
+// `dcBand` (RECV-ORDER): the callers form's --limit (0: the default) when the answer prints the <dc> band (the callers verb,
+// find_referencing_symbols), so declineSlotBand runs; -1 (the default) for a surface that prints no <dc> row.
 inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers,
-                                            const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
+                                            const ValueRefIndex* valueIndex = nullptr,   // the MCP server passes its cached one
+                                            int dcBand = -1 )
 {
     CallHierarchyRows out;
     // X9(b): "file:name" disambiguates here (the same rule --around/--lego/--edit-check use through
@@ -477,6 +571,13 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     }
 
     std::tie( out.declinedCalls, out.declinedSites ) = declinedCallsAndSites( ing, g, out.matches, wantCallers );   // the count and its <dc> rows
+    if( wantCallers && dcBand >= 0 )
+    {
+        const DeclineSlotBand slot = declineSlotBand( ing, g, out.matches, out.declinedSites, dcBand );
+        leadRowsFirst( out.rows, slot.lead );   // before the attribution below, which is parallel to the final order
+        out.slotRows  = slot.lead.size();
+        out.slotSites = slot.slotSites;
+    }
     out.declinedIface = wantCallers ? declinedIfaceCallsNaming( ing, g, out.matches ) : 0;
     out.stdCalls      = wantCallers ? StdMemberCallsMade{} : stdMemberCallsMadeBy( g, out.matches );
 

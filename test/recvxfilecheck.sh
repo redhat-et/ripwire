@@ -185,5 +185,122 @@ case "$qa$qb" in
        else echo "  FAIL QP.moves: binding a plain query-matching callee left the caller's row unchanged ([$qa]): the callee field is gone"; fail=1; fi ;;
 esac
 
+# ---- O (RECV-ORDER, card 19): a caller a receiver record proves at a site the name alone would DECLINE keeps the slot its <dc> row had
+# (callhierarchy.h declineSlotBand). textual-07: TreeNode._expand / _collapse were 2 of 16 shown <dc> rows of `--callers=post_message`;
+# proven, they ranked ~#41 of 123, past the 40-row page, and left the answer. Each shape is written twice: E states the class (the
+# call binds), N misspells it (the call declines, as on main). E must lead with the proven caller (dc_proven="1", defined in the
+# legend), and the rest must be N's answer exactly: the same <s> rows in the same order, and N's <dc> rows less that one site — the
+# positive twin: every caller proven in both keeps its order, and N carries no dc_proven=. A crashed or empty run fails every arm.
+# ofetch MODE ROOT ARGS...: the answer as one normalised line per row (s|name, dc|in|file:line, root|dc_proven value, legend|0/1),
+# or `failed-run`. MODE xml / json (the CLI's --json) / mcp (find_referencing_symbols, ARGS = symbol [limit]).
+ofetch() {
+    local mode=$1 root=$2 out rc; shift 2
+    case "$mode" in
+    mcp) out=$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+                  "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"find_referencing_symbols\",\"arguments\":{\"path\":\"$root\",\"symbol\":\"$1\"${2:+,\"limit\":$2}}}}" \
+                  | ( cd "$root" && "$BIN" --mcp 2>/dev/null ) | tail -1 ); rc=$? ;;
+    json) out=$( cd "$root" && "$BIN" "$root" "$@" --json --no-cache </dev/null 2>/dev/null ); rc=$? ;;
+    *)   out=$( cd "$root" && "$BIN" "$root" "$@" --no-cache --legend=compact </dev/null 2>/dev/null ); rc=$? ;;
+    esac
+    [ "$rc" = 0 ] || { echo failed-run; return; }
+    printf '%s' "$out" | python3 -I -c '
+import json,re,sys
+mode=sys.argv[1]; doc=sys.stdin.read()
+try:
+    if mode=="xml":
+        r=re.search(r"<callers [^>]*>",doc)
+        if "schema=" not in doc or not r: raise ValueError
+        p=re.search(r" dc_proven=\"([0-9]+)\"",r.group(0)); print("root|"+(p.group(1) if p else "-"))
+        print("legend|%d"%("dc_proven=K" in doc))
+        for m in re.finditer(r"<(s|dc) ([^>]*)>",doc):
+            a=dict(re.findall(r"(\w+)=\"([^\"]*)\"",m.group(2)))
+            if "p" not in a: continue   # the legend spells the row shapes (<s t= n= p=>), never a row
+            print("s|"+a["n"] if m.group(1)=="s" else "dc|"+a["in"]+"|"+a["p"])
+    else:
+        d=json.loads(doc)
+        if mode=="mcp": d=json.loads(d["result"]["content"][0]["text"])
+        print("root|%s"%d.get("dc_proven","-")); print("legend|%d"%(mode=="json" or "dc_proven_note" in d))
+        for e in d["callers" if mode=="json" else "calledBy"]: print("s|"+e.get("n",e.get("name","")))
+        for e in d.get("declined_sites",d.get("dc",[])): print("dc|"+e["in"]+"|"+e.get("p",e.get("file","")+":"+str(e.get("line",""))))
+except Exception: print("failed-run")' "$mode"
+}
+# olead ID MODE E N LEAD ARGS...: E leads with LEAD (proven, dc_proven=1, legend), N declines LEAD's call, and E less LEAD is N
+olead() {
+    local id=$1 mode=$2 e=$3 n=$4 lead=$5 de dn; shift 5
+    de=$( ofetch "$mode" "$e" "$@" ); dn=$( ofetch "$mode" "$n" "$@" )
+    printf '%s\n%s' "$de" "$dn" | grep -qx failed-run && { echo "  FAIL $id: a run crashed or printed no answer"; fail=1; return; }
+    local verdict
+    verdict=$( python3 -I -c '
+import sys
+e,n,lead=sys.argv[1].split("\n"),sys.argv[2].split("\n"),sys.argv[3]
+leaf=lead.rsplit(".",1)[-1]
+es=[x for x in e if x.startswith("s|")]; ns=[x for x in n if x.startswith("s|")]
+ed=[x for x in e if x.startswith("dc|")]; nd=[x for x in n if x.startswith("dc|")]
+gone=[x for x in nd if x.split("|")[1]==leaf]
+bad=[]
+if not es or es[0].split("|")[1].rsplit(".",1)[-1]!=leaf: bad.append("E does not lead with %s (first %s)"%(lead,es[:1]))
+if "root|1" not in e: bad.append("E root dc_proven is not 1")
+if "legend|1" not in e: bad.append("E legend does not define dc_proven")
+if "root|-" not in n: bad.append("N carries dc_proven")
+if len(gone)!=1: bad.append("N lists %d <dc> rows for %s, want 1 (premise)"%(len(gone),leaf))
+if es[1:]!=ns: bad.append("E rows after the lead differ from N (%d vs %d rows)"%(len(es)-1,len(ns)))
+if ed!=[x for x in nd if x not in gone]: bad.append("E <dc> rows are not N less the proven site")
+print("; ".join(bad) or "ok")' "$de" "$dn" "$lead" )
+    if [ "$verdict" = ok ]; then echo "  PASS $id: $lead leads, the rest is the declined build's answer"; else echo "  FAIL $id: $verdict"; fail=1; fi
+}
+echo "== O: a caller proven where the name alone declines keeps its <dc> slot"
+# O: 150 callers MessagePump proves through `self` (past the 40-row page and its 16 KB byte band) and 20 declined relays (past the
+# 16-row <dc> band, so the slot the proven site holds shows: E prints 15 <dc> rows, N 16); TreeNode's field is typed from its
+# annotated parameter (E) or a misspelled one (N). Sibling: a def whose proven callers already fill the page.
+owrite() {
+    local d=$1 c=$2 f k body
+    w "$d/pkg/a/pump.py" 'class MessagePump:\n    def post_message(self, m):\n        return m\n'
+    w "$d/pkg/b/mailbox.py" 'class Mailbox:\n    def post_message(self, m):\n        return m\n'
+    w "$d/pkg/c/screen.py" 'class Screen:\n    def post_message(self, m):\n        return m\n'
+    for f in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14; do
+        body='from pkg.a.pump import MessagePump\n'
+        for k in 0 1 2 3 4 5 6 7 8 9; do
+            body="${body}class Widget${f}x$k(MessagePump):\n    def notify_listeners_with_message_${f}_$k(self):\n        self.post_message($k)\n"
+        done
+        w "$d/pkg/a/widgets/widget_family_number_$f.py" "$body"
+    done
+    for k in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19; do
+        w "$d/pkg/y/relay_$k.py" "def relay_message_$k(target):\n    target.post_message($k)\n"
+    done
+    w "$d/pkg/m/tree.py" "class TreeNode:\n    def __init__(self, tree: $c):\n        self._tree = tree\n    def _expand(self):\n        self._tree.post_message(1)\n"
+}
+owrite "$T/o-E" MessagePump; owrite "$T/o-N" MessagePumq
+olead O.page   xml  "$T/o-E" "$T/o-N" TreeNode._expand --callers=post_message
+olead O.json   json "$T/o-E" "$T/o-N" TreeNode._expand --callers=post_message
+olead O.mcp    mcp  "$T/o-E" "$T/o-N" TreeNode._expand post_message
+olead O.limit  xml  "$T/o-E" "$T/o-N" TreeNode._expand --callers=post_message --limit=5
+olead O.mcplim mcp  "$T/o-E" "$T/o-N" TreeNode._expand post_message 5
+# O.offset: the lead rows ride the FIRST page only; a later page carries no dc_proven= and starts after them (next_offset= = 41)
+ooff=$( cd "$T/o-E" && "$BIN" "$T/o-E" --callers=post_message --offset=41 --no-cache </dev/null 2>/dev/null ); orc=$?
+if [ "$orc" = 0 ] && printf '%s' "$ooff" | grep -q 'schema=' && ! printf '%s' "$ooff" | grep -q ' dc_proven=' \
+   && ! printf '%s' "$ooff" | grep -q 'n="TreeNode._expand"' && printf '%s' "$ooff" | grep -q ' offset="41"'; then
+    echo "  PASS O.offset: page 2 has no lead row and no dc_proven="
+else echo "  FAIL O.offset: rc=$orc, page 2 carries the lead row or dc_proven= (or printed nothing)"; fail=1; fi
+# Olim: the same rule on the other receiver paths (Python field, TS chained call, C++ Rule 2) through --limit=1: a caller the name
+# ladder binds anyway (a/use.*, first by path) would otherwise hold the one-row page; the lane-proven caller leads it instead.
+for spec in "pyfield HueBridge HueBridgf async_request_call a/use.py" "ts HueRouter HueRoutex async_request_call a/use.ts" \
+            "cpp HueRouter HueRoutex asyncRequestCall a/use.cpp"; do
+    read -r lang real miss callee usef <<< "$spec"
+    for v in E N; do
+        d=$T/ol-$lang-$v; [ "$v" = E ] && qwrite "$d" "$lang" "$real" || qwrite "$d" "$lang" "$miss"
+        case "$lang" in
+        pyfield) w "$d/$usef" 'from zone.bridge import ZoneBridge\n\ndef use_zone():\n    ZoneBridge().async_request_call(1)\n' ;;
+        ts)      w "$d/$usef" "import { ZoneRouter } from '../zone/router';\n\nexport function useZone(): number {\n    return new ZoneRouter().async_request_call(1);\n}\n" ;;
+        cpp)     w "$d/$usef" '#include "../zone/router.h"\nint useZone()\n{\n    ZoneRouter z;\n    return z.asyncRequestCall(1);\n}\n' ;;
+        esac
+    done
+    olead "Olim.$lang" xml "$T/ol-$lang-E" "$T/ol-$lang-N" async_turn_off "--callers=$callee" --limit=1
+done
+# O.none: with no such site nothing moves: the <dc> row stays and no dc_proven= rides (byte identity is checked on 3 repos)
+on1=$( cd "$T/o-N" && "$BIN" "$T/o-N" --callers=post_message --no-cache </dev/null 2>/dev/null ); r1=$?
+if [ "$r1" = 0 ] && printf '%s' "$on1" | grep -q '<dc in="_expand"' && ! printf '%s' "$on1" | grep -q 'dc_proven'; then
+    echo "  PASS O.none: no proven-declined site, no dc_proven= and the <dc> row stays"
+else echo "  FAIL O.none: rc=$r1, the declined build lost its <dc> row or carries dc_proven="; fail=1; fi
+
 [ "$fail" = 0 ] && echo "recvxfilecheck: PASS" || echo "recvxfilecheck: FAIL"
 exit "$fail"

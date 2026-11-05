@@ -772,7 +772,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     const IngestResult& ing = ix.ing;
     const Graph&        g   = ix.g;
 
-    const CallHierarchyRows chRows = rw::callHierarchyRows( ing, g, name, /*wantCallers=*/referencingOnly, &valueRefIndexOf( ix ) );
+    const CallHierarchyRows chRows = rw::callHierarchyRows( ing, g, name, /*wantCallers=*/referencingOnly, &valueRefIndexOf( ix ),
+                                                            referencingOnly ? std::max( page.limit, 0 ) : -1 );   // RECV-ORDER: the <dc> band
     if( chRows.matches.empty() )
     {
         return {};
@@ -859,7 +860,9 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // same rows, so both surfaces agree on whether a callers list is cut; the calls array keeps the row band.
     CallersByteBand  calledByBand = callersByteBand( ing, chRows.matches, calledBy, VrRender{ sqSingleRoot, sqRootPrefix }, page.limit,
                                                     chTested.testReach, calledByAttr, g.keptForwards );
-    const int        rowCap    = referencingOnly ? callHierarchyRowCap( page.limit, calledBy.size(), calledByBand.rowBytes ) : callHierarchyRowCap( page.limit, calls.size() );
+    // RECV-ORDER (callhierarchy.h declineSlotBand): the first find_referencing_symbols page leads with the callers holding a <dc> band slot
+    const std::size_t sqLead   = referencingOnly ? declineSlotLeadRows( chRows, page.offset ) : 0;
+    const int        rowCap    = referencingOnly ? callHierarchyRowCap( page.limit, calledBy.size(), calledByBand.rowBytes ) + int( sqLead ) : callHierarchyRowCap( page.limit, calls.size() );
     const PageWindow pwPrimary = pageWindow( referencingOnly ? calledBy.size() : calls.size(), rowCap, page.offset );
     const PageWindow pwSecond  = pageWindow( calledBy.size(), callHierarchyRowCap( page.limit, calledBy.size(), calledByBand.rowBytes ), page.offset );
     const std::size_t rowTotal = referencingOnly ? calledBy.size() : calls.size();
@@ -881,7 +884,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // declines its definitions make; find_referencing_symbols: the declined calls that could have meant them), cut by the
     // same `limit` the rows take — one computation (callhierarchy.h ordered them), the CLI's own row builder.
     const DeclinedSiteCut sqDcCut = declinedSiteCut( chRows.declinedSites.size(), page.limit, referencingOnly ? "--callers=" : "--callees=", name,
-                                                     std::size_t( effectiveRowCap( page.limit, rw::kCallHierarchyRowCap ) ) );   // the CLI's <dc> cut: no band
+                                                     std::size_t( effectiveRowCap( page.limit, rw::kCallHierarchyRowCap ) ),   // the CLI's <dc> cut: no band
+                                                     sqLead > 0 ? chRows.slotSites : 0 );   // RECV-ORDER: the slots the lead rows hold
     const std::vector<DeclinedSiteView> sqDc = declinedSiteViews( ing, g, std::span<const std::uint32_t>( chRows.declinedSites ).first( sqDcCut.shown ),
                                                                   referencingOnly, chRows.matches, chRows.attr.groups, VrRender{ sqSingleRoot, sqRootPrefix },
                                                                   /*candidates=*/false );
@@ -908,6 +912,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
          + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's dc_shown= / dc_next=, absent when nothing was cut
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
+         + declineSlotKeyJson( sqLead )                   // RECV-ORDER: the CLI root's dc_proven=
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
          + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, name, chNextSelector );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
@@ -947,6 +952,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     out += nextFieldJson( viaImplLegend( anyImpl ), "impl_note" );      // lane L6: likewise for "via":"impl"
     out += declinedSitesJson( sqDc, referencingOnly, /*mcp=*/true );   // lane declined-sites: the CLI <dc> rows, never in calls/calledBy or count
     out += nextFieldJson( declinedSitesLegend( declinedSitesLegendFlags( sqDc, referencingOnly, sqDcCut ), /*mcp=*/true ), "declined_note" );   // their reading, only when they ride
+    out += nextFieldJson( declineSlotLegendMcp( sqLead > 0 ), "dc_proven_note" );   // RECV-ORDER: dc_proven's reading, only when it rides
     out += nextFieldJson( callSitesAtLegend( calledBySites.any, calledBySites.anyCut, kCallSitesPerRowCap ), "sites_note" );   // CALLSITE-AT: its reading, only when a row carries it (nextFieldJson: "" -> no key, JSON-escaped)
     // Reference-as-value round: the CLI's <vrs> window, the same rows (callhierarchy.h computed them once): valueRefs =
     // where the symbol is USED AS A VALUE (the --callers side), valueCallees = what it stores/passes and may call
