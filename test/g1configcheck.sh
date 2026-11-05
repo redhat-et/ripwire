@@ -548,7 +548,7 @@ def scan(path):
             block = mapping(children(jobs[name], i), 6) if value == "" else {"*": value}
             blocks[name] = block
             writes |= {(name, p) for p, v in block.items() if v in ("write", "write-all")}
-    reportJobs = {"report-failure", "report-green"}
+    reportJobs = {"report-failure", "report-green", "tidy-advisory-report"}   # tidy-advisory-report: the nightly advisory clang-tidy tracking issue (ci.yml)
     expected = {(n, "issues") for n in reportJobs}
     permsOk = topPerms == {"contents": "read"} and writes == expected and all(blocks.get(n) == {"issues": "write"} for n in reportJobs)
     rows["reportperms"] = (permsOk, f"top={topPerms} writes={sorted(writes)}")
@@ -620,8 +620,8 @@ mutations = {
                  "    types: [opened, synchronize, reopened]"),
     "heavygate": ("  fallback-emitter:\n    needs: plan\n    if: needs.plan.outputs.full == 'true'   # not part of the light set — see the header comment\n",
                    "  fallback-emitter:\n    needs: plan\n"),
-    "reportperms": ("permissions:\n  contents: read   # least privilege at the top; only report-failure/report-green below widen, and only for themselves\n",
-                     "permissions:\n  contents: read   # least privilege at the top; only report-failure/report-green below widen, and only for themselves\n  issues: write\n"),
+    "reportperms": ("permissions:\n  contents: read   # least privilege at the top; only report-failure/report-green/tidy-advisory-report below widen, and only for themselves\n",
+                     "permissions:\n  contents: read   # least privilege at the top; only report-failure/report-green/tidy-advisory-report below widen, and only for themselves\n  issues: write\n"),
     "reportscope": ("    if: failure() && github.event_name == 'schedule' && github.ref == 'refs/heads/main'",
                      "    if: failure() && github.ref == 'refs/heads/main'"),
     # Regressing report-green to the bare shared label is exactly the bug the two-label split fixes: it
