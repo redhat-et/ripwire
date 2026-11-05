@@ -239,9 +239,150 @@ if run "$C" "$TMP/l2" --for=ColumnPtr --max-tokens=40000; then
   if has "$TMP/l2" 'shed=: a max-tokens'; then ok "[RED] max-tokens: shed= legend-defined"; else no "[RED] max-tokens: shed= legend missing"; fi
 fi
 
+# ── CodeRabbit round on #537 (tmp/card12-cr/disp.md) ── here [RED] = fails on 26bf91a3b (the head CodeRabbit read)
+X="$TMP/cr"; mkdir -p "$X/src"
+cat > "$X/src/a.h" <<'EOF3'
+namespace A { class Foo { public: int fa() { return 1; } }; using Ptr = Foo; }
+namespace B { class Bar { public: int fb() { return 2; } }; using Ptr = Bar; }
+class Widget { public: void g() {} };
+namespace A { class Widget { public: void a() {} }; using GW = ::Widget; using GS = Holder<::Widget>; using AW = Widget; }
+template <class T> class Holder { public: T* t; };
+namespace S { class Sp { public: void s() {} }; }
+using SW = S :: Sp;
+using SW2 = S:: Sp;
+class Gy { public: void y() {} };
+using Q1 = Gy;
+using Q2 = Q1;
+using Q3 = Q2;
+using Q4 = Q3;
+using Q5 = Q4;
+class Hx { public: void h() {} };
+using H4 = Hx; using H3 = H4; using H2 = H3; using H1 = H2;
+class Many { public: void m1(); void m2(); void m3(); void m4(); void m5(); void m6(); void m7(); void m8(); void m9(); void m10(); void m11(); void m12(); void m13(); void zz(int); void zz(double); };
+using ManyP = Many;
+namespace A { using Same = Foo; }
+using SH = Holder< S :: Sp >;
+EOF3
+printf 'class Gl { public: void g() {} };\n' > "$X/src/gl.h"
+# braces that do not balance (`#if` / `#else` each open a namespace): every chain in this file is unknown
+cat > "$X/src/unbal.h" <<'EOF3'
+#include "gl.h"
+#if defined(OLD)
+namespace Z {
+#else
+namespace Z {
+#endif
+}
+namespace OnlyC { class Lone { public: void l() {} }; }
+using LW = OnlyC::Lone;
+namespace P { using GL2 = Gl; }
+namespace A { int useU(Ptr p); }
+namespace A { using Same = Foo; }
+EOF3
+cat > "$X/src/u.cpp" <<'EOF3'
+#include "a.h"
+namespace B { int useB2(Ptr p) { return p.fb(); } }
+namespace A { int useA2(Ptr p) { return p.fa(); } }
+void useQ4(Q4 q) { (void)q; }
+void useQ5(Q5 q) { (void)q; }
+void useH1(H1 h) { (void)h; }
+namespace B { namespace Deep {
+int early(Ptr p);
+using Ptr = A::Foo;
+int late(Ptr p);
+} }
+EOF3
+# 18. a global `::` target binds the global definition, never the namesake in the alias's own namespace (CR 4476868622)
+if run "$X" "$TMP/x1" --for=GW; then
+  if grep -qE '<h n="Widget" t="cls" p="src/a.h" l="3" d="1" via="alias"' "$TMP/x1" && ! grep -qE '<h n="Widget" [^>]*l="4"' "$TMP/x1"; then ok "[RED] global ::Widget binds the global class only"; else no "[RED] global ::Widget bound the namespace's Widget"; fi
+  if has "$TMP/x1" 'bound="name"'; then no "global ::Widget: hedged although every chain is read"; else ok "global ::Widget: proven, no bound=name (twin of arm 22)"; fi
+fi
+if run "$X" "$TMP/x2" --for=GS; then
+  if grep -qE '<h n="Widget" t="cls" p="src/a.h" l="3" [^>]*arg="1"' "$TMP/x2"; then ok "[RED] global ::Widget as a template argument binds the global class"; else no "[RED] global template argument bound the namespace's Widget"; fi
+fi
+if run "$X" "$TMP/x3" --for=AW; then
+  if grep -qE '<h n="Widget" t="cls" p="src/a.h" l="4" ' "$TMP/x3"; then ok "unqualified Widget inside A binds A::Widget (twin of the global arm)"; else no "unqualified Widget inside A: not A::Widget"; fi
+fi
+# 19. a space beside `::` continues the qualified name (CR 4476868634)
+for a in SW SW2; do
+  if run "$X" "$TMP/x4$a" --for=$a; then
+    if grep -qE '<h n="Sp" t="cls"' "$TMP/x4$a" && ! has "$TMP/x4$a" '<leaf n="S"/>'; then ok "[RED] spaced qualifier ($a): S::Sp bound, no leaf S"; else no "[RED] spaced qualifier ($a): the head ended at the space"; fi
+  fi
+done
+if run "$X" "$TMP/x4SH" --for=SH; then
+  if grep -qE '<h n="Sp" t="cls" [^>]*arg="1"' "$TMP/x4SH"; then ok "[RED] spaced qualifier in a template argument: S::Sp reached as arg"; else no "[RED] spaced qualifier in a template argument: Sp missing"; fi
+fi
+# 20. a qualified target whose definitions' chains are unknown binds hedged, never a false leaf (CR 4476868644)
+if run "$X" "$TMP/x5" --for=LW; then
+  if grep -qE '<h n="Lone" [^>]*bound="name"' "$TMP/x5" && ! has "$TMP/x5" '<leaf n="OnlyC::Lone"/>'; then ok "[RED] unknown chain, class-only namespace: Lone bound=name, no leaf"; else no "[RED] unknown chain, class-only namespace: a false leaf"; fi
+fi
+# 21. an unqualified target from an alias whose own chain is unknown is hedged (CR 4476868651)
+if run "$X" "$TMP/x6" --for=GL2; then
+  if grep -qE '<h n="Gl" [^>]*bound="name"' "$TMP/x6"; then ok "[RED] unknown alias origin: Gl bound=name"; else no "[RED] unknown alias origin: Gl printed as proven"; fi
+fi
+# 22. two same-named alias rows, one proven and one hedged, keep two chains (CR 4476868736)
+if run "$X" "$TMP/x7" --for=Same; then
+  if grep -qE '<chain of="Same" p="src/a.h"' "$TMP/x7" && grep -qE '<chain of="Same" p="src/unbal.h"' "$TMP/x7" && grep -qE '<h n="Foo" [^>]*bound="name"' "$TMP/x7"; then ok "[RED] merge keeps the hedge: two chains, one bound=name"; else no "[RED] merge folded a hedged walk into a proven one"; fi
+fi
+# 23. members= counts a name once, past the 12-name list too (CR 4476868745)
+if run "$X" "$TMP/x8" --for=ManyP; then
+  if grep -qE '<h n="Many" [^>]*members="14"' "$TMP/x8"; then ok "[RED] members=14: the overloaded zz past the list counts once"; else no "[RED] members= counts overloads past the list"; fi
+fi
+# 24. --uses walks one hop per round: a 5-hop alias is cut and disclosed whatever the declaration order; exactly 4 hops is no cut
+if run "$X" "$TMP/x9" --uses=Gy; then
+  if grep -qE 'in_id="[^"]*useQ5" via="alias"' "$TMP/x9"; then no "[RED] round boundary: Q5 (5 hops) listed"; else ok "[RED] round boundary: Q5 (5 hops) not listed (CR 4476868668)"; fi
+  if grep -qE '<uses [^>]* alias_depth_capped="1"' "$TMP/x9"; then ok "[RED] round boundary: alias_depth_capped=1 for Q5"; else no "[RED] round boundary: no alias_depth_capped"; fi
+  if grep -qE 'in_id="[^"]*useQ4" via="alias" alias="Q4"/>' "$TMP/x9"; then ok "round boundary: Q4 (4 hops) listed (twin)"; else no "round boundary: Q4 missing"; fi
+fi
+if run "$X" "$TMP/x10" --uses=Hx; then
+  if has "$TMP/x10" 'alias_depth_capped'; then no "[RED] exact 4 hops: alias_depth_capped with nothing left (CR 4476868673)"; else ok "[RED] exact 4 hops: no alias_depth_capped"; fi
+  if grep -qE 'in_id="[^"]*useH1" via="alias" alias="H1"/>' "$TMP/x10"; then ok "exact 4 hops: H1 listed (twin)"; else no "exact 4 hops: H1 missing"; fi
+fi
+# 25. the full legend's alias_sites_held clause rides only on the columnar form (CR 4476868678); compact count= excludes hedged rows (CR 4476868685)
+if run "$X" "$TMP/x11" --uses=Foo --legend=full && run "$X" "$TMP/x12" --uses=Foo --legend=full --format=columnar; then
+  if has "$TMP/x11" 'alias_sites_held=N'; then no "[RED] XML legend defines alias_sites_held"; else ok "[RED] XML legend: no alias_sites_held clause"; fi
+  if has "$TMP/x12" 'alias_sites_held=N' && has "$TMP/x12" 'alias_sites_held="'; then ok "columnar: alias_sites_held on the root and in the legend (twin)"; else no "columnar: alias_sites_held clause or attribute missing"; fi
+fi
+if run "$X" "$TMP/x13" --uses=Foo; then
+  if has "$TMP/x13" 'count=N: use-site rows in all'; then no "[RED] compact count= says all rows although hedge=name rows are left out"; else ok "[RED] compact count= reading leaves the hedged rows out"; fi
+  # 26. a site whose own chain is unknown is hedged when the alias name has namesakes (CR 4476868752)
+  if grep -qE 'in_id="src/unbal.h::A::useU" via="alias" alias="Ptr" hedge="name"/>' "$TMP/x13"; then ok "[RED] unknown site chain: useU hedged"; else no "[RED] unknown site chain: useU proven"; fi
+  # 27. an alias declared after the site cannot be the one in scope there (CR 4476868782)
+  if grep -qE 'in_id="src/u.cpp::Deep::early" via="alias" alias="Ptr"/>' "$TMP/x13"; then no "[RED] later alias: Deep::early proven through the later Deep::Ptr"; else ok "[RED] later alias: Deep::early not a proven use of Foo"; fi
+  if grep -qE 'in_id="src/u.cpp::Deep::late" via="alias" alias="Ptr"/>' "$TMP/x13"; then ok "later alias: Deep::late (after the alias) proven (twin)"; else no "later alias: Deep::late missing"; fi
+  if grep -qE 'in_id="src/u.cpp::A::useA2" via="alias" alias="Ptr"/>' "$TMP/x13"; then ok "known site chain: useA2 proven (twin)"; else no "known site chain: useA2 missing"; fi
+fi
+if run "$X" "$TMP/x14" --uses=Bar; then
+  if grep -qE 'in_id="src/u.cpp::Deep::early" via="alias" alias="Ptr"/>' "$TMP/x14"; then ok "[RED] later alias: Deep::early is a proven use of Bar (B::Ptr in scope)"; else no "[RED] later alias: Deep::early not under Bar"; fi
+fi
+# 28. a file-qualified selector lists the alias sites its definitions reach (CR 4476868792)
+if run "$X" "$TMP/x15" --uses=src/a.h:Foo; then
+  if grep -qE 'in_id="src/u.cpp::A::useA2" via="alias" alias="Ptr"/>' "$TMP/x15" && grep -qE '<uses [^>]*via_alias="[1-9]' "$TMP/x15"; then ok "[RED] file-qualified: alias sites listed, via_alias="; else no "[RED] file-qualified: alias sites dropped silently"; fi
+fi
+# 29. a credential-shaped literal in an alias declaration is redacted in the block, and in --defs to= (CR 4476868695)
+K="$TMP/key"; mkdir -p "$K/src"
+SECRET="AKIA$( printf 'Q%.0s' 1 2 3 4 5 6 7 8 )$( printf 'Z7%.0s' 1 2 3 4 )"   # built at runtime: no secret-shaped literal in the tree
+printf 'template <const char* K> struct Tok { int t; };\nusing Key = Tok<"%s">;\nusing Key2 = Key;\n' "$SECRET" > "$K/src/k.h"
+for a in --for=Key --for=Key2 --defs=Key; do
+  if run "$K" "$TMP/k$a" "$a"; then
+    if has "$TMP/k$a" "$SECRET"; then no "[RED] redact: $a prints the key"; else ok "[RED] redact: $a prints no key"; fi
+  fi
+done
+if has "$TMP/k--for=Key2" '<aliases'; then ok "redact: the Key2 block is printed (the arm above reads it)"; else no "redact: no Key2 block to read"; fi
+if run "$K" "$TMP/kno" --for=Key2 --no-redact; then
+  if has "$TMP/kno" "$SECRET"; then ok "redact: --no-redact passes the declaration through (twin)"; else no "redact: --no-redact lost the text"; fi
+fi
+if run "$K" "$TMP/kno1" --for=Key --no-redact; then
+  if grep -qE '<chain of="Key"' "$TMP/kno1" && ! grep -qE '<leaf n="[^"]*AKIA' "$TMP/kno1"; then ok "[RED] literal argument: a string literal is no leaf"; else no "[RED] literal argument: a string literal printed as a leaf (or no chain)"; fi
+fi
+# 30. a subject that mixes `.` and `::` takes the rightmost separator (CR 4476868701)
+if run "$K" "$TMP/k30" "--for=pkg.N::Key2"; then
+  if grep -qE '<chain of="Key2"' "$TMP/k30"; then ok "[RED] mixed separators: pkg.N::Key2 walks Key2"; else no "[RED] mixed separators: no chain for pkg.N::Key2"; fi
+fi
+
 # 12. well-formed
 if command -v xmllint >/dev/null 2>&1; then
-  for f in f1 f2 f3 f5 u1 q1 q3 q5 q6 m1 l1 l2; do if xmllint --noout "$TMP/$f" 2>/dev/null; then ok "xmllint $f"; else no "xmllint $f"; fi; done
+  for f in f1 f2 f3 f5 u1 q1 q3 q5 q6 m1 l1 l2 x1 x2 x5 x7 x9 x11 x12 x13 x15; do if xmllint --noout "$TMP/$f" 2>/dev/null; then ok "xmllint $f"; else no "xmllint $f"; fi; done
 else echo "  SKIP  xmllint not installed (arm 12)"; fi
 
 [ "$fail" -eq 0 ] && { echo "xfaliashopcheck: PASS"; exit 0; }

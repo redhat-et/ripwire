@@ -894,6 +894,7 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
     {
         NodeId                   id;
         std::vector<std::string> path;
+        bool                     known = true;   // its file's chain was read (else `path` is its scope word alone)
     };
     std::vector<std::vector<NameDef>> named( names.size() );
     {
@@ -917,7 +918,7 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
             }
             out.facts.namesakes += isReached[ d ] ? 0 : 1;
             NameDef nd{ d, {} };
-            aliashop_detail::enclosingPath( ing, ing.symbols[ d ], reach.cache, nd.path );
+            nd.known = aliashop_detail::enclosingPath( ing, ing.symbols[ d ], reach.cache, nd.path );
             named[ k ].push_back( std::move( nd ) );
         }
     }
@@ -963,11 +964,12 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
             continue;
         }
         // the site's own scope: its enclosing symbol's path (a type's own name included: its members see it); unknown at file scope
-        const bool known = u.from < ing.symbols.size();
+        const bool known     = u.from < ing.symbols.size();
+        bool       chainRead = true;   // CR 4476868752: an unread or unbalanced chain leaves `here` the scope word alone
         if( known )
         {
             const Symbol& f = ing.symbols[ u.from ];
-            aliashop_detail::enclosingPath( ing, f, reach.cache, here );
+            chainRead       = aliashop_detail::enclosingPath( ing, f, reach.cache, here );
             if( f.kind != SymKind::Method && f.kind != SymKind::Function )
             {
                 here.push_back( f.name );
@@ -982,6 +984,10 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
             if( d.fileId != u.fileId && aliashop_detail::cxxSourceFile( ing.files[ d.fileId ] ) )
             {
                 continue;
+            }
+            if( d.fileId == u.fileId && d.line > u.line )
+            {
+                continue;   // CR 4476868782: an alias declared after the site is not yet in scope there
             }
             const bool visible = known ? aliashop_detail::pathStartsWith( here, nd.path ) : ( d.fileId == u.fileId || nd.path.empty() );
             if( !visible )
@@ -998,7 +1004,9 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
                 tie = true;   // a reaching and a non-reaching definition equally near: which one the site means is unknown
             }
         }
-        const bool proven = pick != nullptr && !tie && isReached[ pick->id ] == 1;
+        // with namesakes to choose from, a pick read off an unknown chain (the site's or the alias's) is a guess, so hedged
+        const bool guessed = named[ k ].size() > 1 && ( !chainRead || ( pick != nullptr && !pick->known ) );
+        const bool proven  = pick != nullptr && !tie && !guessed && isReached[ pick->id ] == 1;
         u.viaAlias        = proven ? pick->id : nameAlias[ k ];
         u.aliasHedged     = !proven;
         ( proven ? out.sites : hedged ).push_back( std::move( u ) );
@@ -1012,16 +1020,13 @@ inline AliasUseSites collectAliasUseSites( const rw::IngestResult& ing, const rw
     return out;
 }
 
-// XF-ALIAS-HOP: --uses appends the sites written through an alias of the definition after the direct ones (a plain name only: a
-// qualified selector narrows by resolution, which an alias spelling has none of). The columnar dialect has no column for the
+// XF-ALIAS-HOP: --uses appends the sites written through an alias of the definition after the direct ones. A qualified selector
+// (`file:Name`, `Scope::Name`) gets them too (CR 4476868792): the reverse walk starts from `defs`, the definitions the qualifier
+// already chose, so the alias rows are narrowed by reach, not by name. The columnar dialect has no column for the
 // alias: it counts them on its root (alias_sites_held=) instead, so its rows stay the direct ones.
-inline rw::AliasUsesFacts appendAliasUseSites( const rw::IngestResult& ing, const rw::Graph& g, const UsesSelector& sel, std::span<const rw::NodeId> defs,
+inline rw::AliasUsesFacts appendAliasUseSites( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs,
                                                std::string_view rootForId, bool columnar, std::vector<UseSite>& sites )
 {
-    if( sel.fileQualified || sel.scopeNarrowed )
-    {
-        return {};
-    }
     const AliasUseSites alias = collectAliasUseSites( ing, g, defs, rootForId );
     if( !columnar )
     {
@@ -1124,7 +1129,7 @@ std::optional<int> runUses( const MainDispatch& d )
                                                            usRootForId, defs, &usVri, g.keptForwards, { literalDefs, &usDeclinedLiteralCalls } );
         const rw::ValueRefIndex::DepthCuts usDepthCut = usVri.depthCutsFor( defs );
         rw::rankUseSites( ing, g, sites );   // cut-fix C: most-depended-on sites first, so the cap drops the lightest
-        const rw::AliasUsesFacts usAliasFacts = appendAliasUseSites( ing, g, sel, defs, usRootForId, cfg.columnar, sites );
+        const rw::AliasUsesFacts usAliasFacts = appendAliasUseSites( ing, g, defs, usRootForId, cfg.columnar, sites );
         const std::size_t        usHedged     = usAliasFacts.hedged;   // M1: listed last, never in count=
 
         // §A6b(ii): a file: qualifier naming a file with NO definition of the name is a WRONG SELECTOR — its
@@ -1186,7 +1191,7 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::declinedLiteralCallsLegend( usDeclinedLiteralCalls > 0 )
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
-                       + rw::aliasUsesLegend( usAliasFacts ) ).c_str(),   // XF-ALIAS-HOP: exactly when a site is written through an alias
+                       + rw::aliasUsesLegend( usAliasFacts, cfg.columnar ) ).c_str(),   // XF-ALIAS-HOP: exactly when a site is written through an alias
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -2830,11 +2835,11 @@ std::optional<int> runDefs( const MainDispatch& d )
                 {
                     body += ",";
                 }
-                defRowJson( body, ing, L, r, owners );
+                defRowJson( body, ing, L, r, owners, d.redactPtr );
             }
             else
             {
-                defRowXml( body, ing, L, r, owners, /*compact=*/false, /*aliasTarget=*/true );
+                defRowXml( body, ing, L, r, owners, /*compact=*/false, /*aliasTarget=*/true, d.redactPtr );
                 anyAlias = anyAlias || aliasTargetRow( ing, ing.symbols[ r.rep ] );
             }
         }

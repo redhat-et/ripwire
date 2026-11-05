@@ -61,6 +61,7 @@ struct AliasHopChain
     std::vector<std::string>  leaves;         // target spellings that bind no definition in the tree
     bool                      cycle  = false; // a definition was met twice
     bool                      capped = false; // the walk stopped at kAliasHopDepth with an alias still to follow
+    bool                      unread = false; // a hop's file could not be read: the walk past it is unknown (CR 4476868657)
 };
 
 namespace aliashop_detail
@@ -73,7 +74,8 @@ inline bool identByte( char c ) noexcept
 }
 
 // The head name of a written target (template arguments dropped: `COW<IColumn>::Ptr` -> COW::Ptr) and the identifier chains of
-// its top-level template arguments (`std::shared_ptr<const Foo>` -> Foo). Leading `typename` / `const` / `::` are not names.
+// its top-level template arguments (`std::shared_ptr<const Foo>` -> Foo). Leading `typename` / `const` are not names; a leading
+// `::` is kept (`::Widget` names the global one, bindSpelling reads it), and a space beside `::` (`N :: Widget`) continues the name.
 struct TargetSpelling
 {
     std::string              head;
@@ -97,13 +99,21 @@ inline std::string_view skipWords( std::string_view s )
                 again = true;
             }
         }
-        if( s.starts_with( "::" ) )
-        {
-            s.remove_prefix( 2 );
-            again = true;
-        }
     }
     return s;
+}
+// Does a space at `i` sit inside a qualified name: the name so far ends with `::`, or the next non-space bytes are `::`?
+inline bool spaceJoinsQualified( std::string_view text, std::size_t i, std::string_view sofar )
+{
+    if( sofar.ends_with( "::" ) )
+    {
+        return true;
+    }
+    while( i < text.size() && text[ i ] == ' ' )
+    {
+        ++i;
+    }
+    return !sofar.empty() && text.substr( i ).starts_with( "::" );
 }
 inline TargetSpelling parseTarget( std::string_view text )
 {
@@ -129,6 +139,20 @@ inline TargetSpelling parseTarget( std::string_view text )
     for( std::size_t i = 0; i < text.size(); ++i )
     {
         const char c = text[ i ];
+        if( c == '"' || c == '\'' )
+        {
+            // a string or character literal (`Tok<"key">`) names nothing: skipped whole, and it ends the name being read
+            for( ++i; i < text.size() && text[ i ] != c; ++i )
+            {
+                i += text[ i ] == '\\' ? 1 : 0;
+            }
+            headDone = headDone || ( depth == 0 && !out.head.empty() );
+            if( depth == 1 && arg.empty() )
+            {
+                argOpen = false;   // the argument is the literal: no name to follow
+            }
+            continue;
+        }
         if( c == '<' )
         {
             if( depth == 0 )
@@ -163,7 +187,7 @@ inline TargetSpelling parseTarget( std::string_view text )
             {
                 out.head += c;
             }
-            else
+            else if( c != ' ' || !spaceJoinsQualified( text, i, out.head ) )
             {
                 headDone = !out.head.empty();
             }
@@ -183,7 +207,7 @@ inline TargetSpelling parseTarget( std::string_view text )
             {
                 arg += c;
             }
-            else if( argOpen && !arg.empty() )
+            else if( argOpen && !arg.empty() && !( c == ' ' && spaceJoinsQualified( text, i, arg ) ) )
             {
                 closeArg();
             }
@@ -342,10 +366,16 @@ struct BoundSpelling
 // macro-opened one), the leaf's definitions bind HEDGED. An UNQUALIFIED spelling binds what C++ lookup finds from the alias's own
 // place: the definitions whose enclosing path is a prefix of the alias's, the innermost first (`N1::WP = Widget` is N1::Widget);
 // none such (a using-directive, a base class's member) binds them all, hedged. `types`: only type definitions (a template
-// argument). `std::` / an empty or numeric head: none.
+// argument). A leading `::` (`::Widget`, `::N::Widget`) is looked up from the global scope: the qualifier is anchored there, an
+// unqualified leaf binds only a definition at file scope. `std::` / an empty or numeric head: none.
 inline BoundSpelling bindSpelling( const IngestResult& ing, std::string_view spelling, const Symbol& from, bool types, BindCache& cache )
 {
     BoundSpelling out;
+    const bool global = spelling.starts_with( "::" );
+    if( global )
+    {
+        spelling.remove_prefix( 2 );
+    }
     if( spelling.empty() || spelling.starts_with( "std::" ) || spelling == "std" || ( spelling[ 0 ] >= '0' && spelling[ 0 ] <= '9' ) )
     {
         return out;
@@ -388,31 +418,34 @@ inline BoundSpelling bindSpelling( const IngestResult& ing, std::string_view spe
     {
         std::vector<std::string_view> written;
         namesplit::appendFields( q, "::", written );
+        bool anyUnknown = false;   // a candidate's chain is unknown: its path cannot refute the qualifier
         for( const NodeId n : cands )
         {
-            enclosingPath( ing, ing.symbols[ n ], cache, path );
-            if( pathEndsWith( path, written ) )
+            const bool known = enclosingPath( ing, ing.symbols[ n ], cache, path );
+            anyUnknown       = anyUnknown || !known;
+            if( pathEndsWith( path, written ) && ( !global || path.size() == written.size() ) )
             {
                 out.ids.push_back( n );
             }
         }
         if( out.ids.empty() )
         {
-            // not proven on any definition: a qualifier that is a namespace somewhere binds the leaf's definitions HEDGED; one
-            // that names nothing (a template parameter's member `typename T::Ptr`) leaves a leaf
+            // not proven on any definition: a qualifier that is a namespace somewhere binds the leaf's definitions HEDGED, and so
+            // does any qualifier but a type when a candidate's chain is unknown (CR 4476868644: a namespace that holds only a class
+            // leaves no scope evidence, and an unread chain refutes nothing); one that names nothing (a template parameter's member
+            // `typename T::Ptr`) or a type (`IColumn::Ptr`, Ptr inherited from a base) leaves a leaf
             const std::string_view qLast = written.back();
-            const auto [ at, fresh ]     = cache.isNamespace.try_emplace( std::string( qLast ), '\0' );
+            const auto [ at, fresh ]     = cache.isNamespace.try_emplace( std::string( qLast ), '\0' );   // 1 a namespace, 2 a type
             if( fresh )
             {
-                // a type qualifier (`IColumn::Ptr`, Ptr inherited from a base) is no namespace: it stays a leaf
                 const bool isType = std::ranges::any_of( resolveAllByNameQualified( ing, qLast ), [ & ]( NodeId n )
                                                          {
                                                              const Symbol& t = ing.symbols[ n ];
                                                              return t.name == qLast && ( t.kind == SymKind::Class || t.kind == SymKind::Interface || isStructOrNamedType( t.kind ) );
                                                          } );
-                at->second = !isType && std::ranges::any_of( ing.symbols, [ & ]( const Symbol& t ) { return namesplit::hasField( t.scope, "::", qLast, /*visitTrailingEmpty=*/true ); } ) ? '\1' : '\0';
+                at->second = isType ? '\2' : std::ranges::any_of( ing.symbols, [ & ]( const Symbol& t ) { return namesplit::hasField( t.scope, "::", qLast, /*visitTrailingEmpty=*/true ); } ) ? '\1' : '\0';
             }
-            if( at->second != '\0' )
+            if( at->second == '\1' || ( anyUnknown && at->second != '\2' ) )
             {
                 out.ids    = cands;
                 out.hedged = true;
@@ -422,8 +455,9 @@ inline BoundSpelling bindSpelling( const IngestResult& ing, std::string_view spe
     else
     {
         std::vector<std::string> here;
-        enclosingPath( ing, from, cache, here );
-        if( !( from.kind == SymKind::Method || from.kind == SymKind::Function ) && !aliasTargetRow( ing, from ) )
+        // CR 4476868651: the alias's own chain unknown (unread, braces a macro may open): the lookup from its place is not proven
+        const bool hereKnown = global || enclosingPath( ing, from, cache, here );
+        if( !global && !( from.kind == SymKind::Method || from.kind == SymKind::Function ) && !aliasTargetRow( ing, from ) )
         {
             here.push_back( from.name );   // a type's members see its own scope
         }
@@ -453,7 +487,7 @@ inline BoundSpelling bindSpelling( const IngestResult& ing, std::string_view spe
         {
             out.ids = cands;
         }
-        out.hedged = !any || unknown;
+        out.hedged = !any || unknown || !hereKnown;
     }
     // a definition inside another translation unit's source file cannot be what this alias names (`class IColumn` in an example
     // .cpp beside the real one in a header): dropped while another definition remains
@@ -502,6 +536,7 @@ inline AliasHopChain aliasChain( const IngestResult& ing, NodeId alias, aliashop
             const AliasTargetText t = aliasTargetText( ing, ing.symbols[ from ] );
             if( t.unread )
             {
+                c.unread = true;   // could not read is never "binds nothing": the chain says so
                 continue;
             }
             TargetSpelling sp = parseTarget( t.text );
@@ -657,9 +692,14 @@ struct AliasReach
                 }
             }
         }
-        for( std::size_t round = 0; round < kAliasHopDepth; ++round )
+        // ONE hop per round (CR 4476868668): what a round reaches is wanted from the next round on, so the depth never depends on
+        // the rows' order; round kAliasHopDepth only probes whether an alias is still to follow (capped=, CR 4476868673)
+        std::vector<std::pair<std::string_view, NodeId>> reachedNow;
+        for( std::size_t round = 0; round <= kAliasHopDepth && !capped; ++round )
         {
-            bool grew = false;
+            const bool probeOnly = round == kAliasHopDepth;
+            bool       grew      = false;
+            reachedNow.clear();
             for( const auto& [ k, raw ] : folded )
             {
                 const AliasTarget& a = ing.aliasTargets[ k ];
@@ -694,17 +734,25 @@ struct AliasReach
                 {
                     continue;
                 }
+                if( probeOnly )
+                {
+                    capped = true;
+                    break;
+                }
                 standsFor[ a.id ] = standsFor[ reached ];   // an alias of an alias stands for the asked definition its target stands for
                 hedgedFor[ a.id ] = char( hedged || hedgedFor[ reached ] != 0 );
                 rows.push_back( { a.id, standsFor[ a.id ], hedgedFor[ a.id ] != 0 } );
-                want[ s.name ].push_back( a.id );
+                reachedNow.emplace_back( s.name, a.id );
                 grew = true;
+            }
+            for( const auto& [ name, id ] : reachedNow )
+            {
+                want[ name ].push_back( id );
             }
             if( !grew )
             {
                 break;
             }
-            capped = round + 1 == kAliasHopDepth;
         }
         std::ranges::sort( rows, []( const Row& a, const Row& b ) { return a.alias < b.alias; } );
     }
@@ -720,7 +768,7 @@ struct AliasUsesFacts
     std::size_t unread    = 0;
     bool        capped    = false;   // the reverse walk stopped at its depth with an alias still to follow
 };
-inline std::string aliasUsesLegend( const AliasUsesFacts& f )
+inline std::string aliasUsesLegend( const AliasUsesFacts& f, bool columnar )
 {
     std::string out;
     if( f.viaAlias > 0 || f.hedged > 0 )
@@ -739,7 +787,7 @@ inline std::string aliasUsesLegend( const AliasUsesFacts& f )
     {
         out += "alias_namesakes=K: K definitions share a listed alias's name and reach none of SYM; ";
     }
-    if( f.viaAlias > 0 || f.hedged > 0 )
+    if( columnar && f.viaAlias > 0 )   // CR 4476868678: the attribute aliasUsesAttrXml prints on the columnar root only
     {
         out += "alias_sites_held=N: the columnar form keeps those N sites out of its rows; ";
     }

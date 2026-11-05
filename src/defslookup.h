@@ -23,6 +23,7 @@
 #include "model.h"
 #include "nextverb.h"      // nextFlag / nextAttrXml
 #include "pathpairs.h"     // pathDefInTests — the one test-path rule --path's twins use
+#include "redact.h"        // redactInPlace — to= is source text
 #include "serialize.h"     // escapeXml / jsonStr / symTag
 #include "infra/tablelookup.h"  // findSortedByField — the alias-target side table is ascending by id
 
@@ -263,7 +264,8 @@ inline std::string foldAliasTarget( std::string_view raw )
     }
     return text;
 }
-inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s )
+// `redact`: the run's tally when the text is printed (CR 4476868695: to= is source text; nullptr under --no-redact or to parse)
+inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s, RedactCounts* redact = nullptr )
 {
     AliasTargetText out;
     const std::uint32_t tStart = aliasTargetStart( ing, s );
@@ -337,6 +339,8 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s
         }
         out.next = nextFlag( "--defs=", spell );
     }
+    redactInPlace( out.text, redact );
+    out.fullBytes = out.text.size();
     truncateUtf8WithEllipsis( out.text, kAliasTargetCap );
     return out;
 }
@@ -384,7 +388,8 @@ inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
     }
 }
 
-inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false )
+inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false,
+                       RedactCounts* redact = nullptr )
 {
     std::vector<char> esc;
     const Symbol&     s = ing.symbols[ r.rep ];
@@ -414,12 +419,12 @@ inline void defRowXml( std::string& out, const IngestResult& ing, const DefLooku
     }
     if( aliasTarget )
     {
-        aliasTargetAttrsXml( out, aliasTargetText( ing, s ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
+        aliasTargetAttrsXml( out, aliasTargetText( ing, s, redact ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
     }
     out += "/>";
 }
 
-inline void defRowJson( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners )
+inline void defRowJson( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, RedactCounts* redact = nullptr )
 {
     const Symbol& s = ing.symbols[ r.rep ];
     out += "{\"n\":\"" + jsonStr( qualifiedMemberName( owners, s ) ) + "\",\"t\":\"" + symTag( s.kind ) + "\",\"p\":\""
@@ -434,7 +439,7 @@ inline void defRowJson( std::string& out, const IngestResult& ing, const DefLook
     {
         out += ",\"decl_only\":1";
     }
-    aliasTargetAttrsJson( out, aliasTargetText( ing, s ) );
+    aliasTargetAttrsJson( out, aliasTargetText( ing, s, redact ) );
     out += "}";
 }
 

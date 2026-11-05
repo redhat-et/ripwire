@@ -16,6 +16,7 @@
 #include "lexical.h"       // routeLower, lexicalScanText
 #include "model.h"
 #include "nextverb.h"      // nextFlag / nextAttrXml
+#include "redact.h"        // redactInPlace — declaration text is source text
 #include "serialize.h"     // escapeXml, symTag, truncateUtf8WithEllipsis
 
 #include <algorithm>
@@ -53,7 +54,7 @@ inline std::string aliasHopLegend( const AliasHopSeen& f )
     out += f.cands ? "; cands=N the spelling bound N definitions (3 kept)" : "";
     out += "; the text is the declaration";
     out += f.cut ? " (cut=\"1\" past 240 bytes)" : "";
-    out += f.unread ? "; unread=\"1\": its file could not be read, so no text" : "";
+    out += f.unread ? "; unread=\"1\" (on a row, or a chain): its file could not be read, so no text (a chain: the walk past it is unknown)" : "";
     out += f.members ? "; members=N the type's member functions (its own: declared in it or out of line under its full name)" : "";
     out += f.names ? ", m= the first 12 names" : "";
     out += f.leaf ? "; leaf n=: a target spelling that binds no definition in the tree (std, a template parameter, outside code), never "
@@ -75,8 +76,10 @@ inline std::string aliasHopLegend( const AliasHopSeen& f )
 namespace aliashop_for_detail
 {
 
-// The declaration text of `s` (an alias row: the whole declaration; any other: its signature), whitespace folded, cut past the cap.
-inline std::string declText( const IngestResult& ing, const Symbol& s, std::string& scratch, std::uint32_t& textOf, const std::string*& text, bool& cut, bool& unread )
+// The declaration text of `s` (an alias row: the whole declaration; any other: its signature), whitespace folded, redacted (CR
+// 4476868695: `redact` nullptr under --no-redact), cut past the cap.
+inline std::string declText( const IngestResult& ing, const Symbol& s, std::string& scratch, std::uint32_t& textOf, const std::string*& text, bool& cut, bool& unread,
+                             RedactCounts* redact )
 {
     if( textOf != s.fileId )
     {
@@ -91,6 +94,7 @@ inline std::string declText( const IngestResult& ing, const Symbol& s, std::stri
         return out;
     }
     out = foldAliasTarget( std::string_view( *text ).substr( s.sigStartByte, end - s.sigStartByte ) );   // the one fold (defslookup.h)
+    redactInPlace( out, redact );
     while( !out.empty() && ( out.back() == '{' || out.back() == ';' || out.back() == ' ' ) )
     {
         out.pop_back();
@@ -114,6 +118,7 @@ struct ForAliasHopArgs
     const std::vector<NodeId>* printed = nullptr;   // the answer's printed definition rows, in answer order
     bool                       held    = false;     // a token budget is set
     bool                       shed    = false;     // --max-tokens is set: m= and the leaf-only chains are left out first (S5)
+    RedactCounts*              redact  = nullptr;   // the run's redaction tally (nullptr under --no-redact): the block prints source text
 };
 
 // The <aliases> block ("" when the name the task spells has no alias definition with a written target).
@@ -133,8 +138,11 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
     {
         return {};
     }
-    const std::size_t      cut  = std::min( subject.rfind( "::" ), subject.rfind( '.' ) );
-    const std::string_view leaf = cut == std::string_view::npos ? subject : subject.substr( subject[ cut ] == '.' ? cut + 1 : cut + 2 );
+    // the rightmost separator (CR 4476868701: `pkg.N::Alias` is Alias); npos when neither is spelled
+    const std::size_t      colons = subject.rfind( "::" );
+    const std::size_t      dot    = subject.rfind( '.' );
+    const std::size_t      cut    = colons == std::string_view::npos ? dot : dot == std::string_view::npos ? colons : std::max( colons, dot );
+    const std::string_view leaf   = cut == std::string_view::npos ? subject : subject.substr( subject[ cut ] == '.' ? cut + 1 : cut + 2 );
     const std::string      want = routeLower( leaf );
     // the alias rows the answer printed first (answer order), then the other alias definitions of the name (id order): a sentence
     // that names an alias-only name prints them as literal lines, not rows (forreexport.h sentenceNameUnresolved)
@@ -168,13 +176,15 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
     for( const NodeId n : rows )
     {
         AliasHopChain c = aliasChain( ing, n, cache );
-        if( c.steps.empty() && c.leaves.empty() )
+        if( c.steps.empty() && c.leaves.empty() && !c.unread )
         {
             continue;
         }
         const auto same = std::ranges::find_if( walks, [ & ]( const Walked& w )
                                                 {
-                                                    return w.chain.leaves == c.leaves && std::ranges::equal( w.chain.steps, c.steps, []( const AliasHopStep& x, const AliasHopStep& y ) { return x.def == y.def && x.arg == y.arg; } );
+                                                    // CR 4476868736: a hedged and a proven walk to the same definitions stay two chains
+                                                    return w.chain.leaves == c.leaves && w.chain.unread == c.unread
+                                                           && std::ranges::equal( w.chain.steps, c.steps, []( const AliasHopStep& x, const AliasHopStep& y ) { return x.def == y.def && x.arg == y.arg && x.hedged == y.hedged; } );
                                                 } );
         if( same != walks.end() )
         {
@@ -233,8 +243,9 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
             }
         }
     }
-    std::vector<std::size_t>              memberCount( typeIds.size(), 0 );
-    std::vector<std::vector<std::string>> memberNames( typeIds.size() );
+    std::vector<std::size_t>                   memberCount( typeIds.size(), 0 );
+    std::vector<std::vector<std::string>>      memberNames( typeIds.size() );
+    std::vector<std::vector<std::string_view>> memberSeen( typeIds.size() );   // every distinct name counted (CR 4476868745), past the list too
     if( !typeIds.empty() )
     {
         // the cheap test first (most symbols are no member of these types), then the candidates' chains in one pass per file
@@ -270,13 +281,14 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
                 {
                     continue;
                 }
-                std::vector<std::string>& names = memberNames[ k ];
-                if( std::ranges::find( names, s.name ) == names.end() )
+                std::vector<std::string_view>& seenNames = memberSeen[ k ];
+                if( std::ranges::find( seenNames, std::string_view( s.name ) ) == seenNames.end() )
                 {
+                    seenNames.push_back( s.name );
                     ++memberCount[ k ];
-                    if( names.size() < kAliasHopMemberNames )
+                    if( memberNames[ k ].size() < kAliasHopMemberNames )
                     {
-                        names.push_back( s.name );
+                        memberNames[ k ].push_back( s.name );
                     }
                 }
             }
@@ -300,7 +312,7 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
         attr( "of", as.name );
         attr( "p", rootRelPath( ing, as.fileId ) );
         num( "l", as.line );
-        if( const AliasTargetText t = aliasTargetText( ing, as ); t.has && !t.unread )
+        if( const AliasTargetText t = aliasTargetText( ing, as, a.redact ); t.has && !t.unread )
         {
             attr( "to", t.text );
         }
@@ -314,7 +326,8 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
         {
             usersOf = std::ranges::find( typeIds, st.def ) != typeIds.end() ? st.def : usersOf;
         }
-        out.append( c.cycle ? " cycle=\"1\"" : "" ).append( c.capped ? " depth_capped=\"1\"" : "" );
+        out.append( c.cycle ? " cycle=\"1\"" : "" ).append( c.capped ? " depth_capped=\"1\"" : "" ).append( c.unread ? " unread=\"1\"" : "" );
+        seen.unread      = seen.unread || c.unread;
         seen.cycle       = seen.cycle || c.cycle;
         seen.depthCapped = seen.depthCapped || c.capped;
         if( usersOf != kNoNode )
@@ -362,7 +375,7 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
                 }
             }
             bool              cutText = false, unreadText = false;
-            const std::string decl    = aliashop_for_detail::declText( ing, s, scratch, textOf, text, cutText, unreadText );
+            const std::string decl    = aliashop_for_detail::declText( ing, s, scratch, textOf, text, cutText, unreadText, a.redact );
             out.append( unreadText ? " unread=\"1\"" : "" ).append( cutText ? " cut=\"1\">" : ">" ).append( escapeXml( decl, esc ) ).append( "</h>" );
             seen.unread = seen.unread || unreadText;
             seen.cut    = seen.cut || cutText;
@@ -370,7 +383,9 @@ inline std::string renderForAliasHops( const IngestResult& ing, const ForAliasHo
         for( const std::string& l : c.leaves )
         {
             out.append( "<leaf" );
-            attr( "n", l );
+            std::string shown = l;
+            redactInPlace( shown, a.redact );   // a spelling is source text too
+            attr( "n", shown );
             seen.leaf = true;
             out.append( "/>" );
         }
