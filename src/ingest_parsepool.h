@@ -367,7 +367,7 @@ inline void markMissDirty( ParsePoolShared& sh ) noexcept
 // triple and health alone, and a refused file's hash and stat are forgotten to UNKNOWN (0, -1, -1, -1:
 // forgetNestRefusalsForCache), which is what makes every warm run re-read and re-refuse it. When the blob already
 // holds exactly that record, re-serializing the whole blob changes nothing: envoy rewrote its 146 MB cache on
-// every warm run (saveCache 22.5 % of the run) for one refused deep_recursion.json. So such a miss dirties the
+// every warm run (a full re-serialize and write of the cache) for one refused deep_recursion.json. So such a miss dirties the
 // blob only when the record differs: a path the blob lacks, a file that just became refused or binary, a record
 // that held facts, a hash or stat that moved. A file that stops being refused reaches the parse, which dirties.
 inline void noteFactlessMiss( ParsePoolShared& sh, std::size_t fileId, bool nestRefused ) noexcept

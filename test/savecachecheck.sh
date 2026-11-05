@@ -152,7 +152,7 @@ command -v xmllint >/dev/null 2>&1 \
 # ── WARM-REWRITE: a refused file must not make every warm run rewrite the blob ─────────────────────
 # A nest-refused file yields no facts and is written UNKNOWN (forgetNestRefusalsForCache), so every warm run
 # re-reads and re-refuses it. Before the fix that re-read also set the pool's dirty flag, and the WHOLE blob was
-# re-serialized on every warm run (envoy: 146 MB, saveCache 22.5 % of the warm run, for one deep_recursion.json).
+# re-serialized on every warm run (envoy: a 146 MB write per warm run, for one deep_recursion.json).
 # A rewrite is visible in the blob bytes: the header carries the write's wall-clock stamp, so any saveCache
 # changes the checksum. Arms: (w1) a warm run over an unchanged tree with a refused file leaves the blob
 # byte-identical, and still notes and rows the refusal; (w2) the positive twin, an edited source rewrites it;
