@@ -1224,11 +1224,12 @@ Discloses: **none**
 
 ### `src/serialize.h`
 
-Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `names_capped`, `sibs_capped`, `type_capped`
+Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `type_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kCap` | `65536` | — | — |
+| `kCycleMemberCap` | `12` | — | — |
 | `kForAnchorBodyBudgetBytes` | `22800` | — | — |
 | `kForAutoBodyBudgetBytes` | `6000` | — | — |
 | `kForCapTailSigBytes` | `96` | — | — |
