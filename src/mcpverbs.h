@@ -4110,7 +4110,8 @@ inline constexpr char kConnectHeader[] =
     " edges=, groups=) is a FLOOR, never a total; read a zero as \"none found\", never as \"none exists\"."
     " graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls"
     " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
-    " defs= on a terminal row = that NAME has N definitions; every one is scored and the one reaching the most other"
+    " defs= on a terminal row = the N definitions that terminal's spelling matched (all of a bare name's; only those a qualified"
+    " Owner::m / Owner.m / ns.fn / file:name names; spellings that pick one definition share a row and print the widest); every one is scored and the one reaching the most other"
     " terminals within radius= (fewest hops) is used, else the tower front (most specific kind, leading language, lowest id; a C/C++ declaration without a body yields to the"
     " definition of its scope); ambiguous_terminal= on the root names terminals whose pick tied with another equally-joining"
     " definition. Qualify with file:name to pick another. Steiner rows never carry it."
@@ -4160,8 +4161,25 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                                            // argument serialize() takes — see its comment.
                                                            // Shared by CLI --connect and the MCP connect verb.
                          std::size_t unprovenDefs = 0,     // H1: the terminals' decl→def residue, SUMMED by the caller
-                         std::string_view ambiguousTerminals = {} )   // 0.6.6 D1: joinTerminalPicks' tied names, "" when none
+                         const ConnectPicks& picks = ConnectPicks{} )   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
 {
+    const std::string_view ambiguousTerminals = picks.ambiguous;
+    // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
+    // name reports every definition of the name, as before. Specs folded onto one node print the widest of their counts.
+    const auto terminalDefCount = [ & ]( NodeId t ) -> std::size_t
+    {
+        if( std::find( picks.barePicks.begin(), picks.barePicks.end(), t ) != picks.barePicks.end() )
+        {
+            return definitionCountOfName( ing, t );
+        }
+        std::size_t widest = 0;
+        bool        qualified = false;
+        for( const auto& [ node, defs ] : picks.qualifiedDefs )
+        {
+            if( node == t ) { widest = std::max( widest, defs ); qualified = true; }
+        }
+        return qualified ? widest : definitionCountOfName( ing, t );
+    };
     std::vector<char> escBuf;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, escBuf ) ); };
     const std::string rootPrefix = rootArg.empty() ? std::string() : sarif::rootPrefixOf( rootArg );
@@ -4321,7 +4339,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                 // name; the Steiner subgraph did not, so `--connect=size,…` was built from one of six `size`
                 // definitions with nothing on the row to say which question was answered. Steiner nodes (the
                 // "s" rows) carry no defs= because nobody selected them — the search found them.
-                const std::size_t terminalDefs = definitionCountOfName( ing, t );
+                const std::size_t terminalDefs = terminalDefCount( t );
                 if( terminalDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( terminalDefs ) ).append( "\"" ); }
                 payload.append( "/>" );
             }
@@ -4376,7 +4394,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             // and "no relationship within radius R" is exactly where answering about one of N silently
             // changes the answer. Derived from definitionCountOfName — the same call the <g> arm uses —
             // so the two can never drift into disagreeing about what the name resolved to.
-            const std::size_t loneDefs = definitionCountOfName( ing, grp.terminals[ 0 ] );
+            const std::size_t loneDefs = terminalDefCount( grp.terminals[ 0 ] );
             if( loneDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( loneDefs ) ).append( "\"" ); }
             payload.append( "/></unconnected>" );
         }
@@ -4459,14 +4477,14 @@ inline std::string connectText( const std::string& root, const std::vector<std::
         unprovenDefs += termUnprovenDefs;
     }
 
-    const std::string   ambiguous = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
+    const ConnectPicks  picks = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
     const ConnectResult res = connectSubgraph( g, terminals, radius );
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
     if( !mem ) { err = "internal error"; return {}; }
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),
-                 unprovenDefs, ambiguous );
+                 unprovenDefs, picks );
     std::optional<std::string> answer = mcpAnswerText( stream );
     if( !answer )
     {

@@ -113,6 +113,28 @@ inline std::vector<NodeId> editCheckOverloadSet( const IngestResult& ing, const 
     return overloadNodes;
 }
 
+// XF-QUALIFIED-ENDPOINTS: a SCOPE-LESS grammar (TS/JS, langfacts.h containmentOwners) stores no owner, so its canonical id
+// carries none and editCheckOverloadSet unions `Alpha.run` with a same-file `Beta.run` (or `ns.make` with `other.make`): the
+// contract and its callers then answered about a definition the selector did not name. When the selector names an owner or
+// module (graph.h splitWrittenSpec: a prefix before the leaf; `a.ts:run` names none), the set keeps only the members the
+// selector itself resolves to (resolveAllByNameQualified, every tier). A bare or file:name selector, a focus with a stored
+// scope (its canonical id already holds the owner), or a selector whose matches miss the focus keeps the set unchanged.
+inline std::vector<NodeId> editCheckOwnerNarrowed( const IngestResult& ing, std::vector<NodeId> overloadNodes, NodeId focus, std::string_view selector )
+{
+    if( overloadNodes.size() < 2 || !ing.symbols[ focus ].scope.empty() || !splitWrittenSpec( selector ) )
+    {
+        return overloadNodes;
+    }
+    std::vector<NodeId> named = resolveAllByNameQualified( ing, selector );
+    std::sort( named.begin(), named.end() );
+    if( !std::binary_search( named.begin(), named.end(), focus ) )
+    {
+        return overloadNodes;
+    }
+    std::erase_if( overloadNodes, [ & ]( NodeId id ) { return !std::binary_search( named.begin(), named.end(), id ); } );
+    return overloadNodes;
+}
+
 // The C/C++ declaration/definition identity (one contract, the declaration's defaults) lives in editcheckdecl.h.
 
 // ── §A6a: the DISTINCT contracts one --edit-check selector matched ───────────────────────────────────────
@@ -1414,7 +1436,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         return ecSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], ecRootPrefix ) : std::string_view( ing.files[ fileId ] );
     };
 
-    const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
+    const std::vector<NodeId> overloadNodes = editCheckOwnerNarrowed( ing, editCheckOverloadSet( ing, g, focus ), focus, page.selector );
     const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, maxFileBytes, excludes, focus, overloadNodes );
     EditCheckCalleeTest       callee( ing, fsym, overloadNodes );
     if( spliced.engaged )
