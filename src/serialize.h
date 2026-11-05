@@ -10249,6 +10249,16 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     const bool                healthUnknown = rw::systemNumbersUnknown( noEdge, measure );   // no measured edge left: every cone is one file, nothing behind ccd/nccd/shape but the missing data
     w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
     w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
+    // #479 item 2: at most kCycleMemberCap member rows per shown <cycle>; the legend defines members_capped= exactly when
+    // a shown cycle's member list is cut (the row loop below uses these same two numbers).
+    constexpr std::size_t kCycleMemberCap = 12;
+    const std::size_t     cyclesShown     = std::min( cycles.size(), std::max<std::size_t>( 20, pageLimit > 0 ? std::size_t( pageLimit ) : 0 ) );
+    if( std::any_of( cycles.begin(), cycles.begin() + std::ptrdiff_t( cyclesShown ),
+                     []( const std::vector<std::uint32_t>& members ) { return members.size() > kCycleMemberCap; } ) )
+    {
+        w.write( "cycle members_capped=1: the cycle has more files than the 12 f rows listed (the first in SCC order, not a "
+                 "ranking); size= is the whole count. " );
+    }
     if( containmentEdges > 0 )   // RUST-MOD-DECL: exactly when <health containment_edges=> is printed
     {
         w.write( "health containment_edges=N: Rust `mod x;` parent-to-child pairs whose only directive is the declaration (a parent "
@@ -10380,7 +10390,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     if( !cycles.empty() )   // Lakos's cardinal sin: cyclic physical dependencies (must build/test as one unit)
     {
         // S1: the 20 largest (the list is sorted largest first); --limit above 20 lists more, as the legend's limit=N says
-        const std::size_t capC = std::min( cycles.size(), std::max<std::size_t>( 20, pageLimit > 0 ? std::size_t( pageLimit ) : 0 ) );
+        const std::size_t capC = cyclesShown;
         if( capC < cycles.size() )   // DEPS-SHAPE-HONEST: a cut list says so (pageview.h rules 1-3); an uncut one is unchanged
         {
             w.write( "<cycles total=\"" + std::to_string( cycles.size() ) + "\" shown=\"" + std::to_string( capC ) + "\" capped=\"1\">" );
@@ -10443,7 +10453,6 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
             }
             // #479 item 2: at most kCycleMemberCap member rows; a cut member list says so (size= stays the whole count), an
             // uncut one is unchanged. The rows kept are the first in SCC order — deterministic, not a ranking.
-            constexpr std::size_t kCycleMemberCap = 12;
             const std::size_t     capN            = std::min( cycles[c].size(), kCycleMemberCap );
             if( capN < cycles[c].size() )
             {
