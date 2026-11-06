@@ -127,6 +127,14 @@ Discloses: `loops_capped`
 | `kMaxLoopsModeled` | `20000` | — | — |
 | `kQueryBudget` | `50000` | — | — |
 
+### `src/aliashop.h`
+
+Discloses: `alias_depth_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kAliasHopDepth` | `4` | — | hops past the asked alias (a runaway guard; real chains are 1-3) |
+
 ### `src/atoms.h`
 
 Discloses: `count_capped`
@@ -406,6 +414,14 @@ Discloses: `capped`, `hosts_capped`
 | `kMaxFlipRows` | `25` | OUTPUT | per emitted list; a DEFAULT --limit=N raises and --detail lifts |
 | `kMaxNearMisses` | `5` | OUTPUT | "did you mean" suggestions on an unknown gate name; --limit=N raises it |
 
+### `src/foraliashop.h`
+
+Discloses: `capped`, `depth_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kAliasHopSigBytes` | `240` | — | a declaration's text is cut here (cut="1"); a runaway guard |
+
 ### `src/forcallerhop.h`
 
 Discloses: `capped`
@@ -499,6 +515,7 @@ Discloses: `capped`, `lit_capped`
 | `kForLiteralRegistrationRows` | `2` | — | shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count |
 | `kForLiteralSiteRows` | `8` | — | <ls> rows shown (a runaway guard: shown=/src= count, next= lists all) |
 | `kForLiteralTierFiles` | `64` | — | source hit files classified (k=); past it k="?" |
+| `kForRegLineHits` | `8` | — | shape=table: later hits on one line kept to try as a registration argument (the first is the site) |
 | `kForTableByteCap` | `40000` | — | shape=table: all its <lit> elements together, cut on a row boundary (runaway guard: a 16 KB cap loses ld-nushell-07) |
 | `kForTableContextRows` | `4` | — | shape=table: table rows served with the lines after them |
 | `kForTableMaxAnchor` | `60` | — | a longer backticked span is no anchor |
@@ -655,6 +672,16 @@ Discloses: `capped`
 | `kPathHopBodyMaxHops` | `2` | — | — |
 | `kWrapperFollowDepth` | `2` | — | — |
 | `kWrapperFollowMax` | `3` | — | — |
+
+### `src/hoprecord.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kHopCallMaxBytes` | `120` | — | call= cap (U+2026 marks a cut) |
+| `kHopCallMaxLines` | `3` | — | a call whose arguments continue joins up to this many lines |
+| `kHopSigMaxBytes` | `160` | — | sig= cap on a hop (cleanSig's own 240 cap applies first) |
 
 ### `src/infra/blanktext.h`
 

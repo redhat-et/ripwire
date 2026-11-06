@@ -23,6 +23,7 @@
 #include "model.h"
 #include "nextverb.h"      // nextFlag / nextAttrXml
 #include "pathpairs.h"     // pathDefInTests — the one test-path rule --path's twins use
+#include "redact.h"        // redactInPlace — to= is source text
 #include "serialize.h"     // escapeXml / jsonStr / symTag
 #include "infra/tablelookup.h"  // findSortedByField — the alias-target side table is ascending by id
 
@@ -211,7 +212,60 @@ inline bool aliasTargetRow( const IngestResult& ing, const Symbol& s ) noexcept
 {
     return aliasTargetStart( ing, s ) != 0;
 }
-inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s )
+// An alias target's written text, folded the way to= prints it: whitespace runs to one space, a comment as whitespace, a string
+// literal copied whole, a trailing `;` dropped. The one fold: aliasTargetText and the alias walk (aliashop.h) both read it.
+inline std::string foldAliasTarget( std::string_view raw )
+{
+    std::string text;
+    bool        space = false;
+    for( std::size_t i = 0; i < raw.size(); ++i )
+    {
+        const char c = raw[i];
+        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
+        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
+        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
+        {
+            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
+            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
+            space                 = !text.empty();
+            continue;
+        }
+        const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+        if( ws )
+        {
+            space = !text.empty();
+            continue;
+        }
+        if( space )
+        {
+            text += ' ';
+            space = false;
+        }
+        text += c;
+        if( c == '"' )
+        {
+            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
+            {
+                text += raw[i];
+                if( raw[i] == '\\' && i + 1 < raw.size() )
+                {
+                    text += raw[ ++i ];
+                }
+            }
+            if( i < raw.size() )
+            {
+                text += '"';
+            }
+        }
+    }
+    while( !text.empty() && ( text.back() == ';' || text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
+    {
+        text.pop_back();
+    }
+    return text;
+}
+// `redact`: the run's tally when the text is printed (CR 4476868695: to= is source text; nullptr under --no-redact or to parse)
+inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s, RedactCounts* redact = nullptr )
 {
     AliasTargetText out;
     const std::uint32_t tStart = aliasTargetStart( ing, s );
@@ -228,51 +282,7 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s
         return out;
     }
     const std::string_view raw = std::string_view( *file ).substr( tStart, s.endByte - tStart );
-    bool                   space = false;
-    for( std::size_t i = 0; i < raw.size(); ++i )
-    {
-        const char c = raw[i];
-        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
-        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
-        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
-        {
-            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
-            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
-            space                 = !out.text.empty();
-            continue;
-        }
-        const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-        if( ws )
-        {
-            space = !out.text.empty();
-            continue;
-        }
-        if( space )
-        {
-            out.text += ' ';
-            space = false;
-        }
-        out.text += c;
-        if( c == '"' )
-        {
-            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
-            {
-                out.text += raw[i];
-                if( raw[i] == '\\' && i + 1 < raw.size() )
-                {
-                    out.text += raw[ ++i ];
-                }
-            }
-            if( i < raw.size() )
-            {
-                out.text += '"';
-            }
-        }
-    }
-    while( !out.text.empty() && ( out.text.back() == ';' || out.text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
-    {
-        out.text.pop_back();
-    }
+    out.text                   = foldAliasTarget( raw );
     out.fullBytes = out.text.size();
     // the target's own definition: a plain identifier chain once template arguments are dropped (`COW<IColumn>::Ptr` -> COW::Ptr)
     std::string name;
@@ -329,6 +339,8 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s
         }
         out.next = nextFlag( "--defs=", spell );
     }
+    redactInPlace( out.text, redact );
+    out.fullBytes = out.text.size();
     truncateUtf8WithEllipsis( out.text, kAliasTargetCap );
     return out;
 }
@@ -376,7 +388,8 @@ inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
     }
 }
 
-inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false )
+inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false,
+                       RedactCounts* redact = nullptr )
 {
     std::vector<char> esc;
     const Symbol&     s = ing.symbols[ r.rep ];
@@ -406,12 +419,12 @@ inline void defRowXml( std::string& out, const IngestResult& ing, const DefLooku
     }
     if( aliasTarget )
     {
-        aliasTargetAttrsXml( out, aliasTargetText( ing, s ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
+        aliasTargetAttrsXml( out, aliasTargetText( ing, s, redact ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
     }
     out += "/>";
 }
 
-inline void defRowJson( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners )
+inline void defRowJson( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, RedactCounts* redact = nullptr )
 {
     const Symbol& s = ing.symbols[ r.rep ];
     out += "{\"n\":\"" + jsonStr( qualifiedMemberName( owners, s ) ) + "\",\"t\":\"" + symTag( s.kind ) + "\",\"p\":\""
@@ -426,7 +439,7 @@ inline void defRowJson( std::string& out, const IngestResult& ing, const DefLook
     {
         out += ",\"decl_only\":1";
     }
-    aliasTargetAttrsJson( out, aliasTargetText( ing, s ) );
+    aliasTargetAttrsJson( out, aliasTargetText( ing, s, redact ) );
     out += "}";
 }
 

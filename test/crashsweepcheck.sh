@@ -328,7 +328,6 @@ main.cpp	scipIndexUnreadableReason	open	1	closes	close right after fstat, before
 mcpedit.h	EditLock	open	1	owned	EditLock's destructor unlocks and closes
 mcpindex.h	arm	open	1	owned	held in FsWatcher::dirFds, closed by reset and the destructor
 mcpindex.h	readFileBytes	fopen	1	closes	fclose before both returns
-mcpverbs.h	packConnect	fopen	1	closes	if-scoped; fclose after the read
 mcpverbs.h	sliceText	fopen	1	closes	if-scoped; fclose after the read loop
 naminglens.h	namingLensChecks	fopen	1	closes	if-scoped; fclose after the sized read
 packtask.h	d1ReadSrcCached	fopen	1	closes	if-scoped; fclose after the read loop

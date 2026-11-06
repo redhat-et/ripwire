@@ -345,6 +345,50 @@ struct ParsePoolShared
     memguard::Watch*                 memWatch;              // #350: null = unguarded; else checked before each claim
 };
 
+// WARM-REWRITE: true when the blob's record for a file is exactly the record saveCache would write for it now —
+// `expect` carries that record's key (hash, stat triple, health) and no facts, so the record must hold none in any
+// of the eight families.
+inline bool blobHoldsFactlessRecord( const FileFacts* rec, const FileFacts& expect ) noexcept
+{
+    return rec != nullptr && rec->hash == expect.hash && rec->sizeBytes == expect.sizeBytes && rec->mtimeNs == expect.mtimeNs
+        && rec->ctimeNs == expect.ctimeNs && rec->health == expect.health && rec->defs.empty() && rec->refs.empty() && rec->incs.empty()
+        && rec->binds.empty() && rec->ffis.empty() && rec->routeDefs.empty() && rec->routeUses.empty() && rec->constOpens.empty();
+}
+
+// A cache miss is about to change the blob: mark it dirty and count the file as drift (RIPWIRE_CACHE_STATS reparsed=).
+inline void markMissDirty( ParsePoolShared& sh ) noexcept
+{
+    sh.dirty.store( true, std::memory_order_relaxed );
+    sh.reparsedCount.fetch_add( 1, std::memory_order_relaxed );   // A1: drift-proportional observable
+}
+
+// WARM-REWRITE (reports/graph-efficiency-ideas.md #5): a cache miss that ends BEFORE the parse — unreadable,
+// binary-sniffed, or nest-refused — extracts no facts, so the record saveCache writes for it is its hash, stat
+// triple and health alone, and a refused file's hash and stat are forgotten to UNKNOWN (0, -1, -1, -1:
+// forgetNestRefusalsForCache), which is what makes every warm run re-read and re-refuse it. When the blob already
+// holds exactly that record, re-serializing the whole blob changes nothing: envoy rewrote its 146 MB cache on
+// every warm run (a full re-serialize and write of the cache) for one refused deep_recursion.json. So such a miss dirties the
+// blob only when the record differs: a path the blob lacks, a file that just became refused or binary, a record
+// that held facts, a hash or stat that moved. A file that stops being refused reaches the parse, which dirties.
+inline void noteFactlessMiss( ParsePoolShared& sh, std::size_t fileId, bool nestRefused ) noexcept
+{
+    const IngestFileScan& scan = sh.scan;
+    FileFacts             expect;   // empty families: no allocation
+    expect.health = scan.health[ fileId ];
+    if( !nestRefused )   // a refused file keeps the default UNKNOWN key (0, -1, -1, -1), as forgetNestRefusalsForCache writes it
+    {
+        expect.hash      = scan.hash[ fileId ];
+        expect.sizeBytes = scan.statSize[ fileId ];
+        expect.mtimeNs   = scan.statMtime[ fileId ];
+        expect.ctimeNs   = scan.statCtime[ fileId ];
+    }
+    const bool same = blobHoldsFactlessRecord( sh.cacheCandidateFacts[ fileId ], expect );
+    if( !same )
+    {
+        markMissDirty( sh );
+    }
+}
+
 // one worker's whole life: grab files off the shared cursor, reuse cache hits, parse+capture misses,
 // queueing parsed trees while the tags queries still compile. Body moved verbatim from the lambda in
 // ingest() (accumulators renamed tDefs[t]→out.defs etc., shared state reached through `sh`).
@@ -528,19 +572,20 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 }
             }
 
-            // cache miss (new file or hash changed) → need to actually parse
-            sh.dirty.store( true, std::memory_order_relaxed );
-            sh.reparsedCount.fetch_add( 1, std::memory_order_relaxed );   // A1: drift-proportional observable
+            // cache miss (new file or hash changed) → need to actually parse. The blob is marked dirty once the
+            // outcome is known: below, at the parse, or in noteFactlessMiss for a file that ends before it.
 
             // ensure bytes are loaded (may have been pre-hashed without loading the body)
             if( !bytesLoaded )
             {
                 if( !readFile( path, bytes ) )
                 {
+                    noteFactlessMiss( sh, fileId, false );
                     continue;
                 }
                 if( looksBinary( bytes ) )
                 {
+                    noteFactlessMiss( sh, fileId, false );
                     continue;
                 }
                 if( le->ext == ".h" && looksObjC( bytes ) )
@@ -563,8 +608,10 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             const bool        isRest  = docparse::isRestExtension( restExt );
             if( !isRest && refuseNesting( *le, bytes, path.c_str(), fileId, scan ) )
             {
+                noteFactlessMiss( sh, fileId, true );
                 continue;
             }
+            markMissDirty( sh );   // this file's facts are re-extracted below: the blob's record for it is rewritten
 
             if( isRest )
             {

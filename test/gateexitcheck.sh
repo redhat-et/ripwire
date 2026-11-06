@@ -293,6 +293,7 @@ if seen == len( FIXTURES ):
 # is "a number that is printed but not checked". If you add a row, force the gate to fail and read the
 # status; do not infer it from the `exit` literal you can see, because the one that fires may be another.
 FAILFAST = {
+    "hopcontextcheck.sh":      ( "its checks accumulate inside one embedded Python block (sys.exit(1 if fails)); the shell then exits 1 on its status. rc READ, not inferred: run against the pre-lane base binary (no hop attributes) and a crashing stub, it exits 1 both times (2026-11-04)", 1 ),
     "elixirsemanticcheck.sh":  ( "set -e and Python assertions; missing protocol and branch-scope probes observed exit 1", 1 ),
     "astrocheck.sh":           ( "set -e and Python assertions; same shape as elixircheck. rc READ, not inferred: run against the stock 0.6.2 binary (which has no .astro row in kLangTable, so every fixture file is unindexed and arm 1 asserts first) it exits 1", 1 ),
     "dartcheck.sh":            ( "set -e and Python assertions; pre-Dart HEAD binary probed to exit 1", 1 ),
@@ -332,6 +333,7 @@ FAILFAST = {
     "mcpcodexmetacheck.sh":     ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "readmeexamplecheck.sh":    ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "radixsimdcheck.sh":        ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
+    "fortailwidecheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary (11 FAIL), a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────
