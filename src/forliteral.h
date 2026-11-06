@@ -3999,7 +3999,7 @@ struct TableWalk
     TableTry tryAnchor( const TableAnchor& anchor, bool late, bool tail = false )
     {
         const std::string& word = anchor.text;
-        if( namesIndexedFile( ing, word ) || ( !late && !forTableAnchorKeeps( ing, word, anchor.quoted ) ) || ( cue == TableCue::StrongRowOnly && ( tail || !anchor.quoted ) && isOneLowerWord( word ) ) )
+        if( namesIndexedFile( ing, word ) || ( !late && !forTableAnchorKeeps( ing, word, anchor.quoted ) ) || ( cue == TableCue::StrongRowOnly && isOneLowerWord( word ) ) )
         {
             return TableTry::Unkept;
         }

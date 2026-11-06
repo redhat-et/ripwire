@@ -534,6 +534,7 @@ def setup_nested(r, table):
 PY
 nested(){ if ask "$1"; then L="$( lits <<<"$A" )"; if ! has "$L" 'shape="table"' && [ "$A" = "$( offc "--for=$1" )" ]; then ok "$2"; else no "$2: ${L:0:400}"; fi; else no "$2: call failed rc=$RC"; fi; }
 nested 'lowest common caller of PlainBox.plainword and Gadget.thing' 'N23a [P] a no-cue dotted name whose tail is one lower-case word (plainword): the tail is not scanned, byte-identical (nest-08 shape)'
+nested 'lowest common caller of `plainword` and Gadget.thing' 'N23c [P] a backticked plain lower-case word is skipped too (mdbook-12 `index` shape): byte-identical'
 strong 'lowest common caller of PlainBox.plain_word and Gadget.thing' 'N23b [G] twin: the tail with an underscore (plain_word) is a compound name: its registration row prints' 's="plain_word" shape="table"' 'reg="r.register("'
 nested 'nested_marker_fn setup_nested' 'N24a [P] a site nested in an inner call (register(wrap(x))) is no direct argument: no strong row, byte-identical (vscode-03 shape)'
 nested 'idx_marker_fn setup_nested' 'N24b [P] a site inside an index (register(table[x])) is no direct argument: byte-identical'
