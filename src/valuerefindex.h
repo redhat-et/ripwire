@@ -477,7 +477,7 @@ private:
                 m_fileIndex.emplace( lexicalNormalize( rootRelPath( *m_ing, f ) ), f );
             }
         }
-        const std::uint32_t f = resolveRustImport( rootRelPath( *m_ing, fileId ), target, m_fileIndex, crateRootDir( rootOf ), true );
+        const std::uint32_t f = resolveRustImport( rootRelPath( *m_ing, fileId ), target, m_fileIndex, RustSite{ crateRootDir( rootOf ), true } );
         return f == kNoFile ? At{ Reach::None } : At{ Reach::File, false, f };
     }
     // `module::name` led by an anchor, an in-tree crate's name, a `mod` this file declares or a module a `use` binds.

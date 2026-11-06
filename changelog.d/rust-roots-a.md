@@ -12,13 +12,19 @@ compiled in: the nearest `Cargo.toml` above it and that manifest's target (`[lib
 - `use crate::a::b` where `a/b.rs` exists draws `a/b.rs` even when `a.rs` exists too: the full path as a module file is
   read first and the parent module's file only when it misses, each step unique-or-degrade on its own.
 - A brace group (`use crate::{a::b, c::{self, D}}`) resolves each member, and an `as` rename resolves the path it renames.
+- A directive inside an inline `mod x { }` reads from that module, not from the file's: in `#[cfg(test)] mod tests { use
+  super::*; }` the first `super` is the file's own module (no edge), a `super` past the inline depth climbs from the file's
+  module, `self::` is the inline module itself, and `mod y;` is `x/y.rs` below the module directory. Without this, every
+  unit-tested file drew a false edge to its parent module file.
 
 Measured on three in-sample trees (distinct file pairs from `.rs` includers, base main 292a26dec vs this change):
-mdbook 64 → 118 (+54, none removed), axum 139 → 357 (+234; 16 removed: 15 edges into the `axum-core` crate from `axum`
-files and one `self::rejection` that names an inline module), nushell 1,870 → 3,520 (+1,655; 5 removed, all into
+mdbook 64 → 108 (+44, none removed), axum 139 → 331 (+208; 16 removed: 15 edges into the `axum-core` crate from `axum`
+files and one `self::rejection` that names an inline module), nushell 1,870 → 3,001 (+1,136; 5 removed, all into
 another crate). The call narrow (the import evidence Rust call resolution reads) takes the same edges except brace-group
-members, which it still leaves unresolved: there it adds 40 / 97 / 941 pairs and removes the same 0 / 16 / 5. Read as a
+members, which it still leaves unresolved: there it adds 30 / 64 / 405 pairs and removes the same 0 / 16 / 5. Read as a
 member call's namesakes by name, a group's edges turned two declined calls into name-only edges (card RULE3-MEMBER-GUARD).
+The Rust crate-root table is built once per run and shared by the file graph, the call narrow and the containment cut
+(each used to re-read every `Cargo.toml`).
 
 What it does NOT do: a workspace crate named by its package (`use nu_protocol::…`) still draws no file edge (card
 RUST-ROOTS-B), a one-segment `crate::Item` does not reach the crate root file, and `#[path]` values other than the

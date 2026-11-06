@@ -16,6 +16,7 @@
 #include "structlayout.h"   // cross-translation-unit sizeof/alignof tripwire for the shared model
 
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember
+#include <memory>      // IngestResult::rustCrateRoots — the per-run Rust crate-root table
 #include <tuple>       // std::tie — lessUnindexedExt's mixed-direction compare
 #include <array>       // Symbol::evWhy — the fixed-size ev_why tag counters
 #include <cstdint>
@@ -2168,6 +2169,8 @@ struct MemoryStop
     [[nodiscard]] bool isSet() const noexcept { return phase != Phase::None; }
 };
 
+struct RustCrateRoots;   // resolve.h — IngestResult::rustCrateRoots holds one
+
 struct IngestResult
 {
     std::vector<std::string> files;
@@ -2267,6 +2270,12 @@ struct IngestResult
 
     // ── #350 layer 3: the memory guard stopped this ingest before it finished (MemoryStop, above)
     MemoryStop                 memoryStop;
+
+    // ── Derived, never stored in the cache: the Rust crate-root table (resolve.h buildRustCrateRoots), built on the first
+    //    Rust directive any file-graph or call-narrow pass resolves and shared by every later pass of the SAME run (it
+    //    re-reads each Cargo.toml, so the three passes of a run would read them three times). A fresh IngestResult starts
+    //    empty, so a re-ingest never sees a stale table; a copy shares the pointer (same files, same table).
+    mutable std::shared_ptr<const RustCrateRoots> rustCrateRoots;
 };
 
 // These aggregates cross the ingest/main translation-unit boundary. The record is emitted once per TU by

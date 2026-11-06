@@ -8,6 +8,9 @@
 #   SUB `use crate::a::b` where a/b.rs exists draws a/b.rs although a.rs exists too (tiers: full path first, parent
 #       module file second; unique-or-degrade inside a tier, never across one).
 #   BR  brace groups resolve each member; an `as` rename resolves the path it renames.
+#   IN  a directive inside an INLINE `mod x { }` (`#[cfg(test)] mod tests { use super::*; }`) reads from the inline module:
+#       the first `super`s and `self::` stay inside the file (no edge), `super` past the inline depth climbs from the file's
+#       module, and `mod y;` lives in the inline module's own directory (`mod outer { mod y; }` in lib.rs is src/outer/y.rs).
 # Every arm reads `--impact=FILE` (the file's importers) and checks the command's exit code and that the answer
 # parsed (an <impact> element), so a crash or an empty answer is RED, never a pass. Absence arms each have a positive
 # twin in the same fixture.
@@ -110,6 +113,64 @@ mk "$M/src/q.rs"              'pub mod r;'
 mk "$M/src/q/r.rs"            'pub fn r() {}'
 mk "$M/src/q/r/mod.rs"        'pub fn r() {}'
 
+# ── fixture I: directives inside inline modules (RV-RUST-ROOTS-A) ──
+I="$TMP/i"
+mk "$I/Cargo.toml"            '[package]
+name = "i"'
+mk "$I/src/lib.rs"            'pub mod a;
+pub mod b;
+pub mod k;
+mod outer {
+    mod inner;
+    mod deep {
+        mod z;
+    }
+}'
+mk "$I/src/b.rs"              'pub fn g() {}'
+mk "$I/src/inner.rs"          'pub fn decoy() {}'
+mk "$I/src/z.rs"              'pub fn decoy() {}'
+mk "$I/src/outer/z.rs"        'pub fn decoy() {}'
+mk "$I/src/outer/inner.rs"    'pub fn truth() {}'
+mk "$I/src/outer/deep/z.rs"   'pub fn truth() {}'
+mk "$I/src/a/mod.rs"          'pub mod x;
+pub mod y;
+pub struct Foo;'
+mk "$I/src/a/x.rs"            'pub fn bar() {}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::bar;
+    use self::helper;
+}'
+mk "$I/src/a/x/helper.rs"     'pub fn helper() {}'
+mk "$I/src/a/y.rs"            'use super::Foo;
+use self::helper;'
+mk "$I/src/a/y/helper.rs"     'pub fn helper() {}'
+mk "$I/src/k.rs"              'pub mod j;
+pub mod m;
+pub fn kf() {}
+mod outer2 {
+    mod inn;
+}'
+mk "$I/src/k/b.rs"            'pub fn g() {}'
+mk "$I/src/k/inn.rs"          'pub fn decoy() {}'
+mk "$I/src/inn.rs"            'pub fn decoy() {}'
+mk "$I/src/k/outer2/inn.rs"   'pub fn truth() {}'
+mk "$I/src/k/j.rs"            'use super::kf;
+#[cfg(test)]
+mod tests {
+    use super::super::b::g;
+}'
+mk "$I/src/k/m.rs"            'mod t1 {
+    mod t2 {
+        use super::super::super::b::g;
+    }
+}
+mod t3 {
+    use super::kf;
+}'
+
+
 # importers <tree> <file> -> "$TMP/imp" holds one importer path per line; RED on a nonzero exit or no <impact> answer
 importers(){
   local out="$TMP/imp.xml" rc
@@ -166,6 +227,27 @@ has   BRa  "$M" src/a/b.rs          src/d.rs              # crate::{a::b::g, ...
 has   BRb  "$M" src/e.rs            src/d.rs              # ... e::{self, E}
 has   ALa  "$M" src/e.rs            src/f.rs              # crate::e::E as EE
 hasnt BRc  "$M" src/b.rs            src/d.rs              # twin: a member names a::b, not src/b.rs
+
+echo "-- IN: directives inside an inline mod read from the inline module"
+hasnt INa  "$I" src/a/mod.rs        src/a/x.rs            # mod tests { use super::*; } in a/x.rs is module a::x itself
+has   INb  "$I" src/a/mod.rs        src/a/y.rs            # twin: a file-level use super::Foo in a/y.rs is module a
+hasnt INc  "$I" src/a/x/helper.rs   src/a/x.rs            # self:: inside mod tests is the inline module, not a::x
+has   INd  "$I" src/a/y/helper.rs   src/a/y.rs            # twin: a file-level use self::helper in a/y.rs is a/y/helper.rs
+has   INe  "$I" src/k/b.rs          src/k/j.rs            # super::super:: across one inline boundary: k's b
+hasnt INe- "$I" src/b.rs            src/k/j.rs            # ... not the crate root's b (the file-level super::super)
+has   INf  "$I" src/k.rs            src/k/j.rs            # twin: file-level use super::kf in k/j.rs is k.rs
+has   ING  "$I" src/k/b.rs          src/k/m.rs            # super^3 across two nested inline mods climbs one: k's b
+hasnt ING- "$I" src/b.rs            src/k/m.rs
+hasnt INh  "$I" src/k.rs            src/k/m.rs            # mod t3 { use super::kf; } names m itself: no edge to k.rs
+has   INi  "$I" src/outer/inner.rs  src/lib.rs            # mod outer { mod inner; } in lib.rs is src/outer/inner.rs
+hasnt INi- "$I" src/inner.rs        src/lib.rs            # ... never a same-named src/inner.rs
+has   INj  "$I" src/outer/deep/z.rs src/lib.rs            # two inline levels: src/outer/deep/z.rs
+hasnt INj- "$I" src/z.rs            src/lib.rs
+hasnt INj2 "$I" src/outer/z.rs      src/lib.rs
+has   INk  "$I" src/k/outer2/inn.rs src/k.rs              # in a plain file k.rs: src/k/outer2/inn.rs
+hasnt INk- "$I" src/k/inn.rs        src/k.rs
+hasnt INk2 "$I" src/inn.rs          src/k.rs
+has   INl  "$I" src/b.rs            src/lib.rs            # twin: a plain `pub mod b;` in lib.rs
 
 echo "-- determinism"
 ( cd "$M" && "$BIN" "$M" --deps --no-cache > "$TMP/d1.xml" 2>/dev/null ); r1=$?

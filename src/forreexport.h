@@ -191,14 +191,6 @@ inline std::vector<std::string> splitColons( std::string_view path )
 }
 
 // ── Rust: crates, module paths, `use` paths ─────────────────────────────────────────────────────────────────────────────────
-// An inline `mod name { … }` of a file: its body spans [start, end).
-struct InlineMod
-{
-    std::uint32_t start = 0;
-    std::uint32_t end   = 0;
-    std::string   name;
-};
-
 struct RustCrates
 {
     std::vector<std::string>                          names;      // crate index -> its (first) Cargo name, `_` for `-`
@@ -272,18 +264,15 @@ inline std::optional<std::vector<std::string>> rustModulePath( std::string_view 
 // `use` records that bind a name, per file. An inline body is a module of its crate like a file (a 2018 path may start at it).
 inline void indexRustInlineMods( const IngestResult& ing, RustCrates& rc )
 {
-    for( const Symbol& s : ing.symbols )
-    {
-        if( s.kind == SymKind::Other && dependencyDialect( s.lang ) == DepDialect::Rust && s.fileId < rc.crateOf.size() && rc.crateOf[ s.fileId ] != kNoFile
-            && s.endByte > s.sigStartByte )
-        {
-            rc.inlineOf[ s.fileId ].push_back( InlineMod{ s.sigStartByte, s.endByte, s.name } );
-        }
-    }
+    rc.inlineOf = rustInlineMods( ing );   // resolve.h: the one reader of the spans (the import probe's inline depth reads it too)
+    rc.inlineOf.resize( rc.crateOf.size() );
     for( std::uint32_t f = 0; f < rc.inlineOf.size(); ++f )
     {
         std::vector<InlineMod>& inl = rc.inlineOf[ f ];
-        std::ranges::sort( inl, []( const InlineMod& a, const InlineMod& b ) { return a.start != b.start ? a.start < b.start : a.end > b.end; } );
+        if( rc.crateOf[ f ] == kNoFile )
+        {
+            inl.clear();   // outside every crate's source root: no module path to extend
+        }
         for( const InlineMod& m : inl )
         {
             std::vector<std::string> path = rc.modsAt( f, m.start );

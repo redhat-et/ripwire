@@ -16343,9 +16343,10 @@ inline rw::FileAdjacency resolveIncludeAdj( const IngestResult& ing )
 //   (3) no other directive of P names the child at its head (`x`, `x::…`, `self::x…`, resolved or not: a relative
 //       `use x::Thing;` resolves to no file today), and no reference written in P is qualified by it (`x::go()`, the
 //       immediate qualifier: Reference::qualifier). Any namesake reads as a use, which only cuts less.
-// Allowlist, SAFETY (d)(1): only those shapes are cut. A `mod x;` written inside an inline `mod m { … }` and a
-// `#[path = "…"]` / `#[cfg_attr(…, path = "…")] mod x;` are read as P's own plain `mod x;`: the declaration resolves to
-// P's `x.rs`, the wrong file for those two (card RUST-MOD-RESOLVE), and that edge is cut like any other declaration.
+// Allowlist, SAFETY (d)(1): only those shapes are cut. A `mod x;` written inside an inline `mod m { … }` resolves into the
+// inline module's own directory (resolve.h RustSite::inlineMods), which is not P's module directory: that edge is kept. A
+// `#[path = "…"]` / `#[cfg_attr(…, path = "…")] mod x;` is read as P's own plain `mod x;`: the declaration resolves to
+// P's `x.rs`, the wrong file for it (card RUST-MOD-RESOLVE), and that edge is cut like any other declaration.
 struct ContainmentCut
 {
     rw::FileAdjacency adj;         // the adjacency minus the containment pairs, filled only when pairs > 0
@@ -16470,14 +16471,23 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
     std::sort( declaredNames.begin(), declaredNames.end(), sortutil::svLess );
     declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
 
-    // rule (2) reads the resolver's own `mod:` base, which knows a manifest's crate roots (`[lib] path`, src/bin/*.rs)
+    // rule (2) reads the resolver's own `mod:` base, which knows a manifest's crate roots (`[lib] path`, src/bin/*.rs): the run's
+    // shared table when an earlier pass built it. The path index is built only when it is needed (no shared table yet, or a
+    // declaration that points at the includer's own directory).
     HashMap<std::string, std::uint32_t> rsIndex;
-    rsIndex.reserve( F );
-    for( std::uint32_t f = 0; f < F; ++f )
+    const auto rsIndexOf = [ & ]() -> const HashMap<std::string, std::uint32_t>&
     {
-        rsIndex.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
-    }
-    const RustCrateRoots rustRoots = buildRustCrateRoots( ing, rsIndex );
+        if( rsIndex.empty() )
+        {
+            rsIndex.reserve( F );
+            for( std::uint32_t f = 0; f < F; ++f )
+            {
+                rsIndex.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
+            }
+        }
+        return rsIndex;
+    };
+    const RustCrateRoots& rustRoots = ing.rustCrateRoots ? *ing.rustCrateRoots : rustCrateRootsOf( ing, rsIndexOf() );
     std::vector<std::pair<std::uint32_t, std::uint32_t>>      cutPairs;   // (parent, child) to drop: parents ascending (decls' order), children sorted
     std::vector<std::pair<std::uint32_t, const RustModDecl*>> cand;   // one scratch row, reused: (child, its declaration) per occurrence
     std::vector<std::uint32_t>                                drop;   // the distinct children cut from one parent, sorted
@@ -16503,7 +16513,7 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
                 return true;
             }
             const std::string stem = modDir.empty() ? std::string( name ) : modDir + "/" + std::string( name );
-            return !rsIndex.contains( stem + ".rs" ) && !rsIndex.contains( stem + "/mod.rs" );
+            return !rsIndexOf().contains( stem + ".rs" ) && !rsIndexOf().contains( stem + "/mod.rs" );
         };
         const auto             names    = std::span( decls ).subspan( i, j - i );
         // The declaration naming g by the module-file rule, or nullptr (rule (1)).
