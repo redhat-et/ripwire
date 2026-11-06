@@ -837,32 +837,33 @@ inline std::uint8_t entryStrength( std::string_view folded, const std::vector<st
                                                                      : 0;
 }
 
-// How an entry point's group matches one task word: 2 when the word names the group or one of its dot segments (`pydantic`,
-// `flake8` of `flake8.extension`: the host the plugin hooks into), else 0. A group named after the repo is still an anchor: it is
-// the repo's plugin hook, and the entry point fires only beside a plugin / entry-point word anyway.
-inline std::uint8_t groupStrength( std::string_view group, std::string_view word )
+// The spellings an entry point's group is compared in: the group folded whole and each of its dot segments (`flake8.extension` →
+// flake8extension, flake8, extension), the host the plugin hooks into. A group named after the repo is still an anchor: it is the
+// repo's plugin hook, and the entry point fires only beside a plugin / entry-point word anyway. Empty for an entry with no group.
+inline std::vector<std::string> groupForms( std::string_view group )
 {
+    std::vector<std::string> forms;
     if( group.empty() )
     {
-        return 0;
+        return forms;
     }
-    if( foldedName( group ) == word )
-    {
-        return 2;
-    }
+    forms.push_back( foldedName( group ) );
     for( std::size_t at = 0; at <= group.size(); )
     {
         const std::size_t dot = std::min( group.find( '.', at ), group.size() );
-        if( foldedName( group.substr( at, dot - at ) ) == word )
-        {
-            return 2;
-        }
+        forms.push_back( foldedName( group.substr( at, dot - at ) ) );
         at = dot + 1;
     }
-    return 0;
+    return forms;
 }
 
-// One manifest against the task (see WHEN and RANK). HOISTING: an entry's folded name and parts are built once, not per word.
+// How an entry point's group matches one task word: 2 when the word names the group or one of its dot segments, else 0.
+inline std::uint8_t groupStrength( const std::vector<std::string>& forms, std::string_view word )
+{
+    return std::ranges::contains( forms, word ) ? 2 : 0;
+}
+
+// One manifest against the task (see WHEN and RANK). HOISTING: an entry's folded name, parts and group spellings are built once, not per task word.
 inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, const ManifestTask& t )
 {
     ManifestMatch m { .doc = di };
@@ -882,11 +883,11 @@ inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, cons
         {
             continue; // a dependency on the repo's own crate or package says nothing about the task
         }
-        const std::vector<std::string> parts = nameParts( en.name );
+        const std::vector<std::string> parts = nameParts( en.name ), group = groupForms( en.group );
         ManifestHit hit { .entry = e };
         for( std::size_t w = 0; w < t.words.size(); ++w )
         {
-            const std::uint8_t s = std::max( entryStrength( folded, parts, t.words[w] ), groupStrength( en.group, t.words[w] ) );
+            const std::uint8_t s = std::max( entryStrength( folded, parts, t.words[w] ), groupStrength( group, t.words[w] ) );
             hit.strength = std::max( hit.strength, s );
             best[w] = std::max( best[w], s );
         }
