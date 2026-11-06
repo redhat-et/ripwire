@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <span>
 #include <string>
 #include <string_view>
@@ -534,19 +535,19 @@ struct ForDocBodyInputs
 
 // The task's subject words: its distinct words of 3+ bytes that are neither general English (isCommentStopword) nor a word that only names the
 // act of asking a doc ("docs", "describe"). A section that holds too few of them is not about the task, whatever else it shares with it.
-inline std::vector<std::string> forDocSubjectWords( const std::vector<std::string>& queryToks )
+inline bool isForDocSubjectWord( const std::string& w ) noexcept
 {
     static constexpr std::string_view kActWords[] = { "doc", "docs", "document", "documents", "documentation", "describe", "describes", "explain",
                                                       "explains", "say", "says", "show", "shows", "tell", "tells" };
+    return w.size() >= 3 && !isCommentStopword( w ) && std::ranges::find( kActWords, std::string_view( w ) ) == std::end( kActWords );
+}
+
+inline std::vector<std::string> forDocSubjectWords( const std::vector<std::string>& queryToks )
+{
     std::vector<std::string> subject;
-    for( const std::string& w : queryToks )
-    {
-        if( w.size() >= 3 && !isCommentStopword( w ) && std::ranges::find( kActWords, std::string_view( w ) ) == std::end( kActWords ) &&
-            std::ranges::find( subject, w ) == subject.end() )
-        {
-            subject.push_back( w );
-        }
-    }
+    std::ranges::copy_if( queryToks, std::back_inserter( subject ),
+                          [&]( const std::string& w )
+                          { return isForDocSubjectWord( w ) && std::ranges::find( subject, w ) == subject.end(); } );
     return subject;
 }
 
