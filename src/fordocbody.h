@@ -274,24 +274,16 @@ struct ForDocPassage
     std::uint32_t rangeLo = 0, rangeHi = 0, rangeOf = 0; // isCut: the excerpt is bytes [rangeLo, rangeHi) of the rangeOf-byte section text
 };
 
-// Why a picked doc file (or part of one) was not served. Unreadable: the file could not be read; Allowance: the block's own
+// Why a picked doc file (or part of one) was not served: the why= value. Unreadable: the file could not be read; Allowance: the block's own
 // 7500 bytes were spent; Budget: a token budget left less room than the allowance and the default allowance would have served it.
-enum class ForDocWhy : std::uint8_t
-{
-    Unreadable,
-    Allowance,
-    Budget
-};
-inline std::string_view forDocWhyName( ForDocWhy why ) noexcept
-{
-    static constexpr std::string_view kNames[] = { "unreadable", "allowance", "budget" };
-    return kNames[std::size_t( why )];
-}
+inline constexpr std::string_view kForDocUnreadable = "unreadable";
+inline constexpr std::string_view kForDocAllowance = "allowance";
+inline constexpr std::string_view kForDocBudget = "budget";
 
 struct ForDocUnserved
 {
     std::uint32_t fileId = 0;
-    ForDocWhy why = ForDocWhy::Allowance;
+    std::string_view why = kForDocAllowance;
     std::uint32_t held = 0; // Budget only: the sections of this file the budget kept out (0 = the whole file)
 };
 
@@ -698,7 +690,7 @@ inline ForDocBody serveForDocBody( const IngestResult& ing, const ForDocPrep& pr
     out.allowance = allowance;
     for( const std::uint32_t f : prep.unreadable )
     {
-        out.unserved.push_back( { f, ForDocWhy::Unreadable, 0 } );
+        out.unserved.push_back( { f, kForDocUnreadable, 0 } );
     }
     std::vector<std::size_t> overhead( prep.loaded.size(), 0 ), demand; // the markup is the block's own, outside the text allowance
     for( const ForDocPrep::Loaded& l : prep.loaded )
@@ -718,7 +710,7 @@ inline ForDocBody serveForDocBody( const IngestResult& ing, const ForDocPrep& pr
     {
         if( i >= shares.servedCount )
         {
-            out.unserved.push_back( { prep.loaded[i].fileId, ForDocWhy::Allowance, 0 } ); // the allowance served the files before it
+            out.unserved.push_back( { prep.loaded[i].fileId, kForDocAllowance, 0 } ); // the allowance served the files before it
             out.isCapped = true;
             continue;
         }
@@ -755,9 +747,9 @@ inline ForDocBody serveForDocBodyHeld( const IngestResult& ing, const ForDocPrep
                                                    { return p.fileId == f; } ) ); };
     for( ForDocUnserved& u : out.unserved )
     {
-        if( u.why == ForDocWhy::Allowance && countOf( full, u.fileId ) > 0 )
+        if( u.why == kForDocAllowance && countOf( full, u.fileId ) > 0 )
         {
-            u.why = ForDocWhy::Budget;
+            u.why = kForDocBudget;
             u.held = countOf( full, u.fileId );
         }
     }
@@ -766,7 +758,7 @@ inline ForDocBody serveForDocBodyHeld( const IngestResult& ing, const ForDocPrep
         const std::uint32_t cut = countOf( out, l.fileId ), uncut = countOf( full, l.fileId );
         if( cut > 0 && uncut > cut )
         {
-            out.unserved.push_back( { l.fileId, ForDocWhy::Budget, uncut - cut } );
+            out.unserved.push_back( { l.fileId, kForDocBudget, uncut - cut } );
         }
     }
     out.heldBytes = full.textBytes > out.textBytes ? full.textBytes - out.textBytes : 0;
@@ -852,7 +844,7 @@ inline std::pair<std::string, std::size_t> forDocBodyXml( const IngestResult& in
     }
     for( const ForDocUnserved& u : body.unserved )
     {
-        rows += "<f p=\"" + display( u.fileId ) + "\" why=\"" + std::string( forDocWhyName( u.why ) ) + "\"" +
+        rows += "<f p=\"" + display( u.fileId ) + "\" why=\"" + std::string( u.why ) + "\"" +
                 ( u.held > 0 ? " held=\"" + std::to_string( u.held ) + "\"" : std::string() ) + "/>";
     }
     std::string attrs = " files=\"" + std::to_string( pick.fileIds.size() ) + "\" allowance=\"" + std::to_string( body.allowance ) + "\" bytes=\"" +
@@ -939,7 +931,7 @@ inline std::pair<std::string, std::size_t> forDocBodyJsonServed( const IngestRes
         for( std::size_t i = 0; i < body.unserved.size(); ++i )
         {
             const ForDocUnserved& u = body.unserved[i];
-            tail += std::string( i ? ",{" : "{" ) + "\"p\":\"" + jsonStr( display( u.fileId ) ) + "\",\"why\":\"" + std::string( forDocWhyName( u.why ) ) + "\"" +
+            tail += std::string( i ? ",{" : "{" ) + "\"p\":\"" + jsonStr( display( u.fileId ) ) + "\",\"why\":\"" + std::string( u.why ) + "\"" +
                     ( u.held > 0 ? ",\"held\":" + std::to_string( u.held ) : std::string() ) + "}";
         }
         tail += "]";

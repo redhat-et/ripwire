@@ -1418,9 +1418,9 @@ struct ForLensRootFinish
     bool             guardOver            = false;
 };
 
-// PR #215 review: the finished header AND the number it prints, handed back together. finishForLensHeader
-// below is this function's header half and stays the name every emit site calls; the ceiling ladder's exact-
-// ceiling test needs the OTHER half, because "does this document fit what its root promises" is the question
+// PR #215 review: the finished header AND the number it prints, handed back together (every emit site calls this
+// one now: FOR-DOC-BODY needs the number to serve into the budget left after the answer); the ceiling ladder's exact-
+// ceiling test needs the number too, because "does this document fit what its root promises" is the question
 // `est_tokens <= budget_tokens` asks and nothing else answers it. Computing it a second time beside this
 // fixpoint is how the two came to disagree on the RATE in the first place, so there is one fixpoint and two
 // readers of it. `estTokens` is the number the document will actually carry — the second-stage value when
@@ -1513,11 +1513,6 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     // --from-trace / --handoff / --expand put theirs (M11), not inside the comment.
     spliceBefore( header, "><!--", /*fromEnd=*/false, priced.second + overAttr );
     return { std::move( header ), priced.first };
-}
-
-inline std::string finishForLensHeader( std::string header, const ForLensRootFinish& f )
-{
-    return finishForLensHeaderPriced( std::move( header ), f ).header;
 }
 
 // DEEP-TAIL d2, JSON dialect — the tail stanza and its explicit-regime fill, as a free function over
@@ -4621,7 +4616,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
         }
         // PR #135: the priced root this header will carry — every late splice and the est_tokens fixpoint, in
-        // finishForLensHeader (above runForLens, with each splice's rationale).
+        // finishForLensHeaderPriced (above runForLens, with each splice's rationale).
         const ForLensRootFinish rootFinish{
             .autoAttr             = autoAttr,
             .sigsCeilingAttr      = sigsCeilingAttr,
