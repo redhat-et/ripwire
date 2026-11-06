@@ -548,6 +548,8 @@ This is the part to wire into a script.
 ... [17 more line(s); run it to see the whole thing]
 ```
 
+_This recorded run served 8 documents, from before the default became 6; a run with the current default serves at most 6._
+
 **Shaped by:** `--max-tokens`, `--token-budget`, `--no-redact`, `--from-trace`, `--legend`, `--limit`
 
 **Caveats (stated by the binary):**
@@ -580,19 +582,18 @@ and both are yours, because the file you write is the only thing that sets them:
    an answer buried mid-file arrives at a small `--max-tokens`, and — while the served document
    SET stays fixed — a larger ceiling returns a strict superset of it; the `[sections: S of R
    selected (N in doc) … lines="…"; dropped_by_budget=D]` note names the ranges you actually got
-   and what the ceiling cost. A HEADLESS dump has no sections to rank, so it is cut front-first
-   and carries no such note.
+   and what the ceiling cost. A HEADLESS dump has no sections to rank, so a cut serves the best
+   query-term WINDOW of its share (the head when no window beats it) and carries no such note: its
+   separator line says `[truncated: K of N bytes; served bytes LO-HI, best query-term window]`
+   instead, LO-HI indexing the text recall served.
 
    That per-document guarantee is not global: dump SEVERAL headed documents into the same
    scratch dir and a larger ceiling can admit another one, which re-divides the shared budget
    and can shrink an already-served document's own slice — `share_bytes=` in the header
    discloses exactly that redivision when it happens.
 
-   Measured on a 73811-byte, 2001-line dump whose answer sat at line 1748: the headed copy
-   served exactly that answer at `--max-tokens=1000` (`lines="1748-1752"`, est_tokens=194),
-   while the headless copy of the same content withheld it at 1000, 2000, 4000, 8000 and 16000
-   and produced it only at 40000 — by which point the front-first cut had emitted the whole
-   file.
+   Measured on a 176077-byte, 2001-line headless dump whose answer sat at line 1748: the window
+   cut printed that answer at `--max-tokens=1000`, `2000`, `4000`, `8000`, `16000` and `40000`.
 
 **Try it**
 
