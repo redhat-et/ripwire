@@ -498,6 +498,46 @@ strong 'light.turn_on hue async_turn_on' 'S3 [P] Python bare subject: the regist
 strong 'pods_log_route kubelet' 'S4 [P] Go bare subject: a call registration' 's="pods_log_route" shape="table"' 'reg="r.RegisterHandler("'
 strong 'open_panel extension' 'S5 [P] TypeScript bare subject: registerCommand' 's="open_panel" shape="table"' 'reg="commands.registerCommand("'
 strong 'barrier_interval_ms system param' 'S6 [P] Rust bare subject: the macro-table brace row' 's="barrier_interval_ms" shape="table"' 'tbl="$macro! {"'
+# fix round 1 (rv-forliteral-3 section 2): a no-cue task scans a compound name, never a plain lower-case word (a dotted name's tail `plainword`);
+# a registration call's argument is strong only when it is a DIRECT argument (nothing nested in an inner call or an index)
+mkdir -p "$RF/gsb2"
+cat > "$RF/gsb2/plain.py" <<'PY'
+class PlainBox:
+    def plainword(self):
+        return 1
+
+    def plain_word(self):
+        return 2
+
+
+def setup_plain(r):
+    r.register("plainword", PlainBox)
+    r.register("plain_word", PlainBox)
+
+
+def nested_marker_fn():
+    return 1
+
+
+def direct_marker_fn():
+    return 2
+
+
+def idx_marker_fn():
+    return 3
+
+
+def setup_nested(r, table):
+    r.register(wrap(nested_marker_fn))
+    r.register(table[idx_marker_fn])
+    r.register(direct_marker_fn)
+PY
+nested(){ if ask "$1"; then L="$( lits <<<"$A" )"; if ! has "$L" 'shape="table"' && [ "$A" = "$( offc "--for=$1" )" ]; then ok "$2"; else no "$2: ${L:0:400}"; fi; else no "$2: call failed rc=$RC"; fi; }
+nested 'lowest common caller of PlainBox.plainword and Gadget.thing' 'N23a [P] a no-cue dotted name whose tail is one lower-case word (plainword): the tail is not scanned, byte-identical (nest-08 shape)'
+strong 'lowest common caller of PlainBox.plain_word and Gadget.thing' 'N23b [G] twin: the tail with an underscore (plain_word) is a compound name: its registration row prints' 's="plain_word" shape="table"' 'reg="r.register("'
+nested 'nested_marker_fn setup_nested' 'N24a [P] a site nested in an inner call (register(wrap(x))) is no direct argument: no strong row, byte-identical (vscode-03 shape)'
+nested 'idx_marker_fn setup_nested' 'N24b [P] a site inside an index (register(table[x])) is no direct argument: byte-identical'
+strong 'direct_marker_fn setup_nested' 'N24c [G] twin: a direct argument of the same call stays strong' 's="direct_marker_fn" shape="table"' 'reg="r.register("'
 # S7 [P]: one anchor with a strong and a weak row: the registration prints, the dict row does not, weak= counts it
 if ask 'mixed_anchor_fn setup'; then L="$( lits <<<"$A" )"
     if has "$L" 'reg="r.register("' && ! has "$L" 'tbl="MIXED = {"' && has "$L" 'weak="2"' && has "$A" 'weak='; then ok "S7 [P] strong rows only: the registration prints, the dict row and the def line are counted in weak="; else no "S7 mixed: ${L:0:500}"; fi

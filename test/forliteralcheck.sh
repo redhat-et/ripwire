@@ -66,6 +66,12 @@
 #          registers it, def= the default argument (Go pflag plain and ...P shorthand, argparse default=, click, TCLAP), and when def= names a
 #          field, ld rows = its constant writes, defaults first; near misses (docs only, no site, Rust clap field, no flag word) print no flag lit
 #
+#   F14-F26, E11-E12 (forliteral-3 fix round 1, rv-forliteral-3; RED on 57b487740 where [P]): def= reads only a flag API's own default slot (an alias
+#          after the name, a nushell `.named`, an exec.Command argument are no default; the registration row, not the invocation ranked before it, carries
+#          def=); a name with no inner hyphen is a site only dashed or as a flag call's argument (a dict value, `__all__`, an error message are not);
+#          ld rows are the writes of the field's owner type (a same-named field of another struct is not), a package var and an anonymous struct stay;
+#          a JS object key `default: {` is no arm, a switch's `default:` stays; the flag legend carries the try=N sentence only beside a try=
+#
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
@@ -1817,6 +1823,34 @@ function jsCallback(items) {
   return f;
 }
 JS
+cat > "$EA/app/objkey.js" <<'JS'
+export function makeConfig(env) {
+  const base = env.base;
+  return {
+    default: {
+      a: 1,
+      b: 2,
+      c: 3,
+      label: "JS_OBJ_KEY_LIMIT",
+    },
+    other: base,
+  };
+}
+
+export function pickIt(kind) {
+  const pre = 1;
+  switch (kind) {
+    case "x":
+      return pre;
+    default: {
+      const one = 1;
+      const two = 2;
+      const three = 3;
+      return "JS_SWITCH_DEFAULT_LIMIT" + one + two + three;
+    }
+  }
+}
+JS
 ea(){ ( cd "$EA" || exit 1; "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
 eaoff(){ ( cd "$EA" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
 xel(){ python3 -I -c 'import sys,re;s=sys.stdin.read();i=s.find("<lit ");m=re.search(r"<x [^>]*>.*?</x>",s[i:] if i>=0 else "",re.S);print(m.group(0) if m else "",end="")'; }
@@ -1834,6 +1868,8 @@ noarm(){ local task="$1" want="$2" label="$3"; local A; A="$( ea "--for=$task" )
 noarm RUST_FAR_LIMIT 'l="22,36-41" of="22-41"' 'E6 [G] an arm head 13 lines up is past the cap: the old window'
 noarm PY_IF_LIMIT 'l="14,20-24" of="14-24"' 'E7 [G] an if block (no arm) above the window: the old window'
 noarm JS_CB_LIMIT 'l="1,7-12" of="1-12"' 'E8 [G] a JS arrow callback is no arm: the old window'
+noarm JS_OBJ_KEY_LIMIT 'l="1,7-12" of="1-12"' 'E11 [P] a JS object literal key `default: {` is no arm (it heads no switch): the old window'
+armx JS_SWITCH_DEFAULT_LIMIT 'of="14-26"' 'JS_SWITCH_DEFAULT_LIMIT' 'E12 [G] twin: a switch `default: {` stays an arm (the window starts at it)'
 A1="$( ea --for=RUST_ARM_LIMIT )"; A2="$( ea --for=RUST_ARM_LIMIT )"
 S1="$( python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit[^>]*?-->","",s,flags=re.S);s=re.sub(r"<lit [^>]*>.*?</lit>","",s,flags=re.S);print(s,end="")' <<<"$A1" )"
 if [ -n "$A1" ] && [ "$A1" = "$A2" ] && [ "$S1" = "$( eaoff --for=RUST_ARM_LIMIT )" ]; then ok "E9 [G] deterministic; the answer minus the block is the switch-off answer"; else no "E9 determinism or prefix moved"; fi
@@ -1929,7 +1965,108 @@ pub struct Args {
     pub clap_parallelism: usize,
 }
 RS
-mkdir -p "$FL/source/server"
+mkdir -p "$FL/source/server" "$FL/aaa" "$FL/cmd/outfmt" "$FL/cmd/sq" "$FL/cmd/cache" "$FL/cmd/pkgvar" "$FL/pkg/other" "$FL/crates/nu"
+cat > "$FL/tool/alias.py" <<'PY'
+import argparse
+import click
+
+
+def build_alias_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--alias-verbose", "-v", action="store_true", help="talk more")
+    parser.add_argument("--alias-width", "-w", type=int, default=8, help="width")
+    return parser
+
+
+@click.option("--alias-dry", "-n", is_flag=True, help="do nothing")
+def alias_main(alias_dry):
+    return alias_dry
+PY
+cat > "$FL/crates/nu/sig.rs" <<'RS'
+impl Command for Ls {
+    fn signature(&self) -> Signature {
+        Signature::build("ls").named("named-depth", SyntaxShape::Int, "how deep to recurse", Some('d'))
+    }
+}
+RS
+cat > "$FL/aaa/run.go" <<'GO'
+package aaa
+
+func StartTool() error {
+	return exec.Command("tool", "--output-format", "yaml", "--quiet").Run()
+}
+GO
+cat > "$FL/cmd/outfmt/outfmt.go" <<'GO'
+package outfmt
+
+func Register(fs *FlagSet, o *Options) {
+	fs.StringVarP(&o.Output, "output-format", "o", "json", "Output format.")
+}
+GO
+cat > "$FL/tool/words.py" <<'PY'
+import argparse
+
+__all__ = ["squeezeall", "other"]
+ENCODINGS = {".Z": "squeezeall"}
+
+
+def fail():
+    raise ValueError("squeezeall")
+
+
+def parse():
+    p = argparse.ArgumentParser()
+    p.add_argument("--squeezeall", "-s", action="store_true")
+    return p
+PY
+cat > "$FL/cmd/sq/sq.go" <<'GO'
+package sq
+
+var names = map[string]string{"a": "squeezego"}
+
+func Reg(fs *FlagSet) {
+	fs.Bool("squeezego", false, "Squeeze go output.")
+}
+GO
+cat > "$FL/cmd/cache/cache.go" <<'GO'
+package cache
+
+type Options struct{ CacheSizing int }
+
+func AddCacheFlags(fs *FlagSet, o *Options) {
+	fs.IntVar(&o.CacheSizing, "cache-sizing", o.CacheSizing, "Cache size in MB.")
+}
+
+func SetCacheDefaults(o *Options) {
+	if o.CacheSizing == 0 {
+		o.CacheSizing = 256
+	}
+}
+GO
+cat > "$FL/pkg/other/other.go" <<'GO'
+package other
+
+type Other struct{ CacheSizing int }
+
+func Apply(c *Other) {
+	c.CacheSizing = DefaultCacheSizing
+}
+
+const DefaultCacheSizing = 128
+GO
+cat > "$FL/cmd/pkgvar/pv.go" <<'GO'
+package pkgvar
+
+var pvOpts = struct {
+	PageLimit int
+}{
+	PageLimit: 500,
+}
+
+func init() {
+	f.IntVar(&pvOpts.PageLimit, "page-limit", pvOpts.PageLimit, "Page limit.")
+}
+GO
 cat > "$FL/source/server/options_impl.cc" <<'CC'
 void OptionsImpl::parse(int argc, const char* const* argv) {
   TCLAP::ValueArg<uint32_t> concurrency("", "worker-concurrency", "# of worker threads to run", false, 1, "uint32_t", cmd);
@@ -1955,6 +2092,33 @@ flagarm 'where is --log-level handled' 'F5 [P] Python click: default= a string' 
 flagarm 'what does --dry-run-all do' 'F6 [P] a flag registered with no default: the row, no def=' 's="dry-run-all" shape="flag"' 'p="tool/cli.py"' '!def="'
 flagarm 'kubelet --env-endpoint' 'F7 [P] a default that is a call (os.Getenv): def= quotes it, no field chase' 'def="os.Getenv(&quot;ENDPOINT&quot;)"' '!writes="' '!<ld '
 flagarm 'envoy --worker-concurrency' 'F7b [P] C++ TCLAP ValueArg: the registration row; the description after the name is no default (no def=)' 's="worker-concurrency" shape="flag"' 'p="source/server/options_impl.cc" l="2"' '!def="'
+# ── fix round 1 (rv-forliteral-3 F1, F2 and the <ld> owner): the default slot per flag API, the non-kebab site rule, the owner type of a write ──
+lsrow(){ grep -o '<ls [^>]*>' <<<"$1"; }
+A="$( fl '--for=what does --alias-verbose do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="alias-verbose" shape="flag"' && has "$L" 'p="tool/alias.py"' && ! has "$L" 'def="'; then ok "F14 [P] argparse alias after the name (\"-v\") is no default"; else no "F14 alias: ${L:0:400}"; fi
+A="$( fl '--for=what does --alias-dry do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="alias-dry" shape="flag"' && has "$L" 'p="tool/alias.py"' && ! has "$L" 'def="'; then ok "F15 [P] click alias after the name (\"-n\") is no default"; else no "F15 click alias: ${L:0:400}"; fi
+flagarm 'what does --alias-width do' 'F16 [G] twin: argparse alias, then default=8 on the same call: def=8' 's="alias-width" shape="flag"' 'def="8"'
+A="$( fl '--for=what does --named-depth do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="named-depth" shape="flag"' && has "$L" 'p="crates/nu/sig.rs"' && ! has "$L" 'def="'; then ok "F17 [P] nushell .named(name, SyntaxShape, usage, short): the shape is no default (a Go flag call keeps def=, F1)"; else no "F17 named: ${L:0:400}"; fi
+A="$( fl '--for=what does the --output-format flag default to' )"; L="$( flit <<<"$A" )"; LS="$( lsrow "$L" )"
+if has "$L" 's="output-format" shape="flag"' && has "$( grep 'aaa/run.go' <<<"$LS" )" 'aaa/run.go' && ! has "$( grep 'aaa/run.go' <<<"$LS" )" 'def="' && has "$( grep 'cmd/outfmt/outfmt.go' <<<"$LS" )" 'def="&quot;json&quot;"'; then ok "F18 [P] an exec.Command invocation ranked before the registration: no def= on it, def=json on the StringVarP row"; else no "F18 invocation: $LS"; fi
+A="$( fl '--for=what does the --squeezeall option do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="squeezeall" shape="flag"' && has "$L" 'src="1" shown="1"' && has "$L" "--squeezeall" && ! has "$L" '.Z' && ! has "$L" '__all__' && ! has "$L" 'ValueError'; then ok "F19 [P] a name with no inner hyphen: the dashed argparse site only, not a dict value, an __all__ entry or an error message"; else no "F19 non-kebab: ${L:0:500}"; fi
+A="$( fl '--for=what does the --squeezego flag default to' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="squeezego" shape="flag"' && has "$L" 'src="1" shown="1"' && has "$L" 'p="cmd/sq/sq.go" l="6"' && has "$L" 'def="false"' && ! has "$L" 'l="3"'; then ok "F20 [P] a no-hyphen name as a flag call's argument (Bool(\"squeezego\", false, ...)) is a site with def=false; the map value is not"; else no "F20 flag call: ${L:0:500}"; fi
+A="$( fl '--for=where does --cache-sizing get its default' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="o.CacheSizing"' && has "$L" 'writes="1"' && has "$L" '<ld p="cmd/cache/cache.go" l="11"' && ! has "$L" 'p="pkg/other/other.go"'; then ok "F21 [P] ld rows: the write of the owner type (Options) only; a same-named field of another struct (Other) is no ld and no writes="; else no "F21 owner: $( grep -o '<ld [^>]*>' <<<"$L" ) $( grep -o 'writes="[0-9]*"' <<<"$L" )"; fi
+A="$( fl '--for=what is the --page-limit default' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="pvOpts.PageLimit"' && has "$L" 'writes="1"' && has "$L" '<ld p="cmd/pkgvar/pv.go" l="6" in="pvOpts" ink="var"'; then ok "F22 [G] twin: a package var of an anonymous struct (cockroach --page-size): its literal's write stays an ld row"; else no "F22 package var: ${L:0:500}"; fi
+A="$( fl '--for=how does the kubelet use the --max-pods flag?' )"; L="$( flit <<<"$A" )"
+if has "$L" 'writes="2"' && has "$L" '<ld p="pkg/apis/v1beta1/defaults.go"' && has "$L" '<ld p="pkg/apis/fuzzer/fuzzer.go"'; then ok "F23 [G] twin: both owner-typed writes (Config) are read: writes=2 as before"; else no "F23 owner twin: $( grep -o 'writes="[0-9]*"' <<<"$L" )"; fi
+A="$( fl '--for=kubelet --max-pods' )"
+if ! has "$A" 'try=N' && ! has "$A" "the task's Nth literal"; then ok "F24 [P] the flag legend clause carries no try=N sentence on a fire with no try="; else no "F24 try sentence present without try="; fi
+A="$( fl '--for=where is the --squeezego flag, and the --max-pods flag; also SQUEEZE_NOPE_CONST_X and the --alias-width option' )"
+if has "$A" 'shape="flag"'; then if has "$A" 'try="' && ! has "$A" "the task's Nth literal" ; then no "F25 try= printed with no try legend"; else ok "F25 [G] a try= (when printed) has its sentence, none without (conditional sentence)"; fi; else ok "F25 [G] (no flag fire in this wording: nothing to check)"; fi
+A="$( fl '--for=how does the --cache-sizing option work' )"
+if has "$A" 'ld = a constant write' && has "$A" 'a name match, no type check' && has "$A" 'also an invocation or a lookup'; then ok "F26 [P] the flag legend: sites include invocations and lookups, ld is a name match of the owner type"; else no "F26 flag legend wording"; fi
 # legend: the flag clause rides only on a flag fire
 A="$( fl '--for=kubelet --max-pods' )"
 if has "$A" 'shape=flag a flag the task names' && has "$A" 'writes=N'; then ok "F8 [P] the flag legend clause rides on the fire"; else no "F8 flag legend missing"; fi
