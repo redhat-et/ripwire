@@ -42,6 +42,7 @@
 // FEATURE TOUCH. When a printed manifest's anchor is a cargo feature or a Python extra, the files that mention at least half of that
 // manifest's features (default and `_`-private ones left out) are listed with EXEMPLAR's touch list (exemplarfamily.h
 // exemplarTouchList, one helper): where a new feature must also be documented or gated (axum's crate-doc feature table in lib.rs).
+#include "arch.h" // splitSegments
 #include "darkflags.h" // forEachLine
 #include "docparse.h" // detail::readRegularFile
 #include "epmanifest.h" // epdetail TOML helpers: tomlHeaderParts, tomlKeyEnd, tomlKeyParts, tomlStringValue, tomlMultilineOpen
@@ -115,6 +116,21 @@ namespace manifest_detail
 using exemplar_detail::singular;
 
 // ── readers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// The depth change a byte makes: `{` and `[` open one, `}` and `]` close one.
+inline int jsonDepthStep( char c ) noexcept
+{
+    return ( c == '{' || c == '[' ) ? 1 : ( c == '}' || c == ']' ) ? -1
+                                                                   : 0;
+}
+
+// The string value that follows the colon at text[colon] ("" for any other value).
+inline std::string_view jsonStringValueAfter( std::string_view text, std::size_t colon ) noexcept
+{
+    const std::size_t v = text.find_first_not_of( " \t\r", colon + 1 );
+    const std::size_t ve = v != std::string_view::npos && text[v] == '"' ? jsonStringEnd( text, v ) : std::string_view::npos;
+    return ve != std::string_view::npos ? text.substr( v + 1, ve - v - 1 ) : std::string_view();
+}
+
 // Every key of a JSON object text: its depth (1 = top level), the top-level key it sits under (depth 2 only), its string value
 // ("" for any other value) and its line.
 template<class OnKey>
@@ -125,11 +141,9 @@ inline void forEachJsonKey( std::string_view text, OnKey&& onKey )
     std::string_view top;
     for( std::size_t i = 0; i < text.size(); ++i )
     {
-        const char c = text[i];
-        line += c == '\n' ? 1 : 0;
-        depth += ( c == '{' || c == '[' ) ? 1 : ( c == '}' || c == ']' ) ? -1
-                                                                         : 0;
-        if( c != '"' )
+        line += text[i] == '\n' ? 1 : 0;
+        depth += jsonDepthStep( text[i] );
+        if( text[i] != '"' )
         {
             continue;
         }
@@ -146,9 +160,7 @@ inline void forEachJsonKey( std::string_view text, OnKey&& onKey )
         }
         const std::string_view key = text.substr( i + 1, end - i - 1 );
         top = depth == 1 ? key : top;
-        const std::size_t v = text.find_first_not_of( " \t\r", colon + 1 );
-        const std::size_t ve = v != std::string_view::npos && text[v] == '"' ? jsonStringEnd( text, v ) : std::string_view::npos;
-        onKey( depth, depth == 2 ? top : std::string_view(), key, ve != std::string_view::npos ? text.substr( v + 1, ve - v - 1 ) : std::string_view(), line );
+        onKey( depth, depth == 2 ? top : std::string_view(), key, jsonStringValueAfter( text, colon ), line );
         i = end;
     }
 }
@@ -272,30 +284,53 @@ inline TomlTable pyprojectTable( const std::vector<std::string>& h, bool array, 
     return poetry && h.size() == 3 && h[2] == "dev-dependencies" ? TomlTable { R::Keys, ManifestKind::DevDep, "python" } : TomlTable {};
 }
 
+// The index of the quote that closes the string opened at v[open] (`"` takes backslash escapes, `'` does not); v.size() when it never closes.
+inline std::size_t tomlQuotedEnd( std::string_view v, std::size_t open ) noexcept
+{
+    const char quote = v[open];
+    std::size_t i = open + 1;
+    for( ; i < v.size() && v[i] != quote; ++i )
+    {
+        i += v[i] == '\\' && quote == '"' ? 1 : 0;
+    }
+    return std::min( i, v.size() );
+}
+
 // How many more `[` than `]` a TOML value text opens, outside quoted strings and past a `#` comment: > 0 when its array continues on
 // the next lines.
 inline int tomlBracketDelta( std::string_view v ) noexcept
 {
     int delta = 0;
-    char quote = '\0';
-    for( std::size_t i = 0; i < v.size(); ++i )
+    for( std::size_t i = 0; i < v.size() && v[i] != '#'; ++i )
     {
-        const char c = v[i];
-        if( quote != '\0' )
+        if( v[i] == '"' || v[i] == '\'' )
         {
-            i += c == '\\' && quote == '"' ? 1 : 0;
-            quote = c == quote ? '\0' : quote;
+            i = tomlQuotedEnd( v, i );
             continue;
         }
-        if( c == '#' )
-        {
-            break;
-        }
-        quote = c == '"' || c == '\'' ? c : '\0';
-        delta += c == '[' ? 1 : c == ']' ? -1
-                                          : 0;
+        delta += v[i] == '[' ? 1 : v[i] == ']' ? -1
+                                               : 0;
     }
     return delta;
+}
+
+// The entry a `key = value` line makes in the table being read: a Keys table reads every key (bar its skipKey), a NameOf table its `name`.
+inline void addTomlEntry( const TomlTable& table, std::string_view keyText, std::string_view value, std::uint32_t lineNo, std::vector<ManifestEntry>& out )
+{
+    const std::vector<std::string> key = epdetail::tomlKeyParts( keyText );
+    if( key.empty() || key[0].empty() )
+    {
+        return;
+    }
+    const std::optional<std::string_view> val = epdetail::tomlStringValue( value );
+    if( table.read == TomlTable::Read::Keys && key[0] != table.skipKey )
+    {
+        out.push_back( ManifestEntry { key[0], lineNo, table.kind } );
+    }
+    else if( table.read == TomlTable::Read::NameOf && key.size() == 1 && key[0] == "name" && val && !val->empty() )
+    {
+        out.push_back( ManifestEntry { std::string( *val ), lineNo, table.kind } );
+    }
 }
 
 // A TOML manifest, line by line: table headers through `tableOf`, then the keys the current table reads. Lines inside a multi-line
@@ -337,20 +372,7 @@ inline void readToml( std::string_view text, TableOf&& tableOf, std::vector<Mani
         }
         multiline = epdetail::tomlMultilineOpen( trimWs( t.substr( eq + 1 ) ) );
         arrayDepth = multiline.empty() ? std::max( 0, tomlBracketDelta( t.substr( eq + 1 ) ) ) : 0;
-        const std::vector<std::string> key = epdetail::tomlKeyParts( t.substr( 0, eq ) );
-        if( key.empty() || key[0].empty() )
-        {
-            return;
-        }
-        const std::optional<std::string_view> val = epdetail::tomlStringValue( t.substr( eq + 1 ) );
-        if( table.read == TomlTable::Read::Keys && key[0] != table.skipKey )
-        {
-            out.push_back( ManifestEntry { key[0], lineNo, table.kind } );
-        }
-        else if( table.read == TomlTable::Read::NameOf && key.size() == 1 && key[0] == "name" && val && !val->empty() )
-        {
-            out.push_back( ManifestEntry { std::string( *val ), lineNo, table.kind } );
-        } } );
+        addTomlEntry( table, t.substr( 0, eq ), t.substr( eq + 1 ), lineNo, out ); } );
 }
 
 // setup.cfg: [metadata] name, [options.extras_require] keys (unindented `key = value` lines), [options.entry_points] (epmanifest.h).
@@ -426,14 +448,22 @@ inline void readGoMod( std::string_view text, std::vector<ManifestEntry>& out )
         } } );
 }
 
-// One CMake call being read: its kind, the line its first argument is on and the argument text so far (a call may span lines).
+// One CMake call being read: its kind, the line its first argument is on, the argument text so far and the lines it has taken (a call
+// may span lines).
 struct CMakeCall
 {
     ManifestKind kind = ManifestKind::Package;
     std::uint32_t line = 0;
     std::string args;
+    std::size_t lines = 0;
 };
 inline constexpr std::size_t kCMakeCallLines = 16; // a call longer than this is not read (its `)` is missing or far away)
+
+inline constexpr std::array<std::pair<std::string_view, ManifestKind>, 3> kCMakeCommands { {
+    { "add_executable", ManifestKind::Executable },
+    { "add_library", ManifestKind::Library },
+    { "project", ManifestKind::Package },
+} };
 
 // The closer of a bracket comment `#[[` / `#[==[` that starts the trimmed line `t` and is still open at its end, else "".
 inline std::string cmakeBracketCommentOpen( std::string_view t )
@@ -451,13 +481,13 @@ inline std::string cmakeBracketCommentOpen( std::string_view t )
     return t.find( closer, levels + 1 ) == std::string_view::npos ? closer : std::string();
 }
 
-// A finished call as an entry: its first argument names it. `IMPORTED` / `ALIAS` targets are not defined by this project and a
-// `${VAR}` name is not a name.
+// A finished call as an entry: its first argument names it. `IMPORTED` / `ALIAS` targets are not defined by this project, a `${VAR}`
+// name is not a name, and a call whose `)` never came is not read.
 inline void addCMakeCall( const CMakeCall& call, std::vector<ManifestEntry>& out )
 {
     const std::size_t end = call.args.find( ')' );
     std::vector<std::string_view> words;
-    for( std::size_t at = 0; at < std::min( end, call.args.size() ); )
+    for( std::size_t at = 0; end != std::string::npos && at < end; )
     {
         const std::size_t b = call.args.find_first_not_of( " \t\r", at );
         const std::size_t e = std::min( { call.args.find_first_of( " \t\r)", b ), call.args.size() } );
@@ -475,18 +505,36 @@ inline void addCMakeCall( const CMakeCall& call, std::vector<ManifestEntry>& out
     }
 }
 
+// The call a trimmed line starts (the command in any case, then `(`) with the text after the `(`, or nullopt.
+inline std::optional<std::pair<CMakeCall, std::string_view>> cmakeCallStart( std::string_view t )
+{
+    for( const auto& [cmd, kind] : kCMakeCommands )
+    {
+        const bool named = t.size() > cmd.size() && std::ranges::equal( t.substr( 0, cmd.size() ), cmd, []( char a, char b )
+                                                                       { return lexLowerByte( static_cast<unsigned char>( a ) ) == b; } );
+        const std::string_view paren = named ? trimWs( t.substr( cmd.size() ) ) : std::string_view();
+        if( paren.starts_with( '(' ) )
+        {
+            return std::pair { CMakeCall { .kind = kind }, trimWs( paren.substr( 1 ) ) };
+        }
+    }
+    return std::nullopt;
+}
+
+// One more line of a call (its arguments, comment stripped); true when the call ends here: its `)` came, or it ran too long.
+inline bool takeCMakeLine( CMakeCall& call, std::uint32_t lineNo, std::string_view t )
+{
+    call.line = call.line == 0 && !t.empty() ? lineNo : call.line; // the name's line, so the printed row shows the name
+    call.args += std::string( t ) + " ";
+    return call.args.contains( ')' ) || ++call.lines >= kCMakeCallLines;
+}
+
 // CMakeLists.txt: add_executable( NAME / add_library( NAME / project( NAME (any case), the call on one line or several; a `${VAR}`
 // name, an IMPORTED or ALIAS target, a `#` line comment and a `#[[ .. ]]` bracket comment are not read.
 inline void readCMakeLists( std::string_view text, std::vector<ManifestEntry>& out )
 {
-    static constexpr std::array<std::pair<std::string_view, ManifestKind>, 3> kCommands { {
-        { "add_executable", ManifestKind::Executable },
-        { "add_library", ManifestKind::Library },
-        { "project", ManifestKind::Package },
-    } };
     std::string closer; // the open bracket comment's end
     std::optional<CMakeCall> call;
-    std::size_t callLines = 0;
     darkflags::forEachLine( text, [&]( std::string_view line, std::uint32_t lineNo )
                             {
         std::string_view t = trimWs( line );
@@ -503,31 +551,13 @@ inline void readCMakeLists( std::string_view text, std::vector<ManifestEntry>& o
         }
         if( !call )
         {
-            for( const auto& [cmd, kind] : kCommands )
-            {
-                if( t.size() > cmd.size() && std::ranges::equal( t.substr( 0, cmd.size() ), cmd, []( char a, char b )
-                                                                 { return lexLowerByte( static_cast<unsigned char>( a ) ) == b; } ) &&
-                    trimWs( t.substr( cmd.size() ) ).starts_with( '(' ) )
-                {
-                    call = CMakeCall { kind, 0, {} };
-                    callLines = 0;
-                    t = trimWs( trimWs( t.substr( cmd.size() ) ).substr( 1 ) );
-                    break;
-                }
-            }
+            const auto start = cmakeCallStart( t );
+            call = start ? std::optional( start->first ) : std::nullopt;
+            t = start ? start->second : t;
         }
-        if( !call )
+        if( call && takeCMakeLine( *call, lineNo, t ) )
         {
-            return;
-        }
-        call->line = call->line == 0 && !t.empty() ? lineNo : call->line; // the name's line, so the printed row shows the name
-        call->args += std::string( t ) + " ";
-        if( call->args.contains( ')' ) || ++callLines >= kCMakeCallLines )
-        {
-            if( call->args.contains( ')' ) )
-            {
-                addCMakeCall( *call, out );
-            }
+            addCMakeCall( *call, out );
             call.reset();
         } } );
 }
@@ -593,6 +623,11 @@ inline std::string_view baseName( std::string_view rel ) noexcept
 // Read one manifest and keep it when it defines any name.
 inline void addManifest( std::string rel, std::uint32_t fileId, const std::string& disk, const ManifestFormat& fmt, std::vector<ManifestDoc>& out )
 {
+    if( std::ranges::any_of( kManifestSkipDirs, [&]( std::string_view seg )
+                             { return hasDirSegment( rel, seg ); } ) )
+    {
+        return; // someone else's package or a test's sample tree
+    }
     std::optional<std::string> text = docparse::detail::readRegularFile( fmt.name, disk );
     if( !text || text->size() > kDefaultMaxFileBytes )
     {
@@ -606,6 +641,36 @@ inline void addManifest( std::string rel, std::uint32_t fileId, const std::strin
     }
 }
 
+// `rel` and every directory above it, nearest first, the root ("") last.
+inline void pushAncestorDirs( std::string_view rel, std::vector<std::string_view>& dirs )
+{
+    for( std::string_view d = includerDir( rel );; d = includerDir( d ) )
+    {
+        dirs.push_back( d );
+        if( d.empty() )
+        {
+            break;
+        }
+    }
+}
+
+// The manifests no crawl indexes (setup.cfg, go.mod, CMakeLists.txt), by name in each directory: one stat per directory and name.
+inline void readUnindexedManifests( const std::string& rootPrefix, const std::vector<std::string_view>& dirs, std::vector<ManifestDoc>& docs )
+{
+    for( const std::string_view d : dirs )
+    {
+        for( const ManifestFormat& fmt : kManifestFormats )
+        {
+            const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name );
+            std::error_code ec;
+            if( !fmt.indexed && std::filesystem::is_regular_file( rootPrefix + rel, ec ) )
+            {
+                addManifest( rel, UINT32_MAX, rootPrefix + rel, fmt, docs );
+            }
+        }
+    }
+}
+
 // Every manifest of the tree: the indexed ones from the file list; the others from each directory holding an indexed file, and its
 // ancestors, by name (one stat per directory and name). HOISTING: the directories are collected once, sorted and deduplicated.
 inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
@@ -613,17 +678,6 @@ inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
     std::vector<ManifestDoc> docs;
     std::vector<std::string_view> dirs;
     std::string rootPrefix; // the disk spelling of the root, joined onto a root-relative path
-    const auto skipped = []( std::string_view rel )
-    {
-        for( const std::string_view seg : kManifestSkipDirs )
-        {
-            if( hasDirSegment( rel, seg ) )
-            {
-                return true;
-            }
-        }
-        return false;
-    };
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         const std::string_view rel = rootRelPath( ing, f ), disk = diskPath( ing, f );
@@ -631,34 +685,16 @@ inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
         {
             rootPrefix = std::string( disk.substr( 0, disk.size() - rel.size() ) );
         }
-        for( std::string_view d = includerDir( rel );; d = includerDir( d ) )
-        {
-            dirs.push_back( d );
-            if( d.empty() )
-            {
-                break;
-            }
-        }
+        pushAncestorDirs( rel, dirs );
         const auto fmt = std::ranges::find( kManifestFormats, baseName( rel ), &ManifestFormat::name );
-        if( fmt != kManifestFormats.end() && fmt->indexed && !skipped( rel ) )
+        if( fmt != kManifestFormats.end() && fmt->indexed )
         {
             addManifest( std::string( rel ), f, std::string( disk ), *fmt, docs );
         }
     }
     std::ranges::sort( dirs, sortutil::svLess );
     dirs.erase( std::unique( dirs.begin(), dirs.end() ), dirs.end() );
-    for( const std::string_view d : dirs )
-    {
-        for( const ManifestFormat& fmt : kManifestFormats )
-        {
-            const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name );
-            std::error_code ec;
-            if( !fmt.indexed && !skipped( rel ) && std::filesystem::is_regular_file( rootPrefix + rel, ec ) )
-            {
-                addManifest( rel, UINT32_MAX, rootPrefix + rel, fmt, docs );
-            }
-        }
-    }
+    readUnindexedManifests( rootPrefix, dirs, docs );
     return docs;
 }
 
@@ -672,6 +708,31 @@ inline constexpr auto kManifestStopWords = std::to_array<std::string_view>( { "t
 // A name too generic to anchor (it may still add score as a part).
 inline constexpr auto kManifestGenericNames = std::to_array<std::string_view>( { "test", "testing", "example", "demo", "doc", "lib", "src", "main", "index", "app", "util", "common", "core", "type", "build",
                                                                                  "dev", "default", "internal", "api", "cli", "server", "client", "shared", "tool", "script", "config", "base", "helper", "web", "node" } );
+
+// The words of one task token: each run of letters and digits, and the token folded whole when it is hyphenated or dotted.
+template<class Add>
+inline void splitTaskToken( std::string_view tok, Add&& add )
+{
+    std::string part, folded;
+    for( const char c : tok )
+    {
+        const bool alnum = ( c >= 'a' && c <= 'z' ) || ( c >= '0' && c <= '9' );
+        folded += alnum ? std::string( 1, c ) : std::string();
+        part += alnum ? std::string( 1, c ) : std::string();
+        if( !alnum && !part.empty() )
+        {
+            add( std::exchange( part, std::string() ) );
+        }
+    }
+    if( folded != part && !folded.empty() )
+    {
+        add( folded );
+    }
+    if( !part.empty() )
+    {
+        add( part );
+    }
+}
 
 // The task words a manifest name is compared with: lowercase, singular, split on every non-identifier byte (`built-in` → built, in;
 // `@nestjs/common` → nestjs, common) and, for a hyphenated or dotted word, also folded whole (`matched-path` → matchedpath).
@@ -690,25 +751,7 @@ inline std::vector<std::string> manifestTaskWords( std::string_view task, std::v
     };
     for( const std::string& tok : exemplar_detail::taskWords( task ) )
     {
-        std::string part, folded;
-        for( const char c : tok )
-        {
-            const bool alnum = ( c >= 'a' && c <= 'z' ) || ( c >= '0' && c <= '9' );
-            folded += alnum ? std::string( 1, c ) : std::string();
-            part += alnum ? std::string( 1, c ) : std::string();
-            if( !alnum && !part.empty() )
-            {
-                add( std::exchange( part, std::string() ) );
-            }
-        }
-        if( folded != part && !folded.empty() )
-        {
-            add( folded );
-        }
-        if( !part.empty() )
-        {
-            add( part );
-        }
+        splitTaskToken( tok, add );
     }
     return out;
 }
@@ -832,13 +875,6 @@ inline ManifestTask manifestTaskOf( const IngestResult& ing, std::string_view ta
     return t;
 }
 
-// How one entry matches one task word: 2 when the word names it exactly, 1 when it is one part of it, else 0.
-inline std::uint8_t entryStrength( std::string_view folded, const std::vector<std::string>& parts, std::string_view word )
-{
-    return folded == word ? 2 : std::ranges::contains( parts, word ) ? 1
-                                                                     : 0;
-}
-
 // The spellings an entry point's group is compared in: the group folded whole and each of its dot segments (`flake8.extension` →
 // flake8extension, flake8, extension), the host the plugin hooks into. A group named after the repo is still an anchor: it is the
 // repo's plugin hook, and the entry point fires only beside a plugin / entry-point word anyway. Empty for an entry with no group.
@@ -850,57 +886,50 @@ inline std::vector<std::string> groupForms( std::string_view group )
         return forms;
     }
     forms.push_back( foldedName( group ) );
-    for( std::size_t at = 0; at <= group.size(); )
+    for( const std::string_view segment : splitSegments( group, '.' ) )
     {
-        const std::size_t dot = std::min( group.find( '.', at ), group.size() );
-        forms.push_back( foldedName( group.substr( at, dot - at ) ) );
-        at = dot + 1;
+        forms.push_back( foldedName( segment ) );
     }
     return forms;
 }
 
-// How an entry point's group matches one task word: 2 when the word names the group or one of its dot segments, else 0.
-inline std::uint8_t groupStrength( const std::vector<std::string>& forms, std::string_view word )
+// How one entry matches one task word: 2 when the word names it exactly (its folded name, or an entry point's group or one dot segment
+// of it), 1 when it is one part of the name, else 0.
+inline std::uint8_t entryStrength( std::string_view folded, const std::vector<std::string>& parts, const std::vector<std::string>& group, std::string_view word )
 {
-    return std::ranges::contains( forms, word ) ? 2 : 0;
+    if( folded == word || std::ranges::contains( group, word ) )
+    {
+        return 2;
+    }
+    return std::ranges::contains( parts, word ) ? 1 : 0;
 }
 
-// One manifest against the task (see WHEN and RANK). HOISTING: an entry's folded name, parts and group spellings are built once, not per task word.
-inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, const ManifestTask& t )
+inline bool isDependencyKind( ManifestKind k ) noexcept
 {
-    ManifestMatch m { .doc = di };
-    std::vector<std::uint8_t> best( t.words.size(), 0 );
-    for( std::uint32_t e = 0; e < doc.entries.size(); ++e )
-    {
-        const ManifestEntry& en = doc.entries[e];
-        const std::size_t k = std::size_t( en.kind );
-        const std::string folded = foldedName( en.name );
-        if( ( en.kind == ManifestKind::Script || en.kind == ManifestKind::Main || en.kind == ManifestKind::EntryPoint ) && !t.cue[k] )
-        {
-            continue; // a script, the main entry or a plugin entry point the task does not ask for
-        }
-        const bool own = folded == t.repoName; // the repo's own name: the package so named adds score, never fires the block (a kind word does not change that)
-        const bool dep = en.kind == ManifestKind::Dep || en.kind == ManifestKind::DevDep || en.kind == ManifestKind::PeerDep || en.kind == ManifestKind::OptDep;
-        if( own && dep )
-        {
-            continue; // a dependency on the repo's own crate or package says nothing about the task
-        }
-        const std::vector<std::string> parts = nameParts( en.name ), group = groupForms( en.group );
-        ManifestHit hit { .entry = e };
-        for( std::size_t w = 0; w < t.words.size(); ++w )
-        {
-            const std::uint8_t s = std::max( entryStrength( folded, parts, t.words[w] ), groupStrength( group, t.words[w] ) );
-            hit.strength = std::max( hit.strength, s );
-            best[w] = std::max( best[w], s );
-        }
-        hit.anchor = hit.strength == 2 && !own && ( t.cue[k] || t.addNew ) && ( !std::ranges::contains( kManifestGenericNames, folded ) || en.kind == ManifestKind::EntryPoint );
-        m.anchors += hit.anchor ? 1 : 0;
-        m.defines = m.defines || ( hit.anchor && !dep );
-        if( hit.strength > 0 )
-        {
-            m.hits.push_back( hit );
-        }
-    }
+    static_assert( ManifestKind::Dep < ManifestKind::DevDep && ManifestKind::DevDep < ManifestKind::PeerDep && ManifestKind::PeerDep < ManifestKind::OptDep && std::to_underlying( ManifestKind::OptDep ) - std::to_underlying( ManifestKind::Dep ) == 3,
+                   "the four dependency kinds are consecutive" );
+    return k >= ManifestKind::Dep && k <= ManifestKind::OptDep;
+}
+
+// An entry the task cannot mean: a script, the main entry or a plugin entry point it does not ask for, or a dependency on the
+// repo's own crate or package (it says nothing about the task).
+inline bool entryIgnored( const ManifestEntry& en, bool own, const ManifestTask& t ) noexcept
+{
+    const bool unasked = ( en.kind == ManifestKind::Script || en.kind == ManifestKind::Main || en.kind == ManifestKind::EntryPoint ) && !t.cue[std::size_t( en.kind )];
+    return unasked || ( own && isDependencyKind( en.kind ) );
+}
+
+// Does a name that matches a task word exactly fire the block? Not the repo's own name, not a generic one (an entry point is named
+// freely), and only for a kind the task names or beside an add-a-new task.
+inline bool entryAnchors( const ManifestEntry& en, std::string_view folded, bool own, const ManifestTask& t )
+{
+    return !own && ( t.cue[std::size_t( en.kind )] || t.addNew ) && ( !std::ranges::contains( kManifestGenericNames, folded ) || en.kind == ManifestKind::EntryPoint );
+}
+
+// A manifest's score (the best strength per task word, summed), the task words it names, and its hits in print order: anchors
+// first, then the stronger match, then line order.
+inline void settleMatch( const ManifestDoc& doc, const ManifestTask& t, const std::vector<std::uint8_t>& best, ManifestMatch& m )
+{
     for( std::size_t w = 0; w < t.words.size(); ++w )
     {
         m.score += best[w];
@@ -916,6 +945,39 @@ inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, cons
             return a.anchor;
         }
         return a.strength != b.strength ? a.strength > b.strength : doc.entries[a.entry].line < doc.entries[b.entry].line; } );
+}
+
+// One manifest against the task (see WHEN and RANK). HOISTING: an entry's folded name, parts and group spellings are built once, not per task word.
+inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, const ManifestTask& t )
+{
+    ManifestMatch m { .doc = di };
+    std::vector<std::uint8_t> best( t.words.size(), 0 );
+    for( std::uint32_t e = 0; e < doc.entries.size(); ++e )
+    {
+        const ManifestEntry& en = doc.entries[e];
+        const std::string folded = foldedName( en.name );
+        const bool own = folded == t.repoName; // the repo's own name: the package so named adds score, never fires the block (a kind word does not change that)
+        if( entryIgnored( en, own, t ) )
+        {
+            continue;
+        }
+        const std::vector<std::string> parts = nameParts( en.name ), group = groupForms( en.group );
+        ManifestHit hit { .entry = e };
+        for( std::size_t w = 0; w < t.words.size(); ++w )
+        {
+            const std::uint8_t s = entryStrength( folded, parts, group, t.words[w] );
+            hit.strength = std::max( hit.strength, s );
+            best[w] = std::max( best[w], s );
+        }
+        hit.anchor = hit.strength == 2 && entryAnchors( en, folded, own, t );
+        m.anchors += hit.anchor ? 1 : 0;
+        m.defines = m.defines || ( hit.anchor && !isDependencyKind( en.kind ) );
+        if( hit.strength > 0 )
+        {
+            m.hits.push_back( hit );
+        }
+    }
+    settleMatch( doc, t, best, m );
     return m;
 }
 
@@ -990,7 +1052,7 @@ inline std::optional<ExemplarFamily> featureFamily( const ManifestDoc& doc, cons
 inline bool cfgUseLine( std::string_view line ) noexcept
 {
     const std::string_view t = trimWs( line );
-    return t.starts_with( "#[cfg" ) || t.starts_with( "#![cfg" ) || t.contains( "cfg!(" );
+    return ( t.starts_with( '#' ) && t.find( "cfg" ) < 4 ) || t.contains( "cfg!(" ); // `#[cfg(`, `#![cfg(`, `#[cfg_attr(`, `cfg!(`
 }
 
 // Does `line` hold `name` as a whole word (no letter, digit, `_` or `-` beside it)?
@@ -1009,41 +1071,46 @@ inline bool holdsWord( std::string_view line, std::string_view name ) noexcept
     return false;
 }
 
+// A feature's spellings in a doc line: bare, backticked and quoted.
+using FeatureForms = std::array<std::string, 3>;
+
+// The first line of `txt` that names one of the features and is no cfg use: a line naming it in backticks or quotes beats a bare mention.
+// {0, ""} when no line does.
+inline std::pair<std::uint32_t, std::string> definingLine( std::string_view txt, const std::vector<FeatureForms>& forms )
+{
+    std::pair<std::uint32_t, std::string> best { 0, {} };
+    int bestRank = 2;
+    darkflags::forEachLine( txt, [&]( std::string_view line, std::uint32_t n )
+                            {
+        for( const auto& [bare, ticked, quoted] : forms )
+        {
+            const int rank = line.contains( ticked ) || line.contains( quoted ) ? 0 : holdsWord( line, bare ) ? 1
+                                                                                                             : 2;
+            if( rank < bestRank && !cfgUseLine( line ) )
+            {
+                bestRank = rank;
+                best = { n, std::string( trimWs( line ) ) };
+            }
+        } } );
+    return best;
+}
+
 // A touch row whose line is a `#[cfg(feature = ..)]` use gets the first line of its file that names an anchored feature and is no cfg use,
 // the table row or doc line that defines it (axum's `//! `multipart` | ..` feature table, not a `#[cfg(feature = "form")]` beside a module).
-// A line that names the feature in backticks or quotes beats a bare mention. Only the printed rows are read; no other line is touched.
+// Only the printed rows are read; no other line is touched.
 inline void retargetCfgTouchLines( const IngestResult& ing, const std::vector<std::string_view>& features, std::vector<ExemplarTouch>& touch )
 {
-    std::vector<std::array<std::string, 3>> forms; // HOISTING: per feature, its bare, backticked and quoted spellings, built once
+    std::vector<FeatureForms> forms; // HOISTING: per feature, its spellings, built once
     for( const std::string_view f : features )
     {
         forms.push_back( { std::string( f ), "`" + std::string( f ) + "`", "\"" + std::string( f ) + "\"" } );
     }
     for( std::size_t i = 0; i < touch.size() && i < kExemplarTouchRows; ++i )
     {
-        if( !cfgUseLine( touch[i].text ) )
-        {
-            continue;
-        }
-        const std::optional<std::string> txt = docparse::detail::readWholeFile( diskPath( ing, touch[i].fileId ) );
-        if( !txt )
-        {
-            continue;
-        }
-        int bestRank = 2;
-        darkflags::forEachLine( *txt, [&]( std::string_view line, std::uint32_t n )
-                                {
-            for( const auto& [bare, ticked, quoted] : forms )
-            {
-                const int rank = line.contains( ticked ) || line.contains( quoted ) ? 0 : holdsWord( line, bare ) ? 1
-                                                                                                                 : 2;
-                if( rank < bestRank && !cfgUseLine( line ) )
-                {
-                    bestRank = rank;
-                    touch[i].line = n;
-                    touch[i].text = std::string( trimWs( line ) );
-                }
-            } } );
+        const std::optional<std::string> txt = cfgUseLine( touch[i].text ) ? docparse::detail::readWholeFile( diskPath( ing, touch[i].fileId ) ) : std::nullopt;
+        const auto [line, text] = txt ? definingLine( *txt, forms ) : std::pair<std::uint32_t, std::string>();
+        touch[i].line = line != 0 ? line : touch[i].line;
+        touch[i].text = line != 0 ? text : touch[i].text;
     }
 }
 } // namespace manifest_detail
