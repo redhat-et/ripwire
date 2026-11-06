@@ -1038,6 +1038,7 @@ for _g in \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \
+    warmpeakcheck \
     weaksignalcheck \
     withgraphcheck \
     withprofilecheck \

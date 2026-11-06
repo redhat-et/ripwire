@@ -930,7 +930,7 @@ for i in range(n):
         sites.setdefault(cls, (p, blob[p])); skip(1)
     def site32(cls, rel):                                                 # a u32 slot `rel` bytes ahead; p does not move
         sites.setdefault(cls, (p + rel, struct.unpack_from("<I", blob, p + rel)[0]))
-    s(); skip(4 * 8 + 6 * 4)                                              # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44)
+    s(); skip(4 * 8 + 6 * 4 + 8 * 4)                                      # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44), head family counts (8 u32 since v49)
     for _ in range(u32()):                                                # defs (LEAN family: no subtoken rows)
         site32("def.ppAlt", 9 * 4); site32("def.params", 13 * 4)
         if "def.paramsMin" not in pmin and struct.unpack_from("<I", blob, p + 13 * 4)[0] >= 1:   # B2.2 pair rule: a def with params >= 1

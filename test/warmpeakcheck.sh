@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# warmpeakcheck.sh — a warm run must not hold more fact memory than the cold run that wrote its cache (WARM-DIRECT,
+# reports/graph-efficiency-ideas.md #4). Until cache format 49 a warm run decoded every record into a path-keyed map,
+# moved the facts into the parse workers' arrays and moved them again in the merge: three sets of fact arrays at the
+# parse-pool join, and a warm peak 40-49 % over the cold one on envoy, cockroach and vscode. Now a worker decodes its
+# hit's record straight into its own arrays, and the merge frees each worker's array as soon as its rows have moved.
+#
+# Arms:
+#   S  the warm run is warm: RIPWIRE_CACHE_STATS says reparsed=0 and cached_records = files.
+#   B  the warm answer is byte-identical to the cold answer (and to a --no-cache run).
+#   W  peak footprint, warm <= kWarmPct % of cold (the best of two runs each). Red when a warm-only copy of the facts
+#      comes back (the decoded map, a scratch that keeps every record).
+#   F  peak footprint, warm <= kFactPct % of the blob's size plus the binary's floor (a --version run). The facts in the
+#      generated tree dominate the run, so a second live set of fact arrays (the merge keeping its moved-from arrays,
+#      which raises cold and warm alike, so W cannot see it) moves this ratio well past the line.
+# W and F read macOS phys_footprint and need the large-block route (src/largealloc.cpp), without which freed blocks stay
+# in the peak whatever the code does: elsewhere, or on a binary without the route, they SKIP by name. S and B run everywhere.
+#
+# Usage: RIPWIRE_BIN=build/ripwire bash test/warmpeakcheck.sh
+set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"   # no inherited agent homes or GIT_* repository selection (the gate builds a repo)
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
+TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+fail=0
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
+no(){ fail=1; printf '  FAIL  %s\n' "$*"; return 0; }
+if ! "$BIN" --version 2>/dev/null | grep -q '^ripwire '; then
+    echo "  FAIL  $BIN does not run"; echo "FAIL warmpeakcheck"; exit 1
+fi
+kWarmPct=110
+kFactPct=100000
+
+# ---- fixture: dense calls across many files, so the reference arrays are most of the run's memory ----
+FX="$TMP/fx"
+python3 - "$FX" 1200 240 <<'P'
+import os, sys
+root = sys.argv[1]; files = int(sys.argv[2]); calls = int(sys.argv[3])
+for f in range(files):
+    d = f"{root}/m{f % 30}"; os.makedirs(d, exist_ok=True)
+    L = [f"int leaf_{f}_{k}(int x);" for k in range(8)]
+    for k in range(8):
+        L.append(f"int caller_{f}_{k}(int x) {{")
+        L += [f"    x += leaf_{(f + c) % files}_{c % 8}(x) + helper_{c % 97}(x);" for c in range(calls // 8)]
+        L.append("    return x;\n}")
+    open(f"{d}/f{f}.c", "w").write("\n".join(L) + "\n")
+P
+git -C "$FX" init -q . 2>/dev/null
+NFILES="$( find "$FX" -name '*.c' | wc -l | tr -d ' ' )"
+
+# one run: $1 tag, then ripwire args after the root. Prints the peak MB (macOS phys_footprint, else 0); output in $TMP/$1.{out,err}
+run(){ # tag args...
+    local tag="$1"; shift
+    local rc=0
+    ( cd "$FX" && HOME="$TMP" RIPWIRE_CACHE_STATS=1 /usr/bin/time -l "$BIN" "$FX" "$@" >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        no "$tag: ripwire exited $rc ($( grep -v '^ ' "$TMP/$tag.err" | head -2 | tr '\n' ' ' ))"
+        echo 0; return
+    fi
+    awk '/peak memory footprint/ { printf "%d", $1 / 1048576; f = 1 } END { if( !f ) printf "0" }' "$TMP/$tag.err"
+}
+stat_of(){ sed -n "s/.*cache-stats.* $2=\([0-9]*\).*/\1/p; s/.*cache-stats $2=\([0-9]*\).*/\1/p" "$TMP/$1.err" | head -1; }
+min2(){ [ "$1" -le "$2" ] && echo "$1" || echo "$2"; }
+
+C="$TMP/blob.cache"
+TIMEL=1; /usr/bin/time -l true >/dev/null 2>&1 || TIMEL=0
+if [ "$TIMEL" = 0 ]; then
+    # no BSD time: S and B only, through plain runs
+    run(){ local tag="$1"; shift; local rc=0
+        ( cd "$FX" && HOME="$TMP" RIPWIRE_CACHE_STATS=1 "$BIN" "$FX" "$@" >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) || rc=$?
+        [ "$rc" -ne 0 ] && no "$tag: ripwire exited $rc"; echo 0; }
+fi
+cold1="$( run cold1 --deps --cache="$C" )"
+warm1="$( run warm1 --deps --cache="$C" )"
+blobMB=$(( $( wc -c <"$C" 2>/dev/null || echo 0 ) / 1048576 ))
+rm -f "$C"
+cold2="$( run cold2 --deps --cache="$C" )"
+warm2="$( run warm2 --deps --cache="$C" )"
+run nocache --deps --no-cache >/dev/null
+
+# ---- S ----
+rp="$( stat_of warm1 reparsed )"; cr="$( stat_of warm1 cached_records )"; fl="$( stat_of warm1 files )"
+if [ "$rp" = 0 ] && [ -n "$cr" ] && [ "$cr" = "$fl" ] && [ "$fl" = "$NFILES" ]; then
+    ok "S: warm run reparsed=0 cached_records=$cr of $NFILES files"
+else
+    no "S: warm run is not fully warm (reparsed=${rp:-?} cached_records=${cr:-?} files=${fl:-?}, tree has $NFILES)"
+fi
+# ---- B ----
+if [ -s "$TMP/cold1.out" ] && cmp -s "$TMP/cold1.out" "$TMP/warm1.out" && cmp -s "$TMP/cold1.out" "$TMP/warm2.out" && cmp -s "$TMP/cold1.out" "$TMP/nocache.out"; then
+    ok "B: warm answers byte-identical to cold and to --no-cache ($( wc -c <"$TMP/cold1.out" | tr -d ' ' ) B)"
+else
+    no "B: a warm answer differs from the cold one"
+fi
+
+# ---- W, F: macOS with the large-block route only ----
+if [ "$( uname -s )" != Darwin ] || [ "$TIMEL" = 0 ]; then
+    echo "  SKIP  W, F: peak footprint arms read macOS phys_footprint"
+elif ! LC_ALL=C grep -aqF RIPWIRE_TEST_LARGEALLOC "$BIN"; then
+    echo "  SKIP  W, F: this binary has no large-block route (a sanitizer or opted-out build), so freed blocks stay in the peak"
+else
+    cold="$( min2 "$cold1" "$cold2" )"; warm="$( min2 "$warm1" "$warm2" )"
+    floor="$( ( cd "$TMP" && /usr/bin/time -l "$BIN" --version >/dev/null 2>"$TMP/floor.err" ); awk '/peak memory footprint/ { printf "%d", $1 / 1048576 }' "$TMP/floor.err" )"
+    echo "  peak MB cold: $cold1 $cold2; warm: $warm1 $warm2; blob $blobMB MB; floor ${floor:-?} MB"
+    if [ "$cold" -gt 0 ] && [ "$warm" -gt 0 ] && [ $(( warm * 100 )) -le $(( cold * kWarmPct )) ]; then
+        ok "W: warm peak $warm MB <= $kWarmPct % of cold $cold MB"
+    else
+        no "W: warm peak $warm MB against cold $cold MB (limit $kWarmPct %): a warm-only copy of the facts is back in the peak"
+    fi
+    if [ "$warm" -gt 0 ] && [ "$blobMB" -gt 0 ] && [ -n "$floor" ] && [ $(( ( warm - floor ) * 100 )) -le $(( blobMB * kFactPct )) ]; then
+        ok "F: warm peak $warm MB - floor $floor MB <= $kFactPct % of the $blobMB MB blob"
+    else
+        no "F: warm peak $warm MB - floor ${floor:-?} MB against the $blobMB MB blob (limit $kFactPct %): a second live set of fact arrays"
+    fi
+fi
+[ "$fail" = 0 ] && { echo "PASS warmpeakcheck"; exit 0; }
+echo "FAIL warmpeakcheck"; exit 1

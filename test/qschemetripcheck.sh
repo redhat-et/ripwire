@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-05, lane warm-direct (base lane/warm-rewrite 630a90e3d; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 48 -> 49: the FILE record's head gains the eight family counts (a warm run plans from heads and decodes in
+#   the parse worker); quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no extraction or watched
+#   quality.h function moved.
 # 2026-11-03, lane index-alias-const (base main 824847bd, merged over main 6bae81c6 at 291/292; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 289 -> 293 (rich 294; above 285-292 taken by #504 #506 #512 #513): C++ alias forms are definitions
 #   (src/aliasdef.h); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 (no record changes shape) and kQSnapCacheScheme
