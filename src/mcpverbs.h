@@ -2422,7 +2422,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
         mcpDocPick = pickForDocBody( ing, task, mcpShownIds, [ & ]
-                                    { return computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, /*rankOrder=*/true ); }, flRootArg );
+                                    { return computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, /*rankOrder=*/true ); }, flRootArg, &mcpTail.paths );   // mcpTail: the rows printed above
     }
     std::fwrite( mcpSlot.xml.data(), 1, mcpSlot.xml.size(), mem );   // for-body-slot: "" when no body rides
     rw::emitRaw( mem, "</ctx>" );

@@ -146,10 +146,10 @@ if [ "$j1rc" = 0 ] && [ -s "$TMP/f1.xml" ] && python3 - "$TMP/j1.json" "$TMP/f1.
 import json, re, sys, html
 d = json.load( open( sys.argv[1], encoding="utf8" ) )["doc_body"]
 x = open( sys.argv[2], encoding="utf8" ).read()
-xs = [ ( html.unescape( p ), int( l ), html.unescape( n ) ) for p, l, n in re.findall( r'<b t="section" p="([^"]+)" l="(\d+)" e="\d+" n="([^"]*)"', x ) ]
-js = [ ( p["p"], p["l"], p["n"] ) for p in d["passages"] if p["t"] == "section" ]
+xs = [ ( html.unescape( p ), int( l ), html.unescape( n ), t ) for p, l, n, t in re.findall( r'<b t="section" p="([^"]+)" l="(\d+)" e="\d+" n="([^"]*)"[^>]*><!\[CDATA\[(.*?)\]\]></b>', x, re.S ) ]
+js = [ ( p["p"], p["l"], p["n"], p["text"] ) for p in d["passages"] if p["t"] == "section" ]
 assert d["in_est_tokens"] is False and d["capped"] is True and d["next"].startswith( "--recall=" )
-assert xs == js, ( xs, js )
+assert xs and xs == js, ( "path, line, heading and text of every section", [ x[:3] for x in xs ], [ j[:3] for j in js ] )
 PY
 then ok "(j1) --json: a doc_body key with the XML block's passages, capped and next="; else no "(j1) --json doc_body"; fi
 run "$DFX" "--for=$TASK" --json --token-budget=4000 >"$TMP/j2.json"; j2rc=$?
@@ -263,10 +263,11 @@ d = json.load( open( sys.argv[1], encoding="utf8" ) ); b = d["doc_body"]
 assert "held" not in b and b["match"] == "lexical" and len( b["passages"] ) >= 3 and b["est_tokens"] <= d["budget_tokens"] - d["est_tokens"], b.keys()
 PY
 then ok "(b4) --json --token-budget=100000 serves the passages, priced within the budget left"; else no "(b4) --json under a big budget"; fi
-pj=0; fj=1
+pj=0; fj=0
 for B in 5000 5200 5400 5600 6200 6800 7400 8200; do
-  run "$DFX" "--for=$TASK" --json --token-budget=$B >"$TMP/b4p.json"
-  python3 - "$TMP/b4p.json" $B "$FULLB" <<'PY' && pj=1
+  run "$DFX" "--for=$TASK" --json --token-budget=$B >"$TMP/b4p.json"; b4prc=$?
+  [ "$b4prc" = 0 ] || fj=1   # a crashed run is red, whatever the other budgets did
+  python3 - "$TMP/b4p.json" $B "$FULLB" <<'PY'
 import json, sys
 d = json.load( open( sys.argv[1], encoding="utf8" ) ); b = d["doc_body"]; B = int( sys.argv[2] ); full = int( sys.argv[3] )
 if "passages" in b:
@@ -275,8 +276,9 @@ if "passages" in b:
         assert b["bytes"] + b["held_bytes"] == full, ( "held_bytes is not the bytes the budget kept out", b["bytes"], b["held_bytes"], full )
 sys.exit( 0 if ( b.get( "held" ) == "budget" and b.get( "passages" ) and b["held_bytes"] > 0 and b["next"].startswith( "--for=" ) ) else 3 )
 PY
+  case $? in 0) pj=1 ;; 3) ;; *) fj=1 ;; esac   # 0 = a partial serve, 3 = a valid block that is not one; an invalid response (a failed invariant, bad JSON) is red
 done
-if [ "$pj" = 1 ]; then ok "(b4b) --json under a middle budget: passages served and held=\"budget\" held_bytes= next="; else no "(b4b) --json partial serve"; fi
+if [ "$pj" = 1 ] && [ "$fj" = 0 ]; then ok "(b4b) --json under a middle budget: passages served and held=\"budget\" held_bytes= next="; else no "(b4b) --json partial serve"; fi
 mcp ',"budget_tokens":100000' >"$TMP/b5.xml"
 if grep -q '<doc_body match="lexical" est_tokens' "$TMP/b5.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b5.xml" && [ "$( nsec "$TMP/b5.xml" )" -ge 1 ] && chk_fit "$TMP/b5.xml" 100000 "$FULLB"
 then ok "(b5) MCP budget_tokens=100000 serves the sections"; else no "(b5) MCP big budget: $( grep -o '<doc_body[^>]*>' "$TMP/b5.xml" | head -c 300 )"; fi
@@ -385,6 +387,160 @@ HOFF="$TMP/halfoff"; cp -R "$DFX" "$HOFF"; printf '# Demo\n\nA demo uploader. Se
 if ans "$TMP/q2.xml" "$HOFF" "--for=$TASK" && grep -q '<b t="section" p="README.md"[^>]* n="Demo" rank="1" of="1"' "$TMP/q2.xml" && grep -q ' below_floor="[1-9]' "$TMP/q2.xml" \
    && ! grep -q 'why="floor"' "$TMP/q2.xml"
 then ok "(q2) a file's top-ranked section is served although it holds one subject word (the floor spares it); other files still lose theirs"; else no "(q2) rank-1 exemption: $( grep -o '<b t=[^>]*>' "$TMP/q2.xml" | head -c 400 )"; fi
+
+# ── CodeRabbit round on #561 (arms c1-c10) ───────────────────────────────────────────────────────────────────────
+# (c1) recentring never gives up a task word the winning window held. docs/a.md: a cluster of task words, then "uploads" 0.9 of a window later;
+#      the centroid sits near the cluster, and the window centred on it ended before "uploads". The probe (the word right behind the cluster)
+#      measures the window the run gets, so the arm needs no knowledge of the allowance.
+RCX="$TMP/recenter"; cp -R "$DFX" "$RCX"
+mkrc(){ python3 - "$RCX" "$1" <<'PY'
+import sys
+r, gap = sys.argv[1], int( sys.argv[2] )   # bytes of filler between the task-word cluster and the lone "uploads"
+f = "quartz mica basalt shale granite "
+total = len( f ) * 1800
+pad = f * ( gap // len( f ) )
+body = f * 100 + "retry policy failed retry policy failed. " + pad + "uploads. "
+body += ( f * 1800 )[ :total - len( body ) ]   # the same length for every gap: the same allowance share
+open( r + "/docs/a.md", "w" ).write( "# Notes\n\n## Backoff schedule\n\nThe backoff schedule doubles the wait on every retry policy for failed uploads.\n\n## Everything else\n\n" + body + "\n" )
+PY
+}
+rcread(){ python3 -c '
+import re, sys
+s = open( sys.argv[1], encoding="utf8" ).read()
+m = re.search( r"<b t=\"section\" p=\"docs/a.md\"[^>]*n=\"Everything else\"[^>]*range=\"(\d+)-(\d+)/\d+\"[^>]*><!\[CDATA\[(.*?)\]\]></b>", s, re.S )
+print( ( int( m.group(2) ) - int( m.group(1) ), int( "retry policy failed" in m.group(3) and "uploads." in m.group(3) ) ) if m else "0 0" ) ' "$1" | tr -d '(),'; }
+mkrc 1; c1L=0; c1p=0
+if ans "$TMP/c1p.xml" "$RCX" "--for=$TASK"; then read -r c1L c1p <<<"$( rcread "$TMP/c1p.xml" )"; fi
+mkrc $(( c1L * 9 / 10 ))
+if [ "${c1L:-0}" -gt 1000 ] && [ "$c1p" = 1 ] && ans "$TMP/c1.xml" "$RCX" "--for=$TASK"; then read -r c1L2 c1ok <<<"$( rcread "$TMP/c1.xml" )"; else c1ok=0; fi
+if [ "$c1ok" = 1 ]; then ok "(c1) the excerpt keeps every task word the winning window held (cluster + a word 0.9 of a window away; window $c1L B; probe positive twin)"; else no "(c1) recentring dropped a task word: probe window=$c1L probe-ok=$c1p"; fi
+
+# (c2) a credential in a section heading is redacted in n= (XML and JSON), as in the section text; --no-redact leaves it (positive twin: the section is served)
+TOK="ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+SEC="$TMP/secret"; cp -R "$DFX" "$SEC"
+printf '\n## Retry policy token %s\n\nThe retry policy for failed uploads signs each request with this token.\n' "$TOK" >>"$SEC/docs/retries.md"
+c2ok=1
+ans "$TMP/c2.xml" "$SEC" "--for=$TASK" && ans "$TMP/c2n.xml" "$SEC" "--for=$TASK" --no-redact && run "$SEC" "--for=$TASK" --json >"$TMP/c2.json" || c2ok=0
+python3 - "$TMP/c2.xml" "$TMP/c2n.xml" "$TMP/c2.json" "$TOK" <<'PY' || c2ok=0
+import html, json, re, sys
+x, xn, j = [ open( a, encoding="utf8" ).read() for a in sys.argv[1:4] ]; tok = sys.argv[4]
+def heads( s ): return [ html.unescape( n ) for n in re.findall( r'<b t="section" [^>]*n="([^"]*)"', s[ s.index( "<!-- ripwire for doc_body:" ): ] ) if "token" in n ]
+assert heads( xn ) == [ "Retry policy token " + tok ], ( "--no-redact: the section is served with its heading", heads( xn ) )
+assert len( heads( x ) ) == 1 and tok not in x[ x.index( "<!-- ripwire for doc_body:" ): ] and "[REDACTED:github-token]" in heads( x )[0], ( "XML heading", heads( x ) )
+js = [ p for p in json.loads( j )["doc_body"]["passages"] if "token" in p.get( "n", "" ) ]
+assert len( js ) == 1 and tok not in js[0]["n"] and "[REDACTED:github-token]" in js[0]["n"], ( "JSON heading", js )
+PY
+if [ "$c2ok" = 1 ]; then ok "(c2) a credential in a served section's heading is redacted in n= in XML and JSON; --no-redact leaves it"; else no "(c2) heading redaction"; fi
+
+# (c3) a block held whole prints no section text, so the run's redaction summary does not count the secrets its preparation read: the held
+#      run reports fewer than the served run (positive twin), by the section's one secret
+tally(){ local fx="$1"; shift; ( cd "$fx" || exit 1; "$BIN" "$fx" --no-cache "$@" 2>&1 >/dev/null </dev/null | grep -o 'redacted [0-9]* secret' | grep -o '[0-9]*' ); }
+c3full=$( tally "$SEC" "--for=$TASK" ); c3held=""; c3any=0
+for B in 4200 4300 4400; do   # the answer leaves a little room, the block does not fit it: held whole, but its sections were read
+  if ans "$TMP/c3.xml" "$SEC" "--for=$TASK" --token-budget=$B && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3" next=' "$TMP/c3.xml" && ! grep -q '<b t="section"' "$TMP/c3.xml"; then
+    c3any=1; c3held=$( tally "$SEC" "--for=$TASK" --token-budget=$B )
+    [ -n "$c3full" ] && [ -n "$c3held" ] && [ "$c3held" -lt "$c3full" ] || { c3any=0; break; }
+  fi
+done
+if [ "$c3any" = 1 ]; then ok "(c3) a block held whole does not count the redactions of text it never prints (served run: $c3full, held run: $c3held)"; else no "(c3) held-whole redaction tally: served=${c3full:-?} held=${c3held:-?}"; fi
+
+# (c4)/(c5) accounting under a budget, against the unbudgeted block: every on-subject section is served or counted in dropped= (also for a file
+#      the allowance did not reach), and held= / held_bytes= are read off the sections by identity (file, rank), not off counts
+acct(){ python3 - "$@" <<'PY'
+import html, re, sys
+def parse( path ):
+    s = open( path, encoding="utf8" ).read()
+    b = s[ s.index( "<!-- ripwire for doc_body" ): ]
+    root = re.search( r'<doc_body [^>]*>', b ).group(0)
+    secs = { ( html.unescape( p ), int( r ) ): len( t.encode() ) for p, r, t in re.findall( r'<b t="(?:section|doc)" p="([^"]+)"[^>]* rank="(\d+)"[^>]*><!\[CDATA\[(.*?)\]\]></b>', b, re.S ) }
+    num = lambda k: int( ( re.search( r' %s="(\d+)"' % k, root ) or [ 0, 0 ] )[1] )
+    held = { html.unescape( p ): int( h ) for p, h in re.findall( r'<f p="([^"]+)" why="budget" held="(\d+)"/>', b ) }
+    return secs, num( "dropped" ), num( "held_bytes" ), held, "held=\"budget\"" in root
+full = parse( sys.argv[1] )
+units = len( full[0] ) + full[1]
+served = False
+for path in sys.argv[2:]:
+    secs, dropped, heldBytes, held, isHeld = parse( path )
+    if not secs: continue
+    served = True
+    assert len( secs ) + dropped == units, ( "every on-subject section is served or dropped=", path, len( secs ), dropped, units )
+    missing = [ k for k in full[0] if k not in secs ]
+    want = sum( full[0][k] for k in missing ) + sum( max( 0, v - secs[k] ) for k, v in full[0].items() if k in secs )
+    assert heldBytes == want, ( "held_bytes is the text of the sections the budget kept out, by identity", path, heldBytes, want )
+    for p in { k[0] for k in missing }:
+        assert held.get( p, 0 ) == sum( 1 for k in missing if k[0] == p ), ( "held= names the sections of the file the budget kept out", path, p, held )
+assert served, "no budget served a partial block"
+PY
+}
+c4files=""
+for B in 5000 5200 5400 5600 5800 6000 6400 6800 7200; do ans "$TMP/c4_$B.xml" "$DFX" "--for=$TASK" --token-budget=$B && c4files="$c4files $TMP/c4_$B.xml"; done
+if ans "$TMP/c4full.xml" "$DFX" "--for=$TASK" --token-budget=100000 && [ -n "$c4files" ] && acct "$TMP/c4full.xml" $c4files; then ok "(c4/c5) under every budget in the sweep: sections served + dropped= == the unbudgeted block's; held= and held_bytes= read off the sections by identity"; else no "(c4/c5) budget accounting"; acct "$TMP/c4full.xml" $c4files 2>&1 | tail -1; fi
+
+# (c6) only a doc file the answer shows is served: a code-first tail under a token budget ends before its doc rows, though the doc files lead the
+#      rank order that fires the block. The files the block names are each a printed <t>/<d> row (XML and --json); the unbudgeted twin names them.
+T6="what is the retry policy for failed uploads"
+shownpaths(){ python3 - "$@" <<'PY'
+import json, re, sys
+kind, path = sys.argv[1], sys.argv[2]
+s = open( path, encoding="utf8" ).read()
+if kind == "xml":
+    i = s.find( "<!-- ripwire for doc_body" ); head = s[ :i ] if i >= 0 else s
+    shown = set( re.findall( r'<[td] [^>]*p="([^"]+)"', head ) ); named = set( re.findall( r'<[fb] [^>]*p="([^"]+)"', s[ i: ] ) ) if i >= 0 else set()
+else:
+    d = json.loads( s ); shown = set( d["tail"]["files"] ) | { x["p"] for x in d["sigs"] }; named = set( d["doc_body"]["files"] ) if "doc_body" in d else set()
+print( len( named ), len( named - shown ) )
+PY
+}
+if ans "$TMP/c6a.xml" "$TFX" "--for=$T6" && ans "$TMP/c6b.xml" "$TFX" "--for=$T6" --token-budget=3500 && run "$TFX" "--for=$T6" --json >"$TMP/c6a.json" && run "$TFX" "--for=$T6" --json --token-budget=3500 >"$TMP/c6b.json"; then
+  read -r xn0 xu0 <<<"$( shownpaths xml "$TMP/c6a.xml" )"; read -r xn1 xu1 <<<"$( shownpaths xml "$TMP/c6b.xml" )"
+  read -r jn0 ju0 <<<"$( shownpaths json "$TMP/c6a.json" )"; read -r jn1 ju1 <<<"$( shownpaths json "$TMP/c6b.json" )"
+  if [ "$xn0" = 2 ] && [ "$xu0" = 0 ] && [ "$jn0" = 2 ] && [ "$ju0" = 0 ] && [ "${xu1:-9}" = 0 ] && [ "${ju1:-9}" = 0 ] && ! tailrows "$TMP/c6b.xml" | grep -q 'docs/'; then
+    ok "(c6) unbudgeted: both doc files named (XML, JSON); under --token-budget=3500 the tail ends before its doc rows and the block names no doc file the answer does not print ($xn1 XML, $jn1 JSON named)"
+  else no "(c6) emitted-tail rule: xml $xn0/$xu0 -> $xn1/$xu1, json $jn0/$ju0 -> $jn1/$ju1"; fi
+else no "(c6) a run failed"; fi
+
+# (c7) --signatures-only carries no doc text: neither dialect prints the block (positive twin: the same task without the flag fires)
+c7ok=1
+{ ans "$TMP/c7.xml" "$DFX" "--for=$TASK" --signatures-only && ! grep -q 'doc_body' "$TMP/c7.xml"; } || c7ok=0
+run "$DFX" "--for=$TASK" --signatures-only --json >"$TMP/c7.json"; { [ -s "$TMP/c7.json" ] && ! grep -q 'doc_body' "$TMP/c7.json"; } || c7ok=0
+{ grep -q '<doc_body match="lexical"' "$TMP/f1.xml" && python3 -c 'import json,sys; assert "doc_body" in json.load(open(sys.argv[1]))' "$TMP/j1.json"; } || c7ok=0
+if [ "$c7ok" = 1 ]; then ok "(c7) --signatures-only: no <doc_body> and no \"doc_body\" key (the same task without it fires in both)"; else no "(c7) --signatures-only"; fi
+
+# (c8) a multi-root run serves the block in XML as it does in JSON: the same passages (root-prefixed p=), in the same order
+MRX="$TMP/multiroot"; mkdir -p "$MRX/a" "$MRX/b"; cp -R "$DFX/src" "$MRX/a/"; cp -R "$DFX/docs" "$DFX/README.md" "$MRX/b/"
+mr(){ ( cd "$MRX" || exit 1; "$BIN" a b --no-cache "$@" 2>/dev/null </dev/null ); }
+mr "--for=$TASK" >"$TMP/c8.xml"; c8x=$?; mr "--for=$TASK" --json >"$TMP/c8.json"; c8j=$?
+if [ "$c8x" = 0 ] && [ "$c8j" = 0 ] && python3 - "$TMP/c8.xml" "$TMP/c8.json" <<'PY'
+import html, json, re, sys
+x = open( sys.argv[1], encoding="utf8" ).read(); d = json.load( open( sys.argv[2], encoding="utf8" ) )["doc_body"]
+xs = [ ( html.unescape( p ), html.unescape( n ) ) for p, n in re.findall( r'<b t="section" p="([^"]+)"[^>]* n="([^"]*)"', x ) ]
+js = [ ( p["p"], p["n"] ) for p in d["passages"] if p["t"] == "section" ]
+assert xs and xs == js and all( p.startswith( "b/" ) for p, n in xs ), ( xs, js )
+PY
+then ok "(c8) two roots: the XML block serves the passages the JSON key does, with root-prefixed p="; else no "(c8) multi-root XML/JSON parity"; fi
+
+# (c9) both ceilings bind: --token-budget=9000 with --max-tokens=5000 --detail=1 serves the block into the smaller; the block never exceeds
+#      what 5000 leaves after the answer (positive twin: --token-budget alone serves sections)
+if ans "$TMP/c9.xml" "$DFX" "--for=$TASK" --token-budget=9000 --max-tokens=5000 --detail=1 && ans "$TMP/c9t.xml" "$DFX" "--for=$TASK" --token-budget=9000 && [ "$( nsec "$TMP/c9t.xml" )" -ge 3 ] && python3 - "$TMP/c9.xml" <<'PY'
+import re, sys
+s = open( sys.argv[1], encoding="utf8" ).read()
+ans = int( re.search( r'^<ctx [^>]*est_tokens="(\d+)"', s ).group(1) )
+blk = int( re.search( r'<doc_body match="lexical" est_tokens="(\d+)"', s ).group(1) )
+assert blk <= max( 0, 5000 - ans ), ( "the block is over what the smaller ceiling leaves", ans, blk )
+PY
+then ok "(c9) --token-budget=9000 with --max-tokens=5000 --detail=1: the block fits what 5000 leaves after the answer"; else no "(c9) both ceilings"; fi
+
+# (c10) the --json block prices exactly the bytes it prints: its own est_tokens key counted once (14 + digits bytes), markup 2.5 B per token, text 3.8
+if [ -s "$TMP/j1.json" ] && python3 - "$TMP/j1.json" <<'PY'
+import json, sys
+raw = open( sys.argv[1], encoding="utf8" ).read()
+d = json.loads( raw )["doc_body"]
+blk = raw[ raw.index( '"doc_body"' ): raw.rindex( "}" ) ].encode()
+txt = sum( len( p["text"].encode() ) for p in d["passages"] )
+want = round( ( len( blk ) - txt ) / 2.5 ) + round( txt / 3.8 )
+assert abs( d["est_tokens"] - want ) <= 1, ( d["est_tokens"], want )
+PY
+then ok "(c10) the --json block's est_tokens is its own bytes priced once (the key is not counted twice)"; else no "(c10) --json block price"; fi
 
 # (p1) cost: a doc section of ONE 1.3 MB line is served in a bounded time, with and without a token budget
 PFX="$TMP/longline"; cp -R "$DFX" "$PFX"

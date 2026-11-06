@@ -487,6 +487,7 @@ struct ForLensJsonInputs
     std::string_view                  rankFlags;   // forRankShapingFlags( cfg ), owned by the caller for the call's duration
     // FOR-DOC-BODY: the graph the doc sections are scored on (fordocbody.h, the "doc_body" key) — REQUIRED like fileTail above
     const rw::Graph*                  graph;
+    bool                              signaturesOnly;   // --signatures-only: no doc text rides the answer (the XML twin's rule)
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -1531,14 +1532,15 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
 // fixpoint). Default regime: the full row cap (page 0's 40 rows, FOLD C). Explicit regime (forbudget-soft round C,
 // reserve first): the tail keeps at least its share — `shareBytes`, what the rows at the target cut left of the bundle
 // budget — so rows are added until the stanza reaches it (rw::fileTailShownToFill); a cut tail carries "next".
-inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t tokenBudget, std::size_t shareBytes )
+inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t tokenBudget, std::size_t shareBytes, std::size_t* shownRows = nullptr )
 {
-    if( tokenBudget == 0 )
-    {
-        return "," + rw::renderFileTailJson( tail, tail.paths.size() );   // every row computeFileTail collected
-    }
     const auto render = [ & ]( std::size_t shown ) { return "," + rw::renderFileTailJson( tail, shown ); };
-    return render( rw::fileTailShownToFill( tail, shareBytes, render ) );
+    const std::size_t shown = tokenBudget == 0 ? tail.paths.size() : rw::fileTailShownToFill( tail, shareBytes, render );   // no budget: every row computeFileTail collected
+    if( shownRows != nullptr )
+    {
+        *shownRows = shown;
+    }
+    return render( shown );
 }
 
 // One RENDER of the --json bundle (emitForLensJson below).
@@ -1842,7 +1844,8 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     // lane 2: the rank rows exclude the files of the rows emitted (after a refill: the rows it kept — the XML twin's rule)
     const std::size_t  jsonCutRows = sigsJson.size() - std::min( sigsJson.size(), sigsCut.pastTargetBytes );
     const rw::FileTail jsonTail    = rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task );
-    tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, forLensJsonTailShare( in.tokenBudget, bundleBudget, fixedBytes, jsonCutRows ) );
+    std::size_t        jsonTailShown = 0;
+    tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, forLensJsonTailShare( in.tokenBudget, bundleBudget, fixedBytes, jsonCutRows ), &jsonTailShown );
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
                                         + surfaceCountsStanza.size() + tailStanza.size() + envelopeTextBytes
                                         + droppedPositiveStanza.size()   // A2: 0 bytes on the (overwhelming) no-drop path
@@ -1893,8 +1896,9 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     rw::emitTo( out, ",\"capped\":{},\"est_tokens\":{},\"sigs\":", sigsCappedKey ? "true" : "false", estTokens );
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
     // FOR-DOC-BODY (fordocbody.h): the XML twin's <doc_body>, after "sigs" and outside est_tokens; "" unless it fires
-    if( const rw::ForDocBodyPick docPick = rw::pickForDocBody( in.ing, in.task, jsonShownIds, [ & ]
-        { return rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, /*rankOrder=*/true ); }, in.rootArg ); docPick.fires && !docPick.fileIds.empty() )
+    const std::vector<std::string> jsonTailPaths = rw::emittedTailPaths( jsonTail, jsonTailShown );   // the rows the answer printed
+    if( const rw::ForDocBodyPick docPick = in.signaturesOnly ? rw::ForDocBodyPick {} : rw::pickForDocBody( in.ing, in.task, jsonShownIds, [ & ]
+        { return rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, /*rankOrder=*/true ); }, in.rootArg, &jsonTailPaths ); docPick.fires && !docPick.fileIds.empty() )
     {
         // served first, the block takes the budget the answer left (est_tokens is the answer's); held= names what a budget kept out
         const std::string docBody = rw::renderForDocBody( rw::ForDocBodyInputs{ in.ing, in.graph->outOff, in.graph->outTargets, in.task, docPick, in.redact, in.rootArg },
@@ -2744,16 +2748,17 @@ inline std::vector<rw::NodeId> forCallerHopIds( const rw::Config& cfg, const rw:
 // before the tail), never below the empty shell — so rows are added until the element reaches it (its last row may cross
 // it: a soft target makes no byte promise). A cut tail carries next= (the page after its last row) in every regime.
 inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t tokenBudget,
-                                         std::size_t bundleBudget, std::size_t spentBytes )
+                                         std::size_t bundleBudget, std::size_t spentBytes, std::size_t* shownRows = nullptr )
 {
     std::vector<char> esc;
-    if( tokenBudget == 0 )
-    {
-        return rw::renderFileTailXml( tail, tail.paths.size(), esc );   // every row computeFileTail collected
-    }
     const std::size_t share  = std::max<std::size_t>( bundleBudget > spentBytes ? bundleBudget - spentBytes : 0u, rw::kForFileTailShellReserve );
     const auto        render = [ & ]( std::size_t shown ) { return rw::renderFileTailXml( tail, shown, esc ); };
-    return render( rw::fileTailShownToFill( tail, share, render ) );
+    const std::size_t shown  = tokenBudget == 0 ? tail.paths.size() : rw::fileTailShownToFill( tail, share, render );   // no budget: every row computeFileTail collected
+    if( shownRows != nullptr )
+    {
+        *shownRows = shown;
+    }
+    return render( shown );
 }
 
 
@@ -3635,7 +3640,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
                                                                    &forFileTail, &lr.evidence, d.notesDegraded, forDocsAfterCode, forHeadRR, cfg.forTask,
-                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g } );
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g, cfg.signaturesOnly } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -4440,7 +4445,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // and a body ceiling never moves a row (formaxtokenscheck (E))
         const std::size_t tailSpentBytes = forSoftTarget ? rowsSpentBytes + autoSection.xml.size() + slot.xml.size()
                                                          : rowsSpentBytes + detailSection.xml.size() + autoSection.xml.size() + slot.xml.size();
-        std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes );
+        std::size_t       tailShownRows  = 0;
+        std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
+        std::vector<std::string> tailPrinted = rw::emittedTailPaths( forFileTailShown, tailShownRows );   // FOR-DOC-BODY: the <t> rows this answer prints
 
         // ── round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST): the rows past the soft target's cut fill what the
         // trailing sections left of T. The sections above were funded as if the rows stopped at the cut (sigsFundedBytes), so
@@ -4486,8 +4493,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                     sigsCeilingNote = rw::sigsCutReportLegend( forSigsCut );   // a soft target: no default ceiling, no guard reading
                     // lane 2: a row the refill dropped lands in the tail's rank rows — re-listed against the rows now shown, at
                     // the same share (the share, not the rows, is what the refill priced)
-                    tailStr = renderForFileTailXml( computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask ),
-                                                    cfg.tokenBudget, bundleBudget, tailSpentBytes );
+                    const FileTail refilledTail = computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask );
+                    tailStr     = renderForFileTailXml( refilledTail, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
+                    tailPrinted = rw::emittedTailPaths( refilledTail, tailShownRows );
                 }
                 else
                 {
@@ -4814,13 +4822,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // FOR-DOC-BODY (fordocbody.h): a prose task whose first <t> rows are doc files gets the top-ranked sections of the first doc files
         // shown, last before </ctx>: its own allowance, outside the answer's est_tokens (the block prices itself); "" otherwise. Under a token budget or a body
         // ceiling it is served into the budget left after the answer and holds only what does not fit (held=, next=).
-        if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && sigsPreRendered )
+        if( !cfg.json && !cfg.columnar && !cfg.candidates && !cfg.signaturesOnly && sigsPreRendered )
         {
             const rw::ForDocBodyPick docPick = rw::pickForDocBody( ing, cfg.forTask, shownSigIds, [ & ]
-            { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg );
-            const std::size_t        docBudget = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : forBodyCeiling ? std::size_t( rootFinish.maxTokens ) : 0u;   // the --max-tokens the root was priced with
+            { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg, &tailPrinted );
+            // both ceilings that are active bind: the smaller of --token-budget and the --max-tokens the root was priced with (forBodyCeiling)
+            const std::size_t        ceiling   = forBodyCeiling ? std::size_t( rootFinish.maxTokens ) : 0u;
+            const std::size_t        docBudget = cfg.tokenBudget > 0 && ceiling > 0 ? std::min( std::size_t( cfg.tokenBudget ), ceiling ) : cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : ceiling;
             const std::string        docBody = rw::renderForDocBody( rw::ForDocBodyInputs{ ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg },
-                                                                     rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens }, rw::ForDocDialect::Xml );
+                                                                     rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens, rootFinish.measured }, rw::ForDocDialect::Xml );
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
 
