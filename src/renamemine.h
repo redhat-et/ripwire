@@ -38,6 +38,15 @@
 // position. That is the shape a rename has and an edit does not: `inline void foo( int x )` → `inline void
 // bar( int x )` keeps every byte but the name. Requiring skeleton equality is what keeps ordinary edits out.
 //
+// A pair whose two lines are BOTH comment-only is not a rename site. Prose is not code: `// the rows are read` →
+// `// the rows is read` differs at one "identifier" with every gap unchanged, and the join then credits the
+// function that happens to be called `is` with a rename `are → is` that no developer made (it moved
+// naming-short on a pull request that only fixed grammar). The test is the house one (unusedfile::isCommentLine,
+// the --for/--dead-code comment test) on the file's own language, taken from the `+++ b/<path>` header; a
+// language it does not know (Unknown, Markdown) keeps every pair. A diff has no context lines (-U0), so a
+// `* …` continuation line is read as comment when it leads with `*` in a non-hash language: the block opener is
+// out of the window. A trailing comment after code still leaves the line CODE, and a rename on it still counts.
+//
 // Three candidate line-pairing rules were measured on this repo's history; the shipped one is (c):
 //   (a) index-wise, only when a hunk has equally many removed and added lines   — misses split hunks
 //   (b) every removed × every added line, unbounded                              — O(n²) on a vendored blob
@@ -76,7 +85,10 @@
 #include "model.h"
 #include "ingest.h"
 #include "naminglens.h"
+#include "forunused.h"          // unusedfile::isCommentLine — the house "is this line a comment" test (used on the diff side by detail::commentOnly)
 #include "gitoracle.h"          // walkGitPatch — the shared `git log -p -U0` streaming reader; identByte
+#include "langfacts.h"          // langFacts(l).hashComment
+#include "lintrules.h"          // langOfPath — the file a hunk belongs to
 #include "docparse.h"           // detail::readWholeFile — the canonical whole-file byte read
 #include "infra/jsonesc.h"      // shSingleQuote
 #include "quality.h"            // gitRepoHasHistory
@@ -242,11 +254,50 @@ inline bool renameSiteOf( const SplitLine& before, const SplitLine& after, std::
 // One hunk's two sides, folded into the vote map. A substitution votes ONCE per hunk however many lines in
 // that hunk show it: a hunk is one edit, and letting a 40-line hunk cast 40 votes would make one mechanical
 // sweep outweigh forty considered renames.
+// What the current file's language says about comments: `known` = a comment line can be told apart at all
+// (Unknown and Markdown have none, so every pair is kept); `hash` = `#` opens it (else `//` and `/* */`).
+struct CommentSyntax
+{
+    bool known = false;
+    bool hash  = false;
+};
+
+inline CommentSyntax commentSyntaxOfPath( std::string_view path ) noexcept
+{
+    const Lang lang = langOfPath( path );
+    return { !std::ranges::contains( unusedfile::kNoLanguage, lang ) && !isDocLang( lang ), langFacts( lang ).hashComment };
+}
+
+// A comment-ONLY line. unusedfile::isCommentLine answers whole-line `//`, `#` and `/* … */`; its `* …` branch needs
+// the lines above, which a -U0 diff does not carry, so a leading `*` in a non-hash language reads as a block
+// comment's continuation here (a dereference-led code line is the rare loss, and it costs one candidate).
+inline bool commentOnly( std::string_view line, CommentSyntax syntax ) noexcept
+{
+    if( !syntax.known )
+    {
+        return false;
+    }
+    if( unusedfile::isCommentLine( line, 0, syntax.hash ) )
+    {
+        return true;
+    }
+    const std::string_view trimmed = trimWs( line );
+    return !syntax.hash && ( trimmed == "*" || trimmed.starts_with( "* " ) );
+}
+
+// The `+++ <path>` header of a patch names the file the next hunks belong to (--no-renames: old and new path agree).
+// `+++ /dev/null`, a quoted path or anything else leaves the language unknown, i.e. every pair kept.
+inline CommentSyntax commentSyntaxOfHeader( std::string_view plusHeader ) noexcept
+{
+    return plusHeader.compare( 0, 6, "+++ b/" ) == 0 ? commentSyntaxOfPath( plusHeader.substr( 6 ) ) : CommentSyntax{};
+}
+
 struct HunkBuffer
 {
     std::vector<std::string> removed;
     std::vector<std::string> added;
     bool                     tooWide = false;
+    CommentSyntax            syntax;   // the file's; set by the `+++ b/<path>` header, kept across clear()
 
     void clear()
     {
@@ -255,6 +306,34 @@ struct HunkBuffer
         tooWide = false;
     }
 };
+
+// One site's vote, once per hunk (`seenThisHunk` is the hunk's own dedup list); a full vote map marks the harvest a floor.
+inline void castVote( std::string key, std::vector<std::string>& seenThisHunk, HashMap<std::string, std::uint32_t>& votes, RenameHarvest& harvest )
+{
+    if( std::find( seenThisHunk.begin(), seenThisHunk.end(), key ) != seenThisHunk.end() )
+    {
+        return;
+    }
+    if( votes.size() >= kMaxCandidates && votes.find( key ) == votes.end() )
+    {
+        harvest.truncated = true;   // the map is full — candidates= is a FLOOR from here on
+        return;
+    }
+    ++votes[key];
+    seenThisHunk.push_back( std::move( key ) );
+}
+
+// Per line, once: is it comment-only? The pairing below is removed x added, so each side is asked once, not once per pair.
+inline std::vector<char> commentFlags( const std::vector<std::string>& lines, CommentSyntax syntax )
+{
+    std::vector<char> flags;
+    flags.reserve( lines.size() );
+    for( const std::string& line : lines )
+    {
+        flags.push_back( commentOnly( line, syntax ) ? 1 : 0 );
+    }
+    return flags;
+}
 
 inline void foldHunk( HunkBuffer& hunk, HashMap<std::string, std::uint32_t>& votes, RenameHarvest& harvest )
 {
@@ -274,30 +353,21 @@ inline void foldHunk( HunkBuffer& hunk, HashMap<std::string, std::uint32_t>& vot
     std::vector<std::string> seenThisHunk;
     SplitLine                before;
     SplitLine                after;
-    for( const std::string& removedLine : hunk.removed )
+    const std::vector<char>  removedIsComment = commentFlags( hunk.removed, hunk.syntax );
+    const std::vector<char>  addedIsComment   = commentFlags( hunk.added, hunk.syntax );
+    for( std::size_t removedIndex = 0; removedIndex < hunk.removed.size(); ++removedIndex )
     {
-        splitLine( removedLine, before );
-        for( const std::string& addedLine : hunk.added )
+        splitLine( hunk.removed[removedIndex], before );
+        for( std::size_t addedIndex = 0; addedIndex < hunk.added.size(); ++addedIndex )
         {
-            splitLine( addedLine, after );
+            const bool prose = removedIsComment[removedIndex] && addedIsComment[addedIndex];   // a word change in a comment is not a rename
+            splitLine( hunk.added[addedIndex], after );
             std::string_view oldName;
             std::string_view newName;
-            if( !renameSiteOf( before, after, oldName, newName ) )
+            if( !prose && renameSiteOf( before, after, oldName, newName ) )
             {
-                continue;
+                castVote( voteKey( oldName, newName ), seenThisHunk, votes, harvest );
             }
-            std::string key = voteKey( oldName, newName );
-            if( std::find( seenThisHunk.begin(), seenThisHunk.end(), key ) != seenThisHunk.end() )
-            {
-                continue;
-            }
-            if( votes.size() >= kMaxCandidates && votes.find( key ) == votes.end() )
-            {
-                harvest.truncated = true;   // the map is full — candidates= is a FLOOR from here on
-                continue;
-            }
-            ++votes[key];
-            seenThisHunk.push_back( std::move( key ) );
         }
     }
     hunk.clear();
@@ -349,6 +419,10 @@ inline RenameHarvest mineRenamePairs( const std::string& root )
         if( raw.size() >= 3 && ( raw.compare( 0, 3, "---" ) == 0 || raw.compare( 0, 3, "+++" ) == 0 ) )
         {
             detail::foldHunk( hunk, votes, harvest );
+            if( raw.compare( 0, 3, "+++" ) == 0 )
+            {
+                hunk.syntax = detail::commentSyntaxOfHeader( raw );
+            }
             return;
         }
         if( raw.size() >= 2 && raw.compare( 0, 2, "@@" ) == 0 )
