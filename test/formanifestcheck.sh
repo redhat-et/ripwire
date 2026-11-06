@@ -250,6 +250,11 @@ C
 printf 'int main(void) { return 0; }\n' >"$F/cmk/src/main.c"
 printf 'int lib(void) { return 1; }\n' >"$F/cmk/src/lib.c"
 
+# feature_touch line: the file's first line that defines or documents the anchored feature, not a #[cfg(feature = ..)] use of another
+mkdir -p "$F/cfgf/src"
+printf '[package]\nname = "cfgf"\n\n[features]\njson = []\nmultipart = []\nform = []\ntokio = []\n' >"$F/cfgf/Cargo.toml"
+printf '#[cfg(feature = "form")]\nmod form;\n#[cfg(feature = "json")]\nmod json;\n//! `multipart` | multipart forms\n//! `json` | JSON\n//! `form` | forms\n//! `tokio` | rt\npub fn r() {}\n' >"$F/cfgf/src/lib.rs"
+
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<manifest_rows .*</manifest_rows>' "$1" | head -1; }
 # has ARM FIXTURE TASK PATTERN... — the block fires and holds every (python regex) pattern, in order
@@ -329,6 +334,10 @@ lacks r1d shop "upgrade the koa-router dependency" ''
 has r1d shop "upgrade the find-my-way dependency" '<mf p="packages/router/package.json"' 'kind="dep">&quot;find-my-way&quot;'
 lacks r1e shop "which find-my-way routes are slow" ''
 has r1e shop "add a new route matcher like find-my-way" '<mf p="packages/router/package.json"'
+
+# ── feature_touch line ───────────────────────────────────────────────────────────────────────────────────────────────────────
+has f4a cfgf "add a new cargo feature like multipart" '<touch p="src/lib.rs:5" share="4/4">//! `multipart` \| multipart forms</touch>'
+lacks f4a cfgf "add a new cargo feature like multipart" 'cfg\(feature'
 
 # ── parser shapes ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 lacks f3a poet "the version dependency" ''
