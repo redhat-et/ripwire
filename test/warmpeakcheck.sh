@@ -7,12 +7,15 @@
 #
 # Arms:
 #   S  the warm run is warm: RIPWIRE_CACHE_STATS says reparsed=0 and cached_records = files.
-#   B  the warm answer is byte-identical to the cold answer (and to a --no-cache run).
+#   B  the warm answer is byte-identical to the cold answer (and to a --no-cache run), and so is a warm map (which names every
+#      file's own symbols, so it sees a record decoded for the wrong file, as --deps' summary may not).
 #   W  peak footprint, warm <= kWarmPct % of cold (the best of two runs each). Red when a warm-only copy of the facts
 #      comes back (the decoded map, a scratch that keeps every record).
-#   F  peak footprint, warm <= kFactPct % of the blob's size plus the binary's floor (a --version run). The facts in the
-#      generated tree dominate the run, so a second live set of fact arrays (the merge keeping its moved-from arrays,
-#      which raises cold and warm alike, so W cannot see it) moves this ratio well past the line.
+#   F  peak footprint, warm <= kFactPct % of the blob's size plus the binary's floor (a --version run): an absolute bound
+#      beside W's relative one, so a change that raises cold and warm alike by more than about a quarter goes red too.
+#      It does NOT see the merge keeping its moved-from per-thread arrays (mutant measured 293 vs 293 MB here, 252 vs
+#      254 MB on a def-heavy tree): this tree's peak is in the model build after the merge, not at the merge, and no
+#      footprint reading taken from outside the process can see a copy that is gone before the peak.
 # W and F read macOS phys_footprint and need the large-block route (src/largealloc.cpp), without which freed blocks stay
 # in the peak whatever the code does: elsewhere, or on a binary without the route, they SKIP by name. S and B run everywhere.
 #
@@ -30,7 +33,8 @@ if ! "$BIN" --version 2>/dev/null | grep -q '^ripwire '; then
     echo "  FAIL  $BIN does not run"; echo "FAIL warmpeakcheck"; exit 1
 fi
 kWarmPct=110
-kFactPct=100000
+kFactPct=900   # measured 2026-11-06 (Apple M2 16 GB, other builds running): this head (293 - 8) / 40 MB = 712 %, every run; the
+               # keep-every-decoded-record mutant (446 - 8) / 40 = 1095 %. 900 leaves 26 % over the head and catches it.
 
 # ---- fixture: dense calls across many files, so the reference arrays are most of the run's memory ----
 FX="$TMP/fx"
@@ -78,6 +82,10 @@ rm -f "$C"
 cold2="$( run cold2 --deps --cache="$C" )"
 warm2="$( run warm2 --deps --cache="$C" )"
 run nocache --deps --no-cache >/dev/null
+# the map lists every file's own symbols, so a record decoded into the wrong file shows here (--deps' summary can be blind
+# to a swap between two files of the same shape); served from the same cache, warm
+run warmmap --cache="$C" >/dev/null
+run nocachemap --no-cache >/dev/null
 
 # ---- S ----
 rp="$( stat_of warm1 reparsed )"; cr="$( stat_of warm1 cached_records )"; fl="$( stat_of warm1 files )"
@@ -91,6 +99,12 @@ if [ -s "$TMP/cold1.out" ] && cmp -s "$TMP/cold1.out" "$TMP/warm1.out" && cmp -s
     ok "B: warm answers byte-identical to cold and to --no-cache ($( wc -c <"$TMP/cold1.out" | tr -d ' ' ) B)"
 else
     no "B: a warm answer differs from the cold one"
+fi
+mrp="$( stat_of warmmap reparsed )"
+if [ -s "$TMP/nocachemap.out" ] && [ "$mrp" = 0 ] && cmp -s "$TMP/warmmap.out" "$TMP/nocachemap.out"; then
+    ok "B: warm map (reparsed=0) byte-identical to --no-cache ($( wc -c <"$TMP/nocachemap.out" | tr -d ' ' ) B)"
+else
+    no "B: the warm map differs from the --no-cache one, or was not warm (reparsed=${mrp:-?}): a record served for the wrong file"
 fi
 
 # ---- W, F: macOS with the large-block route only ----
