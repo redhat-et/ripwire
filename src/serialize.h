@@ -1112,7 +1112,9 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 // before the fold (arm M4, the page appended to the answer): 6 of 6 predicted rows reached an R0-missing item, none lost
 // one. The model and its renderers live in forpage.h (they need the page's ranking and its next= composer); the constants
 // and the legend stay here, where the --for header reads them.
-//   • DEFAULT regime: kForFileTailShownCap rank rows + kForFileTailPageRows page rows; the bytes ride ON TOP of the
+//   • DEFAULT regime: kForFileTailShownCap rank rows + the page rows among the file page's first kForFileTailPageWalk
+//     (FOR-TAIL-WIDE, 2026-11-04: 4 pages, not 1; R-ladder: 6 of 7 items the raised page recovered sat at file-page rank
+//     57-177), sym= on the rank rows and page rows 1..kForFileTailPageRows only; the bytes ride ON TOP of the
 //     sig/body budgets and are measured into est_tokens.
 //   • EXPLICIT --token-budget (a soft target): the tail is a trailing section funded first at its share — the
 //     bytes left once the rows at the target cut and the sections before it are paid (runForLens) — and fills
@@ -1120,6 +1122,7 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 //     empty shell `<tail total="NNNNN" shown="0" capped="1"></tail>`.
 inline constexpr std::size_t kForFileTailShownCap     = 24;   // the rank rows (deep-tail d2): files outside the shown head
 inline constexpr std::size_t kForFileTailPageRows     = 40;   // FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault)
+inline constexpr std::size_t kForFileTailPageWalk     = 160;  // FOR-TAIL-WIDE: page rows the tail walks (4 pages); rows past kForFileTailPageRows print p= only
 inline constexpr std::size_t kForFileTailShellReserve = 48;
 inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h)
 
@@ -1142,6 +1145,19 @@ inline constexpr std::string_view kForFileTailLegend =
 inline constexpr std::string_view kForFileTailCodeFirstLegend =
     "; tail order on this code question: every code file of both parts first, each part in the order above, then the doc "
     "files (.md, .rst, a Sphinx .txt page) in that order";
+// FOR-TAIL-WIDE (2026-11-04): the page rows go on past page 0 to the file page's first kForFileTailPageWalk rows, p= only past the
+// old cut. Present-only: rides beside kForFileTailLegend when the file page holds more rows than page 0 (forpage.h
+// fileTailWalksPastPage0), so an answer whose tail ends inside page 0 keeps its bytes. Sigs-charge-exempt with the clause it
+// qualifies. No "--" (it rides inside an XML comment).
+// Fix round 1 (review F2-F5, CodeRabbit 4476426219): a code question walks 160 CODE rows (doc rows within the first 160 ride
+// beside them), the p=-only rows come after every row with sym=, a file the head shows is not listed past the old cut, and
+// p_only= counts the shown p=-only rows.
+inline constexpr std::string_view kForFileTailWideLegend =
+    "; tail walk: the page rows go on to the file page's first 160 rows (a code question: its first 160 code rows, plus the "
+    "doc rows within its first 160 rows); a row past page 0 (a code question: past its first 40 code rows, a doc past row 40) "
+    "prints p= only, after every row with sym=, and skips files the head shows; p_only= counts them";
+// The JSON twin of that clause's p_only= (the JSON answer carries no legend): "p_only_why" beside "p_only" (forpage.h)
+inline constexpr std::string_view kForFileTailPathOnlyWhy = "rows past page 0 of the file page print the path only (sym empty)";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,
