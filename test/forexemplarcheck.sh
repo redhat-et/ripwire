@@ -30,6 +30,13 @@
 #   (w1) matched= names the task words found in key= or scope=; the legend says registry rows are in listing order
 #   (l1) --legend=compact (the CLI default) prints the short legend, --legend=full the long one; both define every attribute
 #
+# ARMS (fix round 2: per-row hedge for the weakest grouping)
+#   (g1) a family grouped by the affix rule (names alone) says so on its own family line: grouping="affix-only, weak: verify one m
+#        before copying"; a family of any other rule prints no grouping=; both legends define grouping=
+#   (g2) the affix rule needs members in at least 3 files: four classes in ONE file and three classes in TWO files are no family
+#        (the three-file twin, s4c in a2, fires)
+#   (g3) an affix family only in .d.ts declaration files is no family (the same three interfaces in .ts files are one)
+#
 # ARMS (E3a TOUCH LIST: files outside the members' own that mention at least half of them)
 #   (e1) per language: Rust exhaustive match + mod list (registered names and file stems), Go name list + defaults list, C platform
 #        table, TS barrel by kebab path (`./dialects/postgres/postgres-dialect`), Python package __init__; C++ registry with no other
@@ -195,6 +202,15 @@ for p in Aa Bb Cc Dd; do printf 'from src.plugins.base import Plugin\n\n\nclass 
 for d in src examples benchmarks; do printf 'ALL = ["AaPlugin", "BbPlugin", "CcPlugin"]\n' > "$F/s2/$d/all.py"; done
 for c in quit write open close; do printf 'pub fn %s_command() -> u32 {\n    1\n}\n' "$c"; done > "$F/s4/src/commands.rs"
 for j in Send Fetch Purge; do printf 'class %sWorker:\n    def run(self):\n        return 1\n' "$j" > "$F/s4c/src/jobs/$(echo "$j" | tr 'A-Z' 'a-z').py"; done
+# g2 / g3 fixtures: affix classes in one file, in two files, in .d.ts files only (and the same in .ts files)
+mkdir -p "$F/g2a/src/jobs" "$F/g2b/src/jobs" "$F/g3d/src/opts" "$F/g3t/src/opts"
+for j in Send Fetch Purge Drain; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2a/src/jobs/all.py"
+for j in Send Fetch; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2b/src/jobs/one.py"
+for j in Purge Drain; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2b/src/jobs/two.py"
+for j in Read Write Seek; do
+    printf 'export interface %sOptions {\n  flag: number\n}\n' "$j" > "$F/g3d/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).d.ts"
+    printf 'export interface %sOptions {\n  flag: number\n}\n' "$j" > "$F/g3t/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).ts"
+done
 
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<exemplar_family .*</exemplar_family>' "$1" | head -1; }
@@ -326,7 +342,18 @@ no_touch h1 "$TMP/h1.xml" benchmarks/all.py "a benchmark directory"
 silent a2 s4 "add a new command"
 fam a2 s4c "add a new worker" affix worker 3
 run s4c "--for=add a new worker" >"$TMP/a2.xml"; run s4c "--for=add a new worker" --legend=full >"$TMP/a2f.xml"
-if grep -q 'weakest grouping' "$TMP/a2.xml" && grep -q 'weakest grouping' "$TMP/a2f.xml"; then ok "(a2) both legends call the affix rule the weakest grouping"; else no "(a2) legend: affix is not called weakest"; fi
+if grep -q 'names alone, weak' "$TMP/a2.xml" && grep -q 'names alone, the weakest grouping' "$TMP/a2f.xml"; then ok "(a2) both legends call the affix rule names alone, weak"; else no "(a2) legend: affix is not called weak"; fi
+# g1: the affix family says on its own row that names alone grouped it; no other rule prints grouping=
+if block "$TMP/a2.xml" | grep -q ' n="3" grouping="affix-only, weak: verify one m before copying">'; then ok "(g1) the affix family line carries grouping=\"affix-only, weak: verify one m before copying\""; else no "(g1) affix row: $( block "$TMP/a2.xml" | head -c 300 )"; fi
+if grep -q 'grouping=' "$TMP/a2.xml" && grep -q 'grouping=' "$TMP/a2f.xml"; then ok "(g1) both legends define grouping="; else no "(g1) legend: grouping= not defined"; fi
+run rs "--for=add a new scalar function" >"$TMP/g1rs.xml"; run py "--for=add a new handler" >"$TMP/g1py.xml"
+if block "$TMP/g1rs.xml" | grep -q ' rule="attribute"' && block "$TMP/g1py.xml" | grep -q ' rule="base"' && ! block "$TMP/g1rs.xml" "$TMP/g1py.xml" | grep -q 'grouping='; then ok "(g1) attribute and base families print no grouping="; else no "(g1) a non-affix family carries grouping="; fi
+# g2: members in at least 3 files
+silent g2 g2a "add a new runner"
+silent g2 g2b "add a new runner"
+# g3: only .d.ts files is no family; the .ts twin is one
+silent g3 g3d "add a new option"
+fam g3 g3t "add a new option" affix option 3
 # w1: why this family
 if block "$TMP/e_rs.xml" | grep -q ' matched="scalar function" scope='; then ok "(w1) matched= names both task words of the scalar function family"; else no "(w1) matched: $( block "$TMP/e_rs.xml" | head -c 300 )"; fi
 if grep -q 'listing order' "$TMP/e_go.xml" && grep -q 'matched=' "$TMP/e_go.xml"; then ok "(w1) the legend says what the first <m> is under rule=registry"; else no "(w1) legend"; fi
@@ -362,7 +389,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full; do
+for f in a1 s2 c1a e_goa l_full a2 a2f; do
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()

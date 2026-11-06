@@ -955,9 +955,23 @@ inline void familiesByAttribute( const IngestResult& ing, const ExemplarScan& sc
     }
 }
 
-// (e) affix: classes in one directory whose names end with the head word (a function name ending in the head is a
-// verb phrase, not a sibling: tmux `cmd_*_command`, helix `execute_command`, the TypeScript `getSyntaxKind`)
-inline void familiesByAffix( const IngestResult& ing, const ExemplarTask& t, std::optional<ExemplarFamily>& best )
+// An affix family is names alone, so it needs more than names: members in at least kExemplarFamilyMin different files (one file full
+// of `*Options` interfaces is a type list, not siblings to copy), and not only in `.d.ts` declaration files (typescript's lib/*.d.ts).
+inline bool affixHasFiles( const IngestResult& ing, const ExemplarFamily& fam )
+{
+    std::vector<std::uint32_t> files;
+    bool code = false;
+    for( const ExemplarMember& m : fam.members )
+    {
+        files.push_back( m.fileId );
+        code = code || !rootRelPath( ing, m.fileId ).ends_with( ".d.ts" );
+    }
+    std::ranges::sort( files );
+    return code && std::ranges::unique( files ).begin() - files.begin() >= std::ptrdiff_t( kExemplarFamilyMin );
+}
+
+// The class-kind symbols whose name ends with the head word, each with its directory, sorted by directory.
+inline std::vector<std::pair<std::string_view, NodeId>> affixCandidates( const IngestResult& ing, const ExemplarTask& t )
 {
     std::vector<std::pair<std::string_view, NodeId>> byDir;
     for( const Symbol& s : ing.symbols )
@@ -974,6 +988,14 @@ inline void familiesByAffix( const IngestResult& ing, const ExemplarTask& t, std
     }
     std::ranges::sort( byDir, []( const auto& a, const auto& b )
                        { return sortutil::svLess( a.first, b.first ) || ( a.first == b.first && a.second < b.second ); } );
+    return byDir;
+}
+
+// (e) affix: classes in one directory whose names end with the head word (a function name ending in the head is a
+// verb phrase, not a sibling: tmux `cmd_*_command`, helix `execute_command`, the TypeScript `getSyntaxKind`)
+inline void familiesByAffix( const IngestResult& ing, const ExemplarTask& t, std::optional<ExemplarFamily>& best )
+{
+    const std::vector<std::pair<std::string_view, NodeId>> byDir = affixCandidates( ing, t );
     for( auto run = byDir.begin(); run != byDir.end(); )
     {
         const auto end = std::find_if( run, byDir.end(), [&]( const auto& x )
@@ -988,7 +1010,10 @@ inline void familiesByAffix( const IngestResult& ing, const ExemplarTask& t, std
                 fam.add( s );
             }
         }
-        consider( ing, t, best, std::move( fam ) );
+        if( affixHasFiles( ing, fam ) )
+        {
+            consider( ing, t, best, std::move( fam ) );
+        }
         run = end;
     }
 }
@@ -1380,11 +1405,14 @@ inline std::vector<ExemplarTouch> exemplarTouchList( const IngestResult& ing, co
     return rows;
 }
 
+// The family line of a family grouped by names alone (rule=affix): a weak guess, said on the row itself and not only in the legend.
+inline constexpr std::string_view kAffixGrouping = "affix-only, weak: verify one m before copying";
+
 inline constexpr std::string_view kForExemplarFamilyLegend =
     "<!-- ripwire for exemplar_family: the task reads as adding one more of=; these are the EXISTING siblings it would join, read off the "
     "index (not a guarantee that a new one needs each row). rule= how they were grouped: base (implementors of key=), registry (the entries "
     "of the map or table key=), typed (instances of the struct type key=), attribute (items under the attribute or decorator key=), affix "
-    "(classes in one directory whose names end in key=: names alone, the weakest grouping, so read one <m> before trusting it). matched= the words of of= found in key= or scope=: why this family and not another "
+    "(classes in one directory whose names end in key=: names alone, the weakest grouping; the block then says so in grouping=, and its <m> and <touch> rows are leads to verify, not rows to copy). matched= the words of of= found in key= or scope=: why this family and not another "
     "(a family that matches few of the words is a weak guess). key_p= where key= is defined (file:line), scope= the directory the members "
     "were narrowed to (the deepest holding half of them), n= the members in scope (test, sample, example and benchmark code excluded). "
     "<m> n= a member, p=file:line, loc= its lines (a registry entry has none); the first <m> is the typical sibling (nearest the median "
@@ -1393,7 +1421,7 @@ inline constexpr std::string_view kForExemplarFamilyLegend =
     "mention at least half of them: where existing siblings are registered or listed (a registry, a name list, an exhaustive match, an "
     "import list), a candidate to edit, not a guarantee; a member is matched by its name, its registered name or its file's stem, with "
     "snake, Camel, kebab and UPPER forms folded, and a name or stem shared by several members counts once. total= such files, shown= and "
-    "capped=\"1\" when fewer rows are printed. <touch> p=file:line the line to copy: the first naming the typical member (the first <m>), "
+    "capped=\"1\" when fewer rows are printed. <touch> p=file:line the line to copy (a lead to verify when grouping= is weak): the first naming the typical member (the first <m>), "
     "else the first other code line mentioning one, an import line or a comment only when no code line does; share=named/of the distinct "
     "member names the file mentions out of the distinct names (by=\"stem\": the distinct file stems it mentions out of the distinct stems), "
     "its text that line, cut=\"1\" when cut to 120 bytes. Test, docs, vendored, generated, frozen and baseline files are not read. The "
@@ -1402,7 +1430,7 @@ inline constexpr std::string_view kForExemplarFamilyLegend =
 inline constexpr std::string_view kForExemplarFamilyCompactLegend =
     "<!-- ripwire for exemplar_family: existing siblings a new of= would join, not a guarantee; not in est_tokens. rule= base (implementors of "
     "key=), registry (entries of map key=), typed (instances of struct key=), attribute (items under macro or decorator key=), affix (classes "
-    "in one dir named for key=: names alone, the weakest grouping, read one <m> first); matched= words of of= found in key= or scope= (few: a weak guess); key_p= key's file:line; scope= dir holding "
+    "in one dir named for key=: names alone, weak: grouping= says so); matched= words of of= found in key= or scope= (few: a weak guess); key_p= key's file:line; scope= dir holding "
     "half of them; n= members (tests, samples, examples, benchmarks out); <m> p= file:line, loc= lines, the first nearest the median size (registry: "
     "listing order); shown=/capped=\"1\": rows cut. <touch_list> total= files outside the members' own naming at least half of them (by name, "
     "registered name or file stem; a shared name or stem counts once): where siblings are registered; shown=/capped=\"1\": cut. <touch> p= "
@@ -1456,6 +1484,10 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
     if( fam.members.size() > kExemplarMemberRows )
     {
         out += " shown=\"" + std::to_string( kExemplarMemberRows ) + "\" capped=\"1\""; // CAP-DISCLOSE: the rows are cut, n= counts all
+    }
+    if( fam.rule == ExemplarRule::Affix )
+    {
+        out += " grouping=\"" + std::string( kAffixGrouping ) + "\""; // the row says itself that names alone grouped it
     }
     out += ">";
     for( std::size_t i = 0; i < fam.members.size() && i < kExemplarMemberRows; ++i )
