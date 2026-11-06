@@ -197,6 +197,9 @@ else no "cycles (f) twin rc=$R12: $( printf '%s' "$CY12" | grep -oE '^<cycle [^>
 if [ "$R14" = 0 ] && printf '%s' "$C14" | grep -q 'members_capped=1:'; then
     ok "cycles (f) legend: the compact legend defines members_capped="
 else no "cycles (f) legend: no members_capped= definition in the answer's compact legend"; fi
+if [ "$R14" = 0 ] && printf '%s' "$C14" | grep -q 'members_capped=1:[^.]*first in SCC order, not ranked'; then
+    ok "cycles (f) legend order: the compact legend says which 12 rows are listed"
+else no "cycles (f) legend order: the compact members_capped= reading does not say the rows are first in SCC order, not ranked"; fi
 # (f) boundary + full legend (#541 review): a 13-file ring is the first size the cap cuts; --legend=full defines the
 #     attribute exactly when a shown cycle is cut, and the uncut 12-file twin's full legend does not mention it.
 mkring "$SH/ring13" 13
