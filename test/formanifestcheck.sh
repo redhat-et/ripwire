@@ -186,6 +186,21 @@ C
 printf 'int main(void) { return 0; }\n' >"$F/cmrepo/src/main.c"
 printf 'int lib(void) { return 1; }\n' >"$F/cmrepo/src/lib.c"
 
+# Noise shapes (review R1): a common word of a task matches a third-party dependency, a feature or a bin with a generic name, in a
+# manifest that is not about what the task asks. `shop`: a crate feature `handler`, a fuzz bin `path`, an npm dependency `http-server`,
+# a benchmarks/ package depending on `koa-router`, and a real package depending on `find-my-way`.
+mkdir -p "$F/shop/crates/shop-extra/src" "$F/shop/fuzz" "$F/shop/benchmarks/routers" "$F/shop/packages/web"
+printf '[workspace]\nmembers = ["crates/shop-extra"]\n' >"$F/shop/Cargo.toml"
+printf '[package]\nname = "shop-extra"\n\n[features]\nhandler = ["dep:shop"]\nmacros = []\n' >"$F/shop/crates/shop-extra/Cargo.toml"
+printf 'pub fn extra() -> u32 { 1 }\n' >"$F/shop/crates/shop-extra/src/lib.rs"
+printf '[package]\nname = "shop-fuzz"\n\n[[bin]]\nname = "path"\npath = "fuzz_targets/path.rs"\n' >"$F/shop/fuzz/Cargo.toml"
+printf '{\n  "name": "shop-test-page",\n  "devDependencies": {\n    "http-server": "14.0.0"\n  }\n}\n' >"$F/shop/packages/web/package.json"
+printf 'export const page = 1;\n' >"$F/shop/packages/web/index.js"
+printf '{\n  "name": "bench-routers",\n  "dependencies": {\n    "koa-router": "12.0.0"\n  }\n}\n' >"$F/shop/benchmarks/routers/package.json"
+mkdir -p "$F/shop/packages/router"
+printf '{\n  "name": "shop-router",\n  "dependencies": {\n    "find-my-way": "8.0.0"\n  }\n}\n' >"$F/shop/packages/router/package.json"
+printf 'export const route = 1;\n' >"$F/shop/packages/router/index.js"
+
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<manifest_rows .*</manifest_rows>' "$1" | head -1; }
 # has ARM FIXTURE TASK PATTERN... — the block fires and holds every (python regex) pattern, in order
@@ -226,7 +241,7 @@ has n2 acme "run the lint npm script on the app" '<mf p="package.json"' '<r l="5
 lacks n3 acme "change core logging" ''
 lacks n4 acme "speed up acme startup" ''
 has n4 acme "rename the acme package" '<mf p="package.json" matched="acme' 'kind="package">&quot;name&quot;: &quot;acme&quot;'
-lacks n5 acme "connect brokers faster" 'kind="main"'
+lacks n5 acme "connect the brokers package faster" 'kind="main"'
 has n5 acme "the main entry of brokers" '<mf p="packages/brokers/package.json"' 'kind="main">&quot;main&quot;'
 has c1 ferris "add a new extractor behind its own cargo feature like multipart" \
     '<mf p="ferris/Cargo.toml" matched="multipart"' '<r l="14" kind="feature">multipart = \[&quot;dep:multer&quot;\]</r>' \
@@ -235,15 +250,15 @@ lacks c1 ferris "add a new extractor behind its own cargo feature like multipart
 has c2 ferris "upgrade the tokio dependency" '<r l="23" kind="dep">\[dependencies\.tokio\]</r>'
 has c3 ferris "ship the ferris-cli binary" '<r l="6" kind="bin">name = &quot;ferris-cli&quot;</r>'
 lacks c4 ferris "speed up ferris routing" ''
-has p1 pyrepo "add msgpack support to widgetkit" '<mf p="pyproject.toml" matched="msgpack widgetkit"' \
+has p1 pyrepo "the msgpack extra of the widgetkit package" '<mf p="pyproject.toml" matched="msgpack widgetkit"' \
     '<r l="2" kind="package">name = &quot;widgetkit&quot;</r>' '<r l="8" kind="extra">msgpack = '
 lacks p1 pyrepo "rename notakey" ''
-has s1 pyrepo "make gadgets faster" '<mf p="sub/setup.cfg" matched="gadgets"' '<r l="2" kind="package">name = gadgets</r>'
+has s1 pyrepo "the gadgets package" '<mf p="sub/setup.cfg" matched="gadgets"' '<r l="2" kind="package">name = gadgets</r>'
 has g1 gorepo "the gizmo module" '<mf p="go.mod"' '<r l="1" kind="module">module example.com/acme/gizmo/v2</r>'
-has g1 gorepo "replace the nats.go client" '<r l="6" kind="dep">github.com/nats-io/nats.go v1.31.0</r>'
+has g1 gorepo "replace the nats.go dependency" '<r l="6" kind="dep">github.com/nats-io/nats.go v1.31.0</r>'
 lacks g1 gorepo "use errgroup from sync" ''
 has k1 cmrepo "start the meterd executable" '<mf p="CMakeLists.txt"' '<r l="3" kind="executable">add_executable\(meterd src/main.c\)</r>'
-has k1 cmrepo "link meterlib statically" '<r l="4" kind="library">ADD_LIBRARY\(meterlib STATIC src/lib.c\)</r>'
+has k1 cmrepo "link the meterlib library statically" '<r l="4" kind="library">ADD_LIBRARY\(meterlib STATIC src/lib.c\)</r>'
 lacks k1 cmrepo "the extra library" ''
 
 has e1 hostlib "write and register a hostlib plugin that observes calls" '<mf p="tests/plugin/pyproject.toml" matched="hostlib plugin"' \
@@ -252,9 +267,21 @@ lacks e2 hostlib "make hostlib calls faster" ''
 has e3 hostlib "ship a hostlib extension" '<mf p="contrib/setup.cfg"' '<r l="6" kind="entry-point" group="hostlib.ext">fancy = fancy.mod:Fancy</r>'
 has e4 hostlib "rename the hostctl command" '<mf p="pyproject.toml" matched="hostctl"' '<r l="5" kind="bin">hostctl = &quot;hostlib.cli:main&quot;</r>'
 
+# ── noise: a common task word is not a request for a same-named dependency, feature or bin ───────────────────────────────────
+lacks r1a shop "what enables debug_handler" ''
+has r1a shop "add the handler feature" '<mf p="crates/shop-extra/Cargo.toml"' 'kind="feature">handler = '
+lacks r1b shop "find the path from parse to render" ''
+has r1b shop "build the path binary" '<mf p="fuzz/Cargo.toml"' 'kind="bin">name = &quot;path&quot;'
+lacks r1c shop "serve it with python -m http.server" ''
+has r1c shop "upgrade the http-server dependency" '<mf p="packages/web/package.json"' 'kind="dev-dep">&quot;http-server&quot;'
+lacks r1d shop "upgrade the koa-router dependency" ''
+has r1d shop "upgrade the find-my-way dependency" '<mf p="packages/router/package.json"' 'kind="dep">&quot;find-my-way&quot;'
+lacks r1e shop "which find-my-way routes are slow" ''
+has r1e shop "add a new route matcher like find-my-way" '<mf p="packages/router/package.json"'
+
 # ── caps, dialects, placement ────────────────────────────────────────────────────────────────────────────────────────────────
-has cap1 acme "use kafkajs in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
-has cap2 acme "add kafkajs nats and mqtt to brokers" '<mf p="packages/brokers/package.json" matched="[^"]*" rows="4" shown="3" capped="1">'
+has cap1 acme "use the kafkajs dependency in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
+has cap2 acme "add the kafkajs, nats and mqtt dependencies to brokers" '<mf p="packages/brokers/package.json" matched="[^"]*" rows="4" shown="3" capped="1">'
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --json >"$TMP/j1.json"
 if [ -s "$TMP/j1.json" ] && ! grep -q 'manifest_rows' "$TMP/j1.json"; then ok "(j1) --json carries no block"; else no "(j1) --json"; fi
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=4000 >"$TMP/b1.xml"
