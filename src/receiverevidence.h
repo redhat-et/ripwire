@@ -3406,15 +3406,53 @@ struct ReceiverEvidence
         return type.has_value() && !type->empty() && methodOf( unalias( r.fileId, *type ), alias->second, false );
     }
 
-    // does module alias `root` (bound in the caller's file) name the file defining `c`
-    bool moduleNames( const Reference& r, std::string_view root, NodeId c ) const
+    // the half of a module-alias proof that reads the CALL alone (LADDER-HOIST: once per call, not once per candidate): the module alias
+    // `root` binds in the caller's file, and for a relative JS/TS specifier the in-tree path it joins to from the caller's
+    // directory. nullopt: `root` is no module alias of that file.
+    struct ModuleRoot
+    {
+        std::string_view source;            // the alias's import path, as the file wrote it
+        std::string      joined;            // a relative specifier joined onto the caller's directory; "" otherwise
+        bool             relative = false;  // a `./` or `../` specifier (Go keeps its own rule)
+    };
+    std::optional<ModuleRoot> moduleRootOf( const Reference& r, std::string_view root ) const
     {
         const auto it = moduleAlias.find( keyOf( r.fileId, '#', root ) );
         if( it == moduleAlias.end() || it->second.empty() )
         {
-            return false;
+            return std::nullopt;
         }
-        const std::string_view source = it->second;
+        ModuleRoot m;
+        m.source = it->second;
+        if( !m.source.starts_with( "./" ) && !m.source.starts_with( "../" ) )
+        {
+            return m;   // a package specifier (or a Go import path, which moduleRootNames reads as written)
+        }
+        // join the caller's directory with the relative specifier, then compare without the extension (or /index);
+        // moduleRootNames answers Go before it reads this
+        m.relative = true;
+        std::vector<std::string_view> parts;
+        const auto push = [ & ]( std::string_view p )
+        {
+            while( !p.empty() )
+            {
+                const std::size_t slash = p.find( '/' );
+                const std::string_view seg = p.substr( 0, slash );
+                p = slash == std::string_view::npos ? std::string_view{} : p.substr( slash + 1 );
+                if( seg.empty() || seg == "." ) { continue; }
+                if( seg == ".." ) { if( !parts.empty() ) { parts.pop_back(); } continue; }
+                parts.push_back( seg );
+            }
+        };
+        push( includerDir( rootRelPath( ing, r.fileId ) ) );
+        push( m.source );
+        for( std::string_view p : parts ) { if( !m.joined.empty() ) { m.joined.push_back( '/' ); } m.joined.append( p ); }
+        return m;
+    }
+    // does the module alias `m` (moduleRootOf, at call `r`) name the file defining `c`
+    bool moduleRootNames( const ModuleRoot& m, const Reference& r, NodeId c ) const
+    {
+        const std::string_view source = m.source;
         const std::string_view target = rootRelPath( ing, ing.symbols[ c ].fileId );
         if( r.lang == Lang::Go )
         {
@@ -3433,35 +3471,16 @@ struct ReceiverEvidence
             return !dir.empty() && source.size() >= dir.size() && source.ends_with( dir )
                 && ( source.size() == dir.size() || source[ source.size() - dir.size() - 1 ] == '/' );
         }
-        if( !source.starts_with( "./" ) && !source.starts_with( "../" ) )
+        if( !m.relative )
         {
             return false;   // a package specifier: outside the tree, or resolved by a bundler this rule does not model
         }
-        // join the caller's directory with the relative specifier, then compare without the extension (or /index)
-        std::vector<std::string_view> parts;
-        std::string_view base = includerDir( rootRelPath( ing, r.fileId ) );
-        const auto push = [ & ]( std::string_view p )
-        {
-            while( !p.empty() )
-            {
-                const std::size_t slash = p.find( '/' );
-                const std::string_view seg = p.substr( 0, slash );
-                p = slash == std::string_view::npos ? std::string_view{} : p.substr( slash + 1 );
-                if( seg.empty() || seg == "." ) { continue; }
-                if( seg == ".." ) { if( !parts.empty() ) { parts.pop_back(); } continue; }
-                parts.push_back( seg );
-            }
-        };
-        push( base );
-        push( source );
-        std::string joined;
-        for( std::string_view p : parts ) { if( !joined.empty() ) { joined.push_back( '/' ); } joined.append( p ); }
         std::string_view stem = target;
         if( const std::size_t dot = stem.rfind( '.' ); dot != std::string_view::npos && stem.find( '/', dot ) == std::string_view::npos )
         {
             stem = stem.substr( 0, dot );
         }
-        return stem == joined || ( stem.ends_with( "/index" ) && stem.substr( 0, stem.size() - 6 ) == joined );
+        return stem == m.joined || ( stem.ends_with( "/index" ) && stem.substr( 0, stem.size() - 6 ) == m.joined );
     }
 };
 

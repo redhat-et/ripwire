@@ -548,6 +548,7 @@ for _g in \
     forselfhookcheck \
     forsigspancheck \
     forsoftbudgetcheck \
+    fortailwidecheck \
     forunusedcheck \
     forwidencheck \
     freshclonecheck \
