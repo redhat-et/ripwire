@@ -2912,27 +2912,6 @@ inline bool servedBodyHead( std::string_view served, std::string_view head ) noe
     return false;
 }
 
-// EXCERPT-ARM: which arm openers a language has beyond `case`/`default` labels (a switch, so no shared-file Lang:: predicate)
-enum class ArmFamily : std::uint8_t
-{
-    CFamily,    // `else if (...) {` / `} else {`
-    FatArrow,   // Rust, C#, PHP `Pattern => {`
-    Python,     // `elif` / `else:`
-    Ruby        // `when` / `elsif` / `else`
-};
-inline ArmFamily armFamilyOf( Lang lang ) noexcept
-{
-    switch( lang )
-    {
-        case Lang::Rust:
-        case Lang::CSharp:
-        case Lang::Php:    return ArmFamily::FatArrow;
-        case Lang::Python: return ArmFamily::Python;
-        case Lang::Ruby:   return ArmFamily::Ruby;
-        default:           return ArmFamily::CFamily;
-    }
-}
-
 // EXCERPT-ARM: the line opens a match arm or a case of `lang` (allowlist): a Rust, C# or PHP `Pat => {` / `Pat =>` (its pattern's parens
 // balanced, no assignment or declaration before the arrow: never a JS `x => {` callback), a `case X:` / `default:` (C, C++, Java, JS, TS, Go,
 // C#, Swift, Python `match`), a Python `elif`/`else:`, a Ruby `when`/`elsif`/`else`, a C-family or Go `else if (...) {` / `} else {`. An `if`,
@@ -2945,9 +2924,9 @@ inline bool isArmHead( std::string_view code, Lang lang ) noexcept
         return false;
     }
     const auto startsWord = [ & ]( std::string_view w ) { return t.starts_with( w ) && ( t.size() == w.size() || !namesplit::isIdentChar( t[w.size()] ) ); };
-    const ArmFamily   family = armFamilyOf( lang );
+    const ArmOpeners  family = langFacts( lang ).armOpeners;
     const std::size_t arrow  = t.find( "=>" );
-    if( family == ArmFamily::FatArrow && arrow != std::string_view::npos && arrow > 0 && ( t.ends_with( "=>" ) || t.ends_with( "{" ) ) )
+    if( family == ArmOpeners::FatArrow && arrow != std::string_view::npos && arrow > 0 && ( t.ends_with( "=>" ) || t.ends_with( "{" ) ) )
     {
         int depth = 0;
         for( std::size_t i = 0; i < arrow; ++i )
@@ -2965,11 +2944,11 @@ inline bool isArmHead( std::string_view code, Lang lang ) noexcept
     {
         return true;
     }
-    if( family == ArmFamily::Python )
+    if( family == ArmOpeners::PythonElif )
     {
         return ( startsWord( "elif" ) || startsWord( "else" ) ) && t.ends_with( ':' );
     }
-    if( family == ArmFamily::Ruby )
+    if( family == ArmOpeners::RubyWhen )
     {
         return startsWord( "when" ) || startsWord( "elsif" ) || t == "else";
     }
