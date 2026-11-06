@@ -20,6 +20,8 @@
 #   (m1) a name or stem several members share is ONE unit: (a) four Rust fns in ONE file (one stem) are not credited to a file whose
 #        comment holds the stem; their registered names in a dispatcher still are (share 4/4); (b) four Python classes all named
 #        `Command` (one name) are not credited to a file that says "Command"; their four file stems in an import list still are (by="stem")
+#       (c) seven classes under three names (Codec x3, StreamReader x2, StreamWriter x2; cpython's 330 codecs): a file that says all three
+#           names is no listing (the name channel needs at least half as many distinct names as members); the seven stems still are
 #   (m2) a function's parameter lines are no registry entries (typed Python): the dict in its body is the family; a signature of
 #        `name: Type,` lines alone is no family
 #   (d1) a decorator is matched whatever its case (`@Widget()` for the head `widget`), with no other mention of the word in the file
@@ -178,6 +180,12 @@ printf 'class BaseCommand:\n    pass\n' > "$F/m1n/cmds/base.py"
 for c in alpha beta gamma delta; do printf 'from .base import BaseCommand\n\n\nclass Command(BaseCommand):\n    def handle(self):\n        return "%s"\n' "$c" > "$F/m1n/cmds/$c.py"; done
 printf '# a Command line tool for the shell\nx = 1\n' > "$F/m1n/notes.py"
 printf 'from cmds import alpha, beta, gamma, delta\n' > "$F/m1n/registry.py"
+mkdir -p "$F/m1c/cmds"
+printf 'class BaseCodec:\n    pass\n' > "$F/m1c/cmds/base.py"
+i=0; for c in alpha:Codec beta:Codec gamma:Codec delta:StreamReader kappa:StreamReader sigma:StreamWriter omega:StreamWriter; do
+    printf 'from .base import BaseCodec\n\n\nclass %s(BaseCodec):\n    pass\n' "${c#*:}" > "$F/m1c/cmds/${c%%:*}.py"; i=$((i+1)); done
+printf '# Codec, StreamReader and StreamWriter live elsewhere\nx = 1\n' > "$F/m1c/notes.py"
+printf 'from cmds import alpha, beta, gamma, delta, kappa, sigma, omega\n' > "$F/m1c/registry.py"
 printf 'def default_handler_options(\n    timeout: int,\n    retries: int,\n    backoff: float,\n    jitter: bool,\n):\n    return 1\n' > "$F/m2/app/opts.py"
 printf 'def handler_table(\n    timeout: int,\n    retries: int,\n):\n    return {\n        "json": 1,\n        "xml": 2,\n        "csv": 3,\n        "yaml": 4,\n        "toml": 5,\n        "ini": 6,\n    }\n' > "$F/m2/app/table.py"
 for w in foo bar baz; do printf "import { Widget } from '../deco'\n\n@Widget()\nexport class %sPanel {\n  x = 1\n}\n" "$w" > "$F/s3/src/ui/$w.ts"; done
@@ -296,6 +304,11 @@ run m1n "--for=add a new command" >"$TMP/m1n.xml"
 if block "$TMP/m1n.xml" | grep -q ' rule="base" key="BaseCommand"[^>]* n="4"'; then ok "(m1) m1n: base BaseCommand n=4 (four classes named Command)"; else no "(m1) m1n family: $( block "$TMP/m1n.xml" | head -c 300 )"; fi
 no_touch m1 "$TMP/m1n.xml" notes.py "the word Command is one shared name, not four members"
 if touchrows "$TMP/m1n.xml" | grep -q '<touch p="registry.py:[0-9]*" share="4/4" by="stem"'; then ok "(m1) m1n: registry.py names the four file stems: share=\"4/4\" by=\"stem\""; else no "(m1) m1n stems: $( touchrows "$TMP/m1n.xml" | head -c 300 )"; fi
+# m1 (c): seven classes under three names (Codec x3, StreamReader x2, StreamWriter x2): the names say nothing per member, the stems do
+run m1c "--for=add a new codec" >"$TMP/m1c.xml"
+if block "$TMP/m1c.xml" | grep -q ' rule="base" key="BaseCodec"[^>]* n="7"'; then ok "(m1) m1c: base BaseCodec n=7 (seven classes under three names)"; else no "(m1) m1c family: $( block "$TMP/m1c.xml" | head -c 300 )"; fi
+no_touch m1 "$TMP/m1c.xml" notes.py "three shared names across seven members"
+if touchrows "$TMP/m1c.xml" | grep -q '<touch p="registry.py:[0-9]*" share="7/7" by="stem"'; then ok "(m1) m1c: registry.py names the seven file stems"; else no "(m1) m1c stems: $( touchrows "$TMP/m1c.xml" | head -c 300 )"; fi
 # m2: parameter lines are no entries
 silent m2 m2 "add a new handler option"
 run m2 "--for=add a new handler table" >"$TMP/m2.xml"

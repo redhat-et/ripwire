@@ -1075,7 +1075,8 @@ inline constexpr std::array<std::string_view, 8> kImportLineHeads { "import ", "
 // The units a share counts. A name or a stem that several members share is ONE unit, so a token that is a shared name credits once,
 // not n times (django's 23 `Command` classes are one name; helix's typed.rs holds every member and is one stem): the share is
 // distinct names mentioned / distinct names, or distinct file stems mentioned / distinct stems. A channel with fewer than
-// kExemplarFamilyMin units is off (two names are no pattern), and a registry has no stems (its entries live in the registry itself).
+// kExemplarFamilyMin units is off (two names are no pattern), the name channel is also off when the distinct names are fewer than
+// half the members (330 codec classes under 3 names), and a registry has no stems (its entries live in the registry itself).
 // A name unit is a member's registered name (alt, else its name); its name is a second spelling of the same unit.
 struct TouchUnits
 {
@@ -1159,7 +1160,7 @@ inline TouchUnits touchUnits( const IngestResult& ing, const ExemplarFamily& fam
     }
     const std::vector<std::uint32_t> nameId = unitIdsOf( nameKeys, nameDistinct );
     const std::vector<std::uint32_t> stemId = unitIdsOf( stemKeys, stemDistinct );
-    const bool namesOn = nameDistinct.size() >= kExemplarFamilyMin;
+    const bool namesOn = nameDistinct.size() >= kExemplarFamilyMin && nameDistinct.size() * 2 >= fam.members.size(); // 330 members under 3 names: a mention of the names says nothing per member
     const bool stemsOn = fam.rule != ExemplarRule::Registry && stemDistinct.size() >= kExemplarFamilyMin;
     u.names = namesOn ? std::uint32_t( nameDistinct.size() ) : 0;
     u.stems = stemsOn ? std::uint32_t( stemDistinct.size() ) : 0;
