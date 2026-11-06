@@ -1158,6 +1158,7 @@ Discloses: **none**
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
 | `kDefaultRecallTopK` | `6` | — | — |
 | `kRecallDemotedNamedMax` | `5` | — | — |
+| `kRecallTitleMaxBytes` | `120` | — | — |
 
 ### `src/receiverevidence.h`
 
