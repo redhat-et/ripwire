@@ -56,6 +56,12 @@
 #   D9-D14 (fix round 1; RED on 8c7cf2011 where [P]): a Dir-near map cuts no table (D9); the home table counts table rows, then a #define list
 #          (D10, D7 with the home file sorting last); a far registration keeps its reserve slot (D11); one-call nearness kept, its twin cut (D12);
 #          the answer's reader rows anchor nothing when they are most of it (D13); a hub (fan-in > 16) lends no one-call nearness (D14)
+#   T8/T8b (forliteral-3 G-STORED-B): a task with no cue word lists strong rows only (a top-level macro row prints, #define X-macro rows do not)
+#   E1-E10 (forliteral-3 EXCERPT-ARM; RED on 2562d9931 where [P]): an <x> window that leaves out the head of the match arm or case holding its site
+#          starts there (Rust tuple-pattern arm through an else, Go case through an if, Python elif, C++ brace-less case, two sites in one arm);
+#          twins keep the old window: an arm 13 lines up (cap), an if above the window, a JS arrow callback; determinism, prefix, xmllint
+#   B1-B3 (forliteral-3 BODY-ABOVE-CHECK): body="above" only beside a whole <b>: a hop row with a fold skip (rw-02 P1) and a truncated <b> are not;
+#          twin: a whole <b> still is
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -1668,6 +1674,184 @@ farreaders hub.knob > "$EX/d14/zzz/far/readers.cpp"
 Q="$( lits <<<"$( ex d14 'getSetting and the hub.knob setting' )" )"
 if [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "src/cfg/defaults.cpp:1 " ] && has "$Q" 'lit_cut="40"'; then ok "D14 [P] a hub anchor lends no one-call nearness: its 40 callers are cut, the Dir-near default stays"
 else no "D14 hub: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
+
+# ── EXCERPT-ARM (forliteral-3 commit 2; [P] = red on 2562d9931): an <x> window that leaves out the head of the match arm or case holding its
+# site starts at that head (at most 12 lines up), arm="1" and its legend clause say so; nothing else moves ──────────────────────────────────
+EA="$TMP/excerptarm"; mkdir -p "$EA/src" "$EA/app"
+cat > "$EA/src/rate.rs" <<'RS'
+pub fn handle_it(target: u8, kind: u8) -> u32 {
+    let reader = 1;
+    match (target, kind) {
+        (Target::Source, Kind::Source) => {
+            let a = reader + 1;
+            a
+        }
+        (Target::Table, Kind::Source) => {
+            let table = lookup(reader);
+            let check = table.size;
+            let source_id = if let Some(id) = table.associated_source_id {
+                id
+            } else {
+                bail("RUST_ARM_LIMIT is not for table without source")
+            };
+            source_id
+        }
+        _ => 0,
+    }
+}
+
+pub fn far_arm(target: u8) -> u32 {
+    match target {
+        Target::Far => {
+            let a1 = 1;
+            let a2 = 2;
+            let a3 = 3;
+            let a4 = 4;
+            let a5 = 5;
+            let a6 = 6;
+            let a7 = 7;
+            let a8 = 8;
+            let a9 = 9;
+            let a10 = 10;
+            let a11 = 11;
+            let a12 = 12;
+            bail("RUST_FAR_LIMIT is past the arm cap")
+        }
+        _ => 0,
+    }
+}
+
+pub fn two_sites(target: u8) -> u32 {
+    let x = 1;
+    match target {
+        Target::Two => {
+            let v = pick_value();
+            let w = v.width;
+            log("RUST_TWO_LIMIT first");
+            let z = w + 1;
+            let q = z + 2;
+            let r = q + 3;
+            log("RUST_TWO_LIMIT second");
+            r
+        }
+        _ => 0,
+    }
+}
+RS
+cat > "$EA/src/case.go" <<'GO'
+package src
+
+func dispatchCase(k int) int {
+	switch k {
+	case 1:
+		return 1
+	case 2:
+		v := lookupThing()
+		w := v.Field
+		if w > 0 {
+			return emit("GO_CASE_LIMIT reached")
+		}
+		return w
+	}
+	return 0
+}
+GO
+cat > "$EA/app/branch.py" <<'PY'
+def py_branch(x):
+    a = 1
+    if x == 1:
+        return a
+    elif x == 2:
+        val = x.payload
+        other = val + 1
+        raise ValueError("PY_ELIF_LIMIT exceeded")
+    b = 2
+    c = 3
+    return b + c
+
+
+def py_if_only(x):
+    a = 1
+    b = 2
+    if x:
+        c = x.payload
+        d = c + 1
+        e = d + 1
+        raise ValueError("PY_IF_LIMIT exceeded")
+    f = 3
+    g = 4
+    return f + g
+PY
+cat > "$EA/src/cases.cpp" <<'CC'
+int cpp_case(int k) {
+    int r = 0;
+    switch (k) {
+    case 1:
+        r = 1;
+        break;
+    case 2:
+        r = table.width;
+        r += 2;
+        log("CPP_CASE_LIMIT hit");
+        break;
+    default:
+        break;
+    }
+    return r;
+}
+CC
+cat > "$EA/app/cb.js" <<'JS'
+function jsCallback(items) {
+  const a = 1;
+  const b = 2;
+  items.forEach(x => {
+    const c = x.payload;
+    const d = c + 1;
+    const e = d + 1;
+    throw new Error("JS_CB_LIMIT reached");
+  });
+  const f = 3;
+  return f;
+}
+JS
+ea(){ ( cd "$EA" || exit 1; "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
+eaoff(){ ( cd "$EA" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
+xel(){ python3 -I -c 'import sys,re;s=sys.stdin.read();i=s.find("<lit ");m=re.search(r"<x [^>]*>.*?</x>",s[i:] if i>=0 else "",re.S);print(m.group(0) if m else "",end="")'; }
+armx(){ local task="$1" want="$2" body="$3" label="$4"; local A; A="$( ea "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
+    if [ "$rc" -eq 0 ] && has "$X" "$want" && has "$X" 'arm="1"' && has "$X" "$body" && has "$A" 'x arm=1: a window starts at the head'; then ok "$label"
+    else no "$label: rc=$rc $( grep -o '<x [^>]*>' <<<"$X" )"; fi; }
+armx RUST_ARM_LIMIT 'l="1,8-19" of="1-20"' 'table.associated_source_id' 'E1 [P] Rust: a site in an else inside a tuple-pattern match arm: the window starts at the arm (rw-02 shape), the field read inside'
+armx GO_CASE_LIMIT 'l="3,7-16" of="3-16"' 'w := v.Field' 'E2 [P] Go: a site in an if inside a switch case: the window starts at the case'
+armx PY_ELIF_LIMIT 'l="1,5-11" of="1-11"' 'val = x.payload' 'E3 [P] Python: a site in an elif branch: the window starts at the elif'
+armx CPP_CASE_LIMIT 'l="1,7-15" of="1-16"' 'r = table.width;' 'E4 [P] C++: a site in a brace-less case: the window starts at the case label'
+armx RUST_TWO_LIMIT 'l="43,46-58" of="43-58"' 'let w = v.width;' 'E5 [P] two sites in one arm: one window from the arm head'
+# near misses [G]: the old window, no arm=, no clause
+noarm(){ local task="$1" want="$2" label="$3"; local A; A="$( ea "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
+    if [ "$rc" -eq 0 ] && has "$X" "$want" && ! has "$A" 'arm="1"' && ! has "$A" 'x arm=1'; then ok "$label"; else no "$label: rc=$rc $( grep -o '<x [^>]*>' <<<"$X" )"; fi; }
+noarm RUST_FAR_LIMIT 'l="22,36-41" of="22-41"' 'E6 [G] an arm head 13 lines up is past the cap: the old window'
+noarm PY_IF_LIMIT 'l="14,20-24" of="14-24"' 'E7 [G] an if block (no arm) above the window: the old window'
+noarm JS_CB_LIMIT 'l="1,7-12" of="1-12"' 'E8 [G] a JS arrow callback is no arm: the old window'
+A1="$( ea --for=RUST_ARM_LIMIT )"; A2="$( ea --for=RUST_ARM_LIMIT )"
+S1="$( python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit[^>]*?-->","",s,flags=re.S);s=re.sub(r"<lit [^>]*>.*?</lit>","",s,flags=re.S);print(s,end="")' <<<"$A1" )"
+if [ -n "$A1" ] && [ "$A1" = "$A2" ] && [ "$S1" = "$( eaoff --for=RUST_ARM_LIMIT )" ]; then ok "E9 [G] deterministic; the answer minus the block is the switch-off answer"; else no "E9 determinism or prefix moved"; fi
+if command -v xmllint >/dev/null 2>&1; then if printf '%s' "$A1" | xmllint --noout - 2>/dev/null; then ok "E10 [G] well-formed"; else no "E10 not well-formed"; fi; else echo "  SKIP  E10 xmllint not installed"; fi
+# BODY-ABOVE-CHECK [P]: body="above" only when the answer printed the owner's whole <b>. A hop row (<h l= p= n=>) beside a fold skip printed no
+# body (rw-02 P1), and a truncated <b> (lines=1-87/115) stops before the site: both now serve the lit's own excerpt holding the site line
+python3 -I - "$EA/app/rate.py" <<'PY'
+import sys
+lines=["def helper_a(x):","    return x + 1","","","def helper_b(x):","    return x * 2","","","def handle_big_rate(req):","    total = helper_a(req.size)"]
+lines+=[f"    step_{i:03d} = helper_b(total + {i})  # padding the body so it is long" for i in range(110)]
+lines+=['    if req.kind == "table":','        raise ValueError("BIG_RATE_LIMIT is not for table without source")',"    return total",""]
+open(sys.argv[1],"w").write("\n".join(lines)+"\n")
+PY
+bodyab(){ local task="$1" label="$2"; local A; A="$( ea "--for=$task" )"; local rc=$?; local L; L="$( python3 -I -c 'import sys;s=sys.stdin.read();i=s.find("<lit ");print(s[i:s.find("</lit>",i)+6] if i>=0 else "")' <<<"$A" )"
+    if [ "$rc" -eq 0 ] && has "$L" '<ls p="app/rate.py" l="122"' && ! has "$L" 'body="above"' && has "$L" '<x p="app/rate.py" n="handle_big_rate"' && has "$L" 'BIG_RATE_LIMIT is not for table'; then ok "$label"
+    else no "$label: rc=$rc $( grep -o '<ls [^>]*>' <<<"$L" ) $( grep -o '<x [^>]*>' <<<"$L" )"; fi; }
+bodyab 'How is the BIG_RATE_LIMIT check executed?' 'B1 [P] a hop row and a fold skip of the owner are no body above: the excerpt is served'
+bodyab 'How is the BIG_RATE_LIMIT check in handle_big_rate executed?' 'B2 [P] a truncated <b> of the owner that stops before the site is no body above (neighbour): the excerpt is served'
+printf 'def setup_small(r):\n    return r.check("SMALL_ABOVE_LIMIT")\n' > "$EA/app/small.py"
+A="$( ea '--for=How does setup_small use SMALL_ABOVE_LIMIT?' )"
+if has "$A" '<b t="fn" l="1" p="app/small.py" n="setup_small"' && has "$A" 'in="setup_small" ink="fn" body="above"'; then ok "B3 [G] twin: a whole <b> printed above still says body=above"; else no "B3 whole body above: $( grep -o '<ls [^>]*>' <<<"$A" )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"

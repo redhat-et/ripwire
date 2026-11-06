@@ -25,8 +25,10 @@
 //   * <b> the whole body of the function or method holding a shown site when it is kForLiteralWholeBodyLines lines or fewer
 //     (at most kForLiteralBodies owners in row order), or <x> an excerpt of a longer one: its signature line plus one window
 //     [site-1, site+5] per shown site (windows merged only where they touch; l= lists the ranges, an ellipsis line sits between
-//     them; of= is the body's lines; next= names the whole body); a body this answer already printed is not repeated
-//     (body="above" on its rows); an owner past the cap prints no body and its rows say body="held".
+//     them; of= is the body's lines; next= names the whole body); EXCERPT-ARM: a window that leaves out the head of the match arm
+//     or case holding its site starts at that head, kForLiteralArmLines up at most (arm="1"); a body this answer already printed
+//     WHOLE in a <b> is not repeated (body="above" on its rows; a hop row, a fold skip or a truncated <b> is no body above);
+//     an owner past the cap prints no body and its rows say body="held".
 // Several sites are always listed with counts: the block never picks one. floor="1" when the scan stopped early (budget,
 // unreadable files) or a source site was left unclassified (k="?": comment= cannot see it): every count is then a floor. No source site, nothing printed (a literal met only in tests, docs or comments
 // anchors nothing; never a "the literal is unused" claim).
@@ -135,6 +137,7 @@ inline constexpr std::size_t kForLiteralBodyCapBytes  = 3000;   // a short body 
 inline constexpr std::uint32_t kForLiteralWholeBodyLines = 10;  // a body of at most this many lines is served whole; a longer one as an excerpt
 inline constexpr std::uint32_t kForLiteralExcerptBefore = 1;    // lines before a site in its excerpt window
 inline constexpr std::uint32_t kForLiteralExcerptAfter  = 5;    // lines after it: what the code does with a literal follows the read (+2/+3 drops fzf R2)
+inline constexpr std::uint32_t kForLiteralArmLines      = 12;   // EXCERPT-ARM: a window widens up to the head of the match arm or case holding its site, at most this many lines up
 inline constexpr std::size_t kForLiteralTierFiles     = 64;     // source hit files classified (k=); past it k="?"
 inline constexpr std::size_t kForLiteralLineBytes     = 200;    // the matched line's text, cut on a UTF-8 boundary
 inline constexpr std::size_t kForLiteralMinQuoted     = 6;
@@ -216,6 +219,11 @@ inline constexpr std::string_view kForLiteralStrongLegend =
     "<!-- ripwire for lit: the task has no table or registration word, so only strong rows are listed: a registration call (reg=), a top level macro or "
     "call row (tbl=item), a macro table row (tbl= a name! opener). weak=N source sites read that are other table rows or no row, not listed. -->";
 static_assert( kForLiteralStrongLegend.find( "--", 4 ) == kForLiteralStrongLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+// EXCERPT-ARM: present only with arm= on an <x> (the first element that prints it)
+inline constexpr std::string_view kForLiteralArmLegend =
+    "<!-- ripwire for lit: x arm=1: a window starts at the head of the match arm or case holding its site (12 lines up at most), not one line above it. -->";
+static_assert( kForLiteralArmLegend.find( "--", 4 ) == kForLiteralArmLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForLiteralArmLines == 12, "the arm legend says how far up a window may widen: 12 lines" );
 // rv-reg2-delta D4: present only with tail= (the first element that prints it)
 inline constexpr std::string_view kForLiteralTailLegend =
     "<!-- ripwire for lit: tail=N: a dotted name found no site; its last part lists quoted keys and its definition, N sites not listed. -->";
@@ -895,6 +903,7 @@ struct ForLiteralRender
     bool        unread = false;   // shape=table: a table-rows-only anchor with more sites than are read for a row, none of those read a row: unknown, not "no table"
     bool        cutLegend = false;   // this element carries the lit_cut legend
     bool        tailLegend = false;  // this element carries the tail= legend
+    bool        armLegend  = false;  // this element carries the arm= legend
 };
 
 // LIT-SITE-DECOY: what the ranked answer above the block stands on, read to order the literal's sites by nearness to it
@@ -2492,13 +2501,17 @@ inline bool isPythonDocstringAt( const std::string& text, std::size_t start ) no
 using LineRange = std::pair<std::uint32_t, std::uint32_t>;   // inclusive, 1-based
 
 // the excerpt of a body: its signature line `first` plus a window [site-before, site+after] per site line, clipped to
-// [first, last], overlapping or touching windows merged; ascending and disjoint
-inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& siteLines, std::uint32_t first, std::uint32_t last )
+// [first, last], overlapping or touching windows merged; ascending and disjoint. `armHeads` (parallel to siteLines, 0 = none): a window
+// starts there instead, at the head of the match arm or case that holds its site (armHeadAbove)
+inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& siteLines, std::uint32_t first, std::uint32_t last,
+                                             const std::vector<std::uint32_t>& armHeads = {} )
 {
     std::vector<LineRange> w{ LineRange{ first, first } };
-    for( const std::uint32_t l : siteLines )
+    for( std::size_t i = 0; i < siteLines.size(); ++i )
     {
-        const std::uint32_t a = std::max( first, l > kForLiteralExcerptBefore ? l - kForLiteralExcerptBefore : 1u );
+        const std::uint32_t l    = siteLines[i];
+        const std::uint32_t head = i < armHeads.size() ? armHeads[i] : 0;
+        const std::uint32_t a    = std::max( first, head > 0 && head < l ? head : ( l > kForLiteralExcerptBefore ? l - kForLiteralExcerptBefore : 1u ) );
         const std::uint32_t b = std::min( last, l + kForLiteralExcerptAfter );
         if( a <= b )
         {
@@ -2521,9 +2534,8 @@ inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& s
     return merged;
 }
 
-// the lines of every range of `text`, each range newline-joined (the grep verb's own slicing core, search.h grepLineRangeText),
-// the ranges joined by a line holding one ellipsis
-inline std::string linesOfRanges( const std::string& text, const std::vector<LineRange>& ranges )
+// the byte offset where each line of `text` starts (line 1 at index 0)
+inline std::vector<std::size_t> lineStartsOf( const std::string& text )
 {
     std::vector<std::size_t> starts{ 0 };
     for( std::size_t i = 0; i < text.size(); ++i )
@@ -2533,6 +2545,13 @@ inline std::string linesOfRanges( const std::string& text, const std::vector<Lin
             starts.push_back( i + 1 );
         }
     }
+    return starts;
+}
+
+// the lines of every range of `text`, each range newline-joined (the grep verb's own slicing core, search.h grepLineRangeText),
+// the ranges joined by a line holding one ellipsis. `starts` = lineStartsOf( text ), computed once by a caller that also reads lines by number
+inline std::string linesOfRanges( const std::string& text, const std::vector<LineRange>& ranges, const std::vector<std::size_t>& starts )
+{
     const std::uint32_t count = grepRealLineCount( text, starts );
     std::string         out;
     for( const LineRange& r : ranges )
@@ -2546,6 +2565,10 @@ inline std::string linesOfRanges( const std::string& text, const std::vector<Lin
         out += grepLineRangeText( text, starts, count, r.first, b );
     }
     return out;
+}
+inline std::string linesOfRanges( const std::string& text, const std::vector<LineRange>& ranges )
+{
+    return linesOfRanges( text, ranges, lineStartsOf( text ) );
 }
 
 // cut every line of `lines` longer than `cap` bytes on a UTF-8 boundary (an ellipsis marks the cut); true when one was cut
@@ -2588,21 +2611,133 @@ inline std::string rangesAttr( const std::vector<LineRange>& ranges )
     }
     return out;
 }
+// BODY-ABOVE-CHECK (OS-6 finding 1): `head` (` l= p= n=`) stands in a <b> element of `served`, the body printed whole above. A hop row
+// (`<h l= p= n=>`) or a fold's skip carries the same attributes and printed no body: it is no `body="above"` (rw-02 P1 said above for a body
+// the answer never served). Neither is a <b truncated="1">, whose lines may stop before the site (a 115-line body cut at line 87).
+inline bool servedBodyHead( std::string_view served, std::string_view head ) noexcept
+{
+    for( std::size_t at = served.find( head ); at != std::string_view::npos; at = served.find( head, at + 1 ) )
+    {
+        const std::size_t open  = served.rfind( '<', at );
+        const std::size_t close = open == std::string_view::npos ? std::string_view::npos : served.find( '>', open );
+        if( open != std::string_view::npos && served.substr( open, 3 ) == "<b " && close > at && close != std::string_view::npos
+            && served.substr( open, close - open ).find( " truncated=\"1\"" ) == std::string_view::npos )
+        {
+            return true;   // a whole <b>; a truncated one (lines=1-87/115) may leave the site out, so this answer serves its own excerpt
+        }
+    }
+    return false;
+}
+
+// EXCERPT-ARM: the line opens a match arm or a case of `lang` (allowlist): a Rust, C# or PHP `Pat => {` / `Pat =>` (its pattern's parens
+// balanced, no assignment or declaration before the arrow: never a JS `x => {` callback), a `case X:` / `default:` (C, C++, Java, JS, TS, Go,
+// C#, Swift, Python `match`), a Python `elif`/`else:`, a Ruby `when`/`elsif`/`else`, a C-family or Go `else if (...) {` / `} else {`. An `if`,
+// a loop, a function or anything else is no arm.
+inline bool isArmHead( std::string_view code, Lang lang ) noexcept
+{
+    const std::string_view t = trimWs( code );
+    if( t.empty() )
+    {
+        return false;
+    }
+    const auto startsWord = [ & ]( std::string_view w ) { return t.starts_with( w ) && ( t.size() == w.size() || !namesplit::isIdentChar( t[w.size()] ) ); };
+    const bool fatArrowLang = lang == Lang::Rust || lang == Lang::CSharp || lang == Lang::Php;
+    const std::size_t arrow = t.find( "=>" );
+    if( fatArrowLang && arrow != std::string_view::npos && arrow > 0 && ( t.ends_with( "=>" ) || t.ends_with( "{" ) ) )
+    {
+        int depth = 0;
+        for( std::size_t i = 0; i < arrow; ++i )
+        {
+            depth += t[i] == '(' || t[i] == '[' ? 1 : ( t[i] == ')' || t[i] == ']' ? -1 : 0 );
+            const bool assign = t[i] == '=' && ( i == 0 || std::string_view( "=!<>" ).find( t[i - 1] ) == std::string_view::npos ) && ( i + 1 >= t.size() || t[i + 1] != '=' );
+            if( depth < 0 || assign )
+            {
+                return false;
+            }
+        }
+        return depth == 0 && !startsWord( "let" ) && !startsWord( "const" ) && !startsWord( "var" ) && !startsWord( "return" ) && !startsWord( "fn" ) && !startsWord( "pub" );
+    }
+    if( ( startsWord( "case" ) || startsWord( "default" ) ) && ( t.ends_with( ':' ) || t.ends_with( ": {" ) || t.ends_with( ":{" ) ) )
+    {
+        return true;
+    }
+    if( lang == Lang::Python )
+    {
+        return ( startsWord( "elif" ) || startsWord( "else" ) ) && t.ends_with( ':' );
+    }
+    if( lang == Lang::Ruby )
+    {
+        return startsWord( "when" ) || startsWord( "elsif" ) || t == "else";
+    }
+    const std::string_view e = t.starts_with( '}' ) ? trimWs( t.substr( 1 ) ) : t;
+    return ( e.starts_with( "else if" ) || e == "else {" || e == "else{" ) && t.ends_with( '{' );
+}
+
+// EXCERPT-ARM: the head line of the match arm or case that holds the site at `site` (1-based), when the window [site-1, ...] leaves it out
+// and it stands at most kForLiteralArmLines lines up, below `first` (the signature); 0 otherwise. The walk climbs the lines that open a less
+// indented block: one already inside the window is shown, so the walk goes on to the next (rw-02: an `else {` at site-1 inside the arm
+// `(Table, Source) => {` seven lines up); the first one above the window must be an arm (isArmHead), anything else ends it with no widening.
+inline std::uint32_t armHeadAbove( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t site, std::uint32_t first, Lang lang )
+{
+    const auto lineText = [ & ]( std::uint32_t l ) -> std::string_view
+    {
+        const std::size_t b = starts[l - 1];
+        const std::size_t e = l < starts.size() ? starts[l] - 1 : text.size();
+        return std::string_view( text ).substr( b, e > b ? e - b : 0 );
+    };
+    if( site < 2 || site > starts.size() )
+    {
+        return 0;
+    }
+    const std::uint32_t windowStart = site > kForLiteralExcerptBefore ? site - kForLiteralExcerptBefore : 1u;
+    std::size_t         cur         = lintdetail::indentOf( lineText( site ) );
+    for( std::uint32_t l = site - 1; l > first && l + kForLiteralArmLines >= site; --l )
+    {
+        const std::string_view line = lineText( l );
+        const std::string_view t    = trimWs( line );
+        const std::size_t      in   = lintdetail::indentOf( line );
+        if( t.empty() || in >= cur || openerWalkSkips( t ) )
+        {
+            continue;
+        }
+        cur = in;
+        if( l >= windowStart )
+        {
+            continue;   // an opener the window already shows: the arm, if any, is further up
+        }
+        return isArmHead( openerCode( line ), lang ) ? l : 0;
+    }
+    return 0;
+}
+
 // <x> for the body [first, last] of `s` in `text`: the signature line and one window per site line (l= lists the ranges, of= the body,
-// next= the whole body)
+// next= the whole body); arm="1" when a window starts at the head of the match arm or case holding its site (armHeadAbove)
 inline std::string excerptElement( const std::string& text, const std::string& path, const Symbol& s, std::uint32_t first, std::uint32_t last,
-                                   const std::vector<std::uint32_t>& siteLines, RedactCounts* redact )
+                                   const std::vector<std::uint32_t>& siteLines, RedactCounts* redact, bool* armWidened = nullptr )
 {
     std::vector<char>      esc;
-    const std::vector<LineRange> ranges = excerptRanges( siteLines, first, last );
+    const std::vector<std::size_t> starts = lineStartsOf( text );   // once per body: armHeadAbove reads lines by number, linesOfRanges slices them
+    std::vector<std::uint32_t> heads( siteLines.size(), 0 );
+    bool                       widened = false;
+    for( std::size_t i = 0; i < siteLines.size(); ++i )
+    {
+        heads[i] = armHeadAbove( text, starts, siteLines[i], first, s.lang );
+        widened  = widened || heads[i] > 0;
+    }
+    const std::vector<LineRange> ranges = excerptRanges( siteLines, first, last, heads );
     std::string x = "<x p=\"";
     x += escapeXml( path, esc );
     x += "\" n=\"";
     x += escapeXml( s.name, esc );
     x += "\" l=\"" + rangesAttr( ranges ) + "\" of=\"" + std::to_string( first ) + "-" + std::to_string( last ) + "\"";
+    x += widened ? " arm=\"1\"" : "";
+    if( armWidened != nullptr )
+    {
+        *armWidened = *armWidened || widened;
+    }
     // train 42b T-3: each window line is cut at kForLiteralLineBytes like an <ls> row (a minified one-line body printed 48.9 KB
     // whole); cut="1" says a line was cut, next= prints the whole body
-    std::string lines = linesOfRanges( text, ranges );
+    std::string lines = linesOfRanges( text, ranges, starts );
     redactInPlace( lines, redact );   // CR 4423843223: a window of raw source is a body-emission seam; redact BEFORE the cut so a key is never half-cut
     const bool  cut   = capLineBytes( lines, kForLiteralLineBytes );
     x += cut ? " cut=\"1\"" : "";
@@ -2624,6 +2759,7 @@ struct ForLiteralLimits
     bool        tailKeysOnly   = false;  // the last part of a dotted name, tried after the name found nothing: only quoted-key rows and its definition are listed
     bool        strongOnly     = false;  // TableCue::StrongRowOnly: only registration calls, top-level macro/call rows and macro-table rows are listed (weak=)
     bool        tailLegendAbove = false; // an earlier element of the task carries the tail= legend
+    bool        armLegendAbove  = false; // an earlier element of the task carries the arm= legend
 };
 
 // THE BLOCK. `served` = the answer's own bytes after <sigs> (bodies, fold, slot, hops): a body whose <b … l= p= n=> head is in it
@@ -2894,6 +3030,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     std::vector<NodeId> owners;
     std::vector<char>   ownerAbove;   // parallel: 1 = already printed by the answer, 2 = body held by the kForLiteralBodies cap, 0 = otherwise
     std::string         bodiesXml;
+    bool                armWindow = false;   // an excerpt window starts at the head of the arm holding its site: arm="1", its legend clause
     for( const GrepHit& h : hits )
     {
         if( h.enclosingId == kNoNode || !ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind )
@@ -2908,7 +3045,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         head += "\" n=\"";
         head += escapeXml( s.name, esc );
         head += "\"";
-        const bool above = served.find( head ) != std::string_view::npos;
+        const bool above = lit_detail::servedBodyHead( served, head );
         owners.push_back( h.enclosingId );
         ownerAbove.push_back( above ? 1 : ( out.bodies >= kForLiteralBodies ? 2 : 0 ) );
         if( above || out.bodies >= kForLiteralBodies )
@@ -2941,7 +3078,8 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                 siteLines.push_back( o.line );
             }
         }
-        std::string excerpt = lit_detail::excerptElement( text, path, s, first, last, siteLines, redact );
+        bool        armed   = false;
+        std::string excerpt = lit_detail::excerptElement( text, path, s, first, last, siteLines, redact, &armed );
         if( bodiesXml.size() + excerpt.size() > limits.byteCap )
         {
             ownerAbove.back() = 2;   // past the byte cap, as past the body cap: the row says body="held"
@@ -2949,6 +3087,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         }
         bodiesXml += excerpt;
         ++out.bodies;
+        armWindow = armWindow || armed;
     }
 
     // ── the rows ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -3025,6 +3164,11 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
         x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
         x += limits.strongOnly ? kForLiteralStrongLegend : std::string_view();   // the whole task has no cue word: every element of it lists strong rows only
+    }
+    if( armWindow && !limits.armLegendAbove )
+    {
+        x += kForLiteralArmLegend;   // present only with arm= (EXCERPT-ARM)
+        out.armLegend = true;
     }
     if( tailDropped > 0 && !limits.tailLegendAbove )
     {
@@ -3156,7 +3300,7 @@ struct TableWalk
         }
         ++scanned;
         ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue != TableCue::AnySite || !anchor.firm, out.cutLegend, tail,
-                                 cue == TableCue::StrongRowOnly, out.tailLegend };
+                                 cue == TableCue::StrongRowOnly, out.tailLegend, out.armLegend };
         ForLiteral lit{ word, "table" };
         ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits, anchors );
         if( r.noRoom || r.unread )
@@ -3175,6 +3319,7 @@ struct TableWalk
         out.bodies += r.bodies;
         out.cutLegend = out.cutLegend || r.cutLegend;
         out.tailLegend = out.tailLegend || r.tailLegend;
+        out.armLegend  = out.armLegend || r.armLegend;
         return TableTry::Printed;
     }
 };
