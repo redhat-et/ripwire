@@ -1989,20 +1989,16 @@ inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t
 }
 
 // An HTML page's converted text opens with its <title> line ("Renderers - mdBook Documentation"); a window past
-// it is otherwise anonymous. Empty when the first line is missing or too long to be a title.
+// it is otherwise anonymous. A first line this long (or an empty one) is not a title and is not repeated.
 inline constexpr std::size_t kRecallTitleMaxBytes = 120;
-inline std::string_view recallPageTitleLine( std::string_view body ) noexcept
-{
-    const std::size_t newline = body.find( '\n' );
-    return newline == std::string_view::npos || newline == 0 || newline >= kRecallTitleMaxBytes ? std::string_view()
-                                                                                                : body.substr( 0, newline + 1 );
-}
 
 // HTML-CUT: a whole-doc body over its allowance — the best query-term window of that size when one beats the
 // head, else the head cut it always had. `isHtml`: the page's title line rides above the window.
 inline RecallTruncation truncateRecallWholeDoc( std::string& body, std::size_t keepBytes, const std::vector<std::string>& queryToks, bool isHtml )
 {
-    const std::string_view title    = isHtml ? recallPageTitleLine( body ) : std::string_view();
+    const std::size_t      titleEnd = isHtml ? body.find( '\n' ) : std::string::npos;   // the first line's '\n'
+    const bool             isTitled = titleEnd > 0 && titleEnd < kRecallTitleMaxBytes;
+    const std::string_view title    = isTitled ? std::string_view( body ).substr( 0, titleEnd + 1 ) : std::string_view();
     const std::size_t      reserved = std::min( keepBytes, kRecallWindowLead.size() + title.size() );
     const RecallWindow     window   = selectRecallWindow( body, keepBytes - reserved, queryToks );
     return window.startByte > 0 ? truncateRecallBodyWindow( body, keepBytes, window, title ) : truncateRecallBody( body, keepBytes );
