@@ -545,9 +545,14 @@ inline bool isForDocSubjectWord( const std::string& w ) noexcept
 inline std::vector<std::string> forDocSubjectWords( const std::vector<std::string>& queryToks )
 {
     std::vector<std::string> subject;
-    std::ranges::copy_if( queryToks, std::back_inserter( subject ),
-                          [&]( const std::string& w )
-                          { return isForDocSubjectWord( w ) && std::ranges::find( subject, w ) == subject.end(); } );
+    for( const std::string& w : queryToks )
+    {
+        if( !isForDocSubjectWord( w ) || std::ranges::find( subject, w ) != subject.end() )
+        {
+            continue;
+        }
+        subject.push_back( w );
+    }
     return subject;
 }
 
