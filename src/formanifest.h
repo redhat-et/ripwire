@@ -13,14 +13,18 @@
 // names an entry a manifest defines (its last `/` segment, letters and digits only): an ANCHOR. Not an anchor: a name equal to the repo's
 // own directory name (every task about a crate names the crate) unless the task also says what kind it is (crate, package, binary,
 // feature, ..: kManifestCues); a generic name (core, common, test, ..: kManifestGenericNames); a script unless the task says script,
-// npm, yarn or pnpm (`test`, `build`, `lint` are in every package.json). A manifest prints only when it holds an anchor; a partial
+// npm, yarn or pnpm (`test`, `build`, `lint` are in every package.json); a plugin entry point unless the task says plugin, entry
+// point or extension. An entry point's group matches by any dot segment, even the repo's own name (`[project.entry-points.pydantic]`
+// is pydantic's plugin hook). A manifest prints only when it holds an anchor; a partial
 // match (a task word that is one part of a name: `nats` in `@nats-io/transport-node`) adds rows and score, never fires alone.
 //
 // READERS (line-based, the way the tools write these files): package.json name, main, bin, scripts, dependencies, devDependencies,
 // peerDependencies, optionalDependencies (a key per line); Cargo.toml [package] / [lib] / [[bin]] name, [features] keys,
 // [dependencies] / [dev-dependencies] / [build-dependencies] (also under [target.*] and [workspace]) keys and [dependencies.X]
 // headers; pyproject.toml [project] / [tool.poetry] name, [project.optional-dependencies] / [tool.poetry.extras] keys,
-// [tool.poetry.dependencies] keys; setup.cfg [metadata] name, [options.extras_require] keys; go.mod module and require lines
+// [tool.poetry.dependencies] keys, and its entry points; setup.cfg [metadata] name, [options.extras_require] keys and
+// [options.entry_points] (the entry points through epmanifest.h's own readers: a console / gui script is kind bin, every other group's
+// entry kind entry-point with group=); go.mod module and require lines
 // (`// indirect` ones skipped); CMakeLists.txt add_executable / add_library / project names. package.json, Cargo.toml and
 // pyproject.toml are indexed files; setup.cfg, go.mod and CMakeLists.txt are not, so they are looked for in every directory that
 // holds an indexed file and in its ancestors. FLOORS: pyproject `dependencies = [..]` arrays, setup.py, Makefile, meson.build and
@@ -76,10 +80,11 @@ enum class ManifestKind : std::uint8_t
     Feature,
     Extra,
     Executable,
-    Library
+    Library,
+    EntryPoint
 };
-inline constexpr std::array<std::string_view, 14> kManifestKindTags { "package", "module", "dep", "dev-dep", "peer-dep", "opt-dep", "script",
-                                                                      "bin", "main", "lib", "feature", "extra", "executable", "library" };
+inline constexpr std::array<std::string_view, 15> kManifestKindTags { "package", "module", "dep", "dev-dep", "peer-dep", "opt-dep", "script",
+                                                                      "bin", "main", "lib", "feature", "extra", "executable", "library", "entry-point" };
 
 // One name a manifest defines: the name as written, its line, what it is.
 struct ManifestEntry
@@ -87,6 +92,7 @@ struct ManifestEntry
     std::string name;
     std::uint32_t line = 0;
     ManifestKind kind = ManifestKind::Package;
+    std::string group; // an entry point's group (`pydantic`, `flake8.extension`); "" for every other kind
 };
 
 // One manifest read: its root-relative path, the indexed file id (UINT32_MAX: not an indexed file), its text and its entries.
@@ -319,8 +325,8 @@ inline void readToml( std::string_view text, TableOf&& tableOf, std::vector<Mani
         } } );
 }
 
-// setup.cfg: [metadata] name, [options.extras_require] keys (unindented `key = value` lines).
-inline void readSetupCfg( std::string_view text, std::vector<ManifestEntry>& out )
+// setup.cfg: [metadata] name, [options.extras_require] keys (unindented `key = value` lines), [options.entry_points] (epmanifest.h).
+inline void readSetupCfgNames( std::string_view text, std::vector<ManifestEntry>& out )
 {
     std::string_view section;
     darkflags::forEachLine( text, [&]( std::string_view line, std::uint32_t lineNo )
@@ -440,9 +446,31 @@ inline void readCargoToml( std::string_view text, std::vector<ManifestEntry>& ou
 {
     readToml( text, cargoTable, out );
 }
+// The entry points of a Python manifest, read by epmanifest.h's own parser: a console or gui script is an installed command (kind
+// bin, named by its key); every other group's entry is kind entry-point, with its group.
+inline void addEntryPoints( const std::vector<EpEntry>& eps, std::vector<ManifestEntry>& out )
+{
+    for( const EpEntry& ep : eps )
+    {
+        const bool script = ep.group == "console_scripts" || ep.group == "gui_scripts";
+        out.push_back( ManifestEntry { ep.name, ep.line, script ? ManifestKind::Bin : ManifestKind::EntryPoint, script ? std::string() : ep.group } );
+    }
+}
+
 inline void readPyproject( std::string_view text, std::vector<ManifestEntry>& out )
 {
     readToml( text, pyprojectTable, out );
+    std::vector<EpEntry> eps;
+    parsePyprojectEntryPoints( text, eps );
+    addEntryPoints( eps, out );
+}
+
+inline void readSetupCfg( std::string_view text, std::vector<ManifestEntry>& out )
+{
+    readSetupCfgNames( text, out );
+    std::vector<EpEntry> eps;
+    parseSetupCfgEntryPoints( text, eps );
+    addEntryPoints( eps, out );
 }
 
 // The reader of a manifest file name, or nullptr. `indexed`: the crawl indexes that name (else it is looked for on disk).
@@ -628,7 +656,7 @@ struct ManifestCue
     ManifestKind kind;
     std::array<std::string_view, 4> words;
 };
-inline constexpr std::array<ManifestCue, 14> kManifestCues { {
+inline constexpr std::array<ManifestCue, 15> kManifestCues { {
     { ManifestKind::Package, { "package", "crate", "library", "module" } },
     { ManifestKind::Module, { "module", "package", "", "" } },
     { ManifestKind::Dep, { "dependency", "depend", "dep", "crate" } },
@@ -643,9 +671,10 @@ inline constexpr std::array<ManifestCue, 14> kManifestCues { {
     { ManifestKind::Extra, { "extra", "optional", "feature", "" } },
     { ManifestKind::Executable, { "executable", "binary", "target", "program" } },
     { ManifestKind::Library, { "library", "lib", "target", "" } },
+    { ManifestKind::EntryPoint, { "plugin", "entry", "entrypoint", "extension" } },
 } };
 
-static_assert( std::ranges::all_of( std::array { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 }, []( int k )
+static_assert( std::ranges::all_of( std::array { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 }, []( int k )
                                     { return kManifestCues[std::size_t( k )].kind == ManifestKind( k ); } ),
                "kManifestCues is indexed by ManifestKind" );
 
@@ -706,6 +735,31 @@ inline std::uint8_t entryStrength( std::string_view folded, const std::vector<st
                                                                      : 0;
 }
 
+// How an entry point's group matches one task word: 2 when the word names the group or one of its dot segments (`pydantic`,
+// `flake8` of `flake8.extension`: the host the plugin hooks into), else 0. A group named after the repo is still an anchor: it is
+// the repo's plugin hook, and the entry point fires only beside a plugin / entry-point word anyway.
+inline std::uint8_t groupStrength( std::string_view group, std::string_view word )
+{
+    if( group.empty() )
+    {
+        return 0;
+    }
+    if( foldedName( group ) == word )
+    {
+        return 2;
+    }
+    for( std::size_t at = 0; at <= group.size(); )
+    {
+        const std::size_t dot = std::min( group.find( '.', at ), group.size() );
+        if( foldedName( group.substr( at, dot - at ) ) == word )
+        {
+            return 2;
+        }
+        at = dot + 1;
+    }
+    return 0;
+}
+
 // One manifest against the task (see WHEN and RANK). HOISTING: an entry's folded name and parts are built once, not per word.
 inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, const ManifestTask& t )
 {
@@ -716,9 +770,9 @@ inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, cons
         const ManifestEntry& en = doc.entries[e];
         const std::size_t k = std::size_t( en.kind );
         const std::string folded = foldedName( en.name );
-        if( ( en.kind == ManifestKind::Script || en.kind == ManifestKind::Main ) && !t.cue[k] )
+        if( ( en.kind == ManifestKind::Script || en.kind == ManifestKind::Main || en.kind == ManifestKind::EntryPoint ) && !t.cue[k] )
         {
-            continue; // a script, or the main entry, the task does not ask for
+            continue; // a script, the main entry or a plugin entry point the task does not ask for
         }
         const bool own = folded == t.repoName && !t.cue[k]; // the repo's own name: the package so named adds score, never fires the block
         const bool dep = en.kind == ManifestKind::Dep || en.kind == ManifestKind::DevDep || en.kind == ManifestKind::PeerDep || en.kind == ManifestKind::OptDep;
@@ -730,11 +784,11 @@ inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, cons
         ManifestHit hit { .entry = e };
         for( std::size_t w = 0; w < t.words.size(); ++w )
         {
-            const std::uint8_t s = entryStrength( folded, parts, t.words[w] );
+            const std::uint8_t s = std::max( entryStrength( folded, parts, t.words[w] ), groupStrength( en.group, t.words[w] ) );
             hit.strength = std::max( hit.strength, s );
             best[w] = std::max( best[w], s );
         }
-        hit.anchor = hit.strength == 2 && !own && !std::ranges::contains( kManifestGenericNames, folded );
+        hit.anchor = hit.strength == 2 && !own && ( !std::ranges::contains( kManifestGenericNames, folded ) || en.kind == ManifestKind::EntryPoint );
         m.anchors += hit.anchor ? 1 : 0;
         if( hit.strength > 0 )
         {
@@ -833,14 +887,16 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "defines (an exact name: its last / segment, letters and digits only, compared lowercase and singular); these are the manifests' DEFINING LINES, read off the manifest text, a "
     "lead to verify, not a guarantee that each must change. Read: package.json (name, main, bin, scripts, dependencies, devDependencies, "
     "peerDependencies, optionalDependencies), Cargo.toml ([package] / [lib] / [[bin]] name, [features], dependency tables), pyproject.toml "
-    "([project] / [tool.poetry] name, optional-dependencies, extras, poetry dependencies), setup.cfg ([metadata] name, extras_require), "
+    "([project] / [tool.poetry] name, optional-dependencies, extras, poetry dependencies, entry points and scripts), setup.cfg ([metadata] name, "
+    "extras_require, entry_points), "
     "go.mod (module, require; indirect ones skipped), CMakeLists.txt (add_executable, add_library, project); not read: pyproject dependency "
     "arrays, setup.py, Makefile, meson and Bazel files, vendored, node_modules, fixtures and testdata trees. A name equal to the repo's, a "
-    "generic name (core, common, test, ..) or a script the task does not call a script does not fire it. files= the manifests that name a "
+    "generic name (core, common, test, ..), a script the task does not call a script, or a plugin entry point the task does not call a "
+    "plugin, entry point or extension does not fire it; an entry point's group (pydantic, flake8.extension) matches by any dot segment. files= the manifests that name a "
     "task word exactly, shown= and capped=\"1\" when fewer are printed, best first (2 per task word named exactly, 1 per word that is one "
     "part of a name). <mf> p= the manifest, matched= the task words its names hold, rows= its matching lines, shown= and capped=\"1\" when "
     "fewer are printed. <r> l= the line, kind= what it defines (package, module, dep, dev-dep, peer-dep, opt-dep, script, bin, main, lib, "
-    "feature, extra, executable, library), its text that line, cut=\"1\" when cut to 120 bytes. <feature_touch> (under a manifest whose "
+    "feature, extra, executable, library, entry-point; a console or gui script is a bin), group= the entry point's group, its text that line, cut=\"1\" when cut to 120 bytes. <feature_touch> (under a manifest whose "
     "match is a feature or extra) n= its features (default and _-private ones left out); <touch_list> the files outside the manifest that "
     "mention at least half of them, where a new feature is listed or gated: total= such files, shown= and capped=\"1\" when fewer rows are "
     "printed; <touch> p=file:line the line to copy, share=named/of the distinct feature names it mentions, cut=\"1\" when cut to 120 bytes; "
@@ -848,10 +904,10 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "est_tokens -->";
 // The --legend=compact posture (the CLI default); the long text rides --legend=full and the MCP tool. Both define every attribute printed.
 inline constexpr std::string_view kForManifestRowsCompactLegend =
-    "<!-- ripwire for manifest_rows: manifest lines defining a package, dependency, script, binary, target or feature the task names "
+    "<!-- ripwire for manifest_rows: manifest lines defining a package, dependency, script, binary, target, feature or plugin entry point the task names "
     "exactly (package.json, Cargo.toml, pyproject.toml, setup.cfg, go.mod, CMakeLists.txt; the repo's own name, generic names and "
-    "un-asked scripts never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word; <mf> p= manifest, "
-    "matched= task words its names hold, rows= matching lines; <r> l= line, kind= what it defines, cut=\"1\": text cut to 120 bytes; "
+    "un-asked scripts or plugin entry points never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word; <mf> p= manifest, "
+    "matched= task words its names hold, rows= matching lines; <r> l= line, kind= what it defines, group= an entry point's group, cut=\"1\": text cut to 120 bytes; "
     "shown=/capped=\"1\": rows cut. <feature_touch> n= the manifest's features; <touch_list> total= files naming at least half of "
     "them (tests, docs, vendored, generated unread); <touch> p= the line, share=named/of distinct feature names, cut=\"1\": cut. -->";
 static_assert( kForManifestRowsLegend.find( "--", 4 ) == kForManifestRowsLegend.size() - 3 && kForManifestRowsCompactLegend.find( "--", 4 ) == kForManifestRowsCompactLegend.size() - 3,
@@ -869,6 +925,7 @@ inline std::string manifestRowXml( const ManifestDoc& doc, const ManifestEntry& 
         --keep;
     }
     std::string out = "<r l=\"" + std::to_string( en.line ) + "\" kind=\"" + std::string( kManifestKindTags[std::size_t( en.kind )] ) + "\"";
+    out += en.group.empty() ? std::string() : " group=\"" + std::string( escapeXml( en.group, esc ) ) + "\"";
     out += keep < text.size() ? " cut=\"1\">" : ">";
     return out + std::string( escapeXml( text.substr( 0, keep ), esc ) ) + "</r>";
 }
