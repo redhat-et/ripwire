@@ -2462,11 +2462,12 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 
 // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms>, read off this answer's own bytes (every block before it), before </ctx>, not priced;
 // held under budget_tokens.
-inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, std::string_view task, bool held )
+inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args )
 {
     if( out.ends_with( "</ctx>" ) )
     {
-        out.insert( out.size() - 6, renderForFileSyms( ing, g, FileSymsArgs { .task = task, .answer = std::string_view( out ).substr( 0, out.size() - 6 ), .held = held } ) );
+        args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
+        out.insert( out.size() - 6, renderForFileSyms( ing, g, args ) );
     }
 }
 
@@ -2985,7 +2986,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         {
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
-            insertFileSyms( out, ing, ix.g, task, budgetTokens > 0 );
+            insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) } );
             return out;
         }
         std::string verb;
@@ -3012,7 +3013,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, opts ) + verb + std::string( kGraphSubjectCloseXml ) );
         }
     }
-    insertFileSyms( out, ing, ix.g, task, budgetTokens > 0 );
+    insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) } );
     return out;
 }
 

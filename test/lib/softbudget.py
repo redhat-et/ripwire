@@ -9,7 +9,7 @@ import json, re
 
 # K-WRONGSYM / K-LEGEND: blocks appended after the ranked answer on their own allowance, outside est_tokens (the <syms> block, or its held
 # stub, each with the legend comment right before it). A soft-target reader leaves them out of the sections it reserves from T.
-APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:.*?-->(?:<syms [^>]*/>|<syms .*?</syms>)", re.S )
+APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|</ctx>)", re.S )
 def strip_appended( t ):
     """The answer text less its appended, unpriced blocks (APPENDED)."""
     return APPENDED.sub( "", t )
@@ -141,7 +141,25 @@ def set_prefix( a, on, off ):
 def _row_lines( p ):
     return [ x for x in open( p, encoding='utf-8', errors='replace' ).read().split( "\n" ) if x ]
 
-if __name__ == "__main__":   # python3 softbudget.py setprefix A ON OFF  (rows files, one p:l:n per line): exit 0 | 1
+def strip_selftest():
+    """CR 4486667657: a `<!-- syms:` quoted inside a body CDATA must not make strip_appended swallow body bytes up to the real block.
+    -> list of failure texts (empty: all hold)."""
+    body = '<b><![CDATA[x <!-- syms: quoted --> text <syms files="1"> more]]></b>'
+    real = '<!-- syms: legend --><syms files="1"><y p="a.py:1" n="n" by="name"/></syms>'
+    held = '<!-- ripwire for syms: held --><syms held="budget" next="--for=x"/>'
+    graph = '<graph fmt="mermaid"><![CDATA[g]]></graph>'
+    cases = [ ( "block", '<ctx>' + body + real + '</ctx>', '<ctx>' + body + '</ctx>' ),
+              ( "held stub", '<ctx>' + body + held + '</ctx>', '<ctx>' + body + '</ctx>' ),
+              ( "before <graph>", '<ctx>' + body + real + graph + '</ctx>', '<ctx>' + body + graph + '</ctx>' ),
+              ( "twin: no block", '<ctx>' + body + '</ctx>', '<ctx>' + body + '</ctx>' ) ]
+    return [ "%s: got %r" % ( name, strip_appended( src ) ) for name, src, want in cases if strip_appended( src ) != want ]
+
+
+if __name__ == "__main__":   # python3 softbudget.py setprefix A ON OFF  (rows files, one p:l:n per line): exit 0 | 1;  python3 softbudget.py strip-selftest: exit 0 | 1
     import sys
+    if len( sys.argv ) == 2 and sys.argv[ 1 ] == "strip-selftest":
+        bad = strip_selftest()
+        print( "\n".join( bad ) )
+        sys.exit( 1 if bad else 0 )
     if len( sys.argv ) != 5 or sys.argv[ 1 ] != "setprefix": sys.exit( 2 )
     sys.exit( 0 if set_prefix( *( _row_lines( p ) for p in sys.argv[ 2:5 ] ) ) else 1 )

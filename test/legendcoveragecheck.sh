@@ -447,11 +447,12 @@ def defined  ( a, legend ): return re.search( r'(?<![\w:.-])' + re.escape( a ) +
 # legend fails it.
 def gapsOf( doc, isDefault ):
     legend  = legendOf( doc, anyRoot = isDefault )
-    blocks  = trailingBlocks( doc )
+    blank = lambda m: b" " * len( m.group( 0 ) )
+    noCdata = re.sub( rb'<!\[CDATA\[.*?\]\]>', blank, doc, flags = re.S ) if isDefault else doc   # offsets kept: a fake block inside a body is no block
+    blocks  = trailingBlocks( noCdata )
     legends = [ legend ] + [ legend + " " + c for _, _, c in blocks ]
     def legendAt( pos ): return next( ( 1 + b for b, ( lo, hi, _ ) in enumerate( blocks ) if lo <= pos < hi ), 0 )
-    blank = lambda m: b" " * len( m.group( 0 ) )
-    scan  = re.sub( rb'<!--.*?-->', blank, re.sub( rb'<!\[CDATA\[.*?\]\]>', blank, doc, flags = re.S ), flags = re.S ) if isDefault else doc
+    scan  = re.sub( rb'<!--.*?-->', blank, noCdata, flags = re.S ) if isDefault else doc
     seen, order, where = {}, [], {}
     for m in ATTR.finditer( scan ):
         tag = m.group( 1 ).decode()
@@ -541,6 +542,11 @@ g = gapsOf( tdoc( b'<z w="1"/>' + GOOD.replace( b'-->', b'w= -->' ) + SYM ), Tru
 tarm( g == [ "z@w" ], f"(T4) a block's comment defines nothing outside its block (gaps {g})" )
 g = gapsOf( tdoc( b'<!-- syms: held= next= --><syms held="budget" next="x"/>' ), True )[ 3 ]
 tarm( g == [], f"(T5) a self-closed block (the held stub) reads its own comment (gaps {g})" )
+# (T7) a fake block inside CDATA (a served body that quotes `<!-- syms: bogus= --><syms>`) is no block: it defines nothing for a later real attribute
+g = gapsOf( tdoc( b'<![CDATA[x <!-- syms: bogus= --><syms>y]]><z bogus="1"/>' ), True )[ 3 ]
+tarm( g == [ "z@bogus" ], f"(T7) a block quoted inside CDATA defines nothing: a later real bogus= is a gap (gaps {g})" )
+g = gapsOf( tdoc( b'<![CDATA[x <!-- syms: bogus= --><syms>y]]>' + GOOD + SYM ), True )[ 3 ]
+tarm( g == [], f"(T7b) twin: a real block after the CDATA quote still reads its own comment (gaps {g})" )
 # (T6) live: a DEFAULT --for answer from the roster that carries a trailing block; the first open-tag attribute only its comment
 # defines is cut from that comment, and the same reader must report it
 live = [ ( n, d ) for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if e is None and d and n.endswith( "-default" ) and trailingBlocks( d ) ]

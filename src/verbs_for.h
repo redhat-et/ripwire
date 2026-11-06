@@ -2857,6 +2857,40 @@ inline bool forFileSymsWanted( const MainDispatch& d )
     return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() );
 }
 
+// What StdoutCapture::finish() hands back.
+struct StdoutCaptured
+{
+    std::string bytes; // every byte read back from the buffer
+    bool        failed   = false; // flushing, writing or reading the buffer failed: `bytes` may be short, the answer is not known whole
+    bool        restored = true; // stdout is the descriptor it was before the capture; false: it still points at the buffer
+};
+// Every byte of `f` from its start; `failed` is set when the read ended on a stream error.
+inline std::string readBackAll( std::FILE* f, bool& failed )
+{
+    std::string doc;
+    std::rewind( f );
+    char buf[ 65536 ];
+    for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), f ) ) > 0; )
+    {
+        doc.append( buf, got );
+    }
+    failed = failed || std::ferror( f ) != 0;
+    return doc;
+}
+// Best effort: all of `bytes` to the descriptor (the real stdout when the restore failed).
+inline void writeAllTo( int fd, const std::string& bytes ) noexcept
+{
+    for( std::size_t at = 0; at < bytes.size(); )
+    {
+        const auto put = rw::os::write( fd, bytes.data() + at, bytes.size() - at );
+        if( put <= 0 )
+        {
+            return;
+        }
+        at += std::size_t( put );
+    }
+}
+
 // stdout pointed at an anonymous file for the lifetime of the object (the dup2 capture runWithCompactLegend and the graph_verb block use):
 // finish() restores stdout and returns every byte written meanwhile; the destructor restores it on any other exit. Inactive when not wanted.
 class StdoutCapture
@@ -2871,12 +2905,11 @@ public:
         std::fflush( stdout );
         file_  = rw::isChargeBufferFaultInjected() ? nullptr : std::tmpfile();   // the est_tokens family's fault switch: no buffer to capture into
         saved_ = file_ != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
-        if( file_ == nullptr || saved_ < 0 || rw::os::dup2( rw::os::fileno( file_ ), STDOUT_FILENO ) < 0 )
+        active_ = file_ != nullptr && saved_ >= 0 && rw::os::dup2( rw::os::fileno( file_ ), STDOUT_FILENO ) >= 0;
+        if( !active_ )
         {
             release();
-            return;
         }
-        active_ = true;
     }
     StdoutCapture( const StdoutCapture& ) = delete;
     StdoutCapture& operator=( const StdoutCapture& ) = delete;
@@ -2888,25 +2921,28 @@ public:
         }
     }
     bool wanted() const noexcept { return wanted_; }
-    // The captured bytes (stdout restored); nullopt when nothing was captured (not wanted, or the buffer could not be set up).
-    std::optional<std::string> finish()
+    // The captured bytes, stdout restored; nullopt when nothing was captured. A failed flush or a stream error is `failed`: the bytes read are
+    // kept, never dropped and never taken for the whole answer. A failed restore keeps the saved descriptor (the only handle on the real
+    // stdout) and writes the bytes to it; the caller reports `restored == false`.
+    std::optional<StdoutCaptured> finish()
     {
         if( !active_ )
         {
             return std::nullopt;
         }
         active_ = false;
-        std::fflush( stdout );
-        rw::os::dup2( saved_, STDOUT_FILENO );
-        std::string doc;
-        std::rewind( file_ );
-        char buf[ 65536 ];
-        for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), file_ ) ) > 0; )
+        StdoutCaptured out;
+        out.failed = std::fflush( stdout ) != 0 || std::ferror( stdout ) != 0; // a short write to the buffer (disk full, a file-size limit) lands here
+        std::clearerr( stdout ); // the error was the buffer's; the restored stdout starts clean
+        out.restored = rw::os::dup2( saved_, STDOUT_FILENO ) >= 0;
+        out.bytes    = readBackAll( file_, out.failed );
+        if( !out.restored )
         {
-            doc.append( buf, got );
+            writeAllTo( saved_, out.bytes );
+            saved_ = -1; // left open for the process's life
         }
         release();
-        return doc;
+        return out;
     }
 
 private:
@@ -2931,31 +2967,49 @@ inline std::size_t forSymsInsertAt( const std::string& emitted, bool withGraph )
     return graphAt != std::string::npos && emitted.find( "</graph>", graphAt ) != std::string::npos ? graphAt : emitted.size();
 }
 
-inline void appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+// The origin call's ranking flags and --pack-top-n for the held block's `next=`: the replay must rank the same list.
+inline std::string forHeldNextFlags( const rw::Config& cfg )
+{
+    return forRankShapingFlags( cfg ) + ( cfg.packTopN > 0 ? " --pack-top-n=" + std::to_string( cfg.packTopN ) : std::string() );
+}
+
+// The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
+inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
 {
     if( !capture.wanted() )
     {
-        return;
+        return 0;
     }
-    const rw::Config&                cfg     = d.cfg;
-    const std::optional<std::string> emitted = capture.finish();
-    if( !emitted )
+    const rw::Config&                      cfg = d.cfg;
+    const std::optional<StdoutCaptured>    cap = capture.finish();
+    if( cap && !cap->restored )
+    {
+        rw::emitTo( stderr, "ripwire: --for: could not restore stdout after the <syms> capture — the answer so far was written to the original stdout, the rest is lost\n" );
+        return 1;
+    }
+    if( !cap )
     {
         rw::emitTo( stderr, "ripwire: --for: could not buffer the answer's bytes — the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
-    const std::string syms = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = emitted ? std::string_view( *emitted ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
-                                      .compactLegend = cfg.legend == "compact", .uncaptured = !emitted } );
-    const std::size_t at = emitted ? forSymsInsertAt( *emitted, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
-    if( emitted )
+    else if( cap->failed )
     {
-        std::fwrite( emitted->data(), 1, at, stdout );
+        rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
+    }
+    const bool        whole = cap && !cap->failed;
+    const std::string syms  = rw::renderForFileSyms(
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
+                                      .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole } );
+    const std::size_t at = cap ? forSymsInsertAt( cap->bytes, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    if( cap )
+    {
+        std::fwrite( cap->bytes.data(), 1, at, stdout );
     }
     std::fwrite( syms.data(), 1, syms.size(), stdout );
-    if( emitted )
+    if( cap )
     {
-        std::fwrite( emitted->data() + at, 1, emitted->size() - at, stdout );
+        std::fwrite( cap->bytes.data() + at, 1, cap->bytes.size() - at, stdout );
     }
+    return cap && cap->failed ? 1 : 0;
 }
 
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
@@ -4917,11 +4971,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
-        appendForFileSyms( d, forAnswerBytes );
+        const int answerRc = appendForFileSyms( d, forAnswerBytes );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
-        return 0;
+        return answerRc;
     }
     return std::nullopt;
 }

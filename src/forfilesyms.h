@@ -238,11 +238,12 @@ inline bool nameInAnswer( const std::vector<std::string_view>& tokens, std::stri
     return !name.empty() && ( spelledIn( text, name ) || spelledIn( text, escapeXml( name, esc ) ) );
 }
 
-// The five XML entities the answer escapes, decoded (a name like `operator<` or a path with `&`).
+// The five XML entities the answer escapes, and the three control-character references escapeXml writes for a path or name holding a tab,
+// newline or carriage return (serialize.h xmlControlCharRef), decoded (a name like `operator<` or a path with `&`).
 inline std::string unescapeXmlAttr( std::string_view v )
 {
-    static constexpr std::array<std::pair<std::string_view, char>, 5> kEnt {
-        { { "&lt;", '<' }, { "&gt;", '>' }, { "&amp;", '&' }, { "&quot;", '"' }, { "&apos;", '\'' } }
+    static constexpr std::array<std::pair<std::string_view, char>, 8> kEnt {
+        { { "&lt;", '<' }, { "&gt;", '>' }, { "&amp;", '&' }, { "&quot;", '"' }, { "&apos;", '\'' }, { "&#9;", '\t' }, { "&#10;", '\n' }, { "&#13;", '\r' } }
     };
     std::string out;
     out.reserve( v.size() );
@@ -393,8 +394,16 @@ private:
 inline std::string_view leafName( std::string_view n )
 {
     // after the last separator, else the whole spelling (a find_last_of + 1 would wrap on npos under -fsanitize=integer)
+    // A `#` that starts the member (`Router.#addRoute`, a bare `#addRoute`) is TypeScript's private mark, part of the stored name; Ruby's
+    // `Owner#name` separator has an identifier byte before it.
     const auto lastSep = std::ranges::find_last_if( n, []( char c ) { return c == '.' || c == ':' || c == '#'; } );
-    return lastSep.empty() ? n : std::string_view( lastSep.begin() + 1, n.end() );
+    if( lastSep.empty() )
+    {
+        return n;
+    }
+    const std::size_t at = std::size_t( lastSep.begin() - n.begin() );
+    const bool privateMark = n[at] == '#' && ( at == 0 || n[at - 1] == '.' );
+    return n.substr( privateMark ? at : at + 1 );
 }
 
 inline std::uint32_t fanIn( const Graph& g, NodeId id )
@@ -592,18 +601,27 @@ inline void creditCallees( const IngestResult& ing, const Graph& g, const Head& 
     }
 }
 
-// `from` folds into `into`: one function to look at, so its head callers (bits OR-ed: one head calling both spellings is one caller) and
-// call hedges count for the row that stays.
-inline void foldInto( Cand& into, const Cand& from )
+// `from` folds into `into`: one function to look at, so its head callers (bits OR-ed: one head calling both spellings is one caller) count
+// for the row that stays.
+inline void foldHeads( Cand& into, const Cand& from )
 {
     into.headMask = std::uint8_t( into.headMask | from.headMask );
     into.byCallee = std::size_t( std::popcount( into.headMask ) );
+}
+// The shown row's exact-target evidence (anyPlain / anySplit: its edge reaches THAT definition) moves only when the two are one function (a
+// declaration and its definition). Between two overloads or two re-opened definitions it stays with the one it was found on: the row printed
+// for `into` has no evidence-bound call, so it says via="name".
+inline void foldInto( Cand& into, const Cand& from )
+{
+    foldHeads( into, from );
     into.anyPlain = into.anyPlain || from.anyPlain;
     into.anySplit = into.anySplit || from.anySplit;
 }
+// What a fold of `c` into its group's leader does.
+enum class Fold : std::uint8_t { Keep, Heads, Whole }; // stay a row; head callers only (overloads); everything (one function)
 
-// Groups `cands` by `key`, ordered inside a group by `rank`, and folds each candidate that `canFold(leader, c)` accepts into its group's first
-// row (the leader); the others stay.
+// Groups `cands` by `key`, ordered inside a group by `rank`, and folds each candidate into its group's first row (the leader) as
+// `canFold(leader, c)` says (a Fold); a Keep stays a row.
 // a < b over a std::tuple, field by field, with every std::string_view field ordered by rw::sortutil::svLess (a tuple's own operator< would
 // order a string_view through operator<, which wraps under -fsanitize=integer on libstdc++; see infra/sortutil.h).
 template<class T>
@@ -648,9 +666,17 @@ inline void foldByKey( std::vector<Cand>& cands, Key key, Rank rank, CanFold can
     for( const Cand& c : cands )
     {
         const bool inGroup = !kept.empty() && key( kept[leader] ) == key( c );
-        if( inGroup && canFold( kept[leader], c ) )
+        const Fold how     = inGroup ? canFold( kept[leader], c ) : Fold::Keep;
+        if( how != Fold::Keep )
         {
-            foldInto( kept[leader], c );
+            if( how == Fold::Whole )
+            {
+                foldInto( kept[leader], c );
+            }
+            else
+            {
+                foldHeads( kept[leader], c );
+            }
             continue;
         }
         leader = inGroup ? leader : kept.size();
@@ -666,6 +692,12 @@ inline std::tuple<std::string_view, std::string_view> scopeName( const IngestRes
     return std::tuple( std::string_view( s.scope ), std::string_view( s.name ) );
 }
 
+// A declaration: the index holds no body for it.
+inline bool bodylessSymbol( const Symbol& s ) noexcept
+{
+    return s.sigEndByte >= s.endByte;
+}
+
 // One row per (file, scope, name): an overload set, a member's in-class declaration and its out-of-line definition, or a re-opened
 // definition name one place to look. The kept row is the one with the most head callers, else the lowest id.
 inline void dedupeCands( const IngestResult& ing, std::vector<Cand>& cands )
@@ -674,11 +706,13 @@ inline void dedupeCands( const IngestResult& ing, std::vector<Cand>& cands )
     {
         c.byCallee = std::size_t( std::popcount( c.headMask ) );
     }
+    const auto bodyless = [&]( const Cand& c )
+    { return bodylessSymbol( ing.symbols[c.id] ); };
     foldByKey(
         cands, [&]( const Cand& c )
         { return std::tuple( ing.symbols[c.id].fileId, scopeName( ing, c ) ); }, []( const Cand& c )
-        { return std::tuple( SIZE_MAX - c.byCallee, c.id ); }, []( const Cand&, const Cand& )
-        { return true; } );
+        { return std::tuple( SIZE_MAX - c.byCallee, c.id ); }, [&]( const Cand& leader, const Cand& c )
+        { return bodyless( leader ) || bodyless( c ) ? Fold::Whole : Fold::Heads; } ); // overloads are not one function; a declaration and its definition are
 }
 
 // A C/C++ declaration in a header (no body) and the definition of the same (scope, name) in another file are one function to look at: the
@@ -686,7 +720,7 @@ inline void dedupeCands( const IngestResult& ing, std::vector<Cand>& cands )
 // definition is not in the shown files); same-named definitions in sibling files stay apart.
 inline bool bodylessHeaderDecl( const IngestResult& ing, const Symbol& s )
 {
-    return s.sigEndByte >= s.endByte && quality::isHeaderPath( rootRelPath( ing, s.fileId ) ); // .h/.hpp/.hh/.hxx: C-family headers, read as C++ or C
+    return bodylessSymbol( s ) && quality::isHeaderPath( rootRelPath( ing, s.fileId ) ); // .h/.hpp/.hh/.hxx: C-family headers, read as C++ or C
 }
 inline void collapseDeclarations( const IngestResult& ing, std::vector<Cand>& cands )
 {
@@ -696,7 +730,7 @@ inline void collapseDeclarations( const IngestResult& ing, std::vector<Cand>& ca
         cands, [&]( const Cand& c )
         { return scopeName( ing, c ); }, [&]( const Cand& c )
         { return std::tuple( decl( c ), c.id ); }, [&]( const Cand& leader, const Cand& c )
-        { return decl( c ) && !decl( leader ); } );
+        { return decl( c ) && !decl( leader ) ? Fold::Whole : Fold::Keep; } );
 }
 
 struct Picks
@@ -802,6 +836,7 @@ struct FileSymsArgs
     std::string_view task; // the --for task
     std::string_view answer; // the answer's text exactly as emitted, before </ctx> (every block that streamed before this one)
     bool held = false; // a token budget: the tag names the call, no rows
+    std::string_view heldFlags; // held: the origin call's ranking flags and --pack-top-n, pre-spelled (" --no-route --anchor --pack-top-n=12"): the replay must rank the same list
     bool compactLegend = false;
     bool uncaptured = false; // the CLI could not buffer the emitted bytes: the tag says so, no rows (`answer` is empty)
 };
@@ -839,7 +874,7 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     }
     if( a.held )
     {
-        return std::string( kForFileSymsHeldLegend ) + "<syms held=\"budget\"" + nextAttrXml( nextFlag( "--for=", a.task ) ) + "/>";
+        return std::string( kForFileSymsHeldLegend ) + "<syms held=\"budget\"" + nextAttrXml( nextFlag( "--for=", a.task ) + std::string( a.heldFlags ) ) + "/>";
     }
     return fd::blockXml( ing, sf, head, picks, a.compactLegend );
 }

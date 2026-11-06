@@ -886,6 +886,10 @@ PY
 done
 rm -rf "$RPD"
 
+# ── (SB-strip) strip_appended removes only the real trailing <syms> block, never body bytes a CDATA quote of its legend would span
+if sbs="$( python3 -I "$RIPWIRE_TESTLIB/softbudget.py" strip-selftest 2>&1 )"; then ok "(SB-strip) strip_appended leaves a quoted '<!-- syms:' body alone: block, held stub, block before <graph>, no-block twin"
+else no "(SB-strip) strip_appended swallowed or missed bytes: $sbs"; fi
+
 # ── twins: the CI-gate personality of --token-budget is unchanged on the map, --query and --recall ───────
 "$BIN" "$CORPUS" --token-budget=100 "$CM" > "$TMP/map.out" 2>/dev/null; grc=$?
 GW="$( attr r withheld "$TMP/map.out" 2>/dev/null )"

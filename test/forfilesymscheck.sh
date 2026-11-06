@@ -27,6 +27,11 @@
 #        (and the C shape: api.h declarations, api.c definitions)
 #   (s1) a row in a test file says test="1"; no row of a source file does
 #   (u1) a run that cannot buffer its bytes prints <syms held="uncaptured"/> and says so on stderr (non-NDEBUG flavour: SKIP otherwise)
+#   (p1) a shown path holding a tab (the answer writes it `a&#9;b.py`) is looked up as the indexed file: its symbols are offered, p= spelled as the answer spells it
+#   (t1) a shown TypeScript private member (`Router.#addRoute`, stored as `#addRoute`) is a head row for by="callee": the helpers it calls are offered
+#   (o1) overloads: the shown row's edge reaches one overload, the kept row is another: it says via="name"; twin (o2) one definition, the call is plain
+#   (h2) a held block's next= carries the origin call's ranking flags (--no-route, --anchor under RIPWIRE_DEV, --pack-top-n=N)
+#   (c2) a capture whose buffer fails to flush (RLIMIT_FSIZE, a real short write) is not read as the whole answer: stderr says so, exit 1, the stub says held="uncaptured", no rows; twin: unlimited, rows
 #   (n1) present-only: a one-function tree has no candidate and prints no block (twin: a1 fires on the same binary)
 #   (h1) --token-budget holds the block: <syms held="budget" next=...>, no rows; (j1) --json carries no block
 #   (x1) MCP `for`: the block (one renderer), read off the MCP answer's own bytes: a1, d1 and w1 hold on it
@@ -100,6 +105,17 @@ w( "chdr", "api.c", '#include "api.h"\n' + "".join( f"int find_home_{i:02d}(void
 for f in range( 1, 9 ):
     w( "wide", f"m{f}.py", "".join( f"def route_table_{f}_{i:02d}(x):\n    return x\n\n\n" for i in range( 1, 30 ) ) )
 w( "one", "solo.py", "def integration_check(x):\n    return x\n" )
+# CR 4486667521: a shown path holding a tab is written a&#9;b.py; CR 4486667567: a TypeScript private head row keeps its # (the stored name);
+# CR 4486667593: overloads, the call binds to the second, the first is kept
+try:
+    w( "tabp", "a\tb.py", "".join( f"def integration_check_{i:02d}(x):\n    return helper_{i:02d}(x)\n\n\ndef helper_{i:02d}(x):\n    return x\n\n\n" for i in range( 1, 30 ) ) )
+except OSError:
+    pass                                                               # a file system that cannot hold a tab in a name: (p1) SKIPs below
+w( "tspriv", "router.ts", "".join( f"function linkTarget{i:02d}(path: string): string {{\n  return path;\n}}\nclass Step{i:02d} {{\n  #routeStep{i:02d}(path: string): string {{\n    return linkTarget{i:02d}(path);\n  }}\n}}\n" for i in M ) )
+w( "ovl", "checks.cpp", "".join( f"static int tally_{i:02d}( int a ) {{ return a; }}\nstatic int tally_{i:02d}( int a, int b ) {{ return a + b; }}\n" for i in N )
+   + "\n".join( f"int integration_check_{i:02d}( int x ) {{\n    return tally_{i:02d}( x, x );\n}}\n" for i in N ) )
+w( "ovl1", "checks.cpp", "".join( f"static int tally_{i:02d}( int a, int b ) {{ return a + b; }}\n" for i in N )
+   + "\n".join( f"int integration_check_{i:02d}( int x ) {{\n    return tally_{i:02d}( x, x );\n}}\n" for i in N ) )
 PY
 
 run(){ local d="$1"; shift; ( cd "$TMP/$d" || exit 1; "$BIN" "$TMP/$d" --no-cache "$@" 2>/dev/null </dev/null ); }
@@ -203,6 +219,17 @@ elif mode == "chdr":
          "s2", "a C declaration and its definition are one row, the definition's: %s" % [ ( r["n"], r["p"] ) for r in rows ] )
 elif mode == "pyt":
     say( len( rows ) >= 1 and all( r.get( "test" ) == "1" for r in rows ), "s1", "every row of a test file says test=\"1\": %s" % rows )
+elif mode == "tabp":
+    say( m is not None and len( rows ) >= 1 and all( r["p"].startswith( "a&#9;b.py:" ) for r in rows ), "p1", "the tab-named file's symbols are offered, p= as the answer spells it: %s" % [ r["p"] for r in rows ][ :3 ] )
+elif mode == "tspriv":
+    cal = [ r for r in rows if r.get( "by" ) == "callee" and r["n"].startswith( "linkTarget" ) ]
+    say( len( cal ) >= 1, "t1", "a shown Router.#priv head row credits its callees: %s" % [ r["n"] for r in rows ] )
+elif mode == "ovl":
+    cal = [ r for r in rows if r.get( "by" ) == "callee" and r["n"].startswith( "tally_" ) ]
+    say( len( cal ) >= 1 and all( r.get( "via" ) == "name" for r in cal ), "o1", "overloads: the kept row was not the one the call reaches, so it is hedged: %s" % [ ( r["n"], r["p"], r.get( "via" ) ) for r in cal ] )
+elif mode == "ovl1":
+    cal = [ r for r in rows if r.get( "by" ) == "callee" and r["n"].startswith( "tally_" ) ]
+    say( len( cal ) >= 1 and all( "via" not in r for r in cal ), "o2", "one definition, a plain call: no hedge: %s" % [ ( r["n"], r.get( "via" ) ) for r in cal ] )
 elif mode == "wide":
     say( m is not None and "files" not in tag and "head" not in tag and int( tag.get( "files_total", "0" ) ) > 6, "c1", "six files and eight head rows are the legend's constants; files_total= names the cut: %s" % tag )
 PY
@@ -224,6 +251,28 @@ fxrun cppdecl cppdecl 'parse the version and check the edge wanted'
 fxrun chdr chdr 'find home 07 and 08'
 fxrun pyt pyt 'why does the integration check fail'
 fxrun wide wide 'route table'
+if [ -f "$TMP/tabp/$( printf 'a\tb.py' )" ]; then fxrun tabp tabp "$TASK"; else echo "  SKIP  (p1) this file system cannot hold a tab in a file name"; fi
+fxrun tspriv tspriv 'how does the router add a route'
+fxrun ovl ovl "$TASK"
+fxrun ovl1 ovl1 "$TASK"
+
+# (h2) the held block's next= keeps the origin call's ranking flags
+RIPWIRE_DEV=1 run py "--for=$TASK" --token-budget=4000 --no-route --anchor --pack-top-n=12 >"$TMP/h2.xml"; rc=$?
+if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for=&apos;$TASK&apos; --anchor --no-route --pack-top-n=12\"/></ctx>\$" "$TMP/h2.xml"; then ok "(h2) a held block's next= carries --anchor --no-route --pack-top-n=12"; else no "(h2) rc=$rc: $( grep -o '<syms held.*' "$TMP/h2.xml" | head -c 300 )"; fi
+run py "--for=$TASK" --max-tokens=2000 --no-route >"$TMP/h3.xml"; rc=$?
+if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for=&apos;$TASK&apos; --no-route\"/></ctx>\$" "$TMP/h3.xml"; then ok "(h2) --max-tokens: next= carries --no-route"; else no "(h2) max-tokens rc=$rc: $( grep -o '<syms held.*' "$TMP/h3.xml" | head -c 300 )"; fi
+
+# (c2) a buffer that fails to flush: a real short write (RLIMIT_FSIZE with SIGXFSZ ignored; stdout is a pipe so only the capture file is limited)
+run py "--for=$TASK" >"$TMP/c2.full.xml"
+bash -c 'trap "" XFSZ; ulimit -f 4 2>/dev/null || exit 99; cd "$1" || exit 98; shift; exec "$@"' x "$TMP/py" "$BIN" "$TMP/py" --no-cache "--for=$TASK" </dev/null 2>"$TMP/c2.err" | cat >"$TMP/c2.xml"; rc=${PIPESTATUS[0]}
+if [ "$rc" = 99 ] || { [ "$rc" = 0 ] && [ -s "$TMP/c2.full.xml" ] && [ "$( wc -c <"$TMP/c2.xml" )" -ge "$( wc -c <"$TMP/c2.full.xml" )" ]; }; then
+  echo "  SKIP  (c2) this platform does not enforce a file-size limit on the capture buffer (rc=$rc)"
+elif [ "$rc" = 1 ] && grep -aq "buffer failed to flush or read back whole" "$TMP/c2.err" && grep -aq '<syms held="uncaptured"/></ctx>$' "$TMP/c2.xml" && ! grep -aq '<y ' "$TMP/c2.xml"; then
+  ok "(c2) a buffer that fails to flush is not the whole answer: stderr says so, exit 1, <syms held=\"uncaptured\"/>, no rows"
+else
+  no "(c2) rc=$rc stderr: $( head -c 200 "$TMP/c2.err" ) tail: $( tail -c 160 "$TMP/c2.xml" )"
+fi
+if grep -aq '<y ' "$TMP/c2.full.xml"; then ok "(c2) twin: without the limit the same run prints rows"; else no "(c2) twin: the unlimited run printed no rows"; fi
 
 # (u1) a run that cannot buffer its bytes: RIPWIRE_FAULT_CHARGE_BUFFER=1 (the est_tokens family's switch, non-NDEBUG flavour only)
 ( cd "$TMP/py" && RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" "$TMP/py" --no-cache "--for=$TASK" >"$TMP/u1.xml" 2>"$TMP/u1.err" </dev/null ); rc=$?

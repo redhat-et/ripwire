@@ -1309,7 +1309,7 @@ def sections_u( s ):
         try: return len( json.dumps( json.loads( s ).get( "tail", {} ), separators=( ",", ":" ), ensure_ascii=False ).encode() )
         except ValueError: return 0
     # K-WRONGSYM: the <syms> block (or its held stub) rides last before </ctx> on its own allowance, never reserved from T: the reader leaves it out
-    s = re.sub( r"(?:<!-- (?:ripwire for )?syms:.*?-->)?(?:<syms [^>]*/>|<syms .*?</syms>)", "", s, flags = re.S )
+    s = re.sub( r"(?:<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->)?(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|</ctx>)", "", s, flags = re.S )
     u = ( len( s.split( "</sigs>", 1 )[ 1 ].encode() ) - len( "</ctx>" ) ) if "</sigs>" in s else 0
     u += sum( len( h.encode() ) for h in re.findall( r"<hdr [^>]*/>", s.split( "<sigs", 1 )[ 0 ] ) )
     root = re.search( r"<ctx [^>]*>", s )
@@ -1510,7 +1510,7 @@ for tb in 500 900; do
     softPair p4 "$P4" . "widget routine dispatcher" "$tb"
     [ -n "$spWhy" ] && { p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb:$spWhy"; }
     for lg in compact full; do
-        f="$TMP/sp.$lg"; pb="$( python3 -c 'import re,sys; print(len(re.sub(rb"(?:<!-- (?:ripwire for )?syms:.*?-->)?(?:<syms [^>]*/>|<syms .*?</syms>)", b"", open(sys.argv[1],"rb").read(), flags=re.S)))' "$f" )"   # K-WRONGSYM: bytes less the <syms> block (outside est_tokens by design)
+        f="$TMP/sp.$lg"; pb="$( python3 -c 'import re,sys; print(len(re.sub(rb"(?:<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->)?(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|</ctx>)", b"", open(sys.argv[1],"rb").read(), flags=re.S)))' "$f" )"   # K-WRONGSYM: bytes less the <syms> block (outside est_tokens by design)
         pe="$( grep -oE '^<ctx [^>]*>' "$f" | head -1 | grep -oE ' est_tokens="[0-9]+"' | tr -dc '0-9' )"
         sigs="$( grep -oE '<sigs( [^>]*)?>' "$f" | head -1 )"
         eval "line=\"\$spLine_$lg\""; r="$( spfield "$line" rows )"; t="$( spfield "$line" total )"
