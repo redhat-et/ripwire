@@ -16474,20 +16474,8 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
     // rule (2) reads the resolver's own `mod:` base, which knows a manifest's crate roots (`[lib] path`, src/bin/*.rs): the run's
     // shared table when an earlier pass built it. The path index is built only when it is needed (no shared table yet, or a
     // declaration that points at the includer's own directory).
-    HashMap<std::string, std::uint32_t> rsIndex;
-    const auto rsIndexOf = [ & ]() -> const HashMap<std::string, std::uint32_t>&
-    {
-        if( rsIndex.empty() )
-        {
-            rsIndex.reserve( F );
-            for( std::uint32_t f = 0; f < F; ++f )
-            {
-                rsIndex.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
-            }
-        }
-        return rsIndex;
-    };
-    const RustCrateRoots& rustRoots = ing.rustCrateRoots ? *ing.rustCrateRoots : rustCrateRootsOf( ing, rsIndexOf() );
+    LazyFileIndex         rsIndexOf( ing );
+    const RustCrateRoots& rustRoots = rustCrateRootsOf( ing, rsIndexOf );
     std::vector<std::pair<std::uint32_t, std::uint32_t>>      cutPairs;   // (parent, child) to drop: parents ascending (decls' order), children sorted
     std::vector<std::pair<std::uint32_t, const RustModDecl*>> cand;   // one scratch row, reused: (child, its declaration) per occurrence
     std::vector<std::uint32_t>                                drop;   // the distinct children cut from one parent, sorted
@@ -16513,7 +16501,8 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
                 return true;
             }
             const std::string stem = modDir.empty() ? std::string( name ) : modDir + "/" + std::string( name );
-            return !rsIndexOf().contains( stem + ".rs" ) && !rsIndexOf().contains( stem + "/mod.rs" );
+            const auto& index = rsIndexOf();
+            return !index.contains( stem + ".rs" ) && !index.contains( stem + "/mod.rs" );
         };
         const auto             names    = std::span( decls ).subspan( i, j - i );
         // The declaration naming g by the module-file rule, or nullptr (rule (1)).

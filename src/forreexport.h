@@ -209,14 +209,10 @@ struct RustCrates
     // A `pub use` inside `pub mod private { }` publishes `<file path>::private::Name`, never `<file path>::Name`.
     [[nodiscard]] std::vector<std::string> modsAt( std::uint32_t f, std::uint32_t byte ) const
     {
-        std::vector<std::string> mods = modOf[ f ];
-        for( const InlineMod& m : inlineOf[ f ] )
-        {
-            if( m.start < byte && byte < m.end )
-            {
-                mods.push_back( m.name );
-            }
-        }
+        std::vector<std::string>      mods = modOf[ f ];
+        std::vector<std::string_view> inl;
+        rustInlineChain( inlineOf[ f ], byte, inl );
+        mods.insert( mods.end(), inl.begin(), inl.end() );
         return mods;
     }
     [[nodiscard]] static std::string importKey( std::uint32_t f, std::string_view name )
@@ -1246,13 +1242,7 @@ inline std::string_view reexportFromPackage( const std::vector<std::string_view>
 // The file map the Web module resolver reads: root-relative normalized path -> file.
 inline HashMap<std::string, std::uint32_t> webFileMap( const IngestResult& ing )
 {
-    HashMap<std::string, std::uint32_t> files;
-    files.reserve( ing.files.size() );
-    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
-    {
-        files.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
-    }
-    return files;
+    return normalizedFileIndex( ing );   // resolve.h
 }
 
 // The definitions a task word names, in a language whose re-exports this file reads (Rust; the Web dialect), inside the

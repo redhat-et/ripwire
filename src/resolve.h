@@ -56,6 +56,7 @@
 #include "memguard.h"                 // guardedFileClosure
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/os.h"           // os::realpath / os::stat — the ancestor-config walk (#220: configs above the crawl root)
+#include "infra/sharedOnce.h"   // sharedOnce — rustCrateRootsOf
 #include "infra/Diagnostics.h"   // ASSUME — buildScopedRecvDecls' index-range precondition
 #include "extentsuspect.h"       // extent::inSet with kHeadRuleLangs / kExtentClassKinds — class identity's C-family and class-kind tables
 
@@ -1028,6 +1029,19 @@ inline std::vector<std::vector<InlineMod>> rustInlineMods( const IngestResult& i
     return out;
 }
 
+// The names of the inline modules among `inl` (one file's, outermost first) whose body holds `byte`, outermost first, appended to
+// `out`. The one chain walk: the import probe's inline depth and forreexport.h's module path both read it.
+inline void rustInlineChain( const std::vector<InlineMod>& inl, std::uint32_t byte, std::vector<std::string_view>& out )
+{
+    for( const InlineMod& m : inl )
+    {
+        if( m.start < byte && byte < m.end )
+        {
+            out.push_back( m.name );
+        }
+    }
+}
+
 // Per-file Rust crate roots (F1): which crate a `.rs` file is compiled in, read from the nearest Cargo.toml above it.
 // A manifest's targets: `[lib] path` (default `src/lib.rs`), `src/main.rs`, each `[[bin]] path`, `build.rs`, and Cargo's
 // auto-discovered directories `src/bin/`, `tests/`, `examples/`, `benches/` (each file there a root; `<dir>/<name>/main.rs` a
@@ -1047,18 +1061,66 @@ struct RustCrateRoots
     // directive sits in: `mod tests { use super::*; }`, `mod outer { mod inner; }`).
     void inlineChainAt( std::uint32_t f, std::uint32_t byte, std::vector<std::string_view>& out ) const
     {
-        if( f >= inlineOf.size() )
+        if( f < inlineOf.size() )
         {
-            return;
-        }
-        for( const InlineMod& m : inlineOf[ f ] )
-        {
-            if( m.start < byte && byte < m.end )
-            {
-                out.push_back( m.name );
-            }
+            rustInlineChain( inlineOf[ f ], byte, out );
         }
     }
+};
+
+// The nearest manifest above a directory ("" or "a/b/" → index into the manifests, kNoFile = none), memoized per directory: the
+// files of one directory (contiguous in the sorted file list) share one answer, and every level a walk visits is kept.
+class NearestManifest
+{
+public:
+    explicit NearestManifest( const HashMap<std::string, std::uint32_t>& manifestAt ) : m_manifestAt( manifestAt ) {}
+
+    std::uint32_t operator()( std::string_view dir )
+    {
+        if( m_haveLast && dir == m_lastDir )
+        {
+            return m_lastFound;
+        }
+        std::uint32_t found = kNoFile;
+        m_visited.clear();
+        for( std::string_view d = dir;; )
+        {
+            m_key.assign( d );
+            if( const auto it = m_manifestAt.find( m_key ); it != m_manifestAt.end() )
+            {
+                found = it->second;
+                break;
+            }
+            if( const auto it = m_memo.find( m_key ); it != m_memo.end() )
+            {
+                found = it->second;
+                break;
+            }
+            m_visited.push_back( d );
+            if( d.empty() )
+            {
+                break;
+            }
+            const std::size_t up = d.size() > 1 ? d.rfind( '/', d.size() - 2 ) : std::string_view::npos;   // "a/b/" → "a/"; "a/" → ""
+            d                    = up == std::string_view::npos ? std::string_view() : d.substr( 0, up + 1 );
+        }
+        for( const std::string_view d : m_visited )
+        {
+            m_memo.try_emplace( std::string( d ), found );
+        }
+        m_lastDir   = std::string( dir );
+        m_lastFound = found;
+        m_haveLast  = true;
+        return found;
+    }
+
+private:
+    const HashMap<std::string, std::uint32_t>& m_manifestAt;
+    HashMap<std::string, std::uint32_t>        m_memo;
+    std::string                                m_lastDir, m_key;
+    std::uint32_t                              m_lastFound = kNoFile;
+    bool                                       m_haveLast  = false;
+    std::vector<std::string_view>              m_visited;
 };
 
 inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex )
@@ -1130,51 +1192,7 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
     rr.isRoot.assign( F, 0 );
     rr.inlineOf = rustInlineMods( ing );
     std::string probe;
-    // The nearest manifest above a directory, memoized per directory ("" or "a/b/" → manifests index, kNoFile = none): the
-    // files of one directory (contiguous in the sorted file list) share one answer, and every level the walk visits is kept.
-    HashMap<std::string, std::uint32_t> nearestAt;
-    std::string                         lastDir, key;
-    std::uint32_t                       lastNearest = kNoFile;
-    bool                                haveLast    = false;
-    std::vector<std::string_view>       visited;
-    const auto nearestManifest = [ & ]( std::string_view dir ) -> std::uint32_t
-    {
-        if( haveLast && dir == lastDir )
-        {
-            return lastNearest;
-        }
-        std::uint32_t found = kNoFile;
-        visited.clear();
-        for( std::string_view d = dir;; )
-        {
-            key.assign( d );
-            if( const auto it = manifestAt.find( key ); it != manifestAt.end() )
-            {
-                found = it->second;
-                break;
-            }
-            if( const auto it = nearestAt.find( key ); it != nearestAt.end() )
-            {
-                found = it->second;
-                break;
-            }
-            visited.push_back( d );
-            if( d.empty() )
-            {
-                break;
-            }
-            const std::size_t up = d.size() > 1 ? d.rfind( '/', d.size() - 2 ) : std::string_view::npos;   // "a/b/" → "a/"; "a/" → ""
-            d                    = up == std::string_view::npos ? std::string_view() : d.substr( 0, up + 1 );
-        }
-        for( const std::string_view d : visited )
-        {
-            nearestAt.try_emplace( std::string( d ), found );
-        }
-        lastDir     = std::string( dir );
-        lastNearest = found;
-        haveLast    = true;
-        return found;
-    };
+    NearestManifest nearestManifest( manifestAt );
     for( std::uint32_t f = 0; f < F; ++f )
     {
         const std::string_view rel = rootRelPath( ing, f );
@@ -1268,11 +1286,44 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
 // narrow and the containment cut. `fileIndex` is the caller's normalized path -> file id index (every caller builds the same one).
 inline const RustCrateRoots& rustCrateRootsOf( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex )
 {
-    if( !ing.rustCrateRoots )
+    return sharedOnce( ing.rustCrateRoots, [ & ] { return std::make_shared<const RustCrateRoots>( buildRustCrateRoots( ing, fileIndex ) ); } );
+}
+
+// The normalized root-relative path -> file id index (the keys buildPreciseIncludeAdj probes on).
+inline HashMap<std::string, std::uint32_t> normalizedFileIndex( const IngestResult& ing )
+{
+    HashMap<std::string, std::uint32_t> files;
+    files.reserve( ing.files.size() );
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        ing.rustCrateRoots = std::make_shared<const RustCrateRoots>( buildRustCrateRoots( ing, fileIndex ) );
+        files.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
     }
-    return *ing.rustCrateRoots;
+    return files;
+}
+
+// normalizedFileIndex, built on first use: a caller that may find the run's crate-root table already built pays for the index only
+// when it needs one.
+class LazyFileIndex
+{
+public:
+    explicit LazyFileIndex( const IngestResult& ing ) : m_ing( ing ) {}
+    const HashMap<std::string, std::uint32_t>& operator()()
+    {
+        if( m_index.empty() )
+        {
+            m_index = normalizedFileIndex( m_ing );
+        }
+        return m_index;
+    }
+
+private:
+    const IngestResult&                 m_ing;
+    HashMap<std::string, std::uint32_t> m_index;
+};
+
+inline const RustCrateRoots& rustCrateRootsOf( const IngestResult& ing, LazyFileIndex& fileIndex )
+{
+    return ing.rustCrateRoots ? *ing.rustCrateRoots : rustCrateRootsOf( ing, fileIndex() );
 }
 
 // Flattens a Rust `use` tree into its leaf paths, appended to `out`: `crate::a::{b, c::{d, self}, e as f, *}` → `crate::a::b`,
@@ -4309,11 +4360,7 @@ private:
 
     const AncestorConfigs& ancestors()
     {
-        if( !ancestors_ )
-        {
-            ancestors_ = findAncestorConfigs( ing_.crawlRoot );
-        }
-        return *ancestors_;
+        return sharedOnce( ancestors_, [ & ] { return findAncestorConfigs( ing_.crawlRoot ); } );
     }
 
     static bool hasEntry( const std::string& dir, std::string_view name )
