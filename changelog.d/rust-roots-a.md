@@ -14,8 +14,7 @@ compiled in: the nearest `Cargo.toml` above it and that manifest's target (`[lib
 - A brace group (`use crate::{a::b, c::{self, D}}`) resolves each member, and an `as` rename resolves the path it renames.
 - A directive inside an inline `mod x { }` reads from that module, not from the file's: in `#[cfg(test)] mod tests { use
   super::*; }` the first `super` is the file's own module (no edge), a `super` past the inline depth climbs from the file's
-  module, `self::` is the inline module itself, and `mod y;` is `x/y.rs` below the module directory. Without this, every
-  unit-tested file drew a false edge to its parent module file.
+  module, `self::` is the inline module itself, and `mod y;` is `x/y.rs` below the module directory.
 
 Measured on three in-sample trees (distinct file pairs from `.rs` includers, base main 292a26dec vs this change):
 mdbook 64 → 108 (+44, none removed), axum 139 → 331 (+208; 16 removed: 15 edges into the `axum-core` crate from `axum`

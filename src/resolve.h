@@ -1513,6 +1513,40 @@ inline std::vector<std::string_view> rustPathSegments( std::string_view path )
     return out;
 }
 
+// `mod x;` (body-less module-file declaration; `mod` the name after "mod:") → `x.rs` / `x/mod.rs` in the includer's MODULE directory
+// (F2); the includer's own directory only when the module directory holds neither, which is where `#[path = "x.rs"] mod x;` points
+// (the attribute is not captured; nushell lex.rs): without it that file could not be this module. Inside an inline `mod outer { }`
+// it is the inline module's own directory, no #[path] tier (`mod outer { mod y; }` in a.rs is a/outer/y.rs).
+inline std::uint32_t resolveRustModDecl( std::string_view includerPath, std::string_view modName, RustProbe& probe, const RustSite& site,
+                                         const std::string& modDir )
+{
+    const std::string mod( modName );
+    if( mod.empty() || mod.find( ':' ) != std::string::npos )
+    {
+        return kNoFile;
+    }
+    if( !site.inlineMods.empty() )
+    {
+        std::string dir = modDir;
+        for( const std::string_view inl : site.inlineMods )
+        {
+            dir.append( dir.empty() ? "" : "/" ).append( inl );
+        }
+        probe( dir, mod + ".rs" );
+        probe( dir, mod + "/mod.rs" );
+        return probe.result();
+    }
+    for( const std::string_view dir : { std::string_view( modDir ), includerDir( includerPath ) } )
+    {
+        if( !probe.any() )
+        {
+            probe( dir, mod + ".rs" );
+            probe( dir, mod + "/mod.rs" );
+        }
+    }
+    return probe.result();
+}
+
 inline std::uint32_t resolveRustImport( std::string_view includerPath, std::string_view target,
                                         const HashMap<std::string, std::uint32_t>& fileIndex, const RustSite& site,
                                         const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
@@ -1524,36 +1558,9 @@ inline std::uint32_t resolveRustImport( std::string_view includerPath, std::stri
     RustProbe         probe{ fileIndex, ws, includerFileId };
     const std::string modDir = rustModuleDir( includerPath, site.isCrateRoot );
 
-    // `mod x;` (body-less module-file declaration) → `x.rs` / `x/mod.rs` in the includer's MODULE directory (F2); the
-    // includer's own directory only when the module directory holds neither, which is where `#[path = "x.rs"] mod x;`
-    // points (the attribute is not captured; nushell lex.rs): without it that file could not be this module.
     if( target.starts_with( "mod:" ) )
     {
-        const std::string mod( target.substr( 4 ) );
-        if( mod.empty() || mod.find( ':' ) != std::string::npos )
-        {
-            return kNoFile;
-        }
-        if( !site.inlineMods.empty() )   // `mod outer { mod y; }` in a.rs is a/outer/y.rs: the inline module's own directory, no #[path] tier
-        {
-            std::string dir = modDir;
-            for( const std::string_view inl : site.inlineMods )
-            {
-                dir.append( dir.empty() ? "" : "/" ).append( inl );
-            }
-            probe( dir, mod + ".rs" );
-            probe( dir, mod + "/mod.rs" );
-            return probe.result();
-        }
-        for( const std::string_view dir : { std::string_view( modDir ), includerDir( includerPath ) } )
-        {
-            if( !probe.any() )
-            {
-                probe( dir, mod + ".rs" );
-                probe( dir, mod + "/mod.rs" );
-            }
-        }
-        return probe.result();
+        return resolveRustModDecl( includerPath, target.substr( 4 ), probe, site, modDir );
     }
 
     // `use …` — one path. A brace group never reaches here as one file (resolveRustUseTree flattens it first); an `as`
