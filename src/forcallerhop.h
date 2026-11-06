@@ -21,8 +21,9 @@
 // kind, nothing unproven (forCallerHopTargets); a bodyless declaration group the verb lists (a <def> table) but no row ties to is
 // not a second function, and its rows then carry no of_def= here (they would all read of_def="1"). A C++ overload set, a same-named static in two files, a function beside a
 // same-named struct and a name in two classes carry no block: the callers verb splits or hedges them (of_def=, cross_kind=), and
-// this element prints exactly what `--callers=NAME` prints or nothing. The second hop's rows carry the by-name hedge the callers
-// verb prints for them (via="name"). The DEFAULT regime and the XML dialect only, as the body fold: an explicit --token-budget,
+// this element prints exactly what `--callers=NAME` prints or nothing. A second-hop row carries via="name" when no proven edge joins
+// it to a proven first-hop row: its own edge is by name (the callers verb's hedge), or it reaches the function only through
+// via="name" first-hop rows (D2-VIA-INHERIT). The DEFAULT regime and the XML dialect only, as the body fold: an explicit --token-budget,
 // --json, --signatures-only, --detail=N and every other route carry none (byte-identical to before). MCP for is not changed.
 // RIPWIRE_NO_CALLER_HOP (any value) turns it off — the A/B handle, the RIPWIRE_NO_BODY_FOLD precedent.
 
@@ -400,11 +401,11 @@ inline std::vector<NodeId> forRankedCallerHopTargets( const IngestResult& ing, c
 inline constexpr std::string_view kForCallerHopLegend =
     "; callers of=: the route named one function, so its callers follow its definition: s t= n= sc= p=file:line rows are its "
     "1-hop callers (n=Owner.name with no sc= on a member whose owner the index defines, as the callers verb prints it; sites_at= their calls of it as file:line, sites_total= when that list was cut; via=name: matched by name "
-    "alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the shown callers by rank, d2_shown= of d2=; "
+    "alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the shown callers by rank (via=name also when every caller it reaches is via=name), d2_shown= of d2=; "
     "capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists the whole caller radius";
 inline constexpr std::string_view kForCompactCallerHopLegend =
     "; callers of=: the one function's 1-hop callers, s t= n= sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; "
-    "via=name by name only), shown= of total=; d=2 rows: their callers, d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
+    "via=name by name only), shown= of total=; d=2 rows: their callers (via=name also if only via=name ones), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
 
 // UPWARD-2HOP: the ranked seed's clauses (by="rank" on the element). Self-contained — the named-route clause never rides with them.
 inline constexpr std::string_view kForRankedCallerHopLegend =
@@ -412,24 +413,24 @@ inline constexpr std::string_view kForRankedCallerHopLegend =
     "3 callers (the first whose body holds the task's words in one string, else the first; found by rank, a lead to check), and the chain above it follows: s t= n= sc= p=file:line rows are its 1-hop callers "
     "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as file:line, sites_total= when "
     "that list was cut; via=name: matched by name alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the "
-    "shown callers by rank, d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
+    "shown callers by rank (via=name also when every caller it reaches is via=name), d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
     "the whole caller radius";
 inline constexpr std::string_view kForCompactRankedCallerHopLegend =
     "; callers by=rank of=: an error task's r=1..3 row that is one function with 1-3 callers (the first with the task's words in a body string, else the first; a lead by rank): its callers, s t= n= "
     "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
-    "shown= of total=; d=2 rows: their callers, d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
+    "shown= of total=; d=2 rows: their callers (via=name also if only via=name ones), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
 
 // SUBJECT-ANCHOR: the subject's named symbol (by="subject" on the element). Self-contained, as the ranked clauses are.
 inline constexpr std::string_view kForSubjectCallerHopLegend =
     "; callers by=subject of=: the subject names this function exactly (several: the first with callers), so its callers ride on the conceptual answer above: s t= n= sc= p=file:line rows are its 1-hop callers "
     "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as file:line, sites_total= when "
     "that list was cut; via=name: matched by name alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the "
-    "shown callers by rank, d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
+    "shown callers by rank (via=name also when every caller it reaches is via=name), d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
     "the whole caller radius";
 inline constexpr std::string_view kForCompactSubjectCallerHopLegend =
     "; callers by=subject of=: the function the subject names (several: the first with callers), on top of the conceptual answer: its callers, s t= n= "
     "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
-    "shown= of total=; d=2 rows: their callers, d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
+    "shown= of total=; d=2 rows: their callers (via=name also if only via=name ones), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
 
 struct CallerHopRender
 {
@@ -498,6 +499,36 @@ inline std::vector<NodeId> callerHopSecondRows( const IngestResult& ing, const G
     return out;
 }
 
+// D2-VIA-INHERIT: per shown d=2 row, 1 when no edge joins it to a PROVEN shown first-hop row (one the element prints without
+// via="name") by more than name alone. Such a row reaches the subject only through a by-name hop: its own d1->d2 edge (the
+// callers verb's reading of `--callers=<that caller>`, rv-mf1-nx B3) or a by-name first hop it would otherwise read as proven
+// (rv-rra-delta (3)). A row with one proven path stays unhedged. The proven subset is built once per answer, not per row.
+inline std::vector<char> callerHopSecondNameOnly( const Graph& g, std::span<const NodeId> shown, const OneHopAttribution& attr,
+                                                  std::span<const NodeId> secondRows )
+{
+    std::vector<NodeId> proven;
+    proven.reserve( shown.size() );
+    for( std::size_t k = 0; k < shown.size(); ++k )
+    {
+        if( !attr.nameOnly( k ) )
+        {
+            proven.push_back( shown[k] );
+        }
+    }
+    std::vector<char> out( secondRows.size(), 1 );
+    for( std::size_t i = 0; i < secondRows.size(); ++i )
+    {
+        out[i] = std::ranges::any_of( proven, [ & ]( NodeId p )
+                                      {
+                                          const std::size_t e = edgeIndex( g, secondRows[i], p );
+                                          return e != SIZE_MAX && defMarkOfEdge( g, e ) != DefMark::Name;
+                                      } )
+                     ? 0
+                     : 1;
+    }
+    return out;
+}
+
 // The element. `rootArg` is the single-root run's own root (empty under multi-root: p= keeps ingest's spelling), as every --for row.
 // `by`: empty on the name-exact route; "rank" (UPWARD-2HOP) the seed came from forRankedCallerHopTargets; "subject" (SUBJECT-ANCHOR) a
 // conceptual route's subject names it (subjectanchor.h). The element says so (by=, its own clause).
@@ -518,10 +549,9 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     // the callers verb's per-row readings over the shown rows: the call sites (CALLSITE-AT) and the by-name hedge (FE-B)
     const RowCallSites       sites = rowCallSites( ing, targets, shown, VrRender{ !rootArg.empty(), rootArg }, g.keptForwards );
     const OneHopAttribution  attr  = attributeOneHopAnswer( ing, g, targets, shown, /*towardMatches=*/true );
-    // the second hop's by-name hedge, as the callers verb on the shown callers prints it (rv-mf1-nx B3): a d=2 row whose every edge
-    // into the shown callers is by name alone is receiver-unproven — via="name", exactly the row `--callers=<that caller>` carries
+    // the second hop's by-name hedge: a d=2 row with no proven edge into a proven shown caller is receiver-unproven — via="name"
     const std::span<const NodeId> secondShownRows = std::span<const NodeId>( second ).first( secondShown );
-    const OneHopAttribution       attr2 = secondShown == 0 ? OneHopAttribution{} : attributeOneHopAnswer( ing, g, shown, secondShownRows, /*towardMatches=*/true );
+    const std::vector<char>       nameOnly2       = callerHopSecondNameOnly( g, shown, attr, secondShownRows );
 
     const Symbol&     t   = ing.symbols[ targets.front() ];
     const std::string sel = t.scope.empty() ? t.name : t.scope + "::" + t.name;   // the callers verb's own qualified selector
@@ -555,7 +585,7 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     }
     for( std::size_t i = 0; i < secondShown; ++i )
     {
-        appendCallerHopRow( x, rc, second[i], std::string( " d=\"2\"" ) + viaNameAttr( attr2.nameOnly( i ) ) );
+        appendCallerHopRow( x, rc, second[i], std::string( " d=\"2\"" ) + viaNameAttr( nameOnly2[i] != 0 ) );
     }
     x += "</callers>";
     return out;

@@ -26,6 +26,10 @@
 #   F1 [P] fix round 1 (rv-mf1-nx B1/B2): no block on a C++ overload set, a method overload set, two same-named statics, a function
 #          beside a same-named struct; [G] a declared-and-defined function (recall control) keeps its block, total= = --callers
 #   B3 [P] a d="2" row carries via="name" when its own callers row does (Python driver(c): c.submit(None))
+#   V1 [P] D2-VIA-INHERIT (rv-rra-delta (3)), Rust, Python, TS and C++: (a) a d=2 row reached only through a via="name" first-hop
+#          row carries via="name" though its own edge is proven; (b) a d=2 row with one proven path (and one by-name) stays unhedged;
+#          (c) [G] a d=2 row whose own edge into a proven first-hop row is by name keeps via="name"; (d) Python: a row with a proven edge
+#          into the by-name hop and a by-name edge into the proven hop (no all-proven path) carries via="name"
 #   Q1 [P] train 33 (MF1-NX x QUALNAME-1): every first-hop row's n= and p= equal the callers verb's own row; a member caller
 #          folds its owner into n= (n="Client.submit", no sc=)
 #   R1 [P] UPWARD-2HOP: an error-shaped task ("dependency cycle error") on the ranked route whose r=1 row is a narrow-funnel function
@@ -233,6 +237,34 @@ else
     no "(B3c-pre) the first-hop row n=\"Client.submit\" p=\"m.py:7\" is missing — the negative would pass vacuously: [$H3b]"
 fi
 
+# ── V1: D2-VIA-INHERIT — a d=2 row inherits a by-name first hop (src/forcallerhop.h callerHopSecondNameOnly) ──────────────────
+# Per language: the first-hop rows' hedges are the premise (name_hop via="name", proven_hop and the relay method unhedged), then
+# the three d=2 shapes. Every row is matched whole, so a respelled or missing row fails instead of passing a negative vacuously.
+FV="test/forcallerhopfix/d2inherit"
+v1(){   # lang, --for subject, then "row|want" pairs: want = via (must carry via="name") or bare (must not)
+    local lang="$1" subj="$2"; shift 2
+    run "$FV/$lang" --for="$subj" >"$TMP/v1.$lang"; local rc=$?
+    [ "$rc" -eq 0 ] && [ -s "$TMP/v1.$lang" ] || { no "(V1-pre) $lang: --for=$subj failed (rc=$rc) or printed nothing"; return; }
+    local H; H="$( hop "$TMP/v1.$lang" )"
+    [ -n "$H" ] || { no "(V1-pre) $lang: no <callers> block for --for=$subj"; return; }
+    local pair row want got
+    for pair in "$@"; do
+        row="${pair%|*}"; want="${pair##*|}"
+        got="$( printf '%s' "$H" | grep -o "<s [^>]*n=\"$row\"[^>]*/>" )"
+        if [ -z "$got" ]; then no "(V1-pre) $lang: row n=\"$row\" missing: [$H]"; continue; fi
+        case "$want:$got" in
+            via:*' via="name"'*)  ok "(V1) $lang: $row carries via=\"name\"" ;;
+            bare:*' via='*)       no "(V1) $lang: $row is hedged but has a proven path: [$got]" ;;
+            bare:*)               ok "(V1) $lang: $row is unhedged (a proven path)" ;;
+            *)                    no "(V1) $lang: $row has no via=\"name\": [$got]" ;;
+        esac
+    done
+}
+v1 py post_entry 'name_hop|via' 'proven_hop|bare' 'Svc.relay|bare' 'only_by_name|via' 'both_paths|bare' 'by_name_edge|via' 'crossed|via'
+v1 rs post_entry 'name_hop|via' 'proven_hop|bare' 'Svc::relay|bare' 'only_by_name|via' 'both_paths|bare' 'by_name_edge|via'
+v1 ts postEntry 'nameHop|via' 'provenHop|bare' 'Svc.relay|bare' 'onlyByName|via' 'bothPaths|bare' 'byNameEdge|via'
+v1 cpp PostEntry 'NameHop|via' 'ProvenHop|bare' 'Svc::Relay|bare' 'OnlyByName|via' 'BothPaths|bare' 'ByNameEdge|via'
+
 # ── Q1 (train 33, MF1-NX x QUALNAME-1): a hop row names a caller exactly as the callers verb does ───────────────────────────────
 # Every first-hop <s> of the block has the identical n= and p= in `--callers=<of=>`'s own rows, and a member whose owner the index
 # defines folds sc= into n= (serialize.h sigRowHead's rule). [P] on the composed head before forcallerhop.h used qualifiedMemberName.
@@ -401,7 +433,7 @@ verdict $? "(X3) no -- inside a legend comment" "(X3) a legend comment holds --"
 run "$FC" --for=start_server >"$TMP/x2"
 cmp -s "$TMP/p1" "$TMP/x2"; verdict $? "(X1) deterministic" "(X1) two runs differ"
 if command -v xmllint >/dev/null 2>&1; then
-    for f in p1 p2 p3 p4f p8 b3 f1.on dp.f r1 r1f r3; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "(X2) well-formed: $f" "(X2) xmllint rejects $f"; done
+    for f in p1 p2 p3 p4f p8 b3 f1.on dp.f r1 r1f r3 v1.py v1.rs v1.ts v1.cpp; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "(X2) well-formed: $f" "(X2) xmllint rejects $f"; done
 else
     printf '  SKIP  (X2) xmllint not installed\n'
 fi
