@@ -1002,18 +1002,54 @@ inline std::string readConfigBytes( const std::string& path )
     return out;
 }
 
+// Advances `open` (0, or the quote character of a TOML multi-line string `"""…"""` / `'''…'''` still open) across one line of a
+// manifest and returns true when the line STARTS inside such a string: its text is a string's body, never a `[section]` header or
+// a `key = "value"` line. A `#` comment outside a string ends the scan of the line.
+inline bool tomlStartsInsideString( std::string_view line, char& open )
+{
+    const bool inside = open != 0;
+    for( std::size_t i = 0; i < line.size(); )
+    {
+        if( open == 0 && line[ i ] == '#' )
+        {
+            break;
+        }
+        const char q = open != 0 ? open : line[ i ];
+        if( ( q == '"' || q == '\'' ) && line.compare( i, 3, std::string( 3, q ) ) == 0 )
+        {
+            open = open == 0 ? q : char( 0 );
+            i += 3;
+        }
+        else if( open == 0 && ( q == '"' || q == '\'' ) )   // a one-line string: its quotes are text (`x = "'''"`)
+        {
+            const std::size_t close = line.find( q, i + 1 );
+            i                       = close == std::string_view::npos ? line.size() : close + 1;
+        }
+        else
+        {
+            ++i;
+        }
+    }
+    return inside;
+}
+
 // (Moved from graph.h for the Rust crate roots below; graph.h includes this header.) Every `name = "x"` line (or `key = "x"` for another key: the --for re-export rows read `[lib] path`) of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
 // dotted key, an inline table or a multi-line string is not read, which can only miss a name, never invent one).
 inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out,
                               std::string_view key = "name" )
 {
     bool inSection = false;
+    char open      = 0;   // the quote of a multi-line string being read
     while( !text.empty() )
     {
         const std::size_t end  = text.find( '\n' );
         std::string_view  line = text.substr( 0, end );
         text = end == std::string_view::npos ? std::string_view() : text.substr( end + 1 );
         line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( tomlStartsInsideString( line, open ) )
+        {
+            continue;
+        }
         if( line.starts_with( '[' ) )
         {
             inSection = std::ranges::any_of( sections, [ & ]( std::string_view h ) { return line.starts_with( h ); } );
@@ -1208,12 +1244,13 @@ private:
 // True when a line of the TOML `text` opens the section `header` (`[package]`, `[workspace]`), a trailing comment allowed.
 inline bool tomlHasSection( std::string_view text, std::string_view header )
 {
+    char open = 0;   // the quote of a multi-line string being read
     for( std::size_t at = 0; at < text.size(); )
     {
         const std::size_t end  = std::min( text.find( '\n', at ), text.size() );
         std::string_view  line = text.substr( at, end - at );
         line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
-        if( line.starts_with( header ) )
+        if( !tomlStartsInsideString( line, open ) && line.starts_with( header ) )
         {
             return true;
         }
@@ -1428,11 +1465,19 @@ inline const RustCrateRoots& rustCrateRootsOf( const IngestResult& ing, LazyFile
     return ing.rustCrateRoots ? *ing.rustCrateRoots : rustCrateRootsOf( ing, fileIndex() );
 }
 
+// The deepest brace nesting flattenRustUseTree reads. Real code nests a use tree about 4 deep; each level copies the growing prefix, so an
+// unbounded tree costs quadratic memory and time (30000 levels: 11 s) and one stack frame per level.
+inline constexpr unsigned kMaxRustUseTreeDepth = 32;
+
 // Flattens a Rust `use` tree into its leaf paths, appended to `out`: `crate::a::{b, c::{d, self}, e as f, *}` → `crate::a::b`,
 // `crate::a::c::d`, `crate::a::c`, `crate::a::e`, `crate::a::*`. An `as` rename keeps the path it renames. False on a shape it does
-// not read (unbalanced braces, a leaf that is not one path), and then `out` gets nothing from this tree.
-inline bool flattenRustUseTree( std::string_view tree, const std::string& prefix, std::vector<std::string>& out )
+// not read (unbalanced braces, a leaf that is not one path, nesting deeper than kMaxRustUseTreeDepth), and then `out` gets nothing from this tree.
+inline bool flattenRustUseTree( std::string_view tree, const std::string& prefix, std::vector<std::string>& out, unsigned depthSoFar = 0 )
 {
+    if( depthSoFar > kMaxRustUseTreeDepth )   // a tree this deep is not read, like an unbalanced one: it draws nothing
+    {
+        return false;
+    }
     const auto trim = []( std::string_view s )
     {
         s.remove_prefix( std::min( s.find_first_not_of( " \t\r\n" ), s.size() ) );
@@ -1500,7 +1545,7 @@ inline bool flattenRustUseTree( std::string_view tree, const std::string& prefix
         {
             if( const std::string_view member = trim( body.substr( start, i - start ) ); !member.empty() )   // a trailing comma
             {
-                ok = flattenRustUseTree( member, inner, out );
+                ok = flattenRustUseTree( member, inner, out, depthSoFar + 1 );
             }
             start = i + 1;
         }

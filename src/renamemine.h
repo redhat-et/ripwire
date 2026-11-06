@@ -287,9 +287,21 @@ inline bool commentOnly( std::string_view line, CommentSyntax syntax ) noexcept
 
 // The `+++ <path>` header of a patch names the file the next hunks belong to (--no-renames: old and new path agree).
 // `+++ /dev/null`, a quoted path or anything else leaves the language unknown, i.e. every pair kept.
+// Git ends the path with a tab when it holds a space, and quotes one holding a tab, quote or backslash (`+++ "b/…"`): both are
+// read here, the quoted path undecoded (a language is told by its extension, which an escape does not reach).
 inline CommentSyntax commentSyntaxOfHeader( std::string_view plusHeader ) noexcept
 {
-    return plusHeader.compare( 0, 6, "+++ b/" ) == 0 ? commentSyntaxOfPath( plusHeader.substr( 6 ) ) : CommentSyntax{};
+    if( plusHeader.compare( 0, 7, "+++ \"b/" ) == 0 )
+    {
+        const std::string_view quoted = plusHeader.substr( 7 );
+        return commentSyntaxOfPath( quoted.substr( 0, quoted.rfind( '"' ) ) );
+    }
+    if( plusHeader.compare( 0, 6, "+++ b/" ) != 0 )
+    {
+        return CommentSyntax{};
+    }
+    const std::string_view path = plusHeader.substr( 6 );
+    return commentSyntaxOfPath( path.substr( 0, path.find( '\t' ) ) );
 }
 
 struct HunkBuffer
@@ -404,6 +416,7 @@ inline RenameHarvest mineRenamePairs( const std::string& root )
 
     HashMap<std::string, std::uint32_t> votes;
     detail::HunkBuffer                  hunk;
+    bool                                inHunk = false;   // between an `@@` line and the next `diff` line: a `+++x` there is an added line `++x`
 
     const auto onLine = [ & ]( std::string_view raw )
     {
@@ -412,11 +425,17 @@ inline RenameHarvest mineRenamePairs( const std::string& root )
         {
             detail::foldHunk( hunk, votes, harvest );
             ++harvest.commitsWalked;
+            inHunk = false;
             return;
         }
+        if( raw.compare( 0, 5, "diff " ) == 0 )
+        {
+            inHunk = false;
+        }
         // Every file/hunk header ENDS the current hunk. The "---"/"+++" tests must precede the single-'-'
-        // and single-'+' tests below, or a file header is read as a removed/added line.
-        if( raw.size() >= 3 && ( raw.compare( 0, 3, "---" ) == 0 || raw.compare( 0, 3, "+++" ) == 0 ) )
+        // and single-'+' tests below, or a file header is read as a removed/added line, and they apply outside a hunk only
+        // (`++counter;` added is the line `+++counter;`; `--n;` removed is `---n;`).
+        if( !inHunk && raw.size() >= 3 && ( raw.compare( 0, 3, "---" ) == 0 || raw.compare( 0, 3, "+++" ) == 0 ) )
         {
             detail::foldHunk( hunk, votes, harvest );
             if( raw.compare( 0, 3, "+++" ) == 0 )
@@ -428,6 +447,7 @@ inline RenameHarvest mineRenamePairs( const std::string& root )
         if( raw.size() >= 2 && raw.compare( 0, 2, "@@" ) == 0 )
         {
             detail::foldHunk( hunk, votes, harvest );
+            inHunk = true;
             return;
         }
         if( raw.empty() || ( raw.front() != '-' && raw.front() != '+' ) )
