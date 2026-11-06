@@ -25,10 +25,11 @@
 // peerDependencies, optionalDependencies (a key per line); Cargo.toml [package] / [lib] / [[bin]] name, [features] keys,
 // [dependencies] / [dev-dependencies] / [build-dependencies] (also under [target.*] and [workspace]) keys and [dependencies.X]
 // headers; pyproject.toml [project] / [tool.poetry] name, [project.optional-dependencies] / [tool.poetry.extras] keys,
-// [tool.poetry.dependencies] keys, and its entry points; setup.cfg [metadata] name, [options.extras_require] keys and
+// [tool.poetry.dependencies] / [tool.poetry.group.<g>.dependencies] / dev-dependencies keys (not `python`), and its entry points; setup.cfg [metadata] name, [options.extras_require] keys and
 // [options.entry_points] (the entry points through epmanifest.h's own readers: a console / gui script is kind bin, every other group's
 // entry kind entry-point with group=); go.mod module and require lines
-// (`// indirect` ones skipped); CMakeLists.txt add_executable / add_library / project names. package.json, Cargo.toml and
+// (`// indirect` ones skipped); CMakeLists.txt add_executable / add_library / project names (a call may span lines; IMPORTED and ALIAS
+// targets, `#` and `#[[ ]]` comments are not read). package.json, Cargo.toml and
 // pyproject.toml are indexed files; setup.cfg, go.mod and CMakeLists.txt are not, so they are looked for in every directory that
 // holds an indexed file and in its ancestors. FLOORS: pyproject `dependencies = [..]` arrays, setup.py, Makefile, meson.build and
 // Bazel files are not read; vendored, node_modules, fixtures and testdata manifests are skipped.
@@ -211,6 +212,7 @@ struct TomlTable
         Keys
     } read = Read::None;
     ManifestKind kind = ManifestKind::Package;
+    std::string_view skipKey; // a key of a Keys table that is not an entry (poetry's `python = ".."` constrains the interpreter)
 };
 
 // The Cargo dependency tables; the second one's keys are dev-dependencies.
@@ -261,22 +263,60 @@ inline TomlTable pyprojectTable( const std::vector<std::string>& h, bool array, 
     {
         return { R::Keys, ManifestKind::Extra };
     }
-    return poetry && h.size() == 3 && h[2] == "dependencies" ? TomlTable { R::Keys, ManifestKind::Dep } : TomlTable {};
+    const bool deps = poetry && ( ( h.size() == 3 && h[2] == "dependencies" ) || ( h.size() == 5 && h[2] == "group" && h[4] == "dependencies" ) ); // groups: Poetry 1.2+
+    if( deps )
+    {
+        return { R::Keys, ManifestKind::Dep, "python" };
+    }
+    return poetry && h.size() == 3 && h[2] == "dev-dependencies" ? TomlTable { R::Keys, ManifestKind::DevDep, "python" } : TomlTable {};
+}
+
+// How many more `[` than `]` a TOML value text opens, outside quoted strings and past a `#` comment: > 0 when its array continues on
+// the next lines.
+inline int tomlBracketDelta( std::string_view v ) noexcept
+{
+    int delta = 0;
+    char quote = '\0';
+    for( std::size_t i = 0; i < v.size(); ++i )
+    {
+        const char c = v[i];
+        if( quote != '\0' )
+        {
+            i += c == '\\' && quote == '"' ? 1 : 0;
+            quote = c == quote ? '\0' : quote;
+            continue;
+        }
+        if( c == '#' )
+        {
+            break;
+        }
+        quote = c == '"' || c == '\'' ? c : '\0';
+        delta += c == '[' ? 1 : c == ']' ? -1
+                                          : 0;
+    }
+    return delta;
 }
 
 // A TOML manifest, line by line: table headers through `tableOf`, then the keys the current table reads. Lines inside a multi-line
-// string are a value, never a key or a table; a dotted key (`serde.workspace = true`) is an entry by its first part.
+// string or a multi-line array are a value, never a key or a table (a poetry constraint list `numpy = [ {version = "^1", python = ".."},
+// ..]` holds `version =` lines); a dotted key (`serde.workspace = true`) is an entry by its first part.
 template<class TableOf>
 inline void readToml( std::string_view text, TableOf&& tableOf, std::vector<ManifestEntry>& out )
 {
     TomlTable table;
     std::string_view multiline;
+    int arrayDepth = 0; // open `[` of a multi-line array value
     darkflags::forEachLine( text, [&]( std::string_view line, std::uint32_t lineNo )
                             {
         const std::string_view t = trimWs( line );
         if( !multiline.empty() )
         {
             multiline = t.contains( multiline ) ? std::string_view() : multiline;
+            return;
+        }
+        if( arrayDepth > 0 )
+        {
+            arrayDepth = std::max( 0, arrayDepth + tomlBracketDelta( t ) );
             return;
         }
         if( t.empty() || t.front() == '#' )
@@ -295,13 +335,14 @@ inline void readToml( std::string_view text, TableOf&& tableOf, std::vector<Mani
             return; // an array element line (`"form",`), never a key
         }
         multiline = epdetail::tomlMultilineOpen( trimWs( t.substr( eq + 1 ) ) );
+        arrayDepth = multiline.empty() ? std::max( 0, tomlBracketDelta( t.substr( eq + 1 ) ) ) : 0;
         const std::vector<std::string> key = epdetail::tomlKeyParts( t.substr( 0, eq ) );
         if( key.empty() || key[0].empty() )
         {
             return;
         }
         const std::optional<std::string_view> val = epdetail::tomlStringValue( t.substr( eq + 1 ) );
-        if( table.read == TomlTable::Read::Keys )
+        if( table.read == TomlTable::Read::Keys && key[0] != table.skipKey )
         {
             out.push_back( ManifestEntry { key[0], lineNo, table.kind } );
         }
@@ -384,7 +425,57 @@ inline void readGoMod( std::string_view text, std::vector<ManifestEntry>& out )
         } } );
 }
 
-// CMakeLists.txt: add_executable( NAME / add_library( NAME / project( NAME (any case); a `${VAR}` name is not read.
+// One CMake call being read: its kind, the line its first argument is on and the argument text so far (a call may span lines).
+struct CMakeCall
+{
+    ManifestKind kind = ManifestKind::Package;
+    std::uint32_t line = 0;
+    std::string args;
+};
+inline constexpr std::size_t kCMakeCallLines = 16; // a call longer than this is not read (its `)` is missing or far away)
+
+// The closer of a bracket comment `#[[` / `#[==[` that starts the trimmed line `t` and is still open at its end, else "".
+inline std::string cmakeBracketCommentOpen( std::string_view t )
+{
+    if( !t.starts_with( "#[" ) )
+    {
+        return {};
+    }
+    const std::size_t levels = t.find_first_not_of( '=', 2 ); // `#[==[`: the `=` run between the brackets
+    if( levels == std::string_view::npos || t[levels] != '[' )
+    {
+        return {};
+    }
+    const std::string closer = "]" + std::string( levels - 2, '=' ) + "]";
+    return t.find( closer, levels + 1 ) == std::string_view::npos ? closer : std::string();
+}
+
+// A finished call as an entry: its first argument names it. `IMPORTED` / `ALIAS` targets are not defined by this project and a
+// `${VAR}` name is not a name.
+inline void addCMakeCall( const CMakeCall& call, std::vector<ManifestEntry>& out )
+{
+    const std::size_t end = call.args.find( ')' );
+    std::vector<std::string_view> words;
+    for( std::size_t at = 0; at < std::min( end, call.args.size() ); )
+    {
+        const std::size_t b = call.args.find_first_not_of( " \t\r", at );
+        const std::size_t e = std::min( { call.args.find_first_of( " \t\r)", b ), call.args.size() } );
+        if( b == std::string::npos || b >= e )
+        {
+            break;
+        }
+        words.push_back( std::string_view( call.args ).substr( b, e - b ) );
+        at = e;
+    }
+    const bool foreign = std::ranges::contains( words, std::string_view( "IMPORTED" ) ) || std::ranges::contains( words, std::string_view( "ALIAS" ) );
+    if( !words.empty() && !foreign && !words[0].contains( '$' ) )
+    {
+        out.push_back( ManifestEntry { std::string( words[0] ), call.line, call.kind } );
+    }
+}
+
+// CMakeLists.txt: add_executable( NAME / add_library( NAME / project( NAME (any case), the call on one line or several; a `${VAR}`
+// name, an IMPORTED or ALIAS target, a `#` line comment and a `#[[ .. ]]` bracket comment are not read.
 inline void readCMakeLists( std::string_view text, std::vector<ManifestEntry>& out )
 {
     static constexpr std::array<std::pair<std::string_view, ManifestKind>, 3> kCommands { {
@@ -392,28 +483,51 @@ inline void readCMakeLists( std::string_view text, std::vector<ManifestEntry>& o
         { "add_library", ManifestKind::Library },
         { "project", ManifestKind::Package },
     } };
+    std::string closer; // the open bracket comment's end
+    std::optional<CMakeCall> call;
+    std::size_t callLines = 0;
     darkflags::forEachLine( text, [&]( std::string_view line, std::uint32_t lineNo )
                             {
-        const std::string_view t = trimWs( line );
-        for( const auto& [cmd, kind] : kCommands )
+        std::string_view t = trimWs( line );
+        if( !closer.empty() )
         {
-            if( t.size() <= cmd.size() || !std::ranges::equal( t.substr( 0, cmd.size() ), cmd, []( char a, char b )
-                                                               { return lexLowerByte( static_cast<unsigned char>( a ) ) == b; } ) )
-            {
-                continue;
-            }
-            std::string_view rest = trimWs( t.substr( cmd.size() ) );
-            if( !rest.starts_with( '(' ) )
-            {
-                continue;
-            }
-            rest = trimWs( rest.substr( 1 ) );
-            rest = rest.substr( 0, rest.find_first_of( " \t)" ) );
-            if( !rest.empty() && !rest.contains( '$' ) )
-            {
-                out.push_back( ManifestEntry { std::string( rest ), lineNo, kind } );
-            }
+            closer = t.contains( closer ) ? std::string() : closer;
             return;
+        }
+        closer = cmakeBracketCommentOpen( t );
+        t = trimWs( t.substr( 0, t.find( '#' ) ) );
+        if( t.empty() )
+        {
+            return;
+        }
+        if( !call )
+        {
+            for( const auto& [cmd, kind] : kCommands )
+            {
+                if( t.size() > cmd.size() && std::ranges::equal( t.substr( 0, cmd.size() ), cmd, []( char a, char b )
+                                                                 { return lexLowerByte( static_cast<unsigned char>( a ) ) == b; } ) &&
+                    trimWs( t.substr( cmd.size() ) ).starts_with( '(' ) )
+                {
+                    call = CMakeCall { kind, 0, {} };
+                    callLines = 0;
+                    t = trimWs( trimWs( t.substr( cmd.size() ) ).substr( 1 ) );
+                    break;
+                }
+            }
+        }
+        if( !call )
+        {
+            return;
+        }
+        call->line = call->line == 0 && !t.empty() ? lineNo : call->line; // the name's line, so the printed row shows the name
+        call->args += std::string( t ) + " ";
+        if( call->args.contains( ')' ) || ++callLines >= kCMakeCallLines )
+        {
+            if( call->args.contains( ')' ) )
+            {
+                addCMakeCall( *call, out );
+            }
+            call.reset();
         } } );
 }
 
@@ -867,9 +981,9 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "defines (an exact name: its last / segment, letters and digits only, compared lowercase and singular); these are the manifests' DEFINING LINES, read off the manifest text, a "
     "lead to verify, not a guarantee that each must change. Read: package.json (name, main, bin, scripts, dependencies, devDependencies, "
     "peerDependencies, optionalDependencies), Cargo.toml ([package] / [lib] / [[bin]] name, [features], dependency tables), pyproject.toml "
-    "([project] / [tool.poetry] name, optional-dependencies, extras, poetry dependencies, entry points and scripts), setup.cfg ([metadata] name, "
+    "([project] / [tool.poetry] name, optional-dependencies, extras, poetry dependencies and groups without the python key, entry points and scripts), setup.cfg ([metadata] name, "
     "extras_require, entry_points), "
-    "go.mod (module, require; indirect ones skipped), CMakeLists.txt (add_executable, add_library, project); not read: pyproject dependency "
+    "go.mod (module, require; indirect ones skipped), CMakeLists.txt (add_executable, add_library, project; a call may span lines; IMPORTED and ALIAS targets and comments skipped); not read: pyproject dependency "
     "arrays, setup.py, Makefile, meson and Bazel files, vendored, node_modules, fixtures and testdata trees. A name equal to the repo's, a "
     "generic name (core, common, test, ..), a script the task does not call a script, or a plugin entry point the task does not call a "
     "plugin, entry point or extension does not fire it; nor does a dependency, feature or other entry the task neither calls by its kind (dependency, feature, package, binary, ..) nor adds as a new X; an entry point's group (pydantic, flake8.extension) matches by any dot segment. files= the manifests that name a "

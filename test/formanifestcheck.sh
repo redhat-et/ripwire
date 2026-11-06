@@ -201,6 +201,55 @@ mkdir -p "$F/shop/packages/router"
 printf '{\n  "name": "shop-router",\n  "dependencies": {\n    "find-my-way": "8.0.0"\n  }\n}\n' >"$F/shop/packages/router/package.json"
 printf 'export const route = 1;\n' >"$F/shop/packages/router/index.js"
 
+# Parser shapes (review F3): a Poetry multi-line constraint array, Poetry groups and the interpreter key; a Cargo feature array with a
+# trailing comment that holds `=`; CMake bracket comments, IMPORTED / ALIAS targets and a call that spans lines.
+mkdir -p "$F/poet/poet" "$F/cg/src" "$F/cmk/src"
+cat >"$F/poet/pyproject.toml" <<'T'
+[tool.poetry]
+name = "poetdemo"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+numpy = [
+    {version = "^1.24", python = ">=3.9"},
+    {version = "^1.21", python = "<3.9"},
+]
+requests = "^2"
+
+[tool.poetry.group.dev.dependencies]
+pytest-cov = "^4"
+T
+printf 'def run():\n    return 1\n' >"$F/poet/poet/__init__.py"
+cat >"$F/cg/Cargo.toml" <<'T'
+[package]
+name = "cgdemo"
+
+[features]
+full = [
+    "dep:serde",  # level = high
+    "dep:rand",   # see docs = none
+]
+std = []
+extra = []
+T
+printf '//! Name | Description\n//! `full` | everything\n//! `std` | the standard library\n//! `extra` | more\npub fn run() -> u32 { 1 }\n' >"$F/cg/src/lib.rs"
+cat >"$F/cmk/CMakeLists.txt" <<'C'
+cmake_minimum_required(VERSION 3.20)
+project(cmkdemo C)
+#[[ old
+add_executable(ghostexe old.c)
+]]
+#[==[ add_executable(ghostlevel old.c) ]==]
+add_library(zlibstatic STATIC IMPORTED)
+add_library(aliaslib ALIAS meterlib)
+add_library(
+  turbine STATIC
+  src/lib.c)
+add_executable(realexe src/main.c)
+C
+printf 'int main(void) { return 0; }\n' >"$F/cmk/src/main.c"
+printf 'int lib(void) { return 1; }\n' >"$F/cmk/src/lib.c"
+
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<manifest_rows .*</manifest_rows>' "$1" | head -1; }
 # has ARM FIXTURE TASK PATTERN... — the block fires and holds every (python regex) pattern, in order
@@ -278,6 +327,21 @@ lacks r1d shop "upgrade the koa-router dependency" ''
 has r1d shop "upgrade the find-my-way dependency" '<mf p="packages/router/package.json"' 'kind="dep">&quot;find-my-way&quot;'
 lacks r1e shop "which find-my-way routes are slow" ''
 has r1e shop "add a new route matcher like find-my-way" '<mf p="packages/router/package.json"'
+
+# ── parser shapes ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+lacks f3a poet "the version dependency" ''
+has f3a poet "the numpy dependency" '<r l="6" kind="dep">numpy = \['
+has f3a poet "the requests dependency" '<r l="10" kind="dep">requests = '
+lacks f3g poet "the python dependency" ''
+has f3g poet "the pytest-cov dependency" '<r l="13" kind="dep">pytest-cov = '
+has f3b cg "add a new cargo feature like std" '<feature_touch n="3"><touch_list total="1"><touch p="src/lib.rs:2" share="[0-9]/3">'
+lacks f3b cg "the level feature" ''
+has f3c cmk "the realexe executable" '<mf p="CMakeLists.txt"' '<r l="12" kind="executable">add_executable\(realexe src/main.c\)</r>'
+lacks f3c cmk "the ghostexe executable" ''
+lacks f3c cmk "the ghostlevel executable" ''
+lacks f3d cmk "the zlibstatic library" ''
+lacks f3d cmk "the aliaslib library" ''
+has f3e cmk "the turbine library" '<r l="10" kind="library">turbine STATIC</r>'
 
 # ── caps, dialects, placement ────────────────────────────────────────────────────────────────────────────────────────────────
 has cap1 acme "use the kafkajs dependency in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
