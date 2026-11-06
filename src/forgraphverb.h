@@ -14,10 +14,12 @@
 // answer is never replaced: the block rides after it, inside <graph_verb endpoints="subject">, whose legend says the
 // endpoints were read from prose (a name match, hedged), and the verb's default caps and next= paging bound it.
 // Nothing resolves → nothing is appended (byte-identical to the answer without this lane).
+#include "compactlegend.h"   // spanHasAttr — the ONE attribute-at-a-tag-boundary test
 #include "filter.h"      // pathTierOf — name_test_hops=: the verb's own test/fixture path classifier
 #include "graph.h"       // resolveAllByNameQualified / resolveFocus — the callers / connect resolvers
 #include "lexical.h"     // parseGraphSubject — the subject-only half
 #include "nextverb.h"    // nextFlag / nextAttrXml — verb= is a pasteable invocation
+#include "packtask.h"    // findSectionOpenTag — an element's open tag, comments skipped
 #include "pathgaps.h"    // resolvePathEndpoint — the --path resolver
 #include "serialize.h"   // escapeXml
 
@@ -362,16 +364,12 @@ inline std::string pathFromUpstreamNote( std::uint32_t moved )
 inline constexpr std::string_view kGraphSubjectCloseXml = "</graph_verb>";
 
 // GRAPH-FORM-ENDPOINTS: did the path verb's printed answer find NO directed path? Read off its open tag (`<path … reachable="0"`), the
-// one attribute every no-path answer carries in every legend; a doc with no <path> tag (a refusal) is not a gap.
+// one attribute every no-path answer carries in every legend (the legend comment before it is skipped); a doc with no <path> tag (a
+// refusal) is not a gap.
 inline bool graphSubjectPathUnreachable( std::string_view doc )
 {
-    const std::size_t at = doc.find( "<path " );
-    if( at == std::string_view::npos )
-    {
-        return false;
-    }
-    const std::size_t end = doc.find( '>', at );
-    return doc.substr( at, end == std::string_view::npos ? std::string_view::npos : end - at ).find( " reachable=\"0\"" ) != std::string_view::npos;
+    const SectionOpenTag tag = findSectionOpenTag( doc, "<path " );
+    return tag.start != std::string::npos && spanHasAttr( doc.substr( tag.start, tag.end - tag.start ), "reachable", "\"0\"" );
 }
 
 // <path_gap from= to= [missing=]>: its own legend, then from='s --callees and to='s --callers answers. missing=from|to|from,to names a
