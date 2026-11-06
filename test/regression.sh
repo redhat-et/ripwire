@@ -873,6 +873,7 @@ for _g in \
     recallshapecheck \
     recalltablecheck \
     recalltotalcheck \
+    recallwindowcheck \
     receiptpostcheck \
     receiverevidencecheck \
     receiverfixescheck \

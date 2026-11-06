@@ -24,6 +24,7 @@
                          //      — recall budgets and estimates with the SAME calibration as the map family
 
 #include <algorithm>
+#include <cmath>         // HTML-CUT: std::log / std::llround — the window scorer's fixed-point idf
 #include <cstdio>
 #include <cstdint>
 #include <fstream>
@@ -559,15 +560,39 @@ struct RecallTruncation
     std::size_t sourceKeptBytes = 0;   // INPUT bytes that survived: pre-ellipsis, pre-fence-repair
 };
 
-inline RecallTruncation truncateRecallBody( std::string& body, std::size_t keepBytes )
+// The cut itself, shared by the head cut below and the windowed cut (truncateRecallBodyWindow): the cascade
+// lands the tail on a readable boundary, appends the visible "…", repairs an open fence, and reports the
+// INPUT bytes that survived plus whether a fence had to be closed. The two callers differ only in what they
+// cut FROM (byte 0, or a window start) and so in what their markers say.
+struct RecallTailCut
 {
-    const std::size_t fullBytes = body.size();
+    std::size_t sourceKeptBytes = 0;     // INPUT bytes that survived: pre-ellipsis, pre-fence-repair
+    bool        isFenceClosed   = false;
+};
 
-    std::size_t cut = std::min( keepBytes, fullBytes );
+// `isWindowCut`: the windowed cut below. A window was CHOSEN for what it holds, so §L4.2's whole-or-nothing
+// rule would cost it exactly that: a fence or table that straddles the window's end (or that the window
+// opens inside) retreats the cut behind it and drops the matched lines — to an empty body when the window
+// opens inside one. A window cut therefore lands on the window's own last line end, inside such a range if
+// need be, and fence repair closes a torn fence, disclosed as fence_closed.
+inline RecallTailCut cutRecallBodyTail( std::string& body, std::size_t keepBytes, bool isWindowCut = false )
+{
+    std::size_t cut = std::min( keepBytes, body.size() );
     while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) { --cut; }   // UTF-8-safe backoff
 
-    cut = findRecallBoundaryCut( body, cut, kRecallBoundaryLookbackBytes );
-    cut = adjustCutForProtectedRanges( cut, findRecallProtectedRanges( body ) );
+    if( isWindowCut )
+    {
+        // The window was sized in whole lines, so its end is a line end: keep it. §L4.1's cascade would prefer
+        // an EARLIER sentence end and drop the window's last line — often the very line it was chosen for.
+        std::size_t lineCut = cut;
+        while( lineCut > 0 && body[lineCut - 1] != '\n' ) { --lineCut; }
+        cut = lineCut > 0 ? lineCut : cut;   // one line longer than the window: the byte cut, as before
+    }
+    else
+    {
+        cut = findRecallBoundaryCut( body, cut, kRecallBoundaryLookbackBytes );
+        cut = adjustCutForProtectedRanges( cut, findRecallProtectedRanges( body ) );
+    }
 
     while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) { --cut; }   // re-verify: both
                                                                                                   // moves above land
@@ -577,19 +602,24 @@ inline RecallTruncation truncateRecallBody( std::string& body, std::size_t keepB
                                                                                                   // assumption
                                                                                                   // costs nothing
                                                                                                   // to re-check.
-    const std::size_t actualKeepBytes = cut;
+    truncateUtf8WithEllipsis( body, cut );                       // deterministic UTF-8-safe prefix + a visible "…"
+    const bool isFenceClosed = closeOpenMarkdownFence( body );   // §B2 — never hand back an open fence
+    return { cut, isFenceClosed };
+}
 
-    truncateUtf8WithEllipsis( body, actualKeepBytes );                                // deterministic UTF-8-safe prefix + a visible "…"
-    const char* fenceNote = closeOpenMarkdownFence( body ) ? ", fence_closed" : "";    // §B2 — never hand back an open fence
+inline RecallTruncation truncateRecallBody( std::string& body, std::size_t keepBytes )
+{
+    const std::size_t   fullBytes = body.size();
+    const RecallTailCut cut       = cutRecallBodyTail( body, keepBytes );
 
     // CA4 H1 sibling sweep: this one was PROVABLY bounded (fixed prose + two %zu + the two-valued fenceNote =
     // 79 bytes worst case in a 160-byte buffer), so it never overflowed. It is composed on std::string anyway,
     // because the SHAPE is the defect, not the arithmetic: "snprintf into a fixed buffer, then append its
     // WOULD-BE return length" is safe only for as long as nobody widens the prose or adds an interpoland, and
     // that safety is invisible at the call site. Byte-identical to the format string it replaces.
-    return { "  [truncated: " + std::to_string( actualKeepBytes ) + " of " + std::to_string( fullBytes ) + " bytes"
-                 + fenceNote + "]",
-             actualKeepBytes };
+    return { "  [truncated: " + std::to_string( cut.sourceKeptBytes ) + " of " + std::to_string( fullBytes ) + " bytes"
+                 + ( cut.isFenceClosed ? ", fence_closed" : "" ) + "]",
+             cut.sourceKeptBytes };
 }
 
 // One recalled doc's emitted text, redacted. P1-B: for a document file this is its EXTRACTED text (the
@@ -1032,6 +1062,15 @@ inline void accumulateRecallTermFreqs( std::string_view text, int fieldWeight, c
     } );
 }
 
+// The query's DISTINCT terms, first-occurrence order: duplicate query words must not double-count df. Shared
+// by §RP3.3's section evidence and HTML-CUT's window scorer, the two per-document term statistics here, and
+// spelled through lexical.h's dedupeQueryTerms — the scorer's own dedupe — with a cap of the query's own
+// length, so no term is ever dropped (recallOwnProseEvidence indexes its df row by every query token).
+inline std::vector<std::string> uniqueRecallQueryTerms( const std::vector<std::string>& queryToks )
+{
+    return dedupeQueryTerms( queryToks, queryToks.size() ).uniqueToks;
+}
+
 inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const std::vector<std::uint32_t>& headingSyms,
                                                   const std::vector<std::uint32_t>& ownEnds, std::string_view raw,
                                                   const std::vector<std::string>& queryToks )
@@ -1039,15 +1078,8 @@ inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const
     const std::size_t  unitCount = headingSyms.size();
     std::vector<float> evidence( unitCount, 0.f );
 
-    std::vector<std::string> uniqueToks;   // duplicate query words must not double-count df
-    for( const std::string& q : queryToks )
-    {
-        if( std::find( uniqueToks.begin(), uniqueToks.end(), q ) == uniqueToks.end() )
-        {
-            uniqueToks.push_back( q );
-        }
-    }
-    const std::size_t termCount = uniqueToks.size();
+    const std::vector<std::string> uniqueToks = uniqueRecallQueryTerms( queryToks );
+    const std::size_t              termCount  = uniqueToks.size();
     if( termCount == 0 || unitCount == 0 )
     {
         return evidence;   // nothing to attribute; every caller reads this as "no demotion"
@@ -1748,6 +1780,195 @@ inline RecallShares allocateRecallShares( const std::vector<std::size_t>& overhe
     return out;
 }
 
+// HTML-CUT (DOCS-XS, 2026-11-05) — WHERE a whole-doc body is cut, when it must be cut. A document with no
+// section units (an HTML page's converted text, a heading-less .txt, any docparse'd extraction) takes the
+// whole-doc path, and its water-fill share used to keep the HEAD: on an HTML page that is the nav list and
+// the contents block, and the paragraph the query matched sat past the ~2.9 KB share
+// (reports/docs-quick-s0.md: 6 dev anchors lost this way). It now keeps the window of the same byte size
+// that carries the most query evidence, in whole lines.
+//
+// Scoring is §RP3.3's local-collection idea at line grain: the LINES of this one document are the
+// collection, so a term on every line (a stopword, the product name) separates none of them and earns ~0.
+// A line scores the BM25 idf, ln((N-df+0.5)/(df+0.5)+1), of each DISTINCT query term it carries (the same
+// tokenizer and term comparison as recallMatchedTermIndex); a window scores the sum of its lines. Scores are
+// fixed-point integers so a window sum is exact and two equal windows compare equal: the tie-break is the
+// EARLIEST start, and a head window that ties the best is kept as the head. startByte 0 (= the old head
+// cut) when nothing in the document carries a query term, or the head already scores best.
+inline constexpr double kRecallWindowScoreScale = 1024.0;   // fixed point: idf × 1024, rounded
+
+struct RecallWindow
+{
+    std::size_t startByte = 0;   // a line start; 0 = no window beats the head
+    std::size_t endByte   = 0;   // a line end (exclusive): the window holds whole lines
+};
+
+// Per line, the DISTINCT query terms it carries, as CSR rows: line l is bytes lineStart[l] .. lineStart[l+1]
+// (lineStart has lineCount+1 entries), its terms lineTerms[termStart[l] .. termStart[l+1]); df[t] counts the
+// lines carrying term t.
+struct RecallLineTerms
+{
+    std::vector<std::size_t>   lineStart;
+    std::vector<std::uint32_t> termStart{ 0 };
+    std::vector<std::uint32_t> lineTerms;
+    std::vector<std::uint32_t> df;
+};
+
+inline RecallLineTerms collectRecallLineTerms( std::string_view body, const std::vector<std::string>& terms )
+{
+    RecallLineTerms   out;
+    std::vector<char> isOnLine( terms.size(), 0 );
+    out.df.assign( terms.size(), 0 );
+    for( std::size_t at = 0; at < body.size(); )
+    {
+        const std::size_t      nl        = body.find( '\n', at );
+        const std::size_t      lineEnd   = nl == std::string_view::npos ? body.size() : nl + 1;
+        const std::string_view line      = body.substr( at, lineEnd - at );
+        const std::size_t      firstTerm = out.lineTerms.size();
+        forEachLexSubtoken( line, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
+        {
+            const std::size_t tokLen = tokEndByte - tokStartByte;
+            if( tokLen < 2 )
+            {
+                return;   // the ≥2-byte drop subtokens() applies — the query was tokenized under it too
+            }
+            const std::size_t t = recallMatchedTermIndex( line, tokStartByte, tokLen, terms );
+            if( t < terms.size() && !isOnLine[t] )
+            {
+                isOnLine[t] = 1;
+                out.lineTerms.push_back( std::uint32_t( t ) );
+            }
+        } );
+        for( std::size_t k = firstTerm; k < out.lineTerms.size(); ++k )
+        {
+            ++out.df[ out.lineTerms[k] ];
+            isOnLine[ out.lineTerms[k] ] = 0;
+        }
+        out.lineStart.push_back( at );
+        out.termStart.push_back( std::uint32_t( out.lineTerms.size() ) );
+        at = lineEnd;
+    }
+    out.lineStart.push_back( body.size() );
+    return out;
+}
+
+// prefix[l] = the summed fixed-point score of lines [0, l): every window sum is one subtraction, exact.
+inline std::vector<std::uint64_t> recallLineScorePrefix( const RecallLineTerms& lt )
+{
+    const std::size_t          lineCount = lt.lineStart.size() - 1;
+    std::vector<std::uint64_t> idfFixed( lt.df.size(), 0 );
+    for( std::size_t t = 0; t < lt.df.size(); ++t )
+    {
+        const double idf = std::log( ( double( lineCount ) - lt.df[t] + 0.5 ) / ( lt.df[t] + 0.5 ) + 1.0 );
+        idfFixed[t] = std::uint64_t( std::llround( idf * kRecallWindowScoreScale ) );
+    }
+    std::vector<std::uint64_t> prefix( lineCount + 1, 0 );
+    for( std::size_t l = 0; l < lineCount; ++l )
+    {
+        std::uint64_t lineScore = 0;
+        for( std::uint32_t k = lt.termStart[l]; k < lt.termStart[l + 1]; ++k )
+        {
+            lineScore += idfFixed[ lt.lineTerms[k] ];
+        }
+        prefix[l + 1] = prefix[l] + lineScore;
+    }
+    return prefix;
+}
+
+inline RecallWindow selectRecallWindow( std::string_view body, std::size_t windowBytes, const std::vector<std::string>& queryToks )
+{
+    const std::vector<std::string> terms = uniqueRecallQueryTerms( queryToks );
+    if( terms.empty() || body.size() <= windowBytes )
+    {
+        return {};
+    }
+    const RecallLineTerms            lt        = collectRecallLineTerms( body, terms );
+    const std::vector<std::uint64_t> prefix    = recallLineScorePrefix( lt );
+    const std::size_t                lineCount = lt.lineStart.size() - 1;
+
+    RecallWindow  best;
+    std::uint64_t bestScore = 0;
+    std::size_t   endLine   = 0;   // two pointers: the window [first, endLine) holds whole lines within windowBytes
+    for( std::size_t first = 0; first < lineCount; ++first )
+    {
+        endLine = std::max( endLine, first );
+        while( endLine < lineCount && lt.lineStart[endLine + 1] - lt.lineStart[first] <= windowBytes )
+        {
+            ++endLine;
+        }
+        const std::uint64_t score = prefix[endLine] - prefix[first];
+        if( score > bestScore )   // strict: the earliest of equal windows wins
+        {
+            bestScore = score;
+            best      = { lt.lineStart[first], lt.lineStart[endLine] };
+        }
+    }
+    return best;
+}
+
+// The windowed form of truncateRecallBody: serve the window selectRecallWindow chose (whole lines, within
+// `keepBytes`) and SAY SO. A start inside a fenced
+// block or table stays there — moving back to the range's start would spend the window on the range's head
+// and push the matched lines out of its tail — and a fence's opening line is repeated above the served lines
+// so they still read as code (`fence_reopened`). The tail may land inside a range too (cutRecallBodyTail's
+// isWindowCut), closed by fence repair (`fence_closed`). The body opens with a
+// "…" line so the reader sees text was skipped above, and the marker names the served byte range:
+//   [truncated: K of N bytes[, fence_reopened][, fence_closed]; served bytes LO-HI, best query-term window]
+// (≤ 126 bytes for any document under 100 MB, inside kRecallTruncNoteBytes, which the allowance reserves.)
+// The byte range indexes the text recall served — the converted text for an HTML page, not its markup — and
+// excludes the repeated opener, which is this function's text, not the document's.
+inline constexpr std::string_view kRecallWindowLead = "\xE2\x80\xA6\n";   // "…" + newline: text skipped above
+
+// The opening line of the fenced block `at` falls strictly inside, or "" (outside any fence, or inside a
+// table, which has no opener line to repeat).
+inline std::string recallFenceOpenerAround( std::string_view body, std::size_t at )
+{
+    for( const RecallProtectedRange& r : findRecallProtectedRanges( body ) )
+    {
+        if( at <= r.start || at >= r.end )
+        {
+            continue;
+        }
+        const std::size_t      newline   = body.find( '\n', r.start );
+        const std::size_t      openerEnd = newline == std::string_view::npos ? body.size() : newline + 1;
+        const std::string_view opener    = body.substr( r.start, openerEnd - r.start );
+        const std::size_t      lead      = opener.find_first_not_of( " \t" );
+        const bool             isFence   = lead != std::string_view::npos && ( opener[lead] == '`' || opener[lead] == '~' );
+        return isFence ? std::string( opener ) : std::string();
+    }
+    return {};
+}
+
+inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t keepBytes, const RecallWindow& window )
+{
+    const std::size_t fullBytes = body.size();
+    const std::size_t start     = std::min( window.startByte, fullBytes );
+    const std::string reopen    = recallFenceOpenerAround( body, start );
+    if( start == 0 )
+    {
+        return truncateRecallBody( body, keepBytes );   // no window past the head: a head cut, said as one
+    }
+    body.erase( 0, start );
+    body.insert( 0, reopen );
+    const std::size_t   allowance = keepBytes > kRecallWindowLead.size() ? keepBytes - kRecallWindowLead.size() : 0;
+    const std::size_t   windowLen = window.endByte > start ? window.endByte - start : 0;
+    const RecallTailCut cut       = cutRecallBodyTail( body, std::min( allowance, reopen.size() + windowLen ), true );
+    const std::size_t   kept = cut.sourceKeptBytes > reopen.size() ? cut.sourceKeptBytes - reopen.size() : 0;
+    body.insert( 0, kRecallWindowLead );
+    return { "  [truncated: " + std::to_string( kept ) + " of " + std::to_string( fullBytes ) + " bytes"
+                 + ( reopen.empty() ? "" : ", fence_reopened" ) + ( cut.isFenceClosed ? ", fence_closed" : "" )
+                 + "; served bytes " + std::to_string( start ) + "-" + std::to_string( start + kept )
+                 + ", best query-term window]",
+             kept };
+}
+
+// HTML-CUT: a whole-doc body over its allowance — the best query-term window of that size when one beats the
+// head, else the head cut it always had.
+inline RecallTruncation truncateRecallWholeDoc( std::string& body, std::size_t keepBytes, const std::vector<std::string>& queryToks )
+{
+    const RecallWindow window = selectRecallWindow( body, keepBytes - std::min( keepBytes, kRecallWindowLead.size() ), queryToks );
+    return window.startByte > 0 ? truncateRecallBodyWindow( body, keepBytes, window ) : truncateRecallBody( body, keepBytes );
+}
+
 // Build the recall bundle IN MEMORY: each top file's path + relevance + body, best-first. `maxBytes` (0 =
 // no cap) SHAPES it — the budget is DIVIDED across the selected docs by allocateRecallShares above (docs
 // past the served rank prefix are dropped from the BOTTOM of the ranking; any doc may be truncated within
@@ -1905,7 +2126,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
             // under-used rather than overshot — the ceiling direction the whole budget path holds to.
             const std::size_t keepBytes = shares.alloc[i] > kRecallTruncNoteBytes ? shares.alloc[i] - kRecallTruncNoteBytes
                                                                                   : kRecallMinBodyBytes;
-            truncNote  = truncateRecallBody( doc.body(), keepBytes ).marker;   // this path names no lines=, so only the marker
+            truncNote  = truncateRecallWholeDoc( doc.body(), keepBytes, queryToks ).marker;   // this path names no lines=, so only the marker
             wasReduced = true;
         }
 
