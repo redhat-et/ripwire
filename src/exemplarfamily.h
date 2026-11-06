@@ -28,6 +28,7 @@
 #include "docparse.h" // detail::readWholeFile
 #include "filter.h" // isTestPath
 #include "graph.h"
+#include "infra/enumcount.h" // enumCountIsExact — kExemplarRuleTags has one row per ExemplarRule value
 #include "infra/sortutil.h" // svLess — the portable string_view order
 #include "infra/namesplit.h" // isIdentChar, stripQuotePair — the shared identifier byte and quote strip
 #include "langfacts.h" // typedInstanceRows
@@ -66,7 +67,11 @@ enum class ExemplarRule : std::uint8_t
     Affix
 };
 
-inline constexpr std::array<std::string_view, 5> kExemplarRuleTags { "base", "registry", "typed", "attribute", "affix" };
+inline constexpr std::array kExemplarRuleTags = { std::string_view( "base" ), std::string_view( "registry" ), std::string_view( "typed" ), std::string_view( "attribute" ),
+                                                  std::string_view( "affix" ) }; // indexed by ExemplarRule
+inline constexpr std::size_t kExemplarRuleCount = 5;
+static_assert( enumCountIsExact<ExemplarRule, kExemplarRuleCount>(), "kExemplarRuleCount must equal the ExemplarRule count — raise it with the append" );
+static_assert( kExemplarRuleTags.size() == kExemplarRuleCount, "one kExemplarRuleTags row per ExemplarRule value (the extent is deduced from the rows)" );
 
 // What the task asks to add: the phrase as written, its words (lowercased, split on '-' and '_', plural -s dropped), the head word.
 struct ExemplarTask
