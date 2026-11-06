@@ -40,6 +40,7 @@
 #   word: byte-identical. N3 moved to a weak-only anchor (get_states now has strong rows). D1a-d [P] useRouter(, addCommandLineOption(, reg_value(,
 #   reg_field( are no registration; D1e-f [G] addEventHandler(, reg_handler( stay.
 #   N22 [G] a no-cue task with more anchors than the scan cap and no strong row adds no <lit_capped> note (the answer is unchanged).
+#   N25a [P] a module-level register(wrap(x)) call row (tbl="item") is nested like the in-function one; N25b [P] a later hit of the line that is a direct argument makes the registration strong (CodeRabbit #560).
 #
 # Usage:  bash test/forregrowcheck.sh [BIN]   (BIN is $1, else RIPWIRE_BIN, else build/ripwire). Exits non-zero on any failure.
 
@@ -531,6 +532,22 @@ def setup_nested(r, table):
     r.register(wrap(nested_marker_fn))
     r.register(table[idx_marker_fn])
     r.register(direct_marker_fn)
+
+
+def item_nested_marker_fn():
+    return 4
+
+
+def later_direct_marker_fn():
+    return 5
+
+
+register(wrap(item_nested_marker_fn))
+register(wrap(item_nested_marker_fn2))
+
+
+def setup_later(r):
+    r.register(wrap(later_direct_marker_fn), later_direct_marker_fn)
 PY
 nested(){ if ask "$1"; then L="$( lits <<<"$A" )"; if ! has "$L" 'shape="table"' && [ "$A" = "$( offc "--for=$1" )" ]; then ok "$2"; else no "$2: ${L:0:400}"; fi; else no "$2: call failed rc=$RC"; fi; }
 nested 'lowest common caller of PlainBox.plainword and Gadget.thing' 'N23a [P] a no-cue dotted name whose tail is one lower-case word (plainword): the tail is not scanned, byte-identical (nest-08 shape)'
@@ -539,6 +556,8 @@ strong 'lowest common caller of PlainBox.plain_word and Gadget.thing' 'N23b [G] 
 nested 'nested_marker_fn setup_nested' 'N24a [P] a site nested in an inner call (register(wrap(x))) is no direct argument: no strong row, byte-identical (vscode-03 shape)'
 nested 'idx_marker_fn setup_nested' 'N24b [P] a site inside an index (register(table[x])) is no direct argument: byte-identical'
 strong 'direct_marker_fn setup_nested' 'N24c [G] twin: a direct argument of the same call stays strong' 's="direct_marker_fn" shape="table"' 'reg="r.register("'
+nested 'item_nested_marker_fn setup_nested' 'N25a [P] a MODULE-LEVEL register(wrap(x)) call row (tbl="item") is as nested as the in-function one: no strong row, byte-identical (CodeRabbit #560)'
+strong 'later_direct_marker_fn setup_later' 'N25b [P] the first hit of a line is nested (wrap(f)) and a later one is a direct argument of the same call: the direct one makes it strong' 's="later_direct_marker_fn" shape="table"' 'reg="r.register("'
 # S7 [P]: one anchor with a strong and a weak row: the registration prints, the dict row does not, weak= counts it
 if ask 'mixed_anchor_fn setup'; then L="$( lits <<<"$A" )"
     if has "$L" 'reg="r.register("' && ! has "$L" 'tbl="MIXED = {"' && has "$L" 'weak="2"' && has "$A" 'weak='; then ok "S7 [P] strong rows only: the registration prints, the dict row and the def line are counted in weak="; else no "S7 mixed: ${L:0:500}"; fi

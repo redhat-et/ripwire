@@ -1851,6 +1851,76 @@ export function pickIt(kind) {
   }
 }
 JS
+cat > "$EA/app/aligned.go" <<'GO'
+package app
+
+func goAligned(k int) int {
+	r := 0
+	switch k {
+	case 1:
+		r = 1
+	case 2:
+		r = 2
+	default:
+		a := 1
+		b := 2
+		c := 3
+		r = a + b + c
+		log("GO_ALIGNED_DEFAULT_LIMIT")
+	}
+	return r
+}
+GO
+cat > "$EA/app/casekey.js" <<'JS'
+export function makeCaseConfig(env) {
+  const base = env.base;
+  return {
+    case: {
+      a: 1,
+      b: 2,
+      c: 3,
+      label: "JS_CASE_KEY_LIMIT",
+    },
+    other: base,
+  };
+}
+JS
+cat > "$EA/app/Cb.cs" <<'CS'
+class Cb {
+  void Run(List<int> items) {
+    var a = 1;
+    var b = 2;
+    items.ForEach(
+        x => {
+            var c = x + 1;
+            var d = c + 1;
+            var e = d + 1;
+            var g = e + 1;
+            var h = g + 1;
+            Log("CS_CB_LIMIT reached");
+        });
+    var f = 3;
+  }
+}
+CS
+cat > "$EA/src/al.cpp" <<'CC'
+int cppAligned(int k) {
+    int r = 0;
+    switch (k) {
+    case 1:
+        r = 1;
+        break;
+    default:
+        r = 2;
+        r += 3;
+        r += 4;
+        r += 5;
+        log("CPP_ALIGNED_DEFAULT_LIMIT");
+        break;
+    }
+    return r;
+}
+CC
 ea(){ ( cd "$EA" || exit 1; "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
 eaoff(){ ( cd "$EA" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
 xel(){ python3 -I -c 'import sys,re;s=sys.stdin.read();i=s.find("<lit ");m=re.search(r"<x [^>]*>.*?</x>",s[i:] if i>=0 else "",re.S);print(m.group(0) if m else "",end="")'; }
@@ -1862,14 +1932,19 @@ armx GO_CASE_LIMIT 'l="3,7-16" of="3-16"' 'w := v.Field' 'E2 [P] Go: a site in a
 armx PY_ELIF_LIMIT 'l="1,5-11" of="1-11"' 'val = x.payload' 'E3 [P] Python: a site in an elif branch: the window starts at the elif'
 armx CPP_CASE_LIMIT 'l="1,7-15" of="1-16"' 'r = table.width;' 'E4 [P] C++: a site in a brace-less case: the window starts at the case label'
 armx RUST_TWO_LIMIT 'l="43,46-58" of="43-58"' 'let w = v.width;' 'E5 [P] two sites in one arm: one window from the arm head'
+# CodeRabbit #560 (arm heads): a Go or C++ `default:` aligned with its `switch` header is an arm; a JS `case: {` object key and a C# callback `x => {` are not
+armx GO_ALIGNED_DEFAULT_LIMIT 'l="3,10-18" of="3-18"' 'GO_ALIGNED_DEFAULT_LIMIT' 'E13 [P] Go: a default: label aligned with its switch header (gofmt) is an arm: the window starts at it'
+armx CPP_ALIGNED_DEFAULT_LIMIT 'l="1,7-16" of="1-16"' 'CPP_ALIGNED_DEFAULT_LIMIT' 'E13b [P] C++: a default: label aligned with its switch header is an arm'
 # near misses [G]: the old window, no arm=, no clause
 noarm(){ local task="$1" want="$2" label="$3"; local A; A="$( ea "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
     if [ "$rc" -eq 0 ] && has "$X" "$want" && ! has "$A" 'arm="1"' && ! has "$A" 'x arm=1'; then ok "$label"; else no "$label: rc=$rc $( grep -o '<x [^>]*>' <<<"$X" )"; fi; }
 noarm RUST_FAR_LIMIT 'l="22,36-41" of="22-41"' 'E6 [G] an arm head 13 lines up is past the cap: the old window'
 noarm PY_IF_LIMIT 'l="14,20-24" of="14-24"' 'E7 [G] an if block (no arm) above the window: the old window'
 noarm JS_CB_LIMIT 'l="1,7-12" of="1-12"' 'E8 [G] a JS arrow callback is no arm: the old window'
+noarm JS_CASE_KEY_LIMIT 'l="1,7-12" of="1-12"' 'E14 [P] a JS object literal key `case: {` is no arm (a label has an expression between case and the colon): the old window'
+noarm CS_CB_LIMIT 'l="2,11-15" of="2-15"' 'E15 [P] a C# callback `x => {` on its own line (no match or switch above it) is no arm: the old window'
 noarm JS_OBJ_KEY_LIMIT 'l="1,7-12" of="1-12"' 'E11 [P] a JS object literal key `default: {` is no arm (it heads no switch): the old window'
-armx JS_SWITCH_DEFAULT_LIMIT 'of="14-26"' 'JS_SWITCH_DEFAULT_LIMIT' 'E12 [G] twin: a switch `default: {` stays an arm (the window starts at it)'
+armx JS_SWITCH_DEFAULT_LIMIT 'l="14,19-26" of="14-26"' 'JS_SWITCH_DEFAULT_LIMIT' 'E12 [G] twin: a switch `default: {` stays an arm (the window starts at it)'
 A1="$( ea --for=RUST_ARM_LIMIT )"; A2="$( ea --for=RUST_ARM_LIMIT )"
 S1="$( python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit[^>]*?-->","",s,flags=re.S);s=re.sub(r"<lit [^>]*>.*?</lit>","",s,flags=re.S);print(s,end="")' <<<"$A1" )"
 if [ -n "$A1" ] && [ "$A1" = "$A2" ] && [ "$S1" = "$( eaoff --for=RUST_ARM_LIMIT )" ]; then ok "E9 [G] deterministic; the answer minus the block is the switch-off answer"; else no "E9 determinism or prefix moved"; fi
@@ -2080,6 +2155,70 @@ void OptionsImpl::parse(int argc, const char* const* argv) {
   cmd.parse(argc, argv);
 }
 CC
+# ── CodeRabbit #560: fixtures for the flag-shape fixes ──
+mkdir -p "$FL/cmd/modes" "$FL/cmd/wr" "$FL/cmd/boosty"
+cat > "$FL/tool/tidy.py" <<'PY'
+import argparse
+
+
+def check(cache):
+    if cache.stale:
+        raise RuntimeError("tidy cache is stale")
+
+
+def build_tidy():
+    p = argparse.ArgumentParser()
+    p.add_argument("--tidy-cache", action="store_true")
+    return p
+PY
+cat > "$FL/source/server/tclap_ws.cc" <<'CC'
+void TclapWs::parse(int argc, const char* const* argv) {
+  TCLAP::SwitchArg spaced ("s", "workerspaced", "Spaced mode", cmd, false);
+}
+CC
+cat > "$FL/cmd/modes/modes.go" <<'GO'
+package modes
+
+func Reg(fs *FlagSet) {
+	fs.String("backendmode", "cachemode", "Backend mode")
+	fs.String("greetingtext", "hello world", "Greeting text.")
+	fs.String("pairingtext", "key=value", "Pairing text.")
+}
+GO
+cat > "$FL/cmd/boosty/boosty.cpp" <<'CC'
+void Opts() {
+  desc.add_options()("paren-close", po::value<std::string>()->default_value(")"), "paren close");
+}
+CC
+cat > "$FL/tool/lookup.py" <<'PY'
+def cfg(conf):
+    return lookup("lk-pods", default=64)
+
+
+def reg(p):
+    p.add_argument("--lk-pods", type=int, default=
+                   32)
+PY
+cat > "$FL/cmd/wr/wr.go" <<'GO'
+package wr
+
+type WrCfg struct{ WrLimit int }
+
+func AddWr(fs *FlagSet, c *WrCfg) {
+	fs.IntVar(&c.WrLimit, "wr-limit", c.WrLimit, "Limit.")
+}
+
+func SetWrDefaults(obj *WrCfg) {
+	// obj.WrLimit = 999
+	obj.WrLimit = 110 // the default
+	other := "x"; obj.WrLimit = 120; other = "y"
+	obj.WrLimit = "pre" + wrIn + "suf"
+}
+
+func AddSk(fs *FlagSet) {
+	fs.Int("sk-limit", skCfg.SkLimit, "Skip limit.")
+}
+GO
 fl(){ ( cd "$FL" || exit 1; "$BIN" "$FL" --no-cache "$@" </dev/null 2>/dev/null ); }
 floff(){ ( cd "$FL" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$FL" --no-cache "$@" </dev/null 2>/dev/null ); }
 flit(){ python3 -I -c 'import sys,re;print("".join(re.findall(r"<lit [^>]*>.*?</lit>",sys.stdin.read(),re.S)))'; }
@@ -2130,6 +2269,21 @@ A="$( fl '--for=what does the --workerthreads flag do' )"; L="$( flit <<<"$A" )"
 if has "$L" 's="workerthreads" shape="flag"' && has "$L" 'p="source/server/tclap_impl.cc" l="2"' && has "$L" 'src="1"' && ! has "$L" 'def="'; then ok "F27 [G] twin: a no-hyphen name as a TCLAP argument object's constructor (ValueArg<T> name(...), envoy --concurrency): a site, no def= (the description is no default)"; else no "F27 TCLAP: ${L:0:500}"; fi
 A="$( fl '--for=what does the --workerquiet flag do' )"; L="$( flit <<<"$A" )"
 if has "$L" 's="workerquiet" shape="flag"' && has "$L" 'p="source/server/tclap_impl.cc" l="3"'; then ok "F28 [G] twin: SwitchArg quiet(...) (no template) is an argument object too"; else no "F28 SwitchArg: ${L:0:300}"; fi
+# CodeRabbit #560 (flag shapes)
+A="$( fl "--for=why does 'tidy cache is stale' error appear with the --tidy-cache flag" )"; L="$( flit <<<"$A" )"
+if has "$L" 's="tidy cache is stale" shape="message"' && ! has "$L" 'shape="flag"'; then ok "F29 [P] a task naming an indexed message AND an indexed flag: the message block stays (the flag is tried after it, as before the flag shape existed)"; else no "F29 order: ${L:0:300}"; fi
+A="$( fl '--for=what does the --tidy-cache flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="tidy-cache" shape="flag"' && has "$L" 'p="tool/tidy.py"'; then ok "F29b [G] twin: the same flag alone is still a flag block"; else no "F29b flag alone: ${L:0:300}"; fi
+flagarm 'what does the --workerspaced flag do' 'F30 [P] TCLAP SwitchArg spaced ("s", ...) (a blank between the object name and its paren) is an argument object: the registration is a site' 's="workerspaced" shape="flag"' 'p="source/server/tclap_ws.cc" l="2"'
+flagarm 'what does the --backendmode flag do' 'F31b [G] twin: the name argument of the same call is a flag site, def= the string' 's="backendmode" shape="flag"' 'p="cmd/modes/modes.go" l="4"' 'def="&quot;cachemode&quot;"'
+flagarm 'what does the --greetingtext flag do' 'F32 [P] a quoted default with a space ("hello world") in the default slot: def= says it' 's="greetingtext" shape="flag"' 'def="&quot;hello world&quot;"'
+flagarm 'what does the --pairingtext flag do' 'F33 [P] a quoted default holding = ("key=value"): def= says it' 's="pairingtext" shape="flag"' 'def="&quot;key=value&quot;"'
+flagarm 'what does the --paren-close flag do' 'F34 [P] boost default_value(")"): the paren in the string does not end the default' 's="paren-close" shape="flag"' 'def="&quot;)&quot;"'
+flagarm 'what does the --lk-pods flag do' 'F35 [P] default=64 on a lookup() call is no flag default; the add_argument whose default= sits on the next line gives def=32 (no newline in it)' 's="lk-pods" shape="flag"' 'def="32"'
+A="$( fl '--for=what does the --wr-limit flag default to' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="c.WrLimit"' && has "$L" 'writes="2"' && ! has "$L" '999' && ! has "$L" 'suf'; then ok "F36 [P] ld writes: a trailing comment and a second statement on the line keep the constants (110, 120); a commented-out write (999) and a concatenation are no writes"; else no "F36 writes: $( grep -o 'writes="[0-9]*"' <<<"$L" ) $( lds <<<"$A" )"; fi
+A="$( fl '--for=what does the --sk-limit flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="skCfg.SkLimit"' && has "$L" 'floor="1"'; then ok "F37 [P] def= names a field whose receiver type is unknown (no write scan ran): the writes= zero is not a total, floor=1"; else no "F37 skipped scan: ${L:0:400}"; fi
 # legend: the flag clause rides only on a flag fire
 A="$( fl '--for=kubelet --max-pods' )"
 if has "$A" 'shape=flag a flag the task names' && has "$A" 'writes=N'; then ok "F8 [P] the flag legend clause rides on the fire"; else no "F8 flag legend missing"; fi
@@ -2140,6 +2294,7 @@ flagnomiss 'how is --no-such-flag-here set' 'F10 [G] a flag with no site: no blo
 flagnomiss 'how is --clap-parallelism set' 'F11 [G] a Rust clap field (no quoted name): no block (not covered: the long name is the field)'
 flagnomiss 'what does --workers do' 'F12 [G] --name with no inner hyphen and no flag/option word after it: no flag'
 flagnomiss 'set the max pods for the kubelet' 'F13 [G] no flag token: no block'
+flagnomiss 'what does the --cachemode flag do' 'F31 [P] a default value (fs.String("backendmode", "cachemode", ...)) is no flag name: no flag block'
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"

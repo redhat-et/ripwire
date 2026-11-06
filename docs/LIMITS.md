@@ -507,6 +507,8 @@ Discloses: `capped`, `lit_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kForFlagDefaultMaxBytes` | `80` | — | def= text |
+| `kForFlagOwnerMaxLines` | `8` | — | a constant write outside any function names the owner type within this many lines above it |
 | `kForFlagWriteHits` | `4096` | — | the field's sites read for a constant write (past it: floor=1) |
 | `kForFlagWriteRows` | `2` | — | constant writes of the default's field listed (ld rows) |
 | `kForLiteralBodyCapBytes` | `3000` | — | a short body over this many bytes is still served as an excerpt <x> |

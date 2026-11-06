@@ -174,10 +174,10 @@ inline constexpr std::size_t kForRegCallLines         = 4;      // shape=table: 
 inline constexpr std::size_t kForRegCallBytes         = 512;    // ...and this many bytes
 inline constexpr std::size_t kForRegLineHits          = 8;      // shape=table: later hits on one line kept to try as a registration argument (the first is the site)
 inline constexpr std::size_t kForFlagMinName          = 3;      // FLAG-SHAPE-LIT: a `--flag` name shorter than this is no flag; a name with no inner hyphen needs kForLiteralMinConst bytes and a flag/option word
-inline constexpr std::size_t kForFlagDefaultBytes     = 80;     // def= text
+inline constexpr std::size_t kForFlagDefaultMaxBytes     = 80;     // def= text
 inline constexpr std::size_t kForFlagWriteRows        = 2;      // constant writes of the default's field listed (ld rows)
 inline constexpr std::size_t kForFlagWriteHits        = 4096;   // the field's sites read for a constant write (past it: floor=1)
-inline constexpr std::size_t kForFlagOwnerLines       = 8;      // a constant write outside any function names the owner type within this many lines above it
+inline constexpr std::size_t kForFlagOwnerMaxLines       = 8;      // a constant write outside any function names the owner type within this many lines above it
 inline constexpr std::size_t kForRegIdentBytes        = 128;    // shape=table: an identifier run longer than this around a hit is no argument name (a blob, not a name)
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
@@ -736,10 +736,6 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     {
         out.push_back( ForLiteral{ std::move( k ), "dotted" } );
     }
-    for( std::string& f : flagNamesOf( task ) )
-    {
-        out.push_back( ForLiteral{ std::move( f ), "flag" } );   // FLAG-SHAPE-LIT: after the shapes that were here before it, so none of them moves
-    }
     std::optional<std::string> m = lit_detail::quotedMessageOf( task );
     if( !m )
     {
@@ -748,6 +744,10 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     if( m )
     {
         out.push_back( ForLiteral{ std::move( *m ), "message" } );
+    }
+    for( std::string& f : flagNamesOf( task ) )
+    {
+        out.push_back( ForLiteral{ std::move( f ), "flag" } );   // FLAG-SHAPE-LIT: after every shape that was here before it, the message too, so none of them moves
     }
     for( std::size_t i = 0; i < out.size(); ++i )
     {
@@ -1128,6 +1128,7 @@ struct Site
     bool        longer = false;     // shape=table: the hit sits inside a longer name; a row only as a registration call's argument (registrationCallOf)
     bool        regCall = false;    // shape=table: tbl holds a registration call's callee (registrationCallOf), printed as reg=, not as a table opener
     bool        regDirect = false;  // regCall: the site is a direct argument of that call (registrationCallOf's direct), no inner call, index or object between
+    bool        itemNested = false; // tbl="item" (a top-level call row) whose hit is NOT a direct argument of a registration call on it (`register(wrap(x))`): not strong
     std::vector<std::uint32_t> more;   // shape=table: the byte offsets of the later hits on this line (the first is raw.byteOffset), at most kForRegLineHits
 };
 
@@ -1431,16 +1432,21 @@ inline std::size_t openParenBefore( std::string_view text, std::size_t at ) noex
 // the identifier run right before the `(` at `open`: the call's callee (`StringVarP`, `add_argument`; a qualifier before a `.` or `::` is not part of it)
 inline std::string_view calleeBefore( std::string_view text, std::size_t open ) noexcept
 {
-    const auto stop = std::find_if_not( std::make_reverse_iterator( text.begin() + std::ptrdiff_t( open ) ), std::make_reverse_iterator( text.begin() ), namesplit::isIdentChar );
+    std::size_t end = open;
+    while( end > 0 && ( text[end - 1] == ' ' || text[end - 1] == '\t' ) )
+    {
+        --end;   // `quiet ("q", ...)`: blanks between the callee and its `(`
+    }
+    const auto stop = std::find_if_not( std::make_reverse_iterator( text.begin() + std::ptrdiff_t( end ) ), std::make_reverse_iterator( text.begin() ), namesplit::isIdentChar );
     const std::size_t from = std::size_t( stop.base() - text.begin() );
-    return text.substr( from, open - from );
+    return text.substr( from, end - from );
 }
 
 // C++ TCLAP: the call at `open` constructs a command-line argument object, `ValueArg<uint32_t> concurrency(...)`, `SwitchArg quiet(...)`: the type
 // before the object's name ends the line's text up to it with `Arg` or `Arg<...>`
 inline bool constructsArgObject( std::string_view text, std::size_t open ) noexcept
 {
-    const std::size_t      calleeAt = open - calleeBefore( text, open ).size();
+    const std::size_t      calleeAt = std::size_t( calleeBefore( text, open ).data() - text.data() );
     const std::size_t      nl       = calleeAt == 0 ? std::string_view::npos : text.rfind( '\n', calleeAt - 1 );
     const std::size_t      ls       = nl == std::string_view::npos ? 0 : nl + 1;
     std::string_view       head     = text.substr( ls, calleeAt - ls );
@@ -1483,6 +1489,51 @@ inline FlagSlot flagSlotOf( std::string_view callee ) noexcept
     return std::find( kBare.begin(), kBare.end(), callee ) != kBare.end() ? FlagSlot::NoDefault : FlagSlot::Absent;
 }
 
+// FLAG-SHAPE-LIT: the 0-based index of the top-level argument of the call opened at `open` that holds `at` (commas outside strings and groups between them)
+inline std::size_t argIndexAt( std::string_view text, std::size_t open, std::size_t at ) noexcept
+{
+    std::size_t index = 0;
+    int         depth = 0;
+    char        quote = 0;
+    for( std::size_t i = open + 1; i < at && i < text.size(); ++i )
+    {
+        const char c = text[i];
+        if( quote != 0 )
+        {
+            i += c == '\\' ? 1 : 0;
+            quote = c == quote ? 0 : quote;
+        }
+        else if( c == '"' || c == '\'' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == '(' || c == '[' || c == '{' )
+        {
+            ++depth;
+        }
+        else if( c == ')' || c == ']' || c == '}' )
+        {
+            --depth;
+        }
+        else if( c == ',' && depth == 0 )
+        {
+            ++index;
+        }
+    }
+    return index;
+}
+
+// FLAG-SHAPE-LIT: the hit at `at` stands in the NAME argument of the flag-definition call opened at `open`, not in its default or usage string
+// (`fs.String("backendmode", "cachemode", "Backend mode")` has no `cachemode` flag): the first argument, or the second when the first is the variable the flag binds
+// (`StringVar(&v, "name", ...)`, `VarP`, `CountVar`); a TCLAP argument object's constructor takes (short, long, ...), so either of its first two
+inline bool holdsFlagName( std::string_view text, std::size_t open, std::size_t at ) noexcept
+{
+    const std::string_view callee    = calleeBefore( text, open );
+    const std::size_t      index     = argIndexAt( text, open, at );
+    const std::size_t      nameIndex = callee.ends_with( "Var" ) || callee.ends_with( "VarP" ) ? 1 : 0;
+    return flagSlotOf( callee ) != FlagSlot::Absent ? index == nameIndex : ( constructsArgObject( text, open ) && index <= 1 );
+}
+
 // FLAG-SHAPE-LIT: the hit at `at` of `text` is the whole quoted flag name: a quote before it (after an optional `-` or `--`) and the same quote,
 // or a `=` (`"--workers=4"`), right after it. `"max-pods-per-core"` and `use --max-pods to cap` are mentions, not sites. A name with no inner hyphen
 // is a common word (`compress`, `cache`): it is a site only in its dashed form (`"--compress"`) or as a flag-definition call's argument
@@ -1512,7 +1563,7 @@ inline bool flagHitAt( std::string_view text, std::size_t at, std::size_t n ) no
         return true;   // dashed, or a kebab name (an inner hyphen discriminates on its own)
     }
     const std::size_t open = openParenBefore( text, at );
-    return open != std::string_view::npos && ( flagSlotOf( calleeBefore( text, open ) ) != FlagSlot::Absent || constructsArgObject( text, open ) );
+    return open != std::string_view::npos && holdsFlagName( text, open, at );
 }
 
 // How a shape of <lit> reads its sites: one row of this table per shape, so a new shape is a new row, never a new bool through renderForLiteral.
@@ -2488,6 +2539,31 @@ inline bool isTypeKind( SymKind k ) noexcept
     return std::find( kTypeBodyKinds.begin(), kTypeBodyKinds.end(), k ) != kTypeBodyKinds.end();
 }
 
+// the registration call a row's hit is an argument of (tbl, regDirect): the first hit's call stays the fallback, and a later hit of the line that is a DIRECT argument of one
+// is preferred (`r.register(wrap(f), f)`)
+inline void registrationOfRow( std::string_view text, Site& row, const RegHitCtx& ctx )
+{
+    row.tbl = registrationCallOf( text, row.raw.byteOffset, ctx, &row.regDirect );
+    for( std::size_t m = 0; m < row.more.size() && ( row.tbl.empty() || !row.regDirect ); ++m )
+    {
+        bool        direct = false;
+        std::string call   = registrationCallOf( text, row.more[m], ctx, &direct );
+        if( !call.empty() && ( row.tbl.empty() || direct ) )
+        {
+            row.tbl       = std::move( call );
+            row.regDirect = direct;
+        }
+    }
+}
+
+// a top-level call row (tbl="item") is strong (G-STORED-B) as a registration call's DIRECT argument only: `register(wrap(x))` at module level is the same nested shape the
+// in-function registration rejects
+inline bool itemIsNested( std::string_view text, std::size_t at, const RegHitCtx& ctx )
+{
+    bool direct = true;
+    return !registrationCallOf( text, at, ctx, &direct ).empty() && !direct;
+}
+
 // shape=table: read each ranked site for a table row; true when one is. A site that is no row of a table may be an argument of a registration
 // call (registrationCallOf, tried at every hit of its line), anywhere: in a function body too, and a hit inside a longer name (`handle_get_states`)
 // only so. A site of a longer name that is no such argument is dropped from `rows` and `enriched` (counted in `longerDropped`, said as longer=).
@@ -2512,13 +2588,13 @@ inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, std
                 ctx.enclosingName  = ing.symbols[owner].name;
                 ctx.enclosedByType = isTypeKind( ing.symbols[owner].kind );
             }
-            rows[i].tbl = registrationCallOf( loadedText, rows[i].raw.byteOffset, ctx, &rows[i].regDirect );
-            for( std::size_t m = 0; rows[i].tbl.empty() && m < rows[i].more.size(); ++m )
-            {
-                rows[i].tbl = registrationCallOf( loadedText, rows[i].more[m], ctx, &rows[i].regDirect );
-            }
+            registrationOfRow( loadedText, rows[i], ctx );
             rows[i].regCall = !rows[i].tbl.empty();
             drop[i]         = rows[i].longer && rows[i].tbl.empty();
+        }
+        else if( rows[i].tbl == "item" )
+        {
+            rows[i].itemNested = itemIsNested( loadedText, rows[i].raw.byteOffset, regLangCtxOf( lang ) );
         }
         any = any || !rows[i].tbl.empty();
     }
@@ -2553,7 +2629,7 @@ inline bool keepTailKeyRows( const IngestResult& ing, std::string_view tail, std
 // (tbl="item"), or a row of a macro table (`for_all_params! {`, `$macro! {`). Allowlist: a dict, list, __all__, #define, enum or const-array row is weak.
 inline bool isStrongRow( const Site& r ) noexcept
 {
-    return ( r.regCall && r.regDirect ) || r.tbl == "item" || ( !r.tbl.empty() && isMacroOpener( openerCode( r.tbl ), /*allowParen=*/false ) );
+    return ( r.regCall && r.regDirect ) || ( r.tbl == "item" && !r.itemNested ) || ( !r.tbl.empty() && isMacroOpener( openerCode( r.tbl ), /*allowParen=*/false ) );
 }
 
 // a table row's tbl= attribute onto its <ls>; the opener is raw source text. No opener, no attribute.
@@ -2745,6 +2821,39 @@ inline std::vector<std::pair<std::size_t, std::size_t>> callArgsAt( std::string_
     return {};
 }
 
+// both ends trimmed of every whitespace byte, newlines included (a default may start on the line after the name)
+inline std::string_view trimAllWs( std::string_view v ) noexcept
+{
+    constexpr std::string_view kBlanks = " \t\r\n\f\v";
+    const std::size_t          first   = v.find_first_not_of( kBlanks );
+    return first == std::string_view::npos ? std::string_view() : v.substr( first, v.find_last_not_of( kBlanks ) - first + 1 );
+}
+
+// boost's `po::value<int>()->default_value(10)`: the text inside the call's parens, a paren inside a string default (`default_value(")")`) not counted
+inline std::optional<std::string_view> boostDefaultOf( std::string_view arg ) noexcept
+{
+    const std::size_t call = arg.find( "default_value(" );
+    char quote = 0;
+    for( std::size_t i = call == std::string_view::npos ? arg.size() : call + 14, depth = 1; i < arg.size(); ++i )
+    {
+        const char c = arg[i];
+        if( quote != 0 )
+        {
+            i += c == '\\' ? 1 : 0;
+            quote = c == quote ? 0 : quote;
+            continue;
+        }
+        quote = c == '"' || c == '\'' ? c : quote;
+        depth += c == '(' ? 1 : 0;
+        depth -= c == ')' ? 1 : 0;
+        if( depth == 0 )
+        {
+            return trimAllWs( arg.substr( call + 14, i - call - 14 ) );
+        }
+    }
+    return std::nullopt;
+}
+
 // the default a keyword argument names: `default=8` (argparse, click), `default_value = "info"` / `default_value_t = 64` (clap derive), `default: 8`
 // (a JS option object), or boost's `po::value<int>()->default_value(10)`; nullopt when the argument is none of these
 inline std::optional<std::string_view> keywordDefaultOf( std::string_view arg ) noexcept
@@ -2756,21 +2865,38 @@ inline std::optional<std::string_view> keywordDefaultOf( std::string_view arg ) 
             const std::string_view rest = trimWs( arg.substr( key.size() ) );
             if( !rest.empty() && ( rest.front() == '=' || rest.front() == ':' ) && !rest.starts_with( "==" ) )
             {
-                return trimWs( rest.substr( 1 ) );
+                return trimAllWs( rest.substr( 1 ) );
             }
         }
     }
-    const std::size_t call = arg.find( "default_value(" );
-    for( std::size_t i = call == std::string_view::npos ? arg.size() : call + 14, depth = 1; i < arg.size(); ++i )
+    return boostDefaultOf( arg );
+}
+
+// FLAG-SHAPE-LIT: a call outside the typed flag APIs (flagSlotOf) that still DEFINES a flag and may carry its `default=` keyword: argparse `add_argument`, click and typer
+// `option` / `Option` / `argument` / `Argument`, optparse `add_option`, a JS `.option(`, and boost's `("name", po::value<T>()->default_value(x), "usage")` chain, whose
+// call has no callee name (the `(` follows an `add_options()` or the previous `)`)
+inline bool definesFlagByKeyword( std::string_view text, std::size_t open, std::string_view callee ) noexcept
+{
+    static constexpr auto kDefiners = std::to_array<std::string_view>( { "add_argument", "add_option", "option", "Option", "argument", "Argument", "addOption", "addArgument" } );
+    if( std::find( kDefiners.begin(), kDefiners.end(), callee ) != kDefiners.end() )
     {
-        depth += arg[i] == '(' ? 1 : 0;
-        depth -= arg[i] == ')' ? 1 : 0;
-        if( depth == 0 )
-        {
-            return arg.substr( call + 14, i - call - 14 );
-        }
+        return true;
     }
-    return std::nullopt;
+    std::size_t before = open;
+    while( before > 0 && std::isspace( static_cast<unsigned char>( text[before - 1] ) ) != 0 )
+    {
+        --before;
+    }
+    return callee.empty() && before > 0 && text[before - 1] == ')';
+}
+
+// FLAG-SHAPE-LIT: the argument in the default slot is the default: a quoted string there is the default whatever it holds (`"hello world"`, `"key=value"`) when the usage
+// text is the last argument (Go flag and pflag take exactly name, default, usage); with more arguments after the slot a quoted sentence reads as usage text, and an unquoted
+// `k=v` is a keyword argument
+inline bool isDefaultSlotText( std::string_view d, bool usageLast ) noexcept
+{
+    const bool quoted = !d.empty() && ( d.front() == '"' || d.front() == '\'' );
+    return !d.empty() && !( quoted && !usageLast && d.find( ' ' ) != std::string_view::npos ) && !( !quoted && d.find( '=' ) != std::string_view::npos );
 }
 
 // FLAG-SHAPE-LIT: the default argument of the call whose argument list holds the flag name at `at` (a whole quoted argument): a `default=`-style
@@ -2785,17 +2911,19 @@ inline std::string flagDefaultAt( std::string_view text, std::size_t at )
         return {};
     }
     const std::vector<std::pair<std::size_t, std::size_t>> args = callArgsAt( text, open );
-    const auto argText = [ & ]( std::size_t k ) { return trimWs( text.substr( args[k].first, args[k].second - args[k].first ) ); };
+    const auto argText = [ & ]( std::size_t k ) { return trimAllWs( text.substr( args[k].first, args[k].second - args[k].first ) ); };
+    const std::string_view callee  = calleeBefore( text, open );
+    const FlagSlot         slot    = flagSlotOf( callee );
+    const bool             defines = slot != FlagSlot::Absent || definesFlagByKeyword( text, open, callee );   // `lookup("max-pods", default=64)` is no flag definition
     std::size_t nameArg = SIZE_MAX;
     for( std::size_t k = 0; k < args.size(); ++k )
     {
         nameArg = at >= args[k].first && at < args[k].second ? k : nameArg;
-        if( const std::optional<std::string_view> kw = keywordDefaultOf( argText( k ) ) )
+        if( const std::optional<std::string_view> kw = defines ? keywordDefaultOf( argText( k ) ) : std::nullopt )
         {
             return std::string( *kw );
         }
     }
-    const FlagSlot slot = flagSlotOf( calleeBefore( text, open ) );
     if( nameArg == SIZE_MAX || ( slot != FlagSlot::AfterName && slot != FlagSlot::AfterShorthand ) )
     {
         return {};
@@ -2806,8 +2934,7 @@ inline std::string flagDefaultAt( std::string_view text, std::size_t at )
         return {};   // no argument after the default (the usage text): not the flag-set shape
     }
     const std::string_view d = argText( defArg );
-    const bool usageText = !d.empty() && ( d.front() == '"' || d.front() == '\'' ) && d.find( ' ' ) != std::string_view::npos;   // a sentence is no default
-    return !d.empty() && d.find( '=' ) == std::string_view::npos && !usageText ? std::string( d ) : std::string();   // a keyword argument is no default
+    return isDefaultSlotText( d, defArg + 2 == args.size() ) ? std::string( d ) : std::string();
 }
 
 // FLAG-SHAPE-LIT: the field a default argument names (`c.MaxPods` -> MaxPods), or "": a dotted chain of identifiers whose last link is at least
@@ -2822,6 +2949,17 @@ inline std::string_view defaultFieldOf( std::string_view def ) noexcept
     const bool chain = std::all_of( def.begin(), def.end(), []( char c ) { return namesplit::isIdentChar( c ) || c == '.' || c == '&' || c == '*'; } );
     const std::string_view f = def.substr( dot + 1 );
     return chain && std::isalpha( static_cast<unsigned char>( f.front() ) ) != 0 ? f : std::string_view();
+}
+
+// the text is ONE quoted literal: its closing quote (escapes skipped) is the last byte, so `"a" + input + "b"` is an expression
+inline bool isOneQuotedLiteral( std::string_view v ) noexcept
+{
+    std::size_t close = 1;
+    while( close < v.size() && v[close] != v.front() )
+    {
+        close += v[close] == '\\' ? 2 : 1;
+    }
+    return v.size() >= 2 && close == v.size() - 1;
 }
 
 // FLAG-SHAPE-LIT: the right side of an assignment is a constant: a number, a quoted string, true/false, a CONST word, or a name that says it is a
@@ -2839,7 +2977,7 @@ inline bool isConstantValue( std::string_view v ) noexcept
     }
     if( v.front() == '"' || v.front() == '\'' )
     {
-        return v.size() >= 2 && v.back() == v.front();
+        return isOneQuotedLiteral( v );
     }
     if( std::isdigit( static_cast<unsigned char>( v.front() ) ) != 0 || ( v.front() == '-' && v.size() > 1 && std::isdigit( static_cast<unsigned char>( v[1] ) ) != 0 ) )
     {
@@ -2851,6 +2989,31 @@ inline bool isConstantValue( std::string_view v ) noexcept
     }
     const bool ident = std::all_of( v.begin(), v.end(), []( char c ) { return namesplit::isIdentChar( c ); } );
     return ident && ( isConstShaped( v ) || v.starts_with( "Default" ) || v.starts_with( "default" ) );
+}
+
+// FLAG-SHAPE-LIT: the assigned expression at the start of `rest` (the line after `=` or `:`): up to the first `;`, `//`, `/*` or ` #` outside a string, so a trailing
+// comment or a second statement on the line does not hide a constant (`obj.MaxPods = 110 // default`)
+inline std::string_view assignedExprOf( std::string_view rest ) noexcept
+{
+    char quote = 0;
+    for( std::size_t i = 0; i < rest.size(); ++i )
+    {
+        const char c = rest[i];
+        if( quote != 0 )
+        {
+            i += c == '\\' ? 1 : 0;
+            quote = c == quote ? 0 : quote;
+        }
+        else if( c == '"' || c == '\'' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == ';' || ( c == '/' && i + 1 < rest.size() && ( rest[i + 1] == '/' || rest[i + 1] == '*' ) ) || ( c == '#' && i > 0 && ( rest[i - 1] == ' ' || rest[i - 1] == '\t' ) ) )
+        {
+            return rest.substr( 0, i );
+        }
+    }
+    return rest;
 }
 
 // FLAG-SHAPE-LIT: the line at `at` (a hit of `field`) writes a constant to the field: `x.F = <const>` (not `==`) or a struct-literal key `F: <const>`
@@ -2866,12 +3029,12 @@ inline bool isConstantWriteAt( std::string_view text, std::size_t at, std::size_
     const bool dotted = at > 0 && text[at - 1] == '.';
     if( dotted && after.starts_with( '=' ) && !after.starts_with( "==" ) )
     {
-        return isConstantValue( after.substr( 1 ) );
+        return isConstantValue( assignedExprOf( after.substr( 1 ) ) );
     }
     const bool opensLine = trimWs( text.substr( ls, at - ls ) ).empty();
     if( opensLine && after.starts_with( ':' ) && !after.starts_with( "::" ) && !after.starts_with( ":=" ) )
     {
-        return isConstantValue( after.substr( 1 ) );
+        return isConstantValue( assignedExprOf( after.substr( 1 ) ) );
     }
     return false;
 }
@@ -3039,7 +3202,9 @@ inline bool isArmHead( std::string_view code, Lang lang ) noexcept
         }
         return depth == 0 && !startsWord( "let" ) && !startsWord( "const" ) && !startsWord( "var" ) && !startsWord( "return" ) && !startsWord( "fn" ) && !startsWord( "pub" );
     }
-    if( ( startsWord( "case" ) || startsWord( "default" ) ) && ( t.ends_with( ':' ) || t.ends_with( ": {" ) || t.ends_with( ":{" ) ) )
+    // `case X:`; a `case: {` is a JS or TS object key (no label has nothing between `case` and the colon)
+    const bool caseLabel = startsWord( "case" ) && !trimWs( t.substr( 4 ) ).starts_with( ':' );
+    if( ( caseLabel || startsWord( "default" ) ) && ( t.ends_with( ':' ) || t.ends_with( ": {" ) || t.ends_with( ":{" ) ) )
     {
         return true;
     }
@@ -3067,22 +3232,54 @@ inline std::string_view lineAtNumber( const std::string& text, const std::vector
     return std::string_view( text ).substr( b, e > b ? e - b : 0 );
 }
 
-// the `default:` at line `l` heads a switch's arm: the nearest less indented line above it (below `first`) opens a `switch` or a Go `select`. A JS or
-// TS object literal's `default: {` key (`return {`, `x = {`, `f({`) is no arm.
-inline bool switchOpensAbove( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l, std::uint32_t first )
+// the line `l` heads an arm of a block that a line above it opens with one of `words` (`switch`, `select`, `match`): the nearest line above (below `first`) that is
+// less indented than `l`, or, with `aligned`, that stands at its indent and is no `case X:` / `default:` label of the same block (gofmt and many C++ styles align the
+// labels with the `switch` header). A JS or TS object literal's `default: {` key (`return {`, `x = {`, `f({`) opens no such block.
+inline bool opensBlockAbove( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l, std::uint32_t first, std::span<const std::string_view> words, bool aligned )
 {
     const std::size_t in = lintdetail::indentOf( lineAtNumber( text, starts, l ) );
     for( std::uint32_t k = l; k-- > first && k > 0; )
     {
         const std::string_view line = lineAtNumber( text, starts, k );
         const std::string_view t    = trimWs( line );
-        if( !t.empty() && lintdetail::indentOf( line ) < in )
+        if( t.empty() )
         {
-            const std::string_view code = openerCode( line );
-            return namesplit::containsWordBoundedBy( code, "switch", namesplit::isIdentChar ) || namesplit::containsWordBoundedBy( code, "select", namesplit::isIdentChar );
+            continue;
+        }
+        const std::size_t ind  = lintdetail::indentOf( line );
+        const std::string_view code = openerCode( line );
+        const auto has = [ & ]() { return std::any_of( words.begin(), words.end(), [ & ]( std::string_view w ) { return namesplit::containsWordBoundedBy( code, w, namesplit::isIdentChar ); } ); };
+        if( ind < in )
+        {
+            return has();
+        }
+        if( aligned && ind == in )
+        {
+            const std::string_view c = trimWs( code );
+            const auto word = [ & ]( std::string_view w ) { return c.starts_with( w ) && ( c.size() == w.size() || !namesplit::isIdentChar( c[w.size()] ) ); };
+            const bool label = ( word( "case" ) && !trimWs( c.substr( 4 ) ).starts_with( ':' ) ) || ( word( "default" ) && c.ends_with( ':' ) );
+            if( !label && has() )
+            {
+                return true;   // the `switch (x) {` header standing at the labels' own indent
+            }
+            // a label, a closing brace or a body line at the labels' indent: on up
         }
     }
     return false;
+}
+
+// the line `l` (the head `code` of an arm, per isArmHead) holds up as one: a `default:` needs a `switch` or `select` block above it (not a JS or TS object key), and a
+// `pat => {` (Rust, C#, PHP) a `match` or `switch` block above it (a standalone `x => {` callback is no arm)
+inline bool armHeadHoldsUp( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l, std::uint32_t first, std::string_view code, Lang lang )
+{
+    static constexpr std::array<std::string_view, 2> kSwitchWords{ "switch", "select" };
+    static constexpr std::array<std::string_view, 2> kMatchWords{ "match", "switch" };
+    const std::string_view t = trimWs( code );
+    if( t.starts_with( "default" ) )
+    {
+        return opensBlockAbove( text, starts, l, first, kSwitchWords, /*aligned=*/true );
+    }
+    return langFacts( lang ).armOpeners != ArmOpeners::FatArrow || t.find( "=>" ) == std::string_view::npos || opensBlockAbove( text, starts, l, first, kMatchWords, /*aligned=*/false );
 }
 
 // EXCERPT-ARM: the head line of the match arm or case that holds the site at `site` (1-based), when the window [site-1, ...] leaves it out
@@ -3113,8 +3310,7 @@ inline std::uint32_t armHeadAbove( const std::string& text, const std::vector<st
             continue;   // an opener the window already shows: the arm, if any, is further up
         }
         const std::string_view code = openerCode( line );
-        const bool             keyed = trimWs( code ).starts_with( "default" ) && !switchOpensAbove( text, starts, l, first );
-        return isArmHead( code, lang ) && !keyed ? l : 0;
+        return isArmHead( code, lang ) && armHeadHoldsUp( text, starts, l, first, code, lang ) ? l : 0;
     }
     return 0;
 }
@@ -3177,7 +3373,7 @@ namespace lit_detail
 struct FlagDefault
 {
     std::size_t row = SIZE_MAX;   // the row that carries def=; SIZE_MAX = none
-    std::string text;             // def=, cut to kForFlagDefaultBytes and redacted
+    std::string text;             // def=, cut to kForFlagDefaultMaxBytes and redacted
     std::string writesXml;        // the <ld> rows, at most kForFlagWriteRows
     std::size_t writeCount = 0;   // writes=: every constant write read
     bool        writesFloor = false;   // the field's scan was partial or past kForFlagWriteHits: writes= is a floor
@@ -3190,14 +3386,20 @@ struct OneFileText
     std::string   text;
     std::vector<std::size_t> starts;   // lineStartsOf( text ), built on first use per file
     bool          haveStarts = false;
+    bool          useMemo    = true;    // the span-tier memo may be read and written (false under --no-cache)
+    bool          curFailed  = false;   // the file now held could not be read
+    bool          unread     = false;   // a read failed since last cleared: its empty text is "could not read", not "no hits"
     const std::string& of( const IngestResult& ing, std::uint32_t fileId )
     {
         if( file != fileId )
         {
             file       = fileId;
             haveStarts = false;
-            text       = docparse::detail::readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );
+            std::optional<std::string> read = docparse::detail::readWholeFile( diskPath( ing, fileId ) );
+            curFailed  = !read.has_value();
+            text       = std::move( read ).value_or( std::string() );
         }
+        unread = unread || curFailed;   // every use of a file that could not be read counts, not only the first
         return text;
     }
     const std::vector<std::size_t>& startsOfText()
@@ -3257,21 +3459,53 @@ inline std::string_view paramTypeIn( std::string_view sig, std::string_view name
     return {};
 }
 
-// the source-tier constant writes of `field` (isConstantWriteAt), the scan's first kForFlagWriteHits hits; floor when the scan was cut
+// the candidates that stand in code: a write in a comment or a string is no write (the span tier says which). A candidate in a file the span tier did not parse (or past
+// kForLiteralTierFiles files) is kept and `floor` is set: the count is then not a verified total.
+inline std::vector<GrepRawHit> codeWritesOf( const IngestResult& ing, const std::vector<GrepRawHit>& candidates, bool useMemo, bool& floor )
+{
+    std::vector<std::uint32_t> tierFiles;
+    std::vector<std::string>   tierPaths;
+    for( const GrepRawHit& r : candidates )
+    {
+        if( tierFiles.size() < kForLiteralTierFiles && std::find( tierFiles.begin(), tierFiles.end(), r.fileId ) == tierFiles.end() )
+        {
+            tierFiles.push_back( r.fileId );
+            tierPaths.push_back( diskPath( ing, r.fileId ) );
+        }
+    }
+    const SpanTierBatch     batch = spanTiersOfFiles( std::span<const std::string>( tierPaths ), useMemo );
+    std::vector<GrepRawHit> writes;
+    for( const GrepRawHit& r : candidates )
+    {
+        const std::size_t idx = std::size_t( std::find( tierFiles.begin(), tierFiles.end(), r.fileId ) - tierFiles.begin() );
+        const bool        classified = idx < batch.perFile.size() && batch.perFile[idx].isParsed;
+        const SpanTier    tier       = classified ? spanTierAt( batch.perFile[idx], r.byteOffset ) : SpanTier::Code;
+        floor = floor || !classified;
+        if( tier != SpanTier::Comment && tier != SpanTier::String )
+        {
+            writes.push_back( r );
+        }
+    }
+    return writes;
+}
+
+// the source-tier constant writes of `field` (isConstantWriteAt), the scan's first kForFlagWriteHits hits, those in code (codeWritesOf); floor when the scan was cut or
+// a candidate could not be classified
 inline std::pair<std::vector<GrepRawHit>, bool> constantWritesOf( const IngestResult& ing, const std::string& field, OneFileText& files )
 {
     const GrepCollection    fc    = grepCollect( ing, field, /*regex=*/false, /*noPrefilter=*/false );
-    const bool              floor = !fc.cleanScan() || fc.raw.size() > kForFlagWriteHits;
-    std::vector<GrepRawHit> writes;
+    bool                    floor = !fc.cleanScan() || fc.raw.size() > kForFlagWriteHits;
+    std::vector<GrepRawHit> candidates;
     for( std::size_t k = 0; k < fc.raw.size() && k < kForFlagWriteHits; ++k )
     {
         const GrepRawHit&      r = fc.raw[k];
         const std::string_view p = rootRelPath( ing, r.fileId );
         if( pathTierOf( p ) == PathTier::Source && !isBareWordCodePath( p ) && isConstantWriteAt( files.of( ing, r.fileId ), r.byteOffset, field.size() ) )
         {
-            writes.push_back( r );
+            candidates.push_back( r );
         }
     }
+    std::vector<GrepRawHit> writes = codeWritesOf( ing, candidates, files.useMemo, floor );
     return { std::move( writes ), floor };
 }
 
@@ -3356,7 +3590,7 @@ inline std::string ownerTypeOf( const IngestResult& ing, const GrepHit& row, std
 }
 
 // the write `w` belongs to the owner type: the function holding it names the type (signature or body), or, outside any function, one of the
-// kForFlagOwnerLines lines above it does (a struct literal `Config{`). A name match: no type check.
+// kForFlagOwnerMaxLines lines above it does (a struct literal `Config{`). A name match: no type check.
 inline bool writeNamesOwner( const IngestResult& ing, const GrepHit& w, std::string_view type, OneFileText& files )
 {
     const std::string& t = files.of( ing, w.fileId );
@@ -3370,7 +3604,7 @@ inline bool writeNamesOwner( const IngestResult& ing, const GrepHit& w, std::str
     {
         return false;
     }
-    const std::size_t lo = starts[w.line > kForFlagOwnerLines ? w.line - 1 - kForFlagOwnerLines : 0];
+    const std::size_t lo = starts[w.line > kForFlagOwnerMaxLines ? w.line - 1 - kForFlagOwnerMaxLines : 0];
     const std::size_t hi = w.line < starts.size() ? starts[w.line] : t.size();
     return namesplit::containsWordBoundedBy( std::string_view( t ).substr( lo, hi - lo ), type, namesplit::isIdentChar );
 }
@@ -3379,10 +3613,11 @@ inline bool writeNamesOwner( const IngestResult& ing, const GrepHit& w, std::str
 // field (defaultFieldOf) of a receiver whose type is known (ownerTypeOf), the field's constant writes in code that names that type
 template <class RelPath>
 inline FlagDefault flagDefaultOfRows( const IngestResult& ing, const std::vector<Site>& rows, const std::vector<GrepHit>& hits, const RelPath& relPath,
-                                      RedactCounts* redact, std::vector<char>& esc )
+                                      RedactCounts* redact, std::vector<char>& esc, bool useMemo )
 {
     FlagDefault out;
     OneFileText files;
+    files.useMemo = useMemo;
     for( std::size_t i = 0; i < hits.size() && out.row == SIZE_MAX; ++i )
     {
         if( rows[i].k != 'c' )
@@ -3394,12 +3629,15 @@ inline FlagDefault flagDefaultOfRows( const IngestResult& ing, const std::vector
     redactInPlace( out.text, redact );   // before the cut: a key is never half-cut
     const std::string field( defaultFieldOf( out.text ) );
     const std::string owner = field.empty() ? std::string() : ownerTypeOf( ing, hits[out.row], out.text, files );
+    out.writesFloor = !field.empty() && owner.empty();   // def= names a field whose receiver type is unknown: no write scan ran, so writes="0" is not a total
     if( !owner.empty() )
     {
+        files.unread            = false;
         auto [ writes, floor ]  = constantWritesOf( ing, field, files );
         out.writesFloor         = floor;
         std::vector<GrepHit> wh = grepEnrich( ing, std::span<const GrepRawHit>( writes ) );
         wh.erase( std::remove_if( wh.begin(), wh.end(), [ & ]( const GrepHit& w ) { return !writeNamesOwner( ing, w, owner, files ); } ), wh.end() );
+        out.writesFloor = out.writesFloor || files.unread;   // a write file that could not be read again is an omitted write
         out.writeCount                       = wh.size();
         const std::vector<std::size_t> order = defaultsFirstOrder( ing, wh );
         for( std::size_t k = 0; k < order.size() && k < kForFlagWriteRows; ++k )
@@ -3407,7 +3645,7 @@ inline FlagDefault flagDefaultOfRows( const IngestResult& ing, const std::vector
             appendWriteRow( out.writesXml, ing, wh[order[k]], relPath, redact, esc );
         }
     }
-    truncateUtf8WithEllipsis( out.text, kForFlagDefaultBytes );
+    truncateUtf8WithEllipsis( out.text, kForFlagDefaultMaxBytes );
     return out;
 }
 }   // namespace lit_detail
@@ -3754,7 +3992,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     lit_detail::FlagDefault flag;
     if( policy.boundary == lit_detail::LitBoundary::Flag )
     {
-        flag = lit_detail::flagDefaultOfRows( ing, rows, hits, relPath, redact, esc );
+        flag = lit_detail::flagDefaultOfRows( ing, rows, hits, relPath, redact, esc, useMemo );
     }
 
     // ── the rows ──────────────────────────────────────────────────────────────────────────────────────────────────────────
