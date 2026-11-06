@@ -91,6 +91,13 @@
 // never listed; none strong, no block. The legend clause rides only on such an answer. The callee vocabulary narrowed with it (rv-reg2-delta D1):
 // `use` is a hook prefix, an adding verb's noun is the name's last word, `reg` is a verb only last or before a noun. The table legend lost the bytes
 // no attribute of the answer needs (D4): the vocabulary list and the rank sentence; the tail= sentence rides only beside a tail=.
+//
+// FLAG-SHAPE-LIT (ORCH reports/os6-flag-default-s0.md OS-6b). A task naming a `--flag` (`kubelet --max-pods`; flagNamesOf: a kebab `--a-b`, or
+// `--name` before a flag/option word) scans the bare name, after the shapes above, as shape="flag": a site is the whole quoted name (flagHitAt:
+// `"max-pods"`, `"--workers"`), any other hit a mention (mention=). On the first string row whose call has one, def= is the default argument
+// (flagDefaultAt: default=/default_value=, else the argument after the name, two after for a pflag `...P(` shorthand form; a sentence is a
+// usage text, no default). When def= names a field (`c.MaxPods`), the field's CONSTANT writes (isConstantWriteAt: `x.F = 110`, `F: 110`; never
+// `out.F = in.F`) are ld rows, functions and files named for defaults first, at most kForFlagWriteRows, writes= counting all read.
 
 #include "infra/namesplit.h" // isIdentChar
 #include "infra/sortutil.h"  // svLess — AnchorSet::dirs sort and search in byte order, never through operator<
@@ -166,6 +173,10 @@ inline constexpr std::size_t kForTableMaxAnchor       = 60;     // a longer back
 inline constexpr std::size_t kForRegCallLines         = 4;      // shape=table: a registration call's open paren is looked for this many lines above a site
 inline constexpr std::size_t kForRegCallBytes         = 512;    // ...and this many bytes
 inline constexpr std::size_t kForRegLineHits          = 8;      // shape=table: later hits on one line kept to try as a registration argument (the first is the site)
+inline constexpr std::size_t kForFlagMinName          = 3;      // FLAG-SHAPE-LIT: a `--flag` name shorter than this is no flag; a name with no inner hyphen needs kForLiteralMinConst bytes and a flag/option word
+inline constexpr std::size_t kForFlagDefaultBytes     = 80;     // def= text
+inline constexpr std::size_t kForFlagWriteRows        = 2;      // constant writes of the default's field listed (ld rows)
+inline constexpr std::size_t kForFlagWriteHits        = 4096;   // the field's sites read for a constant write (past it: floor=1)
 inline constexpr std::size_t kForRegIdentBytes        = 128;    // shape=table: an identifier run longer than this around a hit is no argument name (a blob, not a name)
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
@@ -219,6 +230,16 @@ inline constexpr std::string_view kForLiteralStrongLegend =
     "<!-- ripwire for lit: the task has no table or registration word, so only strong rows are listed: a registration call (reg=), a top level macro or "
     "call row (tbl=item), a macro table row (tbl= a name! opener). weak=N source sites read that are other table rows or no row, not listed. -->";
 static_assert( kForLiteralStrongLegend.find( "--", 4 ) == kForLiteralStrongLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+// FLAG-SHAPE-LIT: the clause of shape=flag (policy legend), present only on a flag fire
+inline constexpr std::string_view kForLiteralFlagLegend =
+    "<!-- ripwire for lit: shape=flag a flag the task names (s= without its leading dashes): rows are the sites where it is a whole quoted string, "
+    "the call that defines the flag; mention= other source sites (usage text, a longer flag name), counted, never rows. def= on a row: that call's "
+    "default argument (default= or the argument after the name), read from the text, no claim it is the value in effect. ld = a constant write of "
+    "the field def= names (x.F = 110, F: 110), functions and files named for defaults first, at most 2; writes=N all such writes read; none is no claim. "
+    "try=N: the task's Nth literal anchored; the ones before it had no source site. -->";
+static_assert( kForLiteralFlagLegend.find( "--", 4 ) == kForLiteralFlagLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForFlagWriteRows == 2, "the flag legend says at most 2 ld rows" );
+
 // EXCERPT-ARM: present only with arm= on an <x> (the first element that prints it)
 inline constexpr std::string_view kForLiteralArmLegend =
     "<!-- ripwire for lit: x arm=1: a window starts at the head of the match arm or case holding its site (12 lines up at most), not one line above it. -->";
@@ -251,7 +272,7 @@ inline bool forLiteralOn()
 struct ForLiteral
 {
     std::string text;
-    std::string_view shape;   // "quoted" | "const" | "dotted" | "message"
+    std::string_view shape;   // "quoted" | "const" | "dotted" | "message" | "flag"
     bool             frag = false;   // shape=message: `text` is a fragment of the task's words, the whole text has no site
     std::size_t      tryNo = 1;      // the task's Nth literal (earlier ones were scanned and have no source site): try="N" when > 1
 };
@@ -653,6 +674,44 @@ inline std::vector<std::string> constWordsOf( std::string_view task )
     return out;
 }
 
+// FLAG-SHAPE-LIT: the `--flag` names of the task (`kubelet --max-pods` -> max-pods), in order, each once: a token `--a-b` (kebab: an inner hyphen),
+// or `--name` of kForLiteralMinConst bytes or more right before a flag/option word. Lower-case letters, digits and hyphens only; a trailing `=value`
+// or punctuation is cut. Backticked or not (a flag is no code name the ranked answer reads).
+inline std::vector<std::string> flagNamesOf( std::string_view task )
+{
+    std::vector<std::string>            out;
+    const std::vector<std::string_view> words = lit_detail::taskWords( task );
+    for( std::size_t i = 0; i < words.size(); ++i )
+    {
+        std::string_view w = words[i];
+        while( !w.empty() && std::string_view( "`'\"([{<" ).find( w.front() ) != std::string_view::npos )
+        {
+            w.remove_prefix( 1 );
+        }
+        if( !w.starts_with( "--" ) )
+        {
+            continue;
+        }
+        w.remove_prefix( 2 );
+        const std::size_t eq = w.find( '=' );
+        w = eq == std::string_view::npos ? w : w.substr( 0, eq );
+        while( !w.empty() && std::string_view( "`'\")]}>,;:.!?" ).find( w.back() ) != std::string_view::npos )
+        {
+            w.remove_suffix( 1 );
+        }
+        const bool bytesOk = !w.empty() && std::islower( static_cast<unsigned char>( w.front() ) ) != 0 && w.back() != '-'
+                             && std::all_of( w.begin(), w.end(), []( char c ) { return std::islower( static_cast<unsigned char>( c ) ) != 0 || std::isdigit( static_cast<unsigned char>( c ) ) != 0 || c == '-'; } )
+                             && w.find( "--" ) == std::string_view::npos;
+        const bool kebab = w.find( '-' ) != std::string_view::npos;
+        const bool cued  = i + 1 < words.size() && lit_detail::wordIsOneOf( lit_detail::stripWordPunct( words[i + 1] ), std::array<std::string_view, 4>{ "flag", "flags", "option", "options" } );
+        if( bytesOk && w.size() >= kForFlagMinName && ( kebab || ( cued && w.size() >= kForLiteralMinConst ) ) && std::find( out.begin(), out.end(), w ) == out.end() )
+        {
+            out.emplace_back( w );
+        }
+    }
+    return out;
+}
+
 // The literals the task names, in the order they are tried: a quoted span (the task's own quoting is the strongest evidence), the
 // CONST_SHAPED words, the dotted keys (the one beside a setting cue first), then a message. The caller scans them in order until one
 // has a source site (kForLiteralCandidates scans, a message's own tries besides): the first literal with no site no longer hides the next.
@@ -671,6 +730,10 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     for( std::string& k : lit_detail::dottedKeysOf( words ) )
     {
         out.push_back( ForLiteral{ std::move( k ), "dotted" } );
+    }
+    for( std::string& f : flagNamesOf( task ) )
+    {
+        out.push_back( ForLiteral{ std::move( f ), "flag" } );   // FLAG-SHAPE-LIT: after the shapes that were here before it, so none of them moves
     }
     std::optional<std::string> m = lit_detail::quotedMessageOf( task );
     if( !m )
@@ -1317,12 +1380,34 @@ inline std::vector<std::size_t> pickRows( const std::vector<char>& reg, std::siz
     return pick;
 }
 
+// FLAG-SHAPE-LIT: the hit at `at` of `text` is the whole quoted flag name: a quote before it (after an optional `-` or `--`) and the same quote,
+// or a `=` (`"--workers=4"`), right after it. `"max-pods-per-core"` and `use --max-pods to cap` are mentions, not sites.
+inline bool flagHitAt( std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    if( at == 0 || at > text.size() || n > text.size() - at )
+    {
+        return false;
+    }
+    std::size_t b = at;
+    for( int dashes = 0; dashes < 2 && b > 0 && text[b - 1] == '-'; ++dashes )
+    {
+        --b;
+    }
+    if( b == 0 || ( text[b - 1] != '"' && text[b - 1] != '\'' && text[b - 1] != '`' ) )
+    {
+        return false;
+    }
+    const char q = text[b - 1];
+    return at + n < text.size() && ( text[at + n] == q || text[at + n] == '=' );
+}
+
 // How a shape of <lit> reads its sites: one row of this table per shape, so a new shape is a new row, never a new bool through renderForLiteral.
 enum class LitBoundary : std::uint8_t
 {
     None,   // shape=quoted|const: every byte-exact hit is a site
     Key,    // shape=dotted: keyHitAt, a hit inside a longer name or a child key is `longer`, quotes around the key rank it
-    Word    // shape=message: wordBounded, a hit inside a longer word is `longer`
+    Word,   // shape=message: wordBounded, a hit inside a longer word is `longer`
+    Flag    // shape=flag: a site is the whole quoted string, `--` allowed before it (`"max-pods"`, `"--workers"`); any other hit is a mention
 };
 struct LitPolicy
 {
@@ -1349,6 +1434,10 @@ inline LitPolicy litPolicyOf( std::string_view shape ) noexcept
     {
         return LitPolicy{ LitBoundary::Word, false, kForTableRows, 0, kForLiteralTableLegend, true, kForTableContextRows, kForTableRankedRows };
     }
+    if( shape == "flag" )
+    {
+        return LitPolicy{ LitBoundary::Flag, false, kForLiteralSiteRows, 0, kForLiteralFlagLegend };
+    }
     return LitPolicy{};
 }
 
@@ -1358,6 +1447,10 @@ inline KeyHit literalHitAt( LitBoundary boundary, std::string_view text, std::si
     if( boundary == LitBoundary::Key )
     {
         return keyHitAt( text, at, n );
+    }
+    if( boundary == LitBoundary::Flag )
+    {
+        return KeyHit{ false, flagHitAt( text, at, n ) };
     }
     KeyHit h;
     h.longer = boundary == LitBoundary::Word && !wordBounded( text, at, n );
@@ -2498,6 +2591,203 @@ inline bool isPythonDocstringAt( const std::string& text, std::size_t start ) no
     return t.starts_with( "def " ) || t.starts_with( "async def " ) || t.starts_with( "class " );
 }
 
+// FLAG-SHAPE-LIT: the default argument of the call whose argument list holds the flag name at `at` (a whole quoted argument): a `default=`,
+// `default_value=` or `default:` argument, else the argument right after the name when one more (the usage text) follows it, or two after it for a
+// pflag shorthand form (`StringVarP(&v, "name", "n", def, usage)`). Read from the text over at most kForRegCallBytes bytes; "" when none.
+inline std::string flagDefaultAt( std::string_view text, std::size_t at )
+{
+    const std::size_t ls = at == 0 ? 0 : ( text.rfind( '\n', at - 1 ) == std::string_view::npos ? 0 : text.rfind( '\n', at - 1 ) + 1 );
+    std::size_t from = at;   // the scan back starts before the name's own opening quote and dashes
+    while( from > ls && text[from - 1] == '-' )
+    {
+        --from;
+    }
+    from -= from > ls && ( text[from - 1] == '"' || text[from - 1] == '\'' || text[from - 1] == '`' ) ? 1 : 0;
+    std::size_t open = std::string_view::npos;
+    int depth = 0;
+    char quote = 0;
+    for( std::size_t i = from; i-- > ls; )
+    {
+        const char c = text[i];
+        if( quote != 0 )
+        {
+            quote = c == quote ? 0 : quote;
+            continue;
+        }
+        if( c == '"' || c == '\'' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == ')' || c == ']' || c == '}' )
+        {
+            ++depth;
+        }
+        else if( c == '(' || c == '[' || c == '{' )
+        {
+            if( depth == 0 )
+            {
+                open = c == '(' ? i : std::string_view::npos;
+                break;
+            }
+            --depth;
+        }
+    }
+    if( open == std::string_view::npos )
+    {
+        return {};
+    }
+    std::size_t cb = open;
+    while( cb > ls && ( namesplit::isIdentChar( text[cb - 1] ) ) )
+    {
+        --cb;
+    }
+    const std::string_view callee = text.substr( cb, open - cb );
+    std::vector<std::pair<std::size_t, std::size_t>> args;   // [begin, end) of each top-level argument
+    std::size_t argStart = open + 1;
+    depth = 0;
+    quote = 0;
+    const std::size_t end = std::min( text.size(), open + 1 + kForRegCallBytes );
+    bool closed = false;
+    for( std::size_t i = open + 1; i < end && !closed; ++i )
+    {
+        const char c = text[i];
+        if( quote != 0 )
+        {
+            if( c == '\\' )
+            {
+                ++i;
+            }
+            else if( c == quote )
+            {
+                quote = 0;
+            }
+            continue;
+        }
+        switch( c )
+        {
+            case '"': case '\'': case '`': quote = c; break;
+            case '(': case '[': case '{': ++depth; break;
+            case ')': case ']': case '}':
+                if( depth == 0 )
+                {
+                    args.emplace_back( argStart, i );
+                    closed = true;
+                }
+                --depth;
+                break;
+            case ',':
+                if( depth == 0 )
+                {
+                    args.emplace_back( argStart, i );
+                    argStart = i + 1;
+                }
+                break;
+            default: break;
+        }
+    }
+    if( !closed )
+    {
+        return {};
+    }
+    const auto argText = [ & ]( std::size_t k ) { return trimWs( text.substr( args[k].first, args[k].second - args[k].first ) ); };
+    std::size_t nameArg = SIZE_MAX;
+    for( std::size_t k = 0; k < args.size(); ++k )
+    {
+        nameArg = at >= args[k].first && at < args[k].second ? k : nameArg;
+        for( const std::string_view key : { std::string_view( "default_value_t" ), std::string_view( "default_value" ), std::string_view( "default" ) } )
+        {
+            const std::string_view a = argText( k );
+            if( a.starts_with( key ) )
+            {
+                const std::string_view rest = trimWs( a.substr( key.size() ) );
+                if( !rest.empty() && ( rest.front() == '=' || rest.front() == ':' ) && !rest.starts_with( "==" ) )
+                {
+                    return std::string( trimWs( rest.substr( 1 ) ) );
+                }
+            }
+        }
+    }
+    if( nameArg == SIZE_MAX )
+    {
+        return {};
+    }
+    const bool        shorthand = callee.size() > 1 && callee.back() == 'P' && std::islower( static_cast<unsigned char>( callee[callee.size() - 2] ) ) != 0;   // pflag `StringVarP`, `BoolP`
+    const std::size_t defArg    = nameArg + ( shorthand ? 2 : 1 );
+    if( defArg + 1 >= args.size() )
+    {
+        return {};   // no argument after the default (the usage text): not the flag-set shape
+    }
+    const std::string_view d = argText( defArg );
+    const bool usageText = !d.empty() && ( d.front() == '"' || d.front() == '\'' ) && d.find( ' ' ) != std::string_view::npos;   // TCLAP `("", "name", "desc", ...)`: a sentence is no default
+    return !d.empty() && d.find( '=' ) == std::string_view::npos && !usageText ? std::string( d ) : std::string();   // a keyword argument is no default
+}
+
+// FLAG-SHAPE-LIT: the field a default argument names (`c.MaxPods` -> MaxPods), or "": a dotted chain of identifiers whose last link is at least
+// kForFlagMinName bytes. A literal, a call, a CONST word or a bare name is no field.
+inline std::string_view defaultFieldOf( std::string_view def ) noexcept
+{
+    const std::size_t dot = def.rfind( '.' );
+    if( dot == std::string_view::npos || dot == 0 || def.size() - dot - 1 < kForFlagMinName || std::isdigit( static_cast<unsigned char>( def.front() ) ) != 0 )
+    {
+        return {};
+    }
+    const bool chain = std::all_of( def.begin(), def.end(), []( char c ) { return namesplit::isIdentChar( c ) || c == '.' || c == '&' || c == '*'; } );
+    const std::string_view f = def.substr( dot + 1 );
+    return chain && std::isalpha( static_cast<unsigned char>( f.front() ) ) != 0 ? f : std::string_view();
+}
+
+// FLAG-SHAPE-LIT: the right side of an assignment is a constant: a number, a quoted string, true/false, a CONST word, or a name that says it is a
+// default (`DefaultMaxPods`). A field or a call (`in.MaxPods`, `f()`) is not.
+inline bool isConstantValue( std::string_view v ) noexcept
+{
+    v = trimWs( v );
+    while( !v.empty() && ( v.back() == ',' || v.back() == ';' ) )
+    {
+        v = trimWs( v.substr( 0, v.size() - 1 ) );
+    }
+    if( v.empty() )
+    {
+        return false;
+    }
+    if( v.front() == '"' || v.front() == '\'' )
+    {
+        return v.size() >= 2 && v.back() == v.front();
+    }
+    if( std::isdigit( static_cast<unsigned char>( v.front() ) ) != 0 || ( v.front() == '-' && v.size() > 1 && std::isdigit( static_cast<unsigned char>( v[1] ) ) != 0 ) )
+    {
+        return std::all_of( v.begin() + 1, v.end(), []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '.'; } );
+    }
+    if( v == "true" || v == "false" || v == "True" || v == "False" )
+    {
+        return true;
+    }
+    const bool ident = std::all_of( v.begin(), v.end(), []( char c ) { return namesplit::isIdentChar( c ); } );
+    return ident && ( isConstShaped( v ) || v.starts_with( "Default" ) || v.starts_with( "default" ) );
+}
+
+// FLAG-SHAPE-LIT: the line at `at` (a hit of `field`) writes a constant to the field: `x.F = <const>` (not `==`) or a struct-literal key `F: <const>`
+inline bool isConstantWriteAt( std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    if( at + n > text.size() || ( at + n < text.size() && namesplit::isIdentChar( text[at + n] ) ) )
+    {
+        return false;
+    }
+    const std::size_t ls  = at == 0 ? 0 : ( text.rfind( '\n', at - 1 ) == std::string_view::npos ? 0 : text.rfind( '\n', at - 1 ) + 1 );
+    const std::size_t nl  = text.find( '\n', at );
+    const std::string_view after = trimWs( text.substr( at + n, ( nl == std::string_view::npos ? text.size() : nl ) - at - n ) );
+    const bool dotted = at > 0 && text[at - 1] == '.';
+    if( dotted && after.starts_with( '=' ) && !after.starts_with( "==" ) )
+    {
+        return isConstantValue( after.substr( 1 ) );
+    }
+    const bool opensLine = trimWs( text.substr( ls, at - ls ) ).empty();
+    if( opensLine && after.starts_with( ':' ) && !after.starts_with( "::" ) && !after.starts_with( ":=" ) )
+    {
+        return isConstantValue( after.substr( 1 ) );
+    }
+    return false;
+}
+
 using LineRange = std::pair<std::uint32_t, std::uint32_t>;   // inclusive, 1-based
 
 // the excerpt of a body: its signature line `first` plus a window [site-before, site+after] per site line, clipped to
@@ -2795,7 +3085,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             loadedText = docparse::detail::readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );
         }
     };
-    std::size_t testHits = 0, docHits = 0, commentHits = 0, longerHits = 0;
+    std::size_t testHits = 0, docHits = 0, commentHits = 0, longerHits = 0, mentionHits = 0;
     std::vector<lit_detail::Site> src;
     std::vector<std::uint32_t>    srcFiles;
     for( const GrepRawHit& r : collected.raw )
@@ -2817,6 +3107,11 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 loadFile( r.fileId );
                 keyHit = lit_detail::literalHitAt( policy.boundary, loadedText, r.byteOffset, lit.text.size() );
+                if( policy.boundary == lit_detail::LitBoundary::Flag && !keyHit.quoted )
+                {
+                    ++mentionHits;   // shape=flag: not the whole quoted name (usage text, a longer flag): a mention, counted, never a row
+                    continue;
+                }
                 if( keyHit.longer
                     && !( policy.tableRows && lit_detail::isArgumentName( loadedText, r.byteOffset, lit.text.size() )
                           && !lit_detail::registrationCallOf( loadedText, r.byteOffset, lit_detail::regLangCtxOf( langOfPath( ing.files[r.fileId] ) ) ).empty() ) )
@@ -3090,6 +3385,92 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         armWindow = armWindow || armed;
     }
 
+    // ── FLAG-SHAPE-LIT: the first shown string row whose call names a default (def=), and the constant writes of the field it names (ld) ──
+    std::size_t defRow = SIZE_MAX;
+    std::string defText, writesXml;
+    std::size_t writeCount = 0;
+    bool        writesFloor = false;
+    if( policy.boundary == lit_detail::LitBoundary::Flag )
+    {
+        for( std::size_t i = 0; i < hits.size() && defRow == SIZE_MAX; ++i )
+        {
+            if( rows[i].k == 'c' )
+            {
+                continue;
+            }
+            loadFile( rows[i].raw.fileId );
+            defText = lit_detail::flagDefaultAt( loadedText, rows[i].raw.byteOffset );
+            defRow  = defText.empty() ? SIZE_MAX : i;
+        }
+        const std::string field( lit_detail::defaultFieldOf( defText ) );
+        if( !field.empty() )
+        {
+            const GrepCollection fc = grepCollect( ing, field, /*regex=*/false, /*noPrefilter=*/false );
+            writesFloor             = !fc.cleanScan() || fc.raw.size() > kForFlagWriteHits;
+            std::vector<GrepRawHit> writes;
+            for( std::size_t k = 0; k < fc.raw.size() && k < kForFlagWriteHits; ++k )
+            {
+                const GrepRawHit& r = fc.raw[k];
+                if( pathTierOf( rootRelPath( ing, r.fileId ) ) != PathTier::Source || isBareWordCodePath( rootRelPath( ing, r.fileId ) ) )
+                {
+                    continue;
+                }
+                loadFile( r.fileId );
+                if( lit_detail::isConstantWriteAt( loadedText, r.byteOffset, field.size() ) )
+                {
+                    writes.push_back( r );
+                }
+            }
+            writeCount = writes.size();
+            std::vector<GrepHit> wh = grepEnrich( ing, std::span<const GrepRawHit>( writes ) );
+            const auto named = [ & ]( std::size_t k )
+            {
+                std::string w = wh[k].enclosing + " " + std::string( rootRelPath( ing, wh[k].fileId ) );
+                std::transform( w.begin(), w.end(), w.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+                return w.find( "default" ) != std::string::npos ? 0 : 1;   // a defaults function or file first (SetDefaults_*, defaults.go)
+            };
+            std::vector<std::size_t> worder( wh.size() );
+            for( std::size_t k = 0; k < worder.size(); ++k )
+            {
+                worder[k] = k;
+            }
+            std::vector<int> wrank( wh.size() );
+            for( std::size_t k = 0; k < wrank.size(); ++k )
+            {
+                wrank[k] = named( k );   // hoisted out of the comparator
+            }
+            std::stable_sort( worder.begin(), worder.end(), [ & ]( std::size_t a, std::size_t b ) { return wrank[a] < wrank[b]; } );
+            for( std::size_t k = 0; k < worder.size() && k < kForFlagWriteRows; ++k )
+            {
+                const GrepHit& w = wh[worder[k]];
+                writesXml += "<ld p=\"";
+                writesXml += escapeXml( relPath( w.fileId ), esc );
+                writesXml += "\" l=\"" + std::to_string( w.line ) + "\"";
+                if( w.enclosingId != kNoNode )
+                {
+                    writesXml += " in=\"";
+                    writesXml += escapeXml( w.enclosing, esc );
+                    writesXml += "\" ink=\"";
+                    writesXml += symTag( ing.symbols[w.enclosingId].kind );
+                    writesXml += "\"";
+                }
+                std::string line = w.text;
+                const std::size_t lead = line.find_first_not_of( " \t" );
+                line = lead == std::string::npos ? std::string() : line.substr( lead );
+                redactInPlace( line, redact );
+                truncateUtf8WithEllipsis( line, kForLiteralLineBytes );
+                writesXml += "><![CDATA[";
+                appendCdataSafe( line, writesXml );
+                writesXml += "]]></ld>";
+            }
+        }
+        if( defText.size() > kForFlagDefaultBytes )
+        {
+            truncateUtf8WithEllipsis( defText, kForFlagDefaultBytes );
+        }
+        redactInPlace( defText, redact );
+    }
+
     // ── the rows ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     const std::string_view needle = policy.boundary != lit_detail::LitBoundary::None ? std::string_view( lit.text ) : std::string_view();   // a cut row opens near it
     std::string rowsXml;
@@ -3125,6 +3506,12 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         lit_detail::cutAround( line, needle, kForLiteralLineBytes );
         const bool callableOwner = h.enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind );
         lit_detail::appendTblAttr( rowsXml, rows[i].tbl, redact, esc, rows[i].regCall ? std::string_view( " reg=\"" ) : std::string_view( " tbl=\"" ) );
+        if( i == defRow )
+        {
+            rowsXml += " def=\"";
+            rowsXml += escapeXml( defText, esc );
+            rowsXml += "\"";
+        }
         if( ( policy.tableRows ? !rows[i].tbl.empty() : rows[i].k == 's' && !callableOwner ) && contextRows < policy.contextRows )
         {
             // a string site outside any function (a table entry, an error-code map): the lines after it hold what it builds
@@ -3194,16 +3581,18 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     x += longerHits > 0 ? " longer=\"" + std::to_string( longerHits ) + "\"" : std::string();
     x += tailDropped > 0 ? " tail=\"" + std::to_string( tailDropped ) + "\"" : std::string();
     x += weakDropped > 0 ? " weak=\"" + std::to_string( weakDropped ) + "\"" : std::string();
+    x += mentionHits > 0 ? " mention=\"" + std::to_string( mentionHits ) + "\"" : std::string();
+    x += !lit_detail::defaultFieldOf( defText ).empty() ? " writes=\"" + std::to_string( writeCount ) + "\"" : std::string();
     x += lit.frag ? " frag=\"1\"" : "";
     x += lit.tryNo > 1 ? " try=\"" + std::to_string( lit.tryNo ) + "\"" : std::string();
     x += cutMovedRow ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
     x += " comment=\"" + std::to_string( commentHits ) + "\" test=\"" + std::to_string( testHits ) + "\" doc=\"" + std::to_string( docHits ) + "\"";
-    if( !collected.cleanScan() || anyUnclassified )
+    if( !collected.cleanScan() || anyUnclassified || writesFloor )
     {
         x += " floor=\"1\"";
     }
     x += nextAttrXml( nextFlag( "--grep=", lit.text ) );
-    const std::string inner = rowsXml + bodiesXml + "</lit>";
+    const std::string inner = rowsXml + writesXml + bodiesXml + "</lit>";
     // bytes= is the element's own size from its open tag on (the legend comment excluded): a fixed point over its own digits
     const std::size_t openAt = x.find( "<lit " );
     const std::size_t fixed  = ( x.size() - openAt ) + std::string_view( " bytes=\"\">" ).size() + inner.size();

@@ -62,6 +62,9 @@
 #          twins keep the old window: an arm 13 lines up (cap), an if above the window, a JS arrow callback; determinism, prefix, xmllint
 #   B1-B3 (forliteral-3 BODY-ABOVE-CHECK): body="above" only beside a whole <b>: a hop row with a fold skip (rw-02 P1) and a truncated <b> are not;
 #          twin: a whole <b> still is
+#   F1-F13 (forliteral-3 FLAG-SHAPE-LIT; RED on 2562d9931 where [P]): a `--flag` the task names anchors on the quoted name at the call that
+#          registers it, def= the default argument (Go pflag plain and ...P shorthand, argparse default=, click, TCLAP), and when def= names a
+#          field, ld rows = its constant writes, defaults first; near misses (docs only, no site, Rust clap field, no flag word) print no flag lit
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -1852,6 +1855,116 @@ bodyab 'How is the BIG_RATE_LIMIT check in handle_big_rate executed?' 'B2 [P] a 
 printf 'def setup_small(r):\n    return r.check("SMALL_ABOVE_LIMIT")\n' > "$EA/app/small.py"
 A="$( ea '--for=How does setup_small use SMALL_ABOVE_LIMIT?' )"
 if has "$A" '<b t="fn" l="1" p="app/small.py" n="setup_small"' && has "$A" 'in="setup_small" ink="fn" body="above"'; then ok "B3 [G] twin: a whole <b> printed above still says body=above"; else no "B3 whole body above: $( grep -o '<ls [^>]*>' <<<"$A" )"; fi
+
+# ── FLAG-SHAPE-LIT (forliteral-3 commit 3; [P] = red on 2562d9931): a `--flag` the task names anchors on the call that registers it (the whole
+# quoted name), def= its default argument, and when that names a field, ld rows: the constant writes of the field, defaults first ────────────
+FL="$TMP/flagfix"; mkdir -p "$FL/cmd/kubelet" "$FL/pkg/apis/fuzzer" "$FL/pkg/apis/v1beta1" "$FL/tool" "$FL/docs" "$FL/crates/cli/src"
+cat > "$FL/cmd/kubelet/options.go" <<'GO'
+package kubelet
+
+// AddFlags registers the kubelet flags; see --max-pods in the docs.
+func AddFlags(fs *FlagSet, c *Config) {
+	fs.Int32Var(&c.MaxPods, "max-pods", c.MaxPods, "Number of Pods that can run on this Kubelet.")
+	fs.Int32Var(&c.PodsPerCore, "max-pods-per-core", c.PodsPerCore, "Pods per core.")
+	fs.StringVarP(&c.Mode, "run-mode", "r", c.Mode, "The run mode.")
+	fs.StringVar(&c.Endpoint, "env-endpoint", os.Getenv("ENDPOINT"), "The endpoint.")
+}
+
+func usage() string {
+	return "use --max-pods to cap the pods"
+}
+GO
+cat > "$FL/pkg/apis/fuzzer/fuzzer.go" <<'GO'
+package fuzzer
+
+func Funcs(obj *Config) {
+	obj.MaxPods = 110
+	obj.Mode = "fuzz"
+}
+GO
+cat > "$FL/pkg/apis/v1beta1/defaults.go" <<'GO'
+package v1beta1
+
+func SetDefaults_KubeletConfiguration(obj *Config) {
+	if obj.MaxPods == 0 {
+		obj.MaxPods = 110
+	}
+	if obj.Mode == "" {
+		obj.Mode = DefaultRunMode
+	}
+}
+GO
+cat > "$FL/pkg/apis/v1beta1/zz_generated.conversion.go" <<'GO'
+package v1beta1
+
+func convert(in *Config, out *Config) {
+	out.MaxPods = in.MaxPods
+	out.Mode = in.Mode
+}
+GO
+cat > "$FL/tool/cli.py" <<'PY'
+import argparse
+import click
+
+DEFAULT_WORKERS = 4
+
+
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="worker count")
+    parser.add_argument("--dry-run-all", action="store_true")
+    return parser
+
+
+@click.option("--log-level", default="info", help="the log level")
+def main(log_level):
+    return log_level
+PY
+cat > "$FL/docs/flags.md" <<'MD'
+Use `--docs-only-flag` to tune it.
+MD
+cat > "$FL/crates/cli/src/args.rs" <<'RS'
+pub struct Args {
+    #[arg(long, default_value_t = 4)]
+    pub clap_parallelism: usize,
+}
+RS
+mkdir -p "$FL/source/server"
+cat > "$FL/source/server/options_impl.cc" <<'CC'
+void OptionsImpl::parse(int argc, const char* const* argv) {
+  TCLAP::ValueArg<uint32_t> concurrency("", "worker-concurrency", "# of worker threads to run", false, 1, "uint32_t", cmd);
+  cmd.parse(argc, argv);
+}
+CC
+fl(){ ( cd "$FL" || exit 1; "$BIN" "$FL" --no-cache "$@" </dev/null 2>/dev/null ); }
+floff(){ ( cd "$FL" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$FL" --no-cache "$@" </dev/null 2>/dev/null ); }
+flit(){ python3 -I -c 'import sys,re;print("".join(re.findall(r"<lit [^>]*>.*?</lit>",sys.stdin.read(),re.S)))'; }
+lds(){ python3 -I -c 'import sys,re;print("\n".join(re.findall(r"<ld [^>]*>",sys.stdin.read())))'; }
+flagarm(){ local task="$1" label="$2"; shift 2; local A; A="$( fl "--for=$task" )"; local rc=$?; local L; L="$( flit <<<"$A" )"; local w okk=1
+    [ "$rc" -eq 0 ] || okk=0
+    for w in "$@"; do case "$w" in !*) has "$L" "${w#!}" && okk=0;; *) has "$L" "$w" || okk=0;; esac; done
+    if [ "$okk" = 1 ]; then ok "$label"; else no "$label: rc=$rc ${L:0:700}"; fi; }
+flagarm 'kubelet --max-pods' 'F1 [P] Go pflag: the registration row, def= the bound field, ld = the SetDefaults_ write first, the fuzzer decoy after it, the copy never (k8s-05 shape)' \
+    's="max-pods" shape="flag"' 'p="cmd/kubelet/options.go" l="5"' 'def="c.MaxPods"' 'writes="2"' \
+    '<ld p="pkg/apis/v1beta1/defaults.go" l="5" in="SetDefaults_KubeletConfiguration"' 'p="pkg/apis/fuzzer/fuzzer.go"' '!in.MaxPods' 'src="1" shown="1"' 'mention="3"'
+A="$( fl '--for=How does the kubelet use the --max-pods flag?' )"; FIRSTLD="$( lds <<<"$A" | sed -n 1p )"
+if has "$FIRSTLD" 'pkg/apis/v1beta1/defaults.go'; then ok "F2 [P] natural wording: the defaults write ranks above the fuzzer write (path order would put the fuzzer first)"; else no "F2 ld order: $FIRSTLD"; fi
+flagarm 'which default does --run-mode take' 'F3 [P] Go pflag shorthand form (StringVarP): def= skips the shorthand letter' 'def="c.Mode"' '<ld p="pkg/apis/v1beta1/defaults.go"' 'DefaultRunMode'
+flagarm 'the --workers option default' 'F4 [P] Python argparse: default= a CONST word, def= says it, no field to chase (no writes=)' 's="workers" shape="flag"' 'def="DEFAULT_WORKERS"' '!writes="' '!<ld '
+flagarm 'where is --log-level handled' 'F5 [P] Python click: default= a string' 's="log-level" shape="flag"' 'def="&quot;info&quot;"'
+flagarm 'what does --dry-run-all do' 'F6 [P] a flag registered with no default: the row, no def=' 's="dry-run-all" shape="flag"' 'p="tool/cli.py"' '!def="'
+flagarm 'kubelet --env-endpoint' 'F7 [P] a default that is a call (os.Getenv): def= quotes it, no field chase' 'def="os.Getenv(&quot;ENDPOINT&quot;)"' '!writes="' '!<ld '
+flagarm 'envoy --worker-concurrency' 'F7b [P] C++ TCLAP ValueArg: the registration row; the description after the name is no default (no def=)' 's="worker-concurrency" shape="flag"' 'p="source/server/options_impl.cc" l="2"' '!def="'
+# legend: the flag clause rides only on a flag fire
+A="$( fl '--for=kubelet --max-pods' )"
+if has "$A" 'shape=flag a flag the task names' && has "$A" 'writes=N'; then ok "F8 [P] the flag legend clause rides on the fire"; else no "F8 flag legend missing"; fi
+# near misses [G]: byte-identical to the switch off
+flagnomiss(){ local X; X="$( fl "--for=$1" )"; local rc=$?; if [ "$rc" -eq 0 ] && [ -n "$X" ] && ! has "$( flit <<<"$X" )" 'shape="flag"' && [ "$X" = "$( floff "--for=$1" )" ]; then ok "$2"; else no "$2: rc=$rc $( flit <<<"$X" | cut -c1-300 )"; fi; }
+flagnomiss 'how is --docs-only-flag used' 'F9 [G] a flag named only in docs: no block'
+flagnomiss 'how is --no-such-flag-here set' 'F10 [G] a flag with no site: no block'
+flagnomiss 'how is --clap-parallelism set' 'F11 [G] a Rust clap field (no quoted name): no block (not covered: the long name is the field)'
+flagnomiss 'what does --workers do' 'F12 [G] --name with no inner hyphen and no flag/option word after it: no flag'
+flagnomiss 'set the max pods for the kubelet' 'F13 [G] no flag token: no block'
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
