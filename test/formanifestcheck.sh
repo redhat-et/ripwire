@@ -7,7 +7,7 @@
 #   (n1) package.json: the sub-package the task names ranks first (its name and peer-dependency lines), the root manifest that only
 #        lists the same libraries as dev-dependencies after it; matched= holds the task words as spelled
 #   (n2) a script fires only when the task says script / npm: `lint` alone is silent, "the lint npm script" prints kind="script"
-#   (n3) a generic name (`core`) never fires; (n4) the repo's own name fires only beside a kind word ("the acme package")
+#   (n3) a generic name (`core`) never fires; (n4) the repo's own name never fires, with or without a kind word ("the acme package"), and adds its row only beside a real anchor
 #   (n5) the main row needs a main / entry cue: "brokers" prints no kind="main" row, "the main entry of brokers" does
 #   (c1) Cargo.toml: a [features] key fires; <feature_touch> lists the file naming at least half of the features (default and
 #        _-private ones out), not one naming a single feature; (c2) a [dependencies.X] header is a dep row on the header line;
@@ -289,7 +289,8 @@ lacks n2 acme "make lint pass on the app" ''
 has n2 acme "run the lint npm script on the app" '<mf p="package.json"' '<r l="5" kind="script">&quot;lint&quot;: &quot;eslint .&quot;</r>'
 lacks n3 acme "change core logging" ''
 lacks n4 acme "speed up acme startup" ''
-has n4 acme "rename the acme package" '<mf p="package.json" matched="acme' 'kind="package">&quot;name&quot;: &quot;acme&quot;'
+lacks n4 acme "rename the acme package" ''
+has n4 acme "rename the acme package and its mqtt dependency" '<mf p="package.json" matched="acme mqtt"' 'kind="dev-dep">&quot;mqtt&quot;'
 lacks n5 acme "connect the brokers package faster" 'kind="main"'
 has n5 acme "the main entry of brokers" '<mf p="packages/brokers/package.json"' 'kind="main">&quot;main&quot;'
 has c1 ferris "add a new extractor behind its own cargo feature like multipart" \
@@ -299,6 +300,7 @@ lacks c1 ferris "add a new extractor behind its own cargo feature like multipart
 has c2 ferris "upgrade the tokio dependency" '<r l="23" kind="dep">\[dependencies\.tokio\]</r>'
 has c3 ferris "ship the ferris-cli binary" '<r l="6" kind="bin">name = &quot;ferris-cli&quot;</r>'
 lacks c4 ferris "speed up ferris routing" ''
+lacks c4 ferris "rename the ferris crate" ''
 has p1 pyrepo "the msgpack extra of the widgetkit package" '<mf p="pyproject.toml" matched="msgpack widgetkit"' \
     '<r l="2" kind="package">name = &quot;widgetkit&quot;</r>' '<r l="8" kind="extra">msgpack = '
 lacks p1 pyrepo "rename notakey" ''

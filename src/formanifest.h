@@ -11,8 +11,8 @@
 //
 // WHEN (present-only). A task word (lowercased, singular, split on `-` `.` `/` `@`; a hyphenated word also as one folded word) EXACTLY
 // names an entry a manifest defines (its last `/` segment, letters and digits only): an ANCHOR. Not an anchor: a name equal to the repo's
-// own directory name (every task about a crate names the crate) unless the task also says what kind it is (crate, package, binary,
-// feature, ..: kManifestCues); a generic name (core, common, test, ..: kManifestGenericNames); a script unless the task says script,
+// own directory name, even beside a kind word (every task about a crate names the crate; such a row adds score and prints only
+// beside a real anchor); a generic name (core, common, test, ..: kManifestGenericNames); a script unless the task says script,
 // npm, yarn or pnpm (`test`, `build`, `lint` are in every package.json); a plugin entry point unless the task says plugin, entry
 // point or extension. An entry point's group matches by any dot segment, even the repo's own name (`[project.entry-points.pydantic]`
 // is pydantic's plugin hook). An entry also anchors only when the task says what KIND of thing it means (the cue words of its kind:
@@ -876,7 +876,7 @@ inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, cons
         {
             continue; // a script, the main entry or a plugin entry point the task does not ask for
         }
-        const bool own = folded == t.repoName && !t.cue[k]; // the repo's own name: the package so named adds score, never fires the block
+        const bool own = folded == t.repoName; // the repo's own name: the package so named adds score, never fires the block (a kind word does not change that)
         const bool dep = en.kind == ManifestKind::Dep || en.kind == ManifestKind::DevDep || en.kind == ManifestKind::PeerDep || en.kind == ManifestKind::OptDep;
         if( own && dep )
         {
@@ -986,7 +986,7 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "go.mod (module, require; indirect ones skipped), CMakeLists.txt (add_executable, add_library, project; a call may span lines; IMPORTED and ALIAS targets and comments skipped); not read: pyproject dependency "
     "arrays, setup.py, Makefile, meson and Bazel files, vendored, node_modules, fixtures and testdata trees. A name equal to the repo's, a "
     "generic name (core, common, test, ..), a script the task does not call a script, or a plugin entry point the task does not call a "
-    "plugin, entry point or extension does not fire it; nor does a dependency, feature or other entry the task neither calls by its kind (dependency, feature, package, binary, ..) nor adds as a new X; an entry point's group (pydantic, flake8.extension) matches by any dot segment. files= the manifests that name a "
+    "plugin, entry point or extension does not fire it; nor does a dependency, feature or other entry the task neither calls by its kind (dependency, feature, package, binary, ..) nor adds as a new X; an entry point's group (pydantic, flake8.extension) matches by any dot segment, and may be the repo's own name. files= the manifests that name a "
     "task word exactly, shown= and capped=\"1\" when fewer are printed, best first (2 per task word named exactly, 1 per word that is one "
     "part of a name). <mf> p= the manifest, matched= the task words its names hold, rows= its matching lines, shown= and capped=\"1\" when "
     "fewer are printed. <r> l= the line, kind= what it defines (package, module, dep, dev-dep, peer-dep, opt-dep, script, bin, main, lib, "
@@ -999,7 +999,7 @@ inline constexpr std::string_view kForManifestRowsLegend =
 // The --legend=compact posture (the CLI default); the long text rides --legend=full and the MCP tool. Both define every attribute printed.
 inline constexpr std::string_view kForManifestRowsCompactLegend =
     "<!-- ripwire for manifest_rows: manifest lines defining a package, dependency, script, binary, target, feature or plugin entry point the task names "
-    "exactly (package.json, Cargo.toml, pyproject.toml, setup.cfg, go.mod, CMakeLists.txt; the repo's own name, generic names, "
+    "exactly (package.json, Cargo.toml, pyproject.toml, setup.cfg, go.mod, CMakeLists.txt; the repo's own name (an entry point's group may be it), generic names, "
     "un-asked scripts or plugin entry points and entries the task neither names by their kind nor adds as a new X never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word; <mf> p= manifest, "
     "matched= task words its names hold, rows= matching lines; <r> l= line, kind= what it defines, group= an entry point's group, cut=\"1\": text cut to 120 bytes; "
     "shown=/capped=\"1\": rows cut. <feature_touch> n= the manifest's features; <touch_list> total= files naming at least half of "
