@@ -28,7 +28,9 @@
 #include "docparse.h" // detail::readWholeFile
 #include "filter.h" // isTestPath
 #include "graph.h"
+#include "infra/sortutil.h" // svLess — the portable string_view order
 #include "infra/namesplit.h" // isIdentChar, stripQuotePair — the shared identifier byte and quote strip
+#include "langfacts.h" // typedInstanceRows
 #include "lexical.h" // forEachLexSubtoken / lexLowerByte — the one identifier splitter
 #include "model.h"
 #include "resolve.h" // trimWs, includerDir
@@ -339,7 +341,7 @@ inline std::string scopeMembers( const IngestResult& ing, std::vector<ExemplarMe
     {
         dirs.push_back( includerDir( rootRelPath( ing, m.fileId ) ) );
     }
-    std::ranges::sort( dirs );
+    std::ranges::sort( dirs, sortutil::svLess );
     std::vector<std::string_view> anc; // every ancestor of every member's directory
     for( std::string_view d : dirs )
     {
@@ -352,7 +354,7 @@ inline std::string scopeMembers( const IngestResult& ing, std::vector<ExemplarMe
             }
         }
     }
-    std::ranges::sort( anc );
+    std::ranges::sort( anc, sortutil::svLess );
     anc.erase( std::unique( anc.begin(), anc.end() ), anc.end() );
     const std::size_t need = std::max( kExemplarFamilyMin, ( ms.size() + 1 ) / 2 );
     std::string_view best;
@@ -361,7 +363,7 @@ inline std::string scopeMembers( const IngestResult& ing, std::vector<ExemplarMe
     {
         // the directories under `a` are one contiguous run of the sorted dirs
         std::size_t n = 0;
-        for( auto it = std::ranges::lower_bound( dirs, a ); it != dirs.end() && it->starts_with( a ); ++it )
+        for( auto it = std::ranges::lower_bound( dirs, a, sortutil::svLess ); it != dirs.end() && it->starts_with( a ); ++it )
         {
             n += inScope( *it, a ) ? 1 : 0;
         }
@@ -514,7 +516,7 @@ inline void nameRegistryEntries( std::vector<ExemplarMember>& ms )
     {
         last.push_back( lastIdent( m.name ) );
     }
-    std::ranges::sort( last );
+    std::ranges::sort( last, sortutil::svLess );
     const std::size_t distinct = std::size_t( std::unique( last.begin(), last.end() ) - last.begin() );
     const bool byFirst = distinct * 2 < ms.size();
     for( ExemplarMember& m : ms )
@@ -743,7 +745,7 @@ inline std::optional<ExemplarFamily> registryOf( const Symbol& s, std::string_vi
         return std::nullopt; // a function that merely contains a map literal is not a registry
     }
     const std::string_view openerType = lastIdent( opener.substr( 0, opener.size() - ( opener.empty() ? 0 : 1 ) ) );
-    if( !openerType.empty() && std::ranges::binary_search( structNames, openerType ) )
+    if( !openerType.empty() && std::ranges::binary_search( structNames, openerType, sortutil::svLess ) )
     {
         return std::nullopt;
     }
@@ -765,7 +767,7 @@ inline void familiesByRegistryAndType( const IngestResult& ing, const ExemplarTa
             structNames.push_back( s.name );
         }
     }
-    std::ranges::sort( structNames );
+    std::ranges::sort( structNames, sortutil::svLess );
     for( const Symbol& s : ing.symbols )
     {
         const bool readable = ( s.kind == SymKind::Var || s.kind == SymKind::Function ) && s.loc >= 2 && s.loc <= kExemplarBodyScanMaxLoc;
@@ -773,7 +775,7 @@ inline void familiesByRegistryAndType( const IngestResult& ing, const ExemplarTa
         {
             continue;
         }
-        if( s.kind == SymKind::Var && ( s.lang == Lang::C || s.lang == Lang::Cpp ) )
+        if( s.kind == SymKind::Var && langFacts( s.lang ).typedInstanceRows )
         {
             const std::string_view text = symbolText( fc, s );
             const std::string_view type = instanceTypeOf( text.substr( 0, text.find( '\n' ) ), s.name );
@@ -881,7 +883,8 @@ inline void familiesByAffix( const IngestResult& ing, const ExemplarTask& t, std
             }
         }
     }
-    std::ranges::sort( byDir );
+    std::ranges::sort( byDir, []( const auto& a, const auto& b )
+                       { return sortutil::svLess( a.first, b.first ) || ( a.first == b.first && a.second < b.second ); } );
     for( auto run = byDir.begin(); run != byDir.end(); )
     {
         const auto end = std::find_if( run, byDir.end(), [&]( const auto& x )

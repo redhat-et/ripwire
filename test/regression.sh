@@ -526,8 +526,8 @@ for _g in \
     forcompresscheck \
     forctorhopcheck \
     fordeclrowcheck \
-    forexemplarcheck \
     fordisclosurecheck \
+    forexemplarcheck \
     fordispatchhopcheck \
     forfileanchorcheck \
     forhdrshapecheck \
