@@ -3406,7 +3406,7 @@ inline std::pair<std::uint32_t, bool> resolveJsNamedImportFile( std::string_view
     // iff the source tier found nothing) and folds in this exact/literal probe as its seed, so a tree
     // carrying BOTH a literal `module` file and a source/declaration alternate still degrades to ambiguous
     // exactly as it did before this shared out.
-    const std::uint32_t seedHit = joinNormalizeLookup( includerDir( importer ), std::string( module ), files, workspace, importerFileId );
+    const std::uint32_t seedHit = joinNormalizeLookup( includerDir( importer ), module, files, workspace, importerFileId );
     return probeJsRuntimeSourceExt( includerDir( importer ), module, *runtimeExt, files, workspace, importerFileId, seedHit );
 }
 
@@ -8224,7 +8224,7 @@ struct BaseEvidenceTables
     const rw::FileSetStore& fileIncludes;  // C-family: the transitive, path-precise include set (sorted)
     const rw::FileAdjacency& includeAdj;   // every language: the files a file's imports resolve to
     const std::vector<std::uint32_t>&       fileDir;       // file → interned directory id
-    const ReceiverEvidence*                 recvEv;        // JS/TS: a CommonJS require alias's module (moduleNames)
+    const ReceiverEvidence*                 recvEv;        // JS/TS: a CommonJS require alias's module (moduleRootOf)
     const HashMap<std::string, char>*       rustOutsideUse;   // Rust: "<fileId>#X" a `use` of an outside path binds (crate-dir aware)
     const HashMap<std::string, char>*       selfImport;       // JS/TS, Python: "<fileId>#X" an import of the tree's OWN package name binds
 };
@@ -8741,7 +8741,7 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
 
 // tier 2, JS/TS: a bare name an ES named import pins, or a CommonJS `const { Node } = require('./a')` (a ModuleAlias, not
 // an ES import) whose relative specifier names the candidate's module — the test a `Node.m()` member call is proven by
-// (receiverevidence.h moduleNames). A qualified `ns.Base` is not read (a namespace import binds no table here).
+// (receiverevidence.h moduleRootNames). A qualified `ns.Base` is not read (a namespace import binds no table here).
 inline void jsImportedBases( const BaseEvidenceTables& t, const Reference& r, const std::vector<NodeId>& cand, std::vector<NodeId>& out )
 {
     if( !r.memberRoot.empty() )
@@ -8755,9 +8755,12 @@ inline void jsImportedBases( const BaseEvidenceTables& t, const Reference& r, co
         out.push_back( pin->second.node );
         return;
     }
+    // the module alias the name binds is the call's own fact: read once, then tested per candidate (LADDER-HOIST)
+    const bool moduleMayName = t.recvEv != nullptr && ( !listed || pin->second.outcome == JsImportOutcome::Unlisted );
+    const std::optional<ReceiverEvidence::ModuleRoot> module = moduleMayName ? t.recvEv->moduleRootOf( r, r.calleeName ) : std::nullopt;
     for( NodeId c : cand )
     {
-        if( t.recvEv != nullptr && ( !listed || pin->second.outcome == JsImportOutcome::Unlisted ) && t.recvEv->moduleNames( r, r.calleeName, c ) )
+        if( module.has_value() && t.recvEv->moduleRootNames( *module, r, c ) )
         {
             out.push_back( c );
         }
@@ -10099,57 +10102,162 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // class or a free function in scope where the receiver is implicit, and elsewhere a definition the caller's scope
     // sees — its own file, a file it imports, Go's package directory — reached by a name that is not a local or a
     // parameter of the caller (a call THROUGH one holds whatever was passed in).
+    // LADDER-HOIST: "c's owner is a class" is read per candidate (84 M ladder asks on vscode); one byte per symbol, filled
+    // once here, where classNames and recvEv.ownerClass are final, replaces a string-keyed probe per ask
+    std::vector<std::uint8_t> ownerClassBit( recvEv.ownerClass.size(), 0 );
+    for( std::size_t s = 0; s < ownerClassBit.size(); ++s )
+    {
+        const std::string& owner = recvEv.ownerClass[ s ];
+        ownerClassBit[ s ]       = static_cast<std::uint8_t>( !owner.empty() && classNames.contains( owner ) );
+    }
     const auto ownerIsClass = [ & ]( NodeId c ) -> std::string_view
     {
-        const std::string& owner = recvEv.ownerClass[ c ];
-        return ( !owner.empty() && classNames.contains( owner ) ) ? std::string_view( owner ) : std::string_view{};
+        return ownerClassBit[ c ] != 0 ? std::string_view( recvEv.ownerClass[ c ] ) : std::string_view{};
     };
-    const auto ladderProves = [ & ]( const Reference& ref, NodeId c ) -> bool
+    // LADDER-HOIST: what ladderProves reads of the CALL alone, filled on first need and kept for all of that call's candidates
+    // (35-93 per call on envoy, cockroach, vscode). Each fact is a pure function of the call and of tables that are final
+    // before the resolve loop, so every candidate gets the answer the per-candidate reads gave. A fresh one per call.
+    struct LadderRefFacts
     {
-        const Symbol& cs = ing.symbols[ c ];
-        if( isMemberCallRef( ref ) )
+        enum class Root : std::uint8_t
         {
-            if( jsMemberRootWritten( jsImports, ref ) != JsWrittenRoot::None ) { return false; }   // a written root names no class by its spelling
-            const ReceiverEvidence::Chain ch = ReceiverEvidence::chainOf( ref );
-            if( !ch.valid || !ch.path.empty() || !ch.ctor.empty() )
-            {
-                return false;   // a chained or constructed receiver the resolve rule could not type proves nothing here
-            }
-            const std::string_view owner = ownerIsClass( c );
-            if( isThisRoot( ch.root ) || ( ref.lang == Lang::Python && ch.root == "cls" ) )
-            {
-                const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-                if( !callerCls.empty() )
-                {
-                    return !owner.empty() && recvEv.inCone( callerCls, owner ) && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
-                }
-                return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
-            }
-            if( isSuperRoot( ref, ch.root ) )
-            {
-                const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-                return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner )
-                    && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
-            }
-            if( recvEv.isLocalName( ref.fromSymbol, ch.root ) || externalVeto.hasLocal( ref, ch.root ) )
-            {
-                return false;   // a parameter or local spelled like the module alias hides it (`alias = make(); alias.run()`)
-            }
-            if( recvEv.moduleNames( ref, ch.root, c ) )
-            {
-                return !( langFacts( ref.lang ).moduleCallReachesFunctionsOnly && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
-            }
-            if( ref.lang == Lang::Python && ref.recv == RecvKind::NamedVar )
+            Unread,    // not classified yet
+            Unproven,  // a written root, or a chained / constructed receiver the resolve rule could not type: proves nothing
+            This,      // this / self / Python cls
+            Super,
+            Hidden,    // a parameter or local spelled like the root hides any module alias or class it names
+            Named,     // a module alias or a class name, decided per candidate
+        };
+        explicit LadderRefFacts( const Reference& r ) : ref( r ) {}
+        const Reference&                              ref;
+        Root                                          root = Root::Unread;
+        ReceiverEvidence::Chain                       chain;
+        bool                                          callerRead   = false;
+        bool                                          callerStatic = false;
+        std::string_view                              callerCls;
+        bool                                          moduleRead = false;
+        std::optional<ReceiverEvidence::ModuleRoot>   module;
+        bool                                          pyBindRead = false;
+        std::optional<std::uint32_t>                  pyBindFile;   // the one file a Python `import` binding of the receiver names
+        std::int8_t                                   namesCls = -1;   // -1 unread; the class the root names, when it does
+        std::string_view                              cls;
+    };
+    const auto ladderCaller = [ & ]( LadderRefFacts& f )
+    {
+        if( !f.callerRead )
+        {
+            f.callerCls    = recvEv.callerClass( f.ref.fromSymbol );
+            f.callerStatic = recvEv.callerIsStatic( f.ref.fromSymbol );
+            f.callerRead   = true;
+        }
+    };
+    const auto ladderRoot = [ & ]( LadderRefFacts& f )
+    {
+        using Root = LadderRefFacts::Root;
+        const Reference& ref = f.ref;
+        if( jsMemberRootWritten( jsImports, ref ) != JsWrittenRoot::None )
+        {
+            return Root::Unproven;   // a written root names no class by its spelling
+        }
+        f.chain = ReceiverEvidence::chainOf( ref );
+        if( !f.chain.valid || !f.chain.path.empty() || !f.chain.ctor.empty() )
+        {
+            return Root::Unproven;
+        }
+        if( isThisRoot( f.chain.root ) || ( ref.lang == Lang::Python && f.chain.root == "cls" ) )
+        {
+            return Root::This;
+        }
+        if( isSuperRoot( ref, f.chain.root ) )
+        {
+            return Root::Super;
+        }
+        if( recvEv.isLocalName( ref.fromSymbol, f.chain.root ) || externalVeto.hasLocal( ref, f.chain.root ) )
+        {
+            return Root::Hidden;   // a parameter or local spelled like the module alias hides it (`alias = make(); alias.run()`)
+        }
+        return Root::Named;
+    };
+    // a member call's receiver root that is a module alias or a class name: does it name candidate c
+    const auto ladderNamedProves = [ & ]( LadderRefFacts& f, NodeId c, std::string_view owner ) -> bool
+    {
+        const Reference& ref = f.ref;
+        const Symbol&    cs  = ing.symbols[ c ];
+        if( !f.moduleRead )
+        {
+            f.module     = recvEv.moduleRootOf( ref, f.chain.root );
+            f.moduleRead = true;
+        }
+        if( f.module.has_value() && recvEv.moduleRootNames( *f.module, ref, c ) )
+        {
+            return !( langFacts( ref.lang ).moduleCallReachesFunctionsOnly && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
+        }
+        if( ref.lang == Lang::Python && ref.recv == RecvKind::NamedVar )
+        {
+            if( !f.pyBindRead )
             {
                 bindKey.clear();  Narrower::appendUint( bindKey, ref.fileId );  bindKey.push_back( '#' );  bindKey.append( ref.recvVar );
-                if( const auto ait = extVeto.importBindFile.find( bindKey ); ait != extVeto.importBindFile.end() && ait->second == cs.fileId )
+                if( const auto ait = extVeto.importBindFile.find( bindKey ); ait != extVeto.importBindFile.end() )
                 {
-                    return true;
+                    f.pyBindFile = ait->second;
                 }
+                f.pyBindRead = true;
             }
-            const std::string_view cls = recvEv.unalias( ref.fileId, ch.root );
-            return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner )   // a class-name receiver: the class or a base,
-                && recvEv.onSide( ref, c, /*classSide=*/true );                                                 // its CLASS side
+            if( f.pyBindFile == cs.fileId )
+            {
+                return true;
+            }
+        }
+        if( owner.empty() )
+        {
+            return false;
+        }
+        if( f.namesCls < 0 )
+        {
+            f.cls      = recvEv.unalias( ref.fileId, f.chain.root );
+            f.namesCls = recvEv.namesClass( ref, f.chain.root, f.cls ) ? 1 : 0;
+        }
+        return f.namesCls != 0 && recvEv.inCone( f.cls, owner )   // a class-name receiver: the class or a base,
+            && recvEv.onSide( ref, c, /*classSide=*/true );          // its CLASS side
+    };
+    const auto ladderProves = [ & ]( LadderRefFacts& f, NodeId c ) -> bool
+    {
+        using Root = LadderRefFacts::Root;
+        const Reference& ref = f.ref;
+        const Symbol&    cs  = ing.symbols[ c ];
+        if( isMemberCallRef( ref ) )
+        {
+            if( f.root == Root::Unread )
+            {
+                f.root = ladderRoot( f );
+            }
+            switch( f.root )
+            {
+                case Root::Unread:
+                case Root::Unproven:
+                case Root::Hidden:
+                    return false;
+                case Root::This:
+                {
+                    const std::string_view owner = ownerIsClass( c );
+                    ladderCaller( f );
+                    if( !f.callerCls.empty() )
+                    {
+                        return !owner.empty() && recvEv.inCone( f.callerCls, owner ) && recvEv.onSide( ref, c, f.callerStatic );
+                    }
+                    return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
+                }
+                case Root::Super:
+                {
+                    const std::string_view owner = ownerIsClass( c );
+                    ladderCaller( f );
+                    return !f.callerCls.empty() && !owner.empty() && owner != f.callerCls && recvEv.inCone( f.callerCls, owner )
+                        && recvEv.onSide( ref, c, f.callerStatic );
+                }
+                case Root::Named:
+                    return ladderNamedProves( f, c, ownerIsClass( c ) );
+            }
+            return false;
         }
         if( langFacts( ref.lang ).implicitReceiver )
         {
@@ -10158,8 +10266,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 return true;   // a free / top-level function
             }
-            const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-            return !callerCls.empty() && recvEv.inCone( callerCls, owner );
+            ladderCaller( f );
+            return !f.callerCls.empty() && recvEv.inCone( f.callerCls, owner );
         }
         if( ref.lang == Lang::Rust || ref.lang == Lang::C )
         {
@@ -12124,12 +12232,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( hedgeEligible && !rule3NoProof && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
         {
             provedScratch.clear();
+            LadderRefFacts ladderFacts( r );   // the call's own facts, read once for all its candidates
             if( !memberRule3.empty() && !isMemberCallRef( r ) )
             {
                 // an implicit receiver's Rule 3 answer, kept where the lookup proves it — Rule 3's own decision, as before
                 for( NodeId c : memberRule3 )
                 {
-                    if( ladderProves( r, c ) )
+                    if( ladderProves( ladderFacts, c ) )
                     {
                         provedScratch.push_back( c );
                     }
@@ -12146,7 +12255,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 provedScratch.clear();
                 for( NodeId c : cand )
                 {
-                    if( ladderProves( r, c ) )
+                    if( ladderProves( ladderFacts, c ) )
                     {
                         provedScratch.push_back( c );
                     }
