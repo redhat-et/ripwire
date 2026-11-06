@@ -1876,6 +1876,13 @@ struct RouteAnchorDef
     std::uint32_t extraDefs = 0;      // further definitions sharing the name — the "+N" the reason discloses
 };
 
+// FRAME-HIGH-CONFIDENCE: the anchor of a name-exact route, in the two forms a ranked head row can match. Empty on every other route.
+struct RouteAnchorKeys
+{
+    std::vector<std::string> lowerNames; // each subject word's leaf, lowercased (`a.b.C::d` gives d), and each resolved anchor name
+    std::vector<std::uint32_t> fileIds; // the files the anchors are defined in, and a FILE subject's own file
+};
+
 struct RouteChoice
 {
     LexMode                     which = LexMode::SubtokenBody;
@@ -2843,13 +2850,15 @@ struct ForConfidence
 // stamp is the same defect wearing a different hat). marginPct is left as the TRUE measured drop even
 // when declined — 0 means "no cliff found" (non-negotiable #3: a zero must mean none found, never none
 // exists), and a real 25% tie-break drop is not that; the note's extra clause is what says not to trust it.
-// anchorNoSource (CONFIDENCE-ANCHOR, subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file. The
-// drop may be real, but it says the name matched, not that the answer is here: low, and route= says why.
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorNoSource = false )
+// anchorUnproven (subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file (CONFIDENCE-ANCHOR), or
+// whose ranked head is not the anchor (FRAME-HIGH-CONFIDENCE). The drop may be real, but it says the name matched, not that the answer
+// is here: low, and route= says why.
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false )
 {
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
-    out.level     = ( homonymDecline || anchorNoSource ) ? "low" : ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
+    const bool sharpHead = !cut.hitCeiling || servedComplete;
+    out.level = ( homonymDecline || anchorUnproven || !sharpHead ) ? "low" : "high";
     out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
     char attrBuf[ 48 ];
     rw::formatTo( attrBuf, sizeof( attrBuf ), " confidence=\"{}\" margin_pct=\"{}\"", out.level, out.marginPct );

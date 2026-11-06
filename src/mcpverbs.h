@@ -2687,6 +2687,13 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     std::sort( lensSurfaceIds.begin(), lensSurfaceIds.end(),
                [ &lensRank ]( NodeId a, NodeId b ) { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );   // id tiebreak → deterministic (most lens scores tie at 0)
     lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
+    // FRAME-HIGH-CONFIDENCE, the CLI twin's rule (verbs_for.h): on a name-exact route high needs the anchor at the head of the rows
+    std::string mcpRouteNote = routeNoteOf( rc, shape, noRoute );
+    if( std::string_view( mcpForConf.level ) == "high" && !lensSurfaceIds.empty() && !routeAnchorHeadsRows( ing, subjectRoute.anchorKeys, lensSurfaceIds.front() ) )
+    {
+        mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, /*anchorUnproven=*/true );
+        mcpRouteNote += routeAnchorNotHeadClause( ing, lensSurfaceIds.front() );
+    }
     // L-W: coverage= joins the pair on this root on a THIN answer only (present-only, the CLI twin's rule in
     // forpage.h) — same clause, same byte exemption (mcpConfidenceExemptBytes reads the sizes below); the same
     // verdict puts the widening page on the r=1 row's next=.
@@ -2739,8 +2746,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // §L10b + verify-wave2 F6: same trim as the CLI --for twin (verbs_for.h) — no leading " [" and no
     // trailing "]"; the value lands only in route=, where the attribute quote is the delimiter.
     const std::string mcpForAtAttrStr = gitstamp::atAttr( root );   // M10's at=, computed once: spliced onto the root AND exempted from the sigs charge below
-    std::string rootOpenStr = ctxRootOpen( task, routeNoteOf( rc, shape, noRoute ),   // row 6: the route CODE, ONE producer (filter.h)
-                                           flRootArg );   // §B1.7: same root attrs as the CLI twin (no route= under no_route, as --no-route)
+    std::string rootOpenStr = ctxRootOpen( task, mcpRouteNote, // row 6: the route CODE, ONE producer (filter.h)
+                                           flRootArg ); // §B1.7: same root attrs as the CLI twin (no route= under no_route, as --no-route)
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
         // Attribute ORDER matches the CLI twin's: confidence/margin_pct, then at=, then this dialect's own

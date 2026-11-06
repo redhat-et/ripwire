@@ -9,6 +9,8 @@
 #   N1-N8  near misses: namesake flood, symbol only in tests, question, graph form, join, plain-only subject, too many plain words, no word to drop
 #   D      dotted beats bare; a polyglot name splits and carries no row until a qualifier places it
 #   H      confidence: an anchor served from a test, doc or data file reads low; a source definition keeps it
+#   FH     FRAME-HIGH-CONFIDENCE: high needs the anchor (or its file) at the head of the ranked rows; another head reads low and route=
+#          names it (CLI and MCP); a file subject and a conceptual route are unchanged
 #   F      FIX ROUND: F6 a declined route flips only where the body AND the callers print (one function, resolved anchor, body fits),
 #          F2 a namesake in ANY directory keeps the map, F1 the MCP `for` verb never trades its map, F4 a plain word never vouches
 #          for a spelled name, F10 an angle-bracketed owner is a name
@@ -266,6 +268,53 @@ A="$( ask "$PY" 'zznope sturdy words' )"; hasnt "$A" "$NOSRC" "H conceptual rout
 printf 'def plain_src(x):\n    return x\n' > "$PY/app/some_mod.py"
 A="$( ask "$PY" 'app/some_mod.py' )"; hasnt "$A" "$NOSRC" "H a source FILE subject is a source anchor"
 A="$( ask "$CX" 'src/registry.cpp' )"; hasnt "$A" "$NOSRC" "H a source FILE subject, cpp"
+# the MCP `for` verb, one tools/call (F1, FH)
+mcpfor(){ ( cd "$1" && HOME="$TMP/mcphome" TMPDIR="$TMP/mcphome/" python3 - "$BIN" "$1" "$2" <<'X'
+import json,subprocess,sys
+b,repo,q=sys.argv[1:4]
+req=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":repo,"task":q}}})+"\n"
+p=subprocess.run([b,"--mcp"],input=req.encode(),capture_output=True,timeout=300,cwd=repo)
+for l in p.stdout.decode('utf8','replace').splitlines():
+    try:d=json.loads(l)
+    except Exception:continue
+    if d.get("id")==1:
+        print("".join(x.get("text","") for x in d["result"]["content"]))
+X
+) ; }
+mkdir -p "$TMP/mcphome"
+# ── FRAME-HIGH-CONFIDENCE: high needs the anchor at the head of the ranked rows (src/subjectanchor.h routeAnchorHeadsRows) ──
+NOHEAD='anchor is not the ranked head'
+FH="$TMP/fh"; mkdir -p "$FH/pkg/futures" "$FH/ui" "$FH/cc"
+printf 'class ThreadPoolExecutor:\n    def submit(self, fn):\n        return fn()\n' > "$FH/pkg/futures/thread.py"
+printf 'class Icon:\n    def where(self, x):\n        return x\n' > "$FH/ui/dnd.py"
+printf 'def where(x):\n    return x\n' > "$FH/ui/other.py"
+printf 'def icon_helper(x):\n    return x\n' > "$FH/ui/IconTools.py"
+# (a) the anchor heads the rows: high, no clause
+A="$( ask "$FH" 'where ThreadPoolExecutor is defined' )"
+has "$( route "$A" )" 'name-exact(ThreadPoolExecutor)' "FH(a) the route is name-exact on the anchor"
+if [ "$( conf "$A" )" = high ]; then ok "FH(a) anchor heads: high"; else no "FH(a) anchor heads: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH(a) anchor heads: no clause"
+# (b) the anchor is present but another symbol heads (a plain word's namesake, ld-cpython-01's shape): not high, and route= says which row heads
+A="$( ask "$FH" 'where pkg.futures.ThreadPoolExecutor is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(pkg.futures.ThreadPoolExecutor)' "FH(b) the route is name-exact on the dotted anchor"
+if [ "$( conf "$A" )" = low ]; then ok "FH(b) another head: low"; else no "FH(b) another head: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is where in ui/other.py)" "FH(b) route= names the row that heads"
+M="$( mcpfor "$FH" 'where pkg.futures.ThreadPoolExecutor is defined' )"
+if [ "$( conf "$M" )" = low ]; then ok "FH(b) MCP twin: low"; else no "FH(b) MCP twin: $( conf "$M" )"; fi; has "$( route "$M" )" "$NOHEAD" "FH(b) MCP twin: the clause"
+# (b) sibling: C++, a qualified anchor beside a plain word that is a function elsewhere
+printf 'namespace app { struct WidgetBox { int size() const { return 1; } }; }\n' > "$FH/cc/widget.h"
+printf 'int where( int x ) { return x; }\n' > "$FH/cc/util.cpp"
+A="$( ask "$FH" 'where app::WidgetBox is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(app::WidgetBox)' "FH(b) C++ sibling: name-exact on the qualified anchor"
+if [ "$( conf "$A" )" = low ]; then ok "FH(b) C++ sibling: the free function where heads, low"; else no "FH(b) C++ sibling: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is where in cc/util.cpp)" "FH(b) C++ sibling: route= names the head"
+# a FILE subject anchors its file: a row in it heads, high stays (mf1-htop-03's shape)
+A="$( ask "$FH" 'IconTools.py' )"; has "$( route "$A" )" 'name-exact(IconTools.py)' "FH file subject: name-exact"
+if [ "$( conf "$A" )" = high ]; then ok "FH file subject: its own row heads, high"; else no "FH file subject: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH file subject: no clause"
+# (c) no anchor (a conceptual route): unchanged, no clause; the positive twin says the fixture can read high there
+A="$( ask "$FH" 'thread pool submit work' )"; R="$( route "$A" )"
+case "$R" in subtoken+body*) ok "FH(c) conceptual route";; *) no "FH(c) not conceptual: $R";; esac
+if [ "$( conf "$A" )" = high ]; then ok "FH(c) no anchor: high as before"; else no "FH(c) no anchor: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH(c) no anchor: no clause"
+
 # two exact on a route declined for a word: no ONE anchor, the map stands, the function's callers on top
 for i in 1 2 3 4 5; do printf 'struct W%s { int fresh2( int a ) { return a; } };\n' "$i" > "$CX/src/w$i.cpp"; done
 printf 'struct UrlThing { int a; };\nint segmentMaker( int a ) { return a; }\nint segUser() { return segmentMaker( 1 ); }\n' > "$CX/src/seg.cpp"
@@ -339,18 +388,6 @@ hasnt "$R" 'dropped:' "F3 a large qualified definition: no flip"
 hasnt "$A" 'body omitted (over budget)' "F3 a large qualified definition: the answer never claims a body it omits"
 has "$( blk "$A" )" 'callBig' "F3 a large qualified definition: its callers ride on the map"
 # F1: the MCP `for` verb serves signatures only, so it never trades a map for the symbol
-mcpfor(){ ( cd "$1" && HOME="$TMP/mcphome" TMPDIR="$TMP/mcphome/" python3 - "$BIN" "$1" "$2" <<'X'
-import json,subprocess,sys
-b,repo,q=sys.argv[1:4]
-req=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":repo,"task":q}}})+"\n"
-p=subprocess.run([b,"--mcp"],input=req.encode(),capture_output=True,timeout=300,cwd=repo)
-for l in p.stdout.decode('utf8','replace').splitlines():
-    try:d=json.loads(l)
-    except Exception:continue
-    if d.get("id")==1:
-        print("".join(x.get("text","") for x in d["result"]["content"]))
-X
-) ; }
 mkdir -p "$TMP/mcphome"
 M="$( mcpfor "$FX" 'SoloThing fresh parameter' )"; R="$( route "$M" )"
 hasnt "$R" 'dropped:' "F1 MCP: a declined route keeps its map"

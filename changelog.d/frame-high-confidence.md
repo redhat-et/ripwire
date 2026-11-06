@@ -1,0 +1,3 @@
+### Fixed — `--for` reads `confidence="high"` on a name-exact route only when the anchor heads the rows
+
+- `--for` and the MCP `for` verb: `confidence=` measures how far the scores drop below the ranked head, so on a name-exact route it vouches for the anchor only when the head row is the anchor (a symbol of the anchor's name, or a row in the file the anchor is defined in or a file subject names). When another symbol heads the rows, as a plain word's namesake does in `where concurrent.futures.ThreadPoolExecutor is defined`, confidence reads low and `route=` appends `; anchor is not the ranked head (r=1 is NAME in PATH)`. The rows themselves do not move. A conceptual route has no anchor and reads as before.

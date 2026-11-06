@@ -80,6 +80,7 @@ struct SubjectRoute
     std::string         rankQuery;     // non-empty only when the words were dropped from the route
     std::vector<std::vector<NodeId>> callerCandidates;   // conceptual route: each exact symbol's definitions, for <callers by="subject">
     bool                anchorNoSource = false;   // CONFIDENCE-ANCHOR: name-exact, and no source-class definition backs the anchor
+    RouteAnchorKeys anchorKeys; // FRAME-HIGH-CONFIDENCE: what counts as the anchor heading the ranked rows
 };
 
 namespace subject_detail
@@ -515,6 +516,96 @@ inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice&
     return false;
 }
 
+// FRAME-HIGH-CONFIDENCE: the keys a ranked head row is matched against (routeAnchorHeadsRows). Name-exact routes only.
+inline RouteAnchorKeys routeAnchorKeys( const IngestResult& ing, const RouteChoice& rc, std::string_view rankQuery )
+{
+    using namespace subject_detail;
+    RouteAnchorKeys out;
+    if( rc.which != LexMode::NameExact )
+    {
+        return out;
+    }
+    const auto addName = [&]( std::string lower )
+    {
+        if( !lower.empty() && std::ranges::find( out.lowerNames, lower ) == out.lowerNames.end() )
+        {
+            out.lowerNames.push_back( std::move( lower ) );
+        }
+    };
+    const auto addFile = [&]( std::uint32_t f )
+    {
+        if( std::ranges::find( out.fileIds, f ) == out.fileIds.end() )
+        {
+            out.fileIds.push_back( f );
+        }
+    };
+    for( const RouteAnchorDef& a : rc.anchorDefs )
+    {
+        addName( a.lowerName );
+        addFile( a.fileId );
+    }
+    // The words' leaves, judged as routeAnchorHasSourceDef judges them: a subject that spells a name is about that name, so its plain
+    // words (`where`, `defined`) are not the anchor; with no identifier-syntax word, the plain words are.
+    std::vector<std::string> leaves;
+    std::vector<std::string> idLeaves;
+    for( const std::string_view w : splitRouteWords( rankQuery ) )
+    {
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        if( const Spelling sp = parseSpelling( t ); sp.valid )
+        {
+            leaves.push_back( routeLower( sp.leaf ) );
+            if( hasNameSyntax( t ) )
+            {
+                idLeaves.push_back( routeLower( sp.leaf ) );
+            }
+        }
+        // a FILE subject ("DynamicScreen.c", "src/x.cc") anchors that file: any row in it is the anchor's
+        if( t.find( '.' ) != std::string_view::npos || t.find( '/' ) != std::string_view::npos )
+        {
+            for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+            {
+                const std::string_view path = rootRelPath( ing, f );
+                if( path.ends_with( t ) && ( path.size() == t.size() || path[path.size() - t.size() - 1] == '/' ) )
+                {
+                    addFile( f );
+                }
+            }
+        }
+    }
+    for( std::string& l : idLeaves.empty() ? leaves : idLeaves )
+    {
+        addName( std::move( l ) );
+    }
+    return out;
+}
+
+// FRAME-HIGH-CONFIDENCE: does the anchor head the ranked rows? confidence= measures the score drop below the head, so it vouches for the
+// anchor only when the head IS the anchor: a symbol of the anchor's name (an Elixir `name/N` by its base), or a row in a file the anchor
+// is defined in. No keys (no name-exact route, or nothing to match): true, the check says nothing.
+inline bool routeAnchorHeadsRows( const IngestResult& ing, const RouteAnchorKeys& keys, NodeId head )
+{
+    if( keys.lowerNames.empty() && keys.fileIds.empty() )
+    {
+        return true;
+    }
+    const Symbol& s = ing.symbols[head];
+    if( std::ranges::find( keys.fileIds, s.fileId ) != keys.fileIds.end() )
+    {
+        return true;
+    }
+    const std::string lower = routeLower( s.name );
+    const std::string base = routeLower( elixirBaseName( s.name ) );
+    return std::ranges::any_of( keys.lowerNames, [&]( const std::string& n )
+                                { return n == lower || n == base; } );
+}
+
+// The route= clause a head that is not the anchor appends, beside the confidence it lowers: the reader sees which row heads instead.
+inline std::string routeAnchorNotHeadClause( const IngestResult& ing, NodeId head )
+{
+    const Symbol& s = ing.symbols[head];
+    return "; anchor is not the ranked head (r=1 is " + s.name + " in " + std::string( rootRelPath( ing, s.fileId ) ) + ")";
+}
+
 // Is a plain word among a name-exact route's anchors?
 inline bool subjectAnchoredPlainWord( const IngestResult& ing, const RouteChoice& whole, const SubjectReading& r )
 {
@@ -674,7 +765,9 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
 inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
 {
     SubjectRoute out = chooseSubjectRouteUnchecked( ing, g, task, servesBodiesAndCallers );
-    out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, out.rankQuery.empty() ? task : std::string_view( out.rankQuery ) );
+    const std::string_view rankQuery = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
+    out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, rankQuery );
+    out.anchorKeys = routeAnchorKeys( ing, out.route, rankQuery );
     if( out.anchorNoSource )
     {
         out.route.reason += "; anchor has no source definition (test, doc, data, CI or vendored only, or not indexed)";
