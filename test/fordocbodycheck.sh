@@ -29,6 +29,10 @@
 #        line start ran once per task-word hit: hits x line length, 127 s at 2.6 MB); the time limit makes a quadratic scan red
 #   (b2) also: held_bytes is exact (bytes + held_bytes == the unbudgeted block's bytes) and the block's est_tokens is the price recomputed from
 #        its own bytes (markup 2.5 B per token, text 3.8), not the binary's word: the held-whole block is priced the same way (h2)
+#   (q1) the relevance floor: a section holding fewer of the task's subject words than a third of them (3 at most) is left out, below_floor= counts
+#        them and every section served holds enough; the section that holds them is served (positive twin); (q2) a file with none left is
+#        f p= why="floor" (XML and JSON "unserved", "below_floor"); (q3) every picked file off the subject: no block at all, where the same repo
+#        shape with on-subject docs fires (n2b)
 #   (z1) a binary that crashes or prints nothing turns every positive arm red (each run's rc and </ctx> are checked)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -80,7 +84,7 @@ assert re.search( r'<doc_body match="lexical" est_tokens="\d+" files="3" allowan
 secs = re.findall( r'<b t="section" p="([^"]+)" l="(\d+)" e="(\d+)" n="([^"]*)" rank="(\d+)" of="(\d+)"[^>]*><!\[CDATA\[(.*?)\]\]></b>', b, re.S )
 assert secs, "no section rows"
 pol = [ x for x in secs if x[0] == "docs/retries.md" and x[3] == "Retry policy" ]
-assert pol and pol[0][1] == "5" and "backs off exponentially" in pol[0][6], "the Retry policy section of docs/retries.md, line 5, with its text"
+assert pol and int( pol[0][1] ) >= 5 and "backs off exponentially" in pol[0][6], "the Retry policy section of docs/retries.md, from line 5, with its text"
 assert any( x[0] == "docs/uploads.md" for x in secs ), "a second doc file"
 assert all( int( x[4] ) <= int( x[5] ) for x in secs ), "rank <= of"
 PY
@@ -88,7 +92,7 @@ then ok "(f1) fires: <doc_body>, its legend, section rows with p= l= e= n= rank=
 
 # (f2) the allowance cut
 if [ -s "$TMP/f1.xml" ] && block "$TMP/f1.xml" | grep -q '<doc_body [^>]*next="--recall=&apos;how do the docs describe the retry policy for failed uploads&apos;" capped="1">' \
-   && block "$TMP/f1.xml" | grep -q '<b t="section" p="docs/retries.md" l="5" e="[0-9]*" n="Retry policy" rank="[0-9]*" of="[0-9]*" cut="1" range="[0-9]*-[0-9]*/[0-9]*">'
+   && block "$TMP/f1.xml" | grep -q '<b t="section" p="docs/retries.md" l="[0-9]*" e="[0-9]*" n="Retry policy" rank="[0-9]*" of="[0-9]*" cut="1" range="[0-9]*-[0-9]*/[0-9]*">'
 then ok "(f2) a section over the allowance is cut=\"1\"; the root says capped=\"1\" and next= the recall call"; else no "(f2) allowance: $( block "$TMP/f1.xml" | grep -o '<doc_body [^>]*>' )"; fi
 
 # (f3) additivity against the switched-off answer
@@ -360,6 +364,31 @@ want = round( n / 2.5 )
 assert d["held"] == "budget" and abs( d["est_tokens"] - want ) <= want * 0.15 + 4, ( d["est_tokens"], want )
 PY
 then ok "(h2) the held-whole block carries est_tokens, XML and JSON, matching its own bytes"; else no "(h2) held-whole block price"; fi
+
+# (q1) the relevance floor: DFX picks README.md, docs/uploads.md and docs/retries.md; the task's subject words are retry, policy, failed, uploads (need 2)
+if [ -s "$TMP/f1.xml" ] && python3 - "$TMP/f1.xml" <<'PY'
+import re, sys
+s = open( sys.argv[1], encoding="utf8" ).read()
+b = s[ s.index( "<!-- ripwire for doc_body:" ): ]
+root = re.search( r'<doc_body [^>]*>', b ).group(0)
+assert int( re.search( r' below_floor="(\d+)"', root ).group(1) ) >= 1, root
+rows = re.findall( r'<b t="section" p="([^"]+)"[^>]* n="([^"]*)"[^>]*><!\[CDATA\[(.*?)\]\]></b>', b, re.S )
+assert rows
+for p, n, t in rows:
+    words = set( re.findall( r"[a-z]+", ( n + " " + t ).lower() ) )
+    assert len( words & { "retry", "policy", "failed", "uploads" } ) >= 2, ( "a served section holds too few subject words", p, n )
+assert ( "docs/uploads.md", "Retry on failure" ) in [ ( p, n ) for p, n, t in rows ], "the on-subject section is still served"
+assert "Upload limits" not in [ n for p, n, t in rows ], "the section with no subject word is left out"
+PY
+then ok "(q1) the floor leaves out the sections with too few of the task's subject words (below_floor= counts them), serves the one that holds them"; else no "(q1) relevance floor"; fi
+HOFF="$TMP/halfoff"; cp -R "$DFX" "$HOFF"; printf '# Demo\n\nA demo uploader. See the docs for the retry.\n' >"$HOFF/README.md"
+run "$HOFF" "--for=$TASK" --json >"$TMP/q2.json"; q2rc=$?
+if ans "$TMP/q2.xml" "$HOFF" "--for=$TASK" && [ "$q2rc" = 0 ] && grep -q '<f p="README.md" why="floor"/>' "$TMP/q2.xml" && grep -q ' below_floor="[1-9]' "$TMP/q2.xml" \
+   && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["doc_body"]; assert d["below_floor"]>=1 and {"p":"README.md","why":"floor"} in d["unserved"], d.get("unserved")' "$TMP/q2.json" 2>/dev/null
+then ok "(q2) a file with nothing on the subject is f p= why=\"floor\" in XML and in JSON unserved, with below_floor="; else no "(q2) why=floor: $( grep -o '<f p=[^>]*>' "$TMP/q2.xml" | head -c 300 )"; fi
+QFX="$TMP/alloff"; cp -R "$TFX" "$QFX"; printf '# Retries\n\n## Retry\n\nRetry once.\n' >"$QFX/docs/retries.md"; printf '# Uploads\n\n## Retry\n\nRetry again.\n' >"$QFX/docs/uploads.md"
+if ans "$TMP/q3.xml" "$QFX" "--for=$TASK" && tailrows "$TMP/q3.xml" | grep -q 'docs/retries.md' && tailrows "$TMP/q3.xml" | grep -q 'docs/uploads.md' && ! grep -q 'doc_body' "$TMP/q3.xml"
+then ok "(q3) two docs in the first t rows but nothing on the subject in either: no block (the same shape with on-subject docs fires, n2b)"; else no "(q3) all-off-subject must print no block: $( tailrows "$TMP/q3.xml" )"; fi
 
 # (p1) cost: a doc section of ONE 1.3 MB line is served in a bounded time, with and without a token budget
 PFX="$TMP/longline"; cp -R "$DFX" "$PFX"

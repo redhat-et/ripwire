@@ -27,6 +27,7 @@
 // tokens left after the answer's est_tokens (the allowance shrinks until the priced block fits) and holds only the part that does not fit:
 // held="budget" held_bytes= on the root, f p= why="budget" held=N per file, next= the call without the budget. When not even
 // kForDocMinAllowance bytes fit it is held whole (the files named).
+#include "commentcoherence.h" // isCommentStopword — the general-English stoplist the subject words leave out
 #include "forpage.h" // FileTail — the answer's <t> rows
 #include "nextverb.h" // nextFlag / nextAttrXml
 #include "recall.h" // recallLensScores, buildSectionGranularBody, loadRecallBody, allocateRecallShares, admitRecallUnits
@@ -279,6 +280,7 @@ struct ForDocPassage
 inline constexpr std::string_view kForDocUnreadable = "unreadable";
 inline constexpr std::string_view kForDocAllowance = "allowance";
 inline constexpr std::string_view kForDocBudget = "budget";
+inline constexpr std::string_view kForDocFloor = "floor"; // every picked section of the file shares fewer than kForDocMinSubjectWords of the task's words
 
 struct ForDocUnserved
 {
@@ -293,6 +295,7 @@ struct ForDocBody
     std::vector<ForDocUnserved> unserved; // picked files with nothing served, or with sections a budget kept out
     std::size_t textBytes = 0;
     std::size_t dropped = 0; // picked sections the allowance left out
+    std::size_t belowFloor = 0; // picked sections left out because they hold fewer than kForDocMinSubjectWords of the task's subject words
     std::size_t allowance = kForDocBodyBytes; // the section text this block could print (less than the default under a token budget)
     std::size_t heldBytes = 0; // text the default allowance would have printed and the token budget kept out
     bool isCapped = false;
@@ -310,6 +313,7 @@ struct ForDocBodyBudget
 
 inline constexpr std::size_t kForDocTopShareTenths = 6; // a file's top-ranked section that does not fit is an excerpt of up to this many tenths of the file's share
 inline constexpr std::size_t kForDocExcerptMinBytes = 400; // an excerpt is cut only when at least this much allowance is left
+inline constexpr std::size_t kForDocMinSubjectWords = 3; // a section is served only when it holds a third of the task's distinct subject words, at most this many
 inline constexpr std::size_t kForDocMinAllowance = 600; // under a token budget a block with less text room than this is held whole
 
 namespace fordocbody_detail
@@ -528,6 +532,40 @@ struct ForDocBodyInputs
     std::string_view rootArg;
 };
 
+// The task's subject words: its distinct words of 3+ bytes that are neither general English (isCommentStopword) nor a word that only names the
+// act of asking a doc ("docs", "describe"). A section that holds too few of them is not about the task, whatever else it shares with it.
+inline std::vector<std::string> forDocSubjectWords( const std::vector<std::string>& queryToks )
+{
+    static constexpr std::string_view kActWords[] = { "doc", "docs", "document", "documents", "documentation", "describe", "describes", "explain",
+                                                      "explains", "say", "says", "show", "shows", "tell", "tells" };
+    std::vector<std::string> subject;
+    for( const std::string& w : queryToks )
+    {
+        if( w.size() >= 3 && !isCommentStopword( w ) && std::ranges::find( kActWords, std::string_view( w ) ) == std::end( kActWords ) &&
+            std::ranges::find( subject, w ) == subject.end() )
+        {
+            subject.push_back( w );
+        }
+    }
+    return subject;
+}
+
+// how many of the `subject` words (distinct) the text holds
+inline std::size_t subjectWordsIn( std::string_view text, const std::vector<std::string>& subject )
+{
+    std::vector<char> seen( subject.size(), 0 );
+    forEachLexSubtoken( text,
+                        [&]( std::size_t tokStartByte, std::size_t tokEndByte )
+                        {
+                            const std::size_t t = recallMatchedTermIndex( text, tokStartByte, tokEndByte - tokStartByte, subject );
+                            if( t < subject.size() )
+                            {
+                                seen[t] = 1;
+                            }
+                        } );
+    return std::size_t( std::ranges::count( seen, 1 ) );
+}
+
 // The doc files a fired pick loads: --recall's section choice per file, read once and served at any allowance.
 struct ForDocPrep
 {
@@ -536,12 +574,43 @@ struct ForDocPrep
         std::uint32_t fileId = 0;
         std::optional<RecallSectionBody> sections;
         std::string whole; // a doc with no heading sections: its whole text
-        std::size_t demand = 0;
+        std::size_t demand = 0; // bytes of the units on the subject
+        std::vector<char> isOnSubject; // per unit of `sections`: 1 = holds enough of the task's subject words
+        std::size_t belowFloor = 0; // units that do not
     };
     std::vector<Loaded> loaded;
     std::vector<std::uint32_t> unreadable;
+    std::vector<std::pair<std::uint32_t, std::size_t>> offSubject; // files with nothing on the subject: (file, sections left out)
     std::vector<std::string> queryToks;
 };
+
+// Keep the units of a loaded file that hold `need` subject words; false when none does (the file is off the subject).
+inline bool applySubjectFloor( ForDocPrep::Loaded& l, const std::vector<std::string>& subject, std::size_t need )
+{
+    l.demand = 0;
+    if( !l.sections )
+    {
+        if( subjectWordsIn( l.whole, subject ) < need )
+        {
+            return false;
+        }
+        l.demand = l.whole.size();
+        return true;
+    }
+    const RecallSectionBody& sec = *l.sections;
+    l.isOnSubject.assign( sec.units.size(), 0 );
+    for( std::size_t u = 0; u < sec.units.size(); ++u )
+    {
+        const RecallSectionUnit& unit = sec.units[u];
+        if( subjectWordsIn( std::string_view( sec.body ).substr( unit.bodyOffset, unit.bodyLength ), subject ) >= need )
+        {
+            l.isOnSubject[u] = 1;
+            l.demand += recallUnitCostBytes( unit );
+        }
+    }
+    l.belowFloor = std::size_t( std::ranges::count( l.isOnSubject, 0 ) );
+    return l.belowFloor < sec.units.size();
+}
 
 inline ForDocPrep prepareForDocBody( const ForDocBodyInputs& in )
 {
@@ -553,24 +622,24 @@ inline ForDocPrep prepareForDocBody( const ForDocBodyInputs& in )
     }
     const std::vector<float> scores = recallLensScores( ing, outOff, outTargets, task, rootArg );
     subtokens( task, prep.queryToks );
+    const std::vector<std::string> subject = forDocSubjectWords( prep.queryToks );
+    const std::size_t need = std::min( kForDocMinSubjectWords, ( subject.size() + 2 ) / 3 ); // a third of the subject words, at most 3
     for( const std::uint32_t f : pick.fileIds )
     {
-        ForDocPrep::Loaded l { f, buildSectionGranularBody( ing, scores, f, redact, prep.queryToks ), {}, 0 };
-        if( l.sections )
+        ForDocPrep::Loaded l { f, buildSectionGranularBody( ing, scores, f, redact, prep.queryToks ), {}, 0, {}, 0 };
+        if( !l.sections )
         {
-            for( const RecallSectionUnit& u : l.sections->units )
+            std::optional<std::string> body = loadRecallBody( ing, f, redact );
+            if( !body )
             {
-                l.demand += recallUnitCostBytes( u );
+                prep.unreadable.push_back( f ); // unreadable on disk: named (why="unreadable"), never a stub
+                continue;
             }
-        }
-        else if( std::optional<std::string> body = loadRecallBody( ing, f, redact ) )
-        {
             l.whole = std::move( *body );
-            l.demand = l.whole.size();
         }
-        else
+        if( !applySubjectFloor( l, subject, need ) )
         {
-            prep.unreadable.push_back( f ); // unreadable on disk: named (why="unreadable"), never a stub
+            prep.offSubject.emplace_back( f, l.sections ? l.sections->units.size() : 1 );
             continue;
         }
         prep.loaded.push_back( std::move( l ) );
@@ -609,16 +678,16 @@ inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep& p
 {
     FileServe fs;
     fs.isServed = true;
-    const std::size_t unitCount = l.sections ? l.sections->units.size() : 1;
+    const std::size_t unitCount = l.sections ? l.sections->units.size() - l.belowFloor : 1; // the units on the subject
     fs.units = unitCount;
-    const auto topExcerpt = [&]( std::uint32_t u )
+    const auto topExcerpt = [&]( std::uint32_t u, std::uint32_t rank )
     {
         const std::size_t cap = unitCount == 1 ? share : share * kForDocTopShareTenths / 10;
         if( cap < kForDocExcerptMinBytes )
         {
             return false;
         }
-        fs.passages.push_back( loadedUnitPassage( ing, prep, l, u, 1, cap ) );
+        fs.passages.push_back( loadedUnitPassage( ing, prep, l, u, rank, cap ) );
         fs.spent += fs.passages.back().text.size();
         return true;
     };
@@ -629,22 +698,27 @@ inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep& p
             fs.passages.push_back( wholeDocPassage( ing, l.fileId, l.whole, DocCut { {}, share } ) );
             fs.spent = l.whole.size();
         }
-        else if( !topExcerpt( 0 ) )
+        else if( !topExcerpt( 0, 1 ) )
         {
             fs.missed.emplace_back( 1, 0 );
         }
         return fs;
     }
     const RecallSectionBody& sec = *l.sections;
-    std::uint32_t rank = 0;
+    std::uint32_t rank = 0, served = 0; // rank= is the place among all picked sections; the first one on the subject is the file's top
     for( const std::uint32_t u : sec.rankOrder )
     {
         ++rank;
+        if( !l.isOnSubject[u] )
+        {
+            continue;
+        }
+        ++served;
         const RecallSectionUnit& unit = sec.units[u];
         const std::size_t cost = recallUnitCostBytes( unit );
         if( fs.spent + cost > share )
         {
-            if( rank == 1 && topExcerpt( u ) )
+            if( served == 1 && topExcerpt( u, rank ) )
             {
                 continue;
             }
@@ -707,6 +781,15 @@ inline ForDocBody serveForDocBody( const IngestResult& ing, const ForDocPrep& pr
     for( const std::uint32_t f : prep.unreadable )
     {
         out.unserved.push_back( { f, kForDocUnreadable, 0 } );
+    }
+    for( const auto& [f, sections] : prep.offSubject )
+    {
+        out.unserved.push_back( { f, kForDocFloor, 0 } );
+        out.belowFloor += sections;
+    }
+    for( const ForDocPrep::Loaded& l : prep.loaded )
+    {
+        out.belowFloor += l.belowFloor;
     }
     std::vector<std::size_t> overhead( prep.loaded.size(), 0 ), demand; // the markup is the block's own, outside the text allowance
     for( const ForDocPrep::Loaded& l : prep.loaded )
@@ -793,8 +876,10 @@ inline constexpr std::string_view kForDocBodyLegend =
     "that shares the task's words and answers another question can rank first (match=\"lexical\" on the root says so). b t=\"doc\": the head of a doc with no matching heading "
     "section; src=\"extracted\": text from HTML or a notebook, no source lines; cut=\"1\" range=S-E/N: an excerpt, bytes S to E of the "
     "section's N, around the task's words. allowance= section text the files share, bytes= printed; est_tokens= prices this block alone (the "
-    "answer's est_tokens leaves it out); dropped= picked sections left out, capped=\"1\", next= the call that serves more; f p= a doc file with "
-    "sections left out, why= unreadable, allowance or budget; held=\"budget\" held_bytes=: a token budget kept that much text out, next= "
+    "answer's est_tokens leaves it out); dropped= picked sections left out, capped=\"1\", next= the call that serves more; below_floor= picked sections left out because "
+    "they hold fewer of the task's subject words than a third of them, 3 at most (subject words: its words of 3+ letters that are not common "
+    "English or doc, describe, explain, show), a file with none left is f p= why=\"floor\"; f p= a doc file with sections left out, why= unreadable, allowance, "
+    "budget or floor; held=\"budget\" held_bytes=: a token budget kept that much text out, next= "
     "repeats the call without it. The answer above is unchanged -->";
 
 inline std::string forDocBodyNext( std::string_view task ) { return nextAttrXml( nextFlag( "--recall=", task ) ); }
@@ -877,6 +962,10 @@ inline std::string forDocBodyRootAttrs( const ForDocBody& body, const ForDocBody
     {
         attrs += " dropped=\"" + std::to_string( body.dropped ) + "\"";
     }
+    if( body.belowFloor > 0 )
+    {
+        attrs += " below_floor=\"" + std::to_string( body.belowFloor ) + "\"";
+    }
     if( body.isHeldByBudget )
     {
         attrs += nextAttrXml( nextFlag( "--for=", task ) );
@@ -910,6 +999,26 @@ inline std::pair<std::string, std::size_t> forDocBodyXml( const ForDocPaths& pat
     return { std::string( kForDocBodyLegend ) + open + priceAttr + attrs + ">" + rows + close, tokens };
 }
 
+// One served passage as its JSON object, the twin of forDocPassageXml.
+inline std::string forDocPassageJson( const ForDocPaths& paths, const ForDocPassage& p )
+{
+    std::string row = std::string( "{\"t\":\"" ) + ( p.isSection ? "section" : "doc" ) + "\",\"p\":\"" + jsonStr( paths.of( p.fileId ) ) + "\"";
+    if( p.lineLo > 0 )
+    {
+        row += ",\"l\":" + std::to_string( p.lineLo ) + ",\"e\":" + std::to_string( p.lineHi );
+    }
+    if( p.isSection )
+    {
+        row += ",\"n\":\"" + jsonStr( p.heading ) + "\",\"rank\":" + std::to_string( p.rank ) + ",\"of\":" + std::to_string( p.of );
+    }
+    row += p.isExtracted ? ",\"src\":\"extracted\"" : "";
+    if( p.isCut )
+    {
+        row += ",\"cut\":true,\"range\":[" + std::to_string( p.rangeLo ) + "," + std::to_string( p.rangeHi ) + "],\"section_bytes\":" + std::to_string( p.rangeOf );
+    }
+    return row + ",\"text\":\"" + jsonStr( p.text ) + "\"}";
+}
+
 // The --json twin: one key, appended after "sigs" (outside the answer's est_tokens, as the XML block). Returns {text, est_tokens}.
 inline std::pair<std::string, std::size_t> forDocBodyJsonServed( const ForDocPaths& paths, const ForDocBody& body, const ForDocBodyPick& pick,
                                                                  std::string_view task )
@@ -932,6 +1041,10 @@ inline std::pair<std::string, std::size_t> forDocBodyJsonServed( const ForDocPat
     {
         tail += ",\"capped\":true,\"dropped\":" + std::to_string( body.dropped );
     }
+    if( body.belowFloor > 0 )
+    {
+        tail += ",\"below_floor\":" + std::to_string( body.belowFloor );
+    }
     if( body.isHeldByBudget || body.isCapped )
     {
         tail += ",\"next\":\"" + jsonStr( nextFlag( body.isHeldByBudget ? "--for=" : "--recall=", task ) ) + "\"";
@@ -939,22 +1052,7 @@ inline std::pair<std::string, std::size_t> forDocBodyJsonServed( const ForDocPat
     tail += ",\"passages\":[";
     for( std::size_t i = 0; i < body.passages.size(); ++i )
     {
-        const ForDocPassage& p = body.passages[i];
-        tail += std::string( i ? ",{" : "{" ) + "\"t\":\"" + ( p.isSection ? "section" : "doc" ) + "\",\"p\":\"" + jsonStr( display( p.fileId ) ) + "\"";
-        if( p.lineLo > 0 )
-        {
-            tail += ",\"l\":" + std::to_string( p.lineLo ) + ",\"e\":" + std::to_string( p.lineHi );
-        }
-        if( p.isSection )
-        {
-            tail += ",\"n\":\"" + jsonStr( p.heading ) + "\",\"rank\":" + std::to_string( p.rank ) + ",\"of\":" + std::to_string( p.of );
-        }
-        tail += p.isExtracted ? ",\"src\":\"extracted\"" : "";
-        if( p.isCut )
-        {
-            tail += ",\"cut\":true,\"range\":[" + std::to_string( p.rangeLo ) + "," + std::to_string( p.rangeHi ) + "],\"section_bytes\":" + std::to_string( p.rangeOf );
-        }
-        tail += ",\"text\":\"" + jsonStr( p.text ) + "\"}";
+        tail += ( i ? "," : "" ) + forDocPassageJson( paths, body.passages[i] );
     }
     tail += "]";
     if( !body.unserved.empty() )
@@ -1042,8 +1140,13 @@ inline std::string renderForDocBody( const ForDocBodyInputs& in, const ForDocBod
     {
         return heldWhole(); // the answer alone spent the budget: nothing is read for the block
     }
+    const ForDocPrep prep = prepareForDocBody( in );
+    if( prep.loaded.empty() && !prep.offSubject.empty() )
+    {
+        return {}; // every readable picked file is off the subject: nothing to serve (present-only, like a pick that does not fire)
+    }
     return fitForDocBody(
-        in.ing, prepareForDocBody( in ), budget,
+        in.ing, prep, budget,
         [&]( const ForDocBody& b )
         { return isJson ? forDocBodyJsonServed( paths, b, in.pick, in.task ) : forDocBodyXml( paths, b, in.pick, in.task ); },
         heldWhole );
