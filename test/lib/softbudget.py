@@ -13,6 +13,9 @@ APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>
 def strip_appended( t ):
     """The answer text less its appended, unpriced blocks (APPENDED)."""
     return APPENDED.sub( "", t )
+def strip_appended_bytes( b ):
+    """strip_appended on a bytes answer, byte-exact for the rest (surrogateescape keeps any non-UTF-8 byte as it was)."""
+    return strip_appended( b.decode( 'utf-8', 'surrogateescape' ) ).encode( 'utf-8', 'surrogateescape' )
 
 
 def tail_size( t ):
@@ -152,7 +155,10 @@ def strip_selftest():
               ( "held stub", '<ctx>' + body + held + '</ctx>', '<ctx>' + body + '</ctx>' ),
               ( "before <graph>", '<ctx>' + body + real + graph + '</ctx>', '<ctx>' + body + graph + '</ctx>' ),
               ( "twin: no block", '<ctx>' + body + '</ctx>', '<ctx>' + body + '</ctx>' ) ]
-    return [ "%s: got %r" % ( name, strip_appended( src ) ) for name, src, want in cases if strip_appended( src ) != want ]
+    bad = [ "%s: got %r" % ( name, strip_appended( src ) ) for name, src, want in cases if strip_appended( src ) != want ]
+    # the bytes form (estchargecheck's A9/A10 readers): the same strip, and a non-UTF-8 byte outside the block survives it untouched
+    raw = b'<ctx>\xff' + real.encode() + b'</ctx>'
+    return bad + ( [] if strip_appended_bytes( raw ) == b'<ctx>\xff</ctx>' else [ "bytes: got %r" % strip_appended_bytes( raw ) ] )
 
 
 if __name__ == "__main__":   # python3 softbudget.py setprefix A ON OFF  (rows files, one p:l:n per line): exit 0 | 1;  python3 softbudget.py strip-selftest: exit 0 | 1
