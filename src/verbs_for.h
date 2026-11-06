@@ -4803,7 +4803,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             const rw::ForDocBodyPick docPick = rw::pickForDocBody( ing, cfg.forTask, shownSigIds, [ & ]
             { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg );
-            const std::size_t        docBudget = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : forBodyCeiling ? std::size_t( cfg.maxTokens ) : 0u;
+            const std::size_t        docBudget = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : forBodyCeiling ? std::size_t( rootFinish.maxTokens ) : 0u;   // the --max-tokens the root was priced with
             const std::string        docBody = rw::renderForDocBodyXml( rw::ForDocBodyInputs{ ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg },
                                                                         rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens } );
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
