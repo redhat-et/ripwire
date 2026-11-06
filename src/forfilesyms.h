@@ -30,6 +30,7 @@
 // est_tokens, after every byte of the ordinary answer: no auto-served body pays for it. XML only: --json, columnar, --candidates and multi-root answers carry none.
 #include "filter.h" // isTestSymbol — the test/fixture mark on a row
 #include "infra/namesplit.h" // namesplit::isIdentChar — the one identifier-byte test
+#include "infra/sortutil.h" // svLess: the byte order every string_view sort/search here uses
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / outProv / inEdges, edgeKindByte, kEdgeName
 #include "lexical.h" // subtokens — the one identifier splitter
 #include "memberowner.h" // MemberOwners, qualifiedMemberName — the Scope.name spelling every row kind shares
@@ -46,11 +47,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <format>
-#include <map>
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <unordered_map>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace rw
@@ -200,7 +201,7 @@ inline std::vector<std::string_view> answerTokens( std::string_view text )
         }
         pushRunVariants( out, text, i, j );
     }
-    std::ranges::sort( out );
+    std::ranges::sort( out, rw::sortutil::svLess );
     out.erase( std::unique( out.begin(), out.end() ), out.end() );
     return out;
 }
@@ -231,7 +232,7 @@ inline bool nameInAnswer( const std::vector<std::string_view>& tokens, std::stri
 {
     if( isTokenName( name ) )
     {
-        return std::ranges::binary_search( tokens, name );
+        return std::ranges::binary_search( tokens, name, rw::sortutil::svLess );
     }
     std::vector<char> esc;
     return !name.empty() && ( spelledIn( text, name ) || spelledIn( text, escapeXml( name, esc ) ) );
@@ -336,29 +337,37 @@ inline std::vector<ShownRow> shownRows( std::string_view text )
     return rows;
 }
 
+// (name, index) rows in name byte order, then index: the order FileLookup and creditCallees binary-search by name.
+inline bool nameThenIndexLess( const std::pair<std::string_view, std::size_t>& a, const std::pair<std::string_view, std::size_t>& b )
+{
+    return a.first != b.first ? rw::sortutil::svLess( a.first, b.first ) : a.second < b.second;
+}
+
 // The file id a row's p= names: the index path itself, else the one file it is a whole-segment suffix of (or that is one of it).
-// One lookup per answer: the exact paths hash once, and each distinct path is resolved once (a suffix match scans the files, memoized).
+// One lookup per answer: the exact paths sort once, and each distinct path is resolved once (a suffix match scans the files, memoized).
 class FileLookup
 {
 public:
     explicit FileLookup( const IngestResult& ing ) : ing_( ing ) {}
     std::uint32_t of( std::string_view p )
     {
-        if( const auto hit = memo_.find( p ); hit != memo_.end() )
+        const auto memoAt = std::ranges::lower_bound( memo_, p, rw::sortutil::svLess, []( const auto& row ) { return std::string_view( row.first ); } );
+        if( memoAt != memo_.end() && memoAt->first == p )
         {
-            return hit->second;
+            return memoAt->second;
         }
         if( exact_.empty() )
         {
             exact_.reserve( ing_.files.size() );
             for( std::uint32_t f = 0; f < ing_.files.size(); ++f )
             {
-                exact_.emplace( rootRelPath( ing_, f ), f ); // the first file of a spelling wins
+                exact_.emplace_back( rootRelPath( ing_, f ), f );
             }
+            std::ranges::sort( exact_, nameThenIndexLess ); // (path, id): the first file of a spelling is the lowest id, so it wins
         }
-        const auto exact = exact_.find( p );
-        const std::uint32_t id = exact != exact_.end() ? exact->second : suffixMatch( p );
-        memo_.emplace( std::string( p ), id );
+        const auto exact = std::ranges::lower_bound( exact_, p, rw::sortutil::svLess, &std::pair<std::string_view, std::size_t>::first );
+        const std::uint32_t id = exact != exact_.end() && exact->first == p ? std::uint32_t( exact->second ) : suffixMatch( p );
+        memo_.emplace( memoAt, std::string( p ), id );
         return id;
     }
 
@@ -377,13 +386,15 @@ private:
         return hits == 1 ? id : UINT32_MAX;
     }
     const IngestResult& ing_;
-    std::unordered_map<std::string_view, std::uint32_t> exact_;
-    std::map<std::string, std::uint32_t, std::less<>> memo_;
+    std::vector<std::pair<std::string_view, std::size_t>> exact_; // sorted by (path, file id), byte order
+    std::vector<std::pair<std::string, std::uint32_t>>    memo_;  // sorted by path, byte order
 };
 
 inline std::string_view leafName( std::string_view n )
 {
-    return n.substr( n.find_last_of( ".:#" ) + 1 ); // npos + 1 is 0: no separator, the whole spelling
+    // after the last separator, else the whole spelling (a find_last_of + 1 would wrap on npos under -fsanitize=integer)
+    const auto lastSep = std::ranges::find_last_if( n, []( char c ) { return c == '.' || c == ':' || c == '#'; } );
+    return lastSep.empty() ? n : std::string_view( lastSep.begin() + 1, n.end() );
 }
 
 inline std::uint32_t fanIn( const Graph& g, NodeId id )
@@ -549,7 +560,7 @@ inline void creditCallees( const IngestResult& ing, const Graph& g, const Head& 
     {
         candByName.emplace_back( ing.symbols[cands[i].id].name, i );
     }
-    std::ranges::sort( candByName );
+    std::ranges::sort( candByName, nameThenIndexLess );
     for( const Symbol& caller : ing.symbols )
     {
         const auto named = std::ranges::find( head.names, caller.name );
@@ -568,7 +579,7 @@ inline void creditCallees( const IngestResult& ing, const Graph& g, const Head& 
                 continue;
             }
             const bool split = e < g.outProv.size() && g.outProv[e] == 3u;
-            const auto [lo, hi] = std::ranges::equal_range( candByName, std::string_view( ing.symbols[to].name ), {}, &std::pair<std::string_view, std::size_t>::first );
+            const auto [lo, hi] = std::ranges::equal_range( candByName, std::string_view( ing.symbols[to].name ), rw::sortutil::svLess, &std::pair<std::string_view, std::size_t>::first );
             for( auto it = lo; it != hi; ++it )
             {
                 Cand& c = cands[it->second];
@@ -593,11 +604,45 @@ inline void foldInto( Cand& into, const Cand& from )
 
 // Groups `cands` by `key`, ordered inside a group by `rank`, and folds each candidate that `canFold(leader, c)` accepts into its group's first
 // row (the leader); the others stay.
+// a < b over a std::tuple, field by field, with every std::string_view field ordered by rw::sortutil::svLess (a tuple's own operator< would
+// order a string_view through operator<, which wraps under -fsanitize=integer on libstdc++; see infra/sortutil.h).
+template<class T>
+inline bool orderLess( const T& a, const T& b );
+template<std::size_t I, class T>
+inline bool tupleLessFrom( const T& a, const T& b )
+{
+    if constexpr( I == std::tuple_size_v<T> )
+    {
+        return false;
+    }
+    else
+    {
+        return orderLess( std::get<I>( a ), std::get<I>( b ) )
+               || ( !orderLess( std::get<I>( b ), std::get<I>( a ) ) && tupleLessFrom<I + 1>( a, b ) );
+    }
+}
+template<class T>
+inline bool orderLess( const T& a, const T& b )
+{
+    if constexpr( std::is_convertible_v<const T&, std::string_view> )
+    {
+        return rw::sortutil::svLess( a, b );
+    }
+    else if constexpr( requires { std::tuple_size<T>::value; } )
+    {
+        return tupleLessFrom<0>( a, b );
+    }
+    else
+    {
+        return a < b;
+    }
+}
+
 template<class Key, class Rank, class CanFold>
 inline void foldByKey( std::vector<Cand>& cands, Key key, Rank rank, CanFold canFold )
 {
     std::ranges::sort( cands, [&]( const Cand& a, const Cand& b )
-                       { return std::tuple( key( a ), rank( a ) ) < std::tuple( key( b ), rank( b ) ); } );
+                       { return orderLess( std::tuple( key( a ), rank( a ) ), std::tuple( key( b ), rank( b ) ) ); } );
     std::vector<Cand> kept;
     std::size_t leader = 0;
     for( const Cand& c : cands )
@@ -659,6 +704,21 @@ struct Picks
     std::vector<const Cand*> byName, byCallee; // capped at kForFileSymsRowsPerRule each
     std::size_t nameTotal = 0, calleeTotal = 0;
 };
+// The tie-break after a rule's own score: fan-in desc, shown-file order, name (byte order), id: a total order. Field by field, not a tuple:
+// the tuple's string_view member would order through operator< (see rw::sortutil::svLess).
+inline bool tailBefore( const IngestResult& ing, const Cand* a, const Cand* b )
+{
+    if( a->fanIn != b->fanIn )
+    {
+        return a->fanIn > b->fanIn;
+    }
+    if( a->fileRank != b->fileRank )
+    {
+        return a->fileRank < b->fileRank;
+    }
+    const std::string_view an( ing.symbols[a->id].name ), bn( ing.symbols[b->id].name );
+    return an != bn ? rw::sortutil::svLess( an, bn ) : a->id < b->id;
+}
 // Each rule's rows: score desc, then fan-in desc, shown-file order, name, id (a total order), cut after the sort. A name both rules
 // pick prints once, as by="name".
 inline Picks pickRows( const IngestResult& ing, const Graph& g, std::vector<Cand>& cands )
@@ -668,10 +728,7 @@ inline Picks pickRows( const IngestResult& ing, const Graph& g, std::vector<Cand
     {
         c.fanIn = ( c.byName > 0 || c.byCallee > 0 ) ? fanIn( g, c.id ) : 0;
     }
-    const auto tail = [&]( const Cand* a, const Cand* b )
-    {
-        return std::tuple( b->fanIn, a->fileRank, std::string_view( ing.symbols[a->id].name ), a->id ) < std::tuple( a->fanIn, b->fileRank, std::string_view( ing.symbols[b->id].name ), b->id );
-    };
+    const auto tail = [&]( const Cand* a, const Cand* b ) { return tailBefore( ing, a, b ); };
     const auto cut = [&]( std::vector<const Cand*>& rule, std::size_t& total, auto&& before )
     {
         std::ranges::sort( rule, [&]( const Cand* a, const Cand* b )

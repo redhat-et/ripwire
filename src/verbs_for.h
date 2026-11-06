@@ -2910,6 +2910,15 @@ private:
     int        saved_  = -1;
 };
 
+// Where <syms> goes in the answer's bytes: in front of the --with-graph <graph> block, which stays the last child, else at the end (rfind: a
+// body printed earlier may quote the tag; the block itself is the last one emitted, and only a run that asked for it has one).
+inline std::size_t forSymsInsertAt( const std::string& emitted, bool withGraph )
+{
+    constexpr std::string_view kGraphOpen = "<graph fmt=\"mermaid\"><![CDATA[";
+    const std::size_t          graphAt    = withGraph ? emitted.rfind( kGraphOpen ) : std::string::npos;
+    return graphAt != std::string::npos && emitted.find( "</graph>", graphAt ) != std::string::npos ? graphAt : emitted.size();
+}
+
 inline void appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
 {
     if( !capture.wanted() )
@@ -2918,18 +2927,23 @@ inline void appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
     }
     const rw::Config&                cfg     = d.cfg;
     const std::optional<std::string> emitted = capture.finish();
-    if( emitted )
-    {
-        std::fwrite( emitted->data(), 1, emitted->size(), stdout );   // the answer, to the real stdout, byte for byte
-    }
-    else
+    if( !emitted )
     {
         rw::emitTo( stderr, "ripwire: --for: could not buffer the answer's bytes — the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const std::string syms = rw::renderForFileSyms(
         d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = emitted ? std::string_view( *emitted ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
                                       .compactLegend = cfg.legend == "compact", .uncaptured = !emitted } );
+    const std::size_t at = emitted ? forSymsInsertAt( *emitted, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    if( emitted )
+    {
+        std::fwrite( emitted->data(), 1, at, stdout );
+    }
     std::fwrite( syms.data(), 1, syms.size(), stdout );
+    if( emitted )
+    {
+        std::fwrite( emitted->data() + at, 1, emitted->size() - at, stdout );
+    }
 }
 
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
