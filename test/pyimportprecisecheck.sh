@@ -111,7 +111,8 @@ monotonic_check
 
 # #358 Python capture slice. Expectations below were read from pristine main, not from the new
 # query: ONE Include per statement (first clause), but bindings for EVERY named/aliased clause.
-# Aliased plain imports keep their whole written clause in --deps; cleaning it is a separate change.
+# An aliased first clause records its bare module (#478 gap 2): these pins read `a as aa` / `a as local` / `a.b as c`
+# until that fix, which moved them on purpose. The #478 gap 2 arms at the end of this gate say why.
 PC="$TMP/captures"; mkdir -p "$PC/pkg"
 cat >"$PC/main.py" <<'PY'
 import a, b
@@ -164,9 +165,9 @@ if python3 - "$TMP/pc.deps" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 rows = {f.get('p'): [i.get('t') for i in f.findall('inc')] for f in root.findall('f')}
-want = ['a', 'a as aa', 'pkg.mod', 'pkg.mod', '.', 'pkg', 'pkg.mod', 'os',
-        'b', 'pkg.mod', 'a', 'b', 'a as local']
-assert rows == {'main.py': want, 'typing.pyi': ['a as aa', 'pkg.mod'], 'broken.py': ['a']}, rows
+want = ['a', 'a', 'pkg.mod', 'pkg.mod', '.', 'pkg', 'pkg.mod', 'os',
+        'b', 'pkg.mod', 'a', 'b', 'a']
+assert rows == {'main.py': want, 'typing.pyi': ['a', 'pkg.mod'], 'broken.py': ['a']}, rows
 PY
 then ok '#358: exact first-clause, alias, from, relative, wildcard, nested and .pyi targets; ERROR import stays out'
 else no '#358: Python target set/order differs from pristine main'
@@ -279,7 +280,7 @@ want = {
     'future.py': ([], []),
     'builtin_call.py': ([], []),
     'importlib_call.py': ([include('importlib')], [bind('importlib', 'importlib', 'module')]),
-    'dotted.py': ([include('a.b as c')], [bind('c', 'a.b', 'module')]),
+    'dotted.py': ([include('a.b')], [bind('c', 'a.b', 'module')]),
     # HISTORY (lane ind4b, fix 5 -> fix 6): the Import RawBind of an ALIASED from-import used to carry importedName '' (no marker); fix 5
     # records the member's own name for it, 'from:a' (kPythonFromMemberMark + a), so `from . import a as b` + `b.Base` can be read as the
     # submodule a. The change is on purpose, not erosion: the pin still asserts the exact value (a wrong or missing marker fails, see the
@@ -398,6 +399,71 @@ if [ -n "$BASE_BIN" ] && [ -x "$BASE_BIN" ]; then
     fi
 else
     skip '#358: pristine-main cache compatibility (set RIPWIRE_BASE_BIN)'
+fi
+
+# #478 gap 2: an aliased plain import records the MODULE as its Include target. tree-sitter-python's import_statement
+# carries name:(dotted_name|aliased_import), and the first-clause capture read the whole aliased_import span, so
+# `import pkg.mod as pm` recorded `pkg.mod as pm`: no resolver finds that module, and the file lost its edge in --deps,
+# --arch, cycles and the Rule 3 call narrow. Arms and fixture shapes ported from joyful-ii-V-I's pyaliasincludecheck
+# (46bfa131, lane/py-alias-include-target, written against the pre-#382 walk); the multi-clause and one-segment rows
+# are new. pkg/mod.py and other/mod.py both define pyai_helper, so a bare call to it binds only through the include.
+PA="$TMP/pyalias"; mkdir -p "$PA/pkg" "$PA/other"
+: >"$PA/pkg/__init__.py"; : >"$PA/other/__init__.py"
+printf 'def pyai_helper():\n    return 1\n' >"$PA/pkg/mod.py"
+printf 'def pyai_helper():\n    return 2\n' >"$PA/other/mod.py"
+printf 'def pyai_single():\n    return 3\n' >"$PA/single.py"
+printf 'import pkg.mod as pm\nimport os.path as osp\n\n\ndef pyai_caller_aliased():\n    return pyai_helper() + len( osp.sep )\n' >"$PA/aliased.py"
+printf 'import pkg.mod\n\n\ndef pyai_caller_plain():\n    return pyai_helper()\n' >"$PA/plain.py"
+printf 'from pkg.mod import pyai_helper as h\n\n\ndef pyai_caller_from():\n    return h()\n' >"$PA/fromimp.py"
+printf 'import pkg.mod as pm, os.path\n' >"$PA/multi.py"
+printf 'import single as s\n' >"$PA/onesegment.py"
+printf 'import as_x\n' >"$PA/asname.py"
+printf 'def as_x_fn():\n    return 4\n' >"$PA/as_x.py"
+"$BIN" "$PA" --deps --no-cache >"$TMP/pa.deps" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<deps ' "$TMP/pa.deps"; then
+    no "#478 gap 2: --deps on the alias fixture did not run (rc=$rc)"
+else
+    if python3 - "$TMP/pa.deps" <<'PY'
+import sys, xml.etree.ElementTree as ET
+rows = {f.get('p'): [i.get('t') for i in f.findall('inc')] for f in ET.parse(sys.argv[1]).getroot().findall('f')}
+want = {'aliased.py': ['pkg.mod', 'os.path'], 'plain.py': ['pkg.mod'], 'fromimp.py': ['pkg.mod'],
+        'multi.py': ['pkg.mod'], 'onesegment.py': ['single'], 'asname.py': ['as_x']}
+got = {p: rows.get(p) for p in want}
+assert got == want, got
+assert not any(' as ' in t for ts in rows.values() for t in ts), rows
+PY
+    then ok '#478 gap 2: aliased, multi-clause and one-segment targets are the bare module; `import as_x` unchanged; no `… as …` row'
+    else no "#478 gap 2: alias targets wrong: $( grep -oE '<inc t="[^"]*"' "$TMP/pa.deps" | sort | uniq -c | tr '\n' ' ' )"
+    fi
+    # afferent counts edge occurrences: plain + fromimp (controls) + aliased + multi (the fix) = 4.
+    grep -q '<f p="pkg/mod.py" afferent="4"/>' "$TMP/pa.deps" \
+        && ok '#478 gap 2: pkg/mod.py afferent="4" (plain + from-import + aliased + aliased-first multi-clause)' \
+        || no "#478 gap 2: pkg/mod.py afferent wrong: $( grep -oE '<f p="pkg/mod.py"[^>]*>' "$TMP/pa.deps" )"
+    grep -q '<f p="single.py" afferent="1"/>' "$TMP/pa.deps" \
+        && ok '#478 gap 2: one-segment `import single as s` resolves (single.py afferent="1")' \
+        || no "#478 gap 2: single.py afferent wrong: $( grep -oE '<f p="single.py"[^>]*>' "$TMP/pa.deps" )"
+    # transitive= is the file's resolved cone: itself + pkg/mod.py = 2 (os.path is external). It read 1 while the
+    # aliased target resolved to nothing.
+    grep -oE '<f p="aliased.py"[^>]*>' "$TMP/pa.deps" | grep -q 'transitive="2"' \
+        && ok '#478 gap 2: aliased.py transitive="2" (itself + pkg/mod.py; os.path is external)' \
+        || no "#478 gap 2: aliased.py cone wrong: $( grep -oE '<f p="aliased.py"[^>]*>' "$TMP/pa.deps" )"
+fi
+"$BIN" "$PA" --callers=pkg/mod.py:pyai_helper --no-cache --legend=compact >"$TMP/pa.callers" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<callers ' "$TMP/pa.callers"; then
+    no "#478 gap 2: --callers did not run (rc=$rc)"
+else
+    grep -q 'n="pyai_caller_aliased" p="aliased.py:5"' "$TMP/pa.callers" \
+        && ok '#478 gap 2 rule 3: aliased.py:pyai_caller_aliased binds pkg/mod.py:pyai_helper through the include' \
+        || no "#478 gap 2 rule 3: pyai_caller_aliased is not a caller of pkg/mod.py:pyai_helper: $( cat "$TMP/pa.callers" )"
+    grep -q 'n="pyai_caller_plain" p="plain.py:4"' "$TMP/pa.callers" \
+        && ok '#478 gap 2 rule 3 control: plain.py:pyai_caller_plain binds pkg/mod.py:pyai_helper' \
+        || no "#478 gap 2 rule 3 control: pyai_caller_plain lost its edge: $( cat "$TMP/pa.callers" )"
+fi
+"$BIN" "$PA" --callers=other/mod.py:pyai_helper --no-cache --legend=compact >"$TMP/pa.other" 2>/dev/null; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '<callers [^>]*count="0"' "$TMP/pa.other"; then
+    ok '#478 gap 2 rule 3 negative: the decoy other/mod.py:pyai_helper has no caller'
+else
+    no "#478 gap 2 rule 3 negative: decoy gained a caller or the run failed (rc=$rc): $( cat "$TMP/pa.other" )"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
