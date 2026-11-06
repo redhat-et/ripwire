@@ -36,7 +36,8 @@
 //
 // RANK. A manifest scores 2 per task word it names exactly and 1 per word it names in part (the best per word); the highest score
 // first, then more anchors, then the shallower path, then the path. kManifestFileRows manifests, kManifestRowsPerFile lines each
-// (exact before part, then line order), every cut disclosed.
+// (exact before part, then line order), every cut disclosed. When the leader only DEPENDS on what the task names, the best manifest that
+// DEFINES a named thing (an anchor that is not a dependency: a package, bin, feature, ..) moves to the front.
 //
 // FEATURE TOUCH. When a printed manifest's anchor is a cargo feature or a Python extra, the files that mention at least half of that
 // manifest's features (default and `_`-private ones left out) are listed with EXEMPLAR's touch list (exemplarfamily.h
@@ -799,6 +800,7 @@ struct ManifestMatch
     std::size_t doc = 0;
     std::size_t score = 0;
     std::size_t anchors = 0;
+    bool defines = false; // an anchor is not a dependency: this manifest DEFINES a thing the task names (a package, bin, feature, ..)
     std::vector<ManifestHit> hits; // one per matching entry, best first (see RANK)
     std::vector<std::string> matched;
 };
@@ -893,6 +895,7 @@ inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, cons
         }
         hit.anchor = hit.strength == 2 && !own && ( t.cue[k] || t.addNew ) && ( !std::ranges::contains( kManifestGenericNames, folded ) || en.kind == ManifestKind::EntryPoint );
         m.anchors += hit.anchor ? 1 : 0;
+        m.defines = m.defines || ( hit.anchor && !dep );
         if( hit.strength > 0 )
         {
             m.hits.push_back( hit );
@@ -941,6 +944,13 @@ inline std::vector<ManifestMatch> rankManifests( const std::vector<ManifestDoc>&
             return a.anchors > b.anchors;
         }
         return depth( a ) != depth( b ) ? depth( a ) < depth( b ) : sortutil::svLess( docs[a.doc].rel, docs[b.doc].rel ); } );
+    // A manifest that only depends on what the task names must not lead when one defines it: the best definer comes first, the rest keep their order.
+    const auto definer = std::ranges::find_if( out, []( const ManifestMatch& m )
+                                               { return m.defines; } );
+    if( definer != out.end() )
+    {
+        std::rotate( out.begin(), definer, definer + 1 );
+    }
     return out;
 }
 
@@ -1050,7 +1060,7 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "generic name (core, common, test, ..), a script the task does not call a script, or a plugin entry point the task does not call a "
     "plugin, entry point or extension does not fire it; nor does a dependency, feature or other entry the task neither calls by its kind (dependency, feature, package, binary, ..) nor adds as a new X; an entry point's group (pydantic, flake8.extension) matches by any dot segment, and may be the repo's own name. files= the manifests that name a "
     "task word exactly, shown= and capped=\"1\" when fewer are printed, best first (2 per task word named exactly, 1 per word that is one "
-    "part of a name). <mf> p= the manifest, matched= the task words its names hold, rows= its matching lines, shown= and capped=\"1\" when "
+    "part of a name; when the first only depends on a thing the task names, the best manifest that defines one moves first). <mf> p= the manifest, matched= the task words its names hold, rows= its matching lines, shown= and capped=\"1\" when "
     "fewer are printed. <r> l= the line, kind= what it defines (package, module, dep, dev-dep, peer-dep, opt-dep, script, bin, main, lib, "
     "feature, extra, executable, library, entry-point; a console or gui script is a bin), group= the entry point's group, its text that line, cut=\"1\" when cut to 120 bytes. <feature_touch> (under a manifest whose "
     "match is a feature or extra) n= its features (default and _-private ones left out); <touch_list> the files outside the manifest that "
