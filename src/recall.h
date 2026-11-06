@@ -1921,7 +1921,7 @@ inline RecallWindow selectRecallWindow( std::string_view body, std::size_t windo
 // (≤ 127 bytes for any document under 100 MB, inside kRecallTruncNoteBytes, which the allowance reserves.)
 // The byte range indexes the text recall served — the converted text for an HTML page, not its markup — and
 // excludes the repeated opener and the repeated title line, which are this function's copies, not the window.
-// An HTML page's title line (recallPageTitleLine) sits above the "…" line when the window starts past it.
+// An HTML page's title line sits above the "…" line when the window starts past it.
 inline constexpr std::string_view kRecallWindowLead = "\xE2\x80\xA6\n";   // "…" + newline: text skipped above
 
 // The opening line of the fenced block `at` falls strictly inside, or "" (outside any fence, or inside a
@@ -1954,8 +1954,9 @@ inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t
         return truncateRecallBody( body, keepBytes );   // no window past the head: a head cut, said as one
     }
     const std::vector<RecallProtectedRange> ranges    = findRecallProtectedRanges( body );
-    // A title line the window itself starts after is repeated above it (recallPageTitleLine): a window past the
-    // title would otherwise not say which page it is from. The caller sized the window net of the title.
+    // A title line the window itself starts after is repeated above it (truncateRecallWholeDoc passes it for an
+    // HTML page): a window past the title would otherwise not say which page it is from. The caller sized the
+    // window net of the title.
     const std::string                       titleText = start > title.size() ? std::string( title ) : std::string();
     const std::size_t                       reserved  = kRecallWindowLead.size() + titleText.size();
     const std::size_t                       allowance = keepBytes > reserved ? keepBytes - reserved : 0;
