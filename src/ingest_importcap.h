@@ -228,6 +228,26 @@ ImportSpec normaliseGoImport( TSNode declaration, std::string_view src )
     return out;
 }
 
+// ── DepDialect::Python ───────────────────────────────────────────────────────────────────────────────
+// The capture is an import_from_statement's `module_name:` (`pkg.mod`, `.`, `..rel`), or the FIRST `name:` of an
+// import_statement, which tree-sitter-python types as dotted_name OR aliased_import. For `import a.b as c` that span
+// reads `a.b as c`, a module no resolver can find, so the file lost its edge in --deps, --arch, cycles and the Rule 3
+// narrow (#478 gap 2). The Include target is the aliased_import's own `name:`; the alias `c` is the binds channel's
+// business (pythonImportBindOf below), not the dependency record's. Every other spelling is returned as captured,
+// byte for byte. A multi-clause `import a, b` still records only its first clause (the query's anchor), a disclosed floor.
+ImportSpec normalisePythonImport( TSNode directive, std::string_view raw, std::string_view src )
+{
+    if( kindIs( ts_node_type( directive ), "import_statement" ) )
+    {
+        const TSNode first = fieldChild( directive, NodeField::Name );
+        if( !ts_node_is_null( first ) && kindIs( ts_node_type( first ), "aliased_import" ) )
+        {
+            return { std::string( nodeTextOf( fieldChild( first, NodeField::Name ), src ) ) };
+        }
+    }
+    return { std::string( raw ) };
+}
+
 // ── the dispatch: ONE normaliser per DepDialect ──────────────────────────────────────────────────────
 // CFamily, Web, Go and Python are the dialects that have moved over so far; every other arm returns an empty ImportSpec,
 // which is what makes the capture INERT rather than wrong on a language whose tags.scm has not adopted
@@ -240,7 +260,7 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::
         case DepDialect::CFamily: return normaliseCFamilyImport( directive, raw, src );
         case DepDialect::Web:     return normaliseWebImport( directive, raw, src );
         case DepDialect::Go:      return normaliseGoImport( directive, src );
-        case DepDialect::Python:  return { std::string( raw ) };   // preserve the first plain clause's written alias
+        case DepDialect::Python:  return normalisePythonImport( directive, raw, src );
         default:                  return {};   // no other language captures @import.path yet
     }
 }
