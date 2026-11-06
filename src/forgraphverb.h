@@ -360,4 +360,37 @@ inline std::string pathFromUpstreamNote( std::uint32_t moved )
 }
 
 inline constexpr std::string_view kGraphSubjectCloseXml = "</graph_verb>";
+
+// GRAPH-FORM-ENDPOINTS: did the path verb's printed answer find NO directed path? Read off its open tag (`<path … reachable="0"`), the
+// one attribute every no-path answer carries in every legend; a doc with no <path> tag (a refusal) is not a gap.
+inline bool graphSubjectPathUnreachable( std::string_view doc )
+{
+    const std::size_t at = doc.find( "<path " );
+    if( at == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::size_t end = doc.find( '>', at );
+    return doc.substr( at, end == std::string_view::npos ? std::string_view::npos : end - at ).find( " reachable=\"0\"" ) != std::string_view::npos;
+}
+
+// <path_gap from= to= [missing=]>: its own legend, then from='s --callees and to='s --callers answers. missing=from|to|from,to names a
+// side whose answer could not be captured (not printed, never "none").
+inline std::string pathGapOpenXml( const GraphSubjectArgs& a, bool fromMissing, bool toMissing )
+{
+    std::vector<char> esc;
+    std::string out = "<!-- ripwire for path_gap: the path verb above found NO directed call path (reachable=\"0\"; its searched= and gaps= say "
+                      "whether that search was complete), so the two sides a missing hop would join follow: from='s callees (what it calls, one "
+                      "hop) and to='s callers (who calls it, one hop), each the bare callees / callers verb answer with its own legend and caps. "
+                      "A name in both lists, or a callee of from= that calls a caller of to=, is a CANDIDATE link to read, not a proven path";
+    out += fromMissing || toMissing ? "; missing= names a side whose answer could not be captured: it is not shown, which is not the same as empty" : "";
+    out += " --><path_gap from=\"" + std::string( escapeXml( a.endpoints[0], esc ) ) + "\"";
+    out += " to=\"" + std::string( escapeXml( a.endpoints[1], esc ) ) + "\"";
+    if( fromMissing || toMissing )
+    {
+        out += std::string( " missing=\"" ) + ( fromMissing ? "from" : "" ) + ( fromMissing && toMissing ? "," : "" ) + ( toMissing ? "to" : "" ) + "\"";
+    }
+    return out + ">";
+}
+inline constexpr std::string_view kPathGapCloseXml = "</path_gap>";
 }   // namespace rw

@@ -2563,6 +2563,136 @@ inline std::vector<std::string> parseGraphSubjectPathFrom( std::string_view task
     return {};
 }
 
+// GRAPH-FORM-ENDPOINTS: a task whose WHOLE wording is a two-endpoint graph question ranks on its two endpoints, not on its frame.
+// "what is the path from parseConfigFileWithSystem to createProgram?" ranked `path` as a subject word (374 definitions: the route
+// declined and the ranked rows drifted to path-handling code). The CLOSED form list (written before measuring; nothing else fires):
+//   F1  [lead-in] path from A to B          lead-in = graphSubjectPathLeadIn: nothing | trace|show|explain | what is, [the], [call|code|execution]
+//   F2  [lead-in] chain from A to B         the same lead-in ("call chain from A to B", "trace the call chain from A to B")
+//   F3  how does|do A reach|reaches B   |   how does|do A get to|lead to B
+//   F4  [lead-in] [lowest|nearest|closest] common caller|callers of A and B
+// A and B are the words between the frame's separators, each cut at its first qualifier or clause word or sentence stop
+// (graphSubjectQualifier, the --path block's own span rule). At least ONE endpoint must hold a name (code-like, `f()` or `main`, the
+// --path block's candidate rule); the other may be plain words ("how does startEntry reach the handler"). Two prose endpoints are not
+// the form: there the frame's words describe the question too. A word `path` anywhere else ("where is the config path parsed",
+// "strip the directory path from a_start() to ...") is not the form. `frame` = the frame's content words (for route= dropped:).
+struct PathFormSpans
+{
+    GraphSubjectForm         form = GraphSubjectForm::Path;
+    std::string              from, to;   // the endpoint words as written (edge punctuation trimmed), space-joined
+    std::vector<std::string> frame;      // the frame's non-stopword words, task order, case-folded
+};
+
+namespace detail
+{
+// the endpoint words of w[b, e) up to the first qualifier / clause word or sentence stop, space-joined ("" when none); `*used` = one past
+// the last word read (the words from there to e are not ranked: they go to the frame, so route= dropped: names them); `*named` is set
+// when a word is a name (code-like, a call `f()`, or `main`: the --path block's own candidate rule)
+inline std::string pathFormSpan( std::span<const std::string_view> w, std::size_t b, std::size_t e, std::size_t* used, bool* named )
+{
+    std::string out;
+    std::size_t k = b;
+    for( ; k < e && !graphSubjectQualifier( w[k] ); ++k )
+    {
+        const GraphSubjectWord t = graphSubjectTrimWord( w[k] );
+        if( !t.text.empty() )
+        {
+            out += out.empty() ? "" : " ";
+            out += t.text;
+            *named = *named || ( graphSubjectNameable( t.text ) && ( t.parens || graphSubjectCodeLike( t.text ) || t.text == "main" ) );
+        }
+        if( t.stop )
+        {
+            ++k;
+            break;
+        }
+    }
+    *used = k;
+    return out;
+}
+}   // namespace detail
+
+inline std::optional<PathFormSpans> parsePathFormSpans( std::string_view task )
+{
+    const std::vector<std::string_view> w = splitRouteWords( task );
+    const std::span<const std::string_view> ws( w );
+    const auto is = [ & ]( std::size_t k, std::initializer_list<std::string_view> any ) { return k < w.size() && detail::graphSubjectWordIs( w[k], any ); };
+    // the frame = every word outside [fb, fe) and [tb, te); both spans must hold a word
+    const auto make = [ & ]( GraphSubjectForm form, std::size_t fb, std::size_t fe, std::size_t tb, std::size_t te ) -> std::optional<PathFormSpans>
+    {
+        PathFormSpans p;
+        p.form = form;
+        std::size_t fu = fb, tu = tb;
+        bool        named = false;
+        p.from = detail::pathFormSpan( ws, fb, fe, &fu, &named );
+        p.to   = detail::pathFormSpan( ws, tb, te, &tu, &named );
+        // an endpoint must be NAMED: with two prose endpoints ("from the Router tower Service call to the handler function") the frame's
+        // words ("call chain") are part of what the task describes, and dropping them lost an item in-sample (axum-06)
+        if( p.from.empty() || p.to.empty() || !named )
+        {
+            return std::nullopt;
+        }
+        for( std::size_t k = 0; k < w.size(); ++k )
+        {
+            if( ( k >= fb && k < fu ) || ( k >= tb && k < tu ) )
+            {
+                continue;
+            }
+            std::string lw = routeLower( detail::graphSubjectTrimWord( w[k] ).text );
+            if( !lw.empty() && !isRouteStopword( lw ) && lw != "from" && lw != "and" )
+            {
+                p.frame.push_back( std::move( lw ) );
+            }
+        }
+        return p;
+    };
+    // the first `sep` word after index `from` with a word on each side
+    const auto sep = [ & ]( std::size_t from, std::string_view word ) -> std::size_t
+    {
+        for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
+        {
+            if( routeLower( w[k] ) == word ) { return k; }
+        }
+        return w.size();
+    };
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // F1 / F2: [lead-in] path|chain from A to B
+    {
+        if( is( i, { "path", "chain" } ) && routeLower( w[i + 1] ) == "from" && graphSubjectPathLeadIn( ws.first( i ) ) )
+        {
+            const std::size_t t = sep( i + 2, "to" );
+            return t < w.size() ? make( GraphSubjectForm::Path, i + 2, t, t + 1, w.size() ) : std::nullopt;
+        }
+    }
+    if( is( 0, { "how" } ) && is( 1, { "does", "do" } ) )   // F3: how does A reach B | how does A get to / lead to B
+    {
+        for( std::size_t k = 3; k + 1 < w.size(); ++k )
+        {
+            if( is( k, { "reach", "reaches" } ) )
+            {
+                return make( GraphSubjectForm::Path, 2, k, k + 1, w.size() );
+            }
+            if( is( k, { "get", "lead" } ) && k + 2 < w.size() && routeLower( w[k + 1] ) == "to" )
+            {
+                return make( GraphSubjectForm::Path, 2, k, k + 2, w.size() );
+            }
+        }
+        return std::nullopt;
+    }
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // F4: [lead-in] [lowest|nearest|closest] common caller(s) of A and B
+    {
+        if( is( i, { "common" } ) && is( i + 1, { "caller", "callers" } ) && routeLower( w[i + 2] ) == "of" )
+        {
+            const std::size_t lead = i > 0 && is( i - 1, { "lowest", "nearest", "closest" } ) ? i - 1 : i;
+            if( !graphSubjectPathLeadIn( ws.first( lead ) ) )
+            {
+                return std::nullopt;
+            }
+            const std::size_t a = sep( i + 3, "and" );
+            return a < w.size() ? make( GraphSubjectForm::Common, i + 3, a, a + 1, w.size() ) : std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
 inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )
 {
     const std::vector<std::string_view> words = splitRouteWords( query );

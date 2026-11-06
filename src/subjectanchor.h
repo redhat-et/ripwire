@@ -13,7 +13,7 @@
 // that spelling, its qualifier placing it when it has one (scope, file stem or directory, the mention anchor's own test), in at most
 // kSubjectMaxDefs definitions. A namesake flood proves nothing, so that route stays declined and says so. Graph forms (path from,
 // callers of, call chain from), joins of named endpoints (+, ->, =>, =, |) and pasted traces or issue forms get no reading; their
-// answers are byte-identical to before.
+// answers are byte-identical to before, except the two-endpoint path forms (lexical.h parsePathFormSpans), which rank on their endpoints.
 // WHAT A PLAIN WORD THAT REALLY IS A SYMBOL GETS. On a flip it is dropped like any other word, beside a proven name, and the route
 // prints its count: "dropped: emit(102-defs) new(41-defs) argument". To ask about emit, the subject is `emit`, which routes as it always did.
 //
@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -624,6 +625,22 @@ inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, c
 inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
 {
     SubjectRoute out;
+    // GRAPH-FORM-ENDPOINTS (lexical.h parsePathFormSpans): a task worded as `path from A to B` / `call chain from A to B` / `how does A
+    // reach B` / `lowest common caller of A and B` ranks on A and B alone; its frame words are dropped (route= says which). Graph forms
+    // get no subject reading below, so this is the whole route for them.
+    if( std::optional<PathFormSpans> pf = parsePathFormSpans( task ) )
+    {
+        // TWO endpoints: the conceptual ranker over both (the mention anchor lifts each one the task names verbatim). A name-exact route
+        // would anchor ONE of them and serve its body in place of the ranked map (axum-08 lost an item and 24 KB to that, in-sample).
+        out.rankQuery    = pf->from + " " + pf->to;
+        out.route.which  = LexMode::SubtokenBody;
+        out.route.reason = "subtoken+body";
+        if( !pf->frame.empty() )
+        {
+            out.route.reason += subjectDroppedClause( ing, pf->frame );
+        }
+        return out;
+    }
     out.route = chooseForRanker( ing, task );
     SubjectReading reading = subjectReading( ing, task );
     if( reading.exact.empty() )
