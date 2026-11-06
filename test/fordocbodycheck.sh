@@ -29,10 +29,9 @@
 #        line start ran once per task-word hit: hits x line length, 127 s at 2.6 MB); the time limit makes a quadratic scan red
 #   (b2) also: held_bytes is exact (bytes + held_bytes == the unbudgeted block's bytes) and the block's est_tokens is the price recomputed from
 #        its own bytes (markup 2.5 B per token, text 3.8), not the binary's word: the held-whole block is priced the same way (h2)
-#   (q1) the relevance floor: a section holding fewer of the task's subject words than a third of them (3 at most) is left out, below_floor= counts
-#        them and every section served holds enough; the section that holds them is served (positive twin); (q2) a file with none left is
-#        f p= why="floor" (XML and JSON "unserved", "below_floor"); (q3) every picked file off the subject: no block at all, where the same repo
-#        shape with on-subject docs fires (n2b)
+#   (q1) the relevance floor: a section holding fewer of the task's subject words than a third of them (3 at most) is left out unless it is its
+#        file's top-ranked section, below_floor= counts them and every other section served holds enough; the section that holds them is served
+#        (positive twin); (q2) a file's top-ranked section is served even when it holds none of them (the held-2 row mdref-02's shape)
 #   (z1) a binary that crashes or prints nothing turns every positive arm red (each run's rc and </ctx> are checked)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -372,23 +371,20 @@ s = open( sys.argv[1], encoding="utf8" ).read()
 b = s[ s.index( "<!-- ripwire for doc_body:" ): ]
 root = re.search( r'<doc_body [^>]*>', b ).group(0)
 assert int( re.search( r' below_floor="(\d+)"', root ).group(1) ) >= 1, root
-rows = re.findall( r'<b t="section" p="([^"]+)"[^>]* n="([^"]*)"[^>]*><!\[CDATA\[(.*?)\]\]></b>', b, re.S )
+rows = re.findall( r'<b t="section" p="([^"]+)"[^>]* n="([^"]*)" rank="(\d+)"[^>]*><!\[CDATA\[(.*?)\]\]></b>', b, re.S )
 assert rows
-for p, n, t in rows:
+for p, n, r, t in rows:
     words = set( re.findall( r"[a-z]+", ( n + " " + t ).lower() ) )
-    assert len( words & { "retry", "policy", "failed", "uploads" } ) >= 2, ( "a served section holds too few subject words", p, n )
-assert ( "docs/uploads.md", "Retry on failure" ) in [ ( p, n ) for p, n, t in rows ], "the on-subject section is still served"
-assert "Upload limits" not in [ n for p, n, t in rows ], "the section with no subject word is left out"
+    assert r == "1" or len( words & { "retry", "policy", "failed", "uploads" } ) >= 2, ( "a served section holds too few subject words", p, n )
+assert ( "docs/uploads.md", "Retry on failure" ) in [ ( p, n ) for p, n, r, t in rows ], "the on-subject section is still served"
+assert "Upload limits" not in [ n for p, n, r, t in rows ], "the section with no subject word is left out (it is not rank 1)"
 PY
 then ok "(q1) the floor leaves out the sections with too few of the task's subject words (below_floor= counts them), serves the one that holds them"; else no "(q1) relevance floor"; fi
+# (q2) a file's top-ranked section is kept even when it holds fewer subject words than the floor: README.md's one section holds only "retry"
 HOFF="$TMP/halfoff"; cp -R "$DFX" "$HOFF"; printf '# Demo\n\nA demo uploader. See the docs for the retry.\n' >"$HOFF/README.md"
-run "$HOFF" "--for=$TASK" --json >"$TMP/q2.json"; q2rc=$?
-if ans "$TMP/q2.xml" "$HOFF" "--for=$TASK" && [ "$q2rc" = 0 ] && grep -q '<f p="README.md" why="floor"/>' "$TMP/q2.xml" && grep -q ' below_floor="[1-9]' "$TMP/q2.xml" \
-   && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["doc_body"]; assert d["below_floor"]>=1 and {"p":"README.md","why":"floor"} in d["unserved"], d.get("unserved")' "$TMP/q2.json" 2>/dev/null
-then ok "(q2) a file with nothing on the subject is f p= why=\"floor\" in XML and in JSON unserved, with below_floor="; else no "(q2) why=floor: $( grep -o '<f p=[^>]*>' "$TMP/q2.xml" | head -c 300 )"; fi
-QFX="$TMP/alloff"; cp -R "$TFX" "$QFX"; printf '# Retries\n\n## Retry\n\nRetry once.\n' >"$QFX/docs/retries.md"; printf '# Uploads\n\n## Retry\n\nRetry again.\n' >"$QFX/docs/uploads.md"
-if ans "$TMP/q3.xml" "$QFX" "--for=$TASK" && tailrows "$TMP/q3.xml" | grep -q 'docs/retries.md' && tailrows "$TMP/q3.xml" | grep -q 'docs/uploads.md' && ! grep -q 'doc_body' "$TMP/q3.xml"
-then ok "(q3) two docs in the first t rows but nothing on the subject in either: no block (the same shape with on-subject docs fires, n2b)"; else no "(q3) all-off-subject must print no block: $( tailrows "$TMP/q3.xml" )"; fi
+if ans "$TMP/q2.xml" "$HOFF" "--for=$TASK" && grep -q '<b t="section" p="README.md"[^>]* n="Demo" rank="1" of="1"' "$TMP/q2.xml" && grep -q ' below_floor="[1-9]' "$TMP/q2.xml" \
+   && ! grep -q 'why="floor"' "$TMP/q2.xml"
+then ok "(q2) a file's top-ranked section is served although it holds one subject word (the floor spares it); other files still lose theirs"; else no "(q2) rank-1 exemption: $( grep -o '<b t=[^>]*>' "$TMP/q2.xml" | head -c 400 )"; fi
 
 # (p1) cost: a doc section of ONE 1.3 MB line is served in a bounded time, with and without a token budget
 PFX="$TMP/longline"; cp -R "$DFX" "$PFX"

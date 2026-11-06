@@ -281,7 +281,6 @@ struct ForDocPassage
 inline constexpr std::string_view kForDocUnreadable = "unreadable";
 inline constexpr std::string_view kForDocAllowance = "allowance";
 inline constexpr std::string_view kForDocBudget = "budget";
-inline constexpr std::string_view kForDocFloor = "floor"; // every picked section of the file shares fewer than kForDocMinSubjectWords of the task's words
 
 struct ForDocUnserved
 {
@@ -586,36 +585,31 @@ struct ForDocPrep
     };
     std::vector<Loaded> loaded;
     std::vector<std::uint32_t> unreadable;
-    std::vector<std::pair<std::uint32_t, std::size_t>> offSubject; // files with nothing on the subject: (file, sections left out)
     std::vector<std::string> queryToks;
 };
 
-// Keep the units of a loaded file that hold `need` subject words; false when none does (the file is off the subject).
-inline bool applySubjectFloor( ForDocPrep::Loaded& l, const std::vector<std::string>& subject, std::size_t need )
+// Keep the units of a loaded file that hold `need` subject words, and always its top-ranked one: a file's best section can share few of the task's
+// words and still be the answer (a task worded around the problem, a section worded around the mechanism).
+inline void applySubjectFloor( ForDocPrep::Loaded& l, const std::vector<std::string>& subject, std::size_t need )
 {
     l.demand = 0;
     if( !l.sections )
     {
-        if( subjectWordsIn( l.whole, subject ) < need )
-        {
-            return false;
-        }
         l.demand = l.whole.size();
-        return true;
+        return;
     }
     const RecallSectionBody& sec = *l.sections;
     l.isOnSubject.assign( sec.units.size(), 0 );
     for( std::size_t u = 0; u < sec.units.size(); ++u )
     {
         const RecallSectionUnit& unit = sec.units[u];
-        if( subjectWordsIn( std::string_view( sec.body ).substr( unit.bodyOffset, unit.bodyLength ), subject ) >= need )
+        if( u == sec.rankOrder.front() || subjectWordsIn( std::string_view( sec.body ).substr( unit.bodyOffset, unit.bodyLength ), subject ) >= need )
         {
             l.isOnSubject[u] = 1;
             l.demand += recallUnitCostBytes( unit );
         }
     }
     l.belowFloor = std::size_t( std::ranges::count( l.isOnSubject, 0 ) );
-    return l.belowFloor < sec.units.size();
 }
 
 inline ForDocPrep prepareForDocBody( const ForDocBodyInputs& in )
@@ -643,11 +637,7 @@ inline ForDocPrep prepareForDocBody( const ForDocBodyInputs& in )
             }
             l.whole = std::move( *body );
         }
-        if( !applySubjectFloor( l, subject, need ) )
-        {
-            prep.offSubject.emplace_back( f, l.sections ? l.sections->units.size() : 1 );
-            continue;
-        }
+        applySubjectFloor( l, subject, need );
         prep.loaded.push_back( std::move( l ) );
     }
     return prep;
@@ -788,11 +778,6 @@ inline ForDocBody serveForDocBody( const IngestResult& ing, const ForDocPrep& pr
     {
         out.unserved.push_back( { f, kForDocUnreadable, 0 } );
     }
-    for( const auto& [f, sections] : prep.offSubject )
-    {
-        out.unserved.push_back( { f, kForDocFloor, 0 } );
-        out.belowFloor += sections;
-    }
     for( const ForDocPrep::Loaded& l : prep.loaded )
     {
         out.belowFloor += l.belowFloor;
@@ -884,8 +869,8 @@ inline constexpr std::string_view kForDocBodyLegend =
     "section's N, around the task's words. allowance= section text the files share, bytes= printed; est_tokens= prices this block alone (the "
     "answer's est_tokens leaves it out); dropped= picked sections left out, capped=\"1\", next= the call that serves more; below_floor= picked sections left out because "
     "they hold fewer of the task's subject words than a third of them, 3 at most (subject words: its words of 3+ letters that are not common "
-    "English or doc, describe, explain, show), a file with none left is f p= why=\"floor\"; f p= a doc file with sections left out, why= unreadable, allowance, "
-    "budget or floor; held=\"budget\" held_bytes=: a token budget kept that much text out, next= "
+    "English or doc, describe, explain, show); a file's top-ranked section is always kept); f p= a doc file with sections left out, why= unreadable, "
+    "allowance or budget; held=\"budget\" held_bytes=: a token budget kept that much text out, next= "
     "repeats the call without it. The answer above is unchanged -->";
 
 inline std::string forDocBodyNext( std::string_view task ) { return nextAttrXml( nextFlag( "--recall=", task ) ); }
@@ -1147,10 +1132,6 @@ inline std::string renderForDocBody( const ForDocBodyInputs& in, const ForDocBod
         return heldWhole(); // the answer alone spent the budget: nothing is read for the block
     }
     const ForDocPrep prep = prepareForDocBody( in );
-    if( prep.loaded.empty() && !prep.offSubject.empty() )
-    {
-        return {}; // every readable picked file is off the subject: nothing to serve (present-only, like a pick that does not fire)
-    }
     return fitForDocBody(
         in.ing, prep, budget,
         [&]( const ForDocBody& b )
