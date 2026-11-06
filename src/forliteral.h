@@ -3211,57 +3211,30 @@ struct OneFileText
     }
 };
 
-// a type spelling is not one of these words: they stand between a name and its type (`c: &mut Config`) or before a declared name (`var x`)
-inline bool isTypeNoise( std::string_view id ) noexcept
+// the type spelling next to a name in a signature: after it (`c *kubeletconfig.Config`, `c: &mut Config`, `c Config`; `at` = the byte after the name) or
+// before it (C++ and Java `const Config& c`; `at` = the name's first byte). The last segment of a qualified type; "" when nothing stands there.
+// A word that stands between a name and its type (`mut`, `const`) or before a declared name (`var x`) is passed over.
+inline std::string_view typeNextTo( std::string_view sig, std::size_t at, bool after ) noexcept
 {
-    static constexpr auto kWords = std::to_array<std::string_view>( { "mut", "const", "struct", "dyn", "var", "let", "val", "static", "final", "pub", "auto", "func", "fn", "def" } );
-    return std::find( kWords.begin(), kWords.end(), id ) != kWords.end();
-}
-inline bool isQualifiedRun( char c ) noexcept { return namesplit::isIdentChar( c ) || c == '.' || c == ':'; }
-inline std::string_view lastSegmentOf( std::string_view id ) noexcept
-{
+    static constexpr auto kNoise = std::to_array<std::string_view>( { "mut", "const", "struct", "dyn", "var", "let", "val", "static", "final", "pub", "auto", "func", "fn", "def" } );
+    const auto            isRun  = []( char c ) { return namesplit::isIdentChar( c ) || c == '.' || c == ':'; };
+    const std::string_view skip  = after ? std::string_view( " \t:*&[]" ) : std::string_view( " \t*&" );
+    std::string_view       id;
+    do
+    {
+        while( after ? at < sig.size() && skip.find( sig[at] ) != std::string_view::npos : at > 0 && skip.find( sig[at - 1] ) != std::string_view::npos )
+        {
+            after ? ++at : --at;
+        }
+        const std::size_t from = at;
+        while( after ? at < sig.size() && isRun( sig[at] ) : at > 0 && isRun( sig[at - 1] ) )
+        {
+            after ? ++at : --at;
+        }
+        id = after ? sig.substr( from, at - from ) : sig.substr( at, from - at );
+    } while( std::find( kNoise.begin(), kNoise.end(), id ) != kNoise.end() );
     const std::size_t k = id.find_last_of( ".:" );
     return k == std::string_view::npos ? id : id.substr( k + 1 );
-}
-
-// the type written after the name that ends at `i` in `sig`: `c *kubeletconfig.Config`, `c: &mut Config`, `c Config`; "" when none follows
-inline std::string_view typeAfterName( std::string_view sig, std::size_t i ) noexcept
-{
-    std::string_view id;
-    do
-    {
-        while( i < sig.size() && std::string_view( " \t:*&[]" ).find( sig[i] ) != std::string_view::npos )
-        {
-            ++i;
-        }
-        const std::size_t b = i;
-        while( i < sig.size() && isQualifiedRun( sig[i] ) )
-        {
-            ++i;
-        }
-        id = sig.substr( b, i - b );
-    } while( isTypeNoise( id ) );
-    return lastSegmentOf( id );
-}
-
-// the type written before the name that starts at `j` in `sig`: C++ and Java `const Config& c`; "" when none precedes
-inline std::string_view typeBeforeName( std::string_view sig, std::size_t j ) noexcept
-{
-    std::string_view id;
-    do
-    {
-        while( j > 0 && std::string_view( " \t*&" ).find( sig[j - 1] ) != std::string_view::npos )
-        {
-            --j;
-        }
-        const std::size_t e = j;
-        while( j > 0 && isQualifiedRun( sig[j - 1] ) )
-        {
-            --j;
-        }
-        id = sig.substr( j, e - j );
-    } while( isTypeNoise( id ) );
-    return lastSegmentOf( id );
 }
 
 // the type name of the parameter or receiver `name` in a signature; "" when it names none (an untyped parameter, a type shared by a list `a, b *T`)
@@ -3273,7 +3246,7 @@ inline std::string_view paramTypeIn( std::string_view sig, std::string_view name
         {
             continue;
         }
-        for( const std::string_view type : { typeAfterName( sig, p + name.size() ), typeBeforeName( sig, p ) } )
+        for( const std::string_view type : { typeNextTo( sig, p + name.size(), true ), typeNextTo( sig, p, false ) } )
         {
             if( !type.empty() )
             {
