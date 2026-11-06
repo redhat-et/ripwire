@@ -316,6 +316,7 @@ struct ForDocBodyBudget
     std::size_t leftTokens() const noexcept { return tokens > answerTokens ? tokens - answerTokens : 0; }
 };
 
+inline constexpr std::size_t kForDocTopShareTenths = 6; // a file's top-ranked section that does not fit is an excerpt of up to this many tenths of the file's share
 inline constexpr std::size_t kForDocExcerptMinBytes = 400; // an excerpt is cut only when at least this much allowance is left
 inline constexpr std::size_t kForDocMinAllowance = 600; // under a token budget a block with less text room than this is held whole
 
@@ -541,28 +542,54 @@ inline ForDocPrep prepareForDocBody( const IngestResult& ing, const std::vector<
 
 namespace fordocbody_detail
 {
+// one unit of a loaded file as a passage, whole or cut to the best window within `maxBytes`
+inline ForDocPassage loadedUnitPassage( const IngestResult& ing, const ForDocPrep& prep, const ForDocPrep::Loaded& l, std::uint32_t u, std::uint32_t rank,
+                                        std::size_t maxBytes )
+{
+    if( !l.sections )
+    {
+        return wholeDocPassage( ing, l.fileId, l.whole, prep.queryToks, maxBytes );
+    }
+    const RecallSectionUnit& unit = l.sections->units[u];
+    return unitPassage( l.fileId, std::string_view( l.sections->body ).substr( unit.bodyOffset, unit.bodyLength ), unit.lineLo, unit.lineHi,
+                        ing.symbols[unit.symIndex].name, rank, std::uint32_t( l.sections->units.size() ), true, false, prep.queryToks, maxBytes );
+}
+
 // pass 1 for one file: its sections in rank order, each admitted whole when it fits what is left of the file's share and SKIPPED
-// when it does not (the next one is tried: a misfit no longer ends the file)
-inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep::Loaded& l, std::size_t share )
+// when it does not (the next one is tried: a misfit no longer ends the file). The file's top-ranked section is never skipped: when it
+// does not fit it is an excerpt around the task's words, up to kForDocTopShareTenths of the share (all of it for a file with one unit),
+// and the sections below it share the rest.
+inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep& prep, const ForDocPrep::Loaded& l, std::size_t share )
 {
     FileServe fs;
     fs.isServed = true;
+    const std::size_t unitCount = l.sections ? l.sections->units.size() : 1;
+    fs.units = unitCount;
+    const auto topExcerpt = [&]( std::uint32_t u )
+    {
+        const std::size_t cap = unitCount == 1 ? share : share * kForDocTopShareTenths / 10;
+        if( cap < kForDocExcerptMinBytes )
+        {
+            return false;
+        }
+        fs.passages.push_back( loadedUnitPassage( ing, prep, l, u, 1, cap ) );
+        fs.spent += fs.passages.back().text.size();
+        return true;
+    };
     if( !l.sections )
     {
-        fs.units = 1;
         if( l.whole.size() <= share )
         {
             fs.passages.push_back( wholeDocPassage( ing, l.fileId, l.whole, {}, share ) );
             fs.spent = l.whole.size();
         }
-        else
+        else if( !topExcerpt( 0 ) )
         {
             fs.missed.emplace_back( 1, 0 );
         }
         return fs;
     }
     const RecallSectionBody& sec = *l.sections;
-    fs.units = sec.units.size();
     std::uint32_t rank = 0;
     for( const std::uint32_t u : sec.rankOrder )
     {
@@ -571,6 +598,10 @@ inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep::L
         const std::size_t cost = recallUnitCostBytes( unit );
         if( fs.spent + cost > share )
         {
+            if( rank == 1 && topExcerpt( u ) )
+            {
+                continue;
+            }
             fs.missed.emplace_back( rank, u );
             continue;
         }
@@ -581,39 +612,38 @@ inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep::L
     return fs;
 }
 
-// pass 2: the allowance the files left unspent goes to the sections their shares did not admit, best first per file: a section that
-// fits the pooled rest is admitted whole, the first that does not is cut to fit around the best window of the task's words
+// pass 2: the allowance the files left unspent goes to the sections their shares did not admit, the pool split equally among the files that
+// still have one (a file that needs less hands the rest on); per file best first: a section that fits is admitted whole, the first that
+// does not is cut to fit around the best window of the task's words
 inline void admitFromPool( const IngestResult& ing, const ForDocPrep& prep, std::vector<FileServe>& served, std::size_t pool )
 {
-    for( std::size_t i = 0; i < served.size() && pool >= kForDocExcerptMinBytes; ++i )
+    std::size_t waiting = std::ranges::count_if( served, []( const FileServe& fs )
+                                                 { return !fs.missed.empty(); } );
+    for( std::size_t i = 0; i < served.size(); ++i )
     {
         FileServe& fs = served[i];
+        if( fs.missed.empty() )
+        {
+            continue;
+        }
+        std::size_t room = std::min( pool, pool / waiting );
+        --waiting;
         const ForDocPrep::Loaded& l = prep.loaded[i];
         std::vector<std::pair<std::uint32_t, std::uint32_t>> stillMissed;
         bool isExcerpted = false;
         for( const auto& [rank, u] : fs.missed )
         {
-            if( isExcerpted || pool < kForDocExcerptMinBytes )
+            const std::size_t cost = l.sections ? recallUnitCostBytes( l.sections->units[u] ) : l.whole.size();
+            if( isExcerpted || room < kForDocExcerptMinBytes )
             {
                 stillMissed.emplace_back( rank, u );
                 continue;
             }
-            const bool isWhole = !l.sections;
-            const std::string_view text = isWhole ? std::string_view( l.whole )
-                                                  : std::string_view( l.sections->body ).substr( l.sections->units[u].bodyOffset, l.sections->units[u].bodyLength );
-            const std::size_t cost = isWhole ? text.size() : recallUnitCostBytes( l.sections->units[u] );
-            if( isWhole )
-            {
-                fs.passages.push_back( wholeDocPassage( ing, l.fileId, text, prep.queryToks, pool ) );
-            }
-            else
-            {
-                const RecallSectionUnit& unit = l.sections->units[u];
-                fs.passages.push_back( unitPassage( l.fileId, text, unit.lineLo, unit.lineHi, ing.symbols[unit.symIndex].name, rank,
-                                                    std::uint32_t( l.sections->units.size() ), true, false, prep.queryToks, pool ) );
-            }
-            const bool isFit = cost <= pool;
-            pool -= std::min( pool, isFit ? cost : fs.passages.back().text.size() );
+            fs.passages.push_back( loadedUnitPassage( ing, prep, l, u, rank, room ) );
+            const bool isFit = cost <= room;
+            const std::size_t used = std::min( room, isFit ? cost : fs.passages.back().text.size() );
+            room -= used;
+            pool -= std::min( pool, used );
             isExcerpted = !isFit;
         }
         fs.missed = std::move( stillMissed );
@@ -642,7 +672,7 @@ inline ForDocBody serveForDocBody( const IngestResult& ing, const ForDocPrep& pr
     std::size_t spent = 0;
     for( std::size_t i = 0; i < shares.servedCount; ++i )
     {
-        served.push_back( fordocbody_detail::admitFileSections( ing, prep.loaded[i], shares.alloc[i] ) );
+        served.push_back( fordocbody_detail::admitFileSections( ing, prep, prep.loaded[i], shares.alloc[i] ) );
         spent += served.back().spent;
     }
     fordocbody_detail::admitFromPool( ing, prep, served, allowance > spent ? allowance - spent : 0 );
@@ -908,19 +938,20 @@ inline std::string fitForDocBody( const IngestResult& ing, const ForDocPrep& pre
     }
     const std::size_t left = budget.leftTokens();
     std::size_t allowance = kForDocBodyBytes;
-    for( int attempt = 0; attempt < 5 && left > 0; ++attempt )
+    for( int attempt = 0; attempt < 8 && left > 0; ++attempt )
     {
         const auto [text, tokens] = render( serveForDocBodyHeld( ing, prep, allowance ) );
         if( tokens <= left )
         {
             return text;
         }
-        const std::size_t shrink = std::size_t( double( tokens - left ) * kBytesPerTokenBody ) + 16;
-        if( allowance < kForDocMinAllowance + shrink )
+        if( allowance <= kForDocMinAllowance )
         {
-            break;
+            break; // even the smallest block is over what the answer left
         }
-        allowance -= shrink;
+        // the over-shoot in tokens, as text bytes at the body rate (a little more: the block is not linear in its allowance)
+        const std::size_t shrink = std::size_t( double( tokens - left ) * kBytesPerTokenBody * 1.15 ) + 16;
+        allowance = allowance > kForDocMinAllowance + shrink ? allowance - shrink : kForDocMinAllowance;
     }
     return heldWhole();
 }

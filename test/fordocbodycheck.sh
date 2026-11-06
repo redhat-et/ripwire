@@ -245,7 +245,7 @@ assert "held" not in b and b["match"] == "lexical" and len( b["passages"] ) >= 3
 PY
 then ok "(b4) --json --token-budget=100000 serves the passages, priced within the budget left"; else no "(b4) --json under a big budget"; fi
 pj=0; fj=1
-for B in 5000 5600 6200 6800 7400 8200; do
+for B in 5000 5200 5400 5600 6200 6800 7400 8200; do
   run "$DFX" "--for=$TASK" --json --token-budget=$B >"$TMP/b4p.json"
   python3 - "$TMP/b4p.json" $B <<'PY' && pj=1
 import json, sys
