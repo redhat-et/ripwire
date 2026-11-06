@@ -2040,6 +2040,22 @@ pub struct Args {
     pub clap_parallelism: usize,
 }
 RS
+cat > "$FL/crates/cli/src/derive.rs" <<'RS'
+pub struct Derive {
+    #[arg(long = "derive-cache", default_value_t = 64)]
+    pub cache_size: usize,
+    #[clap(long = "derive-clap", default_value = "fast")]
+    pub mode: String,
+    #[structopt(long = "derive-stop", default_value = "7")]
+    pub stop: String,
+    #[serde(rename = "derive-serde", default = "9")]
+    pub serde_field: String,
+}
+
+fn probe() {
+    arg("derive-call", default = 5);
+}
+RS
 mkdir -p "$FL/source/server" "$FL/aaa" "$FL/cmd/outfmt" "$FL/cmd/sq" "$FL/cmd/cache" "$FL/cmd/pkgvar" "$FL/pkg/other" "$FL/crates/nu"
 cat > "$FL/tool/alias.py" <<'PY'
 import argparse
@@ -2280,6 +2296,11 @@ flagarm 'what does the --greetingtext flag do' 'F32 [P] a quoted default with a 
 flagarm 'what does the --pairingtext flag do' 'F33 [P] a quoted default holding = ("key=value"): def= says it' 's="pairingtext" shape="flag"' 'def="&quot;key=value&quot;"'
 flagarm 'what does the --paren-close flag do' 'F34 [P] boost default_value(")"): the paren in the string does not end the default' 's="paren-close" shape="flag"' 'def="&quot;)&quot;"'
 flagarm 'what does the --lk-pods flag do' 'F35 [P] default=64 on a lookup() call is no flag default; the add_argument whose default= sits on the next line gives def=32 (no newline in it)' 's="lk-pods" shape="flag"' 'def="32"'
+flagarm 'what does the --derive-cache flag do' 'F38 [P] clap derive #[arg(long = "derive-cache", default_value_t = 64)] defines a flag: def=64 (F35 took keyword defaults only from calls)' 's="derive-cache" shape="flag"' 'p="crates/cli/src/derive.rs"' 'def="64"'
+flagarm 'what does the --derive-clap flag do' 'F38b [G] twin: #[clap(...)] attribute, a quoted default_value' 's="derive-clap" shape="flag"' 'def="&quot;fast&quot;"'
+flagarm 'what does the --derive-stop flag do' 'F38c [G] twin: #[structopt(...)] attribute' 's="derive-stop" shape="flag"' 'def="&quot;7&quot;"'
+flagarm 'what does the --derive-serde flag do' 'F38d [P] an attribute that is no flag definition (#[serde(rename = ..., default = ...)]) gives no def= (F35 intent holds)' 's="derive-serde"' '!def="'
+flagarm 'what does the --derive-call flag do' 'F38e [P] a plain arg(...) call (no #[) is no flag definition: no def=' 's="derive-call"' '!def="'
 A="$( fl '--for=what does the --wr-limit flag default to' )"; L="$( flit <<<"$A" )"
 if has "$L" 'def="c.WrLimit"' && has "$L" 'writes="2"' && ! has "$L" '999' && ! has "$L" 'suf'; then ok "F36 [P] ld writes: a trailing comment and a second statement on the line keep the constants (110, 120); a commented-out write (999) and a concatenation are no writes"; else no "F36 writes: $( grep -o 'writes="[0-9]*"' <<<"$L" ) $( lds <<<"$A" )"; fi
 A="$( fl '--for=what does the --sk-limit flag do' )"; L="$( flit <<<"$A" )"

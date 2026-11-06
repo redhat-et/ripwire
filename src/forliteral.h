@@ -2872,6 +2872,23 @@ inline std::optional<std::string_view> keywordDefaultOf( std::string_view arg ) 
     return boostDefaultOf( arg );
 }
 
+// FLAG-SHAPE-LIT: a Rust clap/structopt derive attribute that defines a flag, `#[arg(long = "cache-size", default_value_t = 64)]`, `#[clap(...)]`, `#[structopt(...)]`:
+// the callee right after `#[`. A plain `arg(...)` call, or another attribute (`#[serde(default = ...)]`), is no flag definition.
+inline bool isRustFlagAttribute( std::string_view text, std::string_view callee ) noexcept
+{
+    static constexpr auto kAttrs = std::to_array<std::string_view>( { "arg", "clap", "structopt" } );
+    if( std::find( kAttrs.begin(), kAttrs.end(), callee ) == kAttrs.end() )
+    {
+        return false;
+    }
+    std::size_t before = std::size_t( callee.data() - text.data() );
+    while( before > 0 && ( text[before - 1] == ' ' || text[before - 1] == '\t' ) )
+    {
+        --before;
+    }
+    return before >= 2 && text[before - 1] == '[' && text[before - 2] == '#';
+}
+
 // FLAG-SHAPE-LIT: a call outside the typed flag APIs (flagSlotOf) that still DEFINES a flag and may carry its `default=` keyword: argparse `add_argument`, click and typer
 // `option` / `Option` / `argument` / `Argument`, optparse `add_option`, a JS `.option(`, and boost's `("name", po::value<T>()->default_value(x), "usage")` chain, whose
 // call has no callee name (the `(` follows an `add_options()` or the previous `)`)
@@ -2879,6 +2896,10 @@ inline bool definesFlagByKeyword( std::string_view text, std::size_t open, std::
 {
     static constexpr auto kDefiners = std::to_array<std::string_view>( { "add_argument", "add_option", "option", "Option", "argument", "Argument", "addOption", "addArgument" } );
     if( std::find( kDefiners.begin(), kDefiners.end(), callee ) != kDefiners.end() )
+    {
+        return true;
+    }
+    if( isRustFlagAttribute( text, callee ) )
     {
         return true;
     }
