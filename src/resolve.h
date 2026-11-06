@@ -1205,6 +1205,23 @@ private:
     std::vector<std::string_view>              m_visited;
 };
 
+// True when a line of the TOML `text` opens the section `header` (`[package]`, `[workspace]`), a trailing comment allowed.
+inline bool tomlHasSection( std::string_view text, std::string_view header )
+{
+    for( std::size_t at = 0; at < text.size(); )
+    {
+        const std::size_t end  = std::min( text.find( '\n', at ), text.size() );
+        std::string_view  line = text.substr( at, end - at );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( header ) )
+        {
+            return true;
+        }
+        at = end + 1;
+    }
+    return false;
+}
+
 inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex )
 {
     RustCrateRoots rr;
@@ -1231,7 +1248,10 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
         const std::string text = readConfigBytes( diskPath( ing, f ) );
         Manifest          m;
         m.dir        = mdir;
-        m.unreadable = text.empty();   // an unreadable (or empty) manifest names no target we can trust: its files degrade
+        // an unreadable (or empty) manifest names no target we can trust: its files degrade. So does a VIRTUAL workspace (a
+        // `[workspace]` with no `[package]`): it is a boundary, but it builds nothing itself, so an incidental src/lib.rs beside it is no
+        // target and its `crate::` paths have no root.
+        m.unreadable = text.empty() || ( tomlHasSection( text, "[workspace]" ) && !tomlHasSection( text, "[package]" ) );
         if( !m.unreadable )
         {
             std::vector<std::string> lib, bins, build;
@@ -1512,7 +1532,7 @@ struct RustProbe
 // Where a Rust directive sits: its crate (F1) and the inline modules around it. `crateRootDir`/`hasCrateRoot`: the includer's
 // crate root directory (no locatable root: `crate::` degrades); `isCrateRoot`: the file is itself a crate root (owns its
 // directory); `inlineMods`: the names of the inline `mod x { }` bodies holding the directive, outermost first (empty at file
-// level). Inside them `self::` and the first `super::`s stay in the file, and a `mod y;` lives in the inline module's directory.
+// level). Inside them `self::` is the inline module and the first `super::`s climb inside the file (a path written after them is read from the module they reach, in that module's directory; an item of the file itself draws no edge), and a `mod y;` lives in the inline module's directory.
 struct RustSite
 {
     std::string_view                  crateRootDir;
@@ -1525,14 +1545,28 @@ struct RustSite
 // `crate` → the includer's crate root; `self` → the includer's module directory; each leading `super` climbs one
 // module, never above the crate root (a crate root, `lib.rs` or `main.rs`, has no parent). The first `inlineMods.size()`
 // `super`s name modules INSIDE the file (an inline `mod tests`' `super` is the file's module itself), and `self` inside one is
-// that inline module: neither names another file, so they are not anchors (ok=false, degrade). ok=false: not an in-tree anchor.
+// that inline module: neither names another file, but the path written after them is read from the module they reach (inFile: its
+// directory is the base, and the parent-file probe of a bare `super::x` is skipped, since the parent is this file). ok=false: not an in-tree anchor.
 struct RustAnchor
 {
     std::string base;
     std::size_t first       = 1;
     bool        atCrateRoot = false;
+    bool        inFile      = false;   // base is a module INSIDE the includer's file (an inline module, or the file's own module via `super`)
     bool        ok          = false;
 };
+
+// The directory of the module holding a directive that sits inside inline modules: the file's module directory, then the first
+// `depth` inline modules' names (`mod outer { mod inner { use self::x; } }` in a.rs reads a/outer/inner/).
+inline std::string inlineModuleDir( const std::string& modDir, std::span<const std::string_view> inlineMods, std::size_t depth )
+{
+    std::string dir = modDir;
+    for( std::size_t k = 0; k < depth && k < inlineMods.size(); ++k )
+    {
+        dir.append( dir.empty() ? "" : "/" ).append( inlineMods[ k ] );
+    }
+    return dir;
+}
 
 inline RustAnchor rustUseAnchor( std::string_view includerPath, std::span<const std::string_view> seg, const RustSite& site, const std::string& modDir )
 {
@@ -1546,8 +1580,9 @@ inline RustAnchor rustUseAnchor( std::string_view includerPath, std::span<const 
     }
     if( seg[0] == "self" )
     {
-        a.base = modDir;
-        a.ok   = site.inlineMods.empty();
+        a.base   = inlineModuleDir( modDir, site.inlineMods, site.inlineMods.size() );   // the file's module, or the inline module around the directive
+        a.inFile = !site.inlineMods.empty();
+        a.ok     = true;
         return a;
     }
     if( seg[0] != "super" )
@@ -1572,9 +1607,12 @@ inline RustAnchor rustUseAnchor( std::string_view includerPath, std::span<const 
         a.base = std::string( includerDir( a.base ) );
         atRoot = site.hasCrateRoot && a.base == site.crateRootDir;
     }
-    if( a.first <= inlineDepth )
+    if( a.first <= inlineDepth )   // every `super` stayed inside the file: the path after them is read from that module
     {
-        return a;   // every `super` stayed inside the file (a.ok stays false)
+        a.base   = inlineModuleDir( modDir, site.inlineMods, inlineDepth - a.first );
+        a.inFile = true;
+        a.ok     = true;
+        return a;
     }
     a.atCrateRoot = atRoot;
     a.ok          = true;
@@ -1609,11 +1647,7 @@ inline std::uint32_t resolveRustModDecl( std::string_view includerPath, std::str
     }
     if( !site.inlineMods.empty() )
     {
-        std::string dir = modDir;
-        for( const std::string_view inl : site.inlineMods )
-        {
-            dir.append( dir.empty() ? "" : "/" ).append( inl );
-        }
+        const std::string dir = inlineModuleDir( modDir, site.inlineMods, site.inlineMods.size() );
         probe( dir, mod + ".rs" );
         probe( dir, mod + "/mod.rs" );
         return probe.result();
@@ -1695,7 +1729,7 @@ inline std::uint32_t resolveRustImport( std::string_view includerPath, std::stri
         probe( anchor.base, parent + ".rs" );
         probe( anchor.base, parent + "/mod.rs" );
     }
-    else if( seg[0] == "super" && !anchor.atCrateRoot && !anchor.base.empty() )
+    else if( seg[0] == "super" && !anchor.atCrateRoot && !anchor.inFile && !anchor.base.empty() )   // inFile: the parent module is this file (no edge)
     {
         const std::string_view up = includerDir( anchor.base );
         probe( up, std::string( std::string_view( anchor.base ).substr( up.empty() ? 0 : up.size() + 1 ) ) + ".rs" );

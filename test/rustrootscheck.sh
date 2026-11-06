@@ -11,6 +11,9 @@
 #   IN  a directive inside an INLINE `mod x { }` (`#[cfg(test)] mod tests { use super::*; }`) reads from the inline module:
 #       the first `super`s and `self::` stay inside the file (no edge), `super` past the inline depth climbs from the file's
 #       module, and `mod y;` lives in the inline module's own directory (`mod outer { mod y; }` in lib.rs is src/outer/y.rs).
+#   IN2 the path written after those (`mod helper { use self::child::run; }` is helper/child.rs; `mod t { use super::sib::Thing; }`
+#       in a.rs is a/sib.rs) is read from the module they reach; an item of the file itself (`use super::own_item;`) names no file and draws none.
+#   VW  a virtual workspace (`[workspace]` with no `[package]`) is a boundary that assigns no crate root.
 # Every arm reads `--impact=FILE` (the file's importers) and checks the command's exit code and that the answer
 # parsed (an <impact> element), so a crash or an empty answer is RED, never a pass. Absence arms each have a positive
 # twin in the same fixture.
@@ -170,6 +173,38 @@ mod t3 {
     use super::kf;
 }'
 
+# ── fixture N: a path written after self/super inside an inline module (CR #557) ──
+N="$TMP/n"
+mk "$N/Cargo.toml"            '[package]
+name = "n"'
+mk "$N/src/lib.rs"            'pub mod a;'
+mk "$N/src/a.rs"              'mod helper {
+    use self::child::run;
+    use self::lone;
+}
+#[cfg(test)]
+mod t {
+    use super::sib::Thing;
+    use super::own_item;
+}
+pub fn own_item() {}'
+mk "$N/src/a/helper/child.rs" 'pub fn run() {}'
+mk "$N/src/a/child.rs"        'pub fn decoy() {}'
+mk "$N/src/a/sib.rs"          'pub struct Thing;'
+mk "$N/src/sib.rs"            'pub struct Thing;'
+
+# ── fixture V: a virtual workspace (a [workspace] with no [package]) is a boundary, not a crate (CR #557) ──
+V="$TMP/v"
+mk "$V/Cargo.toml"            '[workspace]
+members = ["m"]'
+mk "$V/src/lib.rs"            'pub fn incidental() {}'
+mk "$V/src/x.rs"              'use crate::q;'
+mk "$V/src/q.rs"              'pub fn q() {}'
+mk "$V/m/Cargo.toml"          '[package]
+name = "m"'
+mk "$V/m/src/lib.rs"          'pub fn real() {}'
+mk "$V/m/src/x.rs"            'use crate::q;'
+mk "$V/m/src/q.rs"            'pub fn q() {}'
 
 # importers <tree> <file> -> "$TMP/imp" holds one importer path per line; RED on a nonzero exit or no <impact> answer
 importers(){
@@ -248,6 +283,16 @@ has   INk  "$I" src/k/outer2/inn.rs src/k.rs              # in a plain file k.rs
 hasnt INk- "$I" src/k/inn.rs        src/k.rs
 hasnt INk2 "$I" src/inn.rs          src/k.rs
 has   INl  "$I" src/b.rs            src/lib.rs            # twin: a plain `pub mod b;` in lib.rs
+
+echo "-- IN2: a path after self/super inside an inline mod is read from the module it reaches"
+has   INm  "$N" src/a/helper/child.rs src/a.rs            # mod helper { use self::child::run; } is a/helper/child.rs
+hasnt INm- "$N" src/a/child.rs      src/a.rs              # ... not a/child.rs (the file-level self::)
+has   INn  "$N" src/a/sib.rs        src/a.rs              # mod t { use super::sib::Thing; }: super is a itself, so a/sib.rs
+hasnt INn- "$N" src/sib.rs          src/a.rs              # ... not the crate root's sib.rs
+
+echo "-- VW: a virtual workspace assigns no crate roots"
+hasnt VWa  "$V" src/q.rs            src/x.rs              # [workspace]-only manifest: its incidental src/lib.rs is no target
+has   VWb  "$V" m/src/q.rs          m/src/x.rs            # twin: a member crate with [package] anchors normally
 
 echo "-- determinism"
 ( cd "$M" && "$BIN" "$M" --deps --no-cache > "$TMP/d1.xml" 2>/dev/null ); r1=$?
