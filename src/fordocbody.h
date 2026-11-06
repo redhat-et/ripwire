@@ -284,8 +284,8 @@ enum class ForDocWhy : std::uint8_t
 };
 inline std::string_view forDocWhyName( ForDocWhy why ) noexcept
 {
-    return why == ForDocWhy::Unreadable ? "unreadable" : why == ForDocWhy::Allowance ? "allowance"
-                                                                                     : "budget";
+    static constexpr std::string_view kNames[] = { "unreadable", "allowance", "budget" };
+    return kNames[std::size_t( why )];
 }
 
 struct ForDocUnserved
@@ -330,9 +330,113 @@ struct DocExcerpt
     std::size_t from = 0, to = 0; // its byte range in the source text
 };
 
-// The one window of at most `maxBytes` that holds the most of the task's words: each task term weighs 1 / its count in the text, so a
-// term that occurs once pulls harder than one that occurs everywhere. The window starts at a hit (backed to its line start when
-// that is close) and ends at a line or word end. No hit anywhere: the head of the text. A text that fits is returned whole.
+// The task's words found in a text: where each is, and what it weighs (1 / the number of times its term occurs, so a term that occurs
+// once pulls harder than one that occurs everywhere).
+struct TermHits
+{
+    std::vector<std::pair<std::size_t, std::uint32_t>> at; // (byte position, term index), in text order
+    std::vector<double> weight; // per term
+    std::vector<double> prefix; // prefix[i] = summed weight of at[0, i)
+
+    std::size_t firstAtOrAfter( std::size_t pos ) const noexcept
+    {
+        return std::size_t( std::ranges::lower_bound( at, pos, {}, &std::pair<std::size_t, std::uint32_t>::first ) - at.begin() );
+    }
+    // summed weight of the hits at byte positions [from, from + len)
+    double within( std::size_t from, std::size_t len ) const noexcept { return prefix[firstAtOrAfter( from + len )] - prefix[firstAtOrAfter( from )]; }
+};
+
+inline TermHits collectTermHits( std::string_view text, const std::vector<std::string>& terms )
+{
+    TermHits hits;
+    std::vector<std::uint32_t> counts( terms.size(), 0 );
+    forEachLexSubtoken( text,
+                        [&]( std::size_t tokStartByte, std::size_t tokEndByte )
+                        {
+                            const std::size_t t = tokEndByte - tokStartByte < 2 ? terms.size() : recallMatchedTermIndex( text, tokStartByte, tokEndByte - tokStartByte, terms );
+                            if( t < terms.size() )
+                            {
+                                hits.at.emplace_back( tokStartByte, std::uint32_t( t ) );
+                                ++counts[t];
+                            }
+                        } );
+    for( const std::uint32_t c : counts )
+    {
+        hits.weight.push_back( c ? 1.0 / double( c ) : 0.0 );
+    }
+    hits.prefix.assign( hits.at.size() + 1, 0.0 );
+    for( std::size_t i = 0; i < hits.at.size(); ++i )
+    {
+        hits.prefix[i + 1] = hits.prefix[i] + hits.weight[hits.at[i].second];
+    }
+    return hits;
+}
+
+// `pos`, or the start of its line when that is within 160 bytes
+inline std::size_t nearLineStart( std::string_view text, std::size_t pos ) noexcept
+{
+    const std::size_t nl = pos == 0 ? std::string_view::npos : text.rfind( '\n', pos - 1 );
+    return nl != std::string_view::npos && pos - ( nl + 1 ) <= 160 ? nl + 1 : pos;
+}
+
+// The start of the window of `room` bytes that holds the most hit weight (the earliest on a tie), centred on the weighted centroid of
+// the hits it holds so the words sit in the middle and not at its end. 0 when the text holds no hit.
+inline std::size_t bestWindowStart( std::string_view text, const TermHits& hits, std::size_t room )
+{
+    std::size_t from = 0;
+    double best = 0.0;
+    for( const auto& [pos, term] : hits.at )
+    {
+        const std::size_t start = nearLineStart( text, pos );
+        const double weight = hits.within( start, room );
+        if( weight > best + 1e-9 )
+        {
+            best = weight;
+            from = start;
+        }
+    }
+    if( best <= 0.0 )
+    {
+        return 0;
+    }
+    double centroid = 0.0;
+    for( std::size_t i = hits.firstAtOrAfter( from ); i < hits.firstAtOrAfter( from + room ); ++i )
+    {
+        centroid += double( hits.at[i].first ) * hits.weight[hits.at[i].second];
+    }
+    const std::size_t mid = std::size_t( centroid / best );
+    from = std::min( mid > room / 2 ? mid - room / 2 : 0, text.size() - room ); // text.size() > room: a window at the end is full
+    return nearLineStart( text, from );
+}
+
+// The end of a window of `room` bytes from `from`: at a line end, else a word end, in its last 40 %; never inside a UTF-8 sequence
+inline std::size_t windowEnd( std::string_view text, std::size_t from, std::size_t room ) noexcept
+{
+    std::size_t to = std::min( text.size(), from + room );
+    if( to >= text.size() )
+    {
+        return text.size();
+    }
+    const std::size_t floorAt = from + room * 6 / 10;
+    const std::size_t nl = text.rfind( '\n', to - 1 );
+    const std::size_t sp = text.rfind( ' ', to - 1 );
+    if( nl != std::string_view::npos && nl >= floorAt )
+    {
+        to = nl + 1;
+    }
+    else if( sp != std::string_view::npos && sp >= floorAt )
+    {
+        to = sp + 1;
+    }
+    while( to > from && ( static_cast<unsigned char>( text[to] ) & 0xC0 ) == 0x80 )
+    {
+        --to;
+    }
+    return to;
+}
+
+// The one window of at most `maxBytes` that holds the most of the task's words (bestWindowStart, windowEnd), with an ellipsis on each cut
+// side. No hit anywhere: the head of the text. A text that fits is returned whole.
 inline DocExcerpt excerptAroundTerms( std::string_view text, const std::vector<std::string>& terms, std::size_t maxBytes )
 {
     DocExcerpt ex;
@@ -343,94 +447,15 @@ inline DocExcerpt excerptAroundTerms( std::string_view text, const std::vector<s
         return ex;
     }
     const std::size_t room = maxBytes > 2 * kEllipsis.size() ? maxBytes - 2 * kEllipsis.size() : 0;
-    std::vector<std::uint32_t> counts( terms.size(), 0 );
-    std::vector<std::pair<std::size_t, std::uint32_t>> hits; // (byte position, term index)
-    forEachLexSubtoken( text,
-                        [&]( std::size_t tokStartByte, std::size_t tokEndByte )
-                        {
-                            if( tokEndByte - tokStartByte < 2 )
-                            {
-                                return;
-                            }
-                            const std::size_t t = recallMatchedTermIndex( text, tokStartByte, tokEndByte - tokStartByte, terms );
-                            if( t < terms.size() )
-                            {
-                                hits.emplace_back( tokStartByte, std::uint32_t( t ) );
-                                ++counts[t];
-                            }
-                        } );
-    std::vector<double> prefix( hits.size() + 1, 0.0 ); // prefix[i] = weight of hits[0, i)
-    for( std::size_t i = 0; i < hits.size(); ++i )
-    {
-        prefix[i + 1] = prefix[i] + 1.0 / double( counts[hits[i].second] );
-    }
-    const auto posLess = []( const std::pair<std::size_t, std::uint32_t>& h, std::size_t pos )
-    { return h.first < pos; };
-    std::size_t from = 0;
-    double best = -1.0;
-    for( std::size_t i = 0; i < hits.size(); ++i )
-    {
-        std::size_t start = hits[i].first;
-        const std::size_t lineStart = text.rfind( '\n', start == 0 ? 0 : start - 1 );
-        if( lineStart != std::string_view::npos && start - ( lineStart + 1 ) <= 160 )
-        {
-            start = lineStart + 1;
-        }
-        const auto lo = std::lower_bound( hits.begin(), hits.end(), start, posLess ) - hits.begin();
-        const auto hi = std::lower_bound( hits.begin(), hits.end(), start + room, posLess ) - hits.begin();
-        const double weight = prefix[std::size_t( hi )] - prefix[std::size_t( lo )];
-        if( weight > best + 1e-9 )
-        {
-            best = weight;
-            from = start;
-        }
-    }
-    if( best > 0.0 )
-    {
-        // centre the window on the weighted centroid of the hits it holds, so the words sit in the middle, not at its end
-        const auto lo = std::lower_bound( hits.begin(), hits.end(), from, posLess ) - hits.begin();
-        const auto hi = std::lower_bound( hits.begin(), hits.end(), from + room, posLess ) - hits.begin();
-        double centroid = 0.0;
-        for( auto i = lo; i < hi; ++i )
-        {
-            centroid += double( hits[std::size_t( i )].first ) / double( counts[hits[std::size_t( i )].second] );
-        }
-        const std::size_t mid = std::size_t( centroid / best );
-        from = mid > room / 2 ? mid - room / 2 : 0;
-        from = std::min( from, text.size() - room ); // text.size() > maxBytes >= room: a window at the end is full
-        const std::size_t lineStart = from == 0 ? std::string_view::npos : text.rfind( '\n', from - 1 );
-        if( lineStart != std::string_view::npos && from - ( lineStart + 1 ) <= 160 )
-        {
-            from = lineStart + 1;
-        }
-    }
+    std::size_t from = bestWindowStart( text, collectTermHits( text, terms ), room );
     while( from < text.size() && ( static_cast<unsigned char>( text[from] ) & 0xC0 ) == 0x80 )
     {
         ++from;
     }
-    std::size_t to = std::min( text.size(), from + room );
-    if( to < text.size() )
-    {
-        const std::size_t floorAt = from + room * 6 / 10;
-        const std::size_t nl = text.rfind( '\n', to - 1 );
-        const std::size_t sp = text.rfind( ' ', to - 1 );
-        if( nl != std::string_view::npos && nl >= floorAt )
-        {
-            to = nl + 1;
-        }
-        else if( sp != std::string_view::npos && sp >= floorAt )
-        {
-            to = sp + 1;
-        }
-        while( to > from && ( static_cast<unsigned char>( text[to] ) & 0xC0 ) == 0x80 )
-        {
-            --to;
-        }
-    }
     ex.from = from;
-    ex.to = to;
-    ex.text = std::string( from > 0 ? kEllipsis : std::string_view() ) + std::string( text.substr( from, to - from ) ) +
-              std::string( to < text.size() ? kEllipsis : std::string_view() );
+    ex.to = windowEnd( text, from, room );
+    ex.text = std::string( from > 0 ? kEllipsis : std::string_view() ) + std::string( text.substr( from, ex.to - from ) ) +
+              std::string( ex.to < text.size() ? kEllipsis : std::string_view() );
     return ex;
 }
 
@@ -490,6 +515,19 @@ struct FileServe
 };
 } // namespace fordocbody_detail
 
+// What a fired pick is served from: the index, the graph the doc sections are scored on, the task, the pick, the redaction counters and the
+// root the display paths are relative to.
+struct ForDocBodyInputs
+{
+    const IngestResult& ing;
+    const std::vector<std::uint32_t>& outOff;
+    const std::vector<NodeId>& outTargets;
+    std::string_view task;
+    const ForDocBodyPick& pick;
+    RedactCounts* redact;
+    std::string_view rootArg;
+};
+
 // The doc files a fired pick loads: --recall's section choice per file, read once and served at any allowance.
 struct ForDocPrep
 {
@@ -505,9 +543,9 @@ struct ForDocPrep
     std::vector<std::string> queryToks;
 };
 
-inline ForDocPrep prepareForDocBody( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
-                                     std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg )
+inline ForDocPrep prepareForDocBody( const ForDocBodyInputs& in )
 {
+    const auto& [ing, outOff, outTargets, task, pick, redact, rootArg] = in;
     ForDocPrep prep;
     if( !pick.fires || pick.fileIds.empty() )
     {
@@ -956,43 +994,38 @@ inline std::string fitForDocBody( const IngestResult& ing, const ForDocPrep& pre
     return heldWhole();
 }
 
-// The XML block of a fired pick ("" otherwise).
-inline std::string renderForDocBodyXml( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
-                                        std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg,
-                                        const ForDocBodyBudget& budget )
+// Serve a fired pick through one dialect's renderer ("" when it does not fire): see fitForDocBody.
+template<class Render, class HeldWhole>
+inline std::string renderForDocBody( const ForDocBodyInputs& in, const ForDocBodyBudget& budget, Render&& render, HeldWhole&& heldWhole )
 {
-    if( !pick.fires || pick.fileIds.empty() )
+    if( !in.pick.fires || in.pick.fileIds.empty() )
     {
         return {};
     }
-    const auto heldWhole = [&]
-    { return forDocBodyHeldXml( ing, pick, task, rootArg ); };
     if( budget.active() && budget.leftTokens() == 0 )
     {
         return heldWhole(); // the answer alone spent the budget: nothing is read for the block
     }
-    const ForDocPrep prep = prepareForDocBody( ing, outOff, outTargets, task, pick, redact, rootArg );
-    return fitForDocBody( ing, prep, budget, [&]( const ForDocBody& b )
-                          { return forDocBodyXml( ing, b, pick, task, rootArg ); }, heldWhole );
+    return fitForDocBody( in.ing, prepareForDocBody( in ), budget, render, heldWhole );
+}
+
+// The XML block of a fired pick ("" otherwise).
+inline std::string renderForDocBodyXml( const ForDocBodyInputs& in, const ForDocBodyBudget& budget )
+{
+    return renderForDocBody(
+        in, budget, [&]( const ForDocBody& b )
+        { return forDocBodyXml( in.ing, b, in.pick, in.task, in.rootArg ); },
+        [&]
+        { return forDocBodyHeldXml( in.ing, in.pick, in.task, in.rootArg ); } );
 }
 
 // The JSON block of a fired pick (",\"doc_body\":{...}" or "").
-inline std::string renderForDocBodyJson( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
-                                         std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg,
-                                         const ForDocBodyBudget& budget )
+inline std::string renderForDocBodyJson( const ForDocBodyInputs& in, const ForDocBodyBudget& budget )
 {
-    if( !pick.fires || pick.fileIds.empty() )
-    {
-        return {};
-    }
-    const auto heldWhole = [&]
-    { return forDocBodyJsonHeld( ing, pick, task, rootArg ); };
-    if( budget.active() && budget.leftTokens() == 0 )
-    {
-        return heldWhole();
-    }
-    const ForDocPrep prep = prepareForDocBody( ing, outOff, outTargets, task, pick, redact, rootArg );
-    return fitForDocBody( ing, prep, budget, [&]( const ForDocBody& b )
-                          { return forDocBodyJsonServed( ing, b, pick, task, rootArg ); }, heldWhole );
+    return renderForDocBody(
+        in, budget, [&]( const ForDocBody& b )
+        { return forDocBodyJsonServed( in.ing, b, in.pick, in.task, in.rootArg ); },
+        [&]
+        { return forDocBodyJsonHeld( in.ing, in.pick, in.task, in.rootArg ); } );
 }
 } // namespace rw

@@ -2968,7 +2968,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
     if( out.ends_with( "</ctx>" ) )
     {
-        out.insert( out.size() - 6, renderForDocBodyXml( ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens } ) );
+        out.insert( out.size() - 6, renderForDocBodyXml( ForDocBodyInputs{ ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg }, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens } ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
