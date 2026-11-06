@@ -500,6 +500,7 @@ Discloses: `path_from_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kPathFromReachMaxNodes` | `4096` | — | runaway guard on A's forward walk; past it every caller of A stays where it ranked |
+| `kPathGapSideRows` | `10` | — | rows per side of a <path_gap>; the rest is count= and next= |
 
 ### `src/forliteral.h`
 

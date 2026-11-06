@@ -372,18 +372,27 @@ inline bool graphSubjectPathUnreachable( std::string_view doc )
     return tag.start != std::string::npos && spanHasAttr( doc.substr( tag.start, tag.end - tag.start ), "reachable", "\"0\"" );
 }
 
-// <path_gap from= to= [missing=]>: its own legend, then from='s --callees and to='s --callers answers. missing=from|to|from,to names a
-// side whose answer could not be captured (not printed, never "none").
+// The rows each side of a <path_gap> shows: the plain --callees / --callers answer at --limit=10, its count= the total and its next= the
+// page after. Set from the 7 in-sample fires (reports/graph-form-endpoints.md FIN): the two rows that gained an item held 7 and 3 callees,
+// the five that did not held 3 to 51 callees and 5 to 43 callers, so the uncapped sides (up to 40 rows, a 16 KB callers band) were mostly filler.
+inline constexpr int kPathGapSideRows = 10;   // rows per side of a <path_gap>; the rest is count= and next=
+
+// <path_gap from= to= reachable="0" [missing=]>: reachable="0" restates on the block itself that no path from= to to= was found (why the rows
+// follow); then its own legend, from='s --callees and to='s --callers answers. missing=from|to|from,to names a side whose answer could
+// not be captured (not printed, never "none").
 inline std::string pathGapOpenXml( const GraphSubjectArgs& a, bool fromMissing, bool toMissing )
 {
     std::vector<char> esc;
     std::string out = "<!-- ripwire for path_gap: the path verb above found NO directed call path (reachable=\"0\"; its searched= and gaps= say "
-                      "whether that search was complete), so the two sides a missing hop would join follow: from='s callees (what it calls, one "
-                      "hop) and to='s callers (who calls it, one hop), each the bare callees / callers verb answer with its own legend and caps. "
-                      "A name in both lists, or a callee of from= that calls a caller of to=, is a CANDIDATE link to read, not a proven path";
+                      "whether that search was complete), so the two sides a missing hop would join follow (reachable=\"0\" on path_gap restates it): "
+                      "from='s callees (what it calls, one hop) and to='s callers (who calls it, one hop), each the bare callees / callers verb "
+                      "answer cut at ";
+    out += std::to_string( kPathGapSideRows );
+    out += " rows (its count= is the total, its next= the page after) with its own legend. A name in both lists, or a callee of from= that "
+           "calls a caller of to=, is a CANDIDATE link to read, not a proven path";
     out += fromMissing || toMissing ? "; missing= names a side whose answer could not be captured: it is not shown, which is not the same as empty" : "";
     out += " --><path_gap from=\"" + std::string( escapeXml( a.endpoints[0], esc ) ) + "\"";
-    out += " to=\"" + std::string( escapeXml( a.endpoints[1], esc ) ) + "\"";
+    out += " to=\"" + std::string( escapeXml( a.endpoints[1], esc ) ) + "\" reachable=\"0\"";
     if( fromMissing || toMissing )
     {
         out += std::string( " missing=\"" ) + ( fromMissing ? "from" : "" ) + ( fromMissing && toMissing ? "," : "" ) + ( toMissing ? "to" : "" ) + "\"";

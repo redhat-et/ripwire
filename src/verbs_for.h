@@ -178,8 +178,8 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     if( routeOn )
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
-                                                           : lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, forPruneK, ifaceExactPtr, &tierMul,
-                                                                                  0, 0, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out; rankTask = task but on a flip or a path form (GRAPH-FORM-ENDPOINTS)
+                                                           : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
+                                                                                  0, 0, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
         {
             // L-W: the name-exact ranker scores WHOLE names, so the subtoken evidence coverage= and the file page
@@ -2880,8 +2880,8 @@ std::optional<std::string> captureGraphVerbDoc( const rw::Config& sub, Run&& run
 }
 
 // GRAPH-FORM-ENDPOINTS: the path verb found no directed path, so the two sides a missing hop would join are printed inside
-// <path_gap>: from='s callees and to='s callers, each the bare --callees / --callers call's default answer (its own caps, legend and
-// next= paging). A side whose capture cannot be set up is named in missing= (never shown as empty).
+// <path_gap>: from='s callees and to='s callers, each the bare --callees / --callers call's answer at --limit=kPathGapSideRows (its own legend, count=
+// the total, next= the page after). A side whose capture cannot be set up is named in missing= (never shown as empty).
 inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectArgs& args )
 {
     if( args.endpoints.size() != 2 )
@@ -2891,9 +2891,11 @@ inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectAr
     rw::Config callees = sd.cfg;
     callees.pathSpec   = {};
     callees.callees    = args.endpoints[0];
+    callees.pageLimit  = rw::kPathGapSideRows;
     rw::Config callers = sd.cfg;
     callers.pathSpec   = {};
     callers.callers    = args.endpoints[1];
+    callers.pageLimit  = rw::kPathGapSideRows;
     const auto side = [ & ]( const rw::Config& c ) -> std::optional<std::string>
     {
         const MainDispatch cd{ c, sd.ing, sd.g, sd.root, sd.multiRoot, sd.ws, sd.fanIn, sd.fanInPtr, sd.qmetrics, sd.ampPtr, sd.cboPtr, sd.testedPtr,
