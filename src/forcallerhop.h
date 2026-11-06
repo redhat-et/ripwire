@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iterator>
 #include <span>
@@ -499,34 +500,34 @@ inline std::vector<NodeId> callerHopSecondRows( const IngestResult& ing, const G
     return out;
 }
 
-// D2-VIA-INHERIT: per shown d=2 row, 1 when no non-by-name edge joins it to a PROVEN first-hop row. A first-hop row is proven when
-// the element prints it without via="name" (a shown row: the verb's attribution) or, for a row the cap hides, when one of its own
-// edges into a target is not by name (the same reading, computed on first use and kept: once per answer). Such a d=2 row reaches the
-// function only through a by-name hop: its own d1->d2 edge (the callers verb's reading of `--callers=<that caller>`, rv-mf1-nx B3) or
-// a by-name first hop it would otherwise read as proven (rv-rra-delta (3)). A row with one proven path stays unhedged, whichever
-// first-hop row that path runs through, hidden or shown (rv-d2-via S1). The walk is over the d=2 row's own out-edges, never the
-// whole first hop.
-inline std::vector<char> callerHopSecondNameOnly( const Graph& g, std::span<const NodeId> targets, std::span<const NodeId> firstAll,
-                                                  std::size_t firstShown, const OneHopAttribution& attr, std::span<const NodeId> secondRows )
+// D2-VIA-INHERIT: which first-hop rows are PROVEN, the ones the element prints without via="name". A shown row is read off the
+// verb's attribution; a row the cap hides is read on first use (one of its own edges into a target is not by name, the same reading)
+// and kept, so it is once per answer and never a rescan of the whole first hop (rv-d2-via S1).
+struct FirstHopProof
 {
-    std::vector<char> out( secondRows.size(), 1 );
-    if( secondRows.empty() )
+    const Graph&                                    g;
+    std::span<const NodeId>                         targets;
+    std::span<const NodeId>                         firstAll;
+    std::vector<std::pair<NodeId, std::uint32_t>>   byId;     // the first-hop rows by id, with their position
+    std::vector<signed char>                        proven;   // per first-hop position: 1 proven, 0 by name alone, -1 not read yet
+
+    FirstHopProof( const Graph& graph, std::span<const NodeId> tgts, std::span<const NodeId> first, std::size_t firstShown,
+                   const OneHopAttribution& attr )
+        : g( graph ), targets( tgts ), firstAll( first ), proven( first.size(), -1 )
     {
-        return out;
+        byId.reserve( first.size() );
+        for( std::size_t k = 0; k < first.size(); ++k )
+        {
+            byId.emplace_back( first[k], std::uint32_t( k ) );
+        }
+        std::ranges::sort( byId );
+        for( std::size_t k = 0; k < firstShown; ++k )
+        {
+            proven[k] = attr.nameOnly( k ) ? 0 : 1;
+        }
     }
-    std::vector<std::pair<NodeId, std::uint32_t>> byId;   // the first-hop rows by id: a callee of a d=2 row is one of them or not
-    byId.reserve( firstAll.size() );
-    for( std::size_t k = 0; k < firstAll.size(); ++k )
-    {
-        byId.emplace_back( firstAll[k], std::uint32_t( k ) );
-    }
-    std::ranges::sort( byId );
-    std::vector<signed char> proven( firstAll.size(), -1 );   // -1: not read yet
-    for( std::size_t k = 0; k < firstShown; ++k )
-    {
-        proven[k] = attr.nameOnly( k ) ? 0 : 1;
-    }
-    const auto isProven = [ & ]( std::uint32_t k )
+
+    bool provenAt( std::uint32_t k )
     {
         if( proven[k] < 0 )
         {
@@ -539,29 +540,34 @@ inline std::vector<char> callerHopSecondNameOnly( const Graph& g, std::span<cons
                             : 0;
         }
         return proven[k] != 0;
-    };
-    for( std::size_t i = 0; i < secondRows.size(); ++i )
+    }
+
+    // Does a non-by-name edge of `row` (a d=2 row) go into a proven first-hop row? A d=2 row without one reaches the function only through
+    // a by-name hop: its own d1->d2 edge (the callers verb's reading of `--callers=<that caller>`, rv-mf1-nx B3) or a by-name first hop it
+    // would otherwise read as proven (rv-rra-delta (3)); one proven path leaves it unhedged, whichever first-hop row that path runs
+    // through, hidden or shown. Walks the row's own out-edges only.
+    bool reachedByProvenEdge( NodeId row )
     {
-        const NodeId r = secondRows[i];
-        if( std::size_t( r ) + 1 >= g.outOff.size() )
+        if( std::size_t( row ) + 1 >= g.outOff.size() )
         {
-            continue;
+            return false;
         }
-        for( std::size_t e = g.outOff[r]; e < g.outOff[ std::size_t( r ) + 1 ] && out[i] != 0; ++e )
+        for( std::size_t e = g.outOff[row]; e < g.outOff[ std::size_t( row ) + 1 ]; ++e )
         {
             if( defMarkOfEdge( g, e ) == DefMark::Name )
             {
                 continue;
             }
-            const auto it = std::ranges::lower_bound( byId, g.outTargets[e], {}, &std::pair<NodeId, std::uint32_t>::first );
-            if( it != byId.end() && it->first == g.outTargets[e] && isProven( it->second ) )
+            const NodeId to = g.outTargets[e];
+            const auto   it = std::ranges::lower_bound( byId, to, {}, &std::pair<NodeId, std::uint32_t>::first );
+            if( it != byId.end() && it->first == to && provenAt( it->second ) )
             {
-                out[i] = 0;
+                return true;
             }
         }
+        return false;
     }
-    return out;
-}
+};
 
 // The element. `rootArg` is the single-root run's own root (empty under multi-root: p= keeps ingest's spelling), as every --for row.
 // `by`: empty on the name-exact route; "rank" (UPWARD-2HOP) the seed came from forRankedCallerHopTargets; "subject" (SUBJECT-ANCHOR) a
@@ -584,8 +590,7 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     const RowCallSites       sites = rowCallSites( ing, targets, shown, VrRender{ !rootArg.empty(), rootArg }, g.keptForwards );
     const OneHopAttribution  attr  = attributeOneHopAnswer( ing, g, targets, shown, /*towardMatches=*/true );
     // the second hop's by-name hedge: a d=2 row with no proven edge into a proven first-hop caller is receiver-unproven — via="name"
-    const std::span<const NodeId> secondShownRows = std::span<const NodeId>( second ).first( secondShown );
-    const std::vector<char>       nameOnly2       = callerHopSecondNameOnly( g, targets, first, firstShown, attr, secondShownRows );
+    FirstHopProof proof( g, targets, first, firstShown, attr );
 
     const Symbol&     t   = ing.symbols[ targets.front() ];
     const std::string sel = t.scope.empty() ? t.name : t.scope + "::" + t.name;   // the callers verb's own qualified selector
@@ -619,7 +624,7 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     }
     for( std::size_t i = 0; i < secondShown; ++i )
     {
-        appendCallerHopRow( x, rc, second[i], std::string( " d=\"2\"" ) + viaNameAttr( nameOnly2[i] != 0 ) );
+        appendCallerHopRow( x, rc, second[i], std::string( " d=\"2\"" ) + viaNameAttr( !proof.reachedByProvenEdge( second[i] ) ) );
     }
     x += "</callers>";
     return out;
