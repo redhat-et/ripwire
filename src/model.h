@@ -2127,6 +2127,8 @@ struct FileHealth
                                       // errBytes above always describe the parse extraction actually read.
     std::uint32_t useBoundsBlanked = 0;   // its Rust layer (src/rustusebounds.h): precise-capturing use<..> bounds
                                           // blanked for the ADOPTED parse; 0 ⇒ the first parse was kept
+
+    bool operator==( const FileHealth& ) const noexcept = default;   // the parse pool's "blob already holds this record" test
 };
 
 // Output of ingestion. Deterministic: files sorted lexicographically, symbol ids assigned

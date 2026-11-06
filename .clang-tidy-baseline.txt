@@ -1,0 +1,894 @@
+# .clang-tidy-baseline.txt - the advisory clang-tidy findings accepted as of the commit below.
+# One row per finding: file TAB check TAB anchor (the trimmed source line; no line numbers, so unrelated edits do not
+# churn it). Sorted. Every row is either a fix still to come or a triaged false positive / accepted finding; a fixed
+# finding's row is deleted, never kept as a record.
+# The nightly advisory run (ci.yml `style` job, schedule/workflow_dispatch) diffs its report against this file with
+# scripts/tidyadvisory_diff.py and opens or updates ONE tracking issue (label clang-tidy-advisory) listing the NEW rows.
+# REGENERATE: take the `tidy-advisory` artifact of a nightly or workflow_dispatch run, review its
+# tidy-advisory-baseline-candidate.txt against this file, and commit the rows you accept (or the whole candidate).
+# Locally: python3 scripts/tidyadvisory_diff.py --report <clang-tidy output> --baseline .clang-tidy-baseline.txt
+#          --normalized-out <file>   (python3 scripts/tidyadvisory_diff.py --selftest checks the parser)
+# generated from: the advisory clang-tidy 22 report of CI job 127414521171 (PR 537 head 51695de4a; content now on main e5498e79f), deduplicated across translation units
+# rows: 882
+src/abicheck.h	bugprone-easily-swappable-parameters	inline std::string modelKey( std::string_view sha, std::string_view path )
+src/arch.h	bugprone-easily-swappable-parameters	inline PathRuleMatch pathRuleMatches( const PathRule& pr, std::string_view src, std::string_view dst )
+src/arch.h	bugprone-easily-swappable-parameters	inline bool archViolates( const ArchRules& r, int la, int lb )
+src/arch.h	bugprone-easily-swappable-parameters	inline std::uint64_t archViolHash( std::string_view srcFile,
+src/arch.h	bugprone-exception-escape	inline bool archWriteBaseline( const std::string& sidecarPath,
+src/arch.h	bugprone-exception-escape	inline int openArchBaselineSidecar( const std::string& sidecarPath ) noexcept
+src/arch.h	bugprone-exception-escape	inline rw::pathguard::NoFollowRead readArchBaselineSidecar( const std::string& sidecarPath, ArchBaselineRead& baseline ) noexcept
+src/atoms.h	bugprone-branch-clone	{ // `if( 0 )` disables a block and `while( 1 )` loops forever — universal idioms every C
+src/atoms.h	bugprone-easily-swappable-parameters	const Symbol* ownerOf( const IngestResult& ing, std::uint32_t fileId, std::uint32_t offset ) const
+src/backhops.h	bugprone-easily-swappable-parameters	bool derivesFrom( NodeId a, NodeId b ) const
+src/backhops.h	bugprone-easily-swappable-parameters	inline void sizeImpactRing( ImpactRing& ring, int pageLimit, std::size_t provenShown, std::size_t provenTotal, std::string_view sym )
+src/backhops.h	bugprone-unchecked-optional-access	return m_targets.try_emplace( site, m_pix->targets( site ) ).first->second;
+src/backhops.h	bugprone-unchecked-optional-access	std::ranges::copy_if( m_pix->sitesIn( std::span<const NodeId>( &u, 1 ) ), std::back_inserter( out ), [ & ]( std::uint32_t site ) { return isCall( m_ing.references[ site ] ); } );
+src/backhops.h	bugprone-unchecked-optional-access	std::ranges::copy_if( m_pix->sitesTo( std::span<const NodeId>( &d, 1 ) ), std::back_inserter( out ), [ & ]( std::uint32_t site )
+src/callhierarchy.h	bugprone-unchecked-optional-access	const ValueRefIndex& vri = valueIndex != nullptr ? *valueIndex : *local;
+src/cli.h	bugprone-branch-clone	{
+src/cli.h	bugprone-easily-swappable-parameters	inline bool helpEntryAnswersTo( std::string_view line, std::string_view want ) noexcept
+src/cli.h	bugprone-easily-swappable-parameters	inline void normalizePathValueAtIntake( std::string_view prefix, std::string_view value ) noexcept
+src/cli.h	bugprone-exception-escape	[[noreturn]] inline void serveHelpSelector( std::string_view want ) noexcept
+src/cli.h	bugprone-exception-escape	auto deprecatedOrderFlag = [&]( const char* oldFlag, const char* newValue ) noexcept
+src/cli.h	bugprone-exception-escape	auto deprecatedReadabilityFlag = [&]() noexcept
+src/cli.h	bugprone-exception-escape	inline Config parseArgs( int argc, char** argv ) noexcept
+src/cli.h	bugprone-exception-escape	inline bool refusePageValue( const char* flag, const char* s, bool isZeroAllowed, int& out ) noexcept
+src/cli.h	bugprone-exception-escape	inline void noticeShapingFlagIgnored( const Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	inline void refuseEmptyValue( std::string_view flag, const char* needs, const char* example ) noexcept
+src/cli.h	bugprone-exception-escape	inline void refuseFlagValue( const char* flag, const char* wanted, std::string_view got, const char* example ) noexcept
+src/cli.h	bugprone-exception-escape	inline void refuseLspShapingFlag( Config& c, const char* head ) noexcept
+src/cli.h	bugprone-exception-escape	inline void refusePagingFamilyFlag( Config& c, const PagingFamilyFlagGuard& g ) noexcept
+src/cli.h	bugprone-exception-escape	inline void validateAgent( Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	inline void validateConfig( Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	inline void validateModifierGuards( Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	inline void validatePagingHonored( Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	inline void validatePlanLanes( Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	static inline void validateLegendModifier( Config& c ) noexcept
+src/cli.h	bugprone-exception-escape	static inline void validateSectionsModifier( Config& c ) noexcept
+src/cli.h	clang-analyzer-optin.performance.Padding	struct Config
+src/cloneidiom.h	bugprone-branch-clone	{
+src/clones.h	bugprone-exception-escape	inline bool cloneIsKeyword( std::string_view w ) noexcept
+src/codexdoctor.h	bugprone-easily-swappable-parameters	inline HookSurvey surveyHooks( const std::filesystem::path& path, std::string_view nudgeNeedle, std::string_view routeNeedle )
+src/codexdoctor.h	bugprone-implicit-widening-of-multiplication-result	if( ec || byteCount > 1024 * 1024 ) { return {}; }
+src/columnar.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>& fileIds,
+src/columnar.h	bugprone-easily-swappable-parameters	inline void emitColumnarDepthColumn( std::FILE* out, const std::vector<NodeId>& rows, const std::vector<std::uint32_t>& depth )
+src/commentcoherence.h	bugprone-easily-swappable-parameters	std::size_t& outIntersection, std::size_t& outUnion ) noexcept
+src/compactlegend.h	bugprone-easily-swappable-parameters	[[nodiscard]] inline std::size_t compactDeliveredBytes( std::string_view candidate, std::string_view hint )
+src/compactlegend.h	bugprone-easily-swappable-parameters	[[nodiscard]] inline std::size_t compactDeliveredEstTokens( std::string_view candidate, std::string_view hint )
+src/compactlegend.h	bugprone-easily-swappable-parameters	[[nodiscard]] inline std::size_t rootUnsignedAttr( std::string_view rootOpen, std::string_view name ) noexcept
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline bool commentsSpellAttr( std::string_view doc, std::string_view attr )
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline bool isCompletenessTermPresent( const CompactCompletenessTerm& t, std::string_view head, std::string_view doc, std::string_view mapHeader )
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std::string_view onTag = {}, std::string_view valueItem = {} )
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline bool quotedValueListsItem( std::string_view value, std::string_view item ) noexcept
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline bool spanHasAttr( std::string_view span, std::string_view attr, std::string_view tail )
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline const CompactLegendSpec* findCompactSpec( std::string_view rootTag, std::string_view hint ) noexcept
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline std::string compactWindowClause( std::string_view head, std::string_view doc )
+src/compactlegend.h	bugprone-easily-swappable-parameters	inline std::vector<std::uint16_t> compactPresentTerms( std::string_view head, std::string_view doc, std::string_view key = {} )
+src/compactlegend.h	clang-analyzer-optin.performance.Padding	struct CompactCompletenessTerm
+src/compactlegend.h	misc-redundant-expression	if( shape != std::string_view::npos && shape <= 40 )
+src/countfloor.h	bugprone-easily-swappable-parameters	std::span<const NodeId> ifaces, std::span<const std::uint32_t> decidedOutside = {} )
+src/countfloor.h	bugprone-unchecked-optional-access	out[row].isFloor = countfloor::hasValueUse( ing, vri != nullptr ? *vri : *own, sets[row] );
+src/crossref.h	bugprone-easily-swappable-parameters	inline EvalReport evalStray( const std::string& root, const std::string& labelsPath )
+src/crossref.h	bugprone-easily-swappable-parameters	inline PageWindow whereisHitWindow( std::size_t listedCount, std::size_t maxHits, int pageLimit, int pageOffset )
+src/crossref.h	bugprone-easily-swappable-parameters	inline WhereResult computeWhereis( const std::string& root, std::string_view sym, std::string_view filter,
+src/crossref.h	bugprone-easily-swappable-parameters	inline WorktreeCopy readWorktreeCopy( const std::string& root, const std::string& relPath, std::string& bytes )
+src/crossref.h	bugprone-easily-swappable-parameters	inline bool definitionLeftCopy( std::string_view headCopy, std::string_view workCopy, std::string_view name )
+src/crossref.h	bugprone-easily-swappable-parameters	inline bool whereisRowOnHeadCommit( const WhereHit& h, std::string_view headSha, std::string_view headDate ) noexcept
+src/crossref.h	bugprone-easily-swappable-parameters	inline std::size_t countAbsent( const std::vector<std::uint64_t>& a, const std::vector<std::uint64_t>& b )
+src/crossref.h	bugprone-easily-swappable-parameters	inline std::size_t skipGroupBack( std::string_view line, std::size_t p, char open, char close ) noexcept
+src/crossref.h	bugprone-easily-swappable-parameters	inline std::size_t skipGroupForward( std::string_view line, std::size_t open, char opener, char closer ) noexcept
+src/crossref.h	bugprone-easily-swappable-parameters	inline std::vector<std::uint32_t> promotedHitLines( std::span<const std::uint32_t> hitLines, std::span<const std::uint32_t> defLines )
+src/crossref.h	bugprone-easily-swappable-parameters	inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::size_t maxFiles, int pageLimit, int pageOffset )
+src/crossref.h	performance-inefficient-vector-operation	for( const RefInfo& r : refs )
+src/darkflags.h	bugprone-easily-swappable-parameters	[ & ]( const std::filesystem::directory_entry& entry, const std::string& p, const std::string& base )
+src/darkflags.h	bugprone-easily-swappable-parameters	inline FileHarvest harvestFile( std::string_view bytes, std::string_view path, bool isCMake )
+src/darkflags.h	bugprone-easily-swappable-parameters	inline std::size_t gateReadWindow( const Gate& g, std::size_t maxSites, int pageOffset, PageWindow& window ) noexcept
+src/declinedsites.h	bugprone-easily-swappable-parameters	inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::string_view verbFlag, std::string_view selector, std::size_t rowWindow )
+src/declinedsites.h	bugprone-easily-swappable-parameters	inline ImpactDeclinedRows impactDeclinedRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> targets, std::size_t calls,
+src/defattrib.h	bugprone-easily-swappable-parameters	bool foldInto( std::size_t c, std::size_t u, DefMark mark ) noexcept
+src/defattrib.h	bugprone-easily-swappable-parameters	inline PathEndpointBinding pathEndpointBinding( const Graph& g, std::size_t srcDefs, std::size_t dstDefs, std::span<const NodeId> path ) noexcept
+src/defattrib.h	bugprone-easily-swappable-parameters	inline RowDefTokens attributeFiles( const IngestResult& ing, std::span<const std::uint32_t> files, std::span<const NodeId> reach,
+src/defattrib.h	bugprone-easily-swappable-parameters	inline RowDefTokens attributeOneHop( const Graph& g, const DefGroups& groups, std::span<const NodeId> matches,
+src/defattrib.h	bugprone-easily-swappable-parameters	inline RowDefTokens attributeReach( const Graph& g, const DefGroups& groups, std::span<const NodeId> seeds, std::span<const NodeId> reach,
+src/defattrib.h	bugprone-easily-swappable-parameters	inline std::string ofDefIn( const DefGroups& groups, const RowDefTokens& tokens, std::size_t row, std::string_view open, std::string_view sep,
+src/defattrib.h	bugprone-easily-swappable-parameters	inline std::vector<char> rowsViaImpl( const Graph& g, std::span<const NodeId> matches, std::span<const NodeId> rows, bool towardMatches )
+src/defattrib.h	bugprone-narrowing-conversions	declOnly[ groups.ofMatch[i] ] &= char( langCompatible( s.lang, Lang::C ) && !isDefinitionNotDeclaration( s ) );
+src/defattrib.h	bugprone-unchecked-optional-access	untied[grp] = editCheckTieDeclaration( ing, sources, matches[i], matches[j], *defSigs[j] ).tie == EditCheckTie::Unproven ? 1 : 0;
+src/defattrib.h	performance-inefficient-vector-operation	for( std::size_t i = 0; i < rollup.shown; ++i )
+src/defectshape.h	bugprone-branch-clone	{
+src/defectshape.h	bugprone-branch-clone	{
+src/defectshape.h	bugprone-branch-clone	{
+src/defectshape.h	bugprone-easily-swappable-parameters	inline Tok lexPythonString( std::string_view s, std::uint32_t b, std::size_t q )
+src/defectshape.h	bugprone-easily-swappable-parameters	inline bool callHoldsDirective( const std::vector<std::uint32_t>& directives, std::uint32_t open, std::uint32_t close ) noexcept
+src/defectshape.h	bugprone-easily-swappable-parameters	inline bool hasUtf8Guard( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to ) noexcept
+src/defectshape.h	bugprone-easily-swappable-parameters	inline bool isRunUnderTest( const std::vector<ShTok>& t, std::size_t b, std::size_t e )
+src/defectshape.h	bugprone-easily-swappable-parameters	inline bool lengthIsSizeBound( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::string_view v,
+src/defectshape.h	bugprone-easily-swappable-parameters	inline bool readsAnyField( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, const std::vector<std::string>& fields )
+src/defectshape.h	bugprone-easily-swappable-parameters	inline std::size_t ellipsisAppendOn( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::string_view v ) noexcept
+src/defectshape.h	bugprone-easily-swappable-parameters	inline std::size_t skipQuoted( std::string_view s, std::size_t i, char q ) noexcept
+src/defectshape.h	bugprone-easily-swappable-parameters	inline std::string joinTokens( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to )
+src/defectshape.h	bugprone-easily-swappable-parameters	inline void scanDedupFirstFunction( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::vector<Site>& out )
+src/defectshape.h	performance-faster-string-find	else if( w.rfind( "<<<", 0 ) == 0 || w.rfind( "2>", 0 ) == 0 || w.rfind( ">", 0 ) == 0 )
+src/defslookup.h	bugprone-easily-swappable-parameters	inline PathAlts pathAltsOf( const IngestResult& ing, const Graph& g, std::string_view srcN, std::string_view dstN, bool srcGlob, bool dstGlob,
+src/defslookup.h	performance-inefficient-string-concatenation	r.sel = file + ":" + owned;
+src/defslookup.h	performance-inefficient-string-concatenation	tries.push_back( file + ":" + owned );
+src/degradedscan.h	bugprone-assignment-in-if-condition	if( ++scannedFiles > kDegradedScanFiles || ( scannedBytes += h.fileBytes ) > kDegradedScanBytes )
+src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	else if( std::sscanf( buf, "@@ -%d +%d @@", &oldStart, &newStart ) == 2 ) { oldCount = 1; newCount = 1; }
+src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	else if( std::sscanf( buf, "@@ -%d +%d,%d @@", &oldStart, &newStart, &newCount ) == 3 ) { oldCount = 1; }
+src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	else if( std::sscanf( buf, "@@ -%d,%d +%d @@", &oldStart, &oldCount, &newStart ) == 3 ) { newCount = 1; }
+src/diffhunks.h	bugprone-unchecked-string-to-number-conversion	if( std::sscanf( buf, "@@ -%d,%d +%d,%d @@", &oldStart, &oldCount, &newStart, &newCount ) == 4 ) {}
+src/docdrift.h	bugprone-easily-swappable-parameters	const HashMap<std::string, NameFact>& wanted, HashMap<std::string, NameFact>& into )
+src/docdrift.h	bugprone-easily-swappable-parameters	inline DocDating docDatingOf( std::string_view rel, std::string_view bytes )
+src/docdrift.h	bugprone-easily-swappable-parameters	inline bool matchBareExtent( std::string_view line, std::size_t openIndex, std::size_t& closeIndex, std::uint64_t& extent )
+src/docdrift.h	bugprone-easily-swappable-parameters	inline bool matchBracketExtent( std::string_view s, std::size_t openIndex, std::size_t& closeIndex, std::uint64_t& extent )
+src/docdrift.h	bugprone-easily-swappable-parameters	inline bool parseIntLiteral( std::string_view s, std::size_t& i, std::uint64_t& out )
+src/docdrift.h	bugprone-easily-swappable-parameters	inline std::string_view codeFactText( std::string_view path, std::string_view bytes, std::string& scratch )
+src/docdrift.h	bugprone-easily-swappable-parameters	inline void splitQualified( std::string_view s, std::string_view& leaf, std::string_view& scope )
+src/docdrift.h	bugprone-exception-escape	const auto indexWorker = [ & ]() noexcept
+src/editcheck.h	bugprone-easily-swappable-parameters	inline EditCheckRowWindow editCheckRowWindow( std::size_t callerCount, std::size_t incompatibleCount,
+src/editcheck.h	bugprone-easily-swappable-parameters	inline std::vector<CallSiteAt> callSitesAt( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> pageCallers,
+src/editcheck.h	performance-inefficient-vector-operation	for( const std::vector<NodeId>& members : gk.members )
+src/editcheck.h	performance-no-automatic-move	return verdictLine;
+src/editplan.h	bugprone-easily-swappable-parameters	inline Outcome prepare( const std::string& root, const std::string& planPath, std::size_t maxBytes,
+src/editplan.h	bugprone-easily-swappable-parameters	inline bool parseEdit( const McpIndex& ix, const std::string& object, const std::string& planPath,
+src/editplan.h	bugprone-easily-swappable-parameters	inline bool payloadWithinPlanDir( const std::string& planPath, const std::string& payloadPath, std::string& resolved )
+src/editplan.h	bugprone-inc-dec-in-conditions	if( objectIndex != 0 && ( at >= array.size() || array[at++] != ',' ) ) { return false; }
+src/editplan.h	performance-inefficient-vector-operation	for( const FileStage& file : files ) { locks.push_back( std::make_unique<mcpedit::EditLock>( file.disk ) ); }
+src/editpreview.h	bugprone-easily-swappable-parameters	inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string& rel, const std::string& bytes,
+src/elixir_resolve.h	bugprone-easily-swappable-parameters	std::string keyOf( std::string_view module, std::string_view name ) const
+src/ensemble.h	bugprone-easily-swappable-parameters	bool singleRoot = false, const std::string& rootPrefix = {}, const std::string& rootAttr = {} )
+src/ensemble.h	bugprone-easily-swappable-parameters	inline std::size_t ordinalCut( std::size_t rankedCount, std::size_t windowCap ) noexcept
+src/ensemble.h	bugprone-easily-swappable-parameters	inline std::string familyListOf( std::uint8_t bits, std::uint8_t familyCount, FamilyNameFn nameOf )
+src/ensemble.h	misc-redundant-expression	&& kFamilyCount <= std::numeric_limits<decltype( EnsembleFileRow::unionMask )>::digits,
+src/epmanifest.h	bugprone-easily-swappable-parameters	inline bool consumerShape( std::string_view before, std::string_view after ) noexcept
+src/epmanifest.h	bugprone-easily-swappable-parameters	inline bool epInDependencyTree( std::string_view rel, std::string_view diskPath )
+src/epmanifest.h	bugprone-easily-swappable-parameters	inline void addCfgEntry( std::string_view v, std::string_view group, std::uint32_t groupLine, std::uint32_t line, std::vector<EpEntry>& out )
+src/epmanifest.h	bugprone-easily-swappable-parameters	inline void collectManifestsAbove( const IngestResult& ing, std::uint32_t fileId, std::uint8_t formats, std::vector<std::string>& seen,
+src/epmanifest.h	bugprone-signed-char-misuse	q = std::size_t( t[i] );
+src/eval.h	bugprone-easily-swappable-parameters	double avg, const HashMap<std::string, int>& df, std::uint32_t F, std::uint32_t seed )
+src/eval.h	bugprone-easily-swappable-parameters	inline bool allGoldWithinK( const std::vector<std::uint32_t>& ranked, const std::vector<char>& gold, std::size_t goldTotal, std::size_t k )
+src/eval.h	bugprone-easily-swappable-parameters	inline bool findStringValue( const std::string& s, const char* key, std::size_t from, std::size_t& vs, std::size_t& ve )
+src/eval.h	bugprone-easily-swappable-parameters	std::size_t goldTotal, std::size_t k )
+src/fieldaffinity.h	bugprone-easily-swappable-parameters	std::size_t& filesScanned, std::size_t& capped )
+src/filepool.h	bugprone-easily-swappable-parameters	inline bool applyFilePooling( const IngestResult& ing, std::vector<float>& lensRank, std::size_t topK, std::size_t blendPct )
+src/filter.h	bugprone-easily-swappable-parameters	inline bool taskNamesWord( std::string_view lowerTask, std::string_view word ) noexcept
+src/filter.h	performance-inefficient-string-concatenation	[ & ]( std::string_view en ) { return has( head + std::string( en ) + "/" + rest ); } );
+src/flipimpact.h	bugprone-easily-swappable-parameters	inline NodeId innermostAtLine( const IngestResult& ing, const SymbolLineIndex& ix, std::uint32_t fileId, std::uint32_t line )
+src/flipimpact.h	bugprone-easily-swappable-parameters	inline PageWindow flipRowWindow( std::size_t total, std::size_t maxRows, int pageOffset ) noexcept
+src/flipimpact.h	bugprone-easily-swappable-parameters	std::uint32_t fileId, std::uint32_t lo, std::uint32_t hi )
+src/foraliashop.h	bugprone-easily-swappable-parameters	inline std::string declText( const IngestResult& ing, const Symbol& s, std::string& scratch, std::uint32_t& textOf, const std::string*& text, bool& cut, bool& unread,
+src/forcallerhop.h	bugprone-easily-swappable-parameters	inline std::vector<NodeId> callerHopSecondRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> targets,
+src/fordeclrow.h	bugprone-inc-dec-in-conditions	else if( span[i] == ')' && depth > 0 && --depth == 0 )
+src/fordottedstring.h	bugprone-easily-swappable-parameters	inline bool flowHasToken( std::string_view flow, std::string_view token )
+src/forfilepage.h	bugprone-narrowing-conversions	const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+src/forfilepage.h	bugprone-narrowing-conversions	files.insert( files.end(), a.files.begin(), a.files.begin() + std::min( a.files.size(), kForFilePageDirFiles ) ); // serving order
+src/forfold.h	bugprone-easily-swappable-parameters	std::size_t headRows, NodeId bodied )
+src/forfold.h	performance-move-const-arg	files.emplace_back( ms.fileId, text == &scratch ? std::move( scratch ) : *text );
+src/forliteral.h	bugprone-easily-swappable-parameters	inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLiteral& lit, std::string_view rootArg, std::string_view served,
+src/forliteral.h	bugprone-easily-swappable-parameters	inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
+src/forliteral.h	bugprone-easily-swappable-parameters	inline TableOpener allmanOpener( std::string_view text, std::size_t pos, std::size_t indent, std::string_view bracket, bool inFunction, BracketReading br )
+src/forliteral.h	bugprone-easily-swappable-parameters	inline TableOpener tableOpenerOf( std::string_view text, std::size_t rowStart, std::size_t indent, bool inFunction, BracketReading br )
+src/forliteral.h	bugprone-easily-swappable-parameters	inline bool callsOnGraph( const Graph& g, NodeId from, NodeId to ) noexcept
+src/forliteral.h	bugprone-easily-swappable-parameters	inline std::optional<std::string_view> siblingLine( std::string_view text, std::size_t rowStart, std::size_t indent, bool down, bool crossLess ) noexcept
+src/forliteral.h	bugprone-easily-swappable-parameters	inline std::string excerptElement( const std::string& text, const std::string& path, const Symbol& s, std::uint32_t first, std::uint32_t last,
+src/forliteral.h	bugprone-easily-swappable-parameters	inline std::vector<std::size_t> pickRows( const std::vector<char>& reg, std::size_t cap, std::size_t reserve )
+src/forliteral.h	bugprone-narrowing-conversions	ownerAbove.push_back( above ? 1 : ( out.bodies >= kForLiteralBodies ? 2 : 0 ) );
+src/forliteral.h	performance-enum-size	enum class OpenerKind
+src/forliteral.h	performance-inefficient-vector-operation	for( const GrepHit& h : enriched )
+src/forliteral.h	performance-inefficient-vector-operation	for( std::size_t i = 0; i < ranked; ++i )
+src/forpage.h	bugprone-easily-swappable-parameters	const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task )
+src/forpage.h	bugprone-easily-swappable-parameters	std::uint32_t f, NodeId ranked )
+src/forpage.h	bugprone-incorrect-roundings	return int( 100.0 * matched / total + 0.5 );
+src/forpage.h	bugprone-incorrect-roundings	x += "\" score=\"" + std::to_string( int( row.share * 100.0 + 0.5 ) );
+src/forpage.h	performance-inefficient-string-concatenation	pageOut = h + t + legendShed + rowsShed;
+src/forpage.h	performance-inefficient-string-concatenation	pageOut = h + t + legendShed + rowsShed;
+src/forreexport.h	bugprone-easily-swappable-parameters	[[nodiscard]] std::vector<std::string> modsAt( std::uint32_t f, std::uint32_t byte ) const
+src/forreexport.h	bugprone-easily-swappable-parameters	inline bool localExportClause( Sources& src, std::uint32_t f, std::uint32_t byte )
+src/forreexport.h	bugprone-easily-swappable-parameters	int visOf( std::uint32_t f, std::uint32_t byte )
+src/forreexport.h	bugprone-easily-swappable-parameters	std::uint32_t lineOf( std::uint32_t f, std::uint32_t byte )
+src/forreexport.h	bugprone-unused-local-non-trivial-variable	std::string rungs, body, next;
+src/forreexport.h	performance-inefficient-vector-operation	for( const Symbol* s : sameLeaf )
+src/forreexport.h	performance-inefficient-vector-operation	for( const Symbol* s : sameLeaf )
+src/forselfhook.h	bugprone-easily-swappable-parameters	inline bool stringAttrCall( const ParsedFile& f, std::uint32_t at, std::string_view fn, std::string_view recv, std::string_view name )
+src/forselfhook.h	bugprone-easily-swappable-parameters	std::string placeOf( std::uint32_t fileId, std::uint32_t line )
+src/forslots.h	performance-inefficient-vector-operation	for( std::size_t c = 0; c < cand.size(); ++c )
+src/forunused.h	bugprone-branch-clone	{
+src/forunused.h	bugprone-easily-swappable-parameters	inline bool callSplitOverNamesakes( const IngestResult& ing, const Graph& g, NodeId caller, NodeId id ) noexcept
+src/forunused.h	bugprone-easily-swappable-parameters	inline bool lineStarExportsStem( std::string_view line, std::string_view stem, Lang lang ) noexcept
+src/forunused.h	bugprone-easily-swappable-parameters	void noteImports( std::uint32_t fileId, std::string_view path, std::string_view src, bool isTest, bool hashComments, bool self )
+src/forunused.h	bugprone-easily-swappable-parameters	void readImportCalls( std::string_view t, std::string_view importer, bool& imports, std::vector<std::string>& bound, bool& inPlace ) const
+src/forunused.h	bugprone-easily-swappable-parameters	void readPyImport( std::string_view stmt, std::string_view importer, bool& imports, std::vector<std::string>& bound ) const
+src/githarden.h	bugprone-easily-swappable-parameters	inline bool addGitFileTargets( const std::filesystem::path& dir, const std::filesystem::path& dotGit,
+src/githarden.h	bugprone-easily-swappable-parameters	inline void addPointerReadings( std::string_view exactRest, std::string_view looseRest, const std::filesystem::path& base,
+src/gitmine.h	bugprone-branch-clone	if ( b0 < 0x80 ) { ++i; continue; } // ASCII can never be a mark
+src/gitmine.h	bugprone-easily-swappable-parameters	bool namesBaseNameOf( std::uint32_t includer, std::uint32_t other ) const
+src/gitmine.h	bugprone-easily-swappable-parameters	const RawCommitStream& raw, const IngestResult& ing, std::size_t maxFiles,
+src/gitmine.h	bugprone-easily-swappable-parameters	const auto numberAt = []( std::string_view v, std::size_t at, std::size_t count ) -> int
+src/gitmine.h	bugprone-easily-swappable-parameters	inline std::int64_t monthsBeforeEpoch( std::int64_t epoch, unsigned months )
+src/gitmine.h	bugprone-easily-swappable-parameters	inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string& root, const IngestResult& ing, const std::string& windowArgs, std::size_t maxFiles,
+src/gitmine.h	bugprone-easily-swappable-parameters	inline void civilFromDays( std::int64_t z, std::int64_t& y, unsigned& m, unsigned& d )
+src/gitmine.h	bugprone-easily-swappable-parameters	std::size_t maxFiles, std::uint32_t onlyRoot = UINT32_MAX )
+src/gitmine.h	bugprone-easily-swappable-parameters	std::uint32_t onlyFileId = UINT32_MAX,
+src/gitmine.h	bugprone-implicit-widening-of-multiplication-result	std::array<char, 64 * 1024> block;
+src/gitmine.h	bugprone-implicit-widening-of-multiplication-result	std::vector<char> block( 64u * 1024u );
+src/gitoracle.h	performance-unnecessary-value-param	inline void writeHistoryProbe( std::FILE* out, const HistoryIndex& idx, Escape escape )
+src/gitoracle.h	performance-unnecessary-value-param	inline void writeNameFate( std::FILE* out, const std::string& name, const NameFate& f, Escape escape )
+src/graph.h	bugprone-branch-clone	{
+src/graph.h	bugprone-easily-swappable-parameters	bool namedBeyondDefinition( std::uint32_t fileId, std::uint32_t k ) const // unreadable: true (keep the edge)
+src/graph.h	bugprone-easily-swappable-parameters	bool& anyName, bool& anyLink ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	const HashMap<std::string, char>& moduleNames,
+src/graph.h	bugprone-easily-swappable-parameters	const auto typeCallResults = [ & ]( const Reference& r, NodeId callee, std::size_t site )
+src/graph.h	bugprone-easily-swappable-parameters	const std::vector<std::uint8_t>& nameOnly, NodeId from, NodeId to, std::uint8_t want = kEdgeName ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanout = 32 )
+src/graph.h	bugprone-easily-swappable-parameters	inline MarkdownLinkTarget bindOneMarkdownLink( const MdLinkIndex& ix, std::string_view linkerPath, std::string_view written,
+src/graph.h	bugprone-easily-swappable-parameters	inline NamespaceFit namespaceFitOf( std::span<const std::string_view> prefix, const std::vector<std::string_view>& namespaceNames,
+src/graph.h	bugprone-easily-swappable-parameters	inline TerminalChoice scoreTerminalCandidates( std::span<const NodeId> candidates, NodeId preferred, std::size_t self,
+src/graph.h	bugprone-easily-swappable-parameters	inline TomlDepEntry tomlDepEntry( std::string_view key, std::string_view sub, std::string_view rest, const TomlDepCursor& cur )
+src/graph.h	bugprone-easily-swappable-parameters	inline bool declaredInFileOf( const IngestResult& ing, const std::vector<NodeId>& sel, std::size_t declCount, std::uint32_t fileId ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	inline bool dirSpellsPackage( std::string_view dir, std::string_view qual )
+src/graph.h	bugprone-easily-swappable-parameters	inline bool pathsMatch( std::string_view defPath, std::string_view usePath ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	inline bool pythonStarChainReaches( const std::vector<std::vector<std::uint32_t>>& stars, std::uint32_t from, std::uint32_t target )
+src/graph.h	bugprone-easily-swappable-parameters	inline bool pythonSubmoduleOf( std::string_view path, std::string_view pkgDir, std::string_view name ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	inline bool rustDeclaresMacroUseMod( std::string_view source, std::string_view name )
+src/graph.h	bugprone-easily-swappable-parameters	inline bool rustItemIsTupleStruct( std::string_view source, std::uint32_t from, std::uint32_t to, std::string_view name )
+src/graph.h	bugprone-easily-swappable-parameters	inline bool tomlPathInRoot( std::string_view dir, std::string_view path )
+src/graph.h	bugprone-easily-swappable-parameters	inline const char* depsShape( double nccd, std::size_t cyclicFiles, std::size_t depFiles ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	inline const std::vector<std::string>& memoNamesReached( const HashMap<std::string, std::vector<std::string>>& edges,
+src/graph.h	bugprone-easily-swappable-parameters	inline std::pair<std::vector<float>, std::vector<float>> hits( const Graph& g, float tol = 1e-6f, unsigned maxIter = 100 )
+src/graph.h	bugprone-easily-swappable-parameters	inline std::size_t edgeIndex( const Graph& g, NodeId from, NodeId to ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	inline std::string RubyClassObjects::ancestorConstant( std::string_view head, std::string_view rest ) const
+src/graph.h	bugprone-easily-swappable-parameters	inline std::string goPackageImportPath( std::string_view modulePath, std::string_view modDir, std::string_view pkgDir )
+src/graph.h	bugprone-easily-swappable-parameters	inline std::string impactAnchorLegendFor( const Graph& g, std::span<const NodeId> seeds, const std::vector<std::uint32_t>& depth,
+src/graph.h	bugprone-easily-swappable-parameters	inline std::string impactLinkLegendFor( const Graph& g, std::span<const NodeId> seeds, const std::vector<std::uint32_t>& depth,
+src/graph.h	bugprone-easily-swappable-parameters	inline std::string memberOwnerRefusal( const IngestResult& ing, std::span<const FieldId> fields, std::string_view spec, std::string_view retryForm )
+src/graph.h	bugprone-easily-swappable-parameters	inline std::vector<char> includeProofOfDeclFiles( const IngestResult& ing, const std::vector<NodeId>& decls,
+src/graph.h	bugprone-easily-swappable-parameters	inline void applyOutInto( const Graph& g, const float* a, float* h ) noexcept
+src/graph.h	bugprone-easily-swappable-parameters	inline void declToDefFollowThrough( const IngestResult& ing, std::string_view file, std::string_view name,
+src/graph.h	bugprone-easily-swappable-parameters	inline void enqueueUnseen( std::span<const NodeId> nodes, std::uint32_t d, std::vector<char>& seen, std::vector<std::uint32_t>& depth,
+src/graph.h	bugprone-easily-swappable-parameters	inline void jsImportedBases( const BaseEvidenceTables& t, const Reference& r, const std::vector<NodeId>& cand, std::vector<NodeId>& out )
+src/graph.h	bugprone-easily-swappable-parameters	inline void orderByDepthThenRank( std::vector<NodeId>& show, const std::vector<std::uint32_t>& depth, const std::vector<float>& rank )
+src/graph.h	bugprone-easily-swappable-parameters	inline void packageBases( const BaseEvidenceTables& t, const Reference& r, const std::vector<NodeId>& cand, std::vector<NodeId>& out )
+src/graph.h	bugprone-easily-swappable-parameters	inline void splitQualifiedSpec( std::string_view spec, std::string_view& file, std::string_view& name )
+src/graph.h	bugprone-easily-swappable-parameters	inline void writtenTraitBases( const BaseEvidenceTables& t, const Reference& r, const std::vector<NodeId>& cand, std::vector<NodeId>& out )
+src/graph.h	bugprone-exception-escape	inline bool isImpureName( const std::string& n ) noexcept
+src/graph.h	bugprone-narrowing-conversions	std::partial_sort( anchorIds.begin(), anchorIds.begin() + anchorCount, anchorIds.end(),
+src/graph.h	bugprone-narrowing-conversions	std::vector<NodeId> out( q.begin() + nSeed, q.end() ); // reached, minus the seeds
+src/graph.h	bugprone-narrowing-conversions	std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
+src/graph.h	bugprone-narrowing-conversions	t.localNameSet[ key ] |= localNameEvidence( b.kind );
+src/graph.h	bugprone-return-const-ref-from-parameter	return pairs > 0 ? adj : full;
+src/graph.h	bugprone-switch-missing-default-case	switch( prov )
+src/graph.h	bugprone-unchecked-optional-access	&& openedPaths.find( std::string( rubyTypedWritten( *typed ) ) ) == openedPaths.end();
+src/graph.h	clang-analyzer-deadcode.DeadStores	case FalseEdgeRules::Verdict::External: disposition = vetoExternal( r ); continue;
+src/graph.h	clang-analyzer-deadcode.DeadStores	case FalseEdgeRules::Verdict::Local: ++g.unresolvedOut[ r.fromSymbol ]; disposition = CallDisposition::Unresolved; continue;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Bound;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Declined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::FileScope; // no caller node for an edge; the use-site index still lists the site
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::OtherRoot;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::OtherRoot;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::QualifiedExternal; // qualified-external → no edge
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Self; // a covered-but-empty SCIP site (all self/out-of-range) yields no edge
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Self; // the tier held only the caller itself: a recursion, not an edge
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Undefined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Undefined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Undefined;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Undefined; // `it == end` cannot reach here (site A continued); named anyway
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Undefined; // no in-repo def of this builtin name — not external=
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Unresolved;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Unresolved;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Unresolved;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Unresolved;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = CallDisposition::Unresolved;
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = javaCandidateRefused( g, r, it != byName.end() );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = javaCandidateRefused( g, r, it != byName.end() );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r );
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r ); // RSpec's own target, a class whose lookup leaves the tree: the method Ruby runs is outside it
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r ); // every namesake is out of reach: the method Ruby runs is outside the tree
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r ); // every target is one this call cannot reach: not a decline of any of them
+src/graph.h	clang-analyzer-deadcode.DeadStores	disposition = vetoExternal( r ); // nothing inside std answers → external=, counted External
+src/graph.h	performance-inefficient-string-concatenation	scope.dirs.push_back( dirOwner ? identDir : ( identDir.empty() ? stem : identDir + "/" + stem ) );
+src/graphlegend.h	bugprone-easily-swappable-parameters	inline std::pair<std::size_t, std::size_t> graphGaugeTotals( const std::vector<std::uint32_t>& ambOut,
+src/graphlegend.h	bugprone-easily-swappable-parameters	inline std::string viaFactNoteJson( std::string text, std::string_view from, std::string_view jsonSpelling, std::string_view key )
+src/graphlegend.h	bugprone-easily-swappable-parameters	std::size_t unindexedFiles = 0, std::size_t rubyBasesUnscoped = 0 )
+src/graphlegend.h	bugprone-easily-swappable-parameters	std::size_t unindexedFiles = 0, std::size_t rubyBasesUnscoped = 0 )
+src/grepcarrier.h	bugprone-easily-swappable-parameters	inline void fillReads( const IngestResult& ing, const IngestResult& rd, std::span<const GrepEncRow> rows, std::span<GrepCarrier> out )
+src/handlerrule.h	bugprone-easily-swappable-parameters	NodeId functionAt( std::uint32_t fileId, std::uint32_t at ) const
+src/handlerrule.h	bugprone-easily-swappable-parameters	static std::optional<Template> templateOf( std::string_view line, std::string_view attr )
+src/hopbody.h	bugprone-argument-comment	/*ranges=*/nullptr, /*notes=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/capBytes > 0,
+src/hopbody.h	bugprone-easily-swappable-parameters	inline std::size_t byNameCandidates( const IngestResult& ing, const Graph& g, NodeId from, NodeId to ) noexcept
+src/hopbody.h	bugprone-easily-swappable-parameters	inline std::vector<RouteBody> pathMiddleHops( const IngestResult& ing, const Graph& g, std::span<const NodeId> chain, std::span<const NodeId> served )
+src/hopbody.h	bugprone-easily-swappable-parameters	inline void insertOpenTagAttrs( std::string& xml, std::string_view openPrefix, std::string_view attrs )
+src/hoprecord.h	bugprone-easily-swappable-parameters	inline std::size_t findWord( std::string_view text, std::size_t from, std::size_t to, std::string_view name ) noexcept
+src/hoprecord.h	bugprone-easily-swappable-parameters	inline std::string hopEdgeXml( const IngestResult& ing, const HopFacts& hops, NodeId from, NodeId to, std::uint8_t alike, HopShed shed,
+src/htmlexport.h	bugprone-narrowing-conversions	m.top.assign( m.members.begin(), m.members.begin() + topN );
+src/infra/csrverify.h	bugprone-easily-swappable-parameters	inline bool verifyOffsetCsr( std::span<const std::uint32_t> rowOffsets, std::span<const std::uint32_t> columnIndices, std::size_t rowCount,
+src/infra/diagnostics.cpp	bugprone-easily-swappable-parameters	void ConsoleLog::handleAssert( CheckKind kind, const char* expr, const char* file, int line, const char* function,
+src/infra/diagnostics.cpp	bugprone-easily-swappable-parameters	void ConsoleLog::handleThreadViolation( std::uint64_t expected, std::uint64_t got, const char* file, int line, const char* function,
+src/infra/diagnostics.cpp	bugprone-easily-swappable-parameters	void ConsoleLog::handleValidateFailed( const char* expr, const char* file, int line, const char* function, const char* description ) noexcept
+src/infra/diagnostics.cpp	bugprone-easily-swappable-parameters	void markTruncated( char* notice, std::size_t capacity, std::size_t fullBytes ) noexcept
+src/infra/diagnostics.cpp	bugprone-exception-escape	RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcept
+src/infra/diagnostics.cpp	bugprone-exception-escape	const auto formatMarker = [ & ]( std::size_t kept ) noexcept
+src/infra/emit.h	bugprone-empty-catch	catch( const std::system_error& )
+src/infra/fileSetStore.h	bugprone-easily-swappable-parameters	FileSetBuilder( std::uint32_t universe, std::uint32_t files, std::uint32_t chunkBits, std::uint64_t hashMask = ~std::uint64_t( 0 ),
+src/infra/fileSetStore.h	bugprone-easily-swappable-parameters	bool rowHolds( std::uint32_t row, std::uint32_t id ) const noexcept
+src/infra/fileSetStore.h	bugprone-easily-swappable-parameters	void reserve( std::size_t rows, std::size_t chunks, std::size_t words ) noexcept
+src/infra/gitblob.h	bugprone-easily-swappable-parameters	inline std::string sha1Hex( std::string_view head, std::string_view body )
+src/infra/gitblob.h	bugprone-implicit-widening-of-multiplication-result	w[ i ] = ( std::uint32_t( block[ 4 * i ] ) << 24 ) | ( std::uint32_t( block[ 4 * i + 1 ] ) << 16 )
+src/infra/jsonesc.h	bugprone-easily-swappable-parameters	inline int utf8SeqLen( const char* s, std::size_t i, std::size_t n ) noexcept
+src/infra/namesplit.h	bugprone-easily-swappable-parameters	inline bool hasField( std::string_view text, std::string_view sep, std::string_view field, bool visitTrailingEmpty )
+src/infra/namesplit.h	bugprone-easily-swappable-parameters	inline std::string_view stripTrailingGroup( std::string_view f, char open, char close ) noexcept
+src/infra/os.h	bugprone-command-processor	[[gnu::always_inline]] inline int system( const char* command ) { return ::system( command ); }
+src/infra/os.h	bugprone-command-processor	[[gnu::always_inline]] inline std::FILE* popen( const char* command, const char* mode ) { return ::popen( command, mode ); }
+src/infra/os.h	bugprone-easily-swappable-parameters	inline long pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs )
+src/infra/os.h	bugprone-easily-swappable-parameters	static std::size_t read_small( const char* path, char* buf, std::size_t cap )
+src/infra/pipefields.h	bugprone-implicit-widening-of-multiplication-result	: pipe_( pipe ), abandon_( abandon ), deadline_( deadline ), block_( 64u * 1024u ) {}
+src/infra/platform.h	bugprone-misplaced-widening-cast	constexpr Wide kMask64 = Wide( ~std::uint64_t( 0 ) );
+src/infra/profileScope.h	bugprone-easily-swappable-parameters	const Row& r, double nspt, double pctParent )
+src/infra/profileScope.h	bugprone-easily-swappable-parameters	int i, int depth, double nspt, uint64_t threadTotal,
+src/infra/profileScope.h	bugprone-exception-escape	inline void fmt_count( char* buf, std::size_t sz, uint64_t v ) noexcept
+src/infra/profileScope.h	bugprone-exception-escape	void teardown() noexcept
+src/infra/profileScope.h	bugprone-exception-escape	~Reporter()
+src/infra/profileScope.h	bugprone-unhandled-exception-at-new	static Registry* core = new Registry(); // leaked on purpose; see header
+src/infra/radixSort.inl	bugprone-easily-swappable-parameters	void sortPreparedIndices( const Key* keys, uint32_t* indices, uint32_t* scratch, std::size_t count,
+src/infra/radixSort.inl	bugprone-incorrect-roundings	return uint16_t( clamped * 65535.f + 0.5f );
+src/infra/radixSort.inl	bugprone-incorrect-roundings	return uint16_t( clamped * 65535.f + 0.5f );
+src/infra/sparseCsr.h	bugprone-easily-swappable-parameters	sparseCsr( std::size_t rows, std::size_t cols, std::size_t nnz )
+src/infra/stackthreads.h	bugprone-easily-swappable-parameters	inline constexpr std::size_t nextStackTryBytes( std::size_t tryBytes, std::size_t askedBytes ) noexcept
+src/infra/stackthreads.h	bugprone-easily-swappable-parameters	std::size_t runOnStackThreads( std::size_t threadCount, std::size_t stackBytes, Work& work, RefusePolicy isRefused = &isStackNeverRefused ) noexcept
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kCallerStackBytesFloorLibcxx = 512 * 1024;
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kCallerStackBytesFloorLibstdcxx = 8 * 1024 * 1024;
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kStackThreadBytesFloor = 8 * 1024 * 1024; // the smallest stack a refused thread is retried with
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( 12 * 1024 * 1024, 12 * 1024 * 1024 ) == kStackThreadBytesFloor, "a 12 MiB request retries at the 8 MiB floor" );
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( 12 * 1024 * 1024, 12 * 1024 * 1024 ) == kStackThreadBytesFloor, "a 12 MiB request retries at the 8 MiB floor" );
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( 256 * 1024 * 1024, 256 * 1024 * 1024 ) == 128 * 1024 * 1024, "a power-of-two request still halves" );
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( 256 * 1024 * 1024, 256 * 1024 * 1024 ) == 128 * 1024 * 1024, "a power-of-two request still halves" );
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( 256 * 1024 * 1024, 256 * 1024 * 1024 ) == 128 * 1024 * 1024, "a power-of-two request still halves" );
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( 4 * 1024 * 1024, 4 * 1024 * 1024 ) == 0, "a request below the floor is tried once" );
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( 4 * 1024 * 1024, 4 * 1024 * 1024 ) == 0, "a request below the floor is tried once" );
+src/infra/stackthreads.h	bugprone-implicit-widening-of-multiplication-result	static_assert( nextStackTryBytes( kStackThreadBytesFloor, 12 * 1024 * 1024 ) == 0, "the floor is the last try" );
+src/infra/statclock.h	bugprone-easily-swappable-parameters	[[nodiscard]] inline constexpr long long saturatingNanoseconds( long long seconds, long long nanoseconds ) noexcept
+src/infra/strkern.h	bugprone-easily-swappable-parameters	constexpr void addRange( unsigned char lo, unsigned char hi ) noexcept
+src/infra/strkern.h	bugprone-easily-swappable-parameters	inline bool lowerFoldedEquals_scalar( const char* a, const char* bLowered, std::size_t n ) noexcept
+src/infra/strkern.h	bugprone-easily-swappable-parameters	inline std::size_t findByte_scalar( const char* p, std::size_t n, char needle ) noexcept
+src/infra/svector.h	bugprone-bitwise-pointer-cast	if( count != 0 ) { std::memcpy( dst, src, std::size_t( count ) * sizeof( T ) ); }
+src/infra/svector.h	bugprone-bitwise-pointer-cast	static void inlineBlockMove( T* dst, const T* src ) noexcept { std::memcpy( dst, src, std::size_t( N ) * sizeof( T ) ); }
+src/infra/svector.h	bugprone-easily-swappable-parameters	void openHole( std::uint32_t index, std::uint32_t count )
+src/infra/svector.h	bugprone-multi-level-implicit-pointer-conversion	if( count != 0 ) { std::memcpy( dst, src, std::size_t( count ) * sizeof( T ) ); }
+src/infra/svector.h	bugprone-multi-level-implicit-pointer-conversion	if( count != 0 ) { std::memcpy( dst, src, std::size_t( count ) * sizeof( T ) ); }
+src/infra/svector.h	bugprone-multi-level-implicit-pointer-conversion	static void inlineBlockMove( T* dst, const T* src ) noexcept { std::memcpy( dst, src, std::size_t( N ) * sizeof( T ) ); }
+src/infra/svector.h	bugprone-multi-level-implicit-pointer-conversion	static void inlineBlockMove( T* dst, const T* src ) noexcept { std::memcpy( dst, src, std::size_t( N ) * sizeof( T ) ); }
+src/ingest.h	bugprone-easily-swappable-parameters	inline bool crawlPathStaysInRoot( const std::string& path, const std::string& rootReal ) noexcept
+src/ingest.h	bugprone-easily-swappable-parameters	void note( AstRegexUndecidedCause cause, std::uint32_t fileId, std::uint32_t byte, std::uint32_t line, std::string_view pattern, std::string_view reason )
+src/ingest.h	bugprone-easily-swappable-parameters	void note( AstRegexUndecidedCause cause, std::uint32_t fileId, std::uint32_t byte, std::uint32_t line, std::string_view pattern, std::string_view reason )
+src/ingest.h	bugprone-implicit-widening-of-multiplication-result	constexpr std::size_t kDefaultMaxFileBytes = 4u * 1024u * 1024u; // 4 MB (was 1 MB pre-2026-07)
+src/ingest.h	bugprone-implicit-widening-of-multiplication-result	constexpr std::size_t kMaxJsonConfigBytes = 256u * 1024u; // 256 KB
+src/ingest.h	bugprone-implicit-widening-of-multiplication-result	constexpr std::size_t kMaxYamlConfigBytes = 512u * 1024u; // 512 KB — deliberately NOT kMaxJsonConfigBytes
+src/ingest_astquery.h	bugprone-easily-swappable-parameters	static std::string patternGrammarLabel( std::string_view querySub, std::string_view ext, const std::vector<pattern::GrammarRow>& taken )
+src/ingest_astquery.h	bugprone-empty-catch	catch( ... ) { /* per-file degrade — never abort the pass */ }
+src/ingest_astquery.h	misc-redundant-expression	if( u32() != kSpanTierMemoMagic || u32() != kSpanTierMemoVersion )
+src/ingest_binds.h	bugprone-branch-clone	{
+src/ingest_binds.h	bugprone-branch-clone	{
+src/ingest_binds.h	bugprone-branch-clone	{
+src/ingest_binds.h	bugprone-branch-clone	{
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline BindSite javaShadowSite( TSNode declNode, TSNode nameNode ) noexcept
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline RubyValueType rubyFactoryBuildType( TSNode v, std::string_view m, std::string_view src )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline RubyValueType rubyReceiverBuildType( TSNode v, TSNode recv, std::string_view m, std::string_view src, const RubyValueSite& site )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline std::optional<RawRef> subscriptOperatorRef( TSNode access, TSNode recv, std::uint32_t fileId, Lang lang, std::string_view src )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline std::string rubyWrittenPathOfReceiver( TSNode recv, std::string_view final, std::string_view src )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline std::string_view declaredOrConstructed( const BindCtx& cx, TSNode type, TSNode value, std::uint32_t at )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline std::string_view declaredResultClass( TSNode type, TSNode fn, std::string_view src, std::uint8_t& depth, std::string_view& whole )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline std::string_view goResultClass( TSNode type, TSNode fn, std::string_view src, std::string_view& whole )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline std::string_view rustDispatchTrait( TSNode type, TSNode owner, std::string_view src, std::string_view& whole, std::string_view& generic )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline std::string_view rustResultClass( TSNode type, TSNode fn, std::string_view src, std::uint8_t& depth, std::string_view& whole, TSNode* tuple, bool& spelledSelf )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline void RubyBareCallWalk::sendTargets( std::size_t firstRef, std::size_t endRef )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline void RubyBareCallWalk::typeReceivers( std::size_t firstRef, std::size_t endRef )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline void pushCallResult( BindCtx& cx, TSNode var, TSNode call, std::uint8_t index, std::uint8_t depth, BindSite site, std::string written = {} )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline void pushDeclaratorEvidence( BindCtx& cx, LocalBindKind kind, TSNode type, TSNode name, TSNode value, BindSite site )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline void pushImplBlock( BindCtx& cx, TSNode n, std::string_view written, std::string_view implementor )
+src/ingest_binds.h	bugprone-easily-swappable-parameters	inline void pushJavaVarCallResult( BindCtx& cx, TSNode type, TSNode declarator, BindSite site )
+src/ingest_binds.h	clang-analyzer-optin.performance.Padding	struct JsLitChainRow
+src/ingest_binds.h	clang-analyzer-optin.performance.Padding	struct ScopeFactNode
+src/ingest_cache.h	bugprone-easily-swappable-parameters	inline std::string reAbsolutize( std::string_view rel, std::string_view root )
+src/ingest_crawl.h	bugprone-branch-clone	{
+src/ingest_crawl.h	bugprone-easily-swappable-parameters	bool readFile( const std::string& path, std::string& out )
+src/ingest_crawl.h	bugprone-easily-swappable-parameters	bool readFilePrefix( const std::string& path, std::string& out, std::size_t maxBytes )
+src/ingest_crawl.h	bugprone-easily-swappable-parameters	std::size_t sniffSkipQuoted( std::string_view head, std::size_t openIndex, char quote ) noexcept
+src/ingest_crawl.h	bugprone-implicit-widening-of-multiplication-result	static constexpr std::uintmax_t kMaxSphinxConfBytes = 256u * 1024u;
+src/ingest_crawl.h	bugprone-implicit-widening-of-multiplication-result	std::array<NestFrame, 2u * kMaxKotlinStringNestDepth> frames {};
+src/ingest_crawl.h	bugprone-unchecked-optional-access	const bool stands = *speculation_ == *fresh_;
+src/ingest_crawl.h	performance-unnecessary-value-param	bool push( fs::path dir, std::error_code& ec ) // by value: `dir` may name an entry of a level that growing levels_ moves
+src/ingest_docs.h	bugprone-easily-swappable-parameters	inline void pushDocFileNode( std::uint32_t fileId, std::string_view src, std::string_view stem, std::vector<RawDef>& defs )
+src/ingest_docs.h	bugprone-easily-swappable-parameters	inline void scanBacktickMentions( std::string_view line, std::size_t lineStart, std::uint32_t fileId, std::vector<RawRef>& refs )
+src/ingest_elixir.h	bugprone-easily-swappable-parameters	TSNode elixirKeywordValue( TSNode node, std::string_view key, std::string_view src ) noexcept
+src/ingest_elixir.h	bugprone-easily-swappable-parameters	bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std::string_view src ) noexcept
+src/ingest_elixir.h	bugprone-easily-swappable-parameters	std::pair<std::uint16_t, bool> elixirCallArity( TSNode role, TSNode name, std::string_view src ) noexcept
+src/ingest_elixir.h	performance-inefficient-string-concatenation	bindAlias( first, parent + "." + first, call );
+src/ingest_elixir.h	performance-inefficient-string-concatenation	if( auto target = moduleOf( ts_node_named_child( targets, i ), node ); !target.empty() ) { out.push_back( protocol + "." + target ); }
+src/ingest_importcap.h	bugprone-easily-swappable-parameters	ImportSpec normaliseCFamilyImport( TSNode directive, std::string_view raw, std::string_view src )
+src/ingest_importcap.h	bugprone-easily-swappable-parameters	ImportSpec normaliseWebImport( TSNode directive, std::string_view raw, std::string_view src )
+src/ingest_jsimports.h	bugprone-branch-clone	{
+src/ingest_jsimports.h	performance-unnecessary-value-param	const auto noteHoisted = [ & ]( TSNode scope, std::string name, bool keeps, std::uint32_t at )
+src/ingest_metrics.h	bugprone-easily-swappable-parameters	inline bool ev_markBetween( EvCtx& ctx, std::uint32_t from, std::uint32_t target, bool excludeDirectArm ) noexcept
+src/ingest_metrics.h	bugprone-easily-swappable-parameters	inline std::uint32_t ev_findTarget( const EvCtx& ctx, std::uint32_t from, std::uint8_t mask ) noexcept
+src/ingest_metrics.h	bugprone-easily-swappable-parameters	inline std::uint8_t ln_declDepth( TSNode declNode, TSNode funcRoot ) noexcept
+src/ingest_model.h	bugprone-easily-swappable-parameters	NodeId find( std::uint32_t fileId, std::uint32_t pos )
+src/ingest_model.h	bugprone-narrowing-conversions	std::sort( index.spans.begin() + begin, index.spans.begin() + end,
+src/ingest_model.h	bugprone-narrowing-conversions	std::sort( index.spans.begin() + begin, index.spans.begin() + end,
+src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + begin, refOrder.begin() + end, lessRefByByteName );
+src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + begin, refOrder.begin() + end, lessRefByByteName );
+src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + tieBegin, refOrder.begin() + tieEnd, lessRefByName );
+src/ingest_model.h	bugprone-narrowing-conversions	std::sort( refOrder.begin() + tieBegin, refOrder.begin() + tieEnd, lessRefByName );
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline FnScope enclosingFunctionScope( TSNode root, TSNode defNode ) noexcept
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline bool captureSpecializationHeader( bool isDef, Lang lang, std::string_view defCapture, TSNode classNode, TSNode nameNode, std::uint32_t fileId,
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline bool equalsIgnoringAsciiSpace( std::string_view a, std::string_view b ) noexcept
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::string_view src ) noexcept
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline bool isJsxIntrinsicTagIdentifier( TSNode roleNode, TSNode nameNode, std::string_view name ) noexcept
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexcept
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline bool templateIdNamesItsParameters( TSNode templateType, TSNode parameterList, std::string_view src )
+src/ingest_names.h	bugprone-easily-swappable-parameters	inline void captureRubyAttrDefsCall( TSNode n, std::uint32_t fileId, std::string_view src,
+src/ingest_parsepool.h	bugprone-exception-escape	pool.emplace_back( [ &shared, t ]() noexcept { runParseWorker( shared, t ); } );
+src/ingest_parsepool.h	bugprone-implicit-widening-of-multiplication-result	constexpr std::size_t kMaxPendingParsedBytes = 8u * 1024u * 1024u;
+src/ingest_prewarm.h	bugprone-exception-escape	prewarm.compilePool.emplace_back( [ &prewarm, i ]() noexcept { prewarm.compiledQueries[ i ] = compileQueryStandalone( *prewarm.toCompile[ i ] ); } );
+src/ingest_relations.h	bugprone-branch-clone	{
+src/ingest_relations.h	bugprone-easily-swappable-parameters	inline BaseScopeHit findOutward( TSNode site, TSNode self, std::string_view name, bool scopeOwner, std::string_view src ) // allocates (the file's scope index)
+src/ingest_relations.h	bugprone-easily-swappable-parameters	inline FnLiteralBinding fnLiteralBoundTo( TSNode roleNode, TSNode nameNode, Lang lang ) noexcept
+src/ingest_relations.h	bugprone-easily-swappable-parameters	inline void emitTypeAlias( TypeAliasCtx& cx, TSNode aliasNode, TSNode spec, std::string_view target )
+src/ingest_rest.h	bugprone-easily-swappable-parameters	inline bool underlineFits( std::string_view title, std::string_view underline ) noexcept
+src/ingest_rest.h	bugprone-easily-swappable-parameters	inline std::string_view directiveTarget( std::string_view directive, std::string_view args ) noexcept
+src/ingest_rest.h	bugprone-easily-swappable-parameters	inline std::uint32_t scanRestInline( std::string_view src, const RestLine& line, std::uint32_t resumeAt, std::uint32_t fileId, std::string_view ownExt,
+src/ingest_rest.h	bugprone-easily-swappable-parameters	inline void addDirectiveUnit( RestUnitBuilder& build, const ExplicitLine& ex, std::string_view src, const RestLine& line, std::size_t lineIndex, std::uint32_t indent,
+src/ingest_rest.h	bugprone-easily-swappable-parameters	inline void emitRestDocRef( std::uint32_t fileId, std::uint32_t at, std::string_view target, std::string_view ownExt, std::vector<RawRef>& refs )
+src/ingest_rest.h	bugprone-easily-swappable-parameters	inline void emitRestLabelRef( std::uint32_t fileId, std::uint32_t at, std::string_view target, std::vector<RawRef>& refs )
+src/ingest_rest.h	bugprone-easily-swappable-parameters	void closeDirectivesTo( std::uint32_t indent, std::uint32_t at ) noexcept
+src/ingest_rest.h	bugprone-easily-swappable-parameters	void closeTitlesTo( std::uint32_t level, std::uint32_t at ) noexcept
+src/ingest_rest.h	bugprone-easily-swappable-parameters	void extractRest( std::uint32_t fileId, std::string_view src, std::string_view stem, std::string_view ownExt,
+src/ingest_ruby.h	bugprone-easily-swappable-parameters	inline void emitCapturedRubyMixinBase( TSNode call, TSNode constant, std::uint32_t fileId, Lang lang, std::string_view src,
+src/ingest_ruby.h	bugprone-easily-swappable-parameters	inline void rubyNoteClassSideDef( TSNode defNode, std::uint32_t fileId, std::string_view name, std::string_view src, std::vector<RawBind>& binds )
+src/ingest_rustslots.h	bugprone-easily-swappable-parameters	void slotCallAt( TSNode call, TSNode f )
+src/ingest_rustslots.h	bugprone-easily-swappable-parameters	void storeAt( TSNode at, TSNode value, std::string_view fieldName, const std::string& ty )
+src/ingest_sidecap.h	bugprone-branch-clone	case ExtractFamily::DocsData: break;
+src/ingest_valuerefs.h	bugprone-branch-clone	{
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	bool passesOperator( const VrAnc& p, const VrAnc& c ) const noexcept
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	inline std::ptrdiff_t vrPositionOf( TSNode list, TSNode value, const VrStructFields& sf, TSFieldId fDesignator, std::string_view src )
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	std::pair<std::string, bool> slotTypeKey( TSNode ty, TSNode parent, const char* parentKind ) const
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	std::uint32_t pyPositionalIndex( TSNode args, TSNode arg ) const
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	void emitPattern( TSNode site, TSNode recv, const VrTemplate& t )
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	void emitThrough( TSNode call, TSNode obj, TSNode f, std::string key, bool bareCall )
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	void emitValueFact( TSNode at, char scope, std::string recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via )
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	void keyOf( const VrAnc& pair, std::string& into, std::string& key ) const
+src/ingest_valuerefs.h	bugprone-easily-swappable-parameters	void paramSlotFact( std::size_t i, std::size_t d, std::string_view name )
+src/ingest_valuerefs.h	clang-analyzer-optin.performance.Padding	struct VrPassOp
+src/ingest_valuerefs.h	clang-analyzer-optin.performance.Padding	struct VrPatternLookup
+src/ingest_valuerefs.h	performance-inefficient-string-concatenation	chain = std::string( text( child( x, m_fField ) ) ) + "." + chain;
+src/ingest_valuerefs.h	performance-inefficient-string-concatenation	climbed = std::string( up ) + "." + climbed;
+src/ingest_valuerefs.h	performance-inefficient-string-concatenation	s.into = fn + "#" + param;
+src/ingest_valuerefs.h	performance-inefficient-string-concatenation	tail = tail.empty() ? std::string( text( fld ) ) : std::string( text( fld ) ) + "." + tail;
+src/ingest_valuerefs.h	performance-move-const-arg	r.memberCtor = slotCtor( std::move( key ), kw );
+src/ingest_valuerefs.h	performance-unnecessary-value-param	bool paramDefault( std::string param, Slot& s ) const
+src/ingest_valuerefs.h	performance-unnecessary-value-param	void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline ModuleScan scanModule( std::string_view source, std::string_view path )
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline bool hasKey( std::string_view body, std::string_view name )
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline bool moduleSyntaxLoadable( std::string_view path, const detail::ModuleScan& scan, std::string_view moduleType, std::string_view range,
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline const char* nodeTestVerb( std::string_view path, const PackageManifests& manifests, std::string_view source, std::string_view diskPath )
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline std::size_t topLevelValueStart( std::string_view json, std::string_view key )
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline std::string nestedStringValue( std::string_view packageJson, std::string_view objectKey, std::string_view fieldKey )
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline std::string stringValue( std::string_view body, std::string_view key )
+src/jsrunner.h	bugprone-easily-swappable-parameters	inline void readVersion( std::string_view text, std::size_t& p, long long& major, long long& minor, long long& patch ) noexcept
+src/jsrunner.h	bugprone-unchecked-optional-access	pending.push_back( { *target, detail::scanModule( *bytes, key ) } );
+src/landingplan.h	bugprone-easily-swappable-parameters	const std::vector<std::string>& excludes, std::size_t maxFileBytes,
+src/layout.h	bugprone-easily-swappable-parameters	inline LayoutDef modelDefFromSource( ModelCtx& ctx, std::string_view src, std::string_view stripped, const ConstTable& consts,
+src/layout.h	bugprone-easily-swappable-parameters	inline bool attrHasKeyword( std::string_view attr, std::string_view bare ) noexcept
+src/layout.h	bugprone-easily-swappable-parameters	inline bool extractSizeAssert( std::string_view compact, std::string_view fn, std::string_view name, std::uint32_t& out )
+src/layout.h	bugprone-easily-swappable-parameters	inline bool findDefBody( std::string_view src, std::string_view name, std::size_t from, DefSite& out )
+src/layout.h	bugprone-easily-swappable-parameters	inline std::size_t matchBracket( std::string_view src, std::size_t from, char open, char close )
+src/layout.h	bugprone-easily-swappable-parameters	inline void addConst( ConstTable& table, std::string_view name, std::string_view value )
+src/layout.h	bugprone-easily-swappable-parameters	std::int64_t apply( char op, std::int64_t a, std::int64_t b )
+src/legenddict.h	bugprone-easily-swappable-parameters	const auto row = [ & ]( std::string_view attr, std::string_view element, std::string_view source )
+src/legenddict.h	bugprone-suspicious-missing-comma	"<about legend=\"ref\" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and "
+src/lexical.h	bugprone-easily-swappable-parameters	const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0,
+src/lexical.h	bugprone-easily-swappable-parameters	inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+src/lexical.h	bugprone-incorrect-roundings	cut.dropPct = ( bestDrop >= kMinCliffDrop ) ? int( bestDrop * 100.0 + 0.5 ) : 0;
+src/lexical.h	bugprone-incorrect-roundings	cut.dropPct = int( bestCapDrop * 100.0 + 0.5 );
+src/lexindex.h	bugprone-easily-swappable-parameters	forEachLexSubtokenHashed( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte, std::uint64_t tokenHash )
+src/listedin.h	bugprone-easily-swappable-parameters	inline bool inNestedPackage( const IngestResult& ing, std::uint32_t fileId, std::string_view rel, std::string_view mdir )
+src/lsp.h	bugprone-branch-clone	case rw::SymKind::NamedType: return 5; // Class — LSP has no defined-type/alias kind; gopls files a non-struct named type here too
+src/lsp.h	bugprone-branch-clone	{
+src/lsp.h	bugprone-easily-swappable-parameters	inline bool lspFindFile( const rw::IngestResult& ing, const std::string& cwd,
+src/lsp.h	bugprone-easily-swappable-parameters	inline bool lspIdentSpan( const LspDoc& d, std::size_t byte, std::size_t& b0, std::size_t& b1 )
+src/lsp.h	bugprone-easily-swappable-parameters	inline bool lspLineCol( const LspDoc& d, std::size_t byte, std::uint32_t& line, std::uint32_t& ch )
+src/lsp.h	bugprone-easily-swappable-parameters	inline std::string lspLocationJson( const rw::IngestResult& ing, const std::string& cwd, std::uint32_t fileId,
+src/lsp.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kLspMaxBodyBytes = 32u * 1024u * 1024u;
+src/lsp.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kLspMaxHeaderBytes = 64u * 1024u;
+src/main.cpp	bugprone-easily-swappable-parameters	NoteTargetResolution noteTargetForDefinition( const MainDispatch& d, rw::NodeId def, const std::string& rawTarget,
+src/main.cpp	bugprone-easily-swappable-parameters	inline UnservedDefs unservedDefsOf( const rw::IngestResult& ing, const std::vector<rw::NodeId>& requested, std::vector<rw::NodeId> served,
+src/main.cpp	bugprone-easily-swappable-parameters	std::size_t fullEstTokens, std::size_t tokenBudget, const rw::Config& cfg )
+src/main.cpp	bugprone-easily-swappable-parameters	std::string_view verbFlag, std::string_view rootArg )
+src/main.cpp	bugprone-exception-escape	inline ExpandToken parseExpandToken( const std::string& token, const char* verb = "--expand" ) noexcept
+src/main.cpp	bugprone-exception-escape	int main( int argc, char** argv )
+src/main.cpp	bugprone-unsafe-functions	std::rewind( capture );
+src/main.cpp	clang-analyzer-unix.Errno	for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
+src/main.cpp	clang-analyzer-unix.Stream	for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
+src/main.cpp	performance-inefficient-vector-operation	for( const WorkspaceRoot& r : d.ws )
+src/main.cpp	performance-inefficient-vector-operation	for( std::string_view r : cfg.roots )
+src/main.cpp	performance-unnecessary-copy-initialization	const std::string topk = ctxLeanAttr;
+src/mapinventory.h	bugprone-easily-swappable-parameters	inline void collectInventoryEntries( MapInventory& inv, const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+src/mcp.h	bugprone-easily-swappable-parameters	inline bool mcpPathInsideRoot( const std::string& canonRoot, const std::string& candidatePath )
+src/mcpedit.h	bugprone-easily-swappable-parameters	const std::string& pathHint, const std::string& text, bool postCheck = true )
+src/mcpedit.h	bugprone-easily-swappable-parameters	const std::string& text, std::size_t& outStart, std::size_t& outEnd, SeamInfo& seam )
+src/mcpedit.h	bugprone-easily-swappable-parameters	inline EditTarget resolveSeedTarget( const McpIndex& ix, const std::string& target, const std::string& pathHint )
+src/mcpedit.h	bugprone-easily-swappable-parameters	inline bool atomicWrite( const std::string& path, const std::string& bytes )
+src/mcpedit.h	bugprone-easily-swappable-parameters	inline std::string joinLines( const std::vector<std::string_view>& lines, std::uint32_t from, std::uint32_t upto )
+src/mcpedit.h	bugprone-easily-swappable-parameters	inline std::string receiptNextFor( const std::string& fileIdentity, const std::string& symbolName,
+src/mcpedit.h	bugprone-easily-swappable-parameters	inline std::string redactionMarkerRefusal( std::string_view payload, std::string_view existing, const std::string& existingName )
+src/mcpedit.h	bugprone-easily-swappable-parameters	inline std::string redactionMarkerRefusalFor( Op op, std::string_view payload, std::string_view src,
+src/mcpedit.h	bugprone-implicit-widening-of-multiplication-result	struct timespec ts{ 0, 10 * 1000 * 1000 }; // 10 ms
+src/mcpedit.h	performance-unnecessary-copy-initialization	const std::string pcFileIdentity = path;
+src/mcpindex.h	bugprone-easily-swappable-parameters	inline std::string stableHandleId( const std::string& canonId, const std::string& path, const std::string& name )
+src/mcpindex.h	bugprone-empty-catch	catch( ... ) { /* optional work — drop silently (§2b rule 3) */ }
+src/mcpindex.h	bugprone-exception-escape	std::thread( [ root, timingsOn ]() noexcept
+src/mcpindex.h	bugprone-misplaced-widening-cast	d = std::uint64_t( c - 'a' + 10 );
+src/mcpindex.h	clang-analyzer-unix.Stream	while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+src/mcpjson.h	bugprone-easily-swappable-parameters	inline std::string containerSpanAt( const std::string& s, std::size_t at, char openCh, char closeCh )
+src/mcprefusal.h	bugprone-easily-swappable-parameters	inline std::string badValueRefusal( std::string_view field, std::string_view got )
+src/mcprefusal.h	bugprone-easily-swappable-parameters	inline std::string unknownFieldRefusal( std::string_view verb, std::string_view field,
+src/mcprefusal.h	bugprone-implicit-widening-of-multiplication-result	if( !near.empty() && 2u * unsigned( boundedEditDistance( near, field, kMaxEditDistance ) ) < field.size() )
+src/mcprefusal.h	performance-inefficient-string-concatenation	desc = anyOfDescriptionPrefix( anyOf, field ) + desc;
+src/mcpserver.h	bugprone-easily-swappable-parameters	inline Request readRequest( int fd, bool& tooManyHeaderBytes, bool& tooLargeBody )
+src/mcpserver.h	bugprone-easily-swappable-parameters	inline bool hasMediaType( std::string_view values, std::string_view wanted ) noexcept
+src/mcpserver.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kMaxBodyBytes = 8u * 1024u * 1024u; // JSON-RPC body cap (§ requirements) → 413
+src/mcpserver.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kMaxHeaderBytes = 64u * 1024u; // request line + headers cap → 431
+src/mcpverbs.h	bugprone-easily-swappable-parameters	inline BatchSub runBatchSub( const std::string& root, const std::string& obj, int topK, bool stable, RedactCounts* redactPtr,
+src/mcpverbs.h	bugprone-easily-swappable-parameters	inline FetchOutcome fetchBodyByName( const std::string& root, const std::string& name,
+src/mcpverbs.h	bugprone-easily-swappable-parameters	inline FromTraceResult fromTraceText( const std::string& root, const std::string& trace, std::size_t budgetTokens, RedactCounts* redact = nullptr )
+src/mcpverbs.h	bugprone-easily-swappable-parameters	inline SliceReply sliceText( const std::string& root, const std::string& symbol, const std::string& var,
+src/mcpverbs.h	bugprone-easily-swappable-parameters	inline std::string sliceBodyLinesOrError( const std::string& body, long long startLine, long long endLine,
+src/mcpverbs.h	bugprone-easily-swappable-parameters	inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
+src/mcpverbs.h	bugprone-easily-swappable-parameters	long long& clampedStart, long long& clampedEnd, long long& totalLines, bool& oob )
+src/mcpverbs.h	bugprone-easily-swappable-parameters	std::string_view name, std::string_view nextSelector )
+src/mcpverbs.h	bugprone-incorrect-roundings	return std::size_t( wholeDocumentBytes / kBytesPerTokenDefault + 0.5 );
+src/mcpverbs.h	bugprone-narrowing-conversions	const bool imHasLink = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactDirectLink( g, seeds, depth, n ); } );
+src/mcpverbs.h	bugprone-narrowing-conversions	const bool imHasLink = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactDirectLink( g, seeds, depth, n ); } );
+src/mcpverbs.h	bugprone-narrowing-conversions	const bool imHasVia = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
+src/mcpverbs.h	bugprone-narrowing-conversions	const bool imHasVia = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
+src/memguard.h	bugprone-easily-swappable-parameters	inline std::uint64_t replayLimitBytes( std::uint64_t needBytes, std::uint64_t ingestNeedBytes, bool needMeasured )
+src/mention.h	bugprone-branch-clone	{
+src/mention.h	bugprone-easily-swappable-parameters	inline bool wholeBaseUnkept( const IngestResult& ing, const RawMention& m, const std::vector<std::uint32_t>& kept, std::vector<std::uint32_t>& out )
+src/mention.h	bugprone-easily-swappable-parameters	inline std::pair<std::size_t, std::size_t> parseCappedCsvPair( std::string_view s, std::size_t capA, std::size_t capB )
+src/mention.h	bugprone-easily-swappable-parameters	inline std::uint32_t promoteFileSymbolsToSlot( const IngestResult& ing, std::vector<float>& lensRank, std::uint32_t fileId, float slot )
+src/mention.h	bugprone-easily-swappable-parameters	inline void absorbCapDisclosure( const CapDisclosure& disc, std::string& note, std::string& xmlAttrs )
+src/mention.h	bugprone-easily-swappable-parameters	std::size_t from, std::size_t to, std::vector<NodeId>& out,
+src/mention.h	bugprone-narrowing-conversions	const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+src/mention.h	bugprone-narrowing-conversions	const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+src/mention.h	bugprone-narrowing-conversions	const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
+src/mention.h	bugprone-narrowing-conversions	std::partial_sort( order.begin(), order.begin() + topN, order.end(), [ & ]( NodeId a, NodeId b ) noexcept
+src/mergescout.h	bugprone-branch-clone	{
+src/mergescout.h	bugprone-easily-swappable-parameters	inline Arm computeNamedArm( std::string_view ref, const std::string& refSha, const std::string& baseSha, TreeIndexMemo& memo )
+src/mergescout.h	bugprone-easily-swappable-parameters	inline Arm computeWorkingTreeArm( const std::string& root, const std::string& headSha, const IngestResult& workingIng, TreeIndexMemo& memo )
+src/mergescout.h	bugprone-easily-swappable-parameters	inline PairOverlap computeOnePairOverlap( std::size_t a, std::size_t b, const Arm& armA, const Arm& armB )
+src/model.h	bugprone-easily-swappable-parameters	inline bool isJsTsBuiltinMember( std::string_view ctor, std::string_view name ) noexcept
+src/model.h	bugprone-easily-swappable-parameters	inline std::string_view relForHash( std::string_view path, std::string_view root ) noexcept
+src/model.h	bugprone-throwing-static-initialization	RIPWIRE_LAYOUT_REGISTER_TYPES( RIPWIRE_LAYOUT_TYPE_ENTRY( std::string ),
+src/model.h	clang-analyzer-optin.performance.Padding	struct VrSlotLang
+src/naminglens.h	bugprone-branch-clone	{
+src/nextverb.h	bugprone-branch-clone	if( static_cast<unsigned char>( c ) < 0x20 || c == 0x7f ) { a += '?'; ++i; }
+src/nextverb.h	bugprone-easily-swappable-parameters	inline std::string nextFieldJson( std::string_view invocation, std::string_view key = "next" )
+src/nextverb.h	bugprone-easily-swappable-parameters	inline std::string pagedNext( std::string_view invocation, int pageLimit, std::size_t nextOffset, bool offsetAtZero = true )
+src/nonlocalstate.h	bugprone-easily-swappable-parameters	bool unionInto( std::size_t into, std::size_t from ) noexcept
+src/nonlocalstate.h	bugprone-easily-swappable-parameters	void init( std::size_t rowCount, std::size_t cellCount )
+src/notes.h	bugprone-easily-swappable-parameters	inline std::string normalizeNoteTarget( std::string_view target, std::string_view root, bool& outsideRoot )
+src/notes.h	bugprone-easily-swappable-parameters	inline std::vector<Note> readNotesRelative( const std::string& path, const std::string& root, NotesReadStats& stats )
+src/packtask.h	bugprone-easily-swappable-parameters	inline std::uint32_t bodyMaskRankScore( std::uint32_t mask, std::size_t n )
+src/packtask.h	bugprone-easily-swappable-parameters	std::size_t wrapReserve, std::size_t reflow )
+src/packtask.h	bugprone-narrowing-conversions	const std::vector<NodeId> topRanked( order.begin(), order.begin() + topRankedN );
+src/packtask.h	clang-analyzer-optin.performance.Padding	struct PackTaskInputs
+src/pageview.h	bugprone-easily-swappable-parameters	inline PageWindow pageWindow( std::size_t total, int limit, int offset ) noexcept
+src/pageview.h	bugprone-easily-swappable-parameters	std::size_t windowEnd, int limit, int offset,
+src/pageview.h	bugprone-exception-escape	inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,
+src/pageview.h	bugprone-exception-escape	inline const char* pagingDisclosure( char* buf, std::size_t bufCap, std::size_t rowTotal,
+src/pathgaps.h	bugprone-easily-swappable-parameters	bool derives( const Symbol& ns, const Symbol& bs ) const
+src/pathgaps.h	bugprone-easily-swappable-parameters	const auto cross = [ & ]( NodeId from, NodeId to, BridgeVia via, std::size_t fan, std::size_t fwd = 0 )
+src/pathgaps.h	bugprone-easily-swappable-parameters	inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span<const NodeId> srcDefs, std::span<const NodeId> dstDefs,
+src/pathgaps.h	bugprone-easily-swappable-parameters	inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHops& names, std::span<const NodeId> srcDefs, std::span<const NodeId> dstDefs )
+src/pathgaps.h	bugprone-easily-swappable-parameters	inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::span<const NodeId> dstDefs, std::span<const NodeId> forwardCone,
+src/pathgaps.h	bugprone-easily-swappable-parameters	inline std::string_view pathDocEndpoints( const IngestResult& ing, std::span<const NodeId> srcDefs, std::span<const NodeId> dstDefs ) noexcept
+src/pathguard.h	bugprone-easily-swappable-parameters	inline bool readWholeBeneathNoFollow( const std::string& dir, const std::string& path, std::string& out )
+src/pathpairs.h	bugprone-easily-swappable-parameters	inline void pathPairReverseWalk( const Graph& g, std::span<const NodeId> dstMembers, std::span<const NodeId> srcNodes,
+src/pathpairs.h	bugprone-return-const-ref-from-parameter	return pp.active() ? pp.pairs.front().chain : path;
+src/pathroute.h	bugprone-easily-swappable-parameters	inline PathRouteChains pathRouteChains( const IngestResult& ing, const Graph& g, const PathPairs& pp, const std::vector<NodeId>& path,
+src/pattern.h	bugprone-easily-swappable-parameters	inline Normalized normalizePattern( std::string_view raw, std::string_view marker, std::string_view ellipsisSpelling = {} )
+src/pattern.h	bugprone-easily-swappable-parameters	inline PatternProgram compileFor( const TSLanguage* grammar, std::string_view grammarName, std::string_view label, std::string_view raw )
+src/pincensus.h	bugprone-easily-swappable-parameters	void addRow( NodeId from, std::string_view callee, PinMech m, std::uint8_t fl,
+src/planlint.h	bugprone-easily-swappable-parameters	inline LedgerStatus resolveLedgerStatus( const std::vector<std::string_view>& lines, std::uint32_t ledgerLine,
+src/prcontext.h	bugprone-easily-swappable-parameters	inline bool nameOnlyChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree, std::vector<std::string>& paths )
+src/prcontext.h	bugprone-easily-swappable-parameters	inline std::size_t prPriceDocument( const PrPriceCtx& c, std::string_view body, std::size_t testFiles, std::size_t level,
+src/pydottedpath.h	bugprone-easily-swappable-parameters	inline std::uint32_t epModuleFile( const IngestResult& ing, std::string_view mdir, std::string_view module, bool& inTree )
+src/quality.h	bugprone-easily-swappable-parameters	const IngestResult& ing, const Graph& g, const std::string& corpusRoot,
+src/quality.h	bugprone-easily-swappable-parameters	const auto addWithSentinels = [ & ]( const std::string& path, const std::vector<std::string>& cmakeDirs, std::vector<std::string>& list )
+src/quality.h	bugprone-easily-swappable-parameters	const std::string& keepPath, std::size_t keep,
+src/quality.h	bugprone-easily-swappable-parameters	inline BaselineSelection selectBaseline( const std::string& root, const std::string& sidecarPath, bool removeStaleFile )
+src/quality.h	bugprone-easily-swappable-parameters	inline NodeId enclosingDefOf( const IngestResult& ing, const SymbolsByFile& byFile, std::uint32_t fileId, std::uint32_t startByte )
+src/quality.h	bugprone-easily-swappable-parameters	inline RefTreeLoad loadRefSubset( const std::string& repoRoot, const std::string& sha, const std::vector<std::string>& paths,
+src/quality.h	bugprone-easily-swappable-parameters	inline bool atomicWriteFile( const std::string& path, const std::string& blob )
+src/quality.h	bugprone-easily-swappable-parameters	inline bool deserializeRawCommitStream( const std::string& blob, const std::string& keyMat, RawCommitStream& out )
+src/quality.h	bugprone-easily-swappable-parameters	inline bool deserializeSnapshot( const std::string& blob, const std::string& headSha, Snapshot& out )
+src/quality.h	bugprone-easily-swappable-parameters	inline bool numericRegressionIsMajor( std::uint32_t was, std::uint32_t now, std::uint32_t bar, std::uint32_t minorDelta,
+src/quality.h	bugprone-easily-swappable-parameters	inline bool pythonClassBasesNameTestCase( std::string_view source, std::string_view className, std::size_t beforeByte )
+src/quality.h	bugprone-easily-swappable-parameters	inline bool takeOneAckProvenanceToken( std::string& reason, AckRecord& rec, bool& gotNow, bool& gotWas, std::string& prov )
+src/quality.h	bugprone-easily-swappable-parameters	inline int probeSnapshotBlob( const std::string& path, const std::string& sha, Snapshot& out )
+src/quality.h	bugprone-easily-swappable-parameters	inline std::string composeAckReason( const std::string& priorReason, const std::string& newReason )
+src/quality.h	bugprone-easily-swappable-parameters	inline std::string shaKeyedCachePath( const char* family, const std::string& repoHex, const std::string& exclHex, const std::string& sha )
+src/quality.h	bugprone-easily-swappable-parameters	inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>& mine, const std::string& dir,
+src/quality.h	bugprone-easily-swappable-parameters	inline void evictOldCacheFamily( const std::string& dir, const std::string& prefix,
+src/quality.h	bugprone-easily-swappable-parameters	std::uint32_t startLine, std::uint32_t lineCount, std::int64_t windowCutoffEpoch,
+src/quality.h	bugprone-easily-swappable-parameters	std::uint32_t symStart, std::uint32_t symLoc, std::int64_t windowCutoffEpoch,
+src/quality.h	bugprone-implicit-widening-of-multiplication-result	constexpr std::size_t kChunkBytes = 64 * 1024; // well under every ARG_MAX this builds on
+src/quality.h	bugprone-implicit-widening-of-multiplication-result	struct timespec ts{ 0, 10 * 1000 * 1000 }; // 10 ms
+src/quality.h	performance-no-automatic-move	return tmpRoot;
+src/readability.h	bugprone-branch-clone	case CodeTokenKind::Identifier: return TokenRole::Operand; // a name
+src/readability.h	bugprone-branch-clone	case CodeTokenKind::Keyword: return TokenRole::Operator;
+src/recall.h	bugprone-easily-swappable-parameters	inline bool readDocPrefix( const IngestResult& ing, std::uint32_t fileId, std::size_t maxBytes, std::string& out )
+src/recall.h	bugprone-easily-swappable-parameters	inline std::size_t waterFillRecallShares( const std::vector<std::size_t>& demand, std::size_t served, std::size_t avail,
+src/recall.h	bugprone-easily-swappable-parameters	inline std::string withHeaderAttrAfter( std::string_view fullHeaderLine, std::string_view afterField, std::string_view attr )
+src/recall.h	bugprone-easily-swappable-parameters	inline std::string withHeaderField( std::string_view fullHeaderLine, std::string_view field, std::size_t value )
+src/recall.h	bugprone-easily-swappable-parameters	inline std::string withoutHeaderAttr( std::string_view fullHeaderLine, std::string_view attr )
+src/recall.h	bugprone-easily-swappable-parameters	inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const std::vector<std::uint32_t>& headingSyms,
+src/recall.h	bugprone-easily-swappable-parameters	inline std::vector<std::uint32_t> recallHeadingSections( const IngestResult& ing, std::size_t scoredCount, std::uint32_t fileId )
+src/recall.h	bugprone-easily-swappable-parameters	std::string_view task, int k, std::size_t maxTokens, bool docsOnly,
+src/recall.h	bugprone-incorrect-roundings	const std::size_t est = std::size_t( double( honest.size() + noteBytes ) / kBytesPerTokenDefault + 0.5 );
+src/recall.h	bugprone-incorrect-roundings	const std::size_t est = std::size_t( markup / kBytesPerTokenDefault
+src/receiverevidence.h	bugprone-easily-swappable-parameters	NodeId classAt( std::uint32_t fileId, std::uint32_t start, std::uint32_t end, NodeId self = kNoNode ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	NodeId cppResultClass( std::string_view whole, std::string_view cls ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	NodeId goQualifiedClass( std::uint32_t fileId, std::string_view whole, std::string_view cls ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	NodeId innermostHolding( std::uint32_t f, std::uint32_t pos, Keep&& keep ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	NodeId jvmClassIn( std::string_view path, std::string_view cls ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	NodeId rustClassAt( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::string_view cls, int depth = 0 ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	bool cppHiddenAt( std::uint32_t f, std::uint32_t at, NodeId c, const std::vector<std::string_view>& calleePath, CppReach reach ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	bool overloadedAbove( std::string_view type, std::string_view name, std::size_t at ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	bool typeCallResultDispatch( const Binding& b, const Binding& rt )
+src/receiverevidence.h	bugprone-easily-swappable-parameters	bool visibleAt( NodeId c, std::uint32_t f, std::uint32_t at ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	const std::string& keyOf( std::uint32_t id, char sep, std::string_view name ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	const std::string& typeKey( std::string_view type, std::string_view sep, std::string_view name ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	std::string_view fieldOf( std::string_view type, std::string_view field ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	std::string_view rootClass( const Reference& r, const Chain& ch, bool& isStatic, bool& superOnly, NodeId* rootCls = nullptr ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	void chainAt( std::uint32_t f, std::uint32_t at, std::vector<Level>& out ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	void forEachCppUsing( std::uint32_t f, std::uint32_t at, const std::vector<std::string_view>& calleePath, Fn&& fn ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	void namespacePathAt( std::uint32_t f, std::uint32_t at, std::vector<std::string_view>& path ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	void rustFollowReexports( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, NodeId& hit, bool& found, bool& globbed ) const
+src/receiverevidence.h	bugprone-easily-swappable-parameters	void rustModuleAt( std::uint32_t f, std::uint32_t at, std::string& module ) const
+src/regexguard.h	bugprone-easily-swappable-parameters	inline void regexTopLevelBranchSpans( std::size_t bodyBegin, std::size_t closeAt, const std::vector<std::size_t>& pipes,
+src/regexguard.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::uint64_t kRegexStackReserveBytes = 256 * 1024; // the frames below the match: the scan, the worker, regex_search
+src/regexguard.h	bugprone-invalid-enum-default-initialization	const bool isFolded = ( syntax & kRegexIcase ) != RegexSyntax{};
+src/regexguard.h	bugprone-invalid-enum-default-initialization	if( ( syntax & ~( kRegexEcmaScript | kRegexOptimize | kRegexIcase | std::regex_constants::nosubs ) ) != RegexSyntax{}
+src/regexguard.h	bugprone-invalid-enum-default-initialization	if( ( syntax & ~( kRegexEcmaScript | kRegexOptimize | std::regex_constants::nosubs ) ) != RegexSyntax{} || pat.empty() )
+src/regexguard.h	clang-analyzer-deadcode.DeadStores	std::size_t memberEnd = cursor;
+src/regexguard.h	performance-enum-size	enum class RegexAlternationProof
+src/resolve.h	bugprone-easily-swappable-parameters	Outcome resolve( std::string_view importer, std::string_view spec )
+src/resolve.h	bugprone-easily-swappable-parameters	Outcome throughPaths( const AliasScope& sc, std::string_view spec, bool& inRepo, bool& matched ) const
+src/resolve.h	bugprone-easily-swappable-parameters	bool expandWalkLevel( std::size_t lvlBegin, std::size_t lvlEnd, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+src/resolve.h	bugprone-easily-swappable-parameters	bool inBaseClosure( std::string_view typeName, std::string_view base, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+src/resolve.h	bugprone-easily-swappable-parameters	bool inheritedDefinitions( const Reference& r, NodeId receiverClass, const ClassIdentity& ids, bool& declaredAlong, bool& ambiguous ) const
+src/resolve.h	bugprone-easily-swappable-parameters	bool memberFieldHides( std::string_view callerScope, std::string_view name, const HashMap<std::string, char>& memberFields,
+src/resolve.h	bugprone-easily-swappable-parameters	bool members( JsonNode& n, int depth, char close )
+src/resolve.h	bugprone-easily-swappable-parameters	const HashMap<std::string, std::vector<std::string>>& chaUp,
+src/resolve.h	bugprone-easily-swappable-parameters	const WsIncludeCtx* ws, std::uint32_t includerFileId,
+src/resolve.h	bugprone-easily-swappable-parameters	inline bool appendTemplateFamilyKey( std::string& key, std::string_view scope, std::string_view name )
+src/resolve.h	bugprone-easily-swappable-parameters	inline bool derivesFromName( std::string_view derived, std::string_view base, const ChaUpNames& chaUp )
+src/resolve.h	bugprone-easily-swappable-parameters	inline bool projectPatternMatches( std::string_view pattern, std::string_view file, bool isDir = false )
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::pair<std::uint32_t, bool> probeJsRuntimeSourceExt( std::string_view dir, std::string_view target,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::string joinRel( std::string_view dir, std::string_view rel )
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::string pythonSelfChainRoot( std::string_view dir, std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_view rel,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t resolveBashSource( std::string_view includerPath, std::string_view target,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t resolveCIncludeRoots( std::string_view dir, std::string_view target, const HashMap<std::string, std::uint32_t>& fileIndex,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t resolveLuaRequire( std::string_view includerPath, std::string_view target,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::string_view target,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t resolveRubyRequire( std::string_view includerPath, std::string_view target,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t resolveRustImport( std::string_view includerPath, std::string_view target,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string_view target,
+src/resolve.h	bugprone-easily-swappable-parameters	inline std::vector<std::string> pythonFallbackRoots( std::string_view dir, std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex,
+src/resolve.h	bugprone-easily-swappable-parameters	inline void indexCanonicalScope( HashMap<std::string, rw::SmallVec<NodeId, 2>>& byScope, HashMap<std::string, rw::SmallVec<NodeId, 2>>& byFamily,
+src/resolve.h	bugprone-easily-swappable-parameters	inline void probeUpward( std::string_view baseDir, std::string_view rel, UniqueProbe& p,
+src/resolve.h	bugprone-easily-swappable-parameters	static std::optional<BaseLoc> probePackageDir( const std::string& nmRel, const std::string& nmDisk, const std::string& sub )
+src/resolve.h	bugprone-easily-swappable-parameters	std::optional<BaseLoc> locatePackageBase( const std::string& rel, const std::string& disk, std::string_view b ) const
+src/resolve.h	bugprone-easily-swappable-parameters	std::optional<BaseLoc> locateRelativeBase( const std::string& rel, const std::string& disk, std::string_view b, bool inPackage ) const
+src/resolve.h	bugprone-easily-swappable-parameters	std::optional<BaseLoc> probeMemberDir( const std::string& memberDir, const std::string& sub ) const
+src/resolve.h	bugprone-easily-swappable-parameters	std::optional<std::vector<const Entry*>> reach( std::string_view name, std::string_view qualifier, std::uint32_t fileId, const Scope& from ) const
+src/resolve.h	bugprone-easily-swappable-parameters	std::pair<const FlatRecvType*, bool> declaredFieldAt( std::string_view className, std::string_view name, const FieldRecvTables& fields ) const
+src/resolve.h	bugprone-easily-swappable-parameters	std::uint32_t derived, std::string_view written, std::string_view skip = {} )
+src/resolve.h	bugprone-easily-swappable-parameters	std::uint32_t fileId, std::uint32_t byte, std::string_view written )
+src/resolve.h	bugprone-easily-swappable-parameters	std::vector<std::string> sourcesOfEmitted( const std::string& pkgDir, const std::string& at )
+src/resolve.h	bugprone-easily-swappable-parameters	void addToolDecl( const std::string& rel, const std::string& dir, const std::string& bytes, std::vector<WorkspaceDecl>& decls )
+src/resolve.h	performance-inefficient-string-concatenation	std::string abs = lexicalNormalize( baseAbs + "/" + val );
+src/resolve.h	performance-inefficient-string-concatenation	std::string d = nmDisk + "/" + t;
+src/restlinks.h	bugprone-easily-swappable-parameters	inline NodeId bindRestRootDoc( const RestLinkIndex& rx, const FileMap& fileByPath, const std::vector<NodeId>& wholeFile, std::string_view linkerPath, std::string_view written )
+src/sarif.h	bugprone-easily-swappable-parameters	inline std::string_view rootRelativeUri( std::string_view file, std::string_view rootPrefix )
+src/scip.h	bugprone-easily-swappable-parameters	bool tag( std::uint32_t& fieldNumber, std::uint32_t& wireType ) noexcept
+src/scip.h	bugprone-easily-swappable-parameters	std::size_t& internalOccurrences, std::size_t& matchedOccurrencesPreDedup )
+src/scip.h	bugprone-unsafe-functions	std::rewind( f );
+src/search.h	bugprone-easily-swappable-parameters	inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::string& pat, bool regex, std::size_t maxAuxFileBytes,
+src/search.h	bugprone-easily-swappable-parameters	inline std::string grepContextSlice( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line, int count, bool before )
+src/search.h	bugprone-easily-swappable-parameters	inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std::size_t& scanned, std::uint32_t& line ) noexcept
+src/search.h	bugprone-easily-swappable-parameters	inline void appendAuxFileHits( const std::string& text, const std::string& path, const std::vector<GrepMatchSite>& sites,
+src/search.h	bugprone-easily-swappable-parameters	std::uint32_t lineCount, std::uint32_t loLine, std::uint32_t hiLine )
+src/search.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kGrepScanStackBytes = 256 * 1024 * 1024;
+src/search.h	bugprone-signed-char-misuse	for( int ch = lo; ch <= hi; ++ch )
+src/search.h	clang-analyzer-deadcode.DeadStores	scanned = text.size(); // the literal branch's cursor is not shared with this one; keep it honest
+src/search.h	performance-unnecessary-value-param	inline RegexInfo riQuest( RegexInfo /*child*/ ) // a? : zero-or-one ⇒ optional ⇒ no required trigram (ALL)
+src/search.h	performance-unnecessary-value-param	inline RegexInfo riStar( RegexInfo /*child*/ )
+src/serialize.h	bugprone-easily-swappable-parameters	LegoTargetedArgs( std::string_view floorAttr, int limit = 0, int offset = 0, const std::vector<std::vector<std::uint8_t>>* bound = nullptr )
+src/serialize.h	bugprone-easily-swappable-parameters	NodeId iface, int pageLimit, int pageOffset )
+src/serialize.h	bugprone-easily-swappable-parameters	bool metrics = false, const std::vector<std::uint32_t>* fanIn = nullptr,
+src/serialize.h	bugprone-easily-swappable-parameters	const CalleeCallsSink& sink, bool& linkLegendCharged, bool& anchorLegendCharged )
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<NodeId>& outTargets, NodeId id, NodeId cid, bool& legendCharged,
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>& lazyEdgesByFile, std::uint64_t lazyEdges,
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets )
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets )
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>* amp = nullptr, // Q2 change-amplification (callers + co-change partners)
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>* fanIn, const std::vector<std::uint32_t>* ambOut,
+src/serialize.h	bugprone-easily-swappable-parameters	const std::vector<std::uint32_t>* lcom4, const std::vector<std::uint32_t>* amp,
+src/serialize.h	bugprone-easily-swappable-parameters	inline CalleeCallsSink withLinkBits( CalleeCallsSink sink, const std::vector<std::uint8_t>* link,
+src/serialize.h	bugprone-easily-swappable-parameters	inline CeilingLadderChoice climbCeilingLadder( BuildFn&& build, std::string_view builtHeader, std::size_t payloadBytes,
+src/serialize.h	bugprone-easily-swappable-parameters	inline ForSectionStubPlan planForSectionStubs( std::string_view sections, std::string_view forTask, const ForStubbableSection& legoIn,
+src/serialize.h	bugprone-easily-swappable-parameters	inline ForSigsBudgets forSigsBudgets( std::size_t softRowBytes, std::size_t fixedBytes, std::size_t fullFixedBytes, bool tierAtDefault ) noexcept
+src/serialize.h	bugprone-easily-swappable-parameters	inline SigsTrimPlan planSigsTrim( const std::vector<EntryT>& entries, std::size_t totalRows, std::size_t gateCut,
+src/serialize.h	bugprone-easily-swappable-parameters	inline StemShare stemShare( std::string_view stemLower, std::string_view name, std::vector<std::string>& scratch )
+src/serialize.h	bugprone-easily-swappable-parameters	inline bool sectionsWant( std::string_view sections, std::string_view name ) noexcept
+src/serialize.h	bugprone-easily-swappable-parameters	inline std::size_t sigsRowDropEffective( const SigsTrimPlan& plan, std::size_t payloadBudgetBytes, std::size_t rowDropBudgetBytes,
+src/serialize.h	bugprone-easily-swappable-parameters	inline std::string legoClosureAttrs( const LegoClosurePage& page, std::string_view selector, std::string_view unwalkedSelector, int pageLimit )
+src/serialize.h	bugprone-easily-swappable-parameters	inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, std::size_t bodyBytes, std::size_t* outTokens )
+src/serialize.h	bugprone-easily-swappable-parameters	inline std::string sigsCutLegendNotes( bool isCapped, std::size_t shown, std::size_t total, std::size_t docsDropped )
+src/serialize.h	bugprone-easily-swappable-parameters	inline std::string_view calleeRowSplitAttr( const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets, NodeId id, NodeId cid,
+src/serialize.h	bugprone-easily-swappable-parameters	inline void sigsCutRecordLadder( SigsCutReport& cut, const SigLadderOutcome& ladder, std::size_t totalAfterLadder,
+src/serialize.h	bugprone-easily-swappable-parameters	inline void writeMapCalleeRows( XmlWriter& w, const IngestResult& ing, std::uint32_t from, std::uint32_t to, const std::vector<NodeId>& outTargets,
+src/serialize.h	bugprone-easily-swappable-parameters	int topN, std::size_t budgetBytes,
+src/serialize.h	bugprone-easily-swappable-parameters	int topN, std::size_t budgetBytes, RedactCounts* redact )
+src/serialize.h	bugprone-easily-swappable-parameters	std::size_t blockBytes, std::size_t payloadBudgetBytes,
+src/serialize.h	bugprone-easily-swappable-parameters	std::size_t budgetBytes = 0, // per-entry streaming budget (cfg.packBudgetBytes); 0 = unlimited
+src/serialize.h	bugprone-easily-swappable-parameters	std::size_t stdMemberDeclinedCalls = 0,
+src/serialize.h	bugprone-easily-swappable-parameters	std::string_view sigsRendered, std::string_view rootPrefix = {} )
+src/serialize.h	bugprone-exception-escape	inline std::size_t legoPreCapRowCount( const IngestResult& ing, const std::vector<std::vector<NodeId>>& implementors ) noexcept
+src/serialize.h	bugprone-incorrect-roundings	return TokenEstimate{ std::size_t( estTokensF + 0.5 ), std::size_t( modelBytesF + 0.5 ) };
+src/serialize.h	bugprone-incorrect-roundings	return TokenEstimate{ std::size_t( estTokensF + 0.5 ), std::size_t( modelBytesF + 0.5 ) };
+src/serialize.h	bugprone-incorrect-roundings	return std::size_t( double( emittedBytes ) / bytesPerToken + 0.5 );
+src/serialize.h	bugprone-incorrect-roundings	return std::size_t( tokensF + 0.5 );
+src/serialize.h	bugprone-narrowing-conversions	const std::vector<NodeId> nodes( order.begin(), order.begin() + keep ); // rank order, id 0..keep-1 index
+src/serialize.h	clang-analyzer-unix.Stream	while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+src/situ.h	bugprone-easily-swappable-parameters	inline bool hunkFullyInBodies( const std::vector<std::pair<std::uint32_t, std::uint32_t>>& spans, std::uint32_t hStart,
+src/situ.h	bugprone-easily-swappable-parameters	inline std::string fileListRefusalText( const IngestResult& ing, std::string_view lead, std::string_view selector,
+src/situ.h	bugprone-easily-swappable-parameters	std::string_view nextInvocation = {}, std::string_view extraAttrs = {} )
+src/situ.h	performance-inefficient-vector-operation	for( const TestRow& r : testRows )
+src/skillscan.h	bugprone-easily-swappable-parameters	bool prefixWord( std::string_view token, std::string_view low ) noexcept
+src/skillscan.h	bugprone-easily-swappable-parameters	inline SkillFileKind skillFileKindOf( std::string_view path, std::string_view text ) noexcept
+src/skillscan.h	bugprone-easily-swappable-parameters	inline std::string_view fileOperand( std::string_view token, std::string_view prevToken, bool afterRedirect ) noexcept
+src/skillscan.h	bugprone-easily-swappable-parameters	void noteVar( std::size_t start, std::size_t shortestEnd ) noexcept
+src/skillscan.h	bugprone-exception-escape	inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally, bool fullLegend ) noexcept
+src/skillscan.h	bugprone-exception-escape	inline void printSkillScanFullLegend( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally ) noexcept
+src/skillscan.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kSkillScanStackBytes = 256 * 1024 * 1024; // the grep scan threads' size (search.h kGrepScanStackBytes)
+src/skillscan.h	misc-redundant-expression	ASSUME( eol == std::string_view::npos || eol >= 2, "the text starts with \"#!\", so a newline is at index 2 or later" );
+src/slice.h	bugprone-easily-swappable-parameters	inline bool sliceClassifyJsBinder( TSNode n, TSNode p, const char* pk, SliceOcc& o ) noexcept
+src/slice.h	bugprone-easily-swappable-parameters	inline void sliceFlowChainUse( const SliceScan& scan, const std::vector<SliceAnchorOcc>& anchorOccs, std::size_t useIndex,
+src/slice.h	bugprone-easily-swappable-parameters	std::uint32_t varIdx, std::uint32_t rowIdx, std::uint32_t d, std::uint32_t line,
+src/slice.h	bugprone-easily-swappable-parameters	std::uint32_t varIdx, std::uint32_t rowIdx, std::uint32_t d, std::uint32_t line,
+src/slice.h	performance-unnecessary-value-param	std::shared_ptr<SliceRdState> entry, std::shared_ptr<SliceRdState> brk, std::shared_ptr<SliceRdState> cont,
+src/slice.h	performance-unnecessary-value-param	std::shared_ptr<SliceRdState> entry, std::shared_ptr<SliceRdState> brk, std::shared_ptr<SliceRdState> cont,
+src/slice.h	performance-unnecessary-value-param	std::shared_ptr<SliceRdState> entry, std::shared_ptr<SliceRdState> brk, std::shared_ptr<SliceRdState> cont,
+src/slice.h	performance-unnecessary-value-param	std::shared_ptr<SliceRdState> headerExit, std::shared_ptr<SliceRdState> hin, SliceRdState& outState, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	std::shared_ptr<SliceRdState> headerExit, std::shared_ptr<SliceRdState> hin, SliceRdState& outState, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	std::shared_ptr<TSNode> finallyClause, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	void ifPyBranchFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& falseS, SliceRdState& out, std::shared_ptr<bool> hasElse,
+src/slice.h	performance-unnecessary-value-param	void ifPyBranchFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& falseS, SliceRdState& out, std::shared_ptr<bool> hasElse,
+src/slice.h	performance-unnecessary-value-param	void matchCaseFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& state, SliceRdState& out, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	void preprocChildFrom( std::shared_ptr<std::vector<TSNode>> kids, std::shared_ptr<std::vector<bool>> skip, std::size_t i, SliceRdState& bodyOut,
+src/slice.h	performance-unnecessary-value-param	void preprocChildFrom( std::shared_ptr<std::vector<TSNode>> kids, std::shared_ptr<std::vector<bool>> skip, std::size_t i, SliceRdState& bodyOut,
+src/slice.h	performance-unnecessary-value-param	void seqFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& state, TSNode skip, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	void structureFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& state, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	void switchCaseFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& in, SliceRdState& fall, std::shared_ptr<bool> hasDefault,
+src/slice.h	performance-unnecessary-value-param	void switchCaseFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& in, SliceRdState& fall, std::shared_ptr<bool> hasDefault,
+src/slice.h	performance-unnecessary-value-param	void tryCatchFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& handlerIn, SliceRdState& out, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	void tryPyExceptPartFrom( std::shared_ptr<std::vector<TSNode>> parts, std::size_t i, SliceRdState& h, SliceRdStep done )
+src/slice.h	performance-unnecessary-value-param	void tryPyPartFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& handlerIn, SliceRdState& handlersOut, SliceRdState& normalOut,
+src/slice.h	performance-unnecessary-value-param	void withPartFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, TSNode body, SliceRdState& state, SliceRdStep done )
+src/slicediff.h	bugprone-easily-swappable-parameters	inline BlobAtRev blobAtRev( const std::string& root, const std::string& sha, const std::string& rel, std::string& pathAtRev )
+src/slicediff.h	bugprone-easily-swappable-parameters	inline void appendRowText( std::string& out, const std::string& src, std::uint32_t line1, RedactCounts* redact )
+src/subjectanchor.h	performance-inefficient-vector-operation	for( const std::string_view w : words )
+src/taskroute.h	bugprone-easily-swappable-parameters	inline std::optional<RouteChoice> catalogTaskChoice( std::string_view task, std::string_view lower,
+src/taskroute.h	bugprone-easily-swappable-parameters	inline std::optional<RouteChoice> instrumentedTaskChoice( std::string_view task, std::string_view lower, const std::string& root )
+src/taskroute.h	bugprone-easily-swappable-parameters	inline std::optional<RouteChoice> locateImplementationTaskChoice( std::string_view task, std::string_view lower, const std::string& root )
+src/taskroute.h	bugprone-easily-swappable-parameters	inline std::string slotCandidate( std::string_view task, std::string_view lowerTask,
+src/taskroute.h	bugprone-easily-swappable-parameters	std::string command, int score, int floor, int priority )
+src/taskroute.h	clang-analyzer-deadcode.DeadStores	hasUpper = true;
+src/testmap.h	bugprone-easily-swappable-parameters	const std::vector<char>* skipSym, std::span<const std::uint32_t> partnerOf,
+src/testmap.h	bugprone-easily-swappable-parameters	inline bool isTestPartnerOf( std::string_view testPath, std::string_view srcPath ) noexcept
+src/testmap.h	bugprone-exception-escape	const auto groupable = [ & ]( std::uint32_t i ) noexcept
+src/testmap.h	bugprone-narrowing-conversions	jsRow[ ing.symbols[ site.caller ].fileId ] |= char( langFacts( ing.symbols[ site.caller ].lang ).importBoundConstruction );
+src/testmap.h	bugprone-narrowing-conversions	void note( const Reference& r ) { mixed[ r.fileId ] |= char( written( r ) != first[ r.fileId ] ); }
+src/testmap.h	performance-unnecessary-value-param	inline JoinedTestRows testRowsList( const TestRunnerIndex& idx, std::span<const TestRowOut> rows, const TestRowShape& shape, EscapeFn esc, std::string_view sep = {} )
+src/testmap.h	performance-unnecessary-value-param	inline std::string renderSingleTestRow( const TestRunnerIndex& idx, const TestRowOut& r, const TestRowShape& shape, EscapeFn esc )
+src/testmap.h	performance-unnecessary-value-param	inline std::string renderTestRowGroup( std::span<const TestRowOut> rows, std::span<const std::uint32_t> members, const TestRowShape& shape, EscapeFn esc )
+src/testmap.h	performance-unnecessary-value-param	inline std::vector<RenderedTestRow> testRowsRendered( const TestRunnerIndex& idx, std::span<const TestRowOut> rows, const TestRowShape& shape, EscapeFn esc,
+src/testmap.h	performance-unnecessary-value-param	std::string attr = runAttr( idx, fileId, esc );
+src/testmap.h	performance-unnecessary-value-param	std::string field = runFieldJson( idx, fileId, esc );
+src/testmap.h	performance-unnecessary-value-param	std::string_view open, std::string_view close, EscapeFn esc )
+src/testmap.h	performance-unnecessary-value-param	{ return runHint( idx, fileId, " run=\"", "\"", esc ); }
+src/testmap.h	performance-unnecessary-value-param	{ return runHint( idx, fileId, ",\"run\":\"", "\"", esc ); }
+src/tracelocus.h	bugprone-easily-swappable-parameters	inline CeilingLadderChoice climbDeliveredLadder( BuildFn&& build, const std::string& header, const std::string& rest,
+src/tracelocus.h	bugprone-easily-swappable-parameters	inline std::vector<NodeId> testHopCalleeCandidates( const IngestResult& ing, const Graph& g, NodeId from,
+src/tracelocus.h	bugprone-easily-swappable-parameters	std::size_t fixedBytes, std::size_t bundleBudget, bool compactLegend )
+src/tracelocus.h	bugprone-narrowing-conversions	ladder.rungs.assign( spellings.begin(), spellings.begin() + std::min( spellings.size(), kNameCandidateCap ) );
+src/tsprobe.cpp	bugprone-exception-escape	int main( int argc, char** argv )
+src/valuerefindex.h	bugprone-easily-swappable-parameters	At anchored( const Reference& r, std::string_view anchor, std::string_view rest, std::string_view name ) const
+src/valuerefindex.h	bugprone-easily-swappable-parameters	bool isAncestor( NodeId from, NodeId to ) const
+src/valuerefindex.h	bugprone-easily-swappable-parameters	inline std::vector<std::uint32_t> slotCallers( const IngestResult& ing, std::vector<SlotIndex::Hit> hits, bool& typed, std::uint32_t& nameAlso )
+src/valuerefindex.h	bugprone-easily-swappable-parameters	static void noteFact( HashMap<std::string, std::string>& m, const std::string& name, const std::string& to )
+src/valuerefindex.h	bugprone-easily-swappable-parameters	void add( const IngestResult& ing, std::uint32_t v, NodeId target, const std::string& through )
+src/valuerefindex.h	bugprone-unchecked-optional-access	const ValueRefIndex& vri = cached != nullptr ? *cached : *local;
+src/valuerefs.h	bugprone-easily-swappable-parameters	inline std::string vrTargetWindowXml( const IngestResult& ing, std::span<const NodeId> targets, std::size_t cap, std::string_view countName,
+src/valuerefs.h	bugprone-easily-swappable-parameters	std::string_view key, std::string_view nextVerb, std::size_t cap = kValueRefRowCap )
+src/verbs_change.h	bugprone-easily-swappable-parameters	std::string renderRunTraceRecord( const RunCapture& cap, std::uint32_t timeoutSec, std::size_t lineCount, bool isFrameless )
+src/verbs_change.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kRunTraceHeadCapBytes = 8u * 1024 * 1024; // capture cap: first 8 MB kept …
+src/verbs_change.h	bugprone-implicit-widening-of-multiplication-result	inline constexpr std::size_t kRunTraceTailCapBytes = 24u * 1024 * 1024; // … plus the last 24 MB; the dropped middle is COUNTED
+src/verbs_doctor.h	bugprone-easily-swappable-parameters	inline int doctorVersionOrder( std::string_view versionLine, std::string_view mine )
+src/verbs_doctor.h	bugprone-easily-swappable-parameters	inline std::string doctorIndexCacheHint( bool named, const char* leanVerdict, const char* richVerdict,
+src/verbs_for.h	bugprone-easily-swappable-parameters	inline std::size_t forLensJsonTailShare( std::size_t tokenBudget, std::size_t bundleBytes, std::size_t fixedBytes, std::size_t cutRowsBytes ) noexcept
+src/verbs_for.h	bugprone-easily-swappable-parameters	inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t tokenBudget, std::size_t shareBytes )
+src/verbs_for.h	bugprone-easily-swappable-parameters	inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t tokenBudget,
+src/verbs_for.h	bugprone-easily-swappable-parameters	rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget,
+src/verbs_for.h	bugprone-incorrect-roundings	const std::size_t nextTokens = std::size_t( double( withKey ) / kBytesPerTokenDefault + 0.5 );
+src/verbs_for.h	bugprone-unsafe-functions	std::rewind( capture );
+src/verbs_for.h	clang-analyzer-deadcode.DeadStores	const std::size_t confidenceOwnBytes = forConf.attrs.size() + forConf.note.size();
+src/verbs_grep.h	clang-analyzer-deadcode.DeadStores	const bool valueUses = d.valueUses;
+src/verbs_lint.h	bugprone-easily-swappable-parameters	bool opensLambdaBody( std::string_view src, std::size_t bodyStart, std::size_t braceByte ) noexcept
+src/verbs_lint.h	bugprone-easily-swappable-parameters	std::optional<std::uint32_t> inconsistentReturnLine( std::string_view src, std::uint32_t bodyStart, std::uint32_t bodyEnd ) noexcept
+src/verbs_lint.h	performance-inefficient-string-concatenation	hit.text = expression + " = " + expression;
+src/verbs_lint.h	performance-unnecessary-value-param	std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vector<LintOut> outs )
+src/verbs_navigate.h	bugprone-easily-swappable-parameters	const ::TSLanguage* grammar, const rw::slicev::SliceScan& scan, const std::string& src,
+src/verbs_navigate.h	bugprone-easily-swappable-parameters	const auto openRoot = [ & ]( const char* verdict, const std::string& facts, const char* limit, const char* honesty, const char* pageTail )
+src/verbs_navigate.h	bugprone-easily-swappable-parameters	const std::vector<char>& imProven, std::size_t imUnprovenDefs, std::size_t imDeclinedCalls, std::size_t imDeclinedIface,
+src/verbs_navigate.h	bugprone-easily-swappable-parameters	inline std::optional<int> sliceSincePrepare( const MainDispatch& d, std::string_view selector, std::string_view varName,
+src/verbs_navigate.h	bugprone-easily-swappable-parameters	int emitImpactPathAnswer( const rw::Config& cfg, const rw::IngestResult& ing, const ImpactPathSelect& sel, bool singleRoot, const std::string& rootPrefix,
+src/verbs_navigate.h	bugprone-easily-swappable-parameters	std::vector<rw::NodeId>& matches, std::string_view& selector,
+src/verbs_navigate.h	bugprone-narrowing-conversions	+ rw::impactByTypeColumnarLegend( cfg.columnar && std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
+src/verbs_navigate.h	bugprone-narrowing-conversions	+ rw::impactByTypeColumnarLegend( cfg.columnar && std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
+src/verbs_navigate.h	bugprone-narrowing-conversions	+ rw::viaNameLegend( std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
+src/verbs_navigate.h	bugprone-narrowing-conversions	+ rw::viaNameLegend( std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
+src/verbs_navigate.h	bugprone-narrowing-conversions	const std::vector<char> rowVia( via.begin() + v.page.begin, via.begin() + v.page.end ); // FE-B: in `rows` order
+src/verbs_navigate.h	bugprone-narrowing-conversions	const std::vector<char> rowVia( via.begin() + v.page.begin, via.begin() + v.page.end ); // FE-B: in `rows` order
+src/verbs_navigate.h	bugprone-narrowing-conversions	std::vector<NodeId> page( result.begin() + pw.begin, result.begin() + pw.end );
+src/verbs_navigate.h	bugprone-narrowing-conversions	std::vector<NodeId> page( result.begin() + pw.begin, result.begin() + pw.end );
+src/verbs_navigate.h	bugprone-narrowing-conversions	std::vector<NodeId> rows( v.show.begin() + v.page.begin, v.show.begin() + v.page.end );
+src/verbs_navigate.h	bugprone-narrowing-conversions	std::vector<NodeId> rows( v.show.begin() + v.page.begin, v.show.begin() + v.page.end );
+src/verbs_navigate.h	performance-inefficient-vector-operation	for( std::size_t k = 0; k < names.size(); ++k )
+src/verbs_quality.h	bugprone-branch-clone	{
+src/verbs_quality.h	bugprone-easily-swappable-parameters	inline bool deadCodeFilterMatchesPath( std::string_view path, std::string_view dirFilter, bool anchoredAtRoot,
+src/verbs_quality.h	bugprone-easily-swappable-parameters	int runQualityBaselinePin( const MainDispatch& d, const std::string& baselineFile, const std::string& acksFile )
+src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend( std::any_of( prs.begin() + prpw.begin, prs.begin() + prpw.end, []( const CoPairRow& pr ) { return pr.noEdgeLangs != 0; } ) ) ); // sweep: ditto
+src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend( std::any_of( prs.begin() + prpw.begin, prs.begin() + prpw.end, []( const CoPairRow& pr ) { return pr.noEdgeLangs != 0; } ) ) ); // sweep: ditto
+src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + ppw.begin, ps.begin() + ppw.end, []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) ); // sweep: at= was undefined on this screen
+src/verbs_report.h	bugprone-narrowing-conversions	rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + ppw.begin, ps.begin() + ppw.end, []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) ); // sweep: at= was undefined on this screen
+src/workspace.h	bugprone-easily-swappable-parameters	inline std::string labeledWorkspacePath( const std::string& label, const std::string& rootArg, std::string_view crawlPath )
+src/wrap.h	bugprone-easily-swappable-parameters	inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, const std::string_view executablePath )
+src/wrap.h	bugprone-exception-escape	inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept
+src/wrap.h	bugprone-exception-escape	inline void wrapEmitAgent( const std::string_view agent, const WrapListing& asked, const std::string_view executablePath ) noexcept
+src/wrap.h	bugprone-exception-escape	inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
+src/wrap.h	clang-analyzer-optin.performance.Padding	struct AgentTarget

@@ -380,7 +380,7 @@ grep -q 'cli/src/cli_main.cpp' "$TMP/imp1.xml" && ok "--impact: blast radius cro
 run "$WS/svc" "$WS/cli" --connect=run_cli,svc_handle >"$TMP/conn1.xml" 2>/dev/null
 grep -q '<t n="run_cli" t="fn" p="cli/src/cli_main.cpp' "$TMP/conn1.xml" \
   && grep -q '<t n="svc_handle" t="fn" p="svc/include/svc_api.h' "$TMP/conn1.xml" \
-  && grep -q '<e f="run_cli" t="svc_handle"/>' "$TMP/conn1.xml" \
+  && grep -qE '<e f="run_cli" t="svc_handle"( [a-z_]+="[^"]*")*/>' "$TMP/conn1.xml" \
   && grep -q 'groups="1"' "$TMP/conn1.xml" \
   && ok "G-connect: cross-root join spans both roots through the evidence edge (one group)" \
   || no "G-connect: cross-root join missing/malformed: $( cat "$TMP/conn1.xml" )"

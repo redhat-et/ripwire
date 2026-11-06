@@ -102,7 +102,12 @@ inline constexpr std::uint32_t kNoFile = 0xFFFFFFFFu;   // "no repo file" sentin
 // escape → the caller treats an empty result as UNRESOLVED, never as the repo root). Lexical only: no
 // realpath, no I/O — same determinism contract as relForHash. A leading '/' (absolute) is preserved;
 // a trailing '/' is dropped. Empty segments (from `//` or a leading '/') and `.` segments are elided.
-inline std::string lexicalNormalize( std::string_view path )
+// PATH-NORM: the body writes into a caller's buffer, so a probe loop reuses one allocation instead of returning a
+// fresh string per probe (joinNormalizeLookup below: 5.2 M calls on a warm vscode --deps, two heap strings each).
+// `out` is cleared first and must not alias `path`. Returns false on an escape above the base (out left empty);
+// true otherwise, including the empty result a path that normalizes to its own base yields ("a/.."), which is why
+// the flag exists: lexicalNormalize below folds both into the empty string, as it always has.
+inline bool lexicalNormalizeInto( std::string_view path, std::string& out )
 {
     // ONE allocation, the returned string, and it is reserved: the segment list this used to build
     // (`std::vector<std::string_view> segs; segs.reserve( 8 );`) was a second heap block on a function
@@ -114,7 +119,7 @@ inline std::string lexicalNormalize( std::string_view path )
     // may never eat — 1 for an absolute path, 0 for a relative one — which is what makes the two degrade
     // rules ("no-op at the filesystem root" vs "escaping above the base is unsound") one comparison.
     const bool  isAbsolute = ( !path.empty() && path.front() == '/' );
-    std::string out;
+    out.clear();
     out.reserve( path.size() );
     if( isAbsolute )
     {
@@ -147,7 +152,8 @@ inline std::string lexicalNormalize( std::string_view path )
             else if( isAbsolute )                       { /* `..` at the filesystem root is a no-op */ }
             else
             {
-                return {}; // relative `..` escaping above the base → unsound
+                out.clear();
+                return false; // relative `..` escaping above the base → unsound
             }
         }
         else
@@ -161,7 +167,13 @@ inline std::string lexicalNormalize( std::string_view path )
 
         i = ( j < path.size() ) ? j + 1 : j;             // skip the '/'
     }
-    return out;
+    return true;
+}
+
+inline std::string lexicalNormalize( std::string_view path )
+{
+    std::string out;
+    return lexicalNormalizeInto( path, out ) ? std::move( out ) : std::string();   // the empty string is this function's escape answer
 }
 
 // ── LEVER B: per-language import Step-A (string → fileId) ────────────────────────────────────────────
@@ -294,27 +306,35 @@ struct WsIncludeCtx
 //   3. on a same-root miss, the DISK-shape probe reconstructs the includer's absolute directory and
 //      resolves the join against absIndex — the §3.1a evidence channel for an include that genuinely
 //      escapes its root on disk (sibling checkouts). Roots are disjoint, so an abs hit is unique.
+//
+// PATH-NORM: `relTail` is appended to `rel` (a probe loop's extension, `/index.ts`), so a caller never builds
+// `rel + ext` itself, and the join and its normalized copy live in two per-thread buffers that keep their
+// capacity: the probe allocates nothing once they have grown. Same join, same normalization, same lookup,
+// so the answer is the one the allocating version gave.
 inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_view rel,
                                           const HashMap<std::string, std::uint32_t>& fileIndex,
-                                          const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+                                          const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
+                                          std::string_view relTail = {} )
 {
     // rule 2: anchor a root-relative probe at the includer's own root (labels are never empty).
-    std::string      labelBase;
     std::string_view effBase = baseDir;
     const std::uint32_t incRoot = ( ws && includerFileId != kNoFile && includerFileId < ws->fileRoot->size() )
                                 ? ( *ws->fileRoot )[ includerFileId ] : 0xFFFFFFFFu;
     if( ws && baseDir.empty() && incRoot != 0xFFFFFFFFu )
     {
-        labelBase = ws->rootLabels[ incRoot ];
-        effBase   = labelBase;
+        effBase = ws->rootLabels[ incRoot ];
     }
 
-    std::string joined;
-    joined.reserve( effBase.size() + 1 + rel.size() );
+    struct Scratch { std::string joined, candidate; };
+    thread_local Scratch scratch;   // one pair per thread; nothing below calls back into this function
+    std::string& joined    = scratch.joined;
+    std::string& candidate = scratch.candidate;
+    joined.clear();
     if( !effBase.empty() ) { joined.append( effBase ); joined.push_back( '/' ); }
     joined.append( rel );
+    joined.append( relTail );
 
-    const std::string candidate = lexicalNormalize( joined );
+    lexicalNormalizeInto( joined, candidate );   // empty on an escape, the old lexicalNormalize contract
     if( !candidate.empty() )
     {
         const auto it = fileIndex.find( candidate );
@@ -353,10 +373,10 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
         }
     }
     std::string absJoined;
-    absJoined.reserve( ws->rootAbs[ incRoot ].size() + relBase.size() + rel.size() + 2 );
+    absJoined.reserve( ws->rootAbs[ incRoot ].size() + relBase.size() + rel.size() + relTail.size() + 2 );
     absJoined.append( ws->rootAbs[ incRoot ] );
     if( !relBase.empty() ) { absJoined.push_back( '/' );  absJoined.append( relBase ); }
-    absJoined.push_back( '/' );  absJoined.append( rel );
+    absJoined.push_back( '/' );  absJoined.append( rel );  absJoined.append( relTail );
 
     const std::string absCandidate = lexicalNormalize( absJoined );
     if( absCandidate.empty() )
@@ -366,6 +386,64 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
     const auto ait = ws->absIndex.find( absCandidate );
     return ( ait == ws->absIndex.end() ) ? kNoFile : ait->second;
 }
+
+// PATH-NORM: one join + normalize for a probe LIST, `dir/rel + suffix` over many suffixes (resolveTsImport's 12
+// extensions and index files, probeJsRuntimeSourceExt's source alternates). When the last segment of `rel` is a
+// plain name (not empty, `.` or `..`), normalize(dir/rel + suffix) == normalize(dir/rel) + suffix for every suffix
+// that adds only plain characters or plain `/name` segments: the suffix lengthens or follows a segment the
+// normalizer keeps as written, and an escape is decided by the segments before it, so it stays an escape (every
+// probe misses, as each one did). The base is normalized once and each probe is a copy plus a lookup. Any other
+// `rel` (`.`, `..`, a trailing `/`), or a workspace (rules 1-3 read the includer's root per probe), takes
+// joinNormalizeLookup per probe, the old path. One buffer per probe list; nothing per probe.
+class SuffixProbe
+{
+public:
+    SuffixProbe( std::string_view dir, std::string_view rel, const HashMap<std::string, std::uint32_t>& fileIndex,
+                 const WsIncludeCtx* ws, std::uint32_t includerFileId )
+        : dir_( dir ), rel_( rel ), fileIndex_( fileIndex ), ws_( ws ), includerFileId_( includerFileId )
+    {
+        const std::size_t    slash = rel.rfind( '/' );
+        const std::string_view last = ( slash == std::string_view::npos ) ? rel : rel.substr( slash + 1 );
+        fast_ = ( ws == nullptr && !last.empty() && last != "." && last != ".." );
+        if( fast_ )
+        {
+            std::string joined;
+            joined.reserve( dir.size() + 1 + rel.size() );
+            if( !dir.empty() ) { joined.append( dir ); joined.push_back( '/' ); }
+            joined.append( rel );
+            escaped_ = !lexicalNormalizeInto( joined, buf_ );
+            baseLen_ = buf_.size();
+            buf_.reserve( baseLen_ + 16 );   // the longest suffix is `/index.tsx`
+        }
+    }
+
+    std::uint32_t operator()( std::string_view suffix )
+    {
+        if( !fast_ )
+        {
+            return joinNormalizeLookup( dir_, rel_, fileIndex_, ws_, includerFileId_, suffix );
+        }
+        if( escaped_ )
+        {
+            return kNoFile;   // `..` above the base: the per-probe path misses on every suffix too
+        }
+        buf_.resize( baseLen_ );
+        buf_.append( suffix );
+        const auto it = fileIndex_.find( buf_ );
+        return ( it == fileIndex_.end() ) ? kNoFile : it->second;
+    }
+
+private:
+    std::string_view                           dir_;
+    std::string_view                           rel_;
+    const HashMap<std::string, std::uint32_t>& fileIndex_;
+    const WsIncludeCtx*                        ws_;
+    std::uint32_t                              includerFileId_;
+    bool                                       fast_    = false;
+    bool                                       escaped_ = false;
+    std::size_t                                baseLen_ = 0;
+    std::string                                buf_;   // the normalized base, then base + the current suffix
+};
 
 // Is `dir` a Python package, i.e. does it hold an indexed __init__.py? `dir` empty = the root.
 inline bool pythonDirIsPackage( std::string_view dir, const HashMap<std::string, std::uint32_t>& fileIndex,
@@ -675,12 +753,13 @@ inline std::pair<std::uint32_t, bool> probeJsRuntimeSourceExt( std::string_view 
     // candidate, not as a pre-existing ambiguity, and no caller has a reason to pass that sentinel in.
     EXPECTS( target.size() > runtimeExt.runtime.size(), "caller must pass runtimeExt from jsRuntimeSourceExtOf( target )" );
     EXPECTS( seedHit != kNoFile - 1, "seedHit is an ordinary candidate, never the ambiguous marker" );
-    const std::string stem( target.substr( 0, target.size() - runtimeExt.runtime.size() ) );
+    const std::string_view stem = target.substr( 0, target.size() - runtimeExt.runtime.size() );   // a view: the probe appends the extension
     std::uint32_t hit = seedHit;
     bool ambiguous = false;
+    SuffixProbe lookup( dir, stem, fileIndex, ws, includerFileId );
     const auto probe = [ & ]( std::string_view extension )
     {
-        const std::uint32_t candidate = joinNormalizeLookup( dir, stem + std::string( extension ), fileIndex, ws, includerFileId );
+        const std::uint32_t candidate = lookup( extension );
         if( candidate == kNoFile ) { return; }
         if( hit != kNoFile && hit != candidate ) { ambiguous = true; }
         hit = candidate;
@@ -858,9 +937,12 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
 
     const std::string_view dir = includerDir( includerPath );
     std::uint32_t hit = kNoFile;
-    const auto probe = [ & ]( const std::string& rel )
+    // `dir` and `target` are fixed for the whole probe list; only the suffix moves (SuffixProbe: one join and one
+    // normalization for the list, no `target + ext` string per probe).
+    SuffixProbe lookup( dir, target, fileIndex, ws, includerFileId );
+    const auto probe = [ & ]( std::string_view suffix )
     {
-        const std::uint32_t f = joinNormalizeLookup( dir, rel, fileIndex, ws, includerFileId );
+        const std::uint32_t f = lookup( suffix );
         if( f == kNoFile )
         {
             return;
@@ -879,7 +961,7 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
     // index. One accumulator for all of them (probeJsRuntimeSourceExt is SEEDED with it and folds its own
     // result back in), so a tree holding BOTH api.js and api.ts leaves `./api.js` unresolved rather than
     // guessing which module was meant.
-    probe( std::string( target ) );
+    probe( {} );
     if( const JsRuntimeSourceExt* const runtimeExt = jsRuntimeSourceExtOf( target ) )
     {
         const auto [ extHit, extAmbiguous ] = probeJsRuntimeSourceExt( dir, target, *runtimeExt, fileIndex, ws, includerFileId, hit );
@@ -887,11 +969,11 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
     }
     for( std::string_view e : kFileExt )
     {
-        probe( std::string( target ) + std::string( e ) );
+        probe( e );
     }
     for( std::string_view e : kIndexRel )
     {
-        probe( std::string( target ) + std::string( e ) );
+        probe( e );
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
 }
@@ -3079,6 +3161,54 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
     }
     return kNoFile;
 }
+
+// PATH-NORM: a memo of the TS/JS Step-A for ONE include-adjacency build. resolveTsImport reads the includer only
+// through includerDir(includerPath), so on a single root its answer is a pure function of (directory, specifier)
+// and the fixed fileIndex: a directive repeating a pair it has already seen gets the stored answer (a fileId or
+// kNoFile; a failed lookup stays failed) instead of 12-16 more probes. On vscode one build resolves 152,121
+// relative specifiers over 75,709 distinct pairs. Keys are interned ids, (dirId << 32 | specId), in a flat map:
+// the directory id is cached per includer fileId, so a repeat costs one specifier probe and one u64 probe. The
+// interned views point into the IngestResult (rootRelPath, Include::target), which outlives the build.
+// A workspace (ws != nullptr) is not memoized: its answer also reads the includer's root, so it calls through.
+// Only the TS dialect: Rust's `mod x;` reads the includer's file stem and Python reads more than its directory.
+class TsImportMemo
+{
+public:
+    explicit TsImportMemo( std::uint32_t fileCount ) : dirOfFile_( fileCount, kNoFile ) {}
+
+    std::uint32_t resolve( std::string_view includerPath, std::string_view target,
+                           const HashMap<std::string, std::uint32_t>& fileIndex, const WsIncludeCtx* ws, std::uint32_t includerFileId )
+    {
+        if( ws != nullptr || includerFileId >= dirOfFile_.size() )
+        {
+            return resolveTsImport( includerPath, target, fileIndex, ws, includerFileId );
+        }
+        std::uint32_t& dirId = dirOfFile_[ includerFileId ];
+        if( dirId == kNoFile )
+        {
+            dirId = internId( dirIds_, includerDir( includerPath ) );
+        }
+        const std::uint64_t key = ( std::uint64_t( dirId ) << 32 ) | internId( specIds_, target );
+        if( const auto it = answers_.find( key ); it != answers_.end() )
+        {
+            return it->second;
+        }
+        const std::uint32_t to = resolveTsImport( includerPath, target, fileIndex, ws, includerFileId );
+        answers_.emplace( key, to );
+        return to;
+    }
+
+private:
+    static std::uint32_t internId( HashMap<std::string_view, std::uint32_t>& ids, std::string_view s )
+    {
+        return ids.try_emplace( s, std::uint32_t( ids.size() ) ).first->second;
+    }
+
+    std::vector<std::uint32_t>                dirOfFile_;   // includer fileId → interned directory id (kNoFile = not yet)
+    HashMap<std::string_view, std::uint32_t>  dirIds_;
+    HashMap<std::string_view, std::uint32_t>  specIds_;
+    HashMap<std::uint64_t, std::uint32_t>     answers_;     // (dirId << 32 | specId) → fileId or kNoFile
+};
 
 // Build the PRECISE file→file include adjacency: includer fileId → its resolved-includee fileIds
 // (unresolved includes dropped; self-includes dropped). Deterministic: a pure function of ing.includes
@@ -5312,6 +5442,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
     std::optional<tsimport::ImportResolver> tsResolver;   // #220: built on the first bare TS/JS specifier that missed
+    TsImportMemo tsMemo( F );                              // PATH-NORM: this build's (dir, specifier) → answer
     for( const Include& inc : ing.includes )
     {
         if( inc.fileId >= F )
@@ -5367,11 +5498,13 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
             }
             continue;
         }
-        std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle,
-                                                   fileIndex, {}, false, ws, inc.fileId, moduleIndex );
+        const std::string_view includerPath = rootRelPath( ing, inc.fileId );
+        std::uint32_t to = ( !inc.target.empty() && includeLangOf( includerPath ) == IncludeLang::Ts )
+                         ? tsMemo.resolve( includerPath, inc.target, fileIndex, ws, inc.fileId )   // resolvePreciseInclude's Ts case, memoized
+                         : resolvePreciseInclude( includerPath, inc.target, inc.isAngle, fileIndex, {}, false, ws, inc.fileId, moduleIndex );
         if( to == kNoFile && cIncludeRoots )
         {
-            to = resolveCQuoteAtRoots( inc, rootRelPath( ing, inc.fileId ), fileIndex, cBaseDirs, ws, importsUnresolvedOut );
+            to = resolveCQuoteAtRoots( inc, includerPath, fileIndex, cBaseDirs, ws, importsUnresolvedOut );
             if( forCallNarrow && to != kNoFile && to != inc.fileId )
             {
                 rootFrom.push_back( inc.fileId );   // Rule 3's edge only (rootNarrowOut); every other call-narrow reader keeps the includer directory
@@ -5379,7 +5512,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
                 continue;
             }
         }
-        if( to == kNoFile && tsimport::isBareTsSpecifier( rootRelPath( ing, inc.fileId ), inc.target ) )
+        if( to == kNoFile && tsimport::isBareTsSpecifier( includerPath, inc.target ) )
         {
             to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
         }
