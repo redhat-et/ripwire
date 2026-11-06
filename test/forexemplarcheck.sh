@@ -16,6 +16,18 @@
 #   (t1) wordings that fire: add a new / I need a new .. that / write a / implement another / another X like Y / add a X to the ..
 #   (t2) wordings that do not: a parameter, a question, a fix, no article; a family-less X prints nothing
 #
+# ARMS (fix round 1: review rv-exemplar-e1)
+#   (m1) a name or stem several members share is ONE unit: (a) four Rust fns in ONE file (one stem) are not credited to a file whose
+#        comment holds the stem; their registered names in a dispatcher still are (share 4/4); (b) four Python classes all named
+#        `Command` (one name) are not credited to a file that says "Command"; their four file stems in an import list still are (by="stem")
+#   (m2) a function's parameter lines are no registry entries (typed Python): the dict in its body is the family; a signature of
+#        `name: Type,` lines alone is no family
+#   (d1) a decorator is matched whatever its case (`@Widget()` for the head `widget`), with no other mention of the word in the file
+#   (h1) sample, example and benchmark directories hold no member and no touch row
+#   (a2) the affix rule names classes only: four `*_command` functions are no family; three `*Worker` classes are
+#   (w1) matched= names the task words found in key= or scope=; the legend says registry rows are in listing order
+#   (l1) --legend=compact (the CLI default) prints the short legend, --legend=full the long one; both define every attribute
+#
 # ARMS (E3a TOUCH LIST: files outside the members' own that mention at least half of them)
 #   (e1) per language: Rust exhaustive match + mod list (registered names and file stems), Go name list + defaults list, C platform
 #        table, TS barrel by kebab path (`./dialects/postgres/postgres-dialect`), Python package __init__; C++ registry with no other
@@ -157,6 +169,25 @@ printf 'package baseline\n\nvar frozen = "%s"\n' "$all_go" > "$F/go/baseline/lis
 printf 'package x\n\nvar v = "%s"\n' "$all_go" > "$F/go/vendor/x/list.go"
 for i in 1 2 3 4 5 6 7; do printf 'from ui.a import AWidget\nREG%s = [AWidget, "BWidget", "CWidget", "DWidget", "EWidget", "FWidget"]\n' "$i" > "$F/cap/list$i.py"; done
 
+# fix-round fixtures
+mkdir -p "$F/m1s/src" "$F/m1n/cmds" "$F/m2/app" "$F/s3/src/ui" "$F/s2/src/plugins" "$F/s2/examples" "$F/s2/benchmarks" "$F/s4/src" "$F/s4c/src/jobs"
+for c in quit write open close; do printf '#[command]\npub fn %s() {}\n' "$c"; done > "$F/m1s/src/cmds.rs"
+printf '// the cmds live in another module\npub fn helper() -> u32 { 0 }\n' > "$F/m1s/src/notes.rs"
+printf 'pub fn dispatch( name: &str ) {\n    match name {\n        "quit" => (), "write" => (), "open" => (), "close" => (),\n        _ => (),\n    }\n}\n' > "$F/m1s/src/dispatch.rs"
+printf 'class BaseCommand:\n    pass\n' > "$F/m1n/cmds/base.py"
+for c in alpha beta gamma delta; do printf 'from .base import BaseCommand\n\n\nclass Command(BaseCommand):\n    def handle(self):\n        return "%s"\n' "$c" > "$F/m1n/cmds/$c.py"; done
+printf '# a Command line tool for the shell\nx = 1\n' > "$F/m1n/notes.py"
+printf 'from cmds import alpha, beta, gamma, delta\n' > "$F/m1n/registry.py"
+printf 'def default_handler_options(\n    timeout: int,\n    retries: int,\n    backoff: float,\n    jitter: bool,\n):\n    return 1\n' > "$F/m2/app/opts.py"
+printf 'def handler_table(\n    timeout: int,\n    retries: int,\n):\n    return {\n        "json": 1,\n        "xml": 2,\n        "csv": 3,\n        "yaml": 4,\n        "toml": 5,\n        "ini": 6,\n    }\n' > "$F/m2/app/table.py"
+for w in foo bar baz; do printf "import { Widget } from '../deco'\n\n@Widget()\nexport class %sPanel {\n  x = 1\n}\n" "$w" > "$F/s3/src/ui/$w.ts"; done
+printf 'class Plugin:\n    pass\n' > "$F/s2/src/plugins/base.py"
+for p in Aa Bb Cc; do printf 'from .base import Plugin\n\n\nclass %sPlugin(Plugin):\n    pass\n' "$p" > "$F/s2/src/plugins/$p.py"; done
+for p in Aa Bb Cc Dd; do printf 'from src.plugins.base import Plugin\n\n\nclass %sDemo(Plugin):\n    pass\n' "$p" > "$F/s2/examples/$p.py"; done
+for d in src examples benchmarks; do printf 'ALL = ["AaPlugin", "BbPlugin", "CcPlugin"]\n' > "$F/s2/$d/all.py"; done
+for c in quit write open close; do printf 'pub fn %s_command() -> u32 {\n    1\n}\n' "$c"; done > "$F/s4/src/commands.rs"
+for j in Send Fetch Purge; do printf 'class %sWorker:\n    def run(self):\n        return 1\n' "$j" > "$F/s4c/src/jobs/$(echo "$j" | tr 'A-Z' 'a-z').py"; done
+
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<exemplar_family .*</exemplar_family>' "$1" | head -1; }
 # fam ARM FIXTURE TASK RULE KEY N — the block fires with rule=, key=, n=
@@ -254,6 +285,52 @@ silent t2 c  "add a new field to Meter"
 silent t2 ts "How does running the build make a dialect, end to end"
 silent t2 ts "How does createDriver build a dialect for postgres?"
 
+# fix round 1 arms
+# m1 (a): four fns in ONE file are one stem; the registered names in a dispatcher are four names
+run m1s "--for=add a new command" >"$TMP/m1s.xml"
+if block "$TMP/m1s.xml" | grep -q ' rule="attribute" key="command"[^>]* n="4"'; then ok "(m1) m1s: attribute command n=4 (four fns in one file)"; else no "(m1) m1s family: $( block "$TMP/m1s.xml" | head -c 300 )"; fi
+no_touch m1 "$TMP/m1s.xml" src/notes.rs "a comment holding the stem of a file that holds all four is one stem, not four members"
+has_touch m1 "$TMP/m1s.xml" src/dispatch.rs 4/4
+# m1 (b): four classes all named Command are one name; their four file stems are four
+run m1n "--for=add a new command" >"$TMP/m1n.xml"
+if block "$TMP/m1n.xml" | grep -q ' rule="base" key="BaseCommand"[^>]* n="4"'; then ok "(m1) m1n: base BaseCommand n=4 (four classes named Command)"; else no "(m1) m1n family: $( block "$TMP/m1n.xml" | head -c 300 )"; fi
+no_touch m1 "$TMP/m1n.xml" notes.py "the word Command is one shared name, not four members"
+if touchrows "$TMP/m1n.xml" | grep -q '<touch p="registry.py:[0-9]*" share="4/4" by="stem"'; then ok "(m1) m1n: registry.py names the four file stems: share=\"4/4\" by=\"stem\""; else no "(m1) m1n stems: $( touchrows "$TMP/m1n.xml" | head -c 300 )"; fi
+# m2: parameter lines are no entries
+silent m2 m2 "add a new handler option"
+run m2 "--for=add a new handler table" >"$TMP/m2.xml"
+if block "$TMP/m2.xml" | grep -q ' rule="registry" key="handler_table"[^>]* n="6"' && block "$TMP/m2.xml" | grep -q '<m n="json"' && ! block "$TMP/m2.xml" | grep -q '<m n="timeout"'; then ok "(m2) m2: the body dict is the registry (json xml csv yaml toml ini), the parameters timeout/retries are not entries"
+else no "(m2) m2: $( block "$TMP/m2.xml" | head -c 300 )"; fi
+# d1: a decorator in another case than the head, no other mention of the word in the file
+fam d1 s3 "add a new widget" attribute Widget 3
+# h1: sample / example / benchmark dirs
+run s2 "--for=add a new plugin" >"$TMP/h1.xml"
+if block "$TMP/h1.xml" | grep -q ' rule="base" key="Plugin"[^>]* scope="src/plugins" n="3"' && ! block "$TMP/h1.xml" | grep -q 'Demo'; then ok "(h1) s2: four Demo classes under examples/ are no member; the three plugins are"; else no "(h1) s2: $( block "$TMP/h1.xml" | head -c 300 )"; fi
+has_touch h1 "$TMP/h1.xml" src/all.py 3/3
+no_touch h1 "$TMP/h1.xml" examples/all.py "an example directory"
+no_touch h1 "$TMP/h1.xml" benchmarks/all.py "a benchmark directory"
+# a2: affix is for classes
+silent a2 s4 "add a new command"
+fam a2 s4c "add a new worker" affix worker 3
+run s4c "--for=add a new worker" >"$TMP/a2.xml"; run s4c "--for=add a new worker" --legend=full >"$TMP/a2f.xml"
+if grep -q 'weakest grouping' "$TMP/a2.xml" && grep -q 'weakest grouping' "$TMP/a2f.xml"; then ok "(a2) both legends call the affix rule the weakest grouping"; else no "(a2) legend: affix is not called weakest"; fi
+# w1: why this family
+if block "$TMP/e_rs.xml" | grep -q ' matched="scalar function" scope='; then ok "(w1) matched= names both task words of the scalar function family"; else no "(w1) matched: $( block "$TMP/e_rs.xml" | head -c 300 )"; fi
+if grep -q 'listing order' "$TMP/e_go.xml" && grep -q 'matched=' "$TMP/e_go.xml"; then ok "(w1) the legend says what the first <m> is under rule=registry"; else no "(w1) legend"; fi
+# l1: --legend=full prints the long legend, the default (compact) the short one; both define every attribute (a1 below)
+run rs "--for=add a new scalar function" --legend=full >"$TMP/l_full.xml"
+if python3 - "$TMP/e_rs.xml" "$TMP/l_full.xml" <<'PY'
+import sys
+def legend( path ):
+    s = open( path, encoding="utf8" ).read()
+    i = s.index( "<!-- ripwire for exemplar_family:" )
+    return s[ i: s.index( "-->", i ) ], s[ :i ] + s[ s.index( "-->", i ): ]
+a, ra = legend( sys.argv[1] ); b, rb = legend( sys.argv[2] )
+if not len( a ) < len( b ): sys.exit( "compact legend %d B is not shorter than full %d B" % ( len( a ), len( b ) ) )
+if ra.split( "<exemplar_family", 1 )[1] != rb.split( "<exemplar_family", 1 )[1]: sys.exit( "the block rows differ between legends" )
+PY
+then ok "(l1) default legend is shorter than --legend=full; the block rows are the same"; else no "(l1) legend posture"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
@@ -272,7 +349,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa; do
+for f in a1 s2 c1a e_goa l_full; do
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()
