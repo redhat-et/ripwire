@@ -277,7 +277,7 @@ struct QueryPrewarm
 //   - a cache hit (hash-match) → worker skips parse → grammar NOT needed (safe to omit)
 //   - a .h miss that looks Objective-C → marks objc instead of cpp (same looksObjC re-route as parse pool)
 //   - an unreadable .h miss → conservatively marks both cpp and objc, matching the old safety fallback
-inline void prewarmTagsQueries( const std::vector<std::string>& files, const HashMap<std::string, FileFacts>& cache,
+inline void prewarmTagsQueries( const std::vector<std::string>& files, const CacheRecords& cache,
                                 long long cacheWriteNs, IngestFileScan& scan, QueryPrewarm& prewarm )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: compile queries (tags.scm prewarm)" );
@@ -369,10 +369,9 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Has
                         // A4-P7 stat-gate first, else read+hash.
                         if( !cache.empty() )
                         {
-                            const auto cit = cache.find( f );
-                            if( cit != cache.end() )
+                            if( const CachedRecordHead* head = cache.headOf( fi ) )
                             {
-                                const FileFacts& ff = cit->second;
+                                const CachedRecordHead& ff = *head;
 
                                 // A4-P7 STAT-GATE: trust the cached parse WITHOUT reading/hashing when the
                                 // current size+mtime+ctime all still match the cache AND the entry is not
@@ -615,6 +614,21 @@ inline void installCompiledQueriesAndOpenGate( QueryPrewarm& prewarm )
         }
     }
     prewarm.cv.notify_all();
+}
+
+// WARM-DIRECT: compile and install the tags query of each grammar in `grammars` the cache does not hold yet — for the
+// parse pool's late misses (a cached record that failed in a worker after the prewarm counted it a hit). Called after
+// the pool join, so this thread is the cache's only writer, as installCompiledQueriesAndOpenGate is above.
+inline void installLateQueries( const std::vector<const LangEntry*>& grammars )
+{
+    HashMap<const TSLanguage*, TSQuery*>& cache = compiledQueryCache();
+    for( const LangEntry* le : grammars )
+    {
+        if( le->grammar != nullptr && !cache.contains( le->grammar() ) )
+        {
+            cache[ le->grammar() ] = compileQueryStandalone( *le );
+        }
+    }
 }
 
 }   // namespace
