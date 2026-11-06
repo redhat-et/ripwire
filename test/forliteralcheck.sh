@@ -66,7 +66,7 @@
 #          registers it, def= the default argument (Go pflag plain and ...P shorthand, argparse default=, click, TCLAP), and when def= names a
 #          field, ld rows = its constant writes, defaults first; near misses (docs only, no site, Rust clap field, no flag word) print no flag lit
 #
-#   F14-F26, E11-E12 (forliteral-3 fix round 1, rv-forliteral-3; RED on 57b487740 where [P]): def= reads only a flag API's own default slot (an alias
+#   F14-F28, E11-E12 (forliteral-3 fix round 1, rv-forliteral-3; RED on 57b487740 where [P]): def= reads only a flag API's own default slot (an alias
 #          after the name, a nushell `.named`, an exec.Command argument are no default; the registration row, not the invocation ranked before it, carries
 #          def=); a name with no inner hyphen is a site only dashed or as a flag call's argument (a dict value, `__all__`, an error message are not);
 #          ld rows are the writes of the field's owner type (a same-named field of another struct is not), a package var and an anonymous struct stay;
@@ -2019,6 +2019,13 @@ def parse():
     p.add_argument("--squeezeall", "-s", action="store_true")
     return p
 PY
+cat > "$FL/source/server/tclap_impl.cc" <<'CC'
+void TclapImpl::parse(int argc, const char* const* argv) {
+  TCLAP::ValueArg<uint32_t> threads("", "workerthreads", "# of worker threads to run", false, 1, "uint32_t", cmd);
+  TCLAP::SwitchArg quiet("q", "workerquiet", "Quiet mode", cmd, false);
+  const char* other = "workerthreads is documented elsewhere";
+}
+CC
 cat > "$FL/cmd/sq/sq.go" <<'GO'
 package sq
 
@@ -2119,6 +2126,10 @@ A="$( fl '--for=where is the --squeezego flag, and the --max-pods flag; also SQU
 if has "$A" 'shape="flag"'; then if has "$A" 'try="' && ! has "$A" "the task's Nth literal" ; then no "F25 try= printed with no try legend"; else ok "F25 [G] a try= (when printed) has its sentence, none without (conditional sentence)"; fi; else ok "F25 [G] (no flag fire in this wording: nothing to check)"; fi
 A="$( fl '--for=how does the --cache-sizing option work' )"
 if has "$A" 'ld = a constant write' && has "$A" 'a name match, no type check' && has "$A" 'also an invocation or a lookup'; then ok "F26 [P] the flag legend: sites include invocations and lookups, ld is a name match of the owner type"; else no "F26 flag legend wording"; fi
+A="$( fl '--for=what does the --workerthreads flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="workerthreads" shape="flag"' && has "$L" 'p="source/server/tclap_impl.cc" l="2"' && has "$L" 'src="1"' && ! has "$L" 'def="'; then ok "F27 [G] twin: a no-hyphen name as a TCLAP argument object's constructor (ValueArg<T> name(...), envoy --concurrency): a site, no def= (the description is no default)"; else no "F27 TCLAP: ${L:0:500}"; fi
+A="$( fl '--for=what does the --workerquiet flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="workerquiet" shape="flag"' && has "$L" 'p="source/server/tclap_impl.cc" l="3"'; then ok "F28 [G] twin: SwitchArg quiet(...) (no template) is an argument object too"; else no "F28 SwitchArg: ${L:0:300}"; fi
 # legend: the flag clause rides only on a flag fire
 A="$( fl '--for=kubelet --max-pods' )"
 if has "$A" 'shape=flag a flag the task names' && has "$A" 'writes=N'; then ok "F8 [P] the flag legend clause rides on the fire"; else no "F8 flag legend missing"; fi

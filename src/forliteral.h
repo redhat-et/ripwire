@@ -1436,6 +1436,21 @@ inline std::string_view calleeBefore( std::string_view text, std::size_t open ) 
     return text.substr( from, open - from );
 }
 
+// C++ TCLAP: the call at `open` constructs a command-line argument object, `ValueArg<uint32_t> concurrency(...)`, `SwitchArg quiet(...)`: the type
+// before the object's name ends the line's text up to it with `Arg` or `Arg<...>`
+inline bool constructsArgObject( std::string_view text, std::size_t open ) noexcept
+{
+    const std::size_t      calleeAt = open - calleeBefore( text, open ).size();
+    const std::size_t      nl       = calleeAt == 0 ? std::string_view::npos : text.rfind( '\n', calleeAt - 1 );
+    const std::size_t      ls       = nl == std::string_view::npos ? 0 : nl + 1;
+    std::string_view       head     = text.substr( ls, calleeAt - ls );
+    while( !head.empty() && ( head.back() == ' ' || head.back() == '\t' ) )
+    {
+        head.remove_suffix( 1 );
+    }
+    return head.ends_with( "Arg" ) || ( head.ends_with( '>' ) && head.rfind( "Arg<" ) != std::string_view::npos );
+}
+
 // What a callee says about a flag's default (FLAG-SHAPE-LIT; the library's own default slot, never a guess from position):
 enum class FlagSlot : std::uint8_t
 {
@@ -1471,7 +1486,7 @@ inline FlagSlot flagSlotOf( std::string_view callee ) noexcept
 // FLAG-SHAPE-LIT: the hit at `at` of `text` is the whole quoted flag name: a quote before it (after an optional `-` or `--`) and the same quote,
 // or a `=` (`"--workers=4"`), right after it. `"max-pods-per-core"` and `use --max-pods to cap` are mentions, not sites. A name with no inner hyphen
 // is a common word (`compress`, `cache`): it is a site only in its dashed form (`"--compress"`) or as a flag-definition call's argument
-// (flagSlotOf), never a dict value, an `__all__` entry or an error message.
+// (flagSlotOf, or a TCLAP argument object's constructor), never a dict value, an `__all__` entry or an error message.
 inline bool flagHitAt( std::string_view text, std::size_t at, std::size_t n ) noexcept
 {
     if( at == 0 || at > text.size() || n > text.size() - at )
@@ -1497,7 +1512,7 @@ inline bool flagHitAt( std::string_view text, std::size_t at, std::size_t n ) no
         return true;   // dashed, or a kebab name (an inner hyphen discriminates on its own)
     }
     const std::size_t open = openParenBefore( text, at );
-    return open != std::string_view::npos && flagSlotOf( calleeBefore( text, open ) ) != FlagSlot::Absent;
+    return open != std::string_view::npos && ( flagSlotOf( calleeBefore( text, open ) ) != FlagSlot::Absent || constructsArgObject( text, open ) );
 }
 
 // How a shape of <lit> reads its sites: one row of this table per shape, so a new shape is a new row, never a new bool through renderForLiteral.
