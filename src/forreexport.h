@@ -2226,7 +2226,7 @@ inline std::vector<const Symbol*> genProtoDefs( const IngestResult& ing, const s
     const std::string owner = segs.size() >= 2 ? genNorm( segs[ segs.size() - 2 ] ) : std::string();
     for( const Symbol& s : ing.symbols )
     {
-        if( s.lang != Lang::Proto || genNorm( s.name ) != leaf )
+        if( !langFacts( s.lang ).generatedSchema || genNorm( s.name ) != leaf )
         {
             continue;
         }
@@ -2451,7 +2451,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
         }
     }
     // rung 4 (PROTO-INDEX): the generated paths, linked by name to .proto definitions; run only when the index holds one
-    const bool genRan = !exact && !genPaths.empty() && std::ranges::any_of( ing.symbols, []( const Symbol& s ) { return s.lang == Lang::Proto; } );
+    const bool genRan = !exact && !genPaths.empty() && std::ranges::any_of( ing.symbols, []( const Symbol& s ) { return langFacts( s.lang ).generatedSchema; } );
     if( genRan )
     {
         rungs.append( rungs.empty() ? "" : "," ).append( "gen" );

@@ -2277,7 +2277,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
             // Proto (PROTO-INDEX): the grammar names no `body:` field. A message's or enum's body is its *_body child; a service's,
             // an rpc's option block's and a oneof's body starts at its `{` token (an rpc ending in `;` has none).
-            if( ts_node_is_null( body ) && le.lang == Lang::Proto )
+            if( ts_node_is_null( body ) && langFacts( le.lang ).generatedSchema )
             {
                 body = firstChildOfKind( defNode, /*namedOnly=*/false, { "message_body", "enum_body", "{" } );
             }

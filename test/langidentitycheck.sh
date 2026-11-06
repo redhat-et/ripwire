@@ -104,7 +104,7 @@ manifest_check(){
     local tags tag
     tags="$( grep -oE 'lang="[a-z|]+"' "$ROOT/src/model.h" | head -1 | sed 's/lang="//;s/"//' | tr '|' ' ' )"
     for tag in $tags; do
-        case "$tag" in md|json|toml|yaml) continue ;; esac
+        case "$tag" in md|json|toml|yaml|proto) continue ;; esac   # data and schema tags: no call graph to compare
         case " ${CODE_LANGS[*]} " in *" $tag "*) ;; *) no "manifest: src/model.h labels a language '$tag' this gate does not know (add it to CODE_LANGS and the manifest)"; bad=1 ;; esac
     done
     [ "$bad" = 0 ] && ok "manifest: $n row(s), all ${#CODE_LANGS[@]} code languages covered, every directory exists"
