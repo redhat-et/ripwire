@@ -3196,6 +3196,7 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
             {
                 continue;   // an earlier record already matched this file's key
             }
+            const std::string_view expectRel = relForHash( crawledFiles[ file ], rootDir );
             std::size_t want = std::size_t( std::min<std::uint64_t>( e.recLength, kHeadProbeBytes ) );
             headBuf.resize( want );
             if( !preadExact( frame->blob.fd, headBuf.data(), want, e.recOffset ) )
@@ -3208,6 +3209,14 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
             if( want >= 4 )
             {
                 std::memcpy( &keyBytes, headBuf.data(), 4 );
+                if( !VALIDATE( keyBytes == expectRel.size() ) )
+                {
+                    // The second read below is sized by this stored length. A key of any other length is not this file's
+                    // record (a hash collision or a damaged length), so refuse it before reading that many more bytes.
+                    DISCLOSE( Diagnostics::answerUnchanged, "the affected files are reparsed from source: the answer is byte-identical, only slower",
+                              "ingest: cache path-hash collision — the colliding file is reparsed" );
+                    continue;
+                }
             }
             const std::uint64_t headBytes = std::uint64_t( keyBytes ) + kHeadFixedBytes;
             if( headBytes > want && headBytes <= e.recLength )
@@ -3232,7 +3241,7 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
                           "ingest: cache record head is corrupt — that file is reparsed" );
                 continue;
             }
-            if( rel != relForHash( crawledFiles[ file ], rootDir ) )
+            if( rel != expectRel )
             {
                 // The pathHash matched but the record is for a DIFFERENT file — a 64-bit collision. Serving it would be a
                 // wrong answer, so the file reparses instead.

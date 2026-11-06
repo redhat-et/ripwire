@@ -388,6 +388,31 @@ inline void noteFactlessMiss( ParsePoolShared& sh, std::size_t fileId, bool nest
     }
 }
 
+// One worker's cache-record scratch, reused across its hits.
+struct RecordScratch
+{
+    std::string                bytes;   // one cache record's bytes
+    std::vector<std::uint64_t> dict;    //   its subtoken dictionary (rich only)
+    FileFacts                  facts;   //   its decoded facts; moved into the worker's arrays, capacity kept for the next hit
+};
+
+// CacheRecords::decode, with a throw (bad_alloc on the record buffer or a fact array) reported as the failure it is: the
+// caller then schedules the file as a late miss and reparses it after the join, instead of the worker's catch-all
+// marking it extract-partial with its facts missing.
+inline bool decodeCachedRecordNoThrow( const CacheRecords& cache, std::size_t fileId, const std::string& path, RecordScratch& rec )
+{
+    try
+    {
+        return cache.decode( fileId, path, rec.bytes, rec.dict, rec.facts );
+    }
+    catch( ... )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "the affected files are reparsed from source: the answer is byte-identical, only slower",
+                  "ingest: cache record decode threw — that file is reparsed" );
+        return false;
+    }
+}
+
 // one worker's whole life: grab files off the shared cursor, reuse cache hits, parse+capture misses,
 // queueing parsed trees while the tags queries still compile. Body moved verbatim from the lambda in
 // ingest() (accumulators renamed tDefs[t]→out.defs etc., shared state reached through `sh`).
@@ -413,9 +438,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         lexScratch.reserve( 1024 );
     }
     MemberMacroReparse macroWork;                        // member-macro re-parse (src/macroreparse.h): per-worker scratch
-    std::string                recordBuf;                // WARM-DIRECT: one cache record's bytes, reused across hits
-    std::vector<std::uint64_t> recordDict;               //   its subtoken dictionary (rich only)
-    FileFacts                  hitFacts;                 //   its decoded facts; moved into `out`, capacity kept for the next hit
+    RecordScratch              record;                   // WARM-DIRECT: one cache record's bytes, dictionary and decoded facts, reused across hits
     macroWork.captureValueUses = sh.captureValueUses;
     const auto buildLexForNewDefs = [ & ]( std::vector<RawDef>& defs, std::size_t firstNewDefIndex, const std::string& fileBytes )
     {
@@ -569,9 +592,9 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 }
                 if( hit != nullptr )   // unchanged → decode its record straight into this worker's arrays, skip parse
                 {
-                    if( sh.cache.decode( fileId, path, recordBuf, recordDict, hitFacts ) )
+                    if( decodeCachedRecordNoThrow( sh.cache, fileId, path, record ) )
                     {
-                        warmGrowths += appendCacheHitFacts( hitFacts, std::uint32_t( fileId ), scan, out );
+                        warmGrowths += appendCacheHitFacts( record.facts, std::uint32_t( fileId ), scan, out );
                     }
                     else
                     {

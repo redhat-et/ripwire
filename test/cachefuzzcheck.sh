@@ -276,6 +276,9 @@ mutations["huge_head_and_body_def_count_recomputed_checksum"] = mut_huge_both_de
 def mut_head_defcount_off_by_one(b):  # headCountsFit passes; the body disagrees: readFileRecord's head==body check
     p = bytearray(b[:payload_len]); v = struct.unpack_from("<I", p, head_count(0))[0]; struct.pack_into("<I", p, head_count(0), v + 1); return with_recomputed_trailer(p)
 mutations["head_def_count_plus_one_recomputed_checksum"] = mut_head_defcount_off_by_one
+def mut_head_refcount_off_by_one(b):  # the same lie in another family (refs): headCountsFit passes, readFileRecord's head==body check refuses
+    p = bytearray(b[:payload_len]); v = struct.unpack_from("<I", p, head_count(1))[0]; struct.pack_into("<I", p, head_count(1), v + 1); return with_recomputed_trailer(p)
+mutations["head_ref_count_plus_one_recomputed_checksum"] = mut_head_refcount_off_by_one
 def mut_head_zeroed(b):               # the head says factless while the body has rows
     p = bytearray(b[:payload_len]); struct.pack_into("<8I", p, hd_off, 0, 0, 0, 0, 0, 0, 0, 0); return with_recomputed_trailer(p)
 mutations["head_counts_zeroed_recomputed_checksum"] = mut_head_zeroed
@@ -295,6 +298,10 @@ mutations["maxed_mtime_field_recomputed_checksum"] = mut_maxed_mtime
 def mut_string_len_exceeds(b):
     p = bytearray(b[:payload_len]); struct.pack_into("<I", p, HDR, 0x7FFFFFFF); return with_recomputed_trailer(p)
 mutations["string_length_exceeds_blob_recomputed_checksum"] = mut_string_len_exceeds
+
+def mut_key_len_fits_but_differs(b):   # a stored key length that fits the record but is not the file's path length: the planner refuses it before sizing its second read
+    p = bytearray(b[:payload_len]); struct.pack_into("<I", p, HDR, path_len + 8); return with_recomputed_trailer(p)
+mutations["key_length_differs_but_fits_recomputed_checksum"] = mut_key_len_fits_but_differs
 
 def mut_string_len_wraparound(b):
     p = bytearray(b[:payload_len]); struct.pack_into("<I", p, HDR, 0xFFFFFFFF); return with_recomputed_trailer(p)
@@ -452,7 +459,8 @@ FAM_N="$( grep -oE 'cached_records=[0-9]+' "$TMP/famcnt_control.err" | head -1 |
 if [ "$rc" -eq 0 ] && [ -n "$FAM_N" ] && [ "$FAM_N" -gt 1 ] && cmp -s "$TMP/truth.xml" "$TMP/famcnt_control.xml"; then
     ok "[famcnt control] the unmodified blob is used whole under the bound (cached_records=$FAM_N)"
     for name in huge_def_count_recomputed_checksum huge_head_def_count_recomputed_checksum huge_head_ref_count_recomputed_checksum \
-                huge_head_and_body_def_count_recomputed_checksum head_def_count_plus_one_recomputed_checksum head_counts_zeroed_recomputed_checksum; do
+                huge_head_and_body_def_count_recomputed_checksum head_def_count_plus_one_recomputed_checksum head_ref_count_plus_one_recomputed_checksum \
+                head_counts_zeroed_recomputed_checksum key_length_differs_but_fits_recomputed_checksum; do
         cp "$PRISTINE/$name.cache" "$TMP/famcnt_$name.cache"
         famcnt_cached "$TMP/famcnt_$name.cache" "$TMP/famcnt_$name.xml" "$TMP/famcnt_$name.err"; rc=$?
         got="$( grep -oE 'cached_records=[0-9]+' "$TMP/famcnt_$name.err" | head -1 | cut -d= -f2 )"

@@ -7,8 +7,8 @@
 #
 # Arms:
 #   S  the warm run is warm: RIPWIRE_CACHE_STATS says reparsed=0 and cached_records = files.
-#   B  the warm answer is byte-identical to the cold answer (and to a --no-cache run), and so is a warm map (which names every
-#      file's own symbols, so it sees a record decoded for the wrong file, as --deps' summary may not).
+#   B  the warm answer is byte-identical to the cold answer (and to a --no-cache run), and so is a warm map (--top-k past the
+#      symbol count: it names every file's own symbols, so it sees a record decoded for the wrong file, as --deps' summary may not).
 #   W  peak footprint, warm <= kWarmPct % of cold (the best of two runs each). Red when a warm-only copy of the facts
 #      comes back (the decoded map, a scratch that keeps every record).
 #   F  peak footprint, warm <= kFactPct % of the blob's size plus the binary's floor (a --version run): an absolute bound
@@ -59,8 +59,10 @@ run(){ # tag args...
     local rc=0
     ( cd "$FX" && HOME="$TMP" RIPWIRE_CACHE_STATS=1 /usr/bin/time -l "$BIN" "$FX" "$@" >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) || rc=$?
     if [ "$rc" -ne 0 ]; then
-        no "$tag: ripwire exited $rc ($( grep -v '^ ' "$TMP/$tag.err" | head -2 | tr '\n' ' ' ))"
-        echo 0; return
+        # The caller reads this function through $( ), a subshell: the FAIL line goes to stderr (stdout is the peak
+        # value) and the caller sets the gate's failure from the status below, which a subshell's own `no` could not.
+        { no "$tag: ripwire exited $rc ($( grep -v '^ ' "$TMP/$tag.err" | head -2 | tr '\n' ' ' ))"; } >&2
+        echo 0; return 1
     fi
     awk '/peak memory footprint/ { printf "%d", $1 / 1048576; f = 1 } END { if( !f ) printf "0" }' "$TMP/$tag.err"
 }
@@ -73,19 +75,24 @@ if [ "$TIMEL" = 0 ]; then
     # no BSD time: S and B only, through plain runs
     run(){ local tag="$1"; shift; local rc=0
         ( cd "$FX" && HOME="$TMP" RIPWIRE_CACHE_STATS=1 "$BIN" "$FX" "$@" >"$TMP/$tag.out" 2>"$TMP/$tag.err" ) || rc=$?
-        [ "$rc" -ne 0 ] && no "$tag: ripwire exited $rc"; echo 0; }
+        [ "$rc" -ne 0 ] && { { no "$tag: ripwire exited $rc"; } >&2; echo 0; return 1; }
+        echo 0; }
 fi
-cold1="$( run cold1 --deps --cache="$C" )"
-warm1="$( run warm1 --deps --cache="$C" )"
+# A failed measured run sets fail here, in the parent shell: `$( run ... )` ran in a subshell, so run's own `no` could not.
+# cold2 matters most: warm2 would otherwise recreate the cache that cold2 failed to write and the gate would pass.
+cold1="$( run cold1 --deps --cache="$C" )" || fail=1
+warm1="$( run warm1 --deps --cache="$C" )" || fail=1
 blobMB=$(( $( wc -c <"$C" 2>/dev/null || echo 0 ) / 1048576 ))
 rm -f "$C"
-cold2="$( run cold2 --deps --cache="$C" )"
-warm2="$( run warm2 --deps --cache="$C" )"
+cold2="$( run cold2 --deps --cache="$C" )" || fail=1
+[ -s "$C" ] || no "cold2 wrote no cache: warm2 below would run cold and the warm arms would measure nothing"
+warm2="$( run warm2 --deps --cache="$C" )" || fail=1
 run nocache --deps --no-cache >/dev/null
-# the map lists every file's own symbols, so a record decoded into the wrong file shows here (--deps' summary can be blind
-# to a swap between two files of the same shape); served from the same cache, warm
-run warmmap --cache="$C" >/dev/null
-run nocachemap --no-cache >/dev/null
+# the map with --top-k above the symbol count lists EVERY file's own symbols (the default 200-row map names 12 of the 1200
+# files, so a swap between two omitted files would pass), so a record decoded into the wrong file shows here (--deps'
+# summary can be blind to a swap between two files of the same shape); served from the same cache, warm
+run warmmap --cache="$C" --top-k=1000000 >/dev/null
+run nocachemap --no-cache --top-k=1000000 >/dev/null
 
 # ---- S ----
 rp="$( stat_of warm1 reparsed )"; cr="$( stat_of warm1 cached_records )"; fl="$( stat_of warm1 files )"
@@ -101,7 +108,10 @@ else
     no "B: a warm answer differs from the cold one"
 fi
 mrp="$( stat_of warmmap reparsed )"
-if [ -s "$TMP/nocachemap.out" ] && [ "$mrp" = 0 ] && cmp -s "$TMP/warmmap.out" "$TMP/nocachemap.out"; then
+mapfiles="$( grep -o '<f p="' "$TMP/nocachemap.out" | wc -l | tr -d ' ' )"
+if [ "$mapfiles" != "$NFILES" ]; then
+    no "B: the exhaustive map names $mapfiles of $NFILES files: it cannot see a record served for an omitted file"
+elif [ -s "$TMP/nocachemap.out" ] && [ "$mrp" = 0 ] && cmp -s "$TMP/warmmap.out" "$TMP/nocachemap.out"; then
     ok "B: warm map (reparsed=0) byte-identical to --no-cache ($( wc -c <"$TMP/nocachemap.out" | tr -d ' ' ) B)"
 else
     no "B: the warm map differs from the --no-cache one, or was not warm (reparsed=${mrp:-?}): a record served for the wrong file"
