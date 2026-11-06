@@ -1949,7 +1949,7 @@ public:
             sizes_.push_back( recallFenceOpenerOf( body, r ).size() );
         }
     }
-    std::size_t at( std::size_t start )   // calls must not go backwards
+    std::size_t costAt( std::size_t start )   // calls must not go backwards; not named at(): hazard C reads .at( as the throwing std call
     {
         while( next_ < ranges_.size() && ranges_[next_].end <= start ) { ++next_; }
         return next_ < ranges_.size() && ranges_[next_].start < start ? sizes_[next_] : 0;
@@ -1994,7 +1994,7 @@ inline RecallWindow selectRecallWindow( std::string_view body, const RecallWindo
     std::size_t   endLine   = 0;                   // the window [first, endLine) holds whole lines within its budget
     for( std::size_t first = 0; first < lineCount; ++first )
     {
-        const std::size_t budget = windowBytes - std::min( windowBytes, opener.at( lt.lineStart[first] ) );
+        const std::size_t budget = windowBytes - std::min( windowBytes, opener.costAt( lt.lineStart[first] ) );
         endLine = std::max( endLine, first );
         while( endLine > first && lt.lineStart[endLine] - lt.lineStart[first] > budget )   // a fence opener costs this start more
         {
