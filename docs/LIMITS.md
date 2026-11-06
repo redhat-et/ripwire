@@ -527,6 +527,7 @@ Discloses: `capped`, `lit_capped`
 | `kForLiteralRegistrationRows` | `2` | — | shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count |
 | `kForLiteralSiteRows` | `8` | — | <ls> rows shown (a runaway guard: shown=/src= count, next= lists all) |
 | `kForLiteralTierFiles` | `64` | — | source hit files classified (k=); past it k="?" |
+| `kForRegLineHits` | `8` | — | shape=table: later hits on one line kept to try as a registration argument (the first is the site) |
 | `kForTableByteCap` | `40000` | — | shape=table: all its <lit> elements together, cut on a row boundary (runaway guard: a 16 KB cap loses ld-nushell-07) |
 | `kForTableContextRows` | `4` | — | shape=table: table rows served with the lines after them |
 | `kForTableMaxAnchor` | `60` | — | a longer backticked span is no anchor |

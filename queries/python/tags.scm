@@ -74,7 +74,8 @@
   value: (_) @name) @reference.subscript
 
 ; Shared import vocabulary (#358). The dependency target is still ONE per statement: the first
-; name of a plain import (including its alias spelling), or the module_name of a from-import.
+; name of a plain import, or the module_name of a from-import. An aliased first name captures the
+; whole aliased_import; normalisePythonImport keeps only its module (#478 gap 2).
 ; The child anchor captures only the first plain-import name. The C++ side (ingest_importcap.h)
 ; imposes the old container reach/depth; statement patterns remain unanchored so conditional and
 ; function imports keep coverage.
