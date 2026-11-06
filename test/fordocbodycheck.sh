@@ -255,7 +255,7 @@ if "passages" in b:
 sys.exit( 0 if ( b.get( "held" ) == "budget" and b.get( "passages" ) and b["held_bytes"] > 0 and b["next"].startswith( "--for=" ) ) else 3 )
 PY
 done
-[ "$pj" = 1 ] && ok "(b4b) --json under a middle budget: passages served and held=\"budget\" held_bytes= next=" || no "(b4b) --json partial serve"
+if [ "$pj" = 1 ]; then ok "(b4b) --json under a middle budget: passages served and held=\"budget\" held_bytes= next="; else no "(b4b) --json partial serve"; fi
 mcp ',"budget_tokens":100000' >"$TMP/b5.xml"
 if grep -q '<doc_body match="lexical" est_tokens' "$TMP/b5.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b5.xml" && [ "$( nsec "$TMP/b5.xml" )" -ge 1 ] && chk_fit "$TMP/b5.xml" 100000
 then ok "(b5) MCP budget_tokens=100000 serves the sections"; else no "(b5) MCP big budget: $( grep -o '<doc_body[^>]*>' "$TMP/b5.xml" | head -c 300 )"; fi
@@ -328,7 +328,7 @@ for B in 5000 5200 5400 5600 5800; do
   if ans "$TMP/b2f.xml" "$HFX" "--for=$TASK" --token-budget=$B && chk_fit "$TMP/b2f.xml" $B && grep -q '<f p="docs/[^"]*" why="budget" held="[1-9][0-9]*"/>' "$TMP/b2f.xml" \
      && grep -q '<doc_body [^>]*held="budget" held_bytes=' "$TMP/b2f.xml"; then bf=1; fi
 done
-[ "$bf" = 1 ] && ok "(b2f) the sections a budget kept out of a file are named: f p= why=\"budget\" held=N" || no "(b2f) held sections not named"
+if [ "$bf" = 1 ]; then ok "(b2f) the sections a budget kept out of a file are named: f p= why=\"budget\" held=N"; else no "(b2f) held sections not named"; fi
 
 [ "$fail" = 0 ] && echo "fordocbodycheck: PASS" || echo "fordocbodycheck: FAIL"
 exit "$fail"
