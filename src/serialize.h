@@ -10252,6 +10252,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // #479 item 2: at most kCycleMemberCap member rows per shown <cycle>; the legend defines members_capped= exactly when
     // a shown cycle's member list is cut (the row loop below uses these same two numbers).
     constexpr std::size_t kCycleMemberCap = 12;
+    static_assert( kCycleMemberCap == 12, "the members_capped= legend texts here and in compactlegend.h say 12: change them with the cap" );
     const std::size_t     cyclesShown     = std::min( cycles.size(), std::max<std::size_t>( 20, pageLimit > 0 ? std::size_t( pageLimit ) : 0 ) );
     if( std::any_of( cycles.begin(), cycles.begin() + std::ptrdiff_t( cyclesShown ),
                      []( const std::vector<std::uint32_t>& members ) { return members.size() > kCycleMemberCap; } ) )
