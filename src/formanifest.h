@@ -42,6 +42,7 @@
 #include "epmanifest.h" // epdetail TOML helpers: tomlHeaderParts, tomlKeyEnd, tomlKeyParts, tomlStringValue, tomlMultilineOpen
 #include "exemplarfamily.h" // exemplar_detail::taskWords / singular; exemplarTouchList / touchListXml (the E3a co-mention scan)
 #include "filter.h" // hasDirSegment
+#include "infra/jsonesc.h" // jsonStringEnd: the one escape-aware JSON string walk
 #include "infra/sortutil.h" // svLess
 #include "lexical.h" // lexLowerByte
 #include "model.h"
@@ -109,17 +110,6 @@ namespace manifest_detail
 using exemplar_detail::singular;
 
 // ── readers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// The closing quote of the JSON string opening at text[open] (a backslash escapes the next byte), npos when it never closes.
-inline std::size_t jsonStringEnd( std::string_view text, std::size_t open ) noexcept
-{
-    std::size_t end = open + 1;
-    while( end < text.size() && text[end] != '"' )
-    {
-        end += text[end] == '\\' ? 2 : 1;
-    }
-    return end < text.size() ? end : std::string_view::npos;
-}
-
 // Every key of a JSON object text: its depth (1 = top level), the top-level key it sits under (depth 2 only), its string value
 // ("" for any other value) and its line.
 template<class OnKey>
@@ -176,8 +166,8 @@ inline std::optional<ManifestKind> packageJsonMemberKind( std::string_view top )
 // The last `/` segment of a name: npm installs bin `@acme/tool` as `tool`; `@nestjs/microservices` is the microservices package.
 inline std::string_view lastSegment( std::string_view n ) noexcept
 {
-    const std::size_t slash = n.rfind( '/' );
-    return slash == std::string_view::npos ? n : n.substr( slash + 1 );
+    const std::string_view dir = includerDir( n ); // resolve.h: everything before the last '/'
+    return n.substr( dir.size() + ( dir.size() < n.size() && n[dir.size()] == '/' ? 1 : 0 ) );
 }
 
 inline void readPackageJson( std::string_view text, std::vector<ManifestEntry>& out )
@@ -220,15 +210,8 @@ struct TomlTable
     ManifestKind kind = ManifestKind::Package;
 };
 
-inline bool isDepTableWord( std::string_view w ) noexcept
-{
-    return w == "dependencies" || w == "dev-dependencies" || w == "build-dependencies";
-}
-
-inline ManifestKind cargoDepKind( std::string_view w ) noexcept
-{
-    return w == "dev-dependencies" ? ManifestKind::DevDep : ManifestKind::Dep;
-}
+// The Cargo dependency tables; the second one's keys are dev-dependencies.
+inline constexpr std::array<std::string_view, 3> kCargoDepTables { "dependencies", "dev-dependencies", "build-dependencies" };
 
 // A Cargo.toml table header: what its keys are. `[dependencies.serde]` names one dependency on the header line itself (pushed here).
 inline TomlTable cargoTable( const std::vector<std::string>& h, bool array, std::uint32_t lineNo, std::vector<ManifestEntry>& out )
@@ -247,13 +230,13 @@ inline TomlTable cargoTable( const std::vector<std::string>& h, bool array, std:
     {
         return { R::Keys, ManifestKind::Feature };
     }
-    if( !h.empty() && !array && isDepTableWord( h.back() ) ) // [dependencies], [target.'cfg(..)'.dependencies], [workspace.dependencies]
+    if( !h.empty() && !array && std::ranges::contains( kCargoDepTables, h.back() ) ) // [dependencies], [target.'cfg(..)'.dependencies], [workspace.dependencies]
     {
-        return { R::Keys, cargoDepKind( h.back() ) };
+        return { R::Keys, ( h.back() == kCargoDepTables[1] ? ManifestKind::DevDep : ManifestKind::Dep ) };
     }
-    if( h.size() >= 2 && !array && isDepTableWord( h[h.size() - 2] ) )
+    if( h.size() >= 2 && !array && std::ranges::contains( kCargoDepTables, h[h.size() - 2] ) )
     {
-        out.push_back( ManifestEntry { h.back(), lineNo, cargoDepKind( h[h.size() - 2] ) } );
+        out.push_back( ManifestEntry { h.back(), lineNo, ( h[h.size() - 2] == kCargoDepTables[1] ? ManifestKind::DevDep : ManifestKind::Dep ) } );
     }
     return {};
 }
@@ -433,12 +416,7 @@ inline void readCMakeLists( std::string_view text, std::vector<ManifestEntry>& o
 
 // ── discovery ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // A manifest under one of these directories belongs to someone else's package or to a test's sample tree.
-inline bool manifestSkipPath( std::string_view rel ) noexcept
-{
-    static constexpr std::array<std::string_view, 5> kSkip { "node_modules/", "vendor/", "third_party/", "fixtures/", "testdata/" };
-    return std::ranges::any_of( kSkip, [&]( std::string_view s )
-                                { return hasDirSegment( rel, s ); } );
-}
+inline constexpr std::array<std::string_view, 5> kManifestSkipDirs { "node_modules/", "vendor/", "third_party/", "fixtures/", "testdata/" };
 
 using ManifestReader = void ( * )( std::string_view, std::vector<ManifestEntry>& );
 
@@ -494,12 +472,6 @@ inline std::string_view baseName( std::string_view rel ) noexcept
     return lastSegment( rel );
 }
 
-inline std::string_view dirOf( std::string_view rel ) noexcept
-{
-    const std::size_t slash = rel.rfind( '/' );
-    return slash == std::string_view::npos ? std::string_view() : rel.substr( 0, slash );
-}
-
 // Read one manifest and keep it when it defines any name.
 inline void addManifest( std::string rel, std::uint32_t fileId, const std::string& disk, const ManifestFormat& fmt, std::vector<ManifestDoc>& out )
 {
@@ -523,6 +495,17 @@ inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
     std::vector<ManifestDoc> docs;
     std::vector<std::string_view> dirs;
     std::string rootPrefix; // the disk spelling of the root, joined onto a root-relative path
+    const auto skipped = []( std::string_view rel )
+    {
+        for( const std::string_view seg : kManifestSkipDirs )
+        {
+            if( hasDirSegment( rel, seg ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         const std::string_view rel = rootRelPath( ing, f ), disk = diskPath( ing, f );
@@ -530,7 +513,7 @@ inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
         {
             rootPrefix = std::string( disk.substr( 0, disk.size() - rel.size() ) );
         }
-        for( std::string_view d = dirOf( rel );; d = dirOf( d ) )
+        for( std::string_view d = includerDir( rel );; d = includerDir( d ) )
         {
             dirs.push_back( d );
             if( d.empty() )
@@ -539,7 +522,7 @@ inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
             }
         }
         const auto fmt = std::ranges::find( kManifestFormats, baseName( rel ), &ManifestFormat::name );
-        if( fmt != kManifestFormats.end() && fmt->indexed && !manifestSkipPath( rel ) )
+        if( fmt != kManifestFormats.end() && fmt->indexed && !skipped( rel ) )
         {
             addManifest( std::string( rel ), f, std::string( disk ), *fmt, docs );
         }
@@ -552,7 +535,7 @@ inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
         {
             const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name );
             std::error_code ec;
-            if( !fmt.indexed && !manifestSkipPath( rel ) && std::filesystem::is_regular_file( rootPrefix + rel, ec ) )
+            if( !fmt.indexed && !skipped( rel ) && std::filesystem::is_regular_file( rootPrefix + rel, ec ) )
             {
                 addManifest( rel, UINT32_MAX, rootPrefix + rel, fmt, docs );
             }
@@ -844,18 +827,10 @@ inline std::vector<ManifestMatch> rankManifests( const std::vector<ManifestDoc>&
 // The text of line `line` (1-based) of `text`, trimmed.
 inline std::string_view lineOf( std::string_view text, std::uint32_t line ) noexcept
 {
-    std::size_t at = 0;
-    for( std::uint32_t l = 1; l < line && at != std::string_view::npos; ++l )
-    {
-        at = text.find( '\n', at );
-        at = at == std::string_view::npos ? at : at + 1;
-    }
-    if( at == std::string_view::npos )
-    {
-        return {};
-    }
-    const std::size_t nl = text.find( '\n', at );
-    return trimWs( text.substr( at, nl == std::string_view::npos ? std::string_view::npos : nl - at ) );
+    std::string_view found;
+    darkflags::forEachLine( text, [&]( std::string_view l, std::uint32_t n ) // the same line numbering every reader above used
+                            { found = n == line ? trimWs( l ) : found; } );
+    return found;
 }
 
 // The family a manifest's feature table is (its cargo features or Python extras, `default` and `_`-private ones left out), when an
