@@ -47,6 +47,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <format>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -751,6 +752,23 @@ class DeclHome
 public:
     DeclHome( const IngestResult& ing, const Graph& g ) : ing_( ing ), g_( g ) {}
 
+    const IngestResult& ing() const noexcept { return ing_; }
+    bool decl( const Cand& c ) const { return bodylessHeaderDecl( ing_, ing_.symbols[c.id] ); }
+
+    // The definition among `group` (one (scope, name), kept rows so far) that header declaration `c` folds into: the first whose file
+    // answers c's header. nullptr when `c` is no header declaration or no definition answers it.
+    Cand* foldTarget( std::span<Cand> group, const Cand& c )
+    {
+        if( !decl( c ) )
+        {
+            return nullptr;
+        }
+        const std::uint32_t declFile = ing_.symbols[c.id].fileId;
+        const auto def = std::ranges::find_if( group, [&]( const Cand& k )
+                                               { return !decl( k ) && answers( ing_.symbols[k.id].fileId, declFile ); } );
+        return def == group.end() ? nullptr : &*def;
+    }
+
     bool answers( std::uint32_t defFile, std::uint32_t declFile )
     {
         if( defFile == declFile )
@@ -828,14 +846,12 @@ private:
 };
 
 // Groups by (scope, name), definitions first (lowest id first), then declarations. A header declaration folds into the group's first
-// definition its header is answered by (DeclHome); with none it stays a row.
-inline void collapseDeclarations( const IngestResult& ing, const Graph& g, std::vector<Cand>& cands )
+// definition its header is answered by (DeclHome::foldTarget); with none it stays a row.
+inline void collapseDeclarations( DeclHome& home, std::vector<Cand>& cands )
 {
-    const auto decl = [&]( const Cand& c )
-    { return bodylessHeaderDecl( ing, ing.symbols[c.id] ); };
+    const IngestResult& ing = home.ing();
     std::ranges::sort( cands, [&]( const Cand& a, const Cand& b )
-                       { return orderLess( std::tuple( scopeName( ing, a ), decl( a ), a.id ), std::tuple( scopeName( ing, b ), decl( b ), b.id ) ); } );
-    DeclHome home( ing, g );
+                       { return orderLess( std::tuple( scopeName( ing, a ), home.decl( a ), a.id ), std::tuple( scopeName( ing, b ), home.decl( b ), b.id ) ); } );
     std::vector<Cand> kept;
     kept.reserve( cands.size() );
     std::size_t groupStart = 0;
@@ -845,16 +861,10 @@ inline void collapseDeclarations( const IngestResult& ing, const Graph& g, std::
         {
             groupStart = kept.size();
         }
-        if( decl( c ) )
+        if( Cand* def = home.foldTarget( std::span<Cand>( kept ).subspan( groupStart ), c ) )
         {
-            const std::uint32_t declFile = ing.symbols[c.id].fileId;
-            const auto def = std::find_if( kept.begin() + std::ptrdiff_t( groupStart ), kept.end(), [&]( const Cand& k )
-                                           { return !decl( k ) && home.answers( ing.symbols[k.id].fileId, declFile ); } );
-            if( def != kept.end() )
-            {
-                foldInto( *def, c );
-                continue;
-            }
+            foldInto( *def, c );
+            continue;
         }
         kept.push_back( c );
     }
@@ -994,7 +1004,8 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     std::vector<fd::Cand> cands = fd::collectCands( ing, sf, a.answer, a.task );
     fd::creditCallees( ing, g, head, cands );
     fd::dedupeCands( ing, cands );
-    fd::collapseDeclarations( ing, g, cands );
+    fd::DeclHome home( ing, g );
+    fd::collapseDeclarations( home, cands );
     const fd::Picks picks = fd::pickRows( ing, g, cands );
     if( picks.byName.empty() && picks.byCallee.empty() )
     {
