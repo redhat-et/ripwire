@@ -2077,11 +2077,11 @@ inline void spliceForLegoCountLegend( std::string& doc, bool carries )
 // forbudget-soft: budget_tokens= is a SOFT target here too (the CLI twin's rule) — est_tokens may exceed it and nothing is
 // labelled "over" for it. The one over_ceiling this surface can carry is the runaway guard's (`guardOver`: the default head
 // passed kForRunawayGuardBytes); its reading (forRunawayGuardNote) was spliced with the <sigs> clauses by the assembly.
-inline void priceForTaskRoot( std::string& doc, bool guardOver )
+inline std::size_t priceForTaskRoot( std::string& doc, bool guardOver )
 {
     if( doc.empty() )
     {
-        return;
+        return 0;
     }
     std::size_t estTokens = 0;
     std::string rootAttrs = rw::pricedRootAttr( doc.size(), rw::kBytesPerTokenDefault, 0, &estTokens );
@@ -2091,6 +2091,7 @@ inline void priceForTaskRoot( std::string& doc, bool guardOver )
         rootAttrs += " over_ceiling=\"1\"";
     }
     rw::spliceRootAttrs( doc, rootAttrs );
+    return estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
 }
 
 // knob-honesty-068 (orchestrator ruling C3, 2026-10-07): MCP `for`'s ASSEMBLY — everything from the sigs render to the
@@ -2958,16 +2959,16 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + hooks );   // the clause beside it, as <dispatch>: the header's are fixed
         }
     }
-    priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    const std::size_t answerEstTokens = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
     }
-    // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, not priced; held under budget_tokens, as there
+    // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
     if( out.ends_with( "</ctx>" ) )
     {
-        out.insert( out.size() - 6, renderForDocBodyXml( ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg, /*held=*/budgetTokens > 0 ) );
+        out.insert( out.size() - 6, renderForDocBodyXml( ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens } ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)

@@ -10,14 +10,23 @@
 //   (i)  at least kForDocBodyTriggerDocs of the first kForDocBodyTriggerRows file-tail <t> rows IN RANK ORDER are doc files
 //        (forDocBodyExt): the order the tail printed when the rule was written; a code question's tail now prints its code rows
 //        first (forpage.h tailOrdersCodeFirst), and read in that order the rule fired on 6 of the 48 DOCS-DEV rows (17 in rank order, 11-05), and
-//   (ii) the task is prose: no backtick, `::`, `()`, snake_case, camelCase or dotted-call token (forDocBodyProseTask).
+//   (ii) the task is prose: it holds none of the code cues trigger v1 listed (forDocBodyProseTask): a backtick, `::`, `()`, a lowercase
+//        snake_case word that ends in a letter or underscore, a camelCase or CapsLowCaps word, a dotted call `a.b(`. A cue LIST, not a
+//        parse: handle_upload_3, MAX_RETRIES, __init__, HTTPServer and getX read as prose, and the legend says so.
 // A code task, or a prose task whose answer leads with code files, prints nothing: the answer is byte-identical.
 //
 // WHAT. The first kForDocBodyFiles doc files the answer shows (its signature rows first, then its <t> rows in rank order).
 // Each file's sections are the ones --recall would pick for the same task (recallLensScores + buildSectionGranularBody), served in
 // rank order while they fit the block's OWN allowance (kForDocBodyBytes, shared by the files with recall's water-filling): no code
-// row, body or tail row pays for it, and est_tokens does not count it. A section is a lexical match, not a verified answer: a section
-// that shares the task's words and answers another question can rank first, and the legend says so.
+// row, body or tail row pays for it, and the answer's est_tokens does not count it (the block prices itself, est_tokens= on its root). A section
+// that does not fit is skipped and the next tried; the first that still does not fit the unspent rest is an excerpt around the best window of
+// the task's words (cut="1" range=). A section is a lexical match, not a verified answer: a section that shares the task's words and answers
+// another question can rank first, and the legend and match="lexical" on the root say so.
+//
+// BUDGETS. The answer is served first. Under --token-budget, --max-tokens with --detail or MCP budget_tokens the block is served into the
+// tokens left after the answer's est_tokens (the allowance shrinks until the priced block fits) and holds only the part that does not fit:
+// held="budget" held_bytes= on the root, f p= why="budget" held=N per file, next= the call without the budget. When not even
+// kForDocMinAllowance bytes fit it is held whole (the files named).
 #include "forpage.h" // FileTail — the answer's <t> rows
 #include "nextverb.h" // nextFlag / nextAttrXml
 #include "recall.h" // recallLensScores, buildSectionGranularBody, loadRecallBody, allocateRecallShares, admitRecallUnits
@@ -262,143 +271,398 @@ struct ForDocPassage
     bool isSection = false;
     bool isExtracted = false;
     bool isCut = false;
+    std::uint32_t rangeLo = 0, rangeHi = 0, rangeOf = 0; // isCut: the excerpt is bytes [rangeLo, rangeHi) of the rangeOf-byte section text
+};
+
+// Why a picked doc file (or part of one) was not served. Unreadable: the file could not be read; Allowance: the block's own
+// 7500 bytes were spent; Budget: a token budget left less room than the allowance and the default allowance would have served it.
+enum class ForDocWhy : std::uint8_t
+{
+    Unreadable,
+    Allowance,
+    Budget
+};
+inline std::string_view forDocWhyName( ForDocWhy why ) noexcept
+{
+    return why == ForDocWhy::Unreadable ? "unreadable" : why == ForDocWhy::Allowance ? "allowance"
+                                                                                     : "budget";
+}
+
+struct ForDocUnserved
+{
+    std::uint32_t fileId = 0;
+    ForDocWhy why = ForDocWhy::Allowance;
+    std::uint32_t held = 0; // Budget only: the sections of this file the budget kept out (0 = the whole file)
 };
 
 struct ForDocBody
 {
     std::vector<ForDocPassage> passages; // file by file in pick order, each file's sections best first
-    std::vector<std::uint32_t> unread; // picked files that served no text (unreadable, or no allowance left)
+    std::vector<ForDocUnserved> unserved; // picked files with nothing served, or with sections a budget kept out
     std::size_t textBytes = 0;
     std::size_t dropped = 0; // picked sections the allowance left out
+    std::size_t allowance = kForDocBodyBytes; // the section text this block could print (less than the default under a token budget)
+    std::size_t heldBytes = 0; // text the default allowance would have printed and the token budget kept out
     bool isCapped = false;
+    bool isHeldByBudget = false;
 };
+
+// The token budget a block is served under: tokens 0 = none. The answer is served first; the block gets what is left.
+struct ForDocBodyBudget
+{
+    std::size_t tokens = 0; // the budget asked for (--token-budget, --max-tokens with --detail, MCP budget_tokens)
+    std::size_t answerTokens = 0; // the answer's est_tokens
+    bool active() const noexcept { return tokens > 0; }
+    std::size_t leftTokens() const noexcept { return tokens > answerTokens ? tokens - answerTokens : 0; }
+};
+
+inline constexpr std::size_t kForDocExcerptMinBytes = 400; // an excerpt is cut only when at least this much allowance is left
+inline constexpr std::size_t kForDocMinAllowance = 600; // under a token budget a block with less text room than this is held whole
 
 namespace fordocbody_detail
 {
-// a whole-doc head (no heading section matched, or extracted text), cut to `allowance` when it is larger
-inline ForDocPassage wholeDocPassage( const IngestResult& ing, std::uint32_t fileId, std::string body, std::size_t allowance )
+inline constexpr std::string_view kEllipsis = "\xE2\x80\xA6"; // "…"
+
+struct DocExcerpt
+{
+    std::string text; // the window, with an ellipsis on each cut side
+    std::size_t from = 0, to = 0; // its byte range in the source text
+};
+
+// The one window of at most `maxBytes` that holds the most of the task's words: each task term weighs 1 / its count in the text, so a
+// term that occurs once pulls harder than one that occurs everywhere. The window starts at a hit (backed to its line start when
+// that is close) and ends at a line or word end. No hit anywhere: the head of the text. A text that fits is returned whole.
+inline DocExcerpt excerptAroundTerms( std::string_view text, const std::vector<std::string>& terms, std::size_t maxBytes )
+{
+    DocExcerpt ex;
+    if( text.size() <= maxBytes )
+    {
+        ex.text = std::string( text );
+        ex.to = text.size();
+        return ex;
+    }
+    const std::size_t room = maxBytes > 2 * kEllipsis.size() ? maxBytes - 2 * kEllipsis.size() : 0;
+    std::vector<std::uint32_t> counts( terms.size(), 0 );
+    std::vector<std::pair<std::size_t, std::uint32_t>> hits; // (byte position, term index)
+    forEachLexSubtoken( text,
+                        [&]( std::size_t tokStartByte, std::size_t tokEndByte )
+                        {
+                            if( tokEndByte - tokStartByte < 2 )
+                            {
+                                return;
+                            }
+                            const std::size_t t = recallMatchedTermIndex( text, tokStartByte, tokEndByte - tokStartByte, terms );
+                            if( t < terms.size() )
+                            {
+                                hits.emplace_back( tokStartByte, std::uint32_t( t ) );
+                                ++counts[t];
+                            }
+                        } );
+    std::vector<double> prefix( hits.size() + 1, 0.0 ); // prefix[i] = weight of hits[0, i)
+    for( std::size_t i = 0; i < hits.size(); ++i )
+    {
+        prefix[i + 1] = prefix[i] + 1.0 / double( counts[hits[i].second] );
+    }
+    const auto posLess = []( const std::pair<std::size_t, std::uint32_t>& h, std::size_t pos )
+    { return h.first < pos; };
+    std::size_t from = 0;
+    double best = -1.0;
+    for( std::size_t i = 0; i < hits.size(); ++i )
+    {
+        std::size_t start = hits[i].first;
+        const std::size_t lineStart = text.rfind( '\n', start == 0 ? 0 : start - 1 );
+        if( lineStart != std::string_view::npos && start - ( lineStart + 1 ) <= 160 )
+        {
+            start = lineStart + 1;
+        }
+        const auto lo = std::lower_bound( hits.begin(), hits.end(), start, posLess ) - hits.begin();
+        const auto hi = std::lower_bound( hits.begin(), hits.end(), start + room, posLess ) - hits.begin();
+        const double weight = prefix[std::size_t( hi )] - prefix[std::size_t( lo )];
+        if( weight > best + 1e-9 )
+        {
+            best = weight;
+            from = start;
+        }
+    }
+    if( best > 0.0 )
+    {
+        // centre the window on the weighted centroid of the hits it holds, so the words sit in the middle, not at its end
+        const auto lo = std::lower_bound( hits.begin(), hits.end(), from, posLess ) - hits.begin();
+        const auto hi = std::lower_bound( hits.begin(), hits.end(), from + room, posLess ) - hits.begin();
+        double centroid = 0.0;
+        for( auto i = lo; i < hi; ++i )
+        {
+            centroid += double( hits[std::size_t( i )].first ) / double( counts[hits[std::size_t( i )].second] );
+        }
+        const std::size_t mid = std::size_t( centroid / best );
+        from = mid > room / 2 ? mid - room / 2 : 0;
+        from = std::min( from, text.size() - room ); // text.size() > maxBytes >= room: a window at the end is full
+        const std::size_t lineStart = from == 0 ? std::string_view::npos : text.rfind( '\n', from - 1 );
+        if( lineStart != std::string_view::npos && from - ( lineStart + 1 ) <= 160 )
+        {
+            from = lineStart + 1;
+        }
+    }
+    while( from < text.size() && ( static_cast<unsigned char>( text[from] ) & 0xC0 ) == 0x80 )
+    {
+        ++from;
+    }
+    std::size_t to = std::min( text.size(), from + room );
+    if( to < text.size() )
+    {
+        const std::size_t floorAt = from + room * 6 / 10;
+        const std::size_t nl = text.rfind( '\n', to - 1 );
+        const std::size_t sp = text.rfind( ' ', to - 1 );
+        if( nl != std::string_view::npos && nl >= floorAt )
+        {
+            to = nl + 1;
+        }
+        else if( sp != std::string_view::npos && sp >= floorAt )
+        {
+            to = sp + 1;
+        }
+        while( to > from && ( static_cast<unsigned char>( text[to] ) & 0xC0 ) == 0x80 )
+        {
+            --to;
+        }
+    }
+    ex.from = from;
+    ex.to = to;
+    ex.text = std::string( from > 0 ? kEllipsis : std::string_view() ) + std::string( text.substr( from, to - from ) ) +
+              std::string( to < text.size() ? kEllipsis : std::string_view() );
+    return ex;
+}
+
+inline std::uint32_t newlinesIn( std::string_view s ) noexcept
+{
+    return std::uint32_t( std::count( s.begin(), s.end(), '\n' ) );
+}
+
+// one passage from a unit's text: whole when `maxBytes` holds it, else the best-window excerpt (cut="1" with its byte range)
+inline ForDocPassage unitPassage( std::uint32_t fileId, std::string_view text, std::uint32_t lineLo, std::uint32_t lineHi, std::string heading,
+                                  std::uint32_t rank, std::uint32_t of, bool isSection, bool isExtracted, const std::vector<std::string>& terms,
+                                  std::size_t maxBytes )
 {
     ForDocPassage p;
     p.fileId = fileId;
-    p.isExtracted = ing.docText.find( fileId ) != ing.docText.end();
-    if( body.size() > allowance )
+    p.heading = std::move( heading );
+    p.rank = rank;
+    p.of = of;
+    p.isSection = isSection;
+    p.isExtracted = isExtracted;
+    const DocExcerpt ex = excerptAroundTerms( text, terms, maxBytes );
+    p.text = ex.text;
+    p.isCut = ex.to - ex.from < text.size();
+    if( p.isCut )
     {
-        const std::size_t keep = allowance > kRecallTruncNoteBytes ? allowance - kRecallTruncNoteBytes : kRecallMinBodyBytes;
-        const std::size_t kept = truncateRecallBody( body, keep ).sourceKeptBytes;
-        p.isCut = true;
-        const std::string_view served( body.data(), std::min( kept, body.size() ) );
-        p.lineHi = std::uint32_t( 1 + std::count( served.begin(), served.end() - ( served.empty() ? 0 : 1 ), '\n' ) );
+        p.rangeLo = std::uint32_t( ex.from );
+        p.rangeHi = std::uint32_t( ex.to );
+        p.rangeOf = std::uint32_t( text.size() );
     }
-    else
+    if( lineLo > 0 )
     {
-        p.lineHi = std::uint32_t( 1 + std::count( body.begin(), body.end() - ( body.empty() ? 0 : 1 ), '\n' ) );
+        // a line the excerpt only opens (its last byte is the newline that ends the previous one) is not a line it served
+        const std::string_view served = text.substr( ex.from, ex.to - ex.from );
+        p.lineLo = lineLo + newlinesIn( text.substr( 0, ex.from ) );
+        p.lineHi = std::min( lineHi, p.lineLo + newlinesIn( served.substr( 0, served.empty() ? 0 : served.size() - 1 ) ) );
     }
-    p.lineLo = p.isExtracted ? 0 : 1;
-    p.lineHi = p.isExtracted ? 0 : p.lineHi;
-    p.text = std::move( body );
     return p;
 }
 
-// one file's sections in rank order while they fit `allowance`; the top one is cut to fit when even it does not
-inline void sectionPassages( const IngestResult& ing, std::uint32_t fileId, RecallSectionBody& sec, std::size_t allowance, ForDocBody& out )
+// a whole-doc head (a doc with no heading section, or extracted text): the whole text, or the best window of it
+inline ForDocPassage wholeDocPassage( const IngestResult& ing, std::uint32_t fileId, std::string_view text, const std::vector<std::string>& terms,
+                                      std::size_t maxBytes )
 {
-    const RecallUnitAdmission admitted = admitRecallUnits( sec, allowance );
-    const std::uint32_t of = std::uint32_t( sec.units.size() );
-    if( admitted.admittedCount == 0 )
-    {
-        const RecallSectionUnit& top = sec.units[sec.rankOrder[0]];
-        std::string text( sec.body, top.bodyOffset, top.bodyLength );
-        const std::size_t keep = allowance > kRecallTruncNoteBytes ? allowance - kRecallTruncNoteBytes : kRecallMinBodyBytes;
-        const std::size_t kept = truncateRecallBody( text, keep ).sourceKeptBytes;
-        const std::string_view served( text.data(), std::min( kept, text.size() ) );
-        const std::uint32_t hi = top.lineLo + std::uint32_t( std::count( served.begin(), served.end() - ( served.empty() ? 0 : 1 ), '\n' ) );
-        out.passages.push_back( ForDocPassage { fileId, top.lineLo, std::min( hi, top.lineHi ), ing.symbols[top.symIndex].name, std::move( text ), 1, of,
-                                                /*isSection=*/true, /*isExtracted=*/false, /*isCut=*/true } );
-        out.dropped += sec.units.size() - 1;
-        out.isCapped = true;
-        return;
-    }
-    std::uint32_t rank = 0;
-    for( const std::uint32_t u : sec.rankOrder )
-    {
-        ++rank;
-        if( !admitted.isAdmitted[u] )
-        {
-            continue;
-        }
-        const RecallSectionUnit& unit = sec.units[u];
-        out.passages.push_back( ForDocPassage { fileId, unit.lineLo, unit.lineHi, ing.symbols[unit.symIndex].name,
-                                                sec.body.substr( unit.bodyOffset, unit.bodyLength ), rank, of, /*isSection=*/true } );
-    }
-    out.dropped += sec.units.size() - admitted.admittedCount;
-    out.isCapped = out.isCapped || admitted.admittedCount < sec.units.size();
+    const bool isExtracted = ing.docText.find( fileId ) != ing.docText.end();
+    const std::uint32_t lineHi = 1 + newlinesIn( text.substr( 0, text.empty() ? 0 : text.size() - 1 ) );
+    return unitPassage( fileId, text, isExtracted ? 0 : 1, isExtracted ? 0 : lineHi, {}, 0, 0, false, isExtracted, terms, maxBytes );
 }
+
+// What one loaded file keeps from the first admission pass.
+struct FileServe
+{
+    std::vector<ForDocPassage> passages;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> missed; // (rank 1-based, unit index) the file's share did not admit, best first
+    std::size_t spent = 0;
+    std::size_t units = 0;
+    bool isServed = false;
+};
 } // namespace fordocbody_detail
 
-// The passages of a fired pick: --recall's section choice per file, the allowance shared by recall's water-filling.
-inline ForDocBody buildForDocBody( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
-                                   std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg )
+// The doc files a fired pick loads: --recall's section choice per file, read once and served at any allowance.
+struct ForDocPrep
 {
-    ForDocBody out;
-    if( !pick.fires || pick.fileIds.empty() )
-    {
-        return out;
-    }
-    const std::vector<float> scores = recallLensScores( ing, outOff, outTargets, task, rootArg );
-    std::vector<std::string> queryToks;
-    subtokens( task, queryToks );
-
     struct Loaded
     {
         std::uint32_t fileId = 0;
         std::optional<RecallSectionBody> sections;
-        std::string whole;
+        std::string whole; // a doc with no heading sections: its whole text
+        std::size_t demand = 0;
     };
     std::vector<Loaded> loaded;
-    std::vector<std::size_t> overhead, demand;
+    std::vector<std::uint32_t> unreadable;
+    std::vector<std::string> queryToks;
+};
+
+inline ForDocPrep prepareForDocBody( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                                     std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg )
+{
+    ForDocPrep prep;
+    if( !pick.fires || pick.fileIds.empty() )
+    {
+        return prep;
+    }
+    const std::vector<float> scores = recallLensScores( ing, outOff, outTargets, task, rootArg );
+    subtokens( task, prep.queryToks );
     for( const std::uint32_t f : pick.fileIds )
     {
-        Loaded l { f, buildSectionGranularBody( ing, scores, f, redact, queryToks ), {} };
-        std::size_t need = 0;
+        ForDocPrep::Loaded l { f, buildSectionGranularBody( ing, scores, f, redact, prep.queryToks ), {}, 0 };
         if( l.sections )
         {
             for( const RecallSectionUnit& u : l.sections->units )
             {
-                need += recallUnitCostBytes( u );
+                l.demand += recallUnitCostBytes( u );
             }
         }
         else if( std::optional<std::string> body = loadRecallBody( ing, f, redact ) )
         {
             l.whole = std::move( *body );
-            need = l.whole.size();
+            l.demand = l.whole.size();
         }
         else
         {
-            out.unread.push_back( f ); // unreadable on disk: named, never a stub
+            prep.unreadable.push_back( f ); // unreadable on disk: named (why="unreadable"), never a stub
             continue;
         }
-        overhead.push_back( 0 ); // the markup is the block's own, outside the text allowance
-        demand.push_back( need );
-        loaded.push_back( std::move( l ) );
+        prep.loaded.push_back( std::move( l ) );
     }
-    const RecallShares shares = allocateRecallShares( overhead, demand, kForDocBodyBytes );
-    for( std::size_t i = 0; i < loaded.size(); ++i )
+    return prep;
+}
+
+namespace fordocbody_detail
+{
+// pass 1 for one file: its sections in rank order, each admitted whole when it fits what is left of the file's share and SKIPPED
+// when it does not (the next one is tried: a misfit no longer ends the file)
+inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep::Loaded& l, std::size_t share )
+{
+    FileServe fs;
+    fs.isServed = true;
+    if( !l.sections )
     {
-        Loaded& l = loaded[i];
+        fs.units = 1;
+        if( l.whole.size() <= share )
+        {
+            fs.passages.push_back( wholeDocPassage( ing, l.fileId, l.whole, {}, share ) );
+            fs.spent = l.whole.size();
+        }
+        else
+        {
+            fs.missed.emplace_back( 1, 0 );
+        }
+        return fs;
+    }
+    const RecallSectionBody& sec = *l.sections;
+    fs.units = sec.units.size();
+    std::uint32_t rank = 0;
+    for( const std::uint32_t u : sec.rankOrder )
+    {
+        ++rank;
+        const RecallSectionUnit& unit = sec.units[u];
+        const std::size_t cost = recallUnitCostBytes( unit );
+        if( fs.spent + cost > share )
+        {
+            fs.missed.emplace_back( rank, u );
+            continue;
+        }
+        fs.spent += cost;
+        fs.passages.push_back( ForDocPassage { l.fileId, unit.lineLo, unit.lineHi, ing.symbols[unit.symIndex].name,
+                                               sec.body.substr( unit.bodyOffset, unit.bodyLength ), rank, std::uint32_t( sec.units.size() ), /*isSection=*/true } );
+    }
+    return fs;
+}
+
+// pass 2: the allowance the files left unspent goes to the sections their shares did not admit, best first per file: a section that
+// fits the pooled rest is admitted whole, the first that does not is cut to fit around the best window of the task's words
+inline void admitFromPool( const IngestResult& ing, const ForDocPrep& prep, std::vector<FileServe>& served, std::size_t pool )
+{
+    for( std::size_t i = 0; i < served.size() && pool >= kForDocExcerptMinBytes; ++i )
+    {
+        FileServe& fs = served[i];
+        const ForDocPrep::Loaded& l = prep.loaded[i];
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> stillMissed;
+        bool isExcerpted = false;
+        for( const auto& [rank, u] : fs.missed )
+        {
+            if( isExcerpted || pool < kForDocExcerptMinBytes )
+            {
+                stillMissed.emplace_back( rank, u );
+                continue;
+            }
+            const bool isWhole = !l.sections;
+            const std::string_view text = isWhole ? std::string_view( l.whole )
+                                                  : std::string_view( l.sections->body ).substr( l.sections->units[u].bodyOffset, l.sections->units[u].bodyLength );
+            const std::size_t cost = isWhole ? text.size() : recallUnitCostBytes( l.sections->units[u] );
+            if( isWhole )
+            {
+                fs.passages.push_back( wholeDocPassage( ing, l.fileId, text, prep.queryToks, pool ) );
+            }
+            else
+            {
+                const RecallSectionUnit& unit = l.sections->units[u];
+                fs.passages.push_back( unitPassage( l.fileId, text, unit.lineLo, unit.lineHi, ing.symbols[unit.symIndex].name, rank,
+                                                    std::uint32_t( l.sections->units.size() ), true, false, prep.queryToks, pool ) );
+            }
+            const bool isFit = cost <= pool;
+            pool -= std::min( pool, isFit ? cost : fs.passages.back().text.size() );
+            isExcerpted = !isFit;
+        }
+        fs.missed = std::move( stillMissed );
+    }
+}
+} // namespace fordocbody_detail
+
+// The block served at one allowance: the files share it by recall's water-filling, each file admits its sections best first (a
+// misfit is skipped, not a stop), and what the files left unspent is given to the sections their shares missed (the first
+// that still does not fit is an excerpt around the best window of the task's words, cut="1" with its byte range).
+inline ForDocBody serveForDocBody( const IngestResult& ing, const ForDocPrep& prep, std::size_t allowance )
+{
+    ForDocBody out;
+    out.allowance = allowance;
+    for( const std::uint32_t f : prep.unreadable )
+    {
+        out.unserved.push_back( { f, ForDocWhy::Unreadable, 0 } );
+    }
+    std::vector<std::size_t> overhead( prep.loaded.size(), 0 ), demand; // the markup is the block's own, outside the text allowance
+    for( const ForDocPrep::Loaded& l : prep.loaded )
+    {
+        demand.push_back( l.demand );
+    }
+    const RecallShares shares = allocateRecallShares( overhead, demand, allowance );
+    std::vector<fordocbody_detail::FileServe> served;
+    std::size_t spent = 0;
+    for( std::size_t i = 0; i < shares.servedCount; ++i )
+    {
+        served.push_back( fordocbody_detail::admitFileSections( ing, prep.loaded[i], shares.alloc[i] ) );
+        spent += served.back().spent;
+    }
+    fordocbody_detail::admitFromPool( ing, prep, served, allowance > spent ? allowance - spent : 0 );
+    for( std::size_t i = 0; i < prep.loaded.size(); ++i )
+    {
         if( i >= shares.servedCount )
         {
-            out.unread.push_back( l.fileId ); // the allowance served the files before it
+            out.unserved.push_back( { prep.loaded[i].fileId, ForDocWhy::Allowance, 0 } ); // the allowance served the files before it
             out.isCapped = true;
             continue;
         }
-        if( l.sections )
+        fordocbody_detail::FileServe& fs = served[i];
+        std::ranges::stable_sort( fs.passages, []( const ForDocPassage& a, const ForDocPassage& b )
+                                  { return a.rank < b.rank; } );
+        out.dropped += fs.units - fs.passages.size();
+        out.isCapped = out.isCapped || fs.passages.size() < fs.units || std::ranges::any_of( fs.passages, []( const ForDocPassage& p )
+                                                                                             { return p.isCut; } );
+        for( ForDocPassage& p : fs.passages )
         {
-            fordocbody_detail::sectionPassages( ing, l.fileId, *l.sections, shares.alloc[i], out );
-        }
-        else
-        {
-            out.passages.push_back( fordocbody_detail::wholeDocPassage( ing, l.fileId, std::move( l.whole ), shares.alloc[i] ) );
-            out.isCapped = out.isCapped || out.passages.back().isCut;
+            out.passages.push_back( std::move( p ) );
         }
     }
     for( const ForDocPassage& p : out.passages )
@@ -408,30 +672,67 @@ inline ForDocBody buildForDocBody( const IngestResult& ing, const std::vector<st
     return out;
 }
 
+// The block served under a token budget: the same block at a smaller allowance, with what the budget alone kept out named (held=).
+// The block the default allowance would have served is served beside it: the difference is the held part.
+inline ForDocBody serveForDocBodyHeld( const IngestResult& ing, const ForDocPrep& prep, std::size_t allowance )
+{
+    ForDocBody out = serveForDocBody( ing, prep, allowance );
+    if( allowance >= kForDocBodyBytes )
+    {
+        return out;
+    }
+    const ForDocBody full = serveForDocBody( ing, prep, kForDocBodyBytes );
+    const auto countOf = []( const ForDocBody& b, std::uint32_t f ) -> std::uint32_t
+    { return std::uint32_t( std::ranges::count_if( b.passages, [&]( const ForDocPassage& p )
+                                                   { return p.fileId == f; } ) ); };
+    for( ForDocUnserved& u : out.unserved )
+    {
+        if( u.why == ForDocWhy::Allowance && countOf( full, u.fileId ) > 0 )
+        {
+            u.why = ForDocWhy::Budget;
+            u.held = countOf( full, u.fileId );
+        }
+    }
+    for( const ForDocPrep::Loaded& l : prep.loaded )
+    {
+        const std::uint32_t cut = countOf( out, l.fileId ), uncut = countOf( full, l.fileId );
+        if( cut > 0 && uncut > cut )
+        {
+            out.unserved.push_back( { l.fileId, ForDocWhy::Budget, uncut - cut } );
+        }
+    }
+    out.heldBytes = full.textBytes > out.textBytes ? full.textBytes - out.textBytes : 0;
+    out.isHeldByBudget = out.heldBytes > 0;
+    return out;
+}
+
 // ── spellings ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // No double dash inside the comments: XML forbids it there.
 inline constexpr std::string_view kForDocBodyLegend =
-    "<!-- ripwire for doc_body: the task reads as prose and 2 or more of the first 10 t files in rank order are doc files, so the "
-    "sections of the first 3 doc files this answer shows (its sig rows, then its t files in rank order) follow. Each b t=\"section\" is a section of p= that ranks "
-    "highest for the task's words in that file (the recall verb's pick): n= its heading, l= e= its source lines, rank= its place "
-    "among the of= sections picked in that file (1 = top). It is a lexical match, not a verified answer: a section that shares the "
-    "task's words and answers another question can rank first. b t=\"doc\": the head of a doc with no matching heading section; "
-    "src=\"extracted\": text extracted from HTML or a notebook, which has no source lines; cut=\"1\": cut to fit. allowance= the "
-    "section text the files share, bytes= the text printed; dropped= picked sections the allowance left out, and next= is the recall "
-    "call that serves more doc text; f p= a doc file that served none (why=). The answer above is unchanged, and these bytes are "
-    "not in est_tokens -->";
+    "<!-- ripwire for doc_body: the task reads as prose (a cue list, not a parse: it holds no backtick, ::, (), lowercase snake_case word "
+    "ending in a letter, camelCase or CapsLowCaps word, or dotted call a.b(, so handle_upload_3, MAX_RETRIES, __init__, HTTPServer and getX "
+    "read as prose) and 2 or more of the first 10 t files in rank order are doc files, so sections of the first 3 doc files this answer shows "
+    "follow. b t=\"section\" p= ranks highest in that file for the task's words (the recall verb's pick): n= heading, l= e= source lines, "
+    "rank= its place among the of= sections picked there (1 = top). It is a lexical match, not a verified answer: a section "
+    "that shares the task's words and answers another question can rank first (match=\"lexical\" on the root says so). b t=\"doc\": the head of a doc with no matching heading "
+    "section; src=\"extracted\": text from HTML or a notebook, no source lines; cut=\"1\" range=S-E/N: an excerpt, bytes S to E of the "
+    "section's N, around the task's words. allowance= section text the files share, bytes= printed; est_tokens= prices this block alone (the "
+    "answer's est_tokens leaves it out); dropped= picked sections left out, capped=\"1\", next= the call that serves more; f p= a doc file with "
+    "sections left out, why= unreadable, allowance or budget; held=\"budget\" held_bytes=: a token budget kept that much text out, next= "
+    "repeats the call without it. The answer above is unchanged -->";
 
 inline std::string forDocBodyNext( std::string_view task ) { return nextAttrXml( nextFlag( "--recall=", task ) ); }
 
-// A token budget is a request the block must obey: the sections are not printed, the files are named, next= is the call without it.
+// A block no budget room is left for: the sections are not printed, the files are named, next= is the call without the budget.
 inline std::string forDocBodyHeldXml( const IngestResult& ing, const ForDocBodyPick& pick, std::string_view task, std::string_view rootArg )
 {
     std::vector<char> esc;
     const std::string prefix = sarif::rootPrefixOf( rootArg );
     std::string out =
-        "<!-- ripwire for doc_body held=\"budget\": a token budget is set, so the doc sections are not printed (they sit outside "
-        "est_tokens); f p= the doc files they come from; next= repeats this call without the budget. The answer above is unchanged -->"
-        "<doc_body held=\"budget\" files=\"" +
+        "<!-- ripwire for doc_body held=\"budget\": the token budget leaves no room after the answer for the doc sections, so they are not "
+        "printed; match=\"lexical\" is the kind of section they would be; f p= the doc files they come from; next= repeats this call without "
+        "the budget. The answer above is unchanged -->"
+        "<doc_body match=\"lexical\" held=\"budget\" files=\"" +
         std::to_string( pick.fileIds.size() ) + "\"" + nextAttrXml( nextFlag( "--for=", task ) ) + ">";
     for( const std::uint32_t f : pick.fileIds )
     {
@@ -441,7 +742,16 @@ inline std::string forDocBodyHeldXml( const IngestResult& ing, const ForDocBodyP
     return out + "</doc_body>";
 }
 
-inline std::string forDocBodyXml( const IngestResult& ing, const ForDocBody& body, const ForDocBodyPick& pick, std::string_view task, std::string_view rootArg )
+// the block's own price: its markup at the markup rate, its section text at the body rate (the root's est_tokens= is part of what it prices)
+inline std::string forDocBodyPriceAttr( std::size_t blockBytesWithoutPrice, const ForDocBody& body, std::size_t* tokens )
+{
+    ASSUME( blockBytesWithoutPrice >= body.textBytes, "forDocBodyPriceAttr: the block is smaller than its own text" );
+    return pricedRootAttr( blockBytesWithoutPrice - body.textBytes, kBytesPerTokenDefault, body.textBytes, tokens );
+}
+
+// The XML block of a served body, with its price. Returns {block, est_tokens}.
+inline std::pair<std::string, std::size_t> forDocBodyXml( const IngestResult& ing, const ForDocBody& body, const ForDocBodyPick& pick, std::string_view task,
+                                                          std::string_view rootArg )
 {
     std::vector<char> esc;
     const std::string prefix = sarif::rootPrefixOf( rootArg );
@@ -450,109 +760,208 @@ inline std::string forDocBodyXml( const IngestResult& ing, const ForDocBody& bod
         const std::string_view p = rootArg.empty() ? std::string_view( ing.files[f] ) : sarif::rootRelativeUri( ing.files[f], prefix );
         return std::string( escapeXml( p, esc ) );
     };
-    std::string out( kForDocBodyLegend );
-    out += "<doc_body files=\"" + std::to_string( pick.fileIds.size() ) + "\" allowance=\"" + std::to_string( kForDocBodyBytes ) + "\" bytes=\"" + std::to_string( body.textBytes ) + "\"";
-    if( body.dropped > 0 )
-    {
-        out += " dropped=\"" + std::to_string( body.dropped ) + "\"";
-    }
-    if( body.isCapped )
-    {
-        out += " capped=\"1\"" + forDocBodyNext( task );
-    }
-    out += ">";
+    std::string rows;
     for( const ForDocPassage& p : body.passages )
     {
-        out += p.isSection ? "<b t=\"section\" p=\"" : "<b t=\"doc\" p=\"";
-        out += display( p.fileId ) + "\"";
+        rows += p.isSection ? "<b t=\"section\" p=\"" : "<b t=\"doc\" p=\"";
+        rows += display( p.fileId ) + "\"";
         if( p.lineLo > 0 )
         {
-            out += " l=\"" + std::to_string( p.lineLo ) + "\" e=\"" + std::to_string( p.lineHi ) + "\"";
+            rows += " l=\"" + std::to_string( p.lineLo ) + "\" e=\"" + std::to_string( p.lineHi ) + "\"";
         }
         if( p.isSection )
         {
-            out += " n=\"" + std::string( escapeXml( p.heading, esc ) ) + "\" rank=\"" + std::to_string( p.rank ) + "\" of=\"" + std::to_string( p.of ) + "\"";
+            rows += " n=\"" + std::string( escapeXml( p.heading, esc ) ) + "\" rank=\"" + std::to_string( p.rank ) + "\" of=\"" + std::to_string( p.of ) + "\"";
         }
-        out += p.isExtracted ? " src=\"extracted\"" : "";
-        out += p.isCut ? " cut=\"1\"" : "";
-        out += "><![CDATA[";
-        appendCdataSafe( p.text, out );
-        out += "]]></b>";
+        rows += p.isExtracted ? " src=\"extracted\"" : "";
+        if( p.isCut )
+        {
+            rows += " cut=\"1\" range=\"" + std::to_string( p.rangeLo ) + "-" + std::to_string( p.rangeHi ) + "/" + std::to_string( p.rangeOf ) + "\"";
+        }
+        rows += "><![CDATA[";
+        appendCdataSafe( p.text, rows );
+        rows += "]]></b>";
     }
-    for( const std::uint32_t f : body.unread )
+    for( const ForDocUnserved& u : body.unserved )
     {
-        const bool served = std::ranges::any_of( body.passages, [&]( const ForDocPassage& p )
-                                                 { return p.fileId == f; } );
-        out += served ? "" : "<f p=\"" + display( f ) + "\" why=\"" + ( body.isCapped ? "allowance" : "unread" ) + "\"/>";
+        rows += "<f p=\"" + display( u.fileId ) + "\" why=\"" + std::string( forDocWhyName( u.why ) ) + "\"" +
+                ( u.held > 0 ? " held=\"" + std::to_string( u.held ) + "\"" : std::string() ) + "/>";
     }
-    return out + "</doc_body>";
+    std::string attrs = " files=\"" + std::to_string( pick.fileIds.size() ) + "\" allowance=\"" + std::to_string( body.allowance ) + "\" bytes=\"" +
+                        std::to_string( body.textBytes ) + "\"";
+    if( body.isHeldByBudget )
+    {
+        attrs += " held=\"budget\" held_bytes=\"" + std::to_string( body.heldBytes ) + "\"";
+    }
+    if( body.dropped > 0 )
+    {
+        attrs += " dropped=\"" + std::to_string( body.dropped ) + "\"";
+    }
+    if( body.isHeldByBudget )
+    {
+        attrs += nextAttrXml( nextFlag( "--for=", task ) );
+    }
+    else if( body.isCapped )
+    {
+        attrs += forDocBodyNext( task );
+    }
+    if( body.isCapped )
+    {
+        attrs += " capped=\"1\"";
+    }
+    const std::string open = "<doc_body match=\"lexical\"";
+    const std::string close = "</doc_body>";
+    std::size_t tokens = 0;
+    const std::string priceAttr =
+        forDocBodyPriceAttr( kForDocBodyLegend.size() + open.size() + attrs.size() + 1 + rows.size() + close.size(), body, &tokens );
+    return { std::string( kForDocBodyLegend ) + open + priceAttr + attrs + ">" + rows + close, tokens };
 }
 
-// The --json twin: one key, appended after "sigs" (outside est_tokens, as the XML block).
-inline std::string forDocBodyJson( const IngestResult& ing, const ForDocBody& body, const ForDocBodyPick& pick, std::string_view task,
-                                   std::string_view rootArg, bool held )
+// The --json twin: one key, appended after "sigs" (outside the answer's est_tokens, as the XML block). Returns {text, est_tokens}.
+inline std::pair<std::string, std::size_t> forDocBodyJsonServed( const IngestResult& ing, const ForDocBody& body, const ForDocBodyPick& pick,
+                                                                 std::string_view task, std::string_view rootArg )
 {
     const std::string prefix = sarif::rootPrefixOf( rootArg );
     const auto display = [&]( std::uint32_t f ) -> std::string_view
     { return rootArg.empty() ? std::string_view( ing.files[f] ) : sarif::rootRelativeUri( ing.files[f], prefix ); };
-    std::string out = ",\"doc_body\":{\"in_est_tokens\":false,\"files\":[";
+    std::string head = ",\"doc_body\":{\"in_est_tokens\":false,\"match\":\"lexical\",\"files\":[";
     for( std::size_t i = 0; i < pick.fileIds.size(); ++i )
     {
-        out += ( i ? ",\"" : "\"" ) + jsonStr( display( pick.fileIds[i] ) ) + "\"";
+        head += ( i ? ",\"" : "\"" ) + jsonStr( display( pick.fileIds[i] ) ) + "\"";
     }
-    out += "]";
-    if( held )
+    head += "],\"pick\":\"the recall verb's top-ranked sections of these files for the task's words: a lexical match, not a verified answer\"";
+    head += ",\"allowance\":" + std::to_string( body.allowance ) + ",\"bytes\":" + std::to_string( body.textBytes );
+    std::string tail;
+    if( body.isHeldByBudget )
     {
-        return out + ",\"held\":\"budget\",\"next\":\"" + jsonStr( nextFlag( "--for=", task ) ) + "\"}";
+        tail += ",\"held\":\"budget\",\"held_bytes\":" + std::to_string( body.heldBytes );
     }
-    out += ",\"pick\":\"the recall verb's top-ranked sections of these files for the task's words: a lexical match, not a verified answer\"";
-    out += ",\"allowance\":" + std::to_string( kForDocBodyBytes ) + ",\"bytes\":" + std::to_string( body.textBytes );
     if( body.isCapped )
     {
-        out += ",\"capped\":true,\"dropped\":" + std::to_string( body.dropped ) + ",\"next\":\"" + jsonStr( nextFlag( "--recall=", task ) ) + "\"";
+        tail += ",\"capped\":true,\"dropped\":" + std::to_string( body.dropped );
     }
-    out += ",\"passages\":[";
+    if( body.isHeldByBudget || body.isCapped )
+    {
+        tail += ",\"next\":\"" + jsonStr( nextFlag( body.isHeldByBudget ? "--for=" : "--recall=", task ) ) + "\"";
+    }
+    tail += ",\"passages\":[";
     for( std::size_t i = 0; i < body.passages.size(); ++i )
     {
         const ForDocPassage& p = body.passages[i];
-        out += std::string( i ? ",{" : "{" ) + "\"t\":\"" + ( p.isSection ? "section" : "doc" ) + "\",\"p\":\"" + jsonStr( display( p.fileId ) ) + "\"";
+        tail += std::string( i ? ",{" : "{" ) + "\"t\":\"" + ( p.isSection ? "section" : "doc" ) + "\",\"p\":\"" + jsonStr( display( p.fileId ) ) + "\"";
         if( p.lineLo > 0 )
         {
-            out += ",\"l\":" + std::to_string( p.lineLo ) + ",\"e\":" + std::to_string( p.lineHi );
+            tail += ",\"l\":" + std::to_string( p.lineLo ) + ",\"e\":" + std::to_string( p.lineHi );
         }
         if( p.isSection )
         {
-            out += ",\"n\":\"" + jsonStr( p.heading ) + "\",\"rank\":" + std::to_string( p.rank ) + ",\"of\":" + std::to_string( p.of );
+            tail += ",\"n\":\"" + jsonStr( p.heading ) + "\",\"rank\":" + std::to_string( p.rank ) + ",\"of\":" + std::to_string( p.of );
         }
-        out += p.isExtracted ? ",\"src\":\"extracted\"" : "";
-        out += p.isCut ? ",\"cut\":true" : "";
-        out += ",\"text\":\"" + jsonStr( p.text ) + "\"}";
-    }
-    out += "]";
-    if( !body.unread.empty() )
-    {
-        out += ",\"unserved\":[";
-        for( std::size_t i = 0; i < body.unread.size(); ++i )
+        tail += p.isExtracted ? ",\"src\":\"extracted\"" : "";
+        if( p.isCut )
         {
-            out += ( i ? ",\"" : "\"" ) + jsonStr( display( body.unread[i] ) ) + "\"";
+            tail += ",\"cut\":true,\"range\":[" + std::to_string( p.rangeLo ) + "," + std::to_string( p.rangeHi ) + "],\"section_bytes\":" + std::to_string( p.rangeOf );
         }
-        out += "]";
+        tail += ",\"text\":\"" + jsonStr( p.text ) + "\"}";
     }
-    return out + "}";
+    tail += "]";
+    if( !body.unserved.empty() )
+    {
+        tail += ",\"unserved\":[";
+        for( std::size_t i = 0; i < body.unserved.size(); ++i )
+        {
+            const ForDocUnserved& u = body.unserved[i];
+            tail += std::string( i ? ",{" : "{" ) + "\"p\":\"" + jsonStr( display( u.fileId ) ) + "\",\"why\":\"" + std::string( forDocWhyName( u.why ) ) + "\"" +
+                    ( u.held > 0 ? ",\"held\":" + std::to_string( u.held ) : std::string() ) + "}";
+        }
+        tail += "]";
+    }
+    tail += "}";
+    // the price: the JSON text escapes a little more than the XML text; the estimate prices the bytes as written
+    std::size_t tokens = 0;
+    forDocBodyPriceAttr( head.size() + tail.size() + sizeof( ",\"est_tokens\":" ) - 1, body, &tokens );
+    return { head + ",\"est_tokens\":" + std::to_string( tokens ) + tail, tokens };
 }
 
-// The XML block of a fired pick ("" otherwise): held under a token budget, else the passages.
+// The held-whole twin of forDocBodyHeldXml.
+inline std::string forDocBodyJsonHeld( const IngestResult& ing, const ForDocBodyPick& pick, std::string_view task, std::string_view rootArg )
+{
+    const std::string prefix = sarif::rootPrefixOf( rootArg );
+    std::string out = ",\"doc_body\":{\"in_est_tokens\":false,\"match\":\"lexical\",\"files\":[";
+    for( std::size_t i = 0; i < pick.fileIds.size(); ++i )
+    {
+        const std::uint32_t f = pick.fileIds[i];
+        out += ( i ? ",\"" : "\"" ) + jsonStr( rootArg.empty() ? std::string_view( ing.files[f] ) : sarif::rootRelativeUri( ing.files[f], prefix ) ) + "\"";
+    }
+    return out + "],\"held\":\"budget\",\"next\":\"" + jsonStr( nextFlag( "--for=", task ) ) + "\"}";
+}
+
+// Serve a fired pick for one dialect: the XML or JSON text of the block ("" when it does not fire). With no budget the default
+// allowance; under a budget the allowance the budget leaves after the answer (shrunk until the priced block fits), or the held-whole
+// block when not even kForDocMinAllowance fits. `render` maps a served body to {text, est_tokens}, `heldWhole` to the held text.
+template<class Render, class HeldWhole>
+inline std::string fitForDocBody( const IngestResult& ing, const ForDocPrep& prep, const ForDocBodyBudget& budget, Render&& render, HeldWhole&& heldWhole )
+{
+    if( !budget.active() )
+    {
+        return render( serveForDocBody( ing, prep, kForDocBodyBytes ) ).first;
+    }
+    const std::size_t left = budget.leftTokens();
+    std::size_t allowance = kForDocBodyBytes;
+    for( int attempt = 0; attempt < 5 && left > 0; ++attempt )
+    {
+        const auto [text, tokens] = render( serveForDocBodyHeld( ing, prep, allowance ) );
+        if( tokens <= left )
+        {
+            return text;
+        }
+        const std::size_t shrink = std::size_t( double( tokens - left ) * kBytesPerTokenBody ) + 16;
+        if( allowance < kForDocMinAllowance + shrink )
+        {
+            break;
+        }
+        allowance -= shrink;
+    }
+    return heldWhole();
+}
+
+// The XML block of a fired pick ("" otherwise).
 inline std::string renderForDocBodyXml( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
-                                        std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg, bool held )
+                                        std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg,
+                                        const ForDocBodyBudget& budget )
 {
     if( !pick.fires || pick.fileIds.empty() )
     {
         return {};
     }
-    if( held )
+    const auto heldWhole = [&]
+    { return forDocBodyHeldXml( ing, pick, task, rootArg ); };
+    if( budget.active() && budget.leftTokens() == 0 )
     {
-        return forDocBodyHeldXml( ing, pick, task, rootArg );
+        return heldWhole(); // the answer alone spent the budget: nothing is read for the block
     }
-    return forDocBodyXml( ing, buildForDocBody( ing, outOff, outTargets, task, pick, redact, rootArg ), pick, task, rootArg );
+    const ForDocPrep prep = prepareForDocBody( ing, outOff, outTargets, task, pick, redact, rootArg );
+    return fitForDocBody( ing, prep, budget, [&]( const ForDocBody& b )
+                          { return forDocBodyXml( ing, b, pick, task, rootArg ); }, heldWhole );
+}
+
+// The JSON block of a fired pick (",\"doc_body\":{...}" or "").
+inline std::string renderForDocBodyJson( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                                         std::string_view task, const ForDocBodyPick& pick, RedactCounts* redact, std::string_view rootArg,
+                                         const ForDocBodyBudget& budget )
+{
+    if( !pick.fires || pick.fileIds.empty() )
+    {
+        return {};
+    }
+    const auto heldWhole = [&]
+    { return forDocBodyJsonHeld( ing, pick, task, rootArg ); };
+    if( budget.active() && budget.leftTokens() == 0 )
+    {
+        return heldWhole();
+    }
+    const ForDocPrep prep = prepareForDocBody( ing, outOff, outTargets, task, pick, redact, rootArg );
+    return fitForDocBody( ing, prep, budget, [&]( const ForDocBody& b )
+                          { return forDocBodyJsonServed( ing, b, pick, task, rootArg ); }, heldWhole );
 }
 } // namespace rw

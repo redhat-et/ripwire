@@ -1890,10 +1890,9 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     if( const rw::ForDocBodyPick docPick = rw::pickForDocBody( in.ing, in.task, jsonShownIds, [ & ]
         { return rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, /*rankOrder=*/true ); }, in.rootArg ); docPick.fires && !docPick.fileIds.empty() )
     {
-        const bool        held    = in.tokenBudget > 0;
-        const std::string docBody = rw::forDocBodyJson( in.ing,
-                                                        held ? rw::ForDocBody{} : rw::buildForDocBody( in.ing, in.graph->outOff, in.graph->outTargets, in.task, docPick, in.redact, in.rootArg ),
-                                                        docPick, in.task, in.rootArg, held );
+        // served first, the block takes the budget the answer left (est_tokens is the answer's); held= names what a budget kept out
+        const std::string docBody = rw::renderForDocBodyJson( in.ing, in.graph->outOff, in.graph->outTargets, in.task, docPick, in.redact, in.rootArg,
+                                                              rw::ForDocBodyBudget{ in.tokenBudget, estTokens } );
         std::fwrite( docBody.data(), 1, docBody.size(), out );
     }
     std::fputs( "}", out );
@@ -4655,7 +4654,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // forbudget-soft: no header ladder. The W3FIX ceiling ladder (task echo / route= / legend clauses dropped "(ceiling)",
         // over_ceiling's header-floor note) existed to land a HARD ceiling; an explicit --token-budget is a soft target over the
         // rows now (owner decision 2026-10-14), so the header — every legend clause and the verbatim task echo — always ships.
-        headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
+        ForLensPricedHeader pricedHeader     = finishForLensHeaderPriced( std::move( headerStr ), rootFinish );
+        headerStr                            = std::move( pricedHeader.header );
+        const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
 
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         // R2-AF (round 2, S4): first rows inside the root, right after the legend — see forHdrRows above.
@@ -4801,13 +4802,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
         }
         // FOR-DOC-BODY (fordocbody.h): a prose task whose first <t> rows are doc files gets the top-ranked sections of the first doc files
-        // shown, last before </ctx>: its own allowance, outside est_tokens; "" otherwise. Held (files named, next=) under a token budget or a body ceiling.
+        // shown, last before </ctx>: its own allowance, outside the answer's est_tokens (the block prices itself); "" otherwise. Under a token budget or a body
+        // ceiling it is served into the budget left after the answer and holds only what does not fit (held=, next=).
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && sigsPreRendered )
         {
             const rw::ForDocBodyPick docPick = rw::pickForDocBody( ing, cfg.forTask, shownSigIds, [ & ]
             { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg );
+            const std::size_t        docBudget = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : forBodyCeiling ? std::size_t( cfg.maxTokens ) : 0u;
             const std::string        docBody = rw::renderForDocBodyXml( ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg,
-                                                                        /*held=*/cfg.tokenBudget > 0 || forBodyCeiling );
+                                                                        rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens } );
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
 
