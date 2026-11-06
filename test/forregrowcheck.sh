@@ -39,6 +39,7 @@
 #   Python dict, __all__, #define X-macro), no-call shapes (C++ init list, Rust enum variant, a call not named for a registration), no identifier
 #   word: byte-identical. N3 moved to a weak-only anchor (get_states now has strong rows). D1a-d [P] useRouter(, addCommandLineOption(, reg_value(,
 #   reg_field( are no registration; D1e-f [G] addEventHandler(, reg_handler( stay.
+#   N22 [G] a no-cue task with more anchors than the scan cap and no strong row adds no <lit_capped> note (the answer is unchanged).
 #
 # Usage:  bash test/forregrowcheck.sh [BIN]   (BIN is $1, else RIPWIRE_BIN, else build/ripwire). Exits non-zero on any failure.
 
@@ -431,6 +432,7 @@ nomiss 'max_part_size_marker turned off' 'N3c [G] turned without into is no cue:
 nomiss 'where is closed_anchor handled' 'N4 [G] a registration call closed on an earlier line holds no later anchor'
 nomiss 'where is no_such_key_here defined' 'N5 [G] an identifier the index lacks, with no site: no block, no claim'
 nomiss 'where is generated_only_key defined' 'N6 [G] an identifier the index lacks whose only site is no row: no block'
+nomiss 'how do agg_target closed_anchor max_part_size_marker init_marker_a cfg_decl_marker EventRecorder relate' 'N22 [G] no cue word, more anchors than the scan cap, no strong row: no lit_capped note, byte-identical (koa-13 shape; red before the fix)'
 # ── REG2-FIX1 (rv-reg2 F1-F3, CodeRabbit on #539) ────────────────────────────────────────────────────────────────────────────────────────
 # a task with a quoted anchor: `Where is `X` defined?` (the cue prints only beside a row)
 q(){ ask "Where is \`$1\` defined?"; }

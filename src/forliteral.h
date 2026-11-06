@@ -3805,7 +3805,7 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
         walk.tryAnchor( anchor, unindexed, /*tail=*/!unindexed );
     }
     ForLiteralRender out = std::move( walk.out );
-    if( walk.skipped > 0 )
+    if( walk.skipped > 0 && ( cue != TableCue::StrongRowOnly || !out.xml.empty() ) )   // a no-cue walk that listed no strong row leaves the answer as it was
     {
         out.xml += std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( walk.scanned ) + "\" skipped=\"" + std::to_string( walk.skipped )
                    + "\"" + nextAttrXml( nextFlag( "--grep=", walk.firstSkipped ) ) + "/>";
