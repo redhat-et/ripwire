@@ -582,11 +582,16 @@ inline RecallTailCut cutRecallBodyTail( std::string& body, std::size_t keepBytes
 
     if( isWindowCut )
     {
-        // The window was sized in whole lines, so its end is a line end: keep it. §L4.1's cascade would prefer
-        // an EARLIER sentence end and drop the window's last line — often the very line it was chosen for.
-        std::size_t lineCut = cut;
-        while( lineCut > 0 && body[lineCut - 1] != '\n' ) { --lineCut; }
-        cut = lineCut > 0 ? lineCut : cut;   // one line longer than the window: the byte cut, as before
+        // The window was sized in whole lines, so its end is a line end, or the end of the body (a converted page
+        // ends without a newline): keep it. §L4.1's cascade would prefer an EARLIER sentence end and drop the
+        // window's last line — often the very line it was chosen for. Only a cut that landed mid-line (the
+        // allowance ended inside one) steps back to the line before.
+        if( cut < body.size() )
+        {
+            std::size_t lineCut = cut;
+            while( lineCut > 0 && body[lineCut - 1] != '\n' ) { --lineCut; }
+            cut = lineCut > 0 ? lineCut : cut;   // one line longer than the window: the byte cut, as before
+        }
     }
     else
     {
@@ -1913,16 +1918,16 @@ inline RecallWindow selectRecallWindow( std::string_view body, std::size_t windo
 // isWindowCut), closed by fence repair (`fence_closed`). The body opens with a
 // "…" line so the reader sees text was skipped above, and the marker names the served byte range:
 //   [truncated: K of N bytes[, fence_reopened][, fence_closed]; served bytes LO-HI, best query-term window]
-// (≤ 126 bytes for any document under 100 MB, inside kRecallTruncNoteBytes, which the allowance reserves.)
+// (≤ 127 bytes for any document under 100 MB, inside kRecallTruncNoteBytes, which the allowance reserves.)
 // The byte range indexes the text recall served — the converted text for an HTML page, not its markup — and
 // excludes the repeated opener, which is this function's text, not the document's.
 inline constexpr std::string_view kRecallWindowLead = "\xE2\x80\xA6\n";   // "…" + newline: text skipped above
 
 // The opening line of the fenced block `at` falls strictly inside, or "" (outside any fence, or inside a
-// table, which has no opener line to repeat).
-inline std::string recallFenceOpenerAround( std::string_view body, std::size_t at )
+// table, which has no opener line to repeat). `ranges` are findRecallProtectedRanges( body ), computed once.
+inline std::string recallFenceOpenerAround( std::string_view body, std::size_t at, const std::vector<RecallProtectedRange>& ranges )
 {
-    for( const RecallProtectedRange& r : findRecallProtectedRanges( body ) )
+    for( const RecallProtectedRange& r : ranges )
     {
         if( at <= r.start || at >= r.end )
         {
@@ -1941,17 +1946,32 @@ inline std::string recallFenceOpenerAround( std::string_view body, std::size_t a
 inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t keepBytes, const RecallWindow& window )
 {
     const std::size_t fullBytes = body.size();
-    const std::size_t start     = std::min( window.startByte, fullBytes );
-    const std::string reopen    = recallFenceOpenerAround( body, start );
+    std::size_t       start     = std::min( window.startByte, fullBytes );
     if( start == 0 )
     {
         return truncateRecallBody( body, keepBytes );   // no window past the head: a head cut, said as one
     }
+    const std::vector<RecallProtectedRange> ranges    = findRecallProtectedRanges( body );
+    const std::size_t                       allowance = keepBytes > kRecallWindowLead.size() ? keepBytes - kRecallWindowLead.size() : 0;
+    const std::size_t                       windowEnd = std::max( window.endByte, start );
+    std::string                             reopen    = recallFenceOpenerAround( body, start, ranges );
+    // The repeated opener is this function's text, and the window's LAST line is the one it was chosen for: when
+    // the opener does not fit beside the window, the window's HEAD (its lowest-value lines) gives up whole lines
+    // until it does — the tail is never what the opener crowds out.
+    while( reopen.size() + ( windowEnd - start ) > allowance )
+    {
+        const std::size_t newline = body.find( '\n', start );
+        if( newline == std::string::npos || newline + 1 >= windowEnd )
+        {
+            break;   // one line left: nothing more to give
+        }
+        start  = newline + 1;
+        reopen = recallFenceOpenerAround( body, start, ranges );
+    }
+    const std::size_t windowLen = windowEnd - start;
     body.erase( 0, start );
     body.insert( 0, reopen );
-    const std::size_t   allowance = keepBytes > kRecallWindowLead.size() ? keepBytes - kRecallWindowLead.size() : 0;
-    const std::size_t   windowLen = window.endByte > start ? window.endByte - start : 0;
-    const RecallTailCut cut       = cutRecallBodyTail( body, std::min( allowance, reopen.size() + windowLen ), true );
+    const RecallTailCut cut = cutRecallBodyTail( body, std::min( allowance, reopen.size() + windowLen ), true );
     const std::size_t   kept = cut.sourceKeptBytes > reopen.size() ? cut.sourceKeptBytes - reopen.size() : 0;
     body.insert( 0, kRecallWindowLead );
     return { "  [truncated: " + std::to_string( kept ) + " of " + std::to_string( fullBytes ) + " bytes"

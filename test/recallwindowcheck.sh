@@ -25,6 +25,13 @@
 #       run prints a match and balanced fences, never an empty body, and the sweep must hit a fence the window
 #       ends inside (fence_closed: the cut keeps the window's own last line instead of retreating behind the
 #       match to an earlier sentence end or the fence's start).
+#   (h) The window's LAST line is the line it was chosen for (the earliest-start tie-break puts the scoring line
+#       at the tail), so the cut must keep it. A page end with NO trailing newline (every converted HTML page:
+#       extractHtml trims; also a .md file, a CRLF file, a multibyte last line) prints the last line and
+#       discloses a HI equal to the document size; the same files WITH a final newline are the positive twin.
+#   (i) The repeated fence opener is paid for by the window's HEAD, never its tail: a sweep of fence line lengths
+#       (backtick with an info string, `~~~`, an indented fence) prints the in-fence match in EVERY run, whatever
+#       the spare bytes after the window; the sweep must reach fence_reopened.
 #   (f) Budget: every run stays under its --max-tokens ceiling (no over_ceiling=1), and runs are
 #       deterministic (byte-identical twice).
 #   (g) Every run's exit code is checked; a crashed or empty run is a FAIL, never a quiet pass.
@@ -35,7 +42,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -46,7 +53,7 @@ echo "recallwindowcheck: BIN=$BIN"
 R="$( mktemp -d "/tmp/rwwinXXXXXX" )"; trap 'rm -rf "$R"' EXIT
 mkdir -p "$R/h" "$R/m" "$R/c" "$R/t" "$R/f"
 python3 - "$R" <<'PY'
-import sys
+import os, sys
 r = sys.argv[1]
 nav = "".join( '<li><a href="/p%03d.html">Navigation entry %03d of the site contents</a></li>\n' % ( i, i ) for i in range( 160 ) )
 filler = "".join( "<p>Unrelated paragraph %03d about installation steps and general setup notes.</p>\n" % i for i in range( 40 ) )
@@ -65,6 +72,17 @@ open( r + "/t/notes.md", "w" ).write( plain + "Zorblax frobnicate pipeline FIRST
 # (e) the matching line inside a long fenced block, whose opening sits well before it
 fence = "```\n" + "".join( "code line %03d of the example listing\n" % i for i in range( 30 ) ) + "zorblax frobnicate pipeline call\n" + "".join( "code line %03d tail\n" % i for i in range( 5 ) ) + "```\n"
 open( r + "/f/notes.md", "w" ).write( plain + fence + plain.replace( "Plain", "Later" ) )
+# (h) page ends with the matching line and NO trailing newline: md, md+newline twin, CRLF, multibyte, HTML
+last = "The zorblax frobnicate pipeline is the last line"
+for d, text in ( ( "n1", plain + last ), ( "n2", plain + last + "\n" ),
+                 ( "n3", plain.replace( "\n", "\r\n" ) + last ),
+                 ( "n4", plain + "Der zorblax frobnicate pipeline ist die letzte Zeile \u2014 sch\u00f6n" ) ):
+    os.makedirs( "%s/%s" % ( r, d ) )
+    open( "%s/%s/notes.md" % ( r, d ), "w", newline="", encoding="utf-8" ).write( text )
+os.makedirs( r + "/n5" )
+open( r + "/n5/page.html", "w" ).write(
+    "<html><head><title>Guide</title></head><body>\n<nav><ul>\n" + nav + "</ul></nav>\n<main>\n" + filler
+    + "<p>The zorblax frobnicate pipeline honours the output.input-404 setting.</p>\n</main></body></html>\n" )
 PY
 
 # run DIR QUERY TOKENS -> stdout; exit code in $RC
@@ -81,21 +99,29 @@ echo; echo "=== (a) HTML page: the matching paragraph, not the nav head ==="
 run h "zorblax flux capacitor frobnicate" 700
 if checkrun "(a)"; then
     S="$( sepline )"
-    printf '%s' "$S" | grep -qE '\[truncated: [0-9]+ of [0-9]+ bytes; served bytes [0-9]+-[0-9]+, best query-term window\]' \
-        && ok "(a) marker names the served window: $( printf '%s' "$S" | grep -oE '\[truncated[^]]*\]' )" \
-        || no "(a) no window marker on the separator: $S"
-    body | grep -q 'zorblax quantum flux capacitor' \
-        && ok "(a) the matching paragraph is printed" \
-        || no "(a) the matching paragraph is NOT printed (head served?) — first body line: $( body | head -1 )"
-    body | grep -q 'Navigation entry 000' \
-        && no "(a) the nav head (entry 000) is still printed" \
-        || ok "(a) the nav head is skipped"
-    [ "$( body | head -1 )" = "…" ] \
-        && ok "(a) the body opens with a '…' line (text skipped above)" \
-        || no "(a) the body does not open with the '…' lead: '$( body | head -1 )'"
-    overceil && no "(a) over_ceiling=1 under --max-tokens=700" || ok "(a) within the 700-token ceiling"
+    if printf '%s' "$S" | grep -qE '\[truncated: [0-9]+ of [0-9]+ bytes; served bytes [0-9]+-[0-9]+, best query-term window\]'; then
+        ok "(a) marker names the served window: $( printf '%s' "$S" | grep -oE '\[truncated[^]]*\]' )"
+    else
+        no "(a) no window marker on the separator: $S"
+    fi
+    if body | grep -q 'zorblax quantum flux capacitor'; then
+        ok "(a) the matching paragraph is printed"
+    else
+        no "(a) the matching paragraph is NOT printed (head served?) — first body line: $( body | head -1 )"
+    fi
+    if body | grep -q 'Navigation entry 000'; then
+        no "(a) the nav head (entry 000) is still printed"
+    else
+        ok "(a) the nav head is skipped"
+    fi
+    if [ "$( body | head -1 )" = "…" ]; then
+        ok "(a) the body opens with a '…' line (text skipped above)"
+    else
+        no "(a) the body does not open with the '…' lead: '$( body | head -1 )'"
+    fi
+    if overceil; then no "(a) over_ceiling=1 under --max-tokens=700"; else ok "(a) within the 700-token ceiling"; fi
     A1="$OUT"; run h "zorblax flux capacitor frobnicate" 700
-    [ "$OUT" = "$A1" ] && ok "(a) deterministic (byte-identical twice)" || no "(a) two runs differ"
+    if [ "$OUT" = "$A1" ]; then ok "(a) deterministic (byte-identical twice)"; else no "(a) two runs differ"; fi
 fi
 
 echo; echo "=== (b) heading-less markdown: the disclosed byte range is exact ==="
@@ -106,9 +132,9 @@ if checkrun "(b)"; then
     HI="$( printf '%s' "$S" | grep -oE 'served bytes [0-9]+-[0-9]+' | grep -oE '[0-9]+' | sed -n 2p )"
     K="$( printf '%s' "$S" | grep -oE '\[truncated: [0-9]+' | grep -oE '[0-9]+' )"
     if [ -n "$LO" ] && [ -n "$HI" ] && [ -n "$K" ]; then
-        [ $(( HI - LO )) = "$K" ] && ok "(b) HI-LO ($HI-$LO) = kept $K" || no "(b) HI-LO = $(( HI - LO )) but the marker kept $K"
+        if [ $(( HI - LO )) = "$K" ]; then ok "(b) HI-LO ($HI-$LO) = kept $K"; else no "(b) HI-LO = $(( HI - LO )) but the marker kept $K"; fi
         body > "$R/b.body"
-        python3 - "$R/m/notes.md" "$R/b.body" "$LO" "$HI" <<'PY' && ok "(b) bytes LO..HI of the file on disk are exactly the printed body" || no "(b) the printed body is not bytes LO..HI of the file"
+        if python3 - "$R/m/notes.md" "$R/b.body" "$LO" "$HI" <<'PY'
 import sys
 src = open( sys.argv[1], "rb" ).read(); got = open( sys.argv[2], "rb" ).read()
 lo, hi = int( sys.argv[3] ), int( sys.argv[4] )
@@ -120,22 +146,32 @@ got = got.rstrip( b"\n" )
 want = src[ lo:hi ].rstrip( b"\n" )
 sys.exit( 0 if got == want else 1 )
 PY
-        body | grep -q 'zorblax quantum flux capacitor' && ok "(b) the matching line is printed" || no "(b) the matching line is not printed"
+        then
+            ok "(b) bytes LO..HI of the file on disk are exactly the printed body"
+        else
+            no "(b) the printed body is not bytes LO..HI of the file"
+        fi
+        if body | grep -q 'zorblax quantum flux capacitor'; then ok "(b) the matching line is printed"; else no "(b) the matching line is not printed"; fi
     else
         no "(b) no 'served bytes LO-HI' / kept count on the separator: $S"
     fi
-    overceil && no "(b) over_ceiling=1" || ok "(b) within the ceiling"
+    if overceil; then no "(b) over_ceiling=1"; else ok "(b) within the ceiling"; fi
 fi
 
 echo; echo "=== (c) terms in the head: the plain head cut, unchanged shape ==="
 run c "zorblax flux capacitor frobnicate" 700
 if checkrun "(c)"; then
     S="$( sepline )"
-    printf '%s' "$S" | grep -qE '\[truncated: [0-9]+ of [0-9]+ bytes\]$' \
-        && ok "(c) plain head marker: $( printf '%s' "$S" | grep -oE '\[truncated[^]]*\]' )" \
-        || no "(c) expected the plain '[truncated: K of N bytes]' marker: $S"
-    [ "$( body | head -1 )" = "The zorblax quantum flux capacitor reroutes the frobnicate pipeline." ] \
-        && ok "(c) the body starts at the head, no '…' lead" || no "(c) the body does not start at the head: '$( body | head -1 )'"
+    if printf '%s' "$S" | grep -qE '\[truncated: [0-9]+ of [0-9]+ bytes\]$'; then
+        ok "(c) plain head marker: $( printf '%s' "$S" | grep -oE '\[truncated[^]]*\]' )"
+    else
+        no "(c) expected the plain '[truncated: K of N bytes]' marker: $S"
+    fi
+    if [ "$( body | head -1 )" = "The zorblax quantum flux capacitor reroutes the frobnicate pipeline." ]; then
+        ok "(c) the body starts at the head, no '…' lead"
+    else
+        no "(c) the body does not start at the head: '$( body | head -1 )'"
+    fi
 fi
 
 echo; echo "=== (d) tie-break: the earlier of two equal windows ==="
@@ -157,13 +193,20 @@ if checkrun "(e)"; then
     S="$( sepline )"
     LO="$( printf '%s' "$S" | grep -oE 'served bytes [0-9]+-' | grep -oE '[0-9]+' )"
     FENCE="$( python3 -c 'import sys; print(open(sys.argv[1],"rb").read().find(b"```"))' "$R/f/notes.md" )"
-    [ -n "$LO" ] && [ "$LO" -gt "$FENCE" ] && ok "(e) window starts inside the fence (byte $LO > opener $FENCE)" \
-        || no "(e) window start '${LO:-<none>}' is not inside the fence opened at $FENCE: $S"
-    printf '%s' "$S" | grep -q 'fence_reopened' && ok "(e) marker says fence_reopened" || no "(e) no fence_reopened on: $S"
-    [ "$( body | sed -n 2p )" = '```' ] && ok "(e) the opener is repeated right under the '…' lead" || no "(e) line 2 is '$( body | sed -n 2p )', not the fence opener"
+    if [ -n "$LO" ] && [ "$LO" -gt "$FENCE" ]; then
+        ok "(e) window starts inside the fence (byte $LO > opener $FENCE)"
+    else
+        no "(e) window start '${LO:-<none>}' is not inside the fence opened at $FENCE: $S"
+    fi
+    if printf '%s' "$S" | grep -q 'fence_reopened'; then ok "(e) marker says fence_reopened"; else no "(e) no fence_reopened on: $S"; fi
+    if [ "$( body | sed -n 2p )" = '```' ]; then
+        ok "(e) the opener is repeated right under the '…' lead"
+    else
+        no "(e) line 2 is '$( body | sed -n 2p )', not the fence opener"
+    fi
     N="$( body | grep -c '^```' )"
-    [ $(( N % 2 )) = 0 ] && [ "$N" -gt 0 ] && ok "(e) fences balance ($N fence lines)" || no "(e) unbalanced fences ($N)"
-    body | grep -q 'zorblax frobnicate pipeline call' && ok "(e) the matching code line is printed" || no "(e) the matching code line is not printed"
+    if [ $(( N % 2 )) = 0 ] && [ "$N" -gt 0 ]; then ok "(e) fences balance ($N fence lines)"; else no "(e) unbalanced fences ($N)"; fi
+    if body | grep -q 'zorblax frobnicate pipeline call'; then ok "(e) the matching code line is printed"; else no "(e) the matching code line is not printed"; fi
 fi
 
 echo; echo "=== (e2) fence-length sweep: never an empty body, fences torn only with disclosure ==="
@@ -192,9 +235,84 @@ for d in "$R"/s*; do
     printf '%s' "$S" | grep -q 'fence_closed' && CLOSED=$(( CLOSED + 1 ))
     printf '%s' "$S" | grep -q 'fence_reopened' && REOPEN=$(( REOPEN + 1 ))
 done
-[ "$BAD" = 0 ] && ok "(e2) every sweep run prints a match with balanced fences" || no "(e2) $BAD sweep runs failed"
-[ "$CLOSED" -gt 0 ] && ok "(e2) $CLOSED sweep runs cut inside a fence the window ends in (fence_closed)" || no "(e2) no sweep run cut inside a trailing fence"
+if [ "$BAD" = 0 ]; then ok "(e2) every sweep run prints a match with balanced fences"; else no "(e2) $BAD sweep runs failed"; fi
+if [ "$CLOSED" -gt 0 ]; then
+    ok "(e2) $CLOSED sweep runs cut inside a fence the window ends in (fence_closed)"
+else
+    no "(e2) no sweep run cut inside a trailing fence"
+fi
 ok "(e2) $REOPEN sweep runs started inside a fence (fence_reopened; arm (e) pins that branch)"
+
+echo; echo "=== (h) the window's last line survives a page end with no trailing newline ==="
+for d in n1 n2 n3 n4 n5; do
+    run "$d" "zorblax frobnicate pipeline" 700
+    if checkrun "(h) $d"; then
+        S="$( sepline )"
+        case "$d" in
+            n1) WANT='is the last line' ;;
+            n2) WANT='is the last line' ;;
+            n3) WANT='is the last line' ;;
+            n4) WANT='letzte Zeile' ;;
+            n5) WANT='output.input-404' ;;
+        esac
+        if body | grep -q "$WANT"; then
+            ok "(h) $d: the page's last line is printed"
+        else
+            no "(h) $d: the last line ('$WANT') is NOT printed — marker: $S"
+        fi
+        if printf '%s' "$S" | grep -q 'best query-term window'; then
+            ok "(h) $d: a window was served"
+        else
+            no "(h) $d: expected a windowed cut (the arm would pin nothing): $S"
+        fi
+        if [ "$d" != n5 ]; then
+            F="$( wc -c < "$R/$d/notes.md" | tr -d ' ' )"
+            HI="$( printf '%s' "$S" | grep -oE 'served bytes [0-9]+-[0-9]+' | grep -oE '[0-9]+' | sed -n 2p )"
+            if [ "$HI" = "$F" ]; then ok "(h) $d: served range ends at the document end ($HI)"; else no "(h) $d: HI '$HI' is not the document size $F"; fi
+        fi
+        if printf '%s' "$OUT" | python3 -c 'import sys; sys.stdin.buffer.read().decode("utf-8")'; then
+            ok "(h) $d: output is valid UTF-8"
+        else
+            no "(h) $d: output is not valid UTF-8"
+        fi
+    fi
+done
+
+echo; echo "=== (i) the fence opener is paid for by the window head, never the tail ==="
+python3 - "$R" <<'PY'
+import os, sys
+r = sys.argv[1]
+plain = "".join( "Plain line %04d says nothing in particular about the setup.\n" % i for i in range( 300 ) )
+call = "zorblax frobnicate pipeline call\n"
+def fx( kind, n ):
+    ind = "    " if kind == "ind" else ""
+    opener = { "bt": "```python\n", "tl": "~~~text\n", "ind": "    ```python\n" }[kind]
+    closer = ind + ( "~~~\n" if kind == "tl" else "```\n" )
+    code = ( ind + "x" * ( n - 1 - len( ind ) ) + "\n" ) * 60
+    pre = "- item\n\n" if kind == "ind" else ""
+    return plain + pre + opener + code + ind + call + code + closer + plain.replace( "Plain", "Later" )
+for kind, step in ( ( "bt", 2 ), ( "tl", 3 ), ( "ind", 3 ) ):
+    for n in range( 21, 80, step ):
+        d = "%s/o%s%d" % ( r, kind, n )
+        os.makedirs( d )
+        open( d + "/notes.md", "w" ).write( fx( kind, n ) )
+PY
+for kind in bt tl ind; do
+    BAD=0; REO=0; RUNS=0
+    for d in "$R"/o"$kind"[0-9]*; do
+        n="${d##*/o}"
+        run "o$n" "zorblax frobnicate pipeline" 700
+        RUNS=$(( RUNS + 1 ))
+        if [ "$RC" != 0 ] || [ -z "$( sepline )" ]; then no "(i) $n: exit $RC / no document"; BAD=$(( BAD + 1 )); continue; fi
+        S="$( sepline )"
+        if ! body | grep -q 'zorblax frobnicate pipeline call'; then
+            no "(i) $n: the in-fence match is NOT printed: $S"; BAD=$(( BAD + 1 )); continue
+        fi
+        if printf '%s' "$S" | grep -q 'fence_reopened'; then REO=$(( REO + 1 )); fi
+    done
+    if [ "$BAD" = 0 ]; then ok "(i) $kind: all $RUNS sweep runs print the in-fence match ($REO reopened the fence)"; else no "(i) $kind: $BAD of $RUNS sweep runs lost the match"; fi
+    if [ "$REO" -gt 0 ]; then ok "(i) $kind: the sweep reaches fence_reopened ($REO runs)"; else no "(i) $kind: no sweep run reopened the fence — the arm pins nothing"; fi
+done
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
