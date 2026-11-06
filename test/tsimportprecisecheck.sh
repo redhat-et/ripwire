@@ -219,6 +219,53 @@ lh_binds viaB  'lib/b.js:1' 'lib/a.js:1'
 lh_binds viaUp 'lib/b.js:1' 'lib/a.js:1'
 lh_binds viaNear 'sub/b.js:1' 'b.js:1'
 
+# ── PATH-NORM: the per-build (directory, specifier) memo and the one-normalization probe list ─────
+# resolve.h TsImportMemo answers a repeated (includer directory, specifier) pair from its first resolution, and
+# SuffixProbe normalizes `dir/spec` once per probe list. Same specifier, two directories, two answers: a/ and b/
+# each import './util' and each must land on its OWN util.ts (a memo keyed without the directory gives b/y.ts
+# a/util.ts). A hit cached first must not make a later miss hit (a1/w.ts finds a1/missing.ts, b1/z.ts has none),
+# and a miss cached first must not hide a later hit (a2/v.ts misses './only', b2/t.ts finds b2/only.ts). Two
+# importers in one directory share an entry (a/x.ts, a/x2.ts). The specifiers whose last segment is not a plain
+# name take the per-probe path: '..' (sub/q.ts → index.ts), './' and '.' (sub2/ → sub2/index.ts), and an escape
+# above the root resolves to nothing. Read through --deps: transitive= counts the file plus what it reaches,
+# godfiles' afferent= counts importers.
+PN="$TMP/pathnorm"; mkdir -p "$PN/a" "$PN/b" "$PN/a1" "$PN/b1" "$PN/a2" "$PN/b2" "$PN/sub" "$PN/sub2"
+printf 'export const u = 1;\n' >"$PN/a/util.ts"
+printf "import { u } from './util';\nexport const x = u;\n" >"$PN/a/x.ts"
+printf "import { u } from './util';\nexport const x2 = u;\n" >"$PN/a/x2.ts"
+printf 'export const u = 2;\n' >"$PN/b/util.ts"
+printf "import { u } from './util';\nexport const y = u;\n" >"$PN/b/y.ts"
+printf 'export const m = 1;\n' >"$PN/a1/missing.ts"
+printf "import { m } from './missing';\nexport const w = m;\n" >"$PN/a1/w.ts"
+printf "import { m } from './missing';\nexport const z = m;\n" >"$PN/b1/z.ts"
+printf "import { o } from './only';\nexport const v = o;\n" >"$PN/a2/v.ts"
+printf 'export const o = 1;\n' >"$PN/b2/only.ts"
+printf "import { o } from './only';\nexport const t = o;\n" >"$PN/b2/t.ts"
+printf 'export const i = 1;\n' >"$PN/index.ts"
+printf "import { i } from '..';\nexport const q = i;\n" >"$PN/sub/q.ts"
+printf "import { e } from '../../../escape';\nexport const s = e;\n" >"$PN/sub/s.ts"
+printf 'export const j = 1;\n' >"$PN/sub2/index.ts"
+printf "import { j } from './';\nexport const r = j;\n" >"$PN/sub2/r.ts"
+printf "import { j } from '.';\nexport const r2 = j;\n" >"$PN/sub2/r2.ts"
+pn_rc=0; ( cd "$PN" && "$BIN" "$PN" --deps --no-cache ) >"$TMP/pn.out" 2>"$TMP/pn.err" || pn_rc=$?
+if [ "$pn_rc" -ne 0 ] || ! grep -q '<deps ' "$TMP/pn.out"; then
+  no "path-norm: ripwire --deps rc=$pn_rc or no <deps> root"; cat "$TMP/pn.err"
+else
+  pn_has(){  # $1 attribute fragment that must appear  $2 what it proves
+    if grep -qF "$1" "$TMP/pn.out"; then ok "path-norm: $2"; else no "path-norm: $2 (missing $1)"; fi
+  }
+  pn_has '<f p="a/util.ts" afferent="2"/>'     "a/util.ts has its two importers (a/x.ts, a/x2.ts share one memo entry)"
+  pn_has '<f p="b/util.ts" afferent="1"/>'     "b/y.ts's './util' lands on b/util.ts, not a/util.ts (the directory is in the key)"
+  pn_has '<f p="b/y.ts" includes="1" afferent="0" instab="1.00" transitive="2">' "b/y.ts reaches one file"
+  pn_has '<f p="a1/missing.ts" afferent="1"/>' "a1/w.ts's './missing' hits a1/missing.ts"
+  pn_has '<f p="b1/z.ts" includes="1" afferent="0" instab="0.00" transitive="1">' "b1/z.ts's './missing' stays unresolved after a1/'s hit"
+  pn_has '<f p="a2/v.ts" includes="1" afferent="0" instab="0.00" transitive="1">' "a2/v.ts's './only' misses"
+  pn_has '<f p="b2/only.ts" afferent="1"/>'    "b2/t.ts's './only' still hits after a2/'s miss"
+  pn_has '<f p="index.ts" afferent="1"/>'      "'..' from sub/ lands on index.ts (per-probe path)"
+  pn_has '<f p="sub2/index.ts" afferent="2"/>' "'./' and '.' from sub2/ land on sub2/index.ts (per-probe path)"
+  pn_has '<f p="sub/s.ts" includes="1" afferent="0" instab="0.00" transitive="1">' "an escape above the root resolves to nothing"
+fi
+
 bash "$ROOT/test/lib/jsimportalias.sh" "$BIN" || fail=1
 bash "$ROOT/test/lib/jsimportfacts.sh" "$BIN" || fail=1
 bash "$ROOT/test/lib/jsdefaultimport.sh" "$BIN" || fail=1
