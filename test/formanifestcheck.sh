@@ -15,6 +15,11 @@
 #   (p1) pyproject.toml [project] name and an optional-dependencies extra; (s1) setup.cfg [metadata] name (an UNINDEXED file, found
 #        in an indexed directory); (g1) go.mod module, a require-block dep by its dotted name (`nats.go`), an `// indirect` one silent;
 #   (k1) CMakeLists.txt add_executable / add_library (any case), a ${VAR} name not read
+# ARMS (1b entry points: pyproject / setup.cfg, through epmanifest.h's readers)
+#   (e1) an in-repo example's [project.entry-points.<host>] entry fires on a plugin task even though the group is the repo's own name:
+#        kind="entry-point" group="hostlib", the example's manifest first; (e2) the same names without a plugin / entry-point /
+#        extension word are silent; (e3) a setup.cfg [options.entry_points] group matches by a dot segment (`hostlib.ext`);
+#   (e4) a [project.scripts] key is an installed command: kind="bin", no group=
 # ARMS (caps, dialects, placement)
 #   (cap1) four manifests naming the word: files="4" shown="3" capped="1"; (cap2) four matching lines: rows="4" shown="3" capped="1"
 #   (j1) --json carries no block; (b1) a token budget holds it (held="budget", no rows); (x1) MCP `for`: the same element bytes
@@ -134,6 +139,27 @@ printf 'def make():\n    return 1\n' >"$F/pyrepo/widgetkit/__init__.py"
 printf '[metadata]\nname = gadgets\n\n[options.extras_require]\nfast =\n    ujson\n' >"$F/pyrepo/sub/setup.cfg"
 printf 'def gadget():\n    return 2\n' >"$F/pyrepo/sub/gadgets.py"
 
+# Python entry points: the repo dir and its package are both hostlib; an example plugin package under tests/
+mkdir -p "$F/hostlib/hostlib" "$F/hostlib/tests/plugin" "$F/hostlib/contrib"
+cat >"$F/hostlib/pyproject.toml" <<'T'
+[project]
+name = "hostlib"
+
+[project.scripts]
+hostctl = "hostlib.cli:main"
+T
+printf 'def main():\n    return 0\n' >"$F/hostlib/hostlib/cli.py"
+cat >"$F/hostlib/tests/plugin/pyproject.toml" <<'T'
+[project]
+name = "example_plugin"
+
+[project.entry-points.hostlib]
+my_plugin = "example_plugin:plugin"
+T
+printf 'plugin = object()\n' >"$F/hostlib/tests/plugin/example_plugin.py"
+printf '[metadata]\nname = fancy\n\n[options.entry_points]\nhostlib.ext =\n    fancy = fancy.mod:Fancy\n' >"$F/hostlib/contrib/setup.cfg"
+printf 'class Fancy:\n    pass\n' >"$F/hostlib/contrib/mod.py"
+
 # Go
 mkdir -p "$F/gorepo"
 cat >"$F/gorepo/go.mod" <<'G'
@@ -220,6 +246,12 @@ has k1 cmrepo "start the meterd executable" '<mf p="CMakeLists.txt"' '<r l="3" k
 has k1 cmrepo "link meterlib statically" '<r l="4" kind="library">ADD_LIBRARY\(meterlib STATIC src/lib.c\)</r>'
 lacks k1 cmrepo "the extra library" ''
 
+has e1 hostlib "write and register a hostlib plugin that observes calls" '<mf p="tests/plugin/pyproject.toml" matched="hostlib plugin"' \
+    '<r l="5" kind="entry-point" group="hostlib">my_plugin = &quot;example_plugin:plugin&quot;</r>'
+lacks e2 hostlib "make hostlib calls faster" ''
+has e3 hostlib "ship a hostlib extension" '<mf p="contrib/setup.cfg"' '<r l="6" kind="entry-point" group="hostlib.ext">fancy = fancy.mod:Fancy</r>'
+has e4 hostlib "rename the hostctl command" '<mf p="pyproject.toml" matched="hostctl"' '<r l="5" kind="bin">hostctl = &quot;hostlib.cli:main&quot;</r>'
+
 # ── caps, dialects, placement ────────────────────────────────────────────────────────────────────────────────────────────────
 has cap1 acme "use kafkajs in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
 has cap2 acme "add kafkajs nats and mqtt to brokers" '<mf p="packages/brokers/package.json" matched="[^"]*" rows="4" shown="3" capped="1">'
@@ -251,7 +283,7 @@ if not len( a ) < len( b ): sys.exit( "compact legend %d B is not shorter than f
 if ra.split( "<manifest_rows", 1 )[1] != rb.split( "<manifest_rows", 1 )[1]: sys.exit( "the block rows differ between legends" )
 PY
 then ok "(l1) default legend is shorter than --legend=full; the block rows are the same"; else no "(l1) legend posture"; fi
-for f in a1 l1 b1 n1 cap1 cap2 g1 k1 s1; do
+for f in a1 l1 b1 n1 cap1 cap2 g1 k1 s1 e1 e3; do
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()
