@@ -587,6 +587,16 @@ Discloses: `capped`, `lit_capped`
 | `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
 | `kForVerbatimMaxSites` | `3` | — | MSG-VERBATIM: a cue-less whole text with more source sites is no single message |
 
+### `src/formanifest.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kManifestFileRows` | `3` | — | manifests printed (files= counts every manifest holding an anchor) |
+| `kManifestLineMax` | `120` | — | bytes of a defining line printed (cut="1" when longer) |
+| `kManifestRowsPerFile` | `3` | — | defining lines printed per manifest (rows= counts its matching lines) |
+
 ### `src/formembers.h`
 
 Discloses: **none**

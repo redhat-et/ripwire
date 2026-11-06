@@ -16,6 +16,7 @@
 #include "fordocbody.h"   // FOR-DOC-BODY: a prose task's top-ranked doc sections, before </ctx>
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
+#include "formanifest.h"     // MANIFEST-ROW: the manifest lines a task names, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
 #include "foronesidereach.h"  // ONE-SIDE-REACH: rows that reach one of two named endpoints become tail pointers (read off the captured answer)
 #include "forsiblingdemote.h"  // SIBLING-DEMOTE: deep same-file sibling rows become tail pointers (read off the answer after ONE-SIDE-REACH)
@@ -2997,6 +2998,7 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     }
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0 ).c_str() );
     rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
+    rw::emitRaw( stdout, rw::renderForManifestRows( d.ing, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // MANIFEST-ROW: "" unless the task names a manifest entry
 }
 
 // Runs `run` with stdout pointed at a temporary file and returns what it printed, compacted by the same applyCompactDialect +
