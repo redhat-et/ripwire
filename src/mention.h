@@ -972,21 +972,25 @@ inline std::string asciiLower( std::string_view v )
     return out;
 }
 
-// Is `q` the symbol's scope, its file's stem, or its file's directory name?
-inline bool qualifierPlaces( const IngestResult& ing, const Symbol& s, std::string_view q ) noexcept
+// Does `isName` accept the file's stem (base name without extension) or its parent directory's name? The one path rule the
+// qualifier ("nftables.syncProxyRules") and the path-word namesake (pathWordPlaces) share; each brings its own comparison.
+template <class IsName>
+inline bool fileStemOrDirIs( const IngestResult& ing, std::uint32_t fileId, IsName isName )
 {
-    if( s.scope == q )
-    {
-        return true;
-    }
-    const std::string_view path = rootRelPath( ing, s.fileId );
+    const std::string_view path = rootRelPath( ing, fileId );
     const std::string_view base = baseNameOf( path );
-    if( stripExt( base ) == q )
+    if( isName( stripExt( base ) ) )
     {
         return true;
     }
     const std::string_view dir = path.substr( 0, path.size() - base.size() );
-    return dir.size() > 1 && baseNameOf( dir.substr( 0, dir.size() - 1 ) ) == q;
+    return dir.size() > 1 && isName( baseNameOf( dir.substr( 0, dir.size() - 1 ) ) );
+}
+
+// Is `q` the symbol's scope, its file's stem, or its file's directory name?
+inline bool qualifierPlaces( const IngestResult& ing, const Symbol& s, std::string_view q ) noexcept
+{
+    return s.scope == q || fileStemOrDirIs( ing, s.fileId, [ q ]( std::string_view name ) { return name == q; } );
 }
 
 // keep, per file, the one definition with the best (lensRank desc, id asc) — a total order, so ties are integer-exact.
@@ -1083,14 +1087,8 @@ inline constexpr std::uint32_t kNoNamesakeFile     = 0xFFFFFFFFu;
 // Is `lw` (lower case) the file's stem or its parent directory's name, case-insensitively?
 inline bool pathWordPlaces( const IngestResult& ing, std::uint32_t fileId, std::string_view lw )
 {
-    const std::string_view path = rootRelPath( ing, fileId );
-    const std::string_view base = baseNameOf( path );
-    if( asciiLower( stripExt( base ) ) == lw )
-    {
-        return true;
-    }
-    const std::string_view dir = path.substr( 0, path.size() - base.size() );
-    return dir.size() > 1 && asciiLower( baseNameOf( dir.substr( 0, dir.size() - 1 ) ) ) == lw;
+    const auto isWord = [ lw ]( std::string_view name ) { return asciiLower( name ) == lw; };
+    return fileStemOrDirIs( ing, fileId, isWord );
 }
 
 // The one file of `perFile` (an identifier's definitions, best per file) that a task word other than the identifier names by path,
@@ -1145,6 +1143,47 @@ inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::strin
     return chosen;
 }
 
+// The files (best definition each) that one named identifier lifts at, from its `matches` rows: the qualifier's files when it
+// places any, else the bare reading, narrowed to ONE file when another task word names it by path (namesakeFileByPathWord).
+// Empty when nothing matched. Longer than kMentionMaxNameFiles means ambiguous — the caller lifts nothing.
+inline std::vector<std::pair<std::uint32_t, NodeId>> filesForNamedIdent( const IngestResult& ing, const std::vector<float>& lensRank,
+                                                                         const NamedIdent& n, std::string_view task,
+                                                                         std::span<const std::pair<std::uint32_t, NodeId>> rows )
+{
+    const bool bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
+    std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare, every;   // every: the bare reading uncut, for the namesake choice
+    for( const auto& row : rows )
+    {
+        const Symbol& s = ing.symbols[ row.second ];
+        ASSUME( s.id < lensRank.size() );
+        if( !n.qualifier.empty() && qualifierPlaces( ing, s, n.qualifier ) )
+        {
+            keepBestPerFile( narrowed, s, lensRank );
+        }
+        if( bareFallback && narrowed.empty() && bare.size() <= kMentionMaxNameFiles )
+        {
+            keepBestPerFile( bare, s, lensRank );   // stops growing once ambiguous — the verdict is already decided
+        }
+        if( bareFallback && narrowed.empty() && every.size() <= kNamesakeMaxFiles )
+        {
+            keepBestPerFile( every, s, lensRank );   // stops one past the flood bound: the choice is already refused
+        }
+    }
+    if( !narrowed.empty() )
+    {
+        return narrowed;
+    }
+    if( !bareFallback )
+    {
+        return {};
+    }
+    if( const std::uint32_t f = namesakeFileByPathWord( ing, task, n.name, every ); f != kNoNamesakeFile )
+    {
+        return { *std::ranges::find( every, f, &std::pair<std::uint32_t, NodeId>::first ) };
+    }
+    return bare;
+}
+
 // Resolve each identifier, in `named` order, to at most kMentionMaxNameFiles symbols — each named file's best
 // definition by (lensRank desc, id asc) — skipping an ambiguous or unmatched name, then dropping a declaration
 // beside a real definition and test/fixture-tier targets in files the task does not name (`namedFiles`:
@@ -1156,40 +1195,18 @@ inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float
     EXPECTS( lensRank.size() == ing.symbols.size() );
     ASSUME_NO_ALIAS( lensRank, out );
     const std::vector<std::pair<std::uint32_t, NodeId>> matches = matchNamedIdents( ing, named );
-    std::vector<std::pair<std::uint32_t, NodeId>>       perFile;   // (fileId, best symbol in it) for one identifier
     for( std::size_t m = 0; m < matches.size(); )
     {
         const std::uint32_t k = matches[m].first;
         ASSUME( k < named.size() );
-        const NamedIdent& n            = named[k];
-        const bool        bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
-        std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare, every;   // every: the bare reading uncut, for the namesake choice
-        for( ; m < matches.size() && matches[m].first == k; ++m )
+        std::size_t end = m;
+        while( end < matches.size() && matches[end].first == k )
         {
-            const Symbol& s = ing.symbols[ matches[m].second ];
-            ASSUME( s.id < lensRank.size() );
-            if( !n.qualifier.empty() && qualifierPlaces( ing, s, n.qualifier ) )
-            {
-                keepBestPerFile( narrowed, s, lensRank );
-            }
-            if( bareFallback && narrowed.empty() && bare.size() <= kMentionMaxNameFiles )
-            {
-                keepBestPerFile( bare, s, lensRank );   // stops growing once ambiguous — the verdict is already decided
-            }
-            if( bareFallback && narrowed.empty() && every.size() <= kNamesakeMaxFiles )
-            {
-                keepBestPerFile( every, s, lensRank );   // stops one past the flood bound: the choice is already refused
-            }
+            ++end;
         }
-        const bool placedByQualifier = !narrowed.empty();
-        perFile = placedByQualifier ? std::move( narrowed ) : ( bareFallback ? std::move( bare ) : decltype( bare ){} );
-        if( !placedByQualifier && bareFallback )
-        {
-            if( const std::uint32_t f = namesakeFileByPathWord( ing, task, n.name, every ); f != kNoNamesakeFile )
-            {
-                perFile.assign( 1, *std::ranges::find( every, f, &std::pair<std::uint32_t, NodeId>::first ) );
-            }
-        }
+        std::vector<std::pair<std::uint32_t, NodeId>> perFile =   // (fileId, best symbol in it) for one identifier
+            filesForNamedIdent( ing, lensRank, named[k], task, std::span( matches ).subspan( m, end - m ) );
+        m = end;
         if( perFile.empty() || perFile.size() > kMentionMaxNameFiles )
         {
             continue;   // unmatched, or ambiguous: precision over recall — no lift, no reordering

@@ -17,13 +17,13 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
-no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; : > "$TMP/failed"; }   # the marker file survives a $( ) subshell, where fail=1 would not
 echo "foranchornscheck: BIN=$BIN"
 # every answer an arm reads must exist: a crash or an empty answer is a FAIL, never an absence
 ask(){
     local out rc
     out="$( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null </dev/null )"; rc=$?
-    if [ "$rc" -ne 0 ] || [ -z "$out" ]; then no "ask rc=$rc bytes=${#out}: $2"; printf '@@NOANSWER'; return 0; fi
+    if [ "$rc" -ne 0 ] || [ -z "$out" ]; then no "ask rc=$rc bytes=${#out}: $2" >&2; printf '@@NOANSWER'; return 0; fi
     printf '%s' "$out"
 }
 mcpfor(){ ( cd "$1" && HOME="$TMP/mcphome" TMPDIR="$TMP/mcphome/" python3 - "$BIN" "$1" "$2" <<'X'
@@ -53,7 +53,7 @@ for m in re.finditer(r"<d [^>]*>",b):
         p=re.search(r" p=\"([^\"]*)\"",t); print(p.group(1) if p else "@@NOP"); break
 else: print("@@NONE")' "$2"; }
 has(){ case "$1" in *"$2"*) ok "$3";; *) no "$3 (missing: $2)";; esac; }
-hasnt(){ case "$1" in @@NOANSWER*) no "$3 (no answer)";; *"$2"*) no "$3 (present: $2)";; *) ok "$3";; esac; }
+hasnt(){ case "$1" in @@NOANSWER*|@@NONE*) no "$3 (no answer)";; *"$2"*) no "$3 (present: $2)";; *) ok "$3";; esac; }
 NOCOMMIT='not committed: ranked as words'
 NOSRC='anchor has no source definition'
 
@@ -121,7 +121,7 @@ if [ "$P" = 'pkg/proxy/ipvs/proxier.go' ]; then ok "N4 dir word ipvs: the ipvs n
 A="$( ask "$P4" 'ipvs winkernel syncProxyRules' )"; P="$( firstp "$A" syncProxyRules )"
 case "$P" in pkg/proxy/ipvs/proxier.go|pkg/proxy/winkernel/proxier.go) no "N4 silent two words: one was chosen ($P)";; @@*) no "N4 silent two words: no row";; *) ok "N4 silent two words: no lift ($P)";; esac
 B="$( ask "$P4" 'syncProxyRules' )"; Q="$( ask "$P4" 'proxier syncProxyRules' )"
-if [ "$( firstp "$Q" syncProxyRules )" = "$( firstp "$B" syncProxyRules )" ]; then ok "N4 silent: a word placing all of them chooses none"; else no "N4 silent: 'proxier' moved the first row"; fi
+if [ "$( firstp "$B" syncProxyRules )" = pkg/proxy/iptables/proxier.go ] && [ "$( firstp "$Q" syncProxyRules )" = "$( firstp "$B" syncProxyRules )" ]; then ok "N4 silent: a word placing all of them chooses none"; else no "N4 silent: 'proxier' moved the first row"; fi
 # sibling: Python, the FILE STEM names one of several definitions
 P4P="$TMP/n4py"; mkdir -p "$P4P/store"
 for s in disk memory redis s3cache; do printf 'def flush_all_entries(conn):\n    return conn\n' > "$P4P/store/$s.py"; done
@@ -137,12 +137,12 @@ if [ "$P" = 'store/memory.py' ]; then ok "N4 qualifier: memory.py first as befor
 
 # determinism + well-formed
 A1="$( ask "$P4" 'kube-proxy nftables syncProxyRules' )"; A2="$( ask "$P4" 'kube-proxy nftables syncProxyRules' )"
-if [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ]; then ok "determinism"; else no "determinism"; fi
+if [ "${A1#@@}" = "$A1" ] && [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ]; then ok "determinism"; else no "determinism"; fi
 if command -v xmllint >/dev/null 2>&1; then
     for q in 'kube-proxy nftables syncProxyRules'; do if ask "$P4" "$q" | xmllint --noout - 2>/dev/null; then ok "xml well formed N4"; else no "xml N4"; fi; done
     if ask "$P1" 'thread_knob default' | xmllint --noout - 2>/dev/null; then ok "xml well formed N1"; else no "xml N1"; fi
 else
     echo "  SKIP  xml well formed (no xmllint)"
 fi
-[ "$fail" = 0 ] && { echo "foranchornscheck: PASS"; exit 0; }
+[ "$fail" = 0 ] && [ ! -e "$TMP/failed" ] && { echo "foranchornscheck: PASS"; exit 0; }
 echo "foranchornscheck: FAIL"; exit 1
