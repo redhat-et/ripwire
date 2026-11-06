@@ -172,8 +172,13 @@ measure_set(){
         # The regime guard that makes instrument fix (3) real: a query in the UNCAPPED set that has silently
         # grown past the row cap is no longer measuring the uncapped regime, and would quietly drag the
         # median back toward the capped set's shape. Asserted per query, not assumed.
-        shown="$( printf '%s' "$xml" | sed 's|^.*-->||' | "$GREP" -o ' shown="[0-9]*"' | head -1 | tr -dc '0-9' )"
-        hits="$(  printf '%s' "$xml" | sed 's|^.*-->||' | "$GREP" -o ' hits="[0-9]*"'  | head -1 | tr -dc '0-9' )"
+        # The root tag's window attributes, read after the LEADING legend comment(s) only. This was `sed 's|^.*-->||'`, which is greedy on
+        # a one-line answer: a hit line whose source text holds `-->` (K-WRONGSYM's `held="uncaptured"` legend string in src/, which
+        # also says "buffered") ate the root tag and left shown= and hits= empty. Non-greedy, anchored at the start, repeated.
+        local root_tag
+        root_tag="$( printf '%s' "$xml" | perl -0pe 's/\A(?:<!--.*?-->)+//s' | "$GREP" -o '^<grep [^>]*>' | head -1 )"
+        shown="$( printf '%s' "$root_tag" | "$GREP" -o ' shown="[0-9]*"' | head -1 | tr -dc '0-9' )"
+        hits="$(  printf '%s' "$root_tag" | "$GREP" -o ' hits="[0-9]*"'  | head -1 | tr -dc '0-9' )"
         if [ "$expect_capped" = no ] && [ "${shown:-0}" != "${hits:-1}" ]; then
             no "[$label] $q: expected an UNCAPPED answer but shown=$shown != hits=$hits — this query has outgrown the regime the set exists to measure"
         elif [ "$expect_capped" = no ] && [ "${hits:-0}" -gt "$UNCAPPED_HEADROOM" ]; then

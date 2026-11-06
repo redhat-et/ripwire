@@ -226,6 +226,9 @@ elif t:
     n += sum( len( x.encode() ) for x in re.findall( r" next=\x22--expand=[^\x22]*\x22", t.group( 0 ) ) )
 n += sum( len( x.group( 0 ).encode() ) for x in re.finditer( r" mem=\x22[^\x22]*\x22( mem_more=\x22\d+\x22)?", s ) )
 c = re.search( r"; (d mem=|mem= on an owner d row:)[^;]*?mem_more= (names cut|the member names not listed)", s ); n += len( c.group( 0 ).encode() ) if c else 0
+# K-WRONGSYM: the <syms> block (legend comment + rows) is a present-only, separately allowanced append after the ranked answer (outside est_tokens);
+# the band reads the answer without it, as it reads the body-fold additions above
+r = re.search( r"<!-- (ripwire for )?syms:(?:(?!-->).)*-->(<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)", s, re.S ); n += len( r.group( 0 ).encode() ) if r else 0
 print( n )'; }
 # exempt_ok N: in THIS shell (never inside a $( ), where no()'s fail=1 would be lost) — a non-number is a FAIL and counts 0
 exempt_ok(){ case "$1" in ''|*[!0-9]*) no "(3) fold_exempt could not read an answer (got '$1')"; growth_fail=1; return 1;; esac; return 0; }
