@@ -2615,11 +2615,6 @@ namespace detail
 {
 using PathFormWords = std::span<const std::string_view>;
 
-inline bool pathFormWordIs( PathFormWords w, std::size_t k, std::initializer_list<std::string_view> any )
-{
-    return k < w.size() && graphSubjectWordIs( w[k], any );
-}
-
 // the first `word` after index `from` with a word on each side; w.size() when none
 inline std::size_t pathFormSep( PathFormWords w, std::size_t from, std::string_view word )
 {
@@ -2633,10 +2628,17 @@ inline std::size_t pathFormSep( PathFormWords w, std::size_t from, std::string_v
     return w.size();
 }
 
-// The form's two spans, from = w[fb, fe) and to = w[tb, te), each cut by pathFormSpan; nullopt unless both hold a word and one holds a
+// The form's two spans, from = w[fromRange) and to = w[toRange), each cut by pathFormSpan; nullopt unless both hold a word and one holds a
 // name. The frame = every word not read into a span, case-folded, stopwords and the `from` / `and` separators left out.
-inline std::optional<PathFormSpans> pathFormMake( PathFormWords w, GraphSubjectForm form, std::size_t fb, std::size_t fe, std::size_t tb, std::size_t te )
+struct PathFormRange
 {
+    std::size_t begin = 0, end = 0;   // [begin, end) word indices
+};
+
+inline std::optional<PathFormSpans> pathFormMake( PathFormWords w, GraphSubjectForm form, PathFormRange fromRange, PathFormRange toRange )
+{
+    const auto [ fb, fe ] = fromRange;
+    const auto [ tb, te ] = toRange;
     PathFormSpans p;
     p.form            = form;
     std::size_t fromUsed = fb;
@@ -2667,10 +2669,10 @@ inline std::optional<PathFormSpans> pathFormFromTo( PathFormWords w )
 {
     for( std::size_t i = 0; i + 3 < w.size(); ++i )
     {
-        if( pathFormWordIs( w, i, { "path", "chain" } ) && routeLower( w[i + 1] ) == "from" && graphSubjectPathLeadIn( w.first( i ) ) )
+        if( graphSubjectWordIs( w[i], { "path", "chain" } ) && routeLower( w[i + 1] ) == "from" && graphSubjectPathLeadIn( w.first( i ) ) )
         {
             const std::size_t t = pathFormSep( w, i + 2, "to" );
-            return t < w.size() ? pathFormMake( w, GraphSubjectForm::Path, i + 2, t, t + 1, w.size() ) : std::nullopt;
+            return t < w.size() ? pathFormMake( w, GraphSubjectForm::Path, { i + 2, t }, { t + 1, w.size() } ) : std::nullopt;
         }
     }
     return std::nullopt;
@@ -2679,19 +2681,19 @@ inline std::optional<PathFormSpans> pathFormFromTo( PathFormWords w )
 // F3: how does|do A reach|reaches B | how does|do A get to|lead to B
 inline std::optional<PathFormSpans> pathFormReach( PathFormWords w )
 {
-    if( !pathFormWordIs( w, 0, { "how" } ) || !pathFormWordIs( w, 1, { "does", "do" } ) )
+    if( w.size() < 4 || !graphSubjectWordIs( w[0], { "how" } ) || !graphSubjectWordIs( w[1], { "does", "do" } ) )
     {
         return std::nullopt;
     }
     for( std::size_t k = 3; k + 1 < w.size(); ++k )
     {
-        if( pathFormWordIs( w, k, { "reach", "reaches" } ) )
+        if( graphSubjectWordIs( w[k], { "reach", "reaches" } ) )
         {
-            return pathFormMake( w, GraphSubjectForm::Path, 2, k, k + 1, w.size() );
+            return pathFormMake( w, GraphSubjectForm::Path, { 2, k }, { k + 1, w.size() } );
         }
-        if( pathFormWordIs( w, k, { "get", "lead" } ) && k + 2 < w.size() && routeLower( w[k + 1] ) == "to" )
+        if( graphSubjectWordIs( w[k], { "get", "lead" } ) && k + 2 < w.size() && routeLower( w[k + 1] ) == "to" )
         {
-            return pathFormMake( w, GraphSubjectForm::Path, 2, k, k + 2, w.size() );
+            return pathFormMake( w, GraphSubjectForm::Path, { 2, k }, { k + 2, w.size() } );
         }
     }
     return std::nullopt;
@@ -2702,11 +2704,11 @@ inline std::optional<PathFormSpans> pathFormCommon( PathFormWords w )
 {
     for( std::size_t i = 0; i + 3 < w.size(); ++i )
     {
-        if( pathFormWordIs( w, i, { "common" } ) && pathFormWordIs( w, i + 1, { "caller", "callers" } ) && routeLower( w[i + 2] ) == "of" )
+        if( graphSubjectWordIs( w[i], { "common" } ) && graphSubjectWordIs( w[i + 1], { "caller", "callers" } ) && routeLower( w[i + 2] ) == "of" )
         {
-            const std::size_t lead = i > 0 && pathFormWordIs( w, i - 1, { "lowest", "nearest", "closest" } ) ? i - 1 : i;
+            const std::size_t lead = i > 0 && graphSubjectWordIs( w[i - 1], { "lowest", "nearest", "closest" } ) ? i - 1 : i;
             const std::size_t a    = pathFormSep( w, i + 3, "and" );
-            return graphSubjectPathLeadIn( w.first( lead ) ) && a < w.size() ? pathFormMake( w, GraphSubjectForm::Common, i + 3, a, a + 1, w.size() )
+            return graphSubjectPathLeadIn( w.first( lead ) ) && a < w.size() ? pathFormMake( w, GraphSubjectForm::Common, { i + 3, a }, { a + 1, w.size() } )
                                                                              : std::nullopt;
         }
     }
