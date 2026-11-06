@@ -540,12 +540,14 @@ for _g in \
     fornotesbudgetcheck \
     fornotesjsoncheck \
     forrankordercheck \
+    forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsigspancheck \
     forsoftbudgetcheck \
+    fortailwidecheck \
     forunusedcheck \
     forwidencheck \
     freshclonecheck \
@@ -1046,6 +1048,7 @@ for _g in \
     wrapverbscheck \
     writetargetcheck \
     writtenspellingcheck \
+    xfaliashopcheck \
     xmlwellformed \
     yamllangcheck \
     zonecheck \

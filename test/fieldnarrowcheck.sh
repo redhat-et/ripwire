@@ -606,7 +606,10 @@ printf '%s' "$LEGO" | grep -qE '<impl n="(BaseTy|BuilderType|BuilderTy)"' \
     && no "(t6) --lego=IRBuilder lists an ALIAS as an implementor: $( printf '%s' "$LEGO" | grep -oE '<impl [^>]*>' | tr '\n' ' ' )" \
     || ok "(t6) --lego=IRBuilder lists no alias as an implementor"
 USEST="$( "$BIN" "$FIX5" --uses=IRBuilder --no-cache 2>/dev/null )"
-TEXT="$( printf '%s' "$USEST" | grep -oE '<u [^>]*role="extends"[^>]*/>' | tr '\n' ' ' )"   # rows only: the legend itself spells role="extends"
+# rows only: the legend itself spells role="extends". A row written through an alias (via="alias", xf-alias-hop) is the
+# disclosed alias-site class, not a base-clause fact: it names the alias it is written as and may carry hedge="name"; every
+# other extends row must be a real base clause.
+TEXT="$( printf '%s' "$USEST" | grep -oE '<u [^>]*role="extends"[^>]*/>' | grep -v 'via="alias"' | tr '\n' ' ' )"
 [ -n "$TEXT" ] \
     && no "(t6) --uses=IRBuilder reports an alias as role=\"extends\": $TEXT" \
     || ok "(t6) --uses=IRBuilder has no role=\"extends\" row — an alias is not a base clause"

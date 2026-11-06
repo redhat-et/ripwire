@@ -50,4 +50,11 @@ inline constexpr std::uint64_t fnv1aAbsorb( std::uint64_t hash, char c ) noexcep
     return fnv1aMultiply( hash ^ toByte( c ) );
 }
 
+// Pack a (high, low) pair of 32-bit ids into one u64 that sorts by `high`, then `low` — the ONE such key (contextratio.h's fact
+// streams sort these; aliashop.h keys its per-(file, byte) scope chains on them).
+inline constexpr std::uint64_t packPair( std::uint32_t high, std::uint32_t low ) noexcept
+{
+    return ( std::uint64_t( high ) << 32 ) | std::uint64_t( low );
+}
+
 } // namespace rw::hashutil

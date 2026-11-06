@@ -263,11 +263,19 @@ releases and an unpinned checker reports drift on a tree that was formatted corr
 binary that is not on `PATH` (Homebrew's LLVM is not, on macOS, by default).
 
 **clang-tidy's broad report is advisory, and must stay that way; one narrow subset gates.**
-`.clang-tidy` carries an empty `WarningsAsErrors`, CI runs it with `continue-on-error`, and the config
+`.clang-tidy` carries an empty `WarningsAsErrors`, CI runs it with `continue-on-error` (on the nightly schedule and
+on `workflow_dispatch` only: measured at ~1 h 55 min, it no longer delays every PR), and the config
 is curated down to `bugprone-*` / `clang-analyzer-*` / `performance-*` / `misc-dangling-*` /
 `misc-redundant-expression`. Its default catalogue argues for a different C++ than the data-oriented one
 §3 and G2 mandate — POD and SoA, C arrays, 32-bit handles, `ASSUME` instead of exceptions — so read its
 output as a to-triage list, never as a queue of defects.
+
+The nightly report is acted on, not just logged: `scripts/tidyadvisory_diff.py` diffs it against
+`.clang-tidy-baseline.txt` (one row per finding: file, check and the trimmed source line, so unrelated edits do
+not churn it), and the nightly's `tidy-advisory-report` job keeps ONE issue (label `clang-tidy-advisory`) listing
+the rows that are new. Fix a row and delete it from the baseline, or accept it and leave it there; regenerate from the
+run's `tidy-advisory` artifact (`tidy-advisory-baseline-candidate.txt`). It never gates and never touches the issue
+when clang-tidy crashed or the report is empty.
 
 The exception is `scripts/tidycheck.sh`, a separate CI step with `--warnings-as-errors='*'`. It runs
 only checks whose every finding is a silently wrong answer and that sat at **zero rows** on the five CI
