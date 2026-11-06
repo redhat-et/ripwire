@@ -974,6 +974,67 @@ inline std::optional<ExemplarFamily> featureFamily( const ManifestDoc& doc, cons
     }
     return fam.members.size() >= kExemplarFamilyMin ? std::optional( std::move( fam ) ) : std::nullopt;
 }
+
+// A `#[cfg(feature = "x")]` line USES a feature (it gates an item); it is not where the feature is defined or documented.
+inline bool cfgUseLine( std::string_view line ) noexcept
+{
+    const std::string_view t = trimWs( line );
+    return t.starts_with( "#[cfg" ) || t.starts_with( "#![cfg" ) || t.contains( "cfg!(" );
+}
+
+// Does `line` hold `name` as a whole word (no letter, digit, `_` or `-` beside it)?
+inline bool holdsWord( std::string_view line, std::string_view name ) noexcept
+{
+    const auto wordByte = []( char c )
+    { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' || c == '-'; };
+    for( std::size_t at = line.find( name ); at != std::string_view::npos; at = line.find( name, at + 1 ) )
+    {
+        const bool before = at > 0 && wordByte( line[at - 1] ), after = at + name.size() < line.size() && wordByte( line[at + name.size()] );
+        if( !before && !after )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A touch row whose line is a `#[cfg(feature = ..)]` use gets the first line of its file that names an anchored feature and is no cfg use,
+// the table row or doc line that defines it (axum's `//! `multipart` | ..` feature table, not a `#[cfg(feature = "form")]` beside a module).
+// A line that names the feature in backticks or quotes beats a bare mention. Only the printed rows are read; no other line is touched.
+inline void retargetCfgTouchLines( const IngestResult& ing, const std::vector<std::string_view>& features, std::vector<ExemplarTouch>& touch )
+{
+    std::vector<std::array<std::string, 3>> forms; // HOISTING: per feature, its bare, backticked and quoted spellings, built once
+    for( const std::string_view f : features )
+    {
+        forms.push_back( { std::string( f ), "`" + std::string( f ) + "`", "\"" + std::string( f ) + "\"" } );
+    }
+    for( std::size_t i = 0; i < touch.size() && i < kExemplarTouchRows; ++i )
+    {
+        if( !cfgUseLine( touch[i].text ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> txt = docparse::detail::readWholeFile( diskPath( ing, touch[i].fileId ) );
+        if( !txt )
+        {
+            continue;
+        }
+        int bestRank = 2;
+        darkflags::forEachLine( *txt, [&]( std::string_view line, std::uint32_t n )
+                                {
+            for( const auto& [bare, ticked, quoted] : forms )
+            {
+                const int rank = line.contains( ticked ) || line.contains( quoted ) ? 0 : holdsWord( line, bare ) ? 1
+                                                                                                                 : 2;
+                if( rank < bestRank && !cfgUseLine( line ) )
+                {
+                    bestRank = rank;
+                    touch[i].line = n;
+                    touch[i].text = std::string( trimWs( line ) );
+                }
+            } } );
+    }
+}
 } // namespace manifest_detail
 
 inline constexpr std::string_view kForManifestRowsLegend =
@@ -1041,7 +1102,18 @@ inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& 
     }
     if( const std::optional<ExemplarFamily> fam = featureFamily( doc, m ) )
     {
-        out += "<feature_touch n=\"" + std::to_string( fam->members.size() ) + "\">" + touchListXml( ing, *fam, exemplarTouchList( ing, *fam ) ) + "</feature_touch>";
+        std::vector<ExemplarTouch> touch = exemplarTouchList( ing, *fam );
+        std::vector<std::string_view> anchored; // the features the task names: the lines that define or document them
+        for( const ManifestHit& h : m.hits )
+        {
+            const ManifestEntry& en = doc.entries[h.entry];
+            if( h.anchor && ( en.kind == ManifestKind::Feature || en.kind == ManifestKind::Extra ) )
+            {
+                anchored.push_back( en.name );
+            }
+        }
+        retargetCfgTouchLines( ing, anchored, touch );
+        out += "<feature_touch n=\"" + std::to_string( fam->members.size() ) + "\">" + touchListXml( ing, *fam, touch ) + "</feature_touch>";
     }
     return out + "</mf>";
 }
