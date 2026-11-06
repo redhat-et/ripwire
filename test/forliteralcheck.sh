@@ -2121,9 +2121,9 @@ if has "$L" 'def="pvOpts.PageLimit"' && has "$L" 'writes="1"' && has "$L" '<ld p
 A="$( fl '--for=how does the kubelet use the --max-pods flag?' )"; L="$( flit <<<"$A" )"
 if has "$L" 'writes="2"' && has "$L" '<ld p="pkg/apis/v1beta1/defaults.go"' && has "$L" '<ld p="pkg/apis/fuzzer/fuzzer.go"'; then ok "F23 [G] twin: both owner-typed writes (Config) are read: writes=2 as before"; else no "F23 owner twin: $( grep -o 'writes="[0-9]*"' <<<"$L" )"; fi
 A="$( fl '--for=kubelet --max-pods' )"
-if ! has "$A" 'try=N' && ! has "$A" "the task's Nth literal"; then ok "F24 [P] the flag legend clause carries no try=N sentence on a fire with no try="; else no "F24 try sentence present without try="; fi
-A="$( fl '--for=where is the --squeezego flag, and the --max-pods flag; also SQUEEZE_NOPE_CONST_X and the --alias-width option' )"
-if has "$A" 'shape="flag"'; then if has "$A" 'try="' && ! has "$A" "the task's Nth literal" ; then no "F25 try= printed with no try legend"; else ok "F25 [G] a try= (when printed) has its sentence, none without (conditional sentence)"; fi; else ok "F25 [G] (no flag fire in this wording: nothing to check)"; fi
+if has "$A" 'shape="flag"' && has "$A" 'ld = a constant write' && ! has "$A" 'try=' && ! has "$A" "the task's Nth literal"; then ok "F24 [P] the flag legend clause carries no try=N sentence on a fire with no try="; else no "F24 try sentence present without try= (or no flag fire)"; fi
+A="$( fl '--for=where is SQUEEZE_NOPE_CONST_X set and what does the --squeezego flag do' )"
+if has "$A" 'shape="flag"' && has "$A" 'try="2"' && has "$A" "the task's Nth literal anchored"; then ok "F25 [G] twin: a flag lit that is the task's 2nd literal says try=\"2\" and its own sentence rides beside it"; else no "F25 try= twin: $( flit <<<"$A" | cut -c1-200 )"; fi
 A="$( fl '--for=how does the --cache-sizing option work' )"
 if has "$A" 'ld = a constant write' && has "$A" 'a name match, no type check' && has "$A" 'also an invocation or a lookup'; then ok "F26 [P] the flag legend: sites include invocations and lookups, ld is a name match of the owner type"; else no "F26 flag legend wording"; fi
 A="$( fl '--for=what does the --workerthreads flag do' )"; L="$( flit <<<"$A" )"
