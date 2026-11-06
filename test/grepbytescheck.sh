@@ -127,9 +127,12 @@ QUERIES_CAPPED=(stale cache buffer resize DISCLOSE)
 # and train 3 (resolveAtSeed 21, langOfPath 31, RankedGraph 12, BindSite 19, findByField 10).
 # BindSite (74 hits at the l6-iface merge, past the headroom: the type is in every bind-pushing signature) was swapped for
 # rankGraphTeleport (24 hits: one function and its doc mentions).
+# GrepHit (68 hits on main b059ac593, 75 once forliteral-3 added its matches: any identifier the --grep code itself
+# uses grows with every grep change) was swapped for AstQuerySpec (34 hits on main and on that lane: a type of the
+# AST-query verb, which no --grep or --for change touches).
 UNCAPPED_HEADROOM=70
 QUERIES_UNCAPPED=(appendCdataSafe truncateUtf8WithEllipsis resolveAtSeed langOfPath RankedGraph McpPageArgs
-                  GrepHit GrepRawHit lineStarts rankGraphTeleport findByField xmllint)
+                  AstQuerySpec GrepRawHit lineStarts rankGraphTeleport findByField xmllint)
 
 # ── presence guards (CONTRIBUTING.md §2: a gate that cannot observe what it asserts is green for the
 #    wrong reason) — before trusting a byte count, prove the feature that is supposed to produce it fired ──
