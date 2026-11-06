@@ -715,22 +715,150 @@ inline void dedupeCands( const IngestResult& ing, std::vector<Cand>& cands )
         { return bodyless( leader ) || bodyless( c ) ? Fold::Whole : Fold::Heads; } ); // overloads are not one function; a declaration and its definition are
 }
 
-// A C/C++ declaration in a header (no body) and the definition of the same (scope, name) in another file are one function to look at: the
-// declaration folds into the definition, which keeps the row. A name with no definition among the candidates keeps its declaration (the
-// definition is not in the shown files); same-named definitions in sibling files stay apart.
+// A C/C++ declaration in a header (no body) and the definition of the same (scope, name) in another file are one function to look at
+// when the definition provably answers that header (DeclHome): the declaration folds into the definition, which keeps the row. A
+// definition with no such tie is a namesake, so both rows stay and the header keeps its lead. A name with no definition among the
+// candidates keeps its declaration (the definition is not in the shown files); same-named definitions in sibling files stay apart.
 inline bool bodylessHeaderDecl( const IngestResult& ing, const Symbol& s )
 {
     return bodylessSymbol( s ) && quality::isHeaderPath( rootRelPath( ing, s.fileId ) ); // .h/.hpp/.hh/.hxx: C-family headers, read as C++ or C
 }
-inline void collapseDeclarations( const IngestResult& ing, std::vector<Cand>& cands )
+
+// A path up to its last dot when the extension is a C-family source or header one (foo.c, foo.cc, foo.cpp, foo.cxx, foo.m, foo.mm and
+// the four header spellings); "" for any other file, so a Python or Go namesake never shares a header's stem.
+inline std::string_view cFamilyStem( std::string_view path ) noexcept
+{
+    const std::size_t dot = path.rfind( '.' );
+    const std::size_t slash = path.find_last_of( "/\\" );
+    if( dot == std::string_view::npos || ( slash != std::string_view::npos && dot < slash ) )
+    {
+        return {};
+    }
+    const std::string_view ext = path.substr( dot + 1 );
+    constexpr std::array<std::string_view, 10> kExts { "c", "cc", "cpp", "cxx", "m", "mm", "h", "hh", "hpp", "hxx" };
+    return std::ranges::contains( kExts, ext ) ? path.substr( 0, dot ) : std::string_view {};
+}
+
+// K-DECL-IDENT (CodeRabbit on #555): does a definition's file answer a header's declaration? Yes when it is the header itself, shares the
+// header's path stem (src/foo.h and src/foo.cc: one directory, one name up to the last dot), or reaches the header over #include edges,
+// directly or through any number of headers (an umbrella header like tmux.h). The walk reads the graph's precise adjacency first
+// (Graph::importAdj: a quote include resolved at the includer's directory, the buildGraph closure) and, only when that misses, the
+// adjacency with the include-root probe too (`#include "source/server/server.h"` written from the repo root, the envoy shape), built once
+// per answer on that first miss. An angle include and an include no rule resolves draw no edge, so such a pair stays two rows. One object
+// per answer; each (definition file, header) pair is walked once (memo), with one reused mark array.
+class DeclHome
+{
+public:
+    DeclHome( const IngestResult& ing, const Graph& g ) : ing_( ing ), g_( g ) {}
+
+    bool answers( std::uint32_t defFile, std::uint32_t declFile )
+    {
+        if( defFile == declFile )
+        {
+            return true;
+        }
+        const std::string_view stem = cFamilyStem( rootRelPath( ing_, declFile ) );
+        if( !stem.empty() && stem == cFamilyStem( rootRelPath( ing_, defFile ) ) )
+        {
+            return true;
+        }
+        const std::uint64_t key = ( std::uint64_t( defFile ) << 32 ) | declFile;
+        const auto seen = std::ranges::find( memo_, key, &std::pair<std::uint64_t, bool>::first );
+        if( seen != memo_.end() )
+        {
+            return seen->second;
+        }
+        bool yes = reaches( g_.importAdj, defFile, declFile );
+        if( !yes )
+        {
+            if( !rootedBuilt_ )
+            {
+                rooted_ = buildPreciseIncludeAdj( ing_ ); // the --deps adjacency: quote includes also probed from the include roots
+                rootedBuilt_ = true;
+            }
+            yes = reaches( rooted_, defFile, declFile );
+        }
+        memo_.emplace_back( key, yes );
+        return yes;
+    }
+
+private:
+    bool reaches( const rw::FileAdjacency& adj, std::uint32_t from, std::uint32_t to )
+    {
+        if( from >= adj.size() || to >= adj.size() )
+        {
+            return false;
+        }
+        if( mark_.size() < adj.size() )
+        {
+            mark_.assign( adj.size(), 0 );
+            epoch_ = 0;
+        }
+        ++epoch_; // a fresh visit stamp per walk; at most a few walks per answer, so it never wraps
+        stack_.assign( 1, from );
+        mark_[from] = epoch_;
+        while( !stack_.empty() )
+        {
+            const std::uint32_t v = stack_.back();
+            stack_.pop_back();
+            for( const std::uint32_t w : adj[v] )
+            {
+                if( w == to )
+                {
+                    return true;
+                }
+                if( w < adj.size() && mark_[w] != epoch_ )
+                {
+                    mark_[w] = epoch_;
+                    stack_.push_back( w );
+                }
+            }
+        }
+        return false;
+    }
+
+    const IngestResult& ing_;
+    const Graph& g_;
+    rw::FileAdjacency rooted_;
+    bool rootedBuilt_ = false;
+    std::vector<std::uint32_t> mark_;
+    std::uint32_t epoch_ = 0;
+    std::vector<std::uint32_t> stack_;
+    std::vector<std::pair<std::uint64_t, bool>> memo_; // (defFile << 32 | declFile, answers)
+};
+
+// Groups by (scope, name), definitions first (lowest id first), then declarations. A header declaration folds into the group's first
+// definition its header is answered by (DeclHome); with none it stays a row.
+inline void collapseDeclarations( const IngestResult& ing, const Graph& g, std::vector<Cand>& cands )
 {
     const auto decl = [&]( const Cand& c )
     { return bodylessHeaderDecl( ing, ing.symbols[c.id] ); };
-    foldByKey(
-        cands, [&]( const Cand& c )
-        { return scopeName( ing, c ); }, [&]( const Cand& c )
-        { return std::tuple( decl( c ), c.id ); }, [&]( const Cand& leader, const Cand& c )
-        { return decl( c ) && !decl( leader ) ? Fold::Whole : Fold::Keep; } );
+    std::ranges::sort( cands, [&]( const Cand& a, const Cand& b )
+                       { return orderLess( std::tuple( scopeName( ing, a ), decl( a ), a.id ), std::tuple( scopeName( ing, b ), decl( b ), b.id ) ); } );
+    DeclHome home( ing, g );
+    std::vector<Cand> kept;
+    kept.reserve( cands.size() );
+    std::size_t groupStart = 0;
+    for( const Cand& c : cands )
+    {
+        if( kept.empty() || scopeName( ing, kept[groupStart] ) != scopeName( ing, c ) )
+        {
+            groupStart = kept.size();
+        }
+        if( decl( c ) )
+        {
+            const std::uint32_t declFile = ing.symbols[c.id].fileId;
+            const auto def = std::find_if( kept.begin() + std::ptrdiff_t( groupStart ), kept.end(), [&]( const Cand& k )
+                                           { return !decl( k ) && home.answers( ing.symbols[k.id].fileId, declFile ); } );
+            if( def != kept.end() )
+            {
+                foldInto( *def, c );
+                continue;
+            }
+        }
+        kept.push_back( c );
+    }
+    cands = std::move( kept );
 }
 
 struct Picks
@@ -866,7 +994,7 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     std::vector<fd::Cand> cands = fd::collectCands( ing, sf, a.answer, a.task );
     fd::creditCallees( ing, g, head, cands );
     fd::dedupeCands( ing, cands );
-    fd::collapseDeclarations( ing, cands );
+    fd::collapseDeclarations( ing, g, cands );
     const fd::Picks picks = fd::pickRows( ing, g, cands );
     if( picks.byName.empty() && picks.byCallee.empty() )
     {
