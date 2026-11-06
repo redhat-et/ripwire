@@ -250,6 +250,16 @@ C
 printf 'int main(void) { return 0; }\n' >"$F/cmk/src/main.c"
 printf 'int lib(void) { return 1; }\n' >"$F/cmk/src/lib.c"
 
+# Rank: the crate that DEFINES a named thing comes before the crates that only depend on it, even with more anchors of their own
+mkdir -p "$F/ws/crates/editor/src" "$F/ws/crates/ui_a/src" "$F/ws/crates/ui_b/src"
+printf '[workspace]\nmembers = ["crates/*"]\n' >"$F/ws/Cargo.toml"
+printf '[package]\nname = "editor"\n' >"$F/ws/crates/editor/Cargo.toml"
+for c in ui_a ui_b; do
+    printf '[package]\nname = "%s"\n\n[dependencies]\neditor.workspace = true\n\n[dev-dependencies]\neditor = { workspace = true, features = ["test"] }\n' "$c" >"$F/ws/crates/$c/Cargo.toml"
+    printf 'pub fn %s() -> u32 { 1 }\n' "$c" >"$F/ws/crates/$c/src/lib.rs"
+done
+printf 'pub fn edit() -> u32 { 1 }\n' >"$F/ws/crates/editor/src/lib.rs"
+
 # feature_touch line: the file's first line that defines or documents the anchored feature, not a #[cfg(feature = ..)] use of another
 mkdir -p "$F/cfgf/src"
 printf '[package]\nname = "cfgf"\n\n[features]\njson = []\nmultipart = []\nform = []\ntokio = []\n' >"$F/cfgf/Cargo.toml"
@@ -338,6 +348,9 @@ has r1e shop "add a new route matcher like find-my-way" '<mf p="packages/router/
 # ── feature_touch line ───────────────────────────────────────────────────────────────────────────────────────────────────────
 has f4a cfgf "add a new cargo feature like multipart" '<touch p="src/lib.rs:5" share="4/4">//! `multipart` \| multipart forms</touch>'
 lacks f4a cfgf "add a new cargo feature like multipart" 'cfg\(feature'
+
+# ── rank ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+has f2a ws "add a new action to the editor package" '<manifest_rows files="3"><mf p="crates/editor/Cargo.toml"' '<mf p="crates/ui_a/Cargo.toml"' '<mf p="crates/ui_b/Cargo.toml"'
 
 # ── parser shapes ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 lacks f3a poet "the version dependency" ''
