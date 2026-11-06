@@ -2804,17 +2804,17 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         r.ok = false;
         return false;
     };
-    // v49: each family's count must equal the head's copy, which the warm planner reserved from before this body was read.
-    const auto countIs = [ &r ]( std::uint32_t recordCount, std::uint32_t headCount ) noexcept
+    // v49: each family's count must also equal the head's copy, which the warm planner reserved from before this body was read.
+    const auto familyCountOk = [ &r, &countFits ]( std::uint32_t recordCount, std::uint32_t headCount, std::size_t minRecordBytes ) noexcept
     {
-        if( recordCount == headCount )
+        if( recordCount != headCount )
         {
-            return true;
+            DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                      "ingest: cache record family count differs from its head — cache treated as corrupt" );
+            r.ok = false;
+            return false;
         }
-        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
-                  "ingest: cache record family count differs from its head — cache treated as corrupt" );
-        r.ok = false;
-        return false;
+        return countFits( recordCount, minRecordBytes );
     };
 
     std::string_view rel;
@@ -2855,7 +2855,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         }
     }
     const std::uint32_t nd = r.u32();
-    if( !countIs( nd, head.counts.defs ) || !countFits( nd, kMinDefRecordBytes ) )
+    if( !familyCountOk( nd, head.counts.defs, kMinDefRecordBytes ) )
     {
         return false;
     }
@@ -2865,7 +2865,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ffOut.defs.push_back( readDef( r, captureValueUses, fileDict ) );
     }
     const std::uint32_t nr = r.u32();
-    if( !countIs( nr, head.counts.refs ) || !countFits( nr, kMinRefRecordBytes ) )
+    if( !familyCountOk( nr, head.counts.refs, kMinRefRecordBytes ) )
     {
         return false;
     }
@@ -2875,7 +2875,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ffOut.refs.push_back( readRef( r ) );
     }
     const std::uint32_t ni = r.u32();
-    if( !countIs( ni, head.counts.incs ) || !countFits( ni, kMinIncRecordBytes ) )
+    if( !familyCountOk( ni, head.counts.incs, kMinIncRecordBytes ) )
     {
         return false;
     }
@@ -2890,7 +2890,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ffOut.incs.push_back( Include { 0, isAngle, isLazy, isSymbolic, byte, isValueUse, r.str() } );
     }
     const std::uint32_t nb = r.u32();
-    if( !countIs( nb, head.counts.binds ) || !countFits( nb, kMinBindRecordBytes ) )
+    if( !familyCountOk( nb, head.counts.binds, kMinBindRecordBytes ) )
     {
         return false;
     }
@@ -2900,7 +2900,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ffOut.binds.push_back( readBind( r ) );
     }
     const std::uint32_t na = r.u32();
-    if( !countIs( na, head.counts.ffis ) || !countFits( na, kMinFfiRecordBytes ) )
+    if( !familyCountOk( na, head.counts.ffis, kMinFfiRecordBytes ) )
     {
         return false;
     }
@@ -2910,7 +2910,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ffOut.ffis.push_back( readFfi( r ) );
     }
     const std::uint32_t nrd = r.u32();
-    if( !countIs( nrd, head.counts.routeDefs ) || !countFits( nrd, kMinRouteDefRecordBytes ) )
+    if( !familyCountOk( nrd, head.counts.routeDefs, kMinRouteDefRecordBytes ) )
     {
         return false;
     }
@@ -2920,7 +2920,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ffOut.routeDefs.push_back( readRouteDef( r ) ); // B6.3
     }
     const std::uint32_t nru = r.u32();
-    if( !countIs( nru, head.counts.routeUses ) || !countFits( nru, kMinRouteUseRecordBytes ) )
+    if( !familyCountOk( nru, head.counts.routeUses, kMinRouteUseRecordBytes ) )
     {
         return false;
     }
@@ -2930,7 +2930,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ffOut.routeUses.push_back( readRouteUse( r ) ); // B6.3
     }
     const std::uint32_t nco = r.u32();
-    if( !countIs( nco, head.counts.constOpens ) || !countFits( nco, kMinConstOpenRecordBytes ) )
+    if( !familyCountOk( nco, head.counts.constOpens, kMinConstOpenRecordBytes ) )
     {
         return false;
     }
