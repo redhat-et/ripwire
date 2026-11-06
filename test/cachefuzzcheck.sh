@@ -203,7 +203,8 @@ hash_off  = path_off + path_len
 size_off  = hash_off + 8
 mtime_off = size_off + 8
 ctime_off = mtime_off + 8
-nd_off    = ctime_off + 8 + 24   # past ctimeNs and the six FileHealth u32s (v20 macroBlanked, v44 useBoundsBlanked): the LEAN def-record count
+hd_off    = ctime_off + 8 + 24   # past ctimeNs and the six FileHealth u32s (v20 macroBlanked, v44 useBoundsBlanked): the v49 HEAD's family counts (defs first)
+nd_off    = hd_off + 8 * 4       # past the eight head family counts: the BODY's LEAN def-record count (readFileRecord's first count)
 
 mutations = {}
 
@@ -258,6 +259,30 @@ def mut_huge_defcount(b):
     p = bytearray(b[:payload_len]); struct.pack_into("<I", p, nd_off, 0xFFFFFFF0); return with_recomputed_trailer(p)
 mutations["huge_def_count_recomputed_checksum"] = mut_huge_defcount
 
+# The v49 family-count guards, each isolated by a rebuilt frame (Part 1b below also pins cached_records = N-1: exactly
+# record[0] refused). The head's counts are what the warm planner reserves from; the body's are what readFileRecord
+# reserves from; the two must agree and each must fit the record's own bytes. Mutants (a)-(d) are the review's.
+def head_count(slot):
+    return hd_off + 4 * slot          # defs refs incs binds ffis routeDefs routeUses constOpens
+def mut_huge_head_defcount(b):        # the planner's headCountsFit: reserve() never sees it
+    p = bytearray(b[:payload_len]); struct.pack_into("<I", p, head_count(0), 0xFFFFFFF0); return with_recomputed_trailer(p)
+mutations["huge_head_def_count_recomputed_checksum"] = mut_huge_head_defcount
+def mut_huge_head_refcount(b):
+    p = bytearray(b[:payload_len]); struct.pack_into("<I", p, head_count(1), 0x7FFFFFF0); return with_recomputed_trailer(p)
+mutations["huge_head_ref_count_recomputed_checksum"] = mut_huge_head_refcount
+def mut_huge_both_defcount(b):        # head and body agree on an impossible count: headCountsFit refuses before any body byte is read
+    p = bytearray(b[:payload_len]); struct.pack_into("<I", p, head_count(0), 0xFFFFFFF0); struct.pack_into("<I", p, nd_off, 0xFFFFFFF0); return with_recomputed_trailer(p)
+mutations["huge_head_and_body_def_count_recomputed_checksum"] = mut_huge_both_defcount
+def mut_head_defcount_off_by_one(b):  # headCountsFit passes; the body disagrees: readFileRecord's head==body check
+    p = bytearray(b[:payload_len]); v = struct.unpack_from("<I", p, head_count(0))[0]; struct.pack_into("<I", p, head_count(0), v + 1); return with_recomputed_trailer(p)
+mutations["head_def_count_plus_one_recomputed_checksum"] = mut_head_defcount_off_by_one
+def mut_head_refcount_off_by_one(b):  # the same lie in another family (refs): headCountsFit passes, readFileRecord's head==body check refuses
+    p = bytearray(b[:payload_len]); v = struct.unpack_from("<I", p, head_count(1))[0]; struct.pack_into("<I", p, head_count(1), v + 1); return with_recomputed_trailer(p)
+mutations["head_ref_count_plus_one_recomputed_checksum"] = mut_head_refcount_off_by_one
+def mut_head_zeroed(b):               # the head says factless while the body has rows
+    p = bytearray(b[:payload_len]); struct.pack_into("<8I", p, hd_off, 0, 0, 0, 0, 0, 0, 0, 0); return with_recomputed_trailer(p)
+mutations["head_counts_zeroed_recomputed_checksum"] = mut_head_zeroed
+
 def mut_overflow_size(b):
     p = bytearray(b[:payload_len]); struct.pack_into("<Q", p, size_off, 0xFFFFFFFFFFFFFFFF); return with_recomputed_trailer(p)
 mutations["overflow_size_field_recomputed_checksum"] = mut_overflow_size
@@ -274,6 +299,10 @@ def mut_string_len_exceeds(b):
     p = bytearray(b[:payload_len]); struct.pack_into("<I", p, HDR, 0x7FFFFFFF); return with_recomputed_trailer(p)
 mutations["string_length_exceeds_blob_recomputed_checksum"] = mut_string_len_exceeds
 
+def mut_key_len_fits_but_differs(b):   # a stored key length that fits the record but is not the file's path length: the planner refuses it before sizing its second read
+    p = bytearray(b[:payload_len]); struct.pack_into("<I", p, HDR, path_len + 8); return with_recomputed_trailer(p)
+mutations["key_length_differs_but_fits_recomputed_checksum"] = mut_key_len_fits_but_differs
+
 def mut_string_len_wraparound(b):
     p = bytearray(b[:payload_len]); struct.pack_into("<I", p, HDR, 0xFFFFFFFF); return with_recomputed_trailer(p)
 mutations["string_length_wraparound_recomputed_checksum"] = mut_string_len_wraparound
@@ -281,8 +310,9 @@ mutations["string_length_wraparound_recomputed_checksum"] = mut_string_len_wrapa
 # -- checksum-valid-but-garbage-payload: corrupt a wide swath of the body with a FIXED (non-random)
 #    deterministic byte pattern, then recompute the trailer over the corrupted body. --
 def mut_garbage_payload(b):
-    # the RECORD region only, with a rebuilt frame: every record digest matches, so each record is
-    # actually handed to readFileRecord and every one of its guards is what has to refuse it.
+    # the RECORD region only, with a rebuilt frame: every record digest matches, so each record reaches the planner's
+    # key/head check (the garbage starts at the first record's key, so no head survives to be believed); the
+    # body guards are isolated by the family-count arms above and by Part 1b.
     p = bytearray(b[:payload_len])
     x = 0x2545F4914F6CDD1D & 0xFF
     for i in range(min(HDR + 8, TABLE_OFF), TABLE_OFF):
@@ -403,9 +433,52 @@ run_one_dev(){
     ok "[$name] exit 0, output byte-identical to cold, stderr bounded"
 }
 
+# a run rewrites a rejected blob in place (the self-heal), so Part 1b needs the doctored blobs as they were written
+PRISTINE="$TMP/mutations_pristine"; cp -R "$MUTDIR" "$PRISTINE"
 for name in "${MUT_NAMES[@]}"; do
     run_one_dev "$name" "$MUTDIR/$name.cache"
 done
+
+# ── Part 1b: the v49 family-count guards are REFUSED CHEAPLY, not merely survived ───────────────────────────────
+# Part 1 above proves exit 0 and a byte-identical answer; a count that reached reserve() could still pass that on an
+# overcommitting allocator. Each checksum-valid family-count mutant below is run under the allocation bound (ulimit -v on
+# Linux, ASan's max_allocation_size_mb on the instrumented binary) and must (a) exit 0 with the --no-cache answer and
+# (b) report cached_records = N-1: exactly record[0], the one carrying the count, was refused and reparsed while the
+# rest of the blob stood. The control (the unmodified blob, same command) reports N, so (b) cannot pass by every
+# record missing. This is the review's S2 (familyCountOk, headCountsFit unpinned) and S1 (the huge-count arm drifted
+# onto the head): the planner's bound, the head==body check and readFileRecord's own bound each have an arm.
+echo
+echo "=== Part 1b: v49 family-count mutants — refused cheaply, one record reparsed ==="
+FAMCNT_BOUND="$( bound_mode_of "$BIN" )"
+famcnt_cached(){   # $1 = cache file, $2 = out, $3 = err
+    RIPWIRE_CACHE_STATS=1 bounded "$FAMCNT_BOUND" "$BIN" "$FIXTURE" --cache="$1" --no-stable >"$2" 2>"$3"
+}
+cp "$GOOD" "$TMP/famcnt_control.cache"
+famcnt_cached "$TMP/famcnt_control.cache" "$TMP/famcnt_control.xml" "$TMP/famcnt_control.err"; rc=$?
+FAM_N="$( grep -oE 'cached_records=[0-9]+' "$TMP/famcnt_control.err" | head -1 | cut -d= -f2 )"
+if [ "$rc" -eq 0 ] && [ -n "$FAM_N" ] && [ "$FAM_N" -gt 1 ] && cmp -s "$TMP/truth.xml" "$TMP/famcnt_control.xml"; then
+    ok "[famcnt control] the unmodified blob is used whole under the bound (cached_records=$FAM_N)"
+    for name in huge_def_count_recomputed_checksum huge_head_def_count_recomputed_checksum huge_head_ref_count_recomputed_checksum \
+                huge_head_and_body_def_count_recomputed_checksum head_def_count_plus_one_recomputed_checksum head_ref_count_plus_one_recomputed_checksum \
+                head_counts_zeroed_recomputed_checksum key_length_differs_but_fits_recomputed_checksum; do
+        cp "$PRISTINE/$name.cache" "$TMP/famcnt_$name.cache"
+        famcnt_cached "$TMP/famcnt_$name.cache" "$TMP/famcnt_$name.xml" "$TMP/famcnt_$name.err"; rc=$?
+        got="$( grep -oE 'cached_records=[0-9]+' "$TMP/famcnt_$name.err" | head -1 | cut -d= -f2 )"
+        if [ "$rc" -eq 97 ]; then
+            skip "[famcnt:$name] the address-space limit could not be set here"
+        elif [ "$rc" -ne 0 ]; then
+            no "[famcnt:$name] exit $rc — the count reached an allocation (or a crash) before a bound refused it"; sed -n '1,4p' "$TMP/famcnt_$name.err"
+        elif ! cmp -s "$TMP/truth.xml" "$TMP/famcnt_$name.xml"; then
+            no "[famcnt:$name] OUTPUT POISONED — differs from the --no-cache answer"
+        elif [ "${got:-none}" != "$(( FAM_N - 1 ))" ]; then
+            no "[famcnt:$name] cached_records=${got:-none}, expected $(( FAM_N - 1 )) (exactly record[0] refused of $FAM_N) — the guard did not fire, or fired on the wrong record"
+        else
+            ok "[famcnt:$name] refused cheaply: exit 0, byte-identical, cached_records=$got of $FAM_N (one record reparsed)"
+        fi
+    done
+else
+    no "[famcnt control] the unmodified blob did not warm-hit cleanly (rc=$rc, cached_records='${FAM_N:-none}') — the family-count arms cannot conclude"
+fi
 
 # ── filesystem-shape mutations (not byte content — the cache PATH itself is hostile) ────────────────
 echo
@@ -930,7 +1003,7 @@ for i in range(n):
         sites.setdefault(cls, (p, blob[p])); skip(1)
     def site32(cls, rel):                                                 # a u32 slot `rel` bytes ahead; p does not move
         sites.setdefault(cls, (p + rel, struct.unpack_from("<I", blob, p + rel)[0]))
-    s(); skip(4 * 8 + 6 * 4)                                              # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44)
+    s(); skip(4 * 8 + 6 * 4 + 8 * 4)                                      # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44), head family counts (8 u32 since v49)
     for _ in range(u32()):                                                # defs (LEAN family: no subtoken rows)
         site32("def.ppAlt", 9 * 4); site32("def.params", 13 * 4)
         if "def.paramsMin" not in pmin and struct.unpack_from("<I", blob, p + 13 * 4)[0] >= 1:   # B2.2 pair rule: a def with params >= 1
