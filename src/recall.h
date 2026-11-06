@@ -326,6 +326,12 @@ inline constexpr std::size_t kRecallHeaderReserveBytes = 320;
 inline constexpr std::size_t kRecallTruncNoteBytes     = 128;
 inline constexpr std::size_t kRecallMinBodyBytes       = 240;
 inline constexpr std::size_t kDefaultRecallMaxTokens   = 8000;
+// DOCS-TOPK6: how many docs --recall and MCP memory_recall serve when the caller names no --top-k/top_k.
+// ONE constant for both doors (it was a literal 8 in verbs_for.h and mcp.h, a drift risk). 6, not 8: the
+// 8000-token budget is water-filled across the served docs, so fewer docs means a bigger share each, and
+// the measured misses at 8 were mostly "right file, answering section past its ~2.9 KB share"
+// (reports/docs-quick-s0.md: dev 34 rows Complete 11 -> 13 at k=6, held 14 rows 3 -> 4, bytes +2.5 %).
+inline constexpr int         kDefaultRecallTopK        = 6;
 
 // §C4 — the smallest slice worth giving a document A SHARE OF THE BUDGET for: ~350 tokens, one screen of
 // prose. Distinct from kRecallMinBodyBytes above, and the distinction is the whole point. kRecallMinBodyBytes
@@ -803,7 +809,7 @@ inline std::string formatRecallCappedNote( const RecallShape& shape, std::size_t
     {
         // cut-fix E: the note is ONE byte string on both doors (recallparitycheck), so it names both spellings of
         // each knob — the CLI flag and the MCP memory_recall argument — rather than handing an MCP caller a flag.
-        why += "raise --top-k/top_k (default 8) for " + std::to_string( topKOmitted ) + " more";
+        why += "raise --top-k/top_k (default " + std::to_string( kDefaultRecallTopK ) + ") for " + std::to_string( topKOmitted ) + " more";
     }
     if( budgetOmitted > 0 )
     {

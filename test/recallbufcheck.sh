@@ -263,7 +263,7 @@ if grep -aqE '\(capped: [0-9]+ of [0-9]+ relevant document files omitted' "$TMP/
 else
     no "d2 formatRecallCappedNote: note missing/garbled: $( grep -aoE '\(capped.{0,80}' "$TMP/d2.out" | head -1 | cat -v )"
 fi
-grep -aqE 'raise --top-k/top_k \(default 8\) for [0-9]+ more; raise --max-tokens/budget_tokens or narrow the query for [0-9]+ more \(~[0-9]+-byte budget\)\)' "$TMP/d2.out" \
+grep -aqE 'raise --top-k/top_k \(default 6\) for [0-9]+ more; raise --max-tokens/budget_tokens or narrow the query for [0-9]+ more \(~[0-9]+-byte budget\)\)' "$TMP/d2.out" \
     && ok "d2: BOTH attribution clauses present and intact (widest 'why')" \
     || no "d2: the two-clause 'why' was not produced — $( grep -aoE 'omitted —.{0,160}' "$TMP/d2.out" | head -1 | cat -v )"
 D2_CTRL="$( clean_bytes "$TMP/d2.out" )"

@@ -1,0 +1,5 @@
+### Changed — `--recall` and MCP `memory_recall` serve 6 docs by default, not 8
+
+With no `--top-k` (CLI) or `top_k` (MCP), recall now serves the 6 best documents instead of 8. The 8000-token body ceiling is unchanged and is still divided across the served documents, so each one gets a bigger share: the usual miss at 8 was the right file with its answering section past that file's share. The default is now one constant shared by both front doors, and the capped note, `--help` and the MCP tool description name it.
+
+Measured on a 48-question docs set (34 development, 14 held out; Markdown sites, Markdown references, reStructuredText and HTML from six open-source projects), graded by a mechanical anchor rule: development questions fully answered went from 11 to 13 and held-out from 3 to 4; held-out questions with none of the answer printed went from 4 to 1 (development: 11, unchanged). Mean answer size on the development set rose 2.5 % (14.2 KB to 14.6 KB). One question got worse: its second answer sat in the 8th-ranked document, a release-notes page that is no longer served by default. Ask with `--top-k=8` to get the old behaviour.

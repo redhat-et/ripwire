@@ -4971,8 +4971,8 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // H9: the TOKEN count is what travels now — recall.h's recallBytesForTokens owns the one conversion,
         // so the header discloses the ceiling actually applied instead of only the 8000 default.
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
-        // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
-        const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
+        // the --limit refusal both already promised this). DOCS-TOPK6: the default is rw::kDefaultRecallTopK.
+        const int                 recallK = cfg.topKExplicit ? cfg.topK : rw::kDefaultRecallTopK;
         // recallFor (recall.h) is the ONE rank-then-build call MCP `memory_recall` also makes — the recall
         // lens's pathFieldDefaultW=1 and its root-prefix derivation live there, so the two front doors cannot
         // drift apart again (gate: test/recallparitycheck.sh).
