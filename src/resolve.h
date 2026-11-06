@@ -1015,7 +1015,10 @@ inline bool tomlStartsInsideString( std::string_view line, char& open )
             break;
         }
         const char q = open != 0 ? open : line[ i ];
-        if( ( q == '"' || q == '\'' ) && line.compare( i, 3, std::string( 3, q ) ) == 0 )
+        // starts_with on the tail, not compare( i, 3, … ): a tail shorter than 3 makes libstdc++'s compare subtract 3 from a smaller
+        // size_t, which the asan leg's unsigned-overflow check aborts on.
+        const std::string_view triple = q == '"' ? std::string_view( "\"\"\"" ) : std::string_view( "'''" );
+        if( ( q == '"' || q == '\'' ) && line.substr( i ).starts_with( triple ) )
         {
             open = open == 0 ? q : char( 0 );
             i += 3;

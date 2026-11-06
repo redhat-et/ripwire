@@ -291,12 +291,12 @@ inline bool commentOnly( std::string_view line, CommentSyntax syntax ) noexcept
 // read here, the quoted path undecoded (a language is told by its extension, which an escape does not reach).
 inline CommentSyntax commentSyntaxOfHeader( std::string_view plusHeader ) noexcept
 {
-    if( plusHeader.compare( 0, 7, "+++ \"b/" ) == 0 )
+    if( plusHeader.starts_with( "+++ \"b/" ) )
     {
         const std::string_view quoted = plusHeader.substr( 7 );
         return commentSyntaxOfPath( quoted.substr( 0, quoted.rfind( '"' ) ) );
     }
-    if( plusHeader.compare( 0, 6, "+++ b/" ) != 0 )
+    if( !plusHeader.starts_with( "+++ b/" ) )
     {
         return CommentSyntax{};
     }
@@ -428,23 +428,23 @@ inline RenameHarvest mineRenamePairs( const std::string& root )
             inHunk = false;
             return;
         }
-        if( raw.compare( 0, 5, "diff " ) == 0 )
+        if( raw.starts_with( "diff " ) )
         {
             inHunk = false;
         }
         // Every file/hunk header ENDS the current hunk. The "---"/"+++" tests must precede the single-'-'
         // and single-'+' tests below, or a file header is read as a removed/added line, and they apply outside a hunk only
         // (`++counter;` added is the line `+++counter;`; `--n;` removed is `---n;`).
-        if( !inHunk && raw.size() >= 3 && ( raw.compare( 0, 3, "---" ) == 0 || raw.compare( 0, 3, "+++" ) == 0 ) )
+        if( !inHunk && ( raw.starts_with( "---" ) || raw.starts_with( "+++" ) ) )
         {
             detail::foldHunk( hunk, votes, harvest );
-            if( raw.compare( 0, 3, "+++" ) == 0 )
+            if( raw.starts_with( "+++" ) )
             {
                 hunk.syntax = detail::commentSyntaxOfHeader( raw );
             }
             return;
         }
-        if( raw.size() >= 2 && raw.compare( 0, 2, "@@" ) == 0 )
+        if( raw.starts_with( "@@" ) )
         {
             detail::foldHunk( hunk, votes, harvest );
             inHunk = true;
