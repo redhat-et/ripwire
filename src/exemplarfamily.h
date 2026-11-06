@@ -8,7 +8,7 @@
 // on those rows are where the siblings are registered.
 //
 // WHEN (present-only). The task reads as adding one more X (exemplarTasksOf): a creation verb (add, create, register, write, implement,
-// introduce, define, make, build) with an article (a, an, another), `I need|want a new X`, `another X like ..`, or `a new X` after a
+// introduce, define) with an article (a, an, another), `I need|want a new X`, `another X like ..`, or `a new X` after a
 // creation verb (`add support for a new database (a new dialect)`). X is the noun phrase after it, up to a stop word (that, to, for, in,
 // like, where, ..) or punctuation; its last word is the head. A head that names a change to one existing symbol (parameter, argument,
 // field, test, comment, ..) is no family. The block prints only when a family resolves.
@@ -156,7 +156,7 @@ inline std::vector<std::string> taskWords( std::string_view task )
     return out;
 }
 
-inline constexpr std::array<std::string_view, 9> kVerbs { "add", "create", "register", "write", "implement", "introduce", "define", "make", "build" };
+inline constexpr std::array<std::string_view, 7> kVerbs { "add", "create", "register", "write", "implement", "introduce", "define" }; // not build / make: `build a target`, `build an executor` (fire list)
 inline constexpr std::array<std::string_view, 3> kArticles { "a", "an", "another" };
 // The phrase ends at one of these: what follows says where or how, not what.
 inline constexpr std::array<std::string_view, 31> kPhraseStops { "that", "which", "who", "to", "for", "in", "into", "on", "with", "so", "where",
@@ -918,6 +918,259 @@ inline std::optional<ExemplarFamily> exemplarFamily( const IngestResult& ing, co
     return best;
 }
 
+// ── E3a TOUCH LIST (co-mention) ────────────────────────────────────────────────────────────────────────────────────────────────
+// Where a new X must also go: the files that mention at least half of the family (kExemplarTouchShareNum / kExemplarTouchShareDen),
+// outside the members' own files. A member is mentioned by any of its FORMS, folded (lowercase, `_` and `-` dropped, so snake_case,
+// CamelCase, kebab-case and UPPER_CASE meet): its name, its registered name (alt), and its file's module stem (a file holding the
+// member: `mod upper;`, `import './contrib/bracketMatching/browser/bracketMatching'`). Forms shorter than kExemplarFormMinBytes and
+// generic stems (index, main, utils, ..) are not read. Test paths, test-helper directories, docs (.md .rst .adoc .txt .html),
+// vendored trees, generated files (a generator banner, or `generated` / `.pb.` / `_pb2` in the path) and files marked frozen or
+// baseline (a path segment holding `baseline` or `frozen`) are not read. Ranked by share, then path.
+// HOISTING: the forms are hashed once into one sorted array; each file is read and tokenized once, and every token is one binary
+// search (files x bytes, never files x members x lines).
+inline constexpr std::size_t kExemplarTouchRows = 5; // <touch> rows printed; touch_total= counts all
+inline constexpr std::size_t kExemplarTouchLineMax = 120; // bytes of the mentioning line printed (cut="1" when longer)
+inline constexpr std::size_t kExemplarFormMinBytes = 4; // a folded form shorter than this is not a name (`id`, `max`)
+
+struct ExemplarTouch
+{
+    std::uint32_t fileId = 0;
+    std::size_t mentioned = 0; // distinct members the file mentions (its own members not counted)
+    std::uint32_t line = 0; // the line to copy: the first naming the typical member, else the first code line, an import, a comment
+    std::string text; // that line, trimmed
+};
+
+namespace exemplar_detail
+{
+inline std::uint64_t foldHashStep( std::uint64_t h, char c ) noexcept
+{
+    return ( h ^ std::uint64_t( lexLowerByte( static_cast<unsigned char>( c ) ) ) ) * 1099511628211ull;
+}
+inline constexpr std::uint64_t kFoldHashSeed = 14695981039346656037ull;
+
+// The folded hash of a spelling and its folded length: `_` and `-` dropped, letters lowercased.
+inline std::pair<std::uint64_t, std::size_t> foldHash( std::string_view s ) noexcept
+{
+    std::uint64_t h = kFoldHashSeed;
+    std::size_t n = 0;
+    for( const char c : s )
+    {
+        if( c != '_' && c != '-' )
+        {
+            h = foldHashStep( h, c );
+            ++n;
+        }
+    }
+    return { h, n };
+}
+
+
+// A file stem that names no one member: a package entry, a helpers file.
+inline constexpr std::array<std::string_view, 14> kGenericStems { "index", "main", "util", "utils", "types", "type", "base", "common",
+                                                                  "helpers", "helper", "mod", "lib", "init", "__init__" };
+// The heads of an import / include / re-export line.
+inline constexpr std::array<std::string_view, 8> kImportLineHeads { "import ", "from ", "#include", "use ", "pub use ", "export * from", "export {", "require(" };
+
+// (form hash, member) for every member's forms, sorted: the one lookup structure of the scan.
+inline std::vector<std::pair<std::uint64_t, std::uint32_t>> memberForms( const IngestResult& ing, const ExemplarFamily& fam )
+{
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> forms;
+    const auto add = [&]( std::string_view spelling, std::uint32_t m )
+    {
+        const auto [h, n] = foldHash( spelling );
+        if( n >= kExemplarFormMinBytes )
+        {
+            forms.emplace_back( h, m );
+        }
+    };
+    for( std::uint32_t m = 0; m < fam.members.size(); ++m )
+    {
+        const ExemplarMember& mem = fam.members[m];
+        add( mem.name, m );
+        add( mem.alt, m );
+        if( fam.rule != ExemplarRule::Registry ) // a registry entry's place is the registry itself, not a file of its own
+        {
+            const std::string_view rel = rootRelPath( ing, mem.fileId );
+            std::string_view stem = rel.substr( rel.rfind( '/' ) + 1 );
+            stem = stem.substr( 0, stem.find( '.' ) );
+            if( stem == "index" || stem == "mod" || stem == "__init__" )
+            {
+                const std::string_view dir = includerDir( rel );
+                stem = dir.substr( dir.rfind( '/' ) + 1 );
+            }
+            if( !std::ranges::contains( kGenericStems, stem ) )
+            {
+                add( stem, m );
+            }
+        }
+    }
+    std::ranges::sort( forms );
+    forms.erase( std::unique( forms.begin(), forms.end() ), forms.end() );
+    return forms;
+}
+
+// A file the touch scan does not read (see the E3a banner).
+inline bool touchSkipPath( std::string_view p ) noexcept
+{
+    static constexpr std::array<std::string_view, 7> kDocExt { ".md", ".rst", ".adoc", ".txt", ".html", ".htm", ".mdx" };
+    static constexpr std::array<std::string_view, 8> kSkipSeg { "vendor/", "third_party/", "node_modules/", "testing/", "testdata/", "fixtures/", "mocks/", "fake/" };
+    if( isTestPath( p ) || std::ranges::any_of( kDocExt, [&]( std::string_view e )
+                                                { return endsWithLowerAscii( p, e ); } ) ||
+        std::ranges::any_of( kSkipSeg, [&]( std::string_view s )
+                             { return hasDirSegment( p, s ); } ) )
+    {
+        return true;
+    }
+    static constexpr std::array<std::string_view, 6> kMarked { "generated", ".pb.", "_pb2", "baseline", "frozen", ".min." };
+    return std::ranges::any_of( kMarked, [&]( std::string_view m )
+                                { return p.find( m ) != std::string_view::npos; } );
+}
+
+
+// One file's mentions: distinct members (not its own) and the line to copy.
+// Every token of a file, folded and hashed: identifier runs ([A-Za-z0-9_], `_` dropped); a run joined to the previous one by a single
+// '-' also yields the joined (kebab) form. `onLine( next )` at each newline with the offset the next line starts at.
+template<class OnToken, class OnLine>
+inline void forEachFoldedToken( std::string_view txt, OnToken&& onToken, OnLine&& onLine )
+{
+    std::uint64_t run = kFoldHashSeed, chain = kFoldHashSeed;
+    bool inRun = false, chained = false;
+    for( std::size_t i = 0; i <= txt.size(); ++i )
+    {
+        const char c = i < txt.size() ? txt[i] : '\n';
+        if( isIdentChar( c ) )
+        {
+            run = c == '_' ? run : foldHashStep( run, c );
+            chain = c == '_' ? chain : foldHashStep( chain, c );
+            inRun = true;
+            continue;
+        }
+        if( inRun )
+        {
+            onToken( run );
+        }
+        if( inRun && chained )
+        {
+            onToken( chain );
+        }
+        const bool joins = inRun && c == '-' && i + 1 < txt.size() && isIdentChar( txt[i + 1] );
+        chained = joins;
+        chain = joins ? chain : kFoldHashSeed;
+        run = kFoldHashSeed;
+        inRun = false;
+        if( c == '\n' && i < txt.size() )
+        {
+            onLine( i + 1 );
+        }
+    }
+}
+
+// A mentioning line's rank as the line to copy (lower is better): one naming the typical member (members[0]), any other code
+// line, an import line, a comment (a license header that happens to hold a member's word: risingwave's `version` function).
+inline int touchLineRank( std::string_view line, bool typical ) noexcept
+{
+    static constexpr std::array<std::string_view, 5> kComment { "//", "#", "/*", "*", "--" };
+    line = trimWs( line );
+    if( std::ranges::any_of( kComment, [&]( std::string_view c )
+                             { return line.starts_with( c ); } ) &&
+        !line.starts_with( "#include" ) && !line.starts_with( "#[" ) )
+    {
+        return 3;
+    }
+    const bool imports = std::ranges::any_of( kImportLineHeads, [&]( std::string_view h )
+                                              { return line.starts_with( h ); } );
+    return imports ? 2 : typical ? 0
+                                 : 1;
+}
+
+// The forms of one family, hashed: a sorted (hash, member) array and a 64 Ki-bit presence map in front of it, so a token that
+// names no member (nearly all of them) costs one bit test, not a binary search.
+struct TouchForms
+{
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> forms;
+    std::vector<std::uint64_t> bits = std::vector<std::uint64_t>( 1024, 0 );
+    explicit TouchForms( std::vector<std::pair<std::uint64_t, std::uint32_t>> f ) : forms( std::move( f ) )
+    {
+        for( const auto& [h, m] : forms )
+        {
+            bits[( h >> 6 ) & 1023] |= std::uint64_t( 1 ) << ( h & 63 );
+        }
+    }
+    bool maybe( std::uint64_t h ) const noexcept { return ( bits[( h >> 6 ) & 1023] >> ( h & 63 ) ) & 1; }
+};
+
+// One file's mentions: distinct members (not its own) and the line to copy (touchLineRank, then the earliest).
+inline ExemplarTouch scanTouchFile( std::uint32_t f, std::string_view txt, const ExemplarFamily& fam, const TouchForms& tf, std::vector<std::uint32_t>& stamp )
+{
+    ExemplarTouch out { .fileId = f };
+    std::uint32_t ln = 1;
+    std::size_t lineStart = 0, bestStart = std::string_view::npos;
+    int bestRank = 4;
+    const auto hit = [&]( std::uint64_t h )
+    {
+        if( !tf.maybe( h ) )
+        {
+            return;
+        }
+        for( auto it = std::ranges::lower_bound( tf.forms, std::pair( h, std::uint32_t( 0 ) ) ); it != tf.forms.end() && it->first == h; ++it )
+        {
+            if( fam.members[it->second].fileId == f )
+            {
+                continue; // a file's own members are not mentions
+            }
+            out.mentioned += stamp[it->second] == f + 1 ? 0 : 1; // a member counts once
+            stamp[it->second] = f + 1;
+            const int rank = touchLineRank( txt.substr( lineStart, txt.find( '\n', lineStart ) - lineStart ), it->second == 0 );
+            if( rank < bestRank )
+            {
+                bestRank = rank;
+                bestStart = lineStart;
+                out.line = ln;
+            }
+        }
+    };
+    forEachFoldedToken( txt, hit, [&]( std::size_t next )
+                        {
+        ++ln;
+        lineStart = next; } );
+    if( bestStart != std::string_view::npos )
+    {
+        out.text = std::string( trimWs( txt.substr( bestStart, txt.find( '\n', bestStart ) - bestStart ) ) );
+    }
+    return out;
+}
+} // namespace exemplar_detail
+
+// The touch list of a family: every file at or over half of the members, by share then path.
+inline std::vector<ExemplarTouch> exemplarTouchList( const IngestResult& ing, const ExemplarFamily& fam )
+{
+    using namespace exemplar_detail;
+    const TouchForms forms( memberForms( ing, fam ) );
+    std::vector<std::uint32_t> stamp( fam.members.size(), 0 );
+    std::vector<ExemplarTouch> rows;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view rel = rootRelPath( ing, f );
+        if( touchSkipPath( rel ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> txt = docparse::detail::readWholeFile( diskPath( ing, f ) );
+        if( !txt || txt->size() > kDefaultMaxFileBytes || docparse::hasGeneratedMarker( *txt ) )
+        {
+            continue;
+        }
+        ExemplarTouch t = scanTouchFile( f, *txt, fam, forms, stamp );
+        if( t.mentioned * 2 >= fam.members.size() )
+        {
+            rows.push_back( std::move( t ) );
+        }
+    }
+    std::ranges::sort( rows, [&]( const ExemplarTouch& a, const ExemplarTouch& b )
+                       { return std::tuple( b.mentioned, rootRelPath( ing, a.fileId ) ) < std::tuple( a.mentioned, rootRelPath( ing, b.fileId ) ); } );
+    return rows;
+}
+
 inline constexpr std::string_view kForExemplarFamilyLegend =
     "<!-- ripwire for exemplar_family: the task reads as adding one more of=; these are the EXISTING siblings it would join, read off the "
     "index (not a guarantee that a new one needs each row). rule= how they were grouped: base (implementors of key=), registry (the entries "
@@ -925,8 +1178,41 @@ inline constexpr std::string_view kForExemplarFamilyLegend =
     "(names ending in key= in one directory). key_p= where key= is defined (file:line), scope= the directory the members were narrowed "
     "to (the deepest holding half of them), n= the members in scope (test code excluded). <m> n= a member, p=file:line, loc= its lines "
     "(a registry entry has none); the first <m> is the typical sibling (nearest the median size); shown= and capped=\"1\" when fewer <m> rows "
-    "are printed than n=. A registry or instance candidate over 4000 lines is not read. The answer above is unchanged, and these bytes are "
-    "not in est_tokens -->";
+    "are printed than n=. A registry or instance candidate over 4000 lines is not read. <touch_list> the files outside the members' own that "
+    "mention at least half of them: where existing siblings are registered or listed (a registry, a name list, an exhaustive match, an "
+    "import list), a candidate to edit, not a guarantee; a member is matched by its name, its registered name or its file's stem, with "
+    "snake, Camel, kebab and UPPER forms folded. total= such files, shown= and capped=\"1\" when fewer rows are printed. <touch> "
+    "p=file:line the line to copy: the first naming the typical member (the first <m>), else the first other code line mentioning one, "
+    "an import line or a comment only when no code line does; share=members mentioned/n, its text that "
+    "line, cut=\"1\" when cut to 120 bytes. Test, docs, vendored, generated, frozen and baseline files are not read. The answer above is "
+    "unchanged, and these bytes are not in est_tokens -->";
+
+// The <touch_list> element of a family: total=, the cap, and one <touch> row per listing file (see the legend).
+inline std::string touchListXml( const IngestResult& ing, const ExemplarFamily& fam, const std::vector<ExemplarTouch>& touch )
+{
+    std::vector<char> esc;
+    const auto e = [&]( std::string_view s )
+    { return std::string( escapeXml( s, esc ) ); };
+    std::string out = "<touch_list total=\"" + std::to_string( touch.size() ) + "\"";
+    if( touch.size() > kExemplarTouchRows )
+    {
+        out += " shown=\"" + std::to_string( kExemplarTouchRows ) + "\" capped=\"1\""; // CAP-DISCLOSE
+    }
+    out += touch.empty() ? "/>" : ">";
+    for( std::size_t i = 0; i < touch.size() && i < kExemplarTouchRows; ++i )
+    {
+        const ExemplarTouch& r = touch[i];
+        std::size_t keep = std::min( r.text.size(), kExemplarTouchLineMax );
+        while( keep > 0 && keep < r.text.size() && ( static_cast<unsigned char>( r.text[keep] ) & 0xC0 ) == 0x80 )
+        {
+            --keep; // never split a UTF-8 sequence
+        }
+        out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\" share=\"" + std::to_string( r.mentioned ) + "/" + std::to_string( fam.members.size() ) + "\"";
+        out += ( keep < r.text.size() ? " cut=\"1\">" : ">" ) + e( std::string_view( r.text ).substr( 0, keep ) ) + "</touch>";
+    }
+    out += touch.empty() ? "" : "</touch_list>";
+    return out;
+}
 
 inline std::string forExemplarFamilyXml( const IngestResult& ing, const ExemplarTask& t, const ExemplarFamily& fam )
 {
@@ -953,6 +1239,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
         out += "<m n=\"" + e( m.name ) + "\" p=\"" + loc( m.fileId, m.line ) + "\"";
         out += fam.rule != ExemplarRule::Registry ? " loc=\"" + std::to_string( m.loc ) + "\"/>" : std::string( "/>" );
     }
+    out += touchListXml( ing, fam, exemplarTouchList( ing, fam ) );
     return out + "</exemplar_family>";
 }
 

@@ -380,6 +380,8 @@ Discloses: `capped`
 | `kExemplarBodyScanMaxLoc` | `4000` | — | a registry or instance candidate longer than this is not read (runaway guard) |
 | `kExemplarMemberRows` | `4` | — | <m> rows printed (typical first); the rest are counted in n= |
 | `kExemplarPhraseWordsMax` | `4` | — | words of X read after the trigger |
+| `kExemplarTouchLineMax` | `120` | — | bytes of the mentioning line printed (cut="1" when longer) |
+| `kExemplarTouchRows` | `5` | — | <touch> rows printed; touch_total= counts all |
 
 ### `src/expand.h`
 
