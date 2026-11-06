@@ -47,6 +47,7 @@
 #include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
+#include "formanifest.h" // MANIFEST-ROW: the `for` verb's manifest lines (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2966,6 +2967,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
         out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
+        out.insert( out.size() - 6, renderForManifestRows( ing, task, /*held=*/budgetTokens > 0 ) );   // MANIFEST-ROW, the CLI twin's renderer
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
