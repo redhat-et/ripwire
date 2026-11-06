@@ -1886,8 +1886,8 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
         { return rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, /*rankOrder=*/true ); }, in.rootArg ); docPick.fires && !docPick.fileIds.empty() )
     {
         // served first, the block takes the budget the answer left (est_tokens is the answer's); held= names what a budget kept out
-        const std::string docBody = rw::renderForDocBodyJson( rw::ForDocBodyInputs{ in.ing, in.graph->outOff, in.graph->outTargets, in.task, docPick, in.redact, in.rootArg },
-                                                              rw::ForDocBodyBudget{ in.tokenBudget, estTokens } );
+        const std::string docBody = rw::renderForDocBody( rw::ForDocBodyInputs{ in.ing, in.graph->outOff, in.graph->outTargets, in.task, docPick, in.redact, in.rootArg },
+                                                           rw::ForDocBodyBudget{ in.tokenBudget, estTokens }, rw::ForDocDialect::Json );
         std::fwrite( docBody.data(), 1, docBody.size(), out );
     }
     std::fputs( "}", out );
@@ -4804,8 +4804,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const rw::ForDocBodyPick docPick = rw::pickForDocBody( ing, cfg.forTask, shownSigIds, [ & ]
             { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg );
             const std::size_t        docBudget = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : forBodyCeiling ? std::size_t( rootFinish.maxTokens ) : 0u;   // the --max-tokens the root was priced with
-            const std::string        docBody = rw::renderForDocBodyXml( rw::ForDocBodyInputs{ ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg },
-                                                                        rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens } );
+            const std::string        docBody = rw::renderForDocBody( rw::ForDocBodyInputs{ ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg },
+                                                                     rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens }, rw::ForDocDialect::Xml );
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
 

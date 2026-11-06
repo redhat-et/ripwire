@@ -25,6 +25,10 @@
 #        around the task's words (cut="1" range=S-E/N), the allowance mostly used
 #   (s4) the cue-list claim: handle_upload_3, MAX_RETRIES, __init__, HTTPServer and getX read as prose and fire, as the legend says
 #   (e1) hostile doc text (]]> C0 bytes, an XML-shaped heading, a long line, an ampersand path): XML well formed, JSON strict-valid
+#   (p1) cost: a doc section of ONE very long line (1.3 MB) is served in a bounded time, with and without a token budget (the scan back to a
+#        line start ran once per task-word hit: hits x line length, 127 s at 2.6 MB); the time limit makes a quadratic scan red
+#   (b2) also: held_bytes is exact (bytes + held_bytes == the unbudgeted block's bytes) and the block's est_tokens is the price recomputed from
+#        its own bytes (markup 2.5 B per token, text 3.8), not the binary's word: the held-whole block is priced the same way (h2)
 #   (z1) a binary that crashes or prints nothing turns every positive arm red (each run's rc and </ctx> are checked)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -129,7 +133,7 @@ done
 
 # (h1) token budget: held
 if ans "$TMP/h1.xml" "$DFX" "--for=$TASK" --token-budget=4000 \
-   && grep -q '<doc_body match="lexical" held="budget" files="3" next="--for=&apos;how do the docs describe the retry policy for failed uploads&apos;"><f p="[^"]*"/><f p="[^"]*"/><f p="[^"]*"/></doc_body></ctx>$' "$TMP/h1.xml" \
+   && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3" next="--for=&apos;how do the docs describe the retry policy for failed uploads&apos;"><f p="[^"]*"/><f p="[^"]*"/><f p="[^"]*"/></doc_body></ctx>$' "$TMP/h1.xml" \
    && ! grep -q '<b t="section"' "$TMP/h1.xml"
 then ok "(h1) --token-budget below the answer holds the block: held=\"budget\", three f p= rows, next= the same call, no section text"; else no "(h1) held: $( grep -o '<doc_body.*' "$TMP/h1.xml" | head -c 300 )"; fi
 
@@ -164,7 +168,7 @@ if grep -q '<!-- ripwire for doc_body: ' "$TMP/x1.xml" && grep -q '<doc_body mat
    && grep -q '<b t="section" p="docs/[a-z]*\.md" l="[0-9]*" e="[0-9]*" n="[^"]*" rank="[0-9]*" of="[0-9]*"' "$TMP/x1.xml" && grep -q '</doc_body></ctx>$' "$TMP/x1.xml"
 then ok "(x1) MCP for: the block, its legend and section rows, last before </ctx>"; else no "(x1) MCP: $( grep -o '<doc_body[^>]*>' "$TMP/x1.xml" | head -c 300 )"; fi
 mcp ',"budget_tokens":4000' >"$TMP/x2.xml"
-if grep -q '<doc_body match="lexical" held="budget" files="3"' "$TMP/x2.xml" && ! grep -q '<b t="section"' "$TMP/x2.xml"; then ok "(x2) MCP budget_tokens: held"; else no "(x2) MCP held: $( grep -o '<doc_body.*' "$TMP/x2.xml" | head -c 300 )"; fi
+if grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3"' "$TMP/x2.xml" && ! grep -q '<b t="section"' "$TMP/x2.xml"; then ok "(x2) MCP budget_tokens: held"; else no "(x2) MCP held: $( grep -o '<doc_body.*' "$TMP/x2.xml" | head -c 300 )"; fi
 
 
 # ── honesty marker, price, rank order ─────────────────────────────────────────────────────────────────────────────
@@ -206,26 +210,38 @@ PY
 then ok "(r1) per file the ranks are distinct and within of=; the Retry policy section of docs/retries.md is rank 1"; else no "(r1) rank order"; fi
 
 # ── budgets ───────────────────────────────────────────────────────────────────────────────────────────────────────
+FULLB=$( python3 -c 'import re,sys; m=re.search(r"<doc_body [^>]* bytes=\"(\d+)\"", open(sys.argv[1],encoding="utf8").read()); print(m.group(1) if m else 0)' "$TMP/f1.xml" )
 estof(){ python3 -c 'import re,sys; m=re.search(r"est_tokens=\"(\d+)\"", open(sys.argv[1],encoding="utf8").read()); print(m.group(1) if m else 0)' "$1"; }
-# invariant checker: the block (when served) prices at most the budget left after the answer
-chk_fit(){ python3 - "$1" "$2" <<'PY'
+# invariant checker: a block that prints is priced from its own bytes (markup 2.5 B per token, text 3.8: the block's word is not trusted),
+# a served one fits what the answer left of the budget, and its held_bytes are exact (bytes + held_bytes == the unbudgeted block's bytes, $3)
+chk_fit(){ python3 - "$1" "$2" "${3:-0}" <<'PY'
 import re, sys
-s = open( sys.argv[1], encoding="utf8" ).read(); budget = int( sys.argv[2] )
+s = open( sys.argv[1], encoding="utf8" ).read(); budget = int( sys.argv[2] ); full = int( sys.argv[3] )
 ans = int( re.search( r'est_tokens="(\d+)"', s ).group(1) )
-m = re.search( r'<doc_body match="lexical" est_tokens="(\d+)"', s )
-if m:
-    assert int( m.group(1) ) <= max( 0, budget - ans ), ( "block over the budget left", m.group(1), budget, ans )
+i = s.find( "<!-- ripwire for doc_body" )
+if i >= 0:
+    b = s[ i: s.index( "</doc_body>", i ) + 11 ]
+    est = int( re.search( r'<doc_body match="lexical" est_tokens="(\d+)"', b ).group(1) )
+    text = sum( len( t.encode() ) for t in re.findall( r'<!\[CDATA\[(.*?)\]\]></b>', b, re.S ) )
+    want = round( ( len( b.encode() ) - text ) / 2.5 ) + round( text / 3.8 )
+    assert abs( est - want ) <= 4 + want // 50, ( "the block price is not its bytes", est, want )
+    root = re.search( r'<doc_body [^>]*>', b ).group(0)
+    if ' allowance="' in root:
+        assert est <= max( 0, budget - ans ), ( "block over the budget left", est, budget, ans )
+        h = re.search( r' held_bytes="(\d+)"', root )
+        if h and full:
+            assert int( re.search( r' bytes="(\d+)"', root ).group(1) ) + int( h.group(1) ) == full, ( "held_bytes is not the bytes the budget kept out", root, full )
 PY
 }
 nsec(){ grep -o '<b t="section"' "$1" | wc -l | tr -d ' '; }
 # (b1) a budget that holds the answer and the block: served, not held
-if ans "$TMP/b1.xml" "$DFX" "--for=$TASK" --token-budget=100000 && chk_fit "$TMP/b1.xml" 100000 && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b1.xml" && [ "$( nsec "$TMP/b1.xml" )" -ge 3 ]; then
+if ans "$TMP/b1.xml" "$DFX" "--for=$TASK" --token-budget=100000 && chk_fit "$TMP/b1.xml" 100000 "$FULLB" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b1.xml" && [ "$( nsec "$TMP/b1.xml" )" -ge 3 ]; then
   ok "(b1) --token-budget=100000 serves the sections ($( nsec "$TMP/b1.xml" ) of them), no held=, the block fits what the answer left"
 else no "(b1) a budget that fits must serve: $( grep -o '<doc_body[^>]*>' "$TMP/b1.xml" | head -c 300 )"; fi
 # (b2) a budget between: the answer first, what fits served, the rest held and named; every budget keeps the fit invariant
 partial=0; full=0; allfit=1
 for B in 5000 5400 5800 6200 6600 7000 7600 8400; do
-  if ans "$TMP/b2.xml" "$DFX" "--for=$TASK" --token-budget=$B && chk_fit "$TMP/b2.xml" $B; then
+  if ans "$TMP/b2.xml" "$DFX" "--for=$TASK" --token-budget=$B && [ "$FULLB" -gt 0 ] && chk_fit "$TMP/b2.xml" $B "$FULLB"; then
     if grep -q '<doc_body match="lexical" est_tokens="[0-9]*" files="3" allowance="[0-9]*" bytes="[0-9]*" held="budget" held_bytes="[1-9][0-9]*"' "$TMP/b2.xml" && [ "$( nsec "$TMP/b2.xml" )" -ge 1 ] \
        && grep -q ' next="--for=&apos;' "$TMP/b2.xml"; then partial=1; fi
     grep -q '<doc_body match="lexical" est_tokens' "$TMP/b2.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b2.xml" && full=1
@@ -234,7 +250,7 @@ done
 if [ "$partial" = 1 ] && [ "$allfit" = 1 ]; then ok "(b2) a budget between serves what fits and holds the rest (held=\"budget\" held_bytes= next=); the block never exceeds the budget left"; else no "(b2) partial serve under a budget (partial=$partial allfit=$allfit)"; fi
 # (b3) --max-tokens with --detail is a budget too: served when it holds the answer + block, held whole when the answer alone spends it
 if ans "$TMP/b3a.xml" "$DFX" "--for=$TASK" --max-tokens=100000 --detail=1 && grep -q '<doc_body match="lexical" est_tokens' "$TMP/b3a.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b3a.xml" && [ "$( nsec "$TMP/b3a.xml" )" -ge 1 ] \
-   && ans "$TMP/b3b.xml" "$DFX" "--for=$TASK" --max-tokens=300 --detail=1 && grep -q '<doc_body match="lexical" held="budget" files="3"' "$TMP/b3b.xml" && [ "$( nsec "$TMP/b3b.xml" )" = 0 ]
+   && ans "$TMP/b3b.xml" "$DFX" "--for=$TASK" --max-tokens=300 --detail=1 && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3"' "$TMP/b3b.xml" && [ "$( nsec "$TMP/b3b.xml" )" = 0 ]
 then ok "(b3) --max-tokens --detail: 100000 serves the sections, 300 holds the block whole"; else no "(b3) max-tokens with detail"; fi
 # (b4) --json: the same rules; (b5) MCP budget_tokens
 run "$DFX" "--for=$TASK" --json --token-budget=100000 >"$TMP/b4.json"; b4rc=$?
@@ -247,17 +263,19 @@ then ok "(b4) --json --token-budget=100000 serves the passages, priced within th
 pj=0; fj=1
 for B in 5000 5200 5400 5600 6200 6800 7400 8200; do
   run "$DFX" "--for=$TASK" --json --token-budget=$B >"$TMP/b4p.json"
-  python3 - "$TMP/b4p.json" $B <<'PY' && pj=1
+  python3 - "$TMP/b4p.json" $B "$FULLB" <<'PY' && pj=1
 import json, sys
-d = json.load( open( sys.argv[1], encoding="utf8" ) ); b = d["doc_body"]; B = int( sys.argv[2] )
+d = json.load( open( sys.argv[1], encoding="utf8" ) ); b = d["doc_body"]; B = int( sys.argv[2] ); full = int( sys.argv[3] )
 if "passages" in b:
     assert b["est_tokens"] <= max( 0, B - d["est_tokens"] ), "block over the budget left"
+    if "held_bytes" in b:
+        assert b["bytes"] + b["held_bytes"] == full, ( "held_bytes is not the bytes the budget kept out", b["bytes"], b["held_bytes"], full )
 sys.exit( 0 if ( b.get( "held" ) == "budget" and b.get( "passages" ) and b["held_bytes"] > 0 and b["next"].startswith( "--for=" ) ) else 3 )
 PY
 done
 if [ "$pj" = 1 ]; then ok "(b4b) --json under a middle budget: passages served and held=\"budget\" held_bytes= next="; else no "(b4b) --json partial serve"; fi
 mcp ',"budget_tokens":100000' >"$TMP/b5.xml"
-if grep -q '<doc_body match="lexical" est_tokens' "$TMP/b5.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b5.xml" && [ "$( nsec "$TMP/b5.xml" )" -ge 1 ] && chk_fit "$TMP/b5.xml" 100000
+if grep -q '<doc_body match="lexical" est_tokens' "$TMP/b5.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b5.xml" && [ "$( nsec "$TMP/b5.xml" )" -ge 1 ] && chk_fit "$TMP/b5.xml" 100000 "$FULLB"
 then ok "(b5) MCP budget_tokens=100000 serves the sections"; else no "(b5) MCP big budget: $( grep -o '<doc_body[^>]*>' "$TMP/b5.xml" | head -c 300 )"; fi
 
 # ── (s1) skip a misfit; an oversized section is an excerpt around the task's words ───────────────────────────────
@@ -324,11 +342,45 @@ then ok "(e1j) hostile doc text: --json parses strictly and serves the hostile s
 
 # (b2f) a budget that leaves room for only part of a file names the held sections: f p= why="budget" held=N (the hostile fixture has 5 sections in one file)
 bf=0
+FULLH=$( python3 -c 'import re,sys; m=re.search(r"<doc_body [^>]* bytes=\"(\d+)\"", open(sys.argv[1],encoding="utf8").read()); print(m.group(1) if m else 0)' "$TMP/e1.xml" )
 for B in 5000 5200 5400 5600 5800; do
-  if ans "$TMP/b2f.xml" "$HFX" "--for=$TASK" --token-budget=$B && chk_fit "$TMP/b2f.xml" $B && grep -q '<f p="docs/[^"]*" why="budget" held="[1-9][0-9]*"/>' "$TMP/b2f.xml" \
+  if ans "$TMP/b2f.xml" "$HFX" "--for=$TASK" --token-budget=$B && [ "$FULLH" -gt 0 ] && chk_fit "$TMP/b2f.xml" $B "$FULLH" && grep -q '<f p="docs/[^"]*" why="budget" held="[1-9][0-9]*"/>' "$TMP/b2f.xml" \
      && grep -q '<doc_body [^>]*held="budget" held_bytes=' "$TMP/b2f.xml"; then bf=1; fi
 done
 if [ "$bf" = 1 ]; then ok "(b2f) the sections a budget kept out of a file are named: f p= why=\"budget\" held=N"; else no "(b2f) held sections not named"; fi
+
+# (h2) the held-whole block states its price: est_tokens= on the root in XML (h1, x2, b3b), "est_tokens" in JSON (j2), each recomputed from the bytes
+if ans "$TMP/h2x.xml" "$DFX" "--for=$TASK" --token-budget=4000 && chk_fit "$TMP/h2x.xml" 4000 && grep -q '<doc_body match="lexical" est_tokens="[1-9][0-9]*" held="budget"' "$TMP/h2x.xml" \
+   && python3 - "$TMP/j2.json" <<'PY'
+import json, sys
+raw = open( sys.argv[1], encoding="utf8" ).read()
+d = json.loads( raw )["doc_body"]
+i = raw.index( '"doc_body"' ); n = len( raw[ i: raw.rindex( "}" ) ].encode() )
+want = round( n / 2.5 )
+assert d["held"] == "budget" and abs( d["est_tokens"] - want ) <= want * 0.15 + 4, ( d["est_tokens"], want )
+PY
+then ok "(h2) the held-whole block carries est_tokens, XML and JSON, matching its own bytes"; else no "(h2) held-whole block price"; fi
+
+# (p1) cost: a doc section of ONE 1.3 MB line is served in a bounded time, with and without a token budget
+PFX="$TMP/longline"; cp -R "$DFX" "$PFX"
+python3 - "$PFX" <<'PY'
+import sys
+open( sys.argv[1] + "/docs/retries.md", "ab" ).write( b"\n## Long retry notes\n\n" + b"retry policy backoff wait " * 50000 + b"\n" )
+PY
+timed(){ python3 - "$BIN" "$PFX" "$@" <<'PY'
+import subprocess, sys, time
+binp, fx, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+t = time.time()
+try:
+    p = subprocess.run( [ binp, fx, "--no-cache" ] + args, cwd=fx, stdin=subprocess.DEVNULL, capture_output=True, timeout=25 )
+except subprocess.TimeoutExpired:
+    print( "TIMEOUT after 25 s" ); sys.exit( 1 )
+out = p.stdout.decode( "utf8", "replace" )
+ok = p.returncode == 0 and out.endswith( "</ctx>" ) and "<doc_body match=\"lexical\" est_tokens" in out and 'n="Long retry notes"' in out
+print( "%.1f s rc=%d block=%s" % ( time.time() - t, p.returncode, ok ) ); sys.exit( 0 if ok else 2 )
+PY
+}
+if p1a=$( timed "--for=$TASK" ) && p1b=$( timed "--for=$TASK" --token-budget=7000 ); then ok "(p1) a 1.3 MB one-line section is served in bounded time: $p1a; under --token-budget=7000: $p1b"; else no "(p1) long-line section: ${p1a:-} ${p1b:-}"; fi
 
 [ "$fail" = 0 ] && echo "fordocbodycheck: PASS" || echo "fordocbodycheck: FAIL"
 exit "$fail"
