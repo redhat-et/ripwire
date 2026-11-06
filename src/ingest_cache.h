@@ -2797,10 +2797,10 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     // arrays themselves are bounded per record inside readDef.
     const std::size_t     kMinDefRecordBytes      = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
     // v49: a FAMILY count must also equal the head's copy, which the warm planner reserved from before this body was
-    // read. The dictionary count has no head copy (kNoHeadCount). One lambda, so every count is bounded by the bytes
+    // read. The dictionary count has no head copy (it passes kNoHeadCount). One lambda, so every count is bounded by the bytes
     // left at the line that names it, before any reserve() or resize() sizes from it.
     constexpr std::int64_t kNoHeadCount = -1;
-    const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes, std::int64_t headCount = kNoHeadCount ) noexcept
+    const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes, std::int64_t headCount ) noexcept
     {
         if( headCount != kNoHeadCount && std::int64_t( recordCount ) != headCount )
         {
@@ -2836,7 +2836,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         // H3 (v10): the file's subtoken dictionary — def rows below index into it. Must be strictly
         // ascending (readDef's sorted-row invariant hangs on it); anything else is corrupt.
         const std::uint32_t dictCount = r.u32();
-        if( !countFits( dictCount, sizeof( std::uint64_t ) ) )
+        if( !countFits( dictCount, sizeof( std::uint64_t ), kNoHeadCount ) )
         {
             return false;
         }
