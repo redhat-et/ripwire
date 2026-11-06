@@ -15,7 +15,10 @@
 // feature, ..: kManifestCues); a generic name (core, common, test, ..: kManifestGenericNames); a script unless the task says script,
 // npm, yarn or pnpm (`test`, `build`, `lint` are in every package.json); a plugin entry point unless the task says plugin, entry
 // point or extension. An entry point's group matches by any dot segment, even the repo's own name (`[project.entry-points.pydantic]`
-// is pydantic's plugin hook). A manifest prints only when it holds an anchor; a partial
+// is pydantic's plugin hook). An entry also anchors only when the task says what KIND of thing it means (the cue words of its kind:
+// dependency for a dependency, feature for a feature, package for a package, ..) or reads as adding one more X (exemplarTasksOf,
+// EXEMPLAR's own trigger): a common word in a task is not a request for the third-party dependency or the Rust feature of that name
+// (the review's 18 of 35 misleading fires). A manifest prints only when it holds an anchor; a partial
 // match (a task word that is one part of a name: `nats` in `@nats-io/transport-node`) adds rows and score, never fires alone.
 //
 // READERS (line-based, the way the tools write these files): package.json name, main, bin, scripts, dependencies, devDependencies,
@@ -416,7 +419,7 @@ inline void readCMakeLists( std::string_view text, std::vector<ManifestEntry>& o
 
 // ── discovery ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // A manifest under one of these directories belongs to someone else's package or to a test's sample tree.
-inline constexpr std::array<std::string_view, 5> kManifestSkipDirs { "node_modules/", "vendor/", "third_party/", "fixtures/", "testdata/" };
+inline constexpr std::array<std::string_view, 6> kManifestSkipDirs { "node_modules/", "vendor/", "third_party/", "fixtures/", "testdata/", "benchmarks/" };
 
 using ManifestReader = void ( * )( std::string_view, std::vector<ManifestEntry>& );
 
@@ -693,6 +696,7 @@ struct ManifestTask
     std::vector<std::string> spelled; // the same words as the task spells them
     std::string repoName;
     std::array<bool, kManifestKindTags.size()> cue {};
+    bool addNew = false; // the task reads as adding one more X (EXEMPLAR's exemplarTasksOf): it may mean any kind of entry
 };
 
 inline ManifestTask manifestTaskOf( const IngestResult& ing, std::string_view task )
@@ -708,6 +712,7 @@ inline ManifestTask manifestTaskOf( const IngestResult& ing, std::string_view ta
     {
         t.cue[k] = hasCue( t.words, ManifestKind( k ) );
     }
+    t.addNew = !exemplarTasksOf( task ).empty();
     return t;
 }
 
@@ -771,7 +776,7 @@ inline ManifestMatch matchManifest( const ManifestDoc& doc, std::size_t di, cons
             hit.strength = std::max( hit.strength, s );
             best[w] = std::max( best[w], s );
         }
-        hit.anchor = hit.strength == 2 && !own && ( !std::ranges::contains( kManifestGenericNames, folded ) || en.kind == ManifestKind::EntryPoint );
+        hit.anchor = hit.strength == 2 && !own && ( t.cue[k] || t.addNew ) && ( !std::ranges::contains( kManifestGenericNames, folded ) || en.kind == ManifestKind::EntryPoint );
         m.anchors += hit.anchor ? 1 : 0;
         if( hit.strength > 0 )
         {
@@ -867,7 +872,7 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "go.mod (module, require; indirect ones skipped), CMakeLists.txt (add_executable, add_library, project); not read: pyproject dependency "
     "arrays, setup.py, Makefile, meson and Bazel files, vendored, node_modules, fixtures and testdata trees. A name equal to the repo's, a "
     "generic name (core, common, test, ..), a script the task does not call a script, or a plugin entry point the task does not call a "
-    "plugin, entry point or extension does not fire it; an entry point's group (pydantic, flake8.extension) matches by any dot segment. files= the manifests that name a "
+    "plugin, entry point or extension does not fire it; nor does a dependency, feature or other entry the task neither calls by its kind (dependency, feature, package, binary, ..) nor adds as a new X; an entry point's group (pydantic, flake8.extension) matches by any dot segment. files= the manifests that name a "
     "task word exactly, shown= and capped=\"1\" when fewer are printed, best first (2 per task word named exactly, 1 per word that is one "
     "part of a name). <mf> p= the manifest, matched= the task words its names hold, rows= its matching lines, shown= and capped=\"1\" when "
     "fewer are printed. <r> l= the line, kind= what it defines (package, module, dep, dev-dep, peer-dep, opt-dep, script, bin, main, lib, "
@@ -880,8 +885,8 @@ inline constexpr std::string_view kForManifestRowsLegend =
 // The --legend=compact posture (the CLI default); the long text rides --legend=full and the MCP tool. Both define every attribute printed.
 inline constexpr std::string_view kForManifestRowsCompactLegend =
     "<!-- ripwire for manifest_rows: manifest lines defining a package, dependency, script, binary, target, feature or plugin entry point the task names "
-    "exactly (package.json, Cargo.toml, pyproject.toml, setup.cfg, go.mod, CMakeLists.txt; the repo's own name, generic names and "
-    "un-asked scripts or plugin entry points never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word; <mf> p= manifest, "
+    "exactly (package.json, Cargo.toml, pyproject.toml, setup.cfg, go.mod, CMakeLists.txt; the repo's own name, generic names, "
+    "un-asked scripts or plugin entry points and entries the task neither names by their kind nor adds as a new X never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word; <mf> p= manifest, "
     "matched= task words its names hold, rows= matching lines; <r> l= line, kind= what it defines, group= an entry point's group, cut=\"1\": text cut to 120 bytes; "
     "shown=/capped=\"1\": rows cut. <feature_touch> n= the manifest's features; <touch_list> total= files naming at least half of "
     "them (tests, docs, vendored, generated unread); <touch> p= the line, share=named/of distinct feature names, cut=\"1\": cut. -->";
