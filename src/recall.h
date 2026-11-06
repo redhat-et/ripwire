@@ -1920,7 +1920,8 @@ inline RecallWindow selectRecallWindow( std::string_view body, std::size_t windo
 //   [truncated: K of N bytes[, fence_reopened][, fence_closed]; served bytes LO-HI, best query-term window]
 // (≤ 127 bytes for any document under 100 MB, inside kRecallTruncNoteBytes, which the allowance reserves.)
 // The byte range indexes the text recall served — the converted text for an HTML page, not its markup — and
-// excludes the repeated opener, which is this function's text, not the document's.
+// excludes the repeated opener and the repeated title line, which are this function's copies, not the window.
+// An HTML page's title line (recallPageTitleLine) sits above the "…" line when the window starts past it.
 inline constexpr std::string_view kRecallWindowLead = "\xE2\x80\xA6\n";   // "…" + newline: text skipped above
 
 // The opening line of the fenced block `at` falls strictly inside, or "" (outside any fence, or inside a
@@ -1943,7 +1944,8 @@ inline std::string recallFenceOpenerAround( std::string_view body, std::size_t a
     return {};
 }
 
-inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t keepBytes, const RecallWindow& window )
+inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t keepBytes, const RecallWindow& window,
+                                                  std::string_view title = {} )
 {
     const std::size_t fullBytes = body.size();
     std::size_t       start     = std::min( window.startByte, fullBytes );
@@ -1952,7 +1954,11 @@ inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t
         return truncateRecallBody( body, keepBytes );   // no window past the head: a head cut, said as one
     }
     const std::vector<RecallProtectedRange> ranges    = findRecallProtectedRanges( body );
-    const std::size_t                       allowance = keepBytes > kRecallWindowLead.size() ? keepBytes - kRecallWindowLead.size() : 0;
+    // A title line the window itself starts after is repeated above it (recallPageTitleLine): a window past the
+    // title would otherwise not say which page it is from. The caller sized the window net of the title.
+    const std::string                       titleText = start > title.size() ? std::string( title ) : std::string();
+    const std::size_t                       reserved  = kRecallWindowLead.size() + titleText.size();
+    const std::size_t                       allowance = keepBytes > reserved ? keepBytes - reserved : 0;
     const std::size_t                       windowEnd = std::max( window.endByte, start );
     std::string                             reopen    = recallFenceOpenerAround( body, start, ranges );
     // The repeated opener is this function's text, and the window's LAST line is the one it was chosen for: when
@@ -1974,6 +1980,7 @@ inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t
     const RecallTailCut cut = cutRecallBodyTail( body, std::min( allowance, reopen.size() + windowLen ), true );
     const std::size_t   kept = cut.sourceKeptBytes > reopen.size() ? cut.sourceKeptBytes - reopen.size() : 0;
     body.insert( 0, kRecallWindowLead );
+    body.insert( 0, titleText );
     return { "  [truncated: " + std::to_string( kept ) + " of " + std::to_string( fullBytes ) + " bytes"
                  + ( reopen.empty() ? "" : ", fence_reopened" ) + ( cut.isFenceClosed ? ", fence_closed" : "" )
                  + "; served bytes " + std::to_string( start ) + "-" + std::to_string( start + kept )
@@ -1981,12 +1988,24 @@ inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t
              kept };
 }
 
-// HTML-CUT: a whole-doc body over its allowance — the best query-term window of that size when one beats the
-// head, else the head cut it always had.
-inline RecallTruncation truncateRecallWholeDoc( std::string& body, std::size_t keepBytes, const std::vector<std::string>& queryToks )
+// An HTML page's converted text opens with its <title> line ("Renderers - mdBook Documentation"); a window past
+// it is otherwise anonymous. Empty when the first line is missing or too long to be a title.
+inline constexpr std::size_t kRecallTitleMaxBytes = 120;
+inline std::string_view recallPageTitleLine( std::string_view body ) noexcept
 {
-    const RecallWindow window = selectRecallWindow( body, keepBytes - std::min( keepBytes, kRecallWindowLead.size() ), queryToks );
-    return window.startByte > 0 ? truncateRecallBodyWindow( body, keepBytes, window ) : truncateRecallBody( body, keepBytes );
+    const std::size_t newline = body.find( '\n' );
+    return newline == std::string_view::npos || newline == 0 || newline >= kRecallTitleMaxBytes ? std::string_view()
+                                                                                                : body.substr( 0, newline + 1 );
+}
+
+// HTML-CUT: a whole-doc body over its allowance — the best query-term window of that size when one beats the
+// head, else the head cut it always had. `isHtml`: the page's title line rides above the window.
+inline RecallTruncation truncateRecallWholeDoc( std::string& body, std::size_t keepBytes, const std::vector<std::string>& queryToks, bool isHtml )
+{
+    const std::string_view title    = isHtml ? recallPageTitleLine( body ) : std::string_view();
+    const std::size_t      reserved = std::min( keepBytes, kRecallWindowLead.size() + title.size() );
+    const RecallWindow     window   = selectRecallWindow( body, keepBytes - reserved, queryToks );
+    return window.startByte > 0 ? truncateRecallBodyWindow( body, keepBytes, window, title ) : truncateRecallBody( body, keepBytes );
 }
 
 // Build the recall bundle IN MEMORY: each top file's path + relevance + body, best-first. `maxBytes` (0 =
@@ -2059,6 +2078,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         std::string                      wholeBody;     // the whole-doc path's prose
         std::optional<RecallSectionBody> sections;      // the section path's prose AND its units
         std::size_t                      demandBytes = 0;   // what serving it WHOLE costs the budget
+        bool                             isHtml      = false;   // an HTML page's converted text (its first line is the <title>)
 
         // The emitted prose, wherever it lives. An accessor rather than a second member holding a copy of a
         // 600 KB string that then has to be kept in step with the units indexing into it.
@@ -2097,6 +2117,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         {
             doc.wholeBody   = std::move( *loaded );
             doc.demandBytes = doc.wholeBody.size();
+            doc.isHtml      = docparse::docKindOf( docparse::lowerExtOf( ing.files[ r.fileId ] ) ) == docparse::DocKind::Html;
         }
         else
         {
@@ -2146,7 +2167,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
             // under-used rather than overshot — the ceiling direction the whole budget path holds to.
             const std::size_t keepBytes = shares.alloc[i] > kRecallTruncNoteBytes ? shares.alloc[i] - kRecallTruncNoteBytes
                                                                                   : kRecallMinBodyBytes;
-            truncNote  = truncateRecallWholeDoc( doc.body(), keepBytes, queryToks ).marker;   // this path names no lines=, so only the marker
+            truncNote  = truncateRecallWholeDoc( doc.body(), keepBytes, queryToks, doc.isHtml ).marker;   // this path names no lines=, so only the marker
             wasReduced = true;
         }
 

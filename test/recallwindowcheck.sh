@@ -10,8 +10,10 @@
 # ARMS
 #   (a) HTML: a page whose head is a long nav list and whose matching paragraph sits deep in the page.
 #       Under a ceiling that forces a cut, the paragraph is PRINTED, the marker reads
-#       "served bytes LO-HI, best query-term window", the body opens with a "…" line, and the
-#       nav head is NOT printed. Base binaries print the head: red there.
+#       "served bytes LO-HI, best query-term window", the body opens with the page's title (the converted
+#       text's first line) and then a "…" line, and the nav head is NOT printed. Base binaries print the head:
+#       red there.
+#   (a2) A first line too long to be a title (> 120 bytes) is not repeated: the body opens with the "…" line.
 #   (b) Heading-less markdown, where the served text IS the file: bytes LO..LO+K of the file on disk equal the
 #       printed body (minus the "…" lead and the trailing "…"), so the disclosed range is exact, and K matches
 #       the marker's kept count.
@@ -60,6 +62,10 @@ filler = "".join( "<p>Unrelated paragraph %03d about installation steps and gene
 target = "<p>The zorblax quantum flux capacitor reroutes the frobnicate pipeline when the zorblax limit trips.</p>\n"
 open( r + "/h/page.html", "w" ).write(
     "<html><head><title>Guide</title></head><body>\n<nav><ul>\n" + nav + "</ul></nav>\n<main>\n" + filler + target
+    + filler.replace( "Unrelated", "Trailing" ) + "</main></body></html>\n" )
+os.makedirs( r + "/h2" )
+open( r + "/h2/page.html", "w" ).write(
+    "<html><head><title>" + "Very long title " * 12 + "</title></head><body>\n<nav><ul>\n" + nav + "</ul></nav>\n<main>\n" + filler + target
     + filler.replace( "Unrelated", "Trailing" ) + "</main></body></html>\n" )
 # (b) heading-less markdown: plain lines, the matching line deep inside
 plain = "".join( "Plain line %04d says nothing in particular about the setup.\n" % i for i in range( 300 ) )
@@ -114,14 +120,21 @@ if checkrun "(a)"; then
     else
         ok "(a) the nav head is skipped"
     fi
-    if [ "$( body | head -1 )" = "…" ]; then
-        ok "(a) the body opens with a '…' line (text skipped above)"
+    if [ "$( body | head -1 )" = "Guide" ] && [ "$( body | sed -n 2p )" = "…" ]; then
+        ok "(a) the page title ('Guide') sits above the '…' line (text skipped below it)"
     else
-        no "(a) the body does not open with the '…' lead: '$( body | head -1 )'"
+        no "(a) the body does not open with the title and the '…' lead: '$( body | head -2 | tr '\n' '|' )'"
     fi
     if overceil; then no "(a) over_ceiling=1 under --max-tokens=700"; else ok "(a) within the 700-token ceiling"; fi
     A1="$OUT"; run h "zorblax flux capacitor frobnicate" 700
     if [ "$OUT" = "$A1" ]; then ok "(a) deterministic (byte-identical twice)"; else no "(a) two runs differ"; fi
+fi
+
+echo; echo "=== (a2) a first line too long to be a title is not repeated ==="
+run h2 "zorblax flux capacitor frobnicate" 700
+if checkrun "(a2)"; then
+    if [ "$( body | head -1 )" = "…" ]; then ok "(a2) the body opens with the '…' line, no title"; else no "(a2) expected no title line: '$( body | head -1 | cut -c1-60 )'"; fi
+    if body | grep -q 'zorblax quantum flux capacitor'; then ok "(a2) the matching paragraph is printed"; else no "(a2) the matching paragraph is NOT printed"; fi
 fi
 
 echo; echo "=== (b) heading-less markdown: the disclosed byte range is exact ==="
