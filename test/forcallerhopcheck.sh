@@ -29,7 +29,8 @@
 #   V1 [P] D2-VIA-INHERIT (rv-rra-delta (3)), Rust, Python, TS and C++: (a) a d=2 row reached only through a via="name" first-hop
 #          row carries via="name" though its own edge is proven; (b) a d=2 row with one proven path (and one by-name) stays unhedged;
 #          (c) [G] a d=2 row whose own edge into a proven first-hop row is by name keeps via="name"; (d) Python: a row with a proven edge
-#          into the by-name hop and a by-name edge into the proven hop (no all-proven path) carries via="name"
+#          into the by-name hop and a by-name edge into the proven hop (no all-proven path) carries via="name"; (e) Python, fix round 1
+#          (rv-d2-via S1): the only proven path runs through a first-hop row the 16-row cap hides (shown=16 total=17) — stays unhedged
 #   Q1 [P] train 33 (MF1-NX x QUALNAME-1): every first-hop row's n= and p= equal the callers verb's own row; a member caller
 #          folds its owner into n= (n="Client.submit", no sc=)
 #   R1 [P] UPWARD-2HOP: an error-shaped task ("dependency cycle error") on the ranked route whose r=1 row is a narrow-funnel function
@@ -264,6 +265,15 @@ v1 py post_entry 'name_hop|via' 'proven_hop|bare' 'Svc.relay|bare' 'only_by_name
 v1 rs post_entry 'name_hop|via' 'proven_hop|bare' 'Svc::relay|bare' 'only_by_name|via' 'both_paths|bare' 'by_name_edge|via'
 v1 ts postEntry 'nameHop|via' 'provenHop|bare' 'Svc.relay|bare' 'onlyByName|via' 'bothPaths|bare' 'byNameEdge|via'
 v1 cpp PostEntry 'NameHop|via' 'ProvenHop|bare' 'Svc::Relay|bare' 'OnlyByName|via' 'BothPaths|bare' 'ByNameEdge|via'
+# (e) the cap: h01 is by name and shown, zz_hidden is proven and ranked 17th (hidden); reach_both calls both, so its proven path
+# runs through the hidden row. The premise lines fail when the fixture stops capping (the bare arm would then pass vacuously).
+v1 pycap post_entry 'h01|via' 'reach_both|bare'
+H1e="$( hop "$TMP/v1.pycap" )"
+case "$H1e" in
+    *' shown="16" total="17" '*) ok "(V1e-pre) the first hop is capped (shown=16 of total=17)" ;;
+    *) no "(V1e-pre) the first hop is not capped at 16 of 17: [${H1e%%>*}>]" ;;
+esac
+printf '%s' "$H1e" | grep -q 'n="zz_hidden"'; [ $? -ne 0 ]; verdict $? "(V1e-pre) zz_hidden (the proven first hop) is hidden by the cap" "(V1e-pre) zz_hidden is shown — the path no longer runs through a hidden row"
 
 # ── Q1 (train 33, MF1-NX x QUALNAME-1): a hop row names a caller exactly as the callers verb does ───────────────────────────────
 # Every first-hop <s> of the block has the identical n= and p= in `--callers=<of=>`'s own rows, and a member whose owner the index
@@ -433,7 +443,7 @@ verdict $? "(X3) no -- inside a legend comment" "(X3) a legend comment holds --"
 run "$FC" --for=start_server >"$TMP/x2"
 cmp -s "$TMP/p1" "$TMP/x2"; verdict $? "(X1) deterministic" "(X1) two runs differ"
 if command -v xmllint >/dev/null 2>&1; then
-    for f in p1 p2 p3 p4f p8 b3 f1.on dp.f r1 r1f r3 v1.py v1.rs v1.ts v1.cpp; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "(X2) well-formed: $f" "(X2) xmllint rejects $f"; done
+    for f in p1 p2 p3 p4f p8 b3 f1.on dp.f r1 r1f r3 v1.py v1.rs v1.ts v1.cpp v1.pycap; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "(X2) well-formed: $f" "(X2) xmllint rejects $f"; done
 else
     printf '  SKIP  (X2) xmllint not installed\n'
 fi
