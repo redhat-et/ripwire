@@ -87,6 +87,7 @@ inline constexpr std::string_view kForClauseEntries[] =
     kMcpForLensColumnsLegend,
     kForFileTailLegend,
     kForFileTailCodeFirstLegend,
+    kForFileTailWideLegend,
     kForBudgetBytesNote,
     kForDocsDroppedNote,
     kForSigsShrunkNote,

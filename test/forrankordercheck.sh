@@ -226,6 +226,9 @@ elif t:
     n += sum( len( x.encode() ) for x in re.findall( r" next=\x22--expand=[^\x22]*\x22", t.group( 0 ) ) )
 n += sum( len( x.group( 0 ).encode() ) for x in re.finditer( r" mem=\x22[^\x22]*\x22( mem_more=\x22\d+\x22)?", s ) )
 c = re.search( r"; (d mem=|mem= on an owner d row:)[^;]*?mem_more= (names cut|the member names not listed)", s ); n += len( c.group( 0 ).encode() ) if c else 0
+# K-WRONGSYM: the <syms> block (legend comment + rows) is a present-only, separately allowanced append after the ranked answer (outside est_tokens);
+# the band reads the answer without it, as it reads the body-fold additions above
+r = re.search( r"<!-- (ripwire for )?syms:(?:(?!-->).)*-->(<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)", s, re.S ); n += len( r.group( 0 ).encode() ) if r else 0
 print( n )'; }
 # exempt_ok N: in THIS shell (never inside a $( ), where no()'s fail=1 would be lost) — a non-number is a FAIL and counts 0
 exempt_ok(){ case "$1" in ''|*[!0-9]*) no "(3) fold_exempt could not read an answer (got '$1')"; growth_fail=1; return 1;; esac; return 0; }
@@ -255,6 +258,12 @@ page = sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\" sym=\"[^\"]
 for pat, was in ( ( r"; tail: [^\]]*?budget-trimmed row\)", 391 ), ( r"; t p= file outside sigs \(weaker\)[^;]*?r= rank \(gap = trimmed\)", 57 ) ):
     lm = re.search( pat, s )                         # …and the growth of the clause that now defines them (full 391 B / compact 57 B before)
     page += max( 0, len( lm.group( 0 ).encode() ) - was ) if lm else 0
+# FOR-TAIL-WIDE: the tail walks the file page past row 40, so it prints path-only rows (`<t p=\"…\"/>`, no sym=), the tail p_only= count
+# and the walk clause (full or compact); like the sym= page rows above, none of it is answer body the band reads
+page += sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\"/>", s ) )
+page += sum( len( x.encode() ) for x in re.findall( r" p_only=\"[0-9]+\"", s ) )
+for pat in ( r"; tail walk: .*?p_only= counts them", r"; t page rows go on to file-page row 160.*?p_only= counts them" ):
+    lm = re.search( pat, s ); page += len( lm.group( 0 ).encode() ) if lm else 0
 print( past + page + ( max( 0, len( h.group( 0 ).encode() ) - 1000 ) if h else 0 ) )' )"
     pct="$( python3 -c "print( '%+.2f' % ( ( $now - $past - $base ) * 100.0 / $base ) )" )"
     printf '    q%-2d %-28s %5d → %5d - past-target/hops %5d (%s%%)  %s\n' "$i" "'$q'" "$base" "$now" "$past" "$pct" "$marker"

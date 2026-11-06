@@ -234,6 +234,7 @@ exclusive = {"editcheckcheck.sh"}
 DEFAULT_TIMEOUT_SEC = 300
 GATE_BUDGET_SEC = {
     "crossdirincludecheck.sh":    900,
+    "warmpeakcheck.sh":           600,   # five ~10 s indexes of a generated 1,200-file tree (two cold, two warm, --no-cache) under /usr/bin/time
     "nestedimportcheck.sh":       900,
     "preproccondcheck.sh":        900,
     "pyimportprecisecheck.sh":    900,

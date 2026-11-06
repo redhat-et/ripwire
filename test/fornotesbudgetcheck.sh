@@ -333,8 +333,9 @@ a = read( sys.argv[ 1 ] )
 if a is None: sys.exit( 3 )
 N = int( sys.argv[ 2 ] ); X = int( N * 2.36 * 0.90 )
 # the tail size: test/lib/softbudget.py, shared by the five soft-target readers (the FIX1 R1 tail floor)
-import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import tail_size
-U = sections_u( open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read() )
+import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import tail_size, strip_appended
+# K-LEGEND: the <syms> block / held stub rides on its own allowance, outside est_tokens: never reserved from T
+U = sections_u( strip_appended( open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read() ) )
 if len( sys.argv ) > 4:
     _at = open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read(); _rt = open( sys.argv[ 4 ], encoding='utf-8', errors='replace' ).read()
     U += max( 0, tail_size( _rt ) - tail_size( _at ) )

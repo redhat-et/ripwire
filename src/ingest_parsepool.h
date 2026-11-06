@@ -264,36 +264,35 @@ struct WarmHitTotals
     std::size_t ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0;
 };
 
-// One pass over the fileId space: fill `candidates` (path present in the cache, hash not yet compared) and
-// `hits` (hash-verified), and total the hits' eight families on the way through. Body moved verbatim out of
-// runParsePool, plus the four families it never summed.
-inline WarmHitTotals markCacheHits( const std::vector<std::string>& files, const IngestFileScan& scan,
-                                    HashMap<std::string, FileFacts>& cache,
-                                    std::vector<FileFacts*>& candidates, std::vector<FileFacts*>& hits )
+// One pass over the fileId space: fill `candidates` (a record head present in the blob, hash not yet compared) and `hits`
+// (hash-verified), and total the hits' eight families on the way through. WARM-DIRECT: the totals come from the v49 head
+// counts, so the reserve stays exact although no record body has been decoded yet.
+inline WarmHitTotals markCacheHits( const CacheRecords& cache, const IngestFileScan& scan,
+                                    std::vector<const CachedRecordHead*>& candidates, std::vector<const CachedRecordHead*>& hits )
 {
     ASSUME_NO_ALIAS( candidates, hits );
     WarmHitTotals tot;
-    for( std::size_t fileId = 0; fileId < files.size(); ++fileId )
+    for( std::size_t fileId = 0; fileId < candidates.size(); ++fileId )
     {
-        const auto it = cache.find( files[ fileId ] );
-        if( it == cache.end() )
+        const CachedRecordHead* head = cache.headOf( fileId );
+        if( head == nullptr )
         {
             continue;
         }
-        candidates[ fileId ] = &it->second;
-        if( it->second.hash != scan.hash[ fileId ] )
+        candidates[ fileId ] = head;
+        if( head->hash != scan.hash[ fileId ] )
         {
             continue;
         }
-        hits[ fileId ]   = &it->second;
-        tot.defs        += it->second.defs.size();
-        tot.refs        += it->second.refs.size();
-        tot.incs        += it->second.incs.size();
-        tot.binds       += it->second.binds.size();
-        tot.ffis        += it->second.ffis.size();
-        tot.routeDefs   += it->second.routeDefs.size();
-        tot.routeUses   += it->second.routeUses.size();
-        tot.constOpens  += it->second.constOpens.size();
+        hits[ fileId ]   = head;
+        tot.defs        += head->counts.defs;
+        tot.refs        += head->counts.refs;
+        tot.incs        += head->counts.incs;
+        tot.binds       += head->counts.binds;
+        tot.ffis        += head->counts.ffis;
+        tot.routeDefs   += head->counts.routeDefs;
+        tot.routeUses   += head->counts.routeUses;
+        tot.constOpens  += head->counts.constOpens;
     }
     return tot;
 }
@@ -327,12 +326,13 @@ inline void reserveWarmFamilies( std::vector<RawFacts>& tFacts, const WarmHitTot
 struct ParsePoolShared
 {
     const std::vector<std::string>&  files;                 // the fileId space (result.files)
-    HashMap<std::string, FileFacts>& cache;
+    const CacheRecords&              cache;                 // the warm plan: per-fileId record heads + the open blob
     IngestFileScan&                  scan;                  // lang/hash/stat/health per fileId
     QueryPrewarm&                    prewarm;               // .ready gates compiledQueryCache() reads
     const QueryReadyGate&            gate;                  // the cv wait bundle over prewarm's members
-    const std::vector<FileFacts*>&   cacheCandidateFacts;   // path present in cache (hash not yet compared)
-    const std::vector<FileFacts*>&   cacheHitFacts;         // hash-verified hits (prewarm-confirmed)
+    const std::vector<const CachedRecordHead*>& cacheCandidateFacts;   // record head present in the blob (hash not yet compared)
+    const std::vector<const CachedRecordHead*>& cacheHitFacts;         // hash-verified hits (prewarm-confirmed)
+    std::vector<std::uint8_t>&       lateMiss;              // 1 ⇒ this hit's record failed in the worker; parsed after the join
     std::vector<RawFacts>&           tFacts;                // per-thread accumulators, slot t owned by worker t
     const std::vector<std::size_t>&  parseOrder;            // optional work order (empty ⇒ natural order)
     std::atomic<std::size_t>&        nextFile;              // lock-free work queue cursor
@@ -344,6 +344,74 @@ struct ParsePoolShared
     bool                             captureValueUses;
     memguard::Watch*                 memWatch;              // #350: null = unguarded; else checked before each claim
 };
+
+// WARM-REWRITE: true when the blob's record for a file is exactly the record saveCache would write for it now —
+// `expect` carries that record's key (hash, stat triple, health) and no facts, so the record must hold none in any
+// of the eight families (WARM-DIRECT: the v49 head counts say so without decoding the body).
+inline bool blobHoldsFactlessRecord( const CachedRecordHead* rec, const CachedRecordHead& expect ) noexcept
+{
+    return rec != nullptr && rec->hash == expect.hash && rec->sizeBytes == expect.sizeBytes && rec->mtimeNs == expect.mtimeNs
+        && rec->ctimeNs == expect.ctimeNs && rec->health == expect.health && rec->counts.none();
+}
+
+// A cache miss is about to change the blob: mark it dirty and count the file as drift (RIPWIRE_CACHE_STATS reparsed=).
+inline void markMissDirty( ParsePoolShared& sh ) noexcept
+{
+    sh.dirty.store( true, std::memory_order_relaxed );
+    sh.reparsedCount.fetch_add( 1, std::memory_order_relaxed );   // A1: drift-proportional observable
+}
+
+// WARM-REWRITE (reports/graph-efficiency-ideas.md #5): a cache miss that ends BEFORE the parse — unreadable,
+// binary-sniffed, or nest-refused — extracts no facts, so the record saveCache writes for it is its hash, stat
+// triple and health alone, and a refused file's hash and stat are forgotten to UNKNOWN (0, -1, -1, -1:
+// forgetNestRefusalsForCache), which is what makes every warm run re-read and re-refuse it. When the blob already
+// holds exactly that record, re-serializing the whole blob changes nothing: envoy rewrote its 146 MB cache on
+// every warm run (a full re-serialize and write of the cache) for one refused deep_recursion.json. So such a miss dirties the
+// blob only when the record differs: a path the blob lacks, a file that just became refused or binary, a record
+// that held facts, a hash or stat that moved. A file that stops being refused reaches the parse, which dirties.
+inline void noteFactlessMiss( ParsePoolShared& sh, std::size_t fileId, bool nestRefused ) noexcept
+{
+    const IngestFileScan& scan = sh.scan;
+    CachedRecordHead      expect;
+    expect.health = scan.health[ fileId ];
+    if( !nestRefused )   // a refused file keeps the default UNKNOWN key (0, -1, -1, -1), as forgetNestRefusalsForCache writes it
+    {
+        expect.hash      = scan.hash[ fileId ];
+        expect.sizeBytes = scan.statSize[ fileId ];
+        expect.mtimeNs   = scan.statMtime[ fileId ];
+        expect.ctimeNs   = scan.statCtime[ fileId ];
+    }
+    const bool same = blobHoldsFactlessRecord( sh.cacheCandidateFacts[ fileId ], expect );
+    if( !same )
+    {
+        markMissDirty( sh );
+    }
+}
+
+// One worker's cache-record scratch, reused across its hits.
+struct RecordScratch
+{
+    std::string                bytes;   // one cache record's bytes
+    std::vector<std::uint64_t> dict;    //   its subtoken dictionary (rich only)
+    FileFacts                  facts;   //   its decoded facts; moved into the worker's arrays, capacity kept for the next hit
+};
+
+// CacheRecords::decode, with a throw (bad_alloc on the record buffer or a fact array) reported as the failure it is: the
+// caller then schedules the file as a late miss and reparses it after the join, instead of the worker's catch-all
+// marking it extract-partial with its facts missing.
+inline bool decodeCachedRecordNoThrow( const CacheRecords& cache, std::size_t fileId, const std::string& path, RecordScratch& rec )
+{
+    try
+    {
+        return cache.decode( fileId, path, rec.bytes, rec.dict, rec.facts );
+    }
+    catch( ... )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "the affected files are reparsed from source: the answer is byte-identical, only slower",
+                  "ingest: cache record decode threw — that file is reparsed" );
+        return false;
+    }
+}
 
 // one worker's whole life: grab files off the shared cursor, reuse cache hits, parse+capture misses,
 // queueing parsed trees while the tags queries still compile. Body moved verbatim from the lambda in
@@ -370,6 +438,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         lexScratch.reserve( 1024 );
     }
     MemberMacroReparse macroWork;                        // member-macro re-parse (src/macroreparse.h): per-worker scratch
+    RecordScratch              record;                   // WARM-DIRECT: one cache record's bytes, dictionary and decoded facts, reused across hits
     macroWork.captureValueUses = sh.captureValueUses;
     const auto buildLexForNewDefs = [ & ]( std::vector<RawDef>& defs, std::size_t firstNewDefIndex, const std::string& fileBytes )
     {
@@ -512,35 +581,43 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 
             if( !sh.cache.empty() )
             {
-                FileFacts* hit = sh.cacheHitFacts[ fileId ];
+                const CachedRecordHead* hit = sh.cacheHitFacts[ fileId ];
                 if( hit == nullptr )
                 {
-                    FileFacts* candidate = sh.cacheCandidateFacts[ fileId ];
+                    const CachedRecordHead* candidate = sh.cacheCandidateFacts[ fileId ];
                     if( candidate != nullptr && candidate->hash == h )
                     {
                         hit = candidate;
                     }
                 }
-                if( hit != nullptr )   // unchanged → reuse cached facts, skip parse
+                if( hit != nullptr )   // unchanged → decode its record straight into this worker's arrays, skip parse
                 {
-                    warmGrowths += appendCacheHitFacts( *hit, std::uint32_t( fileId ), scan, out );
+                    if( decodeCachedRecordNoThrow( sh.cache, fileId, path, record ) )
+                    {
+                        warmGrowths += appendCacheHitFacts( record.facts, std::uint32_t( fileId ), scan, out );
+                    }
+                    else
+                    {
+                        sh.lateMiss[ fileId ] = 1;   // its grammar may not be compiled: runParsePool parses it after the join
+                    }
                     continue;
                 }
             }
 
-            // cache miss (new file or hash changed) → need to actually parse
-            sh.dirty.store( true, std::memory_order_relaxed );
-            sh.reparsedCount.fetch_add( 1, std::memory_order_relaxed );   // A1: drift-proportional observable
+            // cache miss (new file or hash changed) → need to actually parse. The blob is marked dirty once the
+            // outcome is known: below, at the parse, or in noteFactlessMiss for a file that ends before it.
 
             // ensure bytes are loaded (may have been pre-hashed without loading the body)
             if( !bytesLoaded )
             {
                 if( !readFile( path, bytes ) )
                 {
+                    noteFactlessMiss( sh, fileId, false );
                     continue;
                 }
                 if( looksBinary( bytes ) )
                 {
+                    noteFactlessMiss( sh, fileId, false );
                     continue;
                 }
                 if( le->ext == ".h" && looksObjC( bytes ) )
@@ -563,8 +640,10 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             const bool        isRest  = docparse::isRestExtension( restExt );
             if( !isRest && refuseNesting( *le, bytes, path.c_str(), fileId, scan ) )
             {
+                noteFactlessMiss( sh, fileId, true );
                 continue;
             }
+            markMissDirty( sh );   // this file's facts are re-extracted below: the blob's record for it is rewritten
 
             if( isRest )
             {
@@ -676,67 +755,42 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     sh.warmGrowths.fetch_add( warmGrowths, std::memory_order_relaxed );   // P1-11: one relaxed add per worker, ordered by the pool join
 }
 
+// One fact family of the merge: reserve its exact total, move every thread's rows in, and free each thread's array as soon
+// as its rows have moved. WARM-DIRECT: the merge used to reserve all eight families up front and free the per-thread
+// arrays only after the last one, so the join held two full sets of fact arrays (the merged one and the moved-from
+// per-thread ones). Family by family, it holds one set plus the family being moved. The freed arrays are large blocks,
+// which src/largealloc.cpp hands back to the OS on macOS.
+template <typename Row>
+inline void mergeFamily( std::vector<RawFacts>& tFacts, std::vector<Row> RawFacts::*family, std::vector<Row>& dst )
+{
+    std::size_t total = 0;
+    for( const RawFacts& tf : tFacts )
+    {
+        total += ( tf.*family ).size();
+    }
+    dst.reserve( total );
+    for( RawFacts& tf : tFacts )
+    {
+        std::vector<Row>& src = tf.*family;
+        dst.insert( dst.end(), std::make_move_iterator( src.begin() ), std::make_move_iterator( src.end() ) );
+        std::vector<Row>().swap( src );   // the moved-from rows and their array, released now
+    }
+}
+
 // merge per-thread results into one RawFacts (cross-thread order is irrelevant — everything is
-// re-sorted by the model-build tail), reserving each family's exact total first.
+// re-sorted by the model-build tail), one family at a time (mergeFamily).
 inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: merge per-thread facts" );
     RawFacts raw;
-    std::size_t totDefs = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0, totConstOpens = 0;
-    for( const RawFacts& tf : tFacts )
-    {
-        totDefs  += tf.defs.size();
-        totRefs  += tf.refs.size();
-        totIncs  += tf.incs.size();
-        totBinds += tf.binds.size();
-        totFfis  += tf.ffis.size();
-        totRouteDefs += tf.routeDefs.size();
-        totRouteUses += tf.routeUses.size();
-        totConstOpens += tf.constOpens.size();
-    }
-    raw.defs.reserve( totDefs );
-    raw.refs.reserve( totRefs );
-    raw.incs.reserve( totIncs );
-    raw.binds.reserve( totBinds );
-    raw.ffis.reserve( totFfis );
-    raw.routeDefs.reserve( totRouteDefs );
-    raw.routeUses.reserve( totRouteUses );
-    raw.constOpens.reserve( totConstOpens );
-    for( RawFacts& tf : tFacts )
-    {
-        for( RawDef& d : tf.defs )
-        {
-            raw.defs.push_back( std::move( d ) );
-        }
-        for( RawRef& r : tf.refs )
-        {
-            raw.refs.push_back( std::move( r ) );
-        }
-        for( Include& in : tf.incs )
-        {
-            raw.incs.push_back( std::move( in ) );
-        }
-        for( RawBind& b : tf.binds )
-        {
-            raw.binds.push_back( std::move( b ) );
-        }
-        for( BindingAlias& a : tf.ffis )
-        {
-            raw.ffis.push_back( std::move( a ) );
-        }
-        for( RouteDef& rd : tf.routeDefs )
-        {
-            raw.routeDefs.push_back( std::move( rd ) );
-        }
-        for( RawRouteUse& ru : tf.routeUses )
-        {
-            raw.routeUses.push_back( std::move( ru ) );
-        }
-        for( ConstOpen& co : tf.constOpens )
-        {
-            raw.constOpens.push_back( std::move( co ) );
-        }
-    }
+    mergeFamily( tFacts, &RawFacts::refs, raw.refs );
+    mergeFamily( tFacts, &RawFacts::defs, raw.defs );
+    mergeFamily( tFacts, &RawFacts::binds, raw.binds );
+    mergeFamily( tFacts, &RawFacts::incs, raw.incs );
+    mergeFamily( tFacts, &RawFacts::ffis, raw.ffis );
+    mergeFamily( tFacts, &RawFacts::routeDefs, raw.routeDefs );
+    mergeFamily( tFacts, &RawFacts::routeUses, raw.routeUses );
+    mergeFamily( tFacts, &RawFacts::constOpens, raw.constOpens );
     return raw;
 }
 
@@ -745,6 +799,56 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
 //    model-build tail, so collection order is irrelevant. Also owns the two flags that ride the
 //    pool (the Win-2 dirty flag and the A1 reparsed counter), the install/gate-open moment, and
 //    the dirty-gated saveCache — everything between the prewarm launch and the doc post-pass.
+// WARM-DIRECT: after the pool join, parse the hits whose cached record failed in a worker (CacheRecords::decode: a short
+// read, a torn record, a corrupt body, a key that moved). The prewarm counted them as hits, so their grammar may not be
+// compiled; the pool is joined, so installing it here is the single-writer moment compiledQueryCache() needs. They run
+// on this thread, through the worker body itself (slot 0's accumulators), as ordinary misses: their scan hash is
+// cleared so the file is read and hashed again, and the blob is dirtied so the record is rewritten. Unguarded by the
+// memory watch: these files were claimed by the parse already, and leaving them empty would be a silent hole.
+inline std::size_t parseLateMisses( const ParsePoolShared& pool, std::vector<const CachedRecordHead*>& candidates,
+                                    std::vector<const CachedRecordHead*>& hits, const std::vector<std::uint8_t>& lateMiss )
+{
+    std::vector<std::size_t> late;
+    for( std::size_t fileId = 0; fileId < lateMiss.size(); ++fileId )
+    {
+        if( lateMiss[ fileId ] != 0 )
+        {
+            late.push_back( fileId );
+        }
+    }
+    if( late.empty() )
+    {
+        return 0;
+    }
+    PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: late misses (cached record failed)" );
+    std::vector<const LangEntry*> grammars;
+    for( const std::size_t fileId : late )
+    {
+        candidates[ fileId ]     = nullptr;
+        hits[ fileId ]           = nullptr;
+        pool.scan.hash[ fileId ] = 0;
+        if( const LangEntry* le = pool.scan.lang[ fileId ] )
+        {
+            grammars.push_back( le );
+            if( le->ext == ".h" )
+            {
+                if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                {
+                    grammars.push_back( objcLe );   // the worker's content sniff may reroute the header
+                }
+            }
+        }
+    }
+    installLateQueries( grammars );
+    std::atomic<std::size_t>  next{ 0 };
+    std::vector<std::uint8_t> noLateMiss;   // never written: no file of this pass is a hit
+    ParsePoolShared           shared{ pool.files, pool.cache, pool.scan, pool.prewarm, pool.gate, candidates, hits, noLateMiss,
+                                      pool.tFacts, late, next, pool.dirty, pool.reparsedCount, pool.warmGrowths, late.size(),
+                                      pool.needsCacheHash, pool.captureValueUses, nullptr };
+    runParseWorker( shared, 0 );
+    return late.size();
+}
+
 // #350: after the pool join, a memory-guard stop while files remained. Workers look at the stop flag BEFORE claiming a
 // file, so every claimed file completed and the parsed set is the first K entries of the parse ORDER (cache misses,
 // then cache hits, then grammarless files, each largest first, then fileId — or plain fileId order when the query
@@ -774,7 +878,7 @@ inline bool applyMemoryParseCut( IngestResult& result, memguard::Watch* memWatch
 }
 
 inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::string_view cacheFile, bool captureValueUses,
-                              HashMap<std::string, FileFacts>& cache, const CacheLoadStats& cacheStats,
+                              CacheRecords& cache, const CacheLoadStats& cacheStats,
                               IngestFileScan& scan, QueryPrewarm& prewarm, memguard::Watch* memWatch = nullptr )
 {
     RawFacts raw;
@@ -815,8 +919,9 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( hw, nfiles ) );
 
         std::vector<RawFacts>   tFacts( nthreads );
-        std::vector<FileFacts*> cacheCandidateFacts( nfiles, nullptr );
-        std::vector<FileFacts*> cacheHitFacts( nfiles, nullptr );
+        std::vector<const CachedRecordHead*> cacheCandidateFacts( nfiles, nullptr );
+        std::vector<const CachedRecordHead*> cacheHitFacts( nfiles, nullptr );
+        std::vector<std::uint8_t>            lateMiss( nfiles, 0 );   // WARM-DIRECT: hits whose record failed in a worker
 
         // Per-file byte sizes are wanted in two places below — the cold-path reserve, and the
         // longest-file-first work order. Fill at most once, on demand, so a warm run that also skips
@@ -845,7 +950,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         {
             PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: prepare cache-hit reuse" );
 
-            reserveWarmFamilies( tFacts, markCacheHits( result.files, scan, cache, cacheCandidateFacts, cacheHitFacts ), nthreads );
+            reserveWarmFamilies( tFacts, markCacheHits( cache, scan, cacheCandidateFacts, cacheHitFacts ), nthreads );
         }
         else
         {
@@ -908,7 +1013,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         }
         std::atomic<std::size_t>          nextFile{ 0 };   // lock-free work queue: threads fetch_add for the next parseOrder slot
 
-        ParsePoolShared shared{ result.files, cache, scan, prewarm, queryReadyGate, cacheCandidateFacts, cacheHitFacts,
+        ParsePoolShared shared{ result.files, cache, scan, prewarm, queryReadyGate, cacheCandidateFacts, cacheHitFacts, lateMiss,
                                 tFacts, parseOrder, nextFile, dirty, reparsedCount, warmGrowths, nfiles, needsCacheHash, captureValueUses,
                                 memWatch };
 
@@ -926,6 +1031,11 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
             th.join();
         }
         }
+
+        // WARM-DIRECT: a hit whose record failed in the worker (read, checksum, decode, key) is parsed now, with its
+        // grammar installed, so the answer is the cold one. Then the blob closes and its per-file table is freed.
+        const std::size_t lateMisses = parseLateMisses( shared, cacheCandidateFacts, cacheHitFacts, lateMiss );
+        cache.release();
 
         raw = mergeThreadFacts( tFacts );
 
@@ -954,7 +1064,8 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
             const std::size_t reparsed = reparsedCount.load( std::memory_order_relaxed );
             rw::emitTo( stderr, "ripwire: cache-stats reparsed={} reused={} files={} cached_records={} blob_entries={} warm_growths={}\n",
                           reparsed, ( nfiles >= reparsed ? nfiles - reparsed : std::size_t( 0 ) ), nfiles,
-                          cacheStats.recordsRead, cacheStats.blobEntries, warmGrowths.load( std::memory_order_relaxed ) );
+                          cacheStats.recordsRead - std::min( lateMisses, cacheStats.recordsRead ), cacheStats.blobEntries,
+                          warmGrowths.load( std::memory_order_relaxed ) );
         }
 
         // Win 2: rewrite cache only when at least one file changed (dirty flag set by workers above).

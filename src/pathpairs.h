@@ -639,7 +639,8 @@ inline std::string pathTestTwinRootAttrs( const IngestResult& ing, std::string p
 }
 
 // The <pair> chains and <alt> rows, written where the single path's hop rows go (the CLI's stdout, MCP's memstream).
-inline void emitPathPairs( std::FILE* out, const IngestResult& ing, const Graph& g, const PathPairs& pp, bool singleRoot, std::string_view rootPrefix )
+inline void emitPathPairs( std::FILE* out, const IngestResult& ing, const Graph& g, const PathPairs& pp, bool singleRoot, std::string_view rootPrefix,
+                           const HopFacts& hops )
 {
     std::vector<char> esc;
     const auto loc = [ & ]( NodeId n ) -> std::string
@@ -675,7 +676,7 @@ inline void emitPathPairs( std::FILE* out, const IngestResult& ing, const Graph&
         {
             const std::span<const NodeId>       rows   = std::span<const NodeId>( p.chain ).first( p.joins > 0 ? p.joinRow + 1 : p.chain.size() );
             const std::vector<std::string_view> owners = pathHopOwners( ing, rows );
-            emitPathHopRows( out, ing, g, rows, owners, singleRoot, rootPrefix );
+            emitPathHopRows( out, ing, g, rows, owners, PathRowView{ singleRoot, rootPrefix, hops, i == 0 ? HopShed::Full : HopShed::SiteOnly } );   // HOP-CONTEXT-1: pair 1 full
         }
         emitRaw( out, "</pair>" );
     }
@@ -698,14 +699,48 @@ inline bool pathPairsAnyHop( const PathPairs& pp, Pred&& pred )
 
 // THE hop rows of a reached --path answer: the listed pairs, else today's single path (defattrib.h emitPathHopRows).
 inline void emitPathAnswerRows( std::FILE* out, const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path,
-                                std::span<const std::string_view> owners, bool singleRoot, std::string_view rootPrefix )
+                                std::span<const std::string_view> owners, bool singleRoot, std::string_view rootPrefix, const HopFacts& hops )
 {
     if( pp.active() )
     {
-        emitPathPairs( out, ing, g, pp, singleRoot, rootPrefix );
+        emitPathPairs( out, ing, g, pp, singleRoot, rootPrefix, hops );
         return;
     }
-    emitPathHopRows( out, ing, g, path, owners, singleRoot, rootPrefix );
+    emitPathHopRows( out, ing, g, path, owners, PathRowView{ singleRoot, rootPrefix, hops, HopShed::Full } );
+}
+
+// HOP-CONTEXT-1: the edges emitPathAnswerRows prints, in the shape it prints them (pair 1 and today's single path in full,
+// later pairs site only; a bridge pair prints no hop rows) — the one input of the answer's single hopFacts() pass.
+inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const NodeId> path )
+{
+    std::vector<HopWant> want;
+    const auto add = [ & ]( std::span<const NodeId> rows, bool full )
+    {
+        for( std::size_t i = 1; i < rows.size(); ++i )
+        {
+            want.push_back( HopWant{ rows[ i - 1 ], rows[i], full } );
+        }
+    };
+    if( !pp.active() )
+    {
+        add( path, true );
+        return want;
+    }
+    for( std::size_t i = 0; i < pp.pairs.size() && i < kPathPairChains; ++i )
+    {
+        const PathPair& p = pp.pairs[i];
+        if( !p.isBridge() )
+        {
+            add( std::span<const NodeId>( p.chain ).first( p.joins > 0 ? p.joinRow + 1 : p.chain.size() ), i == 0 );
+        }
+    }
+    return want;
+}
+
+// The one call both --path transports make: the answer's hop facts, before its root is written (the root carries the disclosures).
+inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact )
+{
+    return hopFacts( ing, g, pathHopWants( pp, path ), redact );   // no reader lent: hopFacts makes one for the answer
 }
 
 // What the answer's hop rows carry, for the legend: today's path, or every printed chain when pairs are listed — the CLI and

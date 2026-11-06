@@ -12,6 +12,7 @@
 #include "forslots.h"   // FOR-SLOTS: slots= on the shown initializer rows of a compact-route answer
 #include "fordottedstring.h" // STRING-IMPORT: the dotted-string literals naming a shown row
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
+#include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -22,6 +23,7 @@
 #include "epmanifest.h"     // ep-manifest: the manifest entry-point groups that register a shown row
 #include "listedin.h"       // manifest-noncode: the build/package/registry manifest lines that list a shown file (creation tasks)
 #include "forreexport.h"    // ALIAS-IMPORT: the re-export hop rows of a definition the task names
+#include "foraliashop.h"    // XF-ALIAS-HOP: an alias row the task names, followed to what it names
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
@@ -612,6 +614,7 @@ struct ForLensHeaderParts
                                             // under a target with its next= — and the slot clause defines it (present-only)
     bool             splitPresent = false;   // attrib-multidef Q1: may a <calls><c> row carry prov="split"? viaPresent's twin
     bool             tailCodeFirst = false;  // docs-rest: the tail orders code files first (forpage.h tailOrdersCodeFirst)
+    bool             tailWide = false;       // FOR-TAIL-WIDE: the tail's page walk goes past page 0 (forpage.h fileTailWalksPastPage0)
                                             // question over the same ids (serialize.h splitArmsOutAny); set after construction
     bool             hopsCallsNextPresent = false; // body-fold rider: a ranked <hops> row's cut <calls> carries next= (set after the
                                             // hops render, cleared with the section)
@@ -888,6 +891,14 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
 inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
+inline constexpr std::string_view kForCompactLegendTailWide =
+    "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
+    "past 40 code rows, a doc past row 40) p= only, listed last, head files skipped; p_only= counts them";
+// FOR-TAIL-WIDE (serialize.h kForFileTailWideLegend): rides with the tail clause, only when the walk goes past page 0
+inline std::string_view tailWideLegend( const ForLensHeaderParts& p, bool compact )
+{
+    return presentOnlyClause( p.tailLegend && p.tailWide, compact, kForCompactLegendTailWide, rw::kForFileTailWideLegend );
+}
 // The tail-order clause (serialize.h kForFileTailCodeFirstLegend): rides with the tail clause, only where the order applies
 // (forpage.h tailOrdersCodeFirst: a code question over an index that holds a doc unit).
 inline std::string_view tailCodeFirstLegend( const ForLensHeaderParts& p, bool compact )
@@ -1017,6 +1028,7 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     const struct { bool on; std::string_view clause; } kPresentOnly[] = {
         { p.tailLegend, kForCompactLegendTail },
         { !tailCodeFirstLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailCodeFirst },   // docs-rest: the tail's order
+        { !tailWideLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailWide },   // FOR-TAIL-WIDE: the walk past page 0
         { p.hdrLegend, kForCompactLegendHdr },
         { p.composePresent, kForCompactLegendCompose },  { p.legoPresent, kForCompactLegendLego },
         { p.layerPresent, kForCompactLegendLayer },
@@ -1164,6 +1176,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     {
         h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
         h.append( tailCodeFirstLegend( p, /*compact=*/false ) );   // docs-rest: the order a code question's tail uses
+        h.append( tailWideLegend( p, /*compact=*/false ) );   // FOR-TAIL-WIDE: present-only, the walk past page 0
     }
     if( p.hdrLegend )
     {
@@ -1572,7 +1585,7 @@ inline void forLensJsonSoftRefill( const PackSigs& packSigs, const ForLensJsonIn
     // the tail at its RESERVE: its share, capped at the head-scoped tail's whole stanza (the same at every N; the XML twin's
     // rule) — not its filled bytes nor the cut-scoped tail's size, both of which step with N: rows stay monotone in N
     const std::size_t  tailBytes = std::min( forLensJsonTailShare( in.tokenBudget, b.bundleBytes, b.fixedBytes, cutRows ),
-                                             forLensJsonTailStanza( *in.fileTail, 0, 0 ).size() );
+                                             forLensJsonTailStanza( rw::fileTailOldWalk( *in.fileTail ), 0, 0 ).size() );   // FOR-TAIL-WIDE F1: the old walk's part
     const std::size_t  rowDrop   = rw::forSoftRowDropFill( b.bundleBytes, tailBytes );
     if( rowDrop >= b.firstRowDrop )
     {
@@ -2833,6 +2846,172 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0 ).c_str() );
 }
 
+// K-WRONGSYM (src/forfilesyms.h): the shown files' unnamed symbols in <syms>, just before </ctx>, read off THE BYTES THE RUN EMITTED: the
+// --for lens writes its answer to stdout through a capture from the root tag to this call, and the block is rendered from what was
+// captured, so a section or trailing block added later cannot fall out of a hand-kept list. The block has its own byte allowance, outside
+// est_tokens, so no auto-served body pays for it. XML only, a single root; held under --token-budget / --max-tokens; a run that could not
+// buffer its bytes prints `<syms held="uncaptured"/>` and says so on stderr.
+inline bool forFileSymsWanted( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() );
+}
+
+// What StdoutCapture::finish() hands back.
+struct StdoutCaptured
+{
+    std::string bytes; // every byte read back from the buffer
+    bool        failed   = false; // flushing, writing or reading the buffer failed: `bytes` may be short, the answer is not known whole
+    bool        restored = true; // stdout is the descriptor it was before the capture; false: it still points at the buffer
+};
+// Every byte of `f` from its start; `failed` is set when the read ended on a stream error.
+inline std::string readBackAll( std::FILE* f, bool& failed )
+{
+    std::string doc;
+    std::rewind( f );
+    char buf[ 65536 ];
+    for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), f ) ) > 0; )
+    {
+        doc.append( buf, got );
+    }
+    failed = failed || std::ferror( f ) != 0;
+    return doc;
+}
+// Best effort: all of `bytes` to the descriptor (the real stdout when the restore failed).
+inline void writeAllTo( int fd, const std::string& bytes ) noexcept
+{
+    for( std::size_t at = 0; at < bytes.size(); )
+    {
+        const auto put = rw::os::write( fd, bytes.data() + at, bytes.size() - at );
+        if( put <= 0 )
+        {
+            return;
+        }
+        at += std::size_t( put );
+    }
+}
+
+// stdout pointed at an anonymous file for the lifetime of the object (the dup2 capture runWithCompactLegend and the graph_verb block use):
+// finish() restores stdout and returns every byte written meanwhile; the destructor restores it on any other exit. Inactive when not wanted.
+class StdoutCapture
+{
+public:
+    explicit StdoutCapture( bool wanted ) : wanted_( wanted )
+    {
+        if( !wanted )
+        {
+            return;
+        }
+        std::fflush( stdout );
+        file_  = rw::isChargeBufferFaultInjected() ? nullptr : std::tmpfile();   // the est_tokens family's fault switch: no buffer to capture into
+        saved_ = file_ != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
+        active_ = file_ != nullptr && saved_ >= 0 && rw::os::dup2( rw::os::fileno( file_ ), STDOUT_FILENO ) >= 0;
+        if( !active_ )
+        {
+            release();
+        }
+    }
+    StdoutCapture( const StdoutCapture& ) = delete;
+    StdoutCapture& operator=( const StdoutCapture& ) = delete;
+    ~StdoutCapture()
+    {
+        if( active_ )
+        {
+            (void)finish();
+        }
+    }
+    bool wanted() const noexcept { return wanted_; }
+    // The captured bytes, stdout restored; nullopt when nothing was captured. A failed flush or a stream error is `failed`: the bytes read are
+    // kept, never dropped and never taken for the whole answer. A failed restore keeps the saved descriptor (the only handle on the real
+    // stdout) and writes the bytes to it; the caller reports `restored == false`.
+    std::optional<StdoutCaptured> finish()
+    {
+        if( !active_ )
+        {
+            return std::nullopt;
+        }
+        active_ = false;
+        StdoutCaptured out;
+        out.failed = std::fflush( stdout ) != 0 || std::ferror( stdout ) != 0; // a short write to the buffer (disk full, a file-size limit) lands here
+        std::clearerr( stdout ); // the error was the buffer's; the restored stdout starts clean
+        out.restored = rw::os::dup2( saved_, STDOUT_FILENO ) >= 0;
+        out.bytes    = readBackAll( file_, out.failed );
+        if( !out.restored )
+        {
+            writeAllTo( saved_, out.bytes );
+            saved_ = -1; // left open for the process's life
+        }
+        release();
+        return out;
+    }
+
+private:
+    void release() noexcept
+    {
+        if( saved_ >= 0 ) { rw::os::close( saved_ ); }
+        if( file_ != nullptr ) { std::fclose( file_ ); }
+        saved_ = -1;
+        file_  = nullptr;
+    }
+    bool       wanted_ = false, active_ = false;
+    std::FILE* file_   = nullptr;
+    int        saved_  = -1;
+};
+
+// Where <syms> goes in the answer's bytes: in front of the --with-graph <graph> block, which stays the last child, else at the end (rfind: a
+// body printed earlier may quote the tag; the block itself is the last one emitted, and only a run that asked for it has one).
+inline std::size_t forSymsInsertAt( const std::string& emitted, bool withGraph )
+{
+    constexpr std::string_view kGraphOpen = "<graph fmt=\"mermaid\"><![CDATA[";
+    const std::size_t          graphAt    = withGraph ? emitted.rfind( kGraphOpen ) : std::string::npos;
+    return graphAt != std::string::npos && emitted.find( "</graph>", graphAt ) != std::string::npos ? graphAt : emitted.size();
+}
+
+// The origin call's ranking flags and --pack-top-n for the held block's `next=`: the replay must rank the same list.
+inline std::string forHeldNextFlags( const rw::Config& cfg )
+{
+    return forRankShapingFlags( cfg ) + ( cfg.packTopN > 0 ? " --pack-top-n=" + std::to_string( cfg.packTopN ) : std::string() );
+}
+
+// The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
+inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+{
+    if( !capture.wanted() )
+    {
+        return 0;
+    }
+    const rw::Config&                      cfg = d.cfg;
+    const std::optional<StdoutCaptured>    cap = capture.finish();
+    if( cap && !cap->restored )
+    {
+        rw::emitTo( stderr, "ripwire: --for: could not restore stdout after the <syms> capture — the answer so far was written to the original stdout, the rest is lost\n" );
+        return 1;
+    }
+    if( !cap )
+    {
+        rw::emitTo( stderr, "ripwire: --for: could not buffer the answer's bytes — the <syms> block is not rendered (held=\"uncaptured\")\n" );
+    }
+    else if( cap->failed )
+    {
+        rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
+    }
+    const bool        whole = cap && !cap->failed;
+    const std::string syms  = rw::renderForFileSyms(
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
+                                      .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole } );
+    const std::size_t at = cap ? forSymsInsertAt( cap->bytes, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    if( cap )
+    {
+        std::fwrite( cap->bytes.data(), 1, at, stdout );
+    }
+    std::fwrite( syms.data(), 1, syms.size(), stdout );
+    if( cap )
+    {
+        std::fwrite( cap->bytes.data() + at, 1, cap->bytes.size() - at, stdout );
+    }
+    return cap && cap->failed ? 1 : 0;
+}
+
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
@@ -3436,6 +3615,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                         forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent,
                                         ownerPlan.any(), forViaByOwnerOnly, slotOwner.any() };
         headerParts.tailCodeFirst = rw::tailOrdersCodeFirst( ing, cfg.forTask );   // docs-rest: the tail-order clause rides only here
+        headerParts.tailWide      = rw::fileTailWalksPastPage0( ing, lensRank );   // FOR-TAIL-WIDE: the walk-past-page-0 clause rides only here
         headerParts.splitPresent = forSplitPresent;   // attrib-multidef Q1 (a trailing member: the aggregate above keeps its order)
         // body-fold (forfold.h): the bodies of the top ranked rows, appended — decided here because the header's fold clause reads it.
         // The compact route's XML answer in the DEFAULT regime only: an explicit --token-budget is a size the caller named (that
@@ -3743,7 +3923,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
         const std::size_t tailLegendEmitted    = ( compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size() )
-                                               + tailCodeFirstLegend( headerParts, compactLegendOn ).size();
+                                               + tailCodeFirstLegend( headerParts, compactLegendOn ).size()
+                                               + tailWideLegend( headerParts, compactLegendOn ).size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -3815,7 +3996,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::size_t fullHeaderBytes = fullHeader.size();
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
-                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + idRouteParts.bytes()
+                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + tailWideLegend( fullParts, false ).size() + idRouteParts.bytes()
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u )
                                               + ownerLegendExemptBytes( headerParts, /*compact=*/false )
                                               + bodySlotLegend( headerParts, /*compact=*/false ).size()
@@ -4404,7 +4585,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
         }
 
-        // ── DEEP-TAIL d2: render the file-grain tail (FOLD C: page 0 of the file page; serialize.h kForFileTailShownCap / kForFileTailPageRows) ──
+        // ── DEEP-TAIL d2: render the file-grain tail (FOLD C: the file page's first rows; serialize.h kForFileTailShownCap / kForFileTailPageWalk) ──
         // Rendered after the bodies decision. Default regime: the full 40 rows ride on top — the sigs and the bodies are
         // byte-identical to a tail-less bundle by construction (nothing above charges these bytes). A soft target: the tail is
         // the last trailing section, funded from what the rows AT THE CUT and the sections before it left (reserve first).
@@ -4431,13 +4612,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( forSoftTarget && sigsPreRendered && forSigsCut.pastTarget > 0 )
         {
             // the tail is charged at its RESERVE — its share, capped at the whole render of the head-scoped tail (forFileTail: the
-            // rows outside the 40-row surface, the same at every N) — not at its filled bytes nor at the cut-scoped tail's size:
+            // rows outside the 40-row surface, the same at every N; FOR-TAIL-WIDE review F1: the part the old 40-row walk lists,
+            // rebuilt byte for byte, so the widened rows fill the tail's own share and never narrow <sigs>) — not at its filled
+            // bytes nor at the cut-scoped tail's size:
             // both step with N (a whole row at a time, as a file moves between the rank rows and the page rows), and
             // the rows past the cut would then fall as N grows. With this reserve the rows are monotone in N.
             std::vector<char> tailEsc;
             const std::size_t tailReserve    = std::min( std::max<std::size_t>( bundleBudget > tailSpentBytes ? bundleBudget - tailSpentBytes : 0u,
                                                                                 rw::kForFileTailShellReserve ),
-                                                         rw::renderFileTailXml( forFileTail, forFileTail.paths.size(), tailEsc ).size() );
+                                                         rw::renderFileTailXml( rw::fileTailOldWalk( forFileTail ), forFileTail.oldRows, tailEsc ).size() );
             const std::size_t sectionsServed = forHdrXml.size() + legoStr.size() + composeStr.size() + routeStr.size() + graphSection.xml.size()
                                              + autoSection.xml.size() + slot.xml.size() + tailReserve;   // not the --detail bodies (above)
             const std::size_t rowDropFill    = rw::forSoftRowDropFill( bundleBudget, sectionsServed );
@@ -4643,6 +4826,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // rows now (owner decision 2026-10-14), so the header — every legend clause and the verbatim task echo — always ships.
         headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
 
+        StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         // R2-AF (round 2, S4): first rows inside the root, right after the legend — see forHdrRows above.
         // The SAME string every sum above charged (rendered once, beside forHdrRows) — "" when there is no row.
@@ -4763,6 +4947,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                                              .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }
+        // XF-ALIAS-HOP (foraliashop.h): a printed row the task names is an alias definition: its chain to what it names; "" otherwise.
+        // Its own allowance, outside est_tokens, like the two blocks above. XML only. shed= follows forBodyCeiling (--max-tokens WITH --detail=N), the
+        // kShapingVerbs carve-out: a bare --max-tokens on --for is noticed as ignored ("nothing was dropped"), so the block must not shed under it.
+        if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && sigsPreRendered )
+        {
+            const std::string aliasHops = rw::renderForAliasHops( ing, rw::ForAliasHopArgs{ .task = cfg.forTask, .routeNote = routeNoteRaw, .printed = &shownSigIds,
+                                                                                            .held = cfg.tokenBudget > 0, .shed = forBodyCeiling, .redact = redactPtr } );
+            std::fwrite( aliasHops.data(), 1, aliasHops.size(), stdout );
+        }
         std::vector<rw::NodeId> litAnswerIds = shownSigIds;   // LIT-SITE-DECOY: the answer's rows and whole bodies order the literal's sites
         const std::vector<rw::NodeId> servedWhole = servedAnswerBodies().bodies;
         litAnswerIds.insert( litAnswerIds.end(), servedWhole.begin(), servedWhole.end() );
@@ -4777,10 +4970,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
         }
+        // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
+        const int answerRc = appendForFileSyms( d, forAnswerBytes );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
-        return 0;
+        return answerRc;
     }
     return std::nullopt;
 }

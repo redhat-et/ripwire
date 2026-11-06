@@ -392,9 +392,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     warmFieldIdTable();
 
     CacheLoadStats cacheStats;
-    HashMap<std::string, FileFacts> cache =
-        cacheFile.empty() ? HashMap<std::string, FileFacts>{}
-                          : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
+    CacheRecords cache =
+        cacheFile.empty() ? CacheRecords{} : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
     // per-fileId scan arrays (language classify + hash/stat-gate + health slots) — ingest_prewarm.h
     IngestFileScan scan = makeFileScan( result.files );
 
@@ -407,8 +406,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         memWatch.rearmForParse();   // clears the crawl's stop flags: the second walk is measured on its own
         crawlInto();
         cacheStats = CacheLoadStats{};
-        cache      = cacheFile.empty() ? HashMap<std::string, FileFacts>{}
-                                       : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
+        cache      = cacheFile.empty() ? CacheRecords{} : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
         scan       = makeFileScan( result.files );
     }
     ENSURES( scan.lang.size() == result.files.size(), "the scan arrays describe the crawl the parse pool will read" );
@@ -427,9 +425,9 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     memWatch.rearmForParse();
     RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm, &memWatch );
 
-    // Cache facts are only needed by the parse pool. Release their map and bucket storage before the model tail
-    // creates symbols/references, so a warm run does not carry the cache and the assembled model at once.
-    HashMap<std::string, FileFacts>().swap( cache );
+    // The warm plan is only needed by the parse pool, which has already released it (WARM-DIRECT: the blob closes and its
+    // per-file table is freed at the pool join); this covers the paths that never reach the pool.
+    cache.release();
 
     result.fileHealth = std::move( scan.health );   // §L1: after saveCache, before the (unmeasured) doc pass
     collectNestRefusals( scan, result );             // the nesting guards' refusals, as --skipped rows (ingest_prewarm.h)

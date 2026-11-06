@@ -3406,7 +3406,7 @@ inline std::pair<std::uint32_t, bool> resolveJsNamedImportFile( std::string_view
     // iff the source tier found nothing) and folds in this exact/literal probe as its seed, so a tree
     // carrying BOTH a literal `module` file and a source/declaration alternate still degrades to ambiguous
     // exactly as it did before this shared out.
-    const std::uint32_t seedHit = joinNormalizeLookup( includerDir( importer ), std::string( module ), files, workspace, importerFileId );
+    const std::uint32_t seedHit = joinNormalizeLookup( includerDir( importer ), module, files, workspace, importerFileId );
     return probeJsRuntimeSourceExt( includerDir( importer ), module, *runtimeExt, files, workspace, importerFileId, seedHit );
 }
 
@@ -6954,47 +6954,6 @@ inline HashMap<std::string, char> rustModuleNames( const IngestResult& ing )
     return names;
 }
 
-// Every `name = "x"` line (or `key = "x"` for another key: the --for re-export rows read `[lib] path`) of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
-// dotted key, an inline table or a multi-line string is not read, which can only miss a name, never invent one).
-inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out,
-                              std::string_view key = "name" )
-{
-    bool inSection = false;
-    while( !text.empty() )
-    {
-        const std::size_t end  = text.find( '\n' );
-        std::string_view  line = text.substr( 0, end );
-        text = end == std::string_view::npos ? std::string_view() : text.substr( end + 1 );
-        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
-        if( line.starts_with( '[' ) )
-        {
-            inSection = std::ranges::any_of( sections, [ & ]( std::string_view h ) { return line.starts_with( h ); } );
-            continue;
-        }
-        if( !inSection || !line.starts_with( key ) )
-        {
-            continue;
-        }
-        line.remove_prefix( key.size() );
-        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
-        if( !line.starts_with( '=' ) )
-        {
-            continue;
-        }
-        line.remove_prefix( 1 );
-        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
-        if( line.size() < 2 || ( line.front() != '"' && line.front() != '\'' ) )
-        {
-            continue;
-        }
-        const std::size_t close = line.find( line.front(), 1 );
-        if( close != std::string_view::npos && close > 1 )
-        {
-            out.emplace_back( line.substr( 1, close - 1 ) );
-        }
-    }
-}
-
 // The TOML key or quoted string at the front of `s` (`"a-b"`, `'a'` or a bare `a-b`, which stops at whitespace, `=` or `.`), consumed from `s`.
 inline std::string_view tomlTakeKey( std::string_view& s )
 {
@@ -8224,7 +8183,7 @@ struct BaseEvidenceTables
     const rw::FileSetStore& fileIncludes;  // C-family: the transitive, path-precise include set (sorted)
     const rw::FileAdjacency& includeAdj;   // every language: the files a file's imports resolve to
     const std::vector<std::uint32_t>&       fileDir;       // file → interned directory id
-    const ReceiverEvidence*                 recvEv;        // JS/TS: a CommonJS require alias's module (moduleNames)
+    const ReceiverEvidence*                 recvEv;        // JS/TS: a CommonJS require alias's module (moduleRootOf)
     const HashMap<std::string, char>*       rustOutsideUse;   // Rust: "<fileId>#X" a `use` of an outside path binds (crate-dir aware)
     const HashMap<std::string, char>*       selfImport;       // JS/TS, Python: "<fileId>#X" an import of the tree's OWN package name binds
 };
@@ -8741,7 +8700,7 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
 
 // tier 2, JS/TS: a bare name an ES named import pins, or a CommonJS `const { Node } = require('./a')` (a ModuleAlias, not
 // an ES import) whose relative specifier names the candidate's module — the test a `Node.m()` member call is proven by
-// (receiverevidence.h moduleNames). A qualified `ns.Base` is not read (a namespace import binds no table here).
+// (receiverevidence.h moduleRootNames). A qualified `ns.Base` is not read (a namespace import binds no table here).
 inline void jsImportedBases( const BaseEvidenceTables& t, const Reference& r, const std::vector<NodeId>& cand, std::vector<NodeId>& out )
 {
     if( !r.memberRoot.empty() )
@@ -8755,9 +8714,12 @@ inline void jsImportedBases( const BaseEvidenceTables& t, const Reference& r, co
         out.push_back( pin->second.node );
         return;
     }
+    // the module alias the name binds is the call's own fact: read once, then tested per candidate (LADDER-HOIST)
+    const bool moduleMayName = t.recvEv != nullptr && ( !listed || pin->second.outcome == JsImportOutcome::Unlisted );
+    const std::optional<ReceiverEvidence::ModuleRoot> module = moduleMayName ? t.recvEv->moduleRootOf( r, r.calleeName ) : std::nullopt;
     for( NodeId c : cand )
     {
-        if( t.recvEv != nullptr && ( !listed || pin->second.outcome == JsImportOutcome::Unlisted ) && t.recvEv->moduleNames( r, r.calleeName, c ) )
+        if( module.has_value() && t.recvEv->moduleRootNames( *module, r, c ) )
         {
             out.push_back( c );
         }
@@ -10099,57 +10061,162 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // class or a free function in scope where the receiver is implicit, and elsewhere a definition the caller's scope
     // sees — its own file, a file it imports, Go's package directory — reached by a name that is not a local or a
     // parameter of the caller (a call THROUGH one holds whatever was passed in).
+    // LADDER-HOIST: "c's owner is a class" is read per candidate (84 M ladder asks on vscode); one byte per symbol, filled
+    // once here, where classNames and recvEv.ownerClass are final, replaces a string-keyed probe per ask
+    std::vector<std::uint8_t> ownerClassBit( recvEv.ownerClass.size(), 0 );
+    for( std::size_t s = 0; s < ownerClassBit.size(); ++s )
+    {
+        const std::string& owner = recvEv.ownerClass[ s ];
+        ownerClassBit[ s ]       = static_cast<std::uint8_t>( !owner.empty() && classNames.contains( owner ) );
+    }
     const auto ownerIsClass = [ & ]( NodeId c ) -> std::string_view
     {
-        const std::string& owner = recvEv.ownerClass[ c ];
-        return ( !owner.empty() && classNames.contains( owner ) ) ? std::string_view( owner ) : std::string_view{};
+        return ownerClassBit[ c ] != 0 ? std::string_view( recvEv.ownerClass[ c ] ) : std::string_view{};
     };
-    const auto ladderProves = [ & ]( const Reference& ref, NodeId c ) -> bool
+    // LADDER-HOIST: what ladderProves reads of the CALL alone, filled on first need and kept for all of that call's candidates
+    // (35-93 per call on envoy, cockroach, vscode). Each fact is a pure function of the call and of tables that are final
+    // before the resolve loop, so every candidate gets the answer the per-candidate reads gave. A fresh one per call.
+    struct LadderRefFacts
     {
-        const Symbol& cs = ing.symbols[ c ];
-        if( isMemberCallRef( ref ) )
+        enum class Root : std::uint8_t
         {
-            if( jsMemberRootWritten( jsImports, ref ) != JsWrittenRoot::None ) { return false; }   // a written root names no class by its spelling
-            const ReceiverEvidence::Chain ch = ReceiverEvidence::chainOf( ref );
-            if( !ch.valid || !ch.path.empty() || !ch.ctor.empty() )
-            {
-                return false;   // a chained or constructed receiver the resolve rule could not type proves nothing here
-            }
-            const std::string_view owner = ownerIsClass( c );
-            if( isThisRoot( ch.root ) || ( ref.lang == Lang::Python && ch.root == "cls" ) )
-            {
-                const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-                if( !callerCls.empty() )
-                {
-                    return !owner.empty() && recvEv.inCone( callerCls, owner ) && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
-                }
-                return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
-            }
-            if( isSuperRoot( ref, ch.root ) )
-            {
-                const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-                return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner )
-                    && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
-            }
-            if( recvEv.isLocalName( ref.fromSymbol, ch.root ) || externalVeto.hasLocal( ref, ch.root ) )
-            {
-                return false;   // a parameter or local spelled like the module alias hides it (`alias = make(); alias.run()`)
-            }
-            if( recvEv.moduleNames( ref, ch.root, c ) )
-            {
-                return !( langFacts( ref.lang ).moduleCallReachesFunctionsOnly && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
-            }
-            if( ref.lang == Lang::Python && ref.recv == RecvKind::NamedVar )
+            Unread,    // not classified yet
+            Unproven,  // a written root, or a chained / constructed receiver the resolve rule could not type: proves nothing
+            This,      // this / self / Python cls
+            Super,
+            Hidden,    // a parameter or local spelled like the root hides any module alias or class it names
+            Named,     // a module alias or a class name, decided per candidate
+        };
+        explicit LadderRefFacts( const Reference& r ) : ref( r ) {}
+        const Reference&                              ref;
+        Root                                          root = Root::Unread;
+        ReceiverEvidence::Chain                       chain;
+        bool                                          callerRead   = false;
+        bool                                          callerStatic = false;
+        std::string_view                              callerCls;
+        bool                                          moduleRead = false;
+        std::optional<ReceiverEvidence::ModuleRoot>   module;
+        bool                                          pyBindRead = false;
+        std::optional<std::uint32_t>                  pyBindFile;   // the one file a Python `import` binding of the receiver names
+        std::int8_t                                   namesCls = -1;   // -1 unread; the class the root names, when it does
+        std::string_view                              cls;
+    };
+    const auto ladderCaller = [ & ]( LadderRefFacts& f )
+    {
+        if( !f.callerRead )
+        {
+            f.callerCls    = recvEv.callerClass( f.ref.fromSymbol );
+            f.callerStatic = recvEv.callerIsStatic( f.ref.fromSymbol );
+            f.callerRead   = true;
+        }
+    };
+    const auto ladderRoot = [ & ]( LadderRefFacts& f )
+    {
+        using Root = LadderRefFacts::Root;
+        const Reference& ref = f.ref;
+        if( jsMemberRootWritten( jsImports, ref ) != JsWrittenRoot::None )
+        {
+            return Root::Unproven;   // a written root names no class by its spelling
+        }
+        f.chain = ReceiverEvidence::chainOf( ref );
+        if( !f.chain.valid || !f.chain.path.empty() || !f.chain.ctor.empty() )
+        {
+            return Root::Unproven;
+        }
+        if( isThisRoot( f.chain.root ) || ( ref.lang == Lang::Python && f.chain.root == "cls" ) )
+        {
+            return Root::This;
+        }
+        if( isSuperRoot( ref, f.chain.root ) )
+        {
+            return Root::Super;
+        }
+        if( recvEv.isLocalName( ref.fromSymbol, f.chain.root ) || externalVeto.hasLocal( ref, f.chain.root ) )
+        {
+            return Root::Hidden;   // a parameter or local spelled like the module alias hides it (`alias = make(); alias.run()`)
+        }
+        return Root::Named;
+    };
+    // a member call's receiver root that is a module alias or a class name: does it name candidate c
+    const auto ladderNamedProves = [ & ]( LadderRefFacts& f, NodeId c, std::string_view owner ) -> bool
+    {
+        const Reference& ref = f.ref;
+        const Symbol&    cs  = ing.symbols[ c ];
+        if( !f.moduleRead )
+        {
+            f.module     = recvEv.moduleRootOf( ref, f.chain.root );
+            f.moduleRead = true;
+        }
+        if( f.module.has_value() && recvEv.moduleRootNames( *f.module, ref, c ) )
+        {
+            return !( langFacts( ref.lang ).moduleCallReachesFunctionsOnly && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
+        }
+        if( ref.lang == Lang::Python && ref.recv == RecvKind::NamedVar )
+        {
+            if( !f.pyBindRead )
             {
                 bindKey.clear();  Narrower::appendUint( bindKey, ref.fileId );  bindKey.push_back( '#' );  bindKey.append( ref.recvVar );
-                if( const auto ait = extVeto.importBindFile.find( bindKey ); ait != extVeto.importBindFile.end() && ait->second == cs.fileId )
+                if( const auto ait = extVeto.importBindFile.find( bindKey ); ait != extVeto.importBindFile.end() )
                 {
-                    return true;
+                    f.pyBindFile = ait->second;
                 }
+                f.pyBindRead = true;
             }
-            const std::string_view cls = recvEv.unalias( ref.fileId, ch.root );
-            return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner )   // a class-name receiver: the class or a base,
-                && recvEv.onSide( ref, c, /*classSide=*/true );                                                 // its CLASS side
+            if( f.pyBindFile == cs.fileId )
+            {
+                return true;
+            }
+        }
+        if( owner.empty() )
+        {
+            return false;
+        }
+        if( f.namesCls < 0 )
+        {
+            f.cls      = recvEv.unalias( ref.fileId, f.chain.root );
+            f.namesCls = recvEv.namesClass( ref, f.chain.root, f.cls ) ? 1 : 0;
+        }
+        return f.namesCls != 0 && recvEv.inCone( f.cls, owner )   // a class-name receiver: the class or a base,
+            && recvEv.onSide( ref, c, /*classSide=*/true );          // its CLASS side
+    };
+    const auto ladderProves = [ & ]( LadderRefFacts& f, NodeId c ) -> bool
+    {
+        using Root = LadderRefFacts::Root;
+        const Reference& ref = f.ref;
+        const Symbol&    cs  = ing.symbols[ c ];
+        if( isMemberCallRef( ref ) )
+        {
+            if( f.root == Root::Unread )
+            {
+                f.root = ladderRoot( f );
+            }
+            switch( f.root )
+            {
+                case Root::Unread:
+                case Root::Unproven:
+                case Root::Hidden:
+                    return false;
+                case Root::This:
+                {
+                    const std::string_view owner = ownerIsClass( c );
+                    ladderCaller( f );
+                    if( !f.callerCls.empty() )
+                    {
+                        return !owner.empty() && recvEv.inCone( f.callerCls, owner ) && recvEv.onSide( ref, c, f.callerStatic );
+                    }
+                    return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
+                }
+                case Root::Super:
+                {
+                    const std::string_view owner = ownerIsClass( c );
+                    ladderCaller( f );
+                    return !f.callerCls.empty() && !owner.empty() && owner != f.callerCls && recvEv.inCone( f.callerCls, owner )
+                        && recvEv.onSide( ref, c, f.callerStatic );
+                }
+                case Root::Named:
+                    return ladderNamedProves( f, c, ownerIsClass( c ) );
+            }
+            return false;
         }
         if( langFacts( ref.lang ).implicitReceiver )
         {
@@ -10158,8 +10225,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 return true;   // a free / top-level function
             }
-            const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-            return !callerCls.empty() && recvEv.inCone( callerCls, owner );
+            ladderCaller( f );
+            return !f.callerCls.empty() && recvEv.inCone( f.callerCls, owner );
         }
         if( ref.lang == Lang::Rust || ref.lang == Lang::C )
         {
@@ -12124,12 +12191,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( hedgeEligible && !rule3NoProof && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
         {
             provedScratch.clear();
+            LadderRefFacts ladderFacts( r );   // the call's own facts, read once for all its candidates
             if( !memberRule3.empty() && !isMemberCallRef( r ) )
             {
                 // an implicit receiver's Rule 3 answer, kept where the lookup proves it — Rule 3's own decision, as before
                 for( NodeId c : memberRule3 )
                 {
-                    if( ladderProves( r, c ) )
+                    if( ladderProves( ladderFacts, c ) )
                     {
                         provedScratch.push_back( c );
                     }
@@ -12146,7 +12214,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 provedScratch.clear();
                 for( NodeId c : cand )
                 {
-                    if( ladderProves( r, c ) )
+                    if( ladderProves( ladderFacts, c ) )
                     {
                         provedScratch.push_back( c );
                     }
@@ -16378,15 +16446,16 @@ inline rw::FileAdjacency resolveIncludeAdj( const IngestResult& ing )
 //       (zed: gpui.rs, theme.rs). Declared is read by NAME, so a namesake declared elsewhere makes a root read as a
 //       module, which only cuts less;
 //   (2) every occurrence of the edge in P's row (the adjacency is un-deduped: one per directive) was drawn by one of P's
-//       `mod x;` declarations. resolve.h resolveRustImport resolves `mod:x` in the INCLUDER's directory, which is the
-//       module directory only for a `mod.rs` or a crate root, so a declaration draws this edge only there; anywhere else
-//       every occurrence came from a `use` (`crate::a::b::…`) and the pair is kept (card RUST-MOD-RESOLVE);
+//       `mod x;` declarations. resolve.h resolveRustImport resolves `mod:x` in P's module directory (rustModuleDir, with the
+//       manifest's crate roots: RUST-ROOTS-A F2), so a declaration draws this edge only where that directory is the one rule
+//       (1) read; where the two disagree (a root only one of them knows) every occurrence came from a `use` and the pair is kept;
 //   (3) no other directive of P names the child at its head (`x`, `x::…`, `self::x…`, resolved or not: a relative
 //       `use x::Thing;` resolves to no file today), and no reference written in P is qualified by it (`x::go()`, the
 //       immediate qualifier: Reference::qualifier). Any namesake reads as a use, which only cuts less.
-// Allowlist, SAFETY (d)(1): only those shapes are cut. A `mod x;` written inside an inline `mod m { … }` and a
-// `#[path = "…"]` / `#[cfg_attr(…, path = "…")] mod x;` are read as P's own plain `mod x;`: the declaration resolves to
-// P's `x.rs`, the wrong file for those two (card RUST-MOD-RESOLVE), and that edge is cut like any other declaration.
+// Allowlist, SAFETY (d)(1): only those shapes are cut. A `mod x;` written inside an inline `mod m { … }` resolves into the
+// inline module's own directory (resolve.h RustSite::inlineMods), which is not P's module directory: that edge is kept. A
+// `#[path = "…"]` / `#[cfg_attr(…, path = "…")] mod x;` is read as P's own plain `mod x;`: the declaration resolves to
+// P's `x.rs`, the wrong file for it (card RUST-MOD-RESOLVE), and that edge is cut like any other declaration.
 struct ContainmentCut
 {
     rw::FileAdjacency adj;         // the adjacency minus the containment pairs, filled only when pairs > 0
@@ -16403,15 +16472,10 @@ struct ContainmentCut
 // names this file's stem, so it is a module file, not a crate root.
 inline std::string rustChildModuleDir( std::string_view path, const std::vector<std::string_view>& declaredNames )
 {
-    const std::string_view dir   = includerDir( path );
-    std::string_view       stem  = dir.empty() ? path : path.substr( dir.size() + 1 );
-    stem                         = stem.substr( 0, stem.size() - 3 );   // ".rs", checked by the caller
-    const bool root = stem == "lib" || stem == "main" || !std::binary_search( declaredNames.begin(), declaredNames.end(), stem, sortutil::svLess );
-    if( stem == "mod" || root )
-    {
-        return std::string( dir );
-    }
-    return dir.empty() ? std::string( stem ) : std::string( dir ) + "/" + std::string( stem );
+    const std::string_view dir  = includerDir( path );
+    std::string_view       stem = dir.empty() ? path : path.substr( dir.size() + 1 );
+    stem                        = stem.substr( 0, stem.size() - 3 );   // ".rs", checked by the caller
+    return rustModuleDir( path, !std::binary_search( declaredNames.begin(), declaredNames.end(), stem, sortutil::svLess ) );   // declared by no `mod`: a root
 }
 
 inline bool isRustSourcePath( std::string_view path ) noexcept
@@ -16516,6 +16580,11 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
     std::sort( declaredNames.begin(), declaredNames.end(), sortutil::svLess );
     declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
 
+    // rule (2) reads the resolver's own `mod:` base, which knows a manifest's crate roots (`[lib] path`, src/bin/*.rs): the run's
+    // shared table when an earlier pass built it. The path index is built only when it is needed (no shared table yet, or a
+    // declaration that points at the includer's own directory).
+    LazyFileIndex         rsIndexOf( ing );
+    const RustCrateRoots& rustRoots = rustCrateRootsOf( ing, rsIndexOf );
     std::vector<std::pair<std::uint32_t, std::uint32_t>>      cutPairs;   // (parent, child) to drop: parents ascending (decls' order), children sorted
     std::vector<std::pair<std::uint32_t, const RustModDecl*>> cand;   // one scratch row, reused: (child, its declaration) per occurrence
     std::vector<std::uint32_t>                                drop;   // the distinct children cut from one parent, sorted
@@ -16529,7 +16598,21 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
         }
         const std::string_view pPath    = rootRelPath( ing, p );
         const std::string      childDir = rustChildModuleDir( pPath, declaredNames );
-        const bool             declDraws = childDir == includerDir( pPath );   // rule (2): resolveRustImport's `mod:` base
+        // rule (2): resolveRustImport's `mod:` base is P's module directory, or P's own directory when the module directory
+        // holds neither x.rs nor x/mod.rs (its #[path] tier), which declaresAt checks per name
+        const std::string      modDir    = rustModuleDir( pPath, !rustRoots.empty() && rustRoots.isRoot[ p ] != 0 );
+        const bool             viaOwnDir = childDir != modDir && childDir == includerDir( pPath );
+        const bool             declDraws = childDir == modDir || viaOwnDir;
+        const auto declaresAt = [ & ]( std::string_view name )   // the declaration drew this child (not the module-directory file)
+        {
+            if( !viaOwnDir )
+            {
+                return true;
+            }
+            const std::string stem = modDir.empty() ? std::string( name ) : modDir + "/" + std::string( name );
+            const auto& index = rsIndexOf();
+            return !index.contains( stem + ".rs" ) && !index.contains( stem + "/mod.rs" );
+        };
         const auto             names    = std::span( decls ).subspan( i, j - i );
         // The declaration naming g by the module-file rule, or nullptr (rule (1)).
         const auto declOf = [ & ]( std::uint32_t g ) -> const RustModDecl*
@@ -16580,7 +16663,7 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
                 ++b;
             }
             const RustModDecl& d = *cand[a].second;
-            if( declDraws && !d.used && b - a <= d.count )   // rules (2) and (3): every occurrence is the declaration's
+            if( declDraws && declaresAt( d.name ) && !d.used && b - a <= d.count )   // rules (2) and (3): every occurrence is the declaration's
             {
                 drop.push_back( cand[a].first );
             }
@@ -18394,9 +18477,31 @@ inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vecto
 // call re-reads every spec's full definition set (the same resolver, so `file:name` narrows it exactly as before),
 // lets chooseJoiningTerminals move a many-definition pick onto the definition that joins, and returns the names whose
 // pick tied with another equally-joining definition, comma-joined in spec order ("" when none) — the root's
-// ambiguous_terminal= attribute. Specs whose name has one definition cost nothing and never move.
+// ambiguous_terminal= attribute (ConnectPicks::ambiguous), with each non-bare spec's searched count (ConnectPicks::qualifiedDefs).
+// Specs whose name has one definition cost nothing and never move.
+// XF-QUALIFIED-ENDPOINTS: a terminal spelled with an owner, module or file (`ProcessList::insert`, `AuthPhase.async_handle`,
+// `ns.make`, `file:name`, `@file:line`) searched ONLY the definitions that spelling resolves to, so its defs= is that count,
+// not the bare name's (`defs="645"` on a `--connect=InterpreterFactory::get` terminal read as "the qualifier was dropped").
+// A bare name (a lone identifier; a JS/TS `#private` name is one) keeps the bare-name count byte-identically.
+inline bool selectorIsBareName( std::string_view spec ) noexcept
+{
+    return !spec.empty() && spec.front() != '@' && spec.find_first_of( ":/" ) == std::string_view::npos
+        && spec.find_first_of( ".#", 1 ) == std::string_view::npos;
+}
+
+// What joinTerminalPicks hands packConnect: the tied names (ambiguous_terminal=, "" when none) and, per terminal whose spec is
+// not a bare name, (its pick, the definitions its spelling searched). Fix 1 (NIT-1 / CodeRabbit): several specs can pick ONE
+// node (`--connect=useAlpha,run,Alpha.run`) and print ONE <t> row, so every spec's count is kept (barePicks for the bare ones)
+// and the row prints the WIDEST count any of its spellings searched (packConnect terminalDefCount): a bare spec's whole-name count wins.
+struct ConnectPicks
+{
+    std::string                                 ambiguous;
+    std::vector<std::pair<NodeId, std::size_t>> qualifiedDefs;
+    std::vector<NodeId>                         barePicks;
+};
+
 template<class SpecList>
-inline std::string joinTerminalPicks( const IngestResult& ing, const Graph& g, const SpecList& specs, std::vector<NodeId>& picks, std::uint32_t radius )
+inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, const SpecList& specs, std::vector<NodeId>& picks, std::uint32_t radius )
 {
     EXPECTS( specs.size() == picks.size() );
     std::vector<std::vector<NodeId>> defsPerTerminal;
@@ -18407,7 +18512,19 @@ inline std::string joinTerminalPicks( const IngestResult& ing, const Graph& g, c
     }
     std::vector<std::uint32_t> tied;
     chooseJoiningTerminals( g, defsPerTerminal, picks, tied, radius );
-    std::string ambiguous;
+    ConnectPicks out;
+    for( std::size_t i = 0; i < picks.size(); ++i )
+    {
+        if( !selectorIsBareName( std::string_view( specs[ i ] ) ) )
+        {
+            out.qualifiedDefs.emplace_back( picks[ i ], defsPerTerminal[ i ].size() );
+        }
+        else
+        {
+            out.barePicks.push_back( picks[ i ] );
+        }
+    }
+    std::string& ambiguous = out.ambiguous;
     for( std::size_t i = 0; i < picks.size(); ++i )
     {
         if( tied[ i ] > 1 && picks[ i ] < ing.symbols.size() )
@@ -18419,7 +18536,7 @@ inline std::string joinTerminalPicks( const IngestResult& ing, const Graph& g, c
             ambiguous += ing.symbols[ picks[ i ] ].name;
         }
     }
-    return ambiguous;
+    return out;
 }
 
 // ---- community detection (--communities): one level of Louvain local-moving on the UNDIRECTED projection

@@ -416,6 +416,7 @@ for _g in \
     danglingwarncheck \
     dartcheck \
     deadcheck \
+    deadcodescopecheck \
     deadfiltercheck \
     deadprecisioncheck \
     deckcheck \
@@ -528,6 +529,7 @@ for _g in \
     fordisclosurecheck \
     fordispatchhopcheck \
     forfileanchorcheck \
+    forfilesymscheck \
     forhdrshapecheck \
     forheadrrcheck \
     forinitslotscheck \
@@ -539,12 +541,14 @@ for _g in \
     fornotesbudgetcheck \
     fornotesjsoncheck \
     forrankordercheck \
+    forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsigspancheck \
     forsoftbudgetcheck \
+    fortailwidecheck \
     forunusedcheck \
     forwidencheck \
     freshclonecheck \
@@ -595,6 +599,7 @@ for _g in \
     hookcheck \
     hop1check \
     hopbodycheck \
+    hopcontextcheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \
@@ -833,6 +838,7 @@ for _g in \
     qsnapcachecheck \
     qsnapprefetchcheck \
     qsnapproducercheck \
+    qualendpointcheck \
     qualifiedresolvecheck \
     qualitycheck \
     qualitycrosslangcheck \
@@ -926,6 +932,7 @@ for _g in \
     rustanccheck \
     rustimportprecisecheck \
     rustqualcheck \
+    rustrootscheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
@@ -1036,6 +1043,7 @@ for _g in \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \
+    warmpeakcheck \
     weaksignalcheck \
     withgraphcheck \
     withprofilecheck \
@@ -1043,6 +1051,7 @@ for _g in \
     wrapverbscheck \
     writetargetcheck \
     writtenspellingcheck \
+    xfaliashopcheck \
     xmlwellformed \
     yamllangcheck \
     zonecheck \

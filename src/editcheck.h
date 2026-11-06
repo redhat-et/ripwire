@@ -113,6 +113,28 @@ inline std::vector<NodeId> editCheckOverloadSet( const IngestResult& ing, const 
     return overloadNodes;
 }
 
+// XF-QUALIFIED-ENDPOINTS: a SCOPE-LESS grammar (TS/JS, langfacts.h containmentOwners) stores no owner, so its canonical id
+// carries none and editCheckOverloadSet unions `Alpha.run` with a same-file `Beta.run` (or `ns.make` with `other.make`): the
+// contract and its callers then answered about a definition the selector did not name. When the selector names an owner or
+// module (graph.h splitWrittenSpec: a prefix before the leaf; `a.ts:run` names none), the set keeps only the members the
+// selector itself resolves to (resolveAllByNameQualified, every tier). A bare or file:name selector, a focus with a stored
+// scope (its canonical id already holds the owner), or a selector whose matches miss the focus keeps the set unchanged.
+inline std::vector<NodeId> editCheckOwnerNarrowed( const IngestResult& ing, std::vector<NodeId> overloadNodes, NodeId focus, std::string_view selector )
+{
+    if( overloadNodes.size() < 2 || !ing.symbols[ focus ].scope.empty() || !splitWrittenSpec( selector ) )
+    {
+        return overloadNodes;
+    }
+    std::vector<NodeId> named = resolveAllByNameQualified( ing, selector );
+    std::sort( named.begin(), named.end() );
+    if( !std::binary_search( named.begin(), named.end(), focus ) )
+    {
+        return overloadNodes;
+    }
+    std::erase_if( overloadNodes, [ & ]( NodeId id ) { return !std::binary_search( named.begin(), named.end(), id ); } );
+    return overloadNodes;
+}
+
 // The C/C++ declaration/definition identity (one contract, the declaration's defaults) lives in editcheckdecl.h.
 
 // ── §A6a: the DISTINCT contracts one --edit-check selector matched ───────────────────────────────────────
@@ -819,6 +841,15 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
 // rule; a widely-shared name has hundreds of caller rows). Duplicate (node,line) pairs collapse: this is a
 // set of LINES TO OPEN, so two calls on one line are one site. A FORWARDED call counts only where buildGraph kept it
 // (model.h forwardCounts, `--uses`' own filter: `keptForwards` is Graph::keptForwards).
+// THE call-site filter (--uses' own): a call reference that is a site to open. Shared by forEachCallSite and the hop record
+// (hoprecord.h hopFacts), so the two site passes cannot disagree about which references are call sites.
+// `macroToo`: a macro invocation counts as a site as well (the hop record, hoprecord.h — a C macro the edge calls through).
+inline bool callSiteCounts( const Reference& r, std::uint32_t refIndex, std::span<const std::uint32_t> keptForwards, bool macroToo = false ) noexcept
+{
+    const bool callForm = ( r.role == RefRole::Call && !r.isCompose ) || ( macroToo && r.role == RefRole::Macro );
+    return callForm && !r.isDocLink && r.lang != Lang::Markdown && forwardCounts( r, refIndex, keptForwards );
+}
+
 template <class OnSite>
 inline void forEachCallSite( const IngestResult& ing, CallSiteCalleeTest& callee, std::span<const char> callerSelected,
                              std::span<const std::uint32_t> keptForwards, OnSite&& onSite )
@@ -826,7 +857,7 @@ inline void forEachCallSite( const IngestResult& ing, CallSiteCalleeTest& callee
     for( std::uint32_t refIndex = 0; refIndex < ing.references.size(); ++refIndex )
     {
         const Reference& r = ing.references[refIndex];
-        if( r.role != RefRole::Call || r.isCompose || r.isDocLink || r.lang == Lang::Markdown || !forwardCounts( r, refIndex, keptForwards ) )
+        if( !callSiteCounts( r, refIndex, keptForwards ) )
         {
             continue;
         }
@@ -1414,7 +1445,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         return ecSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], ecRootPrefix ) : std::string_view( ing.files[ fileId ] );
     };
 
-    const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
+    const std::vector<NodeId> overloadNodes = editCheckOwnerNarrowed( ing, editCheckOverloadSet( ing, g, focus ), focus, page.selector );
     const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, maxFileBytes, excludes, focus, overloadNodes );
     EditCheckCalleeTest       callee( ing, fsym, overloadNodes );
     if( spliced.engaged )
