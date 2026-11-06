@@ -114,7 +114,7 @@
 #include "regindex.h"        // reg_detail::isRegistrationCallee — the registrar family's callee vocabulary (REGISTRAR-2 rows)
 #include "sarif.h"           // rootPrefixOf / rootRelativeUri
 #include "search.h"          // grepCollect / grepEnrich / isBareWordCodePath
-#include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis
+#include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis / lineBreaksOf
 #include "taskroute.h"       // taskroute::identifierRunOf
 #include "siblift.h"         // siblift_detail::dirOf — a path's directory
 #include "subjectanchor.h"   // subject_detail::sourceClassDef / isToolOrVendoredPath — the answer's source-class anchors
@@ -2430,17 +2430,6 @@ inline bool isStrongRow( const Site& r ) noexcept
     return r.regCall || r.tbl == "item" || ( !r.tbl.empty() && isMacroOpener( openerCode( r.tbl ), /*allowParen=*/false ) );
 }
 
-// drop the ranked rows that are not strong (isStrongRow); the count dropped (said as weak=)
-inline std::size_t dropWeakRows( std::vector<Site>& rows, std::vector<GrepHit>& enriched )
-{
-    std::vector<char> drop( enriched.size(), 0 );
-    for( std::size_t i = 0; i < enriched.size(); ++i )
-    {
-        drop[i] = !isStrongRow( rows[i] );
-    }
-    return dropRows( rows, enriched, drop );
-}
-
 // a table row's tbl= attribute onto its <ls>; the opener is raw source text. No opener, no attribute.
 inline void appendTblAttr( std::string& xml, std::string opener, RedactCounts* redact, std::vector<char>& esc, std::string_view attr = " tbl=\"" )
 {
@@ -2793,15 +2782,24 @@ using LineRange = std::pair<std::uint32_t, std::uint32_t>;   // inclusive, 1-bas
 // the excerpt of a body: its signature line `first` plus a window [site-before, site+after] per site line, clipped to
 // [first, last], overlapping or touching windows merged; ascending and disjoint. `armHeads` (parallel to siteLines, 0 = none): a window
 // starts there instead, at the head of the match arm or case that holds its site (armHeadAbove)
+// the first line of site line `l`'s window: the arm head `head` above it when there is one (0 = none), else kForLiteralExcerptBefore up
+inline std::uint32_t excerptWindowStart( std::uint32_t l, std::uint32_t head ) noexcept
+{
+    if( head > 0 && head < l )
+    {
+        return head;
+    }
+    return l > kForLiteralExcerptBefore ? l - kForLiteralExcerptBefore : 1u;
+}
+
 inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& siteLines, std::uint32_t first, std::uint32_t last,
                                              const std::vector<std::uint32_t>& armHeads = {} )
 {
     std::vector<LineRange> w{ LineRange{ first, first } };
     for( std::size_t i = 0; i < siteLines.size(); ++i )
     {
-        const std::uint32_t l    = siteLines[i];
-        const std::uint32_t head = i < armHeads.size() ? armHeads[i] : 0;
-        const std::uint32_t a    = std::max( first, head > 0 && head < l ? head : ( l > kForLiteralExcerptBefore ? l - kForLiteralExcerptBefore : 1u ) );
+        const std::uint32_t l = siteLines[i];
+        const std::uint32_t a = std::max( first, excerptWindowStart( l, i < armHeads.size() ? armHeads[i] : 0 ) );
         const std::uint32_t b = std::min( last, l + kForLiteralExcerptAfter );
         if( a <= b )
         {
@@ -2825,22 +2823,17 @@ inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& s
 }
 
 // the byte offset where each line of `text` starts (line 1 at index 0)
-inline std::vector<std::size_t> lineStartsOf( const std::string& text )
+inline std::vector<std::size_t> lineStartsOf( std::string_view text )
 {
-    std::vector<std::size_t> starts{ 0 };
-    for( std::size_t i = 0; i < text.size(); ++i )
-    {
-        if( text[i] == '\n' )
-        {
-            starts.push_back( i + 1 );
-        }
-    }
+    const std::vector<std::uint32_t> breaks = lineBreaksOf( text );   // serialize.h: the newline offsets
+    std::vector<std::size_t>         starts( breaks.size() + 1, 0 );
+    std::transform( breaks.begin(), breaks.end(), starts.begin() + 1, []( std::uint32_t b ) { return std::size_t( b ) + 1; } );
     return starts;
 }
 
 // the lines of every range of `text`, each range newline-joined (the grep verb's own slicing core, search.h grepLineRangeText),
 // the ranges joined by a line holding one ellipsis. `starts` = lineStartsOf( text ), computed once by a caller that also reads lines by number
-inline std::string linesOfRanges( const std::string& text, const std::vector<LineRange>& ranges, const std::vector<std::size_t>& starts )
+inline std::string linesOfRangesAt( const std::string& text, const std::vector<LineRange>& ranges, const std::vector<std::size_t>& starts )
 {
     const std::uint32_t count = grepRealLineCount( text, starts );
     std::string         out;
@@ -2858,7 +2851,7 @@ inline std::string linesOfRanges( const std::string& text, const std::vector<Lin
 }
 inline std::string linesOfRanges( const std::string& text, const std::vector<LineRange>& ranges )
 {
-    return linesOfRanges( text, ranges, lineStartsOf( text ) );
+    return linesOfRangesAt( text, ranges, lineStartsOf( text ) );
 }
 
 // cut every line of `lines` longer than `cap` bytes on a UTF-8 boundary (an ellipsis marks the cut); true when one was cut
@@ -3027,7 +3020,7 @@ inline std::string excerptElement( const std::string& text, const std::string& p
     }
     // train 42b T-3: each window line is cut at kForLiteralLineBytes like an <ls> row (a minified one-line body printed 48.9 KB
     // whole); cut="1" says a line was cut, next= prints the whole body
-    std::string lines = linesOfRanges( text, ranges, starts );
+    std::string lines = linesOfRangesAt( text, ranges, starts );
     redactInPlace( lines, redact );   // CR 4423843223: a window of raw source is a body-emission seam; redact BEFORE the cut so a key is never half-cut
     const bool  cut   = capLineBytes( lines, kForLiteralLineBytes );
     x += cut ? " cut=\"1\"" : "";
@@ -3051,6 +3044,130 @@ struct ForLiteralLimits
     bool        tailLegendAbove = false; // an earlier element of the task carries the tail= legend
     bool        armLegendAbove  = false; // an earlier element of the task carries the arm= legend
 };
+
+namespace lit_detail
+{
+// FLAG-SHAPE-LIT: the default a flag row names (def=, on row `row`) and the constant writes of the field it names (ld rows)
+struct FlagDefault
+{
+    std::size_t row = SIZE_MAX;   // the row that carries def=; SIZE_MAX = none
+    std::string text;             // def=, cut to kForFlagDefaultBytes and redacted
+    std::string writesXml;        // the <ld> rows, at most kForFlagWriteRows
+    std::size_t writeCount = 0;   // writes=: every constant write read
+    bool        writesFloor = false;   // the field's scan was partial or past kForFlagWriteHits: writes= is a floor
+};
+
+// one file's text at a time, read once per run of hits in it
+struct OneFileText
+{
+    std::uint32_t file = UINT32_MAX;
+    std::string   text;
+    const std::string& of( const IngestResult& ing, std::uint32_t fileId )
+    {
+        if( file != fileId )
+        {
+            file = fileId;
+            text = docparse::detail::readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );
+        }
+        return text;
+    }
+};
+
+// the source-tier constant writes of `field` (isConstantWriteAt), the scan's first kForFlagWriteHits hits; floor when the scan was cut
+inline std::pair<std::vector<GrepRawHit>, bool> constantWritesOf( const IngestResult& ing, const std::string& field, OneFileText& files )
+{
+    const GrepCollection    fc    = grepCollect( ing, field, /*regex=*/false, /*noPrefilter=*/false );
+    const bool              floor = !fc.cleanScan() || fc.raw.size() > kForFlagWriteHits;
+    std::vector<GrepRawHit> writes;
+    for( std::size_t k = 0; k < fc.raw.size() && k < kForFlagWriteHits; ++k )
+    {
+        const GrepRawHit&      r = fc.raw[k];
+        const std::string_view p = rootRelPath( ing, r.fileId );
+        if( pathTierOf( p ) == PathTier::Source && !isBareWordCodePath( p ) && isConstantWriteAt( files.of( ing, r.fileId ), r.byteOffset, field.size() ) )
+        {
+            writes.push_back( r );
+        }
+    }
+    return { std::move( writes ), floor };
+}
+
+// the order the write rows print in: a write in a function or file named for defaults first (SetDefaults_*, defaults.go), else scan order
+inline std::vector<std::size_t> defaultsFirstOrder( const IngestResult& ing, const std::vector<GrepHit>& wh )
+{
+    std::vector<int> rank( wh.size() );   // computed once per row, not per comparison
+    for( std::size_t k = 0; k < wh.size(); ++k )
+    {
+        std::string w = wh[k].enclosing + " " + std::string( rootRelPath( ing, wh[k].fileId ) );
+        std::transform( w.begin(), w.end(), w.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        rank[k] = w.find( "default" ) != std::string::npos ? 0 : 1;
+    }
+    std::vector<std::size_t> order( wh.size() );
+    for( std::size_t k = 0; k < order.size(); ++k )
+    {
+        order[k] = k;
+    }
+    std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b ) { return rank[a] < rank[b]; } );
+    return order;
+}
+
+// one <ld p= l= in= ink=> row: the write's line, leading blanks dropped, redacted and cut to kForLiteralLineBytes
+template <class RelPath>
+inline void appendWriteRow( std::string& xml, const IngestResult& ing, const GrepHit& w, const RelPath& relPath, RedactCounts* redact, std::vector<char>& esc )
+{
+    xml += "<ld p=\"";
+    xml += escapeXml( relPath( w.fileId ), esc );
+    xml += "\" l=\"" + std::to_string( w.line ) + "\"";
+    if( w.enclosingId != kNoNode )
+    {
+        xml += " in=\"";
+        xml += escapeXml( w.enclosing, esc );
+        xml += "\" ink=\"";
+        xml += symTag( ing.symbols[w.enclosingId].kind );
+        xml += "\"";
+    }
+    const std::size_t lead = w.text.find_first_not_of( " \t" );
+    std::string       line = lead == std::string::npos ? std::string() : w.text.substr( lead );
+    redactInPlace( line, redact );
+    truncateUtf8WithEllipsis( line, kForLiteralLineBytes );
+    xml += "><![CDATA[";
+    appendCdataSafe( line, xml );
+    xml += "]]></ld>";
+}
+
+// the first of the first `rowCount` rows that is no comment and whose call names a default (flagDefaultAt), and when that default names a
+// field (defaultFieldOf), the field's constant writes
+template <class RelPath>
+inline FlagDefault flagDefaultOfRows( const IngestResult& ing, const std::vector<Site>& rows, std::size_t rowCount, const RelPath& relPath,
+                                      RedactCounts* redact, std::vector<char>& esc )
+{
+    FlagDefault out;
+    OneFileText files;
+    for( std::size_t i = 0; i < rowCount && out.row == SIZE_MAX; ++i )
+    {
+        if( rows[i].k != 'c' )
+        {
+            out.text = flagDefaultAt( files.of( ing, rows[i].raw.fileId ), rows[i].raw.byteOffset );
+            out.row  = out.text.empty() ? SIZE_MAX : i;
+        }
+    }
+    const std::string field( defaultFieldOf( out.text ) );
+    if( !field.empty() )
+    {
+        auto [ writes, floor ]        = constantWritesOf( ing, field, files );
+        out.writesFloor               = floor;
+        out.writeCount                = writes.size();
+        const std::vector<GrepHit> wh = grepEnrich( ing, std::span<const GrepRawHit>( writes ) );
+        const std::vector<std::size_t> order = defaultsFirstOrder( ing, wh );
+        for( std::size_t k = 0; k < order.size() && k < kForFlagWriteRows; ++k )
+        {
+            appendWriteRow( out.writesXml, ing, wh[order[k]], relPath, redact, esc );
+        }
+    }
+    truncateUtf8WithEllipsis( out.text, kForFlagDefaultBytes );
+    redactInPlace( out.text, redact );
+    return out;
+}
+}   // namespace lit_detail
 
 // THE BLOCK. `served` = the answer's own bytes after <sigs> (bodies, fold, slot, hops): a body whose <b … l= p= n=> head is in it
 // is not printed again. `useMemo` = the span-tier memo (false under --no-cache). `compactLegend` = the default --legend=compact dialect.
@@ -3231,7 +3348,12 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         out.sites = rows.size();
         if( keysOk && anyRow && limits.strongOnly )
         {
-            weakDropped = lit_detail::dropWeakRows( rows, enriched );   // G-STORED-B: no cue word, so only the strong rows are listed; the rest is weak=
+            std::vector<char> weak( enriched.size(), 0 );   // G-STORED-B: no cue word, so only the strong rows are listed; the rest is weak=
+            for( std::size_t i = 0; i < weak.size(); ++i )
+            {
+                weak[i] = lit_detail::isStrongRow( rows[i] ) ? 0 : 1;
+            }
+            weakDropped = lit_detail::dropRows( rows, enriched, weak );
             ranked      = enriched.size();
         }
         if( !keysOk || ranked == 0 || ( !anyRow && limits.tableOnly ) )
@@ -3386,89 +3508,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     }
 
     // ── FLAG-SHAPE-LIT: the first shown string row whose call names a default (def=), and the constant writes of the field it names (ld) ──
-    std::size_t defRow = SIZE_MAX;
-    std::string defText, writesXml;
-    std::size_t writeCount = 0;
-    bool        writesFloor = false;
+    lit_detail::FlagDefault flag;
     if( policy.boundary == lit_detail::LitBoundary::Flag )
     {
-        for( std::size_t i = 0; i < hits.size() && defRow == SIZE_MAX; ++i )
-        {
-            if( rows[i].k == 'c' )
-            {
-                continue;
-            }
-            loadFile( rows[i].raw.fileId );
-            defText = lit_detail::flagDefaultAt( loadedText, rows[i].raw.byteOffset );
-            defRow  = defText.empty() ? SIZE_MAX : i;
-        }
-        const std::string field( lit_detail::defaultFieldOf( defText ) );
-        if( !field.empty() )
-        {
-            const GrepCollection fc = grepCollect( ing, field, /*regex=*/false, /*noPrefilter=*/false );
-            writesFloor             = !fc.cleanScan() || fc.raw.size() > kForFlagWriteHits;
-            std::vector<GrepRawHit> writes;
-            for( std::size_t k = 0; k < fc.raw.size() && k < kForFlagWriteHits; ++k )
-            {
-                const GrepRawHit& r = fc.raw[k];
-                if( pathTierOf( rootRelPath( ing, r.fileId ) ) != PathTier::Source || isBareWordCodePath( rootRelPath( ing, r.fileId ) ) )
-                {
-                    continue;
-                }
-                loadFile( r.fileId );
-                if( lit_detail::isConstantWriteAt( loadedText, r.byteOffset, field.size() ) )
-                {
-                    writes.push_back( r );
-                }
-            }
-            writeCount = writes.size();
-            std::vector<GrepHit> wh = grepEnrich( ing, std::span<const GrepRawHit>( writes ) );
-            const auto named = [ & ]( std::size_t k )
-            {
-                std::string w = wh[k].enclosing + " " + std::string( rootRelPath( ing, wh[k].fileId ) );
-                std::transform( w.begin(), w.end(), w.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-                return w.find( "default" ) != std::string::npos ? 0 : 1;   // a defaults function or file first (SetDefaults_*, defaults.go)
-            };
-            std::vector<std::size_t> worder( wh.size() );
-            for( std::size_t k = 0; k < worder.size(); ++k )
-            {
-                worder[k] = k;
-            }
-            std::vector<int> wrank( wh.size() );
-            for( std::size_t k = 0; k < wrank.size(); ++k )
-            {
-                wrank[k] = named( k );   // hoisted out of the comparator
-            }
-            std::stable_sort( worder.begin(), worder.end(), [ & ]( std::size_t a, std::size_t b ) { return wrank[a] < wrank[b]; } );
-            for( std::size_t k = 0; k < worder.size() && k < kForFlagWriteRows; ++k )
-            {
-                const GrepHit& w = wh[worder[k]];
-                writesXml += "<ld p=\"";
-                writesXml += escapeXml( relPath( w.fileId ), esc );
-                writesXml += "\" l=\"" + std::to_string( w.line ) + "\"";
-                if( w.enclosingId != kNoNode )
-                {
-                    writesXml += " in=\"";
-                    writesXml += escapeXml( w.enclosing, esc );
-                    writesXml += "\" ink=\"";
-                    writesXml += symTag( ing.symbols[w.enclosingId].kind );
-                    writesXml += "\"";
-                }
-                std::string line = w.text;
-                const std::size_t lead = line.find_first_not_of( " \t" );
-                line = lead == std::string::npos ? std::string() : line.substr( lead );
-                redactInPlace( line, redact );
-                truncateUtf8WithEllipsis( line, kForLiteralLineBytes );
-                writesXml += "><![CDATA[";
-                appendCdataSafe( line, writesXml );
-                writesXml += "]]></ld>";
-            }
-        }
-        if( defText.size() > kForFlagDefaultBytes )
-        {
-            truncateUtf8WithEllipsis( defText, kForFlagDefaultBytes );
-        }
-        redactInPlace( defText, redact );
+        flag = lit_detail::flagDefaultOfRows( ing, rows, hits.size(), relPath, redact, esc );
     }
 
     // ── the rows ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -3506,10 +3549,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         lit_detail::cutAround( line, needle, kForLiteralLineBytes );
         const bool callableOwner = h.enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind );
         lit_detail::appendTblAttr( rowsXml, rows[i].tbl, redact, esc, rows[i].regCall ? std::string_view( " reg=\"" ) : std::string_view( " tbl=\"" ) );
-        if( i == defRow )
+        if( i == flag.row )
         {
             rowsXml += " def=\"";
-            rowsXml += escapeXml( defText, esc );
+            rowsXml += escapeXml( flag.text, esc );
             rowsXml += "\"";
         }
         if( ( policy.tableRows ? !rows[i].tbl.empty() : rows[i].k == 's' && !callableOwner ) && contextRows < policy.contextRows )
@@ -3582,17 +3625,17 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     x += tailDropped > 0 ? " tail=\"" + std::to_string( tailDropped ) + "\"" : std::string();
     x += weakDropped > 0 ? " weak=\"" + std::to_string( weakDropped ) + "\"" : std::string();
     x += mentionHits > 0 ? " mention=\"" + std::to_string( mentionHits ) + "\"" : std::string();
-    x += !lit_detail::defaultFieldOf( defText ).empty() ? " writes=\"" + std::to_string( writeCount ) + "\"" : std::string();
+    x += !lit_detail::defaultFieldOf( flag.text ).empty() ? " writes=\"" + std::to_string( flag.writeCount ) + "\"" : std::string();
     x += lit.frag ? " frag=\"1\"" : "";
     x += lit.tryNo > 1 ? " try=\"" + std::to_string( lit.tryNo ) + "\"" : std::string();
     x += cutMovedRow ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
     x += " comment=\"" + std::to_string( commentHits ) + "\" test=\"" + std::to_string( testHits ) + "\" doc=\"" + std::to_string( docHits ) + "\"";
-    if( !collected.cleanScan() || anyUnclassified || writesFloor )
+    if( !collected.cleanScan() || anyUnclassified || flag.writesFloor )
     {
         x += " floor=\"1\"";
     }
     x += nextAttrXml( nextFlag( "--grep=", lit.text ) );
-    const std::string inner = rowsXml + writesXml + bodiesXml + "</lit>";
+    const std::string inner = rowsXml + flag.writesXml + bodiesXml + "</lit>";
     // bytes= is the element's own size from its open tag on (the legend comment excluded): a fixed point over its own digits
     const std::size_t openAt = x.find( "<lit " );
     const std::size_t fixed  = ( x.size() - openAt ) + std::string_view( " bytes=\"\">" ).size() + inner.size();
