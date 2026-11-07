@@ -137,6 +137,22 @@ using jsonesc::utf8SeqLen;
 // reference (xmlControlCharRef — see M2 above: G4 + attribute-value normalization); an invalid UTF-8 sequence
 // (A4-F20) is scrubbed to '?' so the emitted name/path/doc-comment/sig text is always well-formed XML AND
 // valid UTF-8 regardless of source bytes.
+// SIZE-1 (size-trim): a legend clause is present-only on the FINAL payload, not on a bit decided before the rows were
+// rendered. A header built ahead of its sections over-approximates on purpose (an undefined attribute costs the meaning);
+// once the rows are final, the clause whose attribute no emitted row carries is erased here, before the document is priced.
+// `clause` must be spelled exactly as the legend appended it; a clause that is not there is a no-op (the other dialect).
+inline void eraseAbsentClause( std::string& legend, std::string_view clause, bool present )
+{
+    if( present || clause.empty() )
+    {
+        return;
+    }
+    if( const std::size_t at = legend.find( clause ); at != std::string::npos )
+    {
+        legend.erase( at, clause.size() );
+    }
+}
+
 // S5 — THE BYTE SET IS THE CONTRACT. Everything below that is NOT in this set is copied through
 // unchanged by the switch's `default:` arm, so the run loop may memcpy it in bulk without looking at it;
 // everything that IS in the set still goes through the SAME switch, one byte at a time, unchanged. The

@@ -76,6 +76,15 @@ inline constexpr std::string_view kForFileSymsLegend =
 inline constexpr std::string_view kForFileSymsLegendCompact =
     "<!-- syms: leads, not the answer: first 6 shown files' symbols it lacks, p=file:line n=Owner.name; by=name task word, by=callee a head <d> row calls it "
     "(via=name name-only, prov=split one arm); test=1 test code; name_total= callee_total= files_total= cut by the 3-row, 6-file cap; files= head= if under 6, 8 -->";
+// SIZE-1: the clauses of the two legends above that define an attribute a block may not print, erased from a block without it
+// (blockXml). Each is spelled exactly as its legend carries it.
+inline constexpr std::string_view kForFileSymsTestClause = "test=\"1\": a test or fixture symbol; ";
+inline constexpr std::string_view kForFileSymsTestClauseCompact = "test=1 test code; ";
+inline constexpr std::string_view kForFileSymsReadClause = "; files= head= the files or <d> rows read when fewer than 6 or 8";
+inline constexpr std::string_view kForFileSymsReadClauseCompact = "; files= head= if under 6, 8";
+static_assert( kForFileSymsLegend.contains( kForFileSymsTestClause ) && kForFileSymsLegend.contains( kForFileSymsReadClause )
+                   && kForFileSymsLegendCompact.contains( kForFileSymsTestClauseCompact ) && kForFileSymsLegendCompact.contains( kForFileSymsReadClauseCompact ),
+               "the present-only syms clauses are spelled as their legends carry them" );
 // The held stub's own legend (both dialects): the reader meets held= and next= beside the tag, not in the block legend it replaces.
 inline constexpr std::string_view kForFileSymsHeldLegend =
     "<!-- ripwire for syms: held=\"budget\": a token budget is set, so the symbol rows of the shown files are not printed; next= repeats this call "
@@ -966,7 +975,14 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     {
         row( *c, true );
     }
-    return out + "</syms>";
+    // SIZE-1: the two clauses whose attributes this block may not carry ride only when it does (the legend is the block's prefix)
+    const std::size_t legendEnd = out.find( "<syms" );
+    std::string       legend    = out.substr( 0, legendEnd );
+    const std::string_view rows = std::string_view( out ).substr( legendEnd );
+    eraseAbsentClause( legend, compactLegend ? kForFileSymsTestClauseCompact : kForFileSymsTestClause, rows.contains( " test=\"1\"" ) );
+    eraseAbsentClause( legend, compactLegend ? kForFileSymsReadClauseCompact : kForFileSymsReadClause,
+                       sf.files.size() != kForFileSymsFiles || head.rows != kForFileSymsHeadRows );
+    return legend + std::string( rows ) + "</syms>";
 }
 } // namespace filesyms_detail
 

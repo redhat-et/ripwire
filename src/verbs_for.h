@@ -4903,6 +4903,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             headerParts.callerHopRanked  = true;
             headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
         }
+        // SIZE-1 (size-trim): present-only on the FINAL rows. layer=/implementors=/<field> were decided from the ranked set before
+        // the header (the over-approximation the TRAIN 9 note above states) and the member slice from the fold's plan; every
+        // section is rendered now, so a clause whose attribute no emitted row carries is erased before the document is priced.
+        // A section streamed unbuffered (the degrade path) keeps its clause: its rows are not known here.
+        rw::eraseAbsentClause( headerStr, kForCompactLegendLayer, !sigsPreRendered || sigsStr.contains( " layer=\"" ) );
+        rw::eraseAbsentClause( headerStr, kForCompactLegendLego, !legoPreRendered || legoStr.contains( " implementors=\"" ) );
+        rw::eraseAbsentClause( headerStr, kForCompactLegendCompose, !composePreRendered || composeStr.contains( "<field " ) );
+        rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactBodyFoldMembersClause : rw::kForBodyFoldMembersClause,
+                               fold.xml.contains( " members=\"" ) );
         // PR #135: the priced root this header will carry — every late splice and the est_tokens fixpoint, in
         // finishForLensHeaderPriced (above runForLens, with each splice's rationale).
         const ForLensRootFinish rootFinish{
