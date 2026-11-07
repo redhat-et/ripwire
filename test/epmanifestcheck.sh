@@ -389,8 +389,15 @@ import re, sys
 a = open(sys.argv[1]).read(); b = open(sys.argv[2]).read()
 a = re.sub(r"<ep [^>]*>.*?</ep>", "", a, flags=re.S)
 a = re.sub(r"; ep p= l= group=:.*?groups_total= if cut", "", a, flags=re.S)
+# K-WRONGSYM: <syms> lists the shown files' symbols that NO WORD OF THE ANSWER names (src/forfilesyms.h), and the <ep> block names
+# some (used_in=load_other), so the answer without it lists one row more. Both sides are read less the <syms> block and its legend
+# comment (the rest is the prefix identity); the off side must carry the row the on side lost, or the strip proves nothing.
+syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=</ctx>)', re.S)
+sa, sb = syms.search(a), syms.search(b)
+twin = sa is not None and sb is not None and 'n="load_other"' in sb.group(0) and 'n="load_other"' not in sa.group(0)
+a, b = syms.sub('', a), syms.sub('', b)
 m = lambda s: re.sub(r'est_tokens="\d+"', 'est_tokens="N"', s)
-sys.exit(0 if m(a) == m(b) and a != open(sys.argv[1]).read() else 1)
+sys.exit(0 if twin and m(a) == m(b) and a != open(sys.argv[1]).read() else 1)
 PY
 # R1-R3: the manifest is picked from the rows <sigs> emitted, not from the head it was asked to render
 Q2='--for=load other group consumer'

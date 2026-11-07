@@ -777,32 +777,36 @@ inline bool sharesWord( std::string_view key, const std::vector<std::string>& wo
 // REGISTRAR-2 (forliteral.h shape=table): a callee that SAYS it registers, the registrar family's one name vocabulary. The last segment of a
 // callee chain (`component.async_register_entity_service`, `decorators.websocket_command`, `r.add_route`) split on `_` and on lower-to-upper
 // case changes into words. An allowlist of three shapes, never a substring and never a noun alone (REG2-FIX1, rv-reg2 F2):
-//   (A) a registration verb word (`register`, `registers`, `reg`) and no access word (`read`, `write`, `get`, `set`, `peek`, `poke`, `load`, `store`,
-//       `dump`): `async_register_entity_service`, `registerCommand`, `async_reg`; not `write_reg`, `reg_read`, `get_registry`, `is_registered`;
-//   (B) an adding verb word (`add`, `on`, `use`, `install`, `bind`, `map`, `connect`, `subscribe`, `mount`, `attach`) and, after it, a noun word
-//       (`route(s)`, `router`, `command(s)`, `handler(s)`): `add_route`, `addEventHandler`, `on_command`; not `get_handler`, `run_command`,
-//       `logging.FileHandler`, `ParseCommandLine`, `handler`;
+//   (A) a registration verb word (`register`, `registers`, or `reg` as the last word or right before a noun word) and no access word (`read`, `write`,
+//       `get`, `set`, `peek`, `poke`, `load`, `store`, `dump`): `async_register_entity_service`, `registerCommand`, `async_reg`, `reg_handler`; not
+//       `write_reg`, `reg_read`, `get_registry`, `is_registered`, `reg_value`, `reg_field` (a hardware register, rv-reg2-delta D1);
+//   (B) an adding verb word (`add`, `on`, `install`, `bind`, `map`, `connect`, `subscribe`, `mount`, `attach`; not `use`, the hook prefix of `useRouter`)
+//       and, after it, a noun word (`route(s)`, `router`, `command(s)`, `handler(s)`) that is the name's LAST word: `add_route`, `addEventHandler`,
+//       `on_command`; not `get_handler`, `run_command`, `logging.FileHandler`, `ParseCommandLine`, `handler`, `addCommandLineOption`;
 //   (C) a decorator (`@x.websocket_command(`, `@app.route(`, `@click.command(`) whose name holds a noun word.
 // A name is no proof the call registers; the shape=table row that reads it says what it is.
 inline bool isRegistrationCallee( std::string_view callee, bool decorator = false ) noexcept
 {
     static constexpr std::array<std::string_view, 3>  kRegVerbs{ "register", "registers", "reg" };
-    static constexpr std::array<std::string_view, 10> kAddVerbs{ "add", "on", "use", "install", "bind", "map", "connect", "subscribe", "mount", "attach" };
+    static constexpr std::array<std::string_view, 9>  kAddVerbs{ "add", "on", "install", "bind", "map", "connect", "subscribe", "mount", "attach" };
     static constexpr std::array<std::string_view, 7>  kNouns{ "route", "routes", "router", "command", "commands", "handler", "handlers" };
     static constexpr std::array<std::string_view, 9>  kAccess{ "read", "write", "get", "set", "peek", "poke", "load", "store", "dump" };
     const auto in = []( const auto& list, std::string_view w ) { return std::find( list.begin(), list.end(), w ) != list.end(); };
     const std::size_t sep = callee.find_last_of( ".:" );
     const std::string_view name = sep == std::string_view::npos ? callee : callee.substr( sep + 1 );
     bool        regVerb = false, access = false, noun = false, addThenNoun = false, adding = false;
+    bool        pendingReg = false;   // the word before was `reg`: a verb only if the name ends there or a noun word follows (`async_reg`, `reg_handler`)
     std::array<char, 32> word{};
     std::size_t          n = 0;
     const auto           take = [ & ]()
     {
         const std::string_view w( word.data(), n );
-        regVerb     = regVerb || in( kRegVerbs, w );
+        const bool isNoun = in( kNouns, w );
+        regVerb     = regVerb || ( pendingReg && isNoun ) || ( in( kRegVerbs, w ) && w != "reg" );
+        pendingReg  = w == "reg";
         access      = access || in( kAccess, w );
-        noun        = noun || in( kNouns, w );
-        addThenNoun = addThenNoun || ( adding && in( kNouns, w ) );
+        noun        = noun || isNoun;
+        addThenNoun = adding && isNoun;   // the noun after an adding verb is the name's last word: a later word resets it (`addCommandLineOption`)
         adding      = adding || in( kAddVerbs, w );
     };
     for( std::size_t i = 0; i <= name.size(); ++i )
@@ -820,6 +824,7 @@ inline bool isRegistrationCallee( std::string_view callee, bool decorator = fals
             word[n++] = upper ? static_cast<char>( c - 'A' + 'a' ) : c;
         }
     }
+    regVerb = regVerb || pendingReg;   // `reg` as the last word (`async_reg`)
     return ( regVerb && !access ) || addThenNoun || ( decorator && noun );
 }
 }   // namespace reg_detail

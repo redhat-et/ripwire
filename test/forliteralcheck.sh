@@ -56,6 +56,21 @@
 #   D9-D14 (fix round 1; RED on 8c7cf2011 where [P]): a Dir-near map cuts no table (D9); the home table counts table rows, then a #define list
 #          (D10, D7 with the home file sorting last); a far registration keeps its reserve slot (D11); one-call nearness kept, its twin cut (D12);
 #          the answer's reader rows anchor nothing when they are most of it (D13); a hub (fan-in > 16) lends no one-call nearness (D14)
+#   T8/T8b (forliteral-3 G-STORED-B): a task with no cue word lists strong rows only (a top-level macro row prints, #define X-macro rows do not)
+#   E1-E10 (forliteral-3 EXCERPT-ARM; RED on 2562d9931 where [P]): an <x> window that leaves out the head of the match arm or case holding its site
+#          starts there (Rust tuple-pattern arm through an else, Go case through an if, Python elif, C++ brace-less case, two sites in one arm);
+#          twins keep the old window: an arm 13 lines up (cap), an if above the window, a JS arrow callback; determinism, prefix, xmllint
+#   B1-B3 (forliteral-3 BODY-ABOVE-CHECK): body="above" only beside a whole <b>: a hop row with a fold skip (rw-02 P1) and a truncated <b> are not;
+#          twin: a whole <b> still is
+#   F1-F13 (forliteral-3 FLAG-SHAPE-LIT; RED on 2562d9931 where [P]): a `--flag` the task names anchors on the quoted name at the call that
+#          registers it, def= the default argument (Go pflag plain and ...P shorthand, argparse default=, click, TCLAP), and when def= names a
+#          field, ld rows = its constant writes, defaults first; near misses (docs only, no site, Rust clap field, no flag word) print no flag lit
+#
+#   F14-F28, E11-E12 (forliteral-3 fix round 1, rv-forliteral-3; RED on 57b487740 where [P]): def= reads only a flag API's own default slot (an alias
+#          after the name, a nushell `.named`, an exec.Command argument are no default; the registration row, not the invocation ranked before it, carries
+#          def=); a name with no inner hyphen is a site only dashed or as a flag call's argument (a dict value, `__all__`, an error message are not);
+#          ld rows are the writes of the field's owner type (a same-named field of another struct is not), a package var and an anonymous struct stay;
+#          a JS object key `default: {` is no arm, a switch's `default:` stays; the flag legend carries the try=N sentence only beside a try=
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -159,8 +174,9 @@ if [ "$neg" -eq 0 ]; then
 fi
 # ── L7 ──
 for t in APPTOOL_RENDER_MODE '"dependency cycle detected" error' APPTOOL_BIG_FLAG; do
-    a="$( run "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();print(re.sub(r"<!-- ripwire for lit:.*?-->(<lit .*?</lit>)","",s,flags=re.S),end="")' )"
-    b="$( off "--for=$t" )"
+    # the K-WRONGSYM <syms> block reads the answer's own bytes (the <lit> block among them), so it differs with the literal block off: both sides drop it
+    a="$( run "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit:.*?-->(<lit .*?</lit>)","",s,flags=re.S);print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)","",s,flags=re.S),end="")' )"
+    b="$( off "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)","",s,flags=re.S),end="")' )"
     if [ -n "$b" ] && [ "$a" = "$b" ]; then ok "L7 prefix identity vs RIPWIRE_NO_LITERAL_ANCHOR=1: $t"; else no "L7 answer outside the block changed: $t"; fi
 done
 # ── L8 ──
@@ -673,7 +689,10 @@ A="$( tr1 '--for=add a new struct like Filter' )"; L="$( lits <<<"$A" )"
 if has "$L" 's="Filter" shape="table"'; then ok "T7b a plain word after like that the index holds anchors"; else no "T7b no sibling: ${L:0:300}"; fi
 # Near misses [G]
 nomiss(){ local T="$1" W="$2"; local X; X="$( tr1 "--for=$1" )"; if [ -n "$X" ] && ! has "$( lits <<<"$X" )" 'shape="table"' && [ "$X" = "$( trf "--for=$1" )" ]; then ok "$W"; else no "$W: ${#X} B $( lits <<<"$X" | cut -c1-240 )"; fi; }
-nomiss 'where is HashJoinNode used' 'T8 no cue: an identifier alone, no block, byte-identical to the switch off'
+nomiss 'where is max_threads used' 'T8 no cue, an identifier whose only rows are weak (#define X-macro rows): no block, byte-identical to the switch off'
+# T8b [P] G-STORED-B: no cue, but a strong row (a top-level macro row) prints, and only it
+A="$( tr1 '--for=where is HashJoinNode used' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="HashJoinNode" shape="table"' && has "$L" 'tbl="item"' && has "$L" 'weak="'; then ok "T8b no cue: the top-level macro row alone, weak= counts the rest"; else no "T8b strong row: ${L:0:300}"; fi
 nomiss 'register the widget' 'T9 a cue with a stop word and a plain word: no anchor'
 nomiss 'add a new argument to HashJoinNode' 'T9b the word after to in an add-a-new task is the target, no anchor'
 nomiss 'register no_such_symbol_here' 'T10 an identifier-shaped word that is no symbol: no anchor'
@@ -1665,6 +1684,639 @@ farreaders hub.knob > "$EX/d14/zzz/far/readers.cpp"
 Q="$( lits <<<"$( ex d14 'getSetting and the hub.knob setting' )" )"
 if [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "src/cfg/defaults.cpp:1 " ] && has "$Q" 'lit_cut="40"'; then ok "D14 [P] a hub anchor lends no one-call nearness: its 40 callers are cut, the Dir-near default stays"
 else no "D14 hub: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
+
+# ── EXCERPT-ARM (forliteral-3 commit 2; [P] = red on 2562d9931): an <x> window that leaves out the head of the match arm or case holding its
+# site starts at that head (at most 12 lines up), arm="1" and its legend clause say so; nothing else moves ──────────────────────────────────
+EA="$TMP/excerptarm"; mkdir -p "$EA/src" "$EA/app"
+cat > "$EA/src/rate.rs" <<'RS'
+pub fn handle_it(target: u8, kind: u8) -> u32 {
+    let reader = 1;
+    match (target, kind) {
+        (Target::Source, Kind::Source) => {
+            let a = reader + 1;
+            a
+        }
+        (Target::Table, Kind::Source) => {
+            let table = lookup(reader);
+            let check = table.size;
+            let source_id = if let Some(id) = table.associated_source_id {
+                id
+            } else {
+                bail("RUST_ARM_LIMIT is not for table without source")
+            };
+            source_id
+        }
+        _ => 0,
+    }
+}
+
+pub fn far_arm(target: u8) -> u32 {
+    match target {
+        Target::Far => {
+            let a1 = 1;
+            let a2 = 2;
+            let a3 = 3;
+            let a4 = 4;
+            let a5 = 5;
+            let a6 = 6;
+            let a7 = 7;
+            let a8 = 8;
+            let a9 = 9;
+            let a10 = 10;
+            let a11 = 11;
+            let a12 = 12;
+            bail("RUST_FAR_LIMIT is past the arm cap")
+        }
+        _ => 0,
+    }
+}
+
+pub fn two_sites(target: u8) -> u32 {
+    let x = 1;
+    match target {
+        Target::Two => {
+            let v = pick_value();
+            let w = v.width;
+            log("RUST_TWO_LIMIT first");
+            let z = w + 1;
+            let q = z + 2;
+            let r = q + 3;
+            log("RUST_TWO_LIMIT second");
+            r
+        }
+        _ => 0,
+    }
+}
+RS
+cat > "$EA/src/case.go" <<'GO'
+package src
+
+func dispatchCase(k int) int {
+	switch k {
+	case 1:
+		return 1
+	case 2:
+		v := lookupThing()
+		w := v.Field
+		if w > 0 {
+			return emit("GO_CASE_LIMIT reached")
+		}
+		return w
+	}
+	return 0
+}
+GO
+cat > "$EA/app/branch.py" <<'PY'
+def py_branch(x):
+    a = 1
+    if x == 1:
+        return a
+    elif x == 2:
+        val = x.payload
+        other = val + 1
+        raise ValueError("PY_ELIF_LIMIT exceeded")
+    b = 2
+    c = 3
+    return b + c
+
+
+def py_if_only(x):
+    a = 1
+    b = 2
+    if x:
+        c = x.payload
+        d = c + 1
+        e = d + 1
+        raise ValueError("PY_IF_LIMIT exceeded")
+    f = 3
+    g = 4
+    return f + g
+PY
+cat > "$EA/src/cases.cpp" <<'CC'
+int cpp_case(int k) {
+    int r = 0;
+    switch (k) {
+    case 1:
+        r = 1;
+        break;
+    case 2:
+        r = table.width;
+        r += 2;
+        log("CPP_CASE_LIMIT hit");
+        break;
+    default:
+        break;
+    }
+    return r;
+}
+CC
+cat > "$EA/app/cb.js" <<'JS'
+function jsCallback(items) {
+  const a = 1;
+  const b = 2;
+  items.forEach(x => {
+    const c = x.payload;
+    const d = c + 1;
+    const e = d + 1;
+    throw new Error("JS_CB_LIMIT reached");
+  });
+  const f = 3;
+  return f;
+}
+JS
+cat > "$EA/app/objkey.js" <<'JS'
+export function makeConfig(env) {
+  const base = env.base;
+  return {
+    default: {
+      a: 1,
+      b: 2,
+      c: 3,
+      label: "JS_OBJ_KEY_LIMIT",
+    },
+    other: base,
+  };
+}
+
+export function pickIt(kind) {
+  const pre = 1;
+  switch (kind) {
+    case "x":
+      return pre;
+    default: {
+      const one = 1;
+      const two = 2;
+      const three = 3;
+      return "JS_SWITCH_DEFAULT_LIMIT" + one + two + three;
+    }
+  }
+}
+JS
+cat > "$EA/app/aligned.go" <<'GO'
+package app
+
+func goAligned(k int) int {
+	r := 0
+	switch k {
+	case 1:
+		r = 1
+	case 2:
+		r = 2
+	default:
+		a := 1
+		b := 2
+		c := 3
+		r = a + b + c
+		log("GO_ALIGNED_DEFAULT_LIMIT")
+	}
+	return r
+}
+GO
+cat > "$EA/app/casekey.js" <<'JS'
+export function makeCaseConfig(env) {
+  const base = env.base;
+  return {
+    case: {
+      a: 1,
+      b: 2,
+      c: 3,
+      label: "JS_CASE_KEY_LIMIT",
+    },
+    other: base,
+  };
+}
+JS
+cat > "$EA/app/Cb.cs" <<'CS'
+class Cb {
+  void Run(List<int> items) {
+    var a = 1;
+    var b = 2;
+    items.ForEach(
+        x => {
+            var c = x + 1;
+            var d = c + 1;
+            var e = d + 1;
+            var g = e + 1;
+            var h = g + 1;
+            Log("CS_CB_LIMIT reached");
+        });
+    var f = 3;
+  }
+}
+CS
+cat > "$EA/src/al.cpp" <<'CC'
+int cppAligned(int k) {
+    int r = 0;
+    switch (k) {
+    case 1:
+        r = 1;
+        break;
+    default:
+        r = 2;
+        r += 3;
+        r += 4;
+        r += 5;
+        log("CPP_ALIGNED_DEFAULT_LIMIT");
+        break;
+    }
+    return r;
+}
+CC
+ea(){ ( cd "$EA" || exit 1; "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
+eaoff(){ ( cd "$EA" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
+xel(){ python3 -I -c 'import sys,re;s=sys.stdin.read();i=s.find("<lit ");m=re.search(r"<x [^>]*>.*?</x>",s[i:] if i>=0 else "",re.S);print(m.group(0) if m else "",end="")'; }
+armx(){ local task="$1" want="$2" body="$3" label="$4"; local A; A="$( ea "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
+    if [ "$rc" -eq 0 ] && has "$X" "$want" && has "$X" 'arm="1"' && has "$X" "$body" && has "$A" 'x arm=1: a window starts at the head'; then ok "$label"
+    else no "$label: rc=$rc $( grep -o '<x [^>]*>' <<<"$X" )"; fi; }
+armx RUST_ARM_LIMIT 'l="1,8-19" of="1-20"' 'table.associated_source_id' 'E1 [P] Rust: a site in an else inside a tuple-pattern match arm: the window starts at the arm (rw-02 shape), the field read inside'
+armx GO_CASE_LIMIT 'l="3,7-16" of="3-16"' 'w := v.Field' 'E2 [P] Go: a site in an if inside a switch case: the window starts at the case'
+armx PY_ELIF_LIMIT 'l="1,5-11" of="1-11"' 'val = x.payload' 'E3 [P] Python: a site in an elif branch: the window starts at the elif'
+armx CPP_CASE_LIMIT 'l="1,7-15" of="1-16"' 'r = table.width;' 'E4 [P] C++: a site in a brace-less case: the window starts at the case label'
+armx RUST_TWO_LIMIT 'l="43,46-58" of="43-58"' 'let w = v.width;' 'E5 [P] two sites in one arm: one window from the arm head'
+# CodeRabbit #560 (arm heads): a Go or C++ `default:` aligned with its `switch` header is an arm; a JS `case: {` object key and a C# callback `x => {` are not
+armx GO_ALIGNED_DEFAULT_LIMIT 'l="3,10-18" of="3-18"' 'GO_ALIGNED_DEFAULT_LIMIT' 'E13 [P] Go: a default: label aligned with its switch header (gofmt) is an arm: the window starts at it'
+armx CPP_ALIGNED_DEFAULT_LIMIT 'l="1,7-16" of="1-16"' 'CPP_ALIGNED_DEFAULT_LIMIT' 'E13b [P] C++: a default: label aligned with its switch header is an arm'
+# near misses [G]: the old window, no arm=, no clause
+noarm(){ local task="$1" want="$2" label="$3"; local A; A="$( ea "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
+    if [ "$rc" -eq 0 ] && has "$X" "$want" && ! has "$A" 'arm="1"' && ! has "$A" 'x arm=1'; then ok "$label"; else no "$label: rc=$rc $( grep -o '<x [^>]*>' <<<"$X" )"; fi; }
+noarm RUST_FAR_LIMIT 'l="22,36-41" of="22-41"' 'E6 [G] an arm head 13 lines up is past the cap: the old window'
+noarm PY_IF_LIMIT 'l="14,20-24" of="14-24"' 'E7 [G] an if block (no arm) above the window: the old window'
+noarm JS_CB_LIMIT 'l="1,7-12" of="1-12"' 'E8 [G] a JS arrow callback is no arm: the old window'
+noarm JS_CASE_KEY_LIMIT 'l="1,7-12" of="1-12"' 'E14 [P] a JS object literal key `case: {` is no arm (a label has an expression between case and the colon): the old window'
+noarm CS_CB_LIMIT 'l="2,11-15" of="2-15"' 'E15 [P] a C# callback `x => {` on its own line (no match or switch above it) is no arm: the old window'
+noarm JS_OBJ_KEY_LIMIT 'l="1,7-12" of="1-12"' 'E11 [P] a JS object literal key `default: {` is no arm (it heads no switch): the old window'
+armx JS_SWITCH_DEFAULT_LIMIT 'l="14,19-26" of="14-26"' 'JS_SWITCH_DEFAULT_LIMIT' 'E12 [G] twin: a switch `default: {` stays an arm (the window starts at it)'
+A1="$( ea --for=RUST_ARM_LIMIT )"; A2="$( ea --for=RUST_ARM_LIMIT )"
+S1="$( python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit[^>]*?-->","",s,flags=re.S);s=re.sub(r"<lit [^>]*>.*?</lit>","",s,flags=re.S);print(s,end="")' <<<"$A1" )"
+if [ -n "$A1" ] && [ "$A1" = "$A2" ] && [ "$S1" = "$( eaoff --for=RUST_ARM_LIMIT )" ]; then ok "E9 [G] deterministic; the answer minus the block is the switch-off answer"; else no "E9 determinism or prefix moved"; fi
+if command -v xmllint >/dev/null 2>&1; then if printf '%s' "$A1" | xmllint --noout - 2>/dev/null; then ok "E10 [G] well-formed"; else no "E10 not well-formed"; fi; else echo "  SKIP  E10 xmllint not installed"; fi
+# BODY-ABOVE-CHECK [P]: body="above" only when the answer printed the owner's whole <b>. A hop row (<h l= p= n=>) beside a fold skip printed no
+# body (rw-02 P1), and a truncated <b> (lines=1-87/115) stops before the site: both now serve the lit's own excerpt holding the site line
+python3 -I - "$EA/app/rate.py" <<'PY'
+import sys
+lines=["def helper_a(x):","    return x + 1","","","def helper_b(x):","    return x * 2","","","def handle_big_rate(req):","    total = helper_a(req.size)"]
+lines+=[f"    step_{i:03d} = helper_b(total + {i})  # padding the body so it is long" for i in range(110)]
+lines+=['    if req.kind == "table":','        raise ValueError("BIG_RATE_LIMIT is not for table without source")',"    return total",""]
+open(sys.argv[1],"w").write("\n".join(lines)+"\n")
+PY
+bodyab(){ local task="$1" label="$2"; local A; A="$( ea "--for=$task" )"; local rc=$?; local L; L="$( python3 -I -c 'import sys;s=sys.stdin.read();i=s.find("<lit ");print(s[i:s.find("</lit>",i)+6] if i>=0 else "")' <<<"$A" )"
+    if [ "$rc" -eq 0 ] && has "$L" '<ls p="app/rate.py" l="122"' && ! has "$L" 'body="above"' && has "$L" '<x p="app/rate.py" n="handle_big_rate"' && has "$L" 'BIG_RATE_LIMIT is not for table'; then ok "$label"
+    else no "$label: rc=$rc $( grep -o '<ls [^>]*>' <<<"$L" ) $( grep -o '<x [^>]*>' <<<"$L" )"; fi; }
+bodyab 'How is the BIG_RATE_LIMIT check executed?' 'B1 [P] a hop row and a fold skip of the owner are no body above: the excerpt is served'
+bodyab 'How is the BIG_RATE_LIMIT check in handle_big_rate executed?' 'B2 [P] a truncated <b> of the owner that stops before the site is no body above (neighbour): the excerpt is served'
+printf 'def setup_small(r):\n    return r.check("SMALL_ABOVE_LIMIT")\n' > "$EA/app/small.py"
+A="$( ea '--for=How does setup_small use SMALL_ABOVE_LIMIT?' )"
+if has "$A" '<b t="fn" l="1" p="app/small.py" n="setup_small"' && has "$A" 'in="setup_small" ink="fn" body="above"'; then ok "B3 [G] twin: a whole <b> printed above still says body=above"; else no "B3 whole body above: $( grep -o '<ls [^>]*>' <<<"$A" )"; fi
+
+# ── FLAG-SHAPE-LIT (forliteral-3 commit 3; [P] = red on 2562d9931): a `--flag` the task names anchors on the call that registers it (the whole
+# quoted name), def= its default argument, and when that names a field, ld rows: the constant writes of the field, defaults first ────────────
+FL="$TMP/flagfix"; mkdir -p "$FL/cmd/kubelet" "$FL/pkg/apis/fuzzer" "$FL/pkg/apis/v1beta1" "$FL/tool" "$FL/docs" "$FL/crates/cli/src"
+cat > "$FL/cmd/kubelet/options.go" <<'GO'
+package kubelet
+
+// AddFlags registers the kubelet flags; see --max-pods in the docs.
+func AddFlags(fs *FlagSet, c *Config) {
+	fs.Int32Var(&c.MaxPods, "max-pods", c.MaxPods, "Number of Pods that can run on this Kubelet.")
+	fs.Int32Var(&c.PodsPerCore, "max-pods-per-core", c.PodsPerCore, "Pods per core.")
+	fs.StringVarP(&c.Mode, "run-mode", "r", c.Mode, "The run mode.")
+	fs.StringVar(&c.Endpoint, "env-endpoint", os.Getenv("ENDPOINT"), "The endpoint.")
+}
+
+func usage() string {
+	return "use --max-pods to cap the pods"
+}
+GO
+cat > "$FL/pkg/apis/fuzzer/fuzzer.go" <<'GO'
+package fuzzer
+
+func Funcs(obj *Config) {
+	obj.MaxPods = 110
+	obj.Mode = "fuzz"
+}
+GO
+cat > "$FL/pkg/apis/v1beta1/defaults.go" <<'GO'
+package v1beta1
+
+func SetDefaults_KubeletConfiguration(obj *Config) {
+	if obj.MaxPods == 0 {
+		obj.MaxPods = 110
+	}
+	if obj.Mode == "" {
+		obj.Mode = DefaultRunMode
+	}
+}
+GO
+cat > "$FL/pkg/apis/v1beta1/zz_generated.conversion.go" <<'GO'
+package v1beta1
+
+func convert(in *Config, out *Config) {
+	out.MaxPods = in.MaxPods
+	out.Mode = in.Mode
+}
+GO
+cat > "$FL/tool/cli.py" <<'PY'
+import argparse
+import click
+
+DEFAULT_WORKERS = 4
+
+
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="worker count")
+    parser.add_argument("--dry-run-all", action="store_true")
+    return parser
+
+
+@click.option("--log-level", default="info", help="the log level")
+def main(log_level):
+    return log_level
+PY
+cat > "$FL/docs/flags.md" <<'MD'
+Use `--docs-only-flag` to tune it.
+MD
+cat > "$FL/crates/cli/src/args.rs" <<'RS'
+pub struct Args {
+    #[arg(long, default_value_t = 4)]
+    pub clap_parallelism: usize,
+}
+RS
+cat > "$FL/crates/cli/src/derive.rs" <<'RS'
+pub struct Derive {
+    #[arg(long = "derive-cache", default_value_t = 64)]
+    pub cache_size: usize,
+    #[clap(long = "derive-clap", default_value = "fast")]
+    pub mode: String,
+    #[structopt(long = "derive-stop", default_value = "7")]
+    pub stop: String,
+    #[serde(rename = "derive-serde", default = "9")]
+    pub serde_field: String,
+}
+
+fn probe() {
+    arg("derive-call", default = 5);
+}
+RS
+mkdir -p "$FL/source/server" "$FL/aaa" "$FL/cmd/outfmt" "$FL/cmd/sq" "$FL/cmd/cache" "$FL/cmd/pkgvar" "$FL/pkg/other" "$FL/crates/nu"
+cat > "$FL/tool/alias.py" <<'PY'
+import argparse
+import click
+
+
+def build_alias_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--alias-verbose", "-v", action="store_true", help="talk more")
+    parser.add_argument("--alias-width", "-w", type=int, default=8, help="width")
+    return parser
+
+
+@click.option("--alias-dry", "-n", is_flag=True, help="do nothing")
+def alias_main(alias_dry):
+    return alias_dry
+PY
+cat > "$FL/crates/nu/sig.rs" <<'RS'
+impl Command for Ls {
+    fn signature(&self) -> Signature {
+        Signature::build("ls").named("named-depth", SyntaxShape::Int, "how deep to recurse", Some('d'))
+    }
+}
+RS
+cat > "$FL/aaa/run.go" <<'GO'
+package aaa
+
+func StartTool() error {
+	return exec.Command("tool", "--output-format", "yaml", "--quiet").Run()
+}
+GO
+cat > "$FL/cmd/outfmt/outfmt.go" <<'GO'
+package outfmt
+
+func Register(fs *FlagSet, o *Options) {
+	fs.StringVarP(&o.Output, "output-format", "o", "json", "Output format.")
+}
+GO
+cat > "$FL/tool/words.py" <<'PY'
+import argparse
+
+__all__ = ["squeezeall", "other"]
+ENCODINGS = {".Z": "squeezeall"}
+
+
+def fail():
+    raise ValueError("squeezeall")
+
+
+def parse():
+    p = argparse.ArgumentParser()
+    p.add_argument("--squeezeall", "-s", action="store_true")
+    return p
+PY
+cat > "$FL/source/server/tclap_impl.cc" <<'CC'
+void TclapImpl::parse(int argc, const char* const* argv) {
+  TCLAP::ValueArg<uint32_t> threads("", "workerthreads", "# of worker threads to run", false, 1, "uint32_t", cmd);
+  TCLAP::SwitchArg quiet("q", "workerquiet", "Quiet mode", cmd, false);
+  const char* other = "workerthreads is documented elsewhere";
+}
+CC
+cat > "$FL/cmd/sq/sq.go" <<'GO'
+package sq
+
+var names = map[string]string{"a": "squeezego"}
+
+func Reg(fs *FlagSet) {
+	fs.Bool("squeezego", false, "Squeeze go output.")
+}
+GO
+cat > "$FL/cmd/cache/cache.go" <<'GO'
+package cache
+
+type Options struct{ CacheSizing int }
+
+func AddCacheFlags(fs *FlagSet, o *Options) {
+	fs.IntVar(&o.CacheSizing, "cache-sizing", o.CacheSizing, "Cache size in MB.")
+}
+
+func SetCacheDefaults(o *Options) {
+	if o.CacheSizing == 0 {
+		o.CacheSizing = 256
+	}
+}
+GO
+cat > "$FL/pkg/other/other.go" <<'GO'
+package other
+
+type Other struct{ CacheSizing int }
+
+func Apply(c *Other) {
+	c.CacheSizing = DefaultCacheSizing
+}
+
+const DefaultCacheSizing = 128
+GO
+cat > "$FL/cmd/pkgvar/pv.go" <<'GO'
+package pkgvar
+
+var pvOpts = struct {
+	PageLimit int
+}{
+	PageLimit: 500,
+}
+
+func init() {
+	f.IntVar(&pvOpts.PageLimit, "page-limit", pvOpts.PageLimit, "Page limit.")
+}
+GO
+cat > "$FL/source/server/options_impl.cc" <<'CC'
+void OptionsImpl::parse(int argc, const char* const* argv) {
+  TCLAP::ValueArg<uint32_t> concurrency("", "worker-concurrency", "# of worker threads to run", false, 1, "uint32_t", cmd);
+  cmd.parse(argc, argv);
+}
+CC
+# ── CodeRabbit #560: fixtures for the flag-shape fixes ──
+mkdir -p "$FL/cmd/modes" "$FL/cmd/wr" "$FL/cmd/boosty"
+cat > "$FL/tool/tidy.py" <<'PY'
+import argparse
+
+
+def check(cache):
+    if cache.stale:
+        raise RuntimeError("tidy cache is stale")
+
+
+def build_tidy():
+    p = argparse.ArgumentParser()
+    p.add_argument("--tidy-cache", action="store_true")
+    return p
+PY
+cat > "$FL/source/server/tclap_ws.cc" <<'CC'
+void TclapWs::parse(int argc, const char* const* argv) {
+  TCLAP::SwitchArg spaced ("s", "workerspaced", "Spaced mode", cmd, false);
+}
+CC
+cat > "$FL/cmd/modes/modes.go" <<'GO'
+package modes
+
+func Reg(fs *FlagSet) {
+	fs.String("backendmode", "cachemode", "Backend mode")
+	fs.String("greetingtext", "hello world", "Greeting text.")
+	fs.String("pairingtext", "key=value", "Pairing text.")
+}
+GO
+cat > "$FL/cmd/boosty/boosty.cpp" <<'CC'
+void Opts() {
+  desc.add_options()("paren-close", po::value<std::string>()->default_value(")"), "paren close");
+}
+CC
+cat > "$FL/tool/lookup.py" <<'PY'
+def cfg(conf):
+    return lookup("lk-pods", default=64)
+
+
+def reg(p):
+    p.add_argument("--lk-pods", type=int, default=
+                   32)
+PY
+cat > "$FL/cmd/wr/wr.go" <<'GO'
+package wr
+
+type WrCfg struct{ WrLimit int }
+
+func AddWr(fs *FlagSet, c *WrCfg) {
+	fs.IntVar(&c.WrLimit, "wr-limit", c.WrLimit, "Limit.")
+}
+
+func SetWrDefaults(obj *WrCfg) {
+	// obj.WrLimit = 999
+	obj.WrLimit = 110 // the default
+	other := "x"; obj.WrLimit = 120; other = "y"
+	obj.WrLimit = "pre" + wrIn + "suf"
+}
+
+func AddSk(fs *FlagSet) {
+	fs.Int("sk-limit", skCfg.SkLimit, "Skip limit.")
+}
+GO
+fl(){ ( cd "$FL" || exit 1; "$BIN" "$FL" --no-cache "$@" </dev/null 2>/dev/null ); }
+floff(){ ( cd "$FL" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$FL" --no-cache "$@" </dev/null 2>/dev/null ); }
+flit(){ python3 -I -c 'import sys,re;print("".join(re.findall(r"<lit [^>]*>.*?</lit>",sys.stdin.read(),re.S)))'; }
+lds(){ python3 -I -c 'import sys,re;print("\n".join(re.findall(r"<ld [^>]*>",sys.stdin.read())))'; }
+flagarm(){ local task="$1" label="$2"; shift 2; local A; A="$( fl "--for=$task" )"; local rc=$?; local L; L="$( flit <<<"$A" )"; local w okk=1
+    [ "$rc" -eq 0 ] || okk=0
+    for w in "$@"; do case "$w" in !*) has "$L" "${w#!}" && okk=0;; *) has "$L" "$w" || okk=0;; esac; done
+    if [ "$okk" = 1 ]; then ok "$label"; else no "$label: rc=$rc ${L:0:700}"; fi; }
+flagarm 'kubelet --max-pods' 'F1 [P] Go pflag: the registration row, def= the bound field, ld = the SetDefaults_ write first, the fuzzer decoy after it, the copy never (k8s-05 shape)' \
+    's="max-pods" shape="flag"' 'p="cmd/kubelet/options.go" l="5"' 'def="c.MaxPods"' 'writes="2"' \
+    '<ld p="pkg/apis/v1beta1/defaults.go" l="5" in="SetDefaults_KubeletConfiguration"' 'p="pkg/apis/fuzzer/fuzzer.go"' '!in.MaxPods' 'src="1" shown="1"' 'mention="3"'
+A="$( fl '--for=How does the kubelet use the --max-pods flag?' )"; FIRSTLD="$( lds <<<"$A" | sed -n 1p )"
+if has "$FIRSTLD" 'pkg/apis/v1beta1/defaults.go'; then ok "F2 [P] natural wording: the defaults write ranks above the fuzzer write (path order would put the fuzzer first)"; else no "F2 ld order: $FIRSTLD"; fi
+flagarm 'which default does --run-mode take' 'F3 [P] Go pflag shorthand form (StringVarP): def= skips the shorthand letter' 'def="c.Mode"' '<ld p="pkg/apis/v1beta1/defaults.go"' 'DefaultRunMode'
+flagarm 'the --workers option default' 'F4 [P] Python argparse: default= a CONST word, def= says it, no field to chase (no writes=)' 's="workers" shape="flag"' 'def="DEFAULT_WORKERS"' '!writes="' '!<ld '
+flagarm 'where is --log-level handled' 'F5 [P] Python click: default= a string' 's="log-level" shape="flag"' 'def="&quot;info&quot;"'
+flagarm 'what does --dry-run-all do' 'F6 [P] a flag registered with no default: the row, no def=' 's="dry-run-all" shape="flag"' 'p="tool/cli.py"' '!def="'
+flagarm 'kubelet --env-endpoint' 'F7 [P] a default that is a call (os.Getenv): def= quotes it, no field chase' 'def="os.Getenv(&quot;ENDPOINT&quot;)"' '!writes="' '!<ld '
+flagarm 'envoy --worker-concurrency' 'F7b [P] C++ TCLAP ValueArg: the registration row; the description after the name is no default (no def=)' 's="worker-concurrency" shape="flag"' 'p="source/server/options_impl.cc" l="2"' '!def="'
+# ── fix round 1 (rv-forliteral-3 F1, F2 and the <ld> owner): the default slot per flag API, the non-kebab site rule, the owner type of a write ──
+lsrow(){ grep -o '<ls [^>]*>' <<<"$1"; }
+A="$( fl '--for=what does --alias-verbose do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="alias-verbose" shape="flag"' && has "$L" 'p="tool/alias.py"' && ! has "$L" 'def="'; then ok "F14 [P] argparse alias after the name (\"-v\") is no default"; else no "F14 alias: ${L:0:400}"; fi
+A="$( fl '--for=what does --alias-dry do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="alias-dry" shape="flag"' && has "$L" 'p="tool/alias.py"' && ! has "$L" 'def="'; then ok "F15 [P] click alias after the name (\"-n\") is no default"; else no "F15 click alias: ${L:0:400}"; fi
+flagarm 'what does --alias-width do' 'F16 [G] twin: argparse alias, then default=8 on the same call: def=8' 's="alias-width" shape="flag"' 'def="8"'
+A="$( fl '--for=what does --named-depth do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="named-depth" shape="flag"' && has "$L" 'p="crates/nu/sig.rs"' && ! has "$L" 'def="'; then ok "F17 [P] nushell .named(name, SyntaxShape, usage, short): the shape is no default (a Go flag call keeps def=, F1)"; else no "F17 named: ${L:0:400}"; fi
+A="$( fl '--for=what does the --output-format flag default to' )"; L="$( flit <<<"$A" )"; LS="$( lsrow "$L" )"
+if has "$L" 's="output-format" shape="flag"' && has "$( grep 'aaa/run.go' <<<"$LS" )" 'aaa/run.go' && ! has "$( grep 'aaa/run.go' <<<"$LS" )" 'def="' && has "$( grep 'cmd/outfmt/outfmt.go' <<<"$LS" )" 'def="&quot;json&quot;"'; then ok "F18 [P] an exec.Command invocation ranked before the registration: no def= on it, def=json on the StringVarP row"; else no "F18 invocation: $LS"; fi
+A="$( fl '--for=what does the --squeezeall option do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="squeezeall" shape="flag"' && has "$L" 'src="1" shown="1"' && has "$L" "--squeezeall" && ! has "$L" '.Z' && ! has "$L" '__all__' && ! has "$L" 'ValueError'; then ok "F19 [P] a name with no inner hyphen: the dashed argparse site only, not a dict value, an __all__ entry or an error message"; else no "F19 non-kebab: ${L:0:500}"; fi
+A="$( fl '--for=what does the --squeezego flag default to' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="squeezego" shape="flag"' && has "$L" 'src="1" shown="1"' && has "$L" 'p="cmd/sq/sq.go" l="6"' && has "$L" 'def="false"' && ! has "$L" 'l="3"'; then ok "F20 [P] a no-hyphen name as a flag call's argument (Bool(\"squeezego\", false, ...)) is a site with def=false; the map value is not"; else no "F20 flag call: ${L:0:500}"; fi
+A="$( fl '--for=where does --cache-sizing get its default' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="o.CacheSizing"' && has "$L" 'writes="1"' && has "$L" '<ld p="cmd/cache/cache.go" l="11"' && ! has "$L" 'p="pkg/other/other.go"'; then ok "F21 [P] ld rows: the write of the owner type (Options) only; a same-named field of another struct (Other) is no ld and no writes="; else no "F21 owner: $( grep -o '<ld [^>]*>' <<<"$L" ) $( grep -o 'writes="[0-9]*"' <<<"$L" )"; fi
+A="$( fl '--for=what is the --page-limit default' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="pvOpts.PageLimit"' && has "$L" 'writes="1"' && has "$L" '<ld p="cmd/pkgvar/pv.go" l="6" in="pvOpts" ink="var"'; then ok "F22 [G] twin: a package var of an anonymous struct (cockroach --page-size): its literal's write stays an ld row"; else no "F22 package var: ${L:0:500}"; fi
+A="$( fl '--for=how does the kubelet use the --max-pods flag?' )"; L="$( flit <<<"$A" )"
+if has "$L" 'writes="2"' && has "$L" '<ld p="pkg/apis/v1beta1/defaults.go"' && has "$L" '<ld p="pkg/apis/fuzzer/fuzzer.go"'; then ok "F23 [G] twin: both owner-typed writes (Config) are read: writes=2 as before"; else no "F23 owner twin: $( grep -o 'writes="[0-9]*"' <<<"$L" )"; fi
+A="$( fl '--for=kubelet --max-pods' )"
+if has "$A" 'shape="flag"' && has "$A" 'ld = a constant write' && ! has "$A" 'try=' && ! has "$A" "the task's Nth literal"; then ok "F24 [P] the flag legend clause carries no try=N sentence on a fire with no try="; else no "F24 try sentence present without try= (or no flag fire)"; fi
+A="$( fl '--for=where is SQUEEZE_NOPE_CONST_X set and what does the --squeezego flag do' )"
+if has "$A" 'shape="flag"' && has "$A" 'try="2"' && has "$A" "the task's Nth literal anchored"; then ok "F25 [G] twin: a flag lit that is the task's 2nd literal says try=\"2\" and its own sentence rides beside it"; else no "F25 try= twin: $( flit <<<"$A" | cut -c1-200 )"; fi
+A="$( fl '--for=how does the --cache-sizing option work' )"
+if has "$A" 'ld = a constant write' && has "$A" 'a name match, no type check' && has "$A" 'also an invocation or a lookup'; then ok "F26 [P] the flag legend: sites include invocations and lookups, ld is a name match of the owner type"; else no "F26 flag legend wording"; fi
+A="$( fl '--for=what does the --workerthreads flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="workerthreads" shape="flag"' && has "$L" 'p="source/server/tclap_impl.cc" l="2"' && has "$L" 'src="1"' && ! has "$L" 'def="'; then ok "F27 [G] twin: a no-hyphen name as a TCLAP argument object's constructor (ValueArg<T> name(...), envoy --concurrency): a site, no def= (the description is no default)"; else no "F27 TCLAP: ${L:0:500}"; fi
+A="$( fl '--for=what does the --workerquiet flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="workerquiet" shape="flag"' && has "$L" 'p="source/server/tclap_impl.cc" l="3"'; then ok "F28 [G] twin: SwitchArg quiet(...) (no template) is an argument object too"; else no "F28 SwitchArg: ${L:0:300}"; fi
+# CodeRabbit #560 (flag shapes)
+A="$( fl "--for=why does 'tidy cache is stale' error appear with the --tidy-cache flag" )"; L="$( flit <<<"$A" )"
+if has "$L" 's="tidy cache is stale" shape="message"' && ! has "$L" 'shape="flag"'; then ok "F29 [P] a task naming an indexed message AND an indexed flag: the message block stays (the flag is tried after it, as before the flag shape existed)"; else no "F29 order: ${L:0:300}"; fi
+A="$( fl '--for=what does the --tidy-cache flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 's="tidy-cache" shape="flag"' && has "$L" 'p="tool/tidy.py"'; then ok "F29b [G] twin: the same flag alone is still a flag block"; else no "F29b flag alone: ${L:0:300}"; fi
+flagarm 'what does the --workerspaced flag do' 'F30 [P] TCLAP SwitchArg spaced ("s", ...) (a blank between the object name and its paren) is an argument object: the registration is a site' 's="workerspaced" shape="flag"' 'p="source/server/tclap_ws.cc" l="2"'
+flagarm 'what does the --backendmode flag do' 'F31b [G] twin: the name argument of the same call is a flag site, def= the string' 's="backendmode" shape="flag"' 'p="cmd/modes/modes.go" l="4"' 'def="&quot;cachemode&quot;"'
+flagarm 'what does the --greetingtext flag do' 'F32 [P] a quoted default with a space ("hello world") in the default slot: def= says it' 's="greetingtext" shape="flag"' 'def="&quot;hello world&quot;"'
+flagarm 'what does the --pairingtext flag do' 'F33 [P] a quoted default holding = ("key=value"): def= says it' 's="pairingtext" shape="flag"' 'def="&quot;key=value&quot;"'
+flagarm 'what does the --paren-close flag do' 'F34 [P] boost default_value(")"): the paren in the string does not end the default' 's="paren-close" shape="flag"' 'def="&quot;)&quot;"'
+flagarm 'what does the --lk-pods flag do' 'F35 [P] default=64 on a lookup() call is no flag default; the add_argument whose default= sits on the next line gives def=32 (no newline in it)' 's="lk-pods" shape="flag"' 'def="32"'
+flagarm 'what does the --derive-cache flag do' 'F38 [P] clap derive #[arg(long = "derive-cache", default_value_t = 64)] defines a flag: def=64 (F35 took keyword defaults only from calls)' 's="derive-cache" shape="flag"' 'p="crates/cli/src/derive.rs"' 'def="64"'
+flagarm 'what does the --derive-clap flag do' 'F38b [G] twin: #[clap(...)] attribute, a quoted default_value' 's="derive-clap" shape="flag"' 'def="&quot;fast&quot;"'
+flagarm 'what does the --derive-stop flag do' 'F38c [G] twin: #[structopt(...)] attribute' 's="derive-stop" shape="flag"' 'def="&quot;7&quot;"'
+flagarm 'what does the --derive-serde flag do' 'F38d [P] an attribute that is no flag definition (#[serde(rename = ..., default = ...)]) gives no def= (F35 intent holds)' 's="derive-serde"' '!def="'
+flagarm 'what does the --derive-call flag do' 'F38e [P] a plain arg(...) call (no #[) is no flag definition: no def=' 's="derive-call"' '!def="'
+A="$( fl '--for=what does the --wr-limit flag default to' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="c.WrLimit"' && has "$L" 'writes="2"' && ! has "$L" '999' && ! has "$L" 'suf'; then ok "F36 [P] ld writes: a trailing comment and a second statement on the line keep the constants (110, 120); a commented-out write (999) and a concatenation are no writes"; else no "F36 writes: $( grep -o 'writes="[0-9]*"' <<<"$L" ) $( lds <<<"$A" )"; fi
+A="$( fl '--for=what does the --sk-limit flag do' )"; L="$( flit <<<"$A" )"
+if has "$L" 'def="skCfg.SkLimit"' && has "$L" 'floor="1"'; then ok "F37 [P] def= names a field whose receiver type is unknown (no write scan ran): the writes= zero is not a total, floor=1"; else no "F37 skipped scan: ${L:0:400}"; fi
+# legend: the flag clause rides only on a flag fire
+A="$( fl '--for=kubelet --max-pods' )"
+if has "$A" 'shape=flag a flag the task names' && has "$A" 'writes=N'; then ok "F8 [P] the flag legend clause rides on the fire"; else no "F8 flag legend missing"; fi
+# near misses [G]: byte-identical to the switch off
+flagnomiss(){ local X; X="$( fl "--for=$1" )"; local rc=$?; if [ "$rc" -eq 0 ] && [ -n "$X" ] && ! has "$( flit <<<"$X" )" 'shape="flag"' && [ "$X" = "$( floff "--for=$1" )" ]; then ok "$2"; else no "$2: rc=$rc $( flit <<<"$X" | cut -c1-300 )"; fi; }
+flagnomiss 'how is --docs-only-flag used' 'F9 [G] a flag named only in docs: no block'
+flagnomiss 'how is --no-such-flag-here set' 'F10 [G] a flag with no site: no block'
+flagnomiss 'how is --clap-parallelism set' 'F11 [G] a Rust clap field (no quoted name): no block (not covered: the long name is the field)'
+flagnomiss 'what does --workers do' 'F12 [G] --name with no inner hyphen and no flag/option word after it: no flag'
+flagnomiss 'set the max pods for the kubelet' 'F13 [G] no flag token: no block'
+flagnomiss 'what does the --cachemode flag do' 'F31 [P] a default value (fs.String("backendmode", "cachemode", ...)) is no flag name: no flag block'
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"

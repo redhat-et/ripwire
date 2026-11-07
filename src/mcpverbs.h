@@ -46,6 +46,7 @@
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
 #include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
+#include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2459,6 +2460,17 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
 inline std::string connectText( const std::string& root, const std::vector<std::string>& symbolSpecs, std::uint32_t radius, std::string& err, RedactCounts* redact );
 inline std::string batchCdata( const std::string& s );   // the callers twin's JSON rides as CDATA
 
+// K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms>, read off this answer's own bytes (every block before it), before </ctx>, not priced;
+// held under budget_tokens.
+inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args )
+{
+    if( out.ends_with( "</ctx>" ) )
+    {
+        args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
+        out.insert( out.size() - 6, renderForFileSyms( ing, g, args ) );
+    }
+}
+
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
@@ -2960,6 +2972,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
     }
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
     if( out.ends_with( "</ctx>" ) )
     {
@@ -2973,6 +2986,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         {
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
+            insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) } );
             return out;
         }
         std::string verb;
@@ -2999,6 +3013,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, opts ) + verb + std::string( kGraphSubjectCloseXml ) );
         }
     }
+    insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) } );
     return out;
 }
 
