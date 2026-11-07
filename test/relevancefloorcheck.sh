@@ -185,13 +185,15 @@ a_bytes="$( printf '%s' "$A_OUT" | wc -c | tr -d ' ' )"
 # the caller hop (src/forcallerhop.h) — here the empty <callers … total="0"> shell (the anchor has no callers) and its full legend
 # clause. (4) normalises both out, so its 3000 B assertion still measures what it measured; (4b) moves 3400 -> 4100 B (measured
 # 3967); (4d) is the twin: the answer minus the hop equals RIPWIRE_NO_CALLER_HOP=1, the pre-hop answer, under (4b)'s old 3400 B.
+# RE-PIN 2026-11-06 (lane d2-via-inherit, by design; budget serves answers): the caller-hop legend clause defines via=name on d=2 rows
+# (" (via=name if every path has a by-name hop)", 43 B), 4066 -> 4109 B; (4b) moves 4100 -> 4200 B. (4) and (4d) are unchanged.
 a_norm_bytes="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); sys.stdout.write(s)' | sed -E 's/ e="[0-9]+"//g; s/; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known \(extent_suspect, docs, config\), never 0; l= is the line of the definition.s name, so a definition can start above l=//' \
                  | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<t p=\"[^\"]*\" sym=\"[^\"]*\"/>","",s); m=re.search(r"; tail: [^\]]*?budget-trimmed row\)",s); s=s.replace(m.group(0),"x"*391) if m and len(m.group(0))>391 else s; sys.stdout.write(s)' | wc -c | tr -d ' ' )"
 case "$a_bytes$a_norm_bytes" in *[!0-9]*|'') no "(4) byte counts are not numeric ('$a_bytes' / '$a_norm_bytes')"; a_bytes=999999; a_norm_bytes=999999 ;; esac
 [ "$a_norm_bytes" -lt 3000 ] && ok "(4) the floored bundle without e= and its clause is $a_norm_bytes B (< 3000; pre-fix was 5307 B on this fixture)" \
                              || no "(4) the floored bundle without e= and its clause is $a_norm_bytes B, over the 3000 B ceiling"
-[ "$a_bytes" -lt 4100 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 4100 with e=, the tail page rows, the caller hop and their legend clauses)" \
-                        || no "(4b) the whole floored bundle is $a_bytes B, over the 4100 B ceiling"
+[ "$a_bytes" -lt 4200 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 4200 with e=, the tail page rows, the caller hop and their legend clauses)" \
+                        || no "(4b) the whole floored bundle is $a_bytes B, over the 4200 B ceiling"
 A_OFF="$( RIPWIRE_NO_CALLER_HOP=1 rw --for=FLOORANCHOR_uniquefn --legend=full )"
 a_off_bytes="$( printf '%s' "$A_OFF" | wc -c | tr -d ' ' )"
 a_on_strip="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); s=re.sub(r" est_tokens=\"[0-9]+\"","",s); sys.stdout.write(s)' )"
