@@ -574,6 +574,7 @@ for _g in \
     gointerfacecheck \
     gokindcheck \
     goscopecheck \
+    graphformendpointscheck \
     graphlegendbudgetcheck \
     graphqueryrefusecheck \
     grepanchorcheck \
