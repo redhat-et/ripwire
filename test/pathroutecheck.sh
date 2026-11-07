@@ -44,7 +44,8 @@
 #   (PM) a pairs answer (two definitions of the from= name) carries the hedge on its first pair's chain and is never refused.
 #   (L) the --legend=full clause rides exactly when route_hedged= does; every answer parses (xmllint when present).
 #   (M) MCP path_between: the same verdict attrs and the same rows as the CLI on R, P, H, N4.
-#   (F) --for "<path subject>": the <graph_verb> block carries the same verdict as the CLI on R.
+#   (F) --for "<path subject>": the <graph_verb> block's <path> carries the same verdict as the CLI on R (no hop rows); the
+#       <path_gap> that follows a reachable="0" path lists the two sides, and its legend says a not-proven refusal is one cause.
 #
 # Usage: test/pathroutecheck.sh [BIN]   (BIN defaults to RIPWIRE_BIN, then build/ripwire)
 set -u
@@ -489,8 +490,10 @@ F="$( run r '--for=path from start_entry to Sink.sink_call' )"
 blk="$( python3 -c 'import re,sys; t=sys.stdin.read(); m=re.search(r"<graph_verb[^>]*>.*?</graph_verb>",t,re.S); print(m.group(0) if m else "")' <<<"$F" )"
 if [ -z "$blk" ]; then
     no "(F) no <graph_verb> block on the --for path subject"
-elif [ "$( attr route_hedged <<<"$blk" )" = not-proven ] && [ -z "$( rows <<<"$blk" )" ]; then
-    ok "(F) the --for <graph_verb> block refuses the same chain"
+elif pblk="$( python3 -c 'import re,sys; m=re.search(r"<path [^>]*>.*?</path>",sys.stdin.read(),re.S); print(m.group(0) if m else "")' <<<"$blk" )" \
+     && [ -n "$pblk" ] && [ "$( attr route_hedged <<<"$pblk" )" = not-proven ] && [ -z "$( rows <<<"$pblk" )" ] \
+     && grep -q '<path_gap from="start_entry" to="Sink.sink_call" reachable="0">' <<<"$blk" && grep -qF 'route_hedged="not-proven" refused the one it found' <<<"$blk"; then
+    ok "(F) the --for <graph_verb> block refuses the same chain (no <s> in its <path>); its <path_gap> sides follow and their legend names the refusal"
 else
     no "(F) $( grep -o '<path [^>]*>' <<<"$blk" )"
 fi
