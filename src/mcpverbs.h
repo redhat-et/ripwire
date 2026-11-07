@@ -46,6 +46,7 @@
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
 #include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
+#include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
@@ -2977,6 +2978,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
+        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
