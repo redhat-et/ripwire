@@ -14,6 +14,7 @@
 #include "infra/sortutil.h"  // svLess — JS/TS builtin-member tables below (binary_search, no signed-char wrap)
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 #include "structlayout.h"   // cross-translation-unit sizeof/alignof tripwire for the shared model
+#include "infra/sharedOnce.h"   // rw::sharedOnce — RefColdFields::block, the cold text block made on its first write
 
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember
 #include <memory>      // IngestResult::rustCrateRoots — the per-run Rust crate-root table
@@ -1174,13 +1175,12 @@ public:
     const std::string& memberCtor() const noexcept { return cold_ ? cold_->memberCtor : kNoRefColdText; }
     const std::string& memberVia() const noexcept { return cold_ ? cold_->memberVia : kNoRefColdText; }
 
-    template <class Text> void setFieldName( Text&& value ) { if( cold_ || !std::string_view( value ).empty() ) { block().fieldName = std::forward<Text>( value ); } }
-    template <class Text> void setComposeRel( Text&& value ) { if( cold_ || !std::string_view( value ).empty() ) { block().composeRel = std::forward<Text>( value ); } }
-    template <class Text> void setMemberPath( Text&& value ) { if( cold_ || !std::string_view( value ).empty() ) { block().memberPath = std::forward<Text>( value ); } }
-    template <class Text> void setMemberCtor( Text&& value ) { if( cold_ || !std::string_view( value ).empty() ) { block().memberCtor = std::forward<Text>( value ); } }
-    template <class Text> void setMemberVia( Text&& value ) { if( cold_ || !std::string_view( value ).empty() ) { block().memberVia = std::forward<Text>( value ); } }
+    template <class Text> void setFieldName( Text&& value ) { setText( &RefColdText::fieldName, std::forward<Text>( value ) ); }
+    template <class Text> void setComposeRel( Text&& value ) { setText( &RefColdText::composeRel, std::forward<Text>( value ) ); }
+    template <class Text> void setMemberPath( Text&& value ) { setText( &RefColdText::memberPath, std::forward<Text>( value ) ); }
+    template <class Text> void setMemberCtor( Text&& value ) { setText( &RefColdText::memberCtor, std::forward<Text>( value ) ); }
+    template <class Text> void setMemberVia( Text&& value ) { setText( &RefColdText::memberVia, std::forward<Text>( value ) ); }
 
-    std::string& fieldNameMut() { return block().fieldName; }
     std::string& memberPathMut() { return block().memberPath; }
     std::string& memberCtorMut() { return block().memberCtor; }
     std::string& memberViaMut() { return block().memberVia; }
@@ -1189,10 +1189,10 @@ public:
     void takeColdFrom( RefColdFields& other ) noexcept { cold_ = std::move( other.cold_ ); }
 
 private:
-    RefColdText& block()
+    RefColdText& block() { return rw::sharedOnce( cold_, [] { return std::make_unique<RefColdText>(); } ); }
+    template <class Text> void setText( std::string RefColdText::* slot, Text&& value )
     {
-        if( !cold_ ) { cold_ = std::make_unique<RefColdText>(); }
-        return *cold_;
+        if( cold_ || !std::string_view( value ).empty() ) { block().*slot = std::forward<Text>( value ); }
     }
     std::unique_ptr<RefColdText> cold_;
 };
