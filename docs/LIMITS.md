@@ -29,16 +29,16 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-05 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-07 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 375 | 131 | 249 | **126** |
+| 396 | 136 | 261 | **135** |
 
 Plus 8 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 375 + 8 is the 383 constants this generator parses out of `src/`.
+are not counted as caps, and 396 + 8 is the 404 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 375 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 233 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 396 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 254 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -89,7 +89,7 @@ measurement that chose it; listing them beside truncation caps invites tuning th
 
 The **anchor** column is read from each constant's own trailing comment. **unsourced** means the
 comment cites no measurement — the value came from somewhere, but not from anything a reader can
-check. All 8 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
+check. All 9 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
 the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per
 `docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider's)`. Sourcing them
 means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator
@@ -102,6 +102,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 | `kCommonNameDefThreshold` | `5` | `src/graph.h` | **unsourced** | >5 defs of the same name ⇒ common (aider's) |
 | `kCoreBudgetShare` | `0.34` | `src/partition.h` | **unsourced** | — |
 | `kExemplarCcxCeilFactor` | `4` | `src/exemplar.h` | **unsourced** | — |
+| `kForDocTopShareTenths` | `6` | `src/fordocbody.h` | **unsourced** | a file's top-ranked section that does not fit is an excerpt of up to this many tenths of the file's share |
 | `kGeneratedMaxProseShare` | `0.15` | `src/docparse.h` | **unsourced** | of the document's bytes that are its own prose |
 | `kSpecificMinLen` | `8` | `src/graph.h` | **unsourced** | ≥8 chars …  (aider's) |
 | `kZoneDistanceThreshold` | `0.5` | `src/arch.h` | **unsourced** | \|A+I-1\| past this → classify into pain/useless |
@@ -371,6 +372,18 @@ Discloses: **none**
 | `kMaxSample` | `80` | INDEXING | — |
 | `kMaxScored` | `4000` | INDEXING | — |
 
+### `src/exemplarfamily.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kExemplarBodyScanMaxLoc` | `4000` | — | a registry or instance candidate longer than this is not read (runaway guard) |
+| `kExemplarMemberRows` | `4` | — | <m> rows printed (typical first); the rest are counted in n= |
+| `kExemplarPhraseWordsMax` | `4` | — | words of X read after the trigger |
+| `kExemplarTouchLineMax` | `120` | — | bytes of the mentioning line printed (cut="1" when longer) |
+| `kExemplarTouchRows` | `5` | — | <touch> rows printed; <touch_list total=> counts all |
+
 ### `src/expand.h`
 
 Discloses: **none**
@@ -457,6 +470,15 @@ Discloses: `capped`
 | --- | --- | --- | --- |
 | `kForDispatchCtorRows` | `4` | — | constructor-caller rows per call |
 | `kForDispatchHopRows` | `8` | — | candidate rows per call |
+
+### `src/fordocbody.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForDocBodyFiles` | `3` | — | doc files whose sections are served (first shown first) |
+| `kForDocBodyTriggerRows` | `10` | — | file-tail <t> files the trigger reads (the first ones in rank order) |
 
 ### `src/fordottedstring.h`
 
@@ -1241,6 +1263,7 @@ Discloses: **none**
 | `kAliasPeelDepth` | `4` | — | — |
 | `kFieldWalkCap` | `16` | INDEXING | total visited names — bounds depth and width together (methodOnTypeOrBases, memberFieldHides and fieldEntryAt) |
 | `kMaxDepth` | `64` | — | — |
+| `kMaxRustUseTreeDepth` | `32` | — | — |
 
 ### `src/search.h`
 
