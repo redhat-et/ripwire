@@ -41,6 +41,7 @@
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
 #include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
 #include "forliteral.h"          // lit_detail::isConstShaped; hopbody.h renderBodyElement — a CONST-shaped key is <lit>'s; search.h grepCollect/grepEnrich, redact, nextverb
+#include "crossref.h"            // crossref::identEndingAt — the gen rung reads a path segment off a line
 #include "graph.h"               // tomlSectionNames, resolveJsNamedImportFile, lexicalNormalize
 #include "infra/namesplit.h"     // isIdentChar
 #include "model.h"
@@ -2044,15 +2045,12 @@ inline std::string genNorm( std::string_view s )
     }
     return out;
 }
-// The identifier ending just before `end` in line ("" when none) and its start.
+// The identifier ending just before `end` in line ("" when none) and its start (crossref.h identEndingAt reads it).
 inline std::string_view genIdentBefore( std::string_view line, std::size_t end, std::size_t& start )
 {
-    start = end;
-    while( start > 0 && namesplit::isIdentChar( line[ start - 1 ] ) )
-    {
-        --start;
-    }
-    return line.substr( start, end - start );
+    const std::string_view id = crossref::identEndingAt( line, end );
+    start                     = end - id.size();
+    return id;
 }
 // A path separator (`::` or one `.`) ending just before `end`: its start, or npos.
 inline std::size_t genSepBefore( std::string_view line, std::size_t end )
@@ -2244,6 +2242,78 @@ inline std::vector<const Symbol*> genProtoDefs( const IngestResult& ing, const s
     return std::move( kept );
 }
 
+// The generated paths the alias-shaped literal rows spell for key (`use … Leaf as key`, `key = a.b.Leaf`, `using` / `type` /
+// `typedef` / `const`), one per row that spells one.
+inline std::vector<std::vector<std::string>> genDeclPaths( const std::vector<ShortKeyDeclLine>& decl, std::string_view key )
+{
+    std::vector<std::vector<std::string>> out;
+    for( const ShortKeyDeclLine& d : decl )
+    {
+        if( d.shape == "import-as" || d.shape == "using" || d.shape == "type" || d.shape == "typedef" || d.shape == "const" || d.shape == "assign" )
+        {
+            out.push_back( genPathOf( d.h->text, key ) );
+        }
+    }
+    return out;
+}
+// The generated path X itself spells: `a::b::Leaf` (its qualifier segments) or a Go / C++ `Outer_Leaf`; empty for a bare name.
+inline std::vector<std::string> genOwnPath( std::span<const std::string_view> segs, std::string_view x )
+{
+    std::vector<std::string> own( segs.begin(), segs.end() );
+    if( own.empty() )
+    {
+        own.emplace_back( x );
+    }
+    genSplitNested( own );   // `Outer_Leaf` is a path; a bare name stays one segment and reads as none
+    if( own.size() < 2 )
+    {
+        own.clear();
+    }
+    return own;
+}
+// The .proto definitions every read path names (first-seen order, no repeats) and the first path that named one, `::`-joined.
+struct GenKept
+{
+    std::vector<const Symbol*> defs;
+    std::string                firstPath;
+};
+inline GenKept genKeptDefs( const IngestResult& ing, const std::vector<std::vector<std::string>>& genPaths )
+{
+    GenKept out;
+    for( const std::vector<std::string>& p : genPaths )
+    {
+        const std::vector<const Symbol*> named = genProtoDefs( ing, p );
+        for( std::size_t i = 0; !named.empty() && out.firstPath.empty() && i < p.size(); ++i )
+        {
+            out.firstPath.append( i == 0 ? "" : "::" ).append( p[ i ] );
+        }
+        for( const Symbol* d : named )
+        {
+            if( std::ranges::find( out.defs, d ) == out.defs.end() )
+            {
+                out.defs.push_back( d );
+            }
+        }
+    }
+    return out;
+}
+// The gen rung's open tag: key= the first path's leaf, path=, paths=, kept=, via="name", cands= when several, exact="0".
+inline std::string genRungOpenTag( const GenKept& kept, std::string_view key, std::size_t paths, std::vector<char>& esc )
+{
+    std::string out = "<rung n=\"gen\" key=\"";
+    out.append( escapeXml( key, esc ) ).append( "\"" );
+    if( !kept.firstPath.empty() )
+    {
+        out.append( " path=\"" ).append( escapeXml( kept.firstPath, esc ) ).append( "\"" );
+    }
+    out.append( " paths=\"" ).append( std::to_string( paths ) ).append( "\" kept=\"" ).append( std::to_string( kept.defs.size() ) ).append( "\" via=\"name\"" );
+    if( kept.defs.size() > 1 )
+    {
+        out.append( " cands=\"" ).append( std::to_string( kept.defs.size() ) ).append( "\"" );
+    }
+    return out.append( " exact=\"0\">" );
+}
+
 }   // namespace shortkey_detail
 
 struct ShortKeyArgs
@@ -2318,18 +2388,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             genPaths.push_back( std::move( p ) );
         }
     };
-    {
-        std::vector<std::string> own( segs.begin(), segs.end() );
-        if( own.empty() )
-        {
-            own.emplace_back( x );
-        }
-        genSplitNested( own );   // `Outer_Leaf` is a path; a bare name stays one segment and reads as none
-        if( own.size() > 1 )
-        {
-            addGenPath( std::move( own ) );
-        }
-    }
+    addGenPath( genOwnPath( segs, x ) );
     // rung 1: the leaf, proven by its qualifier
     bool exact = false;
     if( !segs.empty() )
@@ -2418,12 +2477,9 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             num( "total", decl.size() );
             num( "shown", std::min( decl.size(), kShortKeyRows ) );
             out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
-            for( const ShortKeyDeclLine& d : decl )
+            for( std::vector<std::string>& p : genDeclPaths( decl, key ) )
             {
-                if( d.shape == "import-as" || d.shape == "using" || d.shape == "type" || d.shape == "typedef" || d.shape == "const" || d.shape == "assign" )
-                {
-                    addGenPath( genPathOf( d.h->text, key ) );
-                }
+                addGenPath( std::move( p ) );
             }
             for( std::size_t i = 0; i < decl.size() && i < kShortKeyRows; ++i )
             {
@@ -2455,40 +2511,9 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     if( genRan )
     {
         rungs.append( rungs.empty() ? "" : "," ).append( "gen" );
-        std::vector<const Symbol*> kept;
-        std::string                firstPath;
-        for( const std::vector<std::string>& p : genPaths )
-        {
-            const std::vector<const Symbol*> named = genProtoDefs( ing, p );
-            if( !named.empty() && firstPath.empty() )
-            {
-                for( const std::string& seg : p )
-                {
-                    firstPath.append( firstPath.empty() ? "" : "::" ).append( seg );
-                }
-            }
-            for( const Symbol* d : named )
-            {
-                if( std::ranges::find( kept, d ) == kept.end() )
-                {
-                    kept.push_back( d );
-                }
-            }
-        }
-        out.append( "<rung n=\"gen\"" );
-        attr( "key", genPaths.front().back() );
-        if( !firstPath.empty() )
-        {
-            attr( "path", firstPath );
-        }
-        num( "paths", genPaths.size() );
-        num( "kept", kept.size() );
-        out.append( " via=\"name\"" );
-        if( kept.size() > 1 )
-        {
-            num( "cands", kept.size() );
-        }
-        out.append( " exact=\"0\">" );
+        const GenKept                     gk   = genKeptDefs( ing, genPaths );
+        const std::vector<const Symbol*>& kept = gk.defs;
+        out.append( genRungOpenTag( gk, genPaths.front().back(), genPaths.size(), esc ) );
         for( std::size_t i = 0; i < kept.size() && i < kShortKeyRows; ++i )
         {
             defRow( *kept[ i ], {} );
