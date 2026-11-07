@@ -377,14 +377,15 @@ inline bool graphSubjectPathUnreachable( std::string_view doc )
 // the five that did not held 3 to 51 callees and 5 to 43 callers, so the uncapped sides (up to 40 rows, a 16 KB callers band) were mostly filler.
 inline constexpr int kPathGapSideRows = 10;   // rows per side of a <path_gap>; the rest is count= and next=
 
-// <path_gap from= to= reachable="0" [missing=]>: reachable="0" restates on the block itself that no path from= to to= was found (why the rows
-// follow); then its own legend, from='s --callees and to='s --callers answers. missing=from|to|from,to names a side whose answer could
+// <path_gap from= to= reachable="0" [missing=]>: reachable="0" restates on the block itself that no path from= to to= was printed (none was
+// found, or a route_hedged="not-proven" refusal withheld the one found; why the rows follow); then its own legend, from='s --callees and to='s --callers answers. missing=from|to|from,to names a side whose answer could
 // not be captured (not printed, never "none").
 inline std::string pathGapOpenXml( const GraphSubjectArgs& a, bool fromMissing, bool toMissing )
 {
     std::vector<char> esc;
-    std::string out = "<!-- ripwire for path_gap: the path verb above found NO directed call path (reachable=\"0\"; its searched= and gaps= say "
-                      "whether that search was complete), so the two sides a missing hop would join follow (reachable=\"0\" on path_gap restates it): "
+    std::string out = "<!-- ripwire for path_gap: the path verb above printed NO directed call path (reachable=\"0\": none was found, or route_hedged=\"not-proven\" "
+                      "refused the one it found; its searched= and gaps= say whether that search was complete), so the two sides a missing hop would "
+                      "join follow (reachable=\"0\" on path_gap restates it): "
                       "from='s callees (what it calls, one hop) and to='s callers (who calls it, one hop), each the bare callees / callers verb "
                       "answer cut at ";
     out += std::to_string( kPathGapSideRows );
