@@ -3903,6 +3903,17 @@ static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( con
     return walks;
 }
 
+// --for's at= stamp (gitstamp.h startStampPrefetch): its git children run beside the graph build instead of after it. Called
+// AFTER the ingest, so a cache file the ingest wrote inside the tree counts toward +dirty exactly as before, and only when --for
+// answers from one root (runForLens' own forSingleRoot test, on the root it stamps).
+static void startForStampPrefetch( const rw::Config& cfg, const rw::IngestResult& ing, const char* winningVerbFlag, const std::string& root )
+{
+    if( winningVerbFlag != nullptr && std::strcmp( winningVerbFlag, "--for" ) == 0 && ing.realPaths.empty() && cfg.roots.size() == 1 )
+    {
+        rw::gitstamp::startStampPrefetch( root );
+    }
+}
+
 static int dispatchMain( const rw::Config& cfg, char** argv );
 static int dispatchMainBody( const rw::Config& cfg, char** argv );
 
@@ -5416,6 +5427,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // run with no --scip (the degrade contract — a bad index must never change the map, only stderr).
     const ScipOverlay* scipPtr = scipOverlay.empty() ? nullptr : &scipOverlay;
 
+    startForStampPrefetch( cfg, ing, verbPrec.winner, root );   // --for's at= stamp's git children run beside the graph build
     // §P4.1 — the grep scan runs ALONGSIDE the graph build; verbs_grep.h's startGrepScanPrefetch owns every
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;

@@ -9,14 +9,20 @@
 #include "model.h"
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on the Type-3 pair-cap guard (never throw)
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/os.h"           // os::open / os::fstat / os::pread — findClones reads each file through ONE descriptor
+#include "pathguard.h"          // rw::pathguard::OwnedFd — the descriptor closes itself on every exit
 
 #include <algorithm>
 #include <array>
+#include <atomic>       // findClones' file cursor and per-file done flags, shared by its readers
 #include <cctype>
+#include <cerrno>       // EINTR — a pread the signal interrupted is retried, as fread retried it
 #include <cstdint>
 #include <limits>       // std::numeric_limits — the mask-width static_assert: an index shifted into a mask must fit it
 #include <cstdio>
 #include <string>
+#include <thread>       // findClones fans its per-file reads and normalizations over workers
+#include <functional>   // std::ref — every worker runs the one shared reader
 #include <utility>      // std::forward — the C-family scanCodeTokens spelling hands its sink to the CodeScanOptions one
 #include <vector>
 
@@ -412,7 +418,148 @@ struct CloneGroup
     float               similarity = 1.0f;   // 1.0 for exact; LCS-ratio in [kType3MinSimilarity,1) for Type-3
 };
 
+namespace clonesdetail
+{
+// The whole of `path` into `bytes` through ONE descriptor: open, fstat for the size, pread until it is in. It replaces
+// fopen + fseek(END) + ftell + fseek(SET) + fread, where the SET seek refilled a stdio buffer with a read(2) of its own
+// before fread read the rest (cockroach --for, macOS sample: fseek alone was 7.5 % of the main thread). The degrade is the
+// same one: a file that will not open, reports no size, or reads short leaves `bytes` empty, and the caller skips it.
+inline void readWholeFileOnce( const std::string& path, std::string& bytes )
+{
+    bytes.clear();
+    const pathguard::OwnedFd fd( os::open( path.c_str(), O_RDONLY | O_CLOEXEC ) );
+    os::stat_t               st{};
+    if( !fd.valid() || os::fstat( fd.get(), &st ) != 0 || st.st_size <= 0 )
+    {
+        return;
+    }
+    bytes.resize( std::size_t( st.st_size ) );
+    std::size_t done = 0;
+    while( done < bytes.size() )
+    {
+        const os::ssize_t got = os::pread( fd.get(), bytes.data() + done, bytes.size() - done, os::off_t( done ) );
+        if( got < 0 && errno == EINTR )
+        {
+            continue;
+        }
+        if( got <= 0 )
+        {
+            bytes.clear();   // a short read: the old fread != size branch — evidence of nothing, so nothing
+            return;
+        }
+        done += std::size_t( got );
+    }
+}
+
+// One body that cleared the token floor, as a reader produced it: the key and its rank weight.
+struct NormalizedBody
+{
+    NodeId        id;
+    std::uint32_t tokens;
+    std::string   norm;
+};
+
+// The readers of findClones: file f's bodies, in byFile[f] order, each normalized exactly as the serial loop did. A body under
+// the floor is dropped here, as the serial loop's `continue` dropped it.
+inline std::vector<NormalizedBody> normalizeFileBodies( const IngestResult& ing, const SymbolsByFile::value_type& ids, std::uint32_t fileId,
+                                                        int minTokens, std::string& bytes )
+{
+    std::vector<NormalizedBody> out;
+    readWholeFileOnce( diskPath( ing, fileId ), bytes );
+    if( bytes.empty() )
+    {
+        return out;
+    }
+    for( NodeId id : ids )
+    {
+        const Symbol& s  = ing.symbols[id];
+        std::uint32_t tc = 0;
+        std::string   norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, tc, usesHashLineComments( s.lang ) );   // the BODY only [sigEndByte,endByte); `#` line comments per language
+        if( int( tc ) >= minTokens )
+        {
+            out.push_back( { id, tc, std::move( norm ) } );
+        }
+    }
+    return out;
+}
+
+// Run `reader` on up to `workerCount` threads (this thread alone when one is enough or none can start) and join them all.
+template<class Reader>
+inline void runOnWorkers( std::size_t workerCount, Reader& reader )
+{
+    if( workerCount <= 1 )
+    {
+        reader();
+        return;
+    }
+    std::vector<std::thread> workers;
+    workers.reserve( workerCount );
+    try
+    {
+        for( std::size_t w = 0; w < workerCount; ++w )
+        {
+            workers.emplace_back( std::ref( reader ) );
+        }
+    }
+    catch( ... )   // a thread would not start: the workers that did (if any) and this thread share the cursor
+    {
+        reader();
+    }
+    for( std::thread& worker : workers )
+    {
+        worker.join();
+    }
+}
+
+// FAN-OUT, SAME BYTES. Reading and normalizing a file is independent of every other file, so up to 8 workers take files off
+// one atomic cursor; each file's bodies land in that file's own slot, and findClones builds its groups from the slots in
+// fileId order — the exact insertion sequence the serial loop made, so the map, its iteration order and every member order
+// are the serial ones. A worker that throws leaves its file undone, and this thread redoes that file after the join, where
+// the throw reaches the caller as it always did. Cockroach --for: the reads were most of this pass's wall time.
+inline std::vector<std::vector<NormalizedBody>> normalizeBodiesByFile( const IngestResult& ing, const SymbolsByFile& byFile, int minTokens )
+{
+    const std::uint32_t                      fileCount = std::uint32_t( ing.files.size() );
+    std::vector<std::vector<NormalizedBody>> bodiesByFile( fileCount );
+    std::vector<std::atomic<bool>>           fileDone( fileCount );
+    std::atomic<std::uint32_t>               cursor{ 0 };
+    auto reader = [ & ]()
+    {
+        std::string bytes;   // one buffer per reader, reused across its files
+        for( std::uint32_t f = cursor.fetch_add( 1, std::memory_order_relaxed ); f < fileCount; f = cursor.fetch_add( 1, std::memory_order_relaxed ) )
+        {
+            if( byFile[f].empty() )
+            {
+                fileDone[f].store( true, std::memory_order_relaxed );
+                continue;
+            }
+            try
+            {
+                bodiesByFile[f] = normalizeFileBodies( ing, byFile[f], f, minTokens, bytes );
+                fileDone[f].store( true, std::memory_order_relaxed );
+            }
+            catch( ... )   // a throw crossing a thread is std::terminate: leave the file undone, redone after the join
+            {
+                bodiesByFile[f].clear();
+            }
+        }
+    };
+    const std::size_t hwThreadCount = std::thread::hardware_concurrency();
+    const std::size_t workerCount   = std::min( { hwThreadCount ? hwThreadCount : 1, std::size_t( fileCount ? fileCount : 1 ), std::size_t( 8 ) } );
+    runOnWorkers( workerCount, reader );
+    std::string redoBytes;
+    for( std::uint32_t f = 0; f < fileCount; ++f )
+    {
+        if( !fileDone[f].load( std::memory_order_relaxed ) )
+        {
+            bodiesByFile[f] = normalizeFileBodies( ing, byFile[f], f, minTokens, redoBytes );
+        }
+    }
+    return bodiesByFile;
+}
+}   // namespace clonesdetail
+
 // Find function/method bodies with identical normalized token streams (≥ minTokens, ≥2 members).
+// The per-file work fans out (clonesdetail::normalizeBodiesByFile); the groups are built here, in fileId order.
 inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minTokens )
 {
     // Require a real body (a [sigEndByte,endByte) region exists): excludes prototypes AND the
@@ -422,6 +569,8 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     const SymbolsByFile byFile = symbolsByFileInIdOrder(
         ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
 
+    std::vector<std::vector<clonesdetail::NormalizedBody>> bodiesByFile = clonesdetail::normalizeBodiesByFile( ing, byFile, minTokens );
+
     // normalized body → member symbol ids. N=2 is FREE: rw::svector<NodeId,1> and <NodeId,2> are both 16 B
     // (the union's inline array can never be smaller than the heap pointer it shares storage with), so the
     // second slot costs nothing and lifts inline coverage from 97.8%/94.9% to 99.5%/98.8% across the two
@@ -429,49 +578,14 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
     // key with ≥2 members is a clone — so this replaces ~2.4K/7.2K one-element heap blocks with none.
     HashMap<std::string, rw::SmallVec<NodeId, 2>> groups;
     HashMap<NodeId, std::uint32_t>                tok;   // symbol → token count (for ranking)
-    std::string bytes;
-    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    for( std::vector<clonesdetail::NormalizedBody>& fileBodies : bodiesByFile )   // fileId order: the serial insertion sequence
     {
-        if( byFile[f].empty() )
+        for( clonesdetail::NormalizedBody& body : fileBodies )
         {
-            continue;
+            tok[body.id] = body.tokens;
+            groups[ std::move( body.norm ) ].push_back( body.id );
         }
-        std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !fp )
-        {
-            continue;
-        }
-        std::fseek( fp, 0, SEEK_END );
-        const long sz = std::ftell( fp );
-        std::fseek( fp, 0, SEEK_SET );
-        bytes.clear();
-        if( sz > 0 )
-        {
-            bytes.resize( std::size_t( sz ) );
-            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
-            {
-                bytes.clear();
-            }
-        }
-        std::fclose( fp );
-        if( bytes.empty() )
-        {
-            continue;
-        }
-
-        for( NodeId id : byFile[f] )
-        {
-            const Symbol& s = ing.symbols[id];
-            std::uint32_t tc = 0;
-            const bool    hash = usesHashLineComments( s.lang );   // `#` line comments
-            std::string   norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, tc, hash );   // the BODY only [sigEndByte,endByte)
-            if( int( tc ) < minTokens )
-            {
-                continue;
-            }
-            tok[id] = tc;
-            groups[ std::move( norm ) ].push_back( id );
-        }
+        std::vector<clonesdetail::NormalizedBody>().swap( fileBodies );   // the keys moved out; free the slot as we go
     }
 
     std::vector<CloneGroup> out;

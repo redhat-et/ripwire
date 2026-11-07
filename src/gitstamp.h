@@ -33,7 +33,11 @@
 
 #include "quality.h"   // gitHeadSha / gitOneLine — the SAME git plumbing --abi's own head= already uses
 
+#include <future>   // the stamp prefetch's shared result
+#include <memory>   // std::make_shared — the promise the detached prefetch worker fulfils
+#include <mutex>    // guards the one prefetch slot
 #include <string>
+#include <thread>   // the detached prefetch worker
 
 namespace rw { namespace gitstamp
 {
@@ -104,7 +108,28 @@ inline std::string shallowRefHint( const std::string& root )
     return " — this is a shallow clone, so the ref may lie beyond the fetched history; " + std::string( quality::kShallowDeepenHint );
 }
 
-inline std::string stampAt( const std::string& root )
+namespace detail
+{
+// HEAD's sha and the shallow probe in ONE git child: `rev-parse --is-shallow-repository --verify --quiet HEAD` prints the
+// probe's true/false line, then the sha. Accepted only in exactly that shape (exit 0, two lines, the first true or false, a
+// sha second); any other answer (unborn HEAD, a failing or odd git, an abandoned read) returns false and the caller asks the
+// two questions separately, as it always did, so no shape this does not prove can change a stamp.
+inline bool foldedHeadAndShallow( const std::string& root, std::string& sha, bool& shallow )
+{
+    const GitCommandLines probe = gitCommandLines( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                                                   + " rev-parse --is-shallow-repository --verify --quiet HEAD 2>/dev/null" );
+    if( !probe.isStarted || probe.abandoned || probe.status != 0 || probe.lines.size() != 2 || probe.lines[1].empty()
+        || ( probe.lines[0] != "true" && probe.lines[0] != "false" ) )
+    {
+        return false;
+    }
+    sha     = probe.lines[1];
+    shallow = probe.lines[0] == "true";
+    return true;
+}
+
+// The stamp, computed now: what stampAt returned before the prefetch existed, with HEAD and the shallow probe folded.
+inline std::string computeStampAt( const std::string& root )
 {
     // NO SUBPROCESS ON A NON-GIT ROOT (M10 follow-up, lane L9, capture-audit-2026-09-04). The COST note above
     // reasons about call sites that already shell out to git — but M10 spliced this stamp onto --for, whose
@@ -118,13 +143,91 @@ inline std::string stampAt( const std::string& root )
     {
         return {};
     }
-    const std::string sha = quality::gitHeadSha( root );
-    if( sha.empty() )
+    std::string sha;
+    bool        shallow = false;
+    if( !foldedHeadAndShallow( root, sha, shallow ) )
     {
-        return {}; // not a git repo / no HEAD
+        sha = quality::gitHeadSha( root );
+        if( sha.empty() )
+        {
+            return {}; // not a git repo / no HEAD
+        }
+        shallow = isShallow( root );
     }
     const bool dirty = !quality::gitOneLine( root, "status --porcelain --ignore-submodules=dirty 2>/dev/null" ).empty();
-    return sha.substr( 0, 9 ) + ( dirty ? "+dirty" : "" ) + ( isShallow( root ) ? "+shallow" : "" );
+    return sha.substr( 0, 9 ) + ( dirty ? "+dirty" : "" ) + ( shallow ? "+shallow" : "" );
+}
+
+// THE ONE PREFETCHED STAMP of a CLI run. --for reads its stamp after the graph build, and its git children (the
+// `status --porcelain` above all) then ran serially on the main thread: 13 % of cockroach's --for wall samples. main()
+// starts it right after the ingest (so a cache file the ingest wrote inside the tree is seen exactly as before), and the
+// children run beside the graph build. Heap-owned and never freed, and the worker is detached: a run that stops before
+// reading it (a refusal, a memory-guard stop) never waits on a git child at exit. The MCP server never starts one, so every
+// MCP call still stamps the tree as it is at that call.
+struct StampPrefetch
+{
+    std::mutex                      lock;
+    std::string                     root;    // the exact root string the prefetch was started for; "" = none
+    std::shared_future<std::string> value;
+};
+
+inline StampPrefetch& stampPrefetch()
+{
+    static StampPrefetch* const slot = new StampPrefetch();   // leaked on purpose: see above
+    return *slot;
+}
+}   // namespace detail
+
+// Start computing stampAt( root ) on a worker. One per process: a second call (any root) is a no-op. If no thread can
+// start, nothing is recorded and stampAt computes inline, as before.
+inline void startStampPrefetch( const std::string& root )
+{
+    detail::StampPrefetch&            slot = detail::stampPrefetch();
+    const std::lock_guard<std::mutex> guard{ slot.lock };
+    if( slot.value.valid() || root.empty() )
+    {
+        return;
+    }
+    auto                            promise = std::make_shared<std::promise<std::string>>();
+    std::shared_future<std::string> value   = promise->get_future().share();
+    try
+    {
+        std::thread( [ promise, root ]()
+                     {
+                         try
+                         {
+                             promise->set_value( detail::computeStampAt( root ) );
+                         }
+                         catch( ... )   // a throw crossing this thread is std::terminate: hand it to the reader instead
+                         {
+                             promise->set_exception( std::current_exception() );
+                         }
+                     } ).detach();
+    }
+    catch( ... )   // std::system_error: no thread — stampAt computes inline
+    {
+        return;
+    }
+    slot.root  = root;
+    slot.value = std::move( value );
+}
+
+inline std::string stampAt( const std::string& root )
+{
+    std::shared_future<std::string> prefetched;
+    {
+        detail::StampPrefetch&            slot = detail::stampPrefetch();
+        const std::lock_guard<std::mutex> guard{ slot.lock };
+        if( slot.value.valid() && slot.root == root )
+        {
+            prefetched = slot.value;
+        }
+    }
+    if( prefetched.valid() )
+    {
+        return prefetched.get();   // a worker's throw rethrows here, where the inline computation would have thrown
+    }
+    return detail::computeStampAt( root );
 }
 
 // Formats a ready-to-splice ` at="VALUE"` (leading space included) — or "" when `root` isn't a git repo, so
