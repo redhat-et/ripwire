@@ -624,7 +624,7 @@ inline NodeId routeEmittedHead( const IngestResult& ing, std::span<const NodeId>
 {
     if( docsAfterCode )
     {
-        const auto code = std::ranges::find_if( surface, [&]( NodeId id ) { return ing.symbols[id].lang != Lang::Markdown; } );
+        const auto code = std::ranges::find_if( surface, [&]( NodeId id ) { return !isDocsAfterCodeRow( ing, id ); } );
         if( code != surface.end() )
         {
             return *code;
