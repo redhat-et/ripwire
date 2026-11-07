@@ -1018,6 +1018,7 @@ Discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_idents_capped
 | `kMentionMaxNamedIdents` | `64` | INDEXING | — |
 | `kMentionMaxRawTokens` | `16` | INDEXING | extraction cap: first N candidate mention tokens, text order |
 | `kMentionMaxSymbolsPerFile` | `3` | INDEXING | per mentioned file: its top symbols by (lens score desc, id asc) |
+| `kNamesakeMaxFiles` | `12` | — | the same flood bound as subjectanchor.h kSubjectMaxDefs |
 
 ### `src/model.h`
 
