@@ -417,8 +417,9 @@ exactly rs callees src/ufcs.rs:draw_all "method History::render_all src/ufcs.rs"
 
 echo "=== (S) JS/TS rebind: a written binding names nothing (FC3) ==="
 # the exact row set: every case file whose binding is written is GONE; each near miss keeps its row (nestedP keeps h,
-# its g wrote its own `let Eng`; classexprP's m constructs its own class expression)
-exactly jsrebind callers Eng "fn h cases/nestedP.js;method Eng.m cases/classexprP.js;modscope &lt;file-scope&gt; cases/constwriteP.js;modscope &lt;file-scope&gt; cases/esimport.js;modscope &lt;file-scope&gt; cases/keepdestrP.js;modscope &lt;file-scope&gt; cases/keepmemberP.js;modscope &lt;file-scope&gt; cases/memberroot.js;modscope &lt;file-scope&gt; cases/memberwriteP.js;modscope &lt;file-scope&gt; cases/norewriteP.js;modscope &lt;file-scope&gt; cases/otherfileP_y.js;modscope &lt;file-scope&gt; cases/paramP.js;modscope &lt;file-scope&gt; cases/redeclnoinitP.js"
+# its g wrote its own `let Eng`; classexprP's m constructs its own class expression; varblockP's `var Eng;` in an `if` block and
+# forvarP's `for ( var Eng in xs )` (also in an `if` block) reach their FUNCTION, so the write in k is theirs and h2/h3 keep the module binding)
+exactly jsrebind callers Eng "fn h cases/nestedP.js;fn h2 cases/varblockP.js;fn h3 cases/forvarP.js;method Eng.m cases/classexprP.js;modscope &lt;file-scope&gt; cases/constwriteP.js;modscope &lt;file-scope&gt; cases/esimport.js;modscope &lt;file-scope&gt; cases/keepdestrP.js;modscope &lt;file-scope&gt; cases/keepmemberP.js;modscope &lt;file-scope&gt; cases/memberroot.js;modscope &lt;file-scope&gt; cases/memberwriteP.js;modscope &lt;file-scope&gt; cases/norewriteP.js;modscope &lt;file-scope&gt; cases/otherfileP_y.js;modscope &lt;file-scope&gt; cases/paramP.js;modscope &lt;file-scope&gt; cases/redeclnoinitP.js"
 lacks jsrebind callers leaf "&lt;file-scope&gt; cases/fncall.js"
 has jsrebind callers leaf "method Eng.run src/eng.js"
 lacks jsrebind callers Foo "&lt;file-scope&gt; cases/destr.js" "&lt;file-scope&gt; cases/plainreq.js"   # undecided is not Foo either
