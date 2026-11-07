@@ -1072,8 +1072,9 @@ inline void appendFileTailRows( FileTail& out, FileTail& from )
     }
 }
 
+// `rankOrder`: the plain interleaved walk whatever the task (FOR-DOC-BODY's trigger reads the files in rank order: fordocbody.h).
 inline FileTail computeFileTail( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& ev,
-                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task )
+                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task, bool rankOrder = false )
 {
     FileTail          out;
     std::vector<char> listed( ing.files.size(), 0 );
@@ -1083,7 +1084,7 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     // they follow every code row, in their own allowance (the default regime prints every collected row; an explicit budget
     // fills code rows first). A docs question keeps the plain interleaved walk, byte-identical.
     FileTail                docRows, wideRows;
-    FileTail*               docs   = taskAsksForDocText( task ) ? nullptr : &docRows;
+    FileTail*               docs   = rankOrder || taskAsksForDocText( task ) ? nullptr : &docRows;
     const std::vector<char> inHead = fileMaskOfSymbols( ing, headIds );   // once, for both row kinds
     fileTailRankRows( out, listed, ing, rank, page, inHead, rootArg, docs );
     fileTailPageRows( out, listed, TailPageWalkInputs{ ing, page, rootArg, inHead }, wideRows, docs );

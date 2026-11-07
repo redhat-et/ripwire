@@ -952,6 +952,7 @@ struct RecallSectionUnit
     std::uint32_t bodyLength = 0;   // its length there
     std::uint32_t lineLo     = 0;   // 1-based first source line of the unit
     std::uint32_t lineHi     = 0;   // 1-based last source line of the unit
+    std::uint32_t symIndex   = 0;   // its heading symbol (FOR-DOC-BODY names the section it serves by this heading)
 };
 
 // What LOAD hands to EMIT. `body` is every selected unit concatenated in DOCUMENT order — which is
@@ -1390,6 +1391,7 @@ inline std::optional<RecallSectionBody> buildSectionGranularBody(
         unit.bodyLength = std::uint32_t( slice.size() );
         unit.lineLo     = layout::lineOf( raw, s.sigStartByte );
         unit.lineHi     = layout::lineOf( raw, p.ownEndByte - 1 );   // last INCLUDED byte — ownEndByte is exclusive
+        unit.symIndex   = p.symIndex;
         out.body += slice;
         out.units.push_back( unit );
     }
@@ -2513,6 +2515,15 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
 // the recall lens's measured choice, not a default — bench/recalleval measured +0.03 lenient MRR for it
 // (gate: test/recallevalcheck.sh) and test/recallrankdepthcheck.sh ARM 4 is its kill tripwire. Parity is
 // gated by test/recallparitycheck.sh, which asserts the two doors return the same bundle byte for byte.
+// The recall lens's per-symbol scores for `task`: path weight 1 and the root prefix buildRecall relativizes against (see recallFor
+// below). FOR-DOC-BODY (fordocbody.h) picks a doc file's sections with the same scores, so its sections are the ones --recall picks.
+inline std::vector<float> recallLensScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                                            const std::vector<NodeId>& outTargets, std::string_view task, std::string_view rootArg )
+{
+    const std::string prefix = rw::sarif::rootPrefixOf( rootArg );
+    return lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0, /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
+}
+
 inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                const std::vector<NodeId>& outTargets, std::string_view task, int k,
                                std::size_t maxTokens, RedactCounts* redact, std::string_view rootArg,   // R-R
@@ -2521,9 +2532,7 @@ inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::u
     // R-R: one root fact, spent twice — the ranker scores the root-relative path spelling, buildRecall
     // prints it. Unguarded because rootPrefixOf( "" ) is "" (its trailing-slash loop needs size() > 1), so
     // the multi-root path (empty rootArg, ing.files already labelled) needs no branch.
-    const std::string        prefix = rw::sarif::rootPrefixOf( rootArg );
-    const std::vector<float> scores = lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0,
-                                                     /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
+    const std::vector<float> scores = recallLensScores( ing, outOff, outTargets, task, rootArg );
     return buildRecall( ing, scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg, budgetTokens );
 }
 
