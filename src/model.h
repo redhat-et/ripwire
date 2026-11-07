@@ -2208,6 +2208,13 @@ struct IngestResult
                                                // every symbol splice re-offsets it like fnLocalScopes (workspace.h mergeWorkspaceIngests, editpreview.h previewMerge)
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
+    // #452: ASCENDING symbol ids of the Swift `@main` entry-type defs — the attribute computed at extraction
+    // (ingest_names.h swiftDeclCarriesMainAttr), the entry being the TYPE itself and its static main()
+    // the callee. A sorted id list, the fnLocalScopes shape, so it rides the symbol renumbering
+    // (filter.h applyIgnoreTests), the workspace merge (workspace.h) and the edit-preview splice
+    // (editpreview.h) by the same remaps those seams already apply — and a repo with no Swift pays an
+    // empty vector. Read by mapinventory.h isInventoryEntryShape (binary search) under EntryAttrType.
+    std::vector<NodeId>      entryDeclTypes;
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)
