@@ -1025,6 +1025,13 @@ public:
             }
         }
         std::sort( runners_.begin(), runners_.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+        for( std::uint32_t i = 0; i < std::uint32_t( runners_.size() ); ++i )
+        {
+            if( isDriverCandidate( runners_[i] ) )
+            {
+                drivers_.push_back( i );
+            }
+        }
     }
 
     // The pasteable command for `fileId`, or "" when no REAL runner is derivable.
@@ -1174,16 +1181,17 @@ private:
     /// fileId must be valid; byStem selects stem matching, otherwise loadTexts must have run first.
     std::string matchingRunner( std::uint32_t fileId, bool byStem ) const
     {
-        const std::string_view target = ing_->files[fileId];
-        for( std::size_t i = 0; i < runners_.size(); ++i )
+        const std::string_view target     = ing_->files[fileId];
+        const std::string_view targetStem = stemOf( target );
+        const std::string_view targetBase = mention_detail::baseNameOf( target );
+        for( const std::uint32_t i : drivers_ )   // the driver subset of runners_, path order kept: a row asks only these
         {
             const std::uint32_t candidate = runners_[i];
-            if( !sameRoot( fileId, candidate ) || !isDriverCandidate( candidate ) )
+            if( !sameRoot( fileId, candidate ) )
             {
                 continue;
             }
-            const bool matches = byStem ? stemOf( ing_->files[candidate] ) == stemOf( target )
-                : texts_[i].find( mention_detail::baseNameOf( target ) ) != std::string::npos;
+            const bool matches = byStem ? stemOf( ing_->files[candidate] ) == targetStem : texts_[i].find( targetBase ) != std::string::npos;
             if( matches )
             {
                 if( std::string command = spell( candidate ); !command.empty() )
@@ -1452,6 +1460,7 @@ private:
     const IngestResult*                         ing_;
     std::string                                 rootPrefix_;   // A3: "" ⇒ the command keeps its stored spelling
     std::vector<std::uint32_t>                  runners_;
+    std::vector<std::uint32_t>                  drivers_;   // indices into runners_ of the shell/Python drivers (isDriverCandidate), ascending
     mutable std::vector<std::string>            texts_;
     mutable bool                                textsLoaded_ = false;
     mutable HashMap<std::uint32_t, std::string> cache_;
