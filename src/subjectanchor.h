@@ -795,15 +795,21 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
 }
 
 // ANCHOR-TEST-ONLY: does a name-exact route with no source-backed anchor stay committed to it? It does when the anchors name ONE
-// definition in all (a test helper, a data key, a CI script that is the only thing by that name: the subject can only mean it) or none
-// (an env var or literal the index stores no definition of: the <shortkey> ladder and the <lit> block serve that route). With two or
-// more definitions none of which is source, the route picked one non-source copy among several (gtest_threading.cpp's max_threads of
-// three, a .github action before the real one): the words' ranking is the honest answer, and the anchors ride on as a hint.
+// definition in all (a test helper, a data key, a CI script that is the only thing by that name: the subject can only mean it).
+// With two or more definitions none of which is source, the route picked one non-source copy among several (gtest_threading.cpp's
+// max_threads of three, a .github action before the real one): the words' ranking is the honest answer, and the anchors ride on as a
+// hint. ANCHOR-TEST-ONLY widened: with NO definition (an env var or error code the index stores no definition of, `(syntax)` anchors)
+// the route has nothing to commit to either: the words rank, so the source code that reads the name gets its bodies, while the
+// <shortkey> ladder and the <lit> block, which read the task and not the route, still print (in-sample: 3 calls, 2 items gained, 0 lost).
 inline bool routeAnchorUncommitted( const RouteChoice& rc )
 {
-    if( rc.which != LexMode::NameExact || rc.anchorDefs.empty() )
+    if( rc.which != LexMode::NameExact )
     {
         return false;
+    }
+    if( rc.anchorDefs.empty() )
+    {
+        return true;   // no definition at all: nothing to commit to
     }
     // each distinct anchor name once: a repeated word (`lonely_helper ... lonely_helper`) resolves the same definitions again
     std::size_t defs = 0;
