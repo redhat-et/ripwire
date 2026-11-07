@@ -77,6 +77,17 @@ enum class BaseImportEvidence : std::uint8_t
 /// all (Dart, GDScript, Clojure), so an absent edge means nothing: its Ca/Ce/I/D/zone are unknown, not zero. NotApplicable: docs and
 /// data, which the dependency verbs exclude by decision (lintrules.h dependencyCapable); a directory of them keeps its row.
 /// Unmeasured is the default, the honest answer for a language that says nothing; test/archhonestcheck.sh (H) pins each row to the index.
+/// The match-arm and case openers a language has beyond `case`/`default` labels, for the --for excerpt window that widens to the arm
+/// holding a site (forliteral.h isArmHead, EXCERPT-ARM). ElseBranch: `else if (...) {` / `} else {` (the C family, Go, and the default).
+/// FatArrow: Rust, C# and PHP `Pattern => {`. PythonElif: `elif` / `else:`. RubyWhen: `when` / `elsif` / `else`.
+enum class ArmOpeners : std::uint8_t
+{
+    ElseBranch,
+    FatArrow,
+    PythonElif,
+    RubyWhen
+};
+
 enum class FileEdges : std::uint8_t
 {
     Unmeasured,
@@ -343,6 +354,14 @@ struct LangFacts
     /// C++, Objective-C: a call's `Q::` qualifier names a namespace or class some definition holds, so an included file's namesake
     /// proves nothing about `Q::f()` when the tree defines no Q (graph.h CppQualifierScopes, CPP-EXTQUAL-VETO).
     bool qualifierNamesScope = false;
+
+    /// C, C++: a file-scope const object of a struct type is how a family registers its members (htop `const MeterClass
+    /// CPUMeter_class = { … }`), so exemplarfamily.h's typed rule reads a Var's type from its first line. Elsewhere a typed constant
+    /// is a value, and a family is a base, a registry or an attribute.
+    bool typedInstanceRows = false;
+
+    /// Which arm openers the language has (ArmOpeners above).
+    ArmOpeners armOpeners = ArmOpeners::ElseBranch;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -357,17 +376,18 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
+      .typedInstanceRows = true },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
-      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true },
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
+      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
@@ -382,16 +402,16 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
       .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .armOpeners = ArmOpeners::RubyWhen },
     { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .armOpeners = ArmOpeners::FatArrow },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
-    { .lang = Lang::Php, .memberSeparator = "::" },
+    { .lang = Lang::Php, .memberSeparator = "::", .armOpeners = ArmOpeners::FatArrow },
     { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Dart },

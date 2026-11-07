@@ -314,6 +314,40 @@ if [ "$( conf "$A" )" = high ]; then ok "FH file subject: its own row heads, hig
 A="$( ask "$FH" 'thread pool submit work' )"; R="$( route "$A" )"
 case "$R" in subtoken+body*) ok "FH(c) conceptual route";; *) no "FH(c) not conceptual: $R";; esac
 if [ "$( conf "$A" )" = high ]; then ok "FH(c) no anchor: high as before"; else no "FH(c) no anchor: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH(c) no anchor: no clause"
+# (d) CR 4498011610: code above docs moves a Markdown head below the code rows, so the head the clause and the confidence read is the row printed as r=1
+r1(){ printf '%s' "$1" | python3 -c 'import re,sys; t=re.sub(r"<!--.*?-->","",sys.stdin.read(),flags=re.S); r=[d for d in re.findall(r"<d [^>]*>",t) if " r=\"1\"" in d]; print(("%s|%s" % (re.search(r" n=\"([^\"]*)\"",r[0]).group(1),re.search(r" p=\"([^\"]*)\"",r[0]).group(1))) if r else "@@NONE")'; }
+FD="$TMP/fhd"; mkdir -p "$FD/pkg/futures" "$FD/docs" "$FD/ui"
+printf 'class ThreadPoolExecutor:\n    def submit(self, fn):\n        return fn()\n' > "$FD/pkg/futures/thread.py"
+printf 'class Gadget:\n    def run(self):\n        return 1\n' > "$FD/ui/gadget.py"
+printf '# where\n\n## where\n\nwhere is where\n' > "$FD/docs/where.md"
+A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(pkg.futures.ThreadPoolExecutor)' "FH(d) the route is name-exact on the dotted anchor"
+has "$A" 'docs_after_code=' "FH(d) premise: the Markdown rows scored first and the reorder moved them below the code"
+if [ "$( r1 "$A" )" = 'ThreadPoolExecutor|pkg/futures/thread.py' ]; then ok "FH(d) the anchor is the row printed as r=1"; else no "FH(d) r=1 is $( r1 "$A" )"; fi
+hasnt "$R" "$NOHEAD" "FH(d) the printed head is the anchor: no clause naming a row that is not r=1"
+M="$( mcpfor "$FD" 'where pkg.futures.ThreadPoolExecutor is defined' )"
+if [ "$( r1 "$M" )" = 'ThreadPoolExecutor|pkg/futures/thread.py' ]; then ok "FH(d) MCP twin: the anchor is r=1"; else no "FH(d) MCP twin: r=1 is $( r1 "$M" )"; fi; hasnt "$( route "$M" )" "$NOHEAD" "FH(d) MCP twin: no clause"
+# twin: a question about docs keeps score order, the Markdown row IS r=1, and the clause names it
+A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is documented' )"; R="$( route "$A" )"
+has "$R" "$NOHEAD (r=1 is where in docs/where.md)" "FH(d) twin: a docs question keeps the Markdown head, and the clause names that row"
+if [ "$( r1 "$A" )" = 'where|docs/where.md' ]; then ok "FH(d) twin: the named row is the printed r=1"; else no "FH(d) twin: r=1 is $( r1 "$A" )"; fi
+# (e) CR 4498011593: a dotted word that spells a symbol (`FooBar.py` = the method py of FooBar) is not a file subject because a file of that
+# spelling exists; its tests/FooBar.py is no anchor file, so the plain word's function heading the rows reads low
+FS="$TMP/fhs"; mkdir -p "$FS/src" "$FS/tests"
+printf 'class FooBar:\n    def py(self):\n        return 1\n' > "$FS/src/foo.py"
+printf 'def where(x):\n    return x\n' > "$FS/tests/FooBar.py"
+A="$( ask "$FS" 'where FooBar.py is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(FooBar.py)' "FH(e) the route is name-exact on the spelled symbol"
+if [ "$( conf "$A" )" = low ]; then ok "FH(e) a symbol spelling is not a file subject: the namesake file's row heads, low"; else no "FH(e) symbol spelling: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is where in tests/FooBar.py)" "FH(e) route= names the row that heads"
+# (f) CR nitpick on subjectanchorcheck: a file subject matches whole path segments, so IconTools.py is not notIconTools.py
+FB="$TMP/fhb"; mkdir -p "$FB/ui"
+printf 'def quiet_one(x):\n    return x\n' > "$FB/ui/IconTools.py"
+printf 'def where(x):\n    return x\n' > "$FB/ui/notIconTools.py"
+A="$( ask "$FB" 'where IconTools.py is defined' )"; R="$( route "$A" )"
+has "$R" 'name-exact(IconTools.py)' "FH(f) the route is name-exact on the file subject"
+if [ "$( conf "$A" )" = low ]; then ok "FH(f) a row of notIconTools.py is not IconTools.py's: low"; else no "FH(f) path boundary: $( conf "$A" )"; fi
+has "$R" "$NOHEAD (r=1 is where in ui/notIconTools.py)" "FH(f) route= names the decoy row"
 
 # two exact on a route declined for a word: no ONE anchor, the map stands, the function's callers on top
 for i in 1 2 3 4 5; do printf 'struct W%s { int fresh2( int a ) { return a; } };\n' "$i" > "$CX/src/w$i.cpp"; done

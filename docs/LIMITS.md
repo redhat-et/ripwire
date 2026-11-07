@@ -29,16 +29,16 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-05 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-07 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 375 | 131 | 249 | **126** |
+| 396 | 136 | 261 | **135** |
 
 Plus 8 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 375 + 8 is the 383 constants this generator parses out of `src/`.
+are not counted as caps, and 396 + 8 is the 404 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 375 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 233 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 396 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 254 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -371,6 +371,18 @@ Discloses: **none**
 | `kMaxSample` | `80` | INDEXING | — |
 | `kMaxScored` | `4000` | INDEXING | — |
 
+### `src/exemplarfamily.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kExemplarBodyScanMaxLoc` | `4000` | — | a registry or instance candidate longer than this is not read (runaway guard) |
+| `kExemplarMemberRows` | `4` | — | <m> rows printed (typical first); the rest are counted in n= |
+| `kExemplarPhraseWordsMax` | `4` | — | words of X read after the trigger |
+| `kExemplarTouchLineMax` | `120` | — | bytes of the mentioning line printed (cut="1" when longer) |
+| `kExemplarTouchRows` | `5` | — | <touch> rows printed; <touch_list total=> counts all |
+
 ### `src/expand.h`
 
 Discloses: **none**
@@ -484,6 +496,16 @@ Discloses: `capped`, `bytes_capped`, `dirs_capped`
 | `kForFilePageTopBytes` | `2048` | — | top-level bytes served per file |
 | `kForFilePageTopLines` | `40` | — | top-level lines served per file |
 
+### `src/forfilesyms.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForFileSymsFiles` | `6` | — | shown files whose symbols are candidates (files_total= when more were shown) |
+| `kForFileSymsHeadRows` | `8` | — | head <d> rows whose callees by="callee" reads (head= when fewer) |
+| `kForFileSymsRowsPerRule` | `3` | — | rows per rule (name_total= / callee_total= when cut) |
+
 ### `src/forfold.h`
 
 Discloses: **none**
@@ -507,6 +529,10 @@ Discloses: `capped`, `lit_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kForFlagDefaultMaxBytes` | `80` | — | def= text |
+| `kForFlagOwnerMaxLines` | `8` | — | a constant write outside any function names the owner type within this many lines above it |
+| `kForFlagWriteHits` | `4096` | — | the field's sites read for a constant write (past it: floor=1) |
+| `kForFlagWriteRows` | `2` | — | constant writes of the default's field listed (ld rows) |
 | `kForLiteralBodyCapBytes` | `3000` | — | a short body over this many bytes is still served as an excerpt <x> |
 | `kForLiteralContextRows` | `2` | — | string sites outside any function served with the lines after them |
 | `kForLiteralFileMaxSegments` | `4` | — | a dotted word of this many segments or more is a key even when its last one is an extension (`envoy.filters.http.lua`) |
@@ -979,6 +1005,7 @@ Discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_idents_capped
 | `kMentionMaxNamedIdents` | `64` | INDEXING | — |
 | `kMentionMaxRawTokens` | `16` | INDEXING | extraction cap: first N candidate mention tokens, text order |
 | `kMentionMaxSymbolsPerFile` | `3` | INDEXING | per mentioned file: its top symbols by (lens score desc, id asc) |
+| `kNamesakeMaxFiles` | `12` | — | the same flood bound as subjectanchor.h kSubjectMaxDefs |
 
 ### `src/model.h`
 
@@ -1156,7 +1183,10 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
+| `kDefaultRecallTopK` | `6` | — | — |
 | `kRecallDemotedNamedMax` | `5` | — | — |
+| `kRecallFenceOpenerMaxBytes` | `64` | — | — |
+| `kRecallTitleMaxBytes` | `120` | — | — |
 
 ### `src/receiverevidence.h`
 
