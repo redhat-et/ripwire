@@ -416,7 +416,7 @@ if [ "${c1L:-0}" -gt 1000 ] && [ "$c1p" = 1 ] && ans "$TMP/c1.xml" "$RCX" "--for
 if [ "$c1ok" = 1 ]; then ok "(c1) the excerpt keeps every task word the winning window held (cluster + a word 0.9 of a window away; window $c1L B; probe positive twin)"; else no "(c1) recentring dropped a task word: probe window=$c1L probe-ok=$c1p"; fi
 
 # (c2) a credential in a section heading is redacted in n= (XML and JSON), as in the section text; --no-redact leaves it (positive twin: the section is served)
-TOK="ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+TOK="ghp_""a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
 SEC="$TMP/secret"; cp -R "$DFX" "$SEC"
 printf '\n## Retry policy token %s\n\nThe retry policy for failed uploads signs each request with this token.\n' "$TOK" >>"$SEC/docs/retries.md"
 c2ok=1
