@@ -28,7 +28,9 @@
 #   (k1..k5) K-DECL-IDENT, C and C++: a header declaration folds into a same-name definition only when they are provably one function.
 #        (k1) the definition's file does not include the header and shares no stem: both rows, the header's row kept (a namesake);
 #        (k2) it includes the header directly; (k3) through an umbrella header; (k4) same path stem, no include; (k5) a root-relative
-#        include from another directory (`#include "include/api.h"` in src/): each folds to the definition's row only
+#        include from another directory (`#include "include/api.h"` in src/): each folds to the definition's row only;
+#        (k6) the source file only repeats the prototypes: the header's row stays beside it (a prototype is no implementation);
+#        (k7) api.h and api.C (uppercase C++ extension), no include: same stem, folds
 #   (s1) a row in a test file says test="1"; no row of a source file does
 #   (u1) a run that cannot buffer its bytes prints <syms held="uncaptured"/> and says so on stderr (non-NDEBUG flavour: SKIP otherwise)
 #   (p1) a shown path holding a tab (the answer writes it `a&#9;b.py`) is looked up as the indexed file: its symbols are offered, p= spelled as the answer spells it
@@ -129,6 +131,11 @@ for ext, d in ( ( "c", "k" ), ( "cc", "kx" ) ):
     w( d + "3", "api.h", hdr ); w( d + "3", "all.h", '#pragma once\n#include "api.h"\n' ); w( d + "3", "impl." + ext, defs( '#include "all.h"\n' ) )
     w( d + "4", "api.h", hdr ); w( d + "4", "api." + ext, defs( "" ) )
     w( d + "5/include", "api.h", hdr ); w( d + "5/src", "impl." + ext, defs( '#include "include/api.h"\n' ) )
+    # CR 4497112013: the source file only repeats the prototypes (it includes the header): no implementation to fold into, the header keeps its lead
+    w( d + "6", "api.h", hdr ); w( d + "6", "impl." + ext, '#include "api.h"\n' + "".join( f"int find_home_{i:02d}(void);\n" for i in M ) )
+# CR 4497111991: a path stem is recognised for the uppercase C++ spelling `.C` as well (api.h and api.C: same stem, no include)
+w( "kx7", "api.h", "#pragma once\n" + "".join( f"int find_home_{i:02d}(void);\n" for i in M ) )
+w( "kx7", "api.C", "".join( f"int find_home_{i:02d}(void) {{ return {i}; }}\n" for i in M ) )
 PY
 
 run(){ local d="$1"; shift; ( cd "$TMP/$d" || exit 1; "$BIN" "$TMP/$d" --no-cache "$@" 2>/dev/null </dev/null ); }
@@ -230,12 +237,12 @@ elif mode == "chdr":
     ns = [ r["n"] for r in rows ]
     say( len( rows ) >= 2 and len( set( ns ) ) == len( ns ) and all( r["p"].startswith( "api.c:" ) for r in rows ),
          "s2", "a C declaration and its definition are one row, the definition's: %s" % [ ( r["n"], r["p"] ) for r in rows ] )
-elif mode[ :2 ] in ( "k1", "k2", "k3", "k4", "k5" ):
+elif mode[ :2 ] in ( "k1", "k2", "k3", "k4", "k5", "k6", "k7" ):
     arm = mode[ :2 ]
     hdr = [ r for r in rows if re.match( r'(include/)?api\.h:', r["p"] ) ]
-    defs = [ r for r in rows if re.match( r'(src/)?(impl|api)\.(c|cc):', r["p"] ) ]
-    if arm == "k1":
-        say( m is not None and len( hdr ) >= 1 and len( defs ) >= 1, arm, "an unrelated same-name definition: both rows, the header lead kept: %s" % [ ( r["n"], r["p"] ) for r in rows ] )
+    defs = [ r for r in rows if re.match( r'(src/)?(impl|api)\.(c|cc|C):', r["p"] ) ]
+    if arm in ( "k1", "k6" ):          # the same-name PAIR is in the answer (a header row and a source row of one name), not merely a row of each file
+        say( m is not None and bool( { r["n"] for r in hdr } & { r["n"] for r in defs } ), arm, "the header lead is kept beside the source file's same-name row (%s): %s" % ( "an unrelated definition" if arm == "k1" else "a prototype only", [ ( r["n"], r["p"] ) for r in rows ] ) )
     else:
         say( m is not None and not hdr and len( defs ) >= 1 and len( { r["n"] for r in rows } ) == len( rows ), arm, "the declaration folds into its definition's row: %s" % [ ( r["n"], r["p"] ) for r in rows ] )
 elif mode == "pyt":
@@ -275,11 +282,14 @@ fxrun k2-c k2 'find home 39 and 40'
 fxrun k3-c k3 'find home 39 and 40'
 fxrun k4-c k4 'find home 39 and 40'
 fxrun k5-c k5 'find home 39 and 40'
+fxrun k6-c k6 'find home 39 and 40'
 fxrun k1-cpp kx1 'find home 39 and 40'
 fxrun k2-cpp kx2 'find home 39 and 40'
 fxrun k3-cpp kx3 'find home 39 and 40'
 fxrun k4-cpp kx4 'find home 39 and 40'
 fxrun k5-cpp kx5 'find home 39 and 40'
+fxrun k6-cpp kx6 'find home 39 and 40'
+fxrun k7-cpp kx7 'find home 39 and 40'
 fxrun pyt pyt 'why does the integration check fail'
 fxrun wide wide 'route table'
 if [ -f "$TMP/tabp/$( printf 'a\tb.py' )" ]; then fxrun tabp tabp "$TASK"; else echo "  SKIP  (p1) this file system cannot hold a tab in a file name"; fi

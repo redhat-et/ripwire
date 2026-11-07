@@ -725,8 +725,8 @@ inline bool bodylessHeaderDecl( const IngestResult& ing, const Symbol& s )
     return bodylessSymbol( s ) && quality::isHeaderPath( rootRelPath( ing, s.fileId ) ); // .h/.hpp/.hh/.hxx: C-family headers, read as C++ or C
 }
 
-// A path up to its last dot when the extension is a C-family source or header one (foo.c, foo.cc, foo.cpp, foo.cxx, foo.m, foo.mm and
-// the four header spellings); "" for any other file, so a Python or Go namesake never shares a header's stem.
+// A path up to its last dot when the extension is a C-family source or header one (foo.c, foo.C, foo.cc, foo.cpp, foo.cxx, foo.m, foo.mm
+// and the four header spellings); "" for any other file, so a Python or Go namesake never shares a header's stem.
 inline std::string_view cFamilyStem( std::string_view path ) noexcept
 {
     const std::size_t dot = path.rfind( '.' );
@@ -736,7 +736,7 @@ inline std::string_view cFamilyStem( std::string_view path ) noexcept
         return {};
     }
     const std::string_view ext = path.substr( dot + 1 );
-    constexpr std::array<std::string_view, 10> kExts { "c", "cc", "cpp", "cxx", "m", "mm", "h", "hh", "hpp", "hxx" };
+    constexpr std::array<std::string_view, 11> kExts { "c", "C", "cc", "cpp", "cxx", "m", "mm", "h", "hh", "hpp", "hxx" };
     return std::ranges::contains( kExts, ext ) ? path.substr( 0, dot ) : std::string_view {};
 }
 
@@ -755,8 +755,9 @@ public:
     const IngestResult& ing() const noexcept { return ing_; }
     bool decl( const Cand& c ) const { return bodylessHeaderDecl( ing_, ing_.symbols[c.id] ); }
 
-    // The definition among `group` (one (scope, name), kept rows so far) that header declaration `c` folds into: the first whose file
-    // answers c's header. nullptr when `c` is no header declaration or no definition answers it.
+    // The definition among `group` (one (scope, name), kept rows so far) that header declaration `c` folds into: the first one WITH A
+    // BODY whose file answers c's header (a prototype in a source file is no implementation: the header keeps its lead). nullptr when
+    // `c` is no header declaration or no such definition exists.
     Cand* foldTarget( std::span<Cand> group, const Cand& c )
     {
         if( !decl( c ) )
@@ -765,7 +766,7 @@ public:
         }
         const std::uint32_t declFile = ing_.symbols[c.id].fileId;
         const auto def = std::ranges::find_if( group, [&]( const Cand& k )
-                                               { return !decl( k ) && answers( ing_.symbols[k.id].fileId, declFile ); } );
+                                               { return !bodylessSymbol( ing_.symbols[k.id] ) && answers( ing_.symbols[k.id].fileId, declFile ); } );
         return def == group.end() ? nullptr : &*def;
     }
 
