@@ -517,6 +517,10 @@ Discloses: `capped`, `lit_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kForFlagDefaultMaxBytes` | `80` | — | def= text |
+| `kForFlagOwnerMaxLines` | `8` | — | a constant write outside any function names the owner type within this many lines above it |
+| `kForFlagWriteHits` | `4096` | — | the field's sites read for a constant write (past it: floor=1) |
+| `kForFlagWriteRows` | `2` | — | constant writes of the default's field listed (ld rows) |
 | `kForLiteralBodyCapBytes` | `3000` | — | a short body over this many bytes is still served as an excerpt <x> |
 | `kForLiteralContextRows` | `2` | — | string sites outside any function served with the lines after them |
 | `kForLiteralFileMaxSegments` | `4` | — | a dotted word of this many segments or more is a key even when its last one is an extension (`envoy.filters.http.lua`) |
@@ -1166,7 +1170,10 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
+| `kDefaultRecallTopK` | `6` | — | — |
 | `kRecallDemotedNamedMax` | `5` | — | — |
+| `kRecallFenceOpenerMaxBytes` | `64` | — | — |
+| `kRecallTitleMaxBytes` | `120` | — | — |
 
 ### `src/receiverevidence.h`
 
