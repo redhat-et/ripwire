@@ -98,3 +98,20 @@ diff -q "$TMP/warm" "$TMP/cold" >/dev/null && ok "cache-transparent (arity/CHA f
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
+
+# ── 6) #446: C++ base-clause types read as @reference.base captures (the capture IS the language gate).
+# The fixture covers direct, qualified, template (CRTP family) and multiple-inheritance bases;
+# a nameless struct with a base stays edgeless (the capture only matches a named class/struct),
+# and a specialization's base is walked once (captureSpecializationHeader's own path).
+FIX446="$ROOT/test/chafix446"
+"$BIN" "$FIX446" --no-cache --lego=TBase 2>/dev/null >"$TMP/lego_tbase"
+for impl in Tmpl QualTmpl Crtpd Multi2 DepT In; do
+    if grep -q "n=\"$impl\"" "$TMP/lego_tbase"; then ok "(#446) $impl implements TBase (the capture reads its base)"; \
+    else no "(#446) $impl lost its TBase edge (the capture missed a base-clause shape)"; fi
+done
+if ! grep -q "anon_var" "$TMP/lego_tbase"; then ok "(#446) the nameless struct registered no TBase edge"; \
+    else no "(#446) a nameless struct's base produced an edge (the capture must match only a named class/struct)"; fi
+"$BIN" "$FIX446" --no-cache >"$TMP/base446_map" 2>/dev/null
+"$BIN" "$FIX446" --no-cache >"$TMP/base446_map2" 2>/dev/null
+diff -q "$TMP/base446_map" "$TMP/base446_map2" >/dev/null && ok "(#446) the fixture map is deterministic" \
+    || no "(#446) non-deterministic fixture map"

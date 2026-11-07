@@ -453,3 +453,20 @@
 ; is not `#import`: a dropped row is a floor, and a captured `#pragma` would have been a WRONG edge.
 (preproc_call
   argument: (preproc_arg) @import.path)
+
+; #446 base clause as a capture (family 7): the base type under a C++ base_class_clause, the same
+; direct kinds the captureBases chain accepted. The class-def path reads this capture now (the
+; @reference.base reader in ingest_sidecap.h); template specializations keep their own walk
+; (captureSpecializationHeader), so the C++ chain itself stays for that caller.
+(class_specifier
+  name: [(type_identifier) (qualified_identifier)]
+  (base_class_clause
+    [ (type_identifier) @name
+      (qualified_identifier) @name
+      (template_type name: (type_identifier) @name) ]) @reference.base)
+(struct_specifier
+  name: [(type_identifier) (qualified_identifier)]
+  (base_class_clause
+    [ (type_identifier) @name
+      (qualified_identifier) @name
+      (template_type name: (type_identifier) @name) ]) @reference.base)
