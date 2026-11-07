@@ -1245,6 +1245,7 @@ Discloses: **none**
 | `kAliasPeelDepth` | `4` | — | — |
 | `kFieldWalkCap` | `16` | INDEXING | total visited names — bounds depth and width together (methodOnTypeOrBases, memberFieldHides and fieldEntryAt) |
 | `kMaxDepth` | `64` | — | — |
+| `kMaxRustUseTreeDepth` | `32` | — | — |
 
 ### `src/search.h`
 
