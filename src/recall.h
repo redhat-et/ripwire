@@ -11,6 +11,7 @@
 // best score of any symbol it holds (the markdown file-node, which indexes the whole body, dominates). The
 // graph half ([[links]]/PageRank) is intentionally NOT fused — the eval showed importance ≠ relatedness.
 
+#include "infra/sortutil.h"    // sortutil::svLess — the byte order the mirror-tree path tables sort and search by
 #include "infra/pctenc.h"      // rw::appendPercentEncoded — the path-list attributes (demoted_names=, mirror_dirs=)
 #include "infra/Diagnostics.h" // ASSUME_NO_ALIAS_BUF — waterFillRecallShares reads demand[] while writing alloc[]
 #include "docparse.h"    // §P2b: the generated-document signals (marker / size+fences) + the ONE markdown
@@ -1083,13 +1084,19 @@ inline RecallDocSections splitRecallDocSections( const IngestResult& ing, std::v
 
 // One file's Section symbols (Markdown-lang: markdown, reST, and the extracted HTML/notebook docs), for the serve path,
 // which looks at a handful of files. The corpus scorer below groups every file in one sorted pass instead.
+// A document's heading section: markdown, reST and extracted pages all carry their sections as Markdown Section symbols.
+inline bool isRecallDocSection( const Symbol& s ) noexcept
+{
+    return s.kind == SymKind::Section && s.lang == Lang::Markdown;
+}
+
 inline RecallDocSections recallDocSections( const IngestResult& ing, std::size_t scoredCount, std::uint32_t fileId )
 {
     std::vector<std::uint32_t> secs;
     for( std::size_t i = 0; i < ing.symbols.size() && i < scoredCount; ++i )
     {
         const Symbol& s = ing.symbols[ i ];
-        if( s.fileId == fileId && s.kind == SymKind::Section && s.lang == Lang::Markdown )
+        if( s.fileId == fileId && isRecallDocSection( s ) )
         {
             secs.push_back( std::uint32_t( i ) );
         }
@@ -1681,8 +1688,8 @@ inline RecallMirrorTrees recallMirrorTrees( const IngestResult& ing, const std::
             docPaths.push_back( ing.files[ f ] );
         }
     }
-    std::sort( docPaths.begin(), docPaths.end() );
-    const auto isDocPath = [ & ]( std::string_view p ) { return std::binary_search( docPaths.begin(), docPaths.end(), p ); };
+    std::sort( docPaths.begin(), docPaths.end(), sortutil::svLess );
+    const auto isDocPath = [ & ]( std::string_view p ) { return std::binary_search( docPaths.begin(), docPaths.end(), p, sortutil::svLess ); };
 
     struct DirCounts
     {
@@ -1715,7 +1722,7 @@ inline RecallMirrorTrees recallMirrorTrees( const IngestResult& ing, const std::
             mirrorDirs.push_back( dir );
         }
     }
-    std::sort( mirrorDirs.begin(), mirrorDirs.end() );
+    std::sort( mirrorDirs.begin(), mirrorDirs.end(), sortutil::svLess );
     const auto isUnder = []( std::string_view path, std::string_view dir ) noexcept
     {
         return path.size() > dir.size() && path.starts_with( dir ) && path[ dir.size() ] == '/';
@@ -1767,7 +1774,7 @@ inline RecallUnitScoring recallUnitScores( const IngestResult& ing, std::string_
     for( std::uint32_t i = 0; i < ing.symbols.size(); ++i )
     {
         const Symbol& s = ing.symbols[ i ];
-        if( s.kind == SymKind::Section && s.lang == Lang::Markdown && s.fileId < isDoc.size() && isDoc[ s.fileId ] && !out.mirror.isMirror[ s.fileId ] )
+        if( isRecallDocSection( s ) && s.fileId < isDoc.size() && isDoc[ s.fileId ] && !out.mirror.isMirror[ s.fileId ] )
         {
             secs.push_back( i );
         }
