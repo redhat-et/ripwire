@@ -2639,13 +2639,15 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
 // the recall lens's measured choice, not a default — bench/recalleval measured +0.03 lenient MRR for it
 // (gate: test/recallevalcheck.sh) and test/recallrankdepthcheck.sh ARM 4 is its kill tripwire. Parity is
 // gated by test/recallparitycheck.sh, which asserts the two doors return the same bundle byte for byte.
-// The recall lens's per-symbol scores for `task`: path weight 1 and the root prefix buildRecall relativizes against (see recallFor
-// below). FOR-DOC-BODY (fordocbody.h) picks a doc file's sections with the same scores, so its sections are the ones --recall picks.
+// The recall lens's per-symbol scores for `task`: its section-unit scorer (recallUnitScores) over the root prefix buildRecall
+// relativizes against (see recallFor below). FOR-DOC-BODY (fordocbody.h) picks a doc file's sections with the same scores, so its
+// sections are the units --recall picks, HTML section units (kRankFlagRecallOnly) included; the graph arguments keep one signature.
 inline std::vector<float> recallLensScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                             const std::vector<NodeId>& outTargets, std::string_view task, std::string_view rootArg )
 {
-    const std::string prefix = rw::sarif::rootPrefixOf( rootArg );
-    return lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0, /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
+    (void)outOff;
+    (void)outTargets;
+    return recallUnitScores( ing, task, rw::sarif::rootPrefixOf( rootArg ) ).scores;
 }
 
 inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,

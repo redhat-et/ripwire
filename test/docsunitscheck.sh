@@ -20,6 +20,8 @@
 #                symbol leaves --for, --callers and --defs on that name byte-identical to the same page with the heading
 #                written as a paragraph (no unit), so the doc heading cannot displace or hedge the code definition; --recall
 #                still serves the heading as a unit.
+#   I  DOC BODY  --for's <doc_body> (FOR-DOC-BODY) picks an HTML page's sections with --recall's unit scores (recallLensScores is
+#                recallUnitScores): the section it serves first is the unit --recall picks, not the page's head as a whole doc.
 # Usage: test/docsunitscheck.sh [BIN]   (RIPWIRE_BIN works too)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -221,6 +223,27 @@ fi
 if recall "$TMP/hu" "parseWidgetConfig" "$TMP/h_r"; then
     s="$( sep_of "$TMP/h_r" site/guide.html )"
     arm "H twin: --recall still serves the heading as a unit (section-granular, lines 7-8)" grep -qE 'section-granular.*lines="[^"]*7-8' <<<"$s"
+fi
+
+# ── I: --for's doc_body serves --recall's HTML units ──────────────────────────────────────────────────────────
+# Two pages (two doc files in the tail fire the block on a prose task); only guide.html's "Cache eviction" section holds the task's
+# words "evicts stale entries" (the other units share fewer of its words), so it is --recall's top unit there and doc_body's first section on
+# that page must be the same heading and lines; under lexicalScores the units score 0 and the page's head is served as t="doc".
+I="$TMP/i"; mkdir -p "$I/site" "$I/src"
+printf 'def loadSettings(text):\n    return dict(l.split("=", 1) for l in text.splitlines() if "=" in l)\n' >"$I/src/widget.py"
+printf '<html><head><title>Widget guide</title></head>\n<body>\n<nav><a href="index.html">Home</a></nav>\n<main>\n<h1>Widget guide</h1>\n<p>An overview of the widget pages.</p>\n<h2>Install</h2>\n<p>Copy the widget folder into the plugins directory and restart.</p>\n<h2>Cache eviction</h2>\n<p>The cache evicts stale entries when its timer fires, oldest entries first.</p>\n<h2>Colors</h2>\n<p>Pick a palette for the widget.</p>\n</main>\n</body></html>\n' >"$I/site/guide.html"
+printf '<html><head><title>Widget tuning</title></head>\n<body>\n<main>\n<h1>Widget tuning</h1>\n<p>Tune the widget cache size and its timer.</p>\n<h2>Limits</h2>\n<p>A larger cache keeps more entries.</p>\n</main>\n</body></html>\n' >"$I/site/tuning.html"
+iq="how does the cache evict stale entries"
+if verb "$I" "$TMP/i_for" "--for=$iq" && verb "$I" "$TMP/i_json" "--for=$iq" --json; then
+    arm "I --for serves a doc_body block on the prose task (positive twin of every arm below)" grep -q '<doc_body ' "$TMP/i_for"
+    ib="$( grep -oE '<b t="[a-z]+" p="site/guide.html"[^>]*>' "$TMP/i_for" | head -1 )"
+    arm "I doc_body's first guide.html passage is --recall's unit: t=\"section\" n=\"Cache eviction\" l=9 e=10 rank=1 (got: ${ib:-none})" \
+        grep -qE 't="section" p="site/guide.html" l="9" e="10" n="Cache eviction" rank="1"' <<<"$ib"
+    arm "I --json: the doc_body key serves the same heading" grep -qE '"doc_body".*"Cache eviction"' "$TMP/i_json"
+fi
+if recall "$I" "$iq" "$TMP/i_r"; then
+    s="$( sep_of "$TMP/i_r" site/guide.html )"
+    arm "I twin: --recall serves guide.html as units, the Cache eviction one among them (section-granular, lines 9-10)" grep -qE 'section-granular.*lines="[^"]*9-10' <<<"$s"
 fi
 
 if [ "$fail" -ne 0 ]; then
