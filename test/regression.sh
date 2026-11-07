@@ -902,6 +902,7 @@ for _g in \
     rootrelcheck \
     rootrelemitcheck \
     rootspellingcheck \
+    roundcderivecheck \
     routecheck \
     routeedgecheck \
     routehookcheck \
