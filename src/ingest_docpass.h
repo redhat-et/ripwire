@@ -103,6 +103,73 @@ inline std::string docTextViaBridgeCache( const std::string& path, const std::st
 namespace
 {
 
+// DOCS-UNITS D5 — a doc's extracted text, and for an HTML page its unit boundaries too (htmldoc.h). Every other kind
+// goes through the bridge cache exactly as before and leaves `heads` empty.
+inline std::string docTextOfDoc( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey,
+                                 std::vector<docparse::HtmlHeading>& heads )
+{
+    if( docparse::docKindOf( ext ) != docparse::DocKind::Html )
+    {
+        return docTextViaBridgeCache( path, ext, cacheEnabled, tmpKey );
+    }
+    const std::optional<std::string> bytes = docparse::detail::readWholeFile( path );
+    if( !bytes )
+    {
+        DISCLOSE( "docparse: cannot read document file" );
+        rw::emitTo( stderr, "ripwire: doc {}: cannot read — omitted from the index (the skipped verb counts it as unmeasured)\n", path.c_str() );
+        return {};
+    }
+    docparse::HtmlDoc doc = docparse::extractHtmlDoc( *bytes );
+    heads                 = std::move( doc.headings );
+    return std::move( doc.text );
+}
+
+// Each HTML unit's Section stats over its subtree span (rich runs only), one RawDefLex per unit, in unit order.
+inline void buildHtmlUnitLex( const std::string& text, const std::vector<docparse::HtmlHeading>& heads, HashMap<std::uint64_t, std::uint32_t>& scratch,
+                              std::vector<RawDefLex>& out )
+{
+    out.resize( heads.size() );
+    for( std::size_t h = 0; h < heads.size(); ++h )
+    {
+        buildDefLexStats( text, heads[ h ].startByte, heads[ h ].endByte, scratch, out[ h ] );
+    }
+}
+
+// One Section per HTML unit, shaped like a markdown heading's: [startByte, endByte) is the subtree in the extracted text,
+// the heading construct is the signature, the enclosing unit is the scope. nameByte is the unit's start: unique within the
+// file (two units never start at one byte: each opening tag adds its separator first) and never the file node's EOF.
+inline void pushHtmlUnitDefs( std::uint32_t fid, const std::vector<docparse::HtmlHeading>& heads, std::vector<RawDefLex>& lex,
+                              std::vector<RawDef>& rawDefs )
+{
+    for( std::size_t h = 0; h < heads.size(); ++h )
+    {
+        const docparse::HtmlHeading& u = heads[ h ];
+        RawDef d;
+        d.fileId    = fid;
+        d.line      = u.line;
+        d.startByte = u.startByte;
+        d.endByte   = u.endByte;
+        d.nameByte  = u.startByte;
+        d.bodyByte  = u.sigEnd;
+        d.kind      = SymKind::Section;
+        d.lang      = Lang::Markdown;
+        d.name      = u.name;
+        for( std::size_t p = h; p > 0; --p )
+        {
+            if( heads[ p - 1 ].level < u.level && heads[ p - 1 ].endByte > u.startByte )
+            {
+                d.scope = heads[ p - 1 ].name;
+                break;
+            }
+        }
+        if( h < lex.size() )
+        {
+            d.lex = std::move( lex[ h ] );
+        }
+        rawDefs.push_back( std::move( d ) );
+    }
+}
+
 // ── doc post-pass (P1-B): for every collected document file (notebook/html/csv/…), extract its text and
 //    record it as the docText override + add ONE whole-file Section node so the doc is rankable + recall-
 //    able. Runs OUTSIDE the parse cache (after saveCache, before id-assignment) and is a pure function of
@@ -133,6 +200,8 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
     std::vector<std::string> docTextOut( ndocs );
     std::vector<char>        docHasText( ndocs, 0 );
     std::vector<RawDefLex>   docLex( ndocs );        // B0.2: per-doc Section stats (rich only), own slot per worker
+    std::vector<std::vector<docparse::HtmlHeading>> docHeads( ndocs );   // DOCS-UNITS D5: an HTML page's units, own slot per worker
+    std::vector<std::vector<RawDefLex>>             docHeadLex( ndocs ); // and their stats (rich only), one per unit
     if( ndocs > 0 )
     {
         unsigned hwDoc = std::thread::hardware_concurrency();
@@ -168,12 +237,13 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
                         const std::uint32_t fid = docIds[ di ];
                         const std::string   ext = lowerExtensionOf( result.files[ fid ] );
 
-                        std::string text = docTextViaBridgeCache( result.files[ fid ], ext, cacheEnabled, fid );
+                        std::string text = docTextOfDoc( result.files[ fid ], ext, cacheEnabled, fid, docHeads[ di ] );
                         if( !text.empty() )
                         {
                             if( captureValueUses )
                             { // whole-file Section span [0, len) — same span the RawDef gets below
                                 buildDefLexStats( text, 0, std::uint32_t( text.size() ), docLexScratch, docLex[ di ] );
+                                buildHtmlUnitLex( text, docHeads[ di ], docLexScratch, docHeadLex[ di ] );
                             }
                             docTextOut[ di ] = std::move( text );
                             docHasText[ di ] = 1;
@@ -215,6 +285,7 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
         d.name      = fs::path( result.files[ fid ] ).stem().string();
         d.lex       = std::move( docLex[ di ] );   // B0.2: stats over the extracted text (empty on lean runs)
         rawDefs.push_back( std::move( d ) );
+        pushHtmlUnitDefs( fid, docHeads[ di ], docHeadLex[ di ], rawDefs );
     }
 }
 

@@ -23,6 +23,7 @@
 
 #include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
 #include "infra/ownedfile.h" // rw::OwnedFile — the whole-file readers own their stream, so every return closes it
+#include "htmldoc.h"          // DOCS-UNITS D5: the HTML section tree (line-preserving body text + units)
 #include "pathguard.h"        // rw::pathguard::NoFollowRead — the owned line stream a fixed-name file is read through
 
 #include <algorithm>   // std::binary_search — the membership test, instead of a hand-rolled scan loop
@@ -486,119 +487,11 @@ inline bool ciStartsWith( std::string_view s, std::size_t p, std::string_view li
 
 }   // namespace detail
 
+// The page's line-preserving body text (htmldoc.h: content region, chrome stripped, line k = raw line k). The
+// units ride beside it in HtmlDoc::headings; the doc post-pass reads those through extractHtmlDoc directly.
 inline std::string extractHtml( std::string_view html )
 {
-    std::string out;
-    out.reserve( html.size() );
-
-    for( std::size_t i = 0; i < html.size(); )
-    {
-        if( html[i] == '<' )
-        {
-            // drop <script>…</script> and <style>…</style> wholesale (content is not prose)
-            if( detail::ciStartsWith( html, i, "<script" ) || detail::ciStartsWith( html, i, "<style" ) )
-            {
-                const std::string_view close = detail::ciStartsWith( html, i, "<script" ) ? "</script" : "</style";
-                std::size_t            e     = i + 1;
-                while( e < html.size() && !detail::ciStartsWith( html, e, close ) )
-                {
-                    ++e;
-                }
-                while( e < html.size() && html[e] != '>' )
-                {
-                    ++e; // to end of the closing tag
-                }
-                i = ( e < html.size() ) ? e + 1 : html.size();
-                out.push_back( ' ' );
-                continue;
-            }
-            // ordinary tag — skip to '>'
-            while( i < html.size() && html[i] != '>' )
-            {
-                ++i;
-            }
-            if( i < html.size() )
-            {
-                ++i;
-            }
-            out.push_back( ' ' );
-            continue;
-        }
-
-        // text node — decode the handful of entities that matter for tokens
-        if( html[i] == '&' )
-        {
-            const std::size_t semi = html.find( ';', i );
-            if( semi != std::string_view::npos && semi - i <= 8 )
-            {
-                const std::string_view ent = html.substr( i, semi - i + 1 );
-                if( ent == "&amp;" )
-                {
-                    out.push_back( '&' );
-                }
-                else if( ent == "&lt;" )
-                {
-                    out.push_back( '<' );
-                }
-                else if( ent == "&gt;" )
-                {
-                    out.push_back( '>' );
-                }
-                else if( ent == "&quot;" )
-                {
-                    out.push_back( '"' );
-                }
-                else if( ent == "&#39;" || ent == "&apos;" )
-                {
-                    out.push_back( '\'' );
-                }
-                else
-                {
-                    out.push_back( ' ' ); // &nbsp; and friends → space
-                }
-                i = semi + 1;
-                continue;
-            }
-        }
-
-        out.push_back( html[i] );
-        ++i;
-    }
-
-    // collapse whitespace runs (tag-stripping leaves long blank gaps): a run containing a newline → one '\n'
-    // (keep block structure), a run of spaces/tabs → one ' '. Trim ends. Purely cosmetic for the recall body;
-    // BM25 tokenization is whitespace-insensitive anyway.
-    std::string collapsed;
-    collapsed.reserve( out.size() );
-    for( std::size_t k = 0; k < out.size(); )
-    {
-        if( std::isspace( static_cast<unsigned char>( out[k] ) ) )
-        {
-            bool hasNewline = false;
-            while( k < out.size() && std::isspace( static_cast<unsigned char>( out[k] ) ) )
-            {
-                if( out[k] == '\n' )
-                {
-                    hasNewline = true;
-                }
-                ++k;
-            }
-            if( !collapsed.empty() )
-            {
-                collapsed.push_back( hasNewline ? '\n' : ' ' );
-            }
-        }
-        else
-        {
-            collapsed.push_back( out[k] );
-            ++k;
-        }
-    }
-    while( !collapsed.empty() && std::isspace( static_cast<unsigned char>( collapsed.back() ) ) )
-    {
-        collapsed.pop_back();
-    }
-    return collapsed;
+    return extractHtmlDoc( html ).text;
 }
 
 // ── .csv — header names + a few sample rows (the column names are the searchable tokens) ─────────────
