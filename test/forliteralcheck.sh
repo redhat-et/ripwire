@@ -174,8 +174,9 @@ if [ "$neg" -eq 0 ]; then
 fi
 # ── L7 ──
 for t in APPTOOL_RENDER_MODE '"dependency cycle detected" error' APPTOOL_BIG_FLAG; do
-    a="$( run "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();print(re.sub(r"<!-- ripwire for lit:.*?-->(<lit .*?</lit>)","",s,flags=re.S),end="")' )"
-    b="$( off "--for=$t" )"
+    # the K-WRONGSYM <syms> block reads the answer's own bytes (the <lit> block among them), so it differs with the literal block off: both sides drop it
+    a="$( run "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit:.*?-->(<lit .*?</lit>)","",s,flags=re.S);print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)","",s,flags=re.S),end="")' )"
+    b="$( off "--for=$t" | python3 -I -c 'import sys,re;s=sys.stdin.read();print(re.sub(r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms .*?</syms>|<syms [^>]*/>)(?=<graph fmt=|</ctx>)","",s,flags=re.S),end="")' )"
     if [ -n "$b" ] && [ "$a" = "$b" ]; then ok "L7 prefix identity vs RIPWIRE_NO_LITERAL_ANCHOR=1: $t"; else no "L7 answer outside the block changed: $t"; fi
 done
 # ── L8 ──
