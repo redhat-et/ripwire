@@ -2906,7 +2906,7 @@ A new gate script must be added to `test/regression.sh` in the same change. The 
 Another gate derives the cap inventory. At the counts snapshot 2026-11-07 the tool had 402 compile-time caps and 9 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
-lists the measured cost of each cap.
+lists the measured cost of the caps the sweep has measured, and names the ones it has not.
 
 ### 10. Quality evaluation
 
@@ -3211,7 +3211,7 @@ record, and this line is only the pointer to it.
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
 | Installation and removal procedures | [`INSTALL.md`](INSTALL.md) |
 | The compile-time cap inventory | [`docs/LIMITS.md`](docs/LIMITS.md) |
-| The measured cost of each cap | [`docs/TUNING.md`](docs/TUNING.md) |
+| The measured cost of the caps the sweep covers | [`docs/TUNING.md`](docs/TUNING.md) |
 | Skill-file security checks | [`docs/COMMANDS.md`](docs/COMMANDS.md#--scan-skillsdir) |
 | The whole tool in 36 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 

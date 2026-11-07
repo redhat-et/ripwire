@@ -318,12 +318,14 @@ jobs:
             exit 1
           fi
           # The release body is the hand-written summary at the top of the section, up to the line
-          # `<!-- release-notes-end -->`, then a link to the whole section on the tag: the whole section can pass
+          # `<!-- release-notes-end -->`, then a link to the whole section: the whole section can pass
           # GitHub's 125,000-character release-body limit (0.6.10's is 170 KB). A section with no such line is
-          # published whole.
+          # published whole. The link names the commit this job checked out (github.sha), the one the section was
+          # read from, so a manual run from a ref other than the tag still links the text it summarised; on a tag
+          # push that commit is the tag's.
           if grep -qx '<!-- release-notes-end -->' dist/RELEASE_SECTION.md; then
             sed '/^<!-- release-notes-end -->$/,$d' dist/RELEASE_SECTION.md > dist/RELEASE_NOTES.md
-            printf '\n---\n\nEvery entry of this release, with its measurement and its floors, is in [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md).\n' "${{ github.repository }}" "$tag" >> dist/RELEASE_NOTES.md
+            printf '\n---\n\nEvery entry of this release, with its measurement and its floors, is in [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md).\n' "${{ github.repository }}" "${{ github.sha }}" >> dist/RELEASE_NOTES.md
           else
             cp dist/RELEASE_SECTION.md dist/RELEASE_NOTES.md
           fi
