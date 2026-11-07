@@ -2283,7 +2283,8 @@ inline GenKept genKeptDefs( const IngestResult& ing, const std::vector<std::vect
     for( const std::vector<std::string>& p : genPaths )
     {
         const std::vector<const Symbol*> named = genProtoDefs( ing, p );
-        for( std::size_t i = 0; !named.empty() && out.firstPath.empty() && i < p.size(); ++i )
+        const bool first = !named.empty() && out.firstPath.empty();
+        for( std::size_t i = 0; first && i < p.size(); ++i )
         {
             out.firstPath.append( i == 0 ? "" : "::" ).append( p[ i ] );
         }

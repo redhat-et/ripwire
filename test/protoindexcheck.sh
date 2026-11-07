@@ -120,7 +120,7 @@ out="$( run --for=ExprType )"; rc=$?
 gen="$( printf '%s' "$out" | grep -o '<rung n="gen"[^>]*>.*</rung>' | head -1 )"
 [ -n "$gen" ] || no "D Rust: no gen rung for --for=ExprType (rc=$rc): $( printf '%s' "$out" | grep -o '<shortkey[^>]*>' )"
 if printf '%s' "$gen" | grep -q 'via="name"' && printf '%s' "$gen" | grep -q 'exact="0"'; then ok "D Rust gen rung is hedged (via=name, exact=0)"; else no "D Rust gen rung not hedged: $gen"; fi
-if printf '%s' "$gen" | grep -q '<d n="ExprNode.Type" t="cls" p="proto/expr.proto" l="9"/>'; then ok "D Rust use-as links ExprNode.Type"; else no "D Rust use-as: $gen"; fi
+if printf '%s' "$gen" | grep -q 'path="demo_pb::expr::expr_node::Type"' && printf '%s' "$gen" | grep -q '<d n="ExprNode.Type" t="cls" p="proto/expr.proto" l="9"/>'; then ok "D Rust use-as links ExprNode.Type"; else no "D Rust use-as: $gen"; fi
 if printf '%s' "$out" | grep -q 'shortkey gen:'; then ok "D the gen legend rides the answer"; else no "D gen legend missing"; fi
 # A Go `type GoExprType = pb.ExprNode_Type` is itself a definition: --for serves it name-exact (its line shows the generated
 # path) and the gen rung, a not-found ladder rung, does not run. Disclosed limitation (report ## Follow-ons: GEN-USES).
