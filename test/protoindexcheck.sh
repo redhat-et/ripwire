@@ -17,6 +17,8 @@
 #   E  a same-named Rust struct that is not generated keeps its own proven caller; the proto def gains none.
 #   F  absence arm with a positive twin: a Rust alias whose leaf no .proto defines links nothing (kept="0").
 #   G  a tree with no .proto file prints no gen rung (byte-identical ladder shape).
+#   H  RANK-PROTO: 60 copies of a generic schema name (message Config) take no --for ranked row and displace no code
+#      definition (a .proto def is no lexical document, model.h kRankFlagNotLexRanked); twin: --defs binds all 60.
 # Every command whose output an arm reads has its exit code checked; an empty output is a FAIL, never a pass.
 #
 # Usage: test/protoindexcheck.sh [BIN]   (default build/ripwire). Exits non-zero on any failure.
@@ -150,6 +152,47 @@ out="$( ( cd "$FIX" || exit 1; "$BIN" "$FIX" --cache="$TMP/cache2" --for=ExprTyp
 if [ "$rc" != 0 ] || ! printf '%s' "$out" | grep -q '<shortkey'; then no "G no shortkey at all (rc=$rc): the twin arm needs the ladder"
 elif printf '%s' "$out" | grep -q 'n="gen"'; then no "G a gen rung printed with no .proto in the tree"
 else ok "G no .proto: the ladder has no gen rung"; fi
+
+echo "=== H: a generic proto name does not displace code from --for (RANK-PROTO) ==="
+# 60 schema copies of `message Config` (the envoy/terraform shape: one short generic name in many files) against three code
+# functions. A .proto definition is no --for lexical document (model.h kRankFlagNotLexRanked): before RANK-PROTO the 60
+# Config rows filled the ranked rows and config_defaults fell to a tail <t> name.
+HFIX="$TMP/hrepo"; mkdir -p "$HFIX/proto" "$HFIX/src"
+i=1
+while [ "$i" -le 60 ]; do
+    printf 'syntax = "proto3";\npackage p%s;\nmessage Config {\n  string name = 1;\n}\n' "$i" > "$HFIX/proto/svc$i.proto"
+    i=$(( i + 1 ))
+done
+cat > "$HFIX/src/loader.py" <<'PYEOF'
+def load_listener_config(path):
+    """Read the listener config file."""
+    return open(path).read()
+
+def apply_listener_config(cfg):
+    return cfg
+
+def unrelated_helper(x):
+    return x + 1
+
+def config_defaults():
+    return {}
+PYEOF
+( cd "$HFIX" && git init -q && git add -A && git -c user.name=t -c user.email=t@example.invalid commit -qm fixture ) || { no "H fixture git init failed"; }
+hrun(){ ( cd "$HFIX" || exit 1; "$BIN" "$HFIX" --cache="$TMP/hcache" "$@" ) 2>"$TMP/herr"; }
+out="$( hrun --for="where is the listener config loaded" )"; rc=$?
+rows="$( printf '%s' "$out" | grep -o '<d [^>]*>' )"
+if [ "$rc" != 0 ] || [ -z "$rows" ]; then no "H --for printed no ranked row (rc=$rc)"
+else
+    if printf '%s' "$rows" | grep -q 'n="config_defaults" p="src/loader.py"'; then ok "H config_defaults keeps a ranked row"
+    else no "H config_defaults displaced from the ranked rows: $( printf '%s' "$rows" | grep -o 'n="[^"]*" p="[^"]*"' | head -5 | tr '\n' ' ' )"; fi
+    if printf '%s' "$rows" | grep -q 'p="proto/'; then no "H a proto Config competes in --for ranking: $( printf '%s' "$rows" | grep -c 'p="proto/' ) rows"
+    else ok "H no proto definition takes a --for ranked row"; fi
+fi
+# positive twin: the schema definitions stay definitions (--defs counts all 60); --for reaches a schema name through the
+# name route and the not-found ladder's gen rung (arms C and D), not through subtoken ranking
+out="$( hrun --defs=Config )"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q '<name q="Config" defs="60"' && printf '%s' "$out" | grep -q '<d n="Config" t="cls" p="proto/svc'; then ok "H --defs=Config binds the 60 proto definitions"
+else no "H --defs=Config (rc=$rc): $( printf '%s' "$out" | grep -o '<name [^>]*>' )"; fi
 
 [ "$fail" = 0 ] && echo "protoindexcheck: ALL PASS" || echo "protoindexcheck: FAIL"
 exit "$fail"
