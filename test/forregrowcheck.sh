@@ -44,6 +44,9 @@
 #   storage[resource+"/log"] = x, Python handlers[name + "_svc"] = f, a TS template key), is a reg= row; SW4 [P] it is strong (no cue word). SW-N1-N3 [G] a
 #   literal key, a function not so named, a comparison: byte-identical. RD1-RD2 [P] the table's reads (a caller's local bound to the function's call, a
 #   .get( in the same file, RD3 a chained self._routes) are lr rows when the answer names the table; RD-N1 [G] not named: no lr; RD-N2 [G] a same-named read in an unrelated file: none.
+#   CR-569 ([P] = red on 3603b8aef): SW-N4/N5 a hex or digit-separated literal key; SW-N6 a write inside a multi-line string (SW5 [G] twin: a string value);
+#   SW-N7 a hit in a later statement of the line; RD-N3 a nested call binds no alias; RD4 comment reads, several reads on a line, a writer-file alias;
+#   RD5 a TS const binding; RD-F1/RD-F2 [G] the caller-file cap floor and its twin.
 #   N25a [P] a module-level register(wrap(x)) call row (tbl="item") is nested like the in-function one; N25b [P] a later hit of the line that is a direct argument makes the registration strong (CodeRabbit #560).
 #
 # Usage:  bash test/forregrowcheck.sh [BIN]   (BIN is $1, else RIPWIRE_BIN, else build/ripwire). Exits non-zero on any failure.
@@ -457,6 +460,97 @@ export function registerRoutes(table: Record<string, Fn>, ver: string) {
 }
 export function tsRouteMarker(): void {}
 TS
+# CR-569: sibling shapes of the subscript write and its readers (each arm below names the review finding it pins)
+cat > "$RF/sub/ha/numkeys.py" <<'PY'
+def register_num_handlers(handlers):
+    handlers[0x10] = hex_key_marker
+    handlers[1_000] = num_sep_marker
+
+
+def register_doc_example(handlers, key):
+    text = """
+    handlers[key] = doc_str_marker
+    """
+    handlers[key] = "doc_val_marker"
+    return text
+
+
+def hex_key_marker():
+    return 1
+
+
+def num_sep_marker():
+    return 2
+
+
+def doc_str_marker():
+    return 3
+
+
+def doc_val_marker():
+    return 4
+PY
+cat >> "$RF/sub/ha/registry.py" <<'PY'
+
+
+def triple_marker(handlers, a, b, c):
+    # handlers.get(name + "_svc") in a comment is no read
+    return consume(handlers[a], handlers[b], handlers[c])
+
+
+def setup_marker(names):
+    table = async_register_handlers({}, names)
+    return table["x_svc"]
+PY
+cat > "$RF/sub/registry/later.go" <<'GO'
+package registry
+
+func NewLaterStorage(key string, other Storage) map[string]Storage {
+	storage := map[string]Storage{}
+	storage[key+"/l"] = other; consume(LaterStmtMarker)
+	return storage
+}
+
+type LaterStmtMarker struct{}
+GO
+cat > "$RF/sub/api/nested.go" <<'GO'
+package api
+
+func InstallNestedMarker(p *legacyProvider) {
+	s := chooseOtherTable(p.NewRESTStorage())
+	serve(s["pods/log"])
+}
+GO
+cat > "$RF/sub/web/app.ts" <<'TS'
+import { registerRoutes } from "./routes";
+export function bootRoutes(ver: string) {
+  const routes = registerRoutes({}, ver);
+  return routes[`/api/${ver}`];
+}
+TS
+mkdir -p "$RF/sub/floor"
+cat > "$RF/sub/floor/reg.go" <<'GO'
+package floor
+
+func NewFloorA(k string) map[string]int {
+	fa := map[string]int{}
+	fa[k+"/a"] = FloorMarkerA
+	return fa
+}
+
+func NewFloorB(k string) map[string]int {
+	fb := map[string]int{}
+	fb[k+"/b"] = FloorMarkerB
+	return fb
+}
+
+const FloorMarkerA = 1
+const FloorMarkerB = 2
+GO
+for n in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17; do
+    if [ "$n" = 17 ]; then both='NewFloorA("x")'; else both='NewFloorA("x"); NewFloorB("x")'; fi
+    printf 'package floor\n\nfunc use%s() {\n\t%s\n}\n' "$n" "$both" > "$RF/sub/floor/c$n.go"
+done
 call(){ ( cd "$RF" || exit 1; "$BIN" "$RF" --no-cache "$@" </dev/null 2>/dev/null ); }
 offc(){ ( cd "$RF" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$RF" --no-cache "$@" </dev/null 2>/dev/null ); }
 lits(){ python3 -I -c 'import sys,re;s=sys.stdin.read();print("".join(re.findall(r"<lit [^>]*>.*?</lit>",s,re.S)))'; }
@@ -704,6 +798,38 @@ if ask 'where does register_hub_marker register hub_route_marker'; then L="$( li
     else no "RD3 chained table: ${L:0:900}"; fi
     if printf '%s' "$A" | xmllint --noout - 2>/dev/null || ! command -v xmllint >/dev/null 2>&1; then ok "RD-X [G] an answer with lr rows is well-formed (or xmllint missing: SKIP)"; else no "RD-X not well-formed"; fi
 else no "RD3 call failed rc=$RC"; fi
+# -- CR-569 (review of 48a0a7a41): [P] = red on 3603b8aef
+if ask 'where is hex_key_marker registered'; then L="$( lits <<<"$A" )"
+    if ! has "$L" 'reg="handlers[0x10] ="'; then ok "SW-N4 [P] a hex literal key (handlers[0x10] = f) is a literal, no subscript row"; else no "SW-N4 hex key row: ${L:0:400}"; fi
+else no "SW-N4 call failed rc=$RC"; fi
+if ask 'where is num_sep_marker registered'; then L="$( lits <<<"$A" )"
+    if ! has "$L" 'reg="handlers[1_000] ="'; then ok "SW-N5 [P] a digit-separated literal key (handlers[1_000] = f) is a literal, no subscript row"; else no "SW-N5 1_000 key row: ${L:0:400}"; fi
+else no "SW-N5 call failed rc=$RC"; fi
+if ask 'where is doc_str_marker registered'; then L="$( lits <<<"$A" )"
+    if ! has "$L" 'reg="handlers[key] ="'; then ok "SW-N6 [P] a subscript write inside a multi-line string is no reg= row"; else no "SW-N6 string example row: ${L:0:400}"; fi
+else no "SW-N6 call failed rc=$RC"; fi
+if ask 'where is doc_val_marker registered'; then L="$( lits <<<"$A" )"
+    if has "$L" 'reg="handlers[key] ="'; then ok "SW5 [G] twin: a code write whose value is a string (handlers[key] = \"x\") stays a reg= row"; else no "SW5 string-valued write: ${L:0:400}"; fi
+else no "SW5 call failed rc=$RC"; fi
+if ask 'where is LaterStmtMarker registered'; then L="$( lits <<<"$A" )"
+    if ! has "$L" 'reg="storage[key+&quot;/l&quot;] ="'; then ok "SW-N7 [P] a hit in a later statement of the line (storage[k] = v; consume(x)) is not the write's: no row"; else no "SW-N7 later-statement row: ${L:0:400}"; fi
+else no "SW-N7 call failed rc=$RC"; fi
+if ask 'where does NewRESTStorage register LogMarkerREST'; then L="$( lits <<<"$A" )"
+    if ! has "$L" 'sub/api/nested.go' && has "$L" 'readers="2"'; then ok "RD-N3 [P] s := chooseOtherTable(p.NewRESTStorage()) binds what chooseOtherTable returns: s[k] is no reader (readers=2)"; else no "RD-N3 nested-call alias: ${L:0:900}"; fi
+else no "RD-N3 call failed rc=$RC"; fi
+if ask 'where does async_register_handlers register handle_py_marker'; then L="$( lits <<<"$A" )"
+    if ! has "$L" '# handlers.get' && has "$L" 'readers="5"' && has "$L" 'table["x_svc"]'; then ok "RD4 [P] Python: a comment is no read, three reads on one line count three, a writer-file local bound to the call is a reader (readers=5, its lr row listed)"
+    else no "RD4 Python readers: ${L:0:1200}"; fi
+else no "RD4 call failed rc=$RC"; fi
+if ask 'where does registerRoutes register tsRouteMarker'; then L="$( lits <<<"$A" )"
+    if has "$L" '<lr p="sub/web/app.ts" l="4"'; then ok "RD5 [P] TypeScript: const routes = registerRoutes( binds routes (not const): routes[k] is an lr row"; else no "RD5 TS const binding: ${L:0:900}"; fi
+else no "RD5 call failed rc=$RC"; fi
+if ask 'where does NewFloorA register FloorMarkerA'; then L="$( lits <<<"$A" )"
+    if has "$L" 'reg="fa[k+&quot;/a&quot;] ="' && has "$L" 'readers="' && has "$L" 'floor="1"'; then ok "RD-F1 [G] 17 caller files, past the 16 read: readers= is a floor (floor=\"1\")"; else no "RD-F1 reader floor: ${L:0:900}"; fi
+else no "RD-F1 call failed rc=$RC"; fi
+if ask 'where does NewFloorB register FloorMarkerB'; then L="$( lits <<<"$A" )"
+    if has "$L" 'reg="fb[k+&quot;/b&quot;] ="' && ! has "$L" 'floor="1"'; then ok "RD-F2 [G] twin: 16 caller files, all read: no floor"; else no "RD-F2 reader no-floor twin: ${L:0:900}"; fi
+else no "RD-F2 call failed rc=$RC"; fi
 # X1 [G]
 A1="$( call '--for=Where is barrier_interval_ms defined and what reads it?' )"; A2="$( call '--for=Where is barrier_interval_ms defined and what reads it?' )"
 if [ -n "$A1" ] && [ "$A1" = "$A2" ]; then ok "X1a determinism"; else no "X1a two runs differ or empty"; fi

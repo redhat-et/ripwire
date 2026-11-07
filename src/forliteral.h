@@ -1141,6 +1141,7 @@ struct Site
     bool        regDirect = false;  // regCall: the site is a direct argument of that call (registrationCallOf's direct), no inner call, index or object between
     bool        itemNested = false; // tbl="item" (a top-level call row) whose hit is NOT a direct argument of a registration call on it (`register(wrap(x))`): not strong
     bool        subscript = false;  // REG-READER (a): regCall from a subscript write with a computed key (`storage[resource+"/log"] = x`) in a New*/Register* function
+    bool        leadInString = false;   // k='s' and the line's first non-blank byte is in a string too: a line of a multi-line string, no statement of its own
     std::string table;              // subscript: the table written (`storage`, `hass.data[DOMAIN]`), the text before its last `[`
     std::vector<std::uint32_t> more;   // shape=table: the byte offsets of the later hits on this line (the first is raw.byteOffset), at most kForRegLineHits
 };
@@ -2568,11 +2569,11 @@ inline bool isRegistrarFnName( std::string_view name ) noexcept
     return lead( "New" ) || lead( "new" ) || lead( "Register" ) || lead( "register" );
 }
 
-// the close of the bracket group opened at `open` (quotes skipped), or npos when the line ends first
-inline std::size_t bracketCloseOf( std::string_view t, std::size_t open ) noexcept
+// the first byte of `t` from `from` on, outside quotes, at which `stop( i, c )` says true, or npos when the line ends first
+template <class Stop>
+inline std::size_t firstUnquotedWhere( std::string_view t, std::size_t from, Stop&& stop ) noexcept
 {
-    int depth = 0;
-    for( std::size_t i = open; i < t.size(); ++i )
+    for( std::size_t i = from; i < t.size(); ++i )
     {
         const char c = t[i];
         if( c == '"' || c == '\'' || c == '`' )
@@ -2582,13 +2583,19 @@ inline std::size_t bracketCloseOf( std::string_view t, std::size_t open ) noexce
             }
             continue;
         }
-        depth += c == '[' ? 1 : ( c == ']' ? -1 : 0 );
-        if( depth == 0 )
+        if( stop( i, c ) )
         {
             return i;
         }
     }
     return std::string_view::npos;
+}
+
+// the close of the bracket group opened at `open` (quotes skipped), or npos when the line ends first
+inline std::size_t bracketCloseOf( std::string_view t, std::size_t open ) noexcept
+{
+    int depth = 0;
+    return firstUnquotedWhere( t, open, [ & ]( std::size_t, char c ) { depth += c == '[' ? 1 : ( c == ']' ? -1 : 0 ); return depth == 0; } );
 }
 
 // one subscript write a line opens with: `recv[key] = v` (recv a name chain: `a.b`, `a->b`, `a::b`, earlier index groups `hass.data[DOMAIN]`). Offsets are
@@ -2643,7 +2650,21 @@ inline std::optional<SubscriptWrite> subscriptWriteOf( std::string_view t ) noex
     return w;
 }
 
-// a key that is one literal (`"pods"`, `'k'`, `3`): the table rule's own business, not a computed key
+// the end of the statement that starts at `t` (a `;` outside quotes and bracket groups), or t.size(): a later statement on the line is not the write
+inline std::size_t statementEndOf( std::string_view t ) noexcept
+{
+    static constexpr std::string_view kOpens = "([{", kCloses = ")]}";
+    int                               depth  = 0;
+    const std::size_t                 end    = firstUnquotedWhere( t, 0,
+                                                    [ & ]( std::size_t, char c )
+                                                    {
+                                                        depth += kOpens.find( c ) != std::string_view::npos ? 1 : ( kCloses.find( c ) != std::string_view::npos ? -1 : 0 );
+                                                        return c == ';' && depth <= 0;
+                                                    } );
+    return end == std::string_view::npos ? t.size() : end;
+}
+
+// a key that is one literal (`"pods"`, `'k'`, `3`, `-1`, `0x10`, `1_000`, `2.5`): the table rule's own business, not a computed key
 inline bool isLiteralKey( std::string_view key ) noexcept
 {
     key = trimWs( key );
@@ -2658,14 +2679,18 @@ inline bool isLiteralKey( std::string_view key ) noexcept
     }
     const bool substituted = key.front() == '`' && key.find( "${" ) != std::string_view::npos;   // a template literal with a substitution is computed
     const bool quoted    = key.size() >= 2 && ( key.front() == '"' || key.front() == '\'' || key.front() == '`' ) && close == key.size() - 1 && !substituted;
-    return quoted || std::all_of( key.begin(), key.end(), []( char c ) { return std::isdigit( static_cast<unsigned char>( c ) ) != 0 || c == '-'; } );
+    const std::size_t sign   = key.front() == '-' || key.front() == '+' ? 1 : 0;   // a number token: a digit first, then digits, letters (0x, e, L), `_` or `.`
+    const bool        number = sign < key.size() && std::isdigit( static_cast<unsigned char>( key[sign] ) ) != 0
+                        && std::all_of( key.begin() + std::ptrdiff_t( sign ), key.end(),
+                                        []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '.'; } );
+    return quoted || number;
 }
 
 // REG-READER (a): a row whose hit is the key or the value of a subscript write with a computed key, in a function named for building or registering,
 // is a registration: reg= `table[key] =`. A hit in the table's own name is none (every write of it would be a row).
 inline void subscriptRowOf( std::string_view text, Site& row, std::string_view enclosingName )
 {
-    if( row.longer || !isRegistrarFnName( enclosingName ) || row.raw.byteOffset >= text.size() )
+    if( row.longer || row.leadInString || !isRegistrarFnName( enclosingName ) || row.raw.byteOffset >= text.size() )
     {
         return;
     }
@@ -2683,8 +2708,10 @@ inline void subscriptRowOf( std::string_view text, Site& row, std::string_view e
     {
         return;
     }
-    const std::size_t keyAt = start + lead + w->open;
-    const bool hitPast = row.raw.byteOffset >= keyAt || std::any_of( row.more.begin(), row.more.end(), [ & ]( std::uint32_t m ) { return m >= keyAt; } );
+    const std::size_t keyAt   = start + lead + w->open;
+    const std::size_t stmtEnd = start + lead + statementEndOf( t );   // `storage[k] = v; consume(x)`: a hit in `consume(x)` is not the write's
+    const auto        inWrite = [ & ]( std::size_t at ) { return at >= keyAt && at < stmtEnd; };
+    const bool hitPast = inWrite( row.raw.byteOffset ) || std::any_of( row.more.begin(), row.more.end(), [ & ]( std::uint32_t m ) { return inWrite( m ); } );
     if( !hitPast || isLiteralKey( t.substr( w->open + 1, w->close - w->open - 1 ) ) )
     {
         return;
@@ -3860,31 +3887,50 @@ inline bool readsTableAt( std::string_view line, std::size_t at, std::string_vie
     return !( j != std::string_view::npos && line[j] == '=' && ( j + 1 >= line.size() || line[j + 1] != '=' ) );
 }
 
-// a caller's local that holds what the builder returns: `s := p.NewRESTStorage(`, `s, err := NewX(`, `s = await register_x(`; "" when the line is none
+// `v` (an assigned value, `await` aside) IS a call of `fn`: a receiver chain (`p.`, `self->`, `ns::`) and then `fn(`
+inline bool valueIsCallOf( std::string_view v, std::string_view fn ) noexcept
+{
+    v = v.starts_with( "await " ) ? trimWs( v.substr( 6 ) ) : v;
+    while( !v.empty() && std::isdigit( static_cast<unsigned char>( v.front() ) ) == 0 )
+    {
+        const std::string_view run  = taskroute::identifierRunOf( v );
+        const std::string_view rest = v.substr( run.size() );
+        if( run.empty() || ( run == fn && trimWs( rest ).starts_with( "(" ) ) )
+        {
+            return !run.empty();
+        }
+        const std::size_t sep = rest.starts_with( "->" ) || rest.starts_with( "::" ) ? 2 : ( rest.starts_with( "." ) ? 1 : 0 );
+        if( sep == 0 )
+        {
+            return false;
+        }
+        v = rest.substr( sep );
+    }
+    return false;
+}
+
+// a line's statement with a leading declaration word (`const`, `let`, `var`, `auto`, `final`, `val`) stepped over: the declared name comes first
+inline std::string_view pastDeclWord( std::string_view t ) noexcept
+{
+    static constexpr std::array<std::string_view, 6> kDeclWords{ "auto", "const", "final", "let", "val", "var" };
+    const std::string_view                           word = taskroute::identifierRunOf( t );
+    const bool decl = std::find( kDeclWords.begin(), kDeclWords.end(), word ) != kDeclWords.end() && word.size() < t.size() && ( t[word.size()] == ' ' || t[word.size()] == '\t' );
+    return decl ? trimWs( t.substr( word.size() ) ) : t;
+}
+
+// a caller's local that holds what the builder returns: `s := p.NewRESTStorage(`, `s, err := NewX(`, `s = await register_x(`, `const s = registerX(`; "" when the
+// line is none. The call must BE the assigned value (a receiver chain before it, `await` aside): `s = choose(NewX())` binds what choose returns, not the table.
 inline std::string_view boundToCallOf( std::string_view line, std::string_view fn ) noexcept
 {
-    const std::size_t      lead = line.find_first_not_of( " \t" );
-    const std::string_view t    = lead == std::string_view::npos ? std::string_view() : line.substr( lead );
+    const std::string_view t    = pastDeclWord( trimWs( line ) );
     const std::string_view name = taskroute::identifierRunOf( t );
     std::size_t            i    = name.size();
     while( i < t.size() && ( t[i] == ' ' || t[i] == ',' || taskroute::wordByte( t[i] ) ) )
     {
         ++i;   // `s, err` before the assignment
     }
-    const bool assigns = t.substr( i ).starts_with( ":=" ) || ( i < t.size() && t[i] == '=' && ( i + 1 >= t.size() || t[i + 1] != '=' ) );
-    if( name.empty() || !assigns || fn.empty() )
-    {
-        return {};
-    }
-    for( std::size_t at = t.find( fn, i ); at != std::string_view::npos; at = t.find( fn, at + 1 ) )
-    {
-        const std::size_t open = t.find_first_not_of( " \t", at + fn.size() );
-        if( !taskroute::wordByte( t[at - 1] ) && open != std::string_view::npos && t[open] == '(' )
-        {
-            return name;
-        }
-    }
-    return {};
+    const std::size_t op = t.substr( i ).starts_with( ":=" ) ? 2 : ( i < t.size() && t[i] == '=' && ( i + 1 >= t.size() || t[i + 1] != '=' ) ? 1 : 0 );
+    return !name.empty() && op != 0 && !fn.empty() && valueIsCallOf( trimWs( t.substr( i + op ) ), fn ) ? name : std::string_view();
 }
 
 // the quoted parts of a computed key (`resource+"/log"` -> "/log"), which a reader's literal key shares
@@ -3926,6 +3972,7 @@ inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const 
     std::vector<std::uint32_t> files{ rowFile };
     if( g == nullptr || std::size_t( owner ) >= g->inEdges.rows() )
     {
+        floor = true;   // no graph to find the callers on: their files went unread, so readers= cannot be a total
         return files;
     }
     const auto*                ro = g->inEdges.rowOffsets();
@@ -3943,10 +3990,10 @@ inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const 
     return files;
 }
 
-// the first read of any of `names` on `line` (npos: none): a walk over the line's identifier runs, each run that is a name tried as a read
-inline std::size_t tableReadOnLine( std::string_view line, const std::vector<std::string>& names ) noexcept
+// the first read of any of `names` on `line` at or past `from` (npos: none): a walk over the line's identifier runs, each run that is a name tried as a read
+inline std::size_t tableReadOnLine( std::string_view line, const std::vector<std::string>& names, std::size_t from = 0 ) noexcept
 {
-    std::size_t i = 0;
+    std::size_t i = from;
     while( i < line.size() )
     {
         const std::size_t run = taskroute::identifierRunOf( line.substr( i ) ).size();
@@ -3965,9 +4012,27 @@ inline std::size_t tableReadOnLine( std::string_view line, const std::vector<std
     return std::string_view::npos;
 }
 
-// one file's reads of the table (`callerFile`: a local bound to the call of `fn` reads it too), each with 0 when its line shares a quoted part of the key
-inline void tableReadsInFile( std::string_view text, std::uint32_t fileId, bool callerFile, std::string_view fn, const std::string& table,
-                              std::span<const std::string_view> parts, std::vector<std::pair<int, GrepRawHit>>& found )
+// the reads of `names` on the line at byte `ls` that stand in code (a comment or a string holds none), each one added to `count` (`consume(t[a], t[b])` is
+// two); the first one's offset in the line, or npos
+inline std::size_t codeReadsOnLine( std::string_view line, std::size_t ls, const std::vector<std::string>& names, const SpanTierMap& tiers, std::size_t& count ) noexcept
+{
+    std::size_t first = std::string_view::npos;
+    for( std::size_t at = tableReadOnLine( line, names ); at != std::string_view::npos; at = tableReadOnLine( line, names, at + 1 ) )
+    {
+        const SpanTier tier = spanTierAt( tiers, std::uint32_t( ls + at ) );
+        if( tier != SpanTier::Comment && tier != SpanTier::String )
+        {
+            ++count;
+            first = std::min( first, at );
+        }
+    }
+    return first;
+}
+
+// one file's reads of the table (a local bound to the call of `fn` reads it too, in the writer's file as in a caller's), the reads in a comment or a string
+// (`tiers`) left out: every read is counted in `count`, and each line holding one is a row, with 0 when the line shares a quoted part of the key
+inline void tableReadsInFile( std::string_view text, std::uint32_t fileId, const SpanTierMap& tiers, std::string_view fn, const std::string& table,
+                              std::span<const std::string_view> parts, std::vector<std::pair<int, GrepRawHit>>& found, std::size_t& count )
 {
     std::vector<std::string> names{ table };
     std::uint32_t            lineNo = 1;
@@ -3975,19 +4040,50 @@ inline void tableReadsInFile( std::string_view text, std::uint32_t fileId, bool 
     {
         const std::size_t      le    = std::min( text.find( '\n', ls ), text.size() );
         const std::string_view line  = text.substr( ls, le - ls );
-        const std::string_view bound = callerFile ? boundToCallOf( line, fn ) : std::string_view();
+        const std::string_view bound = boundToCallOf( line, fn );
         if( !bound.empty() && std::find( names.begin(), names.end(), bound ) == names.end() )
         {
             names.emplace_back( bound );
         }
-        const std::size_t at = tableReadOnLine( line, names );
-        if( at != std::string_view::npos )
+        const std::size_t first = codeReadsOnLine( line, ls, names, tiers, count );
+        if( first != std::string_view::npos )
         {
             const bool shares = std::any_of( parts.begin(), parts.end(), [ & ]( std::string_view p ) { return line.find( p ) != std::string_view::npos; } );
-            found.emplace_back( shares ? 0 : 1, GrepRawHit{ fileId, lineNo, std::uint32_t( ls + at ) } );
+            found.emplace_back( shares ? 0 : 1, GrepRawHit{ fileId, lineNo, std::uint32_t( ls + first ) } );
         }
         ls = le + 1;
     }
+}
+
+// the answer above the block names `table`: raw in a CDATA body, or escaped in an attribute (`p-&gt;storage` in a signature)
+inline bool answerNamesTable( std::string_view served, const std::string& table, std::vector<char>& esc )
+{
+    const std::string escaped( escapeXml( table, esc ) );
+    return taskHasCue( served, std::array<DocNoiseCue, 1>{ DocNoiseCue{ table, false } } )
+           || ( escaped != table && taskHasCue( served, std::array<DocNoiseCue, 1>{ DocNoiseCue{ escaped, false } } ) );
+}
+
+// the reads of `table` in `files` (each read once, its comment/string spans from the span tier: a file it did not parse keeps every read); `out.count` counts
+// them, `out.floor` is set when a file could not be read
+inline std::vector<std::pair<int, GrepRawHit>> tableReadsInFiles( const IngestResult& ing, const std::vector<std::uint32_t>& files, bool useMemo, std::string_view fn,
+                                                                  const std::string& table, std::span<const std::string_view> parts, TableReaders& out )
+{
+    std::vector<std::string> paths;
+    for( const std::uint32_t f : files )
+    {
+        paths.push_back( diskPath( ing, f ) );
+    }
+    const SpanTierBatch                     tiers = spanTiersOfFiles( std::span<const std::string>( paths ), useMemo );
+    const SpanTierMap                       unparsed;   // Code everywhere: a read is kept where the tier is unknown
+    std::vector<std::pair<int, GrepRawHit>> found;
+    for( std::size_t f = 0; f < files.size(); ++f )
+    {
+        const std::optional<std::string> read = docparse::detail::readWholeFile( paths[f] );
+        out.floor                            = out.floor || !read.has_value();
+        tableReadsInFile( read ? std::string_view( *read ) : std::string_view(), files[f], f < tiers.perFile.size() ? tiers.perFile[f] : unparsed, fn, table, parts, found,
+                          out.count );
+    }
+    return found;
 }
 
 // REG-READER (b): the reads of the table the first shown subscript row writes, in the row's file and the files of its function's callers. Only for a table the
@@ -3995,12 +4091,11 @@ inline void tableReadsInFile( std::string_view text, std::uint32_t fileId, bool 
 // first, then file (the row's own, then callers' by path) and line order.
 template <class RelPath>
 inline TableReaders tableReadersOf( const IngestResult& ing, const Graph* g, const std::vector<Site>& rows, const std::vector<GrepHit>& hits, std::size_t shown,
-                                    std::string_view served, const RelPath& relPath, RedactCounts* redact, std::vector<char>& esc )
+                                    std::string_view served, const RelPath& relPath, RedactCounts* redact, std::vector<char>& esc, bool useMemo )
 {
     TableReaders out;
     std::size_t  pick = 0;
-    while( pick < shown && !( rows[pick].subscript && hits[pick].enclosingId != kNoNode
-                              && taskHasCue( served, std::array<DocNoiseCue, 1>{ DocNoiseCue{ rows[pick].table, false } } ) ) )
+    while( pick < shown && !( rows[pick].subscript && hits[pick].enclosingId != kNoNode && answerNamesTable( served, rows[pick].table, esc ) ) )
     {
         ++pick;
     }
@@ -4014,15 +4109,8 @@ inline TableReaders tableReadersOf( const IngestResult& ing, const Graph* g, con
     const std::string_view              fn    = std::string_view( name ).substr( dot == std::string::npos ? 0 : dot + 1 );
     const std::vector<std::uint32_t>    files = readerFilesOf( ing, g, hits[pick].enclosingId, row.raw.fileId, out.floor );
     const std::vector<std::string_view> parts = quotedPartsOf( std::string_view( row.tbl ).substr( row.table.size() ) );
-    std::vector<std::pair<int, GrepRawHit>> found;
-    for( std::size_t f = 0; f < files.size(); ++f )
-    {
-        const std::optional<std::string> read = docparse::detail::readWholeFile( diskPath( ing, files[f] ) );
-        out.floor                            = out.floor || !read.has_value();
-        tableReadsInFile( read ? std::string_view( *read ) : std::string_view(), files[f], f > 0, fn, row.table, parts, found );
-    }
+    std::vector<std::pair<int, GrepRawHit>> found = tableReadsInFiles( ing, files, useMemo, fn, row.table, parts, out );
     std::stable_sort( found.begin(), found.end(), []( const auto& a, const auto& b ) { return a.first < b.first; } );
-    out.count = found.size();
     std::vector<GrepRawHit> raw;
     for( std::size_t k = 0; k < found.size() && k < kForTableReaderRows; ++k )
     {
@@ -4152,6 +4240,13 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                 }
             }
             s.k = t == SpanTier::String ? 's' : 'c';
+            if( s.k == 's' )
+            {
+                loadFile( s.raw.fileId );
+                const std::size_t nl   = s.raw.byteOffset == 0 ? std::string::npos : loadedText.rfind( '\n', s.raw.byteOffset - 1 );
+                const std::size_t lead = loadedText.find_first_not_of( " \t", nl == std::string::npos ? 0 : nl + 1 );
+                s.leadInString         = lead != std::string::npos && spanTierAt( m, std::uint32_t( lead ) ) == SpanTier::String;
+            }
         }
         else
         {
@@ -4451,7 +4546,11 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     lit_detail::TableReaders readers;
     if( policy.tableRows )
     {
-        readers = lit_detail::tableReadersOf( ing, anchors.g, rows, hits, shownRowCount, served, relPath, redact, esc );
+        readers = lit_detail::tableReadersOf( ing, anchors.g, rows, hits, shownRowCount, served, relPath, redact, esc, useMemo );
+        if( rowsXml.size() + bodiesXml.size() + readers.xml.size() > limits.byteCap )
+        {
+            readers.xml.clear();   // the lr rows do not fit what the cap left: readers= still counts every read, so none listed says they were cut
+        }
     }
     const bool subscriptShown = policy.tableRows && std::any_of( rows.begin(), rows.begin() + std::ptrdiff_t( shownRowCount ), []( const lit_detail::Site& r ) { return r.subscript; } );
     if( byteCut && shownRowCount == 0 )
