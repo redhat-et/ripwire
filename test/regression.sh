@@ -530,6 +530,7 @@ for _g in \
     fordispatchhopcheck \
     forexemplarcheck \
     forfileanchorcheck \
+    forfilesymscheck \
     forhdrshapecheck \
     forheadrrcheck \
     forinitslotscheck \
@@ -876,6 +877,7 @@ for _g in \
     recallshapecheck \
     recalltablecheck \
     recalltotalcheck \
+    recallwindowcheck \
     receiptpostcheck \
     receiverevidencecheck \
     receiverfixescheck \
@@ -932,6 +934,7 @@ for _g in \
     rustanccheck \
     rustimportprecisecheck \
     rustqualcheck \
+    rustrootscheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
@@ -1042,6 +1045,7 @@ for _g in \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \
+    warmpeakcheck \
     weaksignalcheck \
     withgraphcheck \
     withprofilecheck \

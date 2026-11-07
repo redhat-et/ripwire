@@ -11,6 +11,7 @@
 // mcpedit.h, and mcp.h. Also carries the index-side mcpdetail helpers (mtime/stat/watcher/
 // byte-hash/handle codec) — the JSON-side mcpdetail helpers live in mcpjson.h (same namespace).
 
+#include "infra/sharedOnce.h"   // sharedOnce — valueRefIndexOf
 #include "mcpjson.h"
 
 #include "model.h"
@@ -1173,12 +1174,11 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
 // resets it — see McpIndex::valueRefs).
 inline const ValueRefIndex& valueRefIndexOf( const McpIndex& ix )
 {
-    if( !ix.valueRefs )
-    {
-        ix.valueRefs = std::make_shared<const ValueRefIndex>( ix.ing );
-        ++ix.valueRefBuilds;
-    }
-    return *ix.valueRefs;
+    return sharedOnce( ix.valueRefs, [ & ]
+                       {
+                           ++ix.valueRefBuilds;
+                           return std::make_shared<const ValueRefIndex>( ix.ing );
+                       } );
 }
 
 // notfound-on-cut: the memory-guard sentence an ERROR from `root` carries when the resident index for that root is the one the

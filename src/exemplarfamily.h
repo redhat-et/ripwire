@@ -28,6 +28,7 @@
 #include "docparse.h" // detail::readWholeFile
 #include "filter.h" // isTestPath
 #include "graph.h"
+#include "infra/enumcount.h" // enumCountIsExact — kExemplarRuleTags has one row per ExemplarRule value
 #include "infra/sortutil.h" // svLess — the portable string_view order
 #include "infra/namesplit.h" // isIdentChar, stripQuotePair — the shared identifier byte and quote strip
 #include "langfacts.h" // typedInstanceRows
@@ -66,7 +67,11 @@ enum class ExemplarRule : std::uint8_t
     Affix
 };
 
-inline constexpr std::array<std::string_view, 5> kExemplarRuleTags { "base", "registry", "typed", "attribute", "affix" };
+inline constexpr std::array kExemplarRuleTags = { std::string_view( "base" ), std::string_view( "registry" ), std::string_view( "typed" ), std::string_view( "attribute" ),
+                                                  std::string_view( "affix" ) }; // indexed by ExemplarRule
+inline constexpr std::size_t kExemplarRuleCount = 5;
+static_assert( enumCountIsExact<ExemplarRule, kExemplarRuleCount>(), "kExemplarRuleCount must equal the ExemplarRule count — raise it with the append" );
+static_assert( kExemplarRuleTags.size() == kExemplarRuleCount, "one kExemplarRuleTags row per ExemplarRule value (the extent is deduced from the rows)" );
 
 // What the task asks to add: the phrase as written, its words (lowercased, split on '-' and '_', plural -s dropped), the head word.
 struct ExemplarTask
@@ -96,6 +101,8 @@ struct ExemplarFamily
     std::size_t score = 0; // task words in the key and scope, +1 when the key names X
     std::string matched; // those task words, space-joined: why this family won (the words of of= it holds)
     std::vector<ExemplarMember> members; // every non-test member in scope, typical first
+    std::uint32_t unread = 0; // what the scan that found this family could not look at (set by the renderer; printed as unread= / oversized=)
+    std::uint32_t oversized = 0;
 
     void add( const Symbol& s ) { members.push_back( ExemplarMember { s.name, s.fileId, s.line, s.loc, {} } ); }
 };
@@ -120,7 +127,8 @@ inline std::string singular( std::string w )
     return w;
 }
 
-// The task as lowercased words; a punctuation boundary (, ; : ? ! ( ) ` " or a sentence `.`) is an empty word.
+// The task as lowercased words; a punctuation boundary (, ; : ? ! ( ) ` ") is an empty word and a sentence end (a word's trailing `.`)
+// is the word ".", which stops a phrase like a boundary and ends a creation verb's reach (exemplarTasksOf).
 inline std::vector<std::string> taskWords( std::string_view task )
 {
     static constexpr std::string_view kBoundary = ",;:?!()`\"";
@@ -140,7 +148,7 @@ inline std::vector<std::string> taskWords( std::string_view task )
         }
         if( sentence )
         {
-            out.emplace_back();
+            out.emplace_back( "." );
         }
         cur.clear();
     };
@@ -202,7 +210,7 @@ inline std::size_t phraseAfterAnother( const std::vector<std::string>& w, std::s
     {
         return std::string::npos;
     }
-    for( std::size_t k = i + 1; k < w.size() && k <= i + kExemplarPhraseWordsMax && !w[k].empty(); ++k )
+    for( std::size_t k = i + 1; k < w.size() && k <= i + kExemplarPhraseWordsMax && !w[k].empty() && w[k] != "."; ++k )
     {
         if( w[k] == "like" )
         {
@@ -257,6 +265,12 @@ inline std::optional<ExemplarTask> readPhrase( const std::vector<std::string>& w
     }
     return t;
 }
+
+// `a new X` right after a creation verb's earlier words (add support for a new database (a new dialect)), unless the verb is right before it.
+inline bool isBareNew( const std::vector<std::string>& w, std::size_t i, bool verbSeen )
+{
+    return verbSeen && std::ranges::contains( kArticles, w[i] ) && i + 1 < w.size() && w[i + 1] == "new" && ( i == 0 || !std::ranges::contains( kVerbs, w[i - 1] ) );
+}
 } // namespace exemplar_detail
 
 // The add-a-new-X readings of a task, in task order (see WHEN above); empty when it reads as none.
@@ -268,9 +282,12 @@ inline std::vector<ExemplarTask> exemplarTasksOf( std::string_view task )
     bool verbSeen = false;
     for( std::size_t i = 0; i < w.size() && out.size() < kExemplarTaskReadings; ++i )
     {
-        // add support for a new database (a new dialect): each `a new X` after a creation verb, unless the verb is right before it
-        const bool bareNew = verbSeen && std::ranges::contains( kArticles, w[i] ) && i + 1 < w.size() && w[i + 1] == "new" && ( i == 0 || !std::ranges::contains( kVerbs, w[i - 1] ) );
-        std::size_t start = bareNew ? i + 1 : phraseAfterVerb( w, i );
+        if( w[i] == "." )
+        {
+            verbSeen = false; // `Add a field to Foo. A new handler needs wiring`: the verb reaches to the end of its sentence
+            continue;
+        }
+        std::size_t start = isBareNew( w, i, verbSeen ) ? i + 1 : phraseAfterVerb( w, i );
         start = start != std::string::npos ? start : phraseAfterAnother( w, i );
         verbSeen = verbSeen || std::ranges::contains( kVerbs, w[i] );
         if( start == std::string::npos )
@@ -471,12 +488,15 @@ struct FamilyFileText
     const IngestResult& ing;
     std::uint32_t fileId = UINT32_MAX;
     std::string bytes;
+    std::uint32_t unread = 0; // files the scan could not read: their registries and decorators are not in the answer (disclosed as unread=)
     const std::string& text( std::uint32_t f )
     {
         if( f != fileId )
         {
             fileId = f;
-            bytes = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() );
+            std::optional<std::string> read = docparse::detail::readWholeFile( diskPath( ing, f ) );
+            unread += read ? 0 : 1;
+            bytes = std::move( read ).value_or( std::string() );
         }
         return bytes;
     }
@@ -672,7 +692,7 @@ inline std::string_view attributeNameOf( std::string_view line ) noexcept
 // The name an attribute registers: the leading identifier of its first string argument (`#[function("upper(varchar)")]` → upper).
 inline std::string_view attributeArgName( std::string_view line ) noexcept
 {
-    const std::size_t q = line.find( '"' );
+    const std::size_t q = line.find_first_of( "\"'" ); // `@register("name")` and `@register('name')`
     if( q == std::string_view::npos )
     {
         return {};
@@ -799,9 +819,11 @@ struct ExemplarScan
     std::vector<std::pair<NodeId, ExemplarFamily>> registries; // (variable or function, its entries): the candidates named by some reading
     std::vector<std::pair<std::string, NodeId>> typed; // (type, instance) of C / C++ instances whose type holds some reading's head
     std::vector<std::tuple<std::string, NodeId, std::string>> attr; // (attribute, item, registered name) whose attribute holds some head
+    std::uint32_t unread = 0; // files of the scan that could not be read
+    std::uint32_t oversized = 0; // registry candidates (named for a reading or a registry word) over kExemplarBodyScanMaxLoc, not read
 };
 
-// One file's attribute lines: the item an attribute line decorates is the first definition after it (`syms`: the file's symbols).
+// One file's attribute lines: the item an attribute line decorates is the first definition on or after it (`syms`: the file's symbols).
 inline void scanAttributeLines( const IngestResult& ing, std::span<const Symbol> syms, std::string_view txt, std::span<const ExemplarTask> readings, ExemplarScan& out )
 {
     std::size_t symAt = 0;
@@ -816,9 +838,9 @@ inline void scanAttributeLines( const IngestResult& ing, std::span<const Symbol>
         {
             continue;
         }
-        while( symAt < syms.size() && syms[symAt].line <= ln )
+        while( symAt < syms.size() && syms[symAt].line < ln )
         {
-            ++symAt;
+            ++symAt; // a definition on the attribute's own line (`#[function("x")] fn x() {}`) is the item it decorates
         }
         // the head is matched by subtoken, so `@Widget()` holds the head `widget` (no case-sensitive text prefilter)
         if( symAt < syms.size() && memberEligible( ing, syms[symAt] ) && std::ranges::any_of( readings, [&]( const ExemplarTask& r )
@@ -833,9 +855,16 @@ inline void scanAttributeLines( const IngestResult& ing, std::span<const Symbol>
 inline void scanSymbol( FamilyFileText& fc, const std::vector<std::string_view>& structNames, std::span<const ExemplarTask> readings, const Symbol& s, ExemplarScan& out )
 {
     const IngestResult& ing = fc.ing;
-    const bool readable = ( s.kind == SymKind::Var || s.kind == SymKind::Function ) && s.loc >= 2 && s.loc <= kExemplarBodyScanMaxLoc;
-    if( !readable || !memberEligible( ing, s ) )
+    const bool candidate = ( s.kind == SymKind::Var || s.kind == SymKind::Function ) && s.loc >= 2;
+    if( !candidate || !memberEligible( ing, s ) )
     {
+        return;
+    }
+    const bool named = std::ranges::any_of( readings, [&]( const ExemplarTask& r )
+                                            { return registryNamed( r, s.name ); } );
+    if( s.loc > kExemplarBodyScanMaxLoc )
+    {
+        out.oversized += std::uint32_t( named ); // skipped, and said so (oversized=): it may be the one registry the task means
         return;
     }
     if( s.kind == SymKind::Var && langFacts( s.lang ).typedInstanceRows )
@@ -848,8 +877,7 @@ inline void scanSymbol( FamilyFileText& fc, const std::vector<std::string_view>&
             out.typed.emplace_back( std::string( type ), s.id );
         }
     }
-    if( s.loc <= kExemplarFamilyMin || std::ranges::none_of( readings, [&]( const ExemplarTask& r )
-                                                             { return registryNamed( r, s.name ); } ) )
+    if( s.loc <= kExemplarFamilyMin || !named )
     {
         return;
     }
@@ -894,6 +922,7 @@ inline ExemplarScan scanExemplarFiles( const IngestResult& ing, std::span<const 
         }
         i = end;
     }
+    out.unread = fc.unread;
     return out;
 }
 
@@ -1050,7 +1079,7 @@ inline std::optional<ExemplarFamily> exemplarFamily( const IngestResult& ing, co
 // Ranked by share, then count, then path.
 // HOISTING: the forms are hashed once into one sorted array; each file is read and tokenized once, and every token is one bit test
 // plus a binary search on a hit (files x bytes, never files x members x lines).
-inline constexpr std::size_t kExemplarTouchRows = 5; // <touch> rows printed; touch_total= counts all
+inline constexpr std::size_t kExemplarTouchRows = 5; // <touch> rows printed; <touch_list total=> counts all
 inline constexpr std::size_t kExemplarTouchLineMax = 120; // bytes of the mentioning line printed (cut="1" when longer)
 inline constexpr std::size_t kExemplarFormMinBytes = 4; // a folded form shorter than this is not a name (`id`, `max`)
 
@@ -1363,28 +1392,53 @@ inline bool settleShare( ExemplarTouch& t, const TouchUnits& u )
 }
 } // namespace exemplar_detail
 
+// A listing candidate's text, or nullopt: unreadable or over kDefaultMaxFileBytes now (counted in `unread`, which is not the same as not
+// listed), or generated (skipped on purpose).
+inline std::optional<std::string> readTouchCandidate( const IngestResult& ing, std::uint32_t f, std::uint32_t& unread )
+{
+    std::optional<std::string> txt = docparse::detail::readWholeFile( diskPath( ing, f ) );
+    if( !txt || txt->size() > kDefaultMaxFileBytes )
+    {
+        ++unread;
+        return std::nullopt;
+    }
+    return docparse::hasGeneratedMarker( *txt ) ? std::nullopt : std::move( txt );
+}
+
+// The rows of a touch list and what the scan could not look at: `unread` files that were indexed but could not be read, or are over
+// kDefaultMaxFileBytes now, make total= a floor (a qualifying file among them is missing, and a zero is not "none").
+struct ExemplarTouchList
+{
+    std::vector<ExemplarTouch> rows;
+    std::uint32_t unread = 0;
+};
+
 // The touch list of a family: every file that names at least half of the distinct names, or of the distinct file stems, by the larger
 // share, then the count, then the path.
-inline std::vector<ExemplarTouch> exemplarTouchList( const IngestResult& ing, const ExemplarFamily& fam )
+inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const ExemplarFamily& fam )
 {
     using namespace exemplar_detail;
     const TouchForms forms( touchUnits( ing, fam ) );
     const TouchUnits& u = forms.units;
     std::vector<std::uint32_t> stamp( std::size_t( u.names ) + u.stems, 0 );
-    std::vector<ExemplarTouch> rows;
+    ExemplarTouchList list;
+    std::vector<ExemplarTouch>& rows = list.rows;
     if( u.names + u.stems == 0 )
     {
-        return rows; // too few distinct names and stems to call a mention a pattern
+        return list; // too few distinct names and stems to call a mention a pattern
     }
+    std::vector<std::uint32_t> memberFiles; // a member's file is where the members are, not where they are listed
+    std::ranges::transform( fam.members, std::back_inserter( memberFiles ), &ExemplarMember::fileId );
+    std::ranges::sort( memberFiles );
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         const std::string_view rel = rootRelPath( ing, f );
-        if( touchSkipPath( rel ) )
+        if( touchSkipPath( rel ) || std::ranges::binary_search( memberFiles, f ) )
         {
             continue;
         }
-        const std::optional<std::string> txt = docparse::detail::readWholeFile( diskPath( ing, f ) );
-        if( !txt || txt->size() > kDefaultMaxFileBytes || docparse::hasGeneratedMarker( *txt ) )
+        const std::optional<std::string> txt = readTouchCandidate( ing, f, list.unread );
+        if( !txt )
         {
             continue;
         }
@@ -1402,7 +1456,7 @@ inline std::vector<ExemplarTouch> exemplarTouchList( const IngestResult& ing, co
             return fa > fb;
         }
         return a.mentioned != b.mentioned ? a.mentioned > b.mentioned : sortutil::svLess( rootRelPath( ing, a.fileId ), rootRelPath( ing, b.fileId ) ); } );
-    return rows;
+    return list;
 }
 
 // The family line of a family grouped by names alone (rule=affix): a weak guess, said on the row itself and not only in the legend.
@@ -1417,11 +1471,11 @@ inline constexpr std::string_view kForExemplarFamilyLegend =
     "were narrowed to (the deepest holding half of them), n= the members in scope (test, sample, example and benchmark code excluded). "
     "<m> n= a member, p=file:line, loc= its lines (a registry entry has none); the first <m> is the typical sibling (nearest the median "
     "size), except under rule=registry, where the <m> rows are the first entries in listing order; shown= and capped=\"1\" when fewer <m> rows "
-    "are printed than n=. A registry or instance candidate over 4000 lines is not read. <touch_list> the files outside the members' own that "
+    "are printed than n=. A registry or instance candidate over 4000 lines is not read: oversized=N counts the registry candidates (a function or variable named for a task word or a registry word) skipped for it, and unread=N the files the scan could not read; either may hide a family, and found=\"0\" with one of them means none resolved and a skipped one may be why. <touch_list> the files outside the members' own that "
     "mention at least half of them: where existing siblings are registered or listed (a registry, a name list, an exhaustive match, an "
     "import list), a candidate to edit, not a guarantee; a member is matched by its name, its registered name or its file's stem, with "
     "snake, Camel, kebab and UPPER forms folded, and a name or stem shared by several members counts once. total= such files, shown= and "
-    "capped=\"1\" when fewer rows are printed. <touch> p=file:line the line to copy (a lead to verify when grouping= is weak): the first naming the typical member (the first <m>), "
+    "capped=\"1\" when fewer rows are printed; floor=\"1\" unread=K when K listing files could not be read or are over 4 MiB (total= then counts only the others). <touch> p=file:line the line to copy (a lead to verify when grouping= is weak): the first naming the typical member (the first <m>), "
     "else the first other code line mentioning one, an import line or a comment only when no code line does; share=named/of the distinct "
     "member names the file mentions out of the distinct names (by=\"stem\": the distinct file stems it mentions out of the distinct stems), "
     "its text that line, cut=\"1\" when cut to 120 bytes. Test, docs, vendored, generated, frozen and baseline files are not read. The "
@@ -1432,20 +1486,31 @@ inline constexpr std::string_view kForExemplarFamilyCompactLegend =
     "key=), registry (entries of map key=), typed (instances of struct key=), attribute (items under macro or decorator key=), affix (classes "
     "in one dir named for key=: names alone, weak: grouping= says so); matched= words of of= found in key= or scope= (few: a weak guess); key_p= key's file:line; scope= dir holding "
     "half of them; n= members (tests, samples, examples, benchmarks out); <m> p= file:line, loc= lines, the first nearest the median size (registry: "
-    "listing order); shown=/capped=\"1\": rows cut. <touch_list> total= files outside the members' own naming at least half of them (by name, "
-    "registered name or file stem; a shared name or stem counts once): where siblings are registered; shown=/capped=\"1\": cut. <touch> p= "
+    "listing order); shown=/capped=\"1\": rows cut; oversized=N registry candidates over 4000 lines and unread=N files not read were skipped (a family may hide there; found=\"0\": none resolved). <touch_list> total= files outside the members' own naming at least half of them (by name, "
+    "registered name or file stem; a shared name or stem counts once): where siblings are registered; shown=/capped=\"1\": cut; floor=\"1\" unread=K: K files unreadable or over 4 MiB, total= is a floor. <touch> p= "
     "the line to copy, share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. Tests, docs, "
     "vendored, generated, frozen, baseline files unread. -->";
-static_assert( kForExemplarFamilyLegend.find( "--", 4 ) == kForExemplarFamilyLegend.size() - 3 && kForExemplarFamilyCompactLegend.find( "--", 4 ) == kForExemplarFamilyCompactLegend.size() - 3,
+// The legend of the no-family form (found="0"): short, since it carries no rows to define.
+inline constexpr std::string_view kForExemplarNoFamilyLegend =
+    "<!-- ripwire for exemplar_family: the task reads as adding one more of=, and no family of existing siblings resolved (found=\"0\"), "
+    "but the scan skipped something that may have been it: oversized=N registry candidates (a function or variable named for a task word or "
+    "a registry word) over 4000 lines were not read, unread=N files could not be read. Not in est_tokens -->";
+static_assert( kForExemplarFamilyLegend.find( "--", 4 ) == kForExemplarFamilyLegend.size() - 3 && kForExemplarFamilyCompactLegend.find( "--", 4 ) == kForExemplarFamilyCompactLegend.size() - 3
+                   && kForExemplarNoFamilyLegend.find( "--", 4 ) == kForExemplarNoFamilyLegend.size() - 3,
                "the only double hyphen in a legend comment is its closing: one inside is not well-formed XML" );
 
 // The <touch_list> element of a family: total=, the cap, and one <touch> row per listing file (see the legend).
-inline std::string touchListXml( const IngestResult& ing, const ExemplarFamily& fam, const std::vector<ExemplarTouch>& touch )
+inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchList& list )
 {
+    const std::vector<ExemplarTouch>& touch = list.rows;
     std::vector<char> esc;
     const auto e = [&]( std::string_view s )
     { return std::string( escapeXml( s, esc ) ); };
     std::string out = "<touch_list total=\"" + std::to_string( touch.size() ) + "\"";
+    if( list.unread > 0 )
+    {
+        out += " floor=\"1\" unread=\"" + std::to_string( list.unread ) + "\""; // total= counts only the files that could be read
+    }
     if( touch.size() > kExemplarTouchRows )
     {
         out += " shown=\"" + std::to_string( kExemplarTouchRows ) + "\" capped=\"1\""; // CAP-DISCLOSE
@@ -1467,6 +1532,13 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarFamily& 
     return out;
 }
 
+// The ` unread=` / ` oversized=` attributes of a scan that skipped something ("" when it skipped nothing).
+inline std::string scanSkipAttrs( std::uint32_t unread, std::uint32_t oversized )
+{
+    return ( unread > 0 ? " unread=\"" + std::to_string( unread ) + "\"" : std::string() )
+           + ( oversized > 0 ? " oversized=\"" + std::to_string( oversized ) + "\"" : std::string() );
+}
+
 inline std::string forExemplarFamilyXml( const IngestResult& ing, const ExemplarTask& t, const ExemplarFamily& fam, bool compactLegend )
 {
     std::vector<char> esc;
@@ -1480,7 +1552,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
     {
         out += " key_p=\"" + loc( fam.keyFile, fam.keyLine ) + "\"";
     }
-    out += " matched=\"" + e( fam.matched ) + "\" scope=\"" + e( fam.scope ) + "\" n=\"" + std::to_string( fam.members.size() ) + "\"";
+    out += " matched=\"" + e( fam.matched ) + "\" scope=\"" + e( fam.scope ) + "\" n=\"" + std::to_string( fam.members.size() ) + "\"" + scanSkipAttrs( fam.unread, fam.oversized );
     if( fam.members.size() > kExemplarMemberRows )
     {
         out += " shown=\"" + std::to_string( kExemplarMemberRows ) + "\" capped=\"1\""; // CAP-DISCLOSE: the rows are cut, n= counts all
@@ -1496,7 +1568,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
         out += "<m n=\"" + e( m.name ) + "\" p=\"" + loc( m.fileId, m.line ) + "\"";
         out += fam.rule != ExemplarRule::Registry ? " loc=\"" + std::to_string( m.loc ) + "\"/>" : std::string( "/>" );
     }
-    out += touchListXml( ing, fam, exemplarTouchList( ing, fam ) );
+    out += touchListXml( ing, exemplarTouchList( ing, fam ) );
     return out + "</exemplar_family>";
 }
 
@@ -1508,9 +1580,10 @@ inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph
     const std::vector<ExemplarTask> readings = exemplarTasksOf( task );
     const ExemplarTask* t = nullptr;
     std::optional<ExemplarFamily> fam;
+    exemplar_detail::ExemplarScan scan;
     if( !readings.empty() )
     {
-        const exemplar_detail::ExemplarScan scan = exemplar_detail::scanExemplarFiles( ing, readings );
+        scan = exemplar_detail::scanExemplarFiles( ing, readings );
         for( const ExemplarTask& r : readings )
         {
             std::optional<ExemplarFamily> f = exemplarFamily( ing, g, r, scan );
@@ -1521,11 +1594,16 @@ inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph
             }
         }
     }
+    std::vector<char> esc;
     if( t == nullptr )
     {
-        return {};
+        if( held || readings.empty() || scan.unread + scan.oversized == 0 )
+        {
+            return {};
+        }
+        // no family resolved, and the scan skipped something that may have been it: say so instead of printing nothing
+        return std::string( kForExemplarNoFamilyLegend ) + "<exemplar_family of=\"" + std::string( escapeXml( readings.front().phrase, esc ) ) + "\" found=\"0\"" + scanSkipAttrs( scan.unread, scan.oversized ) + "/>";
     }
-    std::vector<char> esc;
     if( held )
     {
         return "<!-- ripwire for exemplar_family: held=\"budget\": a token budget is set, so the sibling rows of of= are not printed; the same "
@@ -1533,6 +1611,8 @@ inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph
                "<exemplar_family of=\"" +
                std::string( escapeXml( t->phrase, esc ) ) + "\" held=\"budget\"/>";
     }
+    fam->unread = scan.unread;
+    fam->oversized = scan.oversized;
     return forExemplarFamilyXml( ing, *t, *fam, compactLegend );
 }
 } // namespace rw

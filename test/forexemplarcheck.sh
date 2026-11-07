@@ -212,6 +212,35 @@ for j in Read Write Seek; do
     printf 'export interface %sOptions {\n  flag: number\n}\n' "$j" > "$F/g3t/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).ts"
 done
 
+# CR round (#559) fixtures: single-quoted and double-quoted decorator names, a same-line Rust attribute, a registry over 4000 lines
+mkdir -p "$F/q1/app/plug" "$F/q2/app/plug" "$F/rs2/src" "$F/big/src" "$F/mf/app/handlers" "$F/ord/app/tasks"
+i=0
+for p in alpha beta gamma; do
+    i=$(( i + 1 ))
+    printf "from app import register_plugin\n\n\n@register_plugin('%s')\ndef build_%s_thing():\n    return %s\n" "$p" "$i" "$i" > "$F/q1/app/plug/mod$i.py"
+    printf 'from app import register_plugin\n\n\n@register_plugin("%s")\ndef build_%s_thing():\n    return %s\n' "$p" "$i" "$i" > "$F/q2/app/plug/mod$i.py"
+done
+printf 'NAMES = ["alpha", "beta", "gamma"]\n' > "$F/q1/app/names.py"; cp "$F/q1/app/names.py" "$F/q2/app/names.py"
+for p in alpha beta gamma; do
+    printf '#[function("%s()")] pub fn %s_fn() -> u32 { 1 }\nfn helper_%s() -> u32 { 2 }\n' "$p" "$p" "$p" > "$F/rs2/src/$p.rs"
+done
+# f5b fixture: the alphabetically first member (AlphaTask) is the size outlier
+printf 'class Task:\n    pass\n' > "$F/ord/app/tasks/base.py"
+printf 'from .base import Task\n\n\nclass AlphaTask(Task):\n    def a(self):\n        return 1\n\n    def b(self):\n        return 2\n\n    def c(self):\n        return 3\n\n    def d(self):\n        return 4\n' > "$F/ord/app/tasks/alpha.py"
+for t in Beta Gamma Delta; do printf 'from .base import Task\n\n\nclass %sTask(Task):\n    pass\n' "$t" > "$F/ord/app/tasks/$( echo "$t" | tr 'A-Z' 'a-z' ).py"; done
+# a member's file that names three of the other four members (a hub class), and a package __init__ that lists all four
+printf 'class Handler:\n    pass\n' > "$F/mf/app/handlers/base.py"
+for h in xml csv yaml; do H="$( cap "$h" )"; printf 'from .base import Handler\n\n\nclass %sHandler(Handler):\n    pass\n' "$H" > "$F/mf/app/handlers/${h}_handler.py"; done
+printf 'from .base import Handler\nfrom .xml_handler import XmlHandler\nfrom .csv_handler import CsvHandler\nfrom .yaml_handler import YamlHandler\n\n\nclass JsonHandler(Handler):\n    pass\n' > "$F/mf/app/handlers/json_handler.py"
+printf 'from .json_handler import JsonHandler\nfrom .xml_handler import XmlHandler\nfrom .csv_handler import CsvHandler\nfrom .yaml_handler import YamlHandler\n' > "$F/mf/app/handlers/__init__.py"
+python3 - "$F/big/src/plugins.go" <<'PY'
+import sys
+lines = [ "package plugins", "", "type Registry map[string]int", "", "func NewPluginRegistry() Registry {", "\treturn Registry{" ]
+lines += [ "\t\t\"plugin%d\": %d," % ( i, i ) for i in range( 4100 ) ]
+lines += [ "\t}", "}" ]
+open( sys.argv[1], "w" ).write( "\n".join( lines ) + "\n" )
+PY
+
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<exemplar_family .*</exemplar_family>' "$1" | head -1; }
 # fam ARM FIXTURE TASK RULE KEY N — the block fires with rule=, key=, n=
@@ -347,7 +376,7 @@ if grep -q 'names alone, weak' "$TMP/a2.xml" && grep -q 'names alone, the weakes
 if block "$TMP/a2.xml" | grep -q ' n="3" grouping="affix-only, weak: verify one m before copying">'; then ok "(g1) the affix family line carries grouping=\"affix-only, weak: verify one m before copying\""; else no "(g1) affix row: $( block "$TMP/a2.xml" | head -c 300 )"; fi
 if grep -q 'grouping=' "$TMP/a2.xml" && grep -q 'grouping=' "$TMP/a2f.xml"; then ok "(g1) both legends define grouping="; else no "(g1) legend: grouping= not defined"; fi
 run rs "--for=add a new scalar function" >"$TMP/g1rs.xml"; run py "--for=add a new handler" >"$TMP/g1py.xml"
-if block "$TMP/g1rs.xml" | grep -q ' rule="attribute"' && block "$TMP/g1py.xml" | grep -q ' rule="base"' && ! block "$TMP/g1rs.xml" "$TMP/g1py.xml" | grep -q 'grouping='; then ok "(g1) attribute and base families print no grouping="; else no "(g1) a non-affix family carries grouping="; fi
+if block "$TMP/g1rs.xml" | grep -q ' rule="attribute"' && block "$TMP/g1py.xml" | grep -q ' rule="base"' && ! block "$TMP/g1rs.xml" | grep -q 'grouping=' && ! block "$TMP/g1py.xml" | grep -q 'grouping='; then ok "(g1) attribute and base families print no grouping="; else no "(g1) a non-affix family carries grouping="; fi
 # g2: members in at least 3 files
 silent g2 g2a "add a new runner"
 silent g2 g2b "add a new runner"
@@ -371,6 +400,57 @@ if ra.split( "<exemplar_family", 1 )[1] != rb.split( "<exemplar_family", 1 )[1]:
 PY
 then ok "(l1) default legend is shorter than --legend=full; the block rows are the same"; else no "(l1) legend posture"; fi
 
+# f5b: with the alphabetically first member the size outlier, the first row is still the median-nearest one
+run ord "--for=add a new task" >"$TMP/f5b.xml"
+first="$( block "$TMP/f5b.xml" | grep -o '<m n="[^"]*"' | head -1 )"
+if [ -n "$first" ] && [ "$first" != '<m n="AlphaTask"' ]; then ok "(f5b) typical first: $first (not the alphabetically first outlier AlphaTask)"; else no "(f5b) typical first: '$first'"; fi
+# v1: a creation verb reaches to the end of its sentence (CR #559): `A new dialect` in the next sentence is no new item
+silent v1 ts "Add a field to createDriver. A new dialect, already in place, needs wiring"
+fam v1 ts "Add a field to createDriver, a new dialect" base Dialect 4
+# v2: decorator arguments in single quotes register names too (the listing file names them, not the functions)
+run q1 "--for=add a new plugin" >"$TMP/v2s.xml"; run q2 "--for=add a new plugin" >"$TMP/v2d.xml"
+has_touch v2 "$TMP/v2d.xml" app/names.py 3/3
+has_touch v2 "$TMP/v2s.xml" app/names.py 3/3
+# v3: an attribute and its function on one line: the member is that function, not the next definition
+run rs2 "--for=add a new function" >"$TMP/v3.xml"
+if block "$TMP/v3.xml" | grep -q ' rule="attribute" key="function"' && block "$TMP/v3.xml" | grep -q '<m n="alpha_fn"' && ! block "$TMP/v3.xml" | grep -q 'helper'; then ok "(v3) same-line #[function(..)] fn: the members are the decorated functions"
+else no "(v3) same-line attribute: $( block "$TMP/v3.xml" | head -c 400 )"; fi
+# v5: a member's own file is no touch row, even when it names enough of the other members; the package __init__ still is
+run mf "--for=add a new handler" >"$TMP/v5.xml"
+no_touch v5 "$TMP/v5.xml" app/handlers/json_handler.py "a member file that imports three other members"
+has_touch v5 "$TMP/v5.xml" app/handlers/__init__.py 4/4
+# v4: a registry over 4000 lines is skipped, and the answer says so (found="0" when nothing else resolves); a normal run says nothing of it
+run big "--for=add a new plugin" >"$TMP/v4.xml"
+if grep -q '<exemplar_family of="plugin" found="0" oversized="1"/></ctx>$' "$TMP/v4.xml"; then ok "(v4) no family and one registry over 4000 lines: found=\"0\" oversized=\"1\""
+else no "(v4) oversized: $( grep -o '<exemplar_family[^>]*>' "$TMP/v4.xml" | head -c 300 )"; fi
+if [ -n "$( block "$TMP/e_go.xml" )" ] && ! block "$TMP/e_go.xml" | grep -qE 'oversized=|unread=|floor='; then ok "(v4) positive twin: a clean scan prints no oversized=, unread= or floor="
+else no "(v4) a clean run carries a skip attribute: $( grep -o '<exemplar_family [^>]*>' "$TMP/e_go.xml" | head -c 300 )"; fi
+
+# u1 / u2: a file the scan cannot read is a disclosed skip, never a silent zero. The index comes from a primed cache, so the file is
+# indexed and then unreadable (chmod 000); a gate run as root cannot make a file unreadable and says SKIP by name.
+runc(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --cache="$TMP/cache-$fx.bin" "$@" 2>/dev/null </dev/null ); }
+unreadable(){ # FILE — chmod 000; true when the file is now really unreadable
+    chmod 000 "$1"; if [ -r "$1" ]; then chmod 644 "$1"; return 1; fi; return 0
+}
+runc py "--for=add a new handler" >"$TMP/u1prime.xml"
+if unreadable "$F/py/app/handlers/__init__.py"; then
+    runc py "--for=add a new handler" >"$TMP/u1.xml"; chmod 644 "$F/py/app/handlers/__init__.py"
+    if block "$TMP/u1.xml" | grep -q '<touch_list total="0" floor="1" unread="1"/>'; then ok "(u1) an unreadable listing file: total=\"0\" is a floor, floor=\"1\" unread=\"1\""
+    else no "(u1) unreadable listing file: $( touchrows "$TMP/u1.xml" | head -c 300 )"; fi
+else
+    echo "  SKIP  (u1) cannot make a file unreadable here (root?): the unread-listing arm did not run"
+fi
+runc go "--for=write a plugin" >"$TMP/u2prime.xml"
+if unreadable "$F/go/plugins/registry.go"; then
+    runc go "--for=write a plugin" >"$TMP/u2.xml"; chmod 644 "$F/go/plugins/registry.go"
+    if grep -q '<exemplar_family of="plugin" found="0" unread="1"/></ctx>$' "$TMP/u2.xml"; then ok "(u2) the registry's file cannot be read: no family, found=\"0\" unread=\"1\""
+    else no "(u2) unreadable registry file: $( grep -o '<exemplar_family[^>]*>' "$TMP/u2.xml" | head -c 300 )"; fi
+else
+    echo "  SKIP  (u2) cannot make a file unreadable here (root?): the unread-registry arm did not run"
+fi
+if block "$TMP/u2prime.xml" | grep -q ' rule="registry" key="NewInTreeRegistry"' && ! block "$TMP/u2prime.xml" | grep -q 'unread='; then ok "(u2) positive twin: the same run with the file readable resolves the registry and carries no unread="
+else no "(u2) twin: $( block "$TMP/u2prime.xml" | head -c 300 )"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
@@ -389,7 +469,8 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2; do
+    if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()
