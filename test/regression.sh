@@ -528,6 +528,7 @@ for _g in \
     fordeclrowcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
+    forexemplarcheck \
     forfileanchorcheck \
     forfilesymscheck \
     forhdrshapecheck \
@@ -876,6 +877,7 @@ for _g in \
     recallshapecheck \
     recalltablecheck \
     recalltotalcheck \
+    recallwindowcheck \
     receiptpostcheck \
     receiverevidencecheck \
     receiverfixescheck \

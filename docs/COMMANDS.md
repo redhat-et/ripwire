@@ -523,7 +523,7 @@ $ ./build/ripwire . --exemplar="format byte sizes for humans"
 
 **Answers:** search the DOCS, not the code — the most relevant plans, designs and notes, in full recall the most relevant DOCS — memory/plans/designs, full bodies (md, .ipynb/.html/.csv, plus Office/PDF via the optional markitdown bridge).
 
-This is the tool's LARGEST output: its header reports est_tokens + total=/shown=/capped=, where total= is the TRUE relevant count (score > 0) and shown= is what this run actually emitted. The header's "of N document files" denominator counts every file the index carries as a DOCUMENT — .md plus the docparse'd .ipynb/.html/.csv — so it is a SUPERSET of --doc-drift's docs=, which is an extension test (markdown only). Two populations, two names, deliberately. --top-k=N shapes HOW MANY docs are emitted (default 8, not the general --top-k default of 200). Recall defaults to an 8000-token body ceiling; --max-tokens=N overrides it and shapes to fit (disclosing each cut), while --token-budget=N gates the finished artifact (exit 3, nothing streamed). A doc WITH HEADINGS is served as whole SECTIONS in relevance order, each section's unit being its OWN PROSE — its heading line up to the next heading of any depth — so units tile instead of nesting and a parent no longer swallows the subsection that answered. Sections are admitted while they fit and the first that does not stops the walk, so WITHIN one document — with the served document SET held fixed — a bigger ceiling returns a SUPERSET rather than a repacked set. ACROSS documents that guarantee does not hold: raising the ceiling can pull in another document, and §C4 water-filling then re-divides the shared budget, which can shrink an already-served document's own slice; share_bytes= is exactly that re-division disclosed. The sections= note reports how many were served of how many matched, dropped_by_budget= what the ceiling cost, and lines= the ranges actually PRESENT in the emitted body rather than the ones merely selected. GENERATED documents rank LAST by default — a doc that declares itself generated in its first lines, or is >=5x the median doc's size AND mostly ```-fenced quoted output AND under 15% prose of its own (a capture/API dump quotes every term, so BM25 hands it every query; a reference page with prose between its examples is not demoted). Never dropped: it still wins when nothing else matches. Each one says [generated_demoted: marker|size+fences] on its own line; the header tallies generated_demoted=N and names the first 5 best-first in generated_demoted_paths="a,b" (% " , and space percent-encoded; generated_demoted_named=K when it names fewer than N)
+This is the tool's LARGEST output: its header reports est_tokens + total=/shown=/capped=, where total= is the TRUE relevant count (score > 0) and shown= is what this run actually emitted. The header's "of N document files" denominator counts every file the index carries as a DOCUMENT — .md plus the docparse'd .ipynb/.html/.csv — so it is a SUPERSET of --doc-drift's docs=, which is an extension test (markdown only). Two populations, two names, deliberately. --top-k=N shapes HOW MANY docs are emitted (default 6, not the general --top-k default of 200). Recall defaults to an 8000-token body ceiling; --max-tokens=N overrides it and shapes to fit (disclosing each cut), while --token-budget=N gates the finished artifact (exit 3, nothing streamed). A doc WITH HEADINGS is served as whole SECTIONS in relevance order, each section's unit being its OWN PROSE — its heading line up to the next heading of any depth — so units tile instead of nesting and a parent no longer swallows the subsection that answered. Sections are admitted while they fit and the first that does not stops the walk, so WITHIN one document — with the served document SET held fixed — a bigger ceiling returns a SUPERSET rather than a repacked set. ACROSS documents that guarantee does not hold: raising the ceiling can pull in another document, and §C4 water-filling then re-divides the shared budget, which can shrink an already-served document's own slice; share_bytes= is exactly that re-division disclosed. The sections= note reports how many were served of how many matched, dropped_by_budget= what the ceiling cost, and lines= the ranges actually PRESENT in the emitted body rather than the ones merely selected. GENERATED documents rank LAST by default — a doc that declares itself generated in its first lines, or is >=5x the median doc's size AND mostly ```-fenced quoted output AND under 15% prose of its own (a capture/API dump quotes every term, so BM25 hands it every query; a reference page with prose between its examples is not demoted). Never dropped: it still wins when nothing else matches. Each one says [generated_demoted: marker|size+fences] on its own line; the header tallies generated_demoted=N and names the first 5 best-first in generated_demoted_paths="a,b" (% " , and space percent-encoded; generated_demoted_named=K when it names fewer than N)
 
 **Try it**
 
@@ -547,6 +547,8 @@ This is the part to wire into a script.
 | 4 | `--test-gate` found an open obligation. |
 ... [17 more line(s); run it to see the whole thing]
 ```
+
+_This recorded run served 8 documents, from before the default became 6; a run with the current default serves at most 6._
 
 **Shaped by:** `--max-tokens`, `--token-budget`, `--no-redact`, `--from-trace`, `--legend`, `--limit`
 
@@ -580,19 +582,18 @@ and both are yours, because the file you write is the only thing that sets them:
    an answer buried mid-file arrives at a small `--max-tokens`, and — while the served document
    SET stays fixed — a larger ceiling returns a strict superset of it; the `[sections: S of R
    selected (N in doc) … lines="…"; dropped_by_budget=D]` note names the ranges you actually got
-   and what the ceiling cost. A HEADLESS dump has no sections to rank, so it is cut front-first
-   and carries no such note.
+   and what the ceiling cost. A HEADLESS dump has no sections to rank, so a cut serves the best
+   query-term WINDOW of its share (the head when no window beats it) and carries no such note: its
+   separator line says `[truncated: K of N bytes; served bytes LO-HI, best query-term window]`
+   instead, LO-HI indexing the text recall served.
 
    That per-document guarantee is not global: dump SEVERAL headed documents into the same
    scratch dir and a larger ceiling can admit another one, which re-divides the shared budget
    and can shrink an already-served document's own slice — `share_bytes=` in the header
    discloses exactly that redivision when it happens.
 
-   Measured on a 73811-byte, 2001-line dump whose answer sat at line 1748: the headed copy
-   served exactly that answer at `--max-tokens=1000` (`lines="1748-1752"`, est_tokens=194),
-   while the headless copy of the same content withheld it at 1000, 2000, 4000, 8000 and 16000
-   and produced it only at 40000 — by which point the front-first cut had emitted the whole
-   file.
+   Measured on a 176077-byte, 2001-line headless dump whose answer sat at line 1748: the window
+   cut printed that answer at `--max-tokens=1000`, `2000`, `4000`, `8000`, `16000` and `40000`.
 
 **Try it**
 
