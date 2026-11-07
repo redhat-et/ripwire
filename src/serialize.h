@@ -5185,6 +5185,13 @@ inline void applyShownOrder( std::vector<EntryT>& entries, const std::vector<std
     std::stable_sort( entries.begin(), entries.end(), []( const EntryT& a, const EntryT& b ) { return a.displayRank < b.displayRank; } );
 }
 
+// The ONE doc test of the docs-after-code reorder: a Markdown row moves below the code rows. Both reorders (XML, JSON) and the
+// route's printed head (subjectanchor.h routeEmittedHead) read it, so the r=1 row they name is the row printed first.
+inline bool isDocsAfterCodeRow( const IngestResult& ing, NodeId id )
+{
+    return ing.symbols[ id ].lang == Lang::Markdown;
+}
+
 template< class EntryT, class IsDoc, class Rehead >
 inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& isDoc, Rehead&& rehead )
 {
@@ -6418,7 +6425,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         const auto reheadXml = [ & ]( SigEntry& e, std::uint32_t newRank )
         { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext,
                                                        spelling.elideZeroMetrics, &sigOwners }, esc, rootArg ); };
-        const auto isDocRow = [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; };   // both reorders' one doc test
+        const auto isDocRow = [ & ]( const SigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
         if( hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) )
         {
             const bool docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
@@ -11942,7 +11949,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         // the XML twin's reorders, after the ladder and in its order: the shown set is final, only its order changes
         const auto reheadJson = [ & ]( JsonSigEntry& e, std::uint32_t newRank )
         { e.head = jsonSigRowHead( ing, e.id, ing.symbols[ e.id ].fileId, lens, e.pureSig, rootArg, newRank ); };
-        const auto isDocRow = [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; };   // both reorders' one doc test
+        const auto isDocRow = [ & ]( const JsonSigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
         if( lens.headRoundRobin )
         {
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].fileId; },

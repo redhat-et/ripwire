@@ -203,6 +203,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
         out.anchorNoSource = subjectRoute.anchorNoSource;   // CONFIDENCE-ANCHOR
+        out.anchorKeys = std::move( subjectRoute.anchorKeys ); // FRAME-HIGH-CONFIDENCE
         out.anchorDefs = std::move( subjectRoute.route.anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
         out.subjectCallerCandidates = std::move( subjectRoute.callerCandidates );   // SUBJECT-ANCHOR: empty unless a conceptual route's subject names a symbol
     }
@@ -3171,7 +3172,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // code above docs (filter.h): the routed path on a question that does not ask about docs — the shown set's REORDER
         const bool         forDocsAfterCode = !cfg.noRoute && !taskAsksAboutDocs( cfg.forTask ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
                                               && rw::docsAfterCodeFitsCeiling( cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u, forBodyCeiling );   // not under a tight explicit ceiling (uncharged note)
-        const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
+        std::string routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
         const std::string  sibliftNote( std::move( lr.sibliftNote ) );
@@ -3342,6 +3343,18 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
 
         ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
+        // FRAME-HIGH-CONFIDENCE: high says the head is the answer; on a name-exact route that holds only when the anchor heads the rows.
+        // Another head reads low, and route= names the row that heads instead (written before any consumer below reads route=).
+        // The head is the row the answer prints as r=1 (rw::routeEmittedHead: code above docs moves Markdown rows below the code rows).
+        if( std::string_view( forConf.level ) == "high" && !lensSurfaceIds.empty() )
+        {
+            const NodeId emittedHead = rw::routeEmittedHead( ing, lensSurfaceIds, forDocsAfterCode );
+            if( !rw::routeAnchorHeadsRows( ing, lr.anchorKeys, emittedHead ) )
+            {
+                forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, /*anchorUnproven=*/true );
+                routeNoteRaw += rw::routeAnchorNotHeadClause( ing, emittedHead );
+            }
+        }
 
         // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): budget + explicit window ⇒ the
         // resumable candidate page (shared inline; the un-paged bundle below stays byte-identical).
