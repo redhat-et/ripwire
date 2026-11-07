@@ -11,6 +11,7 @@
 #include "formembers.h" // member-names: mem= on the shown owner rows of a compact-route answer
 #include "forslots.h"   // FOR-SLOTS: slots= on the shown initializer rows of a compact-route answer
 #include "fordottedstring.h" // STRING-IMPORT: the dotted-string literals naming a shown row
+#include "fordocbody.h"   // FOR-DOC-BODY: a prose task's top-ranked doc sections, before </ctx>
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
@@ -202,6 +203,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
         out.anchorNoSource = subjectRoute.anchorNoSource;   // CONFIDENCE-ANCHOR
+        out.anchorKeys = std::move( subjectRoute.anchorKeys ); // FRAME-HIGH-CONFIDENCE
         out.anchorDefs = std::move( subjectRoute.route.anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
         out.subjectCallerCandidates = std::move( subjectRoute.callerCandidates );   // SUBJECT-ANCHOR: empty unless a conceptual route's subject names a symbol
     }
@@ -486,6 +488,9 @@ struct ForLensJsonInputs
     std::string_view                  task;
     int                               packTopN;
     std::string_view                  rankFlags;   // forRankShapingFlags( cfg ), owned by the caller for the call's duration
+    // FOR-DOC-BODY: the graph the doc sections are scored on (fordocbody.h, the "doc_body" key) — REQUIRED like fileTail above
+    const rw::Graph*                  graph;
+    bool                              signaturesOnly;   // --signatures-only: no doc text rides the answer (the XML twin's rule)
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -1428,9 +1433,9 @@ struct ForLensRootFinish
     bool             guardOver            = false;
 };
 
-// PR #215 review: the finished header AND the number it prints, handed back together. finishForLensHeader
-// below is this function's header half and stays the name every emit site calls; the ceiling ladder's exact-
-// ceiling test needs the OTHER half, because "does this document fit what its root promises" is the question
+// PR #215 review: the finished header AND the number it prints, handed back together (every emit site calls this
+// one now: FOR-DOC-BODY needs the number to serve into the budget left after the answer); the ceiling ladder's exact-
+// ceiling test needs the number too, because "does this document fit what its root promises" is the question
 // `est_tokens <= budget_tokens` asks and nothing else answers it. Computing it a second time beside this
 // fixpoint is how the two came to disagree on the RATE in the first place, so there is one fixpoint and two
 // readers of it. `estTokens` is the number the document will actually carry — the second-stage value when
@@ -1525,24 +1530,20 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     return { std::move( header ), priced.first };
 }
 
-inline std::string finishForLensHeader( std::string header, const ForLensRootFinish& f )
-{
-    return finishForLensHeaderPriced( std::move( header ), f ).header;
-}
-
 // DEEP-TAIL d2, JSON dialect — the tail stanza and its explicit-regime fill, as a free function over
 // emitForLensJson's locals (the ForLensHeaderParts precedent: that emitter is already carrying the whole envelope
 // fixpoint). Default regime: the full row cap (page 0's 40 rows, FOLD C). Explicit regime (forbudget-soft round C,
 // reserve first): the tail keeps at least its share — `shareBytes`, what the rows at the target cut left of the bundle
 // budget — so rows are added until the stanza reaches it (rw::fileTailShownToFill); a cut tail carries "next".
-inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t tokenBudget, std::size_t shareBytes )
+inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t tokenBudget, std::size_t shareBytes, std::size_t* shownRows = nullptr )
 {
-    if( tokenBudget == 0 )
-    {
-        return "," + rw::renderFileTailJson( tail, tail.paths.size() );   // every row computeFileTail collected
-    }
     const auto render = [ & ]( std::size_t shown ) { return "," + rw::renderFileTailJson( tail, shown ); };
-    return render( rw::fileTailShownToFill( tail, shareBytes, render ) );
+    const std::size_t shown = tokenBudget == 0 ? tail.paths.size() : rw::fileTailShownToFill( tail, shareBytes, render );   // no budget: every row computeFileTail collected
+    if( shownRows != nullptr )
+    {
+        *shownRows = shown;
+    }
+    return render( shown );
 }
 
 // One RENDER of the --json bundle (emitForLensJson below).
@@ -1846,7 +1847,8 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     // lane 2: the rank rows exclude the files of the rows emitted (after a refill: the rows it kept — the XML twin's rule)
     const std::size_t  jsonCutRows = sigsJson.size() - std::min( sigsJson.size(), sigsCut.pastTargetBytes );
     const rw::FileTail jsonTail    = rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task );
-    tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, forLensJsonTailShare( in.tokenBudget, bundleBudget, fixedBytes, jsonCutRows ) );
+    std::size_t        jsonTailShown = 0;
+    tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, forLensJsonTailShare( in.tokenBudget, bundleBudget, fixedBytes, jsonCutRows ), &jsonTailShown );
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
                                         + surfaceCountsStanza.size() + tailStanza.size() + envelopeTextBytes
                                         + droppedPositiveStanza.size()   // A2: 0 bytes on the (overwhelming) no-drop path
@@ -1896,6 +1898,16 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
     rw::emitTo( out, ",\"capped\":{},\"est_tokens\":{},\"sigs\":", sigsCappedKey ? "true" : "false", estTokens );
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
+    // FOR-DOC-BODY (fordocbody.h): the XML twin's <doc_body>, after "sigs" and outside est_tokens; "" unless it fires
+    const std::vector<std::string> jsonTailPaths = rw::emittedTailPaths( jsonTail, jsonTailShown );   // the rows the answer printed
+    if( const rw::ForDocBodyPick docPick = in.signaturesOnly ? rw::ForDocBodyPick {} : rw::pickForDocBody( in.ing, in.task, jsonShownIds, [ & ]
+        { return rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, /*rankOrder=*/true ); }, in.rootArg, &jsonTailPaths ); docPick.fires && !docPick.fileIds.empty() )
+    {
+        // served first, the block takes the budget the answer left (est_tokens is the answer's); held= names what a budget kept out
+        const std::string docBody = rw::renderForDocBody( rw::ForDocBodyInputs{ in.ing, in.graph->outOff, in.graph->outTargets, in.task, docPick, in.redact, in.rootArg },
+                                                           rw::ForDocBodyBudget{ in.tokenBudget, estTokens }, rw::ForDocDialect::Json );
+        std::fwrite( docBody.data(), 1, docBody.size(), out );
+    }
     std::fputs( "}", out );
     return 0;
 }
@@ -2739,16 +2751,17 @@ inline std::vector<rw::NodeId> forCallerHopIds( const rw::Config& cfg, const rw:
 // before the tail), never below the empty shell — so rows are added until the element reaches it (its last row may cross
 // it: a soft target makes no byte promise). A cut tail carries next= (the page after its last row) in every regime.
 inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t tokenBudget,
-                                         std::size_t bundleBudget, std::size_t spentBytes )
+                                         std::size_t bundleBudget, std::size_t spentBytes, std::size_t* shownRows = nullptr )
 {
     std::vector<char> esc;
-    if( tokenBudget == 0 )
-    {
-        return rw::renderFileTailXml( tail, tail.paths.size(), esc );   // every row computeFileTail collected
-    }
     const std::size_t share  = std::max<std::size_t>( bundleBudget > spentBytes ? bundleBudget - spentBytes : 0u, rw::kForFileTailShellReserve );
     const auto        render = [ & ]( std::size_t shown ) { return rw::renderFileTailXml( tail, shown, esc ); };
-    return render( rw::fileTailShownToFill( tail, share, render ) );
+    const std::size_t shown  = tokenBudget == 0 ? tail.paths.size() : rw::fileTailShownToFill( tail, share, render );   // no budget: every row computeFileTail collected
+    if( shownRows != nullptr )
+    {
+        *shownRows = shown;
+    }
+    return render( shown );
 }
 
 
@@ -3159,7 +3172,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // code above docs (filter.h): the routed path on a question that does not ask about docs — the shown set's REORDER
         const bool         forDocsAfterCode = !cfg.noRoute && !taskAsksAboutDocs( cfg.forTask ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
                                               && rw::docsAfterCodeFitsCeiling( cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u, forBodyCeiling );   // not under a tight explicit ceiling (uncharged note)
-        const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
+        std::string routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
         const std::string  sibliftNote( std::move( lr.sibliftNote ) );
@@ -3330,6 +3343,18 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
 
         ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
+        // FRAME-HIGH-CONFIDENCE: high says the head is the answer; on a name-exact route that holds only when the anchor heads the rows.
+        // Another head reads low, and route= names the row that heads instead (written before any consumer below reads route=).
+        // The head is the row the answer prints as r=1 (rw::routeEmittedHead: code above docs moves Markdown rows below the code rows).
+        if( std::string_view( forConf.level ) == "high" && !lensSurfaceIds.empty() )
+        {
+            const NodeId emittedHead = rw::routeEmittedHead( ing, lensSurfaceIds, forDocsAfterCode );
+            if( !rw::routeAnchorHeadsRows( ing, lr.anchorKeys, emittedHead ) )
+            {
+                forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, /*anchorUnproven=*/true );
+                routeNoteRaw += rw::routeAnchorNotHeadClause( ing, emittedHead );
+            }
+        }
 
         // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): budget + explicit window ⇒ the
         // resumable candidate page (shared inline; the un-paged bundle below stays byte-identical).
@@ -3797,7 +3822,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
                                                                    &forFileTail, &lr.evidence, d.notesDegraded, forDocsAfterCode, forHeadRR, cfg.forTask,
-                                                                   cfg.packTopN, forRankShapingFlags( cfg ) } );
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g, cfg.signaturesOnly } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -4602,7 +4627,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // and a body ceiling never moves a row (formaxtokenscheck (E))
         const std::size_t tailSpentBytes = forSoftTarget ? rowsSpentBytes + autoSection.xml.size() + slot.xml.size()
                                                          : rowsSpentBytes + detailSection.xml.size() + autoSection.xml.size() + slot.xml.size();
-        std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes );
+        std::size_t       tailShownRows  = 0;
+        std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
+        std::vector<std::string> tailPrinted = rw::emittedTailPaths( forFileTailShown, tailShownRows );   // FOR-DOC-BODY: the <t> rows this answer prints
 
         // ── round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST): the rows past the soft target's cut fill what the
         // trailing sections left of T. The sections above were funded as if the rows stopped at the cut (sigsFundedBytes), so
@@ -4648,8 +4675,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                     sigsCeilingNote = rw::sigsCutReportLegend( forSigsCut );   // a soft target: no default ceiling, no guard reading
                     // lane 2: a row the refill dropped lands in the tail's rank rows — re-listed against the rows now shown, at
                     // the same share (the share, not the rows, is what the refill priced)
-                    tailStr = renderForFileTailXml( computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask ),
-                                                    cfg.tokenBudget, bundleBudget, tailSpentBytes );
+                    const FileTail refilledTail = computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask );
+                    tailStr     = renderForFileTailXml( refilledTail, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
+                    tailPrinted = rw::emittedTailPaths( refilledTail, tailShownRows );
                 }
                 else
                 {
@@ -4793,7 +4821,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
         }
         // PR #135: the priced root this header will carry — every late splice and the est_tokens fixpoint, in
-        // finishForLensHeader (above runForLens, with each splice's rationale).
+        // finishForLensHeaderPriced (above runForLens, with each splice's rationale).
         const ForLensRootFinish rootFinish{
             .autoAttr             = autoAttr,
             .sigsCeilingAttr      = sigsCeilingAttr,
@@ -4826,7 +4854,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // forbudget-soft: no header ladder. The W3FIX ceiling ladder (task echo / route= / legend clauses dropped "(ceiling)",
         // over_ceiling's header-floor note) existed to land a HARD ceiling; an explicit --token-budget is a soft target over the
         // rows now (owner decision 2026-10-14), so the header — every legend clause and the verbatim task echo — always ships.
-        headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
+        ForLensPricedHeader pricedHeader     = finishForLensHeaderPriced( std::move( headerStr ), rootFinish );
+        headerStr                            = std::move( pricedHeader.header );
+        const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
@@ -4971,6 +5001,20 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
+        }
+        // FOR-DOC-BODY (fordocbody.h): a prose task whose first <t> rows are doc files gets the top-ranked sections of the first doc files
+        // shown, last before </ctx>: its own allowance, outside the answer's est_tokens (the block prices itself); "" otherwise. Under a token budget or a body
+        // ceiling it is served into the budget left after the answer and holds only what does not fit (held=, next=).
+        if( !cfg.json && !cfg.columnar && !cfg.candidates && !cfg.signaturesOnly && sigsPreRendered )
+        {
+            const rw::ForDocBodyPick docPick = rw::pickForDocBody( ing, cfg.forTask, shownSigIds, [ & ]
+            { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg, &tailPrinted );
+            // both ceilings that are active bind: the smaller of --token-budget and the --max-tokens the root was priced with (forBodyCeiling)
+            const std::size_t        ceiling   = forBodyCeiling ? std::size_t( rootFinish.maxTokens ) : 0u;
+            const std::size_t        docBudget = cfg.tokenBudget > 0 && ceiling > 0 ? std::min( std::size_t( cfg.tokenBudget ), ceiling ) : cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : ceiling;
+            const std::string        docBody = rw::renderForDocBody( rw::ForDocBodyInputs{ ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg },
+                                                                     rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens, rootFinish.measured }, rw::ForDocDialect::Xml );
+            std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
         const int answerRc = appendForFileSyms( d, forAnswerBytes );
