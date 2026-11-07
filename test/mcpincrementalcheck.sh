@@ -248,11 +248,22 @@ if [ ! -f "$VICTIM" ]; then
 else
     GONE_SYM="$( grep -oE '^def [a-z_]+' "$VICTIM" | head -1 | sed 's/^def //' )"
     [ -n "$GONE_SYM" ] || GONE_SYM="app.py"
+    # 2026-11-06 (FOR-DOC-BODY, #561): the ask is "no row of the index still defines GONE_SYM", so the arm reads
+    # the ROW spelling (n="SYM" / p="app.py"; the MCP text is still JSON-escaped, so the quote is \"), not the
+    # bare word: the fixture's notes.md prose names `area_of_triangle` and --for now serves that prose (doc body),
+    # correctly, cold and warm alike (the byte-identity arm below pins warm == cold). Positive twin: the
+    # pre-delete text (arm 1's WTEXT) carries the defining row, so the absence read cannot pass on a spelling
+    # the answer never uses.
+    ROW_N='n=\"'"$GONE_SYM"'\"'; ROW_P='p=\"app.py\"'
+    case "$WTEXT" in
+        *"$ROW_N"*) ok "arm 2 (twin): before the delete the answer carries a row defining '$GONE_SYM'";;
+        *)          no "arm 2 (twin): the pre-delete answer has no $ROW_N row — the absence read below would be vacuous";;
+    esac
     rm -f "$VICTIM"
     warm_for 12 "$TASK"
     case "$WTEXT" in
-        *"$GONE_SYM"*) no "arm 2: '$GONE_SYM' still appears after app.py was deleted — the removal was not spliced out";;
-        *)             ok "arm 2: '$GONE_SYM' is gone from the index after its file was deleted";;
+        *"$ROW_N"*|*"$ROW_P"*) no "arm 2: a row for '$GONE_SYM' / app.py still appears after app.py was deleted — the removal was not spliced out";;
+        *)                     ok "arm 2: '$GONE_SYM' is gone from the index after its file was deleted";;
     esac
     case "$WREINGEST" in
         0) ok "arm 2: _reingest=0 — a pure DELETE re-extracts nothing (the work is re-resolution, not parsing)";;

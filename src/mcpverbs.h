@@ -45,6 +45,7 @@
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
 #include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
+#include "fordocbody.h"     // FOR-DOC-BODY: the `for` verb's doc sections (the CLI twin's renderer)
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
@@ -2078,11 +2079,11 @@ inline void spliceForLegoCountLegend( std::string& doc, bool carries )
 // forbudget-soft: budget_tokens= is a SOFT target here too (the CLI twin's rule) — est_tokens may exceed it and nothing is
 // labelled "over" for it. The one over_ceiling this surface can carry is the runaway guard's (`guardOver`: the default head
 // passed kForRunawayGuardBytes); its reading (forRunawayGuardNote) was spliced with the <sigs> clauses by the assembly.
-inline void priceForTaskRoot( std::string& doc, bool guardOver )
+inline std::size_t priceForTaskRoot( std::string& doc, bool guardOver )
 {
     if( doc.empty() )
     {
-        return;
+        return 0;
     }
     std::size_t estTokens = 0;
     std::string rootAttrs = rw::pricedRootAttr( doc.size(), rw::kBytesPerTokenDefault, 0, &estTokens );
@@ -2092,6 +2093,7 @@ inline void priceForTaskRoot( std::string& doc, bool guardOver )
         rootAttrs += " over_ceiling=\"1\"";
     }
     rw::spliceRootAttrs( doc, rootAttrs );
+    return estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
 }
 
 // knob-honesty-068 (orchestrator ruling C3, 2026-10-07): MCP `for`'s ASSEMBLY — everything from the sigs render to the
@@ -2104,6 +2106,7 @@ struct McpForAssembly
 {
     std::optional<std::string> doc;   // nullopt: the answer buffer lost bytes (internal error)
     rw::SigsCutReport          cut;
+    ForDocBodyPick             docPick;   // FOR-DOC-BODY: read off the rows and tail this pass printed (fordocbody.h)
 };
 struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by reference; all outlive the call
 {
@@ -2216,6 +2219,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // R2-AF (round 2, S4): first rows inside the root, right after the legend (forHdrRowsXml); rendered before the rows so the
     // round C refill below prices them
     const std::string mcpHdrXml = forHdrRowsXml( ing, mcpForHdrRows, flRootArg );   // forpage.h: the CLI twin's one render
+    ForDocBodyPick          mcpDocPick;    // FOR-DOC-BODY: set beside the tail below
     std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail's rank rows exclude these files
     // round C: the render is named so a soft target can narrow its rows past the cut once the sections are served (below); the
     // redaction tally around it is snapshotted so a second render replaces this one's count instead of adding to it
@@ -2419,6 +2423,8 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                                                         : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
+        mcpDocPick = pickForDocBody( ing, task, mcpShownIds, [ & ]
+                                    { return computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, /*rankOrder=*/true ); }, flRootArg, &mcpTail.paths );   // mcpTail: the rows printed above
     }
     std::fwrite( mcpSlot.xml.data(), 1, mcpSlot.xml.size(), mem );   // for-body-slot: "" when no body rides
     rw::emitRaw( mem, "</ctx>" );
@@ -2445,7 +2451,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // reading — BEFORE pricing, so est_tokens= prices the bytes served, and after the sigs budget, so the rows are unchanged.
     closeRosterGaps( out );
     mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
-    return McpForAssembly{ std::move( out ), mcpSigsCut };
+    return McpForAssembly{ std::move( out ), mcpSigsCut, std::move( mcpDocPick ) };
 }
 
 // #362 review round 4, follow-up (quality bar): the twins' B2 rank-flags fragment, named once -
@@ -2972,13 +2978,18 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + hooks );   // the clause beside it, as <dispatch>: the header's are fixed
         }
     }
-    priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    const std::size_t answerEstTokens = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
     // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
         out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
+    }
+    // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
+    if( out.ends_with( "</ctx>" ) )
+    {
+        out.insert( out.size() - 6, renderForDocBody( ForDocBodyInputs{ ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg }, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens }, ForDocDialect::Xml ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
