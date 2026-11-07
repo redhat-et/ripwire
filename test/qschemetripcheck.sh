@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-05, lane warm-direct (base lane/warm-rewrite 630a90e3d, merged over main at kParserVer 301; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 48 -> 49: the FILE record's head gains the eight family counts (a warm run plans from heads and decodes in
+#   the parse worker); quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no extraction or watched
+#   quality.h function moved.
 # 2026-11-04, #478 gap 2 (rebased onto main 50bc05e8 at 299/300; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 299 -> 301 (rich 302): an aliased Python `import a.b as c` records the Include target `a.b`, not `a.b as c`;
 #   quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays as main has it: no record changes shape

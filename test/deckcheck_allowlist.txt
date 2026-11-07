@@ -144,3 +144,4 @@
 --continue	flag of this repo's own scripts/merge_main.sh (CONTRIBUTING merge section), never a ripwire flag
 --regen-after-build	flag of this repo's own scripts/merge_main.sh (CONTRIBUTING merge section, changelog.d/gen-docs-merge.md), never a ripwire flag
 --max-drift	flag of this repo's own docs/counts_snapshot.py (check --max-drift, the drift-bounded staleness gate; CONTRIBUTING, docs/EVALS.md), never a ripwire flag
+--max-pods	the kubelet flag (kubernetes), quoted in a --for task in a changelog worked example (forliteral-3 FLAG-SHAPE-LIT)
