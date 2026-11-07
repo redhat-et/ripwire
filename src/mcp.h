@@ -1345,7 +1345,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // §B6 M15 / verifier N5: top_k is the budget knob this verb's own est_tokens disclosure implies. It
                    // was hardcoded to 8 with no way to ask for less, on the one MCP verb that can return ~180 KB,
                    // while the CLI --recall began honoring --top-k in this round's Wave 1.
-                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = docs/memory dir; task = what you're working on; top_k = docs to return, 1..1000 (default 8), refused outside that band, never clamped; budget_tokens = the body ceiling in tokens (default 8000) — it SHAPES to fit, the CLI --recall's --max-tokens, not --token-budget's refuse-if-over GATE, and the header discloses max_tokens= and every cut.\","
+                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = docs/memory dir; task = what you're working on; top_k = docs to return, 1..1000 (default 6), refused outside that band, never clamped; budget_tokens = the body ceiling in tokens (default 8000) — it SHAPES to fit, the CLI --recall's --max-tokens, not --token-budget's refuse-if-over GATE, and the header discloses max_tokens= and every cut.\","
                    + mcprefuse::toolMetadataFor( "memory_recall", pathIsRequired ) + "},"
                    "{\"name\":\"situational_awareness\",\"description\":\"The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. forgotten = the Shotgun Surgery check. diff/files optional — defaults to 'git diff HEAD'. files is a STRING of comma-separated paths (files=\\\"src/a.cpp,src/b.h\\\"), not an array; an array is refused rather than read as absent, which would answer about the working tree instead of the files you named. limit/offset page blast_radius and forgotten only; with no limit every row is served, as always. " + std::string( kTestRowJsonShapeClause ) + "\","
                    + mcprefuse::toolMetadataFor( "situational_awareness", pathIsRequired ) + "},"
@@ -1628,7 +1628,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::size_t budgetTokens = budgetArg.isPresent ? std::size_t( budgetArg.value ) : 0;   // absent ⇒ the shared default
 
             const McpIntArg topKArg    = intArg( "top_k", 1, kMcpRecallTopKMax );      // §B6 M15 memory_recall budget knob
-            const int       recallTopK = topKArg.isPresent ? int( topKArg.value ) : 8;  // 8 = the historic default
+            const int       recallTopK = topKArg.isPresent ? int( topKArg.value ) : rw::kDefaultRecallTopK;  // the CLI's default too
 
             const McpIntArg     partitionArg   = intArg( "partition", packpartition::kMinPartitions, packpartition::kMaxPartitions );   // --partition=N over MCP
             const std::uint32_t partitionCount = partitionArg.isPresent ? std::uint32_t( partitionArg.value ) : 0u;   // absent ⇒ one un-split bundle

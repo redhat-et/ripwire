@@ -1109,7 +1109,7 @@ inline constexpr char kHelpHead[] =
         "                               files\" denominator counts every file the index carries as a DOCUMENT — .md plus the\n"
         "                               docparse'd .ipynb/.html/.csv — so it is a SUPERSET of --doc-drift's docs=, which is an\n"
         "                               extension test (markdown only). Two populations, two names, deliberately. --top-k=N shapes HOW MANY\n"
-        "                               docs are emitted (default 8, not the general --top-k default of 200). Recall defaults to an\n"
+        "                               docs are emitted (default 6, not the general --top-k default of 200). Recall defaults to an\n"
         "                               8000-token body ceiling; --max-tokens=N overrides it and shapes to fit (disclosing each cut),\n"
         "                               while --token-budget=N gates the finished artifact (exit 3, nothing streamed).\n"
         "                               A doc WITH HEADINGS is served as whole SECTIONS in relevance order, each section's unit being\n"

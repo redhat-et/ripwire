@@ -251,12 +251,17 @@ def verdict( path, n, refpath=None ):
     # and the rows past the target cut fill what they leave of T, so maximality is judged against T less their bytes (U: all
     # after </sigs> but </ctx>, and the <hdr> rows — less the --detail bodies, the caller's own request under its own ceiling:
     # on a run without bundle= on the root the <bodies> element is the --detail section)
-    s = open( path, encoding='utf-8', errors='replace' ).read()
+    # K-WRONGSYM / K-LEGEND: the <syms> block (or its held stub) and its legend comment ride after the ranked answer on their own
+    # allowance, outside est_tokens and outside T (test/lib/softbudget.py APPENDED, as forsoftbudgetcheck and fornotesbudgetcheck read
+    # it): the answer AND its no-budget reference are read less that block, or U and the tail floor count ~0.5-1 KB the ladder never spends
+    import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended
+    s = strip_appended( open( path, encoding='utf-8', errors='replace' ).read() )
+    refs = strip_appended( open( refpath, encoding='utf-8', errors='replace' ).read() )
     U = ( len( s.split( '</sigs>', 1 )[ 1 ].encode() ) - len( '</ctx>' ) ) if '</sigs>' in s else 0
     U += sum( len( h.encode() ) for h in re.findall( r'<hdr [^>]*/>', s.split( '<sigs', 1 )[ 0 ] ) )
     # the tail size: test/lib/softbudget.py, shared by the five soft-target readers (the FIX1 R1 tail floor)
-    import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import tail_size
-    U += max( 0, tail_size( open( refpath, encoding='utf-8', errors='replace' ).read() ) - tail_size( s ) )
+    from softbudget import tail_size
+    U += max( 0, tail_size( refs ) - tail_size( s ) )
     root = re.match( r'<ctx [^>]*>', s )
     if root and ' bundle="' not in root.group( 0 ):
         bm = re.search( r'<bodies\b.*?</bodies>', s, re.S )
@@ -265,7 +270,7 @@ def verdict( path, n, refpath=None ):
     # FIX2 C1 (rule 4): the upper-bound twin of maximality (test/lib/softbudget.py upper_bound): rows past the floor stop where T less
     # the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve
     from softbudget import upper_bound
-    upper, udet = upper_bound( s, open( refpath, encoding='utf-8', errors='replace' ).read(), T, k, len( rr ), U )
+    upper, udet = upper_bound( s, refs, T, k, len( rr ), U )
     return fits and maximal and upper, "%s fits=%d maximal=%d upper=%d rows=%d/%d bytes=%d charged=%d next=%d T=%d U=%d%s" % (
         "OK" if fits and maximal and upper else "BAD", fits, maximal, upper, k, len( rr ), pb, ab, rr[ k ][ 1 ], T, U, "" if upper else " -- " + udet )
 if __name__ == "__main__":
@@ -1326,8 +1331,8 @@ hw_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hw.xml" | head -1 )"
 # (kBytesPerTokenDefault). Pre-fix the est_tokens attribute (~19 B) and weak="1" (9 B) sat outside the sum,
 # which is precisely why the delivered rate measured 2.5063 where the emitter's own rate is 2.50.
 selfconsistent(){ python3 - "$1" <<'PY'
-import sys, re
-d = open( sys.argv[1], 'rb' ).read()
+import sys, re, os; sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended_bytes
+d = strip_appended_bytes( open( sys.argv[1], 'rb' ).read() )   # the <syms> block rides outside est_tokens (softbudget.py APPENDED)
 m = re.search( rb'est_tokens="(\d+)"', d )
 if not m: sys.exit( 2 )
 est      = int( m.group( 1 ) )
@@ -1349,8 +1354,8 @@ fi
 # <bodies> span at kBytesPerTokenBody=3.80, each rounded the way the emitter rounds them (a wrong-rate or
 # uncharged auto section cannot pass this identity).
 mixedconsistent(){ python3 - "$1" <<'PY'
-import sys, re
-d = open( sys.argv[1], 'rb' ).read()
+import sys, re, os; sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended_bytes
+d = strip_appended_bytes( open( sys.argv[1], 'rb' ).read() )   # the <syms> block rides outside est_tokens (softbudget.py APPENDED)
 m = re.search( rb'est_tokens="(\d+)"', d )
 if not m: sys.exit( 2 )
 est = int( m.group( 1 ) )
@@ -1381,8 +1386,8 @@ fi
 # and are priced at the body rate. The flat identity is pinned on the fold-off twin (RIPWIRE_NO_BODY_FOLD=1), and the default
 # must satisfy the mixed identity with the fold's served <b> elements as the body span (foldconsistent).
 foldconsistent(){ python3 - "$1" <<'PY'
-import sys, re
-d = open( sys.argv[1], 'rb' ).read()
+import sys, re, os; sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended_bytes
+d = strip_appended_bytes( open( sys.argv[1], 'rb' ).read() )   # the <syms> block rides outside est_tokens (softbudget.py APPENDED)
 m = re.search( rb'est_tokens="(\d+)"', d )
 if not m: sys.exit( 2 )
 est = int( m.group( 1 ) )

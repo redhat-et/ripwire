@@ -222,8 +222,15 @@ python3 - "$TMP/b5.xml" "$TMP/b9off.xml" <<'PY'
 import re, sys
 on, off = (open(p).read() for p in sys.argv[1:3])
 strip = lambda s: re.sub(r' (at|est_tokens)="[^"]*"', '', s)
+# K-WRONGSYM: the <syms> leads (its legend comment and block, right before </ctx>) are read off the shown files, and the shortkey
+# rows are shown files: the answer with the block has a <syms> that the answer without it does not (cpp/fwd.* are shown only through
+# it). The block is a consequence of the shortkey rows, so both sides are read less their <syms>; the positive twin below proves the
+# on side carries one built from the block's rows (a gate that strips a block must show it was there).
+syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=</ctx>)', re.S)
+twin = syms.search(on) is not None and 'p="cpp/fwd' in syms.search(on).group(0)
+on, off = syms.sub('', on), syms.sub('', off)
 i = on.find('<!-- shortkey:'); j = on.find('</shortkey>')
-sys.exit(0 if i > 0 and j > i and strip(on[:i] + on[j + len('</shortkey>'):]) == strip(off) else 1)
+sys.exit(0 if twin and i > 0 and j > i and strip(on[:i] + on[j + len('</shortkey>'):]) == strip(off) else 1)
 PY
 offrc=$?
 if [ "$offrc" -eq 0 ]; then ok "B9 the off switch removes exactly the block"; else no "B9 the off switch changed more than the block"; fi

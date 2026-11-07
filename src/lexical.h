@@ -756,7 +756,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     //
     // R-R RANKING (2026-08-25): the scanned string is the ROOT-RELATIVE VIEW, never ing.files[f] itself,
     // which stays absolute because the emission lane proved it must (g.canonId, Regression::key, every
-    // pathQualifiedKey and the ingest cache's reAbsolutize all key off it). Scanning it verbatim indexed
+    // pathQualifiedKey and the ingest cache's relForHash compare all key off it). Scanning it verbatim indexed
     // every directory ABOVE the corpus as corpus vocabulary — and a directory that spelled a query word
     // then matched EVERY document and collapsed that word's idf — so two clones of ONE commit at different
     // checkout depths ranked --recall differently: 11 of 42 frozen queries reordered, 5 of them returning a
