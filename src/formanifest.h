@@ -1132,7 +1132,8 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "feature, extra, executable, library, entry-point; a console or gui script is a bin), group= the entry point's group, its text that line, cut=\"1\" when cut to 120 bytes. <feature_touch> (under a manifest whose "
     "match is a feature or extra) n= its features (default and _-private ones left out); <touch_list> the files outside the manifest that "
     "mention at least half of them, where a new feature is listed or gated: total= such files, shown= and capped=\"1\" when fewer rows are "
-    "printed; <touch> p=file:line the line to copy, share=named/of the distinct feature names it mentions, cut=\"1\" when cut to 120 bytes; "
+    "printed; floor=\"1\" unread=K when K listing files could not be read or are over 4 MiB (total= then counts only the others); "
+    "<touch> p=file:line the line to copy, share=named/of the distinct feature names it mentions, cut=\"1\" when cut to 120 bytes; "
     "test, docs, vendored, generated, frozen and baseline files are not read. The answer above is unchanged, and these bytes are not in "
     "est_tokens -->";
 // The --legend=compact posture (the CLI default); the long text rides --legend=full and the MCP tool. Both define every attribute printed.
@@ -1142,7 +1143,7 @@ inline constexpr std::string_view kForManifestRowsCompactLegend =
     "un-asked scripts or plugin entry points and entries the task neither names by their kind nor adds as a new X never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word; <mf> p= manifest, "
     "matched= task words its names hold, rows= matching lines; <r> l= line, kind= what it defines, group= an entry point's group, cut=\"1\": text cut to 120 bytes; "
     "shown=/capped=\"1\": rows cut. <feature_touch> n= the manifest's features; <touch_list> total= files naming at least half of "
-    "them (tests, docs, vendored, generated unread); <touch> p= the line, share=named/of distinct feature names, cut=\"1\": cut. -->";
+    "them (tests, docs, vendored, generated unread); floor=\"1\" unread=K: K files unreadable or over 4 MiB, total= is a floor; <touch> p= the line, share=named/of distinct feature names, cut=\"1\": cut. -->";
 static_assert( kForManifestRowsLegend.find( "--", 4 ) == kForManifestRowsLegend.size() - 3 && kForManifestRowsCompactLegend.find( "--", 4 ) == kForManifestRowsCompactLegend.size() - 3,
                "the only double hyphen in a legend comment is its closing: one inside is not well-formed XML" );
 
@@ -1180,7 +1181,7 @@ inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& 
     }
     if( const std::optional<ExemplarFamily> fam = featureFamily( doc, m ) )
     {
-        std::vector<ExemplarTouch> touch = exemplarTouchList( ing, *fam );
+        ExemplarTouchList touch = exemplarTouchList( ing, *fam ); // rows + unread (a floor when a listing file could not be read)
         std::vector<std::string_view> anchored; // the features the task names: the lines that define or document them
         for( const ManifestHit& h : m.hits )
         {
@@ -1190,8 +1191,8 @@ inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& 
                 anchored.push_back( en.name );
             }
         }
-        retargetCfgTouchLines( ing, anchored, touch );
-        out += "<feature_touch n=\"" + std::to_string( fam->members.size() ) + "\">" + touchListXml( ing, *fam, touch ) + "</feature_touch>";
+        retargetCfgTouchLines( ing, anchored, touch.rows );
+        out += "<feature_touch n=\"" + std::to_string( fam->members.size() ) + "\">" + touchListXml( ing, touch ) + "</feature_touch>";
     }
     return out + "</mf>";
 }
