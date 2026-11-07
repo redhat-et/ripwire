@@ -1293,10 +1293,11 @@ private:
         {
             return nullptr;
         }
-        const jsrunner::PackageManifests manifests = jsrunner::nearestPackageManifests( disk, evidenceRoot( runnerFile ) );   // train20-cr C8: + Node's package scope
+        const DirManifests&              dirFacts  = manifestsOfDir( disk, evidenceRoot( runnerFile ) );   // train20-cr C8: + Node's package scope
+        const jsrunner::PackageManifests& manifests = dirFacts.manifests;
         const std::string&               manifest  = manifests.evidence;
         climbs                                     = manifests.evidenceClimbs;   // #335: the package directory, for spellJsRun's cd
-        const jsrunner::Framework        fw        = jsrunner::detectFramework( manifest );
+        const jsrunner::Framework        fw        = dirFacts.framework;
         if( fw == jsrunner::Framework::NodeTest )
         {
             // #60: node's own runner needs a Node-version decision (see jsrunner.h's own banner) whether it
@@ -1320,6 +1321,29 @@ private:
             return nullptr;   // no package.json evidence, and the file's own bytes name no runner either
         }
         return jsrunner::nodeTestVerb( relPath, manifests, source, disk );
+    }
+
+    // The package.json walk and the framework it names, once per DIRECTORY: the walk starts at the test file's own directory
+    // (dirwalk::ascendToRoot), so every test file of one directory reads the same manifests. Keyed by the disk path's text up to
+    // its last separator plus the root; two spellings of one directory only cost a second walk.
+    struct DirManifests
+    {
+        jsrunner::PackageManifests manifests;
+        jsrunner::Framework        framework = jsrunner::Framework::None;
+    };
+    const DirManifests& manifestsOfDir( const std::string& disk, std::string_view root ) const
+    {
+        const std::size_t slash = disk.find_last_of( "/\\" );
+        std::string       key   = slash == std::string::npos ? std::string() : disk.substr( 0, slash );
+        key += '\0';
+        key += root;
+        auto [ entry, fresh ] = manifestsByDir_.try_emplace( std::move( key ) );
+        if( fresh )
+        {
+            entry->second.manifests = jsrunner::nearestPackageManifests( disk, root );
+            entry->second.framework = jsrunner::detectFramework( entry->second.manifests.evidence );
+        }
+        return entry->second;
     }
 
     /// #335: the first `n` '/'-separated components of a root-relative path (n >= 1; the whole path when it has
@@ -1465,6 +1489,7 @@ private:
     mutable bool                                textsLoaded_ = false;
     mutable HashMap<std::uint32_t, std::string> cache_;
     mutable HashMap<std::uint32_t, std::string> scriptCache_;
+    mutable HashMap<std::string, DirManifests>  manifestsByDir_;   // manifestsOfDir's memo
 };
 
 // The ` run="…"` attribute for one test row, or "" — the ONE spelling, so the four emitters (--affected,
