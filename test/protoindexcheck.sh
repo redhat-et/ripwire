@@ -27,7 +27,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "protoindexcheck: BIN=$BIN"
@@ -106,28 +106,28 @@ echo "=== B: comment and string keywords are not definitions (twin: A) ==="
 for n in CommentedMsg CommentedEnum HiddenSvc HiddenRpc StringMsg; do
     out="$( run --defs="$n" )"; rc=$?
     [ -n "$out" ] || { no "B $n: --defs printed nothing (rc=$rc)"; continue; }
-    printf '%s' "$out" | grep -q 'found="0"' && ok "B $n is not a definition" || no "B $n became a definition"
+    if printf '%s' "$out" | grep -q 'found="0"'; then ok "B $n is not a definition"; else no "B $n became a definition"; fi
 done
 
 echo "=== C: --whereis and --for name the definition ==="
 out="$( run --whereis=NowRexNode )"; rc=$?
-printf '%s' "$out" | grep -q 'proto/expr.proto' && ok "C --whereis names proto/expr.proto" || no "C --whereis (rc=$rc): $( printf '%s' "$out" | head -c 300 )"
+if printf '%s' "$out" | grep -q 'proto/expr.proto'; then ok "C --whereis names proto/expr.proto"; else no "C --whereis (rc=$rc): $( printf '%s' "$out" | head -c 300 )"; fi
 out="$( run --for=ExprService )"; rc=$?
-printf '%s' "$out" | grep -q 'p="proto/expr.proto"' && ok "C --for=ExprService serves the proto def" || no "C --for=ExprService (rc=$rc): $( printf '%s' "$out" | head -c 300 )"
+if printf '%s' "$out" | grep -q 'p="proto/expr.proto"'; then ok "C --for=ExprService serves the proto def"; else no "C --for=ExprService (rc=$rc): $( printf '%s' "$out" | head -c 300 )"; fi
 
 echo "=== D: generated names link by name, hedged ==="
 out="$( run --for=ExprType )"; rc=$?
 gen="$( printf '%s' "$out" | grep -o '<rung n="gen"[^>]*>.*</rung>' | head -1 )"
 [ -n "$gen" ] || no "D Rust: no gen rung for --for=ExprType (rc=$rc): $( printf '%s' "$out" | grep -o '<shortkey[^>]*>' )"
-printf '%s' "$gen" | grep -q 'via="name"' && printf '%s' "$gen" | grep -q 'exact="0"' && ok "D Rust gen rung is hedged (via=name, exact=0)" || no "D Rust gen rung not hedged: $gen"
-printf '%s' "$gen" | grep -q '<d n="ExprNode.Type" t="cls" p="proto/expr.proto" l="9"/>' && ok "D Rust use-as links ExprNode.Type" || no "D Rust use-as: $gen"
-printf '%s' "$out" | grep -q 'shortkey gen:' && ok "D the gen legend rides the answer" || no "D gen legend missing"
+if printf '%s' "$gen" | grep -q 'via="name"' && printf '%s' "$gen" | grep -q 'exact="0"'; then ok "D Rust gen rung is hedged (via=name, exact=0)"; else no "D Rust gen rung not hedged: $gen"; fi
+if printf '%s' "$gen" | grep -q '<d n="ExprNode.Type" t="cls" p="proto/expr.proto" l="9"/>'; then ok "D Rust use-as links ExprNode.Type"; else no "D Rust use-as: $gen"; fi
+if printf '%s' "$out" | grep -q 'shortkey gen:'; then ok "D the gen legend rides the answer"; else no "D gen legend missing"; fi
 # A Go `type GoExprType = pb.ExprNode_Type` is itself a definition: --for serves it name-exact (its line shows the generated
 # path) and the gen rung, a not-found ladder rung, does not run. Disclosed limitation (report ## Follow-ons: GEN-USES).
 out="$( run --for=GoExprType )"; rc=$?
-[ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'n="GoExprType" p="go/expr.go"' && ok "D Go alias GoExprType serves its own def (pb.ExprNode_Type on its line)" || no "D Go alias (rc=$rc): $( printf '%s' "$out" | head -c 400 )"
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'n="GoExprType" p="go/expr.go"'; then ok "D Go alias GoExprType serves its own def (pb.ExprNode_Type on its line)"; else no "D Go alias (rc=$rc): $( printf '%s' "$out" | head -c 400 )"; fi
 out="$( run --for=ExprNode_Type )"; rc=$?
-printf '%s' "$out" | grep -o '<rung n="gen"[^>]*>.*</rung>' | grep -q 'ExprNode.Type' && ok "D the Go spelling asked directly links ExprNode.Type" || no "D ExprNode_Type (rc=$rc)"
+if printf '%s' "$out" | grep -o '<rung n="gen"[^>]*>.*</rung>' | grep -q 'ExprNode.Type'; then ok "D the Go spelling asked directly links ExprNode.Type"; else no "D ExprNode_Type (rc=$rc)"; fi
 out="$( run --callers=Type )"; rc=$?
 if [ "$rc" != 0 ] || ! printf '%s' "$out" | grep -q '<callers [^>]*of="Type" defs="1"'; then no "D --callers=Type did not resolve the proto enum (rc=$rc)"
 elif printf '%s' "$out" | grep -q 'kind_of\|Kind'; then no "D a by-name gen link became a proven caller edge"
@@ -135,14 +135,14 @@ else ok "D --callers of the proto enum lists no Rust/Go caller"; fi
 
 echo "=== E: a same-named Rust struct keeps its own proven edges ==="
 out="$( run --callers=Datum::new )"; rc=$?
-printf '%s' "$out" | grep -q 'build' && ok "E Rust Datum::new keeps its caller build" || no "E Datum::new callers (rc=$rc): $( printf '%s' "$out" | head -c 300 )"
+if printf '%s' "$out" | grep -q 'build'; then ok "E Rust Datum::new keeps its caller build"; else no "E Datum::new callers (rc=$rc): $( printf '%s' "$out" | head -c 300 )"; fi
 
 echo "=== F: absence with a positive twin ==="
 # GhostKind is code-shaped: a name-exact route, so the not-found ladder runs
 out="$( run --for=GhostKind )"; rc=$?
 g="$( printf '%s' "$out" | grep -o '<rung n="gen"[^>]*>' )"
 [ -n "$g" ] || no "F GhostKind: no gen rung at all (rc=$rc) — the absence must be a printed kept=0, not silence"
-printf '%s' "$g" | grep -q 'kept="0"' && ok "F an alias no .proto defines links nothing (kept=0); twin = D" || no "F GhostKind: $g"
+if printf '%s' "$g" | grep -q 'kept="0"'; then ok "F an alias no .proto defines links nothing (kept=0); twin = D"; else no "F GhostKind: $g"; fi
 
 echo "=== G: no .proto in the tree, no gen rung ==="
 rm -f "$FIX/proto/expr.proto"
