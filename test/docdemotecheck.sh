@@ -61,6 +61,11 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for the rank assertions"; exit 2; }
 echo "docdemotecheck: BIN=$BIN"
 
+# doc-body (FOR-DOC-BODY, #561, 2026-11-06; fordocbodycheck owns it): a prose --for over a documents-heavy tree now ends with a
+# <doc_body> block (the first doc files' best sections). The goldens below are the pre-doc-body answers byte for byte, and
+# the demotion/ranking arms read rows, not the block, so every run here switches it off; fordocbodycheck (f3) pins
+# "answer minus block == the RIPWIRE_NO_FOR_DOC_BODY=1 answer", which is what keeps these goldens honest.
+export RIPWIRE_NO_FOR_DOC_BODY=1
 cp -R "$ROOT/test/docdemotefix" "$TMP/docdemotefix"
 cd "$TMP"
 

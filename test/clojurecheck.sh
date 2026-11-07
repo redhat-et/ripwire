@@ -111,5 +111,5 @@ calls = {c.get('n').split('/')[0] for c in rows[0].iter('c')}
 assert 'square' in calls and 'secret' not in calls, calls
 PY
 PATH="$(cd "$(dirname "$BIN")" && pwd):$PATH" "$BIN" "$TMP/fix" --doctor >"$TMP/doctor.xml"
-rg -q '<c n="grammars" ok="1" loaded="26" expected="26"' "$TMP/doctor.xml"
+rg -q '<c n="grammars" ok="1" loaded="27" expected="27"' "$TMP/doctor.xml"
 echo 'clojurecheck: ALL PASS'

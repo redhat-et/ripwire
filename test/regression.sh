@@ -529,6 +529,8 @@ for _g in \
     fordeclrowcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
+    fordocbodycheck \
+    forexemplarcheck \
     forfileanchorcheck \
     forfilesymscheck \
     forhdrshapecheck \
@@ -814,6 +816,7 @@ for _g in \
     prnestedcapcheck \
     probecheck \
     propcostcheck \
+    protoindexcheck \
     prrefsafecheck \
     prrenamecheck \
     pyaliascallcheck \

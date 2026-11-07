@@ -133,6 +133,11 @@ struct LangFacts
     /// extension (`book.toml`, `SUMMARY.md`) named in a --for task is context, never a file anchor (mention.h isCodeExtension).
     bool notCode = false;
 
+    /// Protocol Buffers (PROTO-INDEX): an interface-definition schema whose definitions other languages reach only through GENERATED
+    /// modules, usually not in the tree. Its grammar names no `body:` field (ingest_sidecap.h reads the *_body child or the `{`), and
+    /// the --for not-found ladder links a generated name to these definitions by name only (forreexport.h gen rung).
+    bool generatedSchema = false;
+
     /// C++: defect-shape's whole-tree input is the macro-name set, and a changed C++ file (a .h reads as C++) can only be
     /// judged against the base's whole set. A changed C or Objective-C file does not need it, by today's behaviour
     /// (verbs_quality.h; pinned by test/qddegradecheck.sh (E3)).
@@ -355,6 +360,11 @@ struct LangFacts
     /// proves nothing about `Q::f()` when the tree defines no Q (graph.h CppQualifierScopes, CPP-EXTQUAL-VETO).
     bool qualifierNamesScope = false;
 
+    /// C, C++: a file-scope const object of a struct type is how a family registers its members (htop `const MeterClass
+    /// CPUMeter_class = { … }`), so exemplarfamily.h's typed rule reads a Var's type from its first line. Elsewhere a typed constant
+    /// is a value, and a family is a base, a registry or an attribute.
+    bool typedInstanceRows = false;
+
     /// Which arm openers the language has (ArmOpeners above).
     ArmOpeners armOpeners = ArmOpeners::ElseBranch;
 };
@@ -371,7 +381,8 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
+      .typedInstanceRows = true },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif },
@@ -402,7 +413,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .armOpeners = ArmOpeners::FatArrow },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Php, .memberSeparator = "::", .armOpeners = ArmOpeners::FatArrow },
@@ -414,6 +425,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::GDScript, .hashComment = true },
     { .lang = Lang::Clojure },
+    { .lang = Lang::Proto, .generatedSchema = true, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
 } };
 
 /// The index of the first row that is not at its own Lang index, or the table size when every row is.

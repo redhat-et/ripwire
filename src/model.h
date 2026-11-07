@@ -223,14 +223,18 @@ inline bool isUntestableOwner( SymKind kind ) noexcept
 // JVM-bridged to Java via graph.h's langCompatible (mirroring the existing Cpp<->ObjC and Cpp<->C
 // bridges) so a mixed Kotlin+Java module (the Android norm) resolves calls across the language
 // boundary instead of dropping every one of them as unresolved.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart, Kotlin, GDScript, Clojure };
+// Proto (25, PROTO-INDEX) is appended AFTER Clojure: a Protocol Buffers schema is an interface definition, not code
+// (isCodeLang false): message / enum / service / rpc / enum value definitions, no call sites, lang-incompatible with
+// every language, so a generated Rust or Go name never binds to it as a proven edge (forreexport.h's gen rung links
+// it by name, hedged).
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart, Kotlin, GDScript, Clojure, Proto };
 // The number of Lang enumerators. MUST stay ( last enumerator + 1 ): any per-language array sized by
 // a LITERAL silently drops the tail when a language is appended, and the drop is invisible because
 // the affected code paths just see a zero. That happened: nonlocalstate.h's filesByLang was a
 // hardcoded 16 while Php(18), Lua(19) and Elixir(20) existed, so --nonlocal-state never disclosed
 // those three as unanalyzed even though kUnanalyzedLangs listed Php and Lua. Size per-language
 // arrays with this, never with a number.
-inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Clojure ) + 1;
+inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Proto ) + 1;
 // ...and the cache readers validate every cached Lang byte against it, so a stale kLangCount would also refuse
 // the new language's records. The compile-time proof (infra/enumcount.h) makes the append a build error instead.
 static_assert( enumCountIsExact<Lang, kLangCount>(), "kLangCount must name the LAST Lang enumerator — move it with the append" );
@@ -241,7 +245,7 @@ inline constexpr bool isDocLang( Lang l ) noexcept
     return l == Lang::Markdown;
 }
 
-// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt|gd|clj").
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt|gd|clj|proto").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
 /// Return the stable short output label for a language, or "?" for an unknown value.
@@ -274,6 +278,7 @@ inline constexpr const char* langTag( Lang l ) noexcept
         case Lang::Kotlin:     return "kt";
         case Lang::GDScript:   return "gd";
         case Lang::Clojure:    return "clj";
+        case Lang::Proto:      return "proto";
         case Lang::Unknown:    return "?";
     }
     return "?";   // a byte past the enum (a corrupt cache value) still reads "?"; a NEW Lang is a -Werror=switch error above
@@ -293,7 +298,7 @@ inline constexpr bool isCodeLang( Lang l ) noexcept
         case Lang::ObjC: case Lang::JavaScript: case Lang::Bash: case Lang::Java: case Lang::Ruby: case Lang::CSharp:
         case Lang::C: case Lang::Php: case Lang::Lua: case Lang::Elixir: case Lang::Dart: case Lang::Kotlin: case Lang::GDScript: case Lang::Clojure:
             return true;
-        case Lang::Markdown: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Unknown:
+        case Lang::Markdown: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Proto: case Lang::Unknown:
             return false;
     }
     return false;   // a byte past the enum (a corrupt cache value) is not a language
@@ -997,8 +1002,8 @@ static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
 // Symbol::rankFlags bits (a 4-bit field: two bits left). An HTML section unit (ingest_docpass.h pushHtmlUnitDefs) carries both: --recall
-// reads it, nothing else ranks or names it. A later lane may set one of them alone at a def's RawDef (a .proto definition kept out of
-// --for's statistics but still a definition --defs lists: kRankFlagNotLexRanked only, RANK-PROTO).
+// reads it, nothing else ranks or names it. A .proto definition (langfacts.h generatedSchema) carries kRankFlagNotLexRanked alone: out of
+// --for's statistics but still a definition --defs lists (RANK-PROTO; ingest_model.h assignSymbols sets it from the lang on every load).
 //   kRankFlagNotLexRanked: out of every lexical ranking lens (--for, MCP `for`, --query, pack-task): no corpus statistics (document
 //     frequency, average length, symbol count), no score, no route name, no route carrier, no mention-anchor target (lexical.h, mention.h).
 //   kRankFlagNotNamed: no name binds it: no call edge (graph.h byName), no bare-name resolution (resolveAllByName/Qualified: --callers,

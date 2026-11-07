@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-06, lane proto-index (merged over main bb1806df1 at 301/49; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 301 -> 303 (rich 304; above #538's 302): .proto files are indexed (Lang::Proto, queries/proto/tags.scm);
+#   quality.h's kIngestParserVerMirror with it. kCacheVersion stays 49 (no record changes shape) and kQSnapCacheScheme stays as main has
+#   it: no watched quality.h function moved.
 # 2026-11-05, lane warm-direct (base lane/warm-rewrite 630a90e3d, merged over main at kParserVer 301; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kCacheVersion 48 -> 49: the FILE record's head gains the eight family counts (a warm run plans from heads and decodes in
 #   the parse worker); quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no extraction or watched

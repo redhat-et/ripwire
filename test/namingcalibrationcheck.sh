@@ -192,6 +192,29 @@ def newPace():
     return 1
 PY
 
+# an added line `++counter;` is the patch line `+++counter;` (not a file header), and a path with a space ends its header in a tab:
+# neither may leave the file's comment syntax unknown, or the comment-only word change below it votes as a rename
+cat >"$FIX/inc.cpp" <<'CPP'
+int bump( int counter )
+{
+    counter = counter + 1;
+    return counter;
+}
+
+// the oldGrip holds the rows
+int newGrip( int amount )
+{
+    return amount + 4;
+}
+CPP
+cat >"$FIX/prose space.cpp" <<'CPP'
+// the oldCrew walks the rows
+int newCrew( int amount )
+{
+    return amount + 5;
+}
+CPP
+
 git -C "$FIX" init -q 2>/dev/null
 git -C "$FIX" config user.email calibration@example.invalid
 git -C "$FIX" config user.name  calibration
@@ -232,10 +255,12 @@ int stableHelper( int counter )
 CPP
 git -C "$FIX" commit -q -am "rename the five" >/dev/null 2>&1
 
-# the prose commit: three comment-only word changes (must mine nothing) and one trailing-comment code line (must mine)
+# the prose commit: five comment-only word changes (must mine nothing) and one trailing-comment code line (must mine)
 sed -i.bak -e 's/oldSpan/newSpan/' -e 's/oldBand/newBand/' -e 's/return oldKnob/return newKnob/' "$FIX/prose.cpp"
 sed -i.bak -e 's/oldPace/newPace/' "$FIX/prose.py"
-rm -f "$FIX/prose.cpp.bak" "$FIX/prose.py.bak"
+sed -i.bak -e 's/^    counter = counter + 1;$/++counter;/' -e 's/oldGrip/newGrip/' "$FIX/inc.cpp"
+sed -i.bak -e 's/oldCrew/newCrew/' "$FIX/prose space.cpp"
+rm -f "$FIX/prose.cpp.bak" "$FIX/prose.py.bak" "$FIX/inc.cpp.bak" "$FIX/prose space.cpp.bak"
 git -C "$FIX" commit -q -am "reword the comments" >/dev/null 2>&1
 
 cat >"$FIX/split.cpp" <<'CPP'
@@ -311,7 +336,7 @@ done
 
 # negative controls
 # a word changed inside a comment is not a rename, whatever the comment syntax (see the PROSE controls above)
-for prose in oldSpan:newSpan oldBand:newBand oldPace:newPace; do
+for prose in oldSpan:newSpan oldBand:newBand oldPace:newPace oldGrip:newGrip oldCrew:newCrew; do
     if grep -q "o=\"${prose%%:*}\"" "$FIXOUT"; then no "instrument: the comment-only change ${prose%%:*} -> ${prose##*:} was mined as a rename"
     else ok "instrument: the comment-only change ${prose%%:*} -> ${prose##*:} mined nothing"; fi
 done

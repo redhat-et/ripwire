@@ -456,8 +456,20 @@ famcnt_cached(){   # $1 = cache file, $2 = out, $3 = err
 cp "$GOOD" "$TMP/famcnt_control.cache"
 famcnt_cached "$TMP/famcnt_control.cache" "$TMP/famcnt_control.xml" "$TMP/famcnt_control.err"; rc=$?
 FAM_N="$( grep -oE 'cached_records=[0-9]+' "$TMP/famcnt_control.err" | head -1 | cut -d= -f2 )"
-if [ "$rc" -eq 0 ] && [ -n "$FAM_N" ] && [ "$FAM_N" -gt 1 ] && cmp -s "$TMP/truth.xml" "$TMP/famcnt_control.xml"; then
-    ok "[famcnt control] the unmodified blob is used whole under the bound (cached_records=$FAM_N)"
+# The control's N must match counts the run does not derive from the records themselves: the files it crawled and the blob's
+# entries (RIPWIRE_CACHE_STATS files= / blob_entries=). A sibling record that is always rejected would lower N and every
+# mutant's N-1 with it, which the equality below would otherwise accept.
+FAM_FILES="$( grep -oE ' files=[0-9]+' "$TMP/famcnt_control.err" | head -1 | cut -d= -f2 )"
+FAM_BLOB="$( grep -oE 'blob_entries=[0-9]+' "$TMP/famcnt_control.err" | head -1 | cut -d= -f2 )"
+if [ -z "$FAMCNT_BOUND" ]; then
+    FAM_HOW="refused (exit 0, byte-identical, one record reparsed; NOT proven cheap: no allocation bound on this $( uname -s ) binary)"
+    note "family-count arms: no allocation bound for a plain $( uname -s ) binary (its allocator overcommits), so these arms prove the guard fires and the record is reparsed, not that the count never reached reserve(); the ASan sweep or a Linux run proves cheap"
+else
+    FAM_HOW="refused cheaply: exit 0, byte-identical, one record reparsed"
+fi
+if [ "$rc" -eq 0 ] && [ -n "$FAM_N" ] && [ "$FAM_N" -gt 1 ] && [ "${FAM_FILES:-none}" = "$FAM_N" ] && [ "${FAM_BLOB:-none}" = "$FAM_N" ] \
+   && cmp -s "$TMP/truth.xml" "$TMP/famcnt_control.xml"; then
+    ok "[famcnt control] the unmodified blob is used whole (cached_records=$FAM_N = files crawled = blob entries)"
     for name in huge_def_count_recomputed_checksum huge_head_def_count_recomputed_checksum huge_head_ref_count_recomputed_checksum \
                 huge_head_and_body_def_count_recomputed_checksum head_def_count_plus_one_recomputed_checksum head_ref_count_plus_one_recomputed_checksum \
                 head_counts_zeroed_recomputed_checksum key_length_differs_but_fits_recomputed_checksum; do
@@ -473,11 +485,11 @@ if [ "$rc" -eq 0 ] && [ -n "$FAM_N" ] && [ "$FAM_N" -gt 1 ] && cmp -s "$TMP/trut
         elif [ "${got:-none}" != "$(( FAM_N - 1 ))" ]; then
             no "[famcnt:$name] cached_records=${got:-none}, expected $(( FAM_N - 1 )) (exactly record[0] refused of $FAM_N) — the guard did not fire, or fired on the wrong record"
         else
-            ok "[famcnt:$name] refused cheaply: exit 0, byte-identical, cached_records=$got of $FAM_N (one record reparsed)"
+            ok "[famcnt:$name] $FAM_HOW: cached_records=$got of $FAM_N"
         fi
     done
 else
-    no "[famcnt control] the unmodified blob did not warm-hit cleanly (rc=$rc, cached_records='${FAM_N:-none}') — the family-count arms cannot conclude"
+    no "[famcnt control] the unmodified blob did not warm-hit cleanly (rc=$rc, cached_records='${FAM_N:-none}', files='${FAM_FILES:-none}', blob_entries='${FAM_BLOB:-none}') — the family-count arms cannot conclude"
 fi
 
 # ── filesystem-shape mutations (not byte content — the cache PATH itself is hostile) ────────────────
