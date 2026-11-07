@@ -793,8 +793,16 @@ inline std::string forFileRowSymNames( const IngestResult& ing, const ForFileRow
     for( std::size_t k = 0; k < kForPageSymNameCount && row.top[k] != kNoNode; ++k )
     {
         ASSUME( row.top[k] < ing.symbols.size(), "forFileRowSymNames: a page row names a symbol outside the index" );
-        sym += k > 0 ? "," : "";
-        sym += ing.symbols[ row.top[k] ].name;
+        const std::string_view name = ing.symbols[ row.top[k] ].name;
+        // SIZE-3b (size-trim): a name the row already lists (an overload, a same-named member) is not repeated; the first, by rank, stays
+        const bool repeated = std::any_of( std::begin( row.top ), std::begin( row.top ) + std::ptrdiff_t( k ),
+                                           [ & ]( NodeId prev ) { return std::string_view( ing.symbols[ prev ].name ) == name; } );
+        if( repeated )
+        {
+            continue;
+        }
+        sym += sym.empty() ? "" : ",";
+        sym += name;
     }
     return sym;
 }

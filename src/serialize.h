@@ -1191,6 +1191,10 @@ inline constexpr std::string_view kForFileTailFoldedLegend =
 inline constexpr std::string_view kForCompactFileTailFoldedLegend =
     "; t folded=class=N: N p= only rows of that class (doc|test|config|script|testdata|other) not listed, next= pages to them";
 inline constexpr std::string_view kForFileTailFoldedWhy = "rows past page 0 of these non-code file classes are counted, not listed; next pages to them";
+// SIZE-3a (size-trim): present-only beside a <d same_as=> row (packSignatures SigRowSpelling::foldRepeatedText)
+inline constexpr std::string_view kForSameAsLegend =
+    "; d same_as=N: this row's doc and signature text equal the earlier row n=N's, so they are not repeated (every other attribute is its own)";
+inline constexpr std::string_view kForCompactSameAsLegend = "; d same_as=N: doc+sig text as row n=N (not repeated)";
 // The JSON twin of that clause's p_only= (the JSON answer carries no legend): "p_only_why" beside "p_only" (forpage.h)
 inline constexpr std::string_view kForFileTailPathOnlyWhy = "rows past page 0 of the file page print the path only (sym empty)";
 
@@ -6025,7 +6029,21 @@ inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<
 struct SigRowSpelling
 {
     bool elideZeroMetrics = false;   // omit a zero cx=/ccx=/in= on a row (SigRowFacts::elideZero); the legend says absent = 0
+    bool foldRepeatedText = false;   // SIZE-3a: a row whose doc+signature text repeats an earlier row's prints same_as= instead of it
 };
+// SIZE-3a (size-trim): the shortest doc+signature text a row folds (shorter text costs less than the attribute naming its twin)
+inline constexpr std::size_t kSigFoldTextMinBytes = 40;
+// The <d> row's n= value as its head spells it (escaped), "" when the head has none
+inline std::string_view sigHeadName( std::string_view head ) noexcept
+{
+    const std::size_t at = head.find( " n=\"" );
+    if( at == std::string_view::npos )
+    {
+        return {};
+    }
+    const std::size_t end = head.find( '"', at + 4 );
+    return end == std::string_view::npos ? std::string_view() : head.substr( at + 4, end - at - 4 );
+}
 
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                             int topN, std::size_t budgetBytes,
@@ -6496,6 +6514,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             w.write( kExtentSuspectRowLegend );
         }
         std::vector<char> fileNotesPending( sigFiles.size(), 1 );   // P7: a file's notes ride its FIRST live row
+        std::vector<std::pair<std::string, std::string_view>> firstWithText;   // SIZE-3a: (doc+sig text, the n= of the first row printing it)
         for( const SigEntry& e : entries )
         {
             if( e.dropped )
@@ -6507,9 +6526,34 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             // id mapping must subtract rankBase or it reads past the window into the masked tail
             // (the #362 review round's next_offset=2^32 seam).
             pushShownSigId( shownIdsOut, order, std::uint32_t( e.globalRank - rankBase ) );
-            writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
-            if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
-            w.write( escapeXml( e.sig, esc ) );
+            // SIZE-3a: a repeat of an earlier row's text keeps every attribute (n= l= p= r= …) and names that row instead of the text
+            std::string sameAs;
+            if( spelling.foldRepeatedText && e.doc.size() + e.sig.size() >= kSigFoldTextMinBytes )
+            {
+                std::string key = e.doc + '\0' + e.sig;   // a shown head is tens of rows: a linear scan, no node-based map
+                const auto  it  = std::ranges::find_if( firstWithText, [ & ]( const auto& seen ) { return seen.first == key; } );
+                if( it == firstWithText.end() )
+                {
+                    firstWithText.emplace_back( std::move( key ), sigHeadName( e.head ) );
+                }
+                else
+                {
+                    sameAs = std::string( it->second );
+                }
+            }
+            if( sameAs.empty() )
+            {
+                writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
+                if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
+                w.write( escapeXml( e.sig, esc ) );
+            }
+            else
+            {
+                std::string head = e.head;
+                head.pop_back();   // the '>'
+                head += " same_as=\"" + sameAs + "\">";
+                writeSigHeadWithEnd( w, head, e.endLine );
+            }
             w.write( e.notes );                                                // L3: symbol notes on this <d> (inert when null)
             if( fileNotesPending[ e.fileSlot ] )
             {

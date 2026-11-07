@@ -4247,7 +4247,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
                                 &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes;
                                                                              //   knob-honesty-068: carries forSigsNext IN
-                                SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0)
+                                SigRowSpelling{ .elideZeroMetrics = true, .foldRepeatedText = true } );   // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0); SIZE-3a: repeated text folded
             };
         sigsPreRendered = preRender( renderSigs, sigsStr );
         const std::optional<RedactCounts> redactAfterSigs = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
@@ -4912,11 +4912,17 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         rw::eraseAbsentClause( headerStr, kForCompactLegendCompose, !composePreRendered || composeStr.contains( "<field " ) );
         rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactBodyFoldMembersClause : rw::kForBodyFoldMembersClause,
                                fold.xml.contains( " members=\"" ) );
-        // SIZE-2: the tail fold's clause rides beside folded=, after the walk clause
+        // SIZE-2 / SIZE-3a: each fold's clause rides beside the attribute it defines — the tail's after the walk clause, same_as=
+        // after the row facts (the full dialect: the end of its first comment)
         if( tailStr.contains( " folded=\"" ) )
         {
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTailWide : rw::kForFileTailWideLegend,
                                    headerParts.compactLegend ? rw::kForCompactFileTailFoldedLegend : rw::kForFileTailFoldedLegend );
+        }
+        if( sigsPreRendered && sigsStr.contains( " same_as=\"" ) )
+        {
+            rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendFacts : std::string_view(),
+                                   headerParts.compactLegend ? rw::kForCompactSameAsLegend : rw::kForSameAsLegend );
         }
         // PR #135: the priced root this header will carry — every late splice and the est_tokens fixpoint, in
         // finishForLensHeaderPriced (above runForLens, with each splice's rationale).
@@ -4980,7 +4986,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                             rw::forLensRules( forDocsAfterCode, forEndLines, forHeadRR ), nullptr, nullptr, nullptr,   // the degrade path selects identically
                             forTopRowNext,                                           // L-W: same next= rule on the degrade path
                             &degradeSigsCut,                                         // knob-honesty-068: and the same <sigs next=>
-                            SigRowSpelling{ .elideZeroMetrics = true } );            // lean-answers lane: the same row spelling
+                            SigRowSpelling{ .elideZeroMetrics = true, .foldRepeatedText = true } );   // lean-answers lane: the same row spelling (SIZE-3a too)
         }
         if( legoPreRendered )
         {
