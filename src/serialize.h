@@ -153,6 +153,18 @@ inline void eraseAbsentClause( std::string& legend, std::string_view clause, boo
     }
 }
 
+// The present-only clause of an attribute a late fold added (SIZE-2 folded=, SIZE-3a same_as=): spliced after `anchor` (the
+// clause it qualifies), or before the first comment's " -->" when the anchor is empty or absent (the other dialect, a dropped clause).
+inline void spliceClauseAfter( std::string& legend, std::string_view anchor, std::string_view clause )
+{
+    std::size_t at = anchor.empty() ? std::string::npos : legend.find( anchor );
+    at             = at == std::string::npos ? legend.find( " -->" ) : at + anchor.size();
+    if( at != std::string::npos )
+    {
+        legend.insert( at, clause );
+    }
+}
+
 // S5 — THE BYTE SET IS THE CONTRACT. Everything below that is NOT in this set is copied through
 // unchanged by the switch's `default:` arm, so the run loop may memcpy it in bulk without looking at it;
 // everything that IS in the set still goes through the SAME switch, one byte at a time, unchanged. The
@@ -1172,6 +1184,13 @@ inline constexpr std::string_view kForFileTailWideLegend =
     "; tail walk: the page rows go on to the file page's first 160 rows (a code question: its first 160 code rows, plus the "
     "doc rows within its first 160 rows); a row past page 0 (a code question: past its first 40 code rows, a doc past row 40) "
     "prints p= only, after every row with sym=, and skips files the head shows; p_only= counts them";
+// SIZE-2 (size-trim): present-only beside a tail that folded widened rows (forpage.h FileTail::folded); after the walk clause.
+inline constexpr std::string_view kForFileTailFoldedLegend =
+    "; tail folded=class=N: on a code question, N rows past page 0 of that file class (doc, test, config, script, testdata, other) "
+    "are not listed, unless the task names the class; next= pages from the first one";
+inline constexpr std::string_view kForCompactFileTailFoldedLegend =
+    "; t folded=class=N: N p= only rows of that class (doc|test|config|script|testdata|other) not listed, next= pages to them";
+inline constexpr std::string_view kForFileTailFoldedWhy = "rows past page 0 of these non-code file classes are counted, not listed; next pages to them";
 // The JSON twin of that clause's p_only= (the JSON answer carries no legend): "p_only_why" beside "p_only" (forpage.h)
 inline constexpr std::string_view kForFileTailPathOnlyWhy = "rows past page 0 of the file page print the path only (sym empty)";
 

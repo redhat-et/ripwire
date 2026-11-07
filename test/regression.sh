@@ -550,6 +550,7 @@ for _g in \
     forselfhookcheck \
     forsigspancheck \
     forsoftbudgetcheck \
+    fortailfoldcheck \
     fortailwidecheck \
     forunusedcheck \
     forwidencheck \

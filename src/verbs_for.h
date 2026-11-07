@@ -4912,6 +4912,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         rw::eraseAbsentClause( headerStr, kForCompactLegendCompose, !composePreRendered || composeStr.contains( "<field " ) );
         rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactBodyFoldMembersClause : rw::kForBodyFoldMembersClause,
                                fold.xml.contains( " members=\"" ) );
+        // SIZE-2: the tail fold's clause rides beside folded=, after the walk clause
+        if( tailStr.contains( " folded=\"" ) )
+        {
+            rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTailWide : rw::kForFileTailWideLegend,
+                                   headerParts.compactLegend ? rw::kForCompactFileTailFoldedLegend : rw::kForFileTailFoldedLegend );
+        }
         // PR #135: the priced root this header will carry — every late splice and the est_tokens fixpoint, in
         // finishForLensHeaderPriced (above runForLens, with each splice's rationale).
         const ForLensRootFinish rootFinish{

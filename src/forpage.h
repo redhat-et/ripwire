@@ -780,6 +780,9 @@ struct FileTail
     std::size_t               oldRows = 0;
     std::size_t               oldPageSeen = 0;
     std::size_t               oldPageSkip = SIZE_MAX;
+    // SIZE-2 (size-trim): widened rows (past the old cut, p= only) of a NON-code file class the code question did not ask for are
+    // folded: counted here per class (TailFoldClass order), not listed. pageSkip marks the first one, so next= pages to it.
+    std::array<std::uint32_t, 6> folded{};
 };
 
 // a file page row's sym= value: the file's top symbols by lens rank (row.top[], at most kForPageSymNameCount), comma-joined,
@@ -797,6 +800,63 @@ inline std::string forFileRowSymNames( const IngestResult& ing, const ForFileRow
 }
 
 inline constexpr std::uint32_t kNoPageRow = UINT32_MAX;
+
+// SIZE-2 (size-trim): the file class of a widened tail row, by its lead symbol's language and its path. Code is never folded; the
+// other six are, on a code question, unless the task names the class (tailFoldKept). Test = a code file under a test path
+// (filter.h isTestPath, the file-level half of the test=1 predicate: a test-scoped symbol inside a source file keeps that file code).
+enum class TailFoldClass : std::uint8_t
+{
+    Doc,
+    Test,
+    Config,
+    Script,
+    TestData,
+    Other,
+    Code
+};
+inline constexpr std::string_view kTailFoldClassNames[] { "doc", "test", "config", "script", "testdata", "other" };
+static_assert( std::size( kTailFoldClassNames ) == static_cast<std::size_t>( TailFoldClass::Code )
+                   && std::tuple_size_v<decltype( FileTail::folded )> == std::size( kTailFoldClassNames ),
+               "one name and one count per foldable class, in TailFoldClass order" );
+inline TailFoldClass tailFoldClass( const IngestResult& ing, NodeId lead, std::string_view relPath ) noexcept
+{
+    ASSUME( lead < ing.symbols.size(), "tailFoldClass: a page row's lead is outside the index" );
+    const Lang lang = ing.symbols[ lead ].lang;
+    if( isDocLang( lang ) )
+    {
+        return TailFoldClass::Doc;
+    }
+    const bool test = isTestPath( relPath );
+    if( lang == Lang::Bash )
+    {
+        return test ? TailFoldClass::TestData : TailFoldClass::Script;
+    }
+    if( isCodeLang( lang ) )
+    {
+        return test ? TailFoldClass::Test : TailFoldClass::Code;
+    }
+    if( test )
+    {
+        return TailFoldClass::TestData;
+    }
+    return lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml ? TailFoldClass::Config : TailFoldClass::Other;
+}
+// The classes a code question keeps listed because its task names them (a whole word): tests, config, scripts. An allowlist of
+// cue words; a class not named folds. Docs need no cue here: a docs question takes the plain walk, which folds nothing.
+inline std::array<bool, 6> tailFoldKept( std::string_view task )
+{
+    const std::string lower = queryshape::detail::lowerAscii( task );
+    const auto any = [ & ]( std::initializer_list<std::string_view> words )
+    { return std::ranges::any_of( words, [ & ]( std::string_view w ) { return taskNamesWord( lower, w ); } ); };
+    const bool tests = any( { "test", "tests", "testing", "spec", "specs", "fixture", "fixtures" } );
+    return { false, tests, any( { "config", "configuration", "yaml", "yml", "json", "toml", "settings" } ),
+             any( { "script", "scripts", "shell", "bash" } ), tests, false };
+}
+// RIPWIRE_NO_TAIL_FOLD=1: list every widened row (the pre-SIZE-2 tail), the ablation arm of test/fortailfoldcheck.sh
+inline bool tailFoldOn()
+{
+    return std::getenv( "RIPWIRE_NO_TAIL_FOLD" ) == nullptr;
+}
 
 // fileId -> its row in `page`, kNoPageRow for a file holding no positive-score symbol
 inline std::vector<std::uint32_t> forPageRowOfFile( const ForFilePage& page, std::size_t fileCount )
@@ -995,6 +1055,7 @@ struct TailPageWalkInputs
     const ForFilePage&       page;
     std::string_view         rootArg;
     const std::vector<char>& inHead;   // the shown head's files (computeFileTail): skipped past the old cut
+    const std::array<bool, 6>* foldKept = nullptr;   // SIZE-2: a code question folds widened non-code rows except these classes
 };
 inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, FileTail& wide, FileTail* docs = nullptr )
 {
@@ -1023,6 +1084,16 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         }
         else if( ( bits & kTailFateListed ) != 0 )
         {
+            // SIZE-2: a widened row (p= only) of a non-code class is counted, not listed; next= pages to the first one
+            const TailFoldClass cls = fate == TailPageRowFate::ListWide && in.foldKept != nullptr
+                ? tailFoldClass( ing, row.lead, rootRelPath( ing, row.fileId ) ) : TailFoldClass::Code;
+            if( cls != TailFoldClass::Code && !( *in.foldKept )[ std::size_t( cls ) ] )
+            {
+                listed[ row.fileId ] = 1;
+                ++out.folded[ std::size_t( cls ) ];
+                out.pageSkip = std::min( out.pageSkip, r );
+                continue;
+            }
             listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
                          symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );
         }
@@ -1087,7 +1158,8 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     FileTail*               docs   = rankOrder || taskAsksForDocText( task ) ? nullptr : &docRows;
     const std::vector<char> inHead = fileMaskOfSymbols( ing, headIds );   // once, for both row kinds
     fileTailRankRows( out, listed, ing, rank, page, inHead, rootArg, docs );
-    fileTailPageRows( out, listed, TailPageWalkInputs{ ing, page, rootArg, inHead }, wideRows, docs );
+    const std::array<bool, 6> foldKept = tailFoldKept( task );
+    fileTailPageRows( out, listed, TailPageWalkInputs{ ing, page, rootArg, inHead, docs != nullptr && tailFoldOn() ? &foldKept : nullptr }, wideRows, docs );
     appendFileTailRows( out, docRows );
     out.oldRows = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
     appendFileTailRows( out, wideRows );
@@ -1137,6 +1209,29 @@ inline std::vector<NodeId> rowsAtTargetIds( std::vector<NodeId> shown, const std
     return shown;
 }
 
+// SIZE-2: the folded classes, "doc=12,test=30" in TailFoldClass order, "" when nothing folded
+inline std::string fileTailFoldedList( const FileTail& t, std::string_view sep, std::string_view quote = {} )
+{
+    std::string v;
+    for( std::size_t c = 0; c < t.folded.size(); ++c )
+    {
+        if( t.folded[c] > 0 )
+        {
+            v += v.empty() ? "" : ",";
+            v += quote;
+            v += kTailFoldClassNames[c];
+            v += sep;
+            v += std::to_string( t.folded[c] );
+        }
+    }
+    return v;
+}
+inline std::string fileTailFoldedXml( const FileTail& t )
+{
+    const std::string v = fileTailFoldedList( t, "=" );
+    return v.empty() ? std::string() : " folded=\"" + v + "\"";
+}
+
 // the call serving the files a tail of `shown` rows left out: the file page from the first page row it did not print
 inline std::string fileTailNextInvocation( const FileTail& t, std::size_t shown )
 {
@@ -1173,6 +1268,7 @@ inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, s
     {
         x += " p_only=\"" + std::to_string( pOnly ) + "\"";   // review F3: the rows past the old walk's cut, sym= shed
     }
+    x += fileTailFoldedXml( t );   // SIZE-2: the folded rows' counts, absent when none
     x += ">";
     for( std::size_t i = 0; i < shown; ++i )
     {
@@ -1215,6 +1311,10 @@ inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
     if( const std::size_t pOnly = fileTailPathOnlyShown( t, shown ); pOnly > 0 )   // review F3: JSON has no legend, so the why rides
     {
         j += ",\"p_only\":" + std::to_string( pOnly ) + ",\"p_only_why\":\"" + std::string( kForFileTailPathOnlyWhy ) + "\"";
+    }
+    if( const std::string v = fileTailFoldedList( t, "\":", "\"" ); !v.empty() )   // SIZE-2: JSON has no legend, so the why rides too
+    {
+        j += ",\"folded\":{" + v + "},\"folded_why\":\"" + std::string( kForFileTailFoldedWhy ) + "\"";
     }
     j += "}";
     return j;

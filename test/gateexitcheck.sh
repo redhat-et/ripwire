@@ -333,6 +333,7 @@ FAILFAST = {
     "mcpcodexmetacheck.sh":     ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "readmeexamplecheck.sh":    ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "radixsimdcheck.sh":        ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
+    "fortailfoldcheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary, a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
     "fortailwidecheck.sh":      ( "embedded Python counts failures and sys.exit(1)s on any; rc READ, not inferred: run against the base binary (11 FAIL), a SIGSEGV stub and an empty-output stub it exits 1 each time", 1 ),
 }
 
