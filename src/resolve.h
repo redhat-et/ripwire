@@ -1002,44 +1002,85 @@ inline std::string readConfigBytes( const std::string& path )
     return out;
 }
 
+// True when `line` holds the three-quote delimiter of a TOML multi-line string of quote `q` (`"""` basic, `'''` literal) at `i`.
+// starts_with on the tail, not compare( i, 3, … ): a tail shorter than 3 makes libstdc++'s compare subtract 3 from a smaller
+// size_t, which the asan leg's unsigned-overflow check aborts on.
+inline bool tomlTripleAt( std::string_view line, std::size_t i, char q )
+{
+    const char triple[] = { q, q, q };
+    return line.substr( i ).starts_with( std::string_view( triple, 3 ) );
+}
+
+// The index just past the `"""` / `'''` that closes a multi-line string of quote `q` whose body is read from `i`, or npos when
+// the string stays open past the line. A basic one (`"""`) escapes the next character: `\"""` is a quote and two more text
+// characters; a literal one (`'''`) never does.
+inline std::size_t tomlMultiLineStringEnd( std::string_view line, std::size_t i, char q )
+{
+    while( i < line.size() )
+    {
+        if( q == '"' && line[ i ] == '\\' )
+        {
+            i += 2;
+        }
+        else if( tomlTripleAt( line, i, q ) )
+        {
+            return i + 3;
+        }
+        else
+        {
+            ++i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// The index just past the quote that closes a one-line string opened by quote `q` at `i` (its quotes are text: `x = "'''"`), or
+// the line's size when it never closes. A basic string ("…") escapes the next character; a literal one ('…') never does.
+inline std::size_t tomlOneLineStringEnd( std::string_view line, std::size_t i, char q )
+{
+    std::size_t close = i + 1;
+    while( close < line.size() && line[ close ] != q )
+    {
+        close += q == '"' && line[ close ] == '\\' ? 2 : 1;
+    }
+    return close >= line.size() ? line.size() : close + 1;
+}
+
 // Advances `open` (0, or the quote character of a TOML multi-line string `"""…"""` / `'''…'''` still open) across one line of a
 // manifest and returns true when the line STARTS inside such a string: its text is a string's body, never a `[section]` header or
 // a `key = "value"` line. A `#` comment outside a string ends the scan of the line.
 inline bool tomlStartsInsideString( std::string_view line, char& open )
 {
-    const bool inside = open != 0;
-    for( std::size_t i = 0; i < line.size(); )
+    const bool  inside = open != 0;
+    std::size_t i      = 0;
+    if( inside )
     {
-        if( open == 0 && line[ i ] == '#' )
+        i = tomlMultiLineStringEnd( line, 0, open );
+        if( i == std::string_view::npos )
         {
-            break;
+            return inside;
         }
-        if( open == '"' && line[ i ] == '\\' )   // a basic multi-line string escapes the next character: `\"""` is a quote and two more text characters
+        open = 0;
+    }
+    while( i < line.size() && line[ i ] != '#' )
+    {
+        const char c = line[ i ];
+        if( c != '"' && c != '\'' )
         {
-            i += 2;
-            continue;
+            ++i;
         }
-        const char q = open != 0 ? open : line[ i ];
-        // starts_with on the tail, not compare( i, 3, … ): a tail shorter than 3 makes libstdc++'s compare subtract 3 from a smaller
-        // size_t, which the asan leg's unsigned-overflow check aborts on.
-        const std::string_view triple = q == '"' ? std::string_view( "\"\"\"" ) : std::string_view( "'''" );
-        if( ( q == '"' || q == '\'' ) && line.substr( i ).starts_with( triple ) )
+        else if( !tomlTripleAt( line, i, c ) )
         {
-            open = open == 0 ? q : char( 0 );
-            i += 3;
-        }
-        else if( open == 0 && ( q == '"' || q == '\'' ) )   // a one-line string: its quotes are text (`x = "'''"`)
-        {
-            std::size_t close = i + 1;   // a basic string ("…") escapes the next character; a literal one ('…') never does
-            while( close < line.size() && line[ close ] != q )
-            {
-                close += q == '"' && line[ close ] == '\\' ? 2 : 1;
-            }
-            i = close >= line.size() ? line.size() : close + 1;
+            i = tomlOneLineStringEnd( line, i, c );
         }
         else
         {
-            ++i;
+            i = tomlMultiLineStringEnd( line, i + 3, c );
+            if( i == std::string_view::npos )
+            {
+                open = c;
+                break;
+            }
         }
     }
     return inside;
