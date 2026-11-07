@@ -377,10 +377,12 @@ rrun US --uses=selectBaseline \
 # per indexed file for the touch-share scan, skipping test/doc paths first and dropping a file over kDefaultMaxFileBytes or a generated
 # one after the read (bounded by that drop, not memoised across calls). No new fopen/fread. #560 (FORLITERAL-3) also moves this pin (54).
 # 54/55 -> 56 2026-11-07 (merge of origin/main into lane/exemplar-e1): both lanes' new call sites, 53 + 1 (forliteral.h) + 2 (exemplarfamily.h).
+# 56 -> 57 2026-11-07 (lane/reg-reader over main 87ede40d3): src/forliteral.h lit_detail::tableReadersOf (measured: the one new <u> row) reads the subscript
+# row's file and at most kForTableReaderFiles (16) caller files, once each, only when a subscript row is shown and the answer names its table. No new fopen.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 56 ] \
-    && ok "repo: --uses=readWholeFile count=56 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 56, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 57 ] \
+    && ok "repo: --uses=readWholeFile count=57 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 57, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
