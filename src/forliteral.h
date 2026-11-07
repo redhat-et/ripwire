@@ -2424,8 +2424,10 @@ struct RegScan
 // statements are not the call's arguments); `[` groups are passed. `*direct`: no group opened between that call's `(` and the hit.
 inline std::string innermostRegistration( std::string_view text, const RegScan& scan, const RegHitCtx& ctx, bool* direct )
 {
-    for( std::size_t k = scan.open.size(); k-- > 0; )
+    // a 1-based cursor counts down to zero: `k-- > 0` wraps k to SIZE_MAX on its final test, which -fsanitize=integer reports (ingest_names.h)
+    for( std::size_t cursor = scan.open.size(); cursor > 0; --cursor )
     {
+        const std::size_t    k = cursor - 1;
         const RegScan::Open& o = scan.open[k];
         if( o.c == '{' && opensBlockBody( text, o.pos ) )
         {
@@ -4008,7 +4010,8 @@ inline TableReaders tableReadersOf( const IngestResult& ing, const Graph* g, con
     }
     const Site&                         row   = rows[pick];
     const std::string&                  name  = ing.symbols[hits[pick].enclosingId].name;
-    const std::string_view              fn    = std::string_view( name ).substr( name.find_last_of( ".:" ) + 1 );
+    const std::size_t                   dot   = name.find_last_of( ".:" );   // npos + 1 would wrap (-fsanitize=integer)
+    const std::string_view              fn    = std::string_view( name ).substr( dot == std::string::npos ? 0 : dot + 1 );
     const std::vector<std::uint32_t>    files = readerFilesOf( ing, g, hits[pick].enclosingId, row.raw.fileId, out.floor );
     const std::vector<std::string_view> parts = quotedPartsOf( std::string_view( row.tbl ).substr( row.table.size() ) );
     std::vector<std::pair<int, GrepRawHit>> found;

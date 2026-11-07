@@ -524,6 +524,8 @@ Discloses: `capped`, `lit_capped`
 | `kForTableContextRows` | `4` | — | shape=table: table rows served with the lines after them |
 | `kForTableMaxAnchor` | `60` | — | a longer backticked span is no anchor |
 | `kForTableRankedRows` | `4096` | — | shape=table: source sites read for a table row and ordered (a registry past the readers in path order must still rank first) |
+| `kForTableReaderFiles` | `16` | — | REG-READER: caller files read for them, by path (past it: readers= is a floor) |
+| `kForTableReaderRows` | `2` | — | REG-READER: <lr> reads of a subscript row's table listed (readers= counts all) |
 | `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
 
 ### `src/formembers.h`
