@@ -28,8 +28,8 @@ CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 HARNESS="$ROOT/test/clonepersist_harness.cpp"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 fail=0
-ok(){ echo "  PASS  $*"; }
-no(){ echo "  FAIL  $*"; fail=1; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "clonepersistcheck: BIN=$BIN CXX=$CXX"
 
 build_harness() {   # $1 = tag, $2 = include dir holding the clones.h to test
@@ -42,7 +42,11 @@ if build_harness shipped "$ROOT/src"; then
     mkdir -p "$WORK/fix_h"
     if "$WORK/harness_shipped" "$WORK/fix_h" > "$WORK/h.txt"; then ok "(H) harness K1-K7 pass on the shipped clones.h"; else no "(H) harness failed on the shipped clones.h"; fi
     sed 's/^/    /' "$WORK/h.txt"
-    [ "$( grep -c '^  PASS  K' "$WORK/h.txt" )" -eq 11 ] && ok "(H) liveness: all 11 K checks ran and passed" || no "(H) not all 11 K checks ran and passed"
+    if [ "$( grep -c '^  PASS  K' "$WORK/h.txt" )" -eq 11 ]; then
+        ok "(H) liveness: all 11 K checks ran and passed"
+    else
+        no "(H) not all 11 K checks ran and passed"
+    fi
 else
     no "(H) harness failed to compile"; sed 's/^/    /' "$WORK/cc_shipped.log"
 fi
@@ -171,7 +175,11 @@ EOF
         no "(E) --clones does not name the planted clone groups"
     fi
     R="$( RIPWIRE_CACHE_STATS=1 "$BIN" "$F" --clones --cache="$C.lean" 2>&1 >/dev/null | grep -oE 'reparsed=[0-9]+' | head -1 | cut -d= -f2 )"
-    [ "$R" = "0" ] && ok "(E) the warm --clones run is a real warm hit (reparsed=0)" || no "(E) the warm --clones run re-parsed (reparsed=${R:-none})"
+    if [ "$R" = "0" ]; then
+        ok "(E) the warm --clones run is a real warm hit (reparsed=0)"
+    else
+        no "(E) the warm --clones run re-parsed (reparsed=${R:-none})"
+    fi
     FOR='--for=sum the scaled values'
     run "$FOR" --no-cache > "$WORK/for.nc"; r1=$?
     run "$FOR" --cache="$C.rich" > "$WORK/for.cold"; r2=$?
@@ -181,7 +189,11 @@ EOF
     else
         no "(E) --for differs across --no-cache / cold / warm, exits nonzero ($r1 $r2 $r3) or is empty"
     fi
-    grep -q 'clone=' "$WORK/for.nc" && ok "(E) positive twin: the --for answer carries clone=" || no "(E) the --for answer carries no clone= (the arm proves nothing)"
+    if grep -q 'clone=' "$WORK/for.nc"; then
+        ok "(E) positive twin: the --for answer carries clone="
+    else
+        no "(E) the --for answer carries no clone= (the arm proves nothing)"
+    fi
 fi
 
 [ "$fail" -eq 0 ] && echo "clonepersistcheck: ALL PASS" || echo "clonepersistcheck: FAIL"
