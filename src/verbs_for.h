@@ -2884,7 +2884,32 @@ std::optional<std::string> captureGraphVerbDoc( const rw::Config& sub, Run&& run
 
 // GRAPH-FORM-ENDPOINTS: the path verb found no directed path, so the two sides a missing hop would join are printed inside
 // <path_gap>: from='s callees and to='s callers, each the bare --callees / --callers call's answer at --limit=kPathGapSideRows (its own legend, count=
-// the total, next= the page after). A side whose capture cannot be set up is named in missing= (never shown as empty).
+// the total, next= the page after). A side whose capture cannot be set up is named in missing= (never shown as empty) through the
+// PathGapSides sink, and said on stderr.
+struct PathGapSides
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        FromUncaptured,   // no capture buffer for from='s --callees: that side is not shown, which is not the same as empty
+        ToUncaptured,     // no capture buffer for to='s --callers: likewise
+    };
+    bool fromMissing = false;
+    bool toMissing   = false;
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        if( why == DisclosureWhy::FromUncaptured )
+        {
+            fromMissing = true;
+            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
+        }
+        else
+        {
+            toMissing = true;
+            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
+        }
+    }
+};
+
 inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectArgs& args )
 {
     if( args.endpoints.size() != 2 )
@@ -2907,7 +2932,16 @@ inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectAr
     };
     const std::optional<std::string> from = side( callees );
     const std::optional<std::string> to   = side( callers );
-    rw::emitRaw( stdout, rw::pathGapOpenXml( args, /*fromMissing=*/!from, /*toMissing=*/!to ).c_str() );
+    PathGapSides                     gap;
+    if( !from )
+    {
+        DISCLOSE( gap, PathGapSides::DisclosureWhy::FromUncaptured, "appendPathGapSides: no capture buffer for from='s callees" );
+    }
+    if( !to )
+    {
+        DISCLOSE( gap, PathGapSides::DisclosureWhy::ToUncaptured, "appendPathGapSides: no capture buffer for to='s callers" );
+    }
+    rw::emitRaw( stdout, rw::pathGapOpenXml( args, gap.fromMissing, gap.toMissing ).c_str() );
     if( from ) { std::fwrite( from->data(), 1, from->size(), stdout ); }
     if( to ) { std::fwrite( to->data(), 1, to->size(), stdout ); }
     rw::emitRaw( stdout, std::string( rw::kPathGapCloseXml ).c_str() );
