@@ -218,8 +218,8 @@ private:
             RawRef& r       = p.r;   // a parameter stored into a field slot: the registrar's fact, never a row
             r.name.clear();
             r.memberRoot.clear();
-            r.fieldName.clear();
-            r.composeRel.clear();
+            r.setFieldName( std::string_view() );
+            r.setComposeRel( std::string_view() );
             r.qualifier     = std::string( 1, kValueRefSlotParamScope );
             r.recvVar       = std::string( f.name );
             r.argCount      = static_cast<std::uint16_t>( std::min<std::ptrdiff_t>( at - f.params.begin(), 0xFFFF ) );
@@ -454,11 +454,11 @@ private:
             {
                 RawRef r        = rawRefAt( a, m_fileId, m_lang, RefRole::Value, std::string( n.name ) );
                 r.memberRoot    = n.owner;
-                r.memberVia     = std::string( n.module );
+                r.setMemberVia( std::string( n.module ) );
                 r.qualifier     = "a0";
                 r.recvVar       = written;
-                r.fieldName     = shown + "#arg" + std::to_string( pos );
-                r.composeRel    = "#" + std::to_string( pos );
+                r.setFieldName( shown + "#arg" + std::to_string( pos ) );
+                r.setComposeRel( "#" + std::to_string( pos ) );
                 r.argCount      = static_cast<std::uint16_t>( std::min<std::uint32_t>( pos, 0xFFFFu ) );
                 r.argCountKnown = true;
                 land( std::move( r ), n.bare ? n.name : std::string_view(), false, bareCallee );
@@ -490,10 +490,10 @@ private:
         RawRef r     = rawRefAt( call, m_fileId, m_lang, RefRole::Through, std::string() );
         r.qualifier  = std::string( 1, kValueRefSlotCallScope );
         r.name       = std::string( text( root ) );
-        r.fieldName  = std::string( text( f ) );
-        r.composeRel = "." + std::string( text( fld ) );
-        r.memberPath = std::string( text( fld ) );
-        r.memberCtor = hops == 1 && is( root, "self" ) ? std::string( implType() ) : std::string();
+        r.setFieldName( std::string( text( f ) ) );
+        r.setComposeRel( "." + std::string( text( fld ) ) );
+        r.setMemberPath( std::string( text( fld ) ) );
+        r.setMemberCtor( hops == 1 && is( root, "self" ) ? std::string( implType() ) : std::string() );
         m_out.push_back( std::move( r ) );
     }
 
@@ -577,18 +577,18 @@ private:
     {
         const Named n = named( value );
         RawRef      r = rawRefAt( at, m_fileId, m_lang, RefRole::Value, std::string() );
-        r.memberPath  = std::string( fieldName );
-        r.memberCtor  = ty;
+        r.setMemberPath( std::string( fieldName ) );
+        r.setMemberCtor( ty );
         if( n.name.empty() )
         {
             return;
         }
         r.name       = std::string( n.name );
         r.memberRoot = n.owner;
-        r.memberVia  = std::string( n.module );
+        r.setMemberVia( std::string( n.module ) );
         r.qualifier  = "x0";
-        r.fieldName  = shownType( ty ) + "." + std::string( fieldName );
-        r.composeRel = "." + std::string( fieldName );
+        r.setFieldName( shownType( ty ) + "." + std::string( fieldName ) );
+        r.setComposeRel( "." + std::string( fieldName ) );
         land( std::move( r ), n.bare ? n.name : std::string_view(), true );
     }
 

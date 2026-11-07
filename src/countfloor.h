@@ -234,7 +234,7 @@ inline bool hasValueUse( const IngestResult& ing, const ValueRefIndex& vri, std:
 {
     for( const ValueRefRow& vr : valueRefCallerRows( ing, vri, ids ).rows )
     {
-        if( vr.ref < ing.references.size() && !ing.references[ vr.ref ].fieldName.starts_with( '@' ) )
+        if( vr.ref < ing.references.size() && !ing.references[ vr.ref ].fieldName().starts_with( '@' ) )
         {
             return true;
         }

@@ -1089,7 +1089,7 @@ inline void stampMemberReceiver( RawRef& r, TSNode access, Lang lang, std::strin
     RecvShape    rs       = ts_node_is_null( recvNode ) ? RecvShape{} : classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
     r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // a member access is never a bare name
     r.recvVar   = std::move( rs.var );
-    r.fieldName = std::move( rs.field );
+    r.setFieldName( std::move( rs.field ) );
 }
 
 void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
@@ -2604,13 +2604,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                                  ? javaMethodReferenceReceiver( roleNode, src )
                                  : receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
                     r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
-                    r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
+                    r.setFieldName( std::move( rs.field ) );                                 //   depth-2 intermediate field; "" otherwise
                     r.viaArrow  = rs.viaArrow;                                           //   `p->m()`: Rule 2b's smart-pointer pointee needs it
                     r.memberCall = rs.member;  r.memberRoot = std::move( rs.root );      //   FE-A: a Go/JS/TS/Rust member call and its receiver root
-                    r.memberPath = std::move( rs.path );  r.memberCtor = std::move( rs.ctor );   //   FE-B: the rest of that receiver chain
+                    r.setMemberPath( std::move( rs.path ) );  r.setMemberCtor( std::move( rs.ctor ) );   //   FE-B: the rest of that receiver chain
                     if( le.lang == Lang::Ruby && r.recv == RecvKind::NamedVar )
                     {
-                        r.fieldName = rubyReceiverWrittenPath( nameNode, r.recvVar, src );   // parser version 137: a constant's path as written
+                        r.setFieldName( rubyReceiverWrittenPath( nameNode, r.recvVar, src ) );   // parser version 137: a constant's path as written
                     }
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
                     r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
@@ -2620,13 +2620,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     }
                     if( !rustWritten.empty() )
                     {
-                        r.fieldName = std::move( rustWritten );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
+                        r.setFieldName( std::move( rustWritten ) );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
                     }
                     if( isQueueLang( le.lang ) && isQueueCallName( r.name ) )
                     {
                         if( const std::uint8_t kw = callKeywords( nameNode, src ); kw != 0 )
                         {
-                            r.composeRel = pyKwTag( kw );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
+                            r.setComposeRel( pyKwTag( kw ) );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
                         }
                     }
                 }

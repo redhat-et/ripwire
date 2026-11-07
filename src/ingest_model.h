@@ -886,7 +886,7 @@ inline void expandElixirImplementationReferences( IngestResult& result )
     result.references = std::move( merged );
 }
 
-// rawRefs is consumed here (never read again) → MOVE its 5 strings into each Reference instead of copying.
+// rawRefs is consumed here (never read again) → MOVE its strings and its cold block into each Reference instead of copying.
 inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, const std::vector<std::uint32_t>& refOrder, const DefSpanIndex& spanIndex )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: emit refs" );
@@ -915,15 +915,11 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.qualifierRootsStd = r.qualifierRootsStd;   // #150: the FULL written qualifier chain is rooted at std
         ref.memberCall  = r.memberCall;                 // FE-A: a Go/JS/TS/Rust member call (recv stays None)
         ref.memberRoot  = std::move( r.memberRoot );    // FE-A: its receiver chain's root identifier
-        ref.memberPath  = std::move( r.memberPath );    // FE-B: the members between that root and the callee
-        ref.memberCtor  = std::move( r.memberCtor );    // FE-B: the class a constructed receiver names
-        ref.memberVia   = std::move( r.memberVia );     // FE-B on #373: the method a Ruby typed receiver was built by
         ref.memberFactory = r.memberFactory;            // FE-B on #373: memberCtor names a FactoryBot factory
         ref.forwarded   = r.forwarded;                  // lane fcall-forward fix 1: an `f.call/f.apply` site standing for `f( … )`
         ref.trailingLambda = r.trailingLambda;          // #155: a Kotlin call whose lambda trails its argument list (scope-function arm)
         ref.baseBind    = r.baseBind;                   // lane lego-transitive fix 1: an inherit ref's same-file base binding
-        ref.fieldName   = std::move( r.fieldName );   // S5-E: the member variable name (e.g. "m_pool")
-        ref.composeRel  = std::move( r.composeRel );  // S5-E: "creates" or "uses"
+        ref.takeColdFrom( r );   // fieldName, composeRel (S5-E), memberPath, memberCtor, memberVia (FE-B): one block, moved whole
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test
         // #60: the module-scope owner owns EXACTLY the references it was minted for — the call/macro
         // population of pincensus.h isResolvableCallReference. A module-level `import`/`read`/`type`

@@ -459,11 +459,11 @@ private:
     // and an argument list the count could not read (`*args`, `**kw`) is none either.
     static bool queueOp( const Reference& r, bool& put ) noexcept
     {
-        if( !isQueueLang( r.lang ) || r.role != RefRole::Call || r.isInherit || r.recv != RecvKind::FieldOfThis || r.fieldName.empty() || !r.argCountKnown )
+        if( !isQueueLang( r.lang ) || r.role != RefRole::Call || r.isInherit || r.recv != RecvKind::FieldOfThis || r.fieldName().empty() || !r.argCountKnown )
         {
             return false;
         }
-        const PyKwArgs kw = pyKwArgsOf( r.composeRel );
+        const PyKwArgs kw = pyKwArgsOf( r.composeRel() );
         if( kw.other || kw.count > r.argCount )
         {
             return false;
@@ -535,7 +535,7 @@ private:
             bool             put = false;
             if( r.fromSymbol < m_ing.symbols.size() && queueOp( r, put ) )
             {
-                m_sites.push_back( Site{ r.fieldName, r.fromSymbol, m_rule.classOf( r.fromSymbol ), i, put } );
+                m_sites.push_back( Site{ r.fieldName(), r.fromSymbol, m_rule.classOf( r.fromSymbol ), i, put } );
                 if( put )
                 {
                     m_putsByFn.emplace_back( r.fromSymbol, i );

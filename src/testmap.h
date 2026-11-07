@@ -722,7 +722,7 @@ struct ClassNewSpelling
     static std::string written( const Reference& r )
     {
         std::string out( 1, char( '0' + int( r.recv ) ) );
-        for( const std::string* part : { &r.qualifier, &r.recvVar, &r.memberRoot, &r.memberPath } )
+        for( const std::string* part : { &r.qualifier, &r.recvVar, &r.memberRoot, &r.memberPath() } )
         {
             out.append( 1, '|' ).append( *part );
         }
@@ -785,7 +785,7 @@ struct ClassNewJsBinds
     // The definition the construction `r` builds, or kNoNode when the resolver cannot say.
     NodeId resolve( const Reference& r ) const
     {
-        if( r.memberCall && ( r.memberRoot.empty() || !r.memberPath.empty() ) )
+        if( r.memberCall && ( r.memberRoot.empty() || !r.memberPath().empty() ) )
         {
             return kNoNode;   // `new (f()).X()`, `new a.b.X()`: no one-hop module member
         }
