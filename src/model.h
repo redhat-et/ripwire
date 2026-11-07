@@ -1002,8 +1002,8 @@ static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
 // Symbol::rankFlags bits (a 4-bit field: two bits left). An HTML section unit (ingest_docpass.h pushHtmlUnitDefs) carries both: --recall
-// reads it, nothing else ranks or names it. A later lane may set one of them alone at a def's RawDef (a .proto definition kept out of
-// --for's statistics but still a definition --defs lists: kRankFlagNotLexRanked only, RANK-PROTO).
+// reads it, nothing else ranks or names it. A .proto definition (langfacts.h generatedSchema) carries kRankFlagNotLexRanked alone: out of
+// --for's statistics but still a definition --defs lists (RANK-PROTO; ingest_model.h assignSymbols sets it from the lang on every load).
 //   kRankFlagNotLexRanked: out of every lexical ranking lens (--for, MCP `for`, --query, pack-task): no corpus statistics (document
 //     frequency, average length, symbol count), no score, no route name, no route carrier, no mention-anchor target (lexical.h, mention.h).
 //   kRankFlagNotNamed: no name binds it: no call edge (graph.h byName), no bare-name resolution (resolveAllByName/Qualified: --callers,
