@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-07, lane clones-persist (base main e4432b48; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 49 -> 50: a Function/Method def record ends with its u64 clone key (src/ingest_parsepool.h rawDefCloneKey), so a warm
+#   findClones keys bodies with no file I/O; quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no
+#   extraction changes and findClones returns the same groups (it re-reads and compares the real strings of every shared key).
 # 2026-11-05, lane warm-direct (base lane/warm-rewrite 630a90e3d, merged over main at kParserVer 301; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kCacheVersion 48 -> 49: the FILE record's head gains the eight family counts (a warm run plans from heads and decodes in
 #   the parse worker); quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no extraction or watched

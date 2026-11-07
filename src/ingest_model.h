@@ -395,9 +395,11 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
                } );
 
     result.symbols.reserve( rawDefs.size() );
+    result.cloneKeys.resize( rawDefs.size() );   // CLONES-PERSIST: aligned 1:1 with result.symbols
     for( std::uint32_t i = 0; i < rawDefs.size(); ++i )
     {
         const RawDef& d = rawDefs[ i ];
+        result.cloneKeys[ i ] = d.cloneKey;
         Symbol s;
         s.id     = i;
         s.kind   = d.kind;
