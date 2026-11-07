@@ -1116,7 +1116,10 @@ inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::strin
             ++i;
         }
         const std::string lw = asciiLower( task.substr( start, i - start ) );
-        if( lw.size() < kNamesakeMinWordBytes || lw == lname )
+        // a qualifier segment (`Utils.` in `Utils.formatDate`, `Wrong::` in `Wrong::Fmt3::x`) is not a separate word: the qualifier
+        // proof (qualifierPlaces, case-exact, every segment) already judged it, and a directory or stem it only resembles is no proof
+        const bool qualifierSegment = i < task.size() && ( task[i] == '.' || task.substr( i ).starts_with( "::" ) );
+        if( lw.size() < kNamesakeMinWordBytes || lw == lname || qualifierSegment )
         {
             continue;
         }

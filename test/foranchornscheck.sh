@@ -16,7 +16,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN - build first"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; : > "$TMP/failed"; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; : > "$TMP/failed"; }   # the marker file survives a $( ) subshell, where fail=1 would not
 echo "foranchornscheck: BIN=$BIN"
 # every answer an arm reads must exist: a crash or an empty answer is a FAIL, never an absence
@@ -122,6 +122,12 @@ A="$( ask "$P4" 'ipvs winkernel syncProxyRules' )"; P="$( firstp "$A" syncProxyR
 case "$P" in pkg/proxy/ipvs/proxier.go|pkg/proxy/winkernel/proxier.go) no "N4 silent two words: one was chosen ($P)";; @@*) no "N4 silent two words: no row";; *) ok "N4 silent two words: no lift ($P)";; esac
 B="$( ask "$P4" 'syncProxyRules' )"; Q="$( ask "$P4" 'proxier syncProxyRules' )"
 if [ "$( firstp "$B" syncProxyRules )" = pkg/proxy/iptables/proxier.go ] && [ "$( firstp "$Q" syncProxyRules )" = "$( firstp "$B" syncProxyRules )" ]; then ok "N4 silent: a word placing all of them chooses none"; else no "N4 silent: 'proxier' moved the first row"; fi
+# silent: a QUALIFIER segment is not a separate path word (barrelshortkeycheck B1/B3/C2): `Nftables.` and `Nftables::` miss the
+# case-exact qualifier proof, so no namesake is chosen from them; the positive twin is the separate word `nftables` above
+for q in 'Nftables.syncProxyRules work' 'Nftables::syncProxyRules work'; do
+    A="$( ask "$P4" "$q" )"; P="$( firstp "$A" syncProxyRules )"
+    case "$P" in pkg/proxy/nftables/proxier.go) no "N4 qualifier segment ($q): chose nftables as a path word";; @@*) no "N4 qualifier segment ($q): no row";; *) ok "N4 qualifier segment ($q): no path-word choice ($P)";; esac
+done
 # sibling: Python, the FILE STEM names one of several definitions
 P4P="$TMP/n4py"; mkdir -p "$P4P/store"
 for s in disk memory redis s3cache; do printf 'def flush_all_entries(conn):\n    return conn\n' > "$P4P/store/$s.py"; done
