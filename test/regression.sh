@@ -537,6 +537,7 @@ for _g in \
     forinitslotscheck \
     forlenscheck \
     forliteralcheck \
+    formanifestcheck \
     formatgatecheck \
     formaxtokenscheck \
     formembernamescheck \

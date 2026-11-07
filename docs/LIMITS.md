@@ -558,6 +558,17 @@ Discloses: `capped`, `lit_capped`
 | `kForTableRankedRows` | `4096` | — | shape=table: source sites read for a table row and ordered (a registry past the readers in path order must still rank first) |
 | `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
 
+### `src/formanifest.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kCMakeMaxCallLines` | `16` | — | CMake call lines read for one call; a longer call still names its target (its first argument), but an IMPORTED / ALIAS past this is not seen |
+| `kManifestFileRows` | `3` | — | manifests printed (files= counts every manifest holding an anchor) |
+| `kManifestLineMax` | `120` | — | bytes of a defining line printed (cut="1" when longer) |
+| `kManifestRowsPerFile` | `3` | — | defining lines printed per manifest (rows= counts its matching lines) |
+
 ### `src/formembers.h`
 
 Discloses: **none**
