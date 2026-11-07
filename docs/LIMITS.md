@@ -1170,7 +1170,10 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
+| `kDefaultRecallTopK` | `6` | — | — |
 | `kRecallDemotedNamedMax` | `5` | — | — |
+| `kRecallFenceOpenerMaxBytes` | `64` | — | — |
+| `kRecallTitleMaxBytes` | `120` | — | — |
 
 ### `src/receiverevidence.h`
 
