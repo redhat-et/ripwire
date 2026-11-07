@@ -1085,9 +1085,9 @@ inline RecallDocSections splitRecallDocSections( const IngestResult& ing, std::v
 // One file's Section symbols (Markdown-lang: markdown, reST, and the extracted HTML/notebook docs), for the serve path,
 // which looks at a handful of files. The corpus scorer below groups every file in one sorted pass instead.
 // A document's heading section: markdown, reST and extracted pages all carry their sections as Markdown Section symbols.
-inline bool isRecallDocSection( const Symbol& s ) noexcept
+inline bool isRecallDocSection( const IngestResult& ing, const Symbol& s ) noexcept
 {
-    return s.kind == SymKind::Section && s.lang == Lang::Markdown;
+    return s.kind == SymKind::Section && s.lang == Lang::Markdown && s.fileId < ing.files.size();
 }
 
 inline RecallDocSections recallDocSections( const IngestResult& ing, std::size_t scoredCount, std::uint32_t fileId )
@@ -1096,7 +1096,7 @@ inline RecallDocSections recallDocSections( const IngestResult& ing, std::size_t
     for( std::size_t i = 0; i < ing.symbols.size() && i < scoredCount; ++i )
     {
         const Symbol& s = ing.symbols[ i ];
-        if( s.fileId == fileId && isRecallDocSection( s ) )
+        if( s.fileId == fileId && isRecallDocSection( ing, s ) )
         {
             secs.push_back( std::uint32_t( i ) );
         }
@@ -1774,7 +1774,7 @@ inline RecallUnitScoring recallUnitScores( const IngestResult& ing, std::string_
     for( std::uint32_t i = 0; i < ing.symbols.size(); ++i )
     {
         const Symbol& s = ing.symbols[ i ];
-        if( isRecallDocSection( s ) && s.fileId < isDoc.size() && isDoc[ s.fileId ] && !out.mirror.isMirror[ s.fileId ] )
+        if( isRecallDocSection( ing, s ) && s.fileId < isDoc.size() && isDoc[ s.fileId ] && !out.mirror.isMirror[ s.fileId ] )
         {
             secs.push_back( i );
         }
