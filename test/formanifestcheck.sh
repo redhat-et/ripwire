@@ -25,6 +25,17 @@
 #   (j1) --json carries no block; (b1) a token budget holds it (held="budget", no rows); (x1) MCP `for`: the same element bytes
 #   (l1) --legend=full prints the long legend, the default the short one, the rows the same
 #   (a1) the answer is well-formed XML, the block closes right before </ctx>, its legend defines every attribute it prints
+# ARMS (CodeRabbit round on #565)
+#   (cr1) a package.json name with a JSON escape (`pub\u006cish`) matches decoded (publish); the printed line stays the file's own text
+#   (cr2) Cargo dependency tables only in the scopes Cargo reads: [package.metadata.dependencies] keys and a
+#         [package.metadata.dependencies.X] header are silent; [target.'cfg(..)'.dependencies] and [workspace.dependencies] keys fire
+#   (cr3) a CMake call longer than kCMakeMaxCallLines before its `)` still names its target
+#   (cr4) CMake bracket comments inline (`add_library(#[[note]] inlinelib ..)`) and closing mid-line (`]] spanexe ..`): the text after
+#         the closer is read; a `#` inside a quoted argument is no comment
+#   (cr5) a manifest over 4 MiB is not read and makes files= a floor: floor="1" unread="1" (legend-defined, a1), the block still prints
+#   (cr6) a probed go.mod that is a link: inside the root it is read, out of the root it is not (its module never prints) and is counted
+#         in unread=
+#   (cr7) an UNINDEXED setup.cfg's extras give a <feature_touch> (the indexed file naming them)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -265,6 +276,44 @@ mkdir -p "$F/cfgf/src"
 printf '[package]\nname = "cfgf"\n\n[features]\njson = []\nmultipart = []\nform = []\ntokio = []\n' >"$F/cfgf/Cargo.toml"
 printf '#[cfg(feature = "form")]\nmod form;\n#[cfg(feature = "json")]\nmod json;\n//! `multipart` | multipart forms\n//! `json` | JSON\n//! `form` | forms\n//! `tokio` | rt\npub fn r() {}\n' >"$F/cfgf/src/lib.rs"
 
+# CodeRabbit round fixtures (cr1-cr7)
+mkdir -p "$F/jesc/src" "$F/cmeta/src" "$F/cmk2/src" "$F/big/sub" "$F/lnk/mods" "$F/lnk/sub" "$F/xtra/sub" "$TMP/outside"
+printf '{\n  "name": "pub\\u006cish",\n  "version": "1.0.0"\n}\n' >"$F/jesc/package.json"
+printf 'export const p = 1;\n' >"$F/jesc/src/index.js"
+cat >"$F/cmeta/Cargo.toml" <<'T'
+[package]
+name = "cmetademo"
+
+[package.metadata.dependencies]
+serde = "1"
+
+[package.metadata.dependencies.metaonly]
+version = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[workspace.dependencies]
+anyhow = "1"
+T
+printf 'pub fn m() -> u32 { 1 }\n' >"$F/cmeta/src/lib.rs"
+{ printf 'cmake_minimum_required(VERSION 3.20)\nadd_library(\n  longlib STATIC\n'
+  for i in $( seq 1 24 ); do printf '  src/f%s.c\n' "$i"; done
+  printf ')\nadd_library(#[[note]] inlinelib STATIC src/lib.c)\nadd_executable( #[[ spans\n  two lines ]] spanexe src/main.c)\nadd_executable(hashexe "src/a#b.c")\n'; } >"$F/cmk2/CMakeLists.txt"
+printf 'int main(void) { return 0; }\n' >"$F/cmk2/src/main.c"
+printf '[metadata]\nname = bigdemo\n' >"$F/big/setup.cfg"
+printf 'x = 1\n' >"$F/big/sub/x.py"
+python3 -c 'import sys; open( sys.argv[1], "w" ).write( "module example.com/huge\n" + "// pad\n" * ( 4 * 1024 * 1024 // 7 + 2 ) )' "$F/big/sub/go.mod"
+printf 'module example.com/innermod\n\ngo 1.22\n' >"$F/lnk/mods/inner.mod"
+ln -s mods/inner.mod "$F/lnk/go.mod"
+printf 'module example.com/secretmod\n\ngo 1.22\n' >"$TMP/outside/go.mod"
+ln -s "$TMP/outside/go.mod" "$F/lnk/sub/go.mod"
+printf 'package main\n\nfunc main() {}\n' >"$F/lnk/main.go"
+printf 'package sub\n' >"$F/lnk/sub/x.go"
+printf '[metadata]\nname = xtrademo\n\n[options.extras_require]\nalpha = a\nbeta = b\ngamma = c\n' >"$F/xtra/sub/setup.cfg"
+printf 'EXTRAS = ["alpha", "beta", "gamma"]\n' >"$F/xtra/sub/use.py"
+printf 'x = 1\n' >"$F/xtra/sub/other.py"
+
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<manifest_rows .*</manifest_rows>' "$1" | head -1; }
 # has ARM FIXTURE TASK PATTERN... — the block fires and holds every (python regex) pattern, in order
@@ -367,6 +416,22 @@ lacks f3d cmk "the zlibstatic library" ''
 lacks f3d cmk "the aliaslib library" ''
 has f3e cmk "the turbine library" '<r l="10" kind="library">turbine STATIC</r>'
 
+# ── CodeRabbit round (cr1-cr7) ───────────────────────────────────────────────────────────────────────────────────────────────
+has cr1 jesc "rename the publish package" '<mf p="package.json" matched="publish"' '<r l="2" kind="package">&quot;name&quot;: &quot;pub\\u006cish&quot;,</r>'
+lacks cr2 cmeta "upgrade the serde dependency" ''
+lacks cr2 cmeta "upgrade the metaonly dependency" ''
+has cr2 cmeta "upgrade the libc dependency" '<r l="11" kind="dep">libc = '
+has cr2 cmeta "upgrade the anyhow dependency" '<r l="14" kind="dep">anyhow = '
+has cr3 cmk2 "the longlib library" '<r l="3" kind="library">longlib STATIC</r>'
+has cr4 cmk2 "the inlinelib library" '<r l="29" kind="library">add_library\(#\[\[note\]\] inlinelib STATIC src/lib.c\)</r>'
+has cr4 cmk2 "the spanexe executable" '<r l="31" kind="executable">two lines \]\] spanexe src/main.c\)</r>'
+has cr4 cmk2 "the hashexe executable" '<r l="32" kind="executable">add_executable\(hashexe '
+has cr5 big "rename the bigdemo package" '<manifest_rows files="1" floor="1" unread="1">' '<r l="2" kind="package">name = bigdemo</r>'
+lacks cr5 big "the huge module" ''
+has cr6 lnk "the innermod module" '<manifest_rows files="1" floor="1" unread="1">' '<r l="1" kind="module">module example.com/innermod</r>'
+lacks cr6 lnk "the secretmod module" ''
+has cr7 xtra "add a new extra like beta" '<mf p="sub/setup.cfg"' '<feature_touch n="3"><touch_list total="1"><touch p="sub/use.py:1" share="3/3">'
+
 # ── caps, dialects, placement ────────────────────────────────────────────────────────────────────────────────────────────────
 has cap1 acme "use the kafkajs dependency in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
 has cap2 acme "add the kafkajs, nats and mqtt dependencies to brokers" '<mf p="packages/brokers/package.json" matched="[^"]*" rows="4" shown="3" capped="1">'
@@ -398,7 +463,7 @@ if not len( a ) < len( b ): sys.exit( "compact legend %d B is not shorter than f
 if ra.split( "<manifest_rows", 1 )[1] != rb.split( "<manifest_rows", 1 )[1]: sys.exit( "the block rows differ between legends" )
 PY
 then ok "(l1) default legend is shorter than --legend=full; the block rows are the same"; else no "(l1) legend posture"; fi
-for f in a1 l1 b1 n1 cap1 cap2 g1 k1 s1 e1 e3; do
+for f in a1 l1 b1 n1 cap1 cap2 g1 k1 s1 e1 e3 cr5 cr6 cr7; do
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()

@@ -44,10 +44,14 @@
 // exemplarTouchList, one helper): where a new feature must also be documented or gated (axum's crate-doc feature table in lib.rs).
 #include "arch.h" // splitSegments
 #include "darkflags.h" // forEachLine
+#include "eval.h" // minedjson::unescape: a JSON string's escapes decoded (`pub\u006cish` is publish)
 #include "docparse.h" // detail::readRegularFile
 #include "epmanifest.h" // epdetail TOML helpers: tomlHeaderParts, tomlKeyEnd, tomlKeyParts, tomlStringValue, tomlMultilineOpen
 #include "exemplarfamily.h" // exemplar_detail::taskWords / singular; exemplarTouchList / touchListXml (the E3a co-mention scan)
 #include "filter.h" // hasDirSegment
+#include "infra/Diagnostics.h" // DISCLOSE: a manifest that could not be read is counted on the answer (unread=)
+#include "ingest.h" // canonicalCrawlRoot / crawlPathStaysInRoot: a probed manifest that is a link must resolve inside the root
+#include "infra/enumcount.h" // enumCountIsExact: kManifestKindTags / kManifestCues are indexed by ManifestKind
 #include "infra/jsonesc.h" // jsonStringEnd: the one escape-aware JSON string walk
 #include "infra/sortutil.h" // svLess
 #include "lexical.h" // lexLowerByte
@@ -90,7 +94,9 @@ enum class ManifestKind : std::uint8_t
     Library,
     EntryPoint
 };
-inline constexpr std::array<std::string_view, 15> kManifestKindTags { "package", "module", "dep", "dev-dep", "peer-dep", "opt-dep", "script",
+inline constexpr std::size_t kManifestKindCount = static_cast<std::size_t>( ManifestKind::EntryPoint ) + 1;
+static_assert( enumCountIsExact<ManifestKind, kManifestKindCount>(), "kManifestKindCount must name the LAST ManifestKind — move it with the append" );
+inline constexpr std::array<std::string_view, kManifestKindCount> kManifestKindTags { "package", "module", "dep", "dev-dep", "peer-dep", "opt-dep", "script",
                                                                       "bin", "main", "lib", "feature", "extra", "executable", "library", "entry-point" };
 
 // One name a manifest defines: the name as written, its line, what it is.
@@ -131,14 +137,26 @@ inline std::string_view jsonStringValueAfter( std::string_view text, std::size_t
     return ve != std::string_view::npos ? text.substr( v + 1, ve - v - 1 ) : std::string_view();
 }
 
+// A JSON string's text (between its quotes) with its escapes decoded; the raw text itself when it holds none. `buf` keeps a decoded copy.
+inline std::string_view jsonDecoded( std::string_view raw, std::string& buf )
+{
+    if( !raw.contains( '\\' ) )
+    {
+        return raw;
+    }
+    const std::string quoted = "\"" + std::string( raw ) + "\"";
+    buf = minedjson::unescape( quoted, 0, quoted.size() );
+    return buf;
+}
+
 // Every key of a JSON object text: its depth (1 = top level), the top-level key it sits under (depth 2 only), its string value
-// ("" for any other value) and its line.
+// ("" for any other value) and its line. Keys and values are passed decoded (`"pub\u006cish"` is publish); the line is the text's own.
 template<class OnKey>
 inline void forEachJsonKey( std::string_view text, OnKey&& onKey )
 {
     std::uint32_t line = 1;
     int depth = 0;
-    std::string_view top;
+    std::string top, keyBuf, valBuf;
     for( std::size_t i = 0; i < text.size(); ++i )
     {
         line += text[i] == '\n' ? 1 : 0;
@@ -158,9 +176,12 @@ inline void forEachJsonKey( std::string_view text, OnKey&& onKey )
             i = end; // a value or an array element, not a key
             continue;
         }
-        const std::string_view key = text.substr( i + 1, end - i - 1 );
-        top = depth == 1 ? key : top;
-        onKey( depth, depth == 2 ? top : std::string_view(), key, jsonStringValueAfter( text, colon ), line );
+        const std::string_view key = jsonDecoded( text.substr( i + 1, end - i - 1 ), keyBuf );
+        if( depth == 1 )
+        {
+            top.assign( key );
+        }
+        onKey( depth, depth == 2 ? std::string_view( top ) : std::string_view(), key, jsonDecoded( jsonStringValueAfter( text, colon ), valBuf ), line );
         i = end;
     }
 }
@@ -231,6 +252,14 @@ struct TomlTable
 // The Cargo dependency tables; the second one's keys are dev-dependencies.
 inline constexpr std::array<std::string_view, 3> kCargoDepTables { "dependencies", "dev-dependencies", "build-dependencies" };
 
+// Is h[at] a Cargo dependency table in a scope Cargo reads: top level (`[dependencies]`), `[workspace.dependencies]` or
+// `[target.<cfg>.dependencies]`? `[package.metadata.dependencies]` is tool metadata Cargo ignores, not a dependency table.
+inline bool cargoDepTableAt( const std::vector<std::string>& h, std::size_t at )
+{
+    const bool scoped = at == 0 || ( at == 1 && h[0] == "workspace" ) || ( at == 2 && h[0] == "target" );
+    return at < h.size() && scoped && std::ranges::contains( kCargoDepTables, h[at] );
+}
+
 // A Cargo.toml table header: what its keys are. `[dependencies.serde]` names one dependency on the header line itself (pushed here).
 inline TomlTable cargoTable( const std::vector<std::string>& h, bool array, std::uint32_t lineNo, std::vector<ManifestEntry>& out )
 {
@@ -248,11 +277,11 @@ inline TomlTable cargoTable( const std::vector<std::string>& h, bool array, std:
     {
         return { R::Keys, ManifestKind::Feature };
     }
-    if( !h.empty() && !array && std::ranges::contains( kCargoDepTables, h.back() ) ) // [dependencies], [target.'cfg(..)'.dependencies], [workspace.dependencies]
+    if( !h.empty() && !array && cargoDepTableAt( h, h.size() - 1 ) ) // [dependencies], [target.'cfg(..)'.dependencies], [workspace.dependencies]
     {
         return { R::Keys, ( h.back() == kCargoDepTables[1] ? ManifestKind::DevDep : ManifestKind::Dep ) };
     }
-    if( h.size() >= 2 && !array && std::ranges::contains( kCargoDepTables, h[h.size() - 2] ) )
+    if( h.size() >= 2 && !array && cargoDepTableAt( h, h.size() - 2 ) ) // [dependencies.serde], [workspace.dependencies.serde], ..
     {
         out.push_back( ManifestEntry { h.back(), lineNo, ( h[h.size() - 2] == kCargoDepTables[1] ? ManifestKind::DevDep : ManifestKind::Dep ) } );
     }
@@ -361,8 +390,9 @@ inline void readToml( std::string_view text, TableOf&& tableOf, std::vector<Mani
         }
         if( t.front() == '[' )
         {
-            bool array = false;
-            table = tableOf( epdetail::tomlHeaderParts( t, array ), array, lineNo, out );
+            bool array = false; // set by tomlHeaderParts: read it only after that call (an argument beside it may be evaluated first: GCC did)
+            const std::vector<std::string> header = epdetail::tomlHeaderParts( t, array );
+            table = tableOf( header, array, lineNo, out );
             return;
         }
         const std::size_t eq = epdetail::tomlKeyEnd( t );
@@ -457,7 +487,7 @@ struct CMakeCall
     std::string args;
     std::size_t lines = 0;
 };
-inline constexpr std::size_t kCMakeCallLines = 16; // a call longer than this is not read (its `)` is missing or far away)
+inline constexpr std::size_t kCMakeMaxCallLines = 16; // CMake call lines read for one call; a longer call still names its target (its first argument), but an IMPORTED / ALIAS past this is not seen
 
 inline constexpr std::array<std::pair<std::string_view, ManifestKind>, 3> kCMakeCommands { {
     { "add_executable", ManifestKind::Executable },
@@ -465,8 +495,9 @@ inline constexpr std::array<std::pair<std::string_view, ManifestKind>, 3> kCMake
     { "project", ManifestKind::Package },
 } };
 
-// The closer of a bracket comment `#[[` / `#[==[` that starts the trimmed line `t` and is still open at its end, else "".
-inline std::string cmakeBracketCommentOpen( std::string_view t )
+// The closer of the bracket comment `#[[` / `#[==[` that `t` starts with (`]]` / `]==]`), else "" (a `#` line comment, or no `#`).
+// The opener is one byte longer than its closer.
+inline std::string cmakeBracketCloser( std::string_view t )
 {
     if( !t.starts_with( "#[" ) )
     {
@@ -477,17 +508,63 @@ inline std::string cmakeBracketCommentOpen( std::string_view t )
     {
         return {};
     }
-    const std::string closer = "]" + std::string( levels - 2, '=' ) + "]";
-    return t.find( closer, levels + 1 ) == std::string_view::npos ? closer : std::string();
+    return "]" + std::string( levels - 2, '=' ) + "]";
 }
 
-// A finished call as an entry: its first argument names it. `IMPORTED` / `ALIAS` targets are not defined by this project, a `${VAR}`
-// name is not a name, and a call whose `)` never came is not read.
+// The first `#` of `t` outside a quoted argument (`"a#b"` holds no comment), or npos.
+inline std::size_t cmakeCommentStart( std::string_view t ) noexcept
+{
+    bool quoted = false;
+    for( std::size_t i = 0; i < t.size(); ++i )
+    {
+        quoted = t[i] == '"' ? !quoted : quoted;
+        i += quoted && t[i] == '\\' ? 1 : 0;
+        if( !quoted && t[i] == '#' )
+        {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// The code of one CMakeLists.txt line, comments cut: a `#` line comment ends it; a bracket comment, inline or spanning lines (`closer`
+// holds the end of one still open), is skipped and the text after its closer is read on (`add_library( #[[note]] core )`).
+inline std::string cmakeCodeOf( std::string_view t, std::string& closer )
+{
+    std::string code;
+    while( !t.empty() )
+    {
+        if( !closer.empty() )
+        {
+            const std::size_t end = t.find( closer );
+            if( end == std::string_view::npos )
+            {
+                return code; // the comment goes on past this line
+            }
+            t = t.substr( end + closer.size() );
+            closer.clear();
+            code += ' '; // a bracket comment separates arguments
+            continue;
+        }
+        const std::size_t hash = cmakeCommentStart( t );
+        code += t.substr( 0, hash );
+        closer = hash == std::string_view::npos ? std::string() : cmakeBracketCloser( t.substr( hash ) );
+        if( closer.empty() )
+        {
+            return code; // no comment, or a line comment
+        }
+        t = t.substr( hash + closer.size() + 1 );
+    }
+    return code;
+}
+
+// A finished call as an entry: its first argument names it. `IMPORTED` / `ALIAS` targets are not defined by this project and a `${VAR}`
+// name is not a name. A call that ran past kCMakeMaxCallLines before its `)` is read up to there: its name is its first argument.
 inline void addCMakeCall( const CMakeCall& call, std::vector<ManifestEntry>& out )
 {
-    const std::size_t end = call.args.find( ')' );
+    const std::size_t end = std::min( call.args.find( ')' ), call.args.size() );
     std::vector<std::string_view> words;
-    for( std::size_t at = 0; end != std::string::npos && at < end; )
+    for( std::size_t at = 0; at < end; )
     {
         const std::size_t b = call.args.find_first_not_of( " \t\r", at );
         const std::size_t e = std::min( { call.args.find_first_of( " \t\r)", b ), call.args.size() } );
@@ -526,7 +603,7 @@ inline bool takeCMakeLine( CMakeCall& call, std::uint32_t lineNo, std::string_vi
 {
     call.line = call.line == 0 && !t.empty() ? lineNo : call.line; // the name's line, so the printed row shows the name
     call.args += std::string( t ) + " ";
-    return call.args.contains( ')' ) || ++call.lines >= kCMakeCallLines;
+    return call.args.contains( ')' ) || ++call.lines >= kCMakeMaxCallLines;
 }
 
 // CMakeLists.txt: add_executable( NAME / add_library( NAME / project( NAME (any case), the call on one line or several; a `${VAR}`
@@ -537,14 +614,8 @@ inline void readCMakeLists( std::string_view text, std::vector<ManifestEntry>& o
     std::optional<CMakeCall> call;
     darkflags::forEachLine( text, [&]( std::string_view line, std::uint32_t lineNo )
                             {
-        std::string_view t = trimWs( line );
-        if( !closer.empty() )
-        {
-            closer = t.contains( closer ) ? std::string() : closer;
-            return;
-        }
-        closer = cmakeBracketCommentOpen( t );
-        t = trimWs( t.substr( 0, t.find( '#' ) ) );
+        const std::string code = cmakeCodeOf( line, closer );
+        std::string_view t = trimWs( code );
         if( t.empty() )
         {
             return;
@@ -620,24 +691,43 @@ inline std::string_view baseName( std::string_view rel ) noexcept
     return lastSegment( rel );
 }
 
-// Read one manifest and keep it when it defines any name.
-inline void addManifest( std::string rel, std::uint32_t fileId, const std::string& disk, const ManifestFormat& fmt, std::vector<ManifestDoc>& out )
+// The manifests of a tree and how many it found but did not read: unreadable, over kDefaultMaxFileBytes, or a link resolving outside
+// the root. `unread` > 0 makes files= a floor (a manifest naming the task may be among them); the DISCLOSE sink counts them.
+struct ManifestSet
+{
+    std::vector<ManifestDoc> docs;
+    std::uint32_t unread = 0;
+    enum class DisclosureWhy : std::uint8_t
+    {
+        Unread
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        ++unread;
+    }
+};
+
+// Read one manifest and keep it when it defines any name. Its size is checked on disk before anything is allocated for it.
+inline void addManifest( std::string rel, std::uint32_t fileId, const std::string& disk, const ManifestFormat& fmt, ManifestSet& out )
 {
     if( std::ranges::any_of( kManifestSkipDirs, [&]( std::string_view seg )
                              { return hasDirSegment( rel, seg ); } ) )
     {
         return; // someone else's package or a test's sample tree
     }
-    std::optional<std::string> text = docparse::detail::readRegularFile( fmt.name, disk );
-    if( !text || text->size() > kDefaultMaxFileBytes )
+    std::error_code ec;
+    const std::uintmax_t bytes = std::filesystem::file_size( disk, ec );
+    std::optional<std::string> text = !ec && bytes <= kDefaultMaxFileBytes ? docparse::detail::readRegularFile( fmt.name, disk ) : std::nullopt;
+    if( !text || text->size() > kDefaultMaxFileBytes ) // the size again: the file may have grown since the stat
     {
+        DISCLOSE( out, ManifestSet::DisclosureWhy::Unread, "manifest_rows: a manifest could not be read or is over the size ceiling: files= is a floor" );
         return;
     }
     ManifestDoc doc { std::move( rel ), fileId, std::move( *text ), {} };
     fmt.read( doc.text, doc.entries );
     if( !doc.entries.empty() )
     {
-        out.push_back( std::move( doc ) );
+        out.docs.push_back( std::move( doc ) );
     }
 }
 
@@ -654,18 +744,34 @@ inline void pushAncestorDirs( std::string_view rel, std::vector<std::string_view
     }
 }
 
-// The manifests no crawl indexes (setup.cfg, go.mod, CMakeLists.txt), by name in each directory: one stat per directory and name.
-inline void readUnindexedManifests( const std::string& rootPrefix, const std::vector<std::string_view>& dirs, std::vector<ManifestDoc>& docs )
+// The manifests no crawl indexes (setup.cfg, go.mod, CMakeLists.txt), by name in each directory: one stat per directory and name. A
+// name that is a link is read only when it resolves inside the root (the root's real path is resolved once, at the first link).
+inline void readUnindexedManifests( const std::string& rootPrefix, const std::vector<std::string_view>& dirs, ManifestSet& set )
 {
+    std::optional<std::string> rootReal;
     for( const std::string_view d : dirs )
     {
         for( const ManifestFormat& fmt : kManifestFormats )
         {
-            const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name );
-            std::error_code ec;
-            if( !fmt.indexed && std::filesystem::is_regular_file( rootPrefix + rel, ec ) )
+            if( fmt.indexed )
             {
-                addManifest( rel, UINT32_MAX, rootPrefix + rel, fmt, docs );
+                continue;
+            }
+            const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name ), disk = rootPrefix + rel;
+            std::error_code ec;
+            const std::filesystem::file_status st = std::filesystem::symlink_status( disk, ec );
+            const bool link = std::filesystem::is_symlink( st );
+            if( link && !rootReal )
+            {
+                rootReal = canonicalCrawlRoot( rootPrefix );
+            }
+            if( link && !crawlPathStaysInRoot( disk, *rootReal ) )
+            {
+                DISCLOSE( set, ManifestSet::DisclosureWhy::Unread, "manifest_rows: a probed manifest is a link out of the root: not read" );
+            }
+            else if( link ? std::filesystem::is_regular_file( disk, ec ) : std::filesystem::is_regular_file( st ) )
+            {
+                addManifest( rel, UINT32_MAX, disk, fmt, set );
             }
         }
     }
@@ -673,9 +779,9 @@ inline void readUnindexedManifests( const std::string& rootPrefix, const std::ve
 
 // Every manifest of the tree: the indexed ones from the file list; the others from each directory holding an indexed file, and its
 // ancestors, by name (one stat per directory and name). HOISTING: the directories are collected once, sorted and deduplicated.
-inline std::vector<ManifestDoc> readManifests( const IngestResult& ing )
+inline ManifestSet readManifests( const IngestResult& ing )
 {
-    std::vector<ManifestDoc> docs;
+    ManifestSet docs;
     std::vector<std::string_view> dirs;
     std::string rootPrefix; // the disk spelling of the root, joined onto a root-relative path
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
@@ -800,7 +906,7 @@ struct ManifestCue
     ManifestKind kind;
     std::array<std::string_view, 4> words;
 };
-inline constexpr std::array<ManifestCue, 15> kManifestCues { {
+inline constexpr std::array<ManifestCue, kManifestKindCount> kManifestCues { {
     { ManifestKind::Package, { "package", "crate", "library", "module" } },
     { ManifestKind::Module, { "module", "package", "", "" } },
     { ManifestKind::Dep, { "dependency", "depend", "dep", "crate" } },
@@ -1026,14 +1132,15 @@ inline std::string_view lineOf( std::string_view text, std::uint32_t line ) noex
 }
 
 // The family a manifest's feature table is (its cargo features or Python extras, `default` and `_`-private ones left out), when an
-// anchor of the match is one of them and the manifest is an indexed file (the touch list skips the members' own file by id).
+// anchor of the match is one of them. An unindexed manifest (setup.cfg) has the UINT32_MAX file id: a registry family's touch scan only
+// compares member file ids with the indexed files it scans, so no file is skipped for it and none is dereferenced.
 inline std::optional<ExemplarFamily> featureFamily( const ManifestDoc& doc, const ManifestMatch& m )
 {
     const auto isFeature = []( ManifestKind k )
     { return k == ManifestKind::Feature || k == ManifestKind::Extra; };
     const bool anchored = std::ranges::any_of( m.hits, [&]( const ManifestHit& h )
                                                { return h.anchor && isFeature( doc.entries[h.entry].kind ); } );
-    if( !anchored || doc.fileId == UINT32_MAX )
+    if( !anchored )
     {
         return std::nullopt;
     }
@@ -1126,7 +1233,7 @@ inline constexpr std::string_view kForManifestRowsLegend =
     "arrays, setup.py, Makefile, meson and Bazel files, vendored, node_modules, fixtures and testdata trees. A name equal to the repo's, a "
     "generic name (core, common, test, ..), a script the task does not call a script, or a plugin entry point the task does not call a "
     "plugin, entry point or extension does not fire it; nor does a dependency, feature or other entry the task neither calls by its kind (dependency, feature, package, binary, ..) nor adds as a new X; an entry point's group (pydantic, flake8.extension) matches by any dot segment, and may be the repo's own name. files= the manifests that name a "
-    "task word exactly, shown= and capped=\"1\" when fewer are printed, best first (2 per task word named exactly, 1 per word that is one "
+    "task word exactly, shown= and capped=\"1\" when fewer are printed, floor=\"1\" unread=K when K manifests found could not be read, are over 4 MiB or are a link out of the repo (files= then counts only the others), best first (2 per task word named exactly, 1 per word that is one "
     "part of a name; when the first only depends on a thing the task names, the best manifest that defines one moves first). <mf> p= the manifest, matched= the task words its names hold, rows= its matching lines, shown= and capped=\"1\" when "
     "fewer are printed. <r> l= the line, kind= what it defines (package, module, dep, dev-dep, peer-dep, opt-dep, script, bin, main, lib, "
     "feature, extra, executable, library, entry-point; a console or gui script is a bin), group= the entry point's group, its text that line, cut=\"1\" when cut to 120 bytes. <feature_touch> (under a manifest whose "
@@ -1140,7 +1247,7 @@ inline constexpr std::string_view kForManifestRowsLegend =
 inline constexpr std::string_view kForManifestRowsCompactLegend =
     "<!-- ripwire for manifest_rows: manifest lines defining a package, dependency, script, binary, target, feature or plugin entry point the task names "
     "exactly (package.json, Cargo.toml, pyproject.toml, setup.cfg, go.mod, CMakeLists.txt; the repo's own name (an entry point's group may be it), generic names, "
-    "un-asked scripts or plugin entry points and entries the task neither names by their kind nor adds as a new X never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word; <mf> p= manifest, "
+    "un-asked scripts or plugin entry points and entries the task neither names by their kind nor adds as a new X never fire it); leads, not a guarantee; not in est_tokens. files= manifests naming a task word (floor=\"1\" unread=K: K manifests unreadable, over 4 MiB or links out of the repo, files= is a floor); <mf> p= manifest, "
     "matched= task words its names hold, rows= matching lines; <r> l= line, kind= what it defines, group= an entry point's group, cut=\"1\": text cut to 120 bytes; "
     "shown=/capped=\"1\": rows cut. <feature_touch> n= the manifest's features; <touch_list> total= files naming at least half of "
     "them (tests, docs, vendored, generated unread); floor=\"1\" unread=K: K files unreadable or over 4 MiB, total= is a floor; <touch> p= the line, share=named/of distinct feature names, cut=\"1\": cut. -->";
@@ -1212,21 +1319,25 @@ inline std::string renderForManifestRows( const IngestResult& ing, std::string_v
     {
         return {};
     }
-    const std::vector<ManifestDoc> docs = readManifests( ing );
+    const ManifestSet set = readManifests( ing );
+    const std::vector<ManifestDoc>& docs = set.docs;
     const std::vector<ManifestMatch> ranked = rankManifests( docs, t );
     if( ranked.empty() )
     {
         return {};
     }
+    const std::string floor = set.unread > 0 ? " floor=\"1\" unread=\"" + std::to_string( set.unread ) + "\"" : std::string(); // DISCLOSE: files= is a floor
     if( held )
     {
         return "<!-- ripwire for manifest_rows: held=\"budget\": a token budget is set, so the manifest lines the task names are not printed; "
-               "files= the manifests that name a task word exactly; the same call without the token budget prints them; the answer above is unchanged -->"
+               "files= the manifests that name a task word exactly" +
+               std::string( floor.empty() ? "" : " (floor=\"1\" unread=K: K manifests could not be read, files= counts only the others)" ) +
+               "; the same call without the token budget prints them; the answer above is unchanged -->"
                "<manifest_rows files=\"" +
-               std::to_string( ranked.size() ) + "\" held=\"budget\"/>";
+               std::to_string( ranked.size() ) + "\"" + floor + " held=\"budget\"/>";
     }
     std::string out( compactLegend ? kForManifestRowsCompactLegend : kForManifestRowsLegend );
-    out += "<manifest_rows files=\"" + std::to_string( ranked.size() ) + "\"";
+    out += "<manifest_rows files=\"" + std::to_string( ranked.size() ) + "\"" + floor;
     out += ranked.size() > kManifestFileRows ? " shown=\"" + std::to_string( kManifestFileRows ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
     for( std::size_t i = 0; i < ranked.size() && i < kManifestFileRows; ++i )
     {
