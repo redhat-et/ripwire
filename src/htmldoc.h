@@ -67,6 +67,8 @@ struct HtmlDoc
     std::string              text;       // line-preserving body text (see the header comment)
     std::vector<HtmlHeading> headings;   // unit boundaries, in byte order
     bool                     hasRegion = false;   // a content region was found and used (rule 1)
+    std::uint32_t            titleBegin = 0;      // the page <title>'s text in `text`: [titleBegin, titleEnd), on its own raw
+    std::uint32_t            titleEnd   = 0;      // line(s); blanked again when the page has units (see extractHtmlDoc)
 };
 
 namespace htmldetail
@@ -454,6 +456,8 @@ public:
         doc.text      = std::move( out_ );
         doc.headings  = std::move( heads_ );
         doc.hasRegion = region_ != Region::Body;
+        doc.titleBegin = titleBegin_;
+        doc.titleEnd   = titleEnd_;
         return doc;
     }
 
@@ -523,8 +527,47 @@ private:
         {
             ++k;
         }
-        newlinesIn( from, k );
+        if( !( !isPastHead_ && titleEnd_ == 0 && closeLower == "</title" ) )
+        {
+            newlinesIn( from, k );   // the page title's own newlines are emitted by emitPageTitle
+        }
         return k;
+    }
+
+    // The page <title>, one collapsed line of text where it sits, so a heading-less page's text still opens with its
+    // name (HTML-CUT repeats that first line above a window it serves). Newlines inside it are kept: line k stays line k.
+    void emitPageTitle( std::size_t from, std::size_t to )
+    {
+        space();
+        titleBegin_ = std::uint32_t( out_.size() );
+        for( std::size_t k = from; k < to; )
+        {
+            const char c = html_[ k ];
+            if( c == '&' )
+            {
+                k = decodeEntity( html_, k, out_ );
+                continue;
+            }
+            if( c == '\n' )
+            {
+                newline();
+            }
+            else if( c == ' ' || c == '\t' || c == '\r' )
+            {
+                space();
+            }
+            else
+            {
+                out_.push_back( c );
+            }
+            ++k;
+        }
+        titleEnd_ = std::uint32_t( out_.size() );
+        if( titleEnd_ == titleBegin_ )
+        {
+            titleBegin_ = titleEnd_ = 0;   // an empty title is none
+        }
+        space();
     }
 
     std::size_t onAngle( std::size_t i )
@@ -559,12 +602,17 @@ private:
         else
         {
             onStartTag( t );
+            isPastHead_ = isPastHead_ || t.name() == "body";
             if( !t.isSelfClose && ( t.name() == "script" || t.name() == "style" || t.name() == "textarea" || t.name() == "title" ) )
             {
                 // raw text: no markup inside, and none of it is page prose here (a page <title> sits in <head>)
                 std::string closeTag = "</";
                 closeTag += t.name();
                 const std::size_t k = skipTo( t.end, closeTag );
+                if( t.name() == "title" && !isPastHead_ && titleEnd_ == 0 )
+                {
+                    emitPageTitle( t.end, k );
+                }
                 return k;
             }
         }
@@ -787,6 +835,9 @@ private:
     int                      openSection_         = -1;
     bool                     sawTextSinceSection_ = true;
     std::size_t              titleStart_          = 0;
+    std::uint32_t            titleBegin_          = 0;
+    std::uint32_t            titleEnd_            = 0;
+    bool                     isPastHead_          = false;   // a <body> tag was read: a later <title> (an svg's) is no page title
 };
 
 // Rule 3's second half, and the subtree spans: on a page with section ids, drop the h3-h6 boundaries that are not
@@ -822,13 +873,20 @@ inline HtmlDoc extractHtmlDoc( std::string_view html )
 {
     const htmldetail::Region region = htmldetail::probeRegion( html );
     HtmlDoc                  doc    = htmldetail::Extractor( html, region ).run();
-    const bool isEmptyRegion = region != htmldetail::Region::Body
-                            && std::all_of( doc.text.begin(), doc.text.end(), []( char c ) noexcept { return c == ' ' || c == '\n'; } );
+    const auto isBlank       = []( char c ) noexcept { return c == ' ' || c == '\n'; };
+    const bool isEmptyRegion = region != htmldetail::Region::Body && std::all_of( doc.text.begin(), doc.text.begin() + doc.titleBegin, isBlank )
+                            && std::all_of( doc.text.begin() + doc.titleEnd, doc.text.end(), isBlank );
     if( isEmptyRegion )
     {
         doc = htmldetail::Extractor( html, htmldetail::Region::Body ).run();   // a script-filled region: the body is all there is
     }
     htmldetail::finishUnits( doc );
+    if( !doc.headings.empty() )
+    {
+        // A page with units names itself by its headings; its title would only ride, as a short preamble, into the first
+        // unit and stretch its lines=. Blanked in place, so every offset and line stays where it was.
+        std::replace_if( doc.text.begin() + doc.titleBegin, doc.text.begin() + doc.titleEnd, []( char c ) noexcept { return c != '\n'; }, ' ' );
+    }
     return doc;
 }
 

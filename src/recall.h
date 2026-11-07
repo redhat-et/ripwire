@@ -1104,8 +1104,9 @@ inline std::size_t recallNonBlankBytes( std::string_view text ) noexcept
 
 // The units of one document, in byte order, over `text` (the bytes the symbols' offsets index: the extracted text
 // for an extracted doc, the file for the rest). A span past the text's end (the file moved since indexing) is cut
-// to it; a zero-width one (two headings at one byte) is no unit.
-inline std::vector<RecallUnitSpan> recallDocUnits( const IngestResult& ing, const RecallDocSections& doc, std::string_view text )
+// to it; a zero-width one (two headings at one byte) is no unit. `isExtracted`: the text is a docparse extraction
+// (an HTML page), whose units end at their last line of text (below).
+inline std::vector<RecallUnitSpan> recallDocUnits( const IngestResult& ing, const RecallDocSections& doc, std::string_view text, bool isExtracted )
 {
     std::vector<RecallUnitSpan> units;
     const auto                  textEnd          = std::uint32_t( std::min<std::size_t>( text.size(), 0xFFFFFFFFu ) );
@@ -1136,9 +1137,13 @@ inline std::vector<RecallUnitSpan> recallDocUnits( const IngestResult& ing, cons
         const std::uint32_t start = ( isPreambleFolded && p == 0 ) ? 0 : s.sigStartByte;   // never lose the words before it
         units.push_back( { doc.headingSyms[ p ], start, std::min( std::max( s.sigEndByte, s.sigStartByte ), ownEnd ), ownEnd } );
     }
-    // A unit ends at its last non-blank byte (plus that line's newline): the blank lines before the next heading — and on a
-    // line-preserving HTML page, the lines of stripped chrome after the last paragraph — are no part of what it says, and
-    // lines= then names the lines that hold text.
+    if( !isExtracted )
+    {
+        return units;
+    }
+    // On an extracted page a unit ends at its last non-blank byte (plus that line's newline): the line-preserving text
+    // leaves a blank line for every line of stripped chrome or markup after the last paragraph, and lines= then names the
+    // lines that hold text. A file's own units keep §RP3.1's tiling (heading up to the next heading, blank lines included).
     for( RecallUnitSpan& u : units )
     {
         std::uint32_t end = u.endByte;
@@ -1179,7 +1184,7 @@ inline std::optional<RecallSectionBody> buildSectionGranularBody(
         return std::nullopt;
     }
     const bool                        isExtracted = ing.docText.find( fileId ) != ing.docText.end();
-    const std::vector<RecallUnitSpan> all         = recallDocUnits( ing, doc, *text );
+    const std::vector<RecallUnitSpan> all         = recallDocUnits( ing, doc, *text, isExtracted );
 
     std::vector<RecallUnitSpan> picks;   // every scoring unit, document order
     for( const RecallUnitSpan& u : all )
@@ -1806,7 +1811,7 @@ inline RecallUnitScoring recallUnitScores( const IngestResult& ing, std::string_
         int              pathLen = 0;
         const std::string_view path = rootPrefix.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
         accumulateRecallTermFreqs( path, kwPath, terms, pathRow.data(), pathLen );
-        for( const RecallUnitSpan& u : recallDocUnits( ing, doc, *text ) )
+        for( const RecallUnitSpan& u : recallDocUnits( ing, doc, *text, ing.docText.find( fileId ) != ing.docText.end() ) )
         {
             row        = pathRow;
             int length = pathLen;

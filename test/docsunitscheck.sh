@@ -63,7 +63,7 @@ Child prose holds zqchildword and nothing else of note.
 X
 if recall "$A" "zqpreambleword handshake" "$TMP/a1"; then
     s="$( sep_of "$TMP/a1" docs/guide.md )"
-    arm "A1 a preamble holding the word is served as a UNIT (section-granular, lines=\"1-2\")" grep -qF 'lines="1-2"' <<<"$s"
+    arm "A1 a preamble holding the word is served as a UNIT (section-granular, lines=\"1-3\": it tiles up to the first heading)" grep -qF 'lines="1-3"' <<<"$s"
     arm "A1 twin: the guide is the file served" test -n "$s"
 fi
 if recall "$A" "zqchildword" "$TMP/a2"; then
