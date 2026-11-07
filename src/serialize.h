@@ -3156,6 +3156,13 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
     w.write( "</inv>" );
 }
 
+// The map's symbols=: the symbols it ranks. A kRankFlagNotNamed unit (model.h; an HTML section, which --recall reads) has no PageRank
+// prior and no edge, so the map never ranks it and does not count it (DOCS-UNITS-FIX).
+inline std::size_t mapSymbolCount( const IngestResult& ing ) noexcept
+{
+    return ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotNamed );
+}
+
 inline void serialize( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                        const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                        int topK, bool mostImportantLast = false,
@@ -3607,7 +3614,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // document into one unterminated comment. Composed on std::string, the margin question disappears.
         std::string stats = "<!-- files=";
         stats += std::to_string( ing.files.size() );
-        stats += " symbols=";    stats += std::to_string( S );
+        stats += " symbols=";    stats += std::to_string( mapSymbolCount( ing ) );   // the symbols the map ranks
         stats += " edges=";      stats += std::to_string( outTargets.size() );
         stats += " shown=";      stats += std::to_string( ann.stubSymbols ? std::size_t( 0 ) : keep + stemRows.size() );   // C1-b: the stub prints no row
         stats += " est_tokens="; stats += std::to_string( estTokens );
@@ -11261,7 +11268,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
         JsonWriter hw( dst );
-        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
+        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, mapSymbolCount( ing ), outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
                                                     unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls, declinedTotal,
                                                     extentSuspectTotal, macroBlankedFileCount( ing ), ing.crawlSkips.nestRefusedFiles,
                                                     estimate.isModelled, dataSecCut, stemPick.cut, memoryPeakJson } );

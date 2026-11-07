@@ -16,6 +16,10 @@
 #                ranking and DISCLOSED (mirror_skipped=, mirror_dirs=); a directory that only half-mirrors is kept.
 #   G  SPHINX    a `.txt` under a Sphinx conf.py whose source_suffix names '.txt' is ranked as reST sections; a
 #                `.txt` elsewhere is not indexed.
+#   H  RECALL ONLY  an HTML page's section units are --recall's alone (model.h kRankFlagRecallOnly): a heading named like a code
+#                symbol leaves --for, --callers and --defs on that name byte-identical to the same page with the heading
+#                written as a paragraph (no unit), so the doc heading cannot displace or hedge the code definition; --recall
+#                still serves the heading as a unit.
 # Usage: test/docsunitscheck.sh [BIN]   (RIPWIRE_BIN works too)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -185,6 +189,38 @@ if recall "$G" "zqrestword" "$TMP/g1"; then
 fi
 if recall "$G" "zqplaintxtword" "$TMP/g2"; then
     arm "G2 twin: a .txt outside a Sphinx tree is not indexed" has "$TMP/g2" "— 0 relevant of"
+fi
+
+# ── H: HTML units are --recall's alone ────────────────────────────────────────────────────────────────────────
+# Two trees: the same page with its headings as <h1>/<h2> (units) or as same-length unknown tags <x1>/<x2> (no unit). The pages'
+# whole-text readings are identical, so every answer but --recall's must be too (root=, at= and the tag letter in a served page body
+# masked: the raw page bytes differ in that letter alone).
+mkh(){
+    mkdir -p "$1/src" "$1/site"
+    printf 'def parseWidgetConfig(path):\n    """Read the widget config file."""\n    with open(path) as f:\n        return loadSettings(f.read())\n\n\ndef loadSettings(text):\n    return dict(l.split("=", 1) for l in text.splitlines() if "=" in l)\n\n\ndef renderWidget(settings):\n    return "<div>" + settings.get("title", "") + "</div>"\n' >"$1/src/widget.py"
+    printf '<html><head><title>Widget guide</title></head>\n<body>\n<nav><a href="index.html">Home</a></nav>\n<main>\n<%s>Widget guide</%s>\n<p>How the widget reads its settings.</p>\n<%s>parseWidgetConfig</%s>\n<p>The parseWidgetConfig step reads the config file, parses each line, and returns the widget settings.</p>\n<%s>renderWidget</%s>\n<p>Rendering turns the settings into markup.</p>\n</main>\n</body></html>\n' "$2" "$2" "$3" "$3" "$3" "$3" >"$1/site/guide.html"
+}
+mkh "$TMP/hu" h1 h2; mkh "$TMP/hp" x1 x2
+# verb TREE OUT ARG — run one answer; FAIL and an empty OUT on a non-zero exit or an empty answer
+verb(){
+    local dir="$1" out="$2" rc
+    shift 2
+    ( cd "$dir" || exit 97; "$BIN" "$dir" --no-cache "$@" ) | sed -E -e "s#$dir#ROOT#g" -e 's/ at="[^"]*"//g' -e 's#(<|&lt;)(/?)[hx]([12])(>|&gt;)#\1\2T\3\4#g' >"$out"; rc=${PIPESTATUS[0]}
+    if [ "$rc" -ne 0 ] || [ ! -s "$out" ]; then no "$* in ${dir#"$TMP"/}: rc=$rc or empty — the arms reading it cannot pass"; : >"$out"; return 1; fi
+    return 0
+}
+for v in "--for=parseWidgetConfig" "--callers=parseWidgetConfig" "--defs=parseWidgetConfig" "--for=how is the widget config parsed into settings"; do
+    k="$( printf '%s' "$v" | tr -c 'a-zA-Z0-9' '_' )"
+    if verb "$TMP/hu" "$TMP/h_u_$k" "$v" && verb "$TMP/hp" "$TMP/h_p_$k" "$v"; then
+        arm "H $v: a heading unit leaves the answer byte-identical to the heading-free page" cmp -s "$TMP/h_u_$k" "$TMP/h_p_$k"
+    fi
+done
+if [ -s "$TMP/h_u___for_parseWidgetConfig" ]; then
+    arm "H twin: --for serves the code definition first" grep -qE '<d [^>]*n="parseWidgetConfig" p="src/widget.py"' "$TMP/h_u___for_parseWidgetConfig"
+fi
+if recall "$TMP/hu" "parseWidgetConfig" "$TMP/h_r"; then
+    s="$( sep_of "$TMP/h_r" site/guide.html )"
+    arm "H twin: --recall still serves the heading as a unit (section-granular, lines 7-8)" grep -qE 'section-granular.*lines="[^"]*7-8' <<<"$s"
 fi
 
 if [ "$fail" -ne 0 ]; then

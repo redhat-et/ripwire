@@ -104,9 +104,12 @@ namespace
 {
 
 // DOCS-UNITS D5 — a doc's extracted text, and for an HTML page its unit boundaries too (htmldoc.h). Every other kind
-// goes through the bridge cache exactly as before and leaves `heads` empty.
+// goes through the bridge cache exactly as before and leaves `heads` and `flatText` empty. `flatText`: an HTML page's
+// whole-text reading (docparse.h extractHtmlFlat), what every lexical ranking lens has always read for the page; the doc
+// post-pass builds the file node's statistics from it. A page whose content region is empty (all navigation chrome) keeps
+// that reading as its text too: it is the page's only text, and its file node stays indexed as it was before the section tree.
 inline std::string docTextOfDoc( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey,
-                                 std::vector<docparse::HtmlHeading>& heads )
+                                 std::vector<docparse::HtmlHeading>& heads, std::string& flatText )
 {
     if( docparse::docKindOf( ext ) != docparse::DocKind::Html )
     {
@@ -120,7 +123,12 @@ inline std::string docTextOfDoc( const std::string& path, const std::string& ext
         return {};
     }
     docparse::HtmlDoc doc = docparse::extractHtmlDoc( *bytes );
-    heads                 = std::move( doc.headings );
+    flatText              = docparse::extractHtmlFlat( *bytes );
+    if( doc.text.empty() )
+    {
+        return flatText;   // no content region: the whole-text reading, no units (heads stays empty)
+    }
+    heads = std::move( doc.headings );
     return std::move( doc.text );
 }
 
@@ -154,6 +162,7 @@ inline void pushHtmlUnitDefs( std::uint32_t fid, const std::vector<docparse::Htm
         d.kind      = SymKind::Section;
         d.lang      = Lang::Markdown;
         d.name      = u.name;
+        d.rankFlags = kRankFlagRecallOnly;   // --recall's unit: no lexical lens ranks it, no name binds it (model.h)
         for( std::size_t p = h; p > 0; --p )
         {
             if( heads[ p - 1 ].level < u.level && heads[ p - 1 ].endByte > u.startByte )
@@ -168,6 +177,63 @@ inline void pushHtmlUnitDefs( std::uint32_t fid, const std::vector<docparse::Htm
         }
         rawDefs.push_back( std::move( d ) );
     }
+}
+
+// One document's extraction, filled by the worker that owns the slot (runDocPostPass step 2).
+struct DocSlot
+{
+    std::string                         text;
+    bool                                hasText    = false;
+    bool                                recallOnly = false;   // DOCS-UNITS-FIX: the file node takes kRankFlagRecallOnly (model.h)
+    RawDefLex                           lex;                  // B0.2: the file node's Section stats (rich only)
+    std::vector<docparse::HtmlHeading>  heads;                // DOCS-UNITS D5: an HTML page's units
+    std::vector<RawDefLex>              headLex;              // and their stats (rich only), one per unit
+};
+
+inline void extractDocSlot( const std::string& path, std::uint32_t fid, bool cacheEnabled, bool captureValueUses,
+                            HashMap<std::uint64_t, std::uint32_t>& scratch, DocSlot& slot )
+{
+    const std::string ext  = lowerExtensionOf( path );
+    std::string       flat;   // an HTML page's whole-text reading (docTextOfDoc): its file node's statistics
+    std::string       text = docTextOfDoc( path, ext, cacheEnabled, fid, slot.heads, flat );
+    // an HTML page with body text but no whole-text reading had no node before the section tree: --recall reads its node,
+    // nothing else ranks or names it
+    slot.recallOnly = docparse::docKindOf( ext ) == docparse::DocKind::Html && flat.empty();
+    if( text.empty() )
+    {
+        return;
+    }
+    if( captureValueUses )
+    { // whole-file Section span [0, len) — over the whole-text reading for an HTML page (docTextOfDoc)
+        const std::string& lexText = flat.empty() ? text : flat;
+        buildDefLexStats( lexText, 0, std::uint32_t( lexText.size() ), scratch, slot.lex );
+        buildHtmlUnitLex( text, slot.heads, scratch, slot.headLex );
+    }
+    slot.text    = std::move( text );
+    slot.hasText = true;
+}
+
+// The document's whole-file Section node (mirrors the markdown file-node), then its HTML units. lang=Markdown ⇒ docs-only recall +
+// the Section down-weight; span [0,len) so the lexical scorer indexes the whole extracted body.
+inline void pushDocFileNode( IngestResult& result, std::uint32_t fid, DocSlot& slot, std::vector<RawDef>& rawDefs )
+{
+    const std::uint32_t len = static_cast<std::uint32_t>( slot.text.size() );
+    result.docText[ fid ]   = std::move( slot.text );
+    RawDef d;
+    d.fileId    = fid;
+    d.line      = 1;
+    d.startByte = 0;
+    d.endByte   = len;
+    // dedup identity (ingest_model.h dedupRawDefs: fileId, nameByte): a page with units names its node at EOF, a byte no unit starts
+    // at, so a heading at the page's first byte (an HTML fragment opening with <h1>) does not collapse into the node
+    d.nameByte  = slot.heads.empty() ? 0 : len;
+    d.kind      = SymKind::Section;
+    d.lang      = Lang::Markdown;
+    d.name      = fs::path( result.files[ fid ] ).stem().string();
+    d.lex       = std::move( slot.lex );   // B0.2: stats over the extracted text (empty on lean runs)
+    d.rankFlags = slot.recallOnly ? kRankFlagRecallOnly : std::uint8_t( 0 );
+    rawDefs.push_back( std::move( d ) );
+    pushHtmlUnitDefs( fid, slot.heads, slot.headLex, rawDefs );
 }
 
 // ── doc post-pass (P1-B): for every collected document file (notebook/html/csv/…), extract its text and
@@ -196,12 +262,8 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
 
     // 2) extract in parallel, storing each result at its OWN slot (no cross-thread sharing of a slot →
     //    order-independent). A per-doc `hasText` gate distinguishes "not extractable" (skip) from empty.
-    const std::size_t ndocs = docIds.size();
-    std::vector<std::string> docTextOut( ndocs );
-    std::vector<char>        docHasText( ndocs, 0 );
-    std::vector<RawDefLex>   docLex( ndocs );        // B0.2: per-doc Section stats (rich only), own slot per worker
-    std::vector<std::vector<docparse::HtmlHeading>> docHeads( ndocs );   // DOCS-UNITS D5: an HTML page's units, own slot per worker
-    std::vector<std::vector<RawDefLex>>             docHeadLex( ndocs ); // and their stats (rich only), one per unit
+    const std::size_t   ndocs = docIds.size();
+    std::vector<DocSlot> slots( ndocs );
     if( ndocs > 0 )
     {
         unsigned hwDoc = std::thread::hardware_concurrency();
@@ -225,29 +287,11 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
                 {
                     docLexScratch.reserve( 1024 );
                 }
-                for( ;; )
+                for( std::size_t di = nextDoc.fetch_add( 1, std::memory_order_relaxed ); di < ndocs; di = nextDoc.fetch_add( 1, std::memory_order_relaxed ) )
                 {
-                    const std::size_t di = nextDoc.fetch_add( 1, std::memory_order_relaxed );
-                    if( di >= ndocs )
-                    {
-                        break;
-                    }
                     try   // per-file degrade — a throw escaping a worker thread would std::terminate
                     {
-                        const std::uint32_t fid = docIds[ di ];
-                        const std::string   ext = lowerExtensionOf( result.files[ fid ] );
-
-                        std::string text = docTextOfDoc( result.files[ fid ], ext, cacheEnabled, fid, docHeads[ di ] );
-                        if( !text.empty() )
-                        {
-                            if( captureValueUses )
-                            { // whole-file Section span [0, len) — same span the RawDef gets below
-                                buildDefLexStats( text, 0, std::uint32_t( text.size() ), docLexScratch, docLex[ di ] );
-                                buildHtmlUnitLex( text, docHeads[ di ], docLexScratch, docHeadLex[ di ] );
-                            }
-                            docTextOut[ di ] = std::move( text );
-                            docHasText[ di ] = 1;
-                        }
+                        extractDocSlot( result.files[ docIds[ di ] ], docIds[ di ], cacheEnabled, captureValueUses, docLexScratch, slots[ di ] );
                     }
                     catch( ... )
                     {
@@ -265,27 +309,10 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
     // 3) deterministic merge in ascending-fileId order (docIds is already ascending).
     for( std::size_t di = 0; di < ndocs; ++di )
     {
-        if( !docHasText[di] )
-        { // not extractable (e.g. markitdown absent) → skip
-            continue;
+        if( slots[ di ].hasText )   // not extractable (e.g. markitdown absent) → skip
+        {
+            pushDocFileNode( result, docIds[ di ], slots[ di ], rawDefs );
         }
-        const std::uint32_t fid = docIds[ di ];
-        const std::uint32_t len = static_cast<std::uint32_t>( docTextOut[ di ].size() );
-        result.docText[ fid ] = std::move( docTextOut[ di ] );
-
-        // whole-file Section node (mirrors the markdown file-node). lang=Markdown ⇒ docs-only recall +
-        // the Section down-weight; span [0,len) so the lexical scorer indexes the whole extracted body.
-        RawDef d;
-        d.fileId    = fid;
-        d.line      = 1;
-        d.startByte = 0;
-        d.endByte   = len;
-        d.kind      = SymKind::Section;
-        d.lang      = Lang::Markdown;
-        d.name      = fs::path( result.files[ fid ] ).stem().string();
-        d.lex       = std::move( docLex[ di ] );   // B0.2: stats over the extracted text (empty on lean runs)
-        rawDefs.push_back( std::move( d ) );
-        pushHtmlUnitDefs( fid, docHeads[ di ], docHeadLex[ di ], rawDefs );
     }
 }
 
