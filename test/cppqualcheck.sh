@@ -367,10 +367,14 @@ rrun US --uses=selectBaseline \
 # shared-directory root and each parent module file once per macro file (cache.scopes); isProcMacro and preludeBinding read a
 # candidate's file once per candidate (procMacroMemo, preludeBindMemo); useNames reads a caller file once (rustUseText). Measured:
 # the six new <u> rows at src/graph.h:7249/7387/7423/10513/10523/11264 on the merged tree (53); main pins 47. No new fopen.
+# 53 -> 54 2026-11-06 (lane/forliteral-3): src/forliteral.h lit_detail::OneFileText::of (line 3199, measured: the one new <u> row on this lane's tree)
+# reads a flag row's file for the FLAG-SHAPE-LIT default and constant-write scan (flagDefaultOfRows / constantWritesOf / ownerTypeOf / writeNamesOwner).
+# Bounded and memoised: the scan stops at kForFlagWriteHits hits and the helper keeps one file's text at a time (re-read only when the file id changes);
+# it runs for the flag shape only. One new call site, same helper, no new fopen/fread.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 53 ] \
-    && ok "repo: --uses=readWholeFile count=53 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 53, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 54 ] \
+    && ok "repo: --uses=readWholeFile count=54 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 54, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
