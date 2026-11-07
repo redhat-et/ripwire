@@ -1091,6 +1091,22 @@ inline bool pathWordPlaces( const IngestResult& ing, std::uint32_t fileId, std::
     return fileStemOrDirIs( ing, fileId, isWord );
 }
 
+// Definition over declaration (model.h isDefinitionNotDeclaration, the house test), for callables: drop each C-family prototype or
+// abstract method of `perFile` when a real definition of the same name sits in another of its files — it does not spend a lift of
+// its own, and it is not a namesake a path word can choose.
+inline void dropDeclarationsBesideDefinition( const IngestResult& ing, std::vector<std::pair<std::uint32_t, NodeId>>& perFile )
+{
+    const auto callableWithVerdict = [ & ]( const std::pair<std::uint32_t, NodeId>& fb, bool wantDefinition )
+    {
+        const Symbol& c = ing.symbols[fb.second];
+        return ( c.kind == SymKind::Function || c.kind == SymKind::Method ) && isDefinitionNotDeclaration( c ) == wantDefinition;
+    };
+    if( std::ranges::any_of( perFile, [ & ]( const auto& fb ) { return callableWithVerdict( fb, true ); } ) )
+    {
+        std::erase_if( perFile, [ & ]( const auto& fb ) { return callableWithVerdict( fb, false ); } );
+    }
+}
+
 // The one file of `perFile` (an identifier's definitions, best per file) that a task word other than the identifier names by path,
 // or kNoNamesakeFile.
 inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::string_view task, std::string_view name,
@@ -1100,6 +1116,10 @@ inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::strin
     {
         return kNoNamesakeFile;
     }
+    // the choice is among the definitions: a word placing only a bodyless prototype (`api` naming api/x.h) beside a real definition
+    // elsewhere places nothing, and the bare reading's declaration filter lifts the definition (the flood bound above counts all)
+    std::vector<std::pair<std::uint32_t, NodeId>> choosable = perFile;
+    dropDeclarationsBesideDefinition( ing, choosable );
     const std::string lname  = asciiLower( name );
     std::uint32_t     chosen = kNoNamesakeFile;
     const auto        wordChar = []( char c ) { return isIdentChar( c ) || c == '-'; };
@@ -1117,15 +1137,17 @@ inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::strin
         }
         const std::string lw = asciiLower( task.substr( start, i - start ) );
         // a qualifier segment (`Utils.` in `Utils.formatDate`, `Wrong::` in `Wrong::Fmt3::x`) is not a separate word: the qualifier
-        // proof (qualifierPlaces, case-exact, every segment) already judged it, and a directory or stem it only resembles is no proof
-        const bool qualifierSegment = i < task.size() && ( task[i] == '.' || task.substr( i ).starts_with( "::" ) );
+        // proof (qualifierPlaces, case-exact, every segment) already judged it, and a directory or stem it only resembles is no proof.
+        // A dot joins a qualifier only when an identifier follows it: `nftables.` ending a sentence (or `nftables.)`) is a word.
+        const bool dotJoins         = i + 1 < task.size() && task[i] == '.' && isIdentChar( task[i + 1] );
+        const bool qualifierSegment = dotJoins || task.substr( i ).starts_with( "::" );
         if( lw.size() < kNamesakeMinWordBytes || lw == lname || qualifierSegment )
         {
             continue;
         }
         std::size_t   placed = 0;
         std::uint32_t hit    = kNoNamesakeFile;
-        for( const auto& fb : perFile )
+        for( const auto& fb : choosable )
         {
             if( pathWordPlaces( ing, fb.first, lw ) )
             {
@@ -1214,21 +1236,10 @@ inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float
         {
             continue;   // unmatched, or ambiguous: precision over recall — no lift, no reordering
         }
-        // definition over declaration (model.h isDefinitionNotDeclaration, the house test), for callables: a C-family
-        // prototype or an abstract method beside a real definition of the same name does not spend a lift of its own
-        const auto isCallableDecl = [ & ]( NodeId id, bool wantDefinition )
-        {
-            const Symbol& c = ing.symbols[id];
-            return ( c.kind == SymKind::Function || c.kind == SymKind::Method ) && isDefinitionNotDeclaration( c ) == wantDefinition;
-        };
-        const bool hasDefinition = std::ranges::any_of( perFile, [ & ]( const auto& fb ) { return isCallableDecl( fb.second, true ); } );
+        dropDeclarationsBesideDefinition( ing, perFile );
         std::sort( perFile.begin(), perFile.end() );   // file order, a total order on (fileId, id)
         for( const auto& fileBest : perFile )
         {
-            if( hasDefinition && isCallableDecl( fileBest.second, false ) )
-            {
-                continue;
-            }
             if( !isUnnamedTestOrFixtureTarget( ing, fileBest.second, namedFiles ) && std::find( out.begin(), out.end(), fileBest.second ) == out.end() )
             {
                 out.push_back( fileBest.second );

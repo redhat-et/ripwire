@@ -73,7 +73,8 @@ has "$R" "$NOSRC" "N1 two test-only defs: and why"
 has "$R" 'hint anchors: thread_knob(' "N1 two test-only defs: the anchors ride as a hint"
 hasnt "$R" 'name-exact(' "N1 two test-only defs: no second ranker code in route="
 if [ "$( conf "$A" )" = low ]; then ok "N1 fires: confidence low"; else no "N1 fires: confidence $( conf "$A" )"; fi
-has "$A" 'configure_pool' "N1 fires: the source row that reads the key is ranked"
+P="$( firstp "$A" configure_pool )"
+if [ "$P" = 'src/pool.py' ]; then ok "N1 fires: the source row that reads the key is a ranked <d> row"; else no "N1 fires: configure_pool row $P"; fi
 M="$( mcpfor "$P1" 'thread_knob default' )"
 has "$( route "$M" )" "$NOCOMMIT" "N1 MCP twin: not committed"
 # sibling: TypeScript, two spec copies (another language, a camelCase spelling)
@@ -89,6 +90,11 @@ has "$R" 'name-exact(lonely_helper)' "N1 silent, one test-only def: name-exact s
 has "$R" "$NOSRC" "N1 silent, one test-only def: the note stays"
 hasnt "$R" "$NOCOMMIT" "N1 silent, one test-only def: committed"
 if [ "$( conf "$A" )" = low ]; then ok "N1 silent one def: low"; else no "N1 silent one def: $( conf "$A" )"; fi
+# silent: a REPEATED word naming the one test-only definition counts it once (CR-570): still one definition, still committed
+for q in 'lonely_helper lonely_helper' 'Lonely_helper LONELY_HELPER'; do
+    R="$( route "$( ask "$P1" "$q" )" )"
+    has "$R" 'name-exact(' "N1 silent, repeated one-def word ($q): name-exact stays"; hasnt "$R" "$NOCOMMIT" "N1 silent, repeated ($q): committed"
+done
 # silent: NO definition (an env var): the shortkey/lit route stays
 A="$( ask "$P1" 'ZZ_ENV_KNOB_VALUE' )"; R="$( route "$A" )"
 has "$R" 'name-exact(ZZ_ENV_KNOB_VALUE)' "N1 silent, no def: name-exact stays"; hasnt "$R" "$NOCOMMIT" "N1 silent, no def: committed"
@@ -128,6 +134,23 @@ for q in 'Nftables.syncProxyRules work' 'Nftables::syncProxyRules work'; do
     A="$( ask "$P4" "$q" )"; P="$( firstp "$A" syncProxyRules )"
     case "$P" in pkg/proxy/nftables/proxier.go) no "N4 qualifier segment ($q): chose nftables as a path word";; @@*) no "N4 qualifier segment ($q): no row";; *) ok "N4 qualifier segment ($q): no path-word choice ($P)";; esac
 done
+# a dot ENDING a word is punctuation, not a qualifier (CR-570): the path word still chooses; the qualifier arms above stay silent
+for qp in 'how does syncProxyRules work in nftables.|pkg/proxy/nftables/proxier.go' 'syncProxyRules work (ipvs).|pkg/proxy/ipvs/proxier.go' 'is syncProxyRules slow in winkernel...|pkg/proxy/winkernel/proxier.go'; do
+    q="${qp%|*}"; want="${qp#*|}"
+    A="$( ask "$P4" "$q" )"; P="$( firstp "$A" syncProxyRules )"
+    if [ "$P" = "$want" ]; then ok "N4 sentence dot ($q): $want first"; else no "N4 sentence dot ($q): first row $P"; fi
+done
+# a path word placing only a bodyless PROTOTYPE beside definitions elsewhere places nothing (CR-570): the definitions are lifted
+P4C="$TMP/n4c"; mkdir -p "$P4C/api" "$P4C/posix" "$P4C/win" "$P4C/tools"
+printf 'int widget_reset(int x);\n' > "$P4C/api/widget.h"
+printf '#include "../api/widget.h"\nint widget_reset(int x)\n{\n    return x + 1;\n}\n' > "$P4C/posix/widget.c"
+printf '#include "../api/widget.h"\nint widget_reset(int x)\n{\n    return x + 2;\n}\n' > "$P4C/win/widget.c"
+# a head the words own outright, so the lifted row shows right below it (as setup.go above)
+printf '// api widget reset win posix api widget reset win posix\nvoid apiWidgetResetWinPosixNotes(void)\n{\n    const char *s = "api widget reset win posix";\n    (void)s;\n}\n' > "$P4C/tools/notes.c"
+A="$( ask "$P4C" 'how does api widget_reset work' )"; P="$( firstp "$A" widget_reset )"
+if [ "$P" = 'posix/widget.c' ]; then ok "N4 prototype word: the definitions are lifted, posix/widget.c first"; else no "N4 prototype word: first row $P"; fi
+A="$( ask "$P4C" 'how does win widget_reset work' )"; P="$( firstp "$A" widget_reset )"
+if [ "$P" = 'win/widget.c' ]; then ok "N4 definition word (positive twin): win/widget.c first"; else no "N4 definition word: first row $P"; fi
 # sibling: Python, the FILE STEM names one of several definitions
 P4P="$TMP/n4py"; mkdir -p "$P4P/store"
 for s in disk memory redis s3cache; do printf 'def flush_all_entries(conn):\n    return conn\n' > "$P4P/store/$s.py"; done

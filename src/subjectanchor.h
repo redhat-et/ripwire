@@ -805,10 +805,16 @@ inline bool routeAnchorUncommitted( const RouteChoice& rc )
     {
         return false;
     }
+    // each distinct anchor name once: a repeated word (`lonely_helper ... lonely_helper`) resolves the same definitions again
     std::size_t defs = 0;
-    for( const RouteAnchorDef& a : rc.anchorDefs )
+    for( std::size_t i = 0; i < rc.anchorDefs.size(); ++i )
     {
-        defs += 1u + a.extraDefs;
+        const RouteAnchorDef& a = rc.anchorDefs[i];
+        const auto earlier = rc.anchorDefs.begin() + std::ptrdiff_t( i );
+        if( std::find_if( rc.anchorDefs.begin(), earlier, [ & ]( const RouteAnchorDef& b ) { return b.lowerName == a.lowerName; } ) == earlier )
+        {
+            defs += 1u + a.extraDefs;
+        }
     }
     return defs >= 2;
 }
