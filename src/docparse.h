@@ -23,6 +23,7 @@
 
 #include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
 #include "infra/ownedfile.h" // rw::OwnedFile — the whole-file readers own their stream, so every return closes it
+#include "htmldoc.h"          // DOCS-UNITS D5: the HTML section tree (line-preserving body text + units)
 #include "pathguard.h"        // rw::pathguard::NoFollowRead — the owned line stream a fixed-name file is read through
 
 #include <algorithm>   // std::binary_search — the membership test, instead of a hand-rolled scan loop
@@ -486,7 +487,18 @@ inline bool ciStartsWith( std::string_view s, std::size_t p, std::string_view li
 
 }   // namespace detail
 
+// The page's line-preserving body text (htmldoc.h: content region, chrome stripped, line k = raw line k). The
+// units ride beside it in HtmlDoc::headings; the doc post-pass reads those through extractHtmlDoc directly.
 inline std::string extractHtml( std::string_view html )
+{
+    return extractHtmlDoc( html ).text;
+}
+
+// The page's WHOLE-TEXT reading as every lexical ranking lens has always seen it (DOCS-UNITS-FIX): every tag a space, script and style
+// dropped, entities decoded, whitespace collapsed. --recall reads the page through extractHtml above (chrome stripped, line-preserving);
+// the page's file node keeps THIS text's corpus statistics (ingest_docpass.h docTextOfDoc), so --for, --query and pack-task rank an HTML
+// page exactly as before the section tree existed (gate test/docsunitscheck.sh arm H).
+inline std::string extractHtmlFlat( std::string_view html )
 {
     std::string out;
     out.reserve( html.size() );
@@ -600,6 +612,7 @@ inline std::string extractHtml( std::string_view html )
     }
     return collapsed;
 }
+
 
 // ── .csv — header names + a few sample rows (the column names are the searchable tokens) ─────────────
 

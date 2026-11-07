@@ -952,7 +952,13 @@ struct Symbol
     // extraction bit), in ingest_model.h::markExtentSuspects — never persisted itself, so a rule change needs no
     // parser bump. Rows stay; surfaces DISCLOSE it as extent_suspect="name,head,scope,error" and --hotspots keeps
     // a flagged def's complexity out of its ranking. Takes the last free pad byte (the static_assert below holds).
-    std::uint8_t  extentSuspect = 0;
+    // Four bits are enough: extentsuspect.h defines four reasons (name/head/scope/error); the other half of the byte is rankFlags.
+    std::uint8_t  extentSuspect : 4 = 0;
+    // RANK FLAGS (DOCS-UNITS-FIX; gate test/docsunitscheck.sh arm H): a packed per-symbol flag word, the kRankFlag* bits below the
+    // struct: which readers may rank or name this def (an HTML section unit: --recall only). Set by ingest when it makes the def
+    // (RawDef::rankFlags), never cached: the doc post-pass that sets it runs on every load. The high half of extentSuspect's byte, so
+    // Symbol does not grow (the static_assert below holds).
+    std::uint8_t  rankFlags : 4 = 0;
     std::string   name;                // final identifier segment
     std::string   scope;               // enclosing class/namespace name (C++), for canonical scope::name resolution; "" if none
 };
@@ -994,6 +1000,26 @@ struct Symbol
 // 4 bits were free. A u16 field would have cost a full 8 B (64 -> 72: extentSuspect had taken the last pad byte).
 static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
+
+// Symbol::rankFlags bits (a 4-bit field: two bits left). An HTML section unit (ingest_docpass.h pushHtmlUnitDefs) carries both: --recall
+// reads it, nothing else ranks or names it. A later lane may set one of them alone at a def's RawDef (a .proto definition kept out of
+// --for's statistics but still a definition --defs lists: kRankFlagNotLexRanked only, RANK-PROTO).
+//   kRankFlagNotLexRanked: out of every lexical ranking lens (--for, MCP `for`, --query, pack-task): no corpus statistics (document
+//     frequency, average length, symbol count), no score, no route name, no route carrier, no mention-anchor target (lexical.h, mention.h).
+//   kRankFlagNotNamed: no name binds it: no call edge (graph.h byName), no bare-name resolution (resolveAllByName/Qualified: --callers,
+//     --defs, the --for caller hop; a file-qualified selector still reaches it), no markdown-link heading target, no PageRank prior,
+//     and the map's symbols= does not count it.
+inline constexpr std::uint8_t kRankFlagNotLexRanked = 1u << 0;
+inline constexpr std::uint8_t kRankFlagNotNamed     = 1u << 1;
+inline constexpr std::uint8_t kRankFlagRecallOnly   = kRankFlagNotLexRanked | kRankFlagNotNamed;
+inline bool notLexRanked( const Symbol& s ) noexcept
+{
+    return ( s.rankFlags & kRankFlagNotLexRanked ) != 0;
+}
+inline bool notNamed( const Symbol& s ) noexcept
+{
+    return ( s.rankFlags & kRankFlagNotNamed ) != 0;
+}
 
 // INDEX-ALIAS-CONST (src/aliasdef.h): where an alias definition's WRITTEN TARGET starts, when the target ends the declaration —
 // C++ `using X = Y;` / `namespace L = lib;` (a TS arm is carded,
@@ -2426,6 +2452,14 @@ inline bool isMacroBlankedHealth( const FileHealth& health ) noexcept
 inline bool isUseBoundsBlankedHealth( const FileHealth& health ) noexcept
 {
     return health.useBoundsBlanked > 0;
+}
+
+// How many symbols carry a kRankFlag* bit (`flag`, one bit or several: any of them counts). The ranked corpus a lens or the map
+// reads is symbols.size() less this: lexical.h routeCarrierCap and lexicalScoresNameExactTiered (kRankFlagNotLexRanked), serialize.h
+// mapSymbolCount (kRankFlagNotNamed). 0 on an index without such units, the historical sizes.
+inline std::size_t symbolsWithRankFlag( const IngestResult& ing, std::uint8_t flag ) noexcept
+{
+    return std::size_t( std::ranges::count_if( ing.symbols, [ flag ]( const Symbol& s ) { return ( s.rankFlags & flag ) != 0; } ) );
 }
 
 // ...and its corpus count: macro_blanked_files= on the map and --json headers (the skipped verb's root counts the same rows).

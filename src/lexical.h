@@ -470,6 +470,25 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
     return &scratch;
 }
 
+// The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
+// without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
+inline std::vector<char> notLexRankedMask( const IngestResult& ing )
+{
+    std::vector<char> mask;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( notLexRanked( ing.symbols[i] ) )
+        {
+            if( mask.empty() )
+            {
+                mask.assign( ing.symbols.size(), 0 );
+            }
+            mask[i] = 1;
+        }
+    }
+    return mask;
+}
+
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
@@ -480,6 +499,19 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
+    // kRankFlagNotLexRanked units (model.h): out of the statistics like a statsOut unit, and never scored (0 below)
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    std::vector<char>       statsOutMerged;
+    if( !unranked.empty() )
+    {
+        statsOutMerged = unranked;
+        for( std::size_t i = 0; statsOut != nullptr && i < statsOut->size() && i < S; ++i )
+        {
+            statsOutMerged[i] = char( statsOutMerged[i] | ( *statsOut )[i] );
+        }
+        statsOut = &statsOutMerged;
+    }
+    const auto isUnranked = [ &unranked ]( std::size_t i ) noexcept { return !unranked.empty() && unranked[i] != 0; };
     // statsOut (filter.h sphinxTxtStatsExclusion): units SCORED like any other but kept out of the corpus statistics —
     // the symbol count, every document frequency and the average length. Null: every unit counts, the historical pass.
     const auto  statsWeight = [ statsOut ]( std::size_t i ) noexcept -> int
@@ -717,7 +749,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         scanField( i, ing.symbols[i].name, kwName );
-        if( evidenceOut )
+        if( evidenceOut && !isUnranked( i ) )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
             std::uint64_t*   words   = evidenceOut->nameMask.data() + i * evidenceWords;
@@ -732,7 +764,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         if( marginArmed )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
-            for( std::size_t m = 0; m < matchCount; ++m )
+            for( std::size_t m = 0; m < matchCount && !isUnranked( i ); ++m )
             {
                 nameDf[m] += nameRow[m] > 0 ? 1 : 0;
             }
@@ -1146,7 +1178,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* const row   = tfFlat.data() + i * uniqueCount;
             std::uint64_t*   words = evidenceOut->anyMask.data() + i * evidenceWords;
             const int        w     = statsWeight( i );
-            for( std::size_t u = 0; u < uniqueCount; ++u )
+            for( std::size_t u = 0; u < uniqueCount && !isUnranked( i ); ++u )
             {
                 if( row[u] > 0 )
                 {
@@ -1381,6 +1413,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     ub += capOcc[u];
                 }
             }
+            if( isUnranked( i ) )
+            {
+                continue; // a kRankFlagNotLexRanked unit scores 0, the value a skipped symbol keeps
+            }
             const bool mustScore = alwaysExact && i < alwaysExact->size() && (*alwaysExact)[i] != 0;
             if( !mustScore && ub < theta )
             {
@@ -1457,6 +1493,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
     for( std::size_t i = 0; i < S; ++i )
     {
+        if( isUnranked( i ) )
+        {
+            continue; // a kRankFlagNotLexRanked unit scores 0 (model.h)
+        }
         const bool   outI = statsWeight( i ) == 0;
         const double Si   = outI ? double( S ) : double( statsS );
         const double avgI = outI ? avgdlAll : avgdl;
@@ -1599,9 +1639,16 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         }
     };
 
+    // kRankFlagNotLexRanked units (model.h) are no document: no tf, no length, not in the corpus size; they score 0
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    const std::size_t       rankedS  = S - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
     // document = whole name (+ container::name as a second whole token, when a scope exists)
     for( std::size_t i = 0; i < S; ++i )
     {
+        if( !unranked.empty() && unranked[i] != 0 )
+        {
+            continue;
+        }
         const Symbol&          s    = ing.symbols[i];
         const std::string_view base = ( s.lang == Lang::Elixir ) ? elixirBaseName( s.name ) : std::string_view( s.name );
         const std::string_view alt  = ( base.size() != s.name.size() ) ? base : std::string_view{};
@@ -1628,7 +1675,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     {
         avgdl += d;
     }
-    avgdl /= double( S ? S : 1 );
+    avgdl /= double( rankedS ? rankedS : 1 );
     std::vector<int> dfreq( uniqueCount, 0 );
     for( std::size_t i = 0; i < S; ++i )
     {
@@ -1660,7 +1707,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
                 continue;
             }
             const int    n   = dfreq[u];
-            const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+            const double idf = std::log( ( double( rankedS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
         if( ing.symbols[i].kind == SymKind::Section )
@@ -2171,6 +2218,10 @@ inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult&
     std::vector<std::string> parts;
     for( const Symbol& s : ing.symbols )
     {
+        if( notLexRanked( s ) )
+        {
+            continue;   // a unit no lexical lens ranks names no route (model.h kRankFlagNotLexRanked)
+        }
         noteWholeNameDef( names, s );
         parts.clear();
         subtokens( s.name, parts );
@@ -2202,7 +2253,9 @@ inline constexpr std::uint32_t kMaxAnchorDefs = 3;
 // "common" name — test/routecheck.sh (g) covers the floored regime, the r7 webpack corpus the scaled one.
 inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept
 {
-    const std::uint32_t sOver128 = std::uint32_t( ing.symbols.size() / 128 );
+    // the ranked corpus: a kRankFlagNotLexRanked unit (model.h) is no carrier and does not widen the cap
+    const std::size_t   ranked   = ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
+    const std::uint32_t sOver128 = std::uint32_t( ranked / 128 );
     return sOver128 > 8u ? sOver128 : 8u;
 }
 

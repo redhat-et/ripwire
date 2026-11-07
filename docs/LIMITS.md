@@ -709,6 +709,14 @@ Discloses: **none**
 | `kHopCallMaxLines` | `3` | — | a call whose arguments continue joins up to this many lines |
 | `kHopSigMaxBytes` | `160` | — | sig= cap on a hop (cleanSig's own 240 cap applies first) |
 
+### `src/htmldoc.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxNameBytes` | `160` | — | — |
+
 ### `src/infra/blanktext.h`
 
 Discloses: **none**
