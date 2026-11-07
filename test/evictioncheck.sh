@@ -669,3 +669,46 @@ fi
 
 
 [ "$fail" -eq 0 ] && echo "evictioncheck: ALL PASS" || { echo "evictioncheck: SOME CHECKS FAILED"; exit 1; }
+
+# =============================================================================
+# ARM (#303): RIPWIRE_CACHE_DIR — the explicit override is the ladder's FIRST
+# rung, and the sweep's hygiene caps are env-settable. Red on main, where the
+# variable is ignored: blobs land under TMPDIR, not the override.
+# =============================================================================
+echo "  ARM   override dir + env caps (#303)"
+if [ -z "$BIN" ]; then
+    no "(n) no binary to run — pass the ripwire path as \$1"
+else
+    scratch="$( mktemp -d )"
+    override="$scratch/ripwire-cache"
+    mkdir -p "$override"
+    tmpdir_scratch="$( mktemp -d )"
+    if RIPWIRE_CACHE_DIR="$override" TMPDIR="$tmpdir_scratch" "$BIN" doctor >"$scratch/doctor.out" 2>&1 \
+       && grep -q "source=\"override\"" "$scratch/doctor.out" \
+       && grep -q "dir=\"$override\"" "$scratch/doctor.out"; then
+        ok "(n) RIPWIRE_CACHE_DIR wins the ladder: --doctor reports dir= the override and source=override"
+    else
+        no "(n) RIPWIRE_CACHE_DIR was ignored — --doctor did not report the override as the cache dir (see $scratch/doctor.out)"
+    fi
+    if grep -q "cap_bytes=" "$scratch/doctor.out" && grep -q "cap_age_days=" "$scratch/doctor.out" && grep -q "cap_blobs=" "$scratch/doctor.out"; then
+        ok "(n) --doctor discloses the effective hygiene caps (cap_bytes/cap_age_days/cap_blobs)"
+    else
+        no "(n) --doctor does not disclose the hygiene caps"
+    fi
+    if RIPWIRE_CACHE_DIR="$override" RIPWIRE_CACHE_MAX_BYTES=1048576 RIPWIRE_CACHE_MAX_AGE_DAYS=1 RIPWIRE_CACHE_MAX_BLOBS=7 \
+       "$BIN" doctor >"$scratch/caps.out" 2>&1 \
+       && grep -q "cap_bytes=\"1048576\"" "$scratch/caps.out" \
+       && grep -q "cap_age_days=\"1\"" "$scratch/caps.out" \
+       && grep -q "cap_blobs=\"7\"" "$scratch/caps.out"; then
+        ok "(n) the env-settable caps are honoured (1 MiB / 1 day / 7 blobs)"
+    else
+        no "(n) the env-settable caps were ignored (see $scratch/caps.out)"
+    fi
+    # Nothing may land under the ignored TMPDIR rung.
+    if [ -z "$( find "$tmpdir_scratch" -maxdepth 2 -name 'ripwire*' -print -quit )" ]; then
+        ok "(n) with the override set, nothing was created under TMPDIR"
+    else
+        no "(n) with RIPWIRE_CACHE_DIR set, blobs were still created under TMPDIR"
+    fi
+    rm -rf "$scratch" "$tmpdir_scratch"
+fi
