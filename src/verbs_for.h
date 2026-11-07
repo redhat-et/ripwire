@@ -3164,10 +3164,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
         // FRAME-HIGH-CONFIDENCE: high says the head is the answer; on a name-exact route that holds only when the anchor heads the rows.
         // Another head reads low, and route= names the row that heads instead (written before any consumer below reads route=).
-        if( std::string_view( forConf.level ) == "high" && !lensSurfaceIds.empty() && !rw::routeAnchorHeadsRows( ing, lr.anchorKeys, lensSurfaceIds.front() ) )
+        // The head is the row the answer prints as r=1 (rw::routeEmittedHead: code above docs moves Markdown rows below the code rows).
+        if( std::string_view( forConf.level ) == "high" && !lensSurfaceIds.empty() )
         {
-            forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, /*anchorUnproven=*/true );
-            routeNoteRaw += rw::routeAnchorNotHeadClause( ing, lensSurfaceIds.front() );
+            const NodeId emittedHead = rw::routeEmittedHead( ing, lensSurfaceIds, forDocsAfterCode );
+            if( !rw::routeAnchorHeadsRows( ing, lr.anchorKeys, emittedHead ) )
+            {
+                forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, /*anchorUnproven=*/true );
+                routeNoteRaw += rw::routeAnchorNotHeadClause( ing, emittedHead );
+            }
         }
 
         // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): budget + explicit window ⇒ the

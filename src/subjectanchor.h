@@ -516,6 +516,31 @@ inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice&
     return false;
 }
 
+// A FILE subject ("DynamicScreen.c", "src/x.cc") anchors that file: the files whose path ends with the word at a path-segment boundary,
+// so any row in them is the anchor's. None when the word spells a symbol the index holds (`FooBar.py` as the method `py` of FooBar): it
+// names that symbol, and a file of the same spelling is a namesake, not the anchor.
+inline std::vector<std::uint32_t> fileSubjectFiles( const IngestResult& ing, std::string_view t, const subject_detail::Spelling& sp )
+{
+    std::vector<std::uint32_t> named;
+    if( t.find( '.' ) == std::string_view::npos && t.find( '/' ) == std::string_view::npos )
+    {
+        return named;
+    }
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view path = rootRelPath( ing, f );
+        if( path.ends_with( t ) && ( path.size() == t.size() || path[path.size() - t.size() - 1] == '/' ) )
+        {
+            named.push_back( f );
+        }
+    }
+    if( !named.empty() && sp.valid && !subject_detail::placeCandidates( ing, std::vector<subject_detail::Spelling>{ sp } )[0].empty() )
+    {
+        named.clear();
+    }
+    return named;
+}
+
 // FRAME-HIGH-CONFIDENCE: the keys a ranked head row is matched against (routeAnchorHeadsRows). Name-exact routes only.
 inline RouteAnchorKeys routeAnchorKeys( const IngestResult& ing, const RouteChoice& rc, std::string_view rankQuery )
 {
@@ -551,7 +576,8 @@ inline RouteAnchorKeys routeAnchorKeys( const IngestResult& ing, const RouteChoi
     for( const std::string_view w : splitRouteWords( rankQuery ) )
     {
         const std::string_view t = detail::graphSubjectTrimWord( w ).text;
-        if( const Spelling sp = parseSpelling( t ); sp.valid )
+        const Spelling sp = parseSpelling( t );
+        if( sp.valid )
         {
             leaves.push_back( routeLower( sp.leaf ) );
             if( hasNameSyntax( t ) )
@@ -559,17 +585,9 @@ inline RouteAnchorKeys routeAnchorKeys( const IngestResult& ing, const RouteChoi
                 idLeaves.push_back( routeLower( sp.leaf ) );
             }
         }
-        // a FILE subject ("DynamicScreen.c", "src/x.cc") anchors that file: any row in it is the anchor's
-        if( t.find( '.' ) != std::string_view::npos || t.find( '/' ) != std::string_view::npos )
+        for( const std::uint32_t f : fileSubjectFiles( ing, t, sp ) )
         {
-            for( std::uint32_t f = 0; f < ing.files.size(); ++f )
-            {
-                const std::string_view path = rootRelPath( ing, f );
-                if( path.ends_with( t ) && ( path.size() == t.size() || path[path.size() - t.size() - 1] == '/' ) )
-                {
-                    addFile( f );
-                }
-            }
+            addFile( f );
         }
     }
     for( std::string& l : idLeaves.empty() ? leaves : idLeaves )
@@ -597,6 +615,22 @@ inline bool routeAnchorHeadsRows( const IngestResult& ing, const RouteAnchorKeys
     const std::string base = routeLower( elixirBaseName( s.name ) );
     return std::ranges::any_of( keys.lowerNames, [&]( const std::string& n )
                                 { return n == lower || n == base; } );
+}
+
+// The row the answer prints as r=1. confidence= and the route= clause read the score head, but code above docs (serialize.h
+// reorderDocsAfterCode) moves the Markdown rows of the shown set below its code rows, so when that reorder applies the first row printed is
+// the first non-Markdown one of the surface. Same predicate on the CLI and MCP twins (their `docsAfterCode` verdicts).
+inline NodeId routeEmittedHead( const IngestResult& ing, std::span<const NodeId> surface, bool docsAfterCode )
+{
+    if( docsAfterCode )
+    {
+        const auto code = std::ranges::find_if( surface, [&]( NodeId id ) { return ing.symbols[id].lang != Lang::Markdown; } );
+        if( code != surface.end() )
+        {
+            return *code;
+        }
+    }
+    return surface.front();
 }
 
 // The route= clause a head that is not the anchor appends, beside the confidence it lowers: the reader sees which row heads instead.

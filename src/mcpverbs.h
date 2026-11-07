@@ -2689,10 +2689,17 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
     // FRAME-HIGH-CONFIDENCE, the CLI twin's rule (verbs_for.h): on a name-exact route high needs the anchor at the head of the rows
     std::string mcpRouteNote = routeNoteOf( rc, shape, noRoute );
-    if( std::string_view( mcpForConf.level ) == "high" && !lensSurfaceIds.empty() && !routeAnchorHeadsRows( ing, subjectRoute.anchorKeys, lensSurfaceIds.front() ) )
+    // (the head is the row printed as r=1: code above docs moves Markdown rows below the code rows, routeEmittedHead)
+    const bool mcpDocsAfterCode = !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
+                                  && docsAfterCodeFitsCeiling( budgetTokens, /*bodyCeiling=*/false );
+    if( std::string_view( mcpForConf.level ) == "high" && !lensSurfaceIds.empty() )
     {
-        mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, /*anchorUnproven=*/true );
-        mcpRouteNote += routeAnchorNotHeadClause( ing, lensSurfaceIds.front() );
+        const NodeId emittedHead = routeEmittedHead( ing, lensSurfaceIds, mcpDocsAfterCode );
+        if( !routeAnchorHeadsRows( ing, subjectRoute.anchorKeys, emittedHead ) )
+        {
+            mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, /*anchorUnproven=*/true );
+            mcpRouteNote += routeAnchorNotHeadClause( ing, emittedHead );
+        }
     }
     // L-W: coverage= joins the pair on this root on a THIN answer only (present-only, the CLI twin's rule in
     // forpage.h) — same clause, same byte exemption (mcpConfidenceExemptBytes reads the sizes below); the same
@@ -2933,8 +2940,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const McpForAssemblyInputs assemblyIn{ ing, lensRank, forTopN, fanIn, impure, redact, sigsBudget, mcpSigsBudgets.rowDrop, fixedBytes, budgetTokens,
                                            noteIndex, notesPtr, flRootArg, task, mcpTopRowNext, mcpForHdrRows, routeStr,
                                            composePreCapCount, sections,
-                                           rw::forLensRules( !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
-                                                                 && rw::docsAfterCodeFitsCeiling( budgetTokens, /*bodyCeiling=*/false ),
+                                           rw::forLensRules( mcpDocsAfterCode,
                                                              rw::endLinesFitCeiling( budgetTokens, /*bodyCeiling=*/false ),
                                                              // the CLI twin's head round-robin verdict (serialize.h forHeadRoundRobinOn)
                                                              rw::forHeadRoundRobinOn( std::strcmp( mcpRouteTag, "subtoken+body" ) == 0,
