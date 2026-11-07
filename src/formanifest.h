@@ -744,8 +744,29 @@ inline void pushAncestorDirs( std::string_view rel, std::vector<std::string_view
     }
 }
 
-// The manifests no crawl indexes (setup.cfg, go.mod, CMakeLists.txt), by name in each directory: one stat per directory and name. A
-// name that is a link is read only when it resolves inside the root (the root's real path is resolved once, at the first link).
+// Is the probed name `disk` a manifest to read: a regular file, or a link to one that resolves inside the root? A link out of the root is
+// counted unread. The root's real path is resolved once, at the first link (`rootReal`).
+inline bool probedManifestReadable( const std::string& disk, const std::string& rootPrefix, std::optional<std::string>& rootReal, ManifestSet& set )
+{
+    std::error_code ec;
+    const std::filesystem::file_status st = std::filesystem::symlink_status( disk, ec );
+    if( !std::filesystem::is_symlink( st ) )
+    {
+        return std::filesystem::is_regular_file( st );
+    }
+    if( !rootReal )
+    {
+        rootReal = canonicalCrawlRoot( rootPrefix );
+    }
+    if( !crawlPathStaysInRoot( disk, *rootReal ) )
+    {
+        DISCLOSE( set, ManifestSet::DisclosureWhy::Unread, "manifest_rows: a probed manifest is a link out of the root: not read" );
+        return false;
+    }
+    return std::filesystem::is_regular_file( disk, ec );
+}
+
+// The manifests no crawl indexes (setup.cfg, go.mod, CMakeLists.txt), by name in each directory: one stat per directory and name.
 inline void readUnindexedManifests( const std::string& rootPrefix, const std::vector<std::string_view>& dirs, ManifestSet& set )
 {
     std::optional<std::string> rootReal;
@@ -753,25 +774,10 @@ inline void readUnindexedManifests( const std::string& rootPrefix, const std::ve
     {
         for( const ManifestFormat& fmt : kManifestFormats )
         {
-            if( fmt.indexed )
+            const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name );
+            if( !fmt.indexed && probedManifestReadable( rootPrefix + rel, rootPrefix, rootReal, set ) )
             {
-                continue;
-            }
-            const std::string rel = d.empty() ? std::string( fmt.name ) : std::string( d ) + "/" + std::string( fmt.name ), disk = rootPrefix + rel;
-            std::error_code ec;
-            const std::filesystem::file_status st = std::filesystem::symlink_status( disk, ec );
-            const bool link = std::filesystem::is_symlink( st );
-            if( link && !rootReal )
-            {
-                rootReal = canonicalCrawlRoot( rootPrefix );
-            }
-            if( link && !crawlPathStaysInRoot( disk, *rootReal ) )
-            {
-                DISCLOSE( set, ManifestSet::DisclosureWhy::Unread, "manifest_rows: a probed manifest is a link out of the root: not read" );
-            }
-            else if( link ? std::filesystem::is_regular_file( disk, ec ) : std::filesystem::is_regular_file( st ) )
-            {
-                addManifest( rel, UINT32_MAX, disk, fmt, set );
+                addManifest( rel, UINT32_MAX, rootPrefix + rel, fmt, set );
             }
         }
     }
