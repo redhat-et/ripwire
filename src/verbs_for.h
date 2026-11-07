@@ -13,6 +13,7 @@
 #include "fordottedstring.h" // STRING-IMPORT: the dotted-string literals naming a shown row
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
+#include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -2847,6 +2848,172 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
 }
 
+// K-WRONGSYM (src/forfilesyms.h): the shown files' unnamed symbols in <syms>, just before </ctx>, read off THE BYTES THE RUN EMITTED: the
+// --for lens writes its answer to stdout through a capture from the root tag to this call, and the block is rendered from what was
+// captured, so a section or trailing block added later cannot fall out of a hand-kept list. The block has its own byte allowance, outside
+// est_tokens, so no auto-served body pays for it. XML only, a single root; held under --token-budget / --max-tokens; a run that could not
+// buffer its bytes prints `<syms held="uncaptured"/>` and says so on stderr.
+inline bool forFileSymsWanted( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() );
+}
+
+// What StdoutCapture::finish() hands back.
+struct StdoutCaptured
+{
+    std::string bytes; // every byte read back from the buffer
+    bool        failed   = false; // flushing, writing or reading the buffer failed: `bytes` may be short, the answer is not known whole
+    bool        restored = true; // stdout is the descriptor it was before the capture; false: it still points at the buffer
+};
+// Every byte of `f` from its start; `failed` is set when the read ended on a stream error.
+inline std::string readBackAll( std::FILE* f, bool& failed )
+{
+    std::string doc;
+    std::rewind( f );
+    char buf[ 65536 ];
+    for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), f ) ) > 0; )
+    {
+        doc.append( buf, got );
+    }
+    failed = failed || std::ferror( f ) != 0;
+    return doc;
+}
+// Best effort: all of `bytes` to the descriptor (the real stdout when the restore failed).
+inline void writeAllTo( int fd, const std::string& bytes ) noexcept
+{
+    for( std::size_t at = 0; at < bytes.size(); )
+    {
+        const auto put = rw::os::write( fd, bytes.data() + at, bytes.size() - at );
+        if( put <= 0 )
+        {
+            return;
+        }
+        at += std::size_t( put );
+    }
+}
+
+// stdout pointed at an anonymous file for the lifetime of the object (the dup2 capture runWithCompactLegend and the graph_verb block use):
+// finish() restores stdout and returns every byte written meanwhile; the destructor restores it on any other exit. Inactive when not wanted.
+class StdoutCapture
+{
+public:
+    explicit StdoutCapture( bool wanted ) : wanted_( wanted )
+    {
+        if( !wanted )
+        {
+            return;
+        }
+        std::fflush( stdout );
+        file_  = rw::isChargeBufferFaultInjected() ? nullptr : std::tmpfile();   // the est_tokens family's fault switch: no buffer to capture into
+        saved_ = file_ != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
+        active_ = file_ != nullptr && saved_ >= 0 && rw::os::dup2( rw::os::fileno( file_ ), STDOUT_FILENO ) >= 0;
+        if( !active_ )
+        {
+            release();
+        }
+    }
+    StdoutCapture( const StdoutCapture& ) = delete;
+    StdoutCapture& operator=( const StdoutCapture& ) = delete;
+    ~StdoutCapture()
+    {
+        if( active_ )
+        {
+            (void)finish();
+        }
+    }
+    bool wanted() const noexcept { return wanted_; }
+    // The captured bytes, stdout restored; nullopt when nothing was captured. A failed flush or a stream error is `failed`: the bytes read are
+    // kept, never dropped and never taken for the whole answer. A failed restore keeps the saved descriptor (the only handle on the real
+    // stdout) and writes the bytes to it; the caller reports `restored == false`.
+    std::optional<StdoutCaptured> finish()
+    {
+        if( !active_ )
+        {
+            return std::nullopt;
+        }
+        active_ = false;
+        StdoutCaptured out;
+        out.failed = std::fflush( stdout ) != 0 || std::ferror( stdout ) != 0; // a short write to the buffer (disk full, a file-size limit) lands here
+        std::clearerr( stdout ); // the error was the buffer's; the restored stdout starts clean
+        out.restored = rw::os::dup2( saved_, STDOUT_FILENO ) >= 0;
+        out.bytes    = readBackAll( file_, out.failed );
+        if( !out.restored )
+        {
+            writeAllTo( saved_, out.bytes );
+            saved_ = -1; // left open for the process's life
+        }
+        release();
+        return out;
+    }
+
+private:
+    void release() noexcept
+    {
+        if( saved_ >= 0 ) { rw::os::close( saved_ ); }
+        if( file_ != nullptr ) { std::fclose( file_ ); }
+        saved_ = -1;
+        file_  = nullptr;
+    }
+    bool       wanted_ = false, active_ = false;
+    std::FILE* file_   = nullptr;
+    int        saved_  = -1;
+};
+
+// Where <syms> goes in the answer's bytes: in front of the --with-graph <graph> block, which stays the last child, else at the end (rfind: a
+// body printed earlier may quote the tag; the block itself is the last one emitted, and only a run that asked for it has one).
+inline std::size_t forSymsInsertAt( const std::string& emitted, bool withGraph )
+{
+    constexpr std::string_view kGraphOpen = "<graph fmt=\"mermaid\"><![CDATA[";
+    const std::size_t          graphAt    = withGraph ? emitted.rfind( kGraphOpen ) : std::string::npos;
+    return graphAt != std::string::npos && emitted.find( "</graph>", graphAt ) != std::string::npos ? graphAt : emitted.size();
+}
+
+// The origin call's ranking flags and --pack-top-n for the held block's `next=`: the replay must rank the same list.
+inline std::string forHeldNextFlags( const rw::Config& cfg )
+{
+    return forRankShapingFlags( cfg ) + ( cfg.packTopN > 0 ? " --pack-top-n=" + std::to_string( cfg.packTopN ) : std::string() );
+}
+
+// The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
+inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+{
+    if( !capture.wanted() )
+    {
+        return 0;
+    }
+    const rw::Config&                      cfg = d.cfg;
+    const std::optional<StdoutCaptured>    cap = capture.finish();
+    if( cap && !cap->restored )
+    {
+        rw::emitTo( stderr, "ripwire: --for: could not restore stdout after the <syms> capture — the answer so far was written to the original stdout, the rest is lost\n" );
+        return 1;
+    }
+    if( !cap )
+    {
+        rw::emitTo( stderr, "ripwire: --for: could not buffer the answer's bytes — the <syms> block is not rendered (held=\"uncaptured\")\n" );
+    }
+    else if( cap->failed )
+    {
+        rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
+    }
+    const bool        whole = cap && !cap->failed;
+    const std::string syms  = rw::renderForFileSyms(
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
+                                      .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole } );
+    const std::size_t at = cap ? forSymsInsertAt( cap->bytes, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    if( cap )
+    {
+        std::fwrite( cap->bytes.data(), 1, at, stdout );
+    }
+    std::fwrite( syms.data(), 1, syms.size(), stdout );
+    if( cap )
+    {
+        std::fwrite( cap->bytes.data() + at, 1, cap->bytes.size() - at, stdout );
+    }
+    return cap && cap->failed ? 1 : 0;
+}
+
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
@@ -4661,6 +4828,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // rows now (owner decision 2026-10-14), so the header — every legend clause and the verbatim task echo — always ships.
         headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
 
+        StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         // R2-AF (round 2, S4): first rows inside the root, right after the legend — see forHdrRows above.
         // The SAME string every sum above charged (rendered once, beside forHdrRows) — "" when there is no row.
@@ -4804,10 +4972,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );
             std::fwrite( dottedStrings.data(), 1, dottedStrings.size(), stdout );
         }
+        // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
+        const int answerRc = appendForFileSyms( d, forAnswerBytes );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
-        return 0;
+        return answerRc;
     }
     return std::nullopt;
 }
@@ -4988,8 +5158,8 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // H9: the TOKEN count is what travels now — recall.h's recallBytesForTokens owns the one conversion,
         // so the header discloses the ceiling actually applied instead of only the 8000 default.
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
-        // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
-        const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
+        // the --limit refusal both already promised this). DOCS-TOPK6: the default is rw::kDefaultRecallTopK.
+        const int                 recallK = cfg.topKExplicit ? cfg.topK : rw::kDefaultRecallTopK;
         // recallFor (recall.h) is the ONE rank-then-build call MCP `memory_recall` also makes — the recall
         // lens's pathFieldDefaultW=1 and its root-prefix derivation live there, so the two front doors cannot
         // drift apart again (gate: test/recallparitycheck.sh).

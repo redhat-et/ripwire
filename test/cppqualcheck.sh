@@ -367,16 +367,20 @@ rrun US --uses=selectBaseline \
 # shared-directory root and each parent module file once per macro file (cache.scopes); isProcMacro and preludeBinding read a
 # candidate's file once per candidate (procMacroMemo, preludeBindMemo); useNames reads a caller file once (rustUseText). Measured:
 # the six new <u> rows at src/graph.h:7249/7387/7423/10513/10523/11264 on the merged tree (53); main pins 47. No new fopen.
+# 53 -> 54 2026-11-06 (lane/forliteral-3): src/forliteral.h lit_detail::OneFileText::of (line 3199, measured: the one new <u> row on this lane's tree)
+# reads a flag row's file for the FLAG-SHAPE-LIT default and constant-write scan (flagDefaultOfRows / constantWritesOf / ownerTypeOf / writeNamesOwner).
+# Bounded and memoised: the scan stops at kForFlagWriteHits hits and the helper keeps one file's text at a time (re-read only when the file id changes);
+# it runs for the flag shape only. One new call site, same helper, no new fopen/fread.
 # 53 -> 55 2026-11-06 (lane/exemplar-e1, EXEMPLAR): src/exemplarfamily.h reads files through the canonical helper at two new call sites
 # (the two new <u> rows at src/exemplarfamily.h:479/1386 on this lane's tree; main pins 53). :479 is FamilyFileText::text, a one-slot
 # memo — each file is read once per scan, in symbol-id order, for a symbol's signature-to-end bytes; :1386 is exemplarTouchList, one read
 # per indexed file for the touch-share scan, skipping test/doc paths first and dropping a file over kDefaultMaxFileBytes or a generated
-# one after the read (bounded by that drop, not memoised across calls). No new fopen/fread. #560 (FORLITERAL-3) also moves this pin (54);
-# the second lander re-bumps it at land_prep.
+# one after the read (bounded by that drop, not memoised across calls). No new fopen/fread. #560 (FORLITERAL-3) also moves this pin (54).
+# 54/55 -> 56 2026-11-07 (merge of origin/main into lane/exemplar-e1): both lanes' new call sites, 53 + 1 (forliteral.h) + 2 (exemplarfamily.h).
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 55 ] \
-    && ok "repo: --uses=readWholeFile count=55 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 55, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 56 ] \
+    && ok "repo: --uses=readWholeFile count=56 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 56, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
