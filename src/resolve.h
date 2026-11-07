@@ -1014,6 +1014,11 @@ inline bool tomlStartsInsideString( std::string_view line, char& open )
         {
             break;
         }
+        if( open == '"' && line[ i ] == '\\' )   // a basic multi-line string escapes the next character: `\"""` is a quote and two more text characters
+        {
+            i += 2;
+            continue;
+        }
         const char q = open != 0 ? open : line[ i ];
         // starts_with on the tail, not compare( i, 3, … ): a tail shorter than 3 makes libstdc++'s compare subtract 3 from a smaller
         // size_t, which the asan leg's unsigned-overflow check aborts on.
@@ -1025,8 +1030,12 @@ inline bool tomlStartsInsideString( std::string_view line, char& open )
         }
         else if( open == 0 && ( q == '"' || q == '\'' ) )   // a one-line string: its quotes are text (`x = "'''"`)
         {
-            const std::size_t close = line.find( q, i + 1 );
-            i                       = close == std::string_view::npos ? line.size() : close + 1;
+            std::size_t close = i + 1;   // a basic string ("…") escapes the next character; a literal one ('…') never does
+            while( close < line.size() && line[ close ] != q )
+            {
+                close += q == '"' && line[ close ] == '\\' ? 2 : 1;
+            }
+            i = close >= line.size() ? line.size() : close + 1;
         }
         else
         {

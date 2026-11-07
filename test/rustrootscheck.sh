@@ -16,7 +16,7 @@
 #   VW  a virtual workspace (`[workspace]` with no `[package]`) is a boundary that assigns no crate root.
 #   TM  a `[lib]` / `path = ...` line inside a multi-line TOML string (a `description = """..."""`) is text, not a target.
 #   DT  a `use` tree nested deeper than kMaxRustUseTreeDepth is not read (it draws no edge) and costs no more than a shallow one:
-#       the twin at depth 5 resolves; a 30000-deep tree finishes at once (it was quadratic: 11 s for 30000 levels).
+#       the twin at depth 5 resolves, depth 32 (the cap) resolves and 33 does not, and a 30000-deep tree is answered with no edge (it was quadratic: 11 s for 30000 levels; no wall-clock bound, the exact cap is the guard).
 #   CR  `self::child` in a custom-named crate root (`[lib] path = "src/custom.rs"`) is the root's own directory, never src/custom/.
 # Every arm reads `--impact=FILE` (the file's importers) and checks the command's exit code and that the answer
 # parsed (an <impact> element), so a crash or an empty answer is RED, never a pass. Absence arms each have a positive
@@ -237,6 +237,34 @@ mk "$T2/root.rs"              'pub mod u;
 pub mod w;'
 mk "$T2/u.rs"                 'pub fn u() {}'
 mk "$T2/w.rs"                 'use crate::u::u;'
+# CR #567: a backslash in a basic multi-line string escapes the next character, so `\"""` is text and the string runs on to its real closer
+T3="$TMP/t3"
+mk "$T3/Cargo.toml"           '[package]
+name = "t3"
+description = """
+a quote \""" is text, the string is still open
+[lib]
+path = "alt/root.rs"
+"""'
+mk "$T3/src/lib.rs"           'pub mod q;
+pub mod x;'
+mk "$T3/src/q.rs"             'pub fn q() {}'
+mk "$T3/src/x.rs"             'use crate::q::q;'
+mk "$T3/alt/root.rs"          'pub fn r() {}'
+T4="$TMP/t4"
+mk "$T4/Cargo.toml"           '[package]
+name = "t4"
+description = """
+say \"""hi\""" now
+"""
+note = "one \" line"
+
+[lib]
+path = "root.rs"'
+mk "$T4/root.rs"              'pub mod u;
+pub mod w;'
+mk "$T4/u.rs"                 'pub fn u() {}'
+mk "$T4/w.rs"                 'use crate::u::u;'
 
 # ── fixture D: use trees nested deeper than the cap (CR #562) ──
 D="$TMP/d"
@@ -245,10 +273,14 @@ mk "$D/Cargo.toml"            '[package]
 name = "d"'
 mk "$D/src/lib.rs"            'pub mod x;
 pub mod y;
-pub mod z;'
+pub mod z;
+pub mod e;
+pub mod f;'
 mk "$D/src/x.rs"              'pub fn f() {}'
 mk "$D/src/y.rs"              "use crate::$( braces '{' 5 )x::f$( braces '}' 5 );"
 mk "$D/src/z.rs"              "use crate::$( braces '{' 40 )x::f$( braces '}' 40 );"
+mk "$D/src/e.rs"              "use crate::$( braces '{' 32 )x::f$( braces '}' 32 );"   # exactly the cap: still read
+mk "$D/src/f.rs"              "use crate::$( braces '{' 33 )x::f$( braces '}' 33 );"   # one level over: refused
 D2="$TMP/d2"
 mk "$D2/Cargo.toml"           '[package]
 name = "d2"'
@@ -361,15 +393,21 @@ has   VWb  "$V" m/src/q.rs          m/src/x.rs            # twin: a member crate
 echo "-- TM: a multi-line TOML string is text"
 has   TMa  "$T1" src/q.rs           src/x.rs              # the string's [lib] path = "alt/root.rs" is no target: src/lib.rs stays the root
 has   TMb  "$T2" u.rs               w.rs                  # twin: the real [lib] path = "root.rs" after triple-quoted strings is read
+hasnt TMc- "$T3" alt/root.rs         src/x.rs             # `\"""` inside the string does not close it: the string's [lib] path is no target ...
+has   TMc  "$T3" src/q.rs           src/x.rs              # ... src/lib.rs stays the root
+has   TMd  "$T4" u.rs               w.rs                  # twin: escaped quotes in a multi-line and a one-line string, then the real [lib] path
 
 echo "-- DT: a use tree nested deeper than the cap is not read"
 has   DTa  "$D" src/x.rs            src/y.rs              # depth 5 resolves
 hasnt DTb  "$D" src/x.rs            src/z.rs              # depth 40 draws nothing (the cap is 32)
-s0=$SECONDS
-if importers "$D2" src/x.rs; then
-  if [ $(( SECONDS - s0 )) -le 5 ]; then ok "DTc: a 30000-deep use tree is refused at once ($(( SECONDS - s0 )) s)"
-  else no "DTc: a 30000-deep use tree took $(( SECONDS - s0 )) s (quadratic expansion: the cap is gone)"; fi
-fi
+has   DTd  "$D" src/x.rs            src/e.rs              # depth 32 (the cap itself) resolves
+hasnt DTe  "$D" src/x.rs            src/f.rs              # depth 33 draws nothing: the cap is exact
+# DTc: the 30000-deep tree is refused whatever the machine's speed. No wall-clock bound (a loaded runner would fail it with the cap intact):
+# the cap is pinned exactly by DTd/DTe, and this arm checks that the huge tree is answered (a hang guard only) and draws no edge.
+if command -v timeout >/dev/null 2>&1; then GUARD="timeout 300"; else GUARD=""; fi
+( cd "$D2" && $GUARD "$BIN" "$D2" --impact=src/x.rs --no-cache >"$TMP/dtc.xml" 2>"$TMP/dtc.err" ); rc=$?
+if [ "$rc" -eq 0 ] && grep -q '<impact ' "$TMP/dtc.xml" && ! grep -q 'p="src/w.rs"' "$TMP/dtc.xml"; then ok "DTc: a 30000-deep use tree is answered and draws no edge (rc 0)"
+else no "DTc: a 30000-deep use tree: exit $rc, or the answer carries src/w.rs as an importer"; fi
 
 echo "-- CR: self:: in a custom-named crate root"
 has   CRa  "$C" src/child.rs        src/custom.rs         # the root's directory is src/
