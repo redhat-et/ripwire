@@ -490,6 +490,115 @@ inline HttpMethod jsMethodProperty( TSNode objNode, std::string_view src )
     return method;
 }
 
+// #448: the tags queries capture the registrar shapes (`@route.def`); this arm re-checks what a query
+// cannot — the verb table, the leading-'/' first argument (firstPathStringArg's own rule) and a
+// function-valued handler — and pushes the same RouteDef the old text-gated walk did. The client
+// shapes (fetch / axios.<verb> / requests.<verb>) stay in the walk below; they are route USES.
+void routeDefFromCapture( std::uint32_t fileId, std::string_view src, TSNode n, std::vector<RouteDef>& routeDefs )
+{
+    const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
+
+    // the two shapes are disjoint node names (each grammar emits only its own), so the dispatch
+    // needs no Lang:: compare — the langidentity ratchet keeps shared-file predicates at ceiling
+    if( kindIs( ts_node_type( n ), "call_expression" ) )
+    {
+        const TSNode fn = fieldChild( n, NodeField::Function );
+        if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "member_expression" ) )
+        {
+            return;
+        }
+        const TSNode propN      = fieldChild( fn, NodeField::Property );
+        const HttpMethod method = httpMethodFromName( nodeSrc( propN ) );
+        if( method == HttpMethod::Unknown )
+        {
+            return;   // not a recognized verb shortcut
+        }
+        const TSNode argsNode = fieldChild( n, NodeField::Arguments );
+        const std::string path = firstPathStringArg( argsNode, src );
+        if( path.empty() )
+        {
+            return;   // no leading-'/' string as the first argument
+        }
+        // the near-miss discriminator (#448): the LAST argument must be function-valued — an
+        // identifier, a member access or an inline function/arrow. A `Map.get('/x', fallback)` with a
+        // non-function default stops here; `cache.get('/x', fn)` is the measured residual (the
+        // false-positive count on the hono/starlette corpora rides the gate).
+        const std::uint32_t argCount = ts_node_named_child_count( argsNode );
+        if( ts_node_is_null( argsNode ) || argCount < 2 )
+        {
+            return;
+        }
+        const TSNode lastArg = ts_node_named_child( argsNode, argCount - 1 );
+        const char*  lastKind = ts_node_type( lastArg );
+        if( !( kindIs( lastKind, "identifier" ) || kindIs( lastKind, "member_expression" )
+               || kindIs( lastKind, "arrow_function" ) || kindIs( lastKind, "function_expression" ) ) )
+        {
+            return;
+        }
+        routeDefs.push_back( RouteDef{ fileId, ts_node_start_point( n ).row + 1, method, path, lastArgHandlerName( argsNode, src ) } );
+        return;
+    }
+
+    else if( kindIs( ts_node_type( n ), "decorated_definition" ) )
+    {
+        // the old walk's decorated_definition body, verbatim minus the file-level framework gate: the
+        // query already demanded the `@obj.VERB('…')` shape; what remains is verb/methods= resolution.
+        const TSNode defNode = fieldChild( n, NodeField::Definition );
+        std::string  handlerName;
+        if( !ts_node_is_null( defNode ) && kindIs( ts_node_type( defNode ), "function_definition" ) )
+        {
+            const TSNode nameNode = fieldChild( defNode, NodeField::Name );
+            if( !ts_node_is_null( nameNode ) )
+            {
+                handlerName.assign( nodeSrc( nameNode ) );
+            }
+        }
+        ChildCursor cursor( n );
+        forEachChild( n, cursor.cur, [ & ]( TSNode dec )
+        {
+            if( !kindIs( ts_node_type( dec ), "decorator" ) )
+            {
+                return true;
+            }
+            const TSNode expr = ts_node_named_child( dec, 0 );
+            if( ts_node_is_null( expr ) || !kindIs( ts_node_type( expr ), "call" ) )
+            {
+                return true;
+            }
+            const TSNode fn = fieldChild( expr, NodeField::Function );
+            if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "attribute" ) )
+            {
+                return true;
+            }
+            const std::string_view attrName = nodeSrc( fieldChild( fn, NodeField::Attribute ) );
+            const TSNode argsNode = fieldChild( expr, NodeField::Arguments );
+            const std::string path = firstPathStringArg( argsNode, src );
+            if( path.empty() )
+            {
+                return true;
+            }
+
+            HttpMethod method = HttpMethod::Unknown;
+            if( attrName == "route" )
+            {
+                bool hasKeyword = false;
+                const HttpMethod fromKeyword = pyMethodsKeyword( argsNode, src, hasKeyword );
+                method = hasKeyword ? fromKeyword : HttpMethod::Get;   // Flask default: GET when methods= absent
+            }
+            else
+            {
+                method = httpMethodFromName( attrName );
+                if( method == HttpMethod::Unknown )
+                {
+                    return true; // not a recognized verb shortcut (e.g. .on_event)
+                }
+            }
+            routeDefs.push_back( RouteDef{ fileId, ts_node_start_point( n ).row + 1, method, path, handlerName } );
+            return true;
+        } );
+    }
+}
+
 // One visitor on the shared pre-order stream (streamSideCaptures below). The pass arms only on Python/JS/TS;
 // the SERVER detectors stay gated on a file-level framework signal, so a framework-free file still captures
 // no route DEF and the whole feature stays byte-inert on a framework-free corpus.
@@ -501,8 +610,6 @@ struct RouteCtx
     std::vector<RawRouteUse>*  routeUses = nullptr;
     bool                       py = false;
     bool                       js = false;
-    bool                       pyServerGated = false;
-    bool                       jsServerGated = false;
 };
 
 RouteCtx makeRouteCtx( std::uint32_t fileId, Lang lang, std::string_view src,
@@ -515,9 +622,9 @@ RouteCtx makeRouteCtx( std::uint32_t fileId, Lang lang, std::string_view src,
     cx.routeUses     = &routeUses;
     cx.py            = ( lang == Lang::Python );
     cx.js            = ( lang == Lang::TypeScript || lang == Lang::JavaScript );
-    cx.pyServerGated = cx.py && ( src.find( "fastapi" ) != std::string_view::npos || src.find( "FastAPI" ) != std::string_view::npos
-                                || src.find( "flask" )   != std::string_view::npos || src.find( "Flask" )   != std::string_view::npos );
-    cx.jsServerGated = cx.js && ( src.find( "express" ) != std::string_view::npos || src.find( "fastify" ) != std::string_view::npos );
+    // #448: the SERVER detectors moved to the tags queries (routeDefFromCapture above) — the old
+    // file-level framework gates (express/fastify, flask/fastapi text substrings) are gone with them;
+    // a framework-free file that names a handler registers a route on shape alone now.
     return cx;
 }
 
@@ -526,87 +633,19 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
     FUSEPROBE_BUMP( kRoutes );
     const std::uint32_t        fileId        = cx.fileId;
     const std::string_view     src           = cx.src;
-    std::vector<RouteDef>&     routeDefs     = *cx.routeDefs;
     std::vector<RawRouteUse>&  routeUses     = *cx.routeUses;
     const bool                 py            = cx.py;
     const bool                 js            = cx.js;
-    const bool                 pyServerGated = cx.pyServerGated;
-    const bool                 jsServerGated = cx.jsServerGated;
 
     const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
 
-        // Python server: @app.get("/path") / @app.route("/path", methods=[...]) directly above a def.
-        if( pyServerGated && kindIs( t, "decorated_definition" ) )
-        {
-            const TSNode defNode = fieldChild( n, NodeField::Definition );
-            std::string  handlerName;
-            if( !ts_node_is_null( defNode ) && kindIs( ts_node_type( defNode ), "function_definition" ) )
-            {
-                const TSNode nameNode = fieldChild( defNode, NodeField::Name );
-                if( !ts_node_is_null( nameNode ) )
-                {
-                    handlerName.assign( nodeSrc( nameNode ) );
-                }
-            }
-            // decorators of ONE definition: the count comes from the input, and a comment between two
-            // decorators is a further child, so the indexed form was O(children²) here too. No scaling arm
-            // exists for it (a decorator flood is not a shape any corpus produces) — this is the
-            // pure-iteration conversion, covered by the byte-identical arms (test/childwalkscalecheck.sh).
-            ChildCursor cursor( n );
-            forEachChild( n, cursor.cur, [ & ]( TSNode dec )
-            {
-                if( !kindIs( ts_node_type( dec ), "decorator" ) )
-                {
-                    return true;
-                }
-                const TSNode expr = ts_node_named_child( dec, 0 );
-                if( ts_node_is_null( expr ) || !kindIs( ts_node_type( expr ), "call" ) )
-                {
-                    return true;
-                }
-                const TSNode fn = fieldChild( expr, NodeField::Function );
-                if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "attribute" ) )
-                {
-                    return true;
-                }
-                const std::string_view attrName = nodeSrc( fieldChild( fn, NodeField::Attribute ) );
-                const TSNode argsNode = fieldChild( expr, NodeField::Arguments );
-                const std::string path = firstPathStringArg( argsNode, src );
-                if( path.empty() )
-                {
-                    return true;
-                }
-
-                HttpMethod method = HttpMethod::Unknown;
-                if( attrName == "route" )
-                {
-                    bool hasKeyword = false;
-                    const HttpMethod fromKeyword = pyMethodsKeyword( argsNode, src, hasKeyword );
-                    method = hasKeyword ? fromKeyword : HttpMethod::Get;   // Flask default: GET when methods= absent
-                }
-                else
-                {
-                    method = httpMethodFromName( attrName );
-                    if( method == HttpMethod::Unknown )
-                    {
-                        return true; // not a recognized verb shortcut (e.g. .on_event)
-                    }
-                }
-                routeDefs.push_back( RouteDef{ fileId, ts_node_start_point( n ).row + 1, method, path, handlerName } );
-                return true;
-            } );
-        }
-        // JS/TS: ONE dispatch over every call_expression — client shapes (`fetch`, `axios.<verb>`) are
-        // checked FIRST and UNCONDITIONALLY (their callee shape is specific enough to need no file gate),
-        // so a server-gated file's axios/fetch calls are NEVER misread as a route DEF; app.get(...)/
-        // router.post(...) is the gated FALLBACK, tried only when neither client shape matched. This also
-        // fixes the structural trap an `if/else if` split on `jsServerGated` vs `js` would fall into: once
-        // the (possibly file-gated) branch claims a call_expression, an else-if chain never lets the OTHER
-        // shape see that same node.
-        else if( js && kindIs( t, "call_expression" ) )
+        // JS/TS: ONE dispatch        // #448: the server side (`obj.VERB('/path', handler)`) reads as a tags capture now
+        // (routeDefFromCapture above, queries/{javascript,typescript,tsx}/tags.scm); this walk keeps
+        // the CLIENT shapes only — `fetch(...)` and `axios.<verb>(...)` — whose callee shape is
+        // specific enough to have never needed a file gate.
+        if( js && kindIs( t, "call_expression" ) )
         {
             const TSNode fn = fieldChild( n, NodeField::Function );
-            bool handled = false;
 
             if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) && nodeSrc( fn ) == "fetch" )
             {
@@ -621,7 +660,6 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
                     }
                     routeUses.push_back( RawRouteUse{ fileId, ts_node_start_byte( n ), ts_node_start_point( n ).row + 1, method, path } );
                 }
-                handled = true;   // "fetch(...)" is never ALSO a server registrar shape
             }
             else if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "member_expression" ) )
             {
@@ -639,30 +677,10 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
                             routeUses.push_back( RawRouteUse{ fileId, ts_node_start_byte( n ), ts_node_start_point( n ).row + 1, method, path } );
                         }
                     }
-                    handled = true;   // "axios.<verb>(...)" is never ALSO a server registrar shape
-                }
-            }
-
-            // JS/TS server FALLBACK: app.get('/path', handler) / router.post('/path', mw, handler) — last
-            // arg = handler. Only tried when the callee wasn't already claimed by a client shape above, and
-            // only on a file-level framework signal (captureFfi's pybind-gate posture).
-            if( !handled && jsServerGated && !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "member_expression" ) )
-            {
-                const TSNode propN     = fieldChild( fn, NodeField::Property );
-                const HttpMethod method = httpMethodFromName( nodeSrc( propN ) );
-                if( method != HttpMethod::Unknown )
-                {
-                    const TSNode argsNode = fieldChild( n, NodeField::Arguments );
-                    const std::string path = firstPathStringArg( argsNode, src );
-                    if( !path.empty() )
-                    {
-                        const std::string handlerName = lastArgHandlerName( argsNode, src );
-                        routeDefs.push_back( RouteDef{ fileId, ts_node_start_point( n ).row + 1, method, path, handlerName } );
-                    }
                 }
             }
         }
-        // Python client: requests.get('/path') / requests.post('/path', json=...)
+                // Python client: requests.get('/path') / requests.post('/path', json=...)
         else if( py && kindIs( t, "call" ) )
         {
             const TSNode fn = fieldChild( n, NodeField::Function );
@@ -1847,7 +1865,8 @@ enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly };
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
                        const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full,
-                       std::string_view fileStem = {} )   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
+                       std::string_view fileStem = {},   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
+                       std::vector<RouteDef>* routeDefs = nullptr )   // #448: the @route.def capture's sink (a definitions-only pass passes none)
 {
     const bool full = mode == TagsCapture::Full;
     if( cursor == nullptr )
@@ -1913,6 +1932,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 uint32_t    nameLen = 0;
                 const char* capName = ts_query_capture_name_for_id( query, cap.index, &nameLen );
                 const std::string_view capSv( capName, nameLen );
+
+                // #448: the route-registration capture — neither a def nor a reference; its pattern
+                // yields this one capture only, so handling it here ends the match.
+                if( capSv == "route.def" )
+                {
+                    if( routeDefs != nullptr && full )
+                    {
+                        routeDefFromCapture( fileId, src, cap.node, *routeDefs );
+                    }
+                    continue;
+                }
 
                 SymKind k = SymKind::Other;
                 switch( roleOf( capSv, k ) )
