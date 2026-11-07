@@ -242,32 +242,36 @@ fi
 # Per language: the first-hop rows' hedges are the premise (name_hop via="name", proven_hop and the relay method unhedged), then
 # the three d=2 shapes. Every row is matched whole, so a respelled or missing row fails instead of passing a negative vacuously.
 FV="test/forcallerhopfix/d2inherit"
-v1(){   # lang, --for subject, then "row|want" pairs: want = via (must carry via="name") or bare (must not)
+v1(){   # lang, --for subject, then "row|want" pairs: want = via (must carry via="name") or bare (must not); "@2" after it = a d="2" row
     local lang="$1" subj="$2"; shift 2
     run "$FV/$lang" --for="$subj" >"$TMP/v1.$lang"; local rc=$?
     [ "$rc" -eq 0 ] && [ -s "$TMP/v1.$lang" ] || { no "(V1-pre) $lang: --for=$subj failed (rc=$rc) or printed nothing"; return; }
     local H; H="$( hop "$TMP/v1.$lang" )"
     [ -n "$H" ] || { no "(V1-pre) $lang: no <callers> block for --for=$subj"; return; }
-    local pair row want got
+    local pair row want got depth rowre
     for pair in "$@"; do
-        row="${pair%|*}"; want="${pair##*|}"
-        got="$( printf '%s' "$H" | grep -o "<s [^>]*n=\"$row\"[^>]*/>" )"
+        row="${pair%|*}"; want="${pair##*|}"; depth=1
+        case "$want" in *@2) depth=2; want="${want%@2}" ;; esac
+        rowre="$( printf '%s' "$row" | sed 's/[][\.*^$/]/\\&/g' )"   # the row name is a literal: Svc.relay must not match SvcXrelay
+        got="$( printf '%s' "$H" | grep -o "<s [^>]*n=\"$rowre\"[^>]*/>" )"
         if [ -z "$got" ]; then no "(V1-pre) $lang: row n=\"$row\" missing: [$H]"; continue; fi
+        if [ "$depth" = 2 ]; then case "$got" in *' d="2"'*) ;; *) no "(V1) $lang: $row is not a d=2 row: [$got]"; continue ;; esac
+        else case "$got" in *' d="'*) no "(V1) $lang: $row is not a first-hop row: [$got]"; continue ;; esac; fi
         case "$want:$got" in
-            via:*' via="name"'*)  ok "(V1) $lang: $row carries via=\"name\"" ;;
+            via:*' via="name"'*)  ok "(V1) $lang: $row (d=$depth) carries via=\"name\"" ;;
             bare:*' via='*)       no "(V1) $lang: $row is hedged but has a proven path: [$got]" ;;
-            bare:*)               ok "(V1) $lang: $row is unhedged (a proven path)" ;;
+            bare:*)               ok "(V1) $lang: $row (d=$depth) is unhedged (a proven path)" ;;
             *)                    no "(V1) $lang: $row has no via=\"name\": [$got]" ;;
         esac
     done
 }
-v1 py post_entry 'name_hop|via' 'proven_hop|bare' 'Svc.relay|bare' 'only_by_name|via' 'both_paths|bare' 'by_name_edge|via' 'crossed|via'
-v1 rs post_entry 'name_hop|via' 'proven_hop|bare' 'Svc::relay|bare' 'only_by_name|via' 'both_paths|bare' 'by_name_edge|via'
-v1 ts postEntry 'nameHop|via' 'provenHop|bare' 'Svc.relay|bare' 'onlyByName|via' 'bothPaths|bare' 'byNameEdge|via'
-v1 cpp PostEntry 'NameHop|via' 'ProvenHop|bare' 'Svc::Relay|bare' 'OnlyByName|via' 'BothPaths|bare' 'ByNameEdge|via'
+v1 py post_entry 'name_hop|via' 'proven_hop|bare' 'Svc.relay|bare' 'only_by_name|via@2' 'both_paths|bare@2' 'by_name_edge|via@2' 'crossed|via@2'
+v1 rs post_entry 'name_hop|via' 'proven_hop|bare' 'Svc::relay|bare' 'only_by_name|via@2' 'both_paths|bare@2' 'by_name_edge|via@2'
+v1 ts postEntry 'nameHop|via' 'provenHop|bare' 'Svc.relay|bare' 'onlyByName|via@2' 'bothPaths|bare@2' 'byNameEdge|via@2'
+v1 cpp PostEntry 'NameHop|via' 'ProvenHop|bare' 'Svc::Relay|bare' 'OnlyByName|via@2' 'BothPaths|bare@2' 'ByNameEdge|via@2'
 # (e) the cap: h01 is by name and shown, zz_hidden is proven and ranked 17th (hidden); reach_both calls both, so its proven path
 # runs through the hidden row. The premise lines fail when the fixture stops capping (the bare arm would then pass vacuously).
-v1 pycap post_entry 'h01|via' 'reach_both|bare'
+v1 pycap post_entry 'h01|via' 'reach_both|bare@2'
 H1e="$( hop "$TMP/v1.pycap" )"
 case "$H1e" in
     *' shown="16" total="17" '*) ok "(V1e-pre) the first hop is capped (shown=16 of total=17)" ;;
@@ -301,6 +305,36 @@ printf '%s' "$H3b" | grep -q '<s t="fn" n="Client.submit" p="m.py:7" sites_at="m
 
 # ── R: UPWARD-2HOP, the ranked seed (forcallerhop.h forRankedCallerHopTargets; [P] arms RED on the train-40 binary 5163ffbdb) ──
 FR="test/forcallerhopfix/rank"
+# ── V2: the inherited-hedge rule rides in all six legend clauses (named, ranked, subject x compact, full) ───────────────────────────
+# Each answer must carry its element (so the arm cannot pass on an answer without the hop), and the clause that defines it must say the rule.
+RULE='via=name if every path has a by-name hop'
+v2(){   # label, file, element prefix, clause head
+    local label="$1" f="$2" el="$3" head="$4"
+    grep -q "$el" "$f" || { no "(V2-pre) $label: no $el element in the answer"; return; }
+    python3 - "$f" "$head" "$RULE" <<'PY'
+import re, sys
+t = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+legend = " ".join(re.findall(r'<!--(.*?)-->', t, re.S))
+i = legend.find(sys.argv[2])
+sys.exit(0 if i >= 0 and sys.argv[3] in legend[i:] else 1)
+PY
+    verdict $? "(V2) $label: the clause carries the inherited-hedge rule" "(V2) $label: the legend clause '$head' does not say '$RULE'"
+}
+mkdir -p "$TMP/v2subj"
+printf 'def prepare_setup_platform(x):\n    return x\n\n\ndef caller_a(y):\n    return prepare_setup_platform(y)\n\n\ndef caller_b(y):\n    return prepare_setup_platform(y + 1)\n' >"$TMP/v2subj/m.py"
+for i in 1 2 3 4 5 6; do printf 'def zznope_%s(a):\n    return a\n' "$i" >"$TMP/v2subj/z$i.py"; done
+for lg in compact full; do
+    run "$FC" --for=start_server --legend=$lg >"$TMP/v2n.$lg"
+    v2 "named, $lg" "$TMP/v2n.$lg" '<callers of="start_server"' '; callers of=:'
+    run "$FR" --for="dependency cycle error" --legend=$lg >"$TMP/v2r.$lg"
+    v2 "ranked, $lg" "$TMP/v2r.$lg" '<callers by="rank"' '; callers by=rank of=:'
+    run "$TMP/v2subj" --for="prepare_setup_platform zznope sturdy" --legend=$lg >"$TMP/v2s.$lg"
+    v2 "subject, $lg" "$TMP/v2s.$lg" '<callers by="subject"' '; callers by=subject of=:'
+done
+# the arm is red when the clause lacks the rule: the same answer with the rule struck out
+sed "s/$RULE/(rule struck)/g" "$TMP/v2n.full" >"$TMP/v2x.full"
+if ( v2 "negative control" "$TMP/v2x.full" '<callers of="start_server"' '; callers of=:' ) 2>&1 | grep -q '^  FAIL  (V2) negative control'; then ok "(V2n) the legend arm goes red on an answer whose clause lost the rule"; else no "(V2n) the legend arm stayed green on a clause without the rule"; fi
+
 [ -f "$FR/graph.c" ] || { no "(R-pre) fixture $FR missing"; }
 run "$FR" --for="dependency cycle error" >"$TMP/r1"
 run "$FR" --for="dependency cycle error" --legend=full >"$TMP/r1f"
