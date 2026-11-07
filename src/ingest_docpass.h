@@ -263,7 +263,7 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
     // 2) extract in parallel, storing each result at its OWN slot (no cross-thread sharing of a slot →
     //    order-independent). A per-doc `hasText` gate distinguishes "not extractable" (skip) from empty.
     const std::size_t   ndocs = docIds.size();
-    std::vector<DocSlot> slots( ndocs );
+    std::vector<DocSlot> docSlots( ndocs );
     if( ndocs > 0 )
     {
         unsigned hwDoc = std::thread::hardware_concurrency();
@@ -291,7 +291,7 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
                 {
                     try   // per-file degrade — a throw escaping a worker thread would std::terminate
                     {
-                        extractDocSlot( result.files[ docIds[ di ] ], docIds[ di ], cacheEnabled, captureValueUses, docLexScratch, slots[ di ] );
+                        extractDocSlot( result.files[ docIds[ di ] ], docIds[ di ], cacheEnabled, captureValueUses, docLexScratch, docSlots[ di ] );
                     }
                     catch( ... )
                     {
@@ -309,9 +309,9 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
     // 3) deterministic merge in ascending-fileId order (docIds is already ascending).
     for( std::size_t di = 0; di < ndocs; ++di )
     {
-        if( slots[ di ].hasText )   // not extractable (e.g. markitdown absent) → skip
+        if( docSlots[ di ].hasText )   // not extractable (e.g. markitdown absent) → skip
         {
-            pushDocFileNode( result, docIds[ di ], slots[ di ], rawDefs );
+            pushDocFileNode( result, docIds[ di ], docSlots[ di ], rawDefs );
         }
     }
 }
