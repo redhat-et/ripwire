@@ -401,6 +401,99 @@ else
     skip '#358: pristine-main cache compatibility (set RIPWIRE_BASE_BIN)'
 fi
 
+# #478 gap 1: `from pkg import mod` depends on pkg/mod.py, not only on pkg/__init__.py. The from-import's ONE Include names the
+# package (`pkg`, `.`, `..`, `.sub2`), so the edge to the submodule a member names was lost — and with it Ce/Ca, cycles and the
+# importer tiers of every view on the file graph. The wide form (any `from pkg import mod`), with the bare `from . import x` as
+# one case of it. Each member file below has exactly ONE importer shape, so its afferent= is that shape's edge alone, and every
+# negative is a near miss: the alias's own name has a file (pkg/m.py), a class name has a case-folded namesake (pkg/someclass.py),
+# a stdlib member has a root namesake (path.py), and a member that is both pkg/dup.py and pkg/dup/__init__.py is ambiguous.
+PB="$TMP/pymember"; mkdir -p "$PB/pkg/sub" "$PB/pkg/dup" "$PB/rel/inner" "$PB/rel/sub2" "$PB/ns"
+printf 'class SomeClass:\n    pass\n' >"$PB/pkg/__init__.py"
+for m in mod aliased m ma someclass fn_mod dup; do printf 'def pym_%s():\n    return 1\n' "$m" >"$PB/pkg/$m.py"; done
+printf 'def helper():\n    return 1\n' >>"$PB/pkg/mod.py"
+printf 'def helper():\n    return 2\n' >>"$PB/pkg/ma.py"
+: >"$PB/pkg/sub/__init__.py"; : >"$PB/pkg/dup/__init__.py"
+: >"$PB/rel/__init__.py"; : >"$PB/rel/inner/__init__.py"; : >"$PB/rel/sub2/__init__.py"
+for f in rel/sib rel/up rel/sub2/leaf ns/b path; do printf 'def pym_leaf():\n    return 1\n' >"$PB/$f.py"; done
+printf 'from pkg import mod\n\n\ndef pym_use_wide():\n    return helper()\n' >"$PB/wide.py"
+printf 'from pkg import aliased as m\n' >"$PB/aliasm.py"
+printf 'from pkg import ma, sub\n' >"$PB/multi.py"
+printf 'from pkg import SomeClass\n' >"$PB/klass.py"
+printf 'from pkg import *\n' >"$PB/star.py"
+printf 'from os import path\n' >"$PB/ext.py"
+printf 'from pkg import dup\n' >"$PB/dupuser.py"
+printf 'def pym_fn():\n    from pkg import fn_mod\n    return fn_mod\n' >"$PB/fnimp.py"
+printf 'from . import sib\n' >"$PB/rel/user.py"
+printf 'from .. import up\n' >"$PB/rel/inner/deep.py"
+printf 'from .sub2 import leaf\n' >"$PB/rel/s2user.py"
+printf 'from . import b\n' >"$PB/ns/a.py"
+"$BIN" "$PB" --deps --no-cache >"$TMP/pb.deps" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<deps ' "$TMP/pb.deps"; then
+    no "#478 gap 1: --deps on the member fixture did not run (rc=$rc)"
+else
+    if python3 - "$TMP/pb.deps" >"$TMP/pb.verdict" 2>&1 <<'PY'
+import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+god = root.find('godfiles')
+assert god is not None and god.get('capped') == '0', 'godfiles absent or capped: every afferent row must be visible'
+aff = {f.get('p'): int(f.get('afferent')) for f in god.findall('f')}
+# base edges: the seven `from pkg import …` statements hit pkg/__init__.py, the two relative ones rel/__init__.py, `.sub2` its own.
+want = {'pkg/__init__.py': 7, 'rel/__init__.py': 2, 'rel/sub2/__init__.py': 1,
+        'pkg/mod.py': 1, 'pkg/aliased.py': 1, 'pkg/ma.py': 1, 'pkg/sub/__init__.py': 1, 'pkg/fn_mod.py': 1,
+        'rel/sib.py': 1, 'rel/up.py': 1, 'rel/sub2/leaf.py': 1, 'ns/b.py': 1}
+assert aff == want, ('afferent', {k: (aff.get(k), want.get(k)) for k in sorted(set(aff) | set(want)) if aff.get(k) != want.get(k)})
+cone = {f.get('p'): int(f.get('transitive')) for f in root.findall('f')}
+for p, n in {'wide.py': 3, 'multi.py': 4, 'klass.py': 2, 'star.py': 2, 'ext.py': 1, 'dupuser.py': 2, 'ns/a.py': 2,
+             'rel/user.py': 3, 'rel/inner/deep.py': 3, 'rel/s2user.py': 3, 'fnimp.py': 3, 'aliasm.py': 3}.items():
+    assert cone.get(p) == n, ('transitive', p, cone.get(p), n)
+PY
+    then ok '#478 gap 1: member edges for wide, aliased (from:aliased, not m), multi-clause, subpackage, function-level, `.`, `..`, `.sub2` and namespace-package from-imports; none for a class, `*`, stdlib, or an ambiguous member'
+    else no "#478 gap 1: member edges wrong: $( tail -1 "$TMP/pb.verdict" )"
+    fi
+fi
+# A member edge is a DEPENDENCY, not import evidence for a bare call (the Include::isValueUse rule): `from pkg import mod` makes no
+# name of mod visible bare, so wide.py's helper() — defined in both pkg/mod.py and pkg/ma.py — must stay declined, as on main.
+"$BIN" "$PB" --callees=pym_use_wide --no-cache --legend=compact >"$TMP/pb.callees" 2>/dev/null; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '<callees [^>]*count="0"' "$TMP/pb.callees" && grep -q 'declined_calls="1"' "$TMP/pb.callees"; then
+    ok '#478 gap 1 rule 3: a member edge does not bind a bare call (wide.py helper() stays declined)'
+else
+    no "#478 gap 1 rule 3: the member edge changed call binding or the run failed (rc=$rc): $( sed 's/<!--[^>]*-->//' "$TMP/pb.callees" )"
+fi
+
+# #533 review: the importer each member edge resolves TO, not only the counts — `--impact=FILE` lists a file's importers, so a
+# swap of wide.py's pkg/mod.py edge with multi.py's pkg/ma.py edge (same afferent=, same cones) fails here.
+imp(){ "$BIN" "$1" --impact="$2" --no-cache --legend=compact 2>/dev/null | grep -oE '<f via="[^"]*" p="[^"]*"' | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '; }
+IW="$( imp "$PB" pkg/mod.py )"; IM="$( imp "$PB" pkg/ma.py )"
+if [ "$IW" = "wide.py " ] && [ "$IM" = "multi.py " ]; then
+    ok '#478 gap 1 targets: pkg/mod.py is imported by wide.py alone, pkg/ma.py by multi.py alone'
+else no "#478 gap 1 targets: pkg/mod.py <- [$IW], pkg/ma.py <- [$IM]"; fi
+# #533 review: the member lookup is confined to the package that resolved. Python reads `from pkg import m` as pkg's own m, so:
+#   - pkg resolved to <D>/__init__.py → only <D>/m.py or <D>/m/__init__.py; a different root's pkg/m.py is never the member
+#     (app/pkg/fromuser.py: `from pkg import helper` names app/pkg/__init__.py's def, NOT pkg/helper.py);
+#   - pkg resolved to a plain module (util.py beside a util/ directory) → the module wins at import time: no member edge;
+#   - the confined probe still finds the member it should (app/pkg/user2.py → app/pkg/real.py, with a pkg/real.py namesake).
+# And two shapes the member edge must survive: an import under `if TYPE_CHECKING:` and one inside try/except ImportError.
+PC="$TMP/pyconfine"; mkdir -p "$PC/app/pkg" "$PC/pkg" "$PC/util" "$PC/pkg2"
+printf 'def helper():\n    return 1\n' >"$PC/app/pkg/__init__.py"
+printf 'from pkg import helper\n' >"$PC/app/pkg/fromuser.py"
+printf 'from pkg import real\n' >"$PC/app/pkg/user2.py"
+: >"$PC/pkg/__init__.py"; : >"$PC/pkg2/__init__.py"
+for f in app/pkg/real pkg/helper pkg/real util util/x pkg2/tcmod pkg2/trymod; do printf 'def pyc_leaf():\n    return 1\n' >"$PC/$f.py"; done
+printf 'from util import x\n' >"$PC/utiluser.py"
+printf 'from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from pkg2 import tcmod\n' >"$PC/tc.py"
+printf 'try:\n    from pkg2 import trymod\nexcept ImportError:\n    trymod = None\n' >"$PC/tryimp.py"
+CH="$( imp "$PC" pkg/helper.py )"; CU="$( imp "$PC" util/x.py )"; CR="$( imp "$PC" app/pkg/real.py )"; CR2="$( imp "$PC" pkg/real.py )"
+if [ "$CH" = "" ] && [ "$CU" = "" ]; then
+    ok '#533 confine: no member edge from another root (pkg/helper.py) or through a plain module (util.py beside util/x.py)'
+else no "#533 confine: pkg/helper.py <- [$CH], util/x.py <- [$CU] (both must be empty)"; fi
+if [ "$CR" = "app/pkg/user2.py " ] && [ "$CR2" = "" ]; then
+    ok '#533 confine twin: the resolved package'"'"'s own member is found (app/pkg/real.py), its other-root namesake is not'
+else no "#533 confine twin: app/pkg/real.py <- [$CR], pkg/real.py <- [$CR2]"; fi
+CT="$( imp "$PC" pkg2/tcmod.py )"; CY="$( imp "$PC" pkg2/trymod.py )"
+if [ "$CT" = "tc.py " ] && [ "$CY" = "tryimp.py " ]; then
+    ok '#478 gap 1 shapes: a member import under `if TYPE_CHECKING:` and inside try/except ImportError keeps its edge'
+else no "#478 gap 1 shapes: pkg2/tcmod.py <- [$CT], pkg2/trymod.py <- [$CY]"; fi
+
 # #478 gap 2: an aliased plain import records the MODULE as its Include target. tree-sitter-python's import_statement
 # carries name:(dotted_name|aliased_import), and the first-clause capture read the whole aliased_import span, so
 # `import pkg.mod as pm` recorded `pkg.mod as pm`: no resolver finds that module, and the file lost its edge in --deps,
