@@ -547,7 +547,6 @@ Discloses: `capped`, `lit_capped`
 | `kForLiteralBodyCapBytes` | `3000` | — | a short body over this many bytes is still served as an excerpt <x> |
 | `kForLiteralContextRows` | `2` | — | string sites outside any function served with the lines after them |
 | `kForLiteralFileMaxSegments` | `4` | — | a dotted word of this many segments or more is a key even when its last one is an extension (`envoy.filters.http.lua`) |
-| `kForLiteralMinBareCaps` | `10` | — | — |
 | `kForLiteralRankedRows` | `256` | — | source sites ordered for the rows (past it: counted in src=, not ranked) |
 | `kForLiteralRegistrationRows` | `2` | — | shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count |
 | `kForLiteralSiteRows` | `8` | — | <ls> rows shown (a runaway guard: shown=/src= count, next= lists all) |
@@ -1366,6 +1365,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kForLiteralMinBareCaps` | `10` | — | — |
 | `kSubjectMaxDefs` | `12` | — | — |
 | `kSubjectMaxPlainWords` | `4` | — | — |
 
