@@ -925,12 +925,14 @@ inline Picks pickRows( const IngestResult& ing, const Graph& g, std::vector<Cand
 }
 
 // SIZE-1: the block closed, its legend (the prefix before <syms) without the two clauses whose attributes its rows do not carry:
-// test=1 unless a row is a test symbol, files= head= unless `readAttrs` (the tag printed either one)
-inline std::string presentOnlySymsBlock( const std::string& block, bool compactLegend, bool readAttrs )
+// test=1 unless a row is a test symbol, files= head= unless the <syms> tag printed either one
+inline std::string presentOnlySymsBlock( const std::string& block, bool compactLegend )
 {
     const std::size_t      legendEnd = block.find( "<syms" );
     std::string            legend    = block.substr( 0, legendEnd );
     const std::string_view rows      = std::string_view( block ).substr( legendEnd );
+    const std::string_view tag       = rows.substr( 0, rows.find( '>' ) );
+    const bool             readAttrs = !attrOf( tag, "files" ).empty() || !attrOf( tag, "head" ).empty();
     eraseAbsentClause( legend, compactLegend ? kForFileSymsTestClauseCompact : kForFileSymsTestClause, rows.contains( " test=\"1\"" ) );
     eraseAbsentClause( legend, compactLegend ? kForFileSymsReadClauseCompact : kForFileSymsReadClause, readAttrs );
     return legend + std::string( rows ) + "</syms>";
@@ -972,7 +974,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     {
         row( *c, true );
     }
-    return presentOnlySymsBlock( out, compactLegend, sf.files.size() != kForFileSymsFiles || head.rows != kForFileSymsHeadRows );
+    return presentOnlySymsBlock( out, compactLegend );
 }
 } // namespace filesyms_detail
 
