@@ -3065,6 +3065,26 @@ inline void addScopedSubmoduleCalleeNames( const IngestResult& ing, const HashMa
     }
 }
 
+// one Import binding's file tables: the module-form file, the member file and the submodule facts. PY-LOCAL-BIND: an import inside a
+// Python def or class (pythonImportScope) fills the scoped twins keyed by that scope, never the module-level tables.
+inline void recordPythonImportFiles( const IngestResult& ing, const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                     const HashMap<std::string, char>& pythonModuleRebind, std::string& key, PythonSuffixMemo& memo, PythonImportVetoes& t )
+{
+    const NodeId scope = pythonImportScope( ing, b );
+    if( scope == kNoNode )
+    {
+        recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+    }
+    else
+    {
+        recordScopedImportBindFile( ing, b, resolved, fileIndex, scope, key, t.scopedImportBindFile );
+    }
+    recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
+    const bool atModule = scope == kNoNode;
+    recordSubmoduleBind( ing, b, pythonFromImportModuleFile( b, resolved, fileIndex, memo ), fileIndex, key, atModule ? b.fileId : scope,
+                         atModule ? t.submodules : t.scopedSubmodules );
+}
+
 inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
                                                     const HashMap<std::string, char>& moduleNames,
                                                     const HashMap<std::string, char>& pythonModuleRebind )
@@ -3084,18 +3104,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // not just verdict's "cannot leave the package" evidence.
         const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
         const char verdict = pythonImportVerdict( b, resolved, moduleNames );
-        const NodeId scope = pythonImportScope( ing, b );
-        if( scope == kNoNode )
-        {
-            recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
-        }
-        else
-        {
-            recordScopedImportBindFile( ing, b, resolved, fileIndex, scope, key, t.scopedImportBindFile );
-        }
-        recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
-        recordSubmoduleBind( ing, b, pythonFromImportModuleFile( b, resolved, fileIndex, memo ), fileIndex, key, scope == kNoNode ? b.fileId : scope,
-                             scope == kNoNode ? t.submodules : t.scopedSubmodules );
+        recordPythonImportFiles( ing, b, resolved, fileIndex, pythonModuleRebind, key, memo, t );
         key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
         const auto [ it, inserted ] = t.importBind.try_emplace( key, verdict );
         if( !inserted && it->second == 'x' && verdict != 'x' )
