@@ -215,47 +215,13 @@ public:
         const std::size_t start = size_;
         for( const char* at = orEmptyText( text ); *at != '\0'; ++at )
         {
-            char        one[ 8 ];
-            const char* piece = one;
-            std::size_t bytes = 1;
-            one[ 0 ]          = *at;
-            const auto  byte  = static_cast<unsigned char>( *at );
-            if( how == Escape::Json && ( *at == '"' || *at == '\\' ) )
+            const EscapedByte piece = escapeByte( *at, how );
+            if( size_ - start + piece.bytes > maxBytes )
             {
-                one[ 0 ] = '\\';
-                one[ 1 ] = *at;
-                bytes    = 2;
-            }
-            else if( how == Escape::Json && byte < 0x20 )
-            {
-                bytes = rw::formatTo( one, sizeof( one ), "\\u{:04x}", static_cast<unsigned>( byte ) );
-            }
-            else if( how == Escape::Xml && *at == '&' ) { piece = "&amp;"; bytes = 5; }
-            else if( how == Escape::Xml && *at == '<' ) { piece = "&lt;"; bytes = 4; }
-            else if( how == Escape::Xml && *at == '>' ) { piece = "&gt;"; bytes = 4; }
-            else if( how == Escape::Xml && *at == '"' ) { piece = "&quot;"; bytes = 6; }
-            else if( how != Escape::Json && byte < 0x20 )
-            {
-                one[ 0 ] = ' ';   // XML 1.0 cannot carry most control characters even as references; a line cannot carry a newline
-            }
-            if( size_ - start + bytes > maxBytes )
-            {
-                if( ( byte & 0xC0 ) == 0x80 )
-                {
-                    while( size_ > start && ( static_cast<unsigned char>( buffer_[ size_ - 1 ] ) & 0xC0 ) == 0x80 )
-                    {
-                        --size_;
-                    }
-                    if( size_ > start && ( static_cast<unsigned char>( buffer_[ size_ - 1 ] ) & 0xC0 ) == 0xC0 )
-                    {
-                        --size_;
-                    }
-                }
-                buffer_[ size_ ] = '\0';
-                raw( "..." );
+                cutAt( start, static_cast<unsigned char>( *at ) );
                 return;
             }
-            raw( piece, bytes );
+            raw( piece.text, piece.bytes );
         }
     }
 
@@ -264,6 +230,74 @@ public:
 
 private:
     static const char* orEmptyText( const char* text ) noexcept { return text != nullptr ? text : ""; }
+
+    struct EscapedByte
+    {
+        char        text[ 8 ];
+        std::size_t bytes;
+    };
+
+    // One input byte as its context spells it. Bytes 0x80 and up pass through unchanged, so UTF-8 survives.
+    static EscapedByte escapeByte( char c, Escape how ) noexcept
+    {
+        return how == Escape::Json ? jsonByte( c ) : markupByte( c, how == Escape::Xml );
+    }
+
+    static EscapedByte jsonByte( char c ) noexcept
+    {
+        if( c == '"' || c == '\\' )
+        {
+            return EscapedByte{ { '\\', c }, 2 };
+        }
+        EscapedByte out{ { c }, 1 };
+        if( static_cast<unsigned char>( c ) < 0x20 )
+        {
+            out.bytes = rw::formatTo( out.text, sizeof( out.text ), "\\u{:04x}", static_cast<unsigned>( static_cast<unsigned char>( c ) ) );
+        }
+        return out;
+    }
+
+    // XML attribute text (isXml) or a plain line: a control byte becomes a space, because XML 1.0 cannot carry most
+    // of them even as references and a line cannot carry a newline; in XML the four markup bytes become entities.
+    static EscapedByte markupByte( char c, bool isXml ) noexcept
+    {
+        struct Entity
+        {
+            char        byte;
+            const char* text;
+        };
+        static constexpr Entity kEntities[] = { { '&', "&amp;" }, { '<', "&lt;" }, { '>', "&gt;" }, { '"', "&quot;" } };
+        EscapedByte out{ { static_cast<unsigned char>( c ) < 0x20 ? ' ' : c }, 1 };
+        for( const Entity& entity : kEntities )
+        {
+            if( isXml && entity.byte == c )
+            {
+                out.bytes = std::strlen( entity.text );
+                std::memcpy( out.text, entity.text, out.bytes + 1 );
+            }
+        }
+        return out;
+    }
+
+    // The field ran out of room at a byte whose high bits are `next`. If that byte continues a UTF-8 sequence, the
+    // partial sequence already copied goes too, so the kept text is valid UTF-8; then the cut says itself.
+    void cutAt( std::size_t start, unsigned char next ) noexcept
+    {
+        const auto isContinuation = [ & ]( std::size_t at ) noexcept { return ( static_cast<unsigned char>( buffer_[ at ] ) & 0xC0 ) == 0x80; };
+        if( ( next & 0xC0 ) == 0x80 )
+        {
+            while( size_ > start && isContinuation( size_ - 1 ) )
+            {
+                --size_;
+            }
+            if( size_ > start && ( static_cast<unsigned char>( buffer_[ size_ - 1 ] ) & 0xC0 ) == 0xC0 )
+            {
+                --size_;
+            }
+        }
+        buffer_[ size_ ] = '\0';
+        raw( "..." );
+    }
 
     char*       buffer_;
     std::size_t capacity_;
@@ -512,6 +546,57 @@ void reportToAgent( const Failure& f ) noexcept
     }
 }
 
+// argv as a JSON array of strings, capped at kArgvCap with a "..." element when cut.
+void armArgvJson( int argc, const char* const* argv ) noexcept
+{
+    Sink json( g_slot.argvJson, sizeof( g_slot.argvJson ) );
+    json.raw( "[" );
+    for( int i = 0; i < argc; ++i )
+    {
+        if( json.size() + 8 >= kArgvCap )
+        {
+            json.raw( ",\"...\"" );
+            break;
+        }
+        json.raw( i == 0 ? "\"" : ",\"" );
+        json.escaped( argv[ i ], kArgvCap - json.size() - 8, Sink::Escape::Json );
+        json.raw( "\"" );
+    }
+    json.raw( "]" );
+}
+
+// The call's `--name` flags, values dropped. The verb is one of them, but which one is the CLI parser's knowledge, not
+// this file's: the names are listed (so a task string or a path never lands here twice) and argv carries the rest.
+void armFlags( int argc, const char* const* argv ) noexcept
+{
+    Sink flags( g_slot.flags, sizeof( g_slot.flags ) );
+    for( int i = 1; i < argc; ++i )
+    {
+        const char* arg = argv[ i ];
+        if( arg == nullptr || arg[ 0 ] != '-' || arg[ 1 ] != '-' )
+        {
+            continue;
+        }
+        const char*       equals = std::strchr( arg, '=' );
+        const std::size_t bytes  = equals != nullptr ? static_cast<std::size_t>( equals - arg ) : std::strlen( arg );
+        if( flags.size() + bytes + 2 < sizeof( g_slot.flags ) )
+        {
+            flags.raw( flags.size() > 0 ? " " : "" );
+            flags.raw( arg, bytes );
+        }
+    }
+}
+
+void armArgv( int argc, const char* const* argv ) noexcept
+{
+    if( argv == nullptr )
+    {
+        argc = 0;
+    }
+    armArgvJson( argc, argv );
+    armFlags( argc, argv );
+}
+
 } // namespace
 
 void arm( const ArmInfo& info ) noexcept
@@ -527,34 +612,7 @@ void arm( const ArmInfo& info ) noexcept
         path.raw( info.cacheDir );
         path.raw( "/last-crash" );
     }
-    Sink argvJson( g_slot.argvJson, sizeof( g_slot.argvJson ) );
-    argvJson.raw( "[" );
-    Sink flags( g_slot.flags, sizeof( g_slot.flags ) );
-    for( int i = 0; i < info.argc && info.argv != nullptr; ++i )
-    {
-        if( argvJson.size() + 8 >= kArgvCap )
-        {
-            argvJson.raw( ",\"...\"" );
-            break;
-        }
-        argvJson.raw( i == 0 ? "\"" : ",\"" );
-        argvJson.escaped( info.argv[ i ], kArgvCap - argvJson.size() - 8, Sink::Escape::Json );
-        argvJson.raw( "\"" );
-        // The verb is one of these, but which one is the CLI parser's knowledge, not this file's: the names are listed
-        // (values dropped, so a task string or a path never lands here twice) and argv carries the rest.
-        const char* arg = info.argv[ i ];
-        if( i > 0 && arg != nullptr && arg[ 0 ] == '-' && arg[ 1 ] == '-' )
-        {
-            const char*       equals = std::strchr( arg, '=' );
-            const std::size_t bytes  = equals != nullptr ? static_cast<std::size_t>( equals - arg ) : std::strlen( arg );
-            if( flags.size() + bytes + 2 < sizeof( g_slot.flags ) )
-            {
-                flags.raw( flags.size() > 0 ? " " : "" );
-                flags.raw( arg, bytes );
-            }
-        }
-    }
-    argvJson.raw( "]" );
+    armArgv( info.argc, info.argv );
 }
 
 void beginRequest( const char* idToken, std::size_t idBytes, int httpFd ) noexcept
