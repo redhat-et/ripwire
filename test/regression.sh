@@ -517,6 +517,7 @@ for _g in \
     fnliteralcheck \
     fnptrcheck \
     fnslotcheck \
+    foranchornscheck \
     forautobodycheck \
     forblowupcheck \
     forbodyfoldcheck \
