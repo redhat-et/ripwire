@@ -732,6 +732,25 @@ N9O="$( cd "$ROOT/test/testgatenestedfix" && bash -c "$N9C; pwd" 2>&1 )"
     && ok '(n9) #442: the cd is a subshell: the next command still starts at root=' \
     || no "(n9) #442 the cd leaked or the row is not a subshell: ROW=$N9R OUT=$N9O"
 
+# (n10) CR #576 4503286347: the per-directory package.json memo is keyed by the FILESYSTEM parent. On POSIX a file named
+#       `web\b.test.ts` sits at root=, not in web/, so it must not inherit web/package.json's vitest evidence (the key cut at
+#       the last '/' or '\' gave both files the key `web`). Positive twin: web/a.test.ts keeps its vitest command.
+N10D="$TMP/n10"; mkdir -p "$N10D/web"
+if : > "$N10D/web\\b.test.ts" 2>/dev/null && [ -f "$N10D/web\\b.test.ts" ]; then
+    printf '%s\n' '{ "name": "w", "scripts": { "test": "vitest run" }, "devDependencies": { "vitest": "3.2.4" } }' > "$N10D/web/package.json"
+    printf 'export function lib(): number { return 1; }\n' > "$N10D/lib.ts"
+    printf 'import { lib } from "../lib";\nit("x", () => { lib(); });\n' > "$N10D/web/a.test.ts"
+    printf 'import { lib } from "./lib";\nit("x", () => { lib(); });\n' > "$N10D/web\\b.test.ts"
+    N10="$( cd "$N10D" && perl -e 'alarm 15; exec @ARGV' "$BIN" "$N10D" --test-gate=lib.ts --no-cache 2>/dev/null )"; N10EC=$?
+    { [ "$N10EC" = 4 ] || [ "$N10EC" = 0 ]; } \
+        && printf '%s' "$N10" | grep -qF 'p="web/a.test.ts" hops="1" run="(cd web &amp;&amp; npx vitest run a.test.ts)"' \
+        && printf '%s' "$N10" | grep -qF 'p="web\b.test.ts" hops="1" run_unknown="1"' \
+        && ok '(n10) CR #576: a root-level file named web\b.test.ts does not inherit web/package.json (memo keyed by the filesystem parent)' \
+        || no "(n10) CR #576 the manifest memo shared web/'s evidence with a root-level web\\b.test.ts (exit=$N10EC): $N10"
+else
+    printf '  SKIP  (n10) a file name with a backslash cannot be created on this filesystem\n'
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
 
