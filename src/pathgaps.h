@@ -1185,8 +1185,7 @@ inline std::string_view pathFitLegend( bool on ) noexcept
 }
 inline std::string pathFitAttrXml( std::size_t fromFit, std::size_t toFit )
 {
-    return ( fromFit > 0 ? " from_fit=\"" + std::to_string( fromFit ) + "\"" : std::string() )
-         + ( toFit > 0 ? " to_fit=\"" + std::to_string( toFit ) + "\"" : std::string() );
+    return countAttrXmlOrEmpty( "from_fit", fromFit ) + countAttrXmlOrEmpty( "to_fit", toFit );   // graphlegend.h: absent at 0
 }
 
 inline constexpr std::string_view kPathGlobLegend =
