@@ -576,13 +576,13 @@ private:
     void storeAt( TSNode at, TSNode value, std::string_view fieldName, const std::string& ty )
     {
         const Named n = named( value );
-        RawRef      r = rawRefAt( at, m_fileId, m_lang, RefRole::Value, std::string() );
-        r.setMemberPath( std::string( fieldName ) );
-        r.setMemberCtor( ty );
         if( n.name.empty() )
         {
-            return;
+            return;   // no row: build no reference (its cold text block would be allocated and freed unused)
         }
+        RawRef r = rawRefAt( at, m_fileId, m_lang, RefRole::Value, std::string() );
+        r.setMemberPath( std::string( fieldName ) );
+        r.setMemberCtor( ty );
         r.name       = std::string( n.name );
         r.memberRoot = n.owner;
         r.setMemberVia( std::string( n.module ) );
