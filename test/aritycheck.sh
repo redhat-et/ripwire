@@ -158,6 +158,34 @@ if [ "$WRC" = 0 ] && [ "$WGOT" = "b.py:1 " ]; then
 else
     no "wide --callees=call_big rc=$WRC = { $WGOT} want { b.py:1 } — $( head -c 400 "$TMP/wide.err" )"
 fi
+# CodeRabbit on #586 (1): the b.py:1 answer above would also pass if a.py were never indexed, so pin that the wide def
+# IS a row. (2) Its params= saturates at the field width, so it is a floor and says so: params_floor="1" in XML and
+# "params_floor":true in JSON, present only on a saturated count. RED on ecba09cd2: no params_floor anywhere.
+WMX="$( perl -e 'alarm 120; exec @ARGV' "$BIN" "$WIDE" --metrics --no-cache 2>>"$TMP/wide.err" )"
+WROW="$( printf '%s' "$WMX" | grep -oE '<f p="a\.py"><s [^>]*>' | head -1 )"
+WJS="$( perl -e 'alarm 120; exec @ARGV' "$BIN" "$WIDE" --metrics --json --no-cache 2>>"$TMP/wide.err" )"
+if printf '%s' "$WROW" | grep -qF 'params="65535"' && printf '%s' "$WROW" | grep -qF 'params_floor="1"' \
+   && printf '%s' "$WJS" | grep -qF '"params":65535,' && printf '%s' "$WJS" | grep -qF '"params_floor":true' \
+   && ! printf '%s' "$WMX" | grep -oE '<f p="b\.py"><s [^>]*>' | grep -qF 'params_floor'; then
+    ok "wide def a.py big() is indexed, params=\"65535\" params_floor=\"1\" (XML) and \"params_floor\":true (JSON); b.py's exact 1 carries none"
+else
+    no "wide def row/floor: XML row { $WROW } JSON floor=$( printf '%s' "$WJS" | grep -cF '"params_floor":true' ) — $( head -c 400 "$TMP/wide.err" )"
+fi
+# CodeRabbit on #586 (3): callArity's uint16 counter wrapped a 65,536-argument call to a KNOWN 0, so the arity filter
+# kept b.py's zero-parameter big() that 65,536 arguments cannot call. An overflowing count is unknown, and an unknown
+# count filters nothing: both candidates stay. RED on ecba09cd2: { b.py:1 } alone — the wrapped 0 dropped a.py's big(x)
+# as 'too few' and kept the zero-parameter rival.
+CALLW="$TMP/callw"; mkdir -p "$CALLW"
+printf 'def big(x):\n    return x\n' >"$CALLW/a.py"
+printf 'def big():\n    return 0\n' >"$CALLW/b.py"
+python3 -c 'import sys; sys.stdout.write( "def call_big():\n    return big(" + ", ".join( "0" for _ in range( 65536 ) ) + ")\n" )' >"$CALLW/caller.py"
+COUT="$( perl -e 'alarm 120; exec @ARGV' "$BIN" "$CALLW" --callees=call_big --no-cache 2>"$TMP/callw.err" )"; CRC=$?
+CGOT="$( printf '%s' "$COUT" | grep -oE '<s [^>]*p="[^"]*"' | grep -oE 'p="[^"]*"' | sed 's/^p="//; s/"$//' | sort | tr '\n' ' ' )"
+if [ "$CRC" = 0 ] && [ "$CGOT" = "a.py:1 b.py:1 " ]; then
+    ok "65,536-argument big(...) = { $CGOT} — the overflowing count is unknown, so arity drops neither candidate"
+else
+    no "65,536-argument --callees=call_big rc=$CRC = { $CGOT} want { a.py:1 b.py:1 } — $( head -c 400 "$TMP/callw.err" )"
+fi
 
 # ── 4) determinism — byte-identical run-to-run over all three fixtures ──────────────────────────────
 echo "── determinism (byte-identical, two --no-cache runs) ──"
