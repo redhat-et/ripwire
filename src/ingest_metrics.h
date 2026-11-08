@@ -1433,7 +1433,7 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
             // this grammar, not nested inside it, so the generic "every named child" rule reads 3 real
             // params as 5 (verified on a real parse before this branch was written).
             const bool kotlinList = kindIs( t, "function_value_parameters" );
-            std::uint16_t count = 0;
+            std::uint32_t count = 0;   // a list may hold more children than the uint16 result: saturate below, never wrap
             for( const TSNode c : kids )
             {
                 if( !ts_node_is_named( c ) )
@@ -1454,7 +1454,7 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
                 }
                 ++count;
             }
-            return count;
+            return std::uint16_t( std::min<std::uint32_t>( count, std::numeric_limits<std::uint16_t>::max() ) );
         }
         for( std::size_t i = kids.size(); i > 0; --i )
         {
@@ -1607,7 +1607,8 @@ inline ParamShape cc_paramShape( TSNode defNode, Lang lang, SymKind kind, std::s
         if( f.n.id != defNode.id && cc_isParamList( t ) )       // the FIRST parameter list — classify and scan it
         {
             collectChildren( f.n, cursor.cur, kids );           // the list's direct children — read before the scan below reuses kids
-            std::uint16_t named = 0, defaulted = 0, notParam = 0;
+            // uint32: a generated list can hold 65,536+ children, and a wrapped `named` broke the ASSUME below.
+            std::uint32_t named = 0, defaulted = 0, notParam = 0;
             bool          elastic = false, receiver = false, untyped = false;
             TSNode        lone{};
             struct QF { TSNode n; std::uint16_t depth; };
@@ -1665,7 +1666,7 @@ inline ParamShape cc_paramShape( TSNode defNode, Lang lang, SymKind kind, std::s
             if( row != nullptr && !elastic && !receiver && !decorated && !method && !soleVoid && !typedElsewhere )
             {
                 ASSUME( defaulted + notParam <= named );   // each counted child is one of the named ones
-                shape.minimum = std::uint16_t( named - defaulted - notParam );
+                shape.minimum = std::uint16_t( std::min<std::uint32_t>( named - defaulted - notParam, std::numeric_limits<std::uint16_t>::max() ) );
             }
             ENSURES( shape.minimum <= named );
             return shape;

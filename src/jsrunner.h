@@ -1220,6 +1220,10 @@ inline EngineClause engineClause( std::string_view clause ) noexcept
     EngineClause out;
     out.floor = nodeVersion( major, minor < 0 ? 0 : minor );
     out.ceil  = std::min( own, upperBoundCeil( rest ) );
+    if( out.ceil <= out.floor )
+    {
+        return {};   // a contradictory clause (">=18 <0") is input, not an invariant: read as "admits anything"
+    }
     ENSURES( out.floor >= 0 && out.ceil > 0, "a floor is a version and a ceiling is past zero" );
     return out;
 }
