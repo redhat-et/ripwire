@@ -20,6 +20,10 @@
 #                symbol leaves --for, --callers and --defs on that name byte-identical to the same page with the heading
 #                written as a paragraph (no unit), so the doc heading cannot displace or hedge the code definition; --recall
 #                still serves the heading as a unit.
+#   J  CR-572    one fixture per HTML shape the CodeRabbit round on #572 fixed: attribute values after a newline, a tag-like
+#                attribute value, a <main> in a <template> or hidden, an upper-case </SCRIPT>, an omitted </head>, a
+#                <section id="search">, nested section ids at one byte, a decoded &#10;, an h3 outside every section id, a blank
+#                page, --expand of a unit, the map's rows, and the recall term cap's disclosure.
 #   I  DOC BODY  --for's <doc_body> (FOR-DOC-BODY) picks an HTML page's sections with --recall's unit scores (recallLensScores is
 #                recallUnitScores): the section it serves first is the unit --recall picks, not the page's head as a whole doc.
 # Usage: test/docsunitscheck.sh [BIN]   (RIPWIRE_BIN works too)
@@ -218,7 +222,8 @@ for v in "--for=parseWidgetConfig" "--callers=parseWidgetConfig" "--defs=parseWi
     fi
 done
 if [ -s "$TMP/h_u___for_parseWidgetConfig" ]; then
-    arm "H twin: --for serves the code definition first" grep -qE '<d [^>]*n="parseWidgetConfig" p="src/widget.py"' "$TMP/h_u___for_parseWidgetConfig"
+    # the FIRST row inside <sigs>, not any later one: two trees that agree on a wrong order would still pass the cmp above
+    arm "H twin: --for serves the code definition first (the first <sigs> row)" grep -qE '<sigs><d [^>]*n="parseWidgetConfig" p="src/widget.py"' "$TMP/h_u___for_parseWidgetConfig"
 fi
 if recall "$TMP/hu" "parseWidgetConfig" "$TMP/h_r"; then
     s="$( sep_of "$TMP/h_r" site/guide.html )"
@@ -245,6 +250,66 @@ if recall "$I" "$iq" "$TMP/i_r"; then
     s="$( sep_of "$TMP/i_r" site/guide.html )"
     arm "I twin: --recall serves guide.html as units, the Cache eviction one among them (section-granular, lines 9-10)" grep -qE 'section-granular.*lines="[^"]*9-10' <<<"$s"
 fi
+
+# ── J: the CodeRabbit round on #572 — one fixture per fixed shape, each a negative arm with a positive twin ─────
+served(){ test -n "$( sep_of "$1" "$2" )"; }
+unserved(){ [ -s "$1" ] && test -z "$( sep_of "$1" "$2" )"; }   # absence counts only in a real answer
+# jpage CASE — the page body on stdin becomes $TMP/j/CASE/site/p.html
+jpage(){ mkdir -p "$TMP/j/$1/site"; cat >"$TMP/j/$1/site/p.html"; }
+# jpair CASE OUTWORD INWORD LABEL — OUTWORD's text must not reach --recall, INWORD's (the twin) must
+jpair(){
+    if recall "$TMP/j/$1" "$2" "$TMP/j_$1_out"; then arm "J $4: '$2' is not page text" unserved "$TMP/j_$1_out" site/p.html; fi
+    if recall "$TMP/j/$1" "$3" "$TMP/j_$1_in"; then arm "J $4 twin: '$3' is" served "$TMP/j_$1_in" site/p.html; fi
+}
+printf '<html><body><main>\n<div class=\n"sidebar">zqjattrside chrome words</div>\n<p>zqjattrbody prose of the page</p>\n</main></body></html>\n' | jpage attr
+jpair attr zqjattrside zqjattrbody "a class value on the line after its = is read (sidebar chrome)"
+printf '<html><body>\n<div title="see <main> below">x</div>\n<article><p>zqjtagart article prose</p></article>\n<p>zqjtagbanner banner text</p>\n</body></html>\n' | jpage tagattr
+jpair tagattr zqjtagbanner zqjtagart "a <main> inside an attribute value is no region (the article is)"
+printf '<html><body>\n<template><main><p>template text</p></main></template>\n<article><p>zqjtplart article prose</p></article>\n<p>zqjtplbanner banner text</p>\n</body></html>\n' | jpage tpl
+jpair tpl zqjtplbanner zqjtplart "a <main> only inside a <template> gives way to the visible article"
+printf '<html><head><SCRIPT>var a = 1;</SCRIPT></head><body>\n<main><p>zqjcasemain main prose</p></main>\n<p>zqjcasebanner banner text</p>\n</body></html>\n' | jpage case
+jpair case zqjcasebanner zqjcasemain "an upper-case </SCRIPT> ends the script, so the <main> after it is the region"
+printf '<html><body>\n<main hidden><p>zqjhidmain hidden text</p></main>\n<article><p>zqjhidart article prose</p></article>\n</body></html>\n' | jpage hidden
+jpair hidden zqjhidmain zqjhidart "a hidden <main> is no page text, and the visible article is"
+printf '<html><head><title>T</title>\n<body>\n<main><p>zqjnohead body prose without a closing head tag</p></main>\n</body></html>\n' | jpage nohead
+if recall "$TMP/j/nohead" "zqjnohead" "$TMP/j_nohead"; then arm "J a <body> closes a head whose </head> is omitted" served "$TMP/j_nohead" site/p.html; fi
+printf '<html><body><main>\n<section id="search">\n<p>zqjsearchsec member prose</p>\n</section>\n<div id="search"><p>zqjsearchbox box text</p></div>\n</main></body></html>\n' | jpage secid
+jpair secid zqjsearchbox zqjsearchsec "a <div id=search> is chrome, a <section id=search> (a member) is not"
+printf '<html><body><main>\n<section id="outer"><section id="zqjnestmember">\n<p>member prose here</p>\n</section></section>\n</main></body></html>\n' | jpage nest
+if recall "$TMP/j/nest" "zqjnestmember" "$TMP/j_nest"; then arm "J nested section ids opened at one byte are two units: the inner id is scored" served "$TMP/j_nest" site/p.html; fi
+printf '<html><body><main>\n<p>zqjentity line one&#10;still line two of the file</p>\n<h2>Later</h2>\n<p>zqjentlater prose</p>\n</main></body></html>\n' | jpage ent
+if recall "$TMP/j/ent" "zqjentlater" "$TMP/j_ent"; then
+    arm "J a decoded &#10; adds no line: the served unit ends on the file's line 4, not 5" grep -qF 'lines="1-4"' <<<"$( sep_of "$TMP/j_ent" site/p.html )"
+fi
+{
+    printf '<html><body><main>\n<section id="api"><h2>api</h2><p>api member prose</p></section>\n<h3>Chapter one</h3>\n'
+    for n in 1 2 3 4 5 6 7 8; do printf '<p>Filler prose about unrelated matters number %s.</p>\n' "$n"; done
+    printf '<h3>Chapter two</h3>\n<p>zqjchapter prose of the second chapter</p>\n</main></body></html>\n'
+} | jpage chapter
+if recall "$TMP/j/chapter" "zqjchapter" "$TMP/j_chapter"; then
+    arm "J an h3 outside every section id keeps its boundary: Chapter two is its own unit (lines 12-13)" grep -qF 'lines="12-13"' <<<"$( sep_of "$TMP/j_chapter" site/p.html )"
+fi
+mkdir -p "$TMP/j/blank/site" && printf '\n' >"$TMP/j/blank/site/zqjblank.html" && printf '<p>zqjblank twin prose</p>\n' >"$TMP/j/blank/site/twin.html"
+if recall "$TMP/j/blank" "zqjblank" "$TMP/j_blank"; then
+    arm "J a blank HTML page is no document" unserved "$TMP/j_blank" site/zqjblank.html
+    arm "J twin: a page holding the word is served" served "$TMP/j_blank" site/twin.html
+fi
+# the unit's own text through --expand: its offsets index the extracted text, not the page's bytes
+if verb "$TMP/hu" "$TMP/j_expand" "--expand=site/guide.html:parseWidgetConfig" --top-k=0; then
+    arm "J --expand of an HTML unit serves its extracted text" has "$TMP/j_expand" "The parseWidgetConfig step reads the config file"
+    arm "J --expand twin: none of the page's markup" hasnt "$TMP/j_expand" '<nav>'
+fi
+# the map never prints a recall-only unit, and shown= never exceeds symbols=
+if verb "$TMP/hu" "$TMP/j_map" --top-k=1000; then
+    st="$( grep -oE 'symbols=[0-9]+ edges=[0-9]+ shown=[0-9]+' "$TMP/j_map" | head -1 )"
+    sy="$( sed -E 's/symbols=([0-9]+).*/\1/' <<<"$st" )"; sh="$( sed -E 's/.*shown=([0-9]+)/\1/' <<<"$st" )"
+    arm "J map --top-k past the ranked symbols: shown=$sh <= symbols=$sy" test -n "$st" -a "${sh:-1}" -le "${sy:-0}"
+    arm "J map twin: the code definition is a row" grep -qE 'n="parseWidgetConfig"[^>]*' "$TMP/j_map"
+fi
+# a query past the term cap says so; a short one does not
+jq="$( for a in a b c d e f g h i j k l m n o p q r s t u v w x y z; do for b in a b c d e f g h i j k l m n o p q r s t u v w x y z; do printf 'zq%s%sx zq%s%sy ' "$a" "$b" "$a" "$b"; done; done )"
+if recall "$TMP/hu" "$jq" "$TMP/j_terms"; then arm "J a 1352-term query discloses its cut: terms_capped=1 terms_total=1352" grep -qF 'terms_capped=1 terms_total=1352' <(head -1 "$TMP/j_terms"); fi
+if [ -s "$TMP/h_r" ]; then arm "J twin: a short query has no terms_capped" hasnt "$TMP/h_r" 'terms_capped='; fi
 
 if [ "$fail" -ne 0 ]; then
     echo "docsunitscheck: FAIL"

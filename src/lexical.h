@@ -512,6 +512,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         statsOut = &statsOutMerged;
     }
     const auto isUnranked = [ &unranked ]( std::size_t i ) noexcept { return !unranked.empty() && unranked[i] != 0; };
+    // the WHOLE corpus an OUT unit scores against (avgdlAll, allS, dfOut below) is the ranked one: a kRankFlagNotLexRanked
+    // unit is no document there either, so a Sphinx .txt section scores as it did before HTML units existed
+    const std::size_t allS = S - std::size_t( std::count( unranked.begin(), unranked.end(), char( 1 ) ) );
     // statsOut (filter.h sphinxTxtStatsExclusion): units SCORED like any other but kept out of the corpus statistics —
     // the symbol count, every document frequency and the average length. Null: every unit counts, the historical pass.
     const auto  statsWeight = [ statsOut ]( std::size_t i ) noexcept -> int
@@ -1117,7 +1120,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // code operating on the historical layout.
     if( variantCount > 0 )
     {
-        const std::uint32_t sOver64    = std::uint32_t( S / 64 );
+        const std::uint32_t sOver64    = std::uint32_t( allS / 64 );   // the ranked corpus: an unranked unit does not widen the cap
         const std::uint32_t variantCap = sOver64 > 8u ? sOver64 : 8u;
         if( std::getenv( "RIPWIRE_QSTEM_DEBUG" ) != nullptr )
         {
@@ -1297,10 +1300,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         avgdl += statsWeight( i ) != 0 ? dl[i] : 0;
-        avgdlAll += dl[i];
+        avgdlAll += isUnranked( i ) ? 0 : dl[i];
     }
     avgdl /= double( statsS ? statsS : 1 );
-    avgdlAll /= double( S ? S : 1 );
+    avgdlAll /= double( allS ? allS : 1 );
     std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
     const auto       countOut = [ & ]( const int* tfRow )
     {
@@ -1330,7 +1333,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* tfRow = tfFlat.data() + i * uniqueCount;
             bool       any   = false;
             const int  w     = statsWeight( i );
-            if( w == 0 )
+            if( w == 0 && !isUnranked( i ) )
             {
                 countOut( tfRow );
             }
@@ -1385,7 +1388,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const int    n    = dfreq[u];
                 const int    nAll = n + dfOut[u];   // an OUT unit's idf: the larger of the two bounds the contribution
                 const double idfIn  = n > 0 ? std::log( ( double( statsS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 ) : 0.0;
-                const double idfAll = dfOut[u] > 0 ? std::log( ( double( S ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
+                const double idfAll = dfOut[u] > 0 ? std::log( ( double( allS ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
                 const double idf  = std::max( idfIn, idfAll );
                 const double T    = double( tfMaxOf[u] );
                 const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
@@ -1425,7 +1428,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
             // exact score — the IDENTICAL expressions, in the IDENTICAL order, as the exhaustive branch
             const bool   outI = statsWeight( i ) == 0;
-            const double Si   = outI ? double( S ) : double( statsS );
+            const double Si   = outI ? double( allS ) : double( statsS );
             const double avgI = outI ? avgdlAll : avgdl;
             double sc = 0;
             for( std::size_t qi = 0; qi < qToks.size(); ++qi )
@@ -1478,7 +1481,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         const int w = statsWeight( i );
-        if( w == 0 )
+        if( w == 0 && !isUnranked( i ) )
         {
             countOut( tfFlat.data() + i * uniqueCount );
         }
@@ -1498,7 +1501,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             continue; // a kRankFlagNotLexRanked unit scores 0 (model.h)
         }
         const bool   outI = statsWeight( i ) == 0;
-        const double Si   = outI ? double( S ) : double( statsS );
+        const double Si   = outI ? double( allS ) : double( statsS );
         const double avgI = outI ? avgdlAll : avgdl;
         double sc = 0;
         for( std::size_t qi = 0; qi < qToks.size(); ++qi )

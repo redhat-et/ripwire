@@ -145,13 +145,20 @@ inline void buildHtmlUnitLex( const std::string& text, const std::vector<docpars
 
 // One Section per HTML unit, shaped like a markdown heading's: [startByte, endByte) is the subtree in the extracted text,
 // the heading construct is the signature, the enclosing unit is the scope. nameByte is the unit's start: unique within the
-// file (two units never start at one byte: each opening tag adds its separator first) and never the file node's EOF.
+// file (two units never start at one byte: htmldoc.h nextUnitStart) and never the file node's EOF. The scope is
+// the nearest enclosing unit of a lower level, found on a stack of the units still open (one push and at most one pop
+// per unit, so a page of 50,000 sibling headings is linear, not a prefix rescan per heading).
 inline void pushHtmlUnitDefs( std::uint32_t fid, const std::vector<docparse::HtmlHeading>& heads, std::vector<RawDefLex>& lex,
                               std::vector<RawDef>& rawDefs )
 {
+    std::vector<std::size_t> open;   // units whose subtree may still enclose the next one, outermost first
     for( std::size_t h = 0; h < heads.size(); ++h )
     {
         const docparse::HtmlHeading& u = heads[ h ];
+        while( !open.empty() && heads[ open.back() ].endByte <= u.startByte )
+        {
+            open.pop_back();   // starts only grow: a unit that ends before this one encloses no later unit either
+        }
         RawDef d;
         d.fileId    = fid;
         d.line      = u.line;
@@ -163,14 +170,16 @@ inline void pushHtmlUnitDefs( std::uint32_t fid, const std::vector<docparse::Htm
         d.lang      = Lang::Markdown;
         d.name      = u.name;
         d.rankFlags = kRankFlagRecallOnly;   // --recall's unit: no lexical lens ranks it, no name binds it (model.h)
-        for( std::size_t p = h; p > 0; --p )
+        for( std::size_t k = open.size(); k > 0; --k )
         {
-            if( heads[ p - 1 ].level < u.level && heads[ p - 1 ].endByte > u.startByte )
+            const docparse::HtmlHeading& p = heads[ open[ k - 1 ] ];
+            if( p.level < u.level && p.endByte > u.startByte )
             {
-                d.scope = heads[ p - 1 ].name;
+                d.scope = p.name;
                 break;
             }
         }
+        open.push_back( h );
         if( h < lex.size() )
         {
             d.lex = std::move( lex[ h ] );
@@ -198,10 +207,13 @@ inline void extractDocSlot( const std::string& path, std::uint32_t fid, bool cac
     std::string       text = docTextOfDoc( path, ext, cacheEnabled, fid, slot.heads, flat );
     // an HTML page with body text but no whole-text reading had no node before the section tree: --recall reads its node,
     // nothing else ranks or names it
-    slot.recallOnly = docparse::docKindOf( ext ) == docparse::DocKind::Html && flat.empty();
-    if( text.empty() )
+    const bool isHtml = docparse::docKindOf( ext ) == docparse::DocKind::Html;
+    slot.recallOnly   = isHtml && flat.empty();
+    const auto isBlank = []( const std::string& s ) noexcept
+    { return std::all_of( s.begin(), s.end(), []( char c ) noexcept { return c == ' ' || c == '\n' || c == '\t' || c == '\r'; } ); };
+    if( text.empty() || ( isHtml && isBlank( text ) && isBlank( flat ) ) )
     {
-        return;
+        return;   // nothing to recall or rank (an HTML page whose both readings are blank is no document)
     }
     if( captureValueUses )
     { // whole-file Section span [0, len) — over the whole-text reading for an HTML page (docTextOfDoc)

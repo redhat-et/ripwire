@@ -540,8 +540,11 @@ inline std::string extractHtmlFlat( std::string_view html )
         // text node — decode the handful of entities that matter for tokens
         if( html[i] == '&' )
         {
-            const std::size_t semi = html.find( ';', i );
-            if( semi != std::string_view::npos && semi - i <= 8 )
+            // the ';' within the longest entity read here (8 bytes past the '&'), never in the rest of the page (a run of bare
+            // '&' rescanned the document once per '&')
+            const std::size_t rel  = html.substr( i, 9 ).find( ';' );
+            const std::size_t semi = rel == std::string_view::npos ? rel : i + rel;
+            if( semi != std::string_view::npos )
             {
                 const std::string_view ent = html.substr( i, semi - i + 1 );
                 if( ent == "&amp;" )

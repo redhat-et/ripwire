@@ -58,6 +58,7 @@ struct HtmlHeading
     std::uint32_t line      = 0;   // 1-based raw line of the opening tag (== the text's line, by construction)
     std::uint32_t level     = 0;   // 1..6 for h1-h6; nesting depth for a section id
     bool          isSectionId = false;
+    std::uint32_t sectionEnd  = 0;   // a section id's element end in `text` (where its </section> closed it)
     std::string   name;            // heading text, whitespace-collapsed; a bare section's id
     std::string   id;              // the id attribute (heading's, or the section's), "" when none
 };
@@ -155,20 +156,31 @@ inline Tag readTag( std::string_view html, std::size_t i ) noexcept
     return t;
 }
 
+// HTML's ASCII whitespace (space, tab, LF, FF, CR), by byte: what separates attributes, and what may sit on either side of an `=`.
+inline constexpr std::array<bool, 256> kHtmlSpaceByte = []
+{
+    std::array<bool, 256> t{};
+    for( const char c : std::string_view( " \t\n\f\r" ) )
+    {
+        t[ static_cast<unsigned char>( c ) ] = true;
+    }
+    return t;
+}();
+
 // The value of attribute `attr` (lower-case) inside [from, to), or {} when absent. `isPresent` reports a bare
 // attribute (`hidden`), which has no value.
 inline std::string_view attrValue( std::string_view html, std::size_t from, std::size_t to, std::string_view attr, bool* isPresent = nullptr ) noexcept
 {
-    std::size_t p = from;
+    const auto  isHtmlSpace = []( char c ) noexcept { return kHtmlSpaceByte[ static_cast<unsigned char>( c ) ]; };
+    std::size_t p           = from;
     while( p < to )
     {
-        while( p < to && ( html[ p ] == ' ' || html[ p ] == '\t' || html[ p ] == '\n' || html[ p ] == '\r' || html[ p ] == '/' ) )
+        while( p < to && ( isHtmlSpace( html[ p ] ) || html[ p ] == '/' ) )
         {
             ++p;
         }
         const std::size_t nameStart = p;
-        while( p < to && html[ p ] != '=' && html[ p ] != ' ' && html[ p ] != '\t' && html[ p ] != '\n' && html[ p ] != '\r' && html[ p ] != '>'
-               && html[ p ] != '/' )
+        while( p < to && html[ p ] != '=' && !isHtmlSpace( html[ p ] ) && html[ p ] != '>' && html[ p ] != '/' )
         {
             ++p;
         }
@@ -179,7 +191,7 @@ inline std::string_view attrValue( std::string_view html, std::size_t from, std:
             continue;
         }
         const bool isMatch = nameLen == attr.size() && startsWithLower( html, nameStart, attr );
-        while( p < to && ( html[ p ] == ' ' || html[ p ] == '\t' ) )
+        while( p < to && isHtmlSpace( html[ p ] ) )
         {
             ++p;
         }
@@ -192,7 +204,7 @@ inline std::string_view attrValue( std::string_view html, std::size_t from, std:
             continue;   // a bare attribute
         }
         ++p;
-        while( p < to && ( html[ p ] == ' ' || html[ p ] == '\t' ) )
+        while( p < to && isHtmlSpace( html[ p ] ) )
         {
             ++p;
         }
@@ -211,7 +223,7 @@ inline std::string_view attrValue( std::string_view html, std::size_t from, std:
         }
         else
         {
-            while( valEnd < to && html[ valEnd ] != ' ' && html[ valEnd ] != '\t' && html[ valEnd ] != '\n' && html[ valEnd ] != '>' )
+            while( valEnd < to && !isHtmlSpace( html[ valEnd ] ) && html[ valEnd ] != '>' )
             {
                 ++valEnd;
             }
@@ -310,11 +322,27 @@ inline int headingLevelOf( std::string_view n ) noexcept
 
 enum class Region : std::uint8_t { Body, Main, Article, ContentClass };
 
-// Rule 1's probe: which region kind this page has, best first. One pass over the tags, comments skipped.
-inline Region probeRegion( std::string_view html ) noexcept
+// The first case-insensitive occurrence of `lowerLit` at or after `from`, or npos.
+inline std::size_t findLower( std::string_view s, std::size_t from, std::string_view lowerLit ) noexcept
 {
-    bool hasArticle = false, hasContentClass = false;
-    for( std::size_t i = html.find( '<' ); i != std::string_view::npos && i < html.size(); i = html.find( '<', i + 1 ) )
+    if( from >= s.size() )
+    {
+        return std::string_view::npos;
+    }
+    const auto hit = std::search( s.begin() + std::ptrdiff_t( from ), s.end(), lowerLit.begin(), lowerLit.end(),
+                                  []( char c, char lit ) { return lit == char( std::tolower( static_cast<unsigned char>( c ) ) ); } );
+    return hit == s.end() ? std::string_view::npos : std::size_t( hit - s.begin() );
+}
+
+// Rule 1's probe: which region kinds this page has (one bit per Region, Body never set). One pass over the tags,
+// comments skipped, each tag stepped over whole (an attribute value holding "<main>" is no tag), and raw text
+// (script, style) skipped to its case-insensitive end tag. extractHtmlDoc tries the kinds best first: a kind
+// whose elements yield no text (a <main> inside a <template>, a hidden <main>) gives way to the next.
+inline std::uint8_t probeRegions( std::string_view html ) noexcept
+{
+    const auto   bit   = []( Region r ) noexcept { return std::uint8_t( 1u << unsigned( r ) ); };
+    std::uint8_t kinds = 0;
+    for( std::size_t i = html.find( '<' ); i != std::string_view::npos && i < html.size(); i = html.find( '<', i ) )
     {
         if( html.substr( i, 4 ) == "<!--" )
         {
@@ -323,31 +351,36 @@ inline Region probeRegion( std::string_view html ) noexcept
             {
                 break;
             }
-            i = close;
+            i = close + 3;
             continue;
         }
         const Tag t = readTag( html, i );
+        i           = std::max( t.end, i + 1 );   // past the whole tag: the next '<' is outside its attributes
         if( t.isEnd || t.nameLen == 0 )
         {
             continue;
         }
         if( t.name() == "main" || attrValue( html, t.attrsBegin, t.end, "role" ) == "main" )
         {
-            return Region::Main;
+            kinds |= bit( Region::Main );
         }
-        hasArticle = hasArticle || t.name() == "article";
-        if( !hasContentClass && t.name() == "div" )
+        if( t.name() == "article" )
         {
-            hasContentClass = carriesWord( attrValue( html, t.attrsBegin, t.end, "class" ), kContentWords )
-                           || carriesWord( attrValue( html, t.attrsBegin, t.end, "id" ), kContentWords );
+            kinds |= bit( Region::Article );
         }
-        if( t.name() == "script" || t.name() == "style" )
+        if( t.name() == "div"
+            && ( carriesWord( attrValue( html, t.attrsBegin, t.end, "class" ), kContentWords )
+                 || carriesWord( attrValue( html, t.attrsBegin, t.end, "id" ), kContentWords ) ) )
         {
-            const std::size_t close = html.find( t.name() == "script" ? "</script" : "</style", t.end );   // raw text: no tags inside
+            kinds |= bit( Region::ContentClass );
+        }
+        if( !t.isSelfClose && ( t.name() == "script" || t.name() == "style" ) )
+        {
+            const std::size_t close = findLower( html, t.end, t.name() == "script" ? "</script" : "</style" );   // raw text: no tags inside
             i = close == std::string_view::npos ? html.size() : close;
         }
     }
-    return hasArticle ? Region::Article : hasContentClass ? Region::ContentClass : Region::Body;
+    return kinds;
 }
 
 struct OpenElement
@@ -359,14 +392,16 @@ struct OpenElement
     bool                 isPre       = false;
     int                  headingSlot = -1;   // index into headings while a heading is open
     bool                 isSection   = false;
+    int                  sectionSlot = -1;   // index into headings of the section id this element opened
 
     std::string_view name() const noexcept { return { nameBuf.data(), nameLen }; }
 };
 
-// A numeric reference's code point as UTF-8; NUL, surrogates and out-of-range values become one space.
+// A numeric reference's code point as UTF-8; NUL, surrogates and out-of-range values become one space, and so do LF and
+// CR (`&#10;`): a line break the file does not have would shift every later line, and the text's line k is the file's.
 inline void appendCodePoint( std::string& out, std::uint32_t cp )
 {
-    if( cp == 0 || cp > 0x10FFFF || ( cp >= 0xD800 && cp <= 0xDFFF ) )
+    if( cp == 0 || cp == 0x0A || cp == 0x0D || cp > 0x10FFFF || ( cp >= 0xD800 && cp <= 0xDFFF ) )
     {
         out.push_back( ' ' );
         return;
@@ -379,12 +414,15 @@ inline void appendCodePoint( std::string& out, std::uint32_t cp )
 // one space (it is punctuation or a symbol, never a token an agent searches for).
 inline std::size_t decodeEntity( std::string_view html, std::size_t i, std::string& out )
 {
-    const std::size_t semi = html.find( ';', i );
-    if( semi == std::string_view::npos || semi - i > 10 || semi == i + 1 )
+    // the ';' is looked for within the longest entity accepted (10 bytes past the '&'), never in the rest of the page: a run
+    // of bare '&' would otherwise rescan the document once per '&'
+    const std::size_t rel = html.substr( i, 11 ).find( ';' );
+    if( rel == std::string_view::npos || rel == 1 )
     {
         out.push_back( '&' );
         return i + 1;
     }
+    const std::size_t semi = i + rel;
     const std::string_view ent = html.substr( i + 1, semi - i - 1 );
     if( ent[ 0 ] == '#' )
     {
@@ -622,6 +660,10 @@ private:
     void onStartTag( const Tag& t )
     {
         const std::string_view n = t.name();
+        if( n == "body" )
+        {
+            closeOpen( "head" );   // `</head>` is optional: a <body> start tag closes the head it implies
+        }
         if( n.empty() || tagClassOf( n ) == TagClass::Void || t.isSelfClose )
         {
             if( isEmitting() && tagClassOf( n ) != TagClass::Inline && !( preDepth_ > 0 ) )
@@ -642,8 +684,12 @@ private:
         // the document's own frame (html, body) and a region element carry PAGE-STATE classes (`sidebar-visible`,
         // `nav-open`), never chrome of their own: a class word only marks an element inside them
         const bool isFrame = n == "html" || n == "body" || e.isRegion;
-        e.isSkip   = tagClassOf( n ) == TagClass::Chrome
-                  || ( !isFrame && ( isHidden || carriesWord( cls, kChromeWords ) || carriesWord( id, kChromeWords )
+        // `hidden` hides a region element too (its text is no page text; extractHtmlDoc then tries the next region kind). A
+        // <section>'s id is a unit name (pdoc's `search` member, Sphinx's "Search" chapter), never a chrome marker: a
+        // search box is a form or an input, chrome by tag, or carries a class or role that says so.
+        const bool isPageFrame = n == "html" || n == "body";
+        e.isSkip   = tagClassOf( n ) == TagClass::Chrome || ( isHidden && !isPageFrame )
+                  || ( !isFrame && ( carriesWord( cls, kChromeWords ) || ( n != "section" && carriesWord( id, kChromeWords ) )
                                      || carriesWord( attrValue( html_, t.attrsBegin, t.end, "role" ), kChromeRoles ) ) )
                   || ( n == "header" && region_ == Region::Body );
         e.isPre    = n == "pre";
@@ -687,6 +733,15 @@ private:
         return false;
     }
 
+    // Two units never start at one byte (ingest's dedup keys a unit by its start): nested openers with no text between
+    // them (`<section id=a><section id=b>`) are one separator apart, so the inner one gets its own. Returns where the new unit starts.
+    std::uint32_t nextUnitStart()
+    {
+        const bool isTaken = !heads_.empty() && heads_.back().startByte == out_.size();
+        out_.append( isTaken ? 1u : 0u, ' ' );
+        return std::uint32_t( out_.size() );
+    }
+
     void openUnit( OpenElement& e, std::string_view n, std::string_view id )
     {
         if( const int level = headingLevelOf( n ); level > 0 )
@@ -701,7 +756,7 @@ private:
                 return;
             }
             HtmlHeading h;
-            h.startByte = std::uint32_t( out_.size() );
+            h.startByte = nextUnitStart();
             h.line      = line_;
             h.level     = std::uint32_t( level );
             h.id        = std::string( id );
@@ -713,7 +768,7 @@ private:
         if( n == "section" && !id.empty() )
         {
             HtmlHeading h;
-            h.startByte   = std::uint32_t( out_.size() );
+            h.startByte   = nextUnitStart();
             h.sigEnd      = h.startByte;
             h.line        = line_;
             h.level       = std::uint32_t( std::min( sectionDepth_ + 1, 6 ) );
@@ -722,27 +777,34 @@ private:
             h.name        = h.id;
             heads_.push_back( std::move( h ) );
             e.isSection          = true;
-            openSection_         = int( heads_.size() - 1 );
+            e.sectionSlot        = int( heads_.size() - 1 );
+            openSection_         = e.sectionSlot;
             sawTextSinceSection_ = false;
         }
     }
 
-    void onEndTag( const Tag& t )
+    // Close the innermost open element named `n`, and everything the author left open inside it, innermost first.
+    void closeOpen( std::string_view n )
     {
-        const std::string_view n = t.name();
         for( std::size_t k = stack_.size(); k > 0; --k )
         {
             if( stack_[ k - 1 ].name() != n )
             {
                 continue;
             }
-            while( stack_.size() >= k )   // close everything the author left open inside it, innermost first
+            while( stack_.size() >= k )
             {
                 closeElement( stack_.back() );
                 stack_.pop_back();
             }
             break;
         }
+    }
+
+    void onEndTag( const Tag& t )
+    {
+        const std::string_view n = t.name();
+        closeOpen( n );
         if( isEmitting() && tagClassOf( n ) != TagClass::Inline && preDepth_ == 0 )
         {
             space();
@@ -758,6 +820,10 @@ private:
         if( e.isPre && preDepth_ > 0 )
         {
             --preDepth_;
+        }
+        if( e.sectionSlot >= 0 )
+        {
+            heads_[ std::size_t( e.sectionSlot ) ].sectionEnd = std::uint32_t( out_.size() );
         }
         if( e.isSection && sectionDepth_ > 0 )
         {
@@ -840,16 +906,33 @@ private:
     bool                     isPastHead_          = false;   // a <body> tag was read: a later <title> (an svg's) is no page title
 };
 
-// Rule 3's second half, and the subtree spans: on a page with section ids, drop the h3-h6 boundaries that are not
-// a section's own title; then give each unit the end of its subtree (the next unit at the same or a shallower
+// Rule 3's second half, and the subtree spans: drop the h3-h6 boundaries inside a section id's element that are not
+// a section's own title (a standalone h3 chapter outside every section keeps its boundary); then give each unit the end of its subtree (the next unit at the same or a shallower
 // level), which is the span ingest's Section symbols carry for markdown too.
 inline void finishUnits( HtmlDoc& doc )
 {
-    const bool hasSectionIds = std::any_of( doc.headings.begin(), doc.headings.end(), []( const HtmlHeading& h ) noexcept { return h.isSectionId; } );
-    if( hasSectionIds )
+    // byte order, and a nested section ends inside its parent: the furthest end seen so far covers exactly the bytes inside
+    // some section id's element
+    std::uint32_t coveredUntil = 0;
+    std::size_t   kept         = 0;
+    for( std::size_t r = 0; r < doc.headings.size(); ++r )
     {
-        std::erase_if( doc.headings, []( const HtmlHeading& h ) noexcept { return !h.isSectionId && h.level >= 3; } );
+        HtmlHeading& h = doc.headings[ r ];
+        if( h.isSectionId )
+        {
+            coveredUntil = std::max( coveredUntil, h.sectionEnd );
+        }
+        else if( h.level >= 3 && h.startByte < coveredUntil )
+        {
+            continue;   // a docstring heading inside a member
+        }
+        if( kept != r )
+        {
+            doc.headings[ kept ] = std::move( h );
+        }
+        ++kept;
     }
+    doc.headings.resize( kept );
     for( std::size_t p = 0; p < doc.headings.size(); ++p )
     {
         HtmlHeading& h = doc.headings[ p ];
@@ -871,14 +954,33 @@ inline void finishUnits( HtmlDoc& doc )
 // An HTML page as line-preserving body text plus its unit boundaries (rules 1-3 in the header comment).
 inline HtmlDoc extractHtmlDoc( std::string_view html )
 {
-    const htmldetail::Region region = htmldetail::probeRegion( html );
-    HtmlDoc                  doc    = htmldetail::Extractor( html, region ).run();
-    const auto isBlank       = []( char c ) noexcept { return c == ' ' || c == '\n'; };
-    const bool isEmptyRegion = region != htmldetail::Region::Body && std::all_of( doc.text.begin(), doc.text.begin() + doc.titleBegin, isBlank )
-                            && std::all_of( doc.text.begin() + doc.titleEnd, doc.text.end(), isBlank );
-    if( isEmptyRegion )
+    using htmldetail::Region;
+    const std::uint8_t kinds   = htmldetail::probeRegions( html );
+    const auto         isBlank = []( char c ) noexcept { return c == ' ' || c == '\n'; };
+    const auto         isEmpty = [ & ]( const HtmlDoc& d )
     {
-        doc = htmldetail::Extractor( html, htmldetail::Region::Body ).run();   // a script-filled region: the body is all there is
+        return std::all_of( d.text.begin(), d.text.begin() + d.titleBegin, isBlank ) && std::all_of( d.text.begin() + d.titleEnd, d.text.end(), isBlank );
+    };
+    // best kind first; a kind whose elements print nothing (script-filled, hidden, inside a <template>) gives way to the next,
+    // and the body is all there is when every kind is empty
+    HtmlDoc doc;
+    bool    isFound = false;
+    for( const Region r : { Region::Main, Region::Article, Region::ContentClass } )
+    {
+        if( ( kinds & ( 1u << unsigned( r ) ) ) == 0 )
+        {
+            continue;
+        }
+        doc = htmldetail::Extractor( html, r ).run();
+        if( !isEmpty( doc ) )
+        {
+            isFound = true;
+            break;
+        }
+    }
+    if( !isFound )
+    {
+        doc = htmldetail::Extractor( html, Region::Body ).run();
     }
     htmldetail::finishUnits( doc );
     if( !doc.headings.empty() )
