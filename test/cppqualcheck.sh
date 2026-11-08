@@ -379,10 +379,13 @@ rrun US --uses=selectBaseline \
 # 54/55 -> 56 2026-11-07 (merge of origin/main into lane/exemplar-e1): both lanes' new call sites, 53 + 1 (forliteral.h) + 2 (exemplarfamily.h).
 # 56 -> 57 2026-11-07 (lane/reg-reader over main 87ede40d3): src/forliteral.h lit_detail::tableReadersOf (measured: the one new <u> row) reads the subscript
 # row's file and at most kForTableReaderFiles (16) caller files, once each, only when a subscript row is shown and the answer names its table. No new fopen.
+# 57 -> 59 2026-11-08 (merge of lane/docs-units 26d0a5b45 into lane/proto-index, measured: the two new <u> rows): DOCS-UNITS reads a
+# document's bytes through the canonical helper at src/ingest_docpass.h:118 docTextOfDoc (an HTML page's bytes, read once in the doc
+# post-pass) and src/recall.h:1191 recallDocText (a document with no extracted text, read for its section offsets). No new fopen/fread.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 57 ] \
-    && ok "repo: --uses=readWholeFile count=57 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 57, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 59 ] \
+    && ok "repo: --uses=readWholeFile count=59 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 59, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \

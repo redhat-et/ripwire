@@ -5058,8 +5058,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot )
         {
             const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = sigsPreRendered && shownSigIds.empty(),
-                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .rootArg = flRootArg,
-                                                                                             .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
+                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .compress = cfg.compress,
+                                                                                             .rootArg = flRootArg, .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }
         // XF-ALIAS-HOP (foraliashop.h): a printed row the task names is an alias definition: its chain to what it names; "" otherwise.
