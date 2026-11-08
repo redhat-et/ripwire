@@ -517,6 +517,7 @@ for _g in \
     fnliteralcheck \
     fnptrcheck \
     fnslotcheck \
+    foranchornscheck \
     forautobodycheck \
     forblowupcheck \
     forbodyfoldcheck \
@@ -574,6 +575,7 @@ for _g in \
     gointerfacecheck \
     gokindcheck \
     goscopecheck \
+    graphformendpointscheck \
     graphlegendbudgetcheck \
     graphqueryrefusecheck \
     grepanchorcheck \
