@@ -42,6 +42,7 @@
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
 #include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
 #include "exemplarfamily.h" // exemplarTasksOf — the add-a-new-X reading keeps a tail's docs and config listed
+#include "forliteral.h"   // taskQuotesLiteral — a quoted message keeps a tail's config and docs listed
 #include "langfacts.h"   // langFacts — tailFoldClass reads a file's script/config role off the table
 #include "filter.h"      // taskAsksAboutDocs — the code-first tail asks the docs reorder's own question
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
@@ -863,15 +864,17 @@ inline TailFoldClass tailFoldClass( const IngestResult& ing, NodeId lead, std::s
 // The classes a code question keeps listed (TailFoldClass order): the ones its task names (a whole word: test data, config,
 // scripts), and on an add-a-new-X task (exemplarTasksOf, EXEMPLAR-STAIRS' one reading of that intent) its docs and config too:
 // a new member is also registered in a manifest, a public-API golden or a doc page beside its siblings (round 1 of SIZE-2 lost
-// exactly those two items on the 321: a package.json peer dependency, an API golden .md). A class not kept folds. Docs need no
-// cue otherwise: a docs question takes the plain walk, which folds nothing.
+// exactly those two items on the 321: a package.json peer dependency, an API golden .md). A task that quotes a message literal
+// (forliteral.h taskQuotesLiteral) keeps them too: the text of a quoted message lives in a string table or a doc page (round 3: the
+// graded sit lost two items on `Where does the hue cannot_connect error get its "Failed to connect" text?` when 14 strings.json
+// rows folded). A class not kept folds. Docs need no cue otherwise: a docs question takes the plain walk, which folds nothing.
 inline std::array<bool, 5> tailFoldKept( std::string_view task )
 {
     const std::string lower = queryshape::detail::lowerAscii( task );
     const auto any = [ & ]( std::initializer_list<std::string_view> words )
     { return std::ranges::any_of( words, [ & ]( std::string_view w ) { return taskNamesWord( lower, w ); } ); };
-    const bool addNew = !exemplarTasksOf( task ).empty();
-    return { addNew, addNew || any( { "config", "configuration", "yaml", "yml", "json", "toml", "settings" } ),
+    const bool keepText = !exemplarTasksOf( task ).empty() || taskQuotesLiteral( task );   // add-a-new-X, or a quoted message
+    return { keepText, keepText || any( { "config", "configuration", "yaml", "yml", "json", "toml", "settings" } ),
              any( { "script", "scripts", "shell", "bash" } ), any( { "test", "tests", "testing", "spec", "specs", "fixture", "fixtures" } ),
              false };
 }
