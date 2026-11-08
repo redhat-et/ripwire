@@ -15036,8 +15036,10 @@ inline NamespaceFit namespaceFitOf( std::span<const std::string_view> prefix, co
 // `found` is what the earlier tiers matched, returned untouched unless it is empty (resolveAllByDottedScope's contract).
 // `fitted` (lane js-def-naming fix 1): how many definitions the spelling could mean (matches plus candidates left unplaced) when it
 // refuses, 0 on every other path, so a refusal can say "N fit, none chosen" rather than "none".
+// `fittedIdsOut` (ENDPOINT-REFUSED): on a refusal, the matches it refused over (the placed ones; `fitted` also counts the unplaced),
+// for a caller that tries each one and still refuses when none answers (--path, pathgaps.h resolvePathEndpoint).
 inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing, std::string_view spec, std::vector<NodeId> found,
-                                                        std::size_t* fittedOut = nullptr )
+                                                        std::size_t* fittedOut = nullptr, std::vector<NodeId>* fittedIdsOut = nullptr )
 {
     std::size_t scratch = 0;
     std::size_t& fitted = fittedOut != nullptr ? *fittedOut : scratch;
@@ -15274,6 +15276,13 @@ inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing,
     if( unknownChain || unplaced != 0 || ( objectMember && headNamed ) || matches.empty() || !oneEntity )
     {
         fitted = matches.size() + unplaced;
+        if( fittedIdsOut != nullptr && fitted > 1 )
+        {
+            for( const Match& m : matches )
+            {
+                fittedIdsOut->push_back( m.id );
+            }
+        }
         return {};
     }
     std::vector<NodeId> out;
@@ -15454,14 +15463,21 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
 // lane js-def-naming fix 1: how many definitions a selector that resolved to NOTHING was refused over (0 = it simply matched none). A
 // `file:LINE` that starts several definitions, or a written spelling that two definitions fit, is a refusal, not an absence: the
 // not-found answer says so (selectorrefuse.h). Only asked on the refusal path, after every resolution tier came back empty.
-inline std::size_t refusedMatchCount( const IngestResult& ing, std::string_view spec )
+// `fittedIds` (ENDPOINT-REFUSED): the definitions that count is over, as far as the index places them (id order for a line
+// selector, match order for a written spelling); may hold fewer than the count (an unplaced candidate has no id).
+inline std::size_t refusedMatchCount( const IngestResult& ing, std::string_view spec, std::vector<NodeId>* fittedIds = nullptr )
 {
-    if( const std::size_t starts = defLineStarts( ing, spec ).size(); starts > 1 )
+    if( std::vector<NodeId> starts = defLineStarts( ing, spec ); starts.size() > 1 )
     {
-        return starts;
+        const std::size_t n = starts.size();
+        if( fittedIds != nullptr )
+        {
+            *fittedIds = std::move( starts );
+        }
+        return n;
     }
     std::size_t fitted = 0;
-    resolveAllByWrittenSpelling( ing, spec, {}, &fitted );
+    resolveAllByWrittenSpelling( ing, spec, {}, &fitted, fittedIds );
     return fitted > 1 ? fitted : 0;
 }
 

@@ -100,7 +100,12 @@ inline std::optional<GraphSubjectArgs> chooseGraphSubjectArgs( const IngestResul
         bool        glob     = false;
         switch( gs->form )
         {
-            case GraphSubjectForm::Path: return !resolvePathEndpoint( ing, spec, &unproven, &glob ).empty();
+            case GraphSubjectForm::Path:
+            {   // ENDPOINT-REFUSED: a refused spelling resolves as --path reads it (every fitted definition); a block whose verb still
+                // refuses (no fitted pair reaches) is dropped by the caller, so the answer is today's
+                std::size_t fit = 0;
+                return !resolvePathEndpoint( ing, spec, &unproven, &glob, &fit ).empty();
+            }
             case GraphSubjectForm::Callers: return !resolveAllByNameQualified( ing, spec, &unproven ).empty();
             case GraphSubjectForm::Common: return resolveFocus( ing, spec, &unproven ) != kNoNode;
         }

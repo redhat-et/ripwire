@@ -475,6 +475,7 @@ for _g in \
     emittertruthcheck \
     emptycorpuscheck \
     emptyvaluerefusecheck \
+    endpointfitcheck \
     ensembleavailcheck \
     ensemblecheck \
     enumtablecheck \

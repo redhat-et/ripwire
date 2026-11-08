@@ -2950,22 +2950,36 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         // method definition whose name fits it (from_glob=/to_glob= say so); every resolvable spelling resolves as before
         bool                      srcGlob         = false;
         bool                      dstGlob         = false;
-        const std::vector<NodeId> srcDefs         = rw::resolvePathEndpoint( ing, srcN, &srcUnprovenDefs, &srcGlob );
-        const std::vector<NodeId> dstDefs         = rw::resolvePathEndpoint( ing, dstN, &dstUnprovenDefs, &dstGlob );
+        // ENDPOINT-REFUSED: a spelling several definitions fit (none chosen) stands for each of them (src/pathgaps.h); fit = the
+        // refusal's count, 0 when the endpoint resolved. The answer prints only when a pair reaches; otherwise today's refusal.
+        std::size_t               srcFit          = 0;
+        std::size_t               dstFit          = 0;
+        const std::vector<NodeId> srcDefs         = rw::resolvePathEndpoint( ing, srcN, &srcUnprovenDefs, &srcGlob, &srcFit );
+        const std::vector<NodeId> dstDefs         = rw::resolvePathEndpoint( ing, dstN, &dstUnprovenDefs, &dstGlob, &dstFit );
         const std::size_t         pthUnprovenDefs = srcUnprovenDefs + dstUnprovenDefs;
-        if( srcDefs.empty() || dstDefs.empty() )
+        const auto                refuseEndpoint  = [ & ]
         {
             // §M7 (W3FIX): both endpoints resolve through resolveAllByNameQualified, i.e. the shared file:name
             // grammar, so the endpoint that missed gets the shared diagnosis (unindexed path vs wrong file half
-            // vs unknown name) instead of a near-miss on the name half alone.
-            const std::string_view missing = srcDefs.empty() ? srcN : dstN;
+            // vs unknown name) instead of a near-miss on the name half alone. A fitted endpoint is a miss here (its refusal).
+            const bool             srcMiss = srcDefs.empty() || srcFit > 0;
+            const bool             dstMiss = dstDefs.empty() || dstFit > 0;
+            const std::string_view missing = srcMiss ? srcN : dstN;
             return refuseNotFoundWithAnswer( ing, cfg, rw::NotFoundAnswer{ "path", { { "from", std::string( srcN ) }, { "to", std::string( dstN ) } },
-                                                                           srcDefs.empty() && dstDefs.empty() ? "both" : srcDefs.empty() ? "from" : "to",
+                                                                           srcMiss && dstMiss ? "both" : srcMiss ? "from" : "to",
                                                                            rw::notFoundNear( ing, missing, notFoundGitRoot( ing, cfg ) ) },
                                              "ripwire: --path endpoint not found: ", missing, "--path=" );
+        };
+        if( srcDefs.empty() || dstDefs.empty() )
+        {
+            return refuseEndpoint();
         }
 
         const std::vector<NodeId> path    = rw::shortestPathAny( g, srcDefs, dstDefs );   // ONE BFS over every def pair
+        if( path.empty() && ( srcFit > 0 || dstFit > 0 ) )
+        {
+            return refuseEndpoint();   // ENDPOINT-REFUSED: no pair of the fitted definitions reaches — the refusal stands, unchanged
+        }
 
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -3078,12 +3092,12 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                      ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
                      ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + rw::pathBridgeLegend( pthBridge )
                        + rw::nearSinkLegend( pthNear ) + std::string( rw::pathHandlerRuleLegend( pthHandler ) ) + std::string( rw::pathRouteBodiesLegend( !pthRouteEl.xml.empty() ) )
-                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
+                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) + std::string( rw::pathFitLegend( srcFit > 0 || dstFit > 0 ) ) ).c_str(),
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), pthBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                      pthBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                     srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint
+                     srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob ) + rw::pathFitAttrXml( srcFit, dstFit ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint
                      pthRows.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
                      ( pthRootAttrs + rw::hopRootAttrsXml( pthHops ) + pthRootAttr ).c_str(),
                      rw::graphCountFloorAttrXml( g ).c_str() );

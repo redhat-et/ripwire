@@ -1122,10 +1122,31 @@ inline std::string pathNearSinkXml( const IngestResult& ing, const PathNearSink&
 // pattern, and from_defs=/to_defs= count its matches. A name that does resolve is never read as a pattern.
 // The definitions a path endpoint names: resolveAllByNameQualified, else — for a bare `*` pattern — every function or method
 // definition whose name fits it, in id order. `*glob` says which happened.
-inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefs, bool* glob )
+// ENDPOINT-REFUSED: `fitOut` non-null asks for the REFUSED spelling too. A spelling several definitions fit, with none chosen
+// (`ApplicationRef.tick` on angular: 3 fit), then stands for every definition it fits that the index places, and *fitOut is the
+// refusal's count (graph.h refusedMatchCount: placed + unplaced, so it may exceed the ids returned); 0 on every other path. The
+// caller tries every pair (pathpairs.h) and REFUSES, with the unchanged refusal text, when none reaches: a refusal is only
+// lifted by a chain. Null `fitOut` (the refusal builders) keeps the strict reading.
+inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefs, bool* glob,
+                                                std::size_t* fitOut = nullptr )
 {
-    *glob                   = false;
+    *glob = false;
+    if( fitOut != nullptr )
+    {
+        *fitOut = 0;
+    }
     std::vector<NodeId> out = dropDocUnitsBesideCode( ing, resolveAllByNameQualified( ing, spec, unprovenDefs ) );
+    if( out.empty() && fitOut != nullptr )
+    {
+        std::vector<NodeId> fitted;
+        const std::size_t   n = refusedMatchCount( ing, spec, &fitted );
+        fitted                = dropDocUnitsBesideCode( ing, std::move( fitted ) );
+        if( n > 1 && !fitted.empty() )
+        {
+            *fitOut = n;
+            return fitted;
+        }
+    }
     if( !out.empty() || spec.find( '*' ) == std::string_view::npos || spec.find( ':' ) != std::string_view::npos )
     {
         return out;
@@ -1140,6 +1161,32 @@ inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::st
     }
     *glob = !out.empty();
     return out;
+}
+
+// ENDPOINT-REFUSED: true when an endpoint resolves only as a refused spelling (fit > 0) and no fitted pair reaches — the case --path
+// answers with its unchanged refusal, so a caller that wraps the verb (the --for graph_verb block) prints nothing instead
+inline bool pathFittedUnreached( const IngestResult& ing, const Graph& g, std::string_view from, std::string_view to )
+{
+    std::size_t               unproven = 0, srcFit = 0, dstFit = 0;
+    bool                      glob     = false;
+    const std::vector<NodeId> src      = resolvePathEndpoint( ing, from, &unproven, &glob, &srcFit );
+    const std::vector<NodeId> dst      = resolvePathEndpoint( ing, to, &unproven, &glob, &dstFit );
+    return ( srcFit > 0 || dstFit > 0 ) && ( src.empty() || dst.empty() || shortestPathAny( g, src, dst ).empty() );
+}
+
+// ENDPOINT-REFUSED: the root says an endpoint was a refused spelling answered by trying every definition it fits (present-only)
+inline constexpr std::string_view kPathFitLegend =
+    "from_fit=N / to_fit=N: that endpoint's spelling fits N definitions and cannot pick one (alone it refuses, refused=N); each one the "
+    "index places was tried, and this answer prints only because a pair reaches (none reaching keeps the refusal); from_defs=/to_defs= "
+    "count the ones tried. ";
+inline std::string_view pathFitLegend( bool on ) noexcept
+{
+    return on ? kPathFitLegend : std::string_view();
+}
+inline std::string pathFitAttrXml( std::size_t fromFit, std::size_t toFit )
+{
+    return ( fromFit > 0 ? " from_fit=\"" + std::to_string( fromFit ) + "\"" : std::string() )
+         + ( toFit > 0 ? " to_fit=\"" + std::to_string( toFit ) + "\"" : std::string() );
 }
 
 inline constexpr std::string_view kPathGlobLegend =

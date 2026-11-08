@@ -3148,6 +3148,10 @@ inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .held = true } ).c_str() );
         return;
     }
+    if( args->form == rw::GraphSubjectForm::Path && rw::pathFittedUnreached( d.ing, d.g, args->endpoints[0], args->endpoints[1] ) )
+    {
+        return;   // ENDPOINT-REFUSED: a refused spelling no fitted pair lifts — --path would refuse, so the --for answer is today's
+    }
     rw::Config sub = cfg;   // the verb runs as its own bare call: its default caps, no page window, no --for shaping
     sub.forTask    = {};
     sub.pageLimit  = 0;   // defensive, like the json guard above: a paged --for (--limit/--offset) never reaches this site
