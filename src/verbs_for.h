@@ -3096,8 +3096,17 @@ inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string&
     return std::move( edit.answer );
 }
 
-inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture, const std::optional<rw::PricedRootInputs>& price )
+// The captured answer and the inputs its root's est_tokens was priced from (nullopt: no priced root to re-price).
+struct CapturedForAnswer
 {
+    StdoutCapture&                      capture;
+    std::optional<rw::PricedRootInputs> price;
+};
+
+inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
+{
+    StdoutCapture&                             capture = answer.capture;
+    const std::optional<rw::PricedRootInputs>& price   = answer.price;
     if( !capture.wanted() )
     {
         return 0;
@@ -5105,7 +5114,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
-        const int answerRc = appendForFileSyms( d, forAnswerBytes, pricedHeader.inputs );
+        const int answerRc = appendForFileSyms( d, CapturedForAnswer{ forAnswerBytes, pricedHeader.inputs } );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
