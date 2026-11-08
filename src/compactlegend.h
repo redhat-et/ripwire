@@ -377,6 +377,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "called_more",       "called_more=N: N more callers past the first 8", false, "vr" },
     { "slot_calls",        "slot_calls=N: N calls in this body go through a struct field holding a function; in no count" },
     { "slot",              "vs l= through= slot=Type.field via= targets=K shown= next=: one such call and the functions stored in that field anywhere (t n= p=); slot = same declared type, slot-name = field name only; MAY be called, not a proven call", false, "vs" },
+    // ENDPOINT-REFUSED (src/pathgaps.h kPathFitLegend, countAttrXmlOrEmpty): present-only on a reached --path answer
+    { "from_fit",          "from_fit=N: from='s spelling fits N definitions, none chosen (alone it refuses); each placed one was tried and a pair reaches (from_defs= counts the tried)" },
+    { "to_fit",            "to_fit=N: to='s spelling fits N definitions, none chosen (alone it refuses); each placed one was tried and a pair reaches (to_defs= counts the tried)" },
     { "to_value_refs",     "to_value_refs=N: to= is used as a value N times (matched by name); a run through such a slot is not a proven call and no hop here" },
     { "value-ref-excluded", "value-ref-excluded=N: internal functions kept off because a table, field or argument in another function or at file scope holds them (matched by name, not a proven call); a floor" },
     // The value walk's depth cut (ingest_valuerefs.h kVrMaxDepth, graphlegend.h kValueRefsDepthLegend): absent when none.
@@ -932,9 +935,6 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "slot_fns", "s slot_fns=K: K functions that struct field holds (the width the crossing picks from); NOT capped, a wide table is still crossed; a hedge", true, {}, MapHeaderRead::No, {}, "path" },
     { "to_glob", "to_glob=1: to='s * matched every function or method definition fitting it (to_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
     { "from_glob", "from_glob=1: from='s * matched every function or method definition fitting it (from_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
-    // ENDPOINT-REFUSED (src/pathgaps.h kPathFitLegend), present-only on a reached answer
-    { "to_fit", "to_fit=N: to='s spelling fits N definitions, none chosen (alone it refuses); each placed one was tried and a pair reaches (to_defs= counts the tried)", false, "path", MapHeaderRead::No, {}, "path" },
-    { "from_fit", "from_fit=N: from='s spelling fits N definitions, none chosen (alone it refuses); each placed one was tried and a pair reaches (from_defs= counts the tried)", false, "path", MapHeaderRead::No, {}, "path" },
     // PATH-ROUTE v2 (src/pathroute.h pathRouteLegend): present-only, on a single-chain reached answer of >= 2 by-name hops
     { "route_hedged", "route_hedged=name-stitched route_by_name=K route_cands=P: K hops of the shown chain are via=name (receiver unproven), P same-named candidate chains (route_cands counts in-repo same-named definitions along the route; builtin and external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P): a hedge, the true route may be another; =unlikely K>=4: probably not the real route, read next=; =not-proven route_len=N: the shortest chain found (N hops, K by name) is NOT printed, reachable=0 here is a refusal, not none (never no route); next= from='s callees; =proven-preferred: the shortest chain (route_len=, route_by_name= by name) is not shown, a proven-only chain is", false, "path", MapHeaderRead::No, {}, "path" },   // also defines route_by_name= route_cands= route_cands_capped= route_len=
     // SINK-SIDE FRONTIER (src/pathgaps.h kNearSinkLegend), present on a reachable=0 answer: the <near_sink> block and its <ns> rows.
