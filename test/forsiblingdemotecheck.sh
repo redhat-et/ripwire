@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forsiblingdemotecheck: BIN=$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
@@ -208,11 +208,13 @@ grep -q 'same_as="widget_shelf_row"' "$TMP/on.xml" || no "(k5) the fixture no lo
 
 eon="$( grep -o '^<ctx [^>]*' "$TMP/on.xml" | grep -o ' est_tokens="[0-9]*"' | grep -o '[0-9]*' )"
 eoff="$( grep -o '^<ctx [^>]*' "$TMP/off.xml" | grep -o ' est_tokens="[0-9]*"' | grep -o '[0-9]*' )"
-[ -n "$eon" ] && [ -n "$eoff" ] && [ "$eon" -lt "$eoff" ] && ok "(e) est_tokens re-priced: $eoff -> $eon" || no "(e) est_tokens off=$eoff on=$eon"
-if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/on.xml" 2>"$TMP/w.err" && ok "(w) well formed" || no "(w) $( head -c 300 "$TMP/w.err" )"; fi
+if [ -n "$eon" ] && [ -n "$eoff" ] && [ "$eon" -lt "$eoff" ]; then ok "(e) est_tokens re-priced: $eoff -> $eon"; else no "(e) est_tokens off=$eoff on=$eon"; fi
+if command -v xmllint >/dev/null 2>&1; then
+    if xmllint --noout "$TMP/on.xml" 2>"$TMP/w.err"; then ok "(w) well formed"; else no "(w) $( head -c 300 "$TMP/w.err" )"; fi
+fi
 nl="$( python3 -c 'import sys; print( open( sys.argv[1] ).read().count( "<!-- demote:" ) )' "$TMP/on.xml" )"
 lc="$( python3 -c 'import sys; t = open( sys.argv[1] ).read(); a = t.find( "<!-- demote:" ) + 4; print( t[a:t.find( "-->", a )] )' "$TMP/on.xml" )"
-[ "$nl" = 1 ] && [ "${lc#*--}" = "$lc" ] && ok "(l) one legend comment, no double hyphen inside" || no "(l) legend comments=$nl"
+if [ "$nl" = 1 ] && [ "${lc#*--}" = "$lc" ]; then ok "(l) one legend comment, no double hyphen inside"; else no "(l) legend comments=$nl"; fi
 
 run "--for=$UTASK" >"$TMP/u.xml"
 python3 "$TMP/names.py" "$TMP/u.xml" >"$TMP/u.names"
