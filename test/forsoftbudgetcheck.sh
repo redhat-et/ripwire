@@ -739,11 +739,13 @@ PY
         no "(C1) default tail: page rows $( lines "$TMP/c1.page" ) vs the page's $( lines "$TMP/c1.want" ), total=$C1T vs page $C1PT, $C1DUP rank row(s) in the head"
     fi
     # (C1t) tail-sym (train 30): every rank row names sym=, the file page's own sym= for that file (a pointer, reused); a
-    #       rank-row file can sit past page row 40, so the names are read off the WHOLE page (--limit=total=)
+    #       rank-row file can sit past page row 40, so the names are read off the WHOLE page (--limit=total=). SIZE-3b: a tail sym=
+    #       names each name once (src/forpage.h appendTailSymName) while the page's <f sym=> may repeat an overload's, so the page
+    #       names are read once each, first by rank
     "$BIN" "$CORPUS" --for="$Q" --limit="$C1T" "$CF" 2>/dev/null > "$TMP/c1.pageall"
     C1TS="$( python3 "$TMP/tail.py" "$TMP/def.xml" ranksym "$TMP/c1.pagexml" | python3 -c '
 import html, re, sys
-want = { html.unescape( p ): html.unescape( y ) for p, y in re.findall( r"<f p=\"([^\"]*)\"[^>]*? sym=\"([^\"]*)\"", open( sys.argv[ 1 ] ).read() ) }
+want = { html.unescape( p ): ",".join( dict.fromkeys( html.unescape( y ).split( "," ) ) ) for p, y in re.findall( r"<f p=\"([^\"]*)\"[^>]*? sym=\"([^\"]*)\"", open( sys.argv[ 1 ] ).read() ) }
 rows = [ l.rstrip( "\n" ).split( "\t" ) for l in sys.stdin if "\t" in l ]
 print( len( rows ), sum( 1 for p, y in rows if not y or want.get( p ) != y ) )' "$TMP/c1.pageall" )"
     # an explicit PASS shape ("N 0", N >= 1): an empty or malformed reading (the reader crashed) fails, never passes
@@ -773,14 +775,18 @@ print( len( rows ), sum( 1 for p, y in rows if not y or want.get( p ) != y ) )' 
 else
     no "(C1) the default answer carries no <tail>"
 fi
-# (C4) the JSON twin: the same tail rows (files + sym index-aligned), total=, next present exactly when cut
+# (C4) the JSON twin: the same tail rows (files + sym index-aligned), total=, next present exactly when cut. R-DEDUP: the XML
+#      <syms> block cuts the names it prints from a head file's tail row; JSON carries no block, so its head rows are read without them
 cli_for --json > "$TMP/def.json"
 C4="$( python3 - "$TMP/def.json" "$TMP/def.xml" <<'PY'
 import json, re, sys, html
 t = json.load( open( sys.argv[ 1 ] ) ).get( "tail", {} ); x = open( sys.argv[ 2 ] ).read()
 xa = dict( re.findall( r'(\w+)="([^"]*)"', re.search( r'<tail\b([^>]*)>', x ).group( 1 ) ) )
 xr = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?/>', x ) ]
-ok = list( zip( t.get( "files", [] ), t.get( "sym", [] ) ) ) == xr and str( t.get( "total" ) ) == xa.get( "total" ) \
+heads = { html.unescape( p ) for p in re.findall( r'<d [^>]*?\bp="([^"]*)"', x ) }
+ys = { html.unescape( n ) for n in re.findall( r'<y [^>]*?\bn="([^"]*)"', x ) }; ys |= { re.split( r'::|\.', n )[ -1 ] for n in ys }
+jr = [ ( p, ",".join( n for n in y.split( "," ) if n and n not in ys ) if p in heads else y ) for p, y in zip( t.get( "files", [] ), t.get( "sym", [] ) ) ]
+ok = jr == xr and str( t.get( "total" ) ) == xa.get( "total" ) \
      and ( "next" in t ) == ( xa.get( "capped" ) == "1" ) and ( t.get( "next" ) or "" ) == html.unescape( xa.get( "next", "" ) )
 print( "OK" if ok else "BAD json rows=%d xml rows=%d total %s/%s" % ( len( t.get( "files", [] ) ), len( xr ), t.get( "total" ), xa.get( "total" ) ) )
 PY
