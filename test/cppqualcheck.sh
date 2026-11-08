@@ -379,10 +379,12 @@ rrun US --uses=selectBaseline \
 # 54/55 -> 56 2026-11-07 (merge of origin/main into lane/exemplar-e1): both lanes' new call sites, 53 + 1 (forliteral.h) + 2 (exemplarfamily.h).
 # 56 -> 57 2026-11-07 (lane/reg-reader over main 87ede40d3): src/forliteral.h lit_detail::tableReadersOf (measured: the one new <u> row) reads the subscript
 # row's file and at most kForTableReaderFiles (16) caller files, once each, only when a subscript row is shown and the answer names its table. No new fopen.
+# 57 -> 58 2026-11-08 (lane/exemplar-e3a, E3a TOUCH-LIST): src/exemplarfamily.h's into= holder read (the one new call site, the holder's file read once
+# per answer, only when the family block resolves an into= holder) uses the same canonical detail::readWholeFile helper. No new fopen.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 57 ] \
-    && ok "repo: --uses=readWholeFile count=57 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 57, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 58 ] \
+    && ok "repo: --uses=readWholeFile count=58 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 58, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
