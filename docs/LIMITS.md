@@ -722,6 +722,14 @@ Discloses: **none**
 | `kHopCallMaxLines` | `3` | — | a call whose arguments continue joins up to this many lines |
 | `kHopSigMaxBytes` | `160` | — | sig= cap on a hop (cleanSig's own 240 cap applies first) |
 
+### `src/infra/agenttrap.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kSummaryCap` | `2048` | — | the previous call's one-line summary, as read back |
+
 ### `src/infra/blanktext.h`
 
 Discloses: **none**
@@ -736,6 +744,10 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kArgvCap` | `2048` | — | the argv JSON array, preformatted at arm time |
+| `kDocumentCap` | `12288` | — | 3 x kFieldCap x 2 (message + data) + argv + the rest, with room |
+| `kFieldCap` | `700` | — | expr, function, note |
+| `kFileCap` | `256` | — | the source file name |
 | `kNoticeByteCap` | `4096` | OUTPUT | a longer notice is cut and says so: " ... [notice truncated: kept K of N bytes]" |
 
 ### `src/infra/fieldid.h`

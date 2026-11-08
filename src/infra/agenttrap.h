@@ -84,7 +84,7 @@ struct ArmInfo
 };
 
 // The record the previous call left, if any: its one-line summary and the path it was read from.
-inline constexpr std::size_t kSummaryCap = 2048;
+inline constexpr std::size_t kSummaryCap = 2048;   // the previous call's one-line summary, as read back
 struct TakenCrash
 {
     bool        found = false;

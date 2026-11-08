@@ -307,7 +307,7 @@ private:
 // Per-field output caps. Sized so the largest document (the record) stays well inside its buffer: a backstop cut by
 // Sink::raw would break the JSON, so the caps, not the buffer, decide what is kept.
 inline constexpr std::size_t kFieldCap    = 700;   // expr, function, note
-inline constexpr std::size_t kFileCap     = 256;
+inline constexpr std::size_t kFileCap     = 256;   // the source file name
 inline constexpr std::size_t kArgvCap     = 2048;  // the argv JSON array, preformatted at arm time
 inline constexpr std::size_t kDocumentCap = 12288; // 3 x kFieldCap x 2 (message + data) + argv + the rest, with room
 
