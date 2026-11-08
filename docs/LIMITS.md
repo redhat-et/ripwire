@@ -29,16 +29,16 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-07 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-08 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 403 | 137 | 267 | **136** |
+| 404 | 138 | 272 | **132** |
 
 Plus 9 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 403 + 9 is the 412 constants this generator parses out of `src/`.
+are not counted as caps, and 404 + 9 is the 413 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 403 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 261 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 404 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 262 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -180,7 +180,7 @@ Discloses: `capped`, `closures_capped`
 
 ### `src/cli.h`
 
-Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
+Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `terms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -722,6 +722,14 @@ Discloses: **none**
 | `kHopCallMaxLines` | `3` | — | a call whose arguments continue joins up to this many lines |
 | `kHopSigMaxBytes` | `160` | — | sig= cap on a hop (cleanSig's own 240 cap applies first) |
 
+### `src/htmldoc.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxNameBytes` | `160` | — | — |
+
 ### `src/infra/blanktext.h`
 
 Discloses: **none**
@@ -1191,7 +1199,7 @@ Discloses: **none**
 
 ### `src/recall.h`
 
-Discloses: **none**
+Discloses: `terms_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

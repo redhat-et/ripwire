@@ -371,6 +371,7 @@ for _g in \
     clonededupcheck \
     cloneidiomcheck \
     clonelexcheck \
+    clonepersistcheck \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \
@@ -448,6 +449,7 @@ for _g in \
     docmdcachecheck \
     docmentioncheck \
     docscommandscheck \
+    docsunitscheck \
     doctorcheck \
     donelegendcheck \
     dottedstringcheck \

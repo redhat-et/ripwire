@@ -229,6 +229,7 @@ struct Graph
                                                // for every other symbol. Rendered as bind="..." by serialize
                                                // (see serialize.h's `bind` param). Empty vector ⇒ no JNI defs
                                                // (byte-identical to pre-R5 output).
+    std::uint32_t              unrankedNodeCount = 0;   // symbols carrying kRankFlagNotNamed (model.h): prior weight 0, outside rankGraph's uniform share
     std::vector<float>         priorWeight;   // per-symbol name-quality multiplier for the PageRank
                                               // personalization/teleport prior (aider-style repomap weights).
                                               // A PURE function of names + def-counts (byName), so it is
@@ -9081,6 +9082,13 @@ inline bool isMarkdownFileNode( const Symbol& sym, std::uint32_t widestEnd ) noe
     return sym.sigStartByte == 0 && sym.sigEndByte >= sym.endByte && sym.endByte >= widestEnd;
 }
 
+// A section a markdown link can bind: a link-section language's Section in an indexed file, not a --recall-only unit (model.h
+// kRankFlagNotNamed: a link to its page binds the page's file node, as it did before the page had units).
+inline bool isLinkableSection( const IngestResult& ing, const Symbol& sym ) noexcept
+{
+    return langFacts( sym.lang ).linkSections && sym.kind == SymKind::Section && sym.fileId < ing.files.size() && !notNamed( sym );
+}
+
 // Headings, and each file's own node (the first matching symbol in id order). The file node is not a heading.
 inline void indexMarkdownSections( MdLinkIndex& ix, const IngestResult& ing )
 {
@@ -9090,14 +9098,14 @@ inline void indexMarkdownSections( MdLinkIndex& ix, const IngestResult& ing )
     std::vector<std::uint32_t> widest( ing.files.size(), 0 );
     for( const Symbol& sym : ing.symbols )
     {
-        if( langFacts( sym.lang ).linkSections && sym.kind == SymKind::Section && sym.fileId < ing.files.size() )
+        if( isLinkableSection( ing, sym ) )
         {
             widest[ sym.fileId ] = std::max( widest[ sym.fileId ], sym.endByte );
         }
     }
     for( const Symbol& sym : ing.symbols )
     {
-        if( !langFacts( sym.lang ).linkSections || sym.kind != SymKind::Section || sym.fileId >= ing.files.size() )
+        if( !isLinkableSection( ing, sym ) )
         {
             continue;
         }
@@ -9464,6 +9472,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                             // caller, and 200 `name` columns must not damp a model's real `def name`.
                             // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
                             // later behind an evidence rule (receiver proven to be the owning model).
+            }
+            if( notNamed( s ) )
+            {
+                continue;   // a --recall-only unit (model.h kRankFlagNotNamed): no call binds it, no namesake is damped by it
             }
             byName[ s.name ].push_back( s.id );
         }
@@ -13290,6 +13302,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     g.priorWeight.resize( N, 1.f );
     for( const Symbol& s : ing.symbols )
     {
+        if( notNamed( s ) )
+        {
+            g.priorWeight[ s.id ] = 0.f;   // a --recall-only unit draws no teleport mass: PageRank ranks the rest as if it were absent
+            ++g.unrankedNodeCount;
+            continue;
+        }
         const auto it = byName.find( s.name );
         const std::size_t defCount = ( it != byName.end() ) ? it->second.size() : 0;
         g.priorWeight[ s.id ] = priorwt::weight( s.name, defCount );
@@ -13388,10 +13406,13 @@ inline std::vector<float> takeRank( RankedGraph ranked, RankDisclosure& disclosu
 }
 
 // uniform-teleport PageRank (the default).
+// A kRankFlagNotNamed unit (model.h) has no edge and a 0 prior weight, so the uniform share is over the ranked nodes: every other
+// node's teleport is the value it has in an index without those units, bit for bit.
 inline RankedGraph rankGraph( const Graph& g, float alpha = 0.85f )
 {
-    const std::size_t N = g.wOutDeg.size();
-    return rankGraphTeleport( g, std::vector<float>( N, N ? 1.0f / float( N ) : 0.f ), alpha );
+    const std::size_t N      = g.wOutDeg.size();
+    const std::size_t ranked = N - std::min<std::size_t>( N, g.unrankedNodeCount );
+    return rankGraphTeleport( g, std::vector<float>( N, ranked ? 1.0f / float( ranked ) : 0.f ), alpha );
 }
 
 // out-edge SpMV: h[j] = Σ_{j→i} w·a[i] (the HITS hub step; out-degree is capped, scalar is fine).
@@ -14316,7 +14337,7 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( elixirNameMatches( s, name ) )
+        if( elixirNameMatches( s, name ) && !notNamed( s ) )   // a --recall-only unit is no bare-name target (model.h kRankFlagNotNamed)
         {
             out.push_back( s.id );
         }
@@ -15392,6 +15413,13 @@ inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std:
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
 // on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
 // bare name), so a reader never has to ask whether the number is stale.
+// The file half of a `file:name` selector: a bare name (no file) admits every definition but a --recall-only unit (model.h
+// kRankFlagNotNamed), which answers a file-qualified selector only; a file admits the definitions in a file whose path contains it.
+inline bool nameSpecFileAdmits( const IngestResult& ing, const Symbol& s, std::string_view file )
+{
+    return file.empty() ? !notNamed( s ) : filePathContainsRootRel( ing, s.fileId, file );
+}
+
 inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,
                                                       std::size_t* unprovenDefCountOut = nullptr )
 {
@@ -15433,7 +15461,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( elixirNameMatches( s, name ) && ( file.empty() || filePathContainsRootRel( ing, s.fileId, file ) ) )
+        if( elixirNameMatches( s, name ) && nameSpecFileAdmits( ing, s, file ) )
         {
             out.push_back( s.id );
         }
