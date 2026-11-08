@@ -155,8 +155,9 @@ for line in raw("m.two").splitlines():
     except (ValueError, KeyError, TypeError):
         pass
 say("for: d same_as=N:" in raw("dict"), "8 dictionary: --legend-dict defines the same_as= clause")
+shape8 = [('same_as="' in t, "d same_as=N:" in t) for t in texts]
 say(len(texts) == 2 and all('same_as="' in t for t in texts) and "d same_as=N:" in texts[0] and "d same_as=N:" not in texts[1],
-    f"8 served once: both MCP answers fold, only the first carries the clause ({[('same_as=\"' in t, 'd same_as=N:' in t) for t in texts]})")
+    f"8 served once: both MCP answers fold, only the first carries the clause ({shape8})")
 # arm 6: per block, (clause text in the legend) == (attribute on the block's rows)
 BLOCKS = {
     "exemplar_family": (r"<!-- ripwire for exemplar_family.*?</exemplar_family>", [
