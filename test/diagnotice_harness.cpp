@@ -97,6 +97,19 @@ std::string notesRow( const char* description )
     return hasNotes ? std::format( "  Notes:    {}\n", description ) : std::string();
 }
 
+// AGENT-VISIBLE-TRAP: a debug build's ASSUME/EXPECTS/ENSURES/UNREACHABLE notice ends in the row an agent can act on
+// (diagnostics.cpp agenttrap::kHint). Unarmed — as every harness is — the notice is still the whole of what is written.
+std::string nextRow()
+{
+#if !defined( NDEBUG )
+    return "  Next:     This is a ripwire bug, not your input. Retry once with a different wording or verb; if it fails again, "
+           "fall back to grep/Read for this question. Report the kind, location and command at "
+           "https://github.com/redhat-et/ripwire/issues\n";
+#else
+    return std::string();
+#endif
+}
+
 std::string expectedDegraded( const char* description )
 {
     return std::format( "[math degraded] {}  ({}:{}, {} \xE2\x80\x94 logged once per site)\n", description, kFile, kLine, kFunction );
@@ -109,7 +122,7 @@ std::string expectedAssert( const char* description )
     return banner( "!!! ASSUME FAILED !!!",
                    std::format( "  Expr:     {}\n"
                                 "  Blame:    an invariant this function relies on is false here\n", kExpr ) +
-                       locationRows() + notesRow( description ) );
+                       locationRows() + notesRow( description ) + nextRow() );
 }
 
 std::string expectedPanic()

@@ -308,6 +308,7 @@ docparse.h	runMarkitdown	popen	1	closes	no exit between popen and pclose
 gitmine.h	forEachGitLogRecord	popen	1	closes	the shared --name-only reader: the walk loop leaves by stream end or the abandon break; one pclose after it, on the only exit past the failed open
 gitmine.h	gitCommandLines	popen	1	closes	status = pclose after the loop; no exit between
 gitmine.h	gitCommandLinesBy	popen	1	closes	pclose after the poll loop; a read past its deadline hands the pipe to a detached thread that pcloses it, or leaves it to process exit when no thread can start
+infra/agenttrap_os.h	osCalls	open	2	closes	AGENT-VISIBLE-TRAP's table, two lambdas: createTruncate returns its descriptor to diagnostics.cpp writeRecord, which closes it after one writeAll with no return between; readPrefix returns only on a failed open and closes after the bounded read loop
 infra/os_win32.cpp	system	popen	1	closes	Windows body of os::system (compiled only for Windows): the drain loop has no exit; pclose after it
 gitmine.h	popenTrimmed	popen	1	closes	no exit between popen and pclose
 gitoracle.h	loadOracleCache	fopen	1	closes	returns only on a failed open; fclose after the read loop

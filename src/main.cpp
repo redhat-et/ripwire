@@ -141,6 +141,8 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include <csignal>            // VT-1 --run-trace: SIGKILL for the timeout's process-group kill
 #include <tree_sitter/api.h>  // --doctor's grammar-probe check (ts_query_new against each grammar's tags.scm)
 #include "infra/os.h"         // rw::os — getpid, the --run-trace child (spawn_sh/poll/waitpid/kill), --doctor's exepath
+#include "infra/agenttrap.h"     // AGENT-VISIBLE-TRAP: arm the failure path's agent copy, report the previous call's record (debug only)
+#include "infra/agenttrap_os.h"  // … and the rw::os calls it makes (debug only)
 
 namespace
 {
@@ -4212,6 +4214,32 @@ static bool installMemoryGuard( const rw::Config& cfg )
     return true;
 }
 
+#if !defined( NDEBUG )
+// AGENT-VISIBLE-TRAP (infra/agenttrap.h), debug builds only. Tells the failure path which transport this process
+// speaks and where last-crash lives, then — on the CLI — reports and clears the previous call's record (one stderr
+// line; the MCP server does it at `initialize` instead, mcp.h mcpPreviousCrashNote) and fires RIPWIRE_TEST_TRAP.
+// --lsp arms no transport: its stdout is Content-Length framed for an editor, so a failure there keeps stderr only.
+static void armAgentTrap( const rw::Config& cfg, int argc, char** argv )
+{
+    using Diagnostics::agenttrap::Transport;
+    const Transport   transport = cfg.lsp ? Transport::None : !cfg.mcp ? Transport::Cli : cfg.listen.empty() ? Transport::McpStdio : Transport::McpHttp;
+    const std::string cacheDir  = cacheDirLadder();
+    Diagnostics::agenttrap::arm( { .transport = transport, .argc = argc, .argv = argv, .version = rw::kRipwireVersion,
+                                   .builtFrom = rw::kRipwireGitStamp, .cacheDir = cacheDir.c_str(), .os = Diagnostics::agenttrap::osCalls() } );
+    if( transport != Transport::Cli )
+    {
+        return;
+    }
+    const Diagnostics::agenttrap::TakenCrash taken = Diagnostics::agenttrap::takeLastCrash();
+    if( taken.found )
+    {
+        rw::emitTo( stderr, "ripwire: the previous ripwire call failed an internal check (a ripwire bug; record {} now cleared): {}\n",
+                    Diagnostics::agenttrap::lastCrashPath(), rw::cstr( taken.summary ) );
+    }
+    Diagnostics::agenttrap::fireTestTrap();
+}
+#endif
+
 int main( int argc, char** argv )
 {
     using namespace rw;
@@ -4263,6 +4291,9 @@ int main( int argc, char** argv )
     {
         return 1;
     }
+#if !defined( NDEBUG )
+    armAgentTrap( cfg, argc, argv );
+#endif
     if( !installMemoryGuard( cfg ) )
     {
         return 1;   // the refusal is on stderr

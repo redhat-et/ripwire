@@ -663,6 +663,9 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
             // (no id) gets a bodyless 202; everything else a 200 with the JSON-RPC response as the body.
             const McpRequestTiming timing( timingsOn );
 
+#if !defined( NDEBUG )
+            mcpTrapHttpFdSlot() = fd;   // AGENT-VISIBLE-TRAP: a failed dev-build check answers on this socket
+#endif
             const McpDispatchResult r = dispatchMcpLine( req.body, cfg.topK, cfg.stable, cfg.noRedact, policy );
             if( r.isNotification )
             {
@@ -672,6 +675,10 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
             {
                 respond( fd, "200 OK", "application/json", r.resp );
             }
+#if !defined( NDEBUG )
+            Diagnostics::agenttrap::endRequest();
+            mcpTrapHttpFdSlot() = -1;
+#endif
 
             timing.emit( r.timingVerb );   // stderr, after the response (McpRequestTiming, mcpindex.h)
         }
