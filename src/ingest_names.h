@@ -2429,7 +2429,7 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
     {
         return !( isScreamingSnakeName( name ) || declarationCarriesConstQualifier( roleNode, src ) );
     }
-    if( lang == Lang::TypeScript || lang == Lang::JavaScript )
+    if( langFacts( lang ).literalConstDefs )
     {
         return !( isScreamingSnakeName( name ) || jsModuleBindingKept( nameNode, roleNode ) );   // TS-CONST-DEFS
     }

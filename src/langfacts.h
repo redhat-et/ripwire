@@ -288,6 +288,11 @@ struct LangFacts
     /// tier treats such a member as a candidate whose object name is unknown (graph.h resolveAllByWrittenSpelling).
     bool objectLiteralMembers = false;
 
+    /// TypeScript, JavaScript (lane ts-const-defs, test/tsshapecheck.sh §8): a module-level const/let/var whose value is a literal is a
+    /// definition whatever its case, and an exported destructure binds each name (ingest_names.h jsModuleBindingKept); every other
+    /// gated language keeps a @definition.constant only under its own rule (SCREAMING_SNAKE, or C/C++ const evidence).
+    bool literalConstDefs = false;
+
     /// The keyword a method names its own instance by, as a receiver chain's ROOT spells it (lane receiver-fixes: a `this.f.m()` /
     /// `self.f.m()` field receiver, receiverevidence.h foreignFieldOwner / dispatchReceiverOf). `this` unless the language says
     /// otherwise; elsewhere the same text is an ordinary name (a JS `const self = …`, a Python local `this`) that proves nothing.
@@ -391,7 +396,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .literalConstDefs = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
@@ -403,7 +408,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .qualifierNamesScope = true },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .writtenBindingUndecided = true, .objectLiteralMembers = true, .literalConstDefs = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true },
     { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
