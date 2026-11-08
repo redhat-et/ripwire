@@ -11,6 +11,7 @@
 //  DISCLOSE.
 //
 #include "Diagnostics.h"
+#include "agenttrap.h"
 #include "emit.h"
 
 #include <atomic>
@@ -20,6 +21,13 @@
 #include <cstring>
 #include <format>
 #include <utility>
+
+#if !defined( NDEBUG )
+  #include <chrono>
+  #include <ctime>
+  #include <string_view>
+  #include <thread>
+#endif
 
 namespace Diagnostics
 {
@@ -44,7 +52,7 @@ constexpr const char* kKindBanner[] = {
 };
 constexpr const char* kKindBlame[] = {
     "an invariant this function relies on is false here",
-    "the CALLER broke this function's contract — look up the stack",
+    "the CALLER broke this function's contract (a bug in ripwire's calling code, not in your input)",
     "THIS function broke its own contract — look inside it",
     "a debug-only check is false (no release promise was made)",
     "control arrived where this function says it cannot",
@@ -133,12 +141,532 @@ RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcep
 
 } // namespace
 
+// ── AGENT-VISIBLE-TRAP (agenttrap.h) ─────────────────────────────────────────────────────────────────────────────────
+// Debug builds only. What the failure path writes for an agent before the stderr notice and the trap: the JSON-RPC
+// error for the MCP request in flight, or the CLI's one <ripwire_internal_error/> line; then the last-crash record.
+//
+// NO ALLOCATION AFTER THE CHECK FAILS. Everything is formatted into static buffers (the report runs at most once per
+// process, claimReport below) or fixed stack buffers, and written with write(2), not stdio: a stdio stream may be the
+// thing that is broken, and a FILE* open would allocate. stdout's own buffer is flushed first (fflush allocates
+// nothing), so the line lands after whatever the answer already printed, never inside it.
+//
+// WHY THE TRAP STAYS. The exit status is still the trap's signal (SIGTRAP or SIGILL: 133 or 132 under a shell), not a
+// new _exit code. A debugger stops on the failing instruction and a sanitizer or crash reporter records the stack, and
+// both depend on the process dying AT the trap with no unwinding. An agent does not need a new exit code to tell this
+// apart from an answer: ripwire's own codes are 0-5, a signal status is already distinct from all of them, and the
+// line on stdout (or the JSON-RPC error) names the failure in words.
+#if !defined( NDEBUG )
+namespace agenttrap
+{
+namespace
+{
+
+// The OS calls, through the table main hands over at arm time (agenttrap_os.h, rw::os). This file is linked alone into
+// every standalone harness, so it reaches no OS layer of its own; an unarmed process (every harness) has a null table and
+// writes nothing beyond the stderr notice.
+OsCalls g_os{};
+
+// `put` is g_os.write (a descriptor) or g_os.send (the --listen socket). A short write continues; a failed one stops,
+// because nothing is left to fall back to: the stderr notice and the trap still follow.
+void writeAll( long long ( *put )( int, const char*, std::size_t ) noexcept, int fd, const char* bytes, std::size_t count ) noexcept
+{
+    while( put != nullptr && count > 0 )
+    {
+        const long long wrote = put( fd, bytes, count );
+        if( wrote <= 0 )
+        {
+            return;
+        }
+        bytes += wrote;
+        count -= static_cast<std::size_t>( wrote );
+    }
+}
+
+// A bounded byte sink over a caller's buffer. Each escaped FIELD has its own output cap, so a long expression or
+// signature is cut (and ends in "...") instead of pushing the closing quotes and braces off the end; the sink's own
+// cap is a backstop the per-field caps keep it from reaching. A cut backs off to a UTF-8 lead byte, so the kept text
+// is still valid UTF-8 and the JSON still parses.
+class Sink
+{
+public:
+    Sink( char* buffer, std::size_t capacity ) noexcept : buffer_( buffer ), capacity_( capacity ) { buffer_[ 0 ] = '\0'; }
+
+    void raw( const char* text, std::size_t count ) noexcept
+    {
+        const std::size_t room = capacity_ - 1 - size_;
+        const std::size_t kept = count < room ? count : room;
+        std::memcpy( buffer_ + size_, text, kept );
+        size_ += kept;
+        buffer_[ size_ ] = '\0';
+    }
+    void raw( const char* text ) noexcept { raw( text, std::strlen( text ) ); }
+
+    void number( long long value ) noexcept
+    {
+        char digits[ 24 ];
+        raw( digits, rw::formatTo( digits, sizeof( digits ), "{}", value ) );
+    }
+
+    enum class Escape : unsigned char { Json, Xml, Plain };
+
+    // `text` escaped for its context, at most `maxBytes` of output.
+    void escaped( const char* text, std::size_t maxBytes, Escape how ) noexcept
+    {
+        const std::size_t start = size_;
+        for( const char* at = orEmptyText( text ); *at != '\0'; ++at )
+        {
+            char        one[ 8 ];
+            const char* piece = one;
+            std::size_t bytes = 1;
+            one[ 0 ]          = *at;
+            const auto  byte  = static_cast<unsigned char>( *at );
+            if( how == Escape::Json && ( *at == '"' || *at == '\\' ) )
+            {
+                one[ 0 ] = '\\';
+                one[ 1 ] = *at;
+                bytes    = 2;
+            }
+            else if( how == Escape::Json && byte < 0x20 )
+            {
+                bytes = rw::formatTo( one, sizeof( one ), "\\u{:04x}", static_cast<unsigned>( byte ) );
+            }
+            else if( how == Escape::Xml && *at == '&' ) { piece = "&amp;"; bytes = 5; }
+            else if( how == Escape::Xml && *at == '<' ) { piece = "&lt;"; bytes = 4; }
+            else if( how == Escape::Xml && *at == '>' ) { piece = "&gt;"; bytes = 4; }
+            else if( how == Escape::Xml && *at == '"' ) { piece = "&quot;"; bytes = 6; }
+            else if( how != Escape::Json && byte < 0x20 )
+            {
+                one[ 0 ] = ' ';   // XML 1.0 cannot carry most control characters even as references; a line cannot carry a newline
+            }
+            if( size_ - start + bytes > maxBytes )
+            {
+                if( ( byte & 0xC0 ) == 0x80 )
+                {
+                    while( size_ > start && ( static_cast<unsigned char>( buffer_[ size_ - 1 ] ) & 0xC0 ) == 0x80 )
+                    {
+                        --size_;
+                    }
+                    if( size_ > start && ( static_cast<unsigned char>( buffer_[ size_ - 1 ] ) & 0xC0 ) == 0xC0 )
+                    {
+                        --size_;
+                    }
+                }
+                buffer_[ size_ ] = '\0';
+                raw( "..." );
+                return;
+            }
+            raw( piece, bytes );
+        }
+    }
+
+    const char* data() const noexcept { return buffer_; }
+    std::size_t size() const noexcept { return size_; }
+
+private:
+    static const char* orEmptyText( const char* text ) noexcept { return text != nullptr ? text : ""; }
+
+    char*       buffer_;
+    std::size_t capacity_;
+    std::size_t size_ = 0;
+};
+
+// Per-field output caps. Sized so the largest document (the record) stays well inside its buffer: a backstop cut by
+// Sink::raw would break the JSON, so the caps, not the buffer, decide what is kept.
+inline constexpr std::size_t kFieldCap    = 700;   // expr, function, note
+inline constexpr std::size_t kFileCap     = 256;
+inline constexpr std::size_t kArgvCap     = 2048;  // the argv JSON array, preformatted at arm time
+inline constexpr std::size_t kDocumentCap = 12288; // 3 x kFieldCap x 2 (message + data) + argv + the rest, with room
+
+struct Slot
+{
+    Transport         transport = Transport::None;
+    char              version[ 64 ];
+    char              builtFrom[ 64 ];
+    char              crashPath[ 1024 ];
+    char              argvJson[ kArgvCap + 64 ];
+    char              flags[ 256 ];   // the call's `--name` flags, values dropped: "--no-cache --for"
+    char              requestId[ 256 ];
+    char              tool[ 96 ];
+    int               httpFd = -1;
+    std::atomic<bool> inFlight{ false };
+};
+Slot g_slot;
+
+std::atomic<std::uint64_t> g_reportingThread{ 0 };
+char                       g_document[ kDocumentCap ];   // the one report a process writes (claimReport)
+
+void copyCapped( char* destination, std::size_t capacity, const char* source, std::size_t count ) noexcept
+{
+    const std::size_t kept = count < capacity - 1 ? count : capacity - 1;
+    std::memcpy( destination, source, kept );
+    destination[ kept ] = '\0';
+}
+void copyCapped( char* destination, std::size_t capacity, const char* source ) noexcept
+{
+    copyCapped( destination, capacity, source != nullptr ? source : "", source != nullptr ? std::strlen( source ) : 0 );
+}
+
+constexpr const char* kKindName[] = { "Assume", "Expects", "Ensures", "DAssert", "Unreachable" };
+constexpr const char* kTransportName[] = { "none", "cli", "mcp-stdio", "mcp-http" };
+
+// The one sentence an agent can act on: who is at fault, what to do next, where to report. The MCP form adds that
+// the server process is gone, which is what the client will see on its next call.
+constexpr const char kHint[] = "This is a ripwire bug, not your input. Retry once with a different wording or verb; if it fails again, "
+                               "fall back to grep/Read for this question. Report the kind, location and command at "
+                               "https://github.com/redhat-et/ripwire/issues";
+constexpr const char kMcpHint[] = " This MCP server process exits after this response: reconnect it before the next call (Claude Code: /mcp).";
+
+struct Failure
+{
+    CheckKind   kind;
+    const char* expr;
+    const char* file;
+    int         line;
+    const char* function;
+    const char* note;
+};
+
+bool hasText( const char* text ) noexcept
+{
+    return text != nullptr && text[ 0 ] != '\0';
+}
+
+// "<KIND> <expr> at <file>:<line> in <function> — <note>", escaped for `how`.
+void writeSentence( Sink& out, const Failure& f, Sink::Escape how ) noexcept
+{
+    out.raw( kKindName[ static_cast<std::size_t>( f.kind ) ] );
+    out.raw( " " );
+    out.escaped( f.expr, kFieldCap, how );
+    out.raw( " at " );
+    out.escaped( f.file, kFileCap, how );
+    out.raw( ":" );
+    out.number( f.line );
+    out.raw( " in " );
+    out.escaped( f.function, kFieldCap, how );
+    if( hasText( f.note ) )
+    {
+        out.raw( " \xE2\x80\x94 " );
+        out.escaped( f.note, kFieldCap, how );
+    }
+}
+
+// The fields every JSON form shares, without the braces.
+void writeJsonFields( Sink& out, const Failure& f ) noexcept
+{
+    out.raw( "\"kind\":\"" );
+    out.raw( kKindName[ static_cast<std::size_t>( f.kind ) ] );
+    out.raw( "\",\"expr\":\"" );
+    out.escaped( f.expr, kFieldCap, Sink::Escape::Json );
+    out.raw( "\",\"file\":\"" );
+    out.escaped( f.file, kFileCap, Sink::Escape::Json );
+    out.raw( "\",\"line\":" );
+    out.number( f.line );
+    out.raw( ",\"function\":\"" );
+    out.escaped( f.function, kFieldCap, Sink::Escape::Json );
+    out.raw( "\",\"note\":\"" );
+    out.escaped( f.note, kFieldCap, Sink::Escape::Json );
+    out.raw( "\",\"version\":\"" );
+    out.escaped( g_slot.version, 64, Sink::Escape::Json );
+    out.raw( "\",\"built_from\":\"" );
+    out.escaped( g_slot.builtFrom, 64, Sink::Escape::Json );
+    out.raw( "\"" );
+}
+
+void writeMcpError( const Failure& f ) noexcept
+{
+    Sink out( g_document, sizeof( g_document ) );
+    out.raw( "{\"jsonrpc\":\"2.0\",\"id\":" );
+    out.raw( g_slot.requestId );
+    out.raw( ",\"error\":{\"code\":-32603,\"message\":\"ripwire internal check failed (this is a ripwire bug): " );
+    writeSentence( out, f, Sink::Escape::Json );
+    out.raw( "\",\"data\":{" );
+    writeJsonFields( out, f );
+    out.raw( ",\"hint\":\"" );
+    out.raw( kHint );
+    out.raw( kMcpHint );
+    out.raw( "\"}}}" );
+    if( g_slot.transport == Transport::McpStdio )
+    {
+        out.raw( "\n" );   // newline-delimited JSON-RPC, the stdio loop's framing (mcp.h runMcp)
+        std::fflush( stdout );
+        writeAll( g_os.write, 1, out.data(), out.size() );
+        return;
+    }
+    // --listen: one HTTP/1.1 response per connection (mcpserver.h respond), Content-Length framed, on the socket.
+    char       header[ 160 ];
+    const auto headerBytes = rw::formatTo( header, sizeof( header ),
+                                           "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                           out.size() );
+    if( g_slot.httpFd >= 0 && headerBytes < sizeof( header ) )
+    {
+        writeAll( g_os.send, g_slot.httpFd, header, headerBytes );
+        writeAll( g_os.send, g_slot.httpFd, out.data(), out.size() );
+    }
+}
+
+void writeCliLine( const Failure& f ) noexcept
+{
+    Sink out( g_document, sizeof( g_document ) );
+    // The leading newline ends a line the answer may have left open; the element then starts a line of its own.
+    out.raw( "\n<ripwire_internal_error kind=\"" );
+    out.raw( kKindName[ static_cast<std::size_t>( f.kind ) ] );
+    out.raw( "\" expr=\"" );
+    out.escaped( f.expr, kFieldCap, Sink::Escape::Xml );
+    out.raw( "\" at=\"" );
+    out.escaped( f.file, kFileCap, Sink::Escape::Xml );
+    out.raw( ":" );
+    out.number( f.line );
+    out.raw( "\" fn=\"" );
+    out.escaped( f.function, kFieldCap, Sink::Escape::Xml );
+    out.raw( "\" note=\"" );
+    out.escaped( f.note, kFieldCap, Sink::Escape::Xml );
+    out.raw( "\" version=\"" );
+    out.escaped( g_slot.version, 64, Sink::Escape::Xml );
+    out.raw( "\" built_from=\"" );
+    out.escaped( g_slot.builtFrom, 64, Sink::Escape::Xml );
+    out.raw( "\" hint=\"" );
+    out.raw( kHint );
+    out.raw( "\"/>\n" );
+    std::fflush( stdout );
+    writeAll( g_os.write, 1, out.data(), out.size() );
+}
+
+// `<cacheDir>/last-crash`: line 1 the summary the next call prints, line 2 the whole record as one JSON object.
+void writeRecord( const Failure& f ) noexcept
+{
+    if( g_slot.crashPath[ 0 ] == '\0' || g_os.createTruncate == nullptr || g_os.close == nullptr )
+    {
+        return;
+    }
+    Sink out( g_document, sizeof( g_document ) );
+    writeSentence( out, f, Sink::Escape::Plain );
+    out.raw( " (ripwire " );
+    out.escaped( g_slot.version, 64, Sink::Escape::Plain );
+    out.raw( " built_from=" );
+    out.escaped( g_slot.builtFrom, 64, Sink::Escape::Plain );
+    out.raw( g_slot.tool[ 0 ] != '\0' ? ", tool " : ", flags " );
+    out.escaped( g_slot.tool[ 0 ] != '\0' ? g_slot.tool : ( g_slot.flags[ 0 ] != '\0' ? g_slot.flags : "(none: the map)" ), sizeof( g_slot.flags ), Sink::Escape::Plain );
+    out.raw( ")\n{" );
+    writeJsonFields( out, f );
+    out.raw( ",\"transport\":\"" );
+    out.raw( kTransportName[ static_cast<std::size_t>( g_slot.transport ) ] );
+    out.raw( "\",\"argv\":" );
+    out.raw( g_slot.argvJson[ 0 ] != '\0' ? g_slot.argvJson : "[]" );
+    out.raw( ",\"flags\":\"" );
+    out.escaped( g_slot.flags, sizeof( g_slot.flags ), Sink::Escape::Json );
+    out.raw( "\",\"tool\":\"" );
+    out.escaped( g_slot.tool, 96, Sink::Escape::Json );
+    out.raw( "\",\"request_id\":" );
+    out.raw( g_slot.inFlight.load( std::memory_order_acquire ) ? g_slot.requestId : "null" );
+    out.raw( ",\"pid\":" );
+    out.number( g_os.processId != nullptr ? g_os.processId() : 0 );
+    out.raw( ",\"time\":" );
+    out.number( static_cast<long long>( std::time( nullptr ) ) );
+    out.raw( "}\n" );
+    const int fd = g_os.createTruncate( g_slot.crashPath );
+    if( fd >= 0 )
+    {
+        writeAll( g_os.write, fd, out.data(), out.size() );
+        g_os.close( fd );
+    }
+}
+
+// True when this call owns the process's one agent report. A check that fails INSIDE the report (same thread) gets
+// false and falls through to the bare notice and trap. Another thread failing at the same moment waits, bounded, for
+// the first to finish: the first one's trap ends the process, and a reporter stuck on a full pipe cannot hang this one
+// for more than two seconds.
+bool claimReport() noexcept
+{
+    const std::uint64_t self     = currentThreadId();
+    std::uint64_t       expected = 0;
+    if( g_reportingThread.compare_exchange_strong( expected, self ) )
+    {
+        return true;
+    }
+    if( expected != self )
+    {
+        for( int waited = 0; waited < 200; ++waited )
+        {
+            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        }
+    }
+    return false;
+}
+
+bool isAgentVisible( CheckKind kind ) noexcept
+{
+    return kind != CheckKind::DAssert;   // DASSERT promises nothing (Diagnostics.h): unchanged, stderr notice + trap
+}
+
+// Before the stderr notice: the agent's copy, where the transport can carry one.
+void reportToAgent( const Failure& f ) noexcept
+{
+    const Transport transport = g_slot.transport;
+    if( transport == Transport::Cli )
+    {
+        writeCliLine( f );
+    }
+    else if( ( transport == Transport::McpStdio || transport == Transport::McpHttp ) && g_slot.inFlight.load( std::memory_order_acquire ) )
+    {
+        writeMcpError( f );
+    }
+}
+
+} // namespace
+
+void arm( const ArmInfo& info ) noexcept
+{
+    g_os             = info.os;
+    g_slot.transport = info.transport;
+    copyCapped( g_slot.version, sizeof( g_slot.version ), info.version );
+    copyCapped( g_slot.builtFrom, sizeof( g_slot.builtFrom ), info.builtFrom );
+    g_slot.crashPath[ 0 ] = '\0';
+    if( hasText( info.cacheDir ) && std::strlen( info.cacheDir ) + sizeof( "/last-crash" ) < sizeof( g_slot.crashPath ) )
+    {
+        Sink path( g_slot.crashPath, sizeof( g_slot.crashPath ) );
+        path.raw( info.cacheDir );
+        path.raw( "/last-crash" );
+    }
+    Sink argvJson( g_slot.argvJson, sizeof( g_slot.argvJson ) );
+    argvJson.raw( "[" );
+    Sink flags( g_slot.flags, sizeof( g_slot.flags ) );
+    for( int i = 0; i < info.argc && info.argv != nullptr; ++i )
+    {
+        if( argvJson.size() + 8 >= kArgvCap )
+        {
+            argvJson.raw( ",\"...\"" );
+            break;
+        }
+        argvJson.raw( i == 0 ? "\"" : ",\"" );
+        argvJson.escaped( info.argv[ i ], kArgvCap - argvJson.size() - 8, Sink::Escape::Json );
+        argvJson.raw( "\"" );
+        // The verb is one of these, but which one is the CLI parser's knowledge, not this file's: the names are listed
+        // (values dropped, so a task string or a path never lands here twice) and argv carries the rest.
+        const char* arg = info.argv[ i ];
+        if( i > 0 && arg != nullptr && arg[ 0 ] == '-' && arg[ 1 ] == '-' )
+        {
+            const char*       equals = std::strchr( arg, '=' );
+            const std::size_t bytes  = equals != nullptr ? static_cast<std::size_t>( equals - arg ) : std::strlen( arg );
+            if( flags.size() + bytes + 2 < sizeof( g_slot.flags ) )
+            {
+                flags.raw( flags.size() > 0 ? " " : "" );
+                flags.raw( arg, bytes );
+            }
+        }
+    }
+    argvJson.raw( "]" );
+}
+
+void beginRequest( const char* idToken, std::size_t idBytes, int httpFd ) noexcept
+{
+    if( idToken != nullptr && idBytes > 0 && idBytes < sizeof( g_slot.requestId ) )
+    {
+        copyCapped( g_slot.requestId, sizeof( g_slot.requestId ), idToken, idBytes );
+    }
+    else
+    {
+        copyCapped( g_slot.requestId, sizeof( g_slot.requestId ), "null" );
+    }
+    g_slot.httpFd  = httpFd;
+    g_slot.tool[ 0 ] = '\0';
+    g_slot.inFlight.store( true, std::memory_order_release );
+}
+
+void noteTool( const char* name, std::size_t nameBytes ) noexcept
+{
+    copyCapped( g_slot.tool, sizeof( g_slot.tool ), name, nameBytes );
+}
+
+void endRequest() noexcept
+{
+    g_slot.inFlight.store( false, std::memory_order_release );
+    g_slot.httpFd = -1;
+}
+
+TakenCrash takeLastCrash() noexcept
+{
+    TakenCrash taken;
+    if( g_slot.crashPath[ 0 ] == '\0' || g_os.rename == nullptr || g_os.readPrefix == nullptr || g_os.remove == nullptr || g_os.processId == nullptr )
+    {
+        return taken;   // unarmed
+    }
+    char aside[ sizeof( g_slot.crashPath ) + 32 ];
+    if( rw::formatTo( aside, sizeof( aside ), "{}.taken.{}", rw::cstr( g_slot.crashPath ), g_os.processId() ) >= sizeof( aside )
+        || g_os.rename( g_slot.crashPath, aside ) != 0 )
+    {
+        return taken;   // no record (the common case), or another call took it first
+    }
+    // Line 1 is the summary; the read stops at its newline or at the buffer, whichever is first.
+    const std::size_t bytes = g_os.readPrefix( aside, taken.summary, sizeof( taken.summary ) - 1 );
+    taken.summary[ bytes ] = '\0';
+    if( char* const eol = std::strchr( taken.summary, '\n' ) )
+    {
+        *eol = '\0';
+    }
+    taken.summaryBytes = std::strlen( taken.summary );
+    while( taken.summaryBytes > 0 && taken.summary[ taken.summaryBytes - 1 ] == '\r' )
+    {
+        taken.summary[ --taken.summaryBytes ] = '\0';
+    }
+    taken.found = taken.summaryBytes > 0;
+    g_os.remove( aside );
+    return taken;
+}
+
+const char* lastCrashPath() noexcept
+{
+    return g_slot.crashPath;
+}
+
+// RIPWIRE_TEST_TRAP=assume|expects|ensures|unreachable — the gate's trigger (test/agenttrapcheck.sh). Each arm is a
+// real check of its kind, so the report the gate reads is the one a real failure writes.
+void fireTestTrap() noexcept
+{
+    const char* const armed = std::getenv( "RIPWIRE_TEST_TRAP" );
+    if( armed == nullptr )
+    {
+        return;
+    }
+    const std::string_view which( armed );
+    if( which == "assume" )
+    {
+        ASSUME( which != "assume", "RIPWIRE_TEST_TRAP=assume: the agent-visible failure path's test trigger" );
+    }
+    else if( which == "expects" )
+    {
+        EXPECTS( which != "expects", "RIPWIRE_TEST_TRAP=expects: the agent-visible failure path's test trigger" );
+    }
+    else if( which == "ensures" )
+    {
+        ENSURES( which != "ensures", "RIPWIRE_TEST_TRAP=ensures: the agent-visible failure path's test trigger" );
+    }
+    else if( which == "unreachable" )
+    {
+        UNREACHABLE( "RIPWIRE_TEST_TRAP=unreachable: the agent-visible failure path's test trigger" );
+    }
+}
+
+} // namespace agenttrap
+#endif
+
 RW_COLD_NOINLINE
 void ConsoleLog::handleAssert( CheckKind kind, const char* expr, const char* file, int line, const char* function,
                                const char* description ) noexcept
 {
     const std::size_t row   = static_cast<std::size_t>( kind );
     const NotesRow     notes = notesRowOf( description );
+#if !defined( NDEBUG )
+    // AGENT-VISIBLE-TRAP: the agent's copy first (stdout / the request's socket), then this notice, then the record.
+    const agenttrap::Failure failure{ kind, expr, file, line, function, description };
+    const bool               ownsReport = agenttrap::isAgentVisible( kind ) && agenttrap::claimReport();
+    if( ownsReport )
+    {
+        agenttrap::reportToAgent( failure );
+    }
+    const NotesRow next = agenttrap::isAgentVisible( kind ) ? NotesRow{ "  Next:     ", agenttrap::kHint, "\n" } : NotesRow{ "", "", "" };
+#else
+    const NotesRow next{ "", "", "" };
+#endif
     writeNotice( "\n======================================\n"
                  "!!! {} !!!\n"
                  "======================================\n"
@@ -147,9 +675,16 @@ void ConsoleLog::handleAssert( CheckKind kind, const char* expr, const char* fil
                  "  Location: {}:{}\n"
                  "  Function: {}\n"
                  "{}{}{}"
+                 "{}{}{}"
                  "======================================\n",
                  kKindBanner[ row ], orEmpty( expr ), kKindBlame[ row ], orEmpty( file ), line, orEmpty( function ),
-                 notes.label, notes.text, notes.eol );
+                 notes.label, notes.text, notes.eol, next.label, next.text, next.eol );
+#if !defined( NDEBUG )
+    if( ownsReport )
+    {
+        agenttrap::writeRecord( failure );
+    }
+#endif
     RW_TRAP();
 }
 

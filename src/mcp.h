@@ -24,6 +24,7 @@
 
 #include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
 #include "infra/blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
+#include "infra/agenttrap.h"     // AGENT-VISIBLE-TRAP: the request-id slot a failed dev-build check answers (debug only)
 
 #include <cstdio>          // stdin / std::fputs — the stdio request loop
 #include <iostream>        // no longer used HERE (R4 retired the std::cin getline) — kept because downstream
@@ -1129,6 +1130,41 @@ inline std::string mcpLegendResourceRead( const std::string& id, std::string_vie
          + "\",\"mimeType\":\"text/plain\",\"text\":\"" + mcpdetail::jsonEscape( text ) + "\"}]}}";
 }
 
+// AGENT-VISIBLE-TRAP (infra/agenttrap.h), debug builds only. mcpTrapHttpFd is the HTTP transport's connection socket,
+// so dispatchMcpLine's beginRequest answers on it; -1 on stdio. runMcpHttp sets it per connection (one process, one
+// single-threaded loop). In release both helpers are absent and the beginRequest they feed is an empty inline.
+#if !defined( NDEBUG )
+inline int& mcpTrapHttpFdSlot() noexcept
+{
+    static int fd = -1;
+    return fd;
+}
+inline int mcpTrapHttpFd() noexcept
+{
+    return mcpTrapHttpFdSlot();
+}
+
+// The previous call's last-crash record, taken once at `initialize`: one sentence appended to the instructions the
+// model reads, and one stderr line for the client's log. "" when there is none.
+inline std::string mcpPreviousCrashNote()
+{
+    const Diagnostics::agenttrap::TakenCrash taken = Diagnostics::agenttrap::takeLastCrash();
+    if( !taken.found )
+    {
+        return {};
+    }
+    rw::emitTo( stderr, "ripwire: the previous ripwire call failed an internal check (a ripwire bug; record {} now cleared): {}\n",
+                Diagnostics::agenttrap::lastCrashPath(), rw::cstr( taken.summary ) );
+    return std::string( "\n\nNOTE: the previous ripwire call ended on an internal check failure, a ripwire bug and not your input: " )
+         + taken.summary + ". If the same call fails again, use another tool or grep/Read for that question.";
+}
+#else
+inline constexpr int mcpTrapHttpFd() noexcept
+{
+    return -1;
+}
+#endif
+
 // the result of handling one JSON-RPC request line — shared by both transports.
 struct McpDispatchResult
 {
@@ -1194,6 +1230,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
 
         const std::string id = rid.token;
         std::string       resp;
+        // AGENT-VISIBLE-TRAP: from here a failed dev-build check answers THIS id; the transport loop clears the slot
+        // after the response is flushed. The transport set the fd (HTTP) or -1 (stdio) in its own beginRequest call
+        // before dispatch, so this call keeps it. Empty in release.
+        Diagnostics::agenttrap::beginRequest( id.data(), id.size(), mcpTrapHttpFd() );
 
         const bool omitGitVerbs = mcpOmitsGitVerbs( policy );   // V3/F4 — read once; both methods must agree
 
@@ -1275,14 +1315,18 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 const std::string_view negotiatedVersion = isMcpProtocolVersionSupported( requestedVersion )
                                                          ? std::string_view( requestedVersion )
                                                          : kMcpLatestProtocolVersion;
+                std::string instructions = mcpInstructionsText( policy )   // V3/F4: the; --mcp-tools: only hints for listed tools
+                                         + mcpLegendPointer( policy )   // r2-LO: the session dictionary, where a session exists
+                                         + mcpToolSubsetNote( policy )   // --mcp-tools: a subset announces itself
+                                         + mcprefuse::gitOnlyOmissionNote( [ & ]( std::string_view verb ) { return omitGitVerbs && mcpToolEnabled( policy, verb ); },
+                                                                           policy.pinnedRootIsGitDir );  // omission announces itself, finding #7: qualified by which cause it is
+#if !defined( NDEBUG )
+                instructions += mcpPreviousCrashNote();   // AGENT-VISIBLE-TRAP: the previous call's last-crash record, once
+#endif
                 resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
                        ",\"result\":{\"protocolVersion\":\"" + std::string( negotiatedVersion ) +
                        "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{},\"resources\":{}},"
-                       "\"instructions\":\"" + mcpdetail::jsonEscape( mcpInstructionsText( policy )   // V3/F4: the; --mcp-tools: only hints for listed tools
-                                                    + mcpLegendPointer( policy )   // r2-LO: the session dictionary, where a session exists
-                                                    + mcpToolSubsetNote( policy )   // --mcp-tools: a subset announces itself
-                                                    + mcprefuse::gitOnlyOmissionNote( [ & ]( std::string_view verb ) { return omitGitVerbs && mcpToolEnabled( policy, verb ); },
-                                                                                      policy.pinnedRootIsGitDir ) ) + "\"}}";  // omission announces itself, finding #7: qualified by which cause it is
+                       "\"instructions\":\"" + mcpdetail::jsonEscape( instructions ) + "\"}}";
             }
         }
         else if( method == "tools/list" )
@@ -1450,6 +1494,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             {
                 timingVerb = name; // MEASURE-FIRST: attribute the wall to the actual verb
             }
+            Diagnostics::agenttrap::noteTool( name.data(), name.size() );   // the last-crash record names the tool (debug only)
+            Diagnostics::agenttrap::fireTestTrap();                         // RIPWIRE_TEST_TRAP (debug only): test/agenttrapcheck.sh
             // ── W3FIX H5: every STRING argument through the ONE guarded reader ─────────────────────────────
             //
             // Verifier N11 wired mcpStringArg into `files` and stopped there, so thirteen sibling fields kept
@@ -3126,6 +3172,7 @@ inline int runMcp( const McpStdioConfig& config )
         std::fputs( r.resp.c_str(), stdout );
         std::fputc( '\n', stdout );
         std::fflush( stdout );
+        Diagnostics::agenttrap::endRequest();   // AGENT-VISIBLE-TRAP: the response is out; a later failure answers no id
 
         // MEASURE-FIRST per-request timing line (stderr only, env-gated). Emitted AFTER the protocol response is
         // flushed so it can never interleave into the JSON-RPC stdout stream (McpRequestTiming, mcpindex.h).

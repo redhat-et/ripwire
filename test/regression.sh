@@ -301,6 +301,7 @@ for _g in \
     agentloopopencodecheck \
     agentsurfacecheck \
     agenttablecheck \
+    agenttrapcheck \
     aiderbytescheck \
     aliasdefcheck \
     anchorbodycheck \
