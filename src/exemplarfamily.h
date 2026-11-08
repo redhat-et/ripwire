@@ -2026,7 +2026,7 @@ inline constexpr std::string_view kForExemplarFamilyCompactLegend =
     "half of them; n= members (tests, samples, examples, benchmarks out); <m> p= file:line, loc= lines, the first nearest the median size (registry: "
     "listing order); shown=/capped=\"1\": rows cut; oversized=N registry candidates over 4000 lines and unread=N files not read were skipped (a family may hide there; found=\"0\": none resolved). <touch_list> total= files outside the members' own naming at least half of them (by name, "
     "registered name or file stem; a shared name or stem counts once): where siblings are registered; shown=/capped=\"1\": cut; floor=\"1\" unread=K: K files unreadable or over 4 MiB, total= is a floor. <touch> p= "
-    "the line to copy, n= the innermost def holding it (Owner.name for a member; none: no def), share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. Tests, docs, "
+    "the line to copy, n= the innermost def holding it (a member: Owner.name), share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. Tests, docs, "
     "vendored, generated, frozen, baseline files unread. -->";
 // E3a-INTO: the legend of into= and <rows>, spliced in before <touch_list> only when the family prints into= (familyLegend), so a family
 // that is not one of holders keeps its legend bytes.
@@ -2055,13 +2055,15 @@ static_assert( kForExemplarFamilyLegend.find( "--", 4 ) == kForExemplarFamilyLeg
 
 // TOUCH-SYM: the innermost indexed definition holding each touch row's line (kNoNode: none does), by byte-span containment as
 // @FILE:LINE resolves a line (graph.h resolveAtSeed): a definition holds the line when its [sigStartByte, endByte) meets the line's
-// text, the innermost is the latest start (a tie: the shorter span). Two DISJOINT definitions sharing the line are no claim: kNoNode,
-// never a pick. A file's module-scope pseudo-definition holds every line and names none.
+// text, the innermost is the latest start, then the shorter span, then the one declared ON the line. Two DISJOINT definitions sharing
+// the line, or two with the same span neither or both declared on it (a Go `const (` group stores the group's span on every
+// constant), are no claim: kNoNode, never a pick. A file's module-scope pseudo-definition holds every line and names none.
 // HOISTING: one pass over the symbols for all the rows (at most kExemplarTouchRows), never one pass per row.
 inline std::vector<NodeId> touchHolders( const IngestResult& ing, std::span<const ExemplarTouch> rows )
 {
     std::vector<NodeId> best( rows.size(), kNoNode );
     std::vector<std::uint32_t> minEnd( rows.size(), UINT32_MAX ); // the earliest end among a row's holders: before best's start = disjoint
+    std::vector<char> tied( rows.size(), 0 ); // best shares its whole rank with another holder
     for( const Symbol& s : ing.symbols )
     {
         if( s.kind == SymKind::ModuleScope )
@@ -2076,18 +2078,23 @@ inline std::vector<NodeId> touchHolders( const IngestResult& ing, std::span<cons
                 continue;
             }
             minEnd[i] = std::min( minEnd[i], s.endByte );
-            const Symbol* b = best[i] == kNoNode ? nullptr : &ing.symbols[best[i]];
-            if( !b || s.sigStartByte > b->sigStartByte || ( s.sigStartByte == b->sigStartByte && s.endByte < b->endByte ) )
+            const auto rank = [&]( const Symbol& x ) { return std::tuple( x.sigStartByte, ~x.endByte, x.line == r.line ); }; // larger = inner
+            if( best[i] == kNoNode || rank( s ) > rank( ing.symbols[best[i]] ) )
             {
                 best[i] = s.id;
+                tied[i] = 0;
+            }
+            else if( rank( s ) == rank( ing.symbols[best[i]] ) )
+            {
+                tied[i] = 1;
             }
         }
     }
     for( std::size_t i = 0; i < rows.size(); ++i )
     {
-        if( best[i] != kNoNode && minEnd[i] <= ing.symbols[best[i]].sigStartByte )
+        if( best[i] != kNoNode && ( tied[i] || minEnd[i] <= ing.symbols[best[i]].sigStartByte ) )
         {
-            best[i] = kNoNode; // two disjoint definitions on the line
+            best[i] = kNoNode; // two disjoint definitions on the line, or two the line cannot tell apart
         }
     }
     return best;

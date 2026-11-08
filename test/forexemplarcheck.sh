@@ -49,7 +49,8 @@
 #   (e6) TOUCH-SYM: a <touch> row names the innermost indexed definition holding its line, n= as the other rows spell it: a Go
 #        function body (defaults.go:4 n="defaultPlugins"), a Rust match arm (pure.rs:3 n="is_pure"), a TS method in a class
 #        (registry.ts:3 n="DialectRegistry.all", the method and not its class); a line no definition holds (an `export *` line, an
-#        import line) prints no n=
+#        import line) prints no n=; a Go `const (` group stores the group's span on every constant, so a line inside it names the
+#        constant declared on it (kinds.go:5 n="Second") or nothing, never the group's first or last constant
 #   (s1) --json carries no block; (s2) a token budget holds it (held="budget", no rows); (x1) MCP `for`: the same element bytes
 #   (a1) the block's own legend defines every attribute it prints; the answer is well-formed XML; the block closes right before </ctx>
 
@@ -125,6 +126,8 @@ for p in alpha beta gamma delta; do
     printf 'package %s\n\nimport "example.com/x/names"\n\nconst Name = names.%s\n\ntype %s struct{}\n\nfunc New() (*%s, error) { return &%s{}, nil }\n' "$p" "$P" "$P" "$P" "$P" > "$F/go/plugins/$p/$p.go"
 done
 printf 'package names\n\nconst (\n\tAlpha = "Alpha"\n\tBeta  = "Beta"\n\tGamma = "Gamma"\n\tDelta = "Delta"\n)\n' > "$F/go/names/names.go"
+mkdir -p "$F/go/kinds"
+printf 'package kinds\n\nconst (\n\tFirst  = 1\n\tSecond = names.Alpha + names.Beta + names.Gamma + names.Delta\n\tThird  = 3\n)\n' > "$F/go/kinds/kinds.go"
 cat > "$F/go/plugins/registry.go" <<'GO'
 package plugins
 
@@ -484,6 +487,8 @@ touch_n e6 "$TMP/e_rs.xml" src/pure.rs:3 is_pure
 touch_n e6 "$TMP/e_ts.xml" src/registry.ts:3 DialectRegistry.all
 touch_n e6 "$TMP/e_ts.xml" src/index.ts:2 ""
 touch_n e6 "$TMP/e_py.xml" app/handlers/__init__.py:1 ""
+if touchrows "$TMP/e_go.xml" | grep -q '<touch p="kinds/kinds.go:5"\( n="Second"\)\? share='; then ok "(e6) kinds.go:5 inside a const group: n=\"Second\" or none, never First/Third"
+else no "(e6) kinds.go:5 const group: $( touchrows "$TMP/e_go.xml" | grep -o '<touch p="kinds/kinds.go[^>]*>' || touchrows "$TMP/e_go.xml" | head -c 400 )"; fi
 cp "$TMP/e_go.xml" "$TMP/e_goa.xml"
 
 # t1 / t2: wordings
