@@ -13,7 +13,7 @@ invocations at the default value and at a probe value. The tunable binary is byt
 to production at defaults; that control is what makes these numbers mean anything.
 
 **The census is a dated snapshot.** The first two columns below and the paragraph after them are
-the counts snapshot taken 2026-11-07 (`docs/counts.tsv`), so two open changes that each add a cap do not
+the counts snapshot taken 2026-11-08 (`docs/counts.tsv`), so two open changes that each add a cap do not
 both rewrite them; the per-cap tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
@@ -337,7 +337,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kDefaultRecallMaxTokens` = `8000`
 
-`src/recall.h` — discloses: **none** — probe value `64000` — **1 verb(s) respond**
+`src/recall.h` — discloses: `terms_capped` — probe value `64000` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |

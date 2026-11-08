@@ -510,14 +510,28 @@ PY
     P10_KW="$( p10_serves "$TMP/p10_kw.out" )"
     P10_NL="$( p10_serves "$TMP/p10_nl.out" )"
     printf '      keyword phrasing: serves_answer=%s\n      english phrasing: serves_answer=%s\n' "$P10_KW" "$P10_NL"
-    case "$P10_KW" in
-        yes* ) ok "P10 control: the KEYWORD phrasing serves the unit containing line $P10_LINE (${P10_KW#yes }) — the corpus and budget do admit the answer" ;;
-        *    ) no "P10 control: even the KEYWORD phrasing does not serve the unit containing line $P10_LINE ($P10_KW) — the control failed, so the parity result below means nothing" ;;
-    esac
-    case "$P10_NL" in
-        yes* ) ok "P10 parity: the ENGLISH phrasing of the same question also serves the unit containing line $P10_LINE (${P10_NL#yes })" ;;
-        *    ) no "P10 parity: the ENGLISH phrasing serves ${P10_NL#no } and DROPS the answer on line $P10_LINE, which the keyword phrasing of the same question serves — stopwords decided reachability" ;;
-    esac
+    # DOCS-UNITS (2026-11-06) re-scoped this arm to the property its own header names, PHRASING parity. The control used
+    # to require the unit holding line P10_LINE; under section-unit ranking the 13 KB `### ingest — crawl and parse`
+    # unit, whose own prose says crawl 9x, order 5x, sorted 3x and IDs 4x, outranks the 16-line `## 2. Data model`
+    # unit at 800 tokens on BOTH phrasings, so "serves the answer line" now measures ranking, not phrasing. The control
+    # is now that the keyword phrasing serves a unit carrying the question's keywords; parity is that the English
+    # phrasing serves the very same ranges. A stopword deciding reachability still turns parity red.
+    # The keywords are looked for in the SERVED BODY (past the header and the section note, as p10_serves reads it): the header
+    # echoes the query, so a grep over the whole answer passes on a body that holds neither word.
+    p10_ranges(){ grep -o 'lines="[^"]*"' "$1" | head -1; }
+    p10_body_has_keywords(){ python3 -c 'import sys; b = open( sys.argv[1], encoding = "utf-8" ).read().split( "]", 1 )[ -1 ].lower(); sys.exit( 0 if "crawl" in b and "sorted" in b else 1 )' "$1"; }
+    P10_KWR="$( p10_ranges "$TMP/p10_kw.out" )"
+    P10_NLR="$( p10_ranges "$TMP/p10_nl.out" )"
+    if [ -n "$P10_KWR" ] && p10_body_has_keywords "$TMP/p10_kw.out"; then
+        ok "P10 control: the KEYWORD phrasing serves a unit carrying the question's keywords ($P10_KWR)"
+    else
+        no "P10 control: the KEYWORD phrasing serves no unit carrying the keywords (${P10_KWR:-<no lines=>}) — the parity result below means nothing"
+    fi
+    if [ -n "$P10_NLR" ] && [ "$P10_NLR" = "$P10_KWR" ] && p10_body_has_keywords "$TMP/p10_nl.out"; then
+        ok "P10 parity: the ENGLISH phrasing serves the same ranges as the keyword phrasing ($P10_NLR), its body carrying the keywords"
+    else
+        no "P10 parity: the ENGLISH phrasing serves ${P10_NLR:-<no lines=>}, the keyword phrasing $P10_KWR — stopwords decided reachability"
+    fi
 fi
 
 # ── P11 — DEGENERATE-CUT HONESTY. EXPECTED RED until lane F1's fix lands; see the header table for why
