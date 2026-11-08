@@ -2238,7 +2238,8 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
                         &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings;
                                                               //   knob-honesty-068: carries mcpSigsNext IN
-                        SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the CLI twin's row spelling
+                        SigRowSpelling{ .elideZeroMetrics = true, .foldRepeatedText = true } );   // lean-answers lane: the CLI twin's row
+                                                              //   spelling; SIZE-3a: repeated text folded to same_as= (mcpattrparitycheck)
     };
     std::string sigsStr = renderToString( renderSigs );
     const std::optional<RedactCounts> redactAfterSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
@@ -2444,6 +2445,10 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     if( mcpTailFolded )
     {
         rw::spliceClauseAfter( out, rw::kForFileTailWideLegend, rw::kForFileTailFoldedLegend );   // SIZE-2: the CLI twin's clause
+    }
+    if( sigsStr.contains( " same_as=\"" ) )
+    {
+        rw::spliceClauseAfter( out, std::string_view(), rw::kForSameAsLegend );   // SIZE-3a: the CLI twin's full-dialect clause (end of the first comment)
     }
     // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
     // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
