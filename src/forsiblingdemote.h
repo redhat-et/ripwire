@@ -18,7 +18,7 @@
 //        one of the first kCallPathSeeds resolved answer rows, either way round (ROW-FEATURES-2: a tail rule lost credited call-site
 //        rows that are proven callers of the head);
 //   (K5) a kept <d> row's same_as= names it (its doc+signature text is the one that row points to).
-// The pointer keeps the row's p= and n= bytes; a short legend comment rides before the first one. A token budget (CLI --token-budget /
+// The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. A token budget (CLI --token-budget /
 // --max-tokens, MCP budget_tokens) leaves the answer as shaped. The demoted bytes are priced markup, so the root's est_tokens= is
 // re-priced once over both post-passes (R-DEDUP's tail cut, then this one: serialize.h repriceRootAfterCut).
 // RIPWIRE_NO_SIBLING_DEMOTE=1 turns it off (byte identity and the gate's twins).
@@ -47,7 +47,7 @@ inline constexpr std::size_t kOwnerNearRows = 4; // (K3): the <d> rows right abo
 inline constexpr std::size_t kCallPathSeeds = 3; // (K4): the first resolved answer rows a call path may reach
 
 inline constexpr std::string_view kSiblingDemoteLegend =
-    "<!-- demote: a <t> in sigs is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name), not the answer -->";
+    "<!-- demote: a <t> in sigs is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name, r= rank), not the answer -->";
 
 inline bool siblingDemoteOn()
 {
@@ -408,6 +408,8 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
         out += attrOf( r->attrs, "p" );
         out += "\" sym=\"";
         out += attrOf( r->attrs, "n" );
+        const std::string_view rank = attrOf( r->attrs, "r" ); // the row's rank stays readable: a budgeted answer's rows are a rank prefix of this one's
+        out += rank.empty() ? std::string() : "\" r=\"" + std::string( rank );
         out += "\"/>";
         from = r->end;
     }

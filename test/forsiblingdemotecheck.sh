@@ -11,7 +11,7 @@
 # (widget_shelf_row; the member row says same_as= it). other.py: five more helpers (its first row high, the rest deep).
 # ARMS
 #   (a)  the demoted answer equals the RIPWIRE_NO_SIBLING_DEMOTE=1 answer with exactly the rows the rule picks (recomputed here from the
-#        off answer; K4's proven-path rows named) rewritten as <t p= sym=/> and the legend comment before the first, est_tokens= aside
+#        off answer; K4's proven-path rows named) rewritten as <t p= sym= r=/> and the legend comment before the first, est_tokens= aside
 #   (a2) a plain deep sibling is a pointer: widget_config_variant_04 (pos 11) and other.py's deep rows
 #   (p)  position: the rows at answer positions <= 10 stay rows (widget_config_variant_03 at pos 10, rank 10)
 #   (r)  rank: an unused-in-file table puts 28 <u> rows first; the <d> rows of rank <= 5 (all past position 10) stay rows, rank 6+ go
@@ -162,10 +162,10 @@ def rule( t, keep4 ):
     return pick
 off, on, keep4 = open( sys.argv[1] ).read(), open( sys.argv[2] ).read(), set( sys.argv[3].split( "," ) )
 pick = rule( off, keep4 )
-LEG = "<!-- demote: a <t> in sigs is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name), not the answer -->"
+LEG = "<!-- demote: a <t> in sigs is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name, r= rank), not the answer -->"
 exp, at = [], 0
 for k, r in enumerate( pick ):
-    exp += [ off[at:r["s"]], LEG if k == 0 else "", '<t p="%s" sym="%s"/>' % ( r["raw"]["p"], r["raw"]["n"] ) ]; at = r["e"]
+    exp += [ off[at:r["s"]], LEG if k == 0 else "", '<t p="%s" sym="%s"%s/>' % ( r["raw"]["p"], r["raw"]["n"], ' r="%s"' % r["raw"]["r"] if "r" in r["raw"] else "" ) ]; at = r["e"]
 exp = "".join( exp ) + off[at:]
 est = lambda s: re.sub( r' est_tokens="\d+"', "", s, count = 1 )
 print( "rows " + ",".join( r["a"]["n"] for r in pick ) )
@@ -176,7 +176,7 @@ cat >"$TMP/names.py" <<'PY'
 import re, sys
 t = re.sub( r"<!--.*?-->", "", open( sys.argv[1] ).read(), flags = re.S )
 s = t[t.find( "<sigs" ):t.find( "</sigs>" )]
-print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^"]*)"/>', s ) ) )
+print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^"]*)"(?: r="\d+")?/>', s ) ) )
 print( "rows " + ",".join( re.findall( r'<d [^>]*?\bn="([^"]*)"', s ) ) )
 PY
 

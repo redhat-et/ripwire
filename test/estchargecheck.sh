@@ -199,11 +199,13 @@ s = open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read()
 m = re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S )
 if not m: sys.exit( 3 )
 rows = []
-for d in re.finditer( r'<d ([^>]*)>', m.group( 1 ) ):
-    a = d.group( 1 )
+# SIBLING-DEMOTE: a deep same-file sibling prints in place as <t p= sym= r=/> (forsiblingdemote.h); it holds its rank, so it is a row here
+# (key p:n, the pointer carries no l=), and a budgeted answer (never demoted) stays a rank prefix of the no-budget one
+for d in re.finditer( r'<(d|t) ([^>]*)>', m.group( 1 ) ):
+    a = d.group( 2 )
     g = lambda k: ( re.search( r'\b' + k + r'="([^"]*)"', a ) or [ None, "?" ] )[ 1 ]
     r = g( "r" )
-    rows.append( ( int( r ) if r.isdigit() else 10**9, g( "p" ) + ":" + g( "l" ) + ":" + g( "n" ) ) )
+    rows.append( ( int( r ) if r.isdigit() else 10**9, g( "p" ) + ":" + g( "n" if d.group( 1 ) == "d" else "sym" ) ) )
 rows.sort()
 print( "\n".join( x[ 1 ] for x in rows ) )
 PY

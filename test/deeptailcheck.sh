@@ -228,6 +228,7 @@ xml = open( sys.argv[2] ).read()
 rs = sorted( s.get( "r", 0 ) for s in d.get( "sigs", [] ) )   # P7: flat sigs array
 tail = d.get( "tail" )
 import html
+xml = xml[ xml.find( "<tail" ): ]   # the tail block rows only: a SIBLING-DEMOTE pointer inside sigs is a t row too
 xrows = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r"<t p=\"([^\"]*)\"( sym=\"([^\"]*)\")?/>", xml ) ]
 xrows = [ ( p, y ) for p, _h, y in [ ( r[0], None, r[1] ) for r in xrows ] ]
 checks = [
@@ -398,10 +399,11 @@ r = json.load( sys.stdin )
 print( "" if "error" in r else r["result"]["content"][0]["text"] )
 ' )"
 if printf '%s' "$MCP_INNER" | grep -q '<tail total=' && printf '%s' "$MCP_INNER" | grep -q '<t p="[^"]*" sym="'; then ok "MCP for verb serves the file-grain tail, page rows included (sym=)"; else no "MCP for verb has no <tail> or no page rows"; fi
-MCP_BARE="$( printf '%s' "$MCP_INNER" | grep -o '<t p="[^"]*"/>' | grep -c . )"
-MCP_SYM="$( printf '%s' "$MCP_INNER" | grep -o '<t p="[^"]*" sym="[^"]*"/>' | grep -c . )"
+MCP_TAIL="${MCP_INNER#*<tail }"   # the tail block's rows (a SIBLING-DEMOTE pointer inside <sigs> is a <t> too)
+MCP_BARE="$( printf '%s' "$MCP_TAIL" | grep -o '<t p="[^"]*"/>' | grep -c . )"
+MCP_SYM="$( printf '%s' "$MCP_TAIL" | grep -o '<t p="[^"]*" sym="[^"]*"/>' | grep -c . )"
 # R-DEDUP: the default head shows w01..w08 whole, so exactly those 8 page rows print p= only; the other 4 keep sym=
-MCP_BAREF="$( printf '%s' "$MCP_INNER" | grep -o '<t p="[^"]*"/>' | tr '\n' ',' )"
+MCP_BAREF="$( printf '%s' "$MCP_TAIL" | grep -o '<t p="[^"]*"/>' | tr '\n' ',' )"
 if [ "$MCP_BAREF" = '<t p="w01.py"/>,<t p="w02.py"/>,<t p="w03.py"/>,<t p="w04.py"/>,<t p="w05.py"/>,<t p="w06.py"/>,<t p="w07.py"/>,<t p="w08.py"/>,' ] && [ "$MCP_SYM" = "4" ]; then ok "(10t) MCP for twin: the 4 rows outside the head carry sym=, the 8 wholly shown head files p= only (R-DEDUP)"; else no "(10t) MCP for twin: $MCP_BARE tail row(s) without sym= ($MCP_SYM with; bare: $MCP_BAREF)"; fi
 if printf '%s' "$MCP_INNER" | grep -q '<d l="[^>]*r="1"'; then ok "MCP for verb rows carry r="; else no "MCP for verb rows carry no r="; fi
 

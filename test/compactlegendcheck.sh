@@ -1359,13 +1359,15 @@ print( "%s rows=%d total=%d charged=%d T=%d est=%s over=%d next=%d fits=%d maxim
 PY
 spfield(){ local re=" $2=([^ ]*)"; [[ " $1 " =~ $re ]] && printf '%s' "${BASH_REMATCH[1]}"; }   # spfield LINE KEY
 # spRef LAB DIR ROOTARG TASK — the no-budget answer of both dialects (the ST/RP reference), and its rows in "$TMP/sp.ref.LAB.DIAL.rows".
+# SIBLING-DEMOTE (forsiblingdemote.h): the reference is the full rank list with each row's own bytes, so it is read with
+# RIPWIRE_NO_SIBLING_DEMOTE=1 (a no-budget answer prints its deep same-file siblings as <t> pointers; a budgeted one is never demoted).
 spRef(){
     local d; for d in compact full; do
         rm -f "$TMP/sp.ref.$1.$d.rows"
-        ( cd "$2" && "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null
+        ( cd "$2" && RIPWIRE_NO_SIBLING_DEMOTE=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d" 0 "$4" "$TMP/sp.ref.$1.$d.rows" >/dev/null
         rm -f "$TMP/sp.ref.$1.$d.so.rows"   # lane hrr: the RIPWIRE_NO_HEAD_RR=1 twin reference
-        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null
+        ( cd "$2" && RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d.so" 0 "$4" "$TMP/sp.ref.$1.$d.so.rows" >/dev/null
     done
 }
@@ -1536,13 +1538,13 @@ for tb in 500 900; do
                     p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=500: the cut's <sigs> carries no next= to run"
                 else
                     nb=0; nbr="$( printf '%s\n' "$nargv" | sed -n 's/^--token-budget=\([0-9]*\)$/\1/p' | head -1 )"; [ -n "$nbr" ] && nb="$nbr"
-                    ( cd "$P4" && printf '%s\n' "$nargv" | tr '\n' '\0' | xargs -0 "$BIN" . ) >"$TMP/p4n.out" 2>/dev/null
+                    ( cd "$P4" && printf '%s\n' "$nargv" | tr '\n' '\0' | RIPWIRE_NO_SIBLING_DEMOTE=1 xargs -0 "$BIN" . ) >"$TMP/p4n.out" 2>/dev/null   # the rank list (spRef's note)
                     nl="$( python3 "$TMP/softp.py" "$TMP/p4n.out" "$nb" "widget routine dispatcher" "$TMP/p4n.rows" )"
                     nr="$( spfield "$nl" rows )"; nt="$( spfield "$nl" total )"
                     # lane hrr (rule 4): the twin — the RIPWIRE_NO_HEAD_RR=1 cut's next=, run with it set — must serve the twin's
                     # no-budget head in ORDER (unchanged); the answer as served must serve the no-budget head as a SET
                     nargvT="$( grep -oE '<sigs( [^>]*)?>' "$TMP/sp.compact.so" | head -1 | python3 -c 'import sys,re,html,shlex; m=re.search(r"\snext=\"([^\"]+)\"",sys.stdin.read()); print("\n".join(shlex.split(html.unescape(m.group(1)))) if m else "")' )"
-                    ( cd "$P4" && printf '%s\n' "$nargvT" | tr '\n' '\0' | RIPWIRE_NO_HEAD_RR=1 xargs -0 "$BIN" . ) >"$TMP/p4n.so.out" 2>/dev/null
+                    ( cd "$P4" && printf '%s\n' "$nargvT" | tr '\n' '\0' | RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_HEAD_RR=1 xargs -0 "$BIN" . ) >"$TMP/p4n.so.out" 2>/dev/null
                     python3 "$TMP/softp.py" "$TMP/p4n.so.out" "$nb" "widget routine dispatcher" "$TMP/p4n.so.rows" >/dev/null
                     rT="$( wc -l <"$TMP/sp.compact.so.rows" 2>/dev/null | tr -d ' ' )"
                     if [ -n "$nargvT" ] && cmp -s "$TMP/p4n.so.rows" "$TMP/sp.ref.p4.compact.so.rows" && head -n "${rT:-0}" "$TMP/p4n.so.rows" | cmp -s - "$TMP/sp.compact.so.rows"; then
