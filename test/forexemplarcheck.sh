@@ -48,6 +48,19 @@
 #   (e5) CAP-DISCLOSE: seven listing files print five <touch> rows, total="7" shown="5" capped="1"
 #   (s1) --json carries no block; (s2) a token budget holds it (held="budget", no rows); (x1) MCP `for`: the same element bytes
 #   (a1) the block's own legend defines every attribute it prints; the answer is well-formed XML; the block closes right before </ctx>
+
+# ARMS (E3a-INTO: a family of HOLDERS of X — member names carry X's plural — takes X as a row inside one holder)
+#   (i1) C++ BaseSettings holders, each with its own X-macro list: `a new query-level setting` (no holder named for it) goes into
+#        the bare holder SettingsImpl (into_by="bare"), rows by="macro" list="COMMON_SETTINGS" n="4" with the row NAME argument (not the
+#        type); the other holders (ServerSettingsImpl, MergeTreeSettingsImpl) are not printed; a lister of the rows is a touch row, a
+#        docs/ copy of them is not; `a new server setting` goes into ServerSettingsImpl (into_by="word" into_word="server")
+#   (i2) TS affix holders (`*Options` interfaces in three files): `a new compiler option` goes into CompilerOptions over the longer
+#        WatchCompilerOptions (fewest other words), rows by="line" (its `name?: type` lines), commandLineParser.ts the touch row
+#   (i2b) `a new option for the compiler`: a family whose holder is named by a task word outscores a larger family of holders
+#        (src/harness *Options) that names none
+#   (i5) a second family of holders the task word names more than once (a tie) gets no score bonus: the bare holder of (i1) still wins
+#   (i3) holders and no holder the task points into (no bare one): the block is withheld; a sibling family (not holders) is unchanged
+#   (i4) a `### Heading` line inside a row's text does not end the X-macro list (n= counts every row)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -178,6 +191,93 @@ printf 'package baseline\n\nvar frozen = "%s"\n' "$all_go" > "$F/go/baseline/lis
 printf 'package x\n\nvar v = "%s"\n' "$all_go" > "$F/go/vendor/x/list.go"
 for i in 1 2 3 4 5 6 7; do printf 'from ui.a import AWidget\nREG%s = [AWidget, "BWidget", "CWidget", "DWidget", "EWidget", "FWidget"]\n' "$i" > "$F/cap/list$i.py"; done
 
+# E3a-INTO fixtures: C++ settings holders with X-macro lists; TS option-bag interfaces
+mkdir -p "$F/hold/src/Core" "$F/hold/src/Server" "$F/hold/src/Tree" "$F/hold/docs/site" "$F/hold2/src/A" "$F/hold2/src/B" "$F/hold2/src/C" "$F/tsh/src/compiler"
+printf 'template <class T> struct BaseSettings { int x; };\n' > "$F/hold/src/Core/BaseSettings.h"
+cat > "$F/hold/src/Core/Settings.cpp" <<'CPP'
+#include "BaseSettings.h"
+#define COMMON_SETTINGS(DECLARE, DECLARE_WITH_ALIAS) \
+    DECLARE(UInt64, max_threads, 0, R"(
+The maximum number of threads.
+### Heading inside a description
+)", 0) \
+    DECLARE(UInt64, max_block_size, 65536, "rows per block", 0) \
+    DECLARE(Bool, use_uncompressed_cache, false, "cache", 0) \
+    DECLARE_WITH_ALIAS(UInt64, join_buffer_rows, 1000, "rows", 0, join_rows) \
+
+struct SettingsTraits {};
+struct SettingsImpl : public BaseSettings<SettingsTraits>
+{
+    void apply();
+};
+CPP
+cat > "$F/hold/src/Server/ServerSettings.cpp" <<'CPP'
+#include "../Core/BaseSettings.h"
+#define LIST_OF_SERVER_SETTINGS(DECLARE, ALIAS) \
+    DECLARE(UInt64, max_connections, 1024, "conns", 0) \
+    DECLARE(UInt64, listen_backlog, 64, "backlog", 0) \
+    DECLARE(String, tmp_path, "/tmp", "path", 0) \
+
+struct ServerSettingsTraits {};
+struct ServerSettingsImpl : public BaseSettings<ServerSettingsTraits>
+{
+    void load();
+};
+CPP
+cat > "$F/hold/src/Tree/MergeTreeSettings.cpp" <<'CPP'
+#include "../Core/BaseSettings.h"
+#define LIST_OF_MERGE_TREE_SETTINGS(DECLARE, ALIAS) \
+    DECLARE(UInt64, index_granularity, 8192, "gran", 0) \
+    DECLARE(UInt64, parts_to_throw_insert, 300, "parts", 0) \
+    DECLARE(Bool, allow_nullable_key, false, "key", 0) \
+
+struct MergeTreeSettingsTraits {};
+struct MergeTreeSettingsImpl : public BaseSettings<MergeTreeSettingsTraits>
+{
+    void check();
+};
+CPP
+printf 'const char* kFuzzSettings[] = { "max_threads", "max_block_size", "use_uncompressed_cache", "join_buffer_rows" };\n' > "$F/hold/src/Core/FuzzList.cpp"
+printf 'export const settings = [ "max_threads", "max_block_size", "use_uncompressed_cache", "join_buffer_rows" ];\n' > "$F/hold/docs/site/settings.js"
+printf 'template <class T> struct BaseSettings { int x; };\n' > "$F/hold2/src/BaseSettings.h"
+for d in A B C; do
+    cat > "$F/hold2/src/$d/${d}xSettings.cpp" <<CPP
+#include "../BaseSettings.h"
+struct ${d}xTraits {};
+struct ${d}xSettingsImpl : public BaseSettings<${d}xTraits> { void f(); };
+CPP
+done
+# hold3 = hold plus a family of holders the task word `query` names more than once (QueryPlanSettings, QueryTreeSettings, ..): a tie,
+# so that family gets no task-word bonus and cannot outrank the bare holder (ClickHouse: the 2026-11-07 withhold of `query-level setting`)
+mkdir -p "$F/hold3/src/Query" && cp -R "$F/hold/src" "$F/hold3/"
+for q in Plan Tree Ast; do
+    printf '#include "../Core/BaseSettings.h"\nstruct Query%sSettings\n{\n    int a;\n    int b;\n};\nvoid useQuery%sSettings( Query%sSettings& s );\n' "$q" "$q" "$q" > "$F/hold3/src/Query/Query${q}Settings.h"
+done
+cat > "$F/tsh/src/compiler/types.ts" <<'TS'
+export interface CompilerOptions {
+    allowJs?: boolean;
+    strictNullChecks?: boolean;
+    outDir?: string;
+    readonly moduleResolution?: string;
+    [option: string]: unknown;
+}
+export interface WatchCompilerOptions {
+    pollingInterval?: number;
+}
+TS
+printf 'export interface WatchOptions {\n    watchFile?: string;\n}\n' > "$F/tsh/src/compiler/watch.ts"
+printf 'export interface BuildOptions {\n    dry?: boolean;\n}\n' > "$F/tsh/src/compiler/build.ts"
+mkdir -p "$F/tsh/src/harness"
+for h in a b c d; do printf 'export interface %sRunOptions {\n    v?: number;\n}\nexport interface %sShowOptions {\n    w?: number;\n}\n' "$( cap "$h" )" "$( cap "$h" )" > "$F/tsh/src/harness/$h.ts"; done
+cat > "$F/tsh/src/compiler/commandLineParser.ts" <<'TS'
+export const optionDeclarations = [
+    { name: "allowJs", type: "boolean" },
+    { name: "strictNullChecks", type: "boolean" },
+    { name: "outDir", type: "string" },
+    { name: "moduleResolution", type: "string" },
+];
+TS
+
 # fix-round fixtures
 mkdir -p "$F/m1s/src" "$F/m1n/cmds" "$F/m2/app" "$F/s3/src/ui" "$F/s2/src/plugins" "$F/s2/examples" "$F/s2/benchmarks" "$F/s4/src" "$F/s4c/src/jobs"
 for c in quit write open close; do printf '#[command]\npub fn %s() {}\n' "$c"; done > "$F/m1s/src/cmds.rs"
@@ -202,14 +302,14 @@ for p in Aa Bb Cc Dd; do printf 'from src.plugins.base import Plugin\n\n\nclass 
 for d in src examples benchmarks; do printf 'ALL = ["AaPlugin", "BbPlugin", "CcPlugin"]\n' > "$F/s2/$d/all.py"; done
 for c in quit write open close; do printf 'pub fn %s_command() -> u32 {\n    1\n}\n' "$c"; done > "$F/s4/src/commands.rs"
 for j in Send Fetch Purge; do printf 'class %sWorker:\n    def run(self):\n        return 1\n' "$j" > "$F/s4c/src/jobs/$(echo "$j" | tr 'A-Z' 'a-z').py"; done
-# g2 / g3 fixtures: affix classes in one file, in two files, in .d.ts files only (and the same in .ts files)
+# g2 / g3 fixtures: affix classes in one file, in two files, in .d.ts files only (and the same in .ts files) (g3 names are singular *Option: plural *Options members are holders, see i2)
 mkdir -p "$F/g2a/src/jobs" "$F/g2b/src/jobs" "$F/g3d/src/opts" "$F/g3t/src/opts"
 for j in Send Fetch Purge Drain; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2a/src/jobs/all.py"
 for j in Send Fetch; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2b/src/jobs/one.py"
 for j in Purge Drain; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2b/src/jobs/two.py"
 for j in Read Write Seek; do
-    printf 'export interface %sOptions {\n  flag: number\n}\n' "$j" > "$F/g3d/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).d.ts"
-    printf 'export interface %sOptions {\n  flag: number\n}\n' "$j" > "$F/g3t/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).ts"
+    printf 'export interface %sOption {\n  flag: number\n}\n' "$j" > "$F/g3d/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).d.ts"
+    printf 'export interface %sOption {\n  flag: number\n}\n' "$j" > "$F/g3t/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).ts"
 done
 
 # CR round (#559) fixtures: single-quoted and double-quoted decorator names, a same-line Rust attribute, a registry over 4000 lines
@@ -451,6 +551,43 @@ fi
 if block "$TMP/u2prime.xml" | grep -q ' rule="registry" key="NewInTreeRegistry"' && ! block "$TMP/u2prime.xml" | grep -q 'unread='; then ok "(u2) positive twin: the same run with the file readable resolves the registry and carries no unread="
 else no "(u2) twin: $( block "$TMP/u2prime.xml" | head -c 300 )"; fi
 
+# E3a-INTO arms
+run hold "--for=add a new query-level setting" >"$TMP/i1.xml"
+b="$( block "$TMP/i1.xml" )"
+if printf '%s' "$b" | grep -q ' rule="base" key="BaseSettings"[^>]* n="3" into="SettingsImpl" into_p="src/Core/Settings.cpp:[0-9]*" into_by="bare">' \
+   && printf '%s' "$b" | grep -q '<rows by="macro" list="COMMON_SETTINGS" list_p="src/Core/Settings.cpp:2" n="4">' \
+   && printf '%s' "$b" | grep -q '<m n="max_threads" p="src/Core/Settings.cpp:3"/>' && printf '%s' "$b" | grep -q '<m n="join_buffer_rows" ' \
+   && ! printf '%s' "$b" | grep -q 'ServerSettingsImpl\|MergeTreeSettingsImpl\|UInt64'; then ok "(i1) query-level setting: into the bare holder SettingsImpl, COMMON_SETTINGS rows by name, other holders unprinted"
+else no "(i1) query-level setting: $( printf '%s' "$b" | head -c 500 )"; fi
+has_touch i1 "$TMP/i1.xml" src/Core/FuzzList.cpp 4/4
+no_touch i1 "$TMP/i1.xml" docs/site/settings.js "a docs/ tree is not read"
+# i4: the row after the `### Heading` line of max_threads' description is still a row (n="4" above counts all four)
+if printf '%s' "$b" | grep -q '<m n="max_block_size" '; then ok "(i4) a ### line inside a row's text does not end the list"; else no "(i4) rows after the ### line: $( printf '%s' "$b" | head -c 400 )"; fi
+run hold "--for=add a new server setting" >"$TMP/i1b.xml"
+if block "$TMP/i1b.xml" | grep -q ' into="ServerSettingsImpl" into_p="src/Server/ServerSettings.cpp:[0-9]*" into_by="word" into_word="server">' \
+   && block "$TMP/i1b.xml" | grep -q 'list="LIST_OF_SERVER_SETTINGS"[^>]* n="3"' && ! block "$TMP/i1b.xml" | grep -q 'max_threads'; then ok "(i1) server setting: into ServerSettingsImpl by the task word"
+else no "(i1) server setting: $( block "$TMP/i1b.xml" | head -c 400 )"; fi
+run tsh "--for=add a new compiler option" >"$TMP/i2.xml"
+b="$( block "$TMP/i2.xml" )"
+if printf '%s' "$b" | grep -q ' rule="affix"[^>]* into="CompilerOptions" into_p="src/compiler/types.ts:1" into_by="word" into_word="compiler">' \
+   && printf '%s' "$b" | grep -q '<rows by="line" n="4">' && printf '%s' "$b" | grep -q '<m n="moduleResolution" p="src/compiler/types.ts:5"/>' \
+   && ! printf '%s' "$b" | grep -q '<m n="option"\|WatchOptions\|BuildOptions'; then ok "(i2) compiler option: into CompilerOptions, its property lines are the rows"
+else no "(i2) compiler option: $( printf '%s' "$b" | head -c 500 )"; fi
+has_touch i2 "$TMP/i2.xml" src/compiler/commandLineParser.ts 4/4
+# i2b: `a new option for the compiler` (X is only `option`): the larger src/harness family of *Options names no holder for the task;
+# the family whose holder is named by a task word (compiler) wins and goes into CompilerOptions
+run tsh "--for=I need a new option for the compiler; where is it declared?" >"$TMP/i2b.xml"
+if block "$TMP/i2b.xml" | grep -q ' scope="src"[^>]* into="CompilerOptions"[^>]* into_by="word" into_word="compiler">\| into="CompilerOptions"[^>]* into_by="word" into_word="compiler">' \
+   && ! block "$TMP/i2b.xml" | grep -q 'harness'; then ok "(i2b) option for the compiler: the family with a holder named by the task wins over a larger one"
+else no "(i2b) option for the compiler: $( block "$TMP/i2b.xml" | head -c 400 )"; fi
+# i5: a family whose holders the task word names more than once is a tie; it gets no bonus and the bare holder still wins
+run hold3 "--for=add a new query-level setting" >"$TMP/i5.xml"
+if block "$TMP/i5.xml" | grep -q ' into="SettingsImpl" into_p="src/Core/Settings.cpp:[0-9]*" into_by="bare">'; then ok "(i5) holders tied on the task word get no bonus: the bare SettingsImpl still wins"
+else no "(i5) tied holders outranked the bare holder: $( block "$TMP/i5.xml" | head -c 400 )"; fi
+silent i3 hold2 "add a new query-level setting"
+if run hold2 "--for=add a new ax setting" >"$TMP/i3b.xml" && block "$TMP/i3b.xml" | grep -q ' into="AxSettingsImpl"[^>]* into_by="word" into_word="ax"><rows n="0"/>'; then ok "(i3) positive twin: a task word picks the holder; no list in its file: <rows n=\"0\"/>"
+else no "(i3) twin: $( block "$TMP/i3b.xml" | head -c 400 )"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
@@ -469,7 +606,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
@@ -480,7 +617,7 @@ legend = s[ i: s.index( "-->", i ) ]
 if "--" in legend[ 4: ]: sys.exit( "double hyphen in the legend" )
 m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))</ctx>$', s, re.S )
 if not m: sys.exit( "the block does not close right before </ctx>" )
-for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch) ([^>]*?)/?>', m.group( 1 ) ):
+for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows) ([^>]*?)/?>', m.group( 1 ) ):
     for a in re.findall( r'(\w+)="', attrs ):
         if not re.search( r'(?<![\w])' + a + r'=', legend ): sys.exit( "attribute %s= on <%s> is not in the legend" % ( a, tag ) )
 PY

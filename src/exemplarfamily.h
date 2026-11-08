@@ -31,7 +31,7 @@
 #include "infra/enumcount.h" // enumCountIsExact — kExemplarRuleTags has one row per ExemplarRule value
 #include "infra/sortutil.h" // svLess — the portable string_view order
 #include "infra/namesplit.h" // isIdentChar, stripQuotePair — the shared identifier byte and quote strip
-#include "langfacts.h" // typedInstanceRows
+#include "langfacts.h" // typedInstanceRows, xMacroRows, bracedPropertyRows
 #include "lexical.h" // forEachLexSubtoken / lexLowerByte — the one identifier splitter
 #include "model.h"
 #include "resolve.h" // trimWs, includerDir
@@ -79,6 +79,7 @@ struct ExemplarTask
     std::string phrase;
     std::vector<std::string> words;
     std::string head;
+    std::vector<std::string> others; // the task's other content words (outside X): a holder may be named by one (E3a-INTO)
 };
 
 struct ExemplarMember
@@ -88,6 +89,22 @@ struct ExemplarMember
     std::uint32_t line = 0;
     std::uint32_t loc = 0; // the member's own size in lines (0: not read)
     std::string alt; // a second name the repo spells it by (an attribute's registered name: `#[function("upper(..)")]` → upper)
+    NodeId sym = kNoNode; // the member's own definition (kNoNode: a registry entry, a row, no definition of its own)
+};
+
+// E3a-INTO: when the members are holders of X (`ServerSettingsImpl`, `MergeTreeSettingsImpl` for a new setting; `CompilerOptions`
+// for a new compiler option) a new X is not one more member: it is one more ROW inside one of them. `member` is that holder (index
+// into members), `rows` the existing X rows in it (the siblings to copy), read off its fields, its `name: type` property lines, or
+// the largest X-macro list in its file (C, C++: `#define COMMON_SETTINGS(DECLARE, ..)` with one `DECLARE(Type, name, ..)` per row).
+struct ExemplarInto
+{
+    std::size_t member = SIZE_MAX; // SIZE_MAX: not a holder family
+    bool bare = false; // picked as the one holder whose name carries no other kind word (no holder name matched a task word)
+    std::string word; // else the task word the holder's name carries
+    std::string_view by; // where the rows came from: "macro", "field" or "line" ("" when no rows were read)
+    std::string list; // by="macro": the list macro's name
+    std::uint32_t listLine = 0;
+    std::vector<ExemplarMember> rows;
 };
 
 struct ExemplarFamily
@@ -103,8 +120,9 @@ struct ExemplarFamily
     std::vector<ExemplarMember> members; // every non-test member in scope, typical first
     std::uint32_t unread = 0; // what the scan that found this family could not look at (set by the renderer; printed as unread= / oversized=)
     std::uint32_t oversized = 0;
+    ExemplarInto into; // E3a-INTO: the members hold X (plural names), so a new X goes INTO one of them (see settleInto)
 
-    void add( const Symbol& s ) { members.push_back( ExemplarMember { s.name, s.fileId, s.line, s.loc, {} } ); }
+    void add( const Symbol& s ) { members.push_back( ExemplarMember { s.name, s.fileId, s.line, s.loc, {}, s.id } ); }
 };
 
 namespace exemplar_detail
@@ -271,9 +289,44 @@ inline bool isBareNew( const std::vector<std::string>& w, std::size_t i, bool ve
 {
     return verbSeen && std::ranges::contains( kArticles, w[i] ) && i + 1 < w.size() && w[i + 1] == "new" && ( i == 0 || !std::ranges::contains( kVerbs, w[i - 1] ) );
 }
+
+// The task's content words outside X (3 or more letters, no creation verb or stop word), each split and singular, once each.
+inline std::vector<std::string> otherTaskWords( const std::vector<std::string>& w, const ExemplarTask& t )
+{
+    std::vector<std::string> out;
+    for( const std::string& word : w )
+    {
+        std::vector<std::string> parts;
+        appendPhraseParts( word, parts );
+        for( std::string& part : parts )
+        {
+            const bool content = part.size() >= 3 && !std::ranges::contains( kVerbs, part ) && !std::ranges::contains( kPhraseStops, part ) &&
+                                 !std::ranges::contains( t.words, part ) && !std::ranges::contains( out, part );
+            if( content )
+            {
+                out.push_back( std::move( part ) );
+            }
+        }
+    }
+    return out;
+}
 } // namespace exemplar_detail
 
 // The add-a-new-X readings of a task, in task order (see WHEN above); empty when it reads as none.
+namespace exemplar_detail
+{
+// One reading of the task at `start`, with the task's other content words (ExemplarTask.others) filled in.
+inline std::optional<ExemplarTask> readTaskAt( const std::vector<std::string>& w, std::size_t start )
+{
+    std::optional<ExemplarTask> t = readPhrase( w, start );
+    if( t )
+    {
+        t->others = otherTaskWords( w, *t );
+    }
+    return t;
+}
+} // namespace exemplar_detail
+
 inline std::vector<ExemplarTask> exemplarTasksOf( std::string_view task )
 {
     using namespace exemplar_detail;
@@ -294,7 +347,7 @@ inline std::vector<ExemplarTask> exemplarTasksOf( std::string_view task )
         {
             continue;
         }
-        std::optional<ExemplarTask> t = readPhrase( w, start );
+        std::optional<ExemplarTask> t = readTaskAt( w, start );
         if( t && std::ranges::none_of( out, [&]( const ExemplarTask& o )
                                        { return o.words == t->words; } ) )
         {
@@ -345,6 +398,30 @@ inline std::vector<std::string> keyWords( std::string_view name )
             tok.push_back( char( lexLowerByte( static_cast<unsigned char>( name[k] ) ) ) );
         }
         out.push_back( singular( std::move( tok ) ) ); } );
+    return out;
+}
+
+// Does one subtoken of `name` spell `word`'s plural (`Settings` for setting, `Registries` for registry)?
+inline bool subtokenIsPlural( std::string_view name, std::string_view word )
+{
+    const std::string plural = word.ends_with( 'y' ) ? std::string( word.substr( 0, word.size() - 1 ) ) + "ies" : std::string( word ) + "s";
+    bool hit = false;
+    forEachLexSubtoken( name, [&]( std::size_t b, std::size_t e )
+                        {
+        const std::string_view tok = name.substr( b, e - b );
+        hit = hit || ( tok.size() == plural.size() && std::ranges::equal( tok, plural, []( char x, char y )
+                                                                         { return char( lexLowerByte( static_cast<unsigned char>( x ) ) ) == y; } ) ); } );
+    return hit;
+}
+
+// The words of a holder's name other than X's head and kind words (`ServerSettingsImpl` → server; `SettingsImpl` → none).
+inline std::vector<std::string> holderWords( std::string_view name, std::string_view head )
+{
+    static constexpr std::array<std::string_view, 14> kKind { "impl", "base", "class", "interface", "type", "abstract", "default", "struct",
+                                                              "i", "t", "data", "info", "object", "obj" };
+    std::vector<std::string> out = keyWords( name );
+    std::erase_if( out, [&]( const std::string& w )
+                   { return w == head || std::ranges::contains( kKind, w ); } );
     return out;
 }
 
@@ -703,6 +780,10 @@ inline std::string_view attributeArgName( std::string_view line ) noexcept
 
 inline constexpr std::array<Lang, 7> kAttributeLangs { Lang::Rust, Lang::Python, Lang::TypeScript, Lang::JavaScript, Lang::Java, Lang::Kotlin, Lang::CSharp };
 
+// A family of holders of X (most member names carry its plural) where the task picks ONE holder by a word of X or of the task: the
+// pick settleInto makes (a tie between two holders is no pick, and earns no bonus). Defined below holderByWord.
+inline bool holderNamedByTask( const ExemplarTask& t, const ExemplarFamily& fam );
+
 // A candidate family: scoped, scored and kept when it beats the best so far.
 inline void consider( const IngestResult& ing, const ExemplarTask& t, std::optional<ExemplarFamily>& best, ExemplarFamily fam )
 {
@@ -713,6 +794,7 @@ inline void consider( const IngestResult& ing, const ExemplarTask& t, std::optio
     fam.scope = scopeMembers( ing, fam.members );
     bool headIn = false;
     fam.score = matchedWords( t, fam.key, fam.scope, headIn, fam.matched ) + ( fam.rule != ExemplarRule::Affix && keyNamesHead( t, fam.key ) ? 1 : 0 ); // an affix key is the head by construction
+    fam.score += holderNamedByTask( t, fam ) ? 1 : 0; // E3a-INTO: holders of X, one named by a word of the task (`option for the compiler`)
     if( fam.members.size() >= kExemplarFamilyMin && headIn && ( !best || familyBetter( fam, *best ) ) )
     {
         best = std::move( fam );
@@ -786,7 +868,7 @@ inline std::optional<ExemplarFamily> registryOf( const Symbol& s, std::string_vi
         if( k.size() >= 2 && std::ranges::none_of( fam.members, [&]( const ExemplarMember& m )
                                                    { return m.name == k; } ) )
         {
-            fam.members.push_back( ExemplarMember { std::string( k ), s.fileId, ln, 0, {} } );
+            fam.members.push_back( ExemplarMember { std::string( k ), s.fileId, ln, 0, {}, kNoNode } );
         }
         p = nl + 1;
     }
@@ -1066,6 +1148,332 @@ inline std::optional<ExemplarFamily> exemplarFamily( const IngestResult& ing, co
     return best;
 }
 
+// ── E3a-INTO: a family of HOLDERS of X ─────────────────────────────────────────────────────────────────────────────────────────
+// A member whose name carries the head word in its PLURAL form (`ServerSettingsImpl` for `setting`, `CompilerOptions` for `option`)
+// holds X's; when most members do, the family is one of holders, and a new X goes into ONE of them. Which one: the holder whose
+// name carries a word of X (`compiler option` → CompilerOptions), else a word of the task outside X, else the one holder whose name
+// carries no other word than X's and a kind word (`SettingsImpl` beside ServerSettingsImpl and MergeTreeSettingsImpl: the general
+// one, for `a query-level setting`, which no holder is named for). No such holder, or two that tie: the block is withheld (the other
+// holders are other scopes, never siblings to copy). The rows of the picked holder are its existing X's: the largest X-macro list in its
+// file (C, C++), its field definitions, or its `name: type` / `name?: type` property lines at the top of its body (TS, JS).
+namespace exemplar_detail
+{
+// The words of the task a holder name is matched by: X's words but the head, or (`also`) the task's other content words.
+inline std::vector<std::string> intoWords( const ExemplarTask& t, bool also )
+{
+    if( also )
+    {
+        return t.others;
+    }
+    std::vector<std::string> out;
+    std::ranges::copy_if( t.words, std::back_inserter( out ), [&]( const std::string& w )
+                          { return w != t.head; } );
+    return out;
+}
+
+// Is this a family of holders of X (most member names carry its plural)?
+inline bool isHolderFamily( const ExemplarTask& t, const ExemplarFamily& fam )
+{
+    const std::size_t holders = std::size_t( std::ranges::count_if( fam.members, [&]( const ExemplarMember& m )
+                                                                   { return subtokenIsPlural( m.name, t.head ); } ) );
+    return holders * 2 > fam.members.size();
+}
+
+// Each member's holder words (holderWords), in member order.
+inline std::vector<std::vector<std::string>> holderWordsOf( const ExemplarTask& t, const ExemplarFamily& fam )
+{
+    std::vector<std::vector<std::string>> hw( fam.members.size() );
+    std::ranges::transform( fam.members, hw.begin(), [&]( const ExemplarMember& m )
+                            { return holderWords( m.name, t.head ); } );
+    return hw;
+}
+
+// The holder whose name carries one of `words` (the most of them, then the fewest other words; a tie between two holders is no
+// pick): its index, or SIZE_MAX.
+inline std::size_t holderByWord( const ExemplarFamily& fam, const std::vector<std::vector<std::string>>& hw, const std::vector<std::string>& words, std::string& word )
+{
+    std::size_t best = SIZE_MAX, bestHits = 0;
+    bool tie = false;
+    for( std::size_t m = 0; m < fam.members.size(); ++m )
+    {
+        std::size_t hits = 0;
+        std::string first;
+        for( const std::string& w : words )
+        {
+            if( std::ranges::contains( hw[m], w ) )
+            {
+                first = first.empty() ? w : first;
+                ++hits;
+            }
+        }
+        // more task words first, then fewer other words (`CompilerOptions` before `WatchCompilerHostOfFilesAndCompilerOptions`)
+        const bool better = hits > bestHits || ( hits > 0 && hits == bestHits && hw[m].size() < hw[best].size() );
+        if( better )
+        {
+            best = m;
+            bestHits = hits;
+            word = first;
+            tie = false;
+        }
+        else if( hits > 0 && hits == bestHits && hw[m].size() == hw[best].size() && fam.members[m].name != fam.members[best].name )
+        {
+            tie = true;
+        }
+    }
+    return tie ? SIZE_MAX : best;
+}
+
+inline bool holderNamedByTask( const ExemplarTask& t, const ExemplarFamily& fam )
+{
+    if( !isHolderFamily( t, fam ) )
+    {
+        return false;
+    }
+    const std::vector<std::vector<std::string>> hw = holderWordsOf( t, fam );
+    std::string word;
+    return holderByWord( fam, hw, intoWords( t, false ), word ) != SIZE_MAX || holderByWord( fam, hw, intoWords( t, true ), word ) != SIZE_MAX;
+}
+
+// The X-macro list rows of a C / C++ file: per `#define NAME(P, ..)` block, the lines that start with one of its parameters
+// `P(`, up to the next preprocessor line; the largest block of kExemplarFamilyMin or more rows wins. A row's name is the argument at the
+// position with the most distinct identifier values over the block (`DECLARE(UInt64, max_threads, 0, ..)` → max_threads, not UInt64).
+inline void macroListRows( std::string_view txt, std::uint32_t fileId, ExemplarInto& into )
+{
+    struct Row
+    {
+        std::uint32_t line;
+        std::vector<std::string_view> args;
+    };
+    std::vector<Row> best, cur;
+    std::string_view bestName, curName;
+    std::uint32_t bestLine = 0, curLine = 0;
+    std::vector<std::string_view> params;
+    const auto close = [&]
+    {
+        if( cur.size() > best.size() )
+        {
+            best = std::move( cur );
+            bestName = curName;
+            bestLine = curLine;
+        }
+        cur.clear();
+        params.clear();
+    };
+    std::uint32_t ln = 0;
+    for( std::size_t p = 0; p < txt.size(); )
+    {
+        const std::size_t nl = std::min( txt.find( '\n', p ), txt.size() );
+        const std::string_view line = trimWs( txt.substr( p, nl - p ) );
+        p = nl + 1;
+        ++ln;
+        static constexpr std::array<std::string_view, 9> kDirectives { "define", "undef", "if", "ifdef", "ifndef", "elif", "else", "endif", "include" };
+        std::string_view d = line.starts_with( "#" ) ? trimWs( line.substr( 1 ) ) : std::string_view();
+        const std::string_view word = d.substr( 0, std::size_t( std::ranges::find_if_not( d, isIdentChar ) - d.begin() ) );
+        if( std::ranges::contains( kDirectives, word ) ) // a preprocessor line ends a list; `### Heading` inside a row's text does not
+        {
+            close();
+            if( word != "define" )
+            {
+                continue;
+            }
+            d = trimWs( d.substr( 6 ) );
+            const std::size_t open = d.find( '(' );
+            const std::string_view name = d.substr( 0, open );
+            if( open == std::string_view::npos || name.empty() || !std::ranges::all_of( name, isIdentChar ) )
+            {
+                continue;
+            }
+            const std::size_t shut = d.find( ')', open );
+            for( std::string_view ps = d.substr( open + 1, shut == std::string_view::npos ? std::string_view::npos : shut - open - 1 ); !ps.empty(); )
+            {
+                const std::size_t c = std::min( ps.find( ',' ), ps.size() );
+                params.push_back( trimWs( ps.substr( 0, c ) ) );
+                ps = c < ps.size() ? ps.substr( c + 1 ) : std::string_view();
+            }
+            curName = name;
+            curLine = ln;
+            continue;
+        }
+        const std::size_t open = line.find( '(' );
+        if( params.empty() || open == std::string_view::npos || !std::ranges::contains( params, trimWs( line.substr( 0, open ) ) ) )
+        {
+            continue;
+        }
+        Row r { ln, {} };
+        std::string_view a = line.substr( open + 1 );
+        a = a.substr( 0, std::min( a.find_first_of( "\"()" ), a.size() ) ); // the leading arguments, before a string or a nested call
+        while( !a.empty() )
+        {
+            const std::size_t c = std::min( a.find( ',' ), a.size() );
+            r.args.push_back( trimWs( a.substr( 0, c ) ) );
+            a = c < a.size() ? a.substr( c + 1 ) : std::string_view();
+        }
+        cur.push_back( std::move( r ) );
+    }
+    close();
+    if( best.size() < kExemplarFamilyMin )
+    {
+        return;
+    }
+    const auto ident = []( std::string_view v )
+    { return !v.empty() && !( v[0] >= '0' && v[0] <= '9' ) && std::ranges::all_of( v, isIdentChar ); };
+    std::size_t pos = 0, posDistinct = 0;
+    for( std::size_t k = 0; k < 8; ++k )
+    {
+        std::vector<std::string_view> vals;
+        for( const Row& r : best )
+        {
+            if( k < r.args.size() && ident( r.args[k] ) )
+            {
+                vals.push_back( r.args[k] );
+            }
+        }
+        std::ranges::sort( vals, sortutil::svLess );
+        const std::size_t distinct = std::size_t( std::unique( vals.begin(), vals.end() ) - vals.begin() );
+        if( distinct > posDistinct )
+        {
+            pos = k;
+            posDistinct = distinct;
+        }
+    }
+    if( posDistinct < kExemplarFamilyMin )
+    {
+        return;
+    }
+    into.by = "macro";
+    into.list = std::string( bestName );
+    into.listLine = bestLine;
+    for( const Row& r : best )
+    {
+        if( pos < r.args.size() && ident( r.args[pos] ) )
+        {
+            into.rows.push_back( ExemplarMember { std::string( r.args[pos] ), fileId, r.line, 0, {}, kNoNode } );
+        }
+    }
+}
+
+// The field definitions inside a holder's own span.
+inline void fieldRows( const IngestResult& ing, const Symbol& h, ExemplarInto& into )
+{
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Field && s.fileId == h.fileId && s.sigStartByte > h.sigStartByte && s.endByte <= h.endByte )
+        {
+            into.rows.push_back( ExemplarMember { s.name, s.fileId, s.line, s.loc, {}, s.id } );
+        }
+    }
+    into.by = into.rows.size() >= kExemplarFamilyMin ? "field" : "";
+    if( into.by.empty() )
+    {
+        into.rows.clear();
+    }
+}
+
+// The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
+inline void propertyLineRows( std::string_view body, std::uint32_t fileId, std::uint32_t firstLine, ExemplarInto& into )
+{
+    int depth = 0;
+    std::uint32_t ln = firstLine;
+    for( std::size_t p = 0; p < body.size(); )
+    {
+        const std::size_t nl = std::min( body.find( '\n', p ), body.size() );
+        std::string_view line = trimWs( body.substr( p, nl - p ) );
+        const int at = depth;
+        for( const char c : body.substr( p, nl - p ) )
+        {
+            depth += c == '{' ? 1 : c == '}' ? -1 : 0;
+        }
+        p = nl + 1;
+        const std::uint32_t here = ln++;
+        if( at != 1 )
+        {
+            continue;
+        }
+        line = line.starts_with( "readonly " ) ? trimWs( line.substr( 9 ) ) : line;
+        const std::size_t e = std::size_t( std::ranges::find_if_not( line, isIdentChar ) - line.begin() );
+        std::string_view rest = line.substr( e );
+        rest = rest.starts_with( '?' ) ? rest.substr( 1 ) : rest;
+        if( e > 0 && !( line[0] >= '0' && line[0] <= '9' ) && rest.starts_with( ':' ) )
+        {
+            into.rows.push_back( ExemplarMember { std::string( line.substr( 0, e ) ), fileId, here, 0, {}, kNoNode } );
+        }
+    }
+    into.by = into.rows.size() >= kExemplarFamilyMin ? "line" : "";
+    if( into.by.empty() )
+    {
+        into.rows.clear();
+    }
+}
+
+// The rows of the picked holder (see the banner); none read leaves `by` empty and the holder is printed alone.
+inline void holderRows( const IngestResult& ing, const ExemplarMember& holder, ExemplarInto& into )
+{
+    if( holder.sym >= ing.symbols.size() )
+    {
+        return;
+    }
+    const Symbol& h = ing.symbols[holder.sym];
+    const std::optional<std::string> txt = docparse::detail::readWholeFile( diskPath( ing, h.fileId ) );
+    if( !txt )
+    {
+        return;
+    }
+    if( langFacts( h.lang ).xMacroRows )
+    {
+        macroListRows( *txt, h.fileId, into );
+    }
+    if( into.by.empty() )
+    {
+        fieldRows( ing, h, into );
+    }
+    if( into.by.empty() && langFacts( h.lang ).bracedPropertyRows && h.sigStartByte < h.endByte && h.endByte <= txt->size() )
+    {
+        const std::string_view span = std::string_view( *txt ).substr( h.sigStartByte, h.endByte - h.sigStartByte );
+        const std::size_t open = span.find( '{' );
+        if( open != std::string_view::npos )
+        {
+            const std::uint32_t first = h.line + std::uint32_t( std::ranges::count( span.substr( 0, open ), '\n' ) );
+            propertyLineRows( span.substr( open ), h.fileId, first, into );
+        }
+    }
+}
+} // namespace exemplar_detail
+
+// Settle a family of holders (see the banner): false when the block is withheld (holders, and no single one the task points into).
+// A family that is not one of holders is left as it is (true).
+inline bool settleInto( const IngestResult& ing, const ExemplarTask& t, ExemplarFamily& fam )
+{
+    using namespace exemplar_detail;
+    if( !isHolderFamily( t, fam ) )
+    {
+        return true;
+    }
+    const std::vector<std::vector<std::string>> hw = holderWordsOf( t, fam );
+    ExemplarInto& into = fam.into;
+    into.member = holderByWord( fam, hw, intoWords( t, false ), into.word );
+    into.member = into.member != SIZE_MAX ? into.member : holderByWord( fam, hw, intoWords( t, true ), into.word );
+    if( into.member == SIZE_MAX )
+    {
+        std::vector<std::size_t> bare;
+        for( std::size_t m = 0; m < fam.members.size(); ++m )
+        {
+            if( hw[m].empty() && subtokenIsPlural( fam.members[m].name, t.head ) && ( bare.empty() || fam.members[bare.front()].name != fam.members[m].name ) )
+            {
+                bare.push_back( m );
+            }
+        }
+        if( bare.size() != 1 )
+        {
+            return false;
+        }
+        into.member = bare.front();
+        into.bare = true;
+        into.word.clear();
+    }
+    holderRows( ing, fam.members[into.member], into );
+    return true;
+}
+
 // ── E3a TOUCH LIST (co-mention) ────────────────────────────────────────────────────────────────────────────────────────────────
 // Where a new X must also go: the files that mention at least half of the family (half the units),
 // outside the members' own files. The count is over DISTINCT units (see TouchUnits): distinct member names (the registered name, else the
@@ -1074,7 +1482,7 @@ inline std::optional<ExemplarFamily> exemplarFamily( const IngestResult& ing, co
 // FORMS, folded (lowercase, `_` and `-` dropped, so snake_case, CamelCase, kebab-case and UPPER_CASE meet): its name, its registered
 // name (alt), or its file's module stem (`mod upper;`, `import './contrib/bracketMatching/browser/bracketMatching'`). Forms shorter
 // than kExemplarFormMinBytes and generic stems (index, main, utils, ..) are not read. Test paths, test-helper, sample, example and
-// benchmark directories, docs (.md .rst .adoc .txt .html), vendored trees, generated files (a generator banner, or `generated` /
+// benchmark directories, docs (.md .rst .adoc .txt .html, and docs/ or doc/ trees: a site generator's copies), vendored trees, generated files (a generator banner, or `generated` /
 // `.pb.` / `_pb2` in the path) and files marked frozen or baseline (a path segment holding `baseline` or `frozen`) are not read.
 // Ranked by share, then count, then path.
 // HOISTING: the forms are hashed once into one sorted array; each file is read and tokenized once, and every token is one bit test
@@ -1236,7 +1644,7 @@ inline TouchUnits touchUnits( const IngestResult& ing, const ExemplarFamily& fam
 inline bool touchSkipPath( std::string_view p ) noexcept
 {
     static constexpr std::array<std::string_view, 7> kDocExt { ".md", ".rst", ".adoc", ".txt", ".html", ".htm", ".mdx" };
-    static constexpr std::array<std::string_view, 16> kSkipSeg { "vendor/", "third_party/", "node_modules/", "testing/", "testdata/", "fixtures/", "mocks/", "fake/",
+    static constexpr std::array<std::string_view, 19> kSkipSeg { "vendor/", "third_party/", "node_modules/", "testing/", "testdata/", "fixtures/", "mocks/", "fake/", "docs/", "doc/", "unittests/",
                                                                  "sample/", "samples/", "example/", "examples/", "benchmark/", "benchmarks/", "bench/", "benches/" };
     if( isTestPath( p ) || std::ranges::any_of( kDocExt, [&]( std::string_view e )
                                                 { return endsWithLowerAscii( p, e ); } ) ||
@@ -1490,6 +1898,22 @@ inline constexpr std::string_view kForExemplarFamilyCompactLegend =
     "registered name or file stem; a shared name or stem counts once): where siblings are registered; shown=/capped=\"1\": cut; floor=\"1\" unread=K: K files unreadable or over 4 MiB, total= is a floor. <touch> p= "
     "the line to copy, share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. Tests, docs, "
     "vendored, generated, frozen, baseline files unread. -->";
+// E3a-INTO: the legend of into= and <rows>, spliced in before <touch_list> only when the family prints into= (familyLegend), so a family
+// that is not one of holders keeps its legend bytes.
+inline constexpr std::string_view kForExemplarIntoLegend =
+    "into= when the members HOLD of= (their names carry its plural: ServerSettingsImpl for a setting), a new one is a row inside one "
+    "of them, not a new member: into= that holder, into_p= its file:line, into_by=\"word\" when its name carries into_word= (a word of "
+    "the task), \"bare\" when no holder is named for the task and it is the one holder named by nothing but of= and a kind word (the "
+    "general one); n= then counts the holders and the other holders (other scopes) are not printed, and no holder the task points into "
+    "prints no block. <rows> the existing rows of the holder (the siblings to copy): by=\"macro\" the largest X-macro list in its "
+    "file, list= that macro, list_p= its #define, by=\"field\" its field definitions, by=\"line\" its name: type lines; n= the rows, "
+    "<m> the first in listing order, shown=/capped=\"1\" when cut; n=\"0\": none could be read. The <touch_list> then counts mentions "
+    "of the rows. ";
+inline constexpr std::string_view kForExemplarIntoCompactLegend =
+    "into= the members hold of= (plural names): a new one is a row in this holder, into_p= its file:line, into_by= \"word\" (its name "
+    "has into_word=, a task word) or \"bare\" (the one general holder); n= counts holders, others unprinted. <rows> its existing rows: "
+    "by= macro (list= X-macro, list_p= its #define), field or line (name: type); n= rows, <m> first rows in order, "
+    "shown=/capped=\"1\": cut; n=\"0\": unread. ";
 // The legend of the no-family form (found="0"): short, since it carries no rows to define.
 inline constexpr std::string_view kForExemplarNoFamilyLegend =
     "<!-- ripwire for exemplar_family: the task reads as adding one more of=, and no family of existing siblings resolved (found=\"0\"), "
@@ -1539,6 +1963,49 @@ inline std::string scanSkipAttrs( std::uint32_t unread, std::uint32_t oversized 
            + ( oversized > 0 ? " oversized=\"" + std::to_string( oversized ) + "\"" : std::string() );
 }
 
+namespace exemplar_detail
+{
+// The into= / <rows> legend text joins the block legend `out` (before its <touch_list>) only when the family prints into=.
+inline void addIntoLegend( std::string& out, const ExemplarFamily& fam, bool compactLegend )
+{
+    if( fam.into.member != SIZE_MAX )
+    {
+        out.insert( out.find( "<touch_list>" ), compactLegend ? kForExemplarIntoCompactLegend : kForExemplarIntoLegend );
+    }
+}
+
+// The rest of an into= family's open tag and its body: the one holder picked, its <rows> and the touch list over the rows.
+inline std::string intoFamilyXml( const IngestResult& ing, const ExemplarFamily& fam, const auto& e, const auto& loc, std::string out )
+{
+    if( fam.rule == ExemplarRule::Affix )
+    {
+        out += " grouping=\"" + std::string( kAffixGrouping ) + "\""; // the row says itself that names alone grouped it
+    }
+    const ExemplarInto& into = fam.into;
+    // E3a-INTO: the members hold X; a new X is a row in the one picked (the other holders are other scopes and are not printed)
+    const ExemplarMember& h = fam.members[into.member];
+    out += " into=\"" + e( h.name ) + "\" into_p=\"" + loc( h.fileId, h.line ) + "\"";
+    out += into.bare ? std::string( " into_by=\"bare\"" ) : " into_by=\"word\" into_word=\"" + e( into.word ) + "\"";
+    out += ">";
+    if( into.rows.empty() )
+    {
+        return out + "<rows n=\"0\"/></exemplar_family>"; // the holder is named; its rows could not be read off it
+    }
+    out += "<rows by=\"" + std::string( into.by ) + "\"";
+    out += into.list.empty() ? std::string() : " list=\"" + e( into.list ) + "\" list_p=\"" + loc( h.fileId, into.listLine ) + "\"";
+    out += " n=\"" + std::to_string( into.rows.size() ) + "\"";
+    out += into.rows.size() > kExemplarMemberRows ? " shown=\"" + std::to_string( kExemplarMemberRows ) + "\" capped=\"1\">" : std::string( ">" );
+    for( std::size_t i = 0; i < into.rows.size() && i < kExemplarMemberRows; ++i )
+    {
+        out += "<m n=\"" + e( into.rows[i].name ) + "\" p=\"" + loc( into.rows[i].fileId, into.rows[i].line ) + "\"/>";
+    }
+    ExemplarFamily rowFam { .rule = ExemplarRule::Registry, .key = fam.key }; // rows have no file stem of their own (all in the holder's file)
+    rowFam.members = into.rows;
+    out += "</rows>" + touchListXml( ing, exemplarTouchList( ing, rowFam ) );
+    return out + "</exemplar_family>";
+}
+} // namespace exemplar_detail
+
 inline std::string forExemplarFamilyXml( const IngestResult& ing, const ExemplarTask& t, const ExemplarFamily& fam, bool compactLegend )
 {
     std::vector<char> esc;
@@ -1547,12 +2014,17 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
     const auto loc = [&]( std::uint32_t f, std::uint32_t l )
     { return e( rootRelPath( ing, f ) ) + ":" + std::to_string( l ); };
     std::string out( compactLegend ? kForExemplarFamilyCompactLegend : kForExemplarFamilyLegend );
+    exemplar_detail::addIntoLegend( out, fam, compactLegend );
     out += "<exemplar_family of=\"" + e( t.phrase ) + "\" rule=\"" + std::string( kExemplarRuleTags[std::size_t( fam.rule )] ) + "\" key=\"" + e( fam.key ) + "\"";
     if( fam.keyAt )
     {
         out += " key_p=\"" + loc( fam.keyFile, fam.keyLine ) + "\"";
     }
     out += " matched=\"" + e( fam.matched ) + "\" scope=\"" + e( fam.scope ) + "\" n=\"" + std::to_string( fam.members.size() ) + "\"" + scanSkipAttrs( fam.unread, fam.oversized );
+    if( fam.into.member != SIZE_MAX )
+    {
+        return exemplar_detail::intoFamilyXml( ing, fam, e, loc, std::move( out ) ); // into= prints no member rows, so no shown=/capped=
+    }
     if( fam.members.size() > kExemplarMemberRows )
     {
         out += " shown=\"" + std::to_string( kExemplarMemberRows ) + "\" capped=\"1\""; // CAP-DISCLOSE: the rows are cut, n= counts all
@@ -1593,6 +2065,11 @@ inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph
                 t = &r;
             }
         }
+    }
+    if( fam && !settleInto( ing, *t, *fam ) )
+    {
+        fam.reset(); // holders of X, and none the task points into: no sibling to show (E3a-INTO)
+        t = nullptr;
     }
     std::vector<char> esc;
     if( t == nullptr )
