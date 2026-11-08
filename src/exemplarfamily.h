@@ -33,6 +33,7 @@
 #include "infra/namesplit.h" // isIdentChar, stripQuotePair — the shared identifier byte and quote strip
 #include "langfacts.h" // typedInstanceRows, xMacroRows, bracedPropertyRows
 #include "lexical.h" // forEachLexSubtoken / lexLowerByte — the one identifier splitter
+#include "memberowner.h" // TOUCH-SYM: MemberOwners / qualifiedMemberName — a <touch> row's n= as every member row spells it
 #include "model.h"
 #include "resolve.h" // trimWs, includerDir
 #include "serialize.h" // escapeXml
@@ -1626,6 +1627,7 @@ struct ExemplarTouch
     bool byStem = false; // the share counts file stems, not names
     std::uint32_t line = 0; // the line to copy: the first naming the typical member, else the first code line, an import, a comment
     std::string text; // that line, trimmed
+    std::uint32_t byte = 0; // TOUCH-SYM: the file offset of text's first byte (the definition holding the line is looked up by it)
 };
 
 namespace exemplar_detail
@@ -1907,7 +1909,9 @@ inline ExemplarTouch scanTouchFile( std::uint32_t f, std::string_view txt, const
         lineStart = next; } );
     if( bestStart != std::string_view::npos )
     {
-        out.text = std::string( trimWs( txt.substr( bestStart, txt.find( '\n', bestStart ) - bestStart ) ) );
+        const std::string_view trimmed = trimWs( txt.substr( bestStart, txt.find( '\n', bestStart ) - bestStart ) );
+        out.text = std::string( trimmed );
+        out.byte = std::uint32_t( trimmed.data() - txt.data() );
     }
     return out;
 }
@@ -2009,7 +2013,8 @@ inline constexpr std::string_view kForExemplarFamilyLegend =
     "import list), a candidate to edit, not a guarantee; a member is matched by its name, its registered name or its file's stem, with "
     "snake, Camel, kebab and UPPER forms folded, and a name or stem shared by several members counts once. total= such files, shown= and "
     "capped=\"1\" when fewer rows are printed; floor=\"1\" unread=K when K listing files could not be read or are over 4 MiB (total= then counts only the others). <touch> p=file:line the line to copy (a lead to verify when grouping= is weak): the first naming the typical member (the first <m>), "
-    "else the first other code line mentioning one, an import line or a comment only when no code line does; share=named/of the distinct "
+    "else the first other code line mentioning one, an import line or a comment only when no code line does; n= the innermost definition holding "
+    "that line (a member as Owner.name, as the <d> rows spell it; no n= when no definition holds it); share=named/of the distinct "
     "member names the file mentions out of the distinct names (by=\"stem\": the distinct file stems it mentions out of the distinct stems), "
     "its text that line, cut=\"1\" when cut to 120 bytes. Test, docs, vendored, generated, frozen and baseline files are not read. The "
     "answer above is unchanged, and these bytes are not in est_tokens -->";
@@ -2021,7 +2026,7 @@ inline constexpr std::string_view kForExemplarFamilyCompactLegend =
     "half of them; n= members (tests, samples, examples, benchmarks out); <m> p= file:line, loc= lines, the first nearest the median size (registry: "
     "listing order); shown=/capped=\"1\": rows cut; oversized=N registry candidates over 4000 lines and unread=N files not read were skipped (a family may hide there; found=\"0\": none resolved). <touch_list> total= files outside the members' own naming at least half of them (by name, "
     "registered name or file stem; a shared name or stem counts once): where siblings are registered; shown=/capped=\"1\": cut; floor=\"1\" unread=K: K files unreadable or over 4 MiB, total= is a floor. <touch> p= "
-    "the line to copy, share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. Tests, docs, "
+    "the line to copy, n= the innermost def holding it (Owner.name for a member; none: no def), share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. Tests, docs, "
     "vendored, generated, frozen, baseline files unread. -->";
 // E3a-INTO: the legend of into= and <rows>, spliced in before <touch_list> only when the family prints into= (familyLegend), so a family
 // that is not one of holders keeps its legend bytes.
@@ -2048,10 +2053,57 @@ static_assert( kForExemplarFamilyLegend.find( "--", 4 ) == kForExemplarFamilyLeg
                    && kForExemplarNoFamilyLegend.find( "--", 4 ) == kForExemplarNoFamilyLegend.size() - 3,
                "the only double hyphen in a legend comment is its closing: one inside is not well-formed XML" );
 
+// TOUCH-SYM: the innermost indexed definition holding each touch row's line (kNoNode: none does), by byte-span containment as
+// @FILE:LINE resolves a line (graph.h resolveAtSeed): a definition holds the line when its [sigStartByte, endByte) meets the line's
+// text, the innermost is the latest start (a tie: the shorter span). Two DISJOINT definitions sharing the line are no claim: kNoNode,
+// never a pick. A file's module-scope pseudo-definition holds every line and names none.
+// HOISTING: one pass over the symbols for all the rows (at most kExemplarTouchRows), never one pass per row.
+inline std::vector<NodeId> touchHolders( const IngestResult& ing, std::span<const ExemplarTouch> rows )
+{
+    std::vector<NodeId> best( rows.size(), kNoNode );
+    std::vector<std::uint32_t> minEnd( rows.size(), UINT32_MAX ); // the earliest end among a row's holders: before best's start = disjoint
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::ModuleScope )
+        {
+            continue;
+        }
+        for( std::size_t i = 0; i < rows.size(); ++i )
+        {
+            const ExemplarTouch& r = rows[i];
+            if( s.fileId != r.fileId || s.sigStartByte >= r.byte + r.text.size() || s.endByte <= r.byte )
+            {
+                continue;
+            }
+            minEnd[i] = std::min( minEnd[i], s.endByte );
+            const Symbol* b = best[i] == kNoNode ? nullptr : &ing.symbols[best[i]];
+            if( !b || s.sigStartByte > b->sigStartByte || ( s.sigStartByte == b->sigStartByte && s.endByte < b->endByte ) )
+            {
+                best[i] = s.id;
+            }
+        }
+    }
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( best[i] != kNoNode && minEnd[i] <= ing.symbols[best[i]].sigStartByte )
+        {
+            best[i] = kNoNode; // two disjoint definitions on the line
+        }
+    }
+    return best;
+}
+
 // The <touch_list> element of a family: total=, the cap, and one <touch> row per listing file (see the legend).
 inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchList& list )
 {
     const std::vector<ExemplarTouch>& touch = list.rows;
+    const std::span<const ExemplarTouch> shown( touch.data(), std::min( touch.size(), kExemplarTouchRows ) );
+    const std::vector<NodeId> holder = touchHolders( ing, shown );
+    std::optional<MemberOwners> owners; // built only when a holder could print an owner (one pass over the symbols)
+    if( std::ranges::any_of( holder, [&]( NodeId h ) { return h != kNoNode && memberOwnerPossible( ing.symbols[h] ); } ) )
+    {
+        owners.emplace( ing );
+    }
     std::vector<char> esc;
     const auto e = [&]( std::string_view s )
     { return std::string( escapeXml( s, esc ) ); };
@@ -2065,15 +2117,21 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchLis
         out += " shown=\"" + std::to_string( kExemplarTouchRows ) + "\" capped=\"1\""; // CAP-DISCLOSE
     }
     out += touch.empty() ? "/>" : ">";
-    for( std::size_t i = 0; i < touch.size() && i < kExemplarTouchRows; ++i )
+    for( std::size_t i = 0; i < shown.size(); ++i )
     {
-        const ExemplarTouch& r = touch[i];
+        const ExemplarTouch& r = shown[i];
         std::size_t keep = std::min( r.text.size(), kExemplarTouchLineMax );
         while( keep > 0 && keep < r.text.size() && ( static_cast<unsigned char>( r.text[keep] ) & 0xC0 ) == 0x80 )
         {
             --keep; // never split a UTF-8 sequence
         }
-        out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\" share=\"" + std::to_string( r.mentioned ) + "/" + std::to_string( r.of ) + "\"";
+        out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\"";
+        if( holder[i] != kNoNode )
+        {
+            const Symbol& h = ing.symbols[holder[i]];
+            out += " n=\"" + e( owners ? qualifiedMemberName( *owners, h ) : h.name ) + "\"";
+        }
+        out += " share=\"" + std::to_string( r.mentioned ) + "/" + std::to_string( r.of ) + "\"";
         out += r.byStem ? " by=\"stem\"" : "";
         out += ( keep < r.text.size() ? " cut=\"1\">" : ">" ) + e( std::string_view( r.text ).substr( 0, keep ) ) + "</touch>";
     }
