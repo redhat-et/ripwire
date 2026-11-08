@@ -18,6 +18,11 @@
 #      dialects: exemplar_family oversized=/unread=, lit body=/longer=/try=, shortkey's rungs (n=leaf, n=substring, held=lit,
 #      floor=1), reexports glob=/cands=/ns=/q=/q_by=/q_unmatched=/as_skipped=, dotted_strings sink=/loader=/tmpl=, doc_body
 #      held="budget". Non-vacuous: the exemplar, lit, shortkey and reexports blocks each print, and each misses some attribute.
+#   7  same_as unambiguous (CodeRabbit 4505000660, 2026-11-08): a fold names its source by n=, so it folds only when every
+#      earlier row with that n= prints the same text; on a fixture of four top-level run() functions (two texts, two files each)
+#      no same_as= row has an earlier same-n= row of another text (positive twin: both texts print under n="run")
+#   8  same_as dictionary (CodeRabbit 4505000658, 2026-11-08): `--legend-dict` defines the same_as= clause, and the MCP `for`
+#      verb, asked twice in one session on arm 3's fixture, carries same_as= both times and the clause only the first time
 #
 # Usage: test/forsizetrimcheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -41,6 +46,10 @@ printf 'def widget_other(x):\n    return x\n' > "$L/other.py"
 S="$TMP/same"; mkdir -p "$S"
 printf 'class A:\n    def run(self, widget_frobnicate_value, step_parameter_name):\n        """Run the widget frobnicate step for this one."""\n        return widget_frobnicate_value\n' > "$S/a.py"
 printf 'class B:\n    def run(self, widget_frobnicate_value, step_parameter_name):\n        """Run the widget frobnicate step for this one."""\n        return widget_frobnicate_value + 1\n' > "$S/b.py"
+# A: four top-level run() functions sharing one n=: two with one doc+signature text, two with another (arm 7)
+A="$TMP/ambig"; mkdir -p "$A"
+for f in a b; do printf 'def run(widget_frobnicate_value, step_parameter_name):\n    """Run the widget frobnicate step for this one."""\n    return widget_frobnicate_value\n' > "$A/$f.py"; done
+for f in c d; do printf 'def run(widget_frobnicate_value, other_parameter_name):\n    """Run the widget frobnicate step for the other one."""\n    return widget_frobnicate_value\n' > "$A/$f.py"; done
 # T: 60 files, each with two classes holding a same-named method: the tail rows past the head name it
 T="$TMP/tail"; mkdir -p "$T"
 i=0
@@ -62,6 +71,12 @@ run "$L" "$TMP/l.xml" "--for=widget frobnicate"
 run "$S" "$TMP/s.xml" "--for=run the widget frobnicate step"
 run "$S" "$TMP/s.full" "--for=run the widget frobnicate step" --legend=full
 run "$T" "$TMP/t.xml" "--for=widget frobnicate"
+run "$A" "$TMP/a.xml" "--for=run the widget frobnicate step"
+( cd "$S" || exit 9; for id in 1 2; do printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$id" "$S" "run the widget frobnicate step"; done \
+    | HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" --mcp ) > "$TMP/m.two" 2> "$TMP/m.two.err"
+echo $? > "$TMP/m.two.rc"
+( cd "$S" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" --legend-dict ) > "$TMP/dict" 2> "$TMP/dict.err"
+echo $? > "$TMP/dict.rc"
 # X: a handler family, a dotted key and a TS re-export (arm 6's blocks)
 X="$TMP/blocks"; mkdir -p "$X/widgets"
 printf 'class WidgetHandler:\n    """base of every widget handler"""\n    def handle(self, w):\n        return w\n\n' > "$X/widgets/registry.py"
@@ -77,7 +92,7 @@ for lg in compact full; do
 done
 
 python3 - "$TMP" <<'PY'
-import html, re, sys
+import html, json, re, sys
 T = sys.argv[1]; fails = 0
 def say(ok, msg):
     global fails
@@ -89,7 +104,7 @@ def load(name):
     except OSError:
         return None
     return tx if rc == "0" and "<ctx" in tx else None
-ans = {n: load(n) for n in ("p.xml", "p.full", "l.xml", "s.xml", "s.full", "t.xml")}
+ans = {n: load(n) for n in ("p.xml", "p.full", "l.xml", "s.xml", "s.full", "t.xml", "a.xml")}
 say(all(ans.values()), "0 every answer ran (rc 0, a <ctx> root): " + ",".join(n for n, v in ans.items() if not v))
 body = lambda t: re.sub(r"<!--.*?-->", "", t, flags=re.S)
 PAIRS = [("; d layer=:", ' layer="'), ("; iface implementors=N", ' implementors="'), ("; field name= type= owner= rel=", "<field "),
@@ -112,6 +127,36 @@ t = ans["t.xml"] or ""
 syms = [s.split(",") for s in re.findall(r'<t p="[^"]*" sym="([^"]*)"', t)]
 say(bool(syms) and all(len(v) == len(set(v)) for v in syms), f"5 sym once: {sum(len(v) != len(set(v)) for v in syms)} of {len(syms)} tail rows repeat a name")
 say(any("widget_frobnicate" in v for v in syms), "5 twin: a tail row lists the shared method name")
+# arm 7: a same_as= row's n= names exactly one earlier text
+def ambiguous(tx):
+    seen, bad = [], []   # (n=, text) of each earlier row that printed its text
+    for a, t in re.findall(r'<d ([^>]*)>(.*?)</d>', tx, re.S):
+        n = re.search(r'(?:^|\s)n="([^"]*)"', a); src = re.search(r'same_as="([^"]*)"', a)
+        if src:
+            if len({txt for m, txt in seen if m == src.group(1)}) != 1:
+                bad.append(src.group(1))
+        elif n:
+            seen.append((n.group(1), t))
+    return bad, seen
+amb = ans["a.xml"] or ""
+bad7 = [(nm, b) for nm in ("s.xml", "s.full", "a.xml") for b in ambiguous(ans[nm] or "")[0]]
+say(amb != "" and not bad7, f"7 same_as unambiguous: no fold names an n= shared by another text ({bad7[:4]})")
+say(len({t for m, t in ambiguous(amb)[1] if m == "run"}) == 2, "7 twin: both run() texts print under n=\"run\"")
+# arm 8: the same_as= clause is a session-dictionary entry
+def raw(name):
+    try:
+        return open(f"{T}/{name}", errors="replace").read() if open(f"{T}/{name}.rc").read().strip() == "0" else ""
+    except OSError:
+        return ""
+texts = []
+for line in raw("m.two").splitlines():
+    try:
+        texts.append("".join(c.get("text", "") for c in json.loads(line)["result"]["content"]))
+    except (ValueError, KeyError, TypeError):
+        pass
+say("for: d same_as=N:" in raw("dict"), "8 dictionary: --legend-dict defines the same_as= clause")
+say(len(texts) == 2 and all('same_as="' in t for t in texts) and "d same_as=N:" in texts[0] and "d same_as=N:" not in texts[1],
+    f"8 served once: both MCP answers fold, only the first carries the clause ({[('same_as=\"' in t, 'd same_as=N:' in t) for t in texts]})")
 # arm 6: per block, (clause text in the legend) == (attribute on the block's rows)
 BLOCKS = {
     "exemplar_family": (r"<!-- ripwire for exemplar_family.*?</exemplar_family>", [

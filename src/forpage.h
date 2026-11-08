@@ -815,7 +815,8 @@ inline constexpr std::uint32_t kNoPageRow = UINT32_MAX;
 // SIZE-2 (size-trim): the file class of a widened tail row, by its lead symbol's language and its path. The first five fold, on a
 // code question, unless the task keeps the class (tailFoldKept); Test and Code never fold. Test = a code file under a test path
 // (filter.h isTestPath, the file-level half of the test=1 predicate: a test-scoped symbol inside a source file keeps that file
-// code): it defines symbols an edit may have to follow, so it is code to the fold (round 2: test code never folds).
+// code; a shell script under a test path is test code too): it defines symbols an edit may have to follow, so it is code to the
+// fold (round 2: test code never folds).
 enum class TailFoldClass : std::uint8_t
 {
     Doc,
@@ -842,7 +843,7 @@ inline TailFoldClass tailFoldClass( const IngestResult& ing, NodeId lead, std::s
     const bool test = isTestPath( relPath );
     if( facts.shellScript )
     {
-        return test ? TailFoldClass::TestData : TailFoldClass::Script;
+        return test ? ( isCodeLang( lang ) ? TailFoldClass::Test : TailFoldClass::TestData ) : TailFoldClass::Script;   // a shell test is test code (CodeRabbit 4505000649)
     }
     if( isCodeLang( lang ) )
     {

@@ -6053,6 +6053,19 @@ struct SigRowSpelling
 };
 // SIZE-3a (size-trim): the shortest doc+signature text a row folds (shorter text costs less than the attribute naming its twin)
 inline constexpr std::size_t kSigFoldTextMinBytes = 40;
+// SIZE-3a: the n= a repeat of `text` names, or "" to print the text: the first earlier row that printed it, unless another earlier
+// row with that n= printed a different text (an overload, or a same-named function in another file: same_as= names its source by
+// n=, so the reader could take the wrong signature; CodeRabbit 4505000660). `printed` is every row that printed its text, in order.
+inline std::string_view sameAsSourceOf( const std::vector<std::pair<std::string, std::string_view>>& printed, std::string_view text )
+{
+    const auto src = std::ranges::find_if( printed, [ & ]( const auto& row ) { return row.first == text; } );
+    if( src == printed.end() )
+    {
+        return {};
+    }
+    const bool ambiguous = std::ranges::any_of( printed, [ & ]( const auto& row ) { return row.second == src->second && row.first != text; } );
+    return ambiguous ? std::string_view() : src->second;
+}
 // The value of ` name="…"` inside one tag's attribute text, or "" (SIZE-3a moved it here from forfilesyms.h: the <d> head too; the answer's own markup: no attribute holds a raw quote).
 inline std::string_view attrOf( std::string_view tag, std::string_view name )
 {
@@ -6538,7 +6551,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             w.write( kExtentSuspectRowLegend );
         }
         std::vector<char> fileNotesPending( sigFiles.size(), 1 );   // P7: a file's notes ride its FIRST live row
-        std::vector<std::pair<std::string, std::string_view>> firstWithText;   // SIZE-3a: (doc+sig text, the n= of the first row printing it)
+        std::vector<std::pair<std::string, std::string_view>> printedText;   // SIZE-3a: (doc+sig text, n=) of each row that printed its text
         for( const SigEntry& e : entries )
         {
             if( e.dropped )
@@ -6551,31 +6564,27 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             // (the #362 review round's next_offset=2^32 seam).
             pushShownSigId( shownIdsOut, order, std::uint32_t( e.globalRank - rankBase ) );
             // SIZE-3a: a repeat of an earlier row's text keeps every attribute (n= l= p= r= …) and names that row instead of the text
-            std::string sameAs;
+            std::string      key = spelling.foldRepeatedText ? e.doc + '\0' + e.sig : std::string();   // tens of rows: linear scans
+            std::string_view sameAs;
             if( spelling.foldRepeatedText && e.doc.size() + e.sig.size() >= kSigFoldTextMinBytes )
             {
-                std::string key = e.doc + '\0' + e.sig;   // a shown head is tens of rows: a linear scan, no node-based map
-                const auto  it  = std::ranges::find_if( firstWithText, [ & ]( const auto& seen ) { return seen.first == key; } );
-                if( it == firstWithText.end() )
-                {
-                    firstWithText.emplace_back( std::move( key ), attrOf( e.head, "n" ) );
-                }
-                else
-                {
-                    sameAs = std::string( it->second );
-                }
+                sameAs = sameAsSourceOf( printedText, key );
             }
             if( sameAs.empty() )
             {
                 writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
                 if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
                 w.write( escapeXml( e.sig, esc ) );
+                if( spelling.foldRepeatedText )
+                {
+                    printedText.emplace_back( std::move( key ), attrOf( e.head, "n" ) );   // e.head outlives the loop (entries is not touched)
+                }
             }
             else
             {
                 std::string head = e.head;
                 head.pop_back();   // the '>'
-                head += " same_as=\"" + sameAs + "\">";
+                head += " same_as=\"" + std::string( sameAs ) + "\">";
                 writeSigHeadWithEnd( w, head, e.endLine );
             }
             w.write( e.notes );                                                // L3: symbol notes on this <d> (inert when null)
