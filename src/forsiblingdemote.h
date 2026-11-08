@@ -20,7 +20,8 @@
 //   (K5) a kept <d> row's same_as= names it (its doc+signature text is the one that row points to).
 // The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. A token budget (CLI --token-budget /
 // --max-tokens, MCP budget_tokens) leaves the answer as shaped. The demoted bytes are priced markup, so the root's est_tokens= is
-// re-priced once over both post-passes (R-DEDUP's tail cut, then this one: serialize.h repriceRootAfterCut).
+// re-priced once over both post-passes (R-DEDUP's tail cut, then this one: serialize.h repriceRootAfterCut) — the net change is
+// signed: on short rows the legend and pointers can ADD bytes, and est_tokens= then goes up.
 // RIPWIRE_NO_SIBLING_DEMOTE=1 turns it off (byte identity and the gate's twins).
 #include "forfilesyms.h" // FileSymsArgs, renderForFileSyms, filesyms_detail::FileLookup / leafName / unescapeXmlAttr
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / inEdges, edgeIndex, edgeKindByte
@@ -450,7 +451,7 @@ inline std::string renderForFileSymsAndDemote( const IngestResult& ing, const Gr
     std::string& done = demoted.empty() ? cut : demoted;
     if( price != nullptr && !done.empty() ) // the cuts are priced markup: est_tokens= prices the bytes sent
     {
-        repriceRootAfterCut( done, *price, a.answer.size() - done.size() );
+        repriceRootAfterCut( done, *price, a.answer.size() ); // signed: the pointers and legend may outweigh the rows they replace
     }
     *answerOut = std::move( done );
     return syms;

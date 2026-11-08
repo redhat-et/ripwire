@@ -21,6 +21,10 @@
 #   (k5) widget_shelf_row stays a row: the kept WidgetShelf.widget_shelf_row says same_as="widget_shelf_row"
 #   (e)  est_tokens= is re-priced down (estchargecheck holds its value to the bytes); (w) well formed; (l) one legend comment, no "--" in it
 #   (b)  --token-budget leaves the answer as shaped: no pointer in <sigs>, no legend comment
+#   (g)  GROWTH (sit 11-08: 4 aborts): a second tree of ten one-row files and z.py's four short undocumented rows. The legend comment
+#        and three pointers outweigh the rows they replace, so the answer GROWS: the run exits 0 and answers, (a) holds on it (default
+#        and --signatures-only), and on --signatures-only (markup only) est_tokens = round(bytes/2.50) exactly and is above the off
+#        twin's (re-priced UP; the unsigned cut used to wrap and fail repriceRootAfterCut's EXPECTS)
 #   (x)  MCP `for` (one renderer): (a) on the MCP answer and its RIPWIRE_NO_SIBLING_DEMOTE=1 twin (its <h> rows differ from the CLI's,
 #        so its K2 reads differ: the rule is checked on its own bytes)
 set -u
@@ -228,6 +232,38 @@ arm r ptr widget_config_variant_01 "<d> rank 6"
 run "--for=$TASK" --token-budget=4000 >"$TMP/b.xml"
 python3 "$TMP/names.py" "$TMP/b.xml" >"$TMP/b.names"
 if grep -q '^ptr $' "$TMP/b.names" && ! grep -q '<!-- demote:' "$TMP/b.xml"; then ok "(b) --token-budget: no pointer in <sigs>"; else no "(b) $( head -c 300 "$TMP/b.names" )"; fi
+
+# (g) GROWTH: short rows, the answer grows (the legend comment and three pointers outweigh the rows they replace)
+python3 - "$TMP/g" <<'PY' || { echo "fixture generator failed"; exit 2; }
+import os, sys
+d = sys.argv[1]; os.makedirs( d, exist_ok = True )
+for i in range( 1, 11 ):
+    open( os.path.join( d, f"m{i:02d}.py" ), "w" ).write( f'\ndef zap_mode_{i:02d}(x):\n    """Zap mode {i}."""\n    return x\n' )
+open( os.path.join( d, "z.py" ), "w" ).write( "".join( f'\ndef zap_m{i}(x):\n    return x\n' for i in range( 1, 5 ) ) )
+PY
+grun(){ ( cd "$TMP/g" && "$BIN" . --no-cache --for="zap mode" "$@" 2>"$TMP/g.err" ); }
+for shape in default sigonly; do
+    flag=(); [ "$shape" = sigonly ] && flag=( --signatures-only )
+    grun ${flag[@]+"${flag[@]}"} >"$TMP/g.$shape.on"; grc=$?
+    RIPWIRE_NO_SIBLING_DEMOTE=1 grun ${flag[@]+"${flag[@]}"} >"$TMP/g.$shape.off"
+    gon="$( wc -c <"$TMP/g.$shape.on" | tr -d ' ' )"; goff="$( wc -c <"$TMP/g.$shape.off" | tr -d ' ' )"
+    python3 "$TMP/check.py" "$TMP/g.$shape.off" "$TMP/g.$shape.on" "" >"$TMP/g.res" 2>&1
+    if [ "$grc" = 0 ] && [ "$gon" -gt "$goff" ] && grep -q '^PASS (a)' "$TMP/g.res" && ! grep -q '^PASS (a) 0 rows' "$TMP/g.res"; then
+        ok "(g) $shape: the demote grows the answer $goff -> $gon B, rc 0, (a) holds ($( grep -o '[0-9]* rows' "$TMP/g.res" ))"
+    else
+        no "(g) $shape: rc=$grc bytes off=$goff on=$gon $( head -c 300 "$TMP/g.res" ) $( grep -m1 'Expr:' "$TMP/g.err" )"
+    fi
+done
+gest="$( RIPWIRE_TESTLIB="$ROOT/test/lib" python3 - "$TMP/g.sigonly.on" "$TMP/g.sigonly.off" <<'PY'
+import os, re, sys; sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended_bytes
+def est( f ):
+    d = strip_appended_bytes( open( f, "rb" ).read() ); m = re.search( rb'est_tokens="(\d+)"', d )
+    return ( int( m.group( 1 ) ) if m else -1 ), int( len( d ) / 2.50 + 0.5 )
+( e, x ), ( eo, xo ) = est( sys.argv[1] ), est( sys.argv[2] )
+print( f"{'PASS' if e == x and eo == xo and e > eo else 'FAIL'} on est={e} expected={x}, off est={eo} expected={xo}" )
+PY
+)"
+case "$gest" in PASS*) ok "(g) --signatures-only est_tokens exact and re-priced up: ${gest#PASS }";; *) no "(g) est_tokens: $gest";; esac
 
 mcp(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$TMP/py" "$TASK" \
   | ( cd "$TMP/py" || exit 1; "$BIN" --mcp 2>/dev/null ) | python3 -c '

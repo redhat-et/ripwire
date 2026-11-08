@@ -1102,7 +1102,7 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
         *a.answerOut = fd::tailRowsWithoutPicks( ing, a.answer, rows, headTail, picks );
         if( a.price != nullptr && !a.answerOut->empty() ) // the cut is priced markup: est_tokens= prices the bytes sent
         {
-            repriceRootAfterCut( *a.answerOut, *a.price, a.answer.size() - a.answerOut->size() );
+            repriceRootAfterCut( *a.answerOut, *a.price, a.answer.size() );
         }
     }
     return fd::blockXml( ing, sf, head, picks, a.compactLegend );

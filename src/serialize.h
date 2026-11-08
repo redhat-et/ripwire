@@ -1320,9 +1320,13 @@ struct PricedRootInputs
 };
 
 // R-DEDUP: <syms> (forfilesyms.h tailRowsWithoutPicks) chooses its names off the rendered answer, so the cut it makes in the
-// head files' tail rows lands after the root was priced. `cutBytes` markup bytes left the priced span: the root's est_tokens=
-// value is replaced with the fixpoint over the inputs less the cut. Only the number moves; every other byte stays.
-inline void repriceRootAfterCut( std::string& doc, const PricedRootInputs& in, std::size_t cutBytes )
+// head files' tail rows lands after the root was priced; SIBLING-DEMOTE then rewrites deep <sigs> rows as pointers. `doc` is the
+// answer after those markup rewrites and `pricedBytes` the size of the answer the root was priced on (the same est_tokens= digits
+// in both), so the priced markup is now in.markupBytes + doc.size() - pricedBytes. The difference is SIGNED: a pass may add more
+// than it removes (the demote legend comment plus short pointers can outweigh the short rows they replace — sit 11-08: 4 aborts
+// when the unsigned "cut" wrapped). The root's est_tokens= value is replaced with the fixpoint over the rewritten markup.
+// Only the number moves; every other byte stays.
+inline void repriceRootAfterCut( std::string& doc, const PricedRootInputs& in, std::size_t pricedBytes )
 {
     constexpr std::string_view kKey = " est_tokens=\"";
     const std::size_t lt = doc.find( '<' );
@@ -1331,8 +1335,8 @@ inline void repriceRootAfterCut( std::string& doc, const PricedRootInputs& in, s
     const std::size_t end = at == std::string::npos ? std::string::npos : doc.find( '"', at + kKey.size() );
     // the caller priced this root itself (CLI finishForLensHeaderPriced, MCP priceForTaskRoot) and cut only what it priced
     EXPECTS( end != std::string::npos && end < gt, "repriceRootAfterCut: the root carries the est_tokens= its caller priced" );
-    EXPECTS( cutBytes <= in.markupBytes, "repriceRootAfterCut: the cut removed only priced markup" );
-    doc.replace( at, end + 1 - at, pricedRootAttrTokens( in.markupBytes - cutBytes, kBytesPerTokenDefault, in.bodyTokens, nullptr ) );
+    EXPECTS( pricedBytes <= in.markupBytes + doc.size(), "repriceRootAfterCut: the cut removed only priced markup" );
+    doc.replace( at, end + 1 - at, pricedRootAttrTokens( in.markupBytes + doc.size() - pricedBytes, kBytesPerTokenDefault, in.bodyTokens, nullptr ) );
 }
 // R1 (terminality round A 2026-09-05): the ONE definition of over_ceiling=, hoisted to sit beside the
 // estimator whose number it qualifies. It was a function-local constant in verbs_for.h, which is why the
