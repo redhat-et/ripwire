@@ -49,6 +49,7 @@
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
+#include "forsiblingdemote.h" // SIBLING-DEMOTE: the CLI twin's answer edit, one renderer
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2478,10 +2479,10 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
 {
     if( out.ends_with( "</ctx>" ) )
     {
-        std::string cut; // R-DEDUP: <syms> has priority over the head files' tail rows (forfilesyms.h tailRowsWithoutPicks)
+        std::string cut; // R-DEDUP: <syms> has priority over the head files' tail rows (forfilesyms.h tailRowsWithoutPicks); SIBLING-DEMOTE (forsiblingdemote.h)
         args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
         args.answerOut = &cut;
-        const std::string syms = renderForFileSyms( ing, g, args );
+        const std::string syms = renderForFileSymsAndDemote( ing, g, args );
         if( !cut.empty() )
         {
             out = std::move( cut ) + "</ctx>";

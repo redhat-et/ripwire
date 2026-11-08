@@ -15,6 +15,7 @@
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
+#include "forsiblingdemote.h"  // SIBLING-DEMOTE: deep same-file sibling rows become tail pointers (the <syms> pass's answer edit)
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -2957,7 +2958,7 @@ inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectAr
 inline bool forFileSymsWanted( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
-    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() );
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || ( !rw::forFileSymsOn() && !rw::siblingDemoteOn() ) );
 }
 
 // What StdoutCapture::finish() hands back.
@@ -3098,8 +3099,8 @@ inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const bool        whole = cap && !cap->failed;
-    std::string cut; // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
-    const std::string syms = rw::renderForFileSyms(
+    std::string cut; // the answer after the <syms> tail cut (R-DEDUP: <syms> has priority) and SIBLING-DEMOTE, re-priced; "" when neither edits it
+    const std::string syms = rw::renderForFileSymsAndDemote(
         d.ing, d.g, rw::FileSymsArgs { .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0, .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut, .price = capture.rootPrice() } );
     const std::string& bytes = !cut.empty() ? cut : cap ? cap->bytes
                                                         : cut;
