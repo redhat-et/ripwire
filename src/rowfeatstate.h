@@ -4,6 +4,7 @@
 // This header is the state the ranking and the <sigs> render write into: score snapshots after each lift stage of the lens
 // ranking, the tier multipliers, the route, and the <sigs> row order before and after the head round-robin. Every writer is
 // a no-op unless the switch is set (one getenv per process), and none of them changes a byte the answer prints.
+#include "lexical.h"   // LexTermEvidence — the term masks + df the BM25 pass accumulated (the coverage= evidence)
 #include "model.h"
 
 #include <array>
@@ -42,6 +43,7 @@ struct State
     bool                       sigsRR = false;   // the head round-robin rule was on for this render
     std::vector<std::uint32_t> fanIn;          // the in= vector the <sigs> render read
     std::vector<std::uint8_t>  tested;         // the tested= vector the <sigs> render read
+    LexTermEvidence            evidence;       // the subtoken pass's term evidence (coverage= reads the same; empty = unmeasured)
 };
 
 inline const char* outPath() noexcept
@@ -69,12 +71,23 @@ inline void stage( Stage k, const std::vector<float>& rank )
         state().stage[ std::size_t( k ) ] = rank;
     }
 }
-inline void tier( const std::vector<float>& mul )
+// One State field, written only when the switch is set.
+template< class T >
+inline void keep( T State::*slot, const T& value )
 {
     if( on() )
     {
-        state().tier = mul;
+        state().*slot = value;
     }
+}
+inline void tier( const std::vector<float>& mul )
+{
+    keep( &State::tier, mul );
+}
+// The subtoken pass's term evidence, as coverage= and the file page read it (a copy: the ranking's own outlives no render here).
+inline void evidence( const LexTermEvidence& ev )
+{
+    keep( &State::evidence, ev );
 }
 // The route the base ranker took and the definitions that decided it (lexical.h RouteAnchorDef: lowerName, fileId).
 template< class AnchorDefs >

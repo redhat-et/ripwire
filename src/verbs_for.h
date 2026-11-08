@@ -215,6 +215,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
 
     rw::rowfeat::stage( rw::rowfeat::Stage::Lexical, lensRank );   // ROW-FEATURE-DUMP: score snapshots per lift stage (inert unless set)
     rw::rowfeat::tier( tierMul );
+    rw::rowfeat::evidence( out.evidence );
     rw::rowfeat::noteRoute( out.routeTag, out.anchorDefs );
 
     // input blow-up guard disclosure (lexical.h kMaxUniqueQueryTerms/dedupeQueryTerms): a task string with

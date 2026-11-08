@@ -6,13 +6,21 @@
 #            `for` verb, and a TSV path that cannot be opened).
 #   ROWS     the TSV holds one line per printed answer row, in output order: the grader's reading of a row (an opening
 #            <d|y|s|u …> tag after XML comments are masked, <u v="used"> excluded); tag, n= and p= match row by row.
-#   COLUMNS  one '#' header naming 38 columns, every line 38 fields, the numeric columns parse, qhash = FNV-1a 64 of the question.
+#   COLUMNS  one '#' header naming 53 columns, every line 53 fields, the numeric columns parse, qhash = FNV-1a 64 of the question;
+#            the ROW-FEATURES-2 columns parse too, and cov_any (coverage='s own share) is never below the name/doc/body shares.
 #   HEAD_RR  rr_lift=1 on exactly the <sigs> rows the head round-robin moved up (their r= in the RIPWIRE_NO_HEAD_RR=1 answer is
 #            larger), pre_rank = that answer's r=, and RIPWIRE_NO_HEAD_RR=1 reads rr_on=0 with no lift.
 #   SCORE    score = lex*tier + the stage deltas; in score order (pre_rank) score never rises and score_rank rises; a question
 #            naming a file carries the file lift in d_mention (a row the words never matched: lex 0, d_mention = score).
+#   NEWEV    (ROW-FEATURES-2, test/rowfeaturesfix/cov) coverage differs between rows by field: the head's body carries the
+#            question, the callee's name does, the caller's doc comment does and its body does not; the quoted literal is hit
+#            in the one body holding it; the callee is reached from the head (cp_head 1, in, res), the caller reaches it (out);
+#            one file holds every row (ans_file_rank 1, file_top10_share 1).
 #
-# Arms: R1 bytes (mono TS, pair C, py, MCP, unopenable path)  R2 rows  R3 columns  R4 HEAD_RR  R5 score  R6 mention  R7 MCP rows
+# Arms: R1 bytes (mono TS, pair C, py, cov TS, MCP, unopenable path)  R2 rows  R3 columns  R4 HEAD_RR  R5 score  R6 mention
+#       R7 MCP rows  R8 new evidence (coverage by field, quoted literal, call path, file share)
+# Mutants (run by hand, each turns this red): M1 mention snapshot misplaced, M2 delta sign, M3 lift condition inverted,
+#       M4 cov_body read off the doc span (R8), M5 cp_dir swapped (R8).
 # Usage:  bash test/rowfeaturescheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/rowfeaturescheck.sh
 # Exits non-zero on any failure.
 
@@ -29,8 +37,8 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
-MONO="$ROOT/test/forheadrrfix/mono"; PAIR="$ROOT/test/forheadrrfix/pair"; PY="$ROOT/test/receiverevidencefix/py"
-for d in "$MONO" "$PAIR" "$PY"; do [ -d "$d" ] || { echo "fixture $d missing"; exit 2; }; done
+MONO="$ROOT/test/forheadrrfix/mono"; PAIR="$ROOT/test/forheadrrfix/pair"; PY="$ROOT/test/receiverevidencefix/py"; COV="$ROOT/test/rowfeaturesfix/cov"
+for d in "$MONO" "$PAIR" "$PY" "$COV"; do [ -d "$d" ] || { echo "fixture $d missing"; exit 2; }; done
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -39,6 +47,7 @@ Q_MONO="How does the scheduler dispatch queued jobs to workers?"
 Q_PAIR="How is the job scheduler initialised and run?"
 Q_PY="How does the tui app render the screen widget?"
 Q_MENTION="How do the widgets in src/tui/compositor.py get arranged on screen?"
+Q_COV='Where is the ledger balance total checked for "unbalanced books"?'
 
 # run OUT DIR TSV(""=off) NOHRR(0|1) QUESTION — one --for call, rc kept beside the output
 run(){ local out="$1" dir="$2" tsv="$3" nohrr="$4" q="$5"
@@ -52,7 +61,7 @@ ran(){ [ "$( cat "$1.rc" )" = 0 ] && [ -s "$1" ] && return 0; no "$2: rc=$( cat 
 cat > "$TMP/chk.py" <<'PY'
 import html, json, re, sys
 cmd, args = sys.argv[1], sys.argv[2:]
-NCOL = 38
+NCOL = 53
 def load(p): return open(p, "rb").read().decode("utf-8", "replace")
 def fail(m): print(m); sys.exit(1)
 ROW = re.compile(r'<(d|y|s|u)((?:\s+[\w:-]+="[^"]*")*)\s*(/?)>')
@@ -117,6 +126,15 @@ elif cmd == "cols":        # TSV QUESTION — field counts, numeric columns, qha
             if f[col(c)] != "": int(f[col(c)])
         if f[col("edge_head")] not in ("self", "member", "owner", "sibling", "none") and not re.fullmatch(r"(out|in):(call|name|link|import)", f[col("edge_head")]):
             fail("edge_head %r" % f[col("edge_head")])
+        for c in ("cov_name", "cov_doc", "cov_body", "cov_any", "terms_hit", "terms_q", "quote_hit", "cp_top3", "cp_seed"):
+            if f[col(c)] != "": int(f[col(c)])
+        int(f[col("quote_lits")]); int(f[col("cp_head")]); int(f[col("ans_file_rank")])
+        if not 0.0 <= float(f[col("file_top10_share")]) <= 1.0: fail("file_top10_share %s" % f[col("file_top10_share")])
+        if f[col("cp_dir")] not in ("-", "in", "out"): fail("cp_dir %r" % f[col("cp_dir")])
+        if f[col("cp_prov")] and not re.fullmatch(r"(res|scip|binding|split|import|lastseg|impl|other)(\+(res|scip|binding|split|import|lastseg|impl|other))?", f[col("cp_prov")]):
+            fail("cp_prov %r" % f[col("cp_prov")])
+        if f[col("cov_any")] != "":
+            if int(f[col("cov_any")]) < max(int(f[col(c)]) for c in ("cov_name", "cov_doc", "cov_body")): fail("%s cov_any below a field share" % f[col("n")])
     if resolved == 0: fail("no resolved row")
     print("%d lines x %d fields, %d resolved, numeric columns parse, qhash = FNV-1a(question)" % (len(body), NCOL, resolved))
 elif cmd == "rr":          # TSV OFFANSWER OFFTSV — rr_lift = moved up vs the RIPWIRE_NO_HEAD_RR=1 answer, pre_rank = its r=
@@ -148,6 +166,24 @@ elif cmd == "score":       # TSV — the component identity and score order
         if k1 <= k0: fail("score_rank does not rise in score order: %s %d -> %s %d" % (n0, k0, n1, k1))
     if len(sig) < 5: fail("only %d sigs rows" % len(sig))
     print("score = lex*tier + deltas on every resolved row; %d sigs rows in score order" % len(sig))
+elif cmd == "newev":       # TSV — the cov fixture's rows (see NEWEV above)
+    body = header(args[0]); by = {f[col("n")]: f for f in body}
+    want = {"reconcileAccounts", "ledgerBalanceTotal", "auditReport"}
+    if not want <= set(by): fail("rows %s, want %s" % (sorted(by), sorted(want)))
+    hd, ce, cr = by["reconcileAccounts"], by["ledgerBalanceTotal"], by["auditReport"]
+    v = lambda f, c: int(f[col(c)])
+    if body[0][col("n")] != "reconcileAccounts": fail("head %s" % body[0][col("n")])
+    if not v(hd, "cov_body") > v(ce, "cov_body") > 0: fail("cov_body head %s callee %s" % (hd[col("cov_body")], ce[col("cov_body")]))
+    if not v(ce, "cov_name") > v(hd, "cov_name"): fail("cov_name callee %s head %s" % (ce[col("cov_name")], hd[col("cov_name")]))
+    if not (v(cr, "cov_doc") > 0 and v(cr, "cov_body") == 0): fail("caller cov_doc %s cov_body %s" % (cr[col("cov_doc")], cr[col("cov_body")]))
+    if not (v(hd, "terms_hit") > v(cr, "terms_hit") > 0 and v(hd, "terms_q") >= v(hd, "terms_hit")): fail("terms_hit %s %s of %s" % (hd[col("terms_hit")], cr[col("terms_hit")], hd[col("terms_q")]))
+    if [(f[col("quote_lits")], f[col("quote_hit")]) for f in (hd, ce, cr)] != [("1", "1"), ("1", "0"), ("1", "0")]: fail("quote_lits/quote_hit %s" % [(f[col("quote_lits")], f[col("quote_hit")]) for f in (hd, ce, cr)])
+    if (hd[col("cp_head")], ce[col("cp_head")], cr[col("cp_head")]) != ("0", "1", "1"): fail("cp_head %s %s %s" % (hd[col("cp_head")], ce[col("cp_head")], cr[col("cp_head")]))
+    if (ce[col("cp_seed")], ce[col("cp_dir")], ce[col("cp_prov")]) != ("1", "in", "res"): fail("callee cp %s" % [ce[col(c)] for c in ("cp_seed", "cp_dir", "cp_prov")])
+    if (cr[col("cp_seed")], cr[col("cp_dir")], cr[col("cp_prov")]) != ("1", "out", "res"): fail("caller cp %s" % [cr[col(c)] for c in ("cp_seed", "cp_dir", "cp_prov")])
+    if any((f[col("ans_file_rank")], f[col("file_top10_share")]) != ("1", "1") for f in body): fail("file columns %s" % [(f[col("ans_file_rank")], f[col("file_top10_share")]) for f in body])
+    print("cov_body %s>%s, cov_name %s>%s, doc-only caller %s/%s, quote hit on the head only, cp in/out at 1 hop, one file" % (
+        hd[col("cov_body")], ce[col("cov_body")], ce[col("cov_name")], hd[col("cov_name")], cr[col("cov_doc")], cr[col("cov_body")]))
 elif cmd == "mention":     # TSV NAME — the named file's row the words never matched carries the lift in d_mention
     body = header(args[0]); hit = [f for f in body if f[col("n")] == args[1]]
     if not hit: fail("no row %s" % args[1])
@@ -159,7 +195,7 @@ PY
 chk(){ local label="$1"; shift; local m; if m="$( python3 "$TMP/chk.py" "$@" 2>&1 )"; then ok "$label: $m"; else no "$label: $m"; fi; }
 
 # ── R1: bytes ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-for spec in "mono|$MONO|$Q_MONO" "pair|$PAIR|$Q_PAIR" "py|$PY|$Q_PY" "mention|$PY|$Q_MENTION"; do
+for spec in "mono|$MONO|$Q_MONO" "pair|$PAIR|$Q_PAIR" "py|$PY|$Q_PY" "mention|$PY|$Q_MENTION" "cov|$COV|$Q_COV"; do
     IFS='|' read -r name dir q <<<"$spec"
     run "$TMP/$name.off" "$dir" "" 0 "$q"; run "$TMP/$name.on" "$dir" "$TMP/$name.tsv" 0 "$q"
     if ran "$TMP/$name.off" "R1 $name" && ran "$TMP/$name.on" "R1 $name (switch)"; then
@@ -181,7 +217,7 @@ if ran "$TMP/mcp.off" "R1 mcp" && ran "$TMP/mcp.on" "R1 mcp (switch)"; then
 fi
 
 # ── R2/R3: rows and columns ─────────────────────────────────────────────────────────────────────────────────────────────
-for spec in "mono|$Q_MONO" "pair|$Q_PAIR" "py|$Q_PY" "mention|$Q_MENTION"; do
+for spec in "mono|$Q_MONO" "pair|$Q_PAIR" "py|$Q_PY" "mention|$Q_MENTION" "cov|$Q_COV"; do
     IFS='|' read -r name q <<<"$spec"
     chk "R2 $name" rows "$TMP/$name.on" "$TMP/$name.tsv"
     chk "R3 $name" cols "$TMP/$name.tsv" "$q"
@@ -200,6 +236,10 @@ chk "R6 mention" mention "$TMP/mention.tsv" add_widget
 
 # ── R7: MCP rows ────────────────────────────────────────────────────────────────────────────────────────────────────────
 chk "R7 mcp" rows "$TMP/mcp.on" "$TMP/mcp.tsv" mcp
+chk "R7 mcp cols" cols "$TMP/mcp.tsv" "$Q_MONO"
+
+# ── R8: new evidence (ROW-FEATURES-2) ───────────────────────────────────────────────────────────────────────────────────
+chk "R8 cov" newev "$TMP/cov.tsv"
 
 if [ "$fail" = 0 ]; then echo "rowfeaturescheck: OK"; else echo "rowfeaturescheck: FAILED"; fi
 exit "$fail"
