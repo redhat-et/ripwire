@@ -2270,6 +2270,10 @@ struct IngestResult
                                                // every symbol splice re-offsets it like fnLocalScopes (workspace.h mergeWorkspaceIngests, editpreview.h previewMerge)
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
+    std::vector<std::uint64_t> cloneKeys;      // CLONES-PERSIST: size symbols.size() when built (ingest_model.h assignSymbols), else empty:
+                                               // a Function/Method body's exact-clone key (clones.h cloneBodyKey), 0 = none. findClones
+                                               // groups by it with no file I/O and reads a body's file only to key a 0 or to verify a
+                                               // shared key; a size mismatch (an IngestResult built without it) makes it read every file.
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)

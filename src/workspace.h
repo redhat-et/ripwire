@@ -406,6 +406,17 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
 
         mergeCrawlDisclosures( m, p, roots[r] );   // §L1 — see its own header
 
+        // CLONES-PERSIST: the clone-key side array concatenates with the symbols it is aligned to; a part without it
+        // (size mismatch) leaves the merged array short, and findClones then keys every body from its file.
+        if( p.cloneKeys.size() == p.symbols.size() && m.cloneKeys.size() == m.symbols.size() )
+        {
+            m.cloneKeys.insert( m.cloneKeys.end(), p.cloneKeys.begin(), p.cloneKeys.end() );
+        }
+        else
+        {
+            m.cloneKeys.clear();
+            m.cloneKeys.shrink_to_fit();
+        }
         for( Symbol& s : p.symbols )
         {
             s.id     += symOff;
