@@ -989,12 +989,81 @@ inline constexpr std::uint8_t kTailFateOldListed = 1, kTailFateListed = 2;
 inline constexpr std::uint8_t kTailFateBits[] { kTailFateOldListed, 0, 0, kTailFateOldListed | kTailFateListed, kTailFateListed };
 static_assert( std::size( kTailFateBits ) == kTailPageRowFateCount, "kTailFateBits is indexed by TailPageRowFate — one entry per enumerator" );
 
+// R-DEDUP (2026-11-07): a page row of a file the shown head already shows (only page 0 lists such a row with sym=) used to
+// repeat the names its sigs rows print — mf2-pydantic-08 and nfpm-11 named only <d> names there, and the in-file symbol the
+// question wanted sat at the next lens rank. Its sym= now skips those names and fills from the file's next positive-score
+// symbols in the same (score desc, id asc) order, at most kForPageSymNameCount, nameable ones only (forFileRowAbsorb's rule):
+// the same row, never more names. A head file whose every positive-score name is shown prints p= only. Head files are few
+// (the shown rows' files): a sorted id list, one scan of the symbols for their candidates, a sort of those candidates only.
+struct TailHeadFileSyms
+{
+    std::vector<std::uint32_t> files; // the head's files, sorted unique
+    std::vector<std::string> syms; // per entry of `files`: its sym= value, comma-joined, unescaped
+    std::vector<std::uint32_t> slotOfFile; // per indexed file id (sized ing.files): its entry in `files`, else files.size() — one flat index, no search
+};
+// symbol `id` is a sym= candidate of a head file: positive score, nameable, and no shown row of its file carries its name
+inline bool tailHeadSymCandidate( const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds, NodeId id )
+{
+    const Symbol& s = ing.symbols[id];
+    return rank[id] > 0.0f && !isRestLabelUnit( ing, s ) && std::ranges::none_of( headIds, [&]( NodeId h )
+                                                                                  { return h < ing.symbols.size() && ing.symbols[h].fileId == s.fileId && ing.symbols[h].name == s.name; } );
+}
+inline TailHeadFileSyms tailHeadFileSyms( const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds )
+{
+    TailHeadFileSyms out;
+    for( const NodeId id : headIds )
+    {
+        if( id < ing.symbols.size() )
+        {
+            out.files.push_back( ing.symbols[id].fileId );
+        }
+    }
+    std::ranges::sort( out.files );
+    out.files.erase( std::unique( out.files.begin(), out.files.end() ), out.files.end() );
+    out.syms.assign( out.files.size(), std::string() );
+    out.slotOfFile.assign( ing.files.size(), std::uint32_t( out.files.size() ) );
+    for( std::size_t k = 0; k < out.files.size(); ++k )
+    {
+        out.slotOfFile[out.files[k]] = std::uint32_t( k );
+    }
+    std::vector<std::pair<std::size_t, NodeId>> cands; // (head file slot, symbol)
+    const std::size_t S = std::min( ing.symbols.size(), rank.size() );
+    for( NodeId id = 0; id < S && !out.files.empty(); ++id )
+    {
+        const std::size_t slot = out.slotOfFile[ing.symbols[id].fileId];
+        if( slot < out.files.size() && tailHeadSymCandidate( ing, rank, headIds, id ) )
+        {
+            cands.emplace_back( slot, id );
+        }
+    }
+    std::ranges::sort( cands, [&]( const auto& a, const auto& b ) // per file, the lens's (score desc, id asc) order
+                       { return a.first != b.first ? a.first < b.first : rank[a.second] != rank[b.second] ? rank[a.second] > rank[b.second]
+                                                                                                          : a.second < b.second; } );
+    std::vector<std::uint8_t> named( out.files.size(), 0 );
+    for( const auto& [slot, id] : cands )
+    {
+        if( named[slot] < kForPageSymNameCount )
+        {
+            out.syms[slot] += named[slot]++ > 0 ? "," : "";
+            out.syms[slot] += ing.symbols[id].name;
+        }
+    }
+    return out;
+}
+// a page row's sym=: a head file's deduplicated names, else the row's own top symbols
+inline std::string tailPageRowSym( const IngestResult& ing, const ForFileRow& row, const TailHeadFileSyms& head )
+{
+    const std::size_t slot = head.slotOfFile[row.fileId];
+    return slot < head.files.size() ? head.syms[slot] : forFileRowSymNames( ing, row );
+}
+
 struct TailPageWalkInputs
 {
     const IngestResult&      ing;
     const ForFilePage&       page;
     std::string_view         rootArg;
     const std::vector<char>& inHead;   // the shown head's files (computeFileTail): skipped past the old cut
+    const TailHeadFileSyms& headSyms; // R-DEDUP: a head file's sym= without the names its shown sigs rows print
 };
 inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, FileTail& wide, FileTail* docs = nullptr )
 {
@@ -1024,7 +1093,7 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         else if( ( bits & kTailFateListed ) != 0 )
         {
             listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
-                         symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );
+                         symRow ? tailPageRowSym( ing, row, in.headSyms ) : std::string(), r + 1, symRow ? nullptr : &wide );
         }
     }
 }
@@ -1086,8 +1155,9 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     FileTail                docRows, wideRows;
     FileTail*               docs   = rankOrder || taskAsksForDocText( task ) ? nullptr : &docRows;
     const std::vector<char> inHead = fileMaskOfSymbols( ing, headIds );   // once, for both row kinds
+    const TailHeadFileSyms headSyms = tailHeadFileSyms( ing, rank, headIds ); // R-DEDUP: the head files' own sym=
     fileTailRankRows( out, listed, ing, rank, page, inHead, rootArg, docs );
-    fileTailPageRows( out, listed, TailPageWalkInputs{ ing, page, rootArg, inHead }, wideRows, docs );
+    fileTailPageRows( out, listed, TailPageWalkInputs { ing, page, rootArg, inHead, headSyms }, wideRows, docs );
     appendFileTailRows( out, docRows );
     out.oldRows = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
     appendFileTailRows( out, wideRows );

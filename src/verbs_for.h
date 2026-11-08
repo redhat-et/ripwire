@@ -895,7 +895,7 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
          + std::string( presentOnlyClause( p.foldFollowPresent, compact, rw::kForCompactFoldFollowLegend, rw::kForFoldFollowLegend ) );
 }
 inline constexpr std::string_view kForCompactLegendTail =
-    "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
+    "; t p= file outside sigs (weaker), t sym= its top symbols not in sigs (a pointer, not the answer), r= rank (gap = trimmed)";
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
     "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
