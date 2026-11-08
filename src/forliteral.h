@@ -148,8 +148,7 @@ inline constexpr std::uint32_t kForLiteralArmLines      = 12;   // EXCERPT-ARM: 
 inline constexpr std::size_t kForLiteralTierFiles     = 64;     // source hit files classified (k=); past it k="?"
 inline constexpr std::size_t kForLiteralLineBytes     = 200;    // the matched line's text, cut on a UTF-8 boundary
 inline constexpr std::size_t kForLiteralMinQuoted     = 6;
-inline constexpr std::size_t kForLiteralMinConst      = 5;
-inline constexpr std::size_t kForLiteralMinBareCaps   = 10;
+// kForLiteralMinConst / kForLiteralMinBareCaps: subjectanchor.h, beside lit_detail::isConstShaped (the route reads the same shape)
 inline constexpr std::size_t kForLiteralMinKeyBytes   = 6;      // a dotted key shorter than this is not a key (`a.b.c`)
 inline constexpr std::size_t kForLiteralMessageWords  = 3;      // a message or a fragment of one has at least this many words
 inline constexpr std::size_t kForLiteralMessageTries  = 8;      // whole-repo scans a message may cost (a runaway guard on a task's word count)
@@ -295,32 +294,7 @@ struct ForLiteral
 namespace lit_detail
 {
 
-// CONST_SHAPED: upper-case letters and digits, starting with a letter, joined by underscores (at least one, none doubled or at an
-// end) and at least kForLiteralMinConst bytes; or no underscore and at least kForLiteralMinBareCaps bytes (PYTHONASYNCIODEBUG)
-inline bool isConstShaped( std::string_view w ) noexcept
-{
-    if( w.empty() || !( w[0] >= 'A' && w[0] <= 'Z' ) || w.back() == '_' )
-    {
-        return false;
-    }
-    std::size_t underscores = 0;
-    for( std::size_t i = 0; i < w.size(); ++i )
-    {
-        if( w[i] == '_' )
-        {
-            if( w[i - 1] == '_' )
-            {
-                return false;
-            }
-            ++underscores;
-        }
-        else if( !std::isupper( static_cast<unsigned char>( w[i] ) ) && !std::isdigit( static_cast<unsigned char>( w[i] ) ) )
-        {
-            return false;
-        }
-    }
-    return underscores > 0 ? w.size() >= kForLiteralMinConst : w.size() >= kForLiteralMinBareCaps;
-}
+// isConstShaped: subjectanchor.h (ANCHOR-TEST-ONLY's route rule reads the same CONST_SHAPED test as the block)
 
 inline std::optional<std::string> quotedSpan( std::string_view task, char q )
 {

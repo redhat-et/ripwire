@@ -2,8 +2,9 @@
 # foranchornscheck.sh — two anchor choices of a --for answer (lane anchor-ns):
 #   N1 ANCHOR-TEST-ONLY (src/subjectanchor.h routeAnchorUncommitted): a name-exact anchor with no source-class definition among two
 #      or more definitions does not commit the route: it ranks the words (route= subtoken+body..., "not committed", the anchors as a
-#      hint, confidence low). Silent: ONE definition (a test-only helper is the only thing by that name) and NO definition (an env
-#      var: the <shortkey>/<lit> route) stay name-exact, as does a source-backed anchor.
+#      hint, confidence low). Widened: NO definition (an env var, an error code: a `(syntax)` anchor) does not commit either; the
+#      <lit> block still serves it. Silent: ONE definition (a test-only helper is the only thing by that name) stays name-exact, as
+#      does a source-backed anchor.
 #   N4 PATH-WORD-NAMESAKE (src/mention.h namesakeFileByPathWord): an identifier with several definitions is lifted at the ONE whose
 #      file stem or parent directory another task word names. Silent: two words naming two of them, a word naming several, no
 #      such word.
@@ -95,10 +96,33 @@ for q in 'lonely_helper lonely_helper' 'Lonely_helper LONELY_HELPER'; do
     R="$( route "$( ask "$P1" "$q" )" )"
     has "$R" 'name-exact(' "N1 silent, repeated one-def word ($q): name-exact stays"; hasnt "$R" "$NOCOMMIT" "N1 silent, repeated ($q): committed"
 done
-# silent: NO definition (an env var): the shortkey/lit route stays
+# widened: NO definition (an env var): nothing to commit to, the words rank; the literal block still serves it
 A="$( ask "$P1" 'ZZ_ENV_KNOB_VALUE' )"; R="$( route "$A" )"
-has "$R" 'name-exact(ZZ_ENV_KNOB_VALUE)' "N1 silent, no def: name-exact stays"; hasnt "$R" "$NOCOMMIT" "N1 silent, no def: committed"
-has "$A" '<lit ' "N1 silent, no def: the literal block still serves it"
+case "$R" in subtoken+body:broad*) ok "N1 no def: the words rank (subtoken+body:broad)";; *) no "N1 no def: route $R";; esac
+has "$R" "$NOCOMMIT" "N1 no def: not committed"; has "$R" "$NOSRC" "N1 no def: and why"
+has "$R" 'hint anchors: ZZ_ENV_KNOB_VALUE(syntax)' "N1 no def: the anchor rides as a hint"
+hasnt "$R" 'name-exact(' "N1 no def: no second ranker code in route="
+if [ "$( conf "$A" )" = low ]; then ok "N1 no def: low"; else no "N1 no def: $( conf "$A" )"; fi
+has "$A" '<lit ' "N1 no def: the literal block still serves it"
+has "$A" 'read_env' "N1 no def: the source function that reads the name is ranked"
+M="$( mcpfor "$P1" 'ZZ_ENV_KNOB_VALUE' )"; has "$( route "$M" )" "$NOCOMMIT" "N1 no def MCP twin: not committed"
+# widened siblings: a Go env var read by os.Getenv, a JS error code built into an object (other languages, other read shapes)
+P1G="$TMP/n1go"; mkdir -p "$P1G/cmd"
+printf 'package cmd
+
+import "os"
+
+func defaultCommand() string {
+	return os.Getenv("QQ_DEFAULT_COMMAND")
+}
+' > "$P1G/cmd/env.go"
+A="$( ask "$P1G" 'QQ_DEFAULT_COMMAND' )"; has "$( route "$A" )" "$NOCOMMIT" "N1 no def, Go sibling: not committed"
+has "$A" 'defaultCommand' "N1 no def, Go sibling: the reader is ranked"
+P1J="$TMP/n1js"; mkdir -p "$P1J/lib"
+printf "'use strict'\nconst codes = {}\ncodes.QQ_ERR_DUP_ROUTE = createError('QQ_ERR_DUP_ROUTE', 'Method already declared')\nfunction addRoute (r) {\n  if (r.dup) throw new codes.QQ_ERR_DUP_ROUTE()\n}\nmodule.exports = { codes, addRoute }\n" > "$P1J/lib/errors.js"
+A="$( ask "$P1J" 'QQ_ERR_DUP_ROUTE' )"; R="$( route "$A" )"
+case "$R" in name-exact\(*) hasnt "$R" "$NOSRC" "N1 JS sibling: a source-backed anchor stays committed (no note)";; *) has "$R" "$NOCOMMIT" "N1 JS sibling, no def: not committed";; esac
+has "$A" 'addRoute' "N1 JS sibling: the throwing function is in the answer"
 # silent: a source definition backs the anchor
 A="$( ask "$P1" 'source_knob' )"; R="$( route "$A" )"
 has "$R" 'name-exact(source_knob)' "N1 silent, source def: name-exact"; hasnt "$R" "$NOSRC" "N1 silent, source def: no note"

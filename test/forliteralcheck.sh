@@ -92,6 +92,10 @@ FIX="$ROOT/test/forliteralfix"
 run(){ ( cd "$FIX" || exit 1; "$BIN" "$FIX" --no-cache "$@" </dev/null 2>/dev/null ); }
 off(){ ( cd "$FIX" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$FIX" --no-cache "$@" </dev/null 2>/dev/null ); }
 lit(){ python3 -I -c 'import sys;s=sys.stdin.read();i=s.find("<lit ");print(s[i:s.find("</lit>",i)+6] if i>=0 else "")'; }
+# THE EXCERPT REGIME. A CONST_SHAPED key with no definition ranks its readers as words (ANCHOR-TEST-ONLY), and the bundle then prints
+# their whole bodies above the block (body="above" on its rows). The arms that pin the block's OWN <b>/<x> shapes run where the bundle
+# prints no bodies (--signatures-only), so the block carries the readers itself; RD1 pins the default regime.
+xrun(){ run --signatures-only "$@"; }
 has(){ grep -qF -- "$2" <<<"$1"; }
 
 # ── L1 ──
@@ -136,7 +140,7 @@ if has "$B2" 's="bad things happened here" shape="quoted"' && has "$B2" 'comment
     ok "L2b only a first-statement string of a module/class/def body is a docstring (4); a call argument, an if-body string, a Kotlin raw string and a GDScript file-top string are sites"
 else no "L2b docstring position/language wrong: ${B2:0:900}"; fi
 # ── L4b ──
-F="$( run --for=APPTOOL_FAR_FLAG | lit )"
+F="$( xrun --for=APPTOOL_FAR_FLAG | lit )"
 nl="$( python3 -I -c 'import sys,re;m=re.search(r"<x [^>]*><!\[CDATA\[(.*?)\]\]></x>",sys.argv[1],re.S);print(len(m.group(1).split(chr(10))) if m else -1)' "$F" )"
 if has "$F" '<x p="app/far.py" n="far_apart" l="4-10,29-35" of="4-35"' && has "$F" 'next="--expand=app/far.py:4:far_apart"' \
    && ! has "$F" '<b t="fn" l="4" p="app/far.py"' && ! has "$F" 'filler line number 12' && has "$F" 'filler line number 3' \
@@ -144,18 +148,18 @@ if has "$F" '<x p="app/far.py" n="far_apart" l="4-10,29-35" of="4-35"' && has "$
     ok "L4b two far-apart sites: one window each (4-10 and 29-35), 15 lines with the ellipsis line between, never the span between them"
 else no "L4b far-apart excerpt wrong (lines=$nl): ${F:0:900}"; fi
 # ── L4c ──
-T10="$( run --for=APPTOOL_TEN_FLAG | lit )"; T11="$( run --for=APPTOOL_ELEVEN_FLAG | lit )"
+T10="$( xrun --for=APPTOOL_TEN_FLAG | lit )"; T11="$( xrun --for=APPTOOL_ELEVEN_FLAG | lit )"
 if has "$T10" '<b t="fn" l="3" p="app/mid.py" n="ten_lines">' && ! has "$T10" '<x ' \
    && has "$T11" '<x p="app/mid.py" n="eleven_lines" l="15-21" of="15-25"' && ! has "$T11" '<b ' && ! has "$T11" 'eleven 6'; then
     ok "L4c a ten-line body is printed whole; an eleven-line body is an excerpt (15-21 of 15-25)"
 else no "L4c ten/eleven-line boundary wrong: ${T10:0:400} || ${T11:0:600}"; fi
 # ── L4d ──
-LL="$( run --for=APPTOOL_LONG_FLAG | lit )"
+LL="$( xrun --for=APPTOOL_LONG_FLAG | lit )"
 if has "$LL" '<x p="app/longline.py" n="long_line" l="3,11-12" of="3-12"' && ! has "$LL" '<b ' && ! has "$LL" 'ZZZZZZZZ'; then
     ok "L4d a ten-line body over the 3000-byte cap is an excerpt (3,11-12 of 3-12), the 3.3 KB line left out"
 else no "L4d byte cap on a short body wrong: ${LL:0:500}"; fi
 # ── L10 ──
-M="$( run --for=APPTOOL_MANY_FLAG | lit )"
+M="$( xrun --for=APPTOOL_MANY_FLAG | lit )"
 nbx="$( grep -o '<[bx] ' <<<"$M" | wc -l | tr -d ' ' )"
 nls="$( grep -o '<ls ' <<<"$M" | wc -l | tr -d ' ' )"
 if has "$M" 'src="10" shown="8" capped="1"' && [ "$nls" = "8" ] && [ "$nbx" = "3" ]; then
@@ -235,12 +239,18 @@ body=["def big(x):"]+["    filler%d = %d"%(i,i) for i in range(30)]
 body.insert(15,"    key = \""+aws+"\"; mode = os.environ.get(\"APPTOOL_SECRET_FLAG\")")
 open(d+"/app/big.py","w").write("\n".join(body)+"\n")
 open(d+"/app/tbl.py","w").write("X = 1\nTABLE = {\n  \"APPTOOL_SECRET_FLAG\": \""+gh+"\",\n  \"k\": \""+aws+"\",\n}\n")' "$RD" "$RAWS_AWS" "$RAWS_GH"
-RO="$( cd "$RD" && "$BIN" "$RD" --no-cache --for=APPTOOL_SECRET_FLAG </dev/null 2>/dev/null | lit )"
-RN="$( cd "$RD" && "$BIN" "$RD" --no-cache --no-redact --for=APPTOOL_SECRET_FLAG </dev/null 2>/dev/null | lit )"
+RO="$( cd "$RD" && "$BIN" "$RD" --no-cache --signatures-only --for=APPTOOL_SECRET_FLAG </dev/null 2>/dev/null | lit )"
+RN="$( cd "$RD" && "$BIN" "$RD" --no-cache --no-redact --signatures-only --for=APPTOOL_SECRET_FLAG </dev/null 2>/dev/null | lit )"
 if [ -n "$RO" ] && has "$RO" '<x p="app/big.py"' && has "$RO" 'lines="3-5"' && ! has "$RO" "$RAWS_AWS" && ! has "$RO" "${RAWS_GH:0:15}" \
    && has "$RO" '[REDACTED:aws-key]' && has "$RO" '[REDACTED:github-token]' && has "$RN" "$RAWS_AWS" && has "$RN" "${RAWS_GH:0:15}"; then
     ok "R1 a secret on the matched line, in the lines after a table entry and in an <x> window is redacted; --no-redact keeps it verbatim (twin)"
 else no "R1 redaction wrong: ${RO:0:900}"; fi
+# RD1, the default regime: the readers rank as words and their bodies print above the block; the secret is redacted there too
+RW="$( cd "$RD" && "$BIN" "$RD" --no-cache --for=APPTOOL_SECRET_FLAG </dev/null 2>/dev/null )"; RWL="$( lit <<<"$RW" )"
+if has "$RWL" '<ls p="app/big.py" l="16" k="string" in="big" ink="fn" body="above">' && has "$RW" '<b t="fn" l="1" p="app/big.py" n="big" redacted="1">' \
+   && ! has "$RW" "$RAWS_AWS" && ! has "$RW" "${RAWS_GH:0:15}" && has "$RW" '[REDACTED:aws-key]'; then
+    ok "RD1 default regime: the reader's body prints above the block (body=\"above\"), redacted; no secret anywhere in the answer"
+else no "RD1 default regime wrong: ${RWL:0:600}"; fi
 # ── H1 (CR 5712563408, forliteral.h:619): an owner whose body the 3-body cap held back says body="held" on its rows ──
 nheld="$( grep -o 'body="held"' <<<"$M" | wc -l | tr -d ' ' )"; nabove="$( grep -o 'body="above"' <<<"$M" | wc -l | tr -d ' ' )"
 if [ "$nheld" = "5" ] && [ "$nabove" = "0" ] && [ "$nbx" = "3" ]; then ok "H1 ten readers: 3 bodies printed, the 5 other shown rows say body=\"held\""
@@ -1925,7 +1935,7 @@ CC
 ea(){ ( cd "$EA" || exit 1; "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
 eaoff(){ ( cd "$EA" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$EA" --no-cache "$@" </dev/null 2>/dev/null ); }
 xel(){ python3 -I -c 'import sys,re;s=sys.stdin.read();i=s.find("<lit ");m=re.search(r"<x [^>]*>.*?</x>",s[i:] if i>=0 else "",re.S);print(m.group(0) if m else "",end="")'; }
-armx(){ local task="$1" want="$2" body="$3" label="$4"; local A; A="$( ea "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
+armx(){ local task="$1" want="$2" body="$3" label="$4"; local A; A="$( ea --signatures-only "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
     if [ "$rc" -eq 0 ] && has "$X" "$want" && has "$X" 'arm="1"' && has "$X" "$body" && has "$A" 'x arm=1: a window starts at the head'; then ok "$label"
     else no "$label: rc=$rc $( grep -o '<x [^>]*>' <<<"$X" )"; fi; }
 armx RUST_ARM_LIMIT 'l="1,8-19" of="1-20"' 'table.associated_source_id' 'E1 [P] Rust: a site in an else inside a tuple-pattern match arm: the window starts at the arm (rw-02 shape), the field read inside'
@@ -1937,7 +1947,7 @@ armx RUST_TWO_LIMIT 'l="43,46-58" of="43-58"' 'let w = v.width;' 'E5 [P] two sit
 armx GO_ALIGNED_DEFAULT_LIMIT 'l="3,10-18" of="3-18"' 'GO_ALIGNED_DEFAULT_LIMIT' 'E13 [P] Go: a default: label aligned with its switch header (gofmt) is an arm: the window starts at it'
 armx CPP_ALIGNED_DEFAULT_LIMIT 'l="1,7-16" of="1-16"' 'CPP_ALIGNED_DEFAULT_LIMIT' 'E13b [P] C++: a default: label aligned with its switch header is an arm'
 # near misses [G]: the old window, no arm=, no clause
-noarm(){ local task="$1" want="$2" label="$3"; local A; A="$( ea "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
+noarm(){ local task="$1" want="$2" label="$3"; local A; A="$( ea --signatures-only "--for=$task" )"; local rc=$?; local X; X="$( xel <<<"$A" )"
     if [ "$rc" -eq 0 ] && has "$X" "$want" && ! has "$A" 'arm="1"' && ! has "$A" 'x arm=1'; then ok "$label"; else no "$label: rc=$rc $( grep -o '<x [^>]*>' <<<"$X" )"; fi; }
 noarm RUST_FAR_LIMIT 'l="22,36-41" of="22-41"' 'E6 [G] an arm head 13 lines up is past the cap: the old window'
 noarm PY_IF_LIMIT 'l="14,20-24" of="14-24"' 'E7 [G] an if block (no arm) above the window: the old window'

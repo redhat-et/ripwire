@@ -39,6 +39,7 @@
 #include "serialize.h"         // kForAnchorBodyBudgetBytes
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -794,6 +795,39 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
     return out;
 }
 
+// MF1-LIT's CONST_SHAPED word (forliteral.h reads the task's literal with it); here because the route rule below reads it too
+inline constexpr std::size_t kForLiteralMinConst    = 5;
+inline constexpr std::size_t kForLiteralMinBareCaps = 10;
+namespace lit_detail
+{
+// CONST_SHAPED: upper-case letters and digits, starting with a letter, joined by underscores (at least one, none doubled or at an
+// end) and at least kForLiteralMinConst bytes; or no underscore and at least kForLiteralMinBareCaps bytes (PYTHONASYNCIODEBUG)
+inline bool isConstShaped( std::string_view w ) noexcept
+{
+    if( w.empty() || !( w[0] >= 'A' && w[0] <= 'Z' ) || w.back() == '_' )
+    {
+        return false;
+    }
+    std::size_t underscores = 0;
+    for( std::size_t i = 0; i < w.size(); ++i )
+    {
+        if( w[i] == '_' )
+        {
+            if( w[i - 1] == '_' )
+            {
+                return false;
+            }
+            ++underscores;
+        }
+        else if( !std::isupper( static_cast<unsigned char>( w[i] ) ) && !std::isdigit( static_cast<unsigned char>( w[i] ) ) )
+        {
+            return false;
+        }
+    }
+    return underscores > 0 ? w.size() >= kForLiteralMinConst : w.size() >= kForLiteralMinBareCaps;
+}
+}   // namespace lit_detail
+
 // ANCHOR-TEST-ONLY: does a name-exact route with no source-backed anchor stay committed to it? It does when the anchors name ONE
 // definition in all (a test helper, a data key, a CI script that is the only thing by that name: the subject can only mean it) or none
 // (an env var or literal the index stores no definition of: the <shortkey> ladder and the <lit> block serve that route). With two or
@@ -817,6 +851,34 @@ inline bool routeAnchorUncommitted( const RouteChoice& rc )
         }
     }
     return defs >= 2;
+}
+
+// ANCHOR-TEST-ONLY widened: a name-exact route that resolved NO definition, in a task whose every code-shaped name is CONST_SHAPED
+// (lit_detail::isConstShaped: an env var or error code, FZF_DEFAULT_COMMAND / FST_ERR_DUPLICATED_ROUTE, `(syntax)` anchors), has nothing
+// to commit to either: the words rank, so the source code that reads the name gets its bodies, while the <shortkey> ladder and the
+// <lit> block, which read the task and not the route, still print (in-sample: 3 calls, 2 items gained, 0 lost). An undefined name
+// spelled like code (a mistyped function, `utils.formatDate`, a file stem `widget_io`) keeps the name-exact route: its weak signal,
+// the shortkey ladder's qualifier proof and the mention anchor read that route (weaksignalcheck, barrelshortkeycheck, mentioncapcheck).
+inline bool routeAnchorNamesOnlyConstants( const RouteChoice& rc, std::string_view rankQuery )
+{
+    if( rc.which != LexMode::NameExact || !rc.anchorDefs.empty() )
+    {
+        return false;
+    }
+    bool named = false;
+    for( const std::string_view w : splitRouteWords( rankQuery ) )
+    {
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        if( lit_detail::isConstShaped( t ) )
+        {
+            named = true;   // the <lit> block's own literal shape: it serves this name
+        }
+        else if( subject_detail::hasNameSyntax( t ) )
+        {
+            return false;   // a name spelled like code: the name-exact route serves it
+        }
+    }
+    return named;
 }
 
 // The ranker an uncommitted anchor falls through to: the conceptual one, coded as chooseForRanker codes it for the same word count.
@@ -848,7 +910,7 @@ inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, const Graph& g,
     SubjectRoute out = chooseSubjectRouteUnchecked( ing, g, task, servesBodiesAndCallers );
     const std::string_view rankQuery = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
     out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, rankQuery );
-    if( out.anchorNoSource && routeAnchorUncommitted( out.route ) )
+    if( out.anchorNoSource && ( routeAnchorUncommitted( out.route ) || routeAnchorNamesOnlyConstants( out.route, rankQuery ) ) )
     {
         out.route = routeAnchorFallThrough( rankQuery, out.route );   // the words rank; no anchorDefs restrict the bodies
     }

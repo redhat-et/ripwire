@@ -205,7 +205,8 @@ skhasnt "$TMP/b7.xml" "B7 no ld rows of its own"                    '<ld '
 nsk=0; nnext=0
 for f in "$TMP"/b*.xml; do
     c=$( grep -c '<shortkey of=' "$f" ); nsk=$(( nsk + c ))
-    n=$( grep -o '<shortkey of="[^"]*" found="0" rungs="[^"]*" next="--' "$f" | wc -l | tr -d ' ' ); nnext=$(( nnext + n ))
+    # from="sentence" rides when the route read the task as words (a CONST_SHAPED key with no definition: ANCHOR-TEST-ONLY)
+    n=$( grep -o -E '<shortkey of="[^"]*"( from="[^"]*")? found="0" rungs="[^"]*" next="--' "$f" | wc -l | tr -d ' ' ); nnext=$(( nnext + n ))
 done
 if [ "$nsk" -ge 8 ] && [ "$nsk" = "$nnext" ]; then ok "B8 every shortkey carries next= ($nnext of $nsk)"; else no "B8 shortkeys with next= $nnext of $nsk (want all, at least 8)"; fi
 run "$S" "$TMP/b8.xml" "--for=getWidgetPtrCount" && { if grep -q '<shortkey' "$TMP/b8.xml"; then no "B8 a resolved name-exact route prints no shortkey"; else ok "B8 a resolved name-exact route prints no shortkey"; fi; }
