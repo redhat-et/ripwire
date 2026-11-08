@@ -7,8 +7,9 @@
 //
 // THE RULE, once per answer (every reach set below is computed once, never per row):
 //   (E) the task spells exactly two identifier-syntax words (camelCase, snake_case, a qualified Owner::name / pkg.Name), each placing
-//       1..kSubjectMaxDefs definitions (subjectanchor.h placeCandidates, its qualifier test): the endpoints A and B. Any other count of
-//       names: the rule is off.
+//       1..kOneSideMaxEndpointDefs definitions (subjectanchor.h placeCandidates, its qualifier test): the endpoints A and B, every
+//       definition a seed (the --impact reading of a name: TypeScript's createProgram is 14 definitions, overloads and .d.ts twins).
+//       Any other count of names: the rule is off.
 //   (M) ROOT/SINK when the index holds a call path A -> B (or B -> A) of at most kOneSideRootPathMaxHops edges (graph.h
 //       shortestPathAny): R -> S. Otherwise TWO SINKS {A, B} (a common-caller question).
 //   (S) the two sides of a row, from bounded walks of kOneSideReachHops calls over every edge (the --impact walk, graph.h
@@ -30,7 +31,7 @@
 #include "graph.h" // shortestPathAny, expandCallers
 #include "lexical.h" // splitRouteWords, isRouteStopword, routeLower, detail::graphSubjectTrimWord
 #include "model.h"
-#include "subjectanchor.h" // kSubjectMaxDefs, subject_detail::hasNameSyntax / parseSpelling / placeCandidates
+#include "subjectanchor.h" // subject_detail::hasNameSyntax / parseSpelling / placeCandidates
 
 #include <algorithm>
 #include <charconv>
@@ -49,6 +50,7 @@ namespace rw
 inline constexpr std::uint32_t kOneSideReachHops = 3; // (S): calls a side walk follows from an endpoint
 inline constexpr std::size_t kOneSideRootPathMaxHops = 6; // (M): the longest A -> B path read as a root/sink question (two side walks)
 inline constexpr std::size_t kOneSideMaxPathSources = 8; // (D): both-sides rows whose shortest paths to A and B are kept
+inline constexpr std::size_t kOneSideMaxEndpointDefs = 32; // (E): definitions one endpoint name may place (more: a namesake flood, the rule is off)
 
 inline constexpr std::string_view kOneSideReachLegend =
     "<!-- one-side: a <t> among sigs, callers or syms rows reaches only one of the two named endpoints within 3 calls and is on no shortest "
@@ -67,7 +69,7 @@ struct Endpoints
 {
     std::vector<NodeId> a, b; // NodeId order
 };
-// (E): exactly two identifier-syntax words of the task, each placing 1..kSubjectMaxDefs definitions.
+// (E): exactly two identifier-syntax words of the task, each placing 1..kOneSideMaxEndpointDefs definitions.
 inline std::optional<Endpoints> twoNamedEndpoints( const IngestResult& ing, std::string_view task )
 {
     std::vector<std::string_view> named;
@@ -94,7 +96,7 @@ inline std::optional<Endpoints> twoNamedEndpoints( const IngestResult& ing, std:
     std::vector<std::vector<NodeId>> placed = subject_detail::placeCandidates( ing, spelled );
     for( const std::vector<NodeId>& defs : placed )
     {
-        if( defs.empty() || defs.size() > kSubjectMaxDefs )
+        if( defs.empty() || defs.size() > kOneSideMaxEndpointDefs )
         {
             return std::nullopt;
         }
