@@ -6033,17 +6033,21 @@ struct SigRowSpelling
 };
 // SIZE-3a (size-trim): the shortest doc+signature text a row folds (shorter text costs less than the attribute naming its twin)
 inline constexpr std::size_t kSigFoldTextMinBytes = 40;
-// The <d> row's n= value as its head spells it (escaped), "" when the head has none
-inline std::string_view sigHeadName( std::string_view head ) noexcept
+// The value of ` name="…"` inside one tag's attribute text, or "" (SIZE-3a moved it here from forfilesyms.h: the <d> head too; the answer's own markup: no attribute holds a raw quote).
+inline std::string_view attrOf( std::string_view tag, std::string_view name )
 {
-    const std::size_t at = head.find( " n=\"" );
-    if( at == std::string_view::npos )
+    for( std::size_t at = tag.find( name ); at != std::string_view::npos; at = tag.find( name, at + 1 ) )
     {
-        return {};
+        const std::size_t eq = at + name.size();
+        if( at > 0 && tag[at - 1] == ' ' && eq + 1 < tag.size() && tag[eq] == '=' && tag[eq + 1] == '"' )
+        {
+            const std::size_t close = tag.find( '"', eq + 2 );
+            return close == std::string_view::npos ? std::string_view() : tag.substr( eq + 2, close - eq - 2 );
+        }
     }
-    const std::size_t end = head.find( '"', at + 4 );
-    return end == std::string_view::npos ? std::string_view() : head.substr( at + 4, end - at - 4 );
+    return {};
 }
+
 
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                             int topN, std::size_t budgetBytes,
@@ -6534,7 +6538,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 const auto  it  = std::ranges::find_if( firstWithText, [ & ]( const auto& seen ) { return seen.first == key; } );
                 if( it == firstWithText.end() )
                 {
-                    firstWithText.emplace_back( std::move( key ), sigHeadName( e.head ) );
+                    firstWithText.emplace_back( std::move( key ), attrOf( e.head, "n" ) );
                 }
                 else
                 {

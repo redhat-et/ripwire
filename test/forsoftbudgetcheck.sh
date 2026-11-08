@@ -148,7 +148,9 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            r'sc=scope|cut, recoverable|bodies shown|hops shown=#|collapse to a counted stub|'
                            # the <c> row readings ride only with a row that carries them: a spent target's hops cut marker
                            # leaves none (via="name" since forbudget-soft, attrib-multidef's prov="split" since train 28)
-                           r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false', re.I )
+                           r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false|'
+                           # SIZE-1/2/3 (size-trim): judged on the FINAL rows, so fewer rows can legitimately not carry them
+                           r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=', re.I )
 def clauses( path ):
     s = open( path ).read()
     head = s.split( '<sigs', 1 )[ 0 ]

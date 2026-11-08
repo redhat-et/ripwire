@@ -1065,6 +1065,25 @@ struct TailPageWalkInputs
     const std::vector<char>& inHead;   // the shown head's files (computeFileTail): skipped past the old cut
     const std::array<bool, 6>* foldKept = nullptr;   // SIZE-2: a code question folds widened non-code rows except these classes
 };
+// SIZE-2: a widened row (p= only) of a non-code class the task did not name is counted, not listed, and next= pages from the
+// first one (pageSkip). True when the row folded.
+inline bool foldTailRow( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, const ForFileRow& row, std::size_t r,
+                         TailPageRowFate fate )
+{
+    if( fate != TailPageRowFate::ListWide || in.foldKept == nullptr )
+    {
+        return false;
+    }
+    const TailFoldClass cls = tailFoldClass( in.ing, row.lead, rootRelPath( in.ing, row.fileId ) );
+    if( cls == TailFoldClass::Code || ( *in.foldKept )[ std::size_t( cls ) ] )
+    {
+        return false;
+    }
+    listed[ row.fileId ] = 1;
+    ++out.folded[ std::size_t( cls ) ];
+    out.pageSkip = std::min( out.pageSkip, r );
+    return true;
+}
 inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, FileTail& wide, FileTail* docs = nullptr )
 {
     static_assert( kForFileTailPageWalk >= kForFileTailPageRows, "the tail walks at least the page its sym= rows come from" );
@@ -1090,18 +1109,8 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         {
             out.pageSkip = std::min( out.pageSkip, r );
         }
-        else if( ( bits & kTailFateListed ) != 0 )
+        else if( ( bits & kTailFateListed ) != 0 && !foldTailRow( out, listed, in, row, r, fate ) )
         {
-            // SIZE-2: a widened row (p= only) of a non-code class is counted, not listed; next= pages to the first one
-            const TailFoldClass cls = fate == TailPageRowFate::ListWide && in.foldKept != nullptr
-                ? tailFoldClass( ing, row.lead, rootRelPath( ing, row.fileId ) ) : TailFoldClass::Code;
-            if( cls != TailFoldClass::Code && !( *in.foldKept )[ std::size_t( cls ) ] )
-            {
-                listed[ row.fileId ] = 1;
-                ++out.folded[ std::size_t( cls ) ];
-                out.pageSkip = std::min( out.pageSkip, r );
-                continue;
-            }
             listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
                          symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );
         }
@@ -1234,12 +1243,6 @@ inline std::string fileTailFoldedList( const FileTail& t, std::string_view sep, 
     }
     return v;
 }
-inline std::string fileTailFoldedXml( const FileTail& t )
-{
-    const std::string v = fileTailFoldedList( t, "=" );
-    return v.empty() ? std::string() : " folded=\"" + v + "\"";
-}
-
 // the call serving the files a tail of `shown` rows left out: the file page from the first page row it did not print
 inline std::string fileTailNextInvocation( const FileTail& t, std::size_t shown )
 {
@@ -1276,7 +1279,10 @@ inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, s
     {
         x += " p_only=\"" + std::to_string( pOnly ) + "\"";   // review F3: the rows past the old walk's cut, sym= shed
     }
-    x += fileTailFoldedXml( t );   // SIZE-2: the folded rows' counts, absent when none
+    if( const std::string folded = fileTailFoldedList( t, "=" ); !folded.empty() )
+    {
+        x += " folded=\"" + folded + "\"";   // SIZE-2: the folded rows' counts, absent when none
+    }
     x += ">";
     for( std::size_t i = 0; i < shown; ++i )
     {

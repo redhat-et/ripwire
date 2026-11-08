@@ -273,21 +273,6 @@ inline std::string unescapeXmlAttr( std::string_view v )
     return out;
 }
 
-// The value of ` name="…"` inside one tag's attribute text, or "" (the answer's own markup: no attribute holds a raw quote).
-inline std::string_view attrOf( std::string_view tag, std::string_view name )
-{
-    for( std::size_t at = tag.find( name ); at != std::string_view::npos; at = tag.find( name, at + 1 ) )
-    {
-        const std::size_t eq = at + name.size();
-        if( at > 0 && tag[at - 1] == ' ' && eq + 1 < tag.size() && tag[eq] == '=' && tag[eq + 1] == '"' )
-        {
-            const std::size_t close = tag.find( '"', eq + 2 );
-            return close == std::string_view::npos ? std::string_view() : tag.substr( eq + 2, close - eq - 2 );
-        }
-    }
-    return {};
-}
-
 struct ShownRow
 {
     char kind = 0; // 'd', 'b' or 't'
@@ -939,6 +924,18 @@ inline Picks pickRows( const IngestResult& ing, const Graph& g, std::vector<Cand
     return out;
 }
 
+// SIZE-1: the block closed, its legend (the prefix before <syms) without the two clauses whose attributes its rows do not carry:
+// test=1 unless a row is a test symbol, files= head= unless `readAttrs` (the tag printed either one)
+inline std::string presentOnlySymsBlock( const std::string& block, bool compactLegend, bool readAttrs )
+{
+    const std::size_t      legendEnd = block.find( "<syms" );
+    std::string            legend    = block.substr( 0, legendEnd );
+    const std::string_view rows      = std::string_view( block ).substr( legendEnd );
+    eraseAbsentClause( legend, compactLegend ? kForFileSymsTestClauseCompact : kForFileSymsTestClause, rows.contains( " test=\"1\"" ) );
+    eraseAbsentClause( legend, compactLegend ? kForFileSymsReadClauseCompact : kForFileSymsReadClause, readAttrs );
+    return legend + std::string( rows ) + "</syms>";
+}
+
 inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, const Head& head, const Picks& picks, bool compactLegend )
 {
     const MemberOwners owners( ing );
@@ -975,14 +972,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     {
         row( *c, true );
     }
-    // SIZE-1: the two clauses whose attributes this block may not carry ride only when it does (the legend is the block's prefix)
-    const std::size_t legendEnd = out.find( "<syms" );
-    std::string       legend    = out.substr( 0, legendEnd );
-    const std::string_view rows = std::string_view( out ).substr( legendEnd );
-    eraseAbsentClause( legend, compactLegend ? kForFileSymsTestClauseCompact : kForFileSymsTestClause, rows.contains( " test=\"1\"" ) );
-    eraseAbsentClause( legend, compactLegend ? kForFileSymsReadClauseCompact : kForFileSymsReadClause,
-                       sf.files.size() != kForFileSymsFiles || head.rows != kForFileSymsHeadRows );
-    return legend + std::string( rows ) + "</syms>";
+    return presentOnlySymsBlock( out, compactLegend, sf.files.size() != kForFileSymsFiles || head.rows != kForFileSymsHeadRows );
 }
 } // namespace filesyms_detail
 
