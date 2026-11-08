@@ -77,13 +77,25 @@ inline bool tagStarts( std::string_view rest, std::string_view name ) noexcept
     return rest.size() > name.size() + 1 && rest.substr( 1, name.size() ) == name && ( rest[name.size() + 1] == ' ' || rest[name.size() + 1] == '>' );
 }
 
+using OpenElements = std::vector<std::pair<std::string_view, std::string_view>>; // (element name, its p=) of the open elements
+inline void closeElement( OpenElements& open, std::string_view name )
+{
+    const auto at = std::ranges::find( open | std::views::reverse, name, &std::pair<std::string_view, std::string_view>::first );
+    open.erase( at == open.rend() ? open.end() : std::prev( at.base() ), open.end() );
+}
+inline std::string_view nearestP( const OpenElements& open )
+{
+    const auto withP = std::ranges::find_if( open | std::views::reverse, []( const auto& e ) { return !e.second.empty(); } );
+    return withP == open.rend() ? std::string_view() : withP->second;
+}
+
 // One walk over the answer's tags outside comments and CDATA.
 inline AnswerScan scanAnswer( std::string_view text )
 {
     AnswerScan out;
     bool inSigs = false, inHop = false;
     std::size_t dRows = 0;
-    std::vector<std::pair<std::string_view, std::string_view>> open; // (element name, its p=) of the open elements
+    OpenElements open;
     for( std::size_t i = text.find( '<' ); i != std::string_view::npos && i + 2 < text.size(); i = text.find( '<', i + 1 ) )
     {
         const std::string_view rest = text.substr( i );
@@ -109,18 +121,13 @@ inline AnswerScan scanAnswer( std::string_view text )
             const std::string_view name = text.substr( i + 2, close - i - 2 );
             inSigs = inSigs && name != "sigs";
             inHop = inHop && name != "h";
-            const auto at = std::ranges::find( open | std::views::reverse, name, &std::pair<std::string_view, std::string_view>::first );
-            open.erase( at == open.rend() ? open.end() : std::prev( at.base() ), open.end() );
+            closeElement( open, name );
             continue;
         }
         const bool selfClosing = text[close - 1] == '/';
         const std::size_t nameEnd = std::min( text.find_first_of( " />", i + 1 ), close );
         const std::string_view attrs = text.substr( nameEnd, close - nameEnd - ( selfClosing ? 1 : 0 ) );
-        const std::string_view parentP = [&]
-        {
-            const auto withP = std::ranges::find_if( open | std::views::reverse, []( const auto& e ) { return !e.second.empty(); } );
-            return withP == open.rend() ? std::string_view() : withP->second;
-        }();
+        const std::string_view parentP = nearestP( open );
         if( !selfClosing && rest[1] != '?' && rest[1] != '!' )
         {
             open.emplace_back( text.substr( i + 1, nameEnd - i - 1 ), attrOf( attrs, "p" ) );
@@ -129,7 +136,7 @@ inline AnswerScan scanAnswer( std::string_view text )
         {
             inSigs = !selfClosing;
         }
-        else if( tagStarts( rest, "h" ) && rest[2] == ' ' )
+        else if( tagStarts( rest, "h" ) )
         {
             inHop = !selfClosing;
         }
@@ -158,39 +165,24 @@ inline std::string_view fileOf( const AnswerRow& r )
     const std::string_view p = attrOf( r.attrs, "p" );
     return p.substr( 0, p.find( ':' ) );
 }
-// The last segment after `.`, `#` or `::` (the whole name when there is none).
-inline std::string_view lastSegment( std::string_view n ) noexcept
-{
-    const std::size_t dot = n.find_last_of( ".#" );
-    const std::size_t colons = n.rfind( "::" );
-    const std::size_t dotAfter = dot == std::string_view::npos ? 0 : dot + 1;
-    const std::size_t colonsAfter = colons == std::string_view::npos ? 0 : colons + 2;
-    return n.substr( std::max( dotAfter, colonsAfter ) );
-}
-// Owner of Owner.member / Owner::member: the name up to its first `.` or `::` ("" when it has neither).
-inline std::string_view firstSegment( std::string_view n ) noexcept
-{
-    const std::size_t cut = std::min( n.find( '.' ), n.find( "::" ) );
-    return cut == std::string_view::npos ? std::string_view() : n.substr( 0, cut );
-}
-
 inline bool hasMembers( const AnswerRow& r ) noexcept
 {
     return r.attrs.contains( " mem=\"" );
 }
 inline bool hopCallee( const AnswerScan& scan, std::string_view name )
 {
-    const std::string_view last = lastSegment( name );
+    const std::string_view last = filesyms_detail::leafName( name ); // the member after `.`, `::` or `#`, as <syms> reads a head row
     return std::ranges::any_of( scan.callees, [&]( const std::string& c )
                                 { return c == name || c == last; } );
 }
 inline bool ownerNear( const std::vector<const AnswerRow*>& dRows, const AnswerRow& r, std::string_view name )
 {
-    const std::string_view owner = firstSegment( name );
-    if( owner.empty() )
+    const std::size_t ownerEnd = std::min( name.find( '.' ), name.find( "::" ) ); // Owner.member / Owner::member: Owner
+    if( ownerEnd == std::string_view::npos || ownerEnd == 0 )
     {
         return false;
     }
+    const std::string_view owner = name.substr( 0, ownerEnd );
     for( std::size_t k = r.dpos > kOwnerNearRows ? r.dpos - kOwnerNearRows : 1; k < r.dpos; ++k )
     {
         if( filesyms_detail::unescapeXmlAttr( attrOf( dRows[k - 1]->attrs, "n" ) ) == owner )
@@ -323,19 +315,10 @@ inline bool provenPathToSeed( const Graph& g, const SeedReach& sr, NodeId id )
     return found;
 }
 
-// The answer with the demoted rows rewritten as tail pointers; "" when none is.
-inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view answer )
+// The <d> rows (r), (p) and (f) pick that K1-K3 (the answer's own bytes) do not keep, in answer order.
+inline std::vector<const AnswerRow*> pickByBytes( const AnswerScan& scan, const std::vector<const AnswerRow*>& dRows )
 {
-    const AnswerScan scan = scanAnswer( answer );
-    std::vector<const AnswerRow*> dRows;
-    for( const AnswerRow& r : scan.rows )
-    {
-        if( r.tag == 'd' )
-        {
-            dRows.push_back( &r );
-        }
-    }
-    std::vector<const AnswerRow*> picked; // (r)(p)(f) and not K1-K3, in answer order
+    std::vector<const AnswerRow*> picked;
     for( const AnswerRow* r : dRows )
     {
         if( !r->inSigs || r->dpos <= kDemoteMinRank || r->pos <= kDemoteMinPos || hasMembers( *r ) )
@@ -350,11 +333,12 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
             picked.push_back( r );
         }
     }
-    if( picked.empty() )
-    {
-        return {};
-    }
-    // K4: every answer row resolved in one pass — the seeds are the first kCallPathSeeds distinct ones
+    return picked;
+}
+// K4: demote[pos - 1] = 1 for each picked row with no proven <= 2-hop path to a seed. Every answer row is resolved in one pass; the
+// seeds are the first kCallPathSeeds distinct resolved ones.
+inline void markWithoutCallPath( const IngestResult& ing, const Graph& g, const AnswerScan& scan, const std::vector<const AnswerRow*>& picked, std::vector<char>& demote )
+{
     filesyms_detail::FileLookup files( ing );
     std::vector<RowWant> wants;
     for( const AnswerRow& r : scan.rows )
@@ -371,13 +355,15 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
         }
     }
     const SeedReach reach = seedReach( g, std::move( seeds ) );
-    std::vector<char> demote( scan.rows.size(), 0 );
     for( const AnswerRow* r : picked )
     {
         const NodeId id = wants[r->pos - 1].id;
         demote[r->pos - 1] = id == kNoNode || !provenPathToSeed( g, reach, id ) ? 1 : 0;
     }
-    // K5: a kept <d> row's same_as= names the row its text stands for — that row stays (to a fixpoint: a row kept here may name another)
+}
+// K5: a kept <d> row's same_as= names the row its text stands for — that row stays (to a fixpoint: a row kept here may name another).
+inline void keepSameAsTargets( const std::vector<const AnswerRow*>& dRows, const std::vector<const AnswerRow*>& picked, std::vector<char>& demote )
+{
     for( bool changed = true; changed; )
     {
         changed = false;
@@ -394,6 +380,11 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
             }
         }
     }
+}
+// The answer with each demoted row rewritten in place as <t p= sym= r=/> (the row's own bytes; r= keeps its rank readable: a budgeted
+// answer's rows stay a rank prefix of this one's), the legend comment before the first; "" when none is.
+inline std::string pointerAnswer( std::string_view answer, const std::vector<const AnswerRow*>& picked, const std::vector<char>& demote )
+{
     std::string out;
     std::size_t from = 0;
     for( const AnswerRow* r : picked )
@@ -402,18 +393,41 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
         {
             continue;
         }
+        const std::string_view rank = attrOf( r->attrs, "r" );
         out.append( answer.substr( from, r->at - from ) );
         out += from == 0 ? kSiblingDemoteLegend : std::string_view();
         out += "<t p=\"";
         out += attrOf( r->attrs, "p" );
         out += "\" sym=\"";
         out += attrOf( r->attrs, "n" );
-        const std::string_view rank = attrOf( r->attrs, "r" ); // the row's rank stays readable: a budgeted answer's rows are a rank prefix of this one's
         out += rank.empty() ? std::string() : "\" r=\"" + std::string( rank );
         out += "\"/>";
         from = r->end;
     }
     return from == 0 ? std::string() : out.append( answer.substr( from ) );
+}
+
+// The answer with the demoted rows rewritten as tail pointers; "" when none is.
+inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view answer )
+{
+    const AnswerScan scan = scanAnswer( answer );
+    std::vector<const AnswerRow*> dRows;
+    for( const AnswerRow& r : scan.rows )
+    {
+        if( r.tag == 'd' )
+        {
+            dRows.push_back( &r );
+        }
+    }
+    const std::vector<const AnswerRow*> picked = pickByBytes( scan, dRows );
+    if( picked.empty() )
+    {
+        return {};
+    }
+    std::vector<char> demote( scan.rows.size(), 0 );
+    markWithoutCallPath( ing, g, scan, picked, demote );
+    keepSameAsTargets( dRows, picked, demote );
+    return pointerAnswer( answer, picked, demote );
 }
 } // namespace demote_detail
 
