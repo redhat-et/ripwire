@@ -1182,6 +1182,22 @@ inline long long upperBoundCeil( std::string_view rest ) noexcept
     return nodeVersion( major, minor < 0 ? 0 : minor );
 }
 
+/// The ceiling a clause's own operator `op` sets on its first version `major`.`minor` (`rest` is the text after it):
+/// a bare, `=` or `~` version stays within the minor it names (the major when it names none), `^X…` within major X,
+/// and `>=`/`>` or a hyphen range "A - B" (B alone bounds it, review R1) set none here — `kNoCeiling`.
+inline long long operatorCeil( std::string_view op, long long major, long long minor, std::string_view rest ) noexcept
+{
+    if( rest.find( " - " ) != std::string_view::npos )
+    {
+        return kNoCeiling;
+    }
+    if( op.empty() || op == "=" || op == "v" || op == "=v" || op == "~" )   // X, X.Y, X.Y.Z, X.x, ~X.Y
+    {
+        return inclusiveCeil( major, minor );
+    }
+    return op == "^" ? nodeVersion( major + 1, 0 ) : kNoCeiling;
+}
+
 inline EngineClause engineClause( std::string_view clause ) noexcept
 {
     std::size_t p = 0;
@@ -1205,21 +1221,15 @@ inline EngineClause engineClause( std::string_view clause ) noexcept
     {
         return {};   // no version number found at all: unparseable, read as "admits anything"
     }
-    const std::string_view rest   = clause.substr( p );
-    const bool             hyphen = rest.find( " - " ) != std::string_view::npos;   // "A - B": B alone bounds it (R1)
-    const bool             exact  = op.empty() || op == "=" || op == "v" || op == "=v" || op == "~";   // X, X.Y, X.Y.Z, X.x, ~X.Y
-    long long              own    = kNoCeiling;                                                       // >=, >: open above
-    if( !hyphen && exact )
-    {
-        own = inclusiveCeil( major, minor );   // stays within the minor it names, or the major when it names none
-    }
-    else if( !hyphen && op == "^" )
-    {
-        own = nodeVersion( major + 1, 0 );
-    }
+    const std::string_view rest = clause.substr( p );
+    const bool             pre0 = patch == 0 && !rest.empty() && rest[0] == '-';   // "X.Y.0-rc.1": a prerelease below X.Y.0
     EngineClause out;
     out.floor = nodeVersion( major, minor < 0 ? 0 : minor );
-    out.ceil  = std::min( own, upperBoundCeil( rest ) );
+    out.ceil  = std::min( operatorCeil( op, major, minor, rest ), upperBoundCeil( rest ) );
+    if( pre0 && out.ceil == out.floor )
+    {
+        out.ceil = out.floor + 1;   // CR #586: ">=22.0.0-rc.1 <22.0.0" admits 22.0.0's prereleases, read as X.Y like every floor
+    }
     if( out.ceil <= out.floor )
     {
         return {};   // a contradictory clause (">=18 <0") is input, not an invariant: read as "admits anything"

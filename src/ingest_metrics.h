@@ -1746,7 +1746,7 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
     // count NAMED argument children; a spread / splat / apply argument makes the count unreliable → not known.
     // O(children): the `comment` skip below is itself the proof that this list's width is INPUT-set, and this
     // counter runs once per CALL SITE, so the indexed form was O(calls x C²) — arm B11, 56x its control.
-    std::uint16_t count      = 0;
+    std::uint32_t count      = 0;   // wider than the uint16 result: an overflowing count is unknown below, never a wrapped known one
     bool          unreliable = false;
     ChildCursor   argsCursor( args );
     forEachChild( args, argsCursor.cur, [ & ]( TSNode c )
@@ -1762,7 +1762,11 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
         ++count;
         return true; } );
     (void)lang;
-    return unreliable ? std::pair<std::uint16_t,bool>{ 0, false } : std::pair<std::uint16_t,bool>{ count, true };
+    if( unreliable || count > std::numeric_limits<std::uint16_t>::max() )
+    {
+        return { 0, false };   // CR #586: 65,536+ arguments wrapped to a KNOWN 0 and arity-dropped the right def
+    }
+    return { std::uint16_t( count ), true };
 }
 
 // The KEYWORD arguments of the Python call whose callee identifier is `nameNode`, as the byte pyKwTag writes (model.h): the count
