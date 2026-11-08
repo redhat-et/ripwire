@@ -2090,13 +2090,13 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
     const SmartAliasPeel aliasPeel( ing );
     for( const Reference& cr : ing.references )
     {
-        if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName.empty() || cr.calleeName.empty() )
+        if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName().empty() || cr.calleeName.empty() )
         {
             continue;
         }
         key.clear();
         key.append( ing.symbols[ cr.fromSymbol ].name ).push_back( '#' );
-        key.append( cr.fieldName );
+        key.append( cr.fieldName() );
         recordMemberTypeFact( t.fieldTypeByClass, key, cr, aliasPeel );
     }
     t.localNameSet.reserve( ing.bindings.size() );
@@ -5105,7 +5105,7 @@ inline std::string_view rubyConstantReceiver( const Reference& r ) noexcept
 {
     const bool constant = r.lang == Lang::Ruby && r.role == RefRole::Call && r.recv == RecvKind::NamedVar && r.qualifier.empty()
                        && rubyIsConstantName( r.recvVar ) && !rubyTypedRecvOf( r );
-    const std::string_view written = !constant ? std::string_view {} : r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName );
+    const std::string_view written = !constant ? std::string_view {} : r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() );
     return written.substr( written.starts_with( "::" ) ? 2 : 0 );
 }
 
@@ -5143,7 +5143,7 @@ inline RubyClassObject RubyClassObjects::of( const Reference& r ) const
 // every class; external when the constant resolves to nothing the tree opens.
 inline RubyClassObject RubyClassObjects::ofIndexed( const Reference& r ) const
 {
-    std::string       fqn  = fqnOfWritten( r, r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName ) );
+    std::string       fqn  = fqnOfWritten( r, r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() ) );
     const std::size_t last = fqn.rfind( "::" );
     const auto        cls  = fqn.empty() ? typed.reach.classNames.end() : typed.reach.classNames.find( fqn.substr( last == std::string::npos ? 0 : last + 2 ) );
     return cls != typed.reach.classNames.end() ? RubyClassObject { &cls->first, std::move( fqn ), false } : RubyClassObject { nullptr, {}, true };
@@ -8741,7 +8741,7 @@ inline void writtenTraitBases( const BaseEvidenceTables& t, const Reference& r, 
     {
         return;
     }
-    const NodeId trait = t.recvEv->types.rustResultClass( r.fileId, r.startByte, r.memberPath, r.calleeName );
+    const NodeId trait = t.recvEv->types.rustResultClass( r.fileId, r.startByte, r.memberPath(), r.calleeName );
     if( trait != kNoNode && std::find( cand.begin(), cand.end(), trait ) != cand.end() )
     {
         out.push_back( trait );
@@ -9042,7 +9042,7 @@ inline bool isMarkdownLinkRef( const Reference& r ) noexcept
     {
         return false;
     }
-    return !r.memberPath.empty();
+    return !r.memberPath().empty();
 }
 
 // Link-ness is where the reference came from: lang Markdown and not a doc mention. isMarkdownLinkRef also requires a
@@ -9259,8 +9259,8 @@ inline MdLinkPins bindMarkdownLinks( const IngestResult& ing )
         const Reference& r = ing.references[ i ];
         if( isMarkdownLinkRef( r ) && r.fileId < ing.files.size() )
         {
-            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath, out.pin[ i ] ) ) { continue; }
-            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath, ing.crawlRoot );
+            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath(), out.pin[ i ] ) ) { continue; }
+            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath(), ing.crawlRoot );
             out.pin[ i ]      = t.id;
             out.slugMiss[ i ] = t.slugMiss ? 1 : 0;
         }
@@ -10466,7 +10466,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( std::uint32_t i = 0; i < std::uint32_t( ing.references.size() ); ++i )
         {
             const Reference& r = ing.references[ i ];
-            if( r.isCompose && r.composeRel == "elem" && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.memberPath.empty() )
+            if( r.isCompose && r.composeRel() == "elem" && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.memberPath().empty() )
             {
                 key.assign( ing.symbols[ r.fromSymbol ].name ).push_back( '#' );
                 key.append( r.recvVar );
@@ -10491,9 +10491,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( const std::uint32_t i : it->second )
         {
             const Reference& r = ing.references[ i ];
-            if( !r.memberPath.empty() )
+            if( !r.memberPath().empty() )
             {
-                addElementOfText( out, r.memberPath );
+                addElementOfText( out, r.memberPath() );
             }
             else if( !fieldTypeWrittenInStd( r ) && r.calleeName != type )
             {
@@ -10514,7 +10514,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             for( const std::uint32_t i : eit->second )
             {
-                addElementOfText( out, ing.references[ i ].memberPath );
+                addElementOfText( out, ing.references[ i ].memberPath() );
             }
         }
         const FlatRecvType* field = fieldTypeIn( std::string( cls ), member );
@@ -10527,7 +10527,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     Reference stdElemProbe;   // reused: the container root of an element receiver, as a NamedVar receiver of the same call
     const auto addElementReceiver = [ & ]( StdMemberGate::Receiver& out, const Reference& ref, const std::string& callerScope )
     {
-        const std::string_view shape = std::string_view( ref.memberPath ).substr( kCppElementMark.size() );
+        const std::string_view shape = std::string_view( ref.memberPath() ).substr( kCppElementMark.size() );
         const std::size_t      dot   = shape.find( '.' );
         if( shape.starts_with( "this." ) )
         {
@@ -10575,16 +10575,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             addNamed( out, ref, callerScope, ref.viaArrow );
         }
-        else if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName.empty() )
+        else if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName().empty() )
         {
-            addField( out, fieldTypeIn( callerScope, ref.fieldName ), ref.viaArrow );   // `this->items_.m()`
+            addField( out, fieldTypeIn( callerScope, ref.fieldName() ), ref.viaArrow );   // `this->items_.m()`
         }
-        else if( ref.recv == RecvKind::FieldOfVar && ref.recvVar.empty() && !ref.memberCall && ref.memberPath.size() > kCppElementMark.size()
-                 && ref.memberPath.starts_with( kCppElementMark ) )
+        else if( ref.recv == RecvKind::FieldOfVar && ref.recvVar.empty() && !ref.memberCall && ref.memberPath().size() > kCppElementMark.size()
+                 && ref.memberPath().starts_with( kCppElementMark ) )
         {
             addElementReceiver( out, ref, callerScope );   // `m[ k ].empty()`: the container's element type
         }
-        else if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName.empty() )
+        else if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName().empty() )
         {
             // one hop off a typed root (`b.items_.m()`, `up->items_.m()`): the root's written classes, then each one's field.
             // A root written as a std smart pointer or optional reaches its fields through `->` alone, so its pointee is read.
@@ -10592,7 +10592,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             addNamed( stdRecvRoot, ref, callerScope, /*viaArrow=*/true );
             for( const std::string_view r : stdRecvRoot.types )
             {
-                addField( out, fieldTypeIn( std::string( r ), ref.fieldName ), ref.viaArrow );
+                addField( out, fieldTypeIn( std::string( r ), ref.fieldName() ), ref.viaArrow );
             }
         }
     };
@@ -13168,10 +13168,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             ComposeEdge ce;
             ce.ownerSym  = r.fromSymbol;
             ce.typeSym   = typeId;
-            ce.fieldName = r.fieldName;
+            ce.fieldName = r.fieldName();
             ce.typeName  = r.calleeName;
             ce.ownerName = ing.symbols[ r.fromSymbol ].name;
-            ce.rel       = r.composeRel;
+            ce.rel       = r.composeRel();
             // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
             // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
             // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
@@ -15814,7 +15814,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             break;
             case RecvKind::FieldOfThis:
             {
-                candidatesIn( fieldTypeOf( ctxOwner, r.fieldName ), r.lang );
+                candidatesIn( fieldTypeOf( ctxOwner, r.fieldName() ), r.lang );
                 if( cand.empty() )
                 {
                     everyCompatibleOwner( r.lang );
@@ -15823,7 +15823,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             break;
             case RecvKind::FieldOfVar:
             {
-                candidatesIn( fieldTypeOf( receiverTypeOf( r.fromSymbol, r.recvVar, ctxOwner ), r.fieldName ), r.lang );
+                candidatesIn( fieldTypeOf( receiverTypeOf( r.fromSymbol, r.recvVar, ctxOwner ), r.fieldName() ), r.lang );
                 if( cand.empty() )
                 {
                     everyCompatibleOwner( r.lang );   // includes the "receiver too rich to classify" shape (empty recvVar)

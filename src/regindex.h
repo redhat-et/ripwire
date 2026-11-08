@@ -523,7 +523,7 @@ private:
             {
                 continue;
             }
-            const std::string_view into = r.fieldName;
+            const std::string_view into = r.fieldName();
             const std::size_t      hash = into.rfind( "#arg" );
             const std::size_t      dot  = hash == std::string_view::npos ? std::string_view::npos : into.rfind( '.', hash );
             if( dot == std::string_view::npos || into.substr( hash + 4 ) != std::to_string( r.argCount ) )
@@ -571,13 +571,13 @@ private:
         {
             const Reference& r   = m_ing.references[i];
             const RegLang*   row = r.role == RefRole::Value ? regLang( r.lang ) : nullptr;
-            if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel.size() < 2
-                || r.composeRel[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
+            if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel().size() < 2
+                || r.composeRel()[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
             {
                 continue;
             }
-            const std::string_view field = std::string_view( r.composeRel ).substr( 1 );
-            if( !std::string_view( r.fieldName ).ends_with( r.composeRel ) )
+            const std::string_view field = std::string_view( r.composeRel() ).substr( 1 );
+            if( !std::string_view( r.fieldName() ).ends_with( r.composeRel() ) )
             {
                 continue;   // the written slot was capped (vrClean): its object is not provable
             }
@@ -649,9 +649,9 @@ private:
             if( row->form == RegForm::ProviderRecord && r.role == RefRole::Value )
             {
                 const auto it = byName.find( r.calleeName );
-                const std::size_t hash = std::string_view( r.fieldName ).rfind( "#arg" );
+                const std::size_t hash = std::string_view( r.fieldName() ).rfind( "#arg" );
                 if( it == byName.end() || hash == std::string::npos
-                    || std::ranges::find( row->consumerCalls, std::string_view( r.fieldName ).substr( 0, hash ) ) == row->consumerCalls.end() )
+                    || std::ranges::find( row->consumerCalls, std::string_view( r.fieldName() ).substr( 0, hash ) ) == row->consumerCalls.end() )
                 {
                     continue;
                 }
@@ -666,14 +666,14 @@ private:
             }
             else if( row->form == RegForm::ReceiverMethod && r.role == RefRole::Call && !r.recvVar.empty() )
             {
-                const std::string_view leaf = r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName );
+                const std::string_view leaf = r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() );
                 const auto             it   = byName.find( std::string( leaf ) );
                 if( it == byName.end() || std::ranges::find( row->consumerSkip, std::string_view( r.calleeName ) ) != row->consumerSkip.end() )
                 {
                     continue;
                 }
                 const NodeId def = shadowed( r.fileId, r.recvVar.substr( 0, r.recvVar.find( '.' ) ), r.startByte, r.fromSymbol )
-                                       ? kNoNode : resolveDotted( r.fileId, r.fieldName.empty() ? r.recvVar : r.recvVar + "." + r.fieldName );
+                                       ? kNoNode : resolveDotted( r.fileId, r.fieldName().empty() ? r.recvVar : r.recvVar + "." + r.fieldName() );
                 for( const std::size_t k : it->second )
                 {
                     const RegKey& key = keys[k];

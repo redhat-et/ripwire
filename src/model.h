@@ -14,6 +14,7 @@
 #include "infra/sortutil.h"  // svLess — JS/TS builtin-member tables below (binary_search, no signed-char wrap)
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 #include "structlayout.h"   // cross-translation-unit sizeof/alignof tripwire for the shared model
+#include "infra/sharedOnce.h"   // rw::sharedOnce — RefColdFields::block, the cold text block made on its first write
 
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember
 #include <memory>      // IngestResult::rustCrateRoots — the per-run Rust crate-root table
@@ -1170,7 +1171,65 @@ inline PyKwArgs pyKwArgsOf( std::string_view composeRel ) noexcept
     return out;
 }
 
-struct Reference
+// MEM-REF-SHRINK: the five text members most references leave empty (Stage 0 counts, reports/mem-ref-shrink.md: non-empty on
+//   0-13 % of the references of envoy, cockroach and vscode each) live in ONE block a reference owns only when it has one, so a
+//   Reference / RawRef carries an 8 B pointer instead of five string headers (120 B on libc++, 160 B on libstdc++). memberRoot is
+//   NOT here: Go and TS receivers fill it on half the references. Reads go through the accessors (an empty string when the
+//   block is absent); writes through setX (any text: string, view or literal; an empty one allocates nothing) or XMut. Value semantics: a copy copies the block.
+//   The cache record is unchanged: writeRef / readRef read and write the same five strings in the same order.
+struct RefColdText
+{
+    std::string fieldName;
+    std::string composeRel;
+    std::string memberPath;
+    std::string memberCtor;
+    std::string memberVia;
+};
+inline const std::string kNoRefColdText{};   // what every accessor returns without a block (constant-initialised: no guard)
+class RefColdFields
+{
+public:
+    RefColdFields() noexcept = default;
+    RefColdFields( const RefColdFields& other ) : cold_( other.cold_ ? std::make_unique<RefColdText>( *other.cold_ ) : nullptr ) {}
+    RefColdFields& operator=( const RefColdFields& other )
+    {
+        if( this != &other ) { cold_ = other.cold_ ? std::make_unique<RefColdText>( *other.cold_ ) : nullptr; }
+        return *this;
+    }
+    RefColdFields( RefColdFields&& ) noexcept            = default;
+    RefColdFields& operator=( RefColdFields&& ) noexcept = default;
+    ~RefColdFields()                                     = default;
+
+    const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName : kNoRefColdText; }
+    const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel : kNoRefColdText; }
+    const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath : kNoRefColdText; }
+    const std::string& memberCtor() const noexcept { return cold_ ? cold_->memberCtor : kNoRefColdText; }
+    const std::string& memberVia() const noexcept { return cold_ ? cold_->memberVia : kNoRefColdText; }
+
+    template <class Text> void setFieldName( Text&& value ) { setText( &RefColdText::fieldName, std::forward<Text>( value ) ); }
+    template <class Text> void setComposeRel( Text&& value ) { setText( &RefColdText::composeRel, std::forward<Text>( value ) ); }
+    template <class Text> void setMemberPath( Text&& value ) { setText( &RefColdText::memberPath, std::forward<Text>( value ) ); }
+    template <class Text> void setMemberCtor( Text&& value ) { setText( &RefColdText::memberCtor, std::forward<Text>( value ) ); }
+    template <class Text> void setMemberVia( Text&& value ) { setText( &RefColdText::memberVia, std::forward<Text>( value ) ); }
+
+    std::string& memberPathMut() { return block().memberPath; }
+    std::string& memberCtorMut() { return block().memberCtor; }
+    std::string& memberViaMut() { return block().memberVia; }
+
+    // emitReferences: a RawRef's block moves into its Reference whole (one pointer, no string moves).
+    void takeColdFrom( RefColdFields& other ) noexcept { cold_ = std::move( other.cold_ ); }
+
+private:
+    RefColdText& block() { return rw::sharedOnce( cold_, [] { return std::make_unique<RefColdText>(); } ); }
+    template <class Text> void setText( std::string RefColdText::* slot, Text&& value )
+    {
+        if( cold_ || !std::string_view( value ).empty() ) { block().*slot = std::forward<Text>( value ); }
+    }
+    std::unique_ptr<RefColdText> cold_;
+};
+static_assert( sizeof( RefColdFields ) == sizeof( void* ), "one pointer per reference: the whole point of the split" );
+
+struct Reference : RefColdFields
 {
     NodeId        fromSymbol = kNoNode;   // enclosing symbol (caller); kNoNode if file-scope
     std::uint32_t fileId     = 0;
@@ -1200,11 +1259,12 @@ struct Reference
                                           //   graph.h::keepStdQualifiedCandidates, alongside Symbol::scopeRootsStd. false (the safe default) on
                                           //   every bare/unqualified call and on every non-Cpp language (ObjC gets no `qualifier` at all today —
                                           //   see keepStdQualifiedCandidates' stated floor — so this stays false there too, by construction).
+    bool          memberCall = false;     // FE-A: a Go/JS/TS/Rust/C call written on a receiver (`x.f()`), whose recv stays None; see memberRoot below
     std::string   calleeName;             // referenced name (final identifier segment)
     std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
     std::string   recvVar;                // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
                                           //   A Ruby receiver the code BUILDS leaves it empty: its type is memberCtor/memberVia (rubyTypedRecvOf).
-    std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
+    // fieldName() (RefColdFields): member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
                                           //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
                                           //   (`this->m_pool.run()` → "m_pool") — the two are mutually exclusive
                                           //   (a compose ref is never a call ref, and the compose readers all gate
@@ -1217,15 +1277,14 @@ struct Reference
                                           //   A fourth reading, on a Rust CALL reference (role Call, recv None): the whole qualifier a path call
                                           //   is written with when it has more than one segment (`crate::far` for `crate::far::helper()`), ""
                                           //   otherwise (ingest_names.h rustWrittenQualifier; read through rustWrittenQualifierOf below).
-    std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
+    // composeRel() (RefColdFields): "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
     //   recv==None guard). These two fields tell the shapes apart WITHOUT touching recv: memberCall is true when the callee
     //   is the field of a member access, and memberRoot is the receiver chain's ROOT identifier as written (`crypto` for
     //   `crypto.subtle.verify()`, `this`, a package alias), "" when the root is not an identifier (a call, a literal,
     //   `new X()`). Read only by graph.h's FalseEdgeRules. false/"" for every other language and every non-call ref.
-    bool          memberCall = false;
-    std::string   memberRoot;
+    std::string   memberRoot;   // memberCall sits beside qualifierRootsStd above: the bools share one padding slot
     // FE-B (test/receiverevidencecheck.sh): the rest of a member call's receiver chain, for the receiver-evidence rule
     //   (graph.h ReceiverEvidence). memberPath is the member names BETWEEN memberRoot and the callee, '.'-joined —
     //   "bucket" for `this.bucket.listSchemas()`, "req.raw.headers" for `ctx.req.raw.headers.get()`, "" for `root.m()`.
@@ -1241,12 +1300,11 @@ struct Reference
     //   record and a composeRel "elem" field record carry the std container's whole written text here (ingest_relations.h
     //   stdElementContainerText). Rust (lane L6): an `impl Trait for T` inherit ref carries the trait's path as written when it is
     //   qualified (`render::Renderer`, generic arguments dropped), "" for a bare trait name (ingest_relations.h rustImplVisitNode).
-    std::string   memberPath;
-    std::string   memberCtor;
+    // memberPath() and memberCtor() (RefColdFields) hold the two texts above.
     // FE-B on #373: a Ruby receiver the code BUILDS (`User.new`, a finder, a FactoryBot build, a let or local holding one)
     //   carries its type here, out of band: memberCtor = the class's constant as written (or the factory name when
     //   memberFactory), memberVia = the method that built it. recvVar is then empty. Read through rubyTypedRecvOf.
-    std::string   memberVia;
+    // memberVia() (RefColdFields) holds it.
     bool          memberFactory = false;
     // lane fcall-forward fix 1 (test/fcallforwardcheck.sh N7 N8 N10 N11 H): a JS/TS call reference the value-ref walk
     //   FORWARDED from `f.call( … )` / `f.apply( … )` (ingest_valuerefs.h forwardCallAt) — it stands for the bare call
@@ -1266,6 +1324,10 @@ struct Reference
     //   Sits in memberFactory's alignment padding: sizeof(Reference) is unchanged.
     std::uint32_t baseBind = 0;
 };
+// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. Four inline strings (calleeName, qualifier,
+// recvVar, memberRoot), the cold block's pointer and 40 B of ids and flags: 144 B on libc++ (was 264), 176 B on libstdc++.
+// A new std::string member, or a flag placed where it adds a padding slot, fails here; move cold text into RefColdText instead.
+static_assert( sizeof( Reference ) <= 4 * sizeof( std::string ) + 48, "Reference grew: see the MEM-REF-SHRINK note above" );
 // The sentinels Reference::baseBind holds besides a real binding (1 + a name byte): ONE definition for the writer (ingest_relations.h
 // localBaseBinding) and every reader (graph.h provenBasesOf, valuerefindex.h inheritEdges / ClassFamilies::bindBase).
 inline constexpr std::uint32_t kBaseBindNone          = 0;            // no enclosing scope declares the name
@@ -1278,8 +1340,8 @@ static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= 
 // references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
 inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
 {
-    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName.empty();
-    return whole ? std::string_view( r.fieldName ) : std::string_view( r.qualifier );
+    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName().empty();
+    return whole ? std::string_view( r.fieldName() ) : std::string_view( r.qualifier );
 }
 
 // ONE rule for every reader of the reference table that counts a call SITE (train 30, fcall-forward nit N1): a FORWARDED
@@ -1311,11 +1373,11 @@ struct RubyTypedRecv
 // the type a Ruby reference's receiver was built as, or nullopt for every other reference
 inline std::optional<RubyTypedRecv> rubyTypedRecvOf( const Reference& r ) noexcept
 {
-    if( r.lang != Lang::Ruby || r.memberCtor.empty() || r.memberVia.empty() )
+    if( r.lang != Lang::Ruby || r.memberCtor().empty() || r.memberVia().empty() )
     {
         return std::nullopt;
     }
-    return RubyTypedRecv { r.memberCtor, r.memberVia, r.memberFactory };
+    return RubyTypedRecv { r.memberCtor(), r.memberVia(), r.memberFactory };
 }
 
 // RSpec's targets (test/rubyrspectargetcheck.sh, parser version 133): inside an example group, the receiver-less builder
@@ -2239,6 +2301,10 @@ struct IngestResult
                                                // every symbol splice re-offsets it like fnLocalScopes (workspace.h mergeWorkspaceIngests, editpreview.h previewMerge)
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
+    std::vector<std::uint64_t> cloneKeys;      // CLONES-PERSIST: size symbols.size() when built (ingest_model.h assignSymbols), else empty:
+                                               // a Function/Method body's exact-clone key (clones.h cloneBodyKey), 0 = none. findClones
+                                               // groups by it with no file I/O and reads a body's file only to key a 0 or to verify a
+                                               // shared key; a size mismatch (an IngestResult built without it) makes it read every file.
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)
