@@ -222,14 +222,28 @@ inline bool recallOrderLess( const Recalled& a, const Recalled& b, const IngestR
     return ing.files[ a.fileId ] < ing.files[ b.fileId ];   // deterministic tiebreak
 }
 
-inline RecallSelection recallTopFiles( const IngestResult& ing, const std::vector<float>& scores, int k, bool docsOnly )
+// The doc mask less the files `skipped` marks (per fileId; null or all-zero: the mask itself, copied).
+inline std::vector<char> docsLessSkipped( const std::vector<char>& isDoc, const std::vector<char>* skipped )
+{
+    std::vector<char> out = isDoc;
+    for( std::size_t f = 0; skipped != nullptr && f < out.size() && f < skipped->size(); ++f )
+    {
+        out[ f ] = char( out[ f ] != 0 && ( *skipped )[ f ] == 0 );
+    }
+    return out;
+}
+
+// `skipped` (per fileId, may be null): documents the scorer left out (a mirror tree, recallMirrorTrees). They take no part in
+// the generated-doc verdicts either, so many small mirror copies cannot drag the median that demotes the documents kept.
+inline RecallSelection recallTopFiles( const IngestResult& ing, const std::vector<float>& scores, int k, bool docsOnly,
+                                       const std::vector<char>* skipped = nullptr )
 {
     // docsOnly: restrict to DOCUMENT files (docFileMask, above) — recall = "what I already KNOW" (notes / plans /
     // designs), not code (that's --for / --grep). Over a mixed code+docs tree this keeps code files from
     // swamping the docs (which the lexical scorer down-weights ×0.30 anyway). The generated-doc verdicts are
     // taken over that same doc corpus, and only there: a caller ranking code gets the untouched ordering.
     const std::vector<char>    isDoc    = docFileMask( ing );
-    const GeneratedDocVerdicts verdicts = docsOnly ? classifyGeneratedDocs( ing, isDoc ) : GeneratedDocVerdicts{};
+    const GeneratedDocVerdicts verdicts = docsOnly ? classifyGeneratedDocs( ing, docsLessSkipped( isDoc, skipped ) ) : GeneratedDocVerdicts{};
 
     std::vector<float> best( ing.files.size(), 0.f );
     for( std::size_t i = 0; i < ing.symbols.size() && i < scores.size(); ++i )
@@ -295,7 +309,8 @@ struct RecallShape
     std::size_t truncatedCount = 0;       // emitted docs whose body was CUT to fit the budget
     std::size_t demotedCount   = 0;       // §P2b: MATCHING docs de-prioritized as generated artifacts
     std::string mirrorAttr;               // DOCS-UNITS: " mirror_skipped=N mirror_dirs=…" when the scorer left mirror
-                                          // trees out of the corpus; "" when there were none
+                                          // trees out of the corpus, then " terms_capped=1 terms_total=N" when it left
+                                          // query terms past kMaxUniqueQueryTerms out; "" when it left nothing out
     std::string demotedNamesAttr;         // DOCS-DEMOTE-FP: " generated_demoted_paths=…" (and _named= when the
                                           // list is cut), built once from the selection; "" when none demoted
     std::size_t bytes          = 0;       // total emitted bytes (header + bodies + markers)
@@ -1243,7 +1258,7 @@ inline std::optional<RecallSectionBody> buildSectionGranularBody(
         unit.bodyLength = std::uint32_t( slice.size() );
         unit.lineLo     = layout::lineOf( *text, p.startByte );
         unit.lineHi     = layout::lineOf( *text, p.endByte - 1 );   // last INCLUDED byte — endByte is exclusive
-        unit.symIndex   = p.symIndex;
+        unit.symIndex   = p.symIndex;   // the heading; the file node for a preamble unit
         out.body += slice;
         out.units.push_back( unit );
     }
@@ -1752,6 +1767,8 @@ struct RecallUnitScoring
 {
     std::vector<float> scores;   // per symbol; 0 for every non-unit symbol and for a unit sharing no query term
     RecallMirrorTrees  mirror;
+    bool               termsCapped = false;   // the query held more distinct terms than kMaxUniqueQueryTerms; the rest score nothing
+    std::size_t        termsTotal  = 0;       // every distinct term the query held (kept or not)
 };
 
 inline RecallUnitScoring recallUnitScores( const IngestResult& ing, std::string_view task, std::string_view rootPrefix )
@@ -1764,7 +1781,10 @@ inline RecallUnitScoring recallUnitScores( const IngestResult& ing, std::string_
     std::vector<std::string> queryToks;
     subtokens( task, queryToks );
     // unique, first-occurrence order, capped exactly as lexicalScores caps them (its own dedupe)
-    const std::vector<std::string> terms = dedupeQueryTerms( queryToks, kMaxUniqueQueryTerms ).uniqueToks;
+    DedupedQueryTerms              dedup = dedupeQueryTerms( queryToks, kMaxUniqueQueryTerms );
+    out.termsCapped                      = dedup.capped;
+    out.termsTotal                       = dedup.uniqueSeenTotal;
+    const std::vector<std::string> terms = std::move( dedup.uniqueToks );
     if( terms.empty() )
     {
         return out;
@@ -2151,7 +2171,7 @@ inline RecallWindow selectRecallWindow( std::string_view body, const RecallWindo
 inline constexpr std::string_view kRecallWindowLead = "\xE2\x80\xA6\n";   // "…" + newline: text skipped above
 
 inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t keepBytes, const RecallWindow& window,
-                                                  std::string_view title = {} )
+                                                  std::string_view title = {}, std::size_t titleEndByte = 0 )
 {
     const std::size_t fullBytes = body.size();
     std::size_t       start     = std::min( window.startByte, fullBytes );
@@ -2163,7 +2183,7 @@ inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t
     // A title line the window itself starts after is repeated above it (truncateRecallWholeDoc passes it for an
     // HTML page): a window past the title would otherwise not say which page it is from. The caller sized the
     // window net of the title.
-    const std::string                       titleText = start > title.size() ? std::string( title ) : std::string();
+    const std::string                       titleText = start > std::max( title.size(), titleEndByte ) ? std::string( title ) : std::string();
     const std::size_t                       reserved  = kRecallWindowLead.size() + titleText.size();
     const std::size_t                       allowance = keepBytes > reserved ? keepBytes - reserved : 0;
     const std::size_t                       windowEnd = std::max( window.endByte, start );
@@ -2201,17 +2221,20 @@ inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t
              kept };
 }
 
-// An HTML page's converted text opens with its <title> line ("Renderers - mdBook Documentation"); a window past
-// it is otherwise anonymous. A first line this long (or an empty one) is not a title and is not repeated.
+// An HTML page's converted text opens with its <title> line ("Renderers - mdBook Documentation"), after the blank lines
+// of the markup above it (the text is line-preserving: the title sits on its own raw line); a window past it is
+// otherwise anonymous. A first text line this long is not a title and is not repeated.
 inline constexpr std::size_t kRecallTitleMaxBytes = 120;
 
 // HTML-CUT: a whole-doc body over its allowance — the best query-term window of that size when one beats the
 // head, else the head cut it always had. `isHtml`: the page's title line rides above the window.
 inline RecallTruncation truncateRecallWholeDoc( std::string& body, std::size_t keepBytes, const std::vector<std::string>& queryToks, bool isHtml )
 {
-    const std::size_t      titleEnd = isHtml ? body.find( '\n' ) : std::string::npos;   // the first line's '\n'
-    const bool             isTitled = titleEnd > 0 && titleEnd < kRecallTitleMaxBytes;
-    const std::string_view title    = isTitled ? std::string_view( body ).substr( 0, titleEnd + 1 ) : std::string_view();
+    const std::size_t      lead     = isHtml ? body.find_first_not_of( '\n' ) : std::string::npos;   // the first text line
+    const std::size_t      titleEnd = lead == std::string::npos ? std::string::npos : body.find( '\n', lead );   // its '\n'
+    const bool             isTitled = titleEnd != std::string::npos && titleEnd - lead < kRecallTitleMaxBytes;
+    const std::string_view title    = isTitled ? std::string_view( body ).substr( lead, titleEnd + 1 - lead ) : std::string_view();
+    const std::size_t      titleEndByte = isTitled ? titleEnd + 1 : 0;
     const std::size_t      reserved = std::min( keepBytes, kRecallWindowLead.size() + title.size() );
     // The head the window must beat is the head cut as it would be SERVED (boundary cascade and protected
     // ranges included), at the full allowance — not a head shrunk by the title and lead only the window pays.
@@ -2222,7 +2245,7 @@ inline RecallTruncation truncateRecallWholeDoc( std::string& body, std::size_t k
         headKept = cutRecallBodyTail( headCopy, keepBytes ).sourceKeptBytes;
     }
     const RecallWindow     window   = selectRecallWindow( body, { keepBytes - reserved, headKept }, queryToks );
-    return window.startByte > 0 ? truncateRecallBodyWindow( body, keepBytes, window, title ) : truncateRecallBody( body, keepBytes );
+    return window.startByte > 0 ? truncateRecallBodyWindow( body, keepBytes, window, title, titleEndByte ) : truncateRecallBody( body, keepBytes );
 }
 
 // Build the recall bundle IN MEMORY: each top file's path + relevance + body, best-first. `maxBytes` (0 =
@@ -2240,13 +2263,14 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
                                  RedactCounts* redact,
                                  std::string_view rootArg = {},        // R-R: the separator line's path root
                                  std::size_t budgetTokens = 0,         // F4: --token-budget's GATING ceiling, named on the header
-                                 const RecallMirrorTrees* mirror = nullptr )   // DOCS-UNITS: the mirror trees the scorer left out
+                                 const RecallUnitScoring* scored = nullptr )   // DOCS-UNITS: what the unit scorer left out (mirrors, terms)
 {
     const std::size_t maxBytes = recallBytesForTokens( maxTokens );
     // R-R: same convention every other lens's pathRel uses — the "━━ <path>" separator is a DISPLAY path and
     // was the last CLI surface still printing the checkout prefix once per recalled doc.
     const std::string recallRootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
-    const RecallSelection        selected = recallTopFiles( ing, scores, k, docsOnly );
+    const RecallMirrorTrees*     mirror   = scored ? &scored->mirror : nullptr;
+    const RecallSelection        selected = recallTopFiles( ing, scores, k, docsOnly, mirror ? &mirror->isMirror : nullptr );
     const std::vector<Recalled>& top      = selected.files;
     // the display path, one spelling for the separator line and the header's demoted names
     const auto displayPath = [ & ]( std::uint32_t fileId ) -> std::string_view {
@@ -2264,8 +2288,12 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
 
     // the payload's own share of the budget — the header and the closing capped note are charged first so
     // the TOTAL artifact (not just its bodies) honours maxBytes. The demoted names are header bytes too.
-    const std::string mirrorAttr    = mirror ? formatRecallMirrorAttr( *mirror, rootArg.empty() ? std::string_view() : std::string_view( recallRootPrefix ) )
-                                             : std::string();
+    std::string mirrorAttr = scored ? formatRecallMirrorAttr( *mirror, rootArg.empty() ? std::string_view() : std::string_view( recallRootPrefix ) )
+                                    : std::string();
+    if( scored && scored->termsCapped )
+    {
+        mirrorAttr += " terms_capped=1 terms_total=" + std::to_string( scored->termsTotal );   // --for's spelling of the same cap
+    }
     const std::size_t headerReserve = maxBytes ? kRecallHeaderReserveBytes + task.size() + demotedNamesAttr.size() + mirrorAttr.size() : 0;
     const std::size_t payloadBudget = ( maxBytes > headerReserve ) ? maxBytes - headerReserve : 0;
 
@@ -2639,13 +2667,15 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
 // the recall lens's measured choice, not a default — bench/recalleval measured +0.03 lenient MRR for it
 // (gate: test/recallevalcheck.sh) and test/recallrankdepthcheck.sh ARM 4 is its kill tripwire. Parity is
 // gated by test/recallparitycheck.sh, which asserts the two doors return the same bundle byte for byte.
-// The recall lens's per-symbol scores for `task`: path weight 1 and the root prefix buildRecall relativizes against (see recallFor
-// below). FOR-DOC-BODY (fordocbody.h) picks a doc file's sections with the same scores, so its sections are the ones --recall picks.
+// The recall lens's per-symbol scores for `task`: its section-unit scorer (recallUnitScores) over the root prefix buildRecall
+// relativizes against (see recallFor below). FOR-DOC-BODY (fordocbody.h) picks a doc file's sections with the same scores, so its
+// sections are the units --recall picks, HTML section units (kRankFlagRecallOnly) included; the graph arguments keep one signature.
 inline std::vector<float> recallLensScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                             const std::vector<NodeId>& outTargets, std::string_view task, std::string_view rootArg )
 {
-    const std::string prefix = rw::sarif::rootPrefixOf( rootArg );
-    return lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0, /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
+    (void)outOff;
+    (void)outTargets;
+    return recallUnitScores( ing, task, rw::sarif::rootPrefixOf( rootArg ) ).scores;
 }
 
 inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
@@ -2661,7 +2691,7 @@ inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::u
     (void)outTargets;
     const std::string       prefix = rw::sarif::rootPrefixOf( rootArg );
     const RecallUnitScoring scored = recallUnitScores( ing, task, prefix );
-    return buildRecall( ing, scored.scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg, budgetTokens, &scored.mirror );
+    return buildRecall( ing, scored.scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg, budgetTokens, &scored );
 }
 
 // (`writeRecall( out, ing, scores, … )` used to live here — a "render it and hand it over" wrapper that took

@@ -516,16 +516,19 @@ PY
     # unit at 800 tokens on BOTH phrasings, so "serves the answer line" now measures ranking, not phrasing. The control
     # is now that the keyword phrasing serves a unit carrying the question's keywords; parity is that the English
     # phrasing serves the very same ranges. A stopword deciding reachability still turns parity red.
+    # The keywords are looked for in the SERVED BODY (past the header and the section note, as p10_serves reads it): the header
+    # echoes the query, so a grep over the whole answer passes on a body that holds neither word.
     p10_ranges(){ grep -o 'lines="[^"]*"' "$1" | head -1; }
+    p10_body_has_keywords(){ python3 -c 'import sys; b = open( sys.argv[1], encoding = "utf-8" ).read().split( "]", 1 )[ -1 ].lower(); sys.exit( 0 if "crawl" in b and "sorted" in b else 1 )' "$1"; }
     P10_KWR="$( p10_ranges "$TMP/p10_kw.out" )"
     P10_NLR="$( p10_ranges "$TMP/p10_nl.out" )"
-    if [ -n "$P10_KWR" ] && grep -qi "crawl" "$TMP/p10_kw.out" && grep -qi "sorted" "$TMP/p10_kw.out"; then
+    if [ -n "$P10_KWR" ] && p10_body_has_keywords "$TMP/p10_kw.out"; then
         ok "P10 control: the KEYWORD phrasing serves a unit carrying the question's keywords ($P10_KWR)"
     else
         no "P10 control: the KEYWORD phrasing serves no unit carrying the keywords (${P10_KWR:-<no lines=>}) — the parity result below means nothing"
     fi
-    if [ -n "$P10_NLR" ] && [ "$P10_NLR" = "$P10_KWR" ]; then
-        ok "P10 parity: the ENGLISH phrasing serves the same ranges as the keyword phrasing ($P10_NLR)"
+    if [ -n "$P10_NLR" ] && [ "$P10_NLR" = "$P10_KWR" ] && p10_body_has_keywords "$TMP/p10_nl.out"; then
+        ok "P10 parity: the ENGLISH phrasing serves the same ranges as the keyword phrasing ($P10_NLR), its body carrying the keywords"
     else
         no "P10 parity: the ENGLISH phrasing serves ${P10_NLR:-<no lines=>}, the keyword phrasing $P10_KWR — stopwords decided reachability"
     fi

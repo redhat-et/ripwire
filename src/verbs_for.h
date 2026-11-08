@@ -2861,6 +2861,105 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
 }
 
+// Runs `run` with stdout pointed at a temporary file and returns what it printed, compacted by the same applyCompactDialect +
+// compactLegendHint main.cpp's whole-stdout layer gives the bare call (that layer skips --for). nullopt: no capture could be set up,
+// and `run` did NOT run (the caller decides what to print instead).
+template <class Run>
+std::optional<std::string> captureGraphVerbDoc( const rw::Config& sub, Run&& run )
+{
+    std::fflush( stdout );   // everything before the block is out before stdout is pointed at the capture
+    std::FILE* const capture = std::tmpfile();
+    const int        saved   = capture != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
+    if( capture == nullptr || saved < 0 || rw::os::dup2( rw::os::fileno( capture ), STDOUT_FILENO ) < 0 )
+    {
+        if( saved >= 0 ) { rw::os::close( saved ); }
+        if( capture != nullptr ) { std::fclose( capture ); }
+        return std::nullopt;
+    }
+    run();
+    std::fflush( stdout );
+    rw::os::dup2( saved, STDOUT_FILENO );
+    rw::os::close( saved );
+    std::string doc;
+    std::rewind( capture );
+    char buf[ 65536 ];
+    for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
+    {
+        doc.append( buf, got );
+    }
+    std::fclose( capture );
+    if( sub.legend == "compact" )
+    {
+        (void)rw::applyCompactDialect( doc, ::compactLegendHint( sub, doc ) );   // not shaped → the bytes as emitted (the DEFAULT posture's rule)
+    }
+    return doc;
+}
+
+// GRAPH-FORM-ENDPOINTS: the path verb found no directed path, so the two sides a missing hop would join are printed inside
+// <path_gap>: from='s callees and to='s callers, each the bare --callees / --callers call's answer at --limit=kPathGapSideRows (its own legend, count=
+// the total, next= the page after). A side whose capture cannot be set up is named in missing= (never shown as empty) through the
+// PathGapSides sink, and said on stderr.
+struct PathGapSides
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        FromUncaptured,   // no capture buffer for from='s --callees: that side is not shown, which is not the same as empty
+        ToUncaptured,     // no capture buffer for to='s --callers: likewise
+    };
+    bool fromMissing = false;
+    bool toMissing   = false;
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        if( why == DisclosureWhy::FromUncaptured )
+        {
+            fromMissing = true;
+            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
+        }
+        else
+        {
+            toMissing = true;
+            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
+        }
+    }
+};
+
+inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectArgs& args )
+{
+    if( args.endpoints.size() != 2 )
+    {
+        return;
+    }
+    rw::Config callees = sd.cfg;
+    callees.pathSpec   = {};
+    callees.callees    = args.endpoints[0];
+    callees.pageLimit  = rw::kPathGapSideRows;
+    rw::Config callers = sd.cfg;
+    callers.pathSpec   = {};
+    callers.callers    = args.endpoints[1];
+    callers.pageLimit  = rw::kPathGapSideRows;
+    const auto side = [ & ]( const rw::Config& c ) -> std::optional<std::string>
+    {
+        const MainDispatch cd{ c, sd.ing, sd.g, sd.root, sd.multiRoot, sd.ws, sd.fanIn, sd.fanInPtr, sd.qmetrics, sd.ampPtr, sd.cboPtr, sd.testedPtr,
+                               sd.lcom4Ptr, sd.impurePtr, sd.forChurn, sd.redactCounts, sd.redactPtr, sd.notesPtr, sd.notesDegraded, sd.grepPhases, sd.valueUses };
+        return captureGraphVerbDoc( c, [ & ] { (void)runCallHierarchy( cd ); } );
+    };
+    const std::optional<std::string> from = side( callees );
+    const std::optional<std::string> to   = side( callers );
+    PathGapSides                     gap;
+    if( !from )
+    {
+        DISCLOSE( gap, PathGapSides::DisclosureWhy::FromUncaptured, "appendPathGapSides: no capture buffer for from='s callees" );
+    }
+    if( !to )
+    {
+        DISCLOSE( gap, PathGapSides::DisclosureWhy::ToUncaptured, "appendPathGapSides: no capture buffer for to='s callers" );
+    }
+    rw::emitRaw( stdout, rw::pathGapOpenXml( args, gap.fromMissing, gap.toMissing ).c_str() );
+    if( from ) { std::fwrite( from->data(), 1, from->size(), stdout ); }
+    if( to ) { std::fwrite( to->data(), 1, to->size(), stdout ); }
+    rw::emitRaw( stdout, std::string( rw::kPathGapCloseXml ).c_str() );
+}
+
 // K-WRONGSYM (src/forfilesyms.h): the shown files' unnamed symbols in <syms>, just before </ctx>, read off THE BYTES THE RUN EMITTED: the
 // --for lens writes its answer to stdout through a capture from the root tag to this call, and the block is rendered from what was
 // captured, so a section or trailing block added later cannot fall out of a hand-kept list. The block has its own byte allowance, outside
@@ -3075,10 +3174,8 @@ inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
     // the verb is captured here and compacted by the same applyCompactDialect + compactLegendHint, and the block carries the
     // bytes the bare call prints. CR 4396503866: the verb is captured under EVERY legend, because the open tag's name_test_hops= is
     // read off the rows it printed. A capture that cannot be set up emits the verb's FULL legend and an open tag without it.
-    std::fflush( stdout );   // everything before the block is out before stdout is pointed at the capture
-    std::FILE* const capture = std::tmpfile();
-    const int        saved   = capture != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
-    if( capture == nullptr || saved < 0 || rw::os::dup2( rw::os::fileno( capture ), STDOUT_FILENO ) < 0 )
+    const std::optional<std::string> doc = captureGraphVerbDoc( sub, runVerb );
+    if( !doc )
     {
         if( sub.legend == "compact" )
         {
@@ -3087,36 +3184,22 @@ inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
         }
         if( args->form == rw::GraphSubjectForm::Path )   // CR 4396503866: the open tag cannot read the rows, so a by-name hop into a test file goes unmarked
         {
-            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the graph verb — the graph_verb block omits name_test_hops= (a path hop matched by name into a test file is not marked)\n" );
+            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the graph verb — the graph_verb block omits name_test_hops= (a path hop matched by name into a test file is not marked) and, when no path is found, the path_gap callees/callers lists\n" );
         }
-        if( saved >= 0 ) { rw::os::close( saved ); }
-        if( capture != nullptr ) { std::fclose( capture ); }
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args ).c_str() );
         std::fflush( stdout );
         runVerb();
     }
     else
     {
-        runVerb();
-        std::fflush( stdout );
-        rw::os::dup2( saved, STDOUT_FILENO );
-        rw::os::close( saved );
-        std::string doc;
-        std::rewind( capture );
-        char buf[ 65536 ];
-        for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
-        {
-            doc.append( buf, got );
-        }
-        std::fclose( capture );
-        if( sub.legend == "compact" )
-        {
-            (void)rw::applyCompactDialect( doc, ::compactLegendHint( sub, doc ) );   // not shaped → the bytes as emitted (the DEFAULT posture's rule)
-        }
         // the open tag goes out after the verb ran: name_test_hops= (S5) is read off the rows it printed
-        const std::size_t nameTest = args->form == rw::GraphSubjectForm::Path ? rw::graphSubjectNameTestHops( doc ) : 0;
+        const std::size_t nameTest = args->form == rw::GraphSubjectForm::Path ? rw::graphSubjectNameTestHops( *doc ) : 0;
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .nameTestHops = nameTest } ).c_str() );
-        std::fwrite( doc.data(), 1, doc.size(), stdout );
+        std::fwrite( doc->data(), 1, doc->size(), stdout );
+        if( args->form == rw::GraphSubjectForm::Path && rw::graphSubjectPathUnreachable( *doc ) )
+        {
+            appendPathGapSides( sd, *args );
+        }
     }
     rw::emitRaw( stdout, std::string( rw::kGraphSubjectCloseXml ).c_str() );
 }
