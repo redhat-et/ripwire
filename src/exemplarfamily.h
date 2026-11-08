@@ -401,10 +401,11 @@ inline std::vector<std::string> keyWords( std::string_view name )
     return out;
 }
 
-// Does one subtoken of `name` spell `word`'s plural (`Settings` for setting, `Registries` for registry)?
+// Does one subtoken of `name` spell `word`'s plural (`Settings` for setting, `Registries` for registry, `Keys` for key)?
 inline bool subtokenIsPlural( std::string_view name, std::string_view word )
 {
-    const std::string plural = word.ends_with( 'y' ) ? std::string( word.substr( 0, word.size() - 1 ) ) + "ies" : std::string( word ) + "s";
+    const bool consonantY = word.size() >= 2 && word.ends_with( 'y' ) && !std::string_view( "aeiou" ).contains( word[word.size() - 2] );
+    const std::string plural = consonantY ? std::string( word.substr( 0, word.size() - 1 ) ) + "ies" : std::string( word ) + "s";
     bool hit = false;
     forEachLexSubtoken( name, [&]( std::size_t b, std::size_t e )
                         {
@@ -1179,17 +1180,21 @@ inline bool isHolderFamily( const ExemplarTask& t, const ExemplarFamily& fam )
     return holders * 2 > fam.members.size();
 }
 
-// Each member's holder words (holderWords), in member order.
+// Each member's holder words (holderWords), in member order; none for a member that is not a holder (its name does not carry X's
+// plural: `CompilerOption` beside `ServerOptions` is an X, never the holder a task word picks).
 inline std::vector<std::vector<std::string>> holderWordsOf( const ExemplarTask& t, const ExemplarFamily& fam )
 {
     std::vector<std::vector<std::string>> hw( fam.members.size() );
     std::ranges::transform( fam.members, hw.begin(), [&]( const ExemplarMember& m )
-                            { return holderWords( m.name, t.head ); } );
+                            { return subtokenIsPlural( m.name, t.head ) ? holderWords( m.name, t.head ) : std::vector<std::string>(); } );
     return hw;
 }
 
 // The holder whose name carries one of `words` (the most of them, then the fewest other words; a tie between two holders is no
-// pick): its index, or SIZE_MAX.
+// pick): its index, or SIZE_MAX. A tie and no match are both SIZE_MAX on purpose: a word that names several holders equally (`query`
+// for QueryPlanSettings and QueryTreeSettings) names none of them, so the caller goes on to the task's other words and then to the
+// general (bare) holder, the measured home of `a query-level setting`. Two members of ONE name (a declaration and its .d.ts copy)
+// are one holder, not a tie.
 inline std::size_t holderByWord( const ExemplarFamily& fam, const std::vector<std::vector<std::string>>& hw, const std::vector<std::string>& words, std::string& word )
 {
     std::size_t best = SIZE_MAX, bestHits = 0;
@@ -1234,96 +1239,31 @@ inline bool holderNamedByTask( const ExemplarTask& t, const ExemplarFamily& fam 
     return holderByWord( fam, hw, intoWords( t, false ), word ) != SIZE_MAX || holderByWord( fam, hw, intoWords( t, true ), word ) != SIZE_MAX;
 }
 
-// The X-macro list rows of a C / C++ file: per `#define NAME(P, ..)` block, the lines that start with one of its parameters
-// `P(`, up to the next preprocessor line; the largest block of kExemplarFamilyMin or more rows wins. A row's name is the argument at the
-// position with the most distinct identifier values over the block (`DECLARE(UInt64, max_threads, 0, ..)` → max_threads, not UInt64).
-inline void macroListRows( std::string_view txt, std::uint32_t fileId, ExemplarInto& into )
+// One `P(..)` line of an X-macro list: its line and its leading arguments.
+struct MacroRow
 {
-    struct Row
-    {
-        std::uint32_t line;
-        std::vector<std::string_view> args;
-    };
-    std::vector<Row> best, cur;
-    std::string_view bestName, curName;
-    std::uint32_t bestLine = 0, curLine = 0;
-    std::vector<std::string_view> params;
-    const auto close = [&]
-    {
-        if( cur.size() > best.size() )
-        {
-            best = std::move( cur );
-            bestName = curName;
-            bestLine = curLine;
-        }
-        cur.clear();
-        params.clear();
-    };
-    std::uint32_t ln = 0;
-    for( std::size_t p = 0; p < txt.size(); )
-    {
-        const std::size_t nl = std::min( txt.find( '\n', p ), txt.size() );
-        const std::string_view line = trimWs( txt.substr( p, nl - p ) );
-        p = nl + 1;
-        ++ln;
-        static constexpr std::array<std::string_view, 9> kDirectives { "define", "undef", "if", "ifdef", "ifndef", "elif", "else", "endif", "include" };
-        std::string_view d = line.starts_with( "#" ) ? trimWs( line.substr( 1 ) ) : std::string_view();
-        const std::string_view word = d.substr( 0, std::size_t( std::ranges::find_if_not( d, isIdentChar ) - d.begin() ) );
-        if( std::ranges::contains( kDirectives, word ) ) // a preprocessor line ends a list; `### Heading` inside a row's text does not
-        {
-            close();
-            if( word != "define" )
-            {
-                continue;
-            }
-            d = trimWs( d.substr( 6 ) );
-            const std::size_t open = d.find( '(' );
-            const std::string_view name = d.substr( 0, open );
-            if( open == std::string_view::npos || name.empty() || !std::ranges::all_of( name, isIdentChar ) )
-            {
-                continue;
-            }
-            const std::size_t shut = d.find( ')', open );
-            for( std::string_view ps = d.substr( open + 1, shut == std::string_view::npos ? std::string_view::npos : shut - open - 1 ); !ps.empty(); )
-            {
-                const std::size_t c = std::min( ps.find( ',' ), ps.size() );
-                params.push_back( trimWs( ps.substr( 0, c ) ) );
-                ps = c < ps.size() ? ps.substr( c + 1 ) : std::string_view();
-            }
-            curName = name;
-            curLine = ln;
-            continue;
-        }
-        const std::size_t open = line.find( '(' );
-        if( params.empty() || open == std::string_view::npos || !std::ranges::contains( params, trimWs( line.substr( 0, open ) ) ) )
-        {
-            continue;
-        }
-        Row r { ln, {} };
-        std::string_view a = line.substr( open + 1 );
-        a = a.substr( 0, std::min( a.find_first_of( "\"()" ), a.size() ) ); // the leading arguments, before a string or a nested call
-        while( !a.empty() )
-        {
-            const std::size_t c = std::min( a.find( ',' ), a.size() );
-            r.args.push_back( trimWs( a.substr( 0, c ) ) );
-            a = c < a.size() ? a.substr( c + 1 ) : std::string_view();
-        }
-        cur.push_back( std::move( r ) );
-    }
-    close();
-    if( best.size() < kExemplarFamilyMin )
-    {
-        return;
-    }
-    const auto ident = []( std::string_view v )
-    { return !v.empty() && !( v[0] >= '0' && v[0] <= '9' ) && std::ranges::all_of( v, isIdentChar ); };
-    std::size_t pos = 0, posDistinct = 0;
+    std::uint32_t line;
+    std::vector<std::string_view> args;
+};
+
+inline bool macroRowIdent( std::string_view v )
+{
+    return !v.empty() && !( v[0] >= '0' && v[0] <= '9' ) && std::ranges::all_of( v, isIdentChar );
+}
+
+// The argument position that names a list's rows: the one with the most distinct identifier values, kExemplarFamilyMin or more.
+// SIZE_MAX when no position has that many, or two positions tie (a type column whose values are all distinct beside the name column:
+// which one names the rows is not known, so the list claims none).
+inline std::size_t macroNameColumn( const std::vector<MacroRow>& rows )
+{
+    std::size_t pos = SIZE_MAX, posDistinct = 0;
+    bool tie = false;
     for( std::size_t k = 0; k < 8; ++k )
     {
         std::vector<std::string_view> vals;
-        for( const Row& r : best )
+        for( const MacroRow& r : rows )
         {
-            if( k < r.args.size() && ident( r.args[k] ) )
+            if( k < r.args.size() && macroRowIdent( r.args[k] ) )
             {
                 vals.push_back( r.args[k] );
             }
@@ -1334,58 +1274,247 @@ inline void macroListRows( std::string_view txt, std::uint32_t fileId, ExemplarI
         {
             pos = k;
             posDistinct = distinct;
+            tie = false;
+        }
+        else if( distinct > 0 && distinct == posDistinct )
+        {
+            tie = true;
         }
     }
-    if( posDistinct < kExemplarFamilyMin )
+    return posDistinct >= kExemplarFamilyMin && !tie ? pos : SIZE_MAX;
+}
+
+// The terminator of a C / C++ raw-string literal (`)delim"`) or block comment (`*/`) that `s` leaves open, or "". Ordinary string and
+// character literals and a `//` comment are skipped, so an `R"(` or `/*` inside them opens nothing.
+inline std::string openSpanAfter( std::string_view s )
+{
+    for( std::size_t i = 0; i < s.size(); )
+    {
+        const char ch = s[i];
+        if( s.substr( i, 2 ) == "//" )
+        {
+            break;
+        }
+        static constexpr std::array<std::string_view, 5> kRawPrefix { "R", "u8R", "uR", "UR", "LR" };
+        const std::size_t pre = ch == '"' ? s.substr( 0, i ).find_last_not_of( "RuUL8" ) : 0; // the prefix run before a quote
+        const std::size_t from = pre == std::string_view::npos ? 0 : pre + 1;
+        const bool raw = ch == '"' && std::ranges::contains( kRawPrefix, s.substr( from, i - from ) ) && ( from == 0 || !isIdentChar( s[from - 1] ) );
+        const std::size_t paren = raw ? s.find( '(', i ) : std::string_view::npos;
+        const bool comment = s.substr( i, 2 ) == "/*";
+        if( comment || ( paren != std::string_view::npos && paren - i <= 17 ) )
+        {
+            const std::string term = comment ? std::string( "*/" ) : ")" + std::string( s.substr( i + 1, paren - i - 1 ) ) + "\"";
+            const std::size_t c = s.find( term, comment ? i + 2 : paren + 1 );
+            if( c == std::string_view::npos )
+            {
+                return term;
+            }
+            i = c + term.size();
+            continue;
+        }
+        if( ch == '"' || ( ch == '\'' && ( i == 0 || !isIdentChar( s[i - 1] ) ) ) ) // `1'000` is a digit separator, not a literal
+        {
+            std::size_t k = i + 1;
+            while( k < s.size() && s[k] != ch )
+            {
+                k += s[k] == '\\' ? 2 : 1;
+            }
+            i = k + 1;
+            continue;
+        }
+        ++i;
+    }
+    return {};
+}
+
+// The directive word of a preprocessor line (`#  define X` → define), or "".
+inline std::string_view directiveWord( std::string_view line )
+{
+    const std::string_view d = line.starts_with( "#" ) ? trimWs( line.substr( 1 ) ) : std::string_view();
+    return d.substr( 0, std::size_t( std::ranges::find_if_not( d, isIdentChar ) - d.begin() ) );
+}
+
+// A `#define NAME(P, ..) \` line: its parameters into `params`, and NAME. "" (and no parameters) when it is not a function-like macro,
+// or its replacement text is this line alone (no row can follow it).
+inline std::string_view macroParams( std::string_view line, std::vector<std::string_view>& params )
+{
+    const std::string_view d = trimWs( trimWs( line.substr( 1 ) ).substr( 6 ) );
+    const std::size_t paren = d.find( '(' );
+    const std::string_view name = d.substr( 0, paren );
+    if( paren == std::string_view::npos || name.empty() || !std::ranges::all_of( name, isIdentChar ) || !line.ends_with( '\\' ) )
+    {
+        return {};
+    }
+    const std::size_t shut = d.find( ')', paren );
+    for( std::string_view ps = d.substr( paren + 1, shut == std::string_view::npos ? std::string_view::npos : shut - paren - 1 ); !ps.empty(); )
+    {
+        const std::size_t c = std::min( ps.find( ',' ), ps.size() );
+        params.push_back( trimWs( ps.substr( 0, c ) ) );
+        ps = c < ps.size() ? ps.substr( c + 1 ) : std::string_view();
+    }
+    return name;
+}
+
+// One row line's leading arguments (`a`: the text after `P(`), before a string or a nested call.
+inline MacroRow macroRow( std::string_view a, std::uint32_t ln )
+{
+    MacroRow r { ln, {} };
+    a = a.substr( 0, std::min( a.find_first_of( "\"()" ), a.size() ) );
+    while( !a.empty() )
+    {
+        const std::size_t c = std::min( a.find( ',' ), a.size() );
+        r.args.push_back( trimWs( a.substr( 0, c ) ) );
+        a = c < a.size() ? a.substr( c + 1 ) : std::string_view();
+    }
+    return r;
+}
+
+// The X-macro list rows of a C / C++ file: per `#define NAME(P, ..)` block, the lines that start with one of its parameters
+// `P(`, up to the end of its replacement text (a line that does not end in `\`, outside a raw-string literal or block comment that
+// spans lines, as a description's often does); the largest block of kExemplarFamilyMin or more rows whose name column is known
+// (macroNameColumn) wins. A row's name is the argument at that position (`DECLARE(UInt64, max_threads, 0, ..)` → max_threads, not
+// UInt64). A line inside a multi-line literal or comment is text: its `#include` or `P(` neither ends the list nor adds a row.
+inline void macroListRows( std::string_view txt, std::uint32_t fileId, ExemplarInto& into )
+{
+    std::vector<MacroRow> best, cur;
+    std::string_view bestName, curName;
+    std::uint32_t bestLine = 0, curLine = 0;
+    std::size_t bestPos = SIZE_MAX;
+    std::vector<std::string_view> params;
+    const auto close = [&]
+    {
+        const std::size_t pos = cur.size() > best.size() ? macroNameColumn( cur ) : SIZE_MAX;
+        if( pos != SIZE_MAX )
+        {
+            best = std::move( cur );
+            bestName = curName;
+            bestLine = curLine;
+            bestPos = pos;
+        }
+        cur.clear();
+        params.clear();
+    };
+    std::string open; // inside a multi-line raw string or block comment: its terminator
+    std::uint32_t ln = 0;
+    for( std::size_t p = 0; p < txt.size(); )
+    {
+        const std::size_t nl = std::min( txt.find( '\n', p ), txt.size() );
+        std::string_view line = txt.substr( p, nl - p );
+        p = nl + 1;
+        ++ln;
+        const std::size_t shut = open.empty() ? 0 : line.find( open );
+        if( shut == std::string_view::npos )
+        {
+            continue; // text inside the literal or comment
+        }
+        line = trimWs( open.empty() ? line : line.substr( shut + open.size() ) );
+        const std::string_view word = open.empty() ? directiveWord( line ) : std::string_view();
+        static constexpr std::array<std::string_view, 9> kDirectives { "define", "undef", "if", "ifdef", "ifndef", "elif", "else", "endif", "include" };
+        if( std::ranges::contains( kDirectives, word ) ) // a preprocessor line ends a list; `### Heading` inside a row's text does not
+        {
+            close();
+            curName = word == "define" ? macroParams( line, params ) : std::string_view();
+            curLine = ln;
+            continue;
+        }
+        const std::size_t paren = open.empty() ? line.find( '(' ) : std::string_view::npos;
+        if( !params.empty() && paren != std::string_view::npos && std::ranges::contains( params, trimWs( line.substr( 0, paren ) ) ) )
+        {
+            cur.push_back( macroRow( line.substr( paren + 1 ), ln ) );
+        }
+        open = openSpanAfter( line );
+        if( open.empty() && !params.empty() && !line.ends_with( '\\' ) )
+        {
+            close(); // the end of the macro's replacement text: a later `P(` line is a call, not a row
+        }
+    }
+    close();
+    if( best.size() < kExemplarFamilyMin )
     {
         return;
     }
     into.by = "macro";
     into.list = std::string( bestName );
     into.listLine = bestLine;
-    for( const Row& r : best )
+    for( const MacroRow& r : best )
     {
-        if( pos < r.args.size() && ident( r.args[pos] ) )
+        if( bestPos < r.args.size() && macroRowIdent( r.args[bestPos] ) )
         {
-            into.rows.push_back( ExemplarMember { std::string( r.args[pos] ), fileId, r.line, 0, {}, kNoNode } );
+            into.rows.push_back( ExemplarMember { std::string( r.args[bestPos] ), fileId, r.line, 0, {}, kNoNode } );
         }
     }
 }
 
-// The field definitions inside a holder's own span.
+// The field definitions inside a holder's own span (the field side table: a field is never in `symbols`, and its id is a FieldId, so
+// the row carries no NodeId). One or two fields are rows too: n= counts what was found, and only none leaves `by` empty.
 inline void fieldRows( const IngestResult& ing, const Symbol& h, ExemplarInto& into )
 {
-    for( const Symbol& s : ing.symbols )
+    for( const Symbol& s : ing.fields )
     {
-        if( s.kind == SymKind::Field && s.fileId == h.fileId && s.sigStartByte > h.sigStartByte && s.endByte <= h.endByte )
+        if( s.fileId == h.fileId && s.sigStartByte > h.sigStartByte && s.endByte <= h.endByte )
         {
-            into.rows.push_back( ExemplarMember { s.name, s.fileId, s.line, s.loc, {}, s.id } );
+            into.rows.push_back( ExemplarMember { s.name, s.fileId, s.line, s.loc, {}, kNoNode } );
         }
     }
-    into.by = into.rows.size() >= kExemplarFamilyMin ? "field" : "";
-    if( into.by.empty() )
+    into.by = into.rows.empty() ? "" : "field";
+}
+
+// The brace depth change of one line of a TS / JS body: structural braces only, not those in a string, a template literal or a
+// comment (`/** e.g. {foo */`, `"{"`). `inComment`: the line starts inside a block comment; updated for the next line.
+inline int structuralBraces( std::string_view line, bool& inComment )
+{
+    int depth = 0;
+    for( std::size_t i = 0; i < line.size(); ++i )
     {
-        into.rows.clear();
+        if( inComment )
+        {
+            const std::size_t c = line.find( "*/", i );
+            inComment = c == std::string_view::npos;
+            i = inComment ? line.size() : c + 1;
+            continue;
+        }
+        const char ch = line[i];
+        if( line.substr( i, 2 ) == "//" )
+        {
+            break;
+        }
+        if( line.substr( i, 2 ) == "/*" )
+        {
+            inComment = true;
+            ++i;
+            continue;
+        }
+        if( ch == '"' || ch == '\'' || ch == '`' )
+        {
+            std::size_t k = i + 1;
+            while( k < line.size() && line[k] != ch )
+            {
+                k += line[k] == '\\' ? 2 : 1;
+            }
+            i = k;
+            continue;
+        }
+        depth += ch == '{' ? 1 : ch == '}' ? -1 : 0;
     }
+    return depth;
 }
 
 // The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
 inline void propertyLineRows( std::string_view body, std::uint32_t fileId, std::uint32_t firstLine, ExemplarInto& into )
 {
     int depth = 0;
+    bool inComment = false;
     std::uint32_t ln = firstLine;
     for( std::size_t p = 0; p < body.size(); )
     {
         const std::size_t nl = std::min( body.find( '\n', p ), body.size() );
         std::string_view line = trimWs( body.substr( p, nl - p ) );
         const int at = depth;
-        for( const char c : body.substr( p, nl - p ) )
-        {
-            depth += c == '{' ? 1 : c == '}' ? -1 : 0;
-        }
+        const bool startsInComment = inComment;
+        depth += structuralBraces( body.substr( p, nl - p ), inComment );
         p = nl + 1;
         const std::uint32_t here = ln++;
-        if( at != 1 )
+        if( at != 1 || startsInComment )
         {
             continue;
         }
@@ -1398,11 +1527,7 @@ inline void propertyLineRows( std::string_view body, std::uint32_t fileId, std::
             into.rows.push_back( ExemplarMember { std::string( line.substr( 0, e ) ), fileId, here, 0, {}, kNoNode } );
         }
     }
-    into.by = into.rows.size() >= kExemplarFamilyMin ? "line" : "";
-    if( into.by.empty() )
-    {
-        into.rows.clear();
-    }
+    into.by = into.rows.empty() ? "" : "line"; // one or two property lines are rows too (n= counts what was found)
 }
 
 // The rows of the picked holder (see the banner); none read leaves `by` empty and the holder is printed alone.

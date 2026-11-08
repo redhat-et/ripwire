@@ -60,7 +60,11 @@
 #        (src/harness *Options) that names none
 #   (i5) a second family of holders the task word names more than once (a tie) gets no score bonus: the bare holder of (i1) still wins
 #   (i3) holders and no holder the task points into (no bare one): the block is withheld; a sibling family (not holders) is unchanged
-#   (i4) a `### Heading` line inside a row's text does not end the X-macro list (n= counts every row)
+#   (i4) a `### Heading` line inside a row's text does not end the X-macro list (n= counts every row); nor does an `#include`
+#        line inside a raw-string description; a `DECLARE(` call after the macro's replacement text is not a row
+#   (i6) a holder with no X-macro list: its fields (the field side table) are the rows, by="field", two fields are n="2"
+#   (i7) a larger X-macro list whose name column is unknown (type and name columns tie) does not hide a smaller list with a known one
+#   (i8) `key` → `Keys` holders (vowel + y plural); a brace inside a comment does not move the property-line depth; two rows are n="2"
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -200,6 +204,7 @@ cat > "$F/hold/src/Core/Settings.cpp" <<'CPP'
     DECLARE(UInt64, max_threads, 0, R"(
 The maximum number of threads.
 ### Heading inside a description
+#include lines in a description are text
 )", 0) \
     DECLARE(UInt64, max_block_size, 65536, "rows per block", 0) \
     DECLARE(Bool, use_uncompressed_cache, false, "cache", 0) \
@@ -210,6 +215,11 @@ struct SettingsImpl : public BaseSettings<SettingsTraits>
 {
     void apply();
 };
+void SettingsImpl::apply()
+{
+    DECLARE(UInt64, stray_call_one, 0, "x", 0);
+    DECLARE(UInt64, stray_call_two, 0, "x", 0);
+}
 CPP
 cat > "$F/hold/src/Server/ServerSettings.cpp" <<'CPP'
 #include "../Core/BaseSettings.h"
@@ -247,6 +257,44 @@ struct ${d}xTraits {};
 struct ${d}xSettingsImpl : public BaseSettings<${d}xTraits> { void f(); };
 CPP
 done
+# i6: a holder with fields and no list; i7: a 4-row list whose type and name columns tie, then a 3-row list with a known name column
+cat > "$F/hold2/src/B/BxSettings.cpp" <<'CPP'
+#include "../BaseSettings.h"
+struct BxTraits {};
+struct BxSettingsImpl : public BaseSettings<BxTraits>
+{
+    int max_rows;
+    int min_rows;
+};
+CPP
+mkdir -p "$F/hold2/src/D"
+cat > "$F/hold2/src/D/DxSettings.cpp" <<'CPP'
+#include "../BaseSettings.h"
+#define DX_TYPED_SETTINGS(M) \
+    M(Int, alpha) \
+    M(Bool, beta) \
+    M(Str, gamma) \
+    M(Dbl, delta) \
+
+#define DX_SETTINGS(M) \
+    M(UInt64, dx_one, 1) \
+    M(UInt64, dx_two, 2) \
+    M(UInt64, dx_three, 3) \
+
+struct DxTraits {};
+struct DxSettingsImpl : public BaseSettings<DxTraits> { void f(); };
+CPP
+# i8: `*Keys` holders in three files; a brace in a comment inside ServerKeys
+mkdir -p "$F/tsk/src/keys"
+cat > "$F/tsk/src/keys/server.ts" <<'TS'
+export interface ServerKeys {
+    // a stray { in a comment
+    apiKey?: string;
+    /* and a } in another */
+    sessionKey?: string;
+}
+TS
+for k in Client Admin; do printf 'export interface %sKeys {\n    k?: string;\n}\n' "$k" > "$F/tsk/src/keys/$( echo "$k" | tr 'A-Z' 'a-z' ).ts"; done
 # hold3 = hold plus a family of holders the task word `query` names more than once (QueryPlanSettings, QueryTreeSettings, ..): a tie,
 # so that family gets no task-word bonus and cannot outrank the bare holder (ClickHouse: the 2026-11-07 withhold of `query-level setting`)
 mkdir -p "$F/hold3/src/Query" && cp -R "$F/hold/src" "$F/hold3/"
@@ -557,7 +605,7 @@ b="$( block "$TMP/i1.xml" )"
 if printf '%s' "$b" | grep -q ' rule="base" key="BaseSettings"[^>]* n="3" into="SettingsImpl" into_p="src/Core/Settings.cpp:[0-9]*" into_by="bare">' \
    && printf '%s' "$b" | grep -q '<rows by="macro" list="COMMON_SETTINGS" list_p="src/Core/Settings.cpp:2" n="4">' \
    && printf '%s' "$b" | grep -q '<m n="max_threads" p="src/Core/Settings.cpp:3"/>' && printf '%s' "$b" | grep -q '<m n="join_buffer_rows" ' \
-   && ! printf '%s' "$b" | grep -q 'ServerSettingsImpl\|MergeTreeSettingsImpl\|UInt64'; then ok "(i1) query-level setting: into the bare holder SettingsImpl, COMMON_SETTINGS rows by name, other holders unprinted"
+   && ! printf '%s' "$b" | grep -q 'ServerSettingsImpl\|MergeTreeSettingsImpl\|UInt64\|stray_call'; then ok "(i1) query-level setting: into the bare holder SettingsImpl, COMMON_SETTINGS rows by name, other holders unprinted"
 else no "(i1) query-level setting: $( printf '%s' "$b" | head -c 500 )"; fi
 has_touch i1 "$TMP/i1.xml" src/Core/FuzzList.cpp 4/4
 no_touch i1 "$TMP/i1.xml" docs/site/settings.js "a docs/ tree is not read"
@@ -588,6 +636,19 @@ silent i3 hold2 "add a new query-level setting"
 if run hold2 "--for=add a new ax setting" >"$TMP/i3b.xml" && block "$TMP/i3b.xml" | grep -q ' into="AxSettingsImpl"[^>]* into_by="word" into_word="ax"><rows n="0"/>'; then ok "(i3) positive twin: a task word picks the holder; no list in its file: <rows n=\"0\"/>"
 else no "(i3) twin: $( block "$TMP/i3b.xml" | head -c 400 )"; fi
 
+run hold2 "--for=add a new bx setting" >"$TMP/i6.xml"
+if block "$TMP/i6.xml" | grep -q ' into="BxSettingsImpl"[^>]* into_by="word" into_word="bx"><rows by="field" n="2"><m n="max_rows" p="src/B/BxSettings.cpp:5"/><m n="min_rows" '; then
+    ok "(i6) no list in the holder's file: its two fields are the rows (by=\"field\" n=\"2\")"
+else no "(i6) field rows: $( block "$TMP/i6.xml" | head -c 400 )"; fi
+run hold2 "--for=add a new dx setting" >"$TMP/i7.xml"
+if block "$TMP/i7.xml" | grep -q ' into="DxSettingsImpl"[^>]* into_by="word" into_word="dx"><rows by="macro" list="DX_SETTINGS" list_p="src/D/DxSettings.cpp:8" n="3"><m n="dx_one" ' \
+   && ! block "$TMP/i7.xml" | grep -q 'alpha\|"Int"'; then ok "(i7) a larger list with tied type/name columns does not hide the list whose name column is known"
+else no "(i7) tied columns: $( block "$TMP/i7.xml" | head -c 400 )"; fi
+run tsk "--for=add a new server key" >"$TMP/i8.xml"
+if block "$TMP/i8.xml" | grep -q ' into="ServerKeys" into_p="src/keys/server.ts:1" into_by="word" into_word="server"><rows by="line" n="2"><m n="apiKey" p="src/keys/server.ts:3"/><m n="sessionKey" p="src/keys/server.ts:5"/>'; then
+    ok "(i8) key -> Keys holders; braces in comments are not depth; two property lines are n=\"2\""
+else no "(i8) Keys holders: $( block "$TMP/i8.xml" | head -c 400 )"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
@@ -606,7 +667,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
