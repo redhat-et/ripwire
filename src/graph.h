@@ -2993,23 +2993,20 @@ inline std::uint32_t pythonFromImportModuleFile( const Binding& b, std::uint32_t
 // PY-MOD-CALL-SITES: the attribute names `y.f()` reads through a module-scope from-import y that names an in-tree submodule — the
 // names whose module-scope bindings pythonSubmoduleAttrProven asks of the submodule (nameBinds holds only the names asked for) — and
 // every such y, which finalizePythonSubmoduleBinds asks of the importer's star targets
-inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult& ing, const HashMap<std::string, PythonSubmoduleBind>& submodules,
-                                                              const HashMap<std::string, PythonSubmoduleBind>& scoped )
+inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult& ing, const HashMap<std::string, PythonSubmoduleBind>& submodules )
 {
     HashMap<std::string, char> names;
     std::string                key;
-    const auto subAt = [ & ]( const HashMap<std::string, PythonSubmoduleBind>& table, std::uint32_t id, std::string_view y )
-    {
-        const auto it = table.find( fileNameKey( key, id, y ) );   // keyed by Python import bindings only: a hit is a Python file
-        return it != table.end() && it->second.anySub;
-    };
-    const bool anyScoped = !scoped.empty();   // hoisted: most trees import nothing inside a def
     for( const Reference& r : ing.references )
     {
-        if( r.recv == RecvKind::NamedVar && !r.recvVar.empty() && !r.calleeName.empty()
-            && ( subAt( submodules, r.fileId, r.recvVar ) || ( anyScoped && r.fromSymbol != kNoNode && subAt( scoped, r.fromSymbol, r.recvVar ) ) ) )
+        if( r.recv == RecvKind::NamedVar && !r.recvVar.empty() && !r.calleeName.empty() )
         {
-            names.try_emplace( r.calleeName, '\0' );   // PY-LOCAL-BIND: a def-scoped `y` is asked under the caller's own symbol
+            key.clear();  Narrower::appendUint( key, r.fileId );  key.push_back( '#' );  key.append( r.recvVar );
+            const auto it = submodules.find( key );   // keyed by Python import bindings only: a hit is a Python file
+            if( it != submodules.end() && it->second.anySub )
+            {
+                names.try_emplace( r.calleeName, '\0' );
+            }
         }
     }
     for( const auto& [ k, sb ] : submodules )
@@ -3020,6 +3017,52 @@ inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult
         }
     }
     return names;
+}
+
+// PY-LOCAL-BIND: the def or class an import inside a Python def or class binds a local of (never the module-level name), else kNoNode
+inline NodeId pythonImportScope( const IngestResult& ing, const Binding& b )
+{
+    const NodeId scope = pythonBindScope( ing, b );
+    return scope != kNoNode && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) ? scope : kNoNode;
+}
+
+// PY-LOCAL-BIND: a def-scoped `import X [as y]` into ExternalVetoTables::scopedImportBindFile, keyed "<scope>#y" — the module file
+// recordImportBindFile would read; two that disagree in one def record kNoFile. A from-import is recordSubmoduleBind's.
+inline void recordScopedImportBindFile( const IngestResult& ing, const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        NodeId scope, std::string& key, HashMap<std::string, std::uint32_t>& out )
+{
+    if( b.importedName != "module" )
+    {
+        return;
+    }
+    const std::uint32_t file = pythonModuleFormFile( b, resolved, fileIndex, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+    const auto [ it, inserted ] = out.try_emplace( fileNameKey( key, scope, b.var ), file );
+    if( !inserted && it->second != file )
+    {
+        it->second = kNoFile;   // two modules bound to y in one def: neither
+    }
+}
+
+// PY-LOCAL-BIND: pythonSubmoduleCalleeNames' twin for the def-scoped from-imports — `y.f()` whose y a from-import inside the caller's
+// own def binds to a submodule asks f of it, under the caller's symbol. Nothing to read (and no pass over the references) when no def imports one.
+inline void addScopedSubmoduleCalleeNames( const IngestResult& ing, const HashMap<std::string, PythonSubmoduleBind>& scoped, HashMap<std::string, char>& names )
+{
+    if( scoped.empty() )
+    {
+        return;
+    }
+    std::string key;
+    for( const Reference& r : ing.references )
+    {
+        if( r.recv == RecvKind::NamedVar && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.calleeName.empty() )
+        {
+            const auto it = scoped.find( fileNameKey( key, r.fromSymbol, r.recvVar ) );
+            if( it != scoped.end() && it->second.anySub )
+            {
+                names.try_emplace( r.calleeName, '\0' );
+            }
+        }
+    }
 }
 
 inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
@@ -3041,23 +3084,14 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // not just verdict's "cannot leave the package" evidence.
         const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
         const char verdict = pythonImportVerdict( b, resolved, moduleNames );
-        // PY-LOCAL-BIND: an import inside a Python def or class binds a local of that scope, never the module-level name
-        NodeId scope = pythonBindScope( ing, b );
-        scope        = scope != kNoNode && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) ? scope : kNoNode;
-        const std::vector<std::uint32_t>* roots = ing.fileRoot.empty() ? nullptr : &ing.fileRoot;
+        const NodeId scope = pythonImportScope( ing, b );
         if( scope == kNoNode )
         {
-            recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, roots );
+            recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
         }
-        else if( b.importedName == "module" )
+        else
         {
-            key.clear();  Narrower::appendUint( key, scope );  key.push_back( '#' );  key.append( b.var );
-            const std::uint32_t file      = pythonModuleFormFile( b, resolved, fileIndex, roots );
-            const auto [ sit, sinserted ] = t.scopedImportBindFile.try_emplace( key, file );
-            if( !sinserted && sit->second != file )
-            {
-                sit->second = kNoFile;   // two modules bound to y in one def: neither
-            }
+            recordScopedImportBindFile( ing, b, resolved, fileIndex, scope, key, t.scopedImportBindFile );
         }
         recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
         recordSubmoduleBind( ing, b, pythonFromImportModuleFile( b, resolved, fileIndex, memo ), fileIndex, key, scope == kNoNode ? b.fileId : scope,
@@ -3071,7 +3105,9 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     }
     t.importFiles  = buildPythonImportFiles( ing, fileIndex, memo );
     t.scopes             = buildPythonStarTargets( ing, fileIndex, memo );
-    t.scopes.nameBinds   = buildPythonNameBinds( ing, pythonSubmoduleCalleeNames( ing, t.submodules, t.scopedSubmodules ) );
+    HashMap<std::string, char> callees = pythonSubmoduleCalleeNames( ing, t.submodules );
+    addScopedSubmoduleCalleeNames( ing, t.scopedSubmodules, callees );
+    t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ) );
     return t;
 }
 
