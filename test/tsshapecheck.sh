@@ -250,6 +250,47 @@ EOF
                       || no "$ext: --callers=ne got [$got], want [n4]"
 done
 
+# ── 8) TS-CONST-DEFS: module-level value bindings are definitions (test/tsconstfix/) ─────────────────
+# Before this arm a module-level TS/JS `const`/`let`/`var` whose value is not a function was no symbol unless its
+# name was SCREAMING_SNAKE (r3 q10): on microsoft/TypeScript `--defs=versionMajorMinor` (a string const) and
+# `--defs=commandOptionsWithoutBuild` (a 1 050-line array const) found 0, and `--at` on a line inside that array
+# refused ("no indexed symbol spans line"). A literal-valued binding — string, number, template, object or array,
+# under `as` / `as const` / `satisfies` / `!` / parentheses — is now a t="var" definition whose span is its whole
+# declaration, and an EXPORTED destructuring binds each name. Kept out, pinned here: function-local consts, a
+# non-exported destructure (an import-shaped alias of another module's names), and a call-valued const (a scope
+# choice: `require(...)`, factories and singletons are not literal tables; disclosed, not silent).
+CF="$ROOT/test/tsconstfix"
+defsT(){ "$BIN" "$CF" --no-cache --defs="$1" 2>/dev/null | grep -oE "<d n=\"$1\" t=\"[a-z]+\" p=\"[^\"]*\"" | grep -oE 't="[a-z]+" p="[^"]*"' | tr '\n' ' ' | sed 's/ $//'; }
+for pair in 'versionMajorMinor options.ts:18' 'version options.ts:19' 'retryLimit options.ts:22' 'emptyArray options.ts:25' \
+            'commandOptionsWithoutBuild options.ts:28' 'diagnosticCategoryNames options.ts:44' 'defaultSettings options.ts:45' \
+            'versionBanner options.ts:48' 'moduleCounter options.ts:51' 'legacyFlag options.ts:52' \
+            'jsDefaultLocale legacy.js:2' 'jsRetryTable legacy.js:3' 'jsMutableCount legacy.js:4' 'jsExportedLimits legacy.js:5'; do
+    set -- $pair
+    got="$( defsT "$1" )"
+    [ "$got" = "t=\"var\" p=\"$2\"" ] && ok "module value binding is a t=var def: $1 ($2)" \
+                                    || no "module value binding $1: --defs got [$got], want [t=\"var\" p=\"$2\"]"
+done
+for pair in 'pickedAlpha options.ts:55' 'renamedBeta options.ts:55' 'pickedGamma options.ts:55' 'pickedRest options.ts:55' \
+            'firstSlot options.ts:56' 'secondSlot options.ts:56'; do
+    set -- $pair
+    got="$( defsT "$1" )"
+    [ "$got" = "t=\"var\" p=\"$2\"" ] && ok "exported destructure binds a def: $1 ($2)" \
+                                    || no "exported destructure $1: --defs got [$got], want [t=\"var\" p=\"$2\"]"
+done
+for sym in functionLocalName functionLocalTable jsFunctionLocal privateExtra optionRegistry fs pickedBeta; do
+    got="$( defsT "$sym" )"
+    [ -z "$got" ] && ok "not a definition, as scoped: $sym" \
+                  || no "over-capture: $sym became a def [$got] (function-local / non-exported destructure / call-valued / the key of a renamed destructure)"
+done
+AT="$( "$BIN" "$CF" --no-cache --at=options.ts:33 2>/dev/null )"
+printf '%s' "$AT" | grep -q 'sym="commandOptionsWithoutBuild"' && printf '%s' "$AT" | grep -q '<s n="commandOptionsWithoutBuild" t="var" l="28" el="41"/>' \
+    && ok "--at on a line inside the multi-line array const resolves to it (l=28 el=41)" \
+    || no "--at=options.ts:33 does not resolve to commandOptionsWithoutBuild l=28 el=41: $( printf '%s' "$AT" | tail -c 300 )"
+AT="$( "$BIN" "$CF" --no-cache --at=options.ts:65 2>/dev/null )"
+printf '%s' "$AT" | grep -q 'sym="countOptions"' \
+    && ok "--at on a function-local const's line resolves to its function, not to the local" \
+    || no "--at=options.ts:65 does not resolve to countOptions: $( printf '%s' "$AT" | tail -c 300 )"
+
 # ── 6) determinism + well-formedness on this fixture ──────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache --top-k=500 >"$TMP/map2" 2>/dev/null
 if cmp -s "$TMP/map" "$TMP/map2"; then ok "two cold runs byte-identical"; else no "cold runs DIFFER on the TS shape fixture"; fi

@@ -16,9 +16,9 @@
 # globals stay behind the SCREAMING gate. Class-static const/constexpr members with an in-class
 # initializer (a new field_declaration capture; no pattern existed at ALL pre-fix, even SCREAMING)
 # keep under a static+const ingest gate. Probed-and-DEFERRED, pinned absent below: enumerators
-# (>=5000 capture-cap hits on a 2 377-file private validation tree — a corpus blow-up needing its own round) and TS/JS
-# non-SCREAMING top-level consts (r3 q10 pinned policy — constcheck arm 3 asserts retryBudget stays
-# unindexed; relaxing it is a measured behavior change, not a rider). Python/Rust/Go were probed
+# (>=5000 capture-cap hits on a 2 377-file private validation tree — a corpus blow-up needing its own round). TS/JS
+# non-SCREAMING top-level consts were deferred here too; TS-CONST-DEFS (2026-11-08) took them up as their own round
+# (literal values only), and arm 5 now pins them present. Python/Rust/Go were probed
 # case-blind already (2026-08-12 probe table) — no gap, pinned unchanged here.
 #
 # RED-BEFORE-FIX: arms tagged [RED] below fail against the pre-fix binary (verified at b74783e).
@@ -76,8 +76,13 @@ for sym in mcMutableCamelGlobal mc_file_mutable kMcLocalConstexpr mcMemberDefaul
 done
 
 # ── 5. deferred families stay honestly absent (each deferral is a recorded probe verdict) ──────
-for sym in kMcEnumRed kMcEnumGreen MC_ENUM_SCREAM kMcTsCamel kMcJsCamel; do
+for sym in kMcEnumRed kMcEnumGreen MC_ENUM_SCREAM; do
     has_any "$sym" && no "deferred family leaked into the index: '$sym'" || ok "deferred stays absent: $sym"
+done
+# RE-PINNED 2026-11-08: the TS/JS deferral was taken up by TS-CONST-DEFS (test/tsshapecheck.sh §8, its own measured
+# round): a literal-valued module-level const is a def case-blind, so the two camel pins flip to present.
+for sym in kMcTsCamel kMcJsCamel; do
+    if has_var "$sym"; then ok "TS-CONST-DEFS: literal-valued camel module const is a def: $sym"; else no "MISSING t=\"var\" def: $sym (TS-CONST-DEFS)"; fi
 done
 
 # ── 6. no-gap languages pinned unchanged (probed case-blind pre-fix) ───────────────────────────

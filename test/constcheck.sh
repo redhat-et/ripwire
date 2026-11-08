@@ -19,9 +19,10 @@
 #      hashers...") surfaces the settings constant TS_PASSWORD_HASHERS in the lens — the r3
 #      report's own gate shape ("a --for=...selectable/config... fixture must surface a settings
 #      constant"). Structurally impossible pre-fix: the symbol did not exist.
-#   3. SCOPE negatives (the "do not rank every literal" contract): lowercase top-level consts
-#      (TS/JS), camelCase/CamelCase names (Java field, Ruby alias), function-local
-#      SCREAMING_SNAKE (TS), and a lowercase mutable C global stay UNindexed.
+#   3. SCOPE negatives (the "do not rank every literal" contract): camelCase/CamelCase names (Java field,
+#      Ruby alias), function-local
+#      SCREAMING_SNAKE (TS), and a lowercase mutable C global stay UNindexed. Lowercase literal-valued TS/JS
+#      top-level consts were here too until TS-CONST-DEFS (2026-11-08), which made them defs (re-pinned below).
 #   4. KIND precedence: a SCREAMING_SNAKE arrow-function const stays t="fn" (dedup keeps the more
 #      specific kind — the constant pattern must not demote real functions to vars).
 #   5. EXISTING behavior pinned unchanged: Python module-level assignments stay var defs
@@ -80,8 +81,16 @@ grep -q 'n="TS_PASSWORD_HASHERS"' "$FOR_OUT" \
     || no "--for (config query) does NOT surface TS_PASSWORD_HASHERS — the r3 q10 loss shape"
 
 # ── 3. scope negatives: not every literal becomes a symbol ─────────────────────────────────────
-for sym in retryBudget helperBudget TS_LOCAL_GUARD CamelAlias javaCounter c_mutable_global; do
+for sym in TS_LOCAL_GUARD CamelAlias javaCounter c_mutable_global; do
     has_any "$sym" && no "over-capture: '$sym' must stay unindexed" || ok "unindexed as required: $sym"
+done
+# RE-PINNED 2026-11-08 (TS-CONST-DEFS, test/tsshapecheck.sh §8): a lowercase TS/JS module-level const with a LITERAL
+# value is a definition. The r3 q10 policy kept every non-SCREAMING name out, which left microsoft/TypeScript's
+# `versionMajorMinor = "6.0"` and its 1 050-line `commandOptionsWithoutBuild = [ … ]` with no def (`--defs` 0, `--at`
+# refused inside the array). retryBudget = 3 / helperBudget = 2 are exactly that shape; the scope line moved to the
+# VALUE (literal yes; call, new, alias no), and the function-local negative above (TS_LOCAL_GUARD) still holds.
+for sym in retryBudget helperBudget; do
+    if has_var "$sym"; then ok "literal-valued lowercase module const is a t=\"var\" def (TS-CONST-DEFS): $sym"; else no "MISSING t=\"var\" def: $sym (TS-CONST-DEFS)"; fi
 done
 
 # ── 4. kind precedence: SCREAMING_SNAKE arrow const stays a function ───────────────────────────

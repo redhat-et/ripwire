@@ -11,7 +11,7 @@ export const TS_FEATURE_FLAGS = { newCheckout: true, betaSearch: false };
 
 const TS_MAX_RETRIES = 5;
 
-// lowercase top-level const — NOT a settings constant, must stay unindexed
+// lowercase top-level const with a literal value — a t="var" def since TS-CONST-DEFS (was unindexed under r3 q10)
 const retryBudget = 3;
 
 // SCREAMING_SNAKE arrow-function const — must stay a FUNCTION def, not become a var

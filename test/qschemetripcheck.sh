@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-08, lane ts-const-defs (base main 45c2deb24; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 301 -> 303 (rich 304): a TS/JS module-level const/let/var with a literal value is a t="var" def and an
+#   exported destructure binds each name (test/tsshapecheck.sh §8); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 50
+#   and kQSnapCacheScheme stays: no record changes shape and no watched quality.h function moved.
 # 2026-11-07, lane clones-persist (base main e4432b48; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kCacheVersion 49 -> 50: a def record ends with a clone-key presence u8 and, for a keyed Function/Method, its u64 clone key (src/ingest_parsepool.h rawDefCloneKey), so a warm
 #   findClones keys bodies with no file I/O; quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no

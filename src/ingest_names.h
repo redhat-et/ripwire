@@ -2348,6 +2348,53 @@ inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexce
 inline TSNode jsClassFactoryReceiver( TSNode nameNode, std::string_view src ) noexcept;
 inline bool   jsClassFactoryMakesClass( TSNode nameNode, std::string_view src, int depth = 0 );   // allocates (the scope index)
 
+// TS-CONST-DEFS (test/tsshapecheck.sh §8): is a TS/JS module-level binding's value a LITERAL — a string, template,
+// number, regex, boolean/null/undefined, object or array literal, or a unary/binary expression — seen through the
+// wrappers that only restate its type (`( … )`, `… as T`, `… as const`, `… satisfies T`, `…!`, `<T>…`)? This is the
+// value class the r3 q10 SCREAMING gate kept out for every non-SCREAMING name, and the one a reader looks up by name
+// (`versionMajorMinor = "6.0"`, `optionDeclarations = [ … ]`). Calls, `new`, identifiers and member chains are not
+// literals: `require( … )` is an import, `= other` an alias (INDEX-ALIAS's card), a factory call a value nothing types.
+// A function or class value never reaches here as kept: its own tags pattern indexes it. Depth-bounded: the wrappers
+// nest a handful of times in real code, never unboundedly.
+inline bool jsLiteralValue( TSNode value ) noexcept
+{
+    for( int depth = 0; depth < 8 && !ts_node_is_null( value ); ++depth )
+    {
+        const char* t = ts_node_type( value );
+        if( kindIs( t, "type_assertion" ) )   // `<T>x`: the type arguments come first, the value last
+        {
+            value = ts_node_named_child( value, ts_node_named_child_count( value ) - 1u );
+            continue;
+        }
+        if( kindIs( t, "parenthesized_expression" ) || kindIs( t, "as_expression" ) || kindIs( t, "satisfies_expression" )
+            || kindIs( t, "non_null_expression" ) )
+        {
+            value = ts_node_named_child( value, 0 );
+            continue;
+        }
+        return kindIs( t, "string" ) || kindIs( t, "template_string" ) || kindIs( t, "number" ) || kindIs( t, "regex" )
+            || kindIs( t, "true" ) || kindIs( t, "false" ) || kindIs( t, "null" ) || kindIs( t, "undefined" )
+            || kindIs( t, "object" ) || kindIs( t, "array" ) || kindIs( t, "unary_expression" ) || kindIs( t, "binary_expression" );
+    }
+    return false;
+}
+
+// TS-CONST-DEFS: does a non-SCREAMING TS/JS @definition.constant capture keep? The queries bind it only at module level
+// (a (program …) or export_statement parent, so a function-local const never reaches here). A plain declarator keeps when
+// its value is a literal (jsLiteralValue); an uninitialized `let x;` has no value and drops. A destructured name (the
+// @name sits in an object/array pattern, not directly under the variable_declarator) keeps only when EXPORTED: an
+// exported `const { a, b } = x` publishes a and b, while a non-exported one is an import-shaped alias of another
+// module's names (`const { readFile } = require( "fs" )`), which the queries do not bind at all.
+inline bool jsModuleBindingKept( TSNode nameNode, TSNode roleNode ) noexcept
+{
+    const TSNode parent = ts_node_parent( nameNode );
+    if( kindIs( ts_node_type( parent ), "variable_declarator" ) )
+    {
+        return jsLiteralValue( fieldChild( parent, NodeField::Value ) );
+    }
+    return kindIs( ts_node_type( ts_node_parent( roleNode ) ), "export_statement" );   // roleNode is the lexical_declaration
+}
+
 // The @definition.constant drop decision, in its own function for the same reason isCjsExportTarget and
 // isPyEnumMemberTarget have theirs: dropGatedCapture is a dispatcher, and this is the one arm with a
 // policy rather than a predicate. r3 q10 gates on SCREAMING_SNAKE; the §7b close-out adds the CUDA
@@ -2381,6 +2428,10 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
     if( lang == Lang::C )
     {
         return !( isScreamingSnakeName( name ) || declarationCarriesConstQualifier( roleNode, src ) );
+    }
+    if( lang == Lang::TypeScript || lang == Lang::JavaScript )
+    {
+        return !( isScreamingSnakeName( name ) || jsModuleBindingKept( nameNode, roleNode ) );   // TS-CONST-DEFS
     }
     if( lang != Lang::Cpp )
     {

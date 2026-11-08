@@ -99,18 +99,16 @@
 ; ---- module-level settings constants (r3 q10 — bench/headtohead/r3-headroom-2026-08-03) ----
 ; Mirrors queries/typescript/tags.scm (same rationale, same --match-verified shapes; the JS grammar
 ; shares the program/lexical_declaration/export_statement nodes). The legacy `var CONFIG = {...}`
-; spelling is included — pre-ES6 settings tables are exactly the config-module target — but `let`
-; is not (a mutable counter, not config). SCREAMING_SNAKE-gated in ingest.cpp like TS.
+; spelling is included — pre-ES6 settings tables are exactly the config-module target — and, since TS-CONST-DEFS
+; (2026-11-08), `let` too, with the same keep rule as TS (SCREAMING_SNAKE, or a literal value: jsModuleBindingKept).
 
 (program
   (lexical_declaration
-    "const"
     (variable_declarator
       name: (identifier) @name)) @definition.constant)
 
 (export_statement
   (lexical_declaration
-    "const"
     (variable_declarator
       name: (identifier) @name)) @definition.constant)
 
@@ -123,6 +121,26 @@
   (variable_declaration
     (variable_declarator
       name: (identifier) @name)) @definition.constant)
+
+; TS-CONST-DEFS (test/tsshapecheck.sh §8): an EXPORTED destructuring publishes each name it binds (`export const { a, b: c,
+; d = 1, ...rest } = x`, `export const [ p, q ] = pair`). One level deep; a nested pattern's inner names are not bound (a
+; disclosed floor). A non-exported destructure is not captured: it is an import-shaped alias of another module's names.
+(export_statement
+  (lexical_declaration
+    (variable_declarator
+      name: (object_pattern
+              [ (shorthand_property_identifier_pattern) @name
+                (pair_pattern value: (identifier) @name)
+                (object_assignment_pattern left: (shorthand_property_identifier_pattern) @name)
+                (rest_pattern (identifier) @name) ]))) @definition.constant)
+
+(export_statement
+  (lexical_declaration
+    (variable_declarator
+      name: (array_pattern
+              [ (identifier) @name
+                (assignment_pattern left: (identifier) @name)
+                (rest_pattern (identifier) @name) ]))) @definition.constant)
 
 ; lane lego-transitive (M2): a class FACTORY — `const Sub = Base.extend('Sub', …)` (nunjucks' node classes). The call
 ; returns a class extending its receiver, so the declarator is a class definition. Captured by shape here, kept only by
