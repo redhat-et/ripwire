@@ -295,22 +295,33 @@ struct Sides
     std::vector<std::uint32_t> one, two; // two sinks: hops to A / to B; root/sink: hops from R / to S
     std::vector<NodeId> endpoints, onPath; // sorted
 };
-inline std::uint32_t minHops( const std::vector<std::uint32_t>& d, const Row& r )
+// A row's nearest hop counts on the two sides, over all its seeds (kUnreached when no seed is reached).
+struct RowHops
 {
-    std::uint32_t best = kUnreached;
+    std::uint32_t one = kUnreached, two = kUnreached;
+    bool both() const { return one != kUnreached && two != kUnreached; }
+};
+inline RowHops hopsOf( const Sides& s, const Row& r )
+{
+    RowHops h;
     for( const NodeId id : r.seeds )
     {
-        best = std::min( best, d[id] );
+        h.one = std::min( h.one, s.one[id] );
+        h.two = std::min( h.two, s.two[id] );
     }
-    return best;
+    return h;
 }
-inline bool onBothSides( const Sides& s, const Row& r )
+// An endpoint definition or a kept path node among the row's seeds.
+inline bool seedIsKept( const Sides& s, const Row& r )
 {
-    return minHops( s.one, r ) != kUnreached && minHops( s.two, r ) != kUnreached;
-}
-inline bool anySeedIn( const std::vector<NodeId>& sorted, const Row& r )
-{
-    return std::ranges::any_of( r.seeds, [&]( NodeId id ) { return std::ranges::binary_search( sorted, id ); } );
+    for( const NodeId id : r.seeds )
+    {
+        if( std::ranges::binary_search( s.endpoints, id ) || std::ranges::binary_search( s.onPath, id ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Every node of a shortest path from `from` to the sink set whose hop distances are `toSink` (each step one hop nearer).
@@ -371,7 +382,7 @@ inline std::optional<Sides> computeSides( const Graph& g, const Endpoints& ep, c
     std::size_t sources = 0; // printed rows on both sides
     for( const Row& r : rows )
     {
-        if( !onBothSides( s, r ) )
+        if( !hopsOf( s, r ).both() )
         {
             continue;
         }
@@ -393,16 +404,16 @@ inline std::optional<Sides> computeSides( const Graph& g, const Endpoints& ep, c
 // (D) for one row.
 inline bool demoteRow( const Sides& s, const Row& r )
 {
-    if( r.seeds.empty() || anySeedIn( s.endpoints, r ) || anySeedIn( s.onPath, r ) )
+    if( r.seeds.empty() || seedIsKept( s, r ) )
     {
         return false;
     }
-    const std::uint32_t one = minHops( s.one, r ), two = minHops( s.two, r );
+    const RowHops h = hopsOf( s, r );
     if( s.rootSink )
     {
-        return one == kUnreached && two != kUnreached && two > 1; // reaches S from outside R's walk; a direct caller of S stays
+        return h.one == kUnreached && h.two != kUnreached && h.two > 1; // reaches S from outside R's walk; a direct caller of S stays
     }
-    return ( one == kUnreached ) != ( two == kUnreached );
+    return ( h.one == kUnreached ) != ( h.two == kUnreached );
 }
 
 // `text` with each demoted row of it rewritten in place as <t p= sym= r=/> (the legend before the first when `legend`); "" when none is.

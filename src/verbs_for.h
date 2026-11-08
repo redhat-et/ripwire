@@ -3027,8 +3027,6 @@ public:
     bool wanted() const noexcept { return wanted_; }
     // ONE-SIDE-REACH: what the captured answer's root est_tokens= was converged from (null when the root prints none): the demote pass
     // (foronesidereach.h) rewrites priced rows in these bytes, and re-prices the root through it.
-    void rootPricedAs( const std::optional<rw::PricedRootInputs>& price ) { rootPrice_ = price; }
-    const rw::PricedRootInputs* rootPrice() const noexcept { return rootPrice_ ? &*rootPrice_ : nullptr; }
     // The captured bytes, stdout restored; nullopt when nothing was captured. A failed flush or a stream error is `failed`: the bytes read are
     // kept, never dropped and never taken for the whole answer. A failed restore keeps the saved descriptor (the only handle on the real
     // stdout) and writes the bytes to it; the caller reports `restored == false`.
@@ -3064,7 +3062,6 @@ private:
     bool       wanted_ = false, active_ = false;
     std::FILE* file_   = nullptr;
     int        saved_  = -1;
-    std::optional<rw::PricedRootInputs> rootPrice_;
 };
 
 // Where <syms> goes in the answer's bytes: in front of the --with-graph <graph> block, which stays the last child, else at the end (rfind: a
@@ -3083,7 +3080,23 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
 }
 
 // The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
-inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+// ONE-SIDE-REACH (foronesidereach.h): rows reaching one of two named endpoints become pointers, in the answer and in `syms`; "" when none is.
+// The caller skips it under a budget, which leaves both as shaped.
+inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string& answer, std::string& syms, const std::optional<rw::PricedRootInputs>& price )
+{
+    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, d.cfg.forTask, answer, syms );
+    if( !edit.answer.empty() && price )
+    {
+        rw::repriceRootAfterCut( edit.answer, *price, answer.size() );   // signed: the pointers and legend may outweigh the rows they replace
+    }
+    if( !edit.syms.empty() )
+    {
+        syms = std::move( edit.syms );
+    }
+    return std::move( edit.answer );
+}
+
+inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture, const std::optional<rw::PricedRootInputs>& price )
 {
     if( !capture.wanted() )
     {
@@ -3109,17 +3122,8 @@ inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
     std::string       syms  = rw::renderForFileSyms(
         d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = held,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole } );
-    // ONE-SIDE-REACH (foronesidereach.h): rows reaching one of two named endpoints become pointers, in the answer and in <syms>; a budget leaves both as shaped
-    rw::OneSideReachEdit edit = whole && !held ? rw::demoteOneSideRows( d.ing, d.g, cfg.forTask, cap->bytes, syms ) : rw::OneSideReachEdit{};
-    if( !edit.answer.empty() && capture.rootPrice() != nullptr )
-    {
-        rw::repriceRootAfterCut( edit.answer, *capture.rootPrice(), cap->bytes.size() );   // signed: the pointers and legend may outweigh the rows they replace
-    }
-    if( !edit.syms.empty() )
-    {
-        syms = std::move( edit.syms );
-    }
-    const std::string& bytes = !edit.answer.empty() ? edit.answer : cap ? cap->bytes : edit.answer;
+    const std::string  edited = whole && !held ? oneSideReachAnswer( d, cap->bytes, syms, price ) : std::string();
+    const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
     std::fwrite( bytes.data(), 1, at, stdout );
     std::fwrite( syms.data(), 1, syms.size(), stdout );
@@ -4943,7 +4947,6 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
-        forAnswerBytes.rootPricedAs( pricedHeader.inputs );       // ONE-SIDE-REACH: the demote pass re-prices this root
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         // R2-AF (round 2, S4): first rows inside the root, right after the legend — see forHdrRows above.
         // The SAME string every sum above charged (rendered once, beside forHdrRows) — "" when there is no row.
@@ -5102,7 +5105,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
-        const int answerRc = appendForFileSyms( d, forAnswerBytes );
+        const int answerRc = appendForFileSyms( d, forAnswerBytes, pricedHeader.inputs );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
