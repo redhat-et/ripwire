@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <string>
@@ -1324,8 +1325,9 @@ private:
     }
 
     // The package.json walk and the framework it names, once per DIRECTORY: the walk starts at the test file's own directory
-    // (dirwalk::ascendToRoot), so every test file of one directory reads the same manifests. Keyed by the disk path's text up to
-    // its last separator plus the root; two spellings of one directory only cost a second walk.
+    // (dirwalk::ascendToRoot), so every test file of one directory reads the same manifests. Keyed by the disk path's filesystem
+    // parent (std::filesystem's own separator rule, the one the walk climbs by: on POSIX `dir\b.test.ts` is a file in `.`, not
+    // in `dir`) plus the root; two spellings of one directory only cost a second walk.
     struct DirManifests
     {
         jsrunner::PackageManifests manifests;
@@ -1333,8 +1335,7 @@ private:
     };
     const DirManifests& manifestsOfDir( const std::string& disk, std::string_view root ) const
     {
-        const std::size_t slash = disk.find_last_of( "/\\" );
-        std::string       key   = slash == std::string::npos ? std::string() : disk.substr( 0, slash );
+        std::string key = std::filesystem::path( disk ).parent_path().string();
         key += '\0';
         key += root;
         auto [ entry, fresh ] = manifestsByDir_.try_emplace( std::move( key ) );
