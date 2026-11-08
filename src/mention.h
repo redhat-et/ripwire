@@ -521,7 +521,7 @@ inline bool resolveStemFile( const IngestResult& ing, std::string_view word, std
     {
         return false;
     }
-    return std::none_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == word; } );
+    return std::none_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == word && !notLexRanked( s ); } );
 }
 
 // Did kMentionMaxFiles CUT a file this mention names, or only STOP a scan? The anchor's scans stop the instant the
@@ -536,7 +536,7 @@ inline bool resolveStemFile( const IngestResult& ing, std::string_view word, std
 // with a different cap.
 inline bool definesScopeName( const IngestResult& ing, const std::string& scope, const std::string& name ) noexcept
 {
-    return std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == name && s.scope == scope; } );
+    return std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == name && s.scope == scope && !notLexRanked( s ); } );
 }
 
 // FOR-FILE-ANCHOR: the (a0) whole-basename reading of mentionUnkeptFiles — true when it ENDS resolution (the token is a basename the
@@ -1354,7 +1354,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
             const std::string& nameSeg  = m.segments[1];
             for( const Symbol& s : ing.symbols )
             {
-                if( s.name == nameSeg && s.scope == scopeSeg )
+                if( s.name == nameSeg && s.scope == scopeSeg && !notLexRanked( s ) )   // a --recall-only unit is no mention target
                 {
                     ++directSymbolTotal;
                     if( directSymbols.size() < kMentionMaxDirectSymbols )
@@ -1470,7 +1470,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         std::uint32_t bestCount = 0;
         for( const Symbol& s : ing.symbols )
         {
-            if( s.fileId != f )
+            if( s.fileId != f || notLexRanked( s ) )   // a --recall-only unit (model.h kRankFlagNotLexRanked) is never lifted
             {
                 continue;
             }

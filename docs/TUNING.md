@@ -337,7 +337,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kDefaultRecallMaxTokens` = `8000`
 
-`src/recall.h` — discloses: **none** — probe value `64000` — **1 verb(s) respond**
+`src/recall.h` — discloses: `terms_capped` — probe value `64000` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |

@@ -43,12 +43,12 @@ inline std::string slotCallWritten( const Reference& r )
 {
     if( r.role != RefRole::Call )
     {
-        return r.fieldName;
+        return r.fieldName();
     }
     std::string out = r.memberRoot;
-    if( !r.memberPath.empty() )
+    if( !r.memberPath().empty() )
     {
-        out += ( out.empty() ? "" : "." ) + r.memberPath;
+        out += ( out.empty() ? "" : "." ) + r.memberPath();
     }
     return out + "." + r.calleeName;
 }
@@ -143,7 +143,7 @@ inline std::string valueRefsXml( const IngestResult& ing, const ValueRefRows& ro
             out += " to=\"" + ex( t.name ) + "\" def=\"" + ex( vrPath( ing, t.fileId, rr ) ) + ":" + std::to_string( t.line ) + "\"";
         }
         out += " bind=\"" + ex( vrPath( ing, r.fileId, rr ) ) + ":" + std::to_string( r.line ) + "\"";
-        out += " into=\"" + ex( r.fieldName ) + "\"";
+        out += " into=\"" + ex( r.fieldName() ) + "\"";
         if( callersSide && !row.calledBy.empty() )
         {
             out += " called_by=\"" + ex( row.calledBy ) + "\"";
@@ -210,7 +210,7 @@ inline std::string valueRefsJson( const IngestResult& ing, const ValueRefRows& r
             kv( "def", vrPath( ing, t.fileId, rr ) + ":" + std::to_string( t.line ) );
         }
         kv( "bind", vrPath( ing, r.fileId, rr ) + ":" + std::to_string( r.line ) );
-        kv( "into", r.fieldName );
+        kv( "into", r.fieldName() );
         if( callersSide && !row.calledBy.empty() )
         {
             kv( "called_by", row.calledBy );
@@ -426,7 +426,7 @@ inline std::string patternCalleesXml( const IngestResult& ing, const PatternInde
         const Reference&          r     = ing.references[i];
         const std::vector<NodeId> cands = pix.targets( i );
         out += "<pd l=\"" + std::to_string( r.line ) + "\" pattern=\"" + ex( r.calleeName ) + "\"";
-        out += vrTargetWindowXml( ing, cands, kPatternRowCap, "cands", nextFlag( "--grep=", r.fieldName.empty() ? r.composeRel : r.fieldName ), rr, esc )   // checklist 34: through nextFlag
+        out += vrTargetWindowXml( ing, cands, kPatternRowCap, "cands", nextFlag( "--grep=", r.fieldName().empty() ? r.composeRel() : r.fieldName() ), rr, esc )   // checklist 34: through nextFlag
              + "</pd>";
     }
     return out;

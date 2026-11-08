@@ -5862,7 +5862,7 @@ inline bool fieldTypeWrittenInStd( const Reference& r ) noexcept
 // never reads it as a member, and composeRel "alias", which the HAS-A edges refuse. addTypeAliasBases is its one reader.
 inline bool isTypeAliasRecord( const Reference& r ) noexcept
 {
-    return r.isCompose && r.fieldName.empty() && r.composeRel == "alias";
+    return r.isCompose && r.fieldName().empty() && r.composeRel() == "alias";
 }
 
 // The inheritance NAME graph's alias edges (graph.h chaUp): an alias NAME gains its target as a direct base, so a base walk that
@@ -6091,10 +6091,10 @@ public:
             Entry e;
             e.fileId = r.fileId;
             e.scope  = Scope( r.memberRoot );
-            if( !r.memberCtor.empty() )
+            if( !r.memberCtor().empty() )
             {
-                e.kind    = r.memberVia == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
-                e.pointee = FlatRecvType{ r.memberCtor, !r.memberVia.empty(), true };
+                e.kind    = r.memberVia() == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
+                e.pointee = FlatRecvType{ r.memberCtor(), !r.memberVia().empty(), true };
                 anyPointer = anyPointer || e.kind == Kind::Pointer;
             }
             else if( !fieldTypeWrittenInStd( r ) && !r.calleeName.empty() )
@@ -6183,7 +6183,7 @@ public:
     // its base reading.
     std::optional<FlatRecvType> pointeeOf( const Reference& member ) const
     {
-        if( byName_.empty() || member.memberVia == kTemplateParamMemberType || member.memberVia == kPointerMemberType || realClass_.find( member.calleeName ) != realClass_.end() )
+        if( byName_.empty() || member.memberVia() == kTemplateParamMemberType || member.memberVia() == kPointerMemberType || realClass_.find( member.calleeName ) != realClass_.end() )
         {
             return std::nullopt;
         }

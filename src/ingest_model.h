@@ -395,9 +395,11 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
                } );
 
     result.symbols.reserve( rawDefs.size() );
+    result.cloneKeys.resize( rawDefs.size() );   // CLONES-PERSIST: aligned 1:1 with result.symbols
     for( std::uint32_t i = 0; i < rawDefs.size(); ++i )
     {
         const RawDef& d = rawDefs[ i ];
+        result.cloneKeys[ i ] = d.cloneKey;
         Symbol s;
         s.id     = i;
         s.kind   = d.kind;
@@ -421,6 +423,7 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.testScope    = ( d.testScope != 0 ) ? 1 : 0;       // L8: an in-file test convention encloses this def
         s.internalLinkage = ( d.internalLinkage != 0 ) ? 1 : 0;   // C/C++ anonymous-namespace or namespace-scope `static` def (model.h)
         s.scopeRootsStd   = ( d.scopeRootsStd   != 0 ) ? 1 : 0;   // #150: this def's full enclosing-namespace chain roots at std (model.h)
+        s.rankFlags       = std::uint8_t( d.rankFlags & 0x0Fu );  // DOCS-UNITS-FIX: kRankFlag* (model.h), set by the doc post-pass
         s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
         s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
         s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)
@@ -617,7 +620,7 @@ inline void markExtentSuspects( IngestResult& result, const std::vector<RawDef>&
         ENSURES( spanOfDef.size() == fileBits.size(), "one classified bit per def we handed the classifier" );
         for( std::size_t defIndex = 0; defIndex < spanOfDef.size(); ++defIndex )
         {
-            result.symbols[ index.spans[ spanOfDef[ defIndex ] ].id ].extentSuspect = fileBits[ defIndex ];
+            result.symbols[ index.spans[ spanOfDef[ defIndex ] ].id ].extentSuspect = std::uint8_t( fileBits[ defIndex ] & 0x0Fu );   // four reason bits (extentsuspect.h)
         }
     }
 }
@@ -886,7 +889,7 @@ inline void expandElixirImplementationReferences( IngestResult& result )
     result.references = std::move( merged );
 }
 
-// rawRefs is consumed here (never read again) → MOVE its 5 strings into each Reference instead of copying.
+// rawRefs is consumed here (never read again) → MOVE its strings and its cold block into each Reference instead of copying.
 inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, const std::vector<std::uint32_t>& refOrder, const DefSpanIndex& spanIndex )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: emit refs" );
@@ -915,15 +918,11 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.qualifierRootsStd = r.qualifierRootsStd;   // #150: the FULL written qualifier chain is rooted at std
         ref.memberCall  = r.memberCall;                 // FE-A: a Go/JS/TS/Rust member call (recv stays None)
         ref.memberRoot  = std::move( r.memberRoot );    // FE-A: its receiver chain's root identifier
-        ref.memberPath  = std::move( r.memberPath );    // FE-B: the members between that root and the callee
-        ref.memberCtor  = std::move( r.memberCtor );    // FE-B: the class a constructed receiver names
-        ref.memberVia   = std::move( r.memberVia );     // FE-B on #373: the method a Ruby typed receiver was built by
         ref.memberFactory = r.memberFactory;            // FE-B on #373: memberCtor names a FactoryBot factory
         ref.forwarded   = r.forwarded;                  // lane fcall-forward fix 1: an `f.call/f.apply` site standing for `f( … )`
         ref.trailingLambda = r.trailingLambda;          // #155: a Kotlin call whose lambda trails its argument list (scope-function arm)
         ref.baseBind    = r.baseBind;                   // lane lego-transitive fix 1: an inherit ref's same-file base binding
-        ref.fieldName   = std::move( r.fieldName );   // S5-E: the member variable name (e.g. "m_pool")
-        ref.composeRel  = std::move( r.composeRel );  // S5-E: "creates" or "uses"
+        ref.takeColdFrom( r );   // fieldName, composeRel (S5-E), memberPath, memberCtor, memberVia (FE-B): one block, moved whole
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test
         // #60: the module-scope owner owns EXACTLY the references it was minted for — the call/macro
         // population of pincensus.h isResolvableCallReference. A module-level `import`/`read`/`type`
