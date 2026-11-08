@@ -1415,6 +1415,34 @@ fi
 grep -aq '<hops ' "$TMP/f_for.out" \
     && ok "#11 A9/A10 presence: the compact arm really did serve a <hops> section (the arm is not inert)" \
     || no "#11 A9/A10 presence: no <hops> in the default --for bundle — re-anchor this arm, it proves nothing"
+# R-DEDUP: the <syms> block cuts the names it prints out of the head files' tail rows AFTER the root was priced (forfilesyms.h
+# tailRowsWithoutPicks), so both surfaces re-price the root on the cut bytes (serialize.h repriceRootAfterCut). The four CLI arms
+# above carry the cut on this task (est_tokens read 6-7 high without the re-price); this is the MCP `for` twin, same task and
+# corpus: no doc/decl block rides here, so the answer less its <syms> block is the priced document, flat at 2.50.
+python3 - "$FOR_TASK" "$ROOT/src" >"$TMP/f_mcp.in" <<'PYM'
+import json, sys
+print( json.dumps( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } ) )
+print( json.dumps( { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                     "params": { "name": "for", "arguments": { "path": sys.argv[2], "task": sys.argv[1] } } } ) )
+PYM
+rwcall --mcp <"$TMP/f_mcp.in" >"$TMP/f_mcp.json" 2>/dev/null
+mcp_out="$( python3 - "$TMP/f_mcp.json" <<'PYR'
+import json, re, sys, os; sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended_bytes
+try:
+    t = json.loads( [ l for l in open( sys.argv[1] ) if l.strip() ][-1] )["result"]["content"][0]["text"].encode()
+    e = int( re.search( rb'est_tokens="(\d+)"', t ).group( 1 ) )
+except Exception:
+    print( "unreadable" ); sys.exit( 0 )
+d = strip_appended_bytes( t )
+print( f"{len(d)} {e} {int( len( d ) / 2.50 + 0.5 )} syms={int( b'<syms>' in t or b'<syms ' in t )}" )
+PYR
+)"
+read -r _ mcp_e mcp_x mcp_s mcp_more <<<"$mcp_out"
+if [ -n "$mcp_s" ] && [ -z "$mcp_more" ] && [ "$mcp_e" = "$mcp_x" ] && [ "$mcp_s" = "syms=1" ]; then
+    ok "#11 A9/A10 MCP for twin (R-DEDUP <syms> cut): est_tokens = round(bytes/2.50) with the block served — bytes/est/expected = $mcp_out"
+else
+    no "#11 A9/A10 MCP for twin (R-DEDUP <syms> cut): bytes/est/expected = ${mcp_out:-unreadable} (the cut tail rows are priced, or no <syms> rode)"
+fi
 # the weak="1" path: a nonsense query trips the weak-score threshold, so the 9-byte attribute is present and
 # the same identity must still hold with it in the document. R9 fix (W3-S, 2026-08-19): a query this weak
 # also has no positive-score body candidates, so buildForAutoBodies now ALWAYS emits the honest

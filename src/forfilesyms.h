@@ -1056,6 +1056,7 @@ struct FileSymsArgs
     bool compactLegend = false;
     bool uncaptured = false; // the CLI could not buffer the emitted bytes: the tag says so, no rows (`answer` is empty)
     std::string* answerOut = nullptr; // set: receives `answer` with the head files' tail-row names the block prints cut ("" when none is)
+    const PricedRootInputs* price = nullptr; // with answerOut: what the answer's root est_tokens= was converged from — the cut re-prices it
 };
 // The block for one answer: "" when no candidate scores.
 inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, const FileSymsArgs& a )
@@ -1099,6 +1100,10 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     if( a.answerOut != nullptr && !headTail.empty() )
     {
         *a.answerOut = fd::tailRowsWithoutPicks( ing, a.answer, rows, headTail, picks );
+        if( a.price != nullptr && !a.answerOut->empty() ) // the cut is priced markup: est_tokens= prices the bytes sent
+        {
+            repriceRootAfterCut( *a.answerOut, *a.price, a.answer.size() - a.answerOut->size() );
+        }
     }
     return fd::blockXml( ing, sf, head, picks, a.compactLegend );
 }
