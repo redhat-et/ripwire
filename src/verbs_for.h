@@ -3115,7 +3115,10 @@ inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
     {
         rw::repriceRootAfterCut( edit.answer, *capture.rootPrice(), cap->bytes.size() );   // signed: the pointers and legend may outweigh the rows they replace
     }
-    syms = edit.syms.empty() ? std::move( syms ) : std::move( edit.syms );
+    if( !edit.syms.empty() )
+    {
+        syms = std::move( edit.syms );
+    }
     const std::string& bytes = !edit.answer.empty() ? edit.answer : cap ? cap->bytes : edit.answer;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
     std::fwrite( bytes.data(), 1, at, stdout );
