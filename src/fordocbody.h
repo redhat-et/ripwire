@@ -939,6 +939,11 @@ inline constexpr std::string_view kForDocBodyLegend =
     "allowance or budget; held=\"budget\" held_bytes=: a token budget kept that much text out, next= "
     "repeats the call without it. The answer above is unchanged -->";
 
+// SIZE-1 (size-trim): the budget-hold reading, present-only beside held="budget" (forDocBodyXml erases it otherwise)
+inline constexpr std::string_view kForDocBodyHeldClause =
+    "; held=\"budget\" held_bytes=: a token budget kept that much text out, next= repeats the call without it";
+static_assert( kForDocBodyLegend.contains( kForDocBodyHeldClause ), "the held clause is spelled as kForDocBodyLegend carries it" );
+
 inline std::string forDocBodyNext( std::string_view task ) { return nextAttrXml( nextFlag( "--recall=", task ) ); }
 
 // The display path of a picked file, as the answer's <t> rows print it (relative to the root argument when there is one)
@@ -1050,10 +1055,12 @@ inline std::pair<std::string, std::size_t> forDocBodyXml( const ForDocPaths& pat
     const std::string attrs = forDocBodyRootAttrs( body, pick, task );
     const std::string open = "<doc_body match=\"lexical\"";
     const std::string close = "</doc_body>";
+    std::string legend( kForDocBodyLegend );
+    eraseAbsentClause( legend, kForDocBodyHeldClause, body.isHeldByBudget );   // SIZE-1: present-only on this block's root
     std::size_t tokens = 0;
     const std::string priceAttr =
-        forDocBodyPriceAttr( kForDocBodyLegend.size() + open.size() + attrs.size() + 1 + rows.size() + close.size(), body, &tokens );
-    return { std::string( kForDocBodyLegend ) + open + priceAttr + attrs + ">" + rows + close, tokens };
+        forDocBodyPriceAttr( legend.size() + open.size() + attrs.size() + 1 + rows.size() + close.size(), body, &tokens );
+    return { legend + open + priceAttr + attrs + ">" + rows + close, tokens };
 }
 
 // One served passage as its JSON object, the twin of forDocPassageXml.

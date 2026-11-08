@@ -47,6 +47,7 @@
 #include "serialize.h"           // escapeXml
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -88,6 +89,21 @@ inline constexpr std::string_view kReexportLegend =
     "q_by=dir only directories on its path name Q (all hedged); q_unmatched=1 no "
     "chain proves Q (listed because the task asks where it comes from); u p= l= a task-named file's own import of it (the chain's start); "
     "as_skipped=N renamed re-exports not followed; rows, not call edges -->";
+// SIZE-1 (size-trim): the row-attribute clauses of kReexportLegend, present-only on the rows the block printed (renderReexports
+// erases a clause whose attribute no row carries). Spelled exactly as the legend carries them.
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kReexportAttrClauses { {
+    { " glob=\"1\"", "glob=1 a glob/star hop (hedged: the module may not supply the name); " },
+    { " cands=\"", "cands=N the path names N same-named crates (hedged); " },
+    { " ns=\"", "ns= a namespace hop (`import * as X` then `export { X }`, or `export * as X from`): the whole module published as X; " },
+    { " q=\"", "def q= the qualifier the task wrote the name under (`Q.name`), proven at a hop or the definition's own file and printed first "
+               "(when one chain proves every segment, a same-named definition that cannot is not listed); " },
+    { " q_by=\"", "q_by=alias only a consumer's own `import * as Q` reaches it, q_by=path its file path names Q but an `import * as Q` binds Q "
+                  "to another module, q_by=dir only directories on its path name Q (all hedged); " },
+    { " q_unmatched=\"", "q_unmatched=1 no chain proves Q (listed because the task asks where it comes from); " },
+    { " as_skipped=\"", "as_skipped=N renamed re-exports not followed; " },
+} };
+static_assert( std::ranges::all_of( kReexportAttrClauses, []( const auto& c ) { return kReexportLegend.contains( c.second ); } ),
+               "the reexport row clauses are spelled as kReexportLegend carries them" );
 
 namespace reexport_detail
 {
@@ -1487,7 +1503,15 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     {
         return xml.out;
     }
-    return held ? reexportHeldMarker( printedDefs ) : xml.out.append( "</reexports>" );
+    if( held )
+    {
+        return reexportHeldMarker( printedDefs );
+    }
+    for( const auto& [ attrSpelling, clause ] : kReexportAttrClauses )   // SIZE-1: the legend rides the first def; the rows are all printed now
+    {
+        eraseAbsentClause( xml.out, clause, xml.out.contains( attrSpelling ) );
+    }
+    return xml.out.append( "</reexports>" );
 }
 
 // ── SHORT-KEY-FOR (lane barrel-short-key): the fallback ladder of a name-exact route that resolved no definition ─────────────────
@@ -1532,6 +1556,22 @@ inline constexpr std::string_view kShortKeyLegend =
     "held=lit: the lit block lists this key. total= all matches, 6 shown; floor=1: the scan stopped early, counts are floors. "
     "d n= t= p= l=: a definition row; ld p= l= shape=: a line row; b: the exact leaf's body (the expand shape; cut past 8192 bytes "
     "with truncated=1 lines= next=). next= the call that continues. The block is not in est_tokens -->";
+
+// SIZE-1 (size-trim): the per-rung clauses of kShortKeyLegend, present-only on the rungs and attributes this ladder printed
+// (renderShortKey erases the others). Spelled exactly as the legend carries them.
+inline constexpr std::string_view kShortKeyLeafClause =
+    "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove every segment of Q (q_by=scope: its owner path; file: "
+    "its file stem or path tail, never for a member; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own "
+    "`import * as Q`; path: its file path names Q but an `import * as Q` binds Q to another module; dir: only directories on its path; "
+    "alias, path and dir are hedged and kept only when nothing proves Q fully), of= all named leaf; exact=1 one "
+    "fully proven (the ladder stops), cands=N several (hedged), q_unmatched=1 none proves Q (the rows are same-leaf definitions, NOT "
+    "the one asked). ";
+inline constexpr std::string_view kShortKeySubstringClause = "rung n=substring: definitions whose name contains key (exact=0 always). ";
+inline constexpr std::string_view kShortKeyHeldLitClause   = "held=lit: the lit block lists this key. ";
+inline constexpr std::string_view kShortKeyFloorClause     = "; floor=1: the scan stopped early, counts are floors";
+static_assert( kShortKeyLegend.contains( kShortKeyLeafClause ) && kShortKeyLegend.contains( kShortKeySubstringClause )
+                   && kShortKeyLegend.contains( kShortKeyHeldLitClause ) && kShortKeyLegend.contains( kShortKeyFloorClause ),
+               "the shortkey rung clauses are spelled as kShortKeyLegend carries them" );
 
 namespace shortkey_detail
 {
@@ -2199,7 +2239,11 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
         }
     }
     std::string head = std::string( kShortKeyLegend ).append( "<shortkey" );
-    std::swap( out, head );
+    std::swap( out, head );   // head: the rungs; out: the legend, then the root
+    eraseAbsentClause( out, kShortKeyLeafClause, head.contains( "<rung n=\"leaf\"" ) );   // SIZE-1: present-only on the rungs printed
+    eraseAbsentClause( out, kShortKeySubstringClause, head.contains( "<rung n=\"substring\"" ) );
+    eraseAbsentClause( out, kShortKeyHeldLitClause, head.contains( " held=\"lit\"" ) );
+    eraseAbsentClause( out, kShortKeyFloorClause, head.contains( " floor=\"1\"" ) );
     attr( "of", x );
     out.append( fromSentence ? " from=\"sentence\" found=\"0\"" : " found=\"0\"" );
     attr( "rungs", rungs );

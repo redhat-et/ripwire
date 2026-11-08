@@ -14,6 +14,10 @@
 #   4  same_as absent: a fixture with distinct texts prints no same_as= and no clause
 #   5  sym once: no tail row's sym= repeats a name, on a fixture whose tail files each hold two same-named methods
 #      (positive twin: such a tail row lists that name)
+#   6  block clauses (round 2): inside each task block, a row clause rides iff the block's rows carry its attribute, in both
+#      dialects: exemplar_family oversized=/unread=, lit body=/longer=/try=, shortkey's rungs (n=leaf, n=substring, held=lit,
+#      floor=1), reexports glob=/cands=/ns=/q=/q_by=/q_unmatched=/as_skipped=, dotted_strings sink=/loader=/tmpl=, doc_body
+#      held="budget". Non-vacuous: the exemplar, lit, shortkey and reexports blocks each print, and each misses some attribute.
 #
 # Usage: test/forsizetrimcheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -58,6 +62,19 @@ run "$L" "$TMP/l.xml" "--for=widget frobnicate"
 run "$S" "$TMP/s.xml" "--for=run the widget frobnicate step"
 run "$S" "$TMP/s.full" "--for=run the widget frobnicate step" --legend=full
 run "$T" "$TMP/t.xml" "--for=widget frobnicate"
+# X: a handler family, a dotted key and a TS re-export (arm 6's blocks)
+X="$TMP/blocks"; mkdir -p "$X/widgets"
+printf 'class WidgetHandler:\n    """base of every widget handler"""\n    def handle(self, w):\n        return w\n\n' > "$X/widgets/registry.py"
+for k in Foo Bar Baz; do printf 'class %sWidgetHandler(WidgetHandler):\n    def handle(self, w):\n        return "%s"\n\n' "$k" "$k" >> "$X/widgets/registry.py"; done
+printf 'HANDLERS = ["widgets.registry.FooWidgetHandler"]\nWIDGET_KEY = "widget.handler.default"\n\ndef load_handler(name):\n    return HANDLERS[0]\n' > "$X/widgets/settings.py"
+Y="$TMP/reexp"; mkdir -p "$Y/src"
+printf 'export function frobWidget(x: number): number { return x + 1; }\n' > "$Y/src/a.ts"
+printf "export { frobWidget } from './a';\n" > "$Y/src/index.ts"
+for lg in compact full; do
+    run "$X" "$TMP/x1.$lg" "--for=add a new widget handler like FooWidgetHandler" --legend=$lg
+    run "$X" "$TMP/x2.$lg" "--for=where is \`widget.handler.default\` read" --legend=$lg
+    run "$Y" "$TMP/y1.$lg" "--for=which module re-exports frobWidget" --legend=$lg
+done
 
 python3 - "$TMP" <<'PY'
 import html, re, sys
@@ -95,6 +112,45 @@ t = ans["t.xml"] or ""
 syms = [s.split(",") for s in re.findall(r'<t p="[^"]*" sym="([^"]*)"', t)]
 say(bool(syms) and all(len(v) == len(set(v)) for v in syms), f"5 sym once: {sum(len(v) != len(set(v)) for v in syms)} of {len(syms)} tail rows repeat a name")
 say(any("widget_frobnicate" in v for v in syms), "5 twin: a tail row lists the shared method name")
+# arm 6: per block, (clause text in the legend) == (attribute on the block's rows)
+BLOCKS = {
+    "exemplar_family": (r"<!-- ripwire for exemplar_family.*?</exemplar_family>", [
+        ("oversized=N registry candidates over 4000 lines", r"<exemplar_family [^>]*(oversized|unread)=\""),
+        ("oversized=N counts the registry candidates", r"<exemplar_family [^>]*(oversized|unread)=\"")]),
+    "lit": (r"<!-- ripwire for lit.*</lit>", [
+        ("body=above|held: printed above", r' body="'), ("body=above: printed above, held:", r' body="'),
+        ("longer= source sites inside a longer name", r' longer="'), ("anchored; the ones before it had no source site or were not scanned", r' try="')]),
+    "shortkey": (r"<!-- shortkey:.*?</shortkey>", [
+        ("rung n=leaf: X written Q.leaf", r'<rung n="leaf"'), ("rung n=substring: definitions", r'<rung n="substring"'),
+        ("held=lit: the lit block lists this key", r' held="lit"'), ("floor=1: the scan stopped early, counts are floors", r'<rung [^>]*floor="1"')]),
+    "reexports": (r"<reexports>.*?</reexports>", [
+        ("glob=1 a glob/star hop", r' glob="1"'), ("cands=N the path names N same-named crates", r' cands="'), ("ns= a namespace hop", r' ns="'),
+        ("def q= the qualifier the task wrote", r' q="'), ("q_by=alias only a consumer", r' q_by="'), ("q_unmatched=1 no chain proves Q", r' q_unmatched="'),
+        ("as_skipped=N renamed re-exports", r' as_skipped="')]),
+    "dotted_strings": (r"<!-- ripwire for dotted_strings.*?</dotted_strings>", [
+        ("sink= it is the argument of a call", r' sink="'), ("loader= lp= a function in which", r' loaders?(_floor)?="'), ("tmpl= a %-template", r' tmpl="')]),
+    "doc_body": (r"<!-- ripwire for doc_body.*?</doc_body>", [("held_bytes=: a token budget kept", r' held="budget"')]),
+}
+seen = {k: 0 for k in BLOCKS}; absent = {k: 0 for k in BLOCKS}; bad6 = []
+for name in ("x1", "x2", "y1"):
+    for lg in ("compact", "full"):
+        tx = load(f"{name}.{lg}")
+        if tx is None:
+            bad6.append((name, lg, "no answer")); continue
+        for blk, (rx, pairs) in BLOCKS.items():
+            for m in re.finditer(rx, tx, re.S):
+                seen[blk] += 1
+                leg = " ".join(re.findall(r"<!--(.*?)-->", m.group(0), re.S)); rows = body(m.group(0))
+                for clause, attr in pairs:
+                    has = re.search(attr, rows) is not None
+                    absent[blk] += 0 if has else 1
+                    if clause in leg and not has:
+                        bad6.append((name, lg, blk, clause))                 # a clause with no row to define
+                    elif has and not any(c in leg for c, a in pairs if a == attr):
+                        bad6.append((name, lg, blk, "undefined " + attr))    # a row attribute its legend lost
+say(not bad6, f"6 block clauses: each rides iff its attribute does ({bad6[:4]})")
+need = ("exemplar_family", "lit", "shortkey", "reexports")
+say(all(seen[k] > 0 and absent[k] > 0 for k in need), f"6 non-vacuous: blocks printed {seen}, attributes missing {absent}")
 print("forsizetrimcheck:", "FAIL" if fails else "PASS", f"({fails} failing)")
 sys.exit(1 if fails else 0)
 PY
