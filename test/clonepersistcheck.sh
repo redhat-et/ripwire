@@ -22,6 +22,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac   # (E) runs the binary from inside the fixture
 CXX="${CXX:-c++}"
 . "$ROOT/scripts/cxxstd.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
@@ -42,10 +43,10 @@ if build_harness shipped "$ROOT/src"; then
     mkdir -p "$WORK/fix_h"
     if "$WORK/harness_shipped" "$WORK/fix_h" > "$WORK/h.txt"; then ok "(H) harness K1-K7 pass on the shipped clones.h"; else no "(H) harness failed on the shipped clones.h"; fi
     sed 's/^/    /' "$WORK/h.txt"
-    if [ "$( grep -c '^  PASS  K' "$WORK/h.txt" )" -eq 11 ]; then
-        ok "(H) liveness: all 11 K checks ran and passed"
+    if [ "$( grep -c '^  PASS  K' "$WORK/h.txt" )" -eq 12 ]; then
+        ok "(H) liveness: all 12 K checks ran and passed"
     else
-        no "(H) not all 11 K checks ran and passed"
+        no "(H) not all 12 K checks ran and passed"
     fi
 else
     no "(H) harness failed to compile"; sed 's/^/    /' "$WORK/cc_shipped.log"

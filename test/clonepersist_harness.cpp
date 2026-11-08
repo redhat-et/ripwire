@@ -7,7 +7,8 @@
 //   K1  key identity: two bodies with the same normalized stream (renamed identifiers, other literals) get the
 //       SAME key; a body that differs by one operator gets a DIFFERENT key; the token field equals normalizeSpan's.
 //   K2  a computed key is never kCloneKeyNone (0), even for an empty body.
-//   K3  the token field SATURATES at 2^24-1 (a 2^24-token body), so minTokens still admits it.
+//   K3  the token field SATURATES at 2^24-1 (a 2^24-token body), and a saturated key is verified, never rejected:
+//       minTokens=2^24 still groups two identical 2^24-token bodies.
 //   K4  forced collision: three bodies A, B, C where A == C and B differs, with ALL keys forced EQUAL — findClones
 //       emits exactly one group {A, C}. (The mutant without the verify step emits {A, B, C}.)
 //   K5  keyless parity: the same corpus with cloneKeys empty (size mismatch), with keys computed by cloneBodyKey,
@@ -145,6 +146,10 @@ int main( int argc, char** argv )
         }
         const std::uint64_t k = cloneBodyKey( big, 0, std::uint32_t( big.size() ), false );
         check( cloneKeyTokens( k ) == kCloneKeyTokenMask, "K3 a 2^24-token body saturates the token field at 2^24-1" );
+        // minTokens above the saturated field: the key is a floor, so two identical 2^24-token bodies still group
+        IngestResult      ing = corpus( dir, "k3_", { big, big }, false );
+        const std::string got = listing( findClones( ing, int( std::uint32_t( 1 ) << 24 ) ) );
+        check( got == "GROUP tokens=16777216: 0 1\n", "K3 minTokens=2^24 still groups two identical 2^24-token bodies (a saturated key is verified, not rejected)" );
     }
     // K4
     {

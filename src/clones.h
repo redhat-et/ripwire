@@ -529,7 +529,9 @@ inline std::vector<KeyRow> keyBodies( const IngestResult& ing, int minTokens )
                 const Symbol& s = ing.symbols[id];
                 key             = cloneBodyKey( bytes, s.sigEndByte, s.endByte, usesHashLineComments( s.lang ) );
             }
-            if( int( cloneKeyTokens( key ) ) >= minTokens )
+            // A saturated token field is a floor, not a count: keep the body for the verify step, which re-counts.
+            const std::uint32_t keyTokens = cloneKeyTokens( key );
+            if( keyTokens == kCloneKeyTokenMask || int( keyTokens ) >= minTokens )
             {
                 rows.push_back( { key, std::uint32_t( rows.size() ), id } );
             }
