@@ -50,6 +50,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <ranges>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -279,6 +280,7 @@ struct ShownRow
     std::string path;
     std::string name;
     std::uint32_t line = 0;
+    std::size_t symAt = 0, symLen = 0; // a <t> row: its sym= value's bytes in the answer (symLen 0: none)
 };
 
 // The <d>, <b> and <t> row tags of the answer in order, outside comments and CDATA (a served body's own `<b>` is code, not a row).
@@ -314,6 +316,11 @@ inline std::vector<ShownRow> shownRows( std::string_view text )
         ShownRow r { .kind = k, .path = unescapeXmlAttr( attrOf( tag, "p" ) ), .name = unescapeXmlAttr( attrOf( tag, "n" ) ) };
         const std::string_view l = attrOf( tag, "l" );
         std::from_chars( l.data(), l.data() + l.size(), r.line );
+        if( const std::string_view sym = attrOf( tag, "sym" ); k == 't' && !sym.empty() )
+        {
+            r.symAt = std::size_t( sym.data() - text.data() );
+            r.symLen = sym.size();
+        }
         if( const std::size_t colon = r.path.rfind( ':' ); r.line == 0 && colon != std::string::npos ) // a p="file:line" row
         {
             const std::string_view tail = std::string_view( r.path ).substr( colon + 1 );
@@ -938,6 +945,68 @@ inline std::string presentOnlySymsBlock( const std::string& block, bool compactL
     return legend + std::string( rows ) + "</syms>";
 }
 
+// <syms> has priority over a head file's tail row (R-DEDUP, forpage.h tailHeadFileSyms fills it from the file's next ranks — the
+// block's own candidates): the <t> rows with sym= whose path a <d> row shows, in answer order. Their names are no word of the
+// answer to the block's dedupe (headTailMasked), and a name the block prints is dropped from them (tailRowsWithoutPicks).
+inline std::vector<std::size_t> headTailRows( const std::vector<ShownRow>& rows )
+{
+    std::vector<std::size_t> out;
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( rows[i].symLen > 0 && std::ranges::any_of( rows, [&]( const ShownRow& d )
+                                                       { return d.kind == 'd' && d.path == rows[i].path; } ) )
+        {
+            out.push_back( i );
+        }
+    }
+    return out;
+}
+inline std::string headTailMasked( std::string_view answer, const std::vector<ShownRow>& rows, const std::vector<std::size_t>& headTail )
+{
+    std::string out( answer );
+    for( const std::size_t i : headTail )
+    {
+        out.replace( rows[i].symAt, rows[i].symLen, rows[i].symLen, ' ' );
+    }
+    return out;
+}
+// The answer with every name the block prints cut from the head files' tail rows (a row left with none prints p= only); "" when none is cut.
+inline std::string tailRowsWithoutPicks( const IngestResult& ing, std::string_view answer, const std::vector<ShownRow>& rows,
+                                         const std::vector<std::size_t>& headTail, const Picks& picks )
+{
+    constexpr std::size_t kSymOpen = std::string_view( " sym=\"" ).size();
+    std::string out;
+    std::size_t from = 0;
+    for( const std::size_t i : headTail )
+    {
+        const ShownRow& r = rows[i];
+        std::string kept;
+        bool cut = false;
+        for( const auto part : std::views::split( answer.substr( r.symAt, r.symLen ), ',' ) )
+        {
+            const std::string_view raw( part.begin(), part.end() );
+            const auto printed = [&]( const Cand* c )
+            { return unescapeXmlAttr( raw ) == ing.symbols[c->id].name; };
+            if( std::ranges::any_of( picks.byName, printed ) || std::ranges::any_of( picks.byCallee, printed ) )
+            {
+                cut = true;
+                continue;
+            }
+            kept += kept.empty() ? "" : ",";
+            kept += raw;
+        }
+        if( !cut )
+        {
+            continue;
+        }
+        const std::size_t at = kept.empty() ? r.symAt - kSymOpen : r.symAt; // none left: the whole ` sym="…"` goes
+        out.append( answer.substr( from, at - from ) );
+        out += kept;
+        from = r.symAt + r.symLen + ( kept.empty() ? 1 : 0 );
+    }
+    return from == 0 ? std::string() : out.append( answer.substr( from ) );
+}
+
 inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, const Head& head, const Picks& picks, bool compactLegend )
 {
     const MemberOwners owners( ing );
@@ -986,6 +1055,7 @@ struct FileSymsArgs
     std::string_view heldFlags; // held: the origin call's ranking flags and --pack-top-n, pre-spelled (" --no-route --anchor --pack-top-n=12"): the replay must rank the same list
     bool compactLegend = false;
     bool uncaptured = false; // the CLI could not buffer the emitted bytes: the tag says so, no rows (`answer` is empty)
+    std::string* answerOut = nullptr; // set: receives `answer` with the head files' tail-row names the block prints cut ("" when none is)
 };
 // The block for one answer: "" when no candidate scores.
 inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, const FileSymsArgs& a )
@@ -1010,7 +1080,9 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
         return {};
     }
     const fd::Head head = fd::headOf( ing, rows, sf.rowFile );
-    std::vector<fd::Cand> cands = fd::collectCands( ing, sf, a.answer, a.task );
+    const std::vector<std::size_t> headTail = fd::headTailRows( rows );
+    const std::string masked = headTail.empty() ? std::string() : fd::headTailMasked( a.answer, rows, headTail );
+    std::vector<fd::Cand> cands = fd::collectCands( ing, sf, headTail.empty() ? a.answer : std::string_view( masked ), a.task );
     fd::creditCallees( ing, g, head, cands );
     fd::dedupeCands( ing, cands );
     fd::DeclHome home( ing, g );
@@ -1023,6 +1095,10 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     if( a.held )
     {
         return std::string( kForFileSymsHeldLegend ) + "<syms held=\"budget\"" + nextAttrXml( nextFlag( "--for=", a.task ) + std::string( a.heldFlags ) ) + "/>";
+    }
+    if( a.answerOut != nullptr && !headTail.empty() )
+    {
+        *a.answerOut = fd::tailRowsWithoutPicks( ing, a.answer, rows, headTail, picks );
     }
     return fd::blockXml( ing, sf, head, picks, a.compactLegend );
 }

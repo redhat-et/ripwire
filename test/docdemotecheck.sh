@@ -104,6 +104,11 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): docdemotegolden_for.xml 6709 -> 6431 B and
+# docdemotegolden_noroute.xml 10216 -> 9939 B. The moves: the tail legend clause (sym= minus names a sigs row or the syms block
+# shows) and est_tokens; every tail row of a file whose positive-score names the sigs rows all show now prints p= only
+# (pagecache.py, evictor.py, the .md pages); and SIZE-3a's same_as= on the second tier_probe <d> row (its text repeats the
+# first's), which the SIZE-TRIM lane left un-pinned here.
 # RE-PIN 2026-11-02 b (lane docs-rest CI fix 2, the tail-order legend clause; rule 4): docdemotegolden_for.xml 6542 -> 6709 B
 # (est_tokens "2617" -> "2684") and docdemotegolden_noroute.xml 10049 -> 10216 B ("3583" -> "3650"). Both are code questions, so
 # both carry serialize.h kForFileTailCodeFirstLegend (167 B) after the tail clause; removing it and masking est_tokens= gives the

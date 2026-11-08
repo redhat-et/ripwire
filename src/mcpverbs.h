@@ -2479,8 +2479,15 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
 {
     if( out.ends_with( "</ctx>" ) )
     {
+        std::string cut; // R-DEDUP: <syms> has priority over the head files' tail rows (forfilesyms.h tailRowsWithoutPicks)
         args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
-        out.insert( out.size() - 6, renderForFileSyms( ing, g, args ) );
+        args.answerOut = &cut;
+        const std::string syms = renderForFileSyms( ing, g, args );
+        if( !cut.empty() )
+        {
+            out = std::move( cut ) + "</ctx>";
+        }
+        out.insert( out.size() - 6, syms );
     }
 }
 

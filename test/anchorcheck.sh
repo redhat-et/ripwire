@@ -124,6 +124,9 @@ QUERY="frobnicate widget cache"
 # ranking, body or anchor byte moved (anchor-neutrality, this golden's purpose, untouched).
 # L1 (2026-09-19): the CLI default legend is compact; this arm compares against a golden recorded from the full default, so it asks for it.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route --legend=full >"$TMP/plain_full.xml" 2>/dev/null
+# RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): golden_for.xml 4085 -> 4071 B: the tail legend clause
+# (minus names a sigs row or the syms block shows), est_tokens, and the frob.cpp tail row (all three names shown as sigs rows)
+# printing p= only.
 # RE-PIN 2026-10-18 (train 30, lane tail-sym merged; rule 4): golden_for.xml 4067 -> 4085 B (est_tokens "1553" -> "1560"),
 # re-captured from the merged binary and diffed by hand: the ONLY bytes that moved are the tail legend clause only: "first t p= alone" / "then t p= sym=" lose the `t p=` words and sym= reads "its top symbols by lens rank (a pointer, not the answer)".
 # RE-PIN 2026-10-15 (forbudget-soft round C, FOLD C; rule 4): golden_for.xml re-captured — the ONLY bytes that moved are the

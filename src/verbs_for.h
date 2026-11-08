@@ -895,7 +895,7 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
          + std::string( presentOnlyClause( p.foldFollowPresent, compact, rw::kForCompactFoldFollowLegend, rw::kForFoldFollowLegend ) );
 }
 inline constexpr std::string_view kForCompactLegendTail =
-    "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
+    "; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed)";
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
     "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
@@ -3110,19 +3110,15 @@ inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const bool        whole = cap && !cap->failed;
-    const std::string syms  = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
-                                      .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole } );
-    const std::size_t at = cap ? forSymsInsertAt( cap->bytes, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
-    if( cap )
-    {
-        std::fwrite( cap->bytes.data(), 1, at, stdout );
-    }
+    std::string cut; // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
+    const std::string syms = rw::renderForFileSyms(
+        d.ing, d.g, rw::FileSymsArgs { .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0, .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut } );
+    const std::string& bytes = !cut.empty() ? cut : cap ? cap->bytes
+                                                        : cut;
+    const std::size_t at = cap ? forSymsInsertAt( bytes, cfg.withGraph ) : 0; // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    std::fwrite( bytes.data(), 1, at, stdout );
     std::fwrite( syms.data(), 1, syms.size(), stdout );
-    if( cap )
-    {
-        std::fwrite( cap->bytes.data() + at, 1, cap->bytes.size() - at, stdout );
-    }
+    std::fwrite( bytes.data() + at, 1, bytes.size() - at, stdout );
     return cap && cap->failed ? 1 : 0;
 }
 
