@@ -23,6 +23,9 @@
 #   8  docs:     a docs question folds nothing (plain walk) / the code question does (arm 1)
 #   9  add-new:  an add-a-new-X task lists its doc and config path-only rows (no doc= or config= in folded=) and still folds
 #                scripts (script= in folded=: the exemption is those two classes, not the whole fold)
+#  10  literal:  a task that quotes a message literal found only in a .json string table lists its doc and config path-only
+#                rows (no doc= or config= in folded=; round 3: the graded sit lost two items when a quoted message's strings.json
+#                rows folded) and still folds scripts / the same words unquoted still fold config (the quotes are the trigger)
 #
 # Usage: test/fortailfoldcheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -69,6 +72,17 @@ run "$TMP/f.tests" "--for=$Q config"
 run "$TMP/f.new" "--for=add a new widget frobnicate helper"
 run "$TMP/f.docs" "--for=$Q documentation docs"
 ( export RIPWIRE_NO_TAIL_FOLD=1; run "$TMP/a.xml" "--for=$Q" )
+# fixture L (arm 10): F plus 20 .json string tables; the message literal is in one of them only
+L="$TMP/lit"; cp -R "$F" "$L"
+i=0
+while [ $i -lt 20 ]; do
+    n=$( printf '%03d' $i )
+    printf '{"error": {"widget_frobnicate_%s": "widget frobnicate helper"}}\n' "$n" > "$L/conf/s$n.json"
+    i=$(( i + 1 ))
+done
+printf '{"error": {"widget_frobnicate_019": "widget frobnicate helper", "cannot_link": "Link dropped by remote"}}\n' > "$L/conf/s019.json"
+LQ='where does the widget frobnicate helper error get its "Link dropped by remote" text'
+( F="$L"; run "$TMP/l.quoted" "--for=$LQ"; run "$TMP/l.bare" "--for=$( printf '%s' "$LQ" | tr -d '"' )" )
 ( cd "$F" || exit 9; printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$F" "$Q" \
     | HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" --mcp ) > "$TMP/m.def" 2> "$TMP/m.def.err"
 echo $? > "$TMP/m.def.rc"
@@ -95,7 +109,7 @@ def tail_of(tx):
     return attrs, rows
 def klass(p):
     if p.endswith(".md"): return "doc"
-    if p.endswith(".yaml"): return "config"
+    if p.endswith((".yaml", ".json")): return "config"
     if p.endswith(".sh"): return "script"
     if p.startswith("tests/"): return "test"
     return "code"
@@ -153,6 +167,13 @@ fn = folded(tn[0]) if tn else {}
 say(tn is not None and "doc" not in fn and "config" not in fn and any(klass(p) == "doc" and not s for p, s in tn[1])
     and any(klass(p) == "config" and not s for p, s in tn[1]), f"9 add-new: docs and config path-only rows listed (folded={fn})")
 say(tn is not None and fn.get("script", 0) > 0, f"9 twin: the add-new task still folds scripts (folded={fn})")
+lq, lb = tail_of(load("l.quoted")), tail_of(load("l.bare"))
+fq, fb = (folded(lq[0]) if lq else {}), (folded(lb[0]) if lb else {})
+lit_file = lq is not None and any(p == "conf/s019.json" for p, s in lq[1])
+say(lq is not None and "doc" not in fq and "config" not in fq and lit_file and any(klass(p) == "config" and not s for p, s in lq[1])
+    and any(klass(p) == "doc" and not s for p, s in lq[1]), f"10 literal: a quoted message keeps doc and config rows, its .json listed (folded={fq})")
+say(lq is not None and fq.get("script", 0) > 0, f"10 twin: the quoted task still folds scripts (folded={fq})")
+say(lb is not None and fb.get("config", 0) > 0, f"10 twin: the same words unquoted fold config (folded={fb})")
 td2 = tail_of(docs)
 say(td2 is not None and "folded" not in td2[0], "8 docs: a docs question folds nothing")
 print("fortailfoldcheck:", "FAIL" if fails else "PASS", f"({fails} failing)")

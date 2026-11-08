@@ -727,6 +727,20 @@ inline std::vector<std::string> flagNamesOf( std::string_view task )
     return out;
 }
 
+// The task quotes a message literal: a "double-quoted" span (the quoted shape's own reading, lit_detail::quotedSpan) or a
+// 'single-quoted' one (lit_detail::delimitedSpan: `wasn't` is no quote) of the same message-fragment shape (quotedSpan read on that
+// span). SIZE-2 (forpage.h tailFoldKept): such a task keeps its tail's config and doc rows listed — a quoted message's text lives in a
+// string table or a doc, not only in code.
+inline bool taskQuotesLiteral( std::string_view task )
+{
+    if( lit_detail::quotedSpan( task, '"' ) )
+    {
+        return true;
+    }
+    const std::optional<std::string_view> span = lit_detail::delimitedSpan( task, '\'' );   // its delimiters included
+    return span && lit_detail::quotedSpan( *span, '\'' );
+}
+
 // The literals the task names, in the order they are tried: a quoted span (the task's own quoting is the strongest evidence), the
 // CONST_SHAPED words, the dotted keys (the one beside a setting cue first), then a message. The caller scans them in order until one
 // has a source site (kForLiteralCandidates scans, a message's own tries besides): the first literal with no site no longer hides the next.
