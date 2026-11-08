@@ -369,9 +369,9 @@ for _g in \
     clonebandcheck \
     clonecachecheck \
     clonededupcheck \
-    clonepersistcheck \
     cloneidiomcheck \
     clonelexcheck \
+    clonepersistcheck \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \
