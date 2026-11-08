@@ -50,7 +50,8 @@
 #        function body (defaults.go:4 n="defaultPlugins"), a Rust match arm (pure.rs:3 n="is_pure"), a TS method in a class
 #        (registry.ts:3 n="DialectRegistry.all", the method and not its class); a line no definition holds (an `export *` line, an
 #        import line) prints no n=; a Go `const (` group stores the group's span on every constant, so a line inside it names the
-#        constant declared on it (kinds.go:5 n="Second") or nothing, never the group's first or last constant
+#        constant declared on it (kinds.go:5 n="Second") or nothing, never the group's first or last constant; a continuation
+#        line inside the group, where no constant is declared, prints no n= (kinds2.go:6: the span tie stands); own fixture gok
 #   (s1) --json carries no block; (s2) a token budget holds it (held="budget", no rows); (x1) MCP `for`: the same element bytes
 #   (a1) the block's own legend defines every attribute it prints; the answer is well-formed XML; the block closes right before </ctx>
 
@@ -126,8 +127,6 @@ for p in alpha beta gamma delta; do
     printf 'package %s\n\nimport "example.com/x/names"\n\nconst Name = names.%s\n\ntype %s struct{}\n\nfunc New() (*%s, error) { return &%s{}, nil }\n' "$p" "$P" "$P" "$P" "$P" > "$F/go/plugins/$p/$p.go"
 done
 printf 'package names\n\nconst (\n\tAlpha = "Alpha"\n\tBeta  = "Beta"\n\tGamma = "Gamma"\n\tDelta = "Delta"\n)\n' > "$F/go/names/names.go"
-mkdir -p "$F/go/kinds"
-printf 'package kinds\n\nconst (\n\tFirst  = 1\n\tSecond = names.Alpha + names.Beta + names.Gamma + names.Delta\n\tThird  = 3\n)\n' > "$F/go/kinds/kinds.go"
 cat > "$F/go/plugins/registry.go" <<'GO'
 package plugins
 
@@ -202,6 +201,12 @@ mkdir -p "$F/go/baseline" "$F/go/vendor/x"
 printf 'package baseline\n\nvar frozen = "%s"\n' "$all_go" > "$F/go/baseline/list.go"
 printf 'package x\n\nvar v = "%s"\n' "$all_go" > "$F/go/vendor/x/list.go"
 for i in 1 2 3 4 5 6 7; do printf 'from ui.a import AWidget\nREG%s = [AWidget, "BWidget", "CWidget", "DWidget", "EWidget", "FWidget"]\n' "$i" > "$F/cap/list$i.py"; done
+
+# TOUCH-SYM (e6) Go const groups: a copy of the Go fixture plus two listers inside a `const (` group (own copy: the e_go row cap)
+cp -R "$F/go" "$F/gok"
+mkdir -p "$F/gok/kinds"
+printf 'package kinds\n\nconst (\n\tFirst  = 1\n\tSecond = names.Alpha + names.Beta + names.Gamma + names.Delta\n\tThird  = 3\n)\n' > "$F/gok/kinds/kinds.go"
+printf 'package kinds\n\nconst (\n\tOne = 1\n\tTwo =\n\t\tnames.Alpha + names.Beta + names.Gamma + names.Delta\n\tThree = 3\n)\n' > "$F/gok/kinds/kinds2.go"
 
 # E3a-INTO fixtures: C++ settings holders with X-macro lists; TS option-bag interfaces
 mkdir -p "$F/hold/src/Core" "$F/hold/src/Server" "$F/hold/src/Tree" "$F/hold/docs/site" "$F/hold2/src/A" "$F/hold2/src/B" "$F/hold2/src/C" "$F/tsh/src/compiler"
@@ -487,8 +492,10 @@ touch_n e6 "$TMP/e_rs.xml" src/pure.rs:3 is_pure
 touch_n e6 "$TMP/e_ts.xml" src/registry.ts:3 DialectRegistry.all
 touch_n e6 "$TMP/e_ts.xml" src/index.ts:2 ""
 touch_n e6 "$TMP/e_py.xml" app/handlers/__init__.py:1 ""
-if touchrows "$TMP/e_go.xml" | grep -q '<touch p="kinds/kinds.go:5"\( n="Second"\)\? share='; then ok "(e6) kinds.go:5 inside a const group: n=\"Second\" or none, never First/Third"
-else no "(e6) kinds.go:5 const group: $( touchrows "$TMP/e_go.xml" | grep -o '<touch p="kinds/kinds.go[^>]*>' || touchrows "$TMP/e_go.xml" | head -c 400 )"; fi
+run gok "--for=add a new in-tree plugin" >"$TMP/e_gok.xml"
+if touchrows "$TMP/e_gok.xml" | grep -q '<touch p="kinds/kinds.go:5"\( n="Second"\)\? share='; then ok "(e6) kinds.go:5 inside a const group: n=\"Second\" or none, never First/Third"
+else no "(e6) kinds.go:5 const group: $( touchrows "$TMP/e_gok.xml" | grep -o '<touch p="kinds/kinds.go[^>]*>' || touchrows "$TMP/e_gok.xml" | head -c 400 )"; fi
+touch_n e6 "$TMP/e_gok.xml" kinds/kinds2.go:6 ""
 cp "$TMP/e_go.xml" "$TMP/e_goa.xml"
 
 # t1 / t2: wordings

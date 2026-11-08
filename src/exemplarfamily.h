@@ -2059,45 +2059,68 @@ static_assert( kForExemplarFamilyLegend.find( "--", 4 ) == kForExemplarFamilyLeg
 // the line, or two with the same span neither or both declared on it (a Go `const (` group stores the group's span on every
 // constant), are no claim: kNoNode, never a pick. A file's module-scope pseudo-definition holds every line and names none.
 // HOISTING: one pass over the symbols for all the rows (at most kExemplarTouchRows), never one pass per row.
+namespace exemplar_detail
+{
+// One touch row's holder search: the innermost holder so far, whether another shares its whole rank, and the earliest holder end.
+struct TouchHolderPick
+{
+    const Symbol* best = nullptr;
+    bool tied = false; // best shares its whole rank with another holder
+    std::uint32_t minEnd = UINT32_MAX; // the earliest end among the holders: before best's start = two disjoint holders
+
+    void offer( const Symbol& s, const ExemplarTouch& r )
+    {
+        if( s.fileId != r.fileId || s.sigStartByte >= r.byte + r.text.size() || s.endByte <= r.byte )
+        {
+            return; // does not hold the line
+        }
+        minEnd = std::min( minEnd, s.endByte );
+        const auto rank = [&]( const Symbol& x ) { return std::tuple( x.sigStartByte, ~x.endByte, x.line == r.line ); }; // larger = inner
+        if( best && rank( s ) == rank( *best ) )
+        {
+            tied = true;
+        }
+        else if( !best || rank( s ) > rank( *best ) )
+        {
+            best = &s;
+            tied = false;
+        }
+    }
+    NodeId pick() const { return best && !tied && minEnd > best->sigStartByte ? best->id : kNoNode; }
+};
+} // namespace exemplar_detail
+
 inline std::vector<NodeId> touchHolders( const IngestResult& ing, std::span<const ExemplarTouch> rows )
 {
-    std::vector<NodeId> best( rows.size(), kNoNode );
-    std::vector<std::uint32_t> minEnd( rows.size(), UINT32_MAX ); // the earliest end among a row's holders: before best's start = disjoint
-    std::vector<char> tied( rows.size(), 0 ); // best shares its whole rank with another holder
+    std::vector<exemplar_detail::TouchHolderPick> picks( rows.size() );
     for( const Symbol& s : ing.symbols )
     {
-        if( s.kind == SymKind::ModuleScope )
+        for( std::size_t i = 0; i < rows.size() && s.kind != SymKind::ModuleScope; ++i )
         {
-            continue;
-        }
-        for( std::size_t i = 0; i < rows.size(); ++i )
-        {
-            const ExemplarTouch& r = rows[i];
-            if( s.fileId != r.fileId || s.sigStartByte >= r.byte + r.text.size() || s.endByte <= r.byte )
-            {
-                continue;
-            }
-            minEnd[i] = std::min( minEnd[i], s.endByte );
-            const auto rank = [&]( const Symbol& x ) { return std::tuple( x.sigStartByte, ~x.endByte, x.line == r.line ); }; // larger = inner
-            if( best[i] == kNoNode || rank( s ) > rank( ing.symbols[best[i]] ) )
-            {
-                best[i] = s.id;
-                tied[i] = 0;
-            }
-            else if( rank( s ) == rank( ing.symbols[best[i]] ) )
-            {
-                tied[i] = 1;
-            }
+            picks[i].offer( s, rows[i] );
         }
     }
-    for( std::size_t i = 0; i < rows.size(); ++i )
+    std::vector<NodeId> out;
+    std::ranges::transform( picks, std::back_inserter( out ), &exemplar_detail::TouchHolderPick::pick );
+    return out;
+}
+
+// The n= of each touch row ("" = none): the holder's name as every member row spells it (MemberOwners, built only when a holder
+// could print an owner: one more pass over the symbols).
+inline std::vector<std::string> touchHolderNames( const IngestResult& ing, std::span<const ExemplarTouch> rows )
+{
+    const std::vector<NodeId> holder = touchHolders( ing, rows );
+    std::optional<MemberOwners> owners;
+    if( std::ranges::any_of( holder, [&]( NodeId h ) { return h != kNoNode && memberOwnerPossible( ing.symbols[h] ); } ) )
     {
-        if( best[i] != kNoNode && ( tied[i] || minEnd[i] <= ing.symbols[best[i]].sigStartByte ) )
-        {
-            best[i] = kNoNode; // two disjoint definitions on the line, or two the line cannot tell apart
-        }
+        owners.emplace( ing );
     }
-    return best;
+    std::vector<std::string> names( holder.size() );
+    for( std::size_t i = 0; i < holder.size(); ++i )
+    {
+        names[i] = holder[i] == kNoNode ? std::string() : owners ? qualifiedMemberName( *owners, ing.symbols[holder[i]] ) : ing.symbols[holder[i]].name;
+    }
+    return names;
 }
 
 // The <touch_list> element of a family: total=, the cap, and one <touch> row per listing file (see the legend).
@@ -2105,12 +2128,7 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchLis
 {
     const std::vector<ExemplarTouch>& touch = list.rows;
     const std::span<const ExemplarTouch> shown( touch.data(), std::min( touch.size(), kExemplarTouchRows ) );
-    const std::vector<NodeId> holder = touchHolders( ing, shown );
-    std::optional<MemberOwners> owners; // built only when a holder could print an owner (one pass over the symbols)
-    if( std::ranges::any_of( holder, [&]( NodeId h ) { return h != kNoNode && memberOwnerPossible( ing.symbols[h] ); } ) )
-    {
-        owners.emplace( ing );
-    }
+    const std::vector<std::string> holderName = touchHolderNames( ing, shown );
     std::vector<char> esc;
     const auto e = [&]( std::string_view s )
     { return std::string( escapeXml( s, esc ) ); };
@@ -2132,12 +2150,7 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchLis
         {
             --keep; // never split a UTF-8 sequence
         }
-        out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\"";
-        if( holder[i] != kNoNode )
-        {
-            const Symbol& h = ing.symbols[holder[i]];
-            out += " n=\"" + e( owners ? qualifiedMemberName( *owners, h ) : h.name ) + "\"";
-        }
+        out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\"" + ( holderName[i].empty() ? "" : " n=\"" + e( holderName[i] ) + "\"" );
         out += " share=\"" + std::to_string( r.mentioned ) + "/" + std::to_string( r.of ) + "\"";
         out += r.byStem ? " by=\"stem\"" : "";
         out += ( keep < r.text.size() ? " cut=\"1\">" : ">" ) + e( std::string_view( r.text ).substr( 0, keep ) ) + "</touch>";
