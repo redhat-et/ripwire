@@ -379,9 +379,16 @@ echo
 # is an answer under the SAME budget: est_tokens must not exceed the budget on any page, and a page
 # PAST THE END is shown="0" capped="1" has_more="0" — the pageview.h past-the-end contract — never an
 # error, never a silent empty success (an agent's has_more loop terminates on the truth, not on a crash).
+# FIT_QUERY (ANCHOR-NS, 2026-11-07): "rank symbols" used to be this query; once its anchor `rank` (only bench/ namesakes) is
+# ranked as words, its top row on this repo is a documented mention.h function that does not fit 800 even shed, which is ARM F.
+# Pages D-F are asked from inside the checkout with root ".", so their price does not move with the checkout's absolute path
+# (root= and every next= carry it: a 55-byte local path costs ~100 tokens more than CI's 34-byte one).
+FIT_QUERY="token estimate"
 echo "=== ARM D: budgeted-bundle pages obey the budget; past-the-end is the honest empty page ==="
-"$BIN" "$ROOT" --for="rank symbols" --token-budget=800 --limit=3 --offset=0 >"$TMP/d_budget_p0" 2>/dev/null
-"$BIN" "$ROOT" --for="rank symbols" --token-budget=800 --limit=3 --offset=400000 >"$TMP/d_budget_far" 2>/dev/null
+# The query is one whose one-row floor fits 800 only after the attribute shed (ARM E), so the page meets the budget; a floor
+# that cannot fit even shed ships honestly over_ceiling="1" instead, and ARM F pins that case.
+( cd "$ROOT" && "$BIN" . --for="$FIT_QUERY" --token-budget=800 --limit=3 --offset=0 ) >"$TMP/d_budget_p0" 2>/dev/null
+( cd "$ROOT" && "$BIN" . --for="$FIT_QUERY" --token-budget=800 --limit=3 --offset=400000 ) >"$TMP/d_budget_far" 2>/dev/null
 
 python3 - "$TMP" <<'PY'
 import os, sys, xml.etree.ElementTree as ET
@@ -435,8 +442,8 @@ PY
 # names the answer. Red on the pre-shed binary (est_tokens > 800 with the row's attributes intact). The twin at a budget
 # the page fits carries no attrs_shed= and its row, minus exactly the shed attributes, IS the shed row (nothing else moved).
 echo "=== ARM E: an over-budget one-row floor sheds optional row attributes, never the answer ==="
-"$BIN" "$ROOT" --for="rank symbols" --token-budget=800  --limit=3 --offset=0 >"$TMP/e_shed" 2>/dev/null
-"$BIN" "$ROOT" --for="rank symbols" --token-budget=4000 --limit=3 --offset=0 >"$TMP/e_fit"  2>/dev/null
+( cd "$ROOT" && "$BIN" . --for="$FIT_QUERY" --token-budget=800  --limit=3 --offset=0 ) >"$TMP/e_shed" 2>/dev/null
+( cd "$ROOT" && "$BIN" . --for="$FIT_QUERY" --token-budget=4000 --limit=3 --offset=0 ) >"$TMP/e_fit"  2>/dev/null
 python3 - "$TMP" <<'PY'
 import os, re, sys, xml.etree.ElementTree as ET
 tmp = sys.argv[1]; problems = []
@@ -450,6 +457,7 @@ if shed is not None and fit is not None:
     est = int(shed.get("est_tokens", "0"))
     print(f"  INFO  shed page est_tokens={est} budget=800 margin={800 - est}  bytes={len(shed_raw.encode())}")
     if est > 800: problems.append(f"e_shed: est_tokens={est} > 800 — the one-row floor did not shed its optional attributes")
+    if shed.get("attrs_shed") != "1": problems.append("e_shed: no attrs_shed=\"1\" — this query no longer exercises the shed (re-pick FIT_QUERY: its floor must exceed 800 before the shed and fit after)")
     if shed.get("over_ceiling") is not None and est <= 800: problems.append("e_shed: over_ceiling= on a page that fits")
     srows = shed.findall(".//d"); frows = fit.findall(".//d")
     if len(srows) != 1: problems.append(f"e_shed: {len(srows)} rows — the floor serves exactly ONE row, never zero")
@@ -472,6 +480,50 @@ sys.exit(1 if problems else 0)
 PY
 [ $? = 0 ] && ok 'ARM E: the over-budget floor fits by shedding optional row attributes (attrs_shed="1"); the answer row and its identity stay' \
                || no 'ARM E: the one-row floor exceeds the budget or lost its answer — see FAIL lines above'
+
+# ── ARM F (ANCHOR-NS, owner rule: the budget serves the answer): a one-row floor that cannot fit even shed ships HONESTLY ──
+# `rank symbols` on this repo: the top row (a documented function) is over 800 with every optional attribute shed, so the page is
+# over_ceiling="1" with est_tokens= its true price, still exactly ONE row, served whole (identity, signature text and <doc>
+# equal to the twin that fits); anything missing from it is an optional attribute only. Never a cut answer, never a false fit.
+# If this repo's answer to the query changes so that it fits, the over_ceiling arm goes red: re-pick a query that cannot fit.
+echo "=== ARM F: a floor that cannot fit even shed ships whole, over_ceiling=\"1\", never cut ==="
+( cd "$ROOT" && "$BIN" . --for="rank symbols" --token-budget=800  --limit=3 --offset=0 ) >"$TMP/f_over" 2>"$TMP/f_over.err"; frc=$?
+( cd "$ROOT" && "$BIN" . --for="rank symbols" --token-budget=4000 --limit=3 --offset=0 ) >"$TMP/f_fit"  2>/dev/null; ffrc=$?
+python3 - "$TMP" "$frc" "$ffrc" <<'PY'
+import os, sys, xml.etree.ElementTree as ET
+tmp, frc, ffrc = sys.argv[1], sys.argv[2], sys.argv[3]; problems = []
+SHED = ("cx", "ccx", "layer", "next", "sc")
+if frc != "0" or ffrc != "0": problems.append(f"exit codes: over={frc} fit={ffrc} (a page is an answer, rc 0)")
+def load(name):
+    path = os.path.join(tmp, name)
+    raw = open(path, encoding="utf-8", errors="replace").read() if os.path.exists(path) else ""
+    if not raw: problems.append(f"{name}: no output"); return None
+    try: return ET.fromstring(raw)
+    except ET.ParseError as e: problems.append(f"{name}: not parseable XML ({e})"); return None
+over, fit = load("f_over"), load("f_fit")
+if over is not None and fit is not None:
+    est = int(over.get("est_tokens", "0"))
+    print(f"  INFO  over page est_tokens={est} budget=800 over_ceiling={over.get('over_ceiling')} attrs_shed={over.get('attrs_shed')}")
+    if over.get("over_ceiling") != "1": problems.append("f_over: no over_ceiling=\"1\" (the floor fits now? re-pick the query) or the miss is not disclosed")
+    if est <= 800: problems.append(f"f_over: est_tokens={est} <= 800 on an over_ceiling page (the price must be the page's true one)")
+    orows, frows = over.findall(".//d"), fit.findall(".//d")
+    if len(orows) != 1: problems.append(f"f_over: {len(orows)} rows — the floor serves exactly ONE row, never zero")
+    if not frows: problems.append("f_fit: no rows on the twin that fits")
+    if orows and frows:
+        o, f = orows[0], frows[0]
+        for k in ("n", "p", "l", "r", "t"):
+            if f.get(k) != o.get(k): problems.append(f"f_over: identifying attribute {k}= differs: fit={f.get(k)!r} over={o.get(k)!r}")
+        if (o.text or "") != (f.text or ""): problems.append("f_over: the row's signature text changed (the answer was cut)")
+        if [ET.tostring(c) for c in o] != [ET.tostring(c) for c in f]: problems.append("f_over: the row's children (<doc>) differ from the twin's (the answer was cut)")
+        dropped = [k for k in f.attrib if k not in o.attrib]
+        if any(k not in SHED for k in dropped): problems.append(f"f_over: a non-optional attribute is missing: {dropped}")
+        if any(k not in f.attrib or f.get(k) != o.get(k) for k in o.attrib if k in f.attrib and k not in SHED): problems.append("f_over: an attribute value changed")
+        print(f"  INFO  answer row n={o.get('n')} p={o.get('p')} l={o.get('l')}; missing optional: {dropped}")
+for p in problems: print("  FAIL  " + p)
+sys.exit(1 if problems else 0)
+PY
+[ $? = 0 ] && ok 'ARM F: the floor that cannot fit even shed ships whole with over_ceiling="1" and its true est_tokens; only optional attributes may be missing' \
+               || no 'ARM F: the over-budget floor was cut, mispriced, or not disclosed — see FAIL lines above'
 
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES — see above"; exit 1
