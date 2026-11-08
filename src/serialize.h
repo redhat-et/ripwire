@@ -3156,6 +3156,24 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
     w.write( "</inv>" );
 }
 
+// The map's symbols=: the symbols it ranks. A kRankFlagNotNamed unit (model.h; an HTML section, which --recall reads) has no PageRank
+// prior and no edge, so the map never ranks it and does not count it (DOCS-UNITS-FIX).
+inline std::size_t mapSymbolCount( const IngestResult& ing ) noexcept
+{
+    return ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotNamed );
+}
+
+// ...and the rows it may print: the rank order less every kRankFlagNotNamed unit, so a --top-k past the ranked symbols never
+// reaches an HTML section and shown= never exceeds symbols=. Order-preserving; a no-op on an index without such units.
+inline void dropUnmappedRows( const IngestResult& ing, std::vector<NodeId>& order )
+{
+    if( symbolsWithRankFlag( ing, kRankFlagNotNamed ) == 0 )
+    {
+        return;
+    }
+    std::erase_if( order, [ &ing ]( NodeId id ) noexcept { return ( ing.symbols[ id ].rankFlags & kRankFlagNotNamed ) != 0; } );
+}
+
 inline void serialize( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                        const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                        int topK, bool mostImportantLast = false,
@@ -3243,7 +3261,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // ORDER and BUCKET rows nobody prints is skipped: the radix sort over S symbols, the files-sized bucket
     // allocation, and the fill loop. (The <f> loop below already walked an empty order; this is the work that
     // ran to feed it.)
-    const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, S );
+    const std::size_t mapS    = mapSymbolCount( ing );   // the rows the map can print (dropUnmappedRows below)
+    const std::size_t keep    = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : mapS, mapS );
     const bool        stubbed = ann.stubSymbols;
 
     // rank order: (rank desc, id asc) — the id tie-break makes the top-K deterministic.
@@ -3256,6 +3275,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             order[i] = i;
         }
         sortutil::radixSortByScoreDescId( order, rank );
+        dropUnmappedRows( ing, order );
     }
     // The map scope's code-first row pick (MapAnnotations::codeFirstRows): rewrites the kept prefix, returns its disclosure.
     const DataSectionsCut dataSecCut = ( ann.codeFirstRows && !stubbed ) ? codeFirstKeep( ing, order, keep ) : DataSectionsCut{};
@@ -3607,7 +3627,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // document into one unterminated comment. Composed on std::string, the margin question disappears.
         std::string stats = "<!-- files=";
         stats += std::to_string( ing.files.size() );
-        stats += " symbols=";    stats += std::to_string( S );
+        stats += " symbols=";    stats += std::to_string( mapSymbolCount( ing ) );   // the symbols the map ranks
         stats += " edges=";      stats += std::to_string( outTargets.size() );
         stats += " shown=";      stats += std::to_string( ann.stubSymbols ? std::size_t( 0 ) : keep + stemRows.size() );   // C1-b: the stub prints no row
         stats += " est_tokens="; stats += std::to_string( estTokens );
@@ -6742,6 +6762,19 @@ inline std::string candidatesRootTag( std::size_t keep, std::size_t corpusCount,
     return tag + ">";
 }
 
+// A recall-only unit (kRankFlagNotNamed: an HTML heading or section id, ingest_docpass.h) has its offsets in the page's EXTRACTED
+// text (ing.docText), not in its bytes: --expand=page.html:Heading slices it from there. nullptr for every other symbol, which
+// keeps the bytes it has always been served from (a page's file node included: test/docsunitscheck.sh arm H).
+inline const std::string* extractedTextOfUnit( const IngestResult& ing, const Symbol& s )
+{
+    if( !notNamed( s ) )
+    {
+        return nullptr;
+    }
+    const auto doc = ing.docText.find( s.fileId );
+    return doc != ing.docText.end() ? &doc->second : nullptr;
+}
+
 inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, int cap,
                             RedactCounts* redact,                 // §B0/W3-N1: REQUIRED — <sig> is emitted text (nullptr = --no-redact)
                             CandidateProvenance prov = {},
@@ -7985,7 +8018,8 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // re-fetch the content EVERY iteration: `contents` is a flat HashMap (values stored
         // contiguously), so the cross-file callee-signature contentOf() below can reallocate the
         // table and dangle any reference held across it — never cache `src` past an insert.
-        const std::string& src = contentOf( f );
+        const std::string* unitText = extractedTextOfUnit( ing, s );
+        const std::string& src      = unitText ? *unitText : contentOf( f );
         const std::size_t  a = s.sigStartByte, b = s.endByte;
         if( src.empty() || a >= b || b > src.size() )
         {
@@ -8762,8 +8796,9 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
         {
             continue;
         }
-        const Symbol&      s   = ing.symbols[id];
-        const std::string& src = contentOf( s.fileId );
+        const Symbol&      s        = ing.symbols[id];
+        const std::string* unitText = extractedTextOfUnit( ing, s );   // packBodies' own choice of text
+        const std::string& src      = unitText ? *unitText : contentOf( s.fileId );
         const std::size_t  a = s.sigStartByte, b = s.endByte;
         if( a >= b || b > src.size() )
         {
@@ -11186,8 +11221,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         order[i] = i;
     }
     sortutil::radixSortByScoreDescId( order, rank );
+    dropUnmappedRows( ing, order );   // serialize()'s rows, same rule
 
-    const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, S );
+    const std::size_t mapS = mapSymbolCount( ing );
+    const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : mapS, mapS );
     const DataSectionsCut dataSecCut = ann.codeFirstRows ? codeFirstKeep( ing, order, keep ) : DataSectionsCut{};   // serialize()'s pick, same rule
 
     std::vector<std::vector<NodeId>> buckets( ing.files.size() );
@@ -11268,7 +11305,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
         JsonWriter hw( dst );
-        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
+        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, mapSymbolCount( ing ), outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
                                                     unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls, declinedTotal,
                                                     extentSuspectTotal, macroBlankedFileCount( ing ), ing.crawlSkips.nestRefusedFiles,
                                                     estimate.isModelled, dataSecCut, stemPick.cut, memoryPeakJson } );

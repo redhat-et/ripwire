@@ -395,9 +395,11 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
                } );
 
     result.symbols.reserve( rawDefs.size() );
+    result.cloneKeys.resize( rawDefs.size() );   // CLONES-PERSIST: aligned 1:1 with result.symbols
     for( std::uint32_t i = 0; i < rawDefs.size(); ++i )
     {
         const RawDef& d = rawDefs[ i ];
+        result.cloneKeys[ i ] = d.cloneKey;
         Symbol s;
         s.id     = i;
         s.kind   = d.kind;
@@ -421,6 +423,7 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.testScope    = ( d.testScope != 0 ) ? 1 : 0;       // L8: an in-file test convention encloses this def
         s.internalLinkage = ( d.internalLinkage != 0 ) ? 1 : 0;   // C/C++ anonymous-namespace or namespace-scope `static` def (model.h)
         s.scopeRootsStd   = ( d.scopeRootsStd   != 0 ) ? 1 : 0;   // #150: this def's full enclosing-namespace chain roots at std (model.h)
+        s.rankFlags       = std::uint8_t( d.rankFlags & 0x0Fu );  // DOCS-UNITS-FIX: kRankFlag* (model.h), set by the doc post-pass
         s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
         s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
         s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)
@@ -617,7 +620,7 @@ inline void markExtentSuspects( IngestResult& result, const std::vector<RawDef>&
         ENSURES( spanOfDef.size() == fileBits.size(), "one classified bit per def we handed the classifier" );
         for( std::size_t defIndex = 0; defIndex < spanOfDef.size(); ++defIndex )
         {
-            result.symbols[ index.spans[ spanOfDef[ defIndex ] ].id ].extentSuspect = fileBits[ defIndex ];
+            result.symbols[ index.spans[ spanOfDef[ defIndex ] ].id ].extentSuspect = std::uint8_t( fileBits[ defIndex ] & 0x0Fu );   // four reason bits (extentsuspect.h)
         }
     }
 }

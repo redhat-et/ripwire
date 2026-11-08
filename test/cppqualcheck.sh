@@ -381,10 +381,13 @@ rrun US --uses=selectBaseline \
 # row's file and at most kForTableReaderFiles (16) caller files, once each, only when a subscript row is shown and the answer names its table. No new fopen.
 # 57 -> 58 2026-11-08 (lane/exemplar-e3a, E3a TOUCH-LIST): src/exemplarfamily.h's into= holder read (the one new call site, the holder's file read once
 # per answer, only when the family block resolves an into= holder) uses the same canonical detail::readWholeFile helper. No new fopen.
+# 58 -> 60 2026-11-08 (lane/docs-units, DOCS-UNITS, measured after merging main at fc0e35967: the two new <u> rows): a document's bytes are read
+# through the canonical helper in src/ingest_docpass.h docTextOfDoc (an HTML page's bytes, read once in the doc post-pass) and src/recall.h
+# recallDocText (a document with no extracted text, read for its section offsets). No new fopen/fread. #571 stacks on this pin.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 58 ] \
-    && ok "repo: --uses=readWholeFile count=58 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 58, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 60 ] \
+    && ok "repo: --uses=readWholeFile count=60 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 60, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \

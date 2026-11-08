@@ -3,6 +3,7 @@
 #error "ingest_parsepool.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "clones.h"     // cloneBodyKey — CLONES-PERSIST: the per-def clone key the cache carries
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 
 // ingest_parsepool.h — the parallel parse pool, moved VERBATIM out of ingest() in the 2026-08-30
@@ -416,6 +417,19 @@ inline bool decodeCachedRecordNoThrow( const CacheRecords& cache, std::size_t fi
 // one worker's whole life: grab files off the shared cursor, reuse cache hits, parse+capture misses,
 // queueing parsed trees while the tags queries still compile. Body moved verbatim from the lambda in
 // ingest() (accumulators renamed tDefs[t]→out.defs etc., shared state reached through `sh`).
+// CLONES-PERSIST: a new def's clone key, from the span assignSymbols will give its Symbol (ingest_model.h: sigEndByte =
+// bodyByte > startByte ? bodyByte : endByte) — so it hashes exactly the [sigEndByte, endByte) findClones compares.
+// kCloneKeyNone for a def findClones never compares (not a Function/Method, or no body region).
+inline std::uint64_t rawDefCloneKey( const std::string& fileBytes, const RawDef& d )
+{
+    const std::uint32_t sigEnd = d.bodyByte > d.startByte ? d.bodyByte : d.endByte;
+    if( ( ( kCloneKeyKindBits >> unsigned( d.kind ) ) & 1u ) == 0 || d.endByte <= sigEnd )
+    {
+        return kCloneKeyNone;
+    }
+    return cloneBodyKey( fileBytes, sigEnd, d.endByte, usesHashLineComments( d.lang ) );
+}
+
 inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 {
     IngestFileScan& scan = sh.scan;
@@ -440,8 +454,15 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     MemberMacroReparse macroWork;                        // member-macro re-parse (src/macroreparse.h): per-worker scratch
     RecordScratch              record;                   // WARM-DIRECT: one cache record's bytes, dictionary and decoded facts, reused across hits
     macroWork.captureValueUses = sh.captureValueUses;
-    const auto buildLexForNewDefs = [ & ]( std::vector<RawDef>& defs, std::size_t firstNewDefIndex, const std::string& fileBytes )
+    // CLONES-PERSIST: every family keys each new Function/Method body for findClones (rawDefCloneKey) from
+    // the same in-memory bytes, so the key rides the cache record and a warm clone pass reads no file to group.
+    const auto finishNewDefs = [ & ]( std::vector<RawDef>& defs, std::size_t firstNewDefIndex, const std::string& fileBytes )
     {
+        for( std::size_t defIndex = firstNewDefIndex; defIndex < defs.size(); ++defIndex )
+        {
+            RawDef& d  = defs[ defIndex ];
+            d.cloneKey = rawDefCloneKey( fileBytes, d );
+        }
         if( !sh.captureValueUses )
         {
             return;
@@ -482,7 +503,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                                       TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
                 } );
                 notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
-                buildLexForNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
+                finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
                 ts_tree_delete( pending.tree );
                 pending.tree = nullptr;
             }
@@ -651,7 +672,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 const std::size_t firstNewDefIndex = out.defs.size();
                 ExtractShortfall  restShort;
                 extractRest( static_cast<std::uint32_t>( fileId ), bytes, stem, restExt, out.defs, out.refs, restShort );
-                buildLexForNewDefs( out.defs, firstNewDefIndex, bytes );
+                finishNewDefs( out.defs, firstNewDefIndex, bytes );
                 notePartialExtract( scan, fileId, restShort, bytes.size() );
             }
             else if( isDocLang( le->lang ) )
@@ -669,7 +690,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 const std::string stem = fs::path( path ).stem().string();
                 const std::size_t firstNewDefIndex = out.defs.size();
                 extractMarkdown( static_cast<std::uint32_t>( fileId ), bytes, stem, ts_tree_root_node( mdTree.get() ), out.defs, out.refs );
-                buildLexForNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: md sections/file nodes get stats too
+                finishNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: md sections/file nodes get stats too
             }
             else
             {
@@ -740,7 +761,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                                       TagsCapture::Full, cjsExportStem( le->lang, path ) );
                 } );
                 notePartialExtract( scan, fileId, shortfall, bytes.size() );
-                buildLexForNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: bytes still in memory
+                finishNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: bytes still in memory
             }
         }
         catch( ... )
