@@ -2,10 +2,12 @@
 # fortailfoldcheck.sh — SIZE-2: a code question's --for <tail> folds its widened path-only rows of non-code file classes.
 #
 # WHY. FOR-TAIL-WIDE walks 160 code rows of the file page; a row past the old 40-row cut prints p= only. On a code question the
-# path-only rows of doc, test, config, script, test-data and other files carried no graded item on the 258 saved 0.6.10 answers
-# (reports: size-offline, SIZE-2 A: 7,111 rows, 0 items lost) yet were resent on every later agent call. They are now counted per
-# class on the tail (folded="doc=N,test=N,…"), not listed; next= pages to the first one, so the cut is disclosed and recoverable.
-# Code rows are never folded; a class the task names (tests, config, scripts) is kept; a docs question takes the plain walk.
+# path-only rows of doc, config, script, test-data and other files carried no graded item on the 258 saved 0.6.10 answers
+# (reports: size-offline, SIZE-2 A) yet were resent on every later agent call. They are now counted per class on the tail
+# (folded="doc=N,config=N,…"), not listed; next= pages to the first one, so the cut is disclosed and recoverable. Code rows and
+# test CODE rows (a code file under a test path) are never folded; a class the task names (test data, config, scripts) is kept; an
+# add-a-new-X task (the exemplar-family reading) keeps its docs and config (round 2: the 321 lost a package.json peer dependency
+# and an API golden .md when they folded); a docs question takes the plain walk.
 #
 # Arms (each reads the exit code of the command it parses; an empty or crashed answer fails every arm):
 #   1  fold:     the default tail carries folded= and lists no path-only row of a non-code class / the ablated tail
@@ -14,10 +16,13 @@
 #                code rows (sym= and path-only) are the ablated tail's, in order; shown= is the rows printed; capped="1"
 #   3  next:     next= pages from at most the first folded row's page offset (the --limit=100000 page), so it serves every one
 #   4  legend:   the folded= clause rides the compact and the full dialect beside folded=, and neither rides the ablated answer
-#   5  asked:    a task naming tests keeps the test rows (no test= in folded=, a tests/ path-only row listed)
+#   5  asked:    a task naming config keeps the config rows (no config= in folded=, a conf/ path-only row listed);
+#                test code: the default tail lists tests/ path-only rows and folded= has no test= (round 2)
 #   6  JSON:     "tail"."folded" is the XML folded= as an object, with "folded_why"
 #   7  MCP:      the `for` verb's tail carries folded= and the clause
 #   8  docs:     a docs question folds nothing (plain walk) / the code question does (arm 1)
+#   9  add-new:  an add-a-new-X task lists its doc and config path-only rows (no doc= or config= in folded=) and still folds
+#                scripts (script= in folded=: the exemption is those two classes, not the whole fold)
 #
 # Usage: test/fortailfoldcheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -30,10 +35,10 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 echo "fortailfoldcheck: BIN=$BIN"
 
-# fixture F: 90 code files, then test code, docs, config and scripts that all match the question past the page's first 40 rows
+# fixture F: 60 code files, then test code, docs, config and scripts that all match the question past the page's first 40 rows
 F="$TMP/fold"; mkdir -p "$F/tests" "$F/docs" "$F/conf" "$F/scripts"
 i=0
-while [ $i -lt 90 ]; do
+while [ $i -lt 60 ]; do
     n=$( printf '%03d' $i )
     printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return 1\n' "$n" > "$F/c$n.py"
     if [ $i -lt 40 ]; then
@@ -42,7 +47,9 @@ while [ $i -lt 90 ]; do
     fi
     if [ $i -lt 20 ]; then
         printf 'widget_frobnicate_%s:\n  helper: widget frobnicate helper\n' "$n" > "$F/conf/w$n.yaml"
-        printf 'widget_frobnicate_%s() {\n  echo "widget frobnicate helper"\n}\n' "$n" > "$F/scripts/w$n.sh"
+    fi
+    if [ $i -lt 40 ]; then   # 40 scripts: past the old 40-code-row cut they are widened p= rows, so a script class folds
+        printf 'frobnicate_%s() {\n  echo "widget"\n}\n' "$n" > "$F/scripts/w$n.sh"   # weaker match: ranks past the code rows
     fi
     i=$(( i + 1 ))
 done
@@ -58,9 +65,10 @@ run "$TMP/f.xml"  "--for=$Q"
 run "$TMP/f.full" "--for=$Q" --legend=full
 run "$TMP/f.json" "--for=$Q" --json
 run "$TMP/f.page" "--for=$Q" --limit=100000
-run "$TMP/f.tests" "--for=$Q tests"
+run "$TMP/f.tests" "--for=$Q config"
+run "$TMP/f.new" "--for=add a new widget frobnicate helper"
 run "$TMP/f.docs" "--for=$Q documentation docs"
-( export RIPWIRE_NO_TAIL_FOLD=1; run "$TMP/a.xml" "--for=$Q"; run "$TMP/a.tests" "--for=$Q tests" )
+( export RIPWIRE_NO_TAIL_FOLD=1; run "$TMP/a.xml" "--for=$Q" )
 ( cd "$F" || exit 9; printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$F" "$Q" \
     | HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" --mcp ) > "$TMP/m.def" 2> "$TMP/m.def.err"
 echo $? > "$TMP/m.def.rc"
@@ -91,6 +99,7 @@ def klass(p):
     if p.endswith(".sh"): return "script"
     if p.startswith("tests/"): return "test"
     return "code"
+KEPT = ("code", "test")   # never folded: code, and test code
 def folded(attrs):
     v = attrs.get("folded", "")
     return {k: int(n) for k, n in (kv.split("=") for kv in v.split(",") if kv)} if v else {}
@@ -103,14 +112,14 @@ if ok:
     (dA, dR), (aA, aR) = td, ta
     fd = folded(dA)
     pod = [p for p, s in dR if not s]; poa = [p for p, s in aR if not s]
-    say(bool(fd) and all(klass(p) == "code" for p in pod), f"1 fold: folded={dA.get('folded')!r}, every listed path-only row is code ({len(pod)})")
-    say("folded" not in aA and any(klass(p) != "code" for p in poa), f"1 twin: the ablated tail lists non-code path-only rows ({sum(klass(p) != 'code' for p in poa)}), no folded=")
+    say(bool(fd) and all(klass(p) in KEPT for p in pod), f"1 fold: folded={dA.get('folded')!r}, every listed path-only row is code or test code ({len(pod)})")
+    say("folded" not in aA and any(klass(p) not in KEPT for p in poa), f"1 twin: the ablated tail lists non-code path-only rows ({sum(klass(p) not in KEPT for p in poa)}), no folded=")
     gone = [p for p in poa if p not in set(pod)]
     want = {}
     for p in gone:
         want[klass(p)] = want.get(klass(p), 0) + 1
-    say(fd == want and "code" not in want, f"2 counts: folded= {fd} equals the ablated tail's unlisted path-only rows by class {want}")
-    say([r for r in aR if klass(r[0]) == "code" or r[1]] == dR, "2 order: the default rows are the ablated rows minus the folded ones, in order")
+    say(fd == want and not set(KEPT) & set(want), f"2 counts: folded= {fd} equals the ablated tail's unlisted path-only rows by class {want}")
+    say([r for r in aR if klass(r[0]) in KEPT or r[1]] == dR, "2 order: the default rows are the ablated rows minus the folded ones, in order")
     say(dA.get("shown") == str(len(dR)) and dA.get("capped") == "1", f"2 shown={dA.get('shown')} rows={len(dR)} capped={dA.get('capped')}")
     pt = tail_of(page) if page else None
     prow = re.findall(r'<f p="([^"]*)"', page or "") or re.findall(r'<t p="([^"]*)"', page or "")
@@ -124,8 +133,10 @@ say(d is not None and CL in d and full is not None and FL in full and 'folded="'
     "4 legend: the compact and the full clause ride beside folded=")
 say(a is not None and CL not in a and FL not in a, "4 twin: no folded clause on the ablated answer")
 tt = tail_of(tests)
-say(tt is not None and "test" not in folded(tt[0]) and any(klass(p) == "test" and not s for p, s in tt[1]),
-    f"5 asked: a tests task keeps its test rows (folded={tt[0].get('folded') if tt else None!r})")
+say(tt is not None and "config" not in folded(tt[0]) and any(klass(p) == "config" and not s for p, s in tt[1]),
+    f"5 asked: a config task keeps its config rows (folded={tt[0].get('folded') if tt else None!r})")
+say(td is not None and "test" not in folded(td[0]) and any(klass(p) == "test" and not s for p, s in td[1]),
+    f"5 test code: the default tail lists tests/ path-only rows, no test= (folded={td[0].get('folded') if td else None!r})")
 try:
     jt = json.loads(json_tx)["tail"] if json_tx else None
 except (ValueError, KeyError, TypeError):
@@ -137,6 +148,11 @@ try:
 except (ValueError, KeyError, IndexError, TypeError):
     mt = ""
 say('folded="' in mt and "; tail folded=class=N:" in mt, "7 MCP: the for verb's tail carries folded= and its clause")
+tn = tail_of(load("f.new"))
+fn = folded(tn[0]) if tn else {}
+say(tn is not None and "doc" not in fn and "config" not in fn and any(klass(p) == "doc" and not s for p, s in tn[1])
+    and any(klass(p) == "config" and not s for p, s in tn[1]), f"9 add-new: docs and config path-only rows listed (folded={fn})")
+say(tn is not None and fn.get("script", 0) > 0, f"9 twin: the add-new task still folds scripts (folded={fn})")
 td2 = tail_of(docs)
 say(td2 is not None and "folded" not in td2[0], "8 docs: a docs question folds nothing")
 print("fortailfoldcheck:", "FAIL" if fails else "PASS", f"({fails} failing)")

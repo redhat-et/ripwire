@@ -1186,10 +1186,10 @@ inline constexpr std::string_view kForFileTailWideLegend =
     "prints p= only, after every row with sym=, and skips files the head shows; p_only= counts them";
 // SIZE-2 (size-trim): present-only beside a tail that folded widened rows (forpage.h FileTail::folded); after the walk clause.
 inline constexpr std::string_view kForFileTailFoldedLegend =
-    "; tail folded=class=N: on a code question, N rows past page 0 of that file class (doc, test, config, script, testdata, other) "
-    "are not listed, unless the task names the class; next= pages from the first one";
+    "; tail folded=class=N: on a code question, N rows past page 0 of that file class (doc, config, script, testdata, other) "
+    "are not listed, unless the task names the class (adding a new X keeps doc and config); next= pages from the first one";
 inline constexpr std::string_view kForCompactFileTailFoldedLegend =
-    "; t folded=class=N: N p= only rows of that class (doc|test|config|script|testdata|other) not listed, next= pages to them";
+    "; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them";
 inline constexpr std::string_view kForFileTailFoldedWhy = "rows past page 0 of these non-code file classes are counted, not listed; next pages to them";
 // SIZE-3a (size-trim): present-only beside a <d same_as=> row (packSignatures SigRowSpelling::foldRepeatedText)
 inline constexpr std::string_view kForSameAsLegend =

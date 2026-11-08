@@ -41,6 +41,8 @@
 
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
 #include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
+#include "exemplarfamily.h" // exemplarTasksOf — the add-a-new-X reading keeps a tail's docs and config listed
+#include "langfacts.h"   // langFacts — tailFoldClass reads a file's script/config role off the table
 #include "filter.h"      // taskAsksAboutDocs — the code-first tail asks the docs reorder's own question
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
 #include "model.h"
@@ -782,7 +784,7 @@ struct FileTail
     std::size_t               oldPageSkip = SIZE_MAX;
     // SIZE-2 (size-trim): widened rows (past the old cut, p= only) of a NON-code file class the code question did not ask for are
     // folded: counted here per class (TailFoldClass order), not listed. pageSkip marks the first one, so next= pages to it.
-    std::array<std::uint32_t, 6> folded{};
+    std::array<std::uint32_t, 5> folded{};
 };
 
 // a file page row's sym= value: the file's top symbols by lens rank (row.top[], at most kForPageSymNameCount), comma-joined,
@@ -809,33 +811,35 @@ inline std::string forFileRowSymNames( const IngestResult& ing, const ForFileRow
 
 inline constexpr std::uint32_t kNoPageRow = UINT32_MAX;
 
-// SIZE-2 (size-trim): the file class of a widened tail row, by its lead symbol's language and its path. Code is never folded; the
-// other six are, on a code question, unless the task names the class (tailFoldKept). Test = a code file under a test path
-// (filter.h isTestPath, the file-level half of the test=1 predicate: a test-scoped symbol inside a source file keeps that file code).
+// SIZE-2 (size-trim): the file class of a widened tail row, by its lead symbol's language and its path. The first five fold, on a
+// code question, unless the task keeps the class (tailFoldKept); Test and Code never fold. Test = a code file under a test path
+// (filter.h isTestPath, the file-level half of the test=1 predicate: a test-scoped symbol inside a source file keeps that file
+// code): it defines symbols an edit may have to follow, so it is code to the fold (round 2: test code never folds).
 enum class TailFoldClass : std::uint8_t
 {
     Doc,
-    Test,
     Config,
     Script,
     TestData,
     Other,
+    Test,   // the never-folded classes follow (kTailFoldClassNames stops before them)
     Code
 };
-inline constexpr std::string_view kTailFoldClassNames[] { "doc", "test", "config", "script", "testdata", "other" };
-static_assert( std::size( kTailFoldClassNames ) == static_cast<std::size_t>( TailFoldClass::Code )
+inline constexpr std::string_view kTailFoldClassNames[] { "doc", "config", "script", "testdata", "other" };
+static_assert( std::size( kTailFoldClassNames ) == static_cast<std::size_t>( TailFoldClass::Test )
                    && std::tuple_size_v<decltype( FileTail::folded )> == std::size( kTailFoldClassNames ),
                "one name and one count per foldable class, in TailFoldClass order" );
 inline TailFoldClass tailFoldClass( const IngestResult& ing, NodeId lead, std::string_view relPath ) noexcept
 {
     ASSUME( lead < ing.symbols.size(), "tailFoldClass: a page row's lead is outside the index" );
-    const Lang lang = ing.symbols[ lead ].lang;
+    const Lang       lang  = ing.symbols[ lead ].lang;
+    const LangFacts& facts = langFacts( lang );   // the per-language file roles live in the table, not in Lang:: compares here
     if( isDocLang( lang ) )
     {
         return TailFoldClass::Doc;
     }
     const bool test = isTestPath( relPath );
-    if( lang == Lang::Bash )
+    if( facts.shellScript )
     {
         return test ? TailFoldClass::TestData : TailFoldClass::Script;
     }
@@ -847,18 +851,22 @@ inline TailFoldClass tailFoldClass( const IngestResult& ing, NodeId lead, std::s
     {
         return TailFoldClass::TestData;
     }
-    return lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml ? TailFoldClass::Config : TailFoldClass::Other;
+    return facts.configFormat ? TailFoldClass::Config : TailFoldClass::Other;
 }
-// The classes a code question keeps listed because its task names them (a whole word): tests, config, scripts. An allowlist of
-// cue words; a class not named folds. Docs need no cue here: a docs question takes the plain walk, which folds nothing.
-inline std::array<bool, 6> tailFoldKept( std::string_view task )
+// The classes a code question keeps listed (TailFoldClass order): the ones its task names (a whole word: test data, config,
+// scripts), and on an add-a-new-X task (exemplarTasksOf, EXEMPLAR-STAIRS' one reading of that intent) its docs and config too:
+// a new member is also registered in a manifest, a public-API golden or a doc page beside its siblings (round 1 of SIZE-2 lost
+// exactly those two items on the 321: a package.json peer dependency, an API golden .md). A class not kept folds. Docs need no
+// cue otherwise: a docs question takes the plain walk, which folds nothing.
+inline std::array<bool, 5> tailFoldKept( std::string_view task )
 {
     const std::string lower = queryshape::detail::lowerAscii( task );
     const auto any = [ & ]( std::initializer_list<std::string_view> words )
     { return std::ranges::any_of( words, [ & ]( std::string_view w ) { return taskNamesWord( lower, w ); } ); };
-    const bool tests = any( { "test", "tests", "testing", "spec", "specs", "fixture", "fixtures" } );
-    return { false, tests, any( { "config", "configuration", "yaml", "yml", "json", "toml", "settings" } ),
-             any( { "script", "scripts", "shell", "bash" } ), tests, false };
+    const bool addNew = !exemplarTasksOf( task ).empty();
+    return { addNew, addNew || any( { "config", "configuration", "yaml", "yml", "json", "toml", "settings" } ),
+             any( { "script", "scripts", "shell", "bash" } ), any( { "test", "tests", "testing", "spec", "specs", "fixture", "fixtures" } ),
+             false };
 }
 // RIPWIRE_NO_TAIL_FOLD=1: list every widened row (the pre-SIZE-2 tail), the ablation arm of test/fortailfoldcheck.sh
 inline bool tailFoldOn()
@@ -1063,7 +1071,7 @@ struct TailPageWalkInputs
     const ForFilePage&       page;
     std::string_view         rootArg;
     const std::vector<char>& inHead;   // the shown head's files (computeFileTail): skipped past the old cut
-    const std::array<bool, 6>* foldKept = nullptr;   // SIZE-2: a code question folds widened non-code rows except these classes
+    const std::array<bool, 5>* foldKept = nullptr;   // SIZE-2: a code question folds widened non-code rows except these classes
 };
 // SIZE-2: a widened row (p= only) of a non-code class the task did not name is counted, not listed, and next= pages from the
 // first one (pageSkip). True when the row folded.
@@ -1075,7 +1083,7 @@ inline bool foldTailRow( FileTail& out, std::vector<char>& listed, const TailPag
         return false;
     }
     const TailFoldClass cls = tailFoldClass( in.ing, row.lead, rootRelPath( in.ing, row.fileId ) );
-    if( cls == TailFoldClass::Code || ( *in.foldKept )[ std::size_t( cls ) ] )
+    if( cls == TailFoldClass::Code || cls == TailFoldClass::Test || ( *in.foldKept )[ std::size_t( cls ) ] )
     {
         return false;
     }
@@ -1175,7 +1183,7 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     FileTail*               docs   = rankOrder || taskAsksForDocText( task ) ? nullptr : &docRows;
     const std::vector<char> inHead = fileMaskOfSymbols( ing, headIds );   // once, for both row kinds
     fileTailRankRows( out, listed, ing, rank, page, inHead, rootArg, docs );
-    const std::array<bool, 6> foldKept = tailFoldKept( task );
+    const std::array<bool, 5> foldKept = tailFoldKept( task );
     fileTailPageRows( out, listed, TailPageWalkInputs{ ing, page, rootArg, inHead, docs != nullptr && tailFoldOn() ? &foldKept : nullptr }, wideRows, docs );
     appendFileTailRows( out, docRows );
     out.oldRows = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
@@ -1226,7 +1234,7 @@ inline std::vector<NodeId> rowsAtTargetIds( std::vector<NodeId> shown, const std
     return shown;
 }
 
-// SIZE-2: the folded classes, "doc=12,test=30" in TailFoldClass order, "" when nothing folded
+// SIZE-2: the folded classes, "doc=12,config=3" in TailFoldClass order, "" when nothing folded
 inline std::string fileTailFoldedList( const FileTail& t, std::string_view sep, std::string_view quote = {} )
 {
     std::string v;
