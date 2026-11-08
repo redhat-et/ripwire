@@ -379,13 +379,15 @@ rrun US --uses=selectBaseline \
 # 54/55 -> 56 2026-11-07 (merge of origin/main into lane/exemplar-e1): both lanes' new call sites, 53 + 1 (forliteral.h) + 2 (exemplarfamily.h).
 # 56 -> 57 2026-11-07 (lane/reg-reader over main 87ede40d3): src/forliteral.h lit_detail::tableReadersOf (measured: the one new <u> row) reads the subscript
 # row's file and at most kForTableReaderFiles (16) caller files, once each, only when a subscript row is shown and the answer names its table. No new fopen.
-# 57 -> 59 2026-11-08 (lane/docs-units, DOCS-UNITS, measured: the two new <u> rows): a document's bytes are read through the canonical helper
-# at src/ingest_docpass.h:118 docTextOfDoc (an HTML page's bytes, read once in the doc post-pass) and src/recall.h:1191 recallDocText (a document
-# with no extracted text, read for its section offsets). No new fopen/fread. #571 stacks on this pin.
+# 57 -> 58 2026-11-08 (lane/exemplar-e3a, E3a TOUCH-LIST): src/exemplarfamily.h's into= holder read (the one new call site, the holder's file read once
+# per answer, only when the family block resolves an into= holder) uses the same canonical detail::readWholeFile helper. No new fopen.
+# 58 -> 60 2026-11-08 (lane/docs-units, DOCS-UNITS, measured after merging main at fc0e35967: the two new <u> rows): a document's bytes are read
+# through the canonical helper in src/ingest_docpass.h docTextOfDoc (an HTML page's bytes, read once in the doc post-pass) and src/recall.h
+# recallDocText (a document with no extracted text, read for its section offsets). No new fopen/fread. #571 stacks on this pin.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 59 ] \
-    && ok "repo: --uses=readWholeFile count=59 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 59, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 60 ] \
+    && ok "repo: --uses=readWholeFile count=60 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 60, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
