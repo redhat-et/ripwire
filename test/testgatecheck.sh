@@ -621,6 +621,13 @@ zwant '(z25) R2: the legacy module keyword, even with a type-only body' "$Z/z25"
 fxts "$Z/z26" 'namespace N { declare const a: number; }
 export function bounded( t: string ): string { return t; }'
 zwant '(z26) R2: a namespace holding only a declare statement' "$Z/z26" src/bounded.ts run_unknown
+# assume-audit jsrunner.h engineClause: a contradictory clause (ceiling at or below its floor) is input, not an invariant.
+# It reads as "admits anything", like an upper-bound-led clause, so the --test floor cannot be proven. RED before the
+# fix: `<0` made upperBoundCeil return 0 and ENSURES( ceil > 0 ) trapped the dev build (release: silent UB).
+fxcjs "$Z/z27" '{ "engines": { "node": ">=18 <0" } }'
+zwant '(z27) assume-audit: contradictory ">=18 <0" reads as admits-anything' "$Z/z27" src/bounded.js run_unknown
+fxcjs "$Z/z28" '{ "engines": { "node": "^18 <0.0.0 || >=18.1" } }'
+zwant '(z28) assume-audit: a contradictory "^18 <0.0.0" alternative still refuses the whole range' "$Z/z28" src/bounded.js run_unknown
 
 # (n1) #335: a TS/JS package BELOW root= runs from its own directory. run= is `(cd <pkg> && ...)`, a subshell (still
 #      pasteable from root=), and the path after it is package-relative. Before the fix it was `npx vitest run

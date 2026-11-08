@@ -141,6 +141,24 @@ expect pyblock  call_m2       "a.py:9 b.py:4"             "[P] B4 Python method 
 expect pyblock  call_m3       "a.py:14 b.py:6"            "[P] B4 Python method under with in a class body is a method"
 expect pyblock  call_m4       "a.py:18 b.py:8"            "[P] B4 Python method under a nested if in a class body is a method"
 
+# ── 3c) assume-audit ingest_metrics.h cc_paramShape: a parameter list with ≥ 65,536 children ─────────
+# The named/defaulted/notParam counters were uint16: 65,535 plain parameters + 1 defaulted one wrapped `named` to 0
+# while `defaulted` stayed 1, so ASSUME( defaulted + notParam <= named ) trapped the dev build (release: silent UB).
+# The fixture is ~0.5 MB, so it is generated here under $TMP, not committed. b.py's 1-parameter big() is the rival
+# a 1-argument call must bind: the generated big() needs 65,535 arguments (its minimum, saturated at the field width).
+echo "── minimum arity: 65,536-parameter list (generated) ──"
+WIDE="$TMP/wide"; mkdir -p "$WIDE"
+python3 -c 'import sys; sys.stdout.write( "def big(" + ", ".join( "p%d" % i for i in range( 65535 ) ) + ", d=1):\n    return 0\n" )' >"$WIDE/a.py"
+printf 'def big(x):\n    return x\n' >"$WIDE/b.py"
+printf 'def call_big():\n    return big(1)\n' >"$WIDE/caller.py"
+WOUT="$( perl -e 'alarm 120; exec @ARGV' "$BIN" "$WIDE" --callees=call_big --no-cache 2>"$TMP/wide.err" )"; WRC=$?
+WGOT="$( printf '%s' "$WOUT" | grep -oE '<s [^>]*p="[^"]*"' | grep -oE 'p="[^"]*"' | sed 's/^p="//; s/"$//' | sort | tr '\n' ' ' )"
+if [ "$WRC" = 0 ] && [ "$WGOT" = "b.py:1 " ]; then
+    ok "wide --callees=call_big = { $WGOT} — 65,535 params + 1 default: no counter wrap, the 65,535-minimum def drops for big(1)"
+else
+    no "wide --callees=call_big rc=$WRC = { $WGOT} want { b.py:1 } — $( head -c 400 "$TMP/wide.err" )"
+fi
+
 # ── 4) determinism — byte-identical run-to-run over all three fixtures ──────────────────────────────
 echo "── determinism (byte-identical, two --no-cache runs) ──"
 detfail=0
