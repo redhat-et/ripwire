@@ -7,12 +7,12 @@ gates.scripts	777
 limits.boundary	46
 limits.caps	404
 limits.constants	413
-limits.disclosing	267
+limits.disclosing	272
 limits.files	138
 limits.indexing	50
 limits.output	46
 limits.parameters	9
-limits.silent	137
+limits.silent	132
 tuning.constexpr_live	12
 tuning.declarations	291
 tuning.duplicated	`kRowCap`

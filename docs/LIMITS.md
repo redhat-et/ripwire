@@ -35,7 +35,7 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 404 | 138 | 267 | **137** |
+| 404 | 138 | 272 | **132** |
 
 Plus 9 ranking and apportionment parameters, in their own table below: they are not caps, they
 are not counted as caps, and 404 + 9 is the 413 constants this generator parses out of `src/`.
@@ -180,7 +180,7 @@ Discloses: `capped`, `closures_capped`
 
 ### `src/cli.h`
 
-Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
+Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `terms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -1199,7 +1199,7 @@ Discloses: **none**
 
 ### `src/recall.h`
 
-Discloses: **none**
+Discloses: `terms_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
