@@ -32,6 +32,7 @@
 #include "gitmine.h"    // F3 (H2H-Graft): RecentFile — the map's <recent> rows are the churn-decay miner's own product
 #include "lexical.h"       // MAP-STEM: rw::subtokens — the one subtoken rule (lexLowerByte rides with it)
 #include "mapinventory.h"   // D7: the map scope's <inv> tier — computeMapInventory, kMapInventoryLegend
+#include "rowfeatstate.h"   // ROW-FEATURE-DUMP: the <sigs> row order around the head round-robin (dev-only, inert unless set)
 
 #include <algorithm>
 #include <numeric>     // std::iota — codeFirstKeep
@@ -6426,6 +6427,8 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext,
                                                        spelling.elideZeroMetrics, &sigOwners }, esc, rootArg ); };
         const auto isDocRow = [ & ]( const SigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
+        rowfeat::sigsInputs( fanIn, tested, hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) );   // ROW-FEATURE-DUMP (inert unless set)
+        rowfeat::sigsOrder( 0, entries );
         if( hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) )
         {
             const bool docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
@@ -6433,10 +6436,12 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                     [ & ]( const SigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
                                                     [ & ]( const SigEntry& e ) { return !docsLast || !isDocRow( e ); }, reheadXml );
         }
+        rowfeat::sigsOrder( 1, entries );
         if( hasSigLensRule( lensRules, SigLensRules::DocsAfterCode ) )
         {
             cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadXml );   // lean-answers' zero elision included
         }
+        rowfeat::sigsOrder( 2, entries );
         cut.continuationRequest = cutNext;
         sigsCutRecordLadder( cut, ladder, totalAfterLadder, rowDropBudgetIn, pastTargetDisclosed );   // forbudget-soft
         sigsCutRecordPastTargetRanks( cut, entries );   // forbudget-soft: after the docs reorder renumbered them

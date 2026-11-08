@@ -2405,6 +2405,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         const std::optional<std::string> answer = forTaskText( path, task, redactPtr,
                                                                                 budgetArg.isPresent ? std::size_t( budgetArg.value ) : 0, noRoute, pg,
                                                                                 sections );   // L2: "" (default) = stub; the validated closed set otherwise
+                        forTaskRowFeatures( path, task, answer );   // ROW-FEATURE-DUMP (inert unless set)
                         if( !answer )
                         {
                             return errResult( -32603, "internal error: the for answer buffer lost bytes — no answer served" );
