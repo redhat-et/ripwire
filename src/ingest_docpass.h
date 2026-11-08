@@ -103,13 +103,34 @@ inline std::string docTextViaBridgeCache( const std::string& path, const std::st
 namespace
 {
 
-// DOCS-UNITS D5 — a doc's extracted text, and for an HTML page its unit boundaries too (htmldoc.h). Every other kind
-// goes through the bridge cache exactly as before and leaves `heads` and `flatText` empty. `flatText`: an HTML page's
+// One document's extraction, filled by the worker that owns the slot (runDocPostPass step 2).
+struct DocSlot
+{
+    std::string                         text;
+    bool                                hasText    = false;
+    bool                                recallOnly = false;   // DOCS-UNITS-FIX: the file node takes kRankFlagRecallOnly (model.h)
+    RawDefLex                           lex;                  // B0.2: the file node's Section stats (rich only)
+    std::vector<docparse::HtmlHeading>  heads;                // DOCS-UNITS D5: an HTML page's units
+    std::vector<RawDefLex>              headLex;              // and their stats (rich only), one per unit
+    // The DISCLOSE sink for a document whose bytes could not be read: `hasText` stays false, so runDocPostPass gives it
+    // no node, and the skipped verb counts the file as unmeasured.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        UnreadableFile,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        hasText = false;
+    }
+};
+
+// DOCS-UNITS D5 — a doc's extracted text, and for an HTML page its unit boundaries too (htmldoc.h, into `slot.heads`).
+// Every other kind goes through the bridge cache exactly as before and leaves `slot.heads` and `flatText` empty. `flatText`: an HTML page's
 // whole-text reading (docparse.h extractHtmlFlat), what every lexical ranking lens has always read for the page; the doc
 // post-pass builds the file node's statistics from it. A page whose content region is empty (all navigation chrome) keeps
 // that reading as its text too: it is the page's only text, and its file node stays indexed as it was before the section tree.
 inline std::string docTextOfDoc( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey,
-                                 std::vector<docparse::HtmlHeading>& heads, std::string& flatText )
+                                 DocSlot& slot, std::string& flatText )
 {
     if( docparse::docKindOf( ext ) != docparse::DocKind::Html )
     {
@@ -118,7 +139,7 @@ inline std::string docTextOfDoc( const std::string& path, const std::string& ext
     const std::optional<std::string> bytes = docparse::detail::readWholeFile( path );
     if( !bytes )
     {
-        DISCLOSE( "docparse: cannot read document file" );
+        DISCLOSE( slot, DocSlot::DisclosureWhy::UnreadableFile, "docparse: cannot read document file" );
         rw::emitTo( stderr, "ripwire: doc {}: cannot read — omitted from the index (the skipped verb counts it as unmeasured)\n", path.c_str() );
         return {};
     }
@@ -128,7 +149,7 @@ inline std::string docTextOfDoc( const std::string& path, const std::string& ext
     {
         return flatText;   // no content region: the whole-text reading, no units (heads stays empty)
     }
-    heads = std::move( doc.headings );
+    slot.heads = std::move( doc.headings );
     return std::move( doc.text );
 }
 
@@ -188,23 +209,12 @@ inline void pushHtmlUnitDefs( std::uint32_t fid, const std::vector<docparse::Htm
     }
 }
 
-// One document's extraction, filled by the worker that owns the slot (runDocPostPass step 2).
-struct DocSlot
-{
-    std::string                         text;
-    bool                                hasText    = false;
-    bool                                recallOnly = false;   // DOCS-UNITS-FIX: the file node takes kRankFlagRecallOnly (model.h)
-    RawDefLex                           lex;                  // B0.2: the file node's Section stats (rich only)
-    std::vector<docparse::HtmlHeading>  heads;                // DOCS-UNITS D5: an HTML page's units
-    std::vector<RawDefLex>              headLex;              // and their stats (rich only), one per unit
-};
-
 inline void extractDocSlot( const std::string& path, std::uint32_t fid, bool cacheEnabled, bool captureValueUses,
                             HashMap<std::uint64_t, std::uint32_t>& scratch, DocSlot& slot )
 {
     const std::string ext  = lowerExtensionOf( path );
     std::string       flat;   // an HTML page's whole-text reading (docTextOfDoc): its file node's statistics
-    std::string       text = docTextOfDoc( path, ext, cacheEnabled, fid, slot.heads, flat );
+    std::string       text = docTextOfDoc( path, ext, cacheEnabled, fid, slot, flat );
     // an HTML page with body text but no whole-text reading had no node before the section tree: --recall reads its node,
     // nothing else ranks or names it
     const bool isHtml = docparse::docKindOf( ext ) == docparse::DocKind::Html;
