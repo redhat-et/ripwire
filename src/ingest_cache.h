@@ -152,7 +152,7 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist — a Function/Method def record ends with its u64 clone key.
+constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
                                                       // 49: lane warm-direct — the FILE record's head gains the eight family counts
                                                       //    (FileFactCounts, right after FileHealth) so a warm run can size and plan every
                                                       //    record from its head alone and decode the body in the parse worker.
@@ -2491,15 +2491,16 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 {
     return dictCount <= 0x100 ? 1u : dictCount <= 0x10000 ? 2u : 4u;   // indices go up to dictCount-1
 }
-// v50 (CLONES-PERSIST): the def kinds whose record carries the u64 clone key — the kinds findClones compares — as a
-// bit per SymKind, so writeDef and readDef read ONE definition.
+// v50 (CLONES-PERSIST): the def kinds that get a clone key — the kinds findClones compares — as a bit per SymKind
+// (ingest_parsepool.h rawDefCloneKey). The record does not depend on it: every def record carries a presence byte.
 inline constexpr std::uint32_t kCloneKeyKindBits = ( 1u << unsigned( SymKind::Function ) ) | ( 1u << unsigned( SymKind::Method ) );
 static_assert( kSymKindCount <= 32, "kCloneKeyKindBits holds one bit per SymKind" );
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
     w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
-    if( ( kCloneKeyKindBits >> unsigned( d.kind ) ) & 1u ) { w.u64( d.cloneKey ); }   // v50: only the kinds findClones compares
+    w.u8( d.cloneKey != 0 ? 1 : 0 );                                     // v50: clone-key presence byte (0 = no key), then the key
+    if( d.cloneKey != 0 ) { w.u64( d.cloneKey ); }
     if( withLex )
     {
         ASSUME( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
@@ -2608,7 +2609,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 92;   // 17×u32 + 16×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 93;   // 17×u32 + 17×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
 
@@ -2649,7 +2650,16 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
         r.ok = false;
     }
     for( std::uint8_t& tagCount : d.evWhy ) { tagCount = r.u8(); }   // mirrors writeDef's fixed 8×u8 order
-    if( ( kCloneKeyKindBits >> unsigned( d.kind ) ) & 1u ) { d.cloneKey = r.u64(); }   // v50: mirrors writeDef; any u64 is a valid key (0 = none)
+    // v50: mirrors writeDef. The presence byte is 0 or 1; any other value is corruption and takes the one refusal path. Any
+    // u64 is a valid key: findClones re-reads and compares every shared key, so a wrong key costs a read, never an answer.
+    const std::uint8_t hasCloneKey = r.u8();
+    if( r.ok && !VALIDATE( hasCloneKey <= 1 ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache def record carries a clone-key presence byte other than 0/1 — cache treated as corrupt" );
+        r.ok = false;
+    }
+    if( r.ok && hasCloneKey == 1 ) { d.cloneKey = r.u64(); }
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();

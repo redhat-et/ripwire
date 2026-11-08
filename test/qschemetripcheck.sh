@@ -35,7 +35,7 @@ ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (202
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
 # 2026-11-07, lane clones-persist (base main e4432b48; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
-#   Watched text: kCacheVersion 49 -> 50: a Function/Method def record ends with its u64 clone key (src/ingest_parsepool.h rawDefCloneKey), so a warm
+#   Watched text: kCacheVersion 49 -> 50: a def record ends with a clone-key presence u8 and, for a keyed Function/Method, its u64 clone key (src/ingest_parsepool.h rawDefCloneKey), so a warm
 #   findClones keys bodies with no file I/O; quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no
 #   extraction changes and findClones returns the same groups (it re-reads and compares the real strings of every shared key).
 # 2026-11-05, lane warm-direct (base lane/warm-rewrite 630a90e3d, merged over main at kParserVer 301; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
