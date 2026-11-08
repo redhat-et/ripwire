@@ -5,3 +5,5 @@ A `<tail>` page row for a file whose symbols the answer already prints as ranked
 The `<syms>` lead block keeps priority over those rows: it reads the answer as if their `sym=` names were not printed, and a name it prints is then cut from them, so the block's leads (with their `file:line` and qualified name) are the ones that survive and no name is printed twice. Both tail legend clauses say so: `sym=` is the file's top symbols minus names a sigs row or the syms block shows.
 
 On the 321 in-sample `--for` calls this names the missing in-file symbol on mf2-pydantic-08 and nfpm-11 without losing a graded item. `test/deeptailcheck.sh` arms (1d) and (1s) pin the refill and the `<syms>` cut, each with a positive twin.
+
+The tail legend clause change moves the session legend dictionary to `dictv=720b939e8b412eb8 entries=1050` (docs/COMMANDS.md and the showcase capture are re-recorded).

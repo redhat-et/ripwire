@@ -794,6 +794,53 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
     return out;
 }
 
+// ANCHOR-TEST-ONLY: does a name-exact route with no source-backed anchor stay committed to it? It does when the anchors name ONE
+// definition in all (a test helper, a data key, a CI script that is the only thing by that name: the subject can only mean it) or none
+// (an env var or literal the index stores no definition of: the <shortkey> ladder and the <lit> block serve that route). With two or
+// more definitions none of which is source, the route picked one non-source copy among several (gtest_threading.cpp's max_threads of
+// three, a .github action before the real one): the words' ranking is the honest answer, and the anchors ride on as a hint.
+inline bool routeAnchorUncommitted( const RouteChoice& rc )
+{
+    if( rc.which != LexMode::NameExact || rc.anchorDefs.empty() )
+    {
+        return false;
+    }
+    // each distinct anchor name once: a repeated word (`lonely_helper ... lonely_helper`) resolves the same definitions again
+    std::size_t defs = 0;
+    for( std::size_t i = 0; i < rc.anchorDefs.size(); ++i )
+    {
+        const RouteAnchorDef& a = rc.anchorDefs[i];
+        const auto earlier = rc.anchorDefs.begin() + std::ptrdiff_t( i );
+        if( std::find_if( rc.anchorDefs.begin(), earlier, [ & ]( const RouteAnchorDef& b ) { return b.lowerName == a.lowerName; } ) == earlier )
+        {
+            defs += 1u + a.extraDefs;
+        }
+    }
+    return defs >= 2;
+}
+
+// The ranker an uncommitted anchor falls through to: the conceptual one, coded as chooseForRanker codes it for the same word count.
+inline RouteChoice routeAnchorFallThrough( std::string_view query, const RouteChoice& anchored )
+{
+    std::size_t nWords = 0;
+    for( const std::string_view w : splitRouteWords( query ) )
+    {
+        nWords += isRouteStopword( routeLower( w ) ) ? 0 : 1;
+    }
+    RouteChoice rc;
+    rc.which  = LexMode::SubtokenBody;
+    rc.reason = nWords >= 3 ? "subtoken+body" : "subtoken+body:broad";
+    // the hint: the anchors: evidence as the anchored route printed it (word(defining file+N) per anchor). Not the name-exact(X) code:
+    // route= starts with the ranker that ran, and no reader may find a second ranker code in it.
+    const std::size_t at = anchored.reason.find( "; anchors: " );
+    rc.reason += "; anchor has no source definition (test, doc, data, CI or vendored only, or not indexed), not committed: ranked as words";
+    if( at != std::string::npos )
+    {
+        rc.reason += "; hint " + anchored.reason.substr( at + 2 );
+    }
+    return rc;
+}
+
 // THE entry point both the CLI lens and the MCP verbs call in place of chooseForRanker. No reading and a source-backed anchor: exactly
 // chooseForRanker. confidence= reads low on anchorNoSource, and route= says why, so the answer explains itself in every legend dialect.
 inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
@@ -801,11 +848,15 @@ inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, const Graph& g,
     SubjectRoute out = chooseSubjectRouteUnchecked( ing, g, task, servesBodiesAndCallers );
     const std::string_view rankQuery = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
     out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, rankQuery );
-    out.anchorKeys = routeAnchorKeys( ing, out.route, rankQuery );
-    if( out.anchorNoSource )
+    if( out.anchorNoSource && routeAnchorUncommitted( out.route ) )
+    {
+        out.route = routeAnchorFallThrough( rankQuery, out.route );   // the words rank; no anchorDefs restrict the bodies
+    }
+    else if( out.anchorNoSource )
     {
         out.route.reason += "; anchor has no source definition (test, doc, data, CI or vendored only, or not indexed)";
     }
+    out.anchorKeys = routeAnchorKeys( ing, out.route, rankQuery );
     return out;
 }
 
