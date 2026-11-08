@@ -20,6 +20,21 @@
 //   hops_anchor the same from the route's anchor definitions (-1 = none)
 //   edge_head   self | out:call|out:name|out:link|out:import (row → head) | in:… (head → row) | member | owner | sibling | none
 //   rr_*        the <sigs> head round-robin: on for this render, whether it moved this row up, and the row's score-order r=
+//
+// NEW EVIDENCE (ROW-FEATURES-2, 15 more columns after route): cov_name cov_doc cov_body cov_any terms_hit terms_q quote_lits
+// quote_hit cp_head cp_top3 cp_seed cp_dir cp_prov ans_file_rank file_top10_share
+//   cov_*       coverage='s IDF share (forpage.h termShareWithin, whole percent) of the question's subtokens in the row's name
+//               (the pass-1 name mask), doc comment and body (re-tokenized here, for the printed rows only, with the BM25 pass's
+//               own subtoken walker and exact term match: a stem/variant fold is not re-applied), and any field (coverage= itself)
+//   terms_hit   distinct question subtokens the row carries in any field; terms_q = the question's unique subtokens
+//   quote_lits  balanced quoted spans in the question (taskroute firstQuotedLiteral's rule); quote_hit = how many of them the
+//               row's doc+signature+body bytes contain verbatim
+//   cp_head     directed hops (0 = self, 1, 2; -1 = none) between the row and the head over PROVEN edges (a call: no via=name,
+//               no link), either way round; cp_top3 = the same to the nearest of the first three resolved rows other than itself,
+//               cp_seed its 1-based place among them, cp_dir out (row reaches it) | in (it reaches the row), cp_prov the path's
+//               edge provenance (res scip binding split import lastseg impl, joined by +)
+//   ans_file_rank  the row's file's 1-based place among the answer's files in first-appearance order; file_top10_share = the
+//               share of the first 10 answer rows in that file
 #include "rowfeatstate.h"
 #include "model.h"
 #include "graph.h"
@@ -29,8 +44,12 @@
 #include "infra/namesplit.h"
 #include "infra/ownedfile.h"
 #include "siblift.h"
+#include "forpage.h"        // termShareWithin / forCoveragePct — coverage='s one share
+#include "forfilesyms.h"    // unescapeXmlAttr — an n= like &lt;file-scope&gt;
+#include "taskroute.h"      // firstQuotedLiteral — the one quoted-literal rule
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <charconv>
 #include <cstdio>
@@ -263,6 +282,287 @@ inline std::string edgeKindOf( const Graph& g, NodeId from, NodeId to )
     return kind == 1 ? "name" : kind == 2 ? "link" : "call";
 }
 
+// ── ROW-FEATURES-2: new evidence for the printed rows only (no whole-repo pass beyond the hop CSR emitRows already builds) ──
+
+// (a) coverage split by field, the distinct-term count, and the question's quoted literals in the row's own bytes.
+struct CoverageCols
+{
+    int         name = -1, doc = -1, body = -1, any = -1, termsHit = -1;
+    std::size_t quoteHit = 0;
+};
+
+// The question's balanced quoted spans, in order, deduplicated (taskroute::firstQuotedLiteral's rule, walked to the end).
+inline std::vector<std::string> taskQuotedLiterals( std::string_view task )
+{
+    std::vector<std::string> lits;
+    for( std::string_view rest = task; !rest.empty(); )
+    {
+        std::string lit = taskroute::firstQuotedLiteral( rest );
+        if( lit.empty() )
+        {
+            break;
+        }
+        const std::size_t at = rest.find( lit );
+        rest                 = rest.substr( std::min( rest.size(), at + lit.size() + 1 ) );
+        if( lit.size() >= 2 && std::ranges::find( lits, lit ) == lits.end() )
+        {
+            lits.push_back( std::move( lit ) );
+        }
+    }
+    return lits;
+}
+
+// Bit u of `mask` set for every token of `text` that is exactly the question's term u (the BM25 pass's subtoken walker, lowercased).
+inline void markTerms( std::string_view text, const HashMap<std::string_view, std::uint32_t>& termIx, std::uint64_t* mask )
+{
+    std::string tok;
+    forEachLexSubtoken( text, [ & ]( std::size_t b, std::size_t e )
+    {
+        if( e - b < 2 )
+        {
+            return;
+        }
+        tok.assign( text.substr( b, e - b ) );
+        for( char& c : tok )
+        {
+            c = char( lexLowerByte( static_cast<unsigned char>( c ) ) );
+        }
+        if( const auto it = termIx.find( std::string_view( tok ) ); it != termIx.end() )
+        {
+            mask[ it->second / 64 ] |= std::uint64_t( 1 ) << ( it->second % 64 );
+        }
+    } );
+}
+
+inline std::vector<CoverageCols> coverageOfRows( const std::vector<NodeId>& ids, const LexTermEvidence& ev, const std::vector<std::string>& lits,
+                                                 const IngestResult& ing )
+{
+    std::vector<CoverageCols> out( ids.size() );
+    const std::size_t         n     = ing.symbols.size();
+    const std::size_t         words = ev.maskWords;
+    const bool measured = words > 0 && ev.symbolCount == n && ev.nameMask.size() == n * words && ev.anyMask.size() == n * words;
+    HashMap<std::string_view, std::uint32_t> termIx;
+    for( std::uint32_t u = 0; measured && u < ev.terms.size(); ++u )
+    {
+        termIx.emplace( std::string_view( ev.terms[u] ), u );
+    }
+    // one read per distinct file among the resolved rows, in first-appearance order
+    std::vector<std::size_t> order;
+    for( std::size_t k = 0; k < ids.size(); ++k )
+    {
+        if( ids[k] < n )
+        {
+            order.push_back( k );
+        }
+    }
+    std::ranges::stable_sort( order, {}, [ & ]( std::size_t k ) { return ing.symbols[ ids[k] ].fileId; } );
+    std::string       scratch;
+    const std::string* src  = nullptr;
+    std::uint32_t      have = UINT32_MAX;
+    std::vector<std::uint64_t> docMask( words ), bodyMask( words );
+    for( const std::size_t k : order )
+    {
+        const NodeId  id = ids[k];
+        const Symbol& s  = ing.symbols[id];
+        if( s.fileId != have )
+        {
+            have = s.fileId;
+            src  = lexicalScanText( ing, s.fileId, scratch );
+        }
+        const std::string_view sv        = src ? std::string_view( *src ) : std::string_view();
+        const std::size_t      bodyStart = std::min<std::size_t>( s.sigStartByte, sv.size() );
+        const std::size_t      end       = std::max( bodyStart, std::min<std::size_t>( s.endByte, sv.size() ) );
+        const std::size_t      docStart  = src ? docCommentStart( *src, bodyStart ) : bodyStart;
+        CoverageCols&          c         = out[k];
+        for( const std::string& lit : lits )
+        {
+            c.quoteHit += sv.substr( docStart, end - docStart ).find( lit ) != std::string_view::npos ? 1u : 0u;
+        }
+        if( !measured )
+        {
+            continue;
+        }
+        std::ranges::fill( docMask, 0u );
+        std::ranges::fill( bodyMask, 0u );
+        markTerms( sv.substr( docStart, bodyStart - docStart ), termIx, docMask.data() );
+        markTerms( sv.substr( bodyStart, end - bodyStart ), termIx, bodyMask.data() );
+        c.name     = termShareWithin( ev, ev.nameMask.data() + id * words );
+        c.doc      = termShareWithin( ev, docMask.data() );
+        c.body     = termShareWithin( ev, bodyMask.data() );
+        c.any      = forCoveragePct( ev, id );
+        c.termsHit = 0;
+        for( std::size_t w = 0; w < words; ++w )
+        {
+            c.termsHit += std::popcount( ev.anyMaskOf( id )[w] );
+        }
+    }
+    return out;
+}
+
+// (b) call-path agreement: directed reach within 2 hops over proven (call-kind) edges between a row and a seed row.
+inline constexpr int kCallPathMaxHops = 2;
+struct PathReach
+{
+    std::int8_t hops = -1;
+    std::string prov;
+};
+inline std::string_view provName( const Graph& g, std::size_t edge )
+{
+    static constexpr std::array<std::string_view, 7> kProv{ "res", "scip", "binding", "split", "import", "lastseg", "impl" };
+    const std::uint8_t p = edge < g.outProv.size() ? g.outProv[edge] : 0;
+    return p < kProv.size() ? kProv[p] : std::string_view( "other" );
+}
+inline bool provenEdge( const Graph& g, std::size_t edge )
+{
+    return g.outNameOnly.empty() || ( edge < g.outNameOnly.size() && edgeKindByte( g.outNameOnly[edge] ) == 0 );
+}
+// Nodes `seed` reaches (forward) or that reach it (!forward) within kCallPathMaxHops proven edges, with the first path's provenance.
+inline HashMap<NodeId, PathReach> reachWithin2( const Graph& g, const std::vector<std::uint32_t>& inOff, const std::vector<NodeId>& inSrc, NodeId seed, bool forward )
+{
+    HashMap<NodeId, PathReach> seen;
+    seen[seed] = PathReach{ 0, {} };
+    std::vector<NodeId> frontier{ seed };
+    for( int hop = 1; hop <= kCallPathMaxHops && !frontier.empty(); ++hop )
+    {
+        std::vector<NodeId> next;
+        for( const NodeId u : frontier )
+        {
+            const std::string base = seen[u].prov;
+            const auto        step = [ & ]( NodeId v, std::size_t edge )
+            {
+                if( edge == SIZE_MAX || !provenEdge( g, edge ) || seen.contains( v ) )
+                {
+                    return;
+                }
+                seen[v] = PathReach{ std::int8_t( hop ), base.empty() ? std::string( provName( g, edge ) ) : base + "+" + std::string( provName( g, edge ) ) };
+                next.push_back( v );
+            };
+            if( forward && u + 1 < g.outOff.size() )
+            {
+                for( std::uint32_t k = g.outOff[u]; k < g.outOff[ u + 1 ]; ++k ) { step( g.outTargets[k], k ); }
+            }
+            if( !forward && u + 1 < inOff.size() )
+            {
+                for( std::uint32_t k = inOff[u]; k < inOff[ u + 1 ]; ++k ) { step( inSrc[k], edgeIndex( g, inSrc[k], u ) ); }
+            }
+        }
+        frontier.swap( next );
+    }
+    return seen;
+}
+
+struct PathCols
+{
+    int         head = -1, top3 = -1, seed = 0;
+    std::string dir = "-", prov;
+};
+inline std::vector<PathCols> callPathOfRows( const std::vector<NodeId>& ids, const Graph& g, const std::vector<std::uint32_t>& inOff, const std::vector<NodeId>& inSrc,
+                                             std::size_t n )
+{
+    std::vector<NodeId> seeds;
+    for( const NodeId id : ids )
+    {
+        if( id < n && seeds.size() < 3 && std::ranges::find( seeds, id ) == seeds.end() )
+        {
+            seeds.push_back( id );
+        }
+    }
+    std::vector<std::array<HashMap<NodeId, PathReach>, 2>> reach;   // [seed][0 = the seed reaches the row (in), 1 = the row reaches the seed (out)]
+    for( const NodeId s : seeds )
+    {
+        reach.push_back( { reachWithin2( g, inOff, inSrc, s, true ), reachWithin2( g, inOff, inSrc, s, false ) } );
+    }
+    std::vector<PathCols> out( ids.size() );
+    for( std::size_t k = 0; k < ids.size(); ++k )
+    {
+        const NodeId id = ids[k];
+        if( id >= n )
+        {
+            continue;
+        }
+        PathCols& c = out[k];
+        for( std::size_t si = 0; si < seeds.size(); ++si )
+        {
+            for( int dirIx = 0; dirIx < 2; ++dirIx )
+            {
+                const auto it = reach[si][dirIx].find( id );
+                if( it == reach[si][dirIx].end() )
+                {
+                    continue;
+                }
+                const int h = it->second.hops;
+                if( si == 0 && ( c.head < 0 || h < c.head ) )
+                {
+                    c.head = h;
+                }
+                if( seeds[si] != id && ( c.top3 < 0 || h < c.top3 ) )
+                {
+                    c.top3 = h;
+                    c.seed = int( si + 1 );
+                    c.dir  = dirIx == 0 ? "in" : "out";
+                    c.prov = it->second.prov;
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// (c) the row's file among the answer's files: first-appearance place, and its share of the first 10 answer rows.
+struct FileCols
+{
+    std::size_t rank = 0;
+    double      top10Share = 0.0;
+};
+inline std::vector<FileCols> fileShareOfRows( const std::vector<std::string>& fileKey )
+{
+    std::vector<FileCols>              out( fileKey.size() );
+    HashMap<std::string_view, std::size_t> rankOf, top10;
+    const std::size_t                  firstN = std::min<std::size_t>( 10, fileKey.size() );
+    for( std::size_t k = 0; k < fileKey.size(); ++k )
+    {
+        rankOf.emplace( std::string_view( fileKey[k] ), rankOf.size() + 1 );
+        top10[ std::string_view( fileKey[k] ) ] += k < firstN ? 1u : 0u;
+    }
+    for( std::size_t k = 0; k < fileKey.size(); ++k )
+    {
+        out[k] = FileCols{ rankOf[ std::string_view( fileKey[k] ) ], firstN ? double( top10[ std::string_view( fileKey[k] ) ] ) / double( firstN ) : 0.0 };
+    }
+    return out;
+}
+
+// The 15 new columns of every row, each string tab-led (unresolved rows read empty in the per-symbol ones).
+inline std::vector<std::string> newEvidenceColumns( const std::vector<PrintedRow>& rows, const std::vector<NodeId>& ids, std::string_view task, const IngestResult& ing,
+                                                    const Graph& g, const std::vector<std::uint32_t>& inOff, const std::vector<NodeId>& inSrc )
+{
+    const std::size_t              n    = ing.symbols.size();
+    const LexTermEvidence&         ev   = state().evidence;
+    const std::vector<std::string> lits = taskQuotedLiterals( task );
+    const std::vector<CoverageCols> cov = coverageOfRows( ids, ev, lits, ing );
+    const std::vector<PathCols>    path = callPathOfRows( ids, g, inOff, inSrc, n );
+    std::vector<std::string>       fileKey( rows.size() );
+    for( std::size_t k = 0; k < rows.size(); ++k )
+    {
+        std::string_view p = attrOf( rows[k].attrs, "p" );
+        p                  = p.empty() ? rows[k].parentP : p.substr( 0, p.rfind( ':' ) == std::string_view::npos ? p.size() : p.rfind( ':' ) );
+        fileKey[k]         = ids[k] < n ? std::string( rootRelPath( ing, ing.symbols[ ids[k] ].fileId ) ) : std::string( p );
+    }
+    const std::vector<FileCols> files = fileShareOfRows( fileKey );
+    const auto                  num   = []( int v ) { return v < 0 ? std::string() : std::to_string( v ); };
+    std::vector<std::string>    out( rows.size() );
+    for( std::size_t k = 0; k < rows.size(); ++k )
+    {
+        const bool resolved = ids[k] < n;
+        const CoverageCols& c = cov[k];
+        const PathCols&     q = path[k];
+        out[k] = std::format( "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.4g}", num( c.name ), num( c.doc ), num( c.body ), num( c.any ), num( c.termsHit ),
+                              ev.maskWords > 0 ? std::to_string( ev.terms.size() ) : std::string(), lits.size(), resolved ? std::to_string( c.quoteHit ) : std::string(),
+                              resolved ? std::to_string( q.head ) : std::string(), resolved ? std::to_string( q.top3 ) : std::string(), q.seed, q.dir, q.prov,
+                              files[k].rank, files[k].top10Share );
+    }
+    return out;
+}
+
 // Append the TSV lines for `answer`. Never throws past here into the answer: every failure is one stderr line.
 inline void emitRows( std::string_view answer, std::string_view task, const IngestResult& ing, const Graph& g )
 {
@@ -294,6 +594,8 @@ inline void emitRows( std::string_view answer, std::string_view task, const Inge
     {
         std::string_view nm = attrOf( r.attrs, "n" );
         if( nm.empty() ) { nm = attrOf( r.attrs, "sym" ); }
+        const std::string nmPlain = nm.find( '&' ) == std::string_view::npos ? std::string() : filesyms_detail::unescapeXmlAttr( nm );   // &lt;file-scope&gt;
+        if( !nmPlain.empty() ) { nm = nmPlain; }
         std::string_view p    = attrOf( r.attrs, "p" );
         std::uint32_t    line = 0;
         if( const std::string_view l = attrOf( r.attrs, "l" ); !l.empty() ) { std::from_chars( l.data(), l.data() + l.size(), line ); }
@@ -402,8 +704,11 @@ inline void emitRows( std::string_view answer, std::string_view task, const Inge
     {
         out += "#qhash\tpos\ttag\tn\tp\tsrc\tvia\tsym\tkind\tline\tscore\tlex\ttier\td_anchor\td_mention\td_pathcut\td_exp\td_cochange\td_docmention"
                "\tscore_rank\tscore_ratio\tfanin\ttested\tccx\tloc\thops_head\thops_anchor\tedge_head\tsame_file\tsame_dir\trr_on\trr_lift\tpre_rank\tr"
-               "\ttest_path\tgenerated\tvendored\troute\n";
+               "\ttest_path\tgenerated\tvendored\troute"
+               "\tcov_name\tcov_doc\tcov_body\tcov_any\tterms_hit\tterms_q\tquote_lits\tquote_hit\tcp_head\tcp_top3\tcp_seed\tcp_dir\tcp_prov"
+               "\tans_file_rank\tfile_top10_share\n";
     }
+    const std::vector<std::string> extra = newEvidenceColumns( rows, ids, task, ing, g, inOff, inSrc );   // ROW-FEATURES-2
     for( std::size_t k = 0; k < rows.size(); ++k )
     {
         const PrintedRow& r  = rows[k];
@@ -417,6 +722,7 @@ inline void emitRows( std::string_view answer, std::string_view task, const Inge
             out += "-1\t\t0";
             for( int c = 0; c < 28; ++c ) { out += '\t'; }
             out += st.route;
+            out += extra[k];
             out += '\n';
             continue;
         }
@@ -451,13 +757,13 @@ inline void emitRows( std::string_view answer, std::string_view task, const Inge
                 rrLift  = ( a != st.sigsAfterRR.end() && std::size_t( a - st.sigsAfterRR.begin() ) < bi ) ? "1" : "0";
             }
         }
-        std::format_to( std::back_inserter( out ), "\t{}\t{:.6g}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        std::format_to( std::back_inserter( out ), "\t{}\t{:.6g}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}{}\n",
                         id < rankOf.size() ? rankOf[id] : 0u, top > 0.0f ? at( fin, id ) / top : 0.0f,
                         id < st.fanIn.size() ? std::to_string( st.fanIn[id] ) : std::string(), id < st.tested.size() ? std::to_string( st.tested[id] ) : std::string(),
                         s.ccx, s.loc, int( hopsHead[id] ), int( hopsAnchor[id] ), edge, head != kNoNode && ing.symbols[head].fileId == s.fileId ? 1 : 0,
                         head != kNoNode && siblift_detail::dirOf( headRel ) == siblift_detail::dirOf( rel ) ? 1 : 0, st.sigsRR ? 1 : 0, rrLift, preRank,
                         tsvClean( attrOf( r.attrs, "r" ) ), isTestPath( rel ) ? 1 : 0, isDemoOrGeneratedPath( rel ) ? 1 : 0,
-                        listeddetail::isVendoredDir( siblift_detail::dirOf( rel ) ) ? 1 : 0, st.route );
+                        listeddetail::isVendoredDir( siblift_detail::dirOf( rel ) ) ? 1 : 0, st.route, extra[k] );
     }
     if( std::fwrite( out.data(), 1, out.size(), f.file ) != out.size() || !f.close() )
     {

@@ -1267,6 +1267,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kCallPathMaxHops` | `2` | — | — |
 | `kMaxHops` | `6` | — | — |
 
 ### `src/search.h`

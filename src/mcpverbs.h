@@ -2542,6 +2542,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     }
     rw::rowfeat::stage( rw::rowfeat::Stage::Lexical, lensRank );   // ROW-FEATURE-DUMP: the CLI twin's snapshots (inert unless set)
     rw::rowfeat::tier( tierMul );
+    rw::rowfeat::evidence( mcpEvidence );
     rw::rowfeat::noteRoute( noRoute ? std::string_view() : ( rc.which == LexMode::NameExact ? std::string_view( "name-exact" ) : std::string_view( "subtoken+body" ) ),
                             rc.anchorDefs );
     rw::rowfeat::stage( rw::rowfeat::Stage::Anchor, lensRank );
