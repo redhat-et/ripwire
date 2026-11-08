@@ -118,7 +118,7 @@ public:
     std::string keyOfSymbol( const Symbol& s ) const { return jsImportKey( m_dirOfFile[ s.fileId ], s.name ); }
     std::string keyOf( const Reference& r )
     {
-        const std::string_view t   = r.memberCtor;
+        const std::string_view t   = r.memberCtor();
         const std::size_t      dot = t.find( '.' );
         std::uint32_t          dir = t.empty() ? kNoFile : m_dirOfFile[ r.fileId ];
         if( dot != std::string_view::npos )
@@ -595,7 +595,7 @@ public:
     static std::string keyOfSymbol( const Symbol& s, NodeId id ) { return jsImportKey( id, s.name ); }
     std::string keyOf( const IngestResult& ing, const Reference& r ) const
     {
-        const std::string_view t = r.memberCtor;
+        const std::string_view t = r.memberCtor();
         if( t.empty() || m_structs.empty() )
         {
             return {};
@@ -718,7 +718,7 @@ public:
             {
                 continue;   // a method registrar no call of its language reaches by name, or a fact outside its own function's definition
             }
-            const std::string to   = keys.keyOf( r ) + "#" + r.memberPath;
+            const std::string to   = keys.keyOf( r ) + "#" + r.memberPath();
             std::string&      have = m_slot[ jsImportKey( r.fromSymbol, std::to_string( r.argCount ) ) ];
             have = have.empty() || have == to ? to : std::string( kConflict );
         }
@@ -842,7 +842,7 @@ public:
                 continue;
             }
             const Reference& v = ing.references[ values[k] ];
-            if( !v.memberPath.empty() )
+            if( !v.memberPath().empty() )
             {
                 m_values.push_back( endOf( ing, values[k] ) );
             }
@@ -944,15 +944,15 @@ private:
     }
     void addFact( const Reference& r )
     {
-        const std::string to = canonType( r.memberCtor, r.fileId );
-        if( !r.composeRel.empty() && r.composeRel[0] == kValueRefSlotBodyRel )
+        const std::string to = canonType( r.memberCtor(), r.fileId );
+        if( !r.composeRel().empty() && r.composeRel()[0] == kValueRefSlotBodyRel )
         {
             // a struct body (`to` is its digest): the same tag or name with a DIFFERENT body in another file is no one type
             noteFact( m_body, r.recvVar, to );
-            noteFact( m_bodyScope, r.recvVar, "." + r.composeRel.substr( 1 ) );   // FN-SLOT S2 fix 1: where it is defined ("." = the global scope)
+            noteFact( m_bodyScope, r.recvVar, "." + r.composeRel().substr( 1 ) );   // FN-SLOT S2 fix 1: where it is defined ("." = the global scope)
             return;
         }
-        if( r.composeRel.empty() )
+        if( r.composeRel().empty() )
         {
             // `typedef struct tag NAME;`: the file's own spelling, and the repo's (agreed by every file, or a conflict)
             noteFact( m_aliasInFile, jsImportKey( r.fileId, r.recvVar ), to );
@@ -960,7 +960,7 @@ private:
         }
         else
         {
-            noteFact( m_fieldType, canonType( r.recvVar, r.fileId ) + "#" + r.composeRel, to );
+            noteFact( m_fieldType, canonType( r.recvVar, r.fileId ) + "#" + r.composeRel(), to );
         }
     }
     // A type through the aliases as file `fileId` sees them: its own typedef first, else the repo's one agreed spelling (a
@@ -1004,11 +1004,11 @@ private:
             // IX1-V2: a member call `x.F( … )` (slot_join::memberCalls, its receiver's type unread: the name tier), or a store of a
             // language that keys its own types (Go: package-qualified; no typedef aliases or field-type facts on this side)
             e.type  = r.role == RefRole::Call ? std::string() : m_keys.keyOf( r );
-            e.field = r.role == RefRole::Call ? r.calleeName : r.memberPath;
+            e.field = r.role == RefRole::Call ? r.calleeName : r.memberPath();
             return e;
         }
-        std::string_view chain = r.memberPath;
-        std::string      t     = r.memberCtor.empty() ? std::string() : unalias( canonType( r.memberCtor, r.fileId ), r.fileId );
+        std::string_view chain = r.memberPath();
+        std::string      t     = r.memberCtor().empty() ? std::string() : unalias( canonType( r.memberCtor(), r.fileId ), r.fileId );
         if( t.starts_with( kVrSlotMacroCastMark ) )
         {
             t.clear();   // FN-SLOT S2 (c): a macro / function call root no cast fact resolves: the name tier
@@ -1175,7 +1175,7 @@ public:
         return std::ranges::any_of( it->second, [ & ]( std::uint32_t k )
         {
             const Reference& r = m_ing.references[ m_values[k] ];
-            return r.fromSymbol != def && !vrIsWrapperDecorator( r.fieldName );
+            return r.fromSymbol != def && !vrIsWrapperDecorator( r.fieldName() );
         } );
     }
 
@@ -1260,7 +1260,7 @@ public:
                 for( const std::uint32_t t : it->second )
                 {
                     const Reference& tr = m_ing.references[t];
-                    if( scopeOf( tr ) == sc && ( sc == 'f' || tr.fromSymbol == v.fromSymbol ) && vrKeyMatches( tr.composeRel, v.composeRel ) )
+                    if( scopeOf( tr ) == sc && ( sc == 'f' || tr.fromSymbol == v.fromSymbol ) && vrKeyMatches( tr.composeRel(), v.composeRel() ) )
                     {
                         out.push_back( t );
                     }
@@ -1282,7 +1282,7 @@ public:
                 for( const std::uint32_t t : it->second )
                 {
                     const Reference& tr = m_ing.references[t];
-                    if( paramMatches( v.composeRel, tr ) )
+                    if( paramMatches( v.composeRel(), tr ) )
                     {
                         out.push_back( t );
                     }
@@ -1307,7 +1307,7 @@ public:
                 for( const std::uint32_t v : it->second )
                 {
                     const Reference& vr = m_ing.references[v];
-                    if( scopeOf( vr ) == sc && ( sc == 'f' || vr.fromSymbol == t.fromSymbol ) && vrKeyMatches( t.composeRel, vr.composeRel ) )
+                    if( scopeOf( vr ) == sc && ( sc == 'f' || vr.fromSymbol == t.fromSymbol ) && vrKeyMatches( t.composeRel(), vr.composeRel() ) )
                     {
                         out.push_back( v );
                     }
@@ -1322,11 +1322,11 @@ public:
             {
                 const Reference& vr  = m_ing.references[v];
                 const char       vsc = scopeOf( vr );
-                if( vsc == 'p' && vr.fromSymbol == t.fromSymbol && paramMatches( vr.composeRel, t ) )
+                if( vsc == 'p' && vr.fromSymbol == t.fromSymbol && paramMatches( vr.composeRel(), t ) )
                 {
                     out.push_back( v );
                 }
-                else if( vsc == 'a' && vr.recvVar == owner.name && paramMatches( vr.composeRel, t ) )
+                else if( vsc == 'a' && vr.recvVar == owner.name && paramMatches( vr.composeRel(), t ) )
                 {
                     const std::vector<NodeId> owners = resolveName( vr, vr.recvVar );
                     if( std::find( owners.begin(), owners.end(), t.fromSymbol ) != owners.end() )
@@ -1524,7 +1524,7 @@ private:
             const std::string_view sep   = slotPathSep( r.lang );
             const std::size_t      at    = sep.empty() ? std::string::npos : r.recvVar.rfind( sep );
             const std::string      leaf  = at == std::string::npos ? r.recvVar : r.recvVar.substr( at + sep.size() );   // resolveCallee's name
-            if( !named && r.memberPath.empty() && !( sc == 'a' && registrars.contains( leaf ) ) )
+            if( !named && r.memberPath().empty() && !( sc == 'a' && registrars.contains( leaf ) ) )
             {
                 continue;
             }
@@ -1651,7 +1651,7 @@ private:
     //   * Go: never — a method value is always `recv.M`.
     bool memberVisibleFrom( const Reference& r, const Symbol& m, VrLangFamily fam ) const
     {
-        if( r.role == RefRole::Value && r.fieldName.starts_with( '@' ) )
+        if( r.role == RefRole::Value && r.fieldName().starts_with( '@' ) )
         {
             return m.fileId == r.fileId;
         }
@@ -1955,11 +1955,11 @@ private:
         const VrLangFamily  fam = valueRefFamily( r.lang );
         if( r.role == RefRole::Value && !r.memberRoot.empty() )
         {
-            return ownedBy( r, r.memberRoot, it->second, r.memberVia );
+            return ownedBy( r, r.memberRoot, it->second, r.memberVia() );
         }
         if( valueRefFamily( r.lang ) == VrLangFamily::Rust )
         {
-            return resolveIn( r, name, r.role == RefRole::Value ? std::string_view( r.memberVia ) : std::string_view() );
+            return resolveIn( r, name, r.role == RefRole::Value ? std::string_view( r.memberVia() ) : std::string_view() );
         }
         // A C/C++ PROTOTYPE (a bodyless declaration) names the function its definition lives in: it is the target only
         // when no definition with a body is visible — a prototype in this file never hides the extern definition.
@@ -2326,8 +2326,8 @@ private:
         {
             return false;
         }
-        const std::string_view pre = r.fieldName;
-        const std::string_view suf = r.composeRel;
+        const std::string_view pre = r.fieldName();
+        const std::string_view suf = r.composeRel();
         const std::string_view n   = s.name;
         if( n.size() <= pre.size() + suf.size() || !n.starts_with( pre ) || !n.ends_with( suf ) )
         {
@@ -2598,7 +2598,7 @@ inline SlotSiteRow slotSiteOf( const IngestResult& ing, const ValueRefIndex& idx
             continue;
         }
         std::ranges::copy( idx.targetsOf( h.ref ), std::back_inserter( site.targets ) );
-        site.anyDesignated = site.anyDesignated || ing.references[h.ref].composeRel.starts_with( '.' );
+        site.anyDesignated = site.anyDesignated || ing.references[h.ref].composeRel().starts_with( '.' );
     }
     std::ranges::sort( site.targets, [ & ]( NodeId a, NodeId b )
     {
@@ -2677,9 +2677,9 @@ inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefI
         {
             for( const NodeId target : idx.targetsOf( v ) )
             {
-                if( !vrJoinStoredRow( out.rows, v, target, tr.fieldName ) )
+                if( !vrJoinStoredRow( out.rows, v, target, tr.fieldName() ) )
                 {
-                    via.add( ing, v, target, tr.fieldName );
+                    via.add( ing, v, target, tr.fieldName() );
                 }
             }
         }
@@ -2712,7 +2712,7 @@ public:
         for( std::uint32_t i = 0; i < ing.references.size(); ++i )
         {
             const Reference& r = ing.references[i];
-            if( r.role != RefRole::Value || r.calleeName != name || r.fieldName.starts_with( '@' ) )
+            if( r.role != RefRole::Value || r.calleeName != name || r.fieldName().starts_with( '@' ) )
             {
                 continue;   // a decorator row is a fact about the DEFINITION, not a use site elsewhere: the callers verb lists it
             }
