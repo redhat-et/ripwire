@@ -146,6 +146,13 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            r'budget_bytes|BYTE target|over_ceiling|runaway|docs_after_code|relevance floor|this budget left out|'
                            r'e= on a d row|d e= its last line|extent is not known|line of the definition|the name.s line|'
                            r'sc=scope|cut, recoverable|bodies shown|hops shown=#|collapse to a counted stub|'
+                           # RE-PIN 2026-11-08 (main red after #572 + #573/#577): the lego COUNT clause (kForLegoCountLegend,
+                           # count-floor) is present-only by design — verbs_for.h splices it only when the served <lego>
+                           # carries an implementors_ attribute, and the lego is narrowed to the rendered rows' files. Measured:
+                           # #572's Symbol::rankFlags pulls model.h rows into this query's wide head, where MEM-REF-SHRINK's
+                           # RefColdFields renders implementors="2" implementors_shown="1"; at N<=3000 those rows are past
+                           # the cut, the lego narrows away and the clause is rightly absent. Its two segments, below.
+                           r'implementors_shown=K only K impl rows|implementors_floor=# an extends clause|'
                            # the <c> row readings ride only with a row that carries them: a spent target's hops cut marker
                            # leaves none (via="name" since forbudget-soft, attrib-multidef's prov="split" since train 28)
                            r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false|'
