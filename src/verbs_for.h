@@ -15,6 +15,7 @@
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
+#include "forncunion.h"   // NC-UNION: a name-exact answer that scored nothing and printed no body gets the plain ranker's rows, before </ctx>
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -3108,8 +3109,38 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
     return forRankShapingFlags( cfg ) + ( cfg.packTopN > 0 ? " --pack-top-n=" + std::to_string( cfg.packTopN ) : std::string() );
 }
 
+std::optional<int> runForLens( const MainDispatch& d );   // NC-UNION's plain pass (defined below)
+
+// NC-UNION (forncunion.h): the plain ranker's rows and tail pointers the committed answer does not print, or "" — when the committed
+// answer prints a definition body, or the plain pass could not be run and read back whole (nothing is appended then: the committed
+// answer stands alone, as it would with RIPWIRE_NO_NC_UNION=1). The plain pass is this call with --no-route, run once, into a buffer.
+inline std::string forNcUnionWords( const MainDispatch& d, std::string_view committed )
+{
+    if( rw::ncUnionAnswerPrintsBody( committed ) )
+    {
+        return {};
+    }
+    rw::Config       plainCfg = d.cfg;
+    rw::RedactCounts plainRedact;   // the plain pass's own tally: the committed answer's redactions are reported once
+    plainCfg.noRoute = true;
+    const MainDispatch plain { .cfg = plainCfg, .ing = d.ing, .g = d.g, .root = d.root, .multiRoot = d.multiRoot, .ws = d.ws, .fanIn = d.fanIn,
+                               .fanInPtr = d.fanInPtr, .qmetrics = d.qmetrics, .ampPtr = d.ampPtr, .cboPtr = d.cboPtr, .testedPtr = d.testedPtr,
+                               .lcom4Ptr = d.lcom4Ptr, .impurePtr = d.impurePtr, .forChurn = d.forChurn, .redactCounts = plainRedact,
+                               .redactPtr = d.redactPtr != nullptr ? &plainRedact : nullptr, .notesPtr = d.notesPtr, .notesDegraded = d.notesDegraded,
+                               .grepPhases = d.grepPhases, .valueUses = d.valueUses };
+    StdoutCapture                       capture( true );
+    const std::optional<int>            rc  = runForLens( plain );
+    const std::optional<StdoutCaptured> cap = capture.finish();
+    if( !rc || *rc != 0 || !cap || cap->failed || !cap->restored )
+    {
+        return {};
+    }
+    return rw::renderNcUnionBlock( committed, cap->bytes, d.cfg.legend == "compact" );
+}
+
 // The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
-inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+// `ncUnion`: the root's pricing when NC-UNION's gate is open for this call (the capture was taken for it too), else nullptr.
+inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture, const rw::NcUnionPricing* ncUnion = nullptr )
 {
     if( !capture.wanted() )
     {
@@ -3117,34 +3148,42 @@ inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
     }
     const rw::Config&                      cfg = d.cfg;
     const std::optional<StdoutCaptured>    cap = capture.finish();
+    const bool                             symsWanted = forFileSymsWanted( d );
     if( cap && !cap->restored )
     {
         rw::emitTo( stderr, "ripwire: --for: could not restore stdout after the <syms> capture — the answer so far was written to the original stdout, the rest is lost\n" );
         return 1;
     }
-    if( !cap )
+    if( !cap && symsWanted )
     {
         rw::emitTo( stderr, "ripwire: --for: could not buffer the answer's bytes — the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
-    else if( cap->failed )
+    else if( cap && cap->failed && symsWanted )
     {
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const bool        whole = cap && !cap->failed;
-    const std::string syms  = rw::renderForFileSyms(
+    const std::string syms  = !symsWanted ? std::string() : rw::renderForFileSyms(
         d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole } );
-    const std::size_t at = cap ? forSymsInsertAt( cap->bytes, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
-    if( cap )
+    if( !cap )
     {
-        std::fwrite( cap->bytes.data(), 1, at, stdout );
+        std::fwrite( syms.data(), 1, syms.size(), stdout );
+        return 0;
     }
-    std::fwrite( syms.data(), 1, syms.size(), stdout );
-    if( cap )
+    std::string answer = cap->bytes;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    answer.insert( forSymsInsertAt( answer, cfg.withGraph ), syms );
+    if( ncUnion != nullptr && whole )
     {
-        std::fwrite( cap->bytes.data() + at, 1, cap->bytes.size() - at, stdout );
+        const std::string words = forNcUnionWords( d, answer );   // read off the whole committed answer, <syms> included
+        if( !words.empty() )
+        {
+            rw::repriceNcUnionRoot( answer, *ncUnion, words.size() );
+            answer.insert( forSymsInsertAt( answer, cfg.withGraph ), words );   // after <syms>, in front of the <graph> block
+        }
     }
-    return cap && cap->failed ? 1 : 0;
+    std::fwrite( answer.data(), 1, answer.size(), stdout );
+    return cap->failed ? 1 : 0;
 }
 
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
@@ -4969,7 +5008,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         headerStr                            = std::move( pricedHeader.header );
         const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
 
-        StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
+        // NC-UNION (forncunion.h): the gate, decided once from the router's tag and the body posture; the answer's bytes are then
+        // captured for it too, and the root's pricing is kept to re-price est_tokens= for the appended block.
+        const bool ncUnionArmed = !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && cfg.tokenBudget == 0 && cfg.maxTokens == 0
+                               && rw::forNcUnionOn() && rw::ncUnionRouteGate( lr.routeTag, autoAttr );
+        const rw::NcUnionPricing ncUnionPricing { .markupBytes = headerStr.size() + rootFinish.nonHeaderMarkupBytes, .bodyTokens = rootFinish.bodyTokens };
+        StdoutCapture forAnswerBytes( forFileSymsWanted( d ) || ncUnionArmed );   // K-WRONGSYM / NC-UNION: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         // R2-AF (round 2, S4): first rows inside the root, right after the legend — see forHdrRows above.
         // The SAME string every sum above charged (rendered once, beside forHdrRows) — "" when there is no row.
@@ -5128,7 +5172,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
-        const int answerRc = appendForFileSyms( d, forAnswerBytes );
+        const int answerRc = appendForFileSyms( d, forAnswerBytes, ncUnionArmed ? &ncUnionPricing : nullptr );   // NC-UNION: <words> after <syms>
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
