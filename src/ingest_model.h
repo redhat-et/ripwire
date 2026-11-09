@@ -424,6 +424,13 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.internalLinkage = ( d.internalLinkage != 0 ) ? 1 : 0;   // C/C++ anonymous-namespace or namespace-scope `static` def (model.h)
         s.scopeRootsStd   = ( d.scopeRootsStd   != 0 ) ? 1 : 0;   // #150: this def's full enclosing-namespace chain roots at std (model.h)
         s.rankFlags       = std::uint8_t( d.rankFlags & 0x0Fu );  // DOCS-UNITS-FIX: kRankFlag* (model.h), set by the doc post-pass
+        // RANK-PROTO: a schema definition (.proto: langfacts.h generatedSchema) is no lexical document. --for reaches it through
+        // the generated-name rung, --defs/--whereis/--expand and a file-qualified ask, never by competing with code for slots or
+        // shifting the code's IDF. Set here, not at the parse, because the cache record never holds rankFlags (ingest_cache.h).
+        if( langFacts( d.lang ).generatedSchema )
+        {
+            s.rankFlags |= kRankFlagNotLexRanked;
+        }
         s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
         s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
         s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)

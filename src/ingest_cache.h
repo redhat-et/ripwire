@@ -371,10 +371,12 @@ constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 303;          // bump on any grammar/.scm/extraction change
-                                                      // 303 = 2026-11-08 (lane ts-const-defs, PLACEHOLDER: the train renumbers; rich 304; test/tsshapecheck.sh §8):
+constexpr std::uint32_t kParserVer    = 305;          // bump on any grammar/.scm/extraction change
+                                                      // 305 = 2026-11-09 (lane ts-const-defs, PLACEHOLDER: the train renumbers; above main's 303; rich 306; test/tsshapecheck.sh §8):
                                                       //   a TS/JS module-level const/let/var with a literal value is a t="var" def case-blind, and an exported
                                                       //   destructure binds each name. kCacheVersion stays 50: no record changes shape.
+                                                      // 303 = 2026-11-06 (lane proto-index, PLACEHOLDER: the train renumbers; above main's 301 and open #538's 302;
+                                                      //   rich file tag 304): .proto files are indexed (Lang::Proto, queries/proto/tags.scm). kCacheVersion stays 49.
                                                       // 301 = 2026-11-04 (#478 gap 2, PLACEHOLDER: the train renumbers; above main's 299/300, rich file tag 302;
                                                       //   test/pyimportprecisecheck.sh): `import a.b as c` records the Include target `a.b`, not the aliased_import span
                                                       //   `a.b as c` no resolver could find. kCacheVersion stays 48: no record changes shape.
