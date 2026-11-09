@@ -31,10 +31,12 @@
 #include "filter.h"     // isTestSymbol
 #include "graph.h"      // langCompatible
 #include "hopbody.h"    // insertOpenTagAttrs — the one open-tag attribute splice
+#include "langfacts.h"  // LangFacts::literalConstDefs — the languages whose literal-valued module bindings are defs case-blind
 #include "lexical.h"    // isRouteStopword
 #include "model.h"
 #include "serialize.h"  // kForLensDefaultTopN, kForDocExcerptRankCount, packBodies
 #include "taskroute.h"  // hasExplanatoryCue — the explanatory cues, word-bounded (the router's own reading)
+#include "infra/namesplit.h"  // isScreamingSnakeName — the r3 q10 convention the index keeps case-blind before TS-CONST-DEFS
 #include "infra/sortutil.h"
 
 #include <algorithm>
@@ -101,6 +103,52 @@ inline std::vector<std::string> ownerQuestionWords( std::string_view task )
     std::sort( words.begin(), words.end() );
     words.erase( std::unique( words.begin(), words.end() ), words.end() );
     return words;
+}
+
+// TS-CONST-DEFS V1c (reports/s0-ts-const-variants.md; test/tsshapecheck.sh §9): a TS/JS module binding with a literal value
+// is a t="var" def whatever its case (ingest_names.h jsModuleBindingKept), so --defs, --at, --expand and the tail's sym= find
+// `versionMajorMinor`. In the RANKED --for rows such a def competes with the functions a question is about, and measured on
+// microsoft/TypeScript a const that shares one word with the question (`versionRegExp` for a question about `--version`,
+// `notImplementedResolver` for one about a resolver) took the rank slot of the row that answered it. So a non-SCREAMING literal
+// binding keeps its full score only when the question NAMES it: every subtoken of its name (camel/snake/digit split,
+// case-folded, lexical.h subtokens) is a subtoken of the question (its words and the subtokens of its identifiers, the same
+// split). Any other one is scored kUnnamedLiteralConstMul of its BM25, folded into the tier multipliers so every ranker and
+// both --for dialects (verbs_for.h computeLensRanking, mcpverbs.h forTaskText) read one decision: it stays positive (the tail,
+// the file page and total= still count it) and stops taking a head row. A name with no subtoken of two bytes or more is never
+// named. SCREAMING_SNAKE consts keep the score they had before TS-CONST-DEFS (r3 q10 admitted them in every language).
+inline constexpr float kUnnamedLiteralConstMul = 1.0f / 1024.0f;
+
+// Is `s` a literal module binding the question does not name? `questionToks` is subtokens( task ), sorted and unique.
+inline bool isUnnamedLiteralConst( const Symbol& s, const std::vector<std::string>& questionToks, std::vector<std::string>& nameToks )
+{
+    if( s.kind != SymKind::Var || !langFacts( s.lang ).literalConstDefs || namesplit::isScreamingSnakeName( s.name ) )
+    {
+        return false;
+    }
+    nameToks.clear();
+    subtokens( s.name, nameToks );
+    const auto named = [ & ]( const std::string& t ) { return std::binary_search( questionToks.begin(), questionToks.end(), t ); };
+    return nameToks.empty() || !std::ranges::all_of( nameToks, named );
+}
+
+// The --for tier multipliers: the path/evidence tiers (filter.h rankTierSymbolMultipliersShaped) with the rule above folded in.
+// The ONE call both --for dialects rank with, so the CLI lens and the MCP `for` twin price a literal const the same way.
+inline std::vector<float> forTierMultipliers( const IngestResult& ing, std::string_view task, bool demoteDocTier )
+{
+    std::vector<float>       mul = rankTierSymbolMultipliersShaped( ing, demoteDocTier );
+    std::vector<std::string> questionToks;
+    subtokens( task, questionToks );
+    std::sort( questionToks.begin(), questionToks.end() );
+    questionToks.erase( std::unique( questionToks.begin(), questionToks.end() ), questionToks.end() );
+    std::vector<std::string> nameToks;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( isUnnamedLiteralConst( ing.symbols[i], questionToks, nameToks ) )
+        {
+            mul[i] *= kUnnamedLiteralConstMul;
+        }
+    }
+    return mul;
 }
 
 // One owner of the question: a ranked row of the pool, its 1-based rank, the folded word its name equals.

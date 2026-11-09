@@ -1967,26 +1967,8 @@ inline std::string_view testMacroTitleOf( TSNode titleNode, std::string_view src
     return raw;
 }
 
-// r3 q10 (bench/headtohead/r3-headroom-2026-08-03 REPORT.md §(v) item 1): SCREAMING_SNAKE — an
-// ALL-CAPS identifier of ≥2 chars ([A-Z][A-Z0-9_]+), the cross-language naming convention for a
-// module-level settings/config constant. The ≥2 floor drops single-letter names (a top-level `X = …`
-// is a scratch binding, not a settings table). Pure ASCII on purpose: the convention IS ASCII.
-inline bool isScreamingSnakeName( std::string_view name ) noexcept
-{
-    if( name.size() < 2 || name[0] < 'A' || name[0] > 'Z' )
-    {
-        return false;
-    }
-    for( const char c : name )
-    {
-        const bool ok = ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_';
-        if( !ok )
-        {
-            return false;
-        }
-    }
-    return true;
-}
+// r3 q10 SCREAMING_SNAKE: the predicate lives in infra/namesplit.h (the --for ranking reads it too, forowner.h).
+using namesplit::isScreamingSnakeName;
 
 // Which languages' @definition.constant captures are gated on SCREAMING_SNAKE. These grammars' new
 // constant patterns (queries/*/tags.scm, r3 q10) structurally capture EVERY module-level binding of the

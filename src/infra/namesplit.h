@@ -40,6 +40,27 @@ inline bool isIdentChar( char c ) noexcept
 // ...and the same minus the digits: what may START an identifier.
 inline bool isIdentStart( char c ) noexcept { return isIdentChar( c ) && !( c >= '0' && c <= '9' ); }
 
+// r3 q10 (bench/headtohead/r3-headroom-2026-08-03 REPORT.md §(v) item 1): SCREAMING_SNAKE — an
+// ALL-CAPS identifier of ≥2 chars ([A-Z][A-Z0-9_]+), the cross-language naming convention for a
+// module-level settings/config constant. The ≥2 floor drops single-letter names (a top-level `X = …`
+// is a scratch binding, not a settings table). Pure ASCII on purpose: the convention IS ASCII.
+inline bool isScreamingSnakeName( std::string_view name ) noexcept
+{
+    if( name.size() < 2 || name[0] < 'A' || name[0] > 'Z' )
+    {
+        return false;
+    }
+    for( const char c : name )
+    {
+        const bool ok = ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_';
+        if( !ok )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The ONE "is this word spelled like an identifier" test: an interior underscore (snake_case, SCREAMING_CASE —
 // an '_' past the first byte with at least one byte after it) or a lower-to-upper step (camelCase, PascalCase
 // compounds). Plain English words fail both, which is what lets a caller treat a match as the writer's intent to

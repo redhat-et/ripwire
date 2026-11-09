@@ -169,7 +169,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // §P4 tier de-prioritization (filter.h): fixtures / present/ decks / generated captures score down,
     // folded INTO BM25 scoring (pruning-bound-safe) and BEFORE the B8 mention anchor — a fixture the task
     // literally NAMES is still lifted near the top. Plus, when a shape fired, the document tier.
-    const std::vector<float> tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
+    const std::vector<float> tierMul = forTierMultipliers( ing, task, shape.fires() );
     // Change logs and translations go LAST in the doc-mention lift below (filter.h docNoiseSymbolMultipliers), unless
     // the task asks about what those files hold. BM25 is untouched. Routed path only, like the shape.
     const std::vector<float> docNoiseMul = routeOn ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};

@@ -291,6 +291,37 @@ printf '%s' "$AT" | grep -q 'sym="countOptions"' \
     && ok "--at on a function-local const's line resolves to its function, not to the local" \
     || no "--at=options.ts:65 does not resolve to countOptions: $( printf '%s' "$AT" | tail -c 300 )"
 
+# ── 9) TS-CONST-DEFS V1c: a literal const takes a ranked --for row only when the question names it (test/tsconstrank/) ──
+# §8 made every literal module binding a def; measured on microsoft/TypeScript the new rows then took the rank slots of the rows that
+# answered (`versionRegExp` pushed printVersion's lead out on "--version", `notImplementedResolver` pushed createResolver out of the
+# 40 on a resolver question). The rule (forowner.h forTierMultipliers): a non-SCREAMING literal binding keeps its score only when
+# every subtoken of its name is a subtoken of the question (its words and its identifiers' subtokens); otherwise it ranks after
+# every row the rule leaves alone, and stays a def (--defs). Red when the fold is off, when one shared word is enough (any_of), when
+# every const is demoted, or when SCREAMING_SNAKE loses its exemption.
+CR="$ROOT/test/tsconstrank"
+rankOf(){ printf '%s' "$1" | grep -oE "<d [^>]*>" | grep " n=\"$2\"" | grep -oE ' r="[0-9]+"' | head -1 | grep -oE '[0-9]+'; }
+forCR(){ "$BIN" "$CR" --no-cache --for="$1" 2>/dev/null; }
+before(){   # before OUT A B WHY: row A ranks above row B
+    local a b; a="$( rankOf "$1" "$2" )"; b="$( rankOf "$1" "$3" )"
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "$4 ($2 r=$a above $3 r=$b)" || no "$4: $2 r=[${a}] is not above $3 r=[${b}]"
+}
+Q1="$( forCR 'how is the version printed?' )"
+before "$Q1" parseSemver versionRegExp "a const sharing one question word ranks after a function that only mentions it"
+before "$Q1" formatBanner versionRegExp "a const sharing one question word ranks after a body-only match"
+before "$Q1" version parseSemver "a const the question names keeps its row"
+before "$Q1" VERSION_PATTERN parseSemver "a SCREAMING_SNAKE const keeps the score it had before TS-CONST-DEFS"
+Q2="$( forCR 'where is versionRegExp matched?' )"
+[ "$( rankOf "$Q2" versionRegExp )" = 1 ] && ok "an identifier in the question names the const (its subtokens are question words): r=1" \
+                                       || no "versionRegExp named by identifier is r=[$( rankOf "$Q2" versionRegExp )], want 1"
+Q3="$( forCR 'what does the version reg exp match?' )"
+[ "$( rankOf "$Q3" versionRegExp )" = 1 ] && ok "plain question words that cover every name subtoken name the const: r=1" \
+                                       || no "versionRegExp named by plain words is r=[$( rankOf "$Q3" versionRegExp )], want 1"
+Q4="$( forCR 'how does the resolver resolve a name?' )"
+before "$Q4" createResolver notImplementedResolver "a resolver question ranks the resolver function above the unnamed resolver const"
+before "$Q4" formatBanner notImplementedResolver "the unnamed const ranks after every row the rule leaves alone"
+got="$( "$BIN" "$CR" --no-cache --defs=versionRegExp 2>/dev/null | grep -oE '<d n="versionRegExp" t="[a-z]+"' )"
+[ "$got" = '<d n="versionRegExp" t="var"' ] && ok "the demoted const is still a t=var def (--defs)" || no "--defs=versionRegExp got [$got]"
+
 # ── 6) determinism + well-formedness on this fixture ──────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache --top-k=500 >"$TMP/map2" 2>/dev/null
 if cmp -s "$TMP/map" "$TMP/map2"; then ok "two cold runs byte-identical"; else no "cold runs DIFFER on the TS shape fixture"; fi
