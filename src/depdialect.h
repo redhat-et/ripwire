@@ -60,7 +60,7 @@ inline DepDialect dependencyDialect( Lang lang ) noexcept
         case Lang::Clojure:                             // no namespace/import extraction yet
         case Lang::Dart:                                // not dependency-capable (dependencyCapable's DART paragraph)
         case Lang::GDScript:                            // not dependency-capable (the same paragraph)
-        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
+        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Proto: case Lang::Markdown: case Lang::Unknown:
                                                         return DepDialect::None;
     }
     return DepDialect::None;   // a byte past the enum

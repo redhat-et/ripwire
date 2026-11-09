@@ -13,7 +13,7 @@ invocations at the default value and at a probe value. The tunable binary is byt
 to production at defaults; that control is what makes these numbers mean anything.
 
 **The census is a dated snapshot.** The first two columns below and the paragraph after them are
-the counts snapshot taken 2026-11-08 (`docs/counts.tsv`), so two open changes that each add a cap do not
+the counts snapshot taken 2026-11-09 (`docs/counts.tsv`), so two open changes that each add a cap do not
 both rewrite them; the per-cap tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
