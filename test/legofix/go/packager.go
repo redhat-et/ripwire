@@ -31,6 +31,17 @@ type SignedPackager interface {
 	Packager
 }
 
+// ReadSignedPackager embeds Packager AND declares its own method: mixed embed + own method.
+type ReadSignedPackager interface {
+	Packager
+	Verify(sig []byte) bool
+}
+
+// Number is a Go 1.18 type-set constraint: no methods, only type terms.
+type Number interface {
+	~int | ~float64
+}
+
 // Walker's one method takes an interface LITERAL: Pos belongs to the parameter's type, not to Walker.
 type Walker interface {
 	Walk(n interface{ Pos() int }) bool

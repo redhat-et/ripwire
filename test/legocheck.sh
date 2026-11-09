@@ -274,10 +274,12 @@ fi
 # body — never the `type Packager interface {` line, never an embedded interface's name, never a method of an interface
 # literal written in a parameter type (scoped to the named interface by the scope walker, serialize.h legoContractMembers).
 # Rows are counted by their CLOSING tag: the compact legend spells "<m>" in prose, never "</m>".
-"$BIN" "$CORPUS" --no-cache --lego=Packager       2>/dev/null > "$TMP/lego_go_packager"
-"$BIN" "$CORPUS" --no-cache --lego=SignedPackager 2>/dev/null > "$TMP/lego_go_signed"
-"$BIN" "$CORPUS" --no-cache --lego=Walker         2>/dev/null > "$TMP/lego_go_walker"
-"$BIN" "$CORPUS" --no-cache --lego=Deb            2>/dev/null > "$TMP/lego_go_deb"
+"$BIN" "$CORPUS" --no-cache --lego=Packager           2>/dev/null > "$TMP/lego_go_packager"
+"$BIN" "$CORPUS" --no-cache --lego=SignedPackager     2>/dev/null > "$TMP/lego_go_signed"
+"$BIN" "$CORPUS" --no-cache --lego=ReadSignedPackager 2>/dev/null > "$TMP/lego_go_readsigned"
+"$BIN" "$CORPUS" --no-cache --lego=Number             2>/dev/null > "$TMP/lego_go_number"
+"$BIN" "$CORPUS" --no-cache --lego=Walker             2>/dev/null > "$TMP/lego_go_walker"
+"$BIN" "$CORPUS" --no-cache --lego=Deb                2>/dev/null > "$TMP/lego_go_deb"
 GOP="$( cat "$TMP/lego_go_packager" )"
 if printf '%s' "$GOP" | grep -q '<iface n="Packager" p="go/packager.go" defs="1"'; then
     ok "--lego=Packager (Go): iface row present, no caveat between p= and defs="
@@ -294,6 +296,9 @@ if printf '%s' "$GOP" | grep -q '<iface n="Packager" p="go/packager.go" defs="1"
     printf '%s' "$GOP" | grep -Eq '<m[^>]*>[^<]*(interface|type Packager)' \
         && no "--lego=Packager (Go): the declaration line was passed off as a method: $GOP" \
         || ok "--lego=Packager (Go): no <m> carries the interface's own declaration line"
+    printf '%s' "$GOP" | grep -q 'unread_elems=' \
+        && no "--lego=Packager (Go): unread_elems should be absent (all body elements are listed methods): $GOP" \
+        || ok "--lego=Packager (Go): no unread_elems (every body element is a listed method)"
 else
     no "--lego=Packager (Go): expected the iface row without a caveat, got: $GOP"
 fi
@@ -302,8 +307,36 @@ if printf '%s' "$GOS" | grep -q '<iface n="SignedPackager" p="go/packager.go" de
     printf '%s' "$GOS" | grep -q '</m>' \
         && no "--lego=SignedPackager (Go, embed only): an embedded interface was passed off as a method: $GOS" \
         || ok "--lego=SignedPackager (Go, embed only): no <m> row (the embedded Packager is not a method of its own)"
+    printf '%s' "$GOS" | grep -q 'unread_elems="1"' \
+        && ok "--lego=SignedPackager (Go): unread_elems=1 (the embedded Packager is disclosed)" \
+        || no "--lego=SignedPackager (Go): expected unread_elems=\"1\" for the embedded Packager, got: $GOS"
 else
     no "--lego=SignedPackager (Go): expected the iface row without a caveat, got: $GOS"
+fi
+GORS="$( cat "$TMP/lego_go_readsigned" )"
+if printf '%s' "$GORS" | grep -q '<iface n="ReadSignedPackager" p="go/packager.go" defs="1"'; then
+    NRSOM="$( printf '%s' "$GORS" | grep -o '</m>' | wc -l | tr -d ' ' )"
+    if [ "$NRSOM" = 1 ] && printf '%s' "$GORS" | grep -q '<m>Verify('; then
+        ok "--lego=ReadSignedPackager (Go, mixed): one <m> (Verify), the embed is not a method"
+    else
+        no "--lego=ReadSignedPackager (Go, mixed): expected 1 <m> (Verify), got $NRSOM: $GORS"
+    fi
+    printf '%s' "$GORS" | grep -q 'unread_elems="1"' \
+        && ok "--lego=ReadSignedPackager (Go): unread_elems=1 (the embedded Packager is disclosed)" \
+        || no "--lego=ReadSignedPackager (Go): expected unread_elems=\"1\", got: $GORS"
+else
+    no "--lego=ReadSignedPackager (Go): expected the iface row without a caveat, got: $GORS"
+fi
+GONU="$( cat "$TMP/lego_go_number" )"
+if printf '%s' "$GONU" | grep -q '<iface n="Number" p="go/packager.go" defs="1"'; then
+    printf '%s' "$GONU" | grep -q '</m>' \
+        && no "--lego=Number (Go, type-set): a type term was passed off as a method: $GONU" \
+        || ok "--lego=Number (Go, type-set): no <m> row (type terms are not methods)"
+    printf '%s' "$GONU" | grep -q 'unread_elems="1"' \
+        && ok "--lego=Number (Go): unread_elems=1 (the type-set constraint is disclosed)" \
+        || no "--lego=Number (Go): expected unread_elems=\"1\", got: $GONU"
+else
+    no "--lego=Number (Go): expected the iface row without a caveat, got: $GONU"
 fi
 GOW="$( cat "$TMP/lego_go_walker" )"
 NGOW="$( printf '%s' "$GOW" | grep -o '</m>' | wc -l | tr -d ' ' )"
@@ -318,6 +351,9 @@ fi
 printf '%s' "$GOW" | grep -q 'Pos()' \
     && no "--lego=Walker (Go): Pos, a method of the parameter's interface literal, was listed as Walker's: $GOW" \
     || ok "--lego=Walker (Go): Pos (the parameter's interface literal) is not in Walker's contract"
+printf '%s' "$GOW" | grep -q 'unread_elems=' \
+    && no "--lego=Walker (Go): unread_elems should be absent (the interface literal is inside Walk's signature span): $GOW" \
+    || ok "--lego=Walker (Go): no unread_elems (the interface literal is inside Walk's signature span)"
 grep -q '<iface n="Deb" p="go/packager.go" methods="0" caveat="not-extracted-for-lang"' "$TMP/lego_go_deb" \
     && ok "--lego=Deb (Go struct): keeps the caveat — its methods are declared by receiver, outside its body" \
     || no "--lego=Deb (Go struct): expected methods=\"0\" caveat=\"not-extracted-for-lang\", got: $( cat "$TMP/lego_go_deb" )"
@@ -325,9 +361,9 @@ grep -q '<iface n="Vehicle" p="vehicle.rs" methods="0" caveat="not-extracted-for
     && ok "--lego=Vehicle (Rust trait): still carries the caveat (its members are not captured as methods)" \
     || no "--lego=Vehicle (Rust trait): expected the caveat to stay, got: $VEH"
 "$BIN" "$CORPUS" --no-cache --legend=full --lego=SignedPackager 2>/dev/null \
-    | grep -q "a Go interface's embedded interfaces are not read, so its <m> rows are the methods its own body declares" \
-    && ok "--lego legend states the floor: a Go interface's embedded interfaces are not read" \
-    || no "--lego legend does not state the embedded-interface floor for Go"
+    | grep -q "a Go interface's embedded interfaces and type-set terms" \
+    && ok "--lego legend states the floor: a Go interface's embedded interfaces and type-set terms are not read" \
+    || no "--lego legend does not state the embedded-interface and type-set-term floor for Go"
 
 # ── 9) MCP `lego` verb parity with --lego=Shape ───────────────────────────────
 if printf '%s' "$SHP" | grep -q '<iface n="Shape"'; then

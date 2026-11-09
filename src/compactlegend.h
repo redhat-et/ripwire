@@ -738,6 +738,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // span holds the full legend comment between <ctx> and its first child, and kLegoLegend spells caveat="…" in it, so
     // a head read fired on every --lego answer (compactlegendcheck (D7) caught it on --lego=Point).
     { "caveat",            "methods=0 caveat=not-extracted-for-lang: no <m> contract read for this language", true, "iface" },
+    { "unread_elems",      "unread_elems=N: N embedded interfaces or type-set terms the <m> contract does not list", true, "iface" },
     { "next",              "next=: the one pasteable follow-up", true },
     // L8 (train 29): a capped callers page's next= is the next page, and the uses verb rides beside it here (present-only)
     { "uses_next",         "uses_next=: the uses verb on this selector (the call sites), beside a capped callers page's next=", true },

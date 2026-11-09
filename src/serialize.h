@@ -9442,6 +9442,106 @@ inline std::vector<const Symbol*> legoContractMembers( const IngestResult& ing, 
     return own;
 }
 
+// Count the interface body elements that legoContractMembers does NOT list: embedded interfaces and type-set terms
+// (e.g. `~int | ~float64`).  These are non-blank, non-comment byte regions between the opening `{` and closing `}`
+// that no listed member's [sigStartByte, sigEndByte) covers.  Returns 0 when every body element is listed.
+// The source must already be loaded (`src`).  `bodyOpen` is the byte offset of `{` in the source.
+inline int legoUnreadElems( const char* data, std::size_t srcSize,
+                            const Symbol& type,
+                            const std::vector<const Symbol*>& members )
+{
+    if( srcSize == 0 || type.endByte <= type.sigStartByte )
+    {
+        return 0;
+    }
+    // Locate the opening brace inside the type's span.
+    std::size_t bodyOpen = type.sigEndByte;
+    while( bodyOpen < type.endByte && bodyOpen < srcSize && data[bodyOpen] != '{' )
+    {
+        ++bodyOpen;
+    }
+    if( bodyOpen >= type.endByte || bodyOpen >= srcSize )
+    {
+        return 0;
+    }
+    // The body is (bodyOpen, bodyClose) exclusive of the braces.
+    const std::size_t bodyStart = bodyOpen + 1;
+    const std::size_t bodyEnd   = ( type.endByte <= srcSize ? type.endByte : srcSize );
+    if( bodyStart >= bodyEnd )
+    {
+        return 0;
+    }
+    // Mark every byte covered by a listed member's signature span.
+    std::vector<char> covered( bodyEnd - bodyStart, 0 );
+    for( const Symbol* m : members )
+    {
+        const std::size_t lo = m->sigStartByte < bodyStart ? 0 : m->sigStartByte - bodyStart;
+        const std::size_t hi = m->sigEndByte   > bodyEnd   ? covered.size() : m->sigEndByte - bodyStart;
+        for( std::size_t i = lo; i < hi; ++i )
+        {
+            covered[i] = 1;
+        }
+    }
+    // Walk the uncovered bytes; count distinct non-blank, non-comment elements.
+    // An element is a run of non-whitespace text on one line (or separated by `;`) not inside a // or /* */ comment.
+    int count = 0;
+    bool inLineComment  = false;
+    bool inBlockComment = false;
+    bool hasContent     = false;
+    for( std::size_t i = 0; i < covered.size(); ++i )
+    {
+        const char c = data[bodyStart + i];
+        // Handle newlines: they end a line comment and finalise an element.
+        if( c == '\n' || c == '\r' )
+        {
+            inLineComment = false;
+            if( hasContent ) { ++count; hasContent = false; }
+            continue;
+        }
+        if( covered[i] )
+        {
+            // Inside a listed member's span — skip without counting.
+            continue;
+        }
+        if( inBlockComment )
+        {
+            if( c == '*' && i + 1 < covered.size() && data[bodyStart + i + 1] == '/' )
+            {
+                inBlockComment = false;
+                ++i;   // skip the '/'
+            }
+            continue;
+        }
+        if( inLineComment )
+        {
+            continue;
+        }
+        if( c == '/' && i + 1 < covered.size() )
+        {
+            const char c2 = data[bodyStart + i + 1];
+            if( c2 == '/' ) { inLineComment = true;  ++i; continue; }
+            if( c2 == '*' ) { inBlockComment = true; ++i; continue; }
+        }
+        if( c == '}' )
+        {
+            // The closing brace of the interface — stop.
+            if( hasContent ) { ++count; hasContent = false; }
+            break;
+        }
+        if( c == ';' )
+        {
+            if( hasContent ) { ++count; hasContent = false; }
+            continue;
+        }
+        if( c != ' ' && c != '\t' )
+        {
+            hasContent = true;
+        }
+    }
+    if( hasContent ) { ++count; }
+    return count;
+}
+
 // --lego's ROLE order over the tower (graph.h applyNameTower), view-local: the answer to "--lego=NAME" is a TYPE with
 // something to show, so every type kind (Class/Struct/Interface/named type) shares ONE rung, and on it the keys are,
 // in order: at least one implementor (the <impl> rows); a method contract that is extracted (legoMethodContractSound —
@@ -9978,15 +10078,8 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             hdr += " implementors_floor=\"1\"";
             hdr += rw::nextAttrXml( nextFlag( "--uses=", isym.name ), "floor_next" );
         }
-        hdr += ">";
-        w.write( "<iface n=\"" );  w.write( escapeXml( isym.name, esc ) );
-        if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( pathRel( isym.fileId ), esc ) ); }
-        w.write( caveatAttr );
-        w.write( hdr );
-
-        // contract: the interface's own method signatures (what a brick must implement) — only where the
-        // language captures them soundly (see legoMethodContractSound). Read the iface's file once; emit
-        // up to a few method sigs whose span sits inside the class span (or ALL of them for --lego=TYPE).
+        // Load the file and compute the member list BEFORE writing <iface> so unread_elems can ride on it.
+        std::vector<const Symbol*> contractMembers;
         if( isContractExtracted )
         {
             if( isym.fileId != loadedFile )
@@ -10004,9 +10097,27 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                     std::fclose( in );
                 }
             }
+            contractMembers = legoContractMembers( ing, isym, src.size() );
+            const int unread = legoUnreadElems( src.data(), src.size(), isym, contractMembers );
+            if( unread > 0 )
+            {
+                hdr += " unread_elems=\"" + std::to_string( unread ) + "\"";
+            }
+        }
+        hdr += ">";
+        w.write( "<iface n=\"" );  w.write( escapeXml( isym.name, esc ) );
+        if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( pathRel( isym.fileId ), esc ) ); }
+        w.write( caveatAttr );
+        w.write( hdr );
+
+        // contract: the interface's own method signatures (what a brick must implement) — only where the
+        // language captures them soundly (see legoMethodContractSound). Read the iface's file once; emit
+        // up to a few method sigs whose span sits inside the class span (or ALL of them for --lego=TYPE).
+        if( isContractExtracted )
+        {
             const int maxMethods = ( focusId != kNoNode ) ? 64 : 6;   // targeted verb = full contract; --for = a taste
             int shown = 0;
-            for( const Symbol* member : legoContractMembers( ing, isym, src.size() ) )
+            for( const Symbol* member : contractMembers )
             {
                 const Symbol& m = *member;
                 if( ++shown > maxMethods ) { w.write( "<!-- +more methods -->" ); break; }
