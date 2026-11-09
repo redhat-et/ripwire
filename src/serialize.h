@@ -4004,6 +4004,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                     if( isFn )
                     {
                         appendf( " params=\"{}\"", unsigned( s.params ) );
+                        if( s.params == std::numeric_limits<decltype( s.params )>::max() )
+                        {
+                            appendf( " params_floor=\"1\"" );   // CR #586: countParams saturates at the field width, so this count is a floor
+                        }
                         appendf( " nest=\"{}\"", unsigned( s.maxNest ) );
                         // The nesting PROFILE beside the max (model.h Symbol::humps/deepLoc). nest= alone cannot
                         // distinguish a long run of shallow scoped steps from a body that sustains depth — both
@@ -10787,6 +10791,10 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
     {
         rw::formatTo( num, sizeof( num ), ",\"params\":{},\"nest\":{}", unsigned( s.params ), unsigned( s.maxNest ) );
         w.write( num );
+        if( s.params == std::numeric_limits<decltype( s.params )>::max() )
+        {
+            w.write( ",\"params_floor\":true" );   // CR #586: the JSON sibling of XML params_floor="1" (a saturated count)
+        }
         // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): the JSON sibling of the XML
         // locals=/locals_floor= pair — omitted key (never a fabricated 0) outside model.h's
         // localsCountedLang (MVP: C/C++ only). "locals_floor" mirrors the XML boolean-flag convention
