@@ -215,7 +215,7 @@ from collections import Counter
 # string searches: walk the counted arrays and require complete file coverage, clean parse health and exact EOF.
 blob = pathlib.Path(sys.argv[2]).read_bytes()
 endian = '<' if sys.byteorder == 'little' else '>'
-assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 50, 'update the cache walker for a new layout'
+assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 51, 'update the cache walker for a new layout'
 table, count = struct.unpack_from(endian + 'QI', blob, len(blob) - 24)
 assert count == 5 == struct.unpack_from(endian + 'I', blob, 21)[0], 'all five fixtures must be cached'
 assert table + count * 32 == len(blob) - 24, 'cache table bounds'

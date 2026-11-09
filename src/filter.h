@@ -1185,6 +1185,24 @@ inline void applyIgnoreTests( IngestResult& ing )
         keptBinds.push_back( std::move( c ) );
     }
 
+    // the #452 entry-decl side table is keyed by symbol id — left unremapped, a dropped test def's id shift
+    // would re-point a Swift @main entry fact at whatever PRODUCTION symbol inherits the id (maintainer
+    // point 1 on #486: `--ignore-tests` named the wrong type). Rides the same remap as the refs and binds;
+    // the remap is monotone, so the kept ids stay ascending — the sort is free certainty, not a fix.
+    {
+        std::vector<NodeId> keptEntryDecls;
+        keptEntryDecls.reserve( ing.entryDeclTypes.size() );
+        for( const NodeId id : ing.entryDeclTypes )
+        {
+            if( const NodeId nid = id < remap.size() ? remap[ id ] : kNoNode; nid != kNoNode )
+            {
+                keptEntryDecls.push_back( nid );
+            }
+        }
+        std::sort( keptEntryDecls.begin(), keptEntryDecls.end() );
+        ing.entryDeclTypes = std::move( keptEntryDecls );
+    }
+
     ing.symbols    = std::move( keptSyms );
     ing.references = std::move( keptRefs );
     ing.bindings   = std::move( keptBinds );

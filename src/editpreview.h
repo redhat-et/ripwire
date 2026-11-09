@@ -211,6 +211,12 @@ inline IngestResult previewMerge( const IngestResult& ing, std::uint32_t fileId,
     for( AliasTarget a : one.aliasTargets )         { a.id = NodeId( lo + a.id ); out.aliasTargets.push_back( a ); }
     for( AliasTarget a : ing.aliasTargets )         { if( a.id >= hi ) { a.id = shift( a.id ); out.aliasTargets.push_back( a ); } }
 
+    // the #452 entry-decl id list splices at the same seam by the same rule (maintainer point 1 on #486:
+    // the edit preview must not leave the Swift entry fact keyed to a pre-splice id)
+    for( const NodeId e : ing.entryDeclTypes ) { if( e <  lo ) { out.entryDeclTypes.push_back( e ); } }
+    for( const NodeId e : one.entryDeclTypes ) { out.entryDeclTypes.push_back( NodeId( lo + e ) ); }
+    for( const NodeId e : ing.entryDeclTypes ) { if( e >= hi ) { out.entryDeclTypes.push_back( NodeId( shift( e ) ) ); } }
+
     // The field SIDE TABLE keeps its own index space (a FieldId, never a NodeId), so it is spliced by the
     // same (fileId, …) ordering and its ids are simply re-indexed.
     for( const Symbol& f : ing.fields )
