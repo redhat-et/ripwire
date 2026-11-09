@@ -765,6 +765,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // (C/C++ only); pr-context's root truncated= names what its trim ladder dropped to fit budget_tokens=, and
     // budget-floor-exceeded means the smallest renderable document is still over it. ELEMENT-qualified, present-only.
     { "locals_floor",      "locals_floor=1: locals= is a floor", true, "s" },
+    { "params_floor",      "params_floor=1: params= is a floor (65,535+ parameters)", true, "s" },   // CR #586: present only on a saturated count
     { "truncated",         "truncated=: what the trim ladder dropped to fit budget_tokens= (budget-floor-exceeded: still over)", false, "pr-context" },
     // train-7 fix round (CodeRabbit on #295): four present-only degrade disclosures whose full clauses ride only the
     // answer that carries them, so the compact strip must put a reading back. Head terms, except head_conflicts_ok=
