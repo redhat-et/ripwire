@@ -1186,6 +1186,7 @@ inline constexpr ExtractFamily kExtractFamilyByLang[] = {
     ExtractFamily::Scripting,        // GDScript
     ExtractFamily::Scripting,        // Clojure
     ExtractFamily::DocsData,         // Proto
+    ExtractFamily::JvmDotNet,        // Smali — Dalvik bytecode, the same family as Java and Kotlin
 };
 static_assert( std::size( kExtractFamilyByLang ) == kLangCount, "one profile family row per Lang, in enumerator order" );
 static_assert( kExtractFamilyByLang[ std::size_t( Lang::Kotlin ) ] == ExtractFamily::JvmDotNet && kExtractFamilyByLang[ std::size_t( Lang::C ) ] == ExtractFamily::CFamily,
@@ -1845,6 +1846,49 @@ enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly };
 /// `ppDead` is this file's decided-dead byte ranges (preprocDeadRangesFor, computed ONCE per file by the
 /// parse-pool worker and shared with captureSideFacts — the ranges outlive both calls because a queued
 /// file's tags pass runs later, at the prewarm flush).
+// A smali method_signature does not repeat its class. The indexed name is the enclosing class_identifier
+// text, "->", and the signature, which is the same spelling an invoke's full_method_signature carries.
+// Empty when the method is not inside a class_definition: the caller drops it rather than indexing the
+// bare signature, which would collide with every other method of that short name.
+std::string smaliQualifiedMethodName( TSNode methodDef, std::string_view signature, std::string_view src )
+{
+    TSNode parent = ts_node_parent( methodDef );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( parent ); ++guard )
+    {
+        if( kindIs( ts_node_type( parent ), "class_definition" ) )
+        {
+            const std::uint32_t childCount = ts_node_child_count( parent );
+            for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
+            {
+                const TSNode directive = ts_node_child( parent, childIndex );
+                if( !kindIs( ts_node_type( directive ), "class_directive" ) )
+                {
+                    continue;
+                }
+                const std::uint32_t directiveChildCount = ts_node_child_count( directive );
+                for( std::uint32_t idIndex = 0; idIndex < directiveChildCount; ++idIndex )
+                {
+                    const TSNode identifier = ts_node_child( directive, idIndex );
+                    if( !kindIs( ts_node_type( identifier ), "class_identifier" ) )
+                    {
+                        continue;
+                    }
+                    const std::string_view className = nodeTextOf( identifier, src );
+                    std::string qualified;
+                    qualified.reserve( className.size() + 2u + signature.size() );
+                    qualified.append( className );
+                    qualified.append( "->" );
+                    qualified.append( signature );
+                    return qualified;
+                }
+            }
+            return {};
+        }
+        parent = ts_node_parent( parent );
+    }
+    return {};
+}
+
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
                        const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full,
@@ -2350,7 +2394,18 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.evWhy     = fnOrMethod ? evWhyVal : std::array<std::uint8_t, kEvWhyTagCount>{};
             d.kind      = kind;
             d.lang      = le.lang;
-            d.name      = isTestMacroBlock ? std::string( nameTxt ) : defNameFromCapture( le.lang, nameTxt );   // LB-E: a title is a display string — see testMacroTitleOf
+            std::string      smaliQualified;
+            std::string_view defLookup = nameTxt;
+            if( le.lang == Lang::Smali && kind == SymKind::Method )
+            {
+                smaliQualified = smaliQualifiedMethodName( defNode, nameTxt, src );
+                if( smaliQualified.empty() )
+                {
+                    continue;
+                }
+                defLookup = smaliQualified;
+            }
+            d.name      = isTestMacroBlock ? std::string( nameTxt ) : defNameFromCapture( le.lang, defLookup );   // LB-E: a title is a display string — see testMacroTitleOf
             if( defCapSv == "definition.cjsexport" && isCjsModuleExportsItself( nameNode, src ) )
             {   // lane js-def-naming: the module's own export function, named by the file's stem (ingest_names.h isCjsModuleExportsItself)
                 if( fileStem.empty() )
@@ -2549,7 +2604,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 // ABS-3: @reference.call is a call use-site; @reference.import a using-decl re-export. EDGE-PRELUDE-VETO: @reference.macro is a macro
                 // invocation the grammar spells as one (Rust `name!(..)`): role Macro, so it binds only to an indexed macro of the name (graph.h).
                 r.role      = isImportRef ? RefRole::Import : ( refCapSv == "reference.macro" ? RefRole::Macro : RefRole::Call );
-                r.name      = finalSegment( nameTxt );
+                r.name      = le.lang == Lang::Smali ? std::string( nameTxt ) : finalSegment( nameTxt );
                 if( le.lang == Lang::Clojure )
                 {
                     r.qualifier = nodeFieldText( ts_node_parent( nameNode ), NodeField::Namespace, src );

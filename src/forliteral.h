@@ -2250,7 +2250,7 @@ inline RegHitCtx regLangCtxOf( Lang lang ) noexcept
     {
         case Lang::Cpp: case Lang::C: case Lang::ObjC: c.cFamily = true; break;
         case Lang::Rust: c.rust = true; break;
-        case Lang::Python: case Lang::Ruby: case Lang::Bash: case Lang::Yaml: case Lang::Toml: case Lang::Elixir: case Lang::GDScript: c.hashComments = true; break;
+        case Lang::Python: case Lang::Ruby: case Lang::Bash: case Lang::Yaml: case Lang::Toml: case Lang::Elixir: case Lang::GDScript: case Lang::Smali: c.hashComments = true; break;
         default: break;
     }
     return c;

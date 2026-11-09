@@ -175,6 +175,7 @@ extern "C"
     const TSLanguage* tree_sitter_gdscript( void );
     const TSLanguage* tree_sitter_clojure( void );
     const TSLanguage* tree_sitter_proto( void );
+    const TSLanguage* tree_sitter_smali( void );
 }
 
 // ── the ingest-family sections (2026-08-29 split; ingest() phases followed 2026-08-30) ──────────────

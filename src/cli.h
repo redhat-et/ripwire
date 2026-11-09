@@ -810,7 +810,7 @@ inline constexpr char kHelpHead[] =
         "ripwire — the \"ripgrep of AI context\": parse a codebase, rank symbols by Personalized PageRank,\n"
         "stream a deterministic minified XML map to stdout. Zero runtime deps. Languages: C++, C, ObjC/ObjC++,\n"
         "Metal (MSL, .metal — C++ grammar), CUDA (.cu/.cuh — tree-sitter-cuda, <<<>>> launches are call edges),\n"
-        "Python, TypeScript (.ts/.tsx/.mts/.cts; .astro frontmatter), JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Dart (.dart), Kotlin (.kt), Clojure (.clj/.cljs/.cljc/.bb), Bash, Go, Rust, Swift, C#,\n"
+        "Python, TypeScript (.ts/.tsx/.mts/.cts; .astro frontmatter), JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Dart (.dart), Kotlin (.kt), Clojure (.clj/.cljs/.cljc/.bb), Smali (.smali), Bash, Go, Rust, Swift, C#,\n"
         "GDScript (.gd — Godot; .tscn/.tres/.gdshader are NOT indexed);\n"
         "JSON, TOML, YAML (config keys); Protocol Buffers (.proto — message/enum/oneof/service/rpc/enum value definitions, no call edges);\n"
         "Markdown (.md/.markdown — headings are section symbols with spans).\n\n"

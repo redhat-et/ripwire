@@ -312,6 +312,7 @@ set(_ripwire_query_names
   proto
   python
   ruby
+  smali
   rust
   swift
   toml
@@ -589,6 +590,11 @@ add_ts_grammar(clojure https://github.com/yogthos/tree-sitter-clojure.git 8ec840
 # helix 1) it parsed every file with zero ERROR or MISSING nodes, comments and aggregate options included. No scanner.
 add_ts_grammar(proto https://github.com/coder3101/tree-sitter-proto.git 6c878d18628ebbff3474479d2fdd6d8ba1954c3e)  # v0.6.0, ABI 15
 
+# Smali (.smali): apktool's textual Dalvik bytecode. ABI 14, inside [13, 15] for core v0.26.9.
+# scanner.c is stateless (serialize returns 0). Not patched. Method names keep class and descriptor
+# (queries/smali/tags.scm); fields, strings, switches and .super/.implements are not symbols.
+add_ts_grammar(smali https://github.com/tree-sitter-grammars/tree-sitter-smali.git fdfa6a1febc43c7467aa7e937b87b607956f2346)  # ABI 14
+
 # PHP (.php): the official tree-sitter org grammar. Like TypeScript this repo hosts TWO sub-grammars
 # in subdirectories — `php/` (the full one: HTML text interleaved with `<?php … ?>` blocks) and
 # `php_only/` (no surrounding text). ONLY `php/` is vendored and built: a real .php file in a real
@@ -696,6 +702,7 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_gdscript>
   $<TARGET_OBJECTS:ts_clojure>
   $<TARGET_OBJECTS:ts_proto>
+  $<TARGET_OBJECTS:ts_smali>
   $<TARGET_OBJECTS:ts_elixir>
   $<TARGET_OBJECTS:ts_php>
   $<TARGET_OBJECTS:ts_toml>
@@ -950,7 +957,7 @@ endif()
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown
-  ts_php ts_lua ts_elixir ts_dart ts_kotlin ts_gdscript ts_clojure ts_proto)
+  ts_php ts_lua ts_elixir ts_dart ts_kotlin ts_gdscript ts_clojure ts_proto ts_smali)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
@@ -1519,6 +1526,7 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(gdscript   tree_sitter_gdscript   gdscript)
   add_ripwire_fuzzer(clojure    tree_sitter_clojure    clojure)
   add_ripwire_fuzzer(proto      tree_sitter_proto      proto)
+  add_ripwire_fuzzer(smali      tree_sitter_smali      smali)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
 
   # ---- reader fuzzers: ripwire's OWN parsers of bytes it did not create (test/fuzz/readers/) ----
