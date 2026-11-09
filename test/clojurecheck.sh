@@ -21,7 +21,10 @@ names = {s.get('n').split('/')[0] for s in rows}
 expected = {'sample.core', 'sample.browser', 'sample.shared', 'sample.tasks', 'answer', 'cached',
             'square', 'secret', 'unless', 'area', 'Greeter', 'Person', 'Counter', 'quoted', 'interop',
             'run', 'render', 'shared', 'task', 'quoted-holder', 'route', 'spaced', 'commented',
-            'gap-call', 'comment-call', 'comment-holder', 'join', 'qualified-join', 'documented'}
+            'gap-call', 'comment-call', 'comment-holder', 'join', 'qualified-join', 'documented',
+            'nested-quote', 'nested-discard', 'nested-comment', 'comment-not-head', 'comment-x',
+            'comment-x-holder', 'before-discard', 'after-discard', 'quoted-macro', 'a', 'b',
+            'syntax-quote-hole', 'live-hole-control'}
 assert names == expected, (names, expected)
 by = {s.get('n').split('/')[0]: s for s in rows}
 for name, kind in {'answer':'var', 'cached':'var', 'square':'fn', 'unless':'macro',
@@ -44,6 +47,25 @@ for name in ('spaced', 'commented', 'gap-call', 'comment-call'):
     assert 'square' in calls(name), (name, calls(name))
 assert 'square' not in calls('quoted-holder'), calls('quoted-holder')
 assert 'square' not in calls('comment-holder'), calls('comment-holder')
+# Slice 8a: nested inert forms drop their calls; a live sibling proves the holder is still captured.
+for name in ('nested-quote', 'nested-discard', 'nested-comment', 'quoted-macro'):
+    assert calls(name) == {'secret'}, (name, calls(name))
+assert by['quoted-macro'].get('t') == 'macro', by['quoted-macro'].attrib
+print('PASS nested quote/discard/comment and quote inside defmacro keep only the live sibling')
+# Only the exact list head comment is inert: a later symbol and comment-x leave square live.
+assert calls('comment-not-head') == {'square'}, calls('comment-not-head')
+assert calls('comment-x-holder') == {'comment-x', 'square'}, calls('comment-x-holder')
+for name in ('before-discard', 'after-discard'):
+    assert calls(name) == {'square'}, (name, calls(name))
+assert 'discarded-value' not in names, names
+print('PASS comment head near misses and discard of one def preserve neighbouring captures')
+# KNOWN GAP (#449 follow-up: Clojure syntax-quote live holes, separate from slice 8a).
+# In `(a ~(b)), b should be a call, but today's filter makes the whole syntax-quote inert.
+# A future unquoting_lit / unquote_splicing_lit Live arm flips this assertion to {'b'};
+# retain a as inert, and retain this fixture and arm when the gap moves. This migration does not fix it.
+assert calls('live-hole-control') == {'b'}, calls('live-hole-control')
+assert calls('syntax-quote-hole') == set(), ('known gap moved: flip this arm to {"b"}', calls('syntax-quote-hole'))
+print('PASS known syntax-quote/unquote gap: b is currently inert; future live-hole follow-up flips this arm')
 # KNOWN GAP (shared resolver, not Clojure): a qualifier that names no definition still reaches the
 # bare-name ladder, so str/join binds the in-tree join. The maintainers' shared refusal flips this arm.
 # When it goes red, assert 'join' not in these calls; retain the fixture and the arm.
