@@ -3,7 +3,7 @@
 #
 # Synthetic apktool-shaped fixture (test/smalifix/), not a decoded APK:
 #   A.smali     — Lcom/example/A; with <init>, addOne(I)I, addTwo(I)I.
-#                 addTwo invokes Lcom/example/A;->addOne(I)I.
+#                 addTwo invokes Lcom/example/A; -> addOne(I)I (spaces around ->).
 #   Decoy.smali — Lcom/example/Decoy;->addOne(I)I, which must not receive that edge.
 #
 # Indexed names keep the class and the JVM descriptor, so <init> stays intact and a
@@ -113,7 +113,7 @@ echo "=== mutation: rename the invoke target → the edge vanishes ==="
 MUT="$TMP/mut"
 mkdir -p "$MUT"
 cp "$FIX/Decoy.smali" "$MUT/Decoy.smali"
-sed 's/Lcom\/example\/A;->addOne(I)I/Lcom\/example\/A;->addOneX(I)I/' "$FIX/A.smali" >"$MUT/A.smali"
+sed 's/Lcom\/example\/A; -> addOne(I)I/Lcom\/example\/A;->addOneX(I)I/' "$FIX/A.smali" >"$MUT/A.smali"
 $BIN "$MUT" --no-cache >"$TMP/mut.xml" 2>/dev/null
 python3 - "$TMP/mut.xml" "$TWO" "$ONE" <<'PYEOF' >"$TMP/mut_check"
 import sys, xml.etree.ElementTree as ET

@@ -1847,9 +1847,10 @@ enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly };
 /// parse-pool worker and shared with captureSideFacts — the ranges outlive both calls because a queued
 /// file's tags pass runs later, at the prewarm flush).
 // A smali method_signature does not repeat its class. The indexed name is the enclosing class_identifier
-// text, "->", and the signature, which is the same spelling an invoke's full_method_signature carries.
-// Empty when the method is not inside a class_definition: the caller drops it rather than indexing the
-// bare signature, which would collide with every other method of that short name.
+// text, "->", and the signature. An invoke is the same three tokens (class or array, "->", signature);
+// whitespace and comments between them are extras and are not part of the key. Empty when the method is
+// not inside a class_definition: the caller discloses that and drops it rather than indexing the bare
+// signature, which would collide with every other method of that short name.
 std::string smaliQualifiedMethodName( TSNode methodDef, std::string_view signature, std::string_view src )
 {
     TSNode parent = ts_node_parent( methodDef );
@@ -1885,6 +1886,62 @@ std::string smaliQualifiedMethodName( TSNode methodDef, std::string_view signatu
             return {};
         }
         parent = ts_node_parent( parent );
+    }
+    return {};
+}
+
+// The invoke key, built from the full_method_signature's class (or array) token and its method_signature
+// token. Extras between them — a space or a comment around "->" — stay out, so the key matches
+// smaliQualifiedMethodName. Empty when either token is missing; the caller keeps the raw capture then.
+std::string smaliCallKey( TSNode fullSignature, std::string_view src )
+{
+    std::string_view owner;
+    std::string_view signature;
+    const std::uint32_t childCount = ts_node_named_child_count( fullSignature );
+    for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
+    {
+        const TSNode child = ts_node_named_child( fullSignature, childIndex );
+        const char*  kind  = ts_node_type( child );
+        if( kindIs( kind, "class_identifier" ) || kindIs( kind, "array_type" ) )
+        {
+            owner = nodeTextOf( child, src );
+        }
+        else if( kindIs( kind, "method_signature" ) )
+        {
+            signature = nodeTextOf( child, src );
+        }
+    }
+    if( owner.empty() || signature.empty() )
+    {
+        return {};
+    }
+    std::string key;
+    key.reserve( owner.size() + 2u + signature.size() );
+    key.append( owner );
+    key.append( "->" );
+    key.append( signature );
+    return key;
+}
+
+// method_definition is `.method`, modifiers, method_signature, statements, `.end method`, and the
+// statements are not a `body` field. The first named node after the signature is the body start; a
+// method with none (signature then `.end method`) returns null and stays bodyless.
+TSNode smaliFirstStatement( TSNode methodDef )
+{
+    bool seenSignature = false;
+    const std::uint32_t childCount = ts_node_named_child_count( methodDef );
+    for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
+    {
+        const TSNode child = ts_node_named_child( methodDef, childIndex );
+        if( !seenSignature )
+        {
+            if( kindIs( ts_node_type( child ), "method_signature" ) )
+            {
+                seenSignature = true;
+            }
+            continue;
+        }
+        return child;
     }
     return {};
 }
@@ -2335,6 +2392,12 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 body            = dartFollowingBody( defNode );
                 dartSiblingBody = !ts_node_is_null( body );
             }
+            // Smali's statements are positional children of method_definition, not a body field, so a
+            // method with code would otherwise keep bodyByte 0 and read as bodyless (sigEndByte == endByte).
+            if( ts_node_is_null( body ) && le.lang == Lang::Smali && kind == SymKind::Method )
+            {
+                body = smaliFirstStatement( defNode );
+            }
             // Both flags mean the same thing to the three span consumers below: the code this symbol
             // owns lives in a SIBLING node, so byte/row extents and complexity must run through it.
             const bool spanThroughBody = isTestMacroBlock || dartSiblingBody;
@@ -2401,6 +2464,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 smaliQualified = smaliQualifiedMethodName( defNode, nameTxt, src );
                 if( smaliQualified.empty() )
                 {
+                    DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::SmaliMethodUnqualified,
+                              "smali method has no enclosing class identifier — definition not indexed" );
                     continue;
                 }
                 defLookup = smaliQualified;
@@ -2604,7 +2669,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 // ABS-3: @reference.call is a call use-site; @reference.import a using-decl re-export. EDGE-PRELUDE-VETO: @reference.macro is a macro
                 // invocation the grammar spells as one (Rust `name!(..)`): role Macro, so it binds only to an indexed macro of the name (graph.h).
                 r.role      = isImportRef ? RefRole::Import : ( refCapSv == "reference.macro" ? RefRole::Macro : RefRole::Call );
-                r.name      = le.lang == Lang::Smali ? std::string( nameTxt ) : finalSegment( nameTxt );
+                if( le.lang == Lang::Smali )
+                {
+                    std::string key = smaliCallKey( nameNode, src );
+                    r.name = key.empty() ? std::string( nameTxt ) : std::move( key );
+                }
+                else
+                {
+                    r.name = finalSegment( nameTxt );
+                }
                 if( le.lang == Lang::Clojure )
                 {
                     r.qualifier = nodeFieldText( ts_node_parent( nameNode ), NodeField::Namespace, src );

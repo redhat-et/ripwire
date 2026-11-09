@@ -17,7 +17,7 @@
 
 .method public addTwo(I)I
     .registers 2
-    invoke-virtual {p0, p1}, Lcom/example/A;->addOne(I)I
+    invoke-virtual {p0, p1}, Lcom/example/A; -> addOne(I)I
     move-result v0
     return v0
 .end method
