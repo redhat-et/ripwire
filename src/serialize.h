@@ -3973,6 +3973,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                     if( isFn )
                     {
                         appendf( " params=\"{}\"", unsigned( s.params ) );
+                        if( s.params == std::numeric_limits<decltype( s.params )>::max() )
+                        {
+                            appendf( " params_floor=\"1\"" );   // CR #586: countParams saturates at the field width, so this count is a floor
+                        }
                         appendf( " nest=\"{}\"", unsigned( s.maxNest ) );
                         // The nesting PROFILE beside the max (model.h Symbol::humps/deepLoc). nest= alone cannot
                         // distinguish a long run of shallow scoped steps from a body that sustains depth — both
@@ -9315,6 +9319,9 @@ inline ForSectionStubPlan planForSectionStubs( std::string_view sections, std::s
 // because a stub there serves less than the retired ceiling did (forbudget-soft §B5: s078/s083, a 1-interface <lego> became a
 // stub once the soft target's wider rows widened its scope). Otherwise the caller's --sections= stands and the priced
 // collapse (planForSectionStubs) decides. The default regime never calls this: its stub posture is unchanged.
+// `shareBytes` is net of what the sections after them serve at a spent share: the CLI passes its share less the <tail> shell
+// and compact <hops> first row (verbs_for.h forSoftTrailingFloorBytes), because the rows at the cut never give way and a whole
+// section plus those floors would serve past the target (forsoftbudgetcheck (ST-L), 2026-11-08).
 inline std::string_view forSoftSectionsOptIn( std::string_view sections, std::size_t legoBytes, std::size_t composeBytes,
                                               std::size_t shareBytes ) noexcept
 {
@@ -10756,6 +10763,10 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
     {
         rw::formatTo( num, sizeof( num ), ",\"params\":{},\"nest\":{}", unsigned( s.params ), unsigned( s.maxNest ) );
         w.write( num );
+        if( s.params == std::numeric_limits<decltype( s.params )>::max() )
+        {
+            w.write( ",\"params_floor\":true" );   // CR #586: the JSON sibling of XML params_floor="1" (a saturated count)
+        }
         // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): the JSON sibling of the XML
         // locals=/locals_floor= pair — omitted key (never a fabricated 0) outside model.h's
         // localsCountedLang (MVP: C/C++ only). "locals_floor" mirrors the XML boolean-flag convention
