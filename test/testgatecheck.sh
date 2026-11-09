@@ -621,6 +621,22 @@ zwant '(z25) R2: the legacy module keyword, even with a type-only body' "$Z/z25"
 fxts "$Z/z26" 'namespace N { declare const a: number; }
 export function bounded( t: string ): string { return t; }'
 zwant '(z26) R2: a namespace holding only a declare statement' "$Z/z26" src/bounded.ts run_unknown
+# assume-audit jsrunner.h engineClause: a contradictory clause (ceiling at or below its floor) is input, not an invariant.
+# It reads as "admits anything", like an upper-bound-led clause, so the --test floor cannot be proven. RED before the
+# fix: `<0` made upperBoundCeil return 0 and ENSURES( ceil > 0 ) trapped the dev build (release: silent UB).
+fxcjs "$Z/z27" '{ "engines": { "node": ">=18 <0" } }'
+zwant '(z27) assume-audit: contradictory ">=18 <0" reads as admits-anything' "$Z/z27" src/bounded.js run_unknown
+fxcjs "$Z/z28" '{ "engines": { "node": "^18 <0.0.0 || >=18.1" } }'
+zwant '(z28) assume-audit: a contradictory "^18 <0.0.0" alternative still refuses the whole range' "$Z/z28" src/bounded.js run_unknown
+# CodeRabbit on #586: equal bounds are empty too (a `<` guard would let ">=20 <20" derive a command), and a prerelease
+# floor is NOT empty under an exclusive ceiling at its own X.Y.0: ">=22.0.0-rc.1 <22.0.0" admits the 22.0.0 release
+# candidates, read as 22.0. RED on ecba09cd2: z30 read as contradictory, so it fell to run_unknown.
+fxcjs "$Z/z29" '{ "engines": { "node": ">=20 <20" } }'
+zwant '(z29) CR #586: equal bounds ">=20 <20" admit nothing, read as admits-anything' "$Z/z29" src/bounded.js run_unknown
+fxcjs "$Z/z30" '{ "engines": { "node": ">=22.0.0-rc.1 <22.0.0" } }'
+zwant '(z30) CR #586: ">=22.0.0-rc.1 <22.0.0" admits the 22.0.0 prereleases, which have --test' "$Z/z30" src/bounded.js "$JSCMD"
+fxcjs "$Z/z31" '{ "engines": { "node": ">=22.0.5-rc.1 <22.0.0" } }'
+zwant '(z31) CR #586 control: a prerelease past X.Y.0 under "<X.Y.0" is still empty' "$Z/z31" src/bounded.js run_unknown
 
 # (n1) #335: a TS/JS package BELOW root= runs from its own directory. run= is `(cd <pkg> && ...)`, a subshell (still
 #      pasteable from root=), and the path after it is package-relative. Before the fix it was `npx vitest run
