@@ -48,7 +48,7 @@ echo "routeedgecheck: BIN=$BIN  FIXTURE=$FIXTURE"
 # <routes> block, which is scoped to the bundle's resolved surface) existed only as quota padding, and the
 # floor correctly serves nothing for a query that matches nothing. This gate is about ROUTE-EDGE
 # EXTRACTION, not about ranking, so it now asks a question the fixture can actually answer.
-FORQ="load user order widget register item"
+FORQ="load user order widget register item greet feedback send"
 forDump(){ "$BIN" "$@" --for="$FORQ" --no-cache 2>/dev/null; }
 
 # ---------------------------------------------------------------------------------------------------
@@ -85,6 +85,20 @@ printf '%s' "$SINGLE" | grep -q '<route method="GET" path="/widgets/:widgetId" f
   && ok "single-root: JS-server/JS-client cross-file match GET /widgets/:widgetId loadWidget->getWidget" \
   || no "single-root: missing cross-file JS edge loadWidget->getWidget"
 
+# (#448) framework-word-free registrars: the tags capture, not the old text gate, registers them
+printf '%s' "$SINGLE" | grep -q '<route method="GET" path="/greet/:name" from="loadGreeting" to="getGreeting"/>' \
+  && ok "(#448) wordless Hono TS registrar: GET /greet/:name loadGreeting->getGreeting" \
+  || no "(#448) missing wordless Hono edge loadGreeting->getGreeting"
+printf '%s' "$SINGLE" | grep -q '<route method="POST" path="/feedback" from="sendFeedback" to="submitFeedback"/>' \
+  && ok "(#448) wordless Koa JS registrar: POST /feedback sendFeedback->submitFeedback" \
+  || no "(#448) missing wordless Koa edge sendFeedback->submitFeedback"
+
+# (#448) near-miss: a leading-'/' string on a framework-free `.get` with a NON-function second
+# argument is a lookup, not a registration
+printf '%s' "$SINGLE" | grep -q 'path="/defaults"' \
+  && no "(#448) near-miss Map.get('/defaults','fallback') registered a route" \
+  || ok "(#448) near-miss: a non-function second argument registers no route"
+
 # (c) the deliberately AMBIGUOUS case (loadItem -> /items/42, matches BOTH item DEFs) — NO edge
 printf '%s' "$SINGLE" | grep -q 'to="get_item_by_id"' \
   && no "single-root: ambiguous case wrongly resolved to get_item_by_id" \
@@ -101,8 +115,8 @@ printf '%s' "$SINGLE" | grep -q 'does-not-exist' \
 # unused DEF (no caller) and the dynamic template-literal USE (a KNOWN non-detection) both correctly
 # produce no edge — same "from"/"to" absence check, folded into the count below.
 EDGECOUNT="$( printf '%s' "$SINGLE" | grep -o '<route ' | wc -l | tr -d ' ' )"
-[ "$EDGECOUNT" = "4" ] && ok "single-root: exactly 4 synthesized edges (no more, no fewer)" \
-  || no "single-root: expected 4 route edges, got $EDGECOUNT"
+[ "$EDGECOUNT" = "6" ] && ok "single-root: exactly 6 synthesized edges (no more, no fewer)" \
+  || no "single-root: expected 6 route edges, got $EDGECOUNT"
 
 # ---------------------------------------------------------------------------------------------------
 # form 2: MULTI-ROOT (server and client as two SEPARATE roots — the cross-root evidence case)
@@ -141,7 +155,7 @@ printf '%s' "$MULTI" | grep -q 'does-not-exist' \
   || ok "multi-root: unresolved USE (loadNothing) produced NO edge"
 
 MEDGECOUNT="$( printf '%s' "$MULTI" | grep -o '<route ' | wc -l | tr -d ' ' )"
-[ "$MEDGECOUNT" = "4" ] && ok "multi-root: exactly 4 synthesized edges (no more, no fewer)" \
+[ "$MEDGECOUNT" = "6" ] && ok "multi-root: exactly 6 synthesized edges (no more, no fewer)" \
   || no "multi-root: expected 4 route edges, got $MEDGECOUNT"
 
 # ---------------------------------------------------------------------------------------------------

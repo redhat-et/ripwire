@@ -28,3 +28,11 @@ export async function loadWidget() {
 export async function loadDynamic(id: string) {
     return fetch(`/users/${id}`);                     // template literal path -> KNOWN LIMITATION, not detected
 }
+
+export async function loadGreeting() {
+    return fetch('/greet/world');                 // (#448) wordless Hono TS registrar -> getGreeting
+}
+
+export async function sendFeedback() {
+    return fetch('/feedback', { method: 'POST' }); // (#448) wordless Koa JS registrar -> submitFeedback
+}
