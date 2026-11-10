@@ -2392,6 +2392,7 @@ struct ExternalVetoTables
 inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
                                            const std::vector<std::uint32_t>* fileRoot )
 {
+    EXPECTS( !b.typeName.empty(), "typeName.front() below needs a spec: both callers (recordImportBindFile, recordScopedImportBindFile) take bindings buildPythonImportVetoes already filtered for an empty typeName" );
     // ind4b fix 5 (E3): `import pkg.x` binds the ROOT `pkg` (pkg/__init__.py), not pkg.x, but `import pkg.x as pkg` binds pkg.x and the
     // record cannot tell them apart (same var, same typeName): a dotted spec whose first segment is the bound name names no ONE file.
     if( b.typeName.starts_with( b.var ) && b.typeName.size() > b.var.size() && b.typeName[ b.var.size() ] == '.' )
