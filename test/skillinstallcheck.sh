@@ -175,6 +175,7 @@ UNROUTED="
 --version        # meta (version/build info, not an agent moment)
 --sarif          # CI code-scanning output format (--lint modifier, upload-sarif consumes it), not an agent moment
 --pin-census     # resolver-precision census harness (bench/scip_pin_precision.py), not an agent moment
+--deadline-ms    # the prompt hooks' --help-task budget (hooks/ripwire-*-route.sh pass it, issue #594), not an agent moment
 "
 # L5: --anchor / --cochange-boost / --stable / --most-important-last / --no-auto-order dropped
 # from --help entirely (RIPWIRE_DEV=1-gated experiments, or hidden --order= aliases) — they no longer

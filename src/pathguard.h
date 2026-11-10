@@ -541,6 +541,14 @@ public:
     int  get() const noexcept   { return fd_; }
     bool valid() const noexcept { return fd_ >= 0; }
 
+    // Give up ownership without closing: the caller now owns the descriptor (a lock that must live until exit).
+    [[nodiscard]] int release() noexcept
+    {
+        const int fd = fd_;
+        fd_          = -1;
+        return fd;
+    }
+
     // Close what is held and take ownership of `fd` — how a descriptor chain steps one component down.
     void reset( int fd ) noexcept
     {

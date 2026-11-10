@@ -52,6 +52,10 @@
 #include <initializer_list>
 #include <string>
 #include <string_view>
+#if defined( __linux__ )
+  #include <filesystem>   // liveThreadCount: /proc/self/task
+  #include <system_error>
+#endif
 
 #include "shquote.h"   // rw::shSingleQuote: path_prepend_hint quotes its directory as a shell literal
 
@@ -171,12 +175,41 @@ static_assert( requires( const stat_t& st ) { st.st_mode; st.st_size; st.st_mtim
 [[gnu::always_inline]] inline int     fcntl( int fd, int cmd )                                     { return ::fcntl( fd, cmd ); }
 [[gnu::always_inline]] inline int     fcntl( int fd, int cmd, int arg )                            { return ::fcntl( fd, cmd, arg ); }
 [[gnu::always_inline]] inline int     dup( int fd )                                                { return ::dup( fd ); }
+// dup_cloexec: dup, marked close-on-exec — a saved copy of stdout must not reach a git child that could outlive the run.
+[[gnu::always_inline]] inline int     dup_cloexec( int fd )                                        { return ::fcntl( fd, F_DUPFD_CLOEXEC, 0 ); }
+// write_nosigpipe: one write to a pipe whose reader may be gone, failing with EPIPE instead of ending the process.
+// The SIGPIPE disposition is swapped around the call, so only a single-threaded caller may use it (helpdeadline.h's
+// supervising parent, which never starts a thread).
+inline ssize_t write_nosigpipe( int fd, const void* buf, std::size_t count )
+{
+    void ( *const previous )( int ) = ::signal( SIGPIPE, SIG_IGN );
+    const ssize_t written           = ::write( fd, buf, count );
+    ::signal( SIGPIPE, previous );
+    return written;
+}
 [[gnu::always_inline]] inline int     dup2( int fd, int fd2 )                                      { return ::dup2( fd, fd2 ); }
 [[gnu::always_inline]] inline int     ftruncate( int fd, off_t length )                            { return ::ftruncate( fd, length ); }
 [[gnu::always_inline]] inline int     fsync( int fd )                                              { return ::fsync( fd ); }
 [[gnu::always_inline]] inline int     fchmod( int fd, mode_t mode )                                { return ::fchmod( fd, mode ); }
 [[gnu::always_inline]] inline int     flock( int fd, int operation )                               { return ::flock( fd, operation ); }
 [[gnu::always_inline]] inline int     pipe( int fds[ 2 ] )                                         { return ::pipe( fds ); }
+// pipe_cloexec: pipe's two descriptors marked close-on-exec, so a fork keeps them and an exec (a git child, a
+// spawn_sh command) does not — a pipe end or flock a long-lived grandchild inherited would outlive its owner. macOS has
+// no pipe2, so the flag is set right after the pipe; the one caller (helpdeadline.h) is single-threaded at that point.
+inline int pipe_cloexec( int fds[ 2 ] )
+{
+    if( ::pipe( fds ) != 0 )
+    {
+        return -1;
+    }
+    if( ::fcntl( fds[ 0 ], F_SETFD, FD_CLOEXEC ) != 0 || ::fcntl( fds[ 1 ], F_SETFD, FD_CLOEXEC ) != 0 )
+    {
+        ::close( fds[ 0 ] );
+        ::close( fds[ 1 ] );
+        return -1;
+    }
+    return 0;
+}
 [[gnu::always_inline]] inline int     poll( pollfd* fds, nfds_t count, int timeoutMs )             { return ::poll( fds, count, timeoutMs ); }
 
 // ── streams over descriptors and memory ────────────────────────────────────────────────────────────────────
@@ -423,6 +456,23 @@ inline long pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int ti
     return child;
 }
 
+// fork_session: fork a child that leaves the caller's session and process group (setsid), so a hook runner that kills
+// its group on a timeout ends the parent and never the child, and that ignores SIGPIPE, so a write to a pipe whose
+// reader has exited fails with EPIPE instead of ending it. fork's contract: the child's pid in the parent, 0 in the
+// child, -1 with errno set and no child. Only a single-threaded caller may use it (fork copies the calling thread
+// alone; --help-task --deadline-ms forks before any thread exists). Windows has no fork: -1 with ENOSYS, and the
+// caller runs synchronously instead.
+[[gnu::always_inline]] inline pid_t fork_session()
+{
+    const pid_t child = ::fork();
+    if( child == 0 )
+    {
+        ::setsid();
+        ::signal( SIGPIPE, SIG_IGN );
+    }
+    return child;
+}
+
 // ── threads ────────────────────────────────────────────────────────────────────────────────────────────────
 // gettid: the 64-bit kernel thread id a tracer shows (Darwin's pthread_threadid_np, Linux's SYS_gettid).
 // pthread_main_np: nonzero on the process's initial thread. Linux: the thread whose tid EQUALS the pid — the exact
@@ -446,6 +496,39 @@ inline int pthread_main_np()
     static const std::thread::id firstCaller = std::this_thread::get_id();
     return std::this_thread::get_id() == firstCaller ? 1 : 0;
 }
+#endif
+// liveThreadCount: the threads alive in this process right now; 0 = this platform cannot say (Windows always says 0:
+// see its body). For debug checks only (helpdeadline.h's fork seam: only the forking thread survives into the child,
+// so the process must be single-threaded).
+#if defined( __APPLE__ )
+inline std::size_t liveThreadCount()
+{
+    thread_act_array_t     threads = nullptr;
+    mach_msg_type_number_t count   = 0;
+    if( ::task_threads( ::mach_task_self(), &threads, &count ) != KERN_SUCCESS )
+    {
+        return 0;
+    }
+    for( mach_msg_type_number_t i = 0; i < count; ++i )
+    {
+        (void)::mach_port_deallocate( ::mach_task_self(), threads[i] );
+    }
+    (void)::vm_deallocate( ::mach_task_self(), reinterpret_cast<vm_address_t>( threads ), count * sizeof( thread_act_t ) );
+    return count;
+}
+#elif defined( __linux__ )
+inline std::size_t liveThreadCount()
+{
+    std::error_code ec;
+    std::size_t     count = 0;
+    for( std::filesystem::directory_iterator it( "/proc/self/task", ec ), end; !ec && it != end; it.increment( ec ) )
+    {
+        ++count;
+    }
+    return ec ? 0 : count;
+}
+#else
+inline std::size_t liveThreadCount() { return 0; }
 #endif
 #if defined( __APPLE__ ) || defined( __linux__ )
 [[gnu::always_inline]] inline int pthread_getname_np( ::pthread_t thread, char* name, std::size_t nameCount ) { return ::pthread_getname_np( thread, name, nameCount ); }
@@ -1041,12 +1124,15 @@ int     lstat( const char* path, stat_t* st );
 int     fcntl( int fd, int cmd );
 int     fcntl( int fd, int cmd, int arg );
 int     dup( int fd );
+int     dup_cloexec( int fd );   // _dup: every handle here is non-inheritable already
+ssize_t write_nosigpipe( int fd, const void* buf, std::size_t count );   // = write(): Windows has no SIGPIPE
 int     dup2( int fd, int fd2 );
 int     ftruncate( int fd, off_t length );
 int     fsync( int fd );
 int     fchmod( int fd, mode_t mode );
 int     flock( int fd, int operation );
 int     pipe( int fds[ 2 ] );
+int     pipe_cloexec( int fds[ 2 ] );   // = pipe(): every handle here is non-inheritable already
 int     poll( pollfd* fds, nfds_t count, int timeoutMs );
 
 // ── streams over descriptors and memory ────────────────────────────────────────────────────────────────────
@@ -1124,11 +1210,13 @@ int        system( const char* command );
 inline constexpr long kPipeNothingYet = -2;
 long       pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs );   // the POSIX half's comment
 pid_t      spawn_sh( const std::string& command, const int pipeFds[ 2 ] );
+pid_t      fork_session();   // no fork on Windows: -1 with ENOSYS (the POSIX half's comment)
 
 // ── threads ────────────────────────────────────────────────────────────────────────────────────────────────
 pthread_t     pthread_self();
 std::uint64_t gettid();
 int           pthread_main_np();
+std::size_t   liveThreadCount();   // always 0: no fork on Windows, so nothing to check (the body's comment)
 int           pthread_getname_np( pthread_t thread, char* name, std::size_t nameCount );
 int           pthread_attr_init( pthread_attr_t* attr );
 int           pthread_attr_setstacksize( pthread_attr_t* attr, std::size_t stackBytes );

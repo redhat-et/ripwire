@@ -17,7 +17,8 @@ ONE skill to enter. If you routed wrong, each skill's own routing header sends y
 `ripwire <dir> --help-task="<the task in words>" --legend=compact` returns ONE recommended command with the evidence
 behind the pick (intent, score/margin, repository facts) — or honestly abstains when the evidence is
 too thin to name a winner. One hop cheaper than reading this whole map: paste the task, run what it
-recommends. Advice only — it never executes the recommendation.
+recommends. Advice only — it never executes the recommendation. From a prompt hook with a hard timeout, add
+`--deadline-ms=N`: a cold index past N prints the abstention (exit 0) while a background run warms the index.
 
 A short bare word abstains even when it names a real symbol — a lone letter, a SCREAMING name, or an
 ordinary word that happens to match an indexed name (`F` in `--help-task="understand F"`, django's ORM
