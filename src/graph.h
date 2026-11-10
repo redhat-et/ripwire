@@ -2384,6 +2384,7 @@ struct ExternalVetoTables
     // there (two imports disagree, or the def also assigns, receives or otherwise binds y: finalizePythonScopedBinds)
     HashMap<std::string, std::uint32_t> scopedImportBindFile;
     HashMap<std::string, std::uint32_t> scopedSubmoduleBindFile;
+    HashMap<std::string, char>          scopedImportNames;   // "<fileId>#y": some def or class in the file imports y (pythonEnclosingDefBinds' pre-test)
 };
 
 // the ONE module file `import X [as y]` binds y to (Step-A's `resolved`, else the root-scoped suffix match of an absolute spec), kNoFile when
@@ -2633,6 +2634,7 @@ struct PythonImportVetoes
     HashMap<std::string, PythonSubmoduleBind> submodules;
     HashMap<std::string, PythonSubmoduleBind> scopedSubmodules;       // PY-LOCAL-BIND: "<defId>#y", a def-scoped from-import's facts
     HashMap<std::string, std::uint32_t>       scopedImportBindFile;   // PY-LOCAL-BIND: "<defId>#y" → a def-scoped `import X as y`'s file
+    HashMap<std::string, char>                scopedImportNames;      // PY-LOCAL-BIND: "<fileId>#y" of every def-scoped import
     HashMap<std::string, char>              importBind;
     HashMap<std::string, std::uint32_t>     importBindFile;
     HashMap<std::string, std::uint32_t>     memberImportFile;
@@ -2848,13 +2850,39 @@ inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBi
     }
 }
 
+// PY-LOCAL-BIND: the def or class an import inside a Python def or class binds a local of (never the module-level name), else kNoNode
+inline NodeId pythonImportScope( const IngestResult& ing, const Binding& b )
+{
+    const NodeId scope = pythonBindScope( ing, b );
+    return scope != kNoNode && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) ? scope : kNoNode;
+}
+
+// PY-LOCAL-BIND: the def or class whose scoped entry for b.var binding record b withholds, else kNoNode — any other binding of y with
+// the def as its symbol, and the def's own import of y when the file rebinds y at module scope (pythonModuleRebind): a `global y` or
+// `nonlocal y` is sited at byte 0 and names no def, and in the def that declares it the import writes the OUTER y, which a call still
+// reads when the import is conditional (CodeRabbit #592). NameAlias restates a from-import's own `x as y` (its one producer,
+// ingest_binds.h): the import itself, not a rebinding. A def importing y in a file with a module-scope `y = …` withholds too, a floor.
+inline NodeId pythonScopedBindPoisonScope( const IngestResult& ing, const ExternalVetoTables& t, const Binding& b, std::string& key )
+{
+    if( b.var.empty() || b.kind == LocalBindKind::NameAlias )
+    {
+        return kNoNode;
+    }
+    if( b.kind != LocalBindKind::Import )
+    {
+        return b.fromSymbol;
+    }
+    const NodeId scope = pythonImportScope( ing, b );
+    return scope != kNoNode && t.pythonModuleRebind.contains( fileNameKey( key, b.fileId, b.var ) ) ? scope : kNoNode;
+}
+
 // PY-LOCAL-BIND: ExternalVetoTables' scoped tables from the def-scoped imports — a from-import's submodule passes the same package test
 // as a module-scope one (the package's own namespace must not bind x), and y is that def's module only when nothing else binds y there:
 // every other binding record of y with the def as its symbol (a parameter, an assignment such as `except ImportError: y = None`, a
 // comprehension target; an `import X as y` naming another file and a from-import of a member are read above) poisons it to kNoFile, so the call keeps the
 // unchanged ladder or is declined, never picked. A guard (`if`, `try`) needs no mark: an unbound local raises, it reads nothing else.
 // No star check: `from m import *` is a SyntaxError inside a def. A nested def reads the enclosing def's local by closure: not read here
-// (its calls carry the nested def's own symbol), a floor.
+// (its calls carry the nested def's own symbol), a floor; such a call is not proven through the module's y either (pythonEnclosingDefBinds).
 inline void finalizePythonScopedBinds( const IngestResult& ing, PythonImportVetoes& iv, ExternalVetoTables& t )
 {
     std::string pk;
@@ -2876,18 +2904,19 @@ inline void finalizePythonScopedBinds( const IngestResult& ing, PythonImportVeto
         }
     }
     t.scopedImportBindFile = std::move( iv.scopedImportBindFile );
+    t.scopedImportNames    = std::move( iv.scopedImportNames );
     if( t.scopedImportBindFile.empty() && t.scopedSubmoduleBindFile.empty() )
     {
         return;
     }
     for( const Binding& b : ing.bindings )
     {
-        // NameAlias restates a from-import's own `x as y` (its one producer, ingest_binds.h): the import itself, not a rebinding
-        if( b.kind == LocalBindKind::Import || b.kind == LocalBindKind::NameAlias || b.fromSymbol == kNoNode || b.var.empty() )
+        const NodeId scope = pythonScopedBindPoisonScope( ing, t, b, pk );
+        if( scope == kNoNode )
         {
             continue;
         }
-        fileNameKey( pk, b.fromSymbol, b.var );
+        fileNameKey( pk, scope, b.var );
         for( HashMap<std::string, std::uint32_t>* table : { &t.scopedImportBindFile, &t.scopedSubmoduleBindFile } )
         {
             if( const auto it = table->find( pk ); it != table->end() )
@@ -3019,13 +3048,6 @@ inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult
     return names;
 }
 
-// PY-LOCAL-BIND: the def or class an import inside a Python def or class binds a local of (never the module-level name), else kNoNode
-inline NodeId pythonImportScope( const IngestResult& ing, const Binding& b )
-{
-    const NodeId scope = pythonBindScope( ing, b );
-    return scope != kNoNode && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) ? scope : kNoNode;
-}
-
 // PY-LOCAL-BIND: a def-scoped `import X [as y]` into ExternalVetoTables::scopedImportBindFile, keyed "<scope>#y" — the module file
 // recordImportBindFile would read; two that disagree in one def record kNoFile. A from-import is recordSubmoduleBind's.
 inline void recordScopedImportBindFile( const IngestResult& ing, const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
@@ -3078,6 +3100,7 @@ inline void recordPythonImportFiles( const IngestResult& ing, const Binding& b, 
     else
     {
         recordScopedImportBindFile( ing, b, resolved, fileIndex, scope, key, t.scopedImportBindFile );
+        t.scopedImportNames.try_emplace( fileNameKey( key, b.fileId, b.var ), '\0' );
     }
     recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
     const bool atModule = scope == kNoNode;
@@ -8610,6 +8633,42 @@ inline std::vector<NodeId> pythonClassScopeChain( const IngestResult& ing, NodeI
     return chain;
 }
 
+// PY-LOCAL-BIND: does a def enclosing r's caller bind r.recvVar? Python then reads that def's y by closure, never the module's, so the
+// module-level tables must not prove the call (CodeRabbit #592). Only files where some def imports y are scanned (scopedImportNames).
+inline bool pythonEnclosingDefBinds( const IngestResult& ing, const ExternalVetoTables& t, const ExternalVeto& veto, const Reference& r, std::string& key )
+{
+    if( r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size() || !t.scopedImportNames.contains( fileNameKey( key, r.fileId, r.recvVar ) ) )
+    {
+        return false;
+    }
+    return std::ranges::any_of( pythonClassScopeChain( ing, r.fromSymbol ), [ & ]( NodeId a ) {
+        const SymKind k = ing.symbols[ a ].kind;
+        return ( k == SymKind::Function || k == SymKind::Method ) && veto.localNameSet.contains( fileNameKey( key, a, r.recvVar ) );
+    } );
+}
+
+// PY-LOCAL-BIND: the tables a Python `y.f()` reads y's module from, `key` spelled for them. A local y (hasLocal): the caller's own
+// def-scoped tables, keyed by that def — none for a call in the def's signature (a default runs in the enclosing scope, before the body's
+// import binds). A module-level y: the file's tables — none when an enclosing def binds y. None keeps the unchanged ladder.
+struct PythonRecvBindTables
+{
+    const HashMap<std::string, std::uint32_t>& alias;
+    const HashMap<std::string, std::uint32_t>& sub;
+};
+inline PythonRecvBindTables pythonRecvBindTables( const IngestResult& ing, const ExternalVetoTables& t, const ExternalVeto& veto, const Reference& r, std::string& key )
+{
+    static const HashMap<std::string, std::uint32_t> kNone;
+    if( veto.hasLocal( r, r.recvVar ) )
+    {
+        const bool inSignature = r.fromSymbol < ing.symbols.size() && r.startByte < ing.symbols[ r.fromSymbol ].sigEndByte;
+        fileNameKey( key, r.fromSymbol, r.recvVar );
+        return inSignature ? PythonRecvBindTables{ kNone, kNone } : PythonRecvBindTables{ t.scopedImportBindFile, t.scopedSubmoduleBindFile };
+    }
+    const bool closure = pythonEnclosingDefBinds( ing, t, veto, r, key );
+    fileNameKey( key, r.fileId, r.recvVar );
+    return closure ? PythonRecvBindTables{ kNone, kNone } : PythonRecvBindTables{ t.importBindFile, t.submoduleBindFile };
+}
+
 // can package file `pkg` (its __init__.py) bind `name` itself? `from pkg import name` reads the package's attribute FIRST and falls back
 // to the submodule `name` only when there is none, so the submodule is the answer only when nothing in the package binds the name: no
 // import, def, class or assignment of it at module scope (a `global` anywhere counts, pythonModuleRebind), no module `__getattr__`
@@ -8695,7 +8754,10 @@ inline void pythonImportedBases( const BaseEvidenceTables& t, const Reference& r
     {
         return;   // a dotted qualifier (`a.b.X`): not read
     }
-    if( const std::uint32_t f = pythonImportFileOf( t.extVeto.importBindFile, r.fileId, qual, key ); f != kNoFile )
+    // PY-LOCAL-BIND: an import in the class's own def or class body is in the scoped table, keyed by that scope (CodeRabbit #592)
+    const bool atModule = bind->scope == kNoNode;
+    if( const std::uint32_t f = pythonImportFileOf( atModule ? t.extVeto.importBindFile : t.extVeto.scopedImportBindFile, atModule ? r.fileId : bind->scope, qual, key );
+        f != kNoFile )
     {
         pythonReexportChain( t, cand, f, r.calleeName, out );
         return;
@@ -11869,10 +11931,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             // PY-LOCAL-BIND: a local y (hasLocal) is a module only through an import inside the caller's own def, in the scoped tables
             // keyed by that def (a parameter or assignment of y there poisoned the entry); a module-level y uses the file's tables
-            const bool  local    = externalVeto.hasLocal( r, r.recvVar );
-            const auto& aliasTab = local ? extVeto.scopedImportBindFile : extVeto.importBindFile;
-            const auto& subTab   = local ? extVeto.scopedSubmoduleBindFile : extVeto.submoduleBindFile;
-            fileNameKey( bindKey, local ? r.fromSymbol : r.fileId, r.recvVar );
+            const PythonRecvBindTables tabs     = pythonRecvBindTables( ing, extVeto, externalVeto, r, bindKey );
+            const auto&                aliasTab = tabs.alias;
+            const auto&                subTab   = tabs.sub;
             // PY-MOD-CALL-SITES: else `from p import y` naming p's submodule y (ExternalVetoTables::submoduleBindFile) — the same narrow.
             // A site it cannot prove (unproven binding, a dynamic namespace in the submodule, none or two module-scope defs there) keeps
             // the ladder; only where the ladder would read the module attribute as no in-tree def (external=) is it declined instead
