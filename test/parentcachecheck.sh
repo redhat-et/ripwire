@@ -70,7 +70,7 @@ callers_has feed   1 'n="loop" p="shapes.go:8" sites_at="shapes.go:13"'
 callers_has leaf   2 'n="Inner.m" p="deep.py:10"' 'n="deep" p="deep.py:4" sites_at="deep.py:5"'
 callers_has h      1 'n="g" p="missing.c:3" sites_at="missing.c:5 missing.c:6"'
 callers_has k      1 'n="g" p="missing.c:3" sites_at="missing.c:6"'
-callers_has render 2 'n="Panel.refresh" p="shapes.ts:3" sites_at="shapes.ts:5"' 'n="mount" p="shapes.ts:8" sites_at="shapes.ts:10"'
+callers_has render 2 'n="Panel.refresh" p="shapes.ts:3" sites_at="shapes.ts:5"' 'n="mount" p="shapes.ts:9" sites_at="shapes.ts:11"'
 
 # same DIR LABEL ARGS... → the answer is byte-identical with the cache on and off, and not empty
 same(){

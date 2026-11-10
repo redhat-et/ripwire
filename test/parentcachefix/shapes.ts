@@ -1,8 +1,9 @@
 export class Panel {
   render(a: number): number { return a; }
   refresh(): number {
-    const twin = new Panel();
-    return twin.render(this.render(1));
+    let total = 0;
+    for (const twin of [new Panel()]) { total += twin.render(this.render(total)); }
+    return total;
   }
 }
 export function mount(p: Panel): number {
