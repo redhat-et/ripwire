@@ -545,6 +545,7 @@ for _g in \
     formembernamescheck \
     fornotesbudgetcheck \
     fornotesjsoncheck \
+    foronesidecheck \
     forrankordercheck \
     forregrowcheck \
     forrootlegendcheck \

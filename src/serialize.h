@@ -1251,9 +1251,10 @@ inline std::size_t tokensForEmittedBytes( std::size_t emittedBytes, double bytes
 // prices, so the digits are converged the way --for's header splice converges them (≤4 passes). `markupBytes`
 // are priced at `markupRate`, `bodyBytes` at kBytesPerTokenBody. Returns the attribute string; `outTokens`
 // receives the number, so the caller's own --token-budget gate reads the SAME value the root shows.
-inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, std::size_t bodyBytes, std::size_t* outTokens )
+// The body-rate sections may come already priced (`bodyTokens`, --for's per-section charge): pricedRootAttrTokens is the
+// same fixpoint over them, and pricedRootAttr its byte-count reader.
+inline std::string pricedRootAttrTokens( std::size_t markupBytes, double markupRate, std::size_t bodyTokens, std::size_t* outTokens )
 {
-    const std::size_t bodyTokens = bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0;
     std::size_t estTokens = tokensForEmittedBytes( markupBytes, markupRate ) + bodyTokens;
     std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
     for( int pass = 0; pass < 4; ++pass )
@@ -1265,6 +1266,36 @@ inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, s
     }
     if( outTokens ) { *outTokens = estTokens; }
     return attr;
+}
+inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, std::size_t bodyBytes, std::size_t* outTokens )
+{
+    return pricedRootAttrTokens( markupBytes, markupRate, bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0, outTokens );
+}
+
+// What a --for root's number was converged from, at kBytesPerTokenDefault: kept so a pass that later rewrites markup inside the
+// priced span re-prices the root through the same fixpoint (repriceRootAfterCut) — no second estimator, no second pass.
+struct PricedRootInputs
+{
+    std::size_t markupBytes = 0; // every markup byte the number priced, its own est_tokens= attribute excluded
+    std::size_t bodyTokens = 0; // the body-rate sections, already priced
+};
+
+// ONE-SIDE-REACH (foronesidereach.h) rewrites printed <sigs>/<callers> rows as tail pointers after the root was priced. `doc` is the
+// answer after that markup rewrite and `pricedBytes` the size of the answer the root was priced on (the same est_tokens= digits in
+// both), so the priced markup is now in.markupBytes + doc.size() - pricedBytes. The difference is SIGNED: the legend comment plus
+// short pointers can outweigh the short rows they replace. The root's est_tokens= value is replaced with the fixpoint over the
+// rewritten markup. Only the number moves; every other byte stays.
+inline void repriceRootAfterCut( std::string& doc, const PricedRootInputs& in, std::size_t pricedBytes )
+{
+    constexpr std::string_view kKey = " est_tokens=\"";
+    const std::size_t lt = doc.find( '<' );
+    const std::size_t gt = lt == std::string::npos ? std::string::npos : doc.find( '>', lt );
+    const std::size_t at = gt == std::string::npos ? std::string::npos : doc.find( kKey, lt );
+    const std::size_t end = at == std::string::npos ? std::string::npos : doc.find( '"', at + kKey.size() );
+    // the caller priced this root itself (CLI finishForLensHeaderPriced, MCP priceForTaskRoot) and rewrote only what it priced
+    EXPECTS( end != std::string::npos && end < gt, "repriceRootAfterCut: the root carries the est_tokens= its caller priced" );
+    EXPECTS( pricedBytes <= in.markupBytes + doc.size(), "repriceRootAfterCut: the cut removed only priced markup" );
+    doc.replace( at, end + 1 - at, pricedRootAttrTokens( in.markupBytes + doc.size() - pricedBytes, kBytesPerTokenDefault, in.bodyTokens, nullptr ) );
 }
 // R1 (terminality round A 2026-09-05): the ONE definition of over_ceiling=, hoisted to sit beside the
 // estimator whose number it qualifies. It was a function-local constant in verbs_for.h, which is why the
