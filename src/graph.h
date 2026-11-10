@@ -11344,13 +11344,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             for( std::size_t i = cb; i < ce; ++i )
             {
                 const NodeId to = scip->coveredFrom[ i ].to;
-                if( to != r.fromSymbol && to < N )
+                // a schema definition (.proto) is linked to the code that uses it by name only, never a call edge: an index that
+                // resolves a call to one leaves the site pinned with no edge (PROTO-INDEX; the shortkey gen rung is the link)
+                if( to != r.fromSymbol && to < N && !langFacts( ing.symbols[ to ].lang ).generatedSchema )
                 {
                     tier.push_back( to ); // precise target (self-loops dropped, as the fallback ladder below does)
                 }
             }
             scipPinned = !tier.empty();
-            // a covered site whose precise targets are all self / out-of-range yields no edge — treat as pinned
+            // a covered site whose precise targets are all self / out-of-range / schema yields no edge — treat as pinned
             // (the index HAS resolved it) so we do NOT fall back to a name-based guess for a site SCIP resolved.
             if( cb != ce )
             {
