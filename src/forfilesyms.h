@@ -25,6 +25,15 @@
 // name_total= / callee_total= / files_total= only when a cap cut; every printed attribute is in kForFileSymsAttrs, which both legends must
 // define (static_assert). A row in a test or fixture file or scope carries test="1" (a lead, ranked like any other). A name both rules pick
 // prints once, as by="name".
+// A THIRD RULE, by a fact and not by rank (VR-BINDER-ROW):
+//   by="bind"   a function that stores a head row's definition AS A VALUE into a slot: the callers' <vr> row of that definition
+//               (valuerefindex.h, any language whose value-ref pass records into=) names its enclosing symbol (in_id=) and the slot
+//               (into=): a returned object literal (`return { isDeclarationVisible }`), a dict or table entry, a field, a variable. The row
+//               carries into= as the <vr> row spells it, and may come from ANY file (the bind is a fact about the head, not about a shown
+//               file). An argument pass or a parameter default (`#i`/`#kw` keys) and a decorator (`into=@NAME`) are no slot bind; a
+//               self-store, a name the answer already gives and a name another rule picked are skipped. kForFileSymsBindPerHead rows per
+//               head row (bind_total= the distinct binders when a cap cut). Its legend clause rides only beside a printed bind row, and
+//               the value index is built only when a Value reference names a head row: a head nobody binds pays one scan and no byte.
 // PRESENT-ONLY: no candidate scores, no block. A token budget holds it (held="budget", next= the same --for call without the
 // budget; the stub carries its own short legend), and so does a CLI run that could not buffer its bytes (held="uncaptured"). The block is outside
 // est_tokens, after every byte of the ordinary answer: no auto-served body pays for it. XML only: --json, columnar, --candidates and multi-root answers carry none.
@@ -38,6 +47,7 @@
 #include "nextverb.h" // nextFlag / nextAttrXml
 #include "quality.h" // isHeaderPath — a C/C++ declaration lives in a header
 #include "serialize.h" // escapeXml
+#include "valuerefindex.h" // ValueRefIndex::narrowFor / valueRefsTo, vrBindLess — by="bind" reads the callers' <vr> rows
 
 #include <algorithm>
 #include <array>
@@ -61,10 +71,17 @@ namespace rw
 inline constexpr std::size_t kForFileSymsFiles = 6; // shown files whose symbols are candidates (files_total= when more were shown)
 inline constexpr std::size_t kForFileSymsHeadRows = 8; // head <d> rows whose callees by="callee" reads (head= when fewer)
 inline constexpr std::size_t kForFileSymsRowsPerRule = 3; // rows per rule (name_total= / callee_total= when cut)
+inline constexpr std::size_t kForFileSymsBindPerHead = 2; // by="bind" rows per head <d> row (bind_total= when cut)
 
 inline bool forFileSymsOn()
 {
     return std::getenv( "RIPWIRE_NO_FILE_SYMS" ) == nullptr;
+}
+
+// RIPWIRE_NO_BIND_ROWS (any value) drops the by="bind" rule: the A/B handle.
+inline bool forFileSymsBindOn()
+{
+    return std::getenv( "RIPWIRE_NO_BIND_ROWS" ) == nullptr;
 }
 
 inline constexpr std::string_view kForFileSymsLegend =
@@ -90,10 +107,20 @@ inline constexpr std::string_view kForFileSymsHeldLegend =
     "<!-- ripwire for syms: held=\"budget\": a token budget is set, so the symbol rows of the shown files are not printed; next= repeats this call "
     "without the budget, which prints them; held=\"uncaptured\": the answer's own bytes could not be buffered to read, so no rows are printed; not in est_tokens -->";
 
+// The by="bind" clause, present-only: spliced before the legend's closing ` -->` when a bind row prints (the legend stays one comment,
+// the one the reader meets right before <syms>). One clause each, no "--" (the legend is an XML comment).
+inline constexpr std::string_view kForFileSymsBindLegend =
+    "; by=\"bind\" a function that stores one of the first 8 <d> rows as a value into a slot (a returned object, a table or dict entry, a field, "
+    "a variable, any file): into= the slot as the callers' <vr> row spells it, a binding not a call, two per head row, bind_total= the binders when more";
+inline constexpr std::string_view kForFileSymsBindLegendCompact =
+    "; by=bind stores a head <d> row as a value into slot into= (any file, not a call), two per head row, bind_total= when more";
+inline constexpr std::string_view kLegendClose = " -->";
+
 // Every attribute <syms> and its <y> rows can print (blockXml's count() names and its row hedges; p= n= are the core row keys), and the
 // held stub's: each legend that rides beside them spells it `name=` (the legendcoveragecheck predicate), checked at compile time.
 inline constexpr std::array<std::string_view, 9> kForFileSymsAttrs { "files", "files_total", "head", "name_total", "callee_total", "by", "via", "prov", "test" };
 inline constexpr std::array<std::string_view, 2> kForFileSymsHeldAttrs { "held", "next" };
+inline constexpr std::array<std::string_view, 3> kForFileSymsBindAttrs { "by", "into", "bind_total" };
 template<std::size_t N>
 consteval bool legendDefinesAll( std::string_view legend, const std::array<std::string_view, N>& attrs )
 {
@@ -118,6 +145,13 @@ static_assert( kForFileSymsFiles == 6 && kForFileSymsHeadRows == 8 && kForFileSy
 static_assert( legendDefinesAll( kForFileSymsLegend, kForFileSymsAttrs ), "kForFileSymsLegend must spell every <syms> attribute as name=" );
 static_assert( legendDefinesAll( kForFileSymsLegendCompact, kForFileSymsAttrs ), "kForFileSymsLegendCompact must spell every <syms> attribute as name=" );
 static_assert( legendDefinesAll( kForFileSymsHeldLegend, kForFileSymsHeldAttrs ), "kForFileSymsHeldLegend must spell held= and next=" );
+static_assert( legendDefinesAll( kForFileSymsBindLegend, kForFileSymsBindAttrs ) && legendDefinesAll( kForFileSymsBindLegendCompact, kForFileSymsBindAttrs ),
+               "each bind clause must spell by=, into= and bind_total=" );
+static_assert( kForFileSymsBindPerHead == 2, "the bind clauses say \"two per head row\": move the words with the constant" );
+static_assert( kForFileSymsBindLegend.find( "--" ) == std::string_view::npos && kForFileSymsBindLegendCompact.find( "--" ) == std::string_view::npos
+                   && kForFileSymsBindLegend.find( ';', 1 ) == std::string_view::npos && kForFileSymsBindLegendCompact.find( ';', 1 ) == std::string_view::npos,
+               "one clause each, and no '--' (the legend is an XML comment)" );
+static_assert( kForFileSymsLegend.ends_with( kLegendClose ) && kForFileSymsLegendCompact.ends_with( kLegendClose ), "the bind clause splices before the close" );
 
 namespace filesyms_detail
 {
@@ -866,10 +900,30 @@ inline void collapseDeclarations( DeclHome& home, std::vector<Cand>& cands )
     cands = std::move( kept );
 }
 
+// ── by="bind" (VR-BINDER-ROW) ──
+// A Value reference that stores a function into a slot: it names something, has an into= and an enclosing symbol, and is neither an
+// argument pass / parameter default (key `#i` / `#kw`) nor a decorator (`into=@NAME`, a fact about the definition itself).
+inline bool slotBind( const Reference& r )
+{
+    return r.role == RefRole::Value && r.fromSymbol != kNoNode && !r.calleeName.empty() && !r.fieldName().empty()
+        && !r.fieldName().starts_with( '@' ) && !r.composeRel().starts_with( '#' );
+}
+struct BindRow
+{
+    NodeId        id  = kNoNode;   // the binder (the <vr> row's in_id=)
+    std::uint32_t ref = 0;         // its first bind of a head row (into=)
+};
+struct BindPicks
+{
+    std::vector<BindRow> rows;    // at most kForFileSymsBindPerHead per head row
+    std::size_t          total = 0;   // distinct binders found
+};
+
 struct Picks
 {
     std::vector<const Cand*> byName, byCallee; // capped at kForFileSymsRowsPerRule each
     std::size_t nameTotal = 0, calleeTotal = 0;
+    BindPicks   binds; // by="bind" (pickBinds), filled after the two ranked rules
 };
 // The tie-break after a rule's own score: fan-in desc, shown-file order, name (byte order), id: a total order. Field by field, not a tuple:
 // the tuple's string_view member would order through operator< (see rw::sortutil::svLess).
@@ -938,11 +992,149 @@ inline std::string presentOnlySymsBlock( const std::string& block, bool compactL
     return legend + std::string( rows ) + "</syms>";
 }
 
+// ── by="bind" (VR-BINDER-ROW): the picks ──
+// The head rows' definition names, sorted unique (svLess): the narrow index's names and the cost pre-check's lookup.
+inline std::vector<std::string_view> headDefNames( const IngestResult& ing, const Head& head )
+{
+    std::vector<std::string_view> names;   // at most kForFileSymsHeadRows: an ordered insert keeps it sorted unique
+    for( const NodeId h : head.ids )
+    {
+        const std::string_view n  = ing.symbols[h].name;
+        const auto             at = std::ranges::lower_bound( names, n, rw::sortutil::svLess );
+        if( at == names.end() || *at != n )
+        {
+            names.insert( at, n );
+        }
+    }
+    return names;
+}
+// COST: does any slot bind name a head row? One scan; no index and no byte when none does.
+inline bool anyHeadBind( const IngestResult& ing, const std::vector<std::string_view>& names )
+{
+    return std::ranges::any_of( ing.references, [&]( const Reference& r )
+                                { return slotBind( r ) && std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess ); } );
+}
+// One head's slot binds, in served order (vrBindLess, then reference order: a total order).
+inline std::vector<std::uint32_t> headBindsInOrder( const IngestResult& ing, const ValueRefIndex& vri, NodeId h )
+{
+    std::vector<std::uint32_t> refs = vri.valueRefsTo( std::span<const NodeId>( &h, 1 ) );
+    std::erase_if( refs, [&]( std::uint32_t v ) { return !slotBind( ing.references[v] ); } );
+    std::ranges::sort( refs, [&]( std::uint32_t a, std::uint32_t b )
+                       { return vrBindLess( ing, ing.references[a], ing.references[b] ) || ( !vrBindLess( ing, ing.references[b], ing.references[a] ) && a < b ); } );
+    return refs;
+}
+// What a binder must not be: the head itself (a self-store), a non-candidate kind, a symbol a shown row stands on, a name the answer
+// already gives, or a pick of another rule (a name prints once).
+struct BinderFilter
+{
+    const IngestResult&                  ing;
+    const ShownFiles&                    sf;
+    const Picks&                         picks;
+    std::string_view                     answer;
+    const std::vector<std::string_view>& tokens;
+    bool admits( NodeId from, NodeId head ) const
+    {
+        if( from == head || from >= ing.symbols.size() )
+        {
+            return false;
+        }
+        const Symbol& s  = ing.symbols[from];
+        const auto    is = [&]( const Cand* c ) { return c->id == from; };
+        return candidateKind( s ) && !std::ranges::binary_search( sf.shownAt, ( std::uint64_t( s.fileId ) << 32 ) | s.line )
+            && !nameInAnswer( tokens, answer, s.name ) && !std::ranges::any_of( picks.byName, is ) && !std::ranges::any_of( picks.byCallee, is );
+    }
+};
+// The binders pickBinds has met, one state byte per symbol (indexed membership: a head with thousands of binders stays linear). A
+// binder counts once in total and prints at most one row; one counted under an earlier head whose rows were full may still print
+// under a later head's free slot.
+struct BinderTally
+{
+    enum : std::uint8_t { kUnseen = 0, kCounted = 1, kPrinted = 2 };
+    std::vector<std::uint8_t> state;
+    BindPicks&                out;
+    // Counts `from` (bind ref v) once; prints its row when the head has a free slot. True when a row printed.
+    bool take( NodeId from, std::uint32_t v, bool slotFree )
+    {
+        if( state[from] == kPrinted )
+        {
+            return false;
+        }
+        if( state[from] == kUnseen )
+        {
+            ++out.total;
+        }
+        state[from] = slotFree ? kPrinted : kCounted;
+        if( slotFree )
+        {
+            out.rows.push_back( BindRow { from, v } );
+        }
+        return slotFree;
+    }
+};
+// The binders of the head rows' definitions, head by head (head.ids order), each head's binds in served order. A binder prints one row
+// at most and counts once in total; kForFileSymsBindPerHead rows per head, the rest counted in total.
+inline BindPicks pickBinds( const IngestResult& ing, const ShownFiles& sf, const Head& head, const Picks& picks, std::string_view answer )
+{
+    BindPicks out;
+    if( !forFileSymsBindOn() || head.ids.empty() )
+    {
+        return out;
+    }
+    const std::vector<std::string_view> names = headDefNames( ing, head );
+    if( !anyHeadBind( ing, names ) )
+    {
+        return out;
+    }
+    const ValueRefIndex                 vri    = ValueRefIndex::narrowFor( ing, names );
+    const std::vector<std::string_view> tokens = answerTokens( answer );
+    const BinderFilter                  filter { ing, sf, picks, answer, tokens };
+    BinderTally                         tally { std::vector<std::uint8_t>( ing.symbols.size(), BinderTally::kUnseen ), out };
+    for( const NodeId h : head.ids )
+    {
+        std::size_t perHead = 0;
+        for( const std::uint32_t v : headBindsInOrder( ing, vri, h ) )
+        {
+            const NodeId from = ing.references[v].fromSymbol;
+            if( filter.admits( from, h ) && tally.take( from, v, perHead < kForFileSymsBindPerHead ) )   // admits() range-checks from
+            {
+                ++perHead;
+            }
+        }
+    }
+    return out;
+}
+// The legend, with the by="bind" clause spliced before its close when a bind row prints.
+inline std::string symsLegend( bool compactLegend, const BindPicks& binds )
+{
+    std::string out( compactLegend ? kForFileSymsLegendCompact : kForFileSymsLegend );
+    if( !binds.rows.empty() )
+    {
+        out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsBindLegendCompact : kForFileSymsBindLegend );
+    }
+    return out;
+}
+// The by="bind" rows: p=file:line n=Owner.name by="bind" into=the slot [test="1"].
+inline void appendBindRows( std::string& out, const IngestResult& ing, const MemberOwners& owners, const BindPicks& binds, std::vector<char>& esc )
+{
+    for( const BindRow& b : binds.rows )
+    {
+        const Symbol& s = ing.symbols[b.id];
+        out += "<y p=\"";
+        out += escapeXml( rootRelPath( ing, s.fileId ), esc );
+        out += std::format( ":{}\" n=\"", s.line );
+        out += escapeXml( qualifiedMemberName( owners, s ), esc );
+        out += "\" by=\"bind\" into=\"";
+        out += escapeXml( ing.references[b.ref].fieldName(), esc );
+        out += isTestSymbol( ing, b.id ) ? "\" test=\"1\"/>" : "\"/>";
+    }
+}
+
 inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, const Head& head, const Picks& picks, bool compactLegend )
 {
     const MemberOwners owners( ing );
     std::vector<char> esc;
-    std::string out( compactLegend ? kForFileSymsLegendCompact : kForFileSymsLegend );
+    const BindPicks& binds = picks.binds;
+    std::string      out   = symsLegend( compactLegend, binds );
     // Constants live in the legend (6 files read, 8 head rows, 3 rows per rule): an attribute prints only when it differs or says a cap cut.
     const auto attr = [&]( std::string_view name, std::size_t value, bool print )
     { out += print ? std::format( " {}=\"{}\"", name, value ) : std::string(); };
@@ -952,6 +1144,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     attr( "head", head.rows, head.rows != kForFileSymsHeadRows );
     attr( "name_total", picks.nameTotal, picks.nameTotal > picks.byName.size() );
     attr( "callee_total", picks.calleeTotal, picks.calleeTotal > picks.byCallee.size() );
+    attr( "bind_total", binds.total, binds.total > binds.rows.size() );
     out += ">";
     const auto row = [&]( const Cand& c, bool callee )
     {
@@ -974,6 +1167,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     {
         row( *c, true );
     }
+    appendBindRows( out, ing, owners, binds, esc );
     return presentOnlySymsBlock( out, compactLegend );
 }
 } // namespace filesyms_detail
@@ -1015,8 +1209,9 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     fd::dedupeCands( ing, cands );
     fd::DeclHome home( ing, g );
     fd::collapseDeclarations( home, cands );
-    const fd::Picks picks = fd::pickRows( ing, g, cands );
-    if( picks.byName.empty() && picks.byCallee.empty() )
+    fd::Picks picks = fd::pickRows( ing, g, cands );
+    picks.binds     = fd::pickBinds( ing, sf, head, picks, a.answer );
+    if( picks.byName.empty() && picks.byCallee.empty() && picks.binds.rows.empty() )
     {
         return {};
     }
