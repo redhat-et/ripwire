@@ -267,13 +267,13 @@ inline TSNode memberOnlyReceiver( TSNode parent, Lang lang ) noexcept
     }
     if( lang == Lang::CSharp && kindIs( t, "member_binding_expression" ) )
     {
-        const TSNode cond = ts_node_parent( parent );         // `w?.Bump()`: the conditional access holds the receiver
+        const TSNode cond = parentOf( parent );         // `w?.Bump()`: the conditional access holds the receiver
         return ( !ts_node_is_null( cond ) && kindIs( ts_node_type( cond ), "conditional_access_expression" ) && ts_node_named_child_count( cond ) > 0 )
              ? ts_node_named_child( cond, 0 ) : TSNode{};
     }
     if( ( lang == Lang::Kotlin || lang == Lang::Swift ) && kindIs( t, "navigation_suffix" ) )
     {
-        const TSNode nav = ts_node_parent( parent );
+        const TSNode nav = parentOf( parent );
         return ( !ts_node_is_null( nav ) && kindIs( ts_node_type( nav ), "navigation_expression" ) && ts_node_named_child_count( nav ) > 0 )
              ? ts_node_named_child( nav, 0 ) : TSNode{};
     }
@@ -553,7 +553,7 @@ inline bool rubyDescribedClassIsLocal( TSNode site, std::string_view src )
 {
     const std::uint32_t at = ts_node_start_byte( site );
     std::vector<TSNode> stack;
-    for( TSNode n = ts_node_parent( site ); !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    for( TSNode n = parentOf( site ); !ts_node_is_null( n ); n = parentOf( n ) )
     {
         const std::optional<RubyLocalRole> role = rubyLocalRole( ts_node_type( n ) );
         if( rubyNodeBindsDescribedClass( n, role, src ) || rubyEarlierChildBindsDescribedClass( n, at, src, stack ) )
@@ -578,7 +578,7 @@ inline bool rubyDescribedClassIsLocal( TSNode site, std::string_view src )
 inline TSNode rspecDescribingGroup( TSNode node, std::string_view src )
 {
     TSNode prev = node;
-    for( TSNode n = ts_node_parent( node ); !ts_node_is_null( n ); prev = n, n = ts_node_parent( n ) )
+    for( TSNode n = parentOf( node ); !ts_node_is_null( n ); prev = n, n = parentOf( n ) )
     {
         const char* pt = ts_node_type( prev );
         if( !kindIs( ts_node_type( n ), "call" ) || !( kindIs( pt, "do_block" ) || kindIs( pt, "block" ) ) )
@@ -1030,7 +1030,7 @@ inline const SubscriptOperatorNames* subscriptOperatorNamesOf( Lang lang ) noexc
 // (`h[ k ] += 1`, `h[ k ] ||= v`) runs both forms and is recorded as the read one, the setter capture's floor.
 inline std::string_view subscriptOperatorName( TSNode access, const SubscriptOperatorNames& names ) noexcept
 {
-    const TSNode parent = ts_node_parent( access );
+    const TSNode parent = parentOf( access );
     if( ts_node_is_null( parent ) )
     {
         return names.read;
@@ -1043,7 +1043,7 @@ inline std::string_view subscriptOperatorName( TSNode access, const SubscriptOpe
     const bool multiTarget = kindIs( pt, "pattern_list" ) || kindIs( pt, "tuple_pattern" ) || kindIs( pt, "list_pattern" )
                           || kindIs( pt, "left_assignment_list" ) || kindIs( pt, "destructured_left_assignment" );
     const bool notValue    = kindIs( pt, "delete_statement" ) || kindIs( pt, "type" ) || kindIs( pt, "generic_type" )
-                          || ( kindIs( pt, "expression_list" ) && kindIs( ts_node_type( ts_node_parent( parent ) ), "delete_statement" ) );
+                          || ( kindIs( pt, "expression_list" ) && kindIs( ts_node_type( parentOf( parent ) ), "delete_statement" ) );
     return multiTarget || notValue ? std::string_view {} : names.read;
 }
 
@@ -1263,7 +1263,7 @@ inline void RubyBareCallWalk::noteFrame( bool groupBlock, TSNode block )
         frameDescribed_.resize( depth + 1 );
     }
     const std::string_view parent = depth > 0 ? frameDescribed_[ depth - 1 ] : std::string_view {};
-    const TSNode           group  = groupBlock ? ts_node_parent( block ) : TSNode {};
+    const TSNode           group  = groupBlock ? parentOf( block ) : TSNode {};
     const int              kind   = ts_node_is_null( group ) ? 0 : rspecGroupKind( group, src_ );
     const std::optional<std::string_view> argument = kind == 1 ? rspecGroupArgument( group, src_ ) : std::nullopt;
     frameSerial_[ depth ]    = nextSerial_++;
@@ -2602,7 +2602,7 @@ inline std::string_view fnPtrAliasName( TSNode n, const char* t, std::string_vie
 // variable IS in scope in every function below it.
 inline std::pair<std::uint32_t, std::uint32_t> enclosingDefSpan( TSNode n )
 {
-    TSNode p = ts_node_parent( n );
+    TSNode p = parentOf( n );
     for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
     {
         const char* pt = ts_node_type( p );
@@ -2610,7 +2610,7 @@ inline std::pair<std::uint32_t, std::uint32_t> enclosingDefSpan( TSNode n )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ) };
         }
-        p = ts_node_parent( p );
+        p = parentOf( p );
     }
     return { 0u, 0u };
 }
@@ -2770,7 +2770,7 @@ struct ShadowScope
 // first, a header declaration the statement first. That same discrimination is what plainBlock reports.
 inline ShadowScope enclosingShadowScope( TSNode n )
 {
-    TSNode p = ts_node_parent( n );
+    TSNode p = parentOf( n );
     for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
     {
         const char* pt = ts_node_type( p );
@@ -2802,7 +2802,7 @@ inline ShadowScope enclosingShadowScope( TSNode n )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ), false };
         }
-        p = ts_node_parent( p );
+        p = parentOf( p );
     }
     return { 0u, 0u, false };
 }
@@ -3061,7 +3061,7 @@ inline bool javaKindIsCallable( const char* t ) noexcept
 inline BindSite javaShadowSite( TSNode declNode, TSNode nameNode ) noexcept
 {
     const std::uint32_t start = ts_node_start_byte( nameNode );
-    TSNode p = ts_node_parent( declNode );
+    TSNode p = parentOf( declNode );
     for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
     {
         const char* pt = ts_node_type( p );
@@ -3084,7 +3084,7 @@ inline BindSite javaShadowSite( TSNode declNode, TSNode nameNode ) noexcept
             }
             return { start, ts_node_start_byte( body ), ts_node_end_byte( body ) };
         }
-        p = ts_node_parent( p );
+        p = parentOf( p );
     }
     const ShadowScope scope = enclosingShadowScope( declNode );
     return { start, shadowSpanStart( scope, declNode ), scope.end };
@@ -3231,10 +3231,10 @@ inline bool pythonNameIsGlobalOrNonlocalHere( TSNode n, std::string_view name, s
     const bool nGiven = !ts_node_is_null( n );
     EXPECTS( nGiven, "n is the rebind/for/named_expression/as_pattern node the caller is currently visiting — "
                       "the tree walker never dispatches on a null node" );
-    TSNode fn = ts_node_parent( n );
+    TSNode fn = parentOf( n );
     while( !ts_node_is_null( fn ) && !kindIs( ts_node_type( fn ), "function_definition" ) )
     {
-        fn = ts_node_parent( fn );
+        fn = parentOf( fn );
     }
     const bool fnIsNullOrFnDef = ts_node_is_null( fn ) || kindIs( ts_node_type( fn ), "function_definition" );
     ASSUME( fnIsNullOrFnDef, "the loop above exits only when fn is null (walked off the tree) or a function_definition" );
@@ -3383,16 +3383,16 @@ inline void capturePythonTypeParamDecls( TSNode n, std::uint32_t fileId, std::st
 // inside a def or class (not module scope). Read by the kPythonCondDefPrefix record below.
 inline bool pythonDefIsConditionalAtModule( TSNode n )
 {
-    TSNode p = ts_node_parent( n );
+    TSNode p = parentOf( n );
     if( !ts_node_is_null( p ) && kindIs( ts_node_type( p ), "decorated_definition" ) )
     {
-        p = ts_node_parent( p );
+        p = parentOf( p );
     }
     if( ts_node_is_null( p ) || kindIs( ts_node_type( p ), "module" ) )
     {
         return false;
     }
-    for( ; !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( ; !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* pt = ts_node_type( p );
         if( kindIs( pt, "function_definition" ) || kindIs( pt, "class_definition" ) || kindIs( pt, "lambda" ) )
@@ -3436,7 +3436,7 @@ inline void capturePythonLocalScopeDecls( TSNode n, const char* t, std::uint32_t
         collectPythonNameTargets( fieldChild( n, NodeField::Left ), targets );
         for( const TSNode& id : targets )
         {
-            pushPythonLocalScopeDecl( id, ts_node_parent( n ), fileId, lang, src, binds );
+            pushPythonLocalScopeDecl( id, parentOf( n ), fileId, lang, src, binds );
         }
         return;
     }
@@ -4164,7 +4164,7 @@ inline void noteTypeParameter( BindCtx& cx, TSNode param, std::uint32_t start, s
 // (the pre-order walk meets the list before the owner's parameters, fields and body)
 inline void noteTypeParameters( BindCtx& cx, TSNode list )
 {
-    const TSNode owner = ts_node_parent( list );
+    const TSNode owner = parentOf( list );
     if( ts_node_is_null( owner ) )
     {
         return;
@@ -4255,14 +4255,14 @@ inline std::string_view declaredOrConstructed( const BindCtx& cx, TSNode type, T
 // the nearest proper ancestor of `n` whose kind is one of `kinds`; null when none within 64 levels
 inline TSNode ancestorOfKind( TSNode n, std::initializer_list<std::string_view> kinds )
 {
-    TSNode p = ts_node_is_null( n ) ? TSNode{} : ts_node_parent( n );
+    TSNode p = ts_node_is_null( n ) ? TSNode{} : parentOf( n );
     for( int guard = 0; guard < 64 && !ts_node_is_null( p ); ++guard )
     {
         if( std::ranges::find( kinds, std::string_view( ts_node_type( p ) ) ) != kinds.end() )
         {
             return p;
         }
-        p = ts_node_parent( p );
+        p = parentOf( p );
     }
     return TSNode{};
 }
@@ -4594,14 +4594,14 @@ inline const ScopeFactNode* scopeFactRow( Lang lang, const char* t )
 // function body (fix round 4: a local class's member result is declared inside it), or the whole file (0 .. 0xFFFFFFFF)
 inline std::pair<std::uint32_t, std::uint32_t> cppDeclScope( TSNode n, bool classScope )
 {
-    for( TSNode up = ts_node_parent( n ); !ts_node_is_null( up ); up = ts_node_parent( up ) )
+    for( TSNode up = parentOf( n ); !ts_node_is_null( up ); up = parentOf( up ) )
     {
         const char* ut = ts_node_type( up );
         if( kindIs( ut, "translation_unit" ) )
         {
             return { 0u, 0xFFFFFFFFu };
         }
-        const TSNode owner = ts_node_parent( up );
+        const TSNode owner = parentOf( up );
         if( kindIs( ut, "declaration_list" ) && !ts_node_is_null( owner ) && kindIs( ts_node_type( owner ), "namespace_definition" ) )
         {
             return { ts_node_start_byte( up ), ts_node_end_byte( up ) };
@@ -4706,7 +4706,7 @@ inline void captureShadowDecl( BindCtx& cx, TSNode n, const char* t )
     std::uint32_t    spanEnd       = 0;
     if( callResultFamilyOf( cx.lang ) == CallResultFamily::Cpp )
     {
-        const TSNode      parent   = ts_node_parent( n );
+        const TSNode      parent   = parentOf( n );
         const char*       pt       = ts_node_is_null( parent ) ? "" : ts_node_type( parent );
         const bool        bodiless = ts_node_is_null( fieldChild( n, NodeField::Body ) );
         constexpr std::string_view kDeclScopes[] = { "declaration_list", "translation_unit", "compound_statement" };   // a statement of its own
@@ -4784,7 +4784,7 @@ inline CppMacroShape cppMacroShape( TSNode n, const char* t, TSNode scope, std::
     {
         return CppMacroShape::None;   // a destructor, a conversion operator, a qualified name
     }
-    const TSNode owner = kindIs( ts_node_type( scope ), "field_declaration_list" ) ? ts_node_parent( scope ) : TSNode{};
+    const TSNode owner = kindIs( ts_node_type( scope ), "field_declaration_list" ) ? parentOf( scope ) : TSNode{};
     TSNode       cls   = ts_node_is_null( owner ) ? TSNode{} : fieldChild( owner, NodeField::Name );
     if( !ts_node_is_null( cls ) && kindIs( ts_node_type( cls ), "template_type" ) )
     {
@@ -4829,10 +4829,10 @@ inline void pushUnrecordedNames( BindCtx& cx, TSNode n )
 }
 inline void captureCppUnparsed( BindCtx& cx, TSNode n, const char* t )
 {
-    TSNode scope = ts_node_parent( n );
+    TSNode scope = parentOf( n );
     while( !ts_node_is_null( scope ) && kindIs( ts_node_type( scope ), "template_declaration" ) )
     {
-        scope = ts_node_parent( scope );   // a template's declaration stands in the template's scope
+        scope = parentOf( scope );   // a template's declaration stands in the template's scope
     }
     const char* pt = ts_node_is_null( scope ) ? "" : ts_node_type( scope );
     constexpr std::string_view kDeclOnly[] = { "declaration_list", "translation_unit", "field_declaration_list" };   // no statement stands here
@@ -4898,7 +4898,7 @@ inline void captureUnparsedBlocks( BindCtx& cx, TSNode n )
         seen.pop_back();   // blocks the walk has left (the walk is in source order)
     }
     std::vector<TSNode> blocks;   // the enclosing blocks not yet read, innermost first; the walk stops at the module
-    for( TSNode up = ts_node_parent( n ); !ts_node_is_null( up ) && ts_node_type( up ) != rule->stop; up = ts_node_parent( up ) )
+    for( TSNode up = parentOf( n ); !ts_node_is_null( up ) && ts_node_type( up ) != rule->stop; up = parentOf( up ) )
     {
         if( ts_node_type( up ) == rule->block && std::ranges::none_of( seen, [ & ]( const auto& b ) { return b.first == ts_node_start_byte( up ); } ) )
         {
@@ -5083,8 +5083,8 @@ inline bool namesTypeParam( TSNode list, std::string_view name, std::string_view
 // reader's own check.
 inline bool enclosingGenericDeclares( TSNode fn, std::string_view name, std::string_view src )
 {
-    TSNode a = ts_node_is_null( fn ) ? TSNode{} : ts_node_parent( fn );
-    for( int guard = 0; guard < 64 && !ts_node_is_null( a ); ++guard, a = ts_node_parent( a ) )
+    TSNode a = ts_node_is_null( fn ) ? TSNode{} : parentOf( fn );
+    for( int guard = 0; guard < 64 && !ts_node_is_null( a ); ++guard, a = parentOf( a ) )
     {
         const std::string_view kind = ts_node_type( a );
         if( std::ranges::find( kGenericOwnerKinds, kind ) == std::end( kGenericOwnerKinds ) )
@@ -5246,7 +5246,7 @@ inline std::string_view cppResultClass( TSNode fn, std::string_view src, bool& a
     const TSNode tmpl  = ancestorOfKind( fn, { "template_declaration" } );
     const auto   param = [ & ]( std::string_view name )
     {
-        return ( !ts_node_is_null( tmpl ) && ts_node_eq( ts_node_parent( fn ), tmpl ) && declaresTypeName( fieldChild( tmpl, NodeField::Parameters ), name, src ) )
+        return ( !ts_node_is_null( tmpl ) && ts_node_eq( parentOf( fn ), tmpl ) && declaresTypeName( fieldChild( tmpl, NodeField::Parameters ), name, src ) )
             || enclosingGenericDeclares( fn, name, src );   // fix round 3: a class template's parameter (`template <class S> struct H { S load(); }`)
     };
     const char* t = ts_node_type( type );
@@ -5452,12 +5452,12 @@ inline void captureJavaDeclEvidence( BindCtx& cx, TSNode n, const char* t, std::
     }
     if( kindIs( t, "inferred_parameters" ) )
     {
-        pushPatternTombstones( cx, n, siteIn( at, ts_node_parent( n ) ) );   // `( a, b ) -> …`
+        pushPatternTombstones( cx, n, siteIn( at, parentOf( n ) ) );   // `( a, b ) -> …`
         return;
     }
     if( kindIs( t, "catch_formal_parameter" ) )
     {
-        pushLocalEvidence( cx, fieldChild( n, NodeField::Name ), {}, siteIn( at, ts_node_parent( n ) ) );
+        pushLocalEvidence( cx, fieldChild( n, NodeField::Name ), {}, siteIn( at, parentOf( n ) ) );
         return;
     }
     if( kindIs( t, "resource" ) )
@@ -5483,7 +5483,7 @@ inline void captureJavaDeclEvidence( BindCtx& cx, TSNode n, const char* t, std::
     const bool          field = kindIs( t, "field_declaration" );
     const LocalBindKind kind  = field ? LocalBindKind::MemberType : LocalBindKind::RecvType;
     const TSNode        type  = fieldChild( n, NodeField::Type );
-    const BindSite      site  = field ? BindSite{ at, 0u, 0u } : siteFrom( at, ts_node_parent( n ) );
+    const BindSite      site  = field ? BindSite{ at, 0u, 0u } : siteFrom( at, parentOf( n ) );
     for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
     {
         const TSNode d = ts_node_named_child( n, i );
@@ -5515,7 +5515,7 @@ inline void captureCSharpDeclEvidence( BindCtx& cx, TSNode n, const char* t, std
     }
     if( kindIs( t, "implicit_parameter" ) )
     {
-        pushLocalEvidence( cx, nodeTextOf( n, cx.src ), {}, siteIn( at, ts_node_parent( n ) ) );   // `x => …`
+        pushLocalEvidence( cx, nodeTextOf( n, cx.src ), {}, siteIn( at, parentOf( n ) ) );   // `x => …`
         return;
     }
     if( kindIs( t, "foreach_statement" ) )
@@ -5544,7 +5544,7 @@ inline void captureCSharpDeclEvidence( BindCtx& cx, TSNode n, const char* t, std
     }
     if( kindIs( t, "catch_declaration" ) )
     {
-        pushLocalEvidence( cx, fieldChild( n, NodeField::Name ), {}, siteIn( at, ts_node_parent( n ) ) );
+        pushLocalEvidence( cx, fieldChild( n, NodeField::Name ), {}, siteIn( at, parentOf( n ) ) );
         return;
     }
     if( kindIs( t, "from_clause" ) || kindIs( t, "join_clause" ) || kindIs( t, "let_clause" ) || kindIs( t, "query_continuation" ) || kindIs( t, "join_into_clause" ) )
@@ -5564,11 +5564,11 @@ inline void captureCSharpDeclEvidence( BindCtx& cx, TSNode n, const char* t, std
     }
     // a field's declaration sits in a field_declaration, a local's in a local_declaration_statement (or a using/for), whose
     // block is where it is visible
-    TSNode up = ts_node_parent( n );
+    TSNode up = parentOf( n );
     const bool field = !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "field_declaration" );
     if( !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "local_declaration_statement" ) )
     {
-        up = ts_node_parent( up );
+        up = parentOf( up );
     }
     const LocalBindKind kind = field ? LocalBindKind::MemberType : LocalBindKind::RecvType;
     const BindSite      site = field ? BindSite{ at, 0u, 0u } : siteFrom( at, up );
@@ -5613,10 +5613,10 @@ inline void captureKotlinDeclEvidence( BindCtx& cx, TSNode n, const char* t, std
     if( kindIs( t, "variable_declaration" ) )
     {
         // a declaration's own variable is read with the declaration below; here, every other place a variable is bound
-        TSNode up = ts_node_parent( n );
+        TSNode up = parentOf( n );
         if( !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "multi_variable_declaration" ) )
         {
-            up = ts_node_parent( up );
+            up = parentOf( up );
         }
         if( ts_node_is_null( up ) || kindIs( ts_node_type( up ), "property_declaration" ) )
         {
@@ -5625,7 +5625,7 @@ inline void captureKotlinDeclEvidence( BindCtx& cx, TSNode n, const char* t, std
         TSNode scope = up;   // a for loop
         if( kindIs( ts_node_type( up ), "lambda_parameters" ) || kindIs( ts_node_type( up ), "when_subject" ) )
         {
-            scope = ts_node_parent( up );   // the lambda / the when expression
+            scope = parentOf( up );   // the lambda / the when expression
         }
         else if( !kindIs( ts_node_type( up ), "for_statement" ) )
         {
@@ -5639,7 +5639,7 @@ inline void captureKotlinDeclEvidence( BindCtx& cx, TSNode n, const char* t, std
     {
         return;
     }
-    const TSNode up    = ts_node_parent( n );
+    const TSNode up    = parentOf( n );
     const bool   field = !ts_node_is_null( up ) && ( kindIs( ts_node_type( up ), "class_body" ) || kindIs( ts_node_type( up ), "enum_class_body" ) );
     const BindSite site = field ? BindSite{ at, 0u, 0u } : siteFrom( at, up );
     const TSNode var = namedChildOfKind( n, { "variable_declaration" } );
@@ -5669,7 +5669,7 @@ inline BindSite swiftBindingSite( TSNode n, std::uint32_t at )
                                           "lambda_literal", "guard_statement", "property_declaration", "function_declaration", "init_declaration" } );
     if( !ts_node_is_null( s ) && ( kindIs( ts_node_type( s ), "guard_statement" ) || kindIs( ts_node_type( s ), "property_declaration" ) ) )
     {
-        return { at, ts_node_start_byte( s ), ts_node_end_byte( ts_node_parent( s ) ) };
+        return { at, ts_node_start_byte( s ), ts_node_end_byte( parentOf( s ) ) };
     }
     return siteIn( at, s );
 }
@@ -5695,7 +5695,7 @@ inline void captureSwiftDeclEvidence( BindCtx& cx, TSNode n, const char* t, std:
     }
     if( kindIs( t, "pattern" ) )
     {
-        const TSNode up = ts_node_parent( n );
+        const TSNode up = parentOf( n );
         if( !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "property_declaration" ) && !ts_node_is_null( namedChildOfKind( n, { "simple_identifier" } ) ) )
         {
             return;   // a plain declaration: read with its type below
@@ -5713,7 +5713,7 @@ inline void captureSwiftDeclEvidence( BindCtx& cx, TSNode n, const char* t, std:
     if( kindIs( t, "if_statement" ) || kindIs( t, "guard_statement" ) || kindIs( t, "while_statement" ) )
     {
         // `if let x = …`: the bound name is the statement's own `bound_identifier` child
-        const BindSite site = kindIs( t, "guard_statement" ) ? BindSite{ at, at, ts_node_end_byte( ts_node_parent( n ) ) } : siteIn( at, n );
+        const BindSite site = kindIs( t, "guard_statement" ) ? BindSite{ at, at, ts_node_end_byte( parentOf( n ) ) } : siteIn( at, n );
         ChildCursor cursor( n );
         forEachChild( n, cursor.cur, [ & ]( TSNode c )
         {
@@ -5730,7 +5730,7 @@ inline void captureSwiftDeclEvidence( BindCtx& cx, TSNode n, const char* t, std:
     {
         return;
     }
-    const TSNode   up      = ts_node_parent( n );
+    const TSNode   up      = parentOf( n );
     const bool     field   = !ts_node_is_null( up ) && ( kindIs( ts_node_type( up ), "class_body" ) || kindIs( ts_node_type( up ), "enum_class_body" ) );
     const TSNode   pattern = fieldChild( n, NodeField::Name );
     const TSNode   ann     = namedChildOfKind( n, { "type_annotation" } );
@@ -5808,12 +5808,12 @@ inline void captureSwiftEvidence( BindCtx& cx, TSNode n, const char* t, std::uin
 inline BindSite jsDeclaratorSite( TSNode declarator )
 {
     const std::uint32_t at   = ts_node_start_byte( declarator );
-    const TSNode        decl = ts_node_parent( declarator );
+    const TSNode        decl = parentOf( declarator );
     if( ts_node_is_null( decl ) || !kindIs( ts_node_type( decl ), "lexical_declaration" ) )
     {
         return { at, 0u, 0u };
     }
-    TSNode scope = ts_node_parent( decl );
+    TSNode scope = parentOf( decl );
     for( int guard = 0; guard < 64 && !ts_node_is_null( scope ); ++guard )
     {
         const char* st = ts_node_type( scope );
@@ -5822,7 +5822,7 @@ inline BindSite jsDeclaratorSite( TSNode declarator )
         {
             return siteFrom( at, scope );
         }
-        scope = ts_node_parent( scope );
+        scope = parentOf( scope );
     }
     return { at, 0u, 0u };
 }
@@ -6075,7 +6075,7 @@ inline void capturePythonBindingTombstones( BindCtx& cx, TSNode n, const char* t
     }
     else if( kindIs( t, "for_in_clause" ) )
     {
-        tombstones( fieldChild( n, NodeField::Left ), siteIn( at, ts_node_parent( n ) ) );
+        tombstones( fieldChild( n, NodeField::Left ), siteIn( at, parentOf( n ) ) );
     }
     else if( kindIs( t, "named_expression" ) )
     {
@@ -6153,7 +6153,7 @@ inline void capturePythonBindingTombstones( BindCtx& cx, TSNode n, const char* t
 // there to the block's end; in an if / for / switch header, that whole statement
 inline BindSite goShortVarSite( TSNode decl, std::uint32_t at )
 {
-    const TSNode up = ts_node_parent( decl );
+    const TSNode up = parentOf( decl );
     if( ts_node_is_null( up ) )
     {
         return { at, 0u, 0u };
@@ -6165,7 +6165,7 @@ inline BindSite goShortVarSite( TSNode decl, std::uint32_t at )
     }
     if( kindIs( ut, "for_clause" ) )
     {
-        return siteIn( at, ts_node_parent( up ) );
+        return siteIn( at, parentOf( up ) );
     }
     if( kindIs( ut, "if_statement" ) || kindIs( ut, "expression_switch_statement" ) || kindIs( ut, "type_switch_statement" ) )
     {
@@ -6204,8 +6204,8 @@ inline void captureGoEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32
     }
     else if( kindIs( t, "parameter_declaration" ) )
     {
-        const TSNode list     = ts_node_parent( n );
-        const TSNode method   = ts_node_is_null( list ) ? TSNode{} : ts_node_parent( list );
+        const TSNode list     = parentOf( n );
+        const TSNode method   = ts_node_is_null( list ) ? TSNode{} : parentOf( list );
         const bool   receiver = !ts_node_is_null( method ) && kindIs( ts_node_type( method ), "method_declaration" )
                              && ts_node_eq( fieldChild( method, NodeField::Receiver ), list );
         const std::string_view type  = writtenClass( cx, fieldChild( n, NodeField::Type ), at );
@@ -6821,8 +6821,8 @@ inline void captureRustParameter( BindCtx& cx, TSNode n, std::uint32_t at )
 // field whose type names no class is a tombstone. An enum variant's fields are no struct's: nothing.
 inline void captureRustField( BindCtx& cx, TSNode n, std::uint32_t at )
 {
-    const TSNode list = ts_node_parent( n );
-    const TSNode item = ts_node_is_null( list ) ? TSNode{} : ts_node_parent( list );
+    const TSNode list = parentOf( n );
+    const TSNode item = ts_node_is_null( list ) ? TSNode{} : parentOf( list );
     const TSNode name = fieldChild( n, NodeField::Name );
     if( ts_node_is_null( item ) || !kindIs( ts_node_type( item ), "struct_item" ) || ts_node_is_null( name ) )
     {
@@ -6876,7 +6876,7 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     else if( kindIs( t, "closure_parameters" ) )
     {
         // `|a, (b, c)|`: each pattern's names are tombstones; a typed `|b: &Book|` is a `parameter`, recorded by its own arm
-        const BindSite site = siteIn( at, ts_node_parent( n ) );
+        const BindSite site = siteIn( at, parentOf( n ) );
         for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
         {
             if( const TSNode c = ts_node_named_child( n, i ); !kindIs( ts_node_type( c ), "parameter" ) )
@@ -7008,7 +7008,7 @@ inline void captureJsEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32
     }
     else if( kindIs( t, "formal_parameters" ) )
     {
-        const BindSite site = siteIn( at, ts_node_parent( n ) );   // the function, arrow or method the list belongs to
+        const BindSite site = siteIn( at, parentOf( n ) );   // the function, arrow or method the list belongs to
         for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
         {
             const TSNode p       = ts_node_named_child( n, i );

@@ -273,7 +273,7 @@ inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
     {
         return false;
     }
-    const TSNode parent = ts_node_parent( n );
+    const TSNode parent = parentOf( n );
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "compound_statement" ) )
     {
         return false;
@@ -1124,7 +1124,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         if( isNamed && ( cc_isNestingControl( t, lang ) || elixirControl ) )
         {
             const bool   isIf = ( kindIs( t, "if_statement" ) || kindIs( t, "if_expression" ) );
-            const TSNode p    = ts_node_parent( n );
+            const TSNode p    = parentOf( n );
             const bool   elseIf = isIf && !ts_node_is_null( p )
                                   && ( kindIs( ts_node_type( p ), "if_statement" ) || kindIs( ts_node_type( p ), "if_expression" ) );
             const std::uint32_t childNest = elseIf ? nesting : nesting + 1;   // else-if doesn't deepen
@@ -1195,7 +1195,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             continue;
         }
         const std::string_view bop = cc_boolOp( n, src );
-        if( !bop.empty() && cc_boolOp( ts_node_parent( n ), src ) != bop )
+        if( !bop.empty() && cc_boolOp( parentOf( n ), src ) != bop )
         {
             ++acc.cog; // new boolean run (cognitive)
         }
@@ -1308,7 +1308,7 @@ inline void ln_declaratorIdentifiers( TSNode declNode, std::vector<TSNode>& outI
 inline std::uint8_t ln_declDepth( TSNode declNode, TSNode funcRoot ) noexcept
 {
     std::uint8_t depth = 0;
-    TSNode       cur   = ts_node_parent( declNode );
+    TSNode       cur   = parentOf( declNode );
     while( !ts_node_is_null( cur ) )
     {
         if( kindIs( ts_node_type( cur ), "compound_statement" ) )
@@ -1323,7 +1323,7 @@ inline std::uint8_t ln_declDepth( TSNode declNode, TSNode funcRoot ) noexcept
         {
             break;
         }
-        cur = ts_node_parent( cur );
+        cur = parentOf( cur );
     }
     return depth;
 }
@@ -1513,7 +1513,7 @@ inline constexpr ParamMinLang kParamMinLangs[] = {
 // stops at the first function, since a def nested in a method's body is a closure, not a member.
 inline bool ownedBy( TSNode def, std::string_view owner ) noexcept
 {
-    for( TSNode p = ts_node_parent( def ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( def ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const std::string_view t = ts_node_type( p );
         if( t == owner )
@@ -1650,15 +1650,15 @@ inline ParamShape cc_paramShape( TSNode defNode, Lang lang, SymKind kind, std::s
             }
             ParamShape shape;
             shape.exact = !elastic && defaulted == 0;
-            const TSNode decoParent = ts_node_parent( defNode );
+            const TSNode decoParent = parentOf( defNode );
             const bool   decorated  = row != nullptr && !row->decoratedParent.empty() && !ts_node_is_null( decoParent )
                                    && std::string_view( ts_node_type( decoParent ) ) == row->decoratedParent;
             const bool   method     = row != nullptr && !row->selfOwner.empty() && ownedBy( defNode, row->selfOwner );
             const bool   soleVoid   = row != nullptr && !row->soleVoid.empty() && named == 1 && nodeTextOf( lone, src ) == row->soleVoid;
             // a function VALUE whose signature lives elsewhere (row comment `fnValue`): annotated or cast binding, or a
             // contextually typed (untyped) parameter.
-            const TSNode fnNode     = ts_node_parent( f.n );
-            const TSNode binding    = ts_node_is_null( fnNode ) ? TSNode{} : ts_node_parent( fnNode );
+            const TSNode fnNode     = parentOf( f.n );
+            const TSNode binding    = ts_node_is_null( fnNode ) ? TSNode{} : parentOf( fnNode );
             const bool   fnValue    = row != nullptr && !ts_node_is_null( fnNode ) && paramKindIn( ts_node_type( fnNode ), row->fnValue );
             const bool   typedElsewhere = fnValue
                                    && ( untyped || ts_node_is_null( binding ) || !ts_node_eq( fieldChild( binding, NodeField::Value ), fnNode )

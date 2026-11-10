@@ -724,7 +724,7 @@ inline bool spanContains( TSNode outer, TSNode inner ) noexcept
 // base of) an update operand, or exactly the `left` side of an assignment?
 inline bool isUpdateOrAssignmentTarget( TSNode node ) noexcept
 {
-    const TSNode parent = ts_node_parent( node );
+    const TSNode parent = parentOf( node );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -755,7 +755,7 @@ inline bool isUpdateOrAssignmentTarget( TSNode node ) noexcept
 // in `a.b.c = 1` only `c` is written and `b` is traversed).
 inline TSNode outermostBaseOf( TSNode node, bool throughMemberAccess ) noexcept
 {
-    for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ); up = ts_node_parent( node ) )
+    for( TSNode up = parentOf( node ); !ts_node_is_null( up ); up = parentOf( node ) )
     {
         const char* ut = ts_node_type( up );
         const bool isSubscript = kindIs( ut, "subscript_expression" ) || kindIs( ut, "subscript" );   // C/C++ · Python `a[i]`
@@ -778,7 +778,7 @@ inline bool isWriteTarget( TSNode id ) noexcept
 // is `id` the callee/function-position name of a call (already captured as a Call ref by the tags query)?
 inline bool isCallCallee( TSNode id ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -803,7 +803,7 @@ inline bool isCallCallee( TSNode id ) noexcept
         {
             return false;
         }
-        const TSNode gp = ts_node_parent( parent );   // the field-access is the callee only when its parent is a call whose `function` is it
+        const TSNode gp = parentOf( parent );   // the field-access is the callee only when its parent is a call whose `function` is it
         if( ts_node_is_null( gp ) )
         {
             return false;
@@ -881,7 +881,7 @@ inline bool isDeclSiteName( TSNode id, TSNode parent, const char* pt ) noexcept
 // we EXCLUDE rather than mislabel — a missed read is far better than reporting a def's own name as a "read".
 inline bool isNonValueContext( TSNode id ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -980,7 +980,7 @@ inline bool isTypeMentionNode( const char* nt ) noexcept
 //   (c) a TYPE PARAMETER's own name (`template< typename T >`) — T is being declared here, not named.
 inline bool isTypeDeclarationSite( TSNode id ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -1033,7 +1033,7 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
 // node. The receiver half (`a`, `p`, `o`) is NOT this shape and keeps its bare-identifier treatment.
 inline TSNode memberAccessOfField( TSNode id, Lang lang ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) || !isMemberAccessNode( ts_node_type( parent ), lang ) )
     {
         return TSNode{};
@@ -1634,6 +1634,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
                        std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses,
                        const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall )
 {
+    AncestorCacheScope ancestors( root );   // parent-carry: the side walk's visitors climb through one cached root-descent path (infra/tsparent.h)
     const std::size_t firstRefOfFile  = refs.size();
     const std::size_t firstIncOfFile  = incs.size();
     const std::size_t firstBindOfFile = binds.size();
@@ -2091,7 +2092,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             if( le.lang == Lang::Elixir && refCapSv == "reference.bare" )
             {
                 // Bare pipe targets have their own capture; every other bare name needs lexical variable exclusion.
-                const TSNode parent = ts_node_parent( nameNode );
+                const TSNode parent = parentOf( nameNode );
                 if( ( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "|>"
                       && ts_node_eq( fieldChild( parent, NodeField::Right ), nameNode ) ) || !elixir.bareCall( nameNode ) ) { continue; }
             }
@@ -2099,7 +2100,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 constexpr std::string_view special[] = { "=", "<-", "\\\\", "::", "|>", "when", "|", "^", "&", "@" };
                 if( std::find( std::begin( special ), std::end( special ), nameTxt ) != std::end( special ) ) { continue; }
-                const TSNode parent = ts_node_parent( roleNode );
+                const TSNode parent = parentOf( roleNode );
                 if( nameTxt == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "&" ) { continue; }
             }
 
@@ -2186,7 +2187,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field && le.lang != Lang::Elixir )
             {
                 TSNode child = roleNode;
-                TSNode p     = ts_node_parent( roleNode );
+                TSNode p     = parentOf( roleNode );
                 for( int guard = 0; !ts_node_is_null( p ) && guard < 4; ++guard )
                 {
                     const char* pt = ts_node_type( p );
@@ -2234,7 +2235,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         break;
                     }
                     child = p;
-                    p     = ts_node_parent( p );
+                    p     = parentOf( p );
                 }
             }
             if( typeUseInSignature )
@@ -2371,7 +2372,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 const auto attribute = elixirAttribute( roleNode, src );
                 if( elixirTypedAttribute( attribute ) )
                 {
-                    const TSNode args = elixirArguments( ts_node_parent( nameNode ) );
+                    const TSNode args = elixirArguments( parentOf( nameNode ) );
                     std::uint32_t arity = 0;
                     for( std::uint32_t i = 0; !ts_node_is_null( args ) && i < ts_node_named_child_count( args ); ++i )
                     {
@@ -2554,7 +2555,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 // the captureBases walk passed; C++ is the first language on this capture.
                 if( refCapSv == "reference.base" )
                 {
-                    emitBaseRef( nameNode, fileId, le.lang, src, refs, ts_node_parent( roleNode ) );
+                    emitBaseRef( nameNode, fileId, le.lang, src, refs, parentOf( roleNode ) );
                     continue;
                 }
 
@@ -2569,7 +2570,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 r.name      = finalSegment( nameTxt );
                 if( le.lang == Lang::Clojure )
                 {
-                    r.qualifier = nodeFieldText( ts_node_parent( nameNode ), NodeField::Namespace, src );
+                    r.qualifier = nodeFieldText( parentOf( nameNode ), NodeField::Namespace, src );
                 }
                 if( le.lang == Lang::Elixir )
                 {
