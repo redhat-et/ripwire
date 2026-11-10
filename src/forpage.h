@@ -1101,7 +1101,7 @@ inline TailHeadFileSyms tailHeadFileSyms( const IngestResult& ing, const std::ve
     TailHeadFileSyms out;
     for( const NodeId id : headIds )
     {
-        if( id < ing.symbols.size() )
+        if( id < ing.symbols.size() && ing.symbols[id].fileId < ing.files.size() ) // a cached ingest's fileId is bounded before it indexes slotOfFile
         {
             out.files.push_back( ing.symbols[id].fileId );
         }
@@ -1118,7 +1118,8 @@ inline TailHeadFileSyms tailHeadFileSyms( const IngestResult& ing, const std::ve
     const std::size_t S = std::min( ing.symbols.size(), rank.size() );
     for( NodeId id = 0; id < S && !out.files.empty(); ++id )
     {
-        const std::size_t slot = out.slotOfFile[ing.symbols[id].fileId];
+        const std::size_t fileId = ing.symbols[id].fileId;
+        const std::size_t slot   = fileId < out.slotOfFile.size() ? out.slotOfFile[fileId] : out.files.size();
         if( slot < out.files.size() && tailHeadSymCandidate( ing, rank, headIds, id ) )
         {
             cands.emplace_back( slot, id );
@@ -1140,7 +1141,7 @@ inline TailHeadFileSyms tailHeadFileSyms( const IngestResult& ing, const std::ve
 // a page row's sym=: a head file's deduplicated names, else the row's own top symbols
 inline std::string tailPageRowSym( const IngestResult& ing, const ForFileRow& row, const TailHeadFileSyms& head )
 {
-    const std::size_t slot = head.slotOfFile[row.fileId];
+    const std::size_t slot = row.fileId < head.slotOfFile.size() ? head.slotOfFile[row.fileId] : head.files.size(); // out of range: not a head file
     return slot < head.files.size() ? head.syms[slot] : forFileRowSymNames( ing, row );
 }
 
