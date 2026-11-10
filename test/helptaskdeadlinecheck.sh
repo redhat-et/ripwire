@@ -114,8 +114,11 @@ for spec in "recommend|$TASK_RECOMMEND|" "named|$TASK_NAMED|" "abstain|hello the
         no "(B) $name: plain exit $rcP vs deadline exit $rcD; $( cmp "$E/$name.plain" "$E/$name.dl" 2>&1 | head -1 )"
     fi
 done
-grep -q 'status="recommend"' "$E/recommend.plain" && ok "(B) the recommend task recommends (the identity covers a real answer)" \
-                                                  || no "(B) the recommend task did not recommend: $( head -c 300 "$E/recommend.plain" )"
+if grep -q 'status="recommend"' "$E/recommend.plain"; then
+    ok "(B) the recommend task recommends (the identity covers a real answer)"
+else
+    no "(B) the recommend task did not recommend: $( head -c 300 "$E/recommend.plain" )"
+fi
 if [ ! -s "$RIPWIRE_HOME/routing.jsonl" ]; then
     ok "(B) in-time runs wrote no meter row"
 else
@@ -133,8 +136,16 @@ if [ "$rc" = 0 ] && [ "$wall" -lt $(( N + SLACK_MS )) ] && grep -q '<task-route[
 else
     no "(C) slow index: exit $rc in ${wall} ms; stdout: $( head -c 300 "$E/c.out" )"
 fi
-xmllint --noout "$E/c.out" 2>/dev/null && ok "(C) the abstention is well-formed XML" || no "(C) the abstention fails xmllint"
-[ "$( causes overrun )" = 1 ] && ok "(C) one deferred cause=overrun meter row" || no "(C) overrun rows: $( causes overrun )"
+if xmllint --noout "$E/c.out" 2>/dev/null; then
+    ok "(C) the abstention is well-formed XML"
+else
+    no "(C) the abstention fails xmllint"
+fi
+if [ "$( causes overrun )" = 1 ]; then
+    ok "(C) one deferred cause=overrun meter row"
+else
+    no "(C) overrun rows: $( causes overrun )"
+fi
 if ! grep -q '"agent":"claude"' "$RIPWIRE_HOME/routing.jsonl" && grep -q '"agent":"ripwire","router":"warm"' "$RIPWIRE_HOME/routing.jsonl"; then
     ok "(C) the rows are agent=ripwire router=warm (never pooled into the agent=claude A/B readout)"
 else
@@ -176,11 +187,18 @@ else
     no "(C) warm-done rows: $( grep warm-done "$RIPWIRE_HOME/routing.jsonl" )"
 fi
 blobs=$( find "$TMPDIR/ripwire" -name 'ripwire-*.bin' -not -path '*/locks/*' 2>/dev/null | wc -l | tr -d ' ' )
-[ "$blobs" -ge 1 ] && ok "(C) the child wrote the root's cache ($blobs blob)" || no "(C) no cache blob after the child finished"
+if [ "$blobs" -ge 1 ]; then
+    ok "(C) the child wrote the root's cache ($blobs blob)"
+else
+    no "(C) no cache blob after the child finished"
+fi
 "$BIN" "$WORK/repo" --help-task="$TASK_NAMED" >"$E/c.plain" 2>/dev/null
 "$BIN" "$WORK/repo" --help-task="$TASK_NAMED" --deadline-ms=120000 >"$E/c.after" 2>/dev/null; rc=$?; note_rc $rc
-cmp -s "$E/c.plain" "$E/c.after" && ok "(C) the next call answers in time, byte-identical to the plain run" \
-                                 || no "(C) the next call differs from the plain run"
+if cmp -s "$E/c.plain" "$E/c.after"; then
+    ok "(C) the next call answers in time, byte-identical to the plain run"
+else
+    no "(C) the next call differs from the plain run"
+fi
 
 # ── (E) two concurrent cold calls index once ──────────────────────────────────────────────────────────────────────
 fresh_env e
@@ -195,9 +213,17 @@ if [ "$rc1" = 0 ] && [ "$rc2" = 0 ] && grep -q 'status="abstain"' "$E/e1.out" &&
 else
     no "(E) concurrent calls: exit $rc1 / $rc2"
 fi
-[ "$( causes overrun )" = 1 ] && ok "(E) exactly one call started an index (one overrun row)" || no "(E) overrun rows: $( causes overrun )"
+if [ "$( causes overrun )" = 1 ]; then
+    ok "(E) exactly one call started an index (one overrun row)"
+else
+    no "(E) overrun rows: $( causes overrun )"
+fi
 wait_children "$TMPDIR" || no "(E) the child never finished"
-[ "$( rows warm-done )" = 1 ] && ok "(E) exactly one warm-done row (one index)" || no "(E) warm-done rows: $( rows warm-done )"
+if [ "$( rows warm-done )" = 1 ]; then
+    ok "(E) exactly one warm-done row (one index)"
+else
+    no "(E) warm-done rows: $( rows warm-done )"
+fi
 
 # ── (F) a crashed child is visible, and the next call recovers ────────────────────────────────────────────────────
 fresh_env f
@@ -257,7 +283,11 @@ else
 fi
 
 # ── (H) ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-[ "$saw2" = 0 ] && ok "(H) no call in this gate exited 2" || no "(H) a call exited 2"
+if [ "$saw2" = 0 ]; then
+    ok "(H) no call in this gate exited 2"
+else
+    no "(H) a call exited 2"
+fi
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
