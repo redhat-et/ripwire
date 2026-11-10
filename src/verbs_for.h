@@ -3097,15 +3097,38 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
 
 // The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
 // ONE-SIDE-REACH (foronesidereach.h): rows reaching one of two named endpoints become pointers, in the answer and in `syms`; "" when none is.
-// The caller skips it under a budget, which leaves both as shaped, and re-prices the root on the bytes it sends.
-inline std::string oneSideReachAnswer( const MainDispatch& d, std::string_view answer, std::string& syms )
+// The caller skips it under a budget, which leaves both as shaped.
+inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string& answer, std::string& syms, const std::optional<rw::PricedRootInputs>& price )
 {
     rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, d.cfg.forTask, answer, syms );
+    if( !edit.answer.empty() && price )
+    {
+        rw::repriceRootAfterCut( edit.answer, *price, answer.size() );   // signed: the pointers and legend may outweigh the rows they replace
+    }
     if( !edit.syms.empty() )
     {
         syms = std::move( edit.syms );
     }
     return std::move( edit.answer );
+}
+
+// The answer as sent after <syms> rendered, "" when unchanged: R-DEDUP's cut (`cut`, forfilesyms.h tailRowsWithoutPicks: <syms> has
+// priority over the head files' tail rows) first, then the ONE-SIDE-REACH demote pass on the cut answer, except under a budget. The
+// root is re-priced once, on the final bytes, against `captured`, the answer it was priced on (the cut keeps its est_tokens= digits).
+inline std::string shapedForFileSymsAnswer( const MainDispatch& d, const std::string& captured, std::string cut, std::string& syms,
+                                            const std::optional<rw::PricedRootInputs>& price )
+{
+    const std::string& shaped = cut.empty() ? captured : cut;
+    std::string out = d.cfg.tokenBudget == 0 && d.cfg.maxTokens <= 0 ? oneSideReachAnswer( d, shaped, syms, std::nullopt ) : std::string();
+    if( out.empty() )
+    {
+        out = std::move( cut );
+    }
+    if( !out.empty() && price )
+    {
+        rw::repriceRootAfterCut( out, *price, captured.size() );   // signed: the pointers and legend may outweigh the rows they replace
+    }
+    return out;
 }
 
 // The captured answer and the inputs its root's est_tokens was priced from (nullopt: no priced root to re-price).
@@ -3144,15 +3167,7 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     std::string       syms  = rw::renderForFileSyms(
         d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = held,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut } );
-    std::string edited = whole && !held ? oneSideReachAnswer( d, cut.empty() ? std::string_view( cap->bytes ) : std::string_view( cut ), syms ) : std::string();
-    if( edited.empty() )
-    {
-        edited = std::move( cut );
-    }
-    if( !edited.empty() && price )
-    {
-        rw::repriceRootAfterCut( edited, *price, cap->bytes.size() );   // once, on the bytes sent; signed: the pointers and legend may outweigh the rows they replace
-    }
+    const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price ) : std::string();
     const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
     std::fwrite( bytes.data(), 1, at, stdout );
