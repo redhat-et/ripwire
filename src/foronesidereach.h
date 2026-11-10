@@ -27,7 +27,7 @@
 // --token-budget / --max-tokens, MCP budget_tokens) leaves the answer as shaped. The <d>/<s> rows are priced markup, so the root's
 // est_tokens= is re-priced over the rewritten bytes (serialize.h repriceRootAfterCut, signed); <syms> is outside the price.
 // RIPWIRE_NO_ONE_SIDE_REACH=1 turns it off (byte identity and the gate's twins).
-#include "forfilesyms.h" // filesyms_detail::FileLookup / DeclHome / leafName / unescapeXmlAttr / attrOf / bodylessHeaderDecl
+#include "forfilesyms.h" // filesyms_detail::FileLookup / DeclHome / leafName / unescapeXmlAttr / bodylessHeaderDecl (attrOf: serialize.h)
 #include "graph.h" // shortestPathAny, expandCallers
 #include "lexical.h" // splitRouteWords, isRouteStopword, routeLower, detail::graphSubjectTrimWord
 #include "model.h"
@@ -251,8 +251,8 @@ inline void resolveSeeds( const IngestResult& ing, const Graph& g, std::vector<R
     for( const Row& r : rows )
     {
         Want w;
-        std::string p = filesyms_detail::unescapeXmlAttr( filesyms_detail::attrOf( r.attrs, "p" ) );
-        const std::string_view l = filesyms_detail::attrOf( r.attrs, "l" );
+        std::string p = filesyms_detail::unescapeXmlAttr( attrOf( r.attrs, "p" ) );
+        const std::string_view l = attrOf( r.attrs, "l" );
         std::from_chars( l.data(), l.data() + l.size(), w.line );
         if( const std::size_t colon = p.rfind( ':' ); colon != std::string::npos && colon + 1 < p.size()
             && std::ranges::all_of( std::string_view( p ).substr( colon + 1 ), []( char c ) { return c >= '0' && c <= '9'; } ) )
@@ -261,7 +261,7 @@ inline void resolveSeeds( const IngestResult& ing, const Graph& g, std::vector<R
             p.resize( colon );
         }
         w.file = p.empty() ? UINT32_MAX : files.of( p );
-        const std::string n = filesyms_detail::unescapeXmlAttr( filesyms_detail::attrOf( r.attrs, "n" ) );
+        const std::string n = filesyms_detail::unescapeXmlAttr( attrOf( r.attrs, "n" ) );
         w.leaf = std::string( filesyms_detail::leafName( n ) );
         w.qual = n.substr( 0, n.size() - w.leaf.size() );
         while( !w.qual.empty() && ( w.qual.back() == '.' || w.qual.back() == ':' || w.qual.back() == '#' ) )
@@ -484,8 +484,8 @@ inline std::string pointerText( std::string_view text, const std::vector<const R
     std::size_t from = 0;
     for( const Row* r : demoted )
     {
-        const std::string_view p = filesyms_detail::attrOf( r->attrs, "p" );
-        const std::string_view rank = filesyms_detail::attrOf( r->attrs, "r" );
+        const std::string_view p = attrOf( r->attrs, "p" );
+        const std::string_view rank = attrOf( r->attrs, "r" );
         const std::size_t colon = r->tag == 'd' ? std::string_view::npos : p.rfind( ':' ); // <s>/<y> p= is file:line; a pointer names the file
         out.append( text.substr( from, r->at - from ) );
         out += legend ? kOneSideReachLegend : std::string_view();
@@ -493,7 +493,7 @@ inline std::string pointerText( std::string_view text, const std::vector<const R
         out += "<t p=\"";
         out += p.substr( 0, colon );
         out += "\" sym=\"";
-        out += filesyms_detail::attrOf( r->attrs, "n" );
+        out += attrOf( r->attrs, "n" );
         out += rank.empty() ? std::string() : "\" r=\"" + std::string( rank );
         out += "\"/>";
         from = r->end;
