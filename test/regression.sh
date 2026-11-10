@@ -595,6 +595,7 @@ for _g in \
     grepseamcheck \
     greptiercheck \
     guardmsgcheck \
+    gvassemblycheck \
     handlerrulecheck \
     hasacheck \
     hazardpatterncheck \
