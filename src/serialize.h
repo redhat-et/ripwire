@@ -1311,7 +1311,7 @@ inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, s
     return pricedRootAttrTokens( markupBytes, markupRate, bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0, outTokens );
 }
 
-// What a --for root's number was converged from, at kBytesPerTokenDefault: kept so a pass that later CUTS markup out of the
+// What a --for root's number was converged from, at kBytesPerTokenDefault: kept so a pass that later rewrites markup inside the
 // priced span re-prices the root through the same fixpoint (repriceRootAfterCut) — no second estimator, no second pass.
 struct PricedRootInputs
 {
@@ -1319,20 +1319,23 @@ struct PricedRootInputs
     std::size_t bodyTokens = 0; // the body-rate sections, already priced
 };
 
-// R-DEDUP: <syms> (forfilesyms.h tailRowsWithoutPicks) chooses its names off the rendered answer, so the cut it makes in the
-// head files' tail rows lands after the root was priced. `cutBytes` markup bytes left the priced span: the root's est_tokens=
-// value is replaced with the fixpoint over the inputs less the cut. Only the number moves; every other byte stays.
-inline void repriceRootAfterCut( std::string& doc, const PricedRootInputs& in, std::size_t cutBytes )
+// ONE-SIDE-REACH (foronesidereach.h) rewrites printed <sigs>/<callers> rows as tail pointers, and R-DEDUP's <syms> (forfilesyms.h
+// tailRowsWithoutPicks) cuts names from the head files' tail rows, after the root was priced. `doc` is the
+// answer after that markup rewrite and `pricedBytes` the size of the answer the root was priced on (the same est_tokens= digits in
+// both), so the priced markup is now in.markupBytes + doc.size() - pricedBytes. The difference is SIGNED: the legend comment plus
+// short pointers can outweigh the short rows they replace. The root's est_tokens= value is replaced with the fixpoint over the
+// rewritten markup. Only the number moves; every other byte stays.
+inline void repriceRootAfterCut( std::string& doc, const PricedRootInputs& in, std::size_t pricedBytes )
 {
     constexpr std::string_view kKey = " est_tokens=\"";
     const std::size_t lt = doc.find( '<' );
     const std::size_t gt = lt == std::string::npos ? std::string::npos : doc.find( '>', lt );
     const std::size_t at = gt == std::string::npos ? std::string::npos : doc.find( kKey, lt );
     const std::size_t end = at == std::string::npos ? std::string::npos : doc.find( '"', at + kKey.size() );
-    // the caller priced this root itself (CLI finishForLensHeaderPriced, MCP priceForTaskRoot) and cut only what it priced
+    // the caller priced this root itself (CLI finishForLensHeaderPriced, MCP priceForTaskRoot) and rewrote only what it priced
     EXPECTS( end != std::string::npos && end < gt, "repriceRootAfterCut: the root carries the est_tokens= its caller priced" );
-    EXPECTS( cutBytes <= in.markupBytes, "repriceRootAfterCut: the cut removed only priced markup" );
-    doc.replace( at, end + 1 - at, pricedRootAttrTokens( in.markupBytes - cutBytes, kBytesPerTokenDefault, in.bodyTokens, nullptr ) );
+    EXPECTS( pricedBytes <= in.markupBytes + doc.size(), "repriceRootAfterCut: the cut removed only priced markup" );
+    doc.replace( at, end + 1 - at, pricedRootAttrTokens( in.markupBytes + doc.size() - pricedBytes, kBytesPerTokenDefault, in.bodyTokens, nullptr ) );
 }
 // R1 (terminality round A 2026-09-05): the ONE definition of over_ceiling=, hoisted to sit beside the
 // estimator whose number it qualifies. It was a function-local constant in verbs_for.h, which is why the
@@ -3224,6 +3227,24 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
     w.write( "</inv>" );
 }
 
+// The map's symbols=: the symbols it ranks. A kRankFlagNotNamed unit (model.h; an HTML section, which --recall reads) has no PageRank
+// prior and no edge, so the map never ranks it and does not count it (DOCS-UNITS-FIX).
+inline std::size_t mapSymbolCount( const IngestResult& ing ) noexcept
+{
+    return ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotNamed );
+}
+
+// ...and the rows it may print: the rank order less every kRankFlagNotNamed unit, so a --top-k past the ranked symbols never
+// reaches an HTML section and shown= never exceeds symbols=. Order-preserving; a no-op on an index without such units.
+inline void dropUnmappedRows( const IngestResult& ing, std::vector<NodeId>& order )
+{
+    if( symbolsWithRankFlag( ing, kRankFlagNotNamed ) == 0 )
+    {
+        return;
+    }
+    std::erase_if( order, [ &ing ]( NodeId id ) noexcept { return ( ing.symbols[ id ].rankFlags & kRankFlagNotNamed ) != 0; } );
+}
+
 inline void serialize( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                        const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                        int topK, bool mostImportantLast = false,
@@ -3311,7 +3332,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // ORDER and BUCKET rows nobody prints is skipped: the radix sort over S symbols, the files-sized bucket
     // allocation, and the fill loop. (The <f> loop below already walked an empty order; this is the work that
     // ran to feed it.)
-    const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, S );
+    const std::size_t mapS    = mapSymbolCount( ing );   // the rows the map can print (dropUnmappedRows below)
+    const std::size_t keep    = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : mapS, mapS );
     const bool        stubbed = ann.stubSymbols;
 
     // rank order: (rank desc, id asc) — the id tie-break makes the top-K deterministic.
@@ -3324,6 +3346,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             order[i] = i;
         }
         sortutil::radixSortByScoreDescId( order, rank );
+        dropUnmappedRows( ing, order );
     }
     // The map scope's code-first row pick (MapAnnotations::codeFirstRows): rewrites the kept prefix, returns its disclosure.
     const DataSectionsCut dataSecCut = ( ann.codeFirstRows && !stubbed ) ? codeFirstKeep( ing, order, keep ) : DataSectionsCut{};
@@ -3675,7 +3698,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // document into one unterminated comment. Composed on std::string, the margin question disappears.
         std::string stats = "<!-- files=";
         stats += std::to_string( ing.files.size() );
-        stats += " symbols=";    stats += std::to_string( S );
+        stats += " symbols=";    stats += std::to_string( mapSymbolCount( ing ) );   // the symbols the map ranks
         stats += " edges=";      stats += std::to_string( outTargets.size() );
         stats += " shown=";      stats += std::to_string( ann.stubSymbols ? std::size_t( 0 ) : keep + stemRows.size() );   // C1-b: the stub prints no row
         stats += " est_tokens="; stats += std::to_string( estTokens );
@@ -4021,6 +4044,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                     if( isFn )
                     {
                         appendf( " params=\"{}\"", unsigned( s.params ) );
+                        if( s.params == std::numeric_limits<decltype( s.params )>::max() )
+                        {
+                            appendf( " params_floor=\"1\"" );   // CR #586: countParams saturates at the field width, so this count is a floor
+                        }
                         appendf( " nest=\"{}\"", unsigned( s.maxNest ) );
                         // The nesting PROFILE beside the max (model.h Symbol::humps/deepLoc). nest= alone cannot
                         // distinguish a long run of shallow scoped steps from a body that sustains depth — both
@@ -6062,6 +6089,19 @@ struct SigRowSpelling
 };
 // SIZE-3a (size-trim): the shortest doc+signature text a row folds (shorter text costs less than the attribute naming its twin)
 inline constexpr std::size_t kSigFoldTextMinBytes = 40;
+// SIZE-3a: the n= a repeat of `text` names, or "" to print the text: the first earlier row that printed it, unless another earlier
+// row with that n= printed a different text (an overload, or a same-named function in another file: same_as= names its source by
+// n=, so the reader could take the wrong signature; CodeRabbit 4505000660). `printed` is every row that printed its text, in order.
+inline std::string_view sameAsSourceOf( const std::vector<std::pair<std::string, std::string_view>>& printed, std::string_view text )
+{
+    const auto src = std::ranges::find_if( printed, [ & ]( const auto& row ) { return row.first == text; } );
+    if( src == printed.end() )
+    {
+        return {};
+    }
+    const bool ambiguous = std::ranges::any_of( printed, [ & ]( const auto& row ) { return row.second == src->second && row.first != text; } );
+    return ambiguous ? std::string_view() : src->second;
+}
 // The value of ` name="…"` inside one tag's attribute text, or "" (SIZE-3a moved it here from forfilesyms.h: the <d> head too; the answer's own markup: no attribute holds a raw quote).
 inline std::string_view attrOf( std::string_view tag, std::string_view name )
 {
@@ -6547,7 +6587,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             w.write( kExtentSuspectRowLegend );
         }
         std::vector<char> fileNotesPending( sigFiles.size(), 1 );   // P7: a file's notes ride its FIRST live row
-        std::vector<std::pair<std::string, std::string_view>> firstWithText;   // SIZE-3a: (doc+sig text, the n= of the first row printing it)
+        std::vector<std::pair<std::string, std::string_view>> printedText;   // SIZE-3a: (doc+sig text, n=) of each row that printed its text
         for( const SigEntry& e : entries )
         {
             if( e.dropped )
@@ -6560,31 +6600,27 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             // (the #362 review round's next_offset=2^32 seam).
             pushShownSigId( shownIdsOut, order, std::uint32_t( e.globalRank - rankBase ) );
             // SIZE-3a: a repeat of an earlier row's text keeps every attribute (n= l= p= r= …) and names that row instead of the text
-            std::string sameAs;
+            std::string      key = spelling.foldRepeatedText ? e.doc + '\0' + e.sig : std::string();   // tens of rows: linear scans
+            std::string_view sameAs;
             if( spelling.foldRepeatedText && e.doc.size() + e.sig.size() >= kSigFoldTextMinBytes )
             {
-                std::string key = e.doc + '\0' + e.sig;   // a shown head is tens of rows: a linear scan, no node-based map
-                const auto  it  = std::ranges::find_if( firstWithText, [ & ]( const auto& seen ) { return seen.first == key; } );
-                if( it == firstWithText.end() )
-                {
-                    firstWithText.emplace_back( std::move( key ), attrOf( e.head, "n" ) );
-                }
-                else
-                {
-                    sameAs = std::string( it->second );
-                }
+                sameAs = sameAsSourceOf( printedText, key );
             }
             if( sameAs.empty() )
             {
                 writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
                 if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
                 w.write( escapeXml( e.sig, esc ) );
+                if( spelling.foldRepeatedText )
+                {
+                    printedText.emplace_back( std::move( key ), attrOf( e.head, "n" ) );   // e.head outlives the loop (entries is not touched)
+                }
             }
             else
             {
                 std::string head = e.head;
                 head.pop_back();   // the '>'
-                head += " same_as=\"" + sameAs + "\">";
+                head += " same_as=\"" + std::string( sameAs ) + "\">";
                 writeSigHeadWithEnd( w, head, e.endLine );
             }
             w.write( e.notes );                                                // L3: symbol notes on this <d> (inert when null)
@@ -6852,6 +6888,19 @@ inline std::string candidatesRootTag( std::size_t keep, std::size_t corpusCount,
     }
     if( prov.docTier ) { tag += " doc_tier=\"";  tag += prov.docTier;  tag += "\""; }
     return tag + ">";
+}
+
+// A recall-only unit (kRankFlagNotNamed: an HTML heading or section id, ingest_docpass.h) has its offsets in the page's EXTRACTED
+// text (ing.docText), not in its bytes: --expand=page.html:Heading slices it from there. nullptr for every other symbol, which
+// keeps the bytes it has always been served from (a page's file node included: test/docsunitscheck.sh arm H).
+inline const std::string* extractedTextOfUnit( const IngestResult& ing, const Symbol& s )
+{
+    if( !notNamed( s ) )
+    {
+        return nullptr;
+    }
+    const auto doc = ing.docText.find( s.fileId );
+    return doc != ing.docText.end() ? &doc->second : nullptr;
 }
 
 inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, int cap,
@@ -8097,7 +8146,8 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // re-fetch the content EVERY iteration: `contents` is a flat HashMap (values stored
         // contiguously), so the cross-file callee-signature contentOf() below can reallocate the
         // table and dangle any reference held across it — never cache `src` past an insert.
-        const std::string& src = contentOf( f );
+        const std::string* unitText = extractedTextOfUnit( ing, s );
+        const std::string& src      = unitText ? *unitText : contentOf( f );
         const std::size_t  a = s.sigStartByte, b = s.endByte;
         if( src.empty() || a >= b || b > src.size() )
         {
@@ -8874,8 +8924,9 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
         {
             continue;
         }
-        const Symbol&      s   = ing.symbols[id];
-        const std::string& src = contentOf( s.fileId );
+        const Symbol&      s        = ing.symbols[id];
+        const std::string* unitText = extractedTextOfUnit( ing, s );   // packBodies' own choice of text
+        const std::string& src      = unitText ? *unitText : contentOf( s.fileId );
         const std::size_t  a = s.sigStartByte, b = s.endByte;
         if( a >= b || b > src.size() )
         {
@@ -9392,6 +9443,9 @@ inline ForSectionStubPlan planForSectionStubs( std::string_view sections, std::s
 // because a stub there serves less than the retired ceiling did (forbudget-soft §B5: s078/s083, a 1-interface <lego> became a
 // stub once the soft target's wider rows widened its scope). Otherwise the caller's --sections= stands and the priced
 // collapse (planForSectionStubs) decides. The default regime never calls this: its stub posture is unchanged.
+// `shareBytes` is net of what the sections after them serve at a spent share: the CLI passes its share less the <tail> shell
+// and compact <hops> first row (verbs_for.h forSoftTrailingFloorBytes), because the rows at the cut never give way and a whole
+// section plus those floors would serve past the target (forsoftbudgetcheck (ST-L), 2026-11-08).
 inline std::string_view forSoftSectionsOptIn( std::string_view sections, std::size_t legoBytes, std::size_t composeBytes,
                                               std::size_t shareBytes ) noexcept
 {
@@ -10833,6 +10887,10 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
     {
         rw::formatTo( num, sizeof( num ), ",\"params\":{},\"nest\":{}", unsigned( s.params ), unsigned( s.maxNest ) );
         w.write( num );
+        if( s.params == std::numeric_limits<decltype( s.params )>::max() )
+        {
+            w.write( ",\"params_floor\":true" );   // CR #586: the JSON sibling of XML params_floor="1" (a saturated count)
+        }
         // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): the JSON sibling of the XML
         // locals=/locals_floor= pair — omitted key (never a fabricated 0) outside model.h's
         // localsCountedLang (MVP: C/C++ only). "locals_floor" mirrors the XML boolean-flag convention
@@ -11298,8 +11356,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         order[i] = i;
     }
     sortutil::radixSortByScoreDescId( order, rank );
+    dropUnmappedRows( ing, order );   // serialize()'s rows, same rule
 
-    const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, S );
+    const std::size_t mapS = mapSymbolCount( ing );
+    const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : mapS, mapS );
     const DataSectionsCut dataSecCut = ann.codeFirstRows ? codeFirstKeep( ing, order, keep ) : DataSectionsCut{};   // serialize()'s pick, same rule
 
     std::vector<std::vector<NodeId>> buckets( ing.files.size() );
@@ -11380,7 +11440,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
         JsonWriter hw( dst );
-        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
+        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, mapSymbolCount( ing ), outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
                                                     unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls, declinedTotal,
                                                     extentSuspectTotal, macroBlankedFileCount( ing ), ing.crawlSkips.nestRefusedFiles,
                                                     estimate.isModelled, dataSecCut, stemPick.cut, memoryPeakJson } );

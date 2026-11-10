@@ -1,0 +1,3 @@
+### Fixed — `--for --token-budget=N` no longer serves a whole `<lego>`/`<compose>` out of the bytes its trailing sections need
+
+Under a soft target the two sections ride whole when they fit what the rows at the cut left. The `<tail>` shell and the compact route's first `<hops>` row ship however little is left, and the rows at the cut never give way, so a whole section that spent those bytes served the answer past the target (68-77 B past the rows' room on this repo's `src/` at `--token-budget=3000`-`3600`). The whole-section test now reserves both floors; when they do not fit, the sections collapse to their counted stubs. The rows served are unchanged. `test/forsoftbudgetcheck.sh` gains the (ST-L) arm.

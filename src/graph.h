@@ -229,6 +229,7 @@ struct Graph
                                                // for every other symbol. Rendered as bind="..." by serialize
                                                // (see serialize.h's `bind` param). Empty vector ⇒ no JNI defs
                                                // (byte-identical to pre-R5 output).
+    std::uint32_t              unrankedNodeCount = 0;   // symbols carrying kRankFlagNotNamed (model.h): prior weight 0, outside rankGraph's uniform share
     std::vector<float>         priorWeight;   // per-symbol name-quality multiplier for the PageRank
                                               // personalization/teleport prior (aider-style repomap weights).
                                               // A PURE function of names + def-counts (byName), so it is
@@ -2089,13 +2090,13 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
     const SmartAliasPeel aliasPeel( ing );
     for( const Reference& cr : ing.references )
     {
-        if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName.empty() || cr.calleeName.empty() )
+        if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName().empty() || cr.calleeName.empty() )
         {
             continue;
         }
         key.clear();
         key.append( ing.symbols[ cr.fromSymbol ].name ).push_back( '#' );
-        key.append( cr.fieldName );
+        key.append( cr.fieldName() );
         recordMemberTypeFact( t.fieldTypeByClass, key, cr, aliasPeel );
     }
     t.localNameSet.reserve( ing.bindings.size() );
@@ -5104,7 +5105,7 @@ inline std::string_view rubyConstantReceiver( const Reference& r ) noexcept
 {
     const bool constant = r.lang == Lang::Ruby && r.role == RefRole::Call && r.recv == RecvKind::NamedVar && r.qualifier.empty()
                        && rubyIsConstantName( r.recvVar ) && !rubyTypedRecvOf( r );
-    const std::string_view written = !constant ? std::string_view {} : r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName );
+    const std::string_view written = !constant ? std::string_view {} : r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() );
     return written.substr( written.starts_with( "::" ) ? 2 : 0 );
 }
 
@@ -5142,7 +5143,7 @@ inline RubyClassObject RubyClassObjects::of( const Reference& r ) const
 // every class; external when the constant resolves to nothing the tree opens.
 inline RubyClassObject RubyClassObjects::ofIndexed( const Reference& r ) const
 {
-    std::string       fqn  = fqnOfWritten( r, r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName ) );
+    std::string       fqn  = fqnOfWritten( r, r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() ) );
     const std::size_t last = fqn.rfind( "::" );
     const auto        cls  = fqn.empty() ? typed.reach.classNames.end() : typed.reach.classNames.find( fqn.substr( last == std::string::npos ? 0 : last + 2 ) );
     return cls != typed.reach.classNames.end() ? RubyClassObject { &cls->first, std::move( fqn ), false } : RubyClassObject { nullptr, {}, true };
@@ -8740,7 +8741,7 @@ inline void writtenTraitBases( const BaseEvidenceTables& t, const Reference& r, 
     {
         return;
     }
-    const NodeId trait = t.recvEv->types.rustResultClass( r.fileId, r.startByte, r.memberPath, r.calleeName );
+    const NodeId trait = t.recvEv->types.rustResultClass( r.fileId, r.startByte, r.memberPath(), r.calleeName );
     if( trait != kNoNode && std::find( cand.begin(), cand.end(), trait ) != cand.end() )
     {
         out.push_back( trait );
@@ -9041,7 +9042,7 @@ inline bool isMarkdownLinkRef( const Reference& r ) noexcept
     {
         return false;
     }
-    return !r.memberPath.empty();
+    return !r.memberPath().empty();
 }
 
 // Link-ness is where the reference came from: lang Markdown and not a doc mention. isMarkdownLinkRef also requires a
@@ -9081,6 +9082,13 @@ inline bool isMarkdownFileNode( const Symbol& sym, std::uint32_t widestEnd ) noe
     return sym.sigStartByte == 0 && sym.sigEndByte >= sym.endByte && sym.endByte >= widestEnd;
 }
 
+// A section a markdown link can bind: a link-section language's Section in an indexed file, not a --recall-only unit (model.h
+// kRankFlagNotNamed: a link to its page binds the page's file node, as it did before the page had units).
+inline bool isLinkableSection( const IngestResult& ing, const Symbol& sym ) noexcept
+{
+    return langFacts( sym.lang ).linkSections && sym.kind == SymKind::Section && sym.fileId < ing.files.size() && !notNamed( sym );
+}
+
 // Headings, and each file's own node (the first matching symbol in id order). The file node is not a heading.
 inline void indexMarkdownSections( MdLinkIndex& ix, const IngestResult& ing )
 {
@@ -9090,14 +9098,14 @@ inline void indexMarkdownSections( MdLinkIndex& ix, const IngestResult& ing )
     std::vector<std::uint32_t> widest( ing.files.size(), 0 );
     for( const Symbol& sym : ing.symbols )
     {
-        if( langFacts( sym.lang ).linkSections && sym.kind == SymKind::Section && sym.fileId < ing.files.size() )
+        if( isLinkableSection( ing, sym ) )
         {
             widest[ sym.fileId ] = std::max( widest[ sym.fileId ], sym.endByte );
         }
     }
     for( const Symbol& sym : ing.symbols )
     {
-        if( !langFacts( sym.lang ).linkSections || sym.kind != SymKind::Section || sym.fileId >= ing.files.size() )
+        if( !isLinkableSection( ing, sym ) )
         {
             continue;
         }
@@ -9251,8 +9259,8 @@ inline MdLinkPins bindMarkdownLinks( const IngestResult& ing )
         const Reference& r = ing.references[ i ];
         if( isMarkdownLinkRef( r ) && r.fileId < ing.files.size() )
         {
-            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath, out.pin[ i ] ) ) { continue; }
-            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath, ing.crawlRoot );
+            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath(), out.pin[ i ] ) ) { continue; }
+            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath(), ing.crawlRoot );
             out.pin[ i ]      = t.id;
             out.slugMiss[ i ] = t.slugMiss ? 1 : 0;
         }
@@ -9464,6 +9472,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                             // caller, and 200 `name` columns must not damp a model's real `def name`.
                             // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
                             // later behind an evidence rule (receiver proven to be the owning model).
+            }
+            if( notNamed( s ) )
+            {
+                continue;   // a --recall-only unit (model.h kRankFlagNotNamed): no call binds it, no namesake is damped by it
             }
             byName[ s.name ].push_back( s.id );
         }
@@ -10454,7 +10466,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( std::uint32_t i = 0; i < std::uint32_t( ing.references.size() ); ++i )
         {
             const Reference& r = ing.references[ i ];
-            if( r.isCompose && r.composeRel == "elem" && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.memberPath.empty() )
+            if( r.isCompose && r.composeRel() == "elem" && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.memberPath().empty() )
             {
                 key.assign( ing.symbols[ r.fromSymbol ].name ).push_back( '#' );
                 key.append( r.recvVar );
@@ -10479,9 +10491,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( const std::uint32_t i : it->second )
         {
             const Reference& r = ing.references[ i ];
-            if( !r.memberPath.empty() )
+            if( !r.memberPath().empty() )
             {
-                addElementOfText( out, r.memberPath );
+                addElementOfText( out, r.memberPath() );
             }
             else if( !fieldTypeWrittenInStd( r ) && r.calleeName != type )
             {
@@ -10502,7 +10514,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             for( const std::uint32_t i : eit->second )
             {
-                addElementOfText( out, ing.references[ i ].memberPath );
+                addElementOfText( out, ing.references[ i ].memberPath() );
             }
         }
         const FlatRecvType* field = fieldTypeIn( std::string( cls ), member );
@@ -10515,7 +10527,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     Reference stdElemProbe;   // reused: the container root of an element receiver, as a NamedVar receiver of the same call
     const auto addElementReceiver = [ & ]( StdMemberGate::Receiver& out, const Reference& ref, const std::string& callerScope )
     {
-        const std::string_view shape = std::string_view( ref.memberPath ).substr( kCppElementMark.size() );
+        const std::string_view shape = std::string_view( ref.memberPath() ).substr( kCppElementMark.size() );
         const std::size_t      dot   = shape.find( '.' );
         if( shape.starts_with( "this." ) )
         {
@@ -10563,16 +10575,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             addNamed( out, ref, callerScope, ref.viaArrow );
         }
-        else if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName.empty() )
+        else if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName().empty() )
         {
-            addField( out, fieldTypeIn( callerScope, ref.fieldName ), ref.viaArrow );   // `this->items_.m()`
+            addField( out, fieldTypeIn( callerScope, ref.fieldName() ), ref.viaArrow );   // `this->items_.m()`
         }
-        else if( ref.recv == RecvKind::FieldOfVar && ref.recvVar.empty() && !ref.memberCall && ref.memberPath.size() > kCppElementMark.size()
-                 && ref.memberPath.starts_with( kCppElementMark ) )
+        else if( ref.recv == RecvKind::FieldOfVar && ref.recvVar.empty() && !ref.memberCall && ref.memberPath().size() > kCppElementMark.size()
+                 && ref.memberPath().starts_with( kCppElementMark ) )
         {
             addElementReceiver( out, ref, callerScope );   // `m[ k ].empty()`: the container's element type
         }
-        else if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName.empty() )
+        else if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName().empty() )
         {
             // one hop off a typed root (`b.items_.m()`, `up->items_.m()`): the root's written classes, then each one's field.
             // A root written as a std smart pointer or optional reaches its fields through `->` alone, so its pointee is read.
@@ -10580,7 +10592,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             addNamed( stdRecvRoot, ref, callerScope, /*viaArrow=*/true );
             for( const std::string_view r : stdRecvRoot.types )
             {
-                addField( out, fieldTypeIn( std::string( r ), ref.fieldName ), ref.viaArrow );
+                addField( out, fieldTypeIn( std::string( r ), ref.fieldName() ), ref.viaArrow );
             }
         }
     };
@@ -11130,13 +11142,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             for( std::size_t i = cb; i < ce; ++i )
             {
                 const NodeId to = scip->coveredFrom[ i ].to;
-                if( to != r.fromSymbol && to < N )
+                // a schema definition (.proto) is linked to the code that uses it by name only, never a call edge: an index that
+                // resolves a call to one leaves the site pinned with no edge (PROTO-INDEX; the shortkey gen rung is the link)
+                if( to != r.fromSymbol && to < N && !langFacts( ing.symbols[ to ].lang ).generatedSchema )
                 {
                     tier.push_back( to ); // precise target (self-loops dropped, as the fallback ladder below does)
                 }
             }
             scipPinned = !tier.empty();
-            // a covered site whose precise targets are all self / out-of-range yields no edge — treat as pinned
+            // a covered site whose precise targets are all self / out-of-range / schema yields no edge — treat as pinned
             // (the index HAS resolved it) so we do NOT fall back to a name-based guess for a site SCIP resolved.
             if( cb != ce )
             {
@@ -13154,10 +13168,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             ComposeEdge ce;
             ce.ownerSym  = r.fromSymbol;
             ce.typeSym   = typeId;
-            ce.fieldName = r.fieldName;
+            ce.fieldName = r.fieldName();
             ce.typeName  = r.calleeName;
             ce.ownerName = ing.symbols[ r.fromSymbol ].name;
-            ce.rel       = r.composeRel;
+            ce.rel       = r.composeRel();
             // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
             // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
             // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
@@ -13290,6 +13304,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     g.priorWeight.resize( N, 1.f );
     for( const Symbol& s : ing.symbols )
     {
+        if( notNamed( s ) )
+        {
+            g.priorWeight[ s.id ] = 0.f;   // a --recall-only unit draws no teleport mass: PageRank ranks the rest as if it were absent
+            ++g.unrankedNodeCount;
+            continue;
+        }
         const auto it = byName.find( s.name );
         const std::size_t defCount = ( it != byName.end() ) ? it->second.size() : 0;
         g.priorWeight[ s.id ] = priorwt::weight( s.name, defCount );
@@ -13388,10 +13408,13 @@ inline std::vector<float> takeRank( RankedGraph ranked, RankDisclosure& disclosu
 }
 
 // uniform-teleport PageRank (the default).
+// A kRankFlagNotNamed unit (model.h) has no edge and a 0 prior weight, so the uniform share is over the ranked nodes: every other
+// node's teleport is the value it has in an index without those units, bit for bit.
 inline RankedGraph rankGraph( const Graph& g, float alpha = 0.85f )
 {
-    const std::size_t N = g.wOutDeg.size();
-    return rankGraphTeleport( g, std::vector<float>( N, N ? 1.0f / float( N ) : 0.f ), alpha );
+    const std::size_t N      = g.wOutDeg.size();
+    const std::size_t ranked = N - std::min<std::size_t>( N, g.unrankedNodeCount );
+    return rankGraphTeleport( g, std::vector<float>( N, ranked ? 1.0f / float( ranked ) : 0.f ), alpha );
 }
 
 // out-edge SpMV: h[j] = Σ_{j→i} w·a[i] (the HITS hub step; out-degree is capped, scalar is fine).
@@ -14316,7 +14339,7 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( elixirNameMatches( s, name ) )
+        if( elixirNameMatches( s, name ) && !notNamed( s ) )   // a --recall-only unit is no bare-name target (model.h kRankFlagNotNamed)
         {
             out.push_back( s.id );
         }
@@ -15392,6 +15415,13 @@ inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std:
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
 // on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
 // bare name), so a reader never has to ask whether the number is stale.
+// The file half of a `file:name` selector: a bare name (no file) admits every definition but a --recall-only unit (model.h
+// kRankFlagNotNamed), which answers a file-qualified selector only; a file admits the definitions in a file whose path contains it.
+inline bool nameSpecFileAdmits( const IngestResult& ing, const Symbol& s, std::string_view file )
+{
+    return file.empty() ? !notNamed( s ) : filePathContainsRootRel( ing, s.fileId, file );
+}
+
 inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,
                                                       std::size_t* unprovenDefCountOut = nullptr )
 {
@@ -15433,7 +15463,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( elixirNameMatches( s, name ) && ( file.empty() || filePathContainsRootRel( ing, s.fileId, file ) ) )
+        if( elixirNameMatches( s, name ) && nameSpecFileAdmits( ing, s, file ) )
         {
             out.push_back( s.id );
         }
@@ -15784,7 +15814,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             break;
             case RecvKind::FieldOfThis:
             {
-                candidatesIn( fieldTypeOf( ctxOwner, r.fieldName ), r.lang );
+                candidatesIn( fieldTypeOf( ctxOwner, r.fieldName() ), r.lang );
                 if( cand.empty() )
                 {
                     everyCompatibleOwner( r.lang );
@@ -15793,7 +15823,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             break;
             case RecvKind::FieldOfVar:
             {
-                candidatesIn( fieldTypeOf( receiverTypeOf( r.fromSymbol, r.recvVar, ctxOwner ), r.fieldName ), r.lang );
+                candidatesIn( fieldTypeOf( receiverTypeOf( r.fromSymbol, r.recvVar, ctxOwner ), r.fieldName() ), r.lang );
                 if( cand.empty() )
                 {
                     everyCompatibleOwner( r.lang );   // includes the "receiver too rich to classify" shape (empty recvVar)

@@ -371,6 +371,7 @@ for _g in \
     clonededupcheck \
     cloneidiomcheck \
     clonelexcheck \
+    clonepersistcheck \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \
@@ -448,6 +449,7 @@ for _g in \
     docmdcachecheck \
     docmentioncheck \
     docscommandscheck \
+    docsunitscheck \
     doctorcheck \
     donelegendcheck \
     dottedstringcheck \
@@ -543,6 +545,7 @@ for _g in \
     formembernamescheck \
     fornotesbudgetcheck \
     fornotesjsoncheck \
+    foronesidecheck \
     forrankordercheck \
     forregrowcheck \
     forrootlegendcheck \
@@ -819,6 +822,7 @@ for _g in \
     prnestedcapcheck \
     probecheck \
     propcostcheck \
+    protoindexcheck \
     prrefsafecheck \
     prrenamecheck \
     pyaliascallcheck \

@@ -43,6 +43,13 @@
 #   (n1) present-only: a one-function tree has no candidate and prints no block (twin: a1 fires on the same binary)
 #   (h1) --token-budget holds the block: <syms held="budget" next=...>, no rows; (j1) --json carries no block
 #   (x1) MCP `for`: the block (one renderer), read off the MCP answer's own bytes: a1, d1 and w1 hold on it
+#   (b1..b5) VR-BINDER-ROW, TypeScript and Python (any language whose value-ref pass records into= slot binds): a head <d> row that
+#        another function stores into a slot (a returned object literal, a dict) gains a by="bind" row naming that binder, with into=
+#        the slot as the callers' <vr> row spells it, from any file. (b1) the factory in another file is the row; (b2) a head nobody
+#        binds, in a block a by="name" row prints, has no by="bind" row and no bind clause in its legend (bytes only when a bind exists); (b3) three binders of one
+#        head: two rows (kForFileSymsBindPerHead) and bind_total="3", the cap stated in the legend; (b4) Python: a dict's value binds
+#        the same way; (b5) the legend right before the block defines by="bind", into= and bind_total=; RIPWIRE_NO_BIND_ROWS=1 drops them; (b6) a binder an
+#        earlier head counted past its cap prints once under a later head's free slot
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -354,6 +361,108 @@ for line in sys.stdin:
 ' >"$TMP/x1.xml"
 if [ -s "$TMP/x1.xml" ] && python3 "$TMP/check.py" "$TMP/x1.xml" mcp - >"$TMP/x1.res" 2>&1 && grep -q '^PASS (d1)' "$TMP/x1.res" && grep -q '^PASS (a1)' "$TMP/x1.res" && grep -q '^PASS (w1)' "$TMP/x1.res" && grep -q '^PASS (l1)' "$TMP/x1.res"
 then ok "(x1) MCP for: the block, its by=name cap, its dedupe against the MCP answer's own words, and the full legend defines its attributes"; else no "(x1) MCP: $( grep -v '^PASS' "$TMP/x1.res" | head -c 400 )"; fi
+
+# ── VR-BINDER-ROW (b1..b5): the binder of a head row's slot bind, a <y by="bind"> row ──────────────────────────────────────────
+mkdir -p "$TMP/bind/src" "$TMP/bindpy"
+cat >"$TMP/bind/src/vis.ts" <<'TS'
+export function isNodeShown(node: number): boolean {
+    return node > 0 && node < 100;
+}
+export function plainHelper(x: number): number {
+    return x * 2 + 1;
+}
+export function cappedPredicate(x: number): boolean {
+    return x % 3 === 0;
+}
+export function helperPlainScale(x: number): number {
+    return x * 4;
+}
+TS
+cat >"$TMP/bind/src/table.ts" <<'TS'
+import { isNodeShown, cappedPredicate } from "./vis";
+export function buildTable() {
+    return { isNodeShown, count: 3 };
+}
+export function wireOne() {
+    return { check: cappedPredicate };
+}
+export function wireTwo() {
+    return { check: cappedPredicate };
+}
+export function wireThree() {
+    return { check: cappedPredicate };
+}
+TS
+cat >"$TMP/bind/src/use.ts" <<'TS'
+import { plainHelper } from "./vis";
+export function runIt(n: number): number {
+    return plainHelper(n) + 1;
+}
+TS
+# (b6) CR 4507663235: a binder an earlier head counted past its cap still prints under a later head with a free slot
+mkdir -p "$TMP/bind2/src"
+cat >"$TMP/bind2/src/vis.ts" <<'TS'
+export function alphaPred(x: number): boolean {
+    return x % 3 === 0;
+}
+export function betaPred(x: number): boolean {
+    return x % 5 === 0;
+}
+TS
+cat >"$TMP/bind2/src/table.ts" <<'TS'
+import { alphaPred, betaPred } from "./vis";
+export function wireAlphaOne() {
+    return { check: alphaPred };
+}
+export function wireAlphaTwo() {
+    return { check: alphaPred };
+}
+export function wireBoth() {
+    return { first: alphaPred, second: betaPred };
+}
+TS
+cat >"$TMP/bindpy/handlers.py" <<'PYF'
+def on_resize_event(ev):
+    return ev + 1
+PYF
+cat >"$TMP/bindpy/registry.py" <<'PYF'
+from handlers import on_resize_event
+
+def make_dispatch():
+    return {"resize": on_resize_event}
+PYF
+# bindrows ANSWER: line 1 the by="bind" rows as name@into@file;… line 2 bind_total= or -, line 3 clause|noclause, line 4 defs|nodefs
+bindrows(){ python3 - "$1" <<'PYF'
+import re, sys
+s = open( sys.argv[1], encoding = "utf8" ).read()
+m = re.search( r'(<!-- (?:ripwire for )?syms:.*?-->)(<syms[^>]*>.*?</syms>)', s, re.S )
+legend, blk = ( m.group( 1 ), m.group( 2 ) ) if m else ( "", "" )
+rows = [ dict( re.findall( r'(\w+)="([^"]*)"', r ) ) for r in re.findall( r'<y [^>]*/>', blk ) ]
+total = re.search( r'<syms[^>]* bind_total="(\d+)"', blk )
+print( ";".join( "%s@%s@%s" % ( r["n"], r.get( "into", "" ), r["p"].split( ":" )[0] ) for r in rows if r.get( "by" ) == "bind" ) )
+print( total.group( 1 ) if total else "-" )
+print( "clause" if 'by="bind"' in legend or "by=bind" in legend else "noclause" )
+print( "defs" if all( re.search( r'(?<![\w:.-])' + a + r'\s*=', legend ) for a in ( "by", "into", "bind_total" ) ) else "nodefs" )
+PYF
+}
+run bind "--for=isNodeShown" >"$TMP/b1.xml"; rc=$?
+b1="$( bindrows "$TMP/b1.xml" )"
+if [ "$rc" = 0 ] && [ "$( sed -n 1p <<<"$b1" )" = "buildTable@(return).isNodeShown@src/table.ts" ] && [ "$( sed -n 2p <<<"$b1" )" = "-" ]; then ok "(b1) the factory that returns { isNodeShown } is a by=\"bind\" row with into=, from another file"; else no "(b1) rc=$rc rows: $( tr '\n' '|' <<<"$b1" ) $( grep -o '<syms.*' "$TMP/b1.xml" | head -c 400 )"; fi
+run bind "--for=plainHelper" >"$TMP/b2.xml"; rc=$?
+b2="$( bindrows "$TMP/b2.xml" )"
+if [ "$rc" = 0 ] && grep -q '<y [^>]*n="helperPlainScale" by="name"' "$TMP/b2.xml" && [ -z "$( sed -n 1p <<<"$b2" )" ] && [ "$( sed -n 3p <<<"$b2" )" = "noclause" ]; then ok "(b2) a head nobody binds: the block prints (a by=\"name\" row) with no by=\"bind\" row and no bind clause in the legend"; else no "(b2) rc=$rc: $( tr '\n' '|' <<<"$b2" ) $( grep -o '<syms.*' "$TMP/b2.xml" | head -c 400 )"; fi
+run bind "--for=cappedPredicate" >"$TMP/b3.xml"; rc=$?
+b3="$( bindrows "$TMP/b3.xml" )"
+if [ "$rc" = 0 ] && [ "$( sed -n 1p <<<"$b3" | tr ';' '\n' | grep -c '@(return).check@src/table.ts$' )" = 2 ] && [ "$( sed -n 2p <<<"$b3" )" = 3 ] \
+   && grep -q 'two per head' "$TMP/b3.xml"; then ok "(b3) three binders of one head: two rows, bind_total=\"3\", the cap in the legend"; else no "(b3) rc=$rc: $( tr '\n' '|' <<<"$b3" ) $( grep -o '<syms.*' "$TMP/b3.xml" | head -c 400 )"; fi
+run bindpy "--for=on_resize_event" >"$TMP/b4.xml"; rc=$?
+b4="$( bindrows "$TMP/b4.xml" )"
+if [ "$rc" = 0 ] && sed -n 1p <<<"$b4" | grep -q '^make_dispatch@[^@]*resize[^@]*@registry.py$'; then ok "(b4) Python: the function returning {\"resize\": on_resize_event} is a by=\"bind\" row"; else no "(b4) rc=$rc: $( tr '\n' '|' <<<"$b4" ) $( grep -o '<syms.*' "$TMP/b4.xml" | head -c 400 )"; fi
+run bind2 "--for=alphaPred betaPred" >"$TMP/b6.xml"; rc=$?
+b6="$( bindrows "$TMP/b6.xml" )"
+if [ "$rc" = 0 ] && sed -n 1p <<<"$b6" | tr ';' '\n' | grep -q '^wireBoth@(return).second@src/table.ts$' && [ "$( sed -n 1p <<<"$b6" | tr ';' '\n' | grep -c '^wireBoth@' )" = 1 ]; then ok "(b6) a binder alphaPred counted past its cap prints once under betaPred's free slot"; else no "(b6) rc=$rc: $( tr '\n' '|' <<<"$b6" ) $( grep -o '<syms.*' "$TMP/b6.xml" | head -c 400 )"; fi
+RIPWIRE_NO_BIND_ROWS=1 run bind "--for=isNodeShown" >"$TMP/b5.off.xml"
+if [ "$( sed -n 3,4p <<<"$b1" | tr '\n' ' ' )" = "clause defs " ] && ! grep -q 'by="bind"' "$TMP/b5.off.xml"; then ok "(b5) the legend before the block defines by=\"bind\" into= bind_total=; RIPWIRE_NO_BIND_ROWS=1 drops the rows"; else no "(b5) legend: $( sed -n 3,4p <<<"$b1" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/b5.off.xml" | head -c 300 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"

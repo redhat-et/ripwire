@@ -770,8 +770,8 @@ inline bool rubyNamingChild( TSNode n, const char* t, TSNode c ) noexcept
 inline void rubyTypeReceiver( RawRef& ref, std::string_view type, std::string_view via, bool factory )
 {
     ref.recvVar.clear();
-    ref.memberCtor.assign( type );
-    ref.memberVia.assign( via );
+    ref.memberCtorMut().assign( type );
+    ref.memberViaMut().assign( via );
     ref.memberFactory = factory;
 }
 
@@ -2028,10 +2028,10 @@ inline std::optional<RawRef> subscriptOperatorRef( TSNode access, TSNode recv, s
     r.name      = op;
     r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // receiverOf's "too rich" member shape
     r.recvVar   = std::move( rs.var );
-    r.fieldName = std::move( rs.field );
+    r.setFieldName( std::move( rs.field ) );
     if( langFacts( lang ).constantPathReceiver && r.recv == RecvKind::NamedVar )
     {
-        r.fieldName = rubyWrittenPathOfReceiver( recv, r.recvVar, src );   // a constant's path as written (parser version 137)
+        r.setFieldName( rubyWrittenPathOfReceiver( recv, r.recvVar, src ) );   // a constant's path as written (parser version 137)
     }
     ENSURES( r.recv != RecvKind::None, "a subscript always has a receiver: graph.h's receiver rules read it as a member call" );
     return r;

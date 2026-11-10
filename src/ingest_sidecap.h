@@ -1089,7 +1089,7 @@ inline void stampMemberReceiver( RawRef& r, TSNode access, Lang lang, std::strin
     RecvShape    rs       = ts_node_is_null( recvNode ) ? RecvShape{} : classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
     r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // a member access is never a bare name
     r.recvVar   = std::move( rs.var );
-    r.fieldName = std::move( rs.field );
+    r.setFieldName( std::move( rs.field ) );
 }
 
 void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
@@ -1185,6 +1185,7 @@ inline constexpr ExtractFamily kExtractFamilyByLang[] = {
     ExtractFamily::JvmDotNet,        // Kotlin
     ExtractFamily::Scripting,        // GDScript
     ExtractFamily::Scripting,        // Clojure
+    ExtractFamily::DocsData,         // Proto
 };
 static_assert( std::size( kExtractFamilyByLang ) == kLangCount, "one profile family row per Lang, in enumerator order" );
 static_assert( kExtractFamilyByLang[ std::size_t( Lang::Kotlin ) ] == ExtractFamily::JvmDotNet && kExtractFamilyByLang[ std::size_t( Lang::C ) ] == ExtractFamily::CFamily,
@@ -2274,6 +2275,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                                          { "compound_statement", "function_body", "block", "implementation_definition", "class_body", "enum_class_body" } );
             }
 
+            // Proto (PROTO-INDEX): the grammar names no `body:` field. A message's or enum's body is its *_body child; a service's,
+            // an rpc's option block's and a oneof's body starts at its `{` token (an rpc ending in `;` has none).
+            if( ts_node_is_null( body ) && langFacts( le.lang ).generatedSchema )
+            {
+                body = firstChildOfKind( defNode, /*namedOnly=*/false, { "message_body", "enum_body", "{" } );
+            }
+
             // Dart's body is a SIBLING of the signature, so neither defBodyNodeOf nor the climb above can
             // find it and the span would stop at the signature — see dartFollowingBody (ingest_relations.h)
             // for the measurement and for why an abstract member still comes back null.
@@ -2604,13 +2612,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                                  ? javaMethodReferenceReceiver( roleNode, src )
                                  : receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
                     r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
-                    r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
+                    r.setFieldName( std::move( rs.field ) );                                 //   depth-2 intermediate field; "" otherwise
                     r.viaArrow  = rs.viaArrow;                                           //   `p->m()`: Rule 2b's smart-pointer pointee needs it
                     r.memberCall = rs.member;  r.memberRoot = std::move( rs.root );      //   FE-A: a Go/JS/TS/Rust member call and its receiver root
-                    r.memberPath = std::move( rs.path );  r.memberCtor = std::move( rs.ctor );   //   FE-B: the rest of that receiver chain
+                    r.setMemberPath( std::move( rs.path ) );  r.setMemberCtor( std::move( rs.ctor ) );   //   FE-B: the rest of that receiver chain
                     if( le.lang == Lang::Ruby && r.recv == RecvKind::NamedVar )
                     {
-                        r.fieldName = rubyReceiverWrittenPath( nameNode, r.recvVar, src );   // parser version 137: a constant's path as written
+                        r.setFieldName( rubyReceiverWrittenPath( nameNode, r.recvVar, src ) );   // parser version 137: a constant's path as written
                     }
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
                     r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
@@ -2620,13 +2628,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     }
                     if( !rustWritten.empty() )
                     {
-                        r.fieldName = std::move( rustWritten );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
+                        r.setFieldName( std::move( rustWritten ) );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
                     }
                     if( isQueueLang( le.lang ) && isQueueCallName( r.name ) )
                     {
                         if( const std::uint8_t kw = callKeywords( nameNode, src ); kw != 0 )
                         {
-                            r.composeRel = pyKwTag( kw );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
+                            r.setComposeRel( pyKwTag( kw ) );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
                         }
                     }
                 }

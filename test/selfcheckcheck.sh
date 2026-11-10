@@ -124,7 +124,8 @@ HISTORY_EXACT = { "CHANGELOG.md", "docs/EVALS.md", "bench/PROFILE.md", "docs/LIN
 HISTORY_LINES = [ ( "test/connectjoincheck.sh", "`VERIFY` 27" ),                 # a recorded measurement of join-node names
                   ( "test/showcase_capture.py", "VERIFY a closed claim" ),        # English: the --verify feature's caption
                   ( "test/showcase_capture.py", "VERIFY/VERIFY_TEXT/VERIFY_DEBUG_ONLY/VERIFY_NOT_REACHED/VERIFY_SAME_THREAD/VERIFY_NO_ALIAS*/DYNMAP_VERIFY/DEGRADED_PATH_ALERT renamed to" ),  # the --pack-signatures caption's own before/after name list (provenance of the 2026-09-17 re-derivation), keyed by TEXT not line: see CONTRIBUTING/LIMITS.md's never-pin-a-line rule
-                  ( "src/infra/Diagnostics.h", "define ASSERT, VERIFY and ENSURE" ) ]  # the collision note names MFC macros
+                  ( "src/infra/Diagnostics.h", "define ASSERT, VERIFY and ENSURE" ),  # the collision note names MFC macros
+                  ( "src/clones.h", "(2) VERIFY: only bodies whose key" ) ]  # English: the clone-key pass's second step, re-read and compare
 # The word glued to a suffix is still the old name in prose ("never VERIFYs on hostile input", "VERIFYed here").
 INFLECTED_RE = re.compile( r"(?<![A-Za-z0-9_])VERIFY(s|ed)\b" )
 ACCESSORS = { "size", "empty", "data", "begin", "end", "cbegin", "cend", "rbegin", "rend", "front", "back", "rows", "cols",

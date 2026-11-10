@@ -15,6 +15,7 @@
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
+#include "foronesidereach.h"  // ONE-SIDE-REACH: rows that reach one of two named endpoints become tail pointers (read off the captured answer)
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -1489,7 +1490,8 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     // EACH KIND OF BYTE AT ITS OWN RATE: markup (header, <sigs>, <lego>, <compose>, <routes>, the mermaid graph
     // block, the tail, a compact <hops>) at kBytesPerTokenDefault, and the --detail / auto bodies at the
     // kBytesPerTokenBody rate chargeSection already charged them at (one rate for both kinds is §H7's defect).
-    // R-DEDUP: the inputs ride back with the number, so the <syms> cut (forfilesyms.h, FileSymsArgs::price) re-prices through this fixpoint.
+    // ONE-SIDE-REACH / R-DEDUP: the inputs ride back with the number, so the demote pass (foronesidereach.h) and the <syms> cut
+    // (forfilesyms.h) re-price through this fixpoint.
     rw::PricedRootInputs inputs { .markupBytes = header.size() + f.nonHeaderMarkupBytes, .bodyTokens = f.bodyTokens };
     std::size_t est = 0;
     std::string estAttr = rw::pricedRootAttrTokens( inputs.markupBytes, rw::kBytesPerTokenDefault, inputs.bodyTokens, &est );
@@ -2753,6 +2755,27 @@ inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t t
     return render( shown );
 }
 
+// What the trailing sections of a soft-target answer serve however little the target leaves them: the <tail> shell (its share
+// floors at the shell) and, on the compact route, the <hops> first row (buildForCompactHops serves one at a 1 B room). The rows
+// at the target cut are a floor the refill never goes below, so a whole <lego>/<compose> served out of bytes these floors then
+// take puts the answer past T (forsoftbudgetcheck (ST)/(ST-L): measured 2026-11-08 on this repo's src/, 68-77 B past the
+// rows' room at N=3000-3600). The opt-in's share is net of them. The hops render here only measures: the run's redaction
+// tally is left untouched.
+inline std::size_t forSoftTrailingFloorBytes( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                              const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
+                                              const ForEnrichmentPlan& plan, std::size_t bundleBudget, const rw::RedactCounts* redactPtr,
+                                              const ForSectionPromises& promised, const rw::FileTail& tailAtCut )
+{
+    std::size_t floorBytes = renderForFileTailXml( tailAtCut, cfg.tokenBudget, bundleBudget, bundleBudget ).size();
+    if( plan.compact && bundleBudget > 0 )
+    {
+        std::optional<rw::RedactCounts> scratch = redactPtr != nullptr ? std::optional<rw::RedactCounts>( *redactPtr ) : std::nullopt;
+        floorBytes += buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, bundleBudget - 1, bundleBudget,
+                                           scratch ? &*scratch : nullptr, promised ).section.xml.size();
+    }
+    return floorBytes;
+}
+
 
 // R2-AF (round 2, S4): render the task's named-file/decl-impl-partner rows (rw::forNamedHeaderRows,
 // mention.h — the resolution rule and its rationale live there) as `<hdr p= of=/>`, root-relative like
@@ -2957,7 +2980,7 @@ inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectAr
 inline bool forFileSymsWanted( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
-    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() );
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || ( !rw::forFileSymsOn() && !rw::oneSideReachOn() ) );
 }
 
 // What StdoutCapture::finish() hands back.
@@ -3016,12 +3039,10 @@ public:
     }
     StdoutCapture( const StdoutCapture& ) = delete;
     StdoutCapture& operator=( const StdoutCapture& ) = delete;
-    // R-DEDUP: what the captured answer's root est_tokens= was converged from (null when the root prints none): the <syms> cut
-    // (forfilesyms.h) takes priced markup out of these bytes, and re-prices the root through it.
-    void rootPricedAs( const std::optional<rw::PricedRootInputs>& price ) { rootPrice_ = price; }
-    const rw::PricedRootInputs* rootPrice() const noexcept { return rootPrice_ ? &*rootPrice_ : nullptr; }
     ~StdoutCapture() { if( active_ ) { (void)finish(); } }
     bool wanted() const noexcept { return wanted_; }
+    // ONE-SIDE-REACH: what the captured answer's root est_tokens= was converged from (null when the root prints none): the demote pass
+    // (foronesidereach.h) rewrites priced rows in these bytes, and re-prices the root through it.
     // The captured bytes, stdout restored; nullopt when nothing was captured. A failed flush or a stream error is `failed`: the bytes read are
     // kept, never dropped and never taken for the whole answer. A failed restore keeps the saved descriptor (the only handle on the real
     // stdout) and writes the bytes to it; the caller reports `restored == false`.
@@ -3057,7 +3078,6 @@ private:
     bool       wanted_ = false, active_ = false;
     std::FILE* file_   = nullptr;
     int        saved_  = -1;
-    std::optional<rw::PricedRootInputs> rootPrice_;
 };
 
 // Where <syms> goes in the answer's bytes: in front of the --with-graph <graph> block, which stays the last child, else at the end (rfind: a
@@ -3076,8 +3096,29 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
 }
 
 // The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
-inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+// ONE-SIDE-REACH (foronesidereach.h): rows reaching one of two named endpoints become pointers, in the answer and in `syms`; "" when none is.
+// The caller skips it under a budget, which leaves both as shaped, and re-prices the root on the bytes it sends.
+inline std::string oneSideReachAnswer( const MainDispatch& d, std::string_view answer, std::string& syms )
 {
+    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, d.cfg.forTask, answer, syms );
+    if( !edit.syms.empty() )
+    {
+        syms = std::move( edit.syms );
+    }
+    return std::move( edit.answer );
+}
+
+// The captured answer and the inputs its root's est_tokens was priced from (nullopt: no priced root to re-price).
+struct CapturedForAnswer
+{
+    StdoutCapture&                      capture;
+    std::optional<rw::PricedRootInputs> price;
+};
+
+inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
+{
+    StdoutCapture&                             capture = answer.capture;
+    const std::optional<rw::PricedRootInputs>& price   = answer.price;
     if( !capture.wanted() )
     {
         return 0;
@@ -3098,12 +3139,22 @@ inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const bool        whole = cap && !cap->failed;
-    std::string cut; // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
-    const std::string syms = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs { .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0, .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut, .price = capture.rootPrice() } );
-    const std::string& bytes = !cut.empty() ? cut : cap ? cap->bytes
-                                                        : cut;
-    const std::size_t at = cap ? forSymsInsertAt( bytes, cfg.withGraph ) : 0; // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;
+    std::string       cut;   // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
+    std::string       syms  = rw::renderForFileSyms(
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = held,
+                                      .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut } );
+    std::string edited = whole && !held ? oneSideReachAnswer( d, cut.empty() ? std::string_view( cap->bytes ) : std::string_view( cut ), syms ) : std::string();
+    if( edited.empty() )
+    {
+        edited = std::move( cut );
+    }
+    if( !edited.empty() && price )
+    {
+        rw::repriceRootAfterCut( edited, *price, cap->bytes.size() );   // once, on the bytes sent; signed: the pointers and legend may outweigh the rows they replace
+    }
+    const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
+    const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
     std::fwrite( bytes.data(), 1, at, stdout );
     std::fwrite( syms.data(), 1, syms.size(), stdout );
     std::fwrite( bytes.data() + at, 1, bytes.size() - at, stdout );
@@ -4372,9 +4423,21 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // round C (reserve first): a soft target serves the sections whole when they fit what the rows at its cut left
         const std::size_t sigsAtCutBytes = sigsStr.size() - std::min( sigsStr.size(), forSigsCut.pastTargetBytes );
         const std::size_t sectionsShare  = bundleBudget - std::min( bundleBudget, forHdrXml.size() + sigsAtCutBytes + routeStr.size() + graphSection.xml.size() );
+        // DEEP-TAIL d2's tail, its rank rows excluding the shown rows' files — under a soft target the rows AT THE CUT, the ones a
+        // refill below keeps (rendered after the bodies decision; computed here so the opt-in can reserve its shell)
+        const FileTail    forFileTailShown = sigsPreRendered ? computeFileTail( ing, lensRank, lr.evidence,
+                                                                                forSoftTarget ? rowsAtTargetIds( shownSigIds, lensRank, forSigsCut.pastTarget )
+                                                                                              : shownSigIds,
+                                                                                flRootArg, cfg.forTask )
+                                                             : forFileTail;
+        const bool        softOptInCandidate = forSoftTarget && legoPreRendered && composePreRendered && legoStr.size() + composeStr.size() <= sectionsShare;
+        const std::size_t trailingFloor      = softOptInCandidate && autoBundleMode && sigsPreRendered
+            ? forSoftTrailingFloorBytes( cfg, ing, g, lensSurfaceIds, lensRank, plan, bundleBudget, redactPtr,
+                                         ForSectionPromises{ headerParts.viaPresent, &ownerPlan, headerParts.splitPresent }, forFileTailShown )
+            : 0u;
         const rw::ForSectionStubPlan stubPlan = rw::planForSectionStubs(
-            forSoftTarget && legoPreRendered && composePreRendered ? rw::forSoftSectionsOptIn( cfg.sections, legoStr.size(), composeStr.size(), sectionsShare )
-                                                                   : std::string_view( cfg.sections ),
+            softOptInCandidate ? rw::forSoftSectionsOptIn( cfg.sections, legoStr.size(), composeStr.size(), sectionsShare - std::min( sectionsShare, trailingFloor ) )
+                               : std::string_view( cfg.sections ),
             cfg.forTask,
             rw::ForStubbableSection{ .hasContent = legoPreRendered ? !legoStr.empty() : legoStubTotal > 0, .preCapTotal = legoStubTotal,
                                      .rendered = legoPreRendered, .renderedBytes = legoStr.size() },
@@ -4683,12 +4746,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // Rendered after the bodies decision. Default regime: the full 40 rows ride on top — the sigs and the bodies are
         // byte-identical to a tail-less bundle by construction (nothing above charges these bytes). A soft target: the tail is
         // the last trailing section, funded from what the rows AT THE CUT and the sections before it left (reserve first).
-        // its rank rows exclude the shown rows' files — under a soft target the rows AT THE CUT, the ones a refill below keeps
-        const FileTail    forFileTailShown = sigsPreRendered ? computeFileTail( ing, lensRank, lr.evidence,
-                                                                                forSoftTarget ? rowsAtTargetIds( shownSigIds, lensRank, forSigsCut.pastTarget )
-                                                                                              : shownSigIds,
-                                                                                flRootArg, cfg.forTask )
-                                                             : forFileTail;
+        // (forFileTailShown, the tail scoped to the rows at the cut, is computed above the sections' opt-in, which reserves its shell)
         // round C: the --detail bodies are the caller's own request under their own ceiling (--max-tokens / the pack budget), so
         // they neither fund nor are funded by the reserved sections: the tail's share and the rows' refill both leave them out,
         // and a body ceiling never moves a row (formaxtokenscheck (E))
@@ -4947,7 +5005,6 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
-        forAnswerBytes.rootPricedAs( pricedHeader.inputs ); // R-DEDUP: the <syms> cut re-prices this root
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         // R2-AF (round 2, S4): first rows inside the root, right after the legend — see forHdrRows above.
         // The SAME string every sum above charged (rendered once, beside forHdrRows) — "" when there is no row.
@@ -5064,8 +5121,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot )
         {
             const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = sigsPreRendered && shownSigIds.empty(),
-                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .rootArg = flRootArg,
-                                                                                             .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
+                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .compress = cfg.compress,
+                                                                                             .rootArg = flRootArg, .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }
         // XF-ALIAS-HOP (foraliashop.h): a printed row the task names is an alias definition: its chain to what it names; "" otherwise.
@@ -5106,7 +5163,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
-        const int answerRc = appendForFileSyms( d, forAnswerBytes );
+        const int answerRc = appendForFileSyms( d, CapturedForAnswer{ forAnswerBytes, pricedHeader.inputs } );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
