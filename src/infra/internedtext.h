@@ -213,16 +213,6 @@ public:
     auto        begin() const noexcept { return str().begin(); }
     auto        end() const noexcept { return str().end(); }
     std::string substr( std::size_t pos = 0, std::size_t n = std::string::npos ) const { return str().substr( pos, n ); }
-    template <class... Args> std::size_t find( Args&&... args ) const noexcept { return str().find( std::forward<Args>( args )... ); }
-    template <class... Args> std::size_t rfind( Args&&... args ) const noexcept { return str().rfind( std::forward<Args>( args )... ); }
-    template <class... Args> std::size_t find_first_of( Args&&... args ) const noexcept { return str().find_first_of( std::forward<Args>( args )... ); }
-    template <class... Args> std::size_t find_last_of( Args&&... args ) const noexcept { return str().find_last_of( std::forward<Args>( args )... ); }
-    template <class... Args> std::size_t find_first_not_of( Args&&... args ) const noexcept { return str().find_first_not_of( std::forward<Args>( args )... ); }
-    template <class... Args> std::size_t find_last_not_of( Args&&... args ) const noexcept { return str().find_last_not_of( std::forward<Args>( args )... ); }
-    template <class Arg> bool starts_with( Arg&& a ) const noexcept { return str().starts_with( std::forward<Arg>( a ) ); }
-    template <class Arg> bool ends_with( Arg&& a ) const noexcept { return str().ends_with( std::forward<Arg>( a ) ); }
-    template <class Arg> bool contains( Arg&& a ) const noexcept { return std::string_view( str() ).find( std::forward<Arg>( a ) ) != std::string_view::npos; }
-    template <class... Args> int compare( Args&&... args ) const noexcept { return str().compare( std::forward<Args>( args )... ); }
     void clear() noexcept { id_ = TextPool::kEmptyId; }
 
     friend std::string operator+( std::string lhs, const InternedText& rhs ) { return lhs.append( rhs.str() ); }

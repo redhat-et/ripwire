@@ -11390,7 +11390,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             javaProvenType = javaProvenTypeReceiver( r, classNames, fieldNarrow, qkey );
             // (L) fix round 2 / 3 (D3, D6): `import ext.Util; … Util::open` (or `import ext.*;` alone) names the outside Util
-            if( javaProvenType.empty() || recvEv.types.jvmHides( r.fileId, r.startByte, r.recvVar.substr( 0, std::min( r.recvVar.find( '.' ), r.recvVar.size() ) ) ) )
+            if( javaProvenType.empty() || recvEv.types.jvmHides( r.fileId, r.startByte, r.recvVar.substr( 0, std::min( r.recvVar.str().find( '.' ), r.recvVar.size() ) ) ) )
             {
                 disposition = javaCandidateRefused( g, r, it != byName.end() );
                 continue;
@@ -11811,7 +11811,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // alone) is an outside class, never an in-tree namesake — the call falls to the ladder, which hedges it.
         if( !scipPinned && !canonical && !narrowed && writtenRoot == JsWrittenRoot::None
             && !( callResultFamilyOf( r.lang ) == CallResultFamily::Jvm
-                  && recvEv.types.jvmHides( r.fileId, r.startByte, std::string_view( r.recvVar ).substr( 0, std::min( r.recvVar.find( '.' ), r.recvVar.size() ) ) ) ) )
+                  && recvEv.types.jvmHides( r.fileId, r.startByte, std::string_view( r.recvVar ).substr( 0, std::min( r.recvVar.str().find( '.' ), r.recvVar.size() ) ) ) ) )
         {
             narrowed = narrowTo( narrower.rule2cClassNameRecv( r, ing.symbols[ r.fromSymbol ].scope, { classNames, fieldNarrow.localNameSet, memberFields }, chaUp ), r, cand );
         }

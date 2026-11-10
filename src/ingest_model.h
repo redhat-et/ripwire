@@ -872,7 +872,7 @@ inline void expandElixirImplementationReferences( IngestResult& result )
             clone.fromSymbol = node;
             const std::string& scope = result.symbols[ node ].scope;
             if( clone.recv == RecvKind::None && clone.role != RefRole::Import && clone.role != RefRole::Extends ) { clone.qualifier = scope; }
-            else if( clone.recv == RecvKind::ElixirSelfModule && !primary.empty() && clone.qualifier.starts_with( primary ) )
+            else if( clone.recv == RecvKind::ElixirSelfModule && !primary.empty() && clone.qualifier.str().starts_with( primary ) )
             {
                 clone.qualifier = std::string( clone.qualifier ).replace( 0, primary.size(), scope );
             }
