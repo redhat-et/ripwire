@@ -29,6 +29,9 @@
 #  10  literal:  a task that quotes a message literal found only in a .json string table lists its doc and config path-only
 #                rows (no doc= or config= in folded=; round 3: the graded sit lost two items when a quoted message's strings.json
 #                rows folded) and still folds scripts / the same words unquoted still fold config (the quotes are the trigger)
+#  11  sym wide: TAIL-SYM-WIDE (2026-11-10) names the widened rows (sym=), so arms 1-10 read a widened row as "path-only" on the
+#                pre-card tail (RIPWIRE_TAIL_SYM_WIDE_ROWS=0, fortailwidecheck arm 14's ablation); this arm pins that the fold is
+#                independent of the naming: the default tail lists the same rows and carries the same folded= as that ablation
 #
 # Usage: test/fortailfoldcheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -70,6 +73,8 @@ run() {   # run OUTFILE ARGS... -> rc file beside the output; HOME/TMPDIR privat
     echo $? > "$o.rc"
 }
 mkdir -p "$TMP/home"
+run "$TMP/f.sw" "--for=$Q"   # arm 11: the default (named widened rows); every run below reads the pre-card tail
+export RIPWIRE_TAIL_SYM_WIDE_ROWS=0
 run "$TMP/f.xml"  "--for=$Q"
 run "$TMP/f.full" "--for=$Q" --legend=full
 run "$TMP/f.json" "--for=$Q" --json
@@ -198,6 +203,10 @@ say(lq is not None and fq.get("script", 0) > 0, f"10 twin: the quoted task still
 say(lb is not None and fb.get("config", 0) > 0, f"10 twin: the same words unquoted fold config (folded={fb})")
 td2 = tail_of(docs)
 say(td2 is not None and "folded" not in td2[0], "8 docs: a docs question folds nothing")
+sw, ab = tail_of(load("f.sw")), tail_of(load("f.xml"))
+say(sw is not None and ab is not None and [q for q, _ in sw[1]] == [q for q, _ in ab[1]] and sw[0].get("folded") == ab[0].get("folded")
+    and bool(sw[0].get("folded")) and sum(1 for _, y in sw[1] if y) > sum(1 for _, y in ab[1] if y),
+    f"11 sym wide: the default tail lists the ablation's rows with the same folded= ({None if sw is None else sw[0].get('folded')}), more of them with sym=")
 print("fortailfoldcheck:", "FAIL" if fails else "PASS", f"({fails} failing)")
 sys.exit(1 if fails else 0)
 PY
