@@ -32,6 +32,10 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+# SIBLING-DEMOTE (forsiblingdemote.h) runs after this pass and demotes deep same-file <d> rows past <d> rank 10; the pointers this
+# pass prints move those ranks, so its on/off twins would differ in rows that are not this rule's. This gate pins ONE-SIDE-REACH alone;
+# SIBLING-DEMOTE's rule is pinned in forsiblingdemotecheck.
+export RIPWIRE_NO_SIBLING_DEMOTE=1
 unset RIPWIRE_NO_ONE_SIDE_REACH # an inherited value (even 0) would turn the rule off in both twins
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

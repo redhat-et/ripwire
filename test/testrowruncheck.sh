@@ -52,9 +52,11 @@ echo "testrowruncheck: BIN=$BIN"
 # answer's FILE tail rows (`<t p=… sym=…/>`, moved there from serialize.h, already excluded): file rows, not tests_to_run.
 # foronesidereach.h (ONE-SIDE-REACH) rewrites a --for answer's demoted <sigs>/<callers> rows as the same `<t p= sym= r=/>`
 # FILE tail pointers (pointerText): file rows naming a file and a symbol, never a tests_to_run row, so it is excluded like forpage.h.
+# forsiblingdemote.h (SIBLING-DEMOTE) prints a --for answer's deep same-file <sigs> <d> rows as the same `<t p= sym= r=/>` FILE tail
+# pointers (pointerAnswer): excluded for the same reason.
 EXPECTED_SITES="src/verbs_change.h src/situ.h src/prcontext.h src/packtask.h src/handoff.h src/flipimpact.h src/mcpverbs.h src/mcpedit.h"
 FOUND_SITES="$( cd "$ROOT" && grep -lE 'testRows(Rendered|Joined|List)\(|"<(t|test) p=\\"|\{\\"test\\":|\{\\"p\\":\\"%s\\"%s\}' src/*.h src/*.cpp 2>/dev/null \
-                | grep -vE 'src/(serialize|testmap|forpage|foronesidereach)\.h' | sort | tr '\n' ' ' | sed 's/ $//' )"
+                | grep -vE 'src/(serialize|testmap|forpage|foronesidereach|forsiblingdemote)\.h' | sort | tr '\n' ' ' | sed 's/ $//' )"
 WANT_SITES="$( printf '%s\n' $EXPECTED_SITES | sort | tr '\n' ' ' | sed 's/ $//' )"
 [ "$FOUND_SITES" = "$WANT_SITES" ] \
     && ok "(0) the tests_to_run row emitters are exactly the census this gate drives" \
