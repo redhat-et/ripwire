@@ -3612,7 +3612,6 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
     return 0;
 }
 
-
 // #350: an edit over an index the memory guard cut refuses first (runEditVerb / editplan::run), and that refusal line
 // already names the guard — so it answers for the stop and exits 5, rather than 1 plus the backstop's second line
 int editRefusalExit() noexcept
