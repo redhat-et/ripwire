@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "qdclonepaircheck: BIN=$BIN"
 G=( git -c user.name=t -c user.email=t@t -c commit.gpgsign=false )
@@ -152,16 +152,17 @@ def load_omega(path, limit):
     return rows
 ''')"
 
-[ -z "$( rows shrink )" ] && [ "$( cat "$TMP/shrink.rc" )" = 0 ] && ok "(a) shrink: no clone row, exit 0" \
-    || { no "(a) shrink: rc=$( cat "$TMP/shrink.rc" ) rows:"; rows shrink; }
-[ -z "$( rows twin )" ] && [ "$( cat "$TMP/twin.rc" )" = 0 ] && ok "(b) twin: no clone row, exit 0" \
-    || { no "(b) twin: rc=$( cat "$TMP/twin.rc" ) rows:"; rows twin; }
-rows third | grep 'load_delta' | grep -q 'gating="1"' && [ "$( cat "$TMP/third.rc" )" = 2 ] && ok "(c) third exact copy gates (exit 2)" \
-    || { no "(c) third copy: rc=$( cat "$TMP/third.rc" ) rows:"; rows third; }
-rows newnear | grep 'load_omega' | grep -q 'gating="1"' && [ "$( cat "$TMP/newnear.rc" )" = 2 ] && ok "(d) new near clone gates (exit 2)" \
-    || { no "(d) new near clone: rc=$( cat "$TMP/newnear.rc" ) rows:"; rows newnear; }
+if [ -z "$( rows shrink )" ] && [ "$( cat "$TMP/shrink.rc" )" = 0 ]; then ok "(a) shrink: no clone row, exit 0"
+else no "(a) shrink: rc=$( cat "$TMP/shrink.rc" ) rows:"; rows shrink; fi
+if [ -z "$( rows twin )" ] && [ "$( cat "$TMP/twin.rc" )" = 0 ]; then ok "(b) twin: no clone row, exit 0"
+else no "(b) twin: rc=$( cat "$TMP/twin.rc" ) rows:"; rows twin; fi
+if rows third | grep 'load_delta' | grep -q 'gating="1"' && [ "$( cat "$TMP/third.rc" )" = 2 ]; then ok "(c) third exact copy gates (exit 2)"
+else no "(c) third copy: rc=$( cat "$TMP/third.rc" ) rows:"; rows third; fi
+if rows newnear | grep 'load_omega' | grep -q 'gating="1"' && [ "$( cat "$TMP/newnear.rc" )" = 2 ]; then ok "(d) new near clone gates (exit 2)"
+else no "(d) new near clone: rc=$( cat "$TMP/newnear.rc" ) rows:"; rows newnear; fi
 "$BIN" "$TMP/shrink" --quality-delta=HEAD~1..HEAD --legend=compact >"$TMP/shrink2.out" 2>/dev/null
-cmp -s "$TMP/shrink.out" "$TMP/shrink2.out" && ok "(e) deterministic" || no "(e) shrink output differs across runs"
+if cmp -s "$TMP/shrink.out" "$TMP/shrink2.out"; then ok "(e) deterministic"; else no "(e) shrink output differs across runs"; fi
 
 echo
-[ "$fail" -eq 0 ] && { echo "ALL PASS"; exit 0; } || { echo "SOME CHECKS FAILED"; exit 1; }
+if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; fi
+echo "SOME CHECKS FAILED"; exit 1

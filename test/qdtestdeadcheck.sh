@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "qdtestdeadcheck: BIN=$BIN"
 
@@ -134,16 +134,17 @@ echo "  dead-code rows: $( echo $DEAD )"
 has(){ printf '%s\n' "$DEAD" | grep -qx "$1"; }
 
 for t in TestNewThing Test_underscored BenchmarkNewThing ExampleUsed FuzzNewThing TestMain; do
-    has "$t" && no "(a) Go test-runner entry $t reported dead-code" || ok "(a) Go test-runner entry $t is not dead-code"
+    if has "$t"; then no "(a) Go test-runner entry $t reported dead-code"; else ok "(a) Go test-runner entry $t is not dead-code"; fi
 done
 for t in Testify helperUnused TestInProd; do
-    has "$t" && ok "(b) Go control $t still reported dead-code" || no "(b) Go control $t lost its dead-code row (rule too wide)"
+    if has "$t"; then ok "(b) Go control $t still reported dead-code"; else no "(b) Go control $t lost its dead-code row (rule too wide)"; fi
 done
 for t in used_works qd_new_tests integration_works; do
-    has "$t" && no "(c) Rust test $t reported dead-code" || ok "(c) Rust test $t is not dead-code"
+    if has "$t"; then no "(c) Rust test $t reported dead-code"; else ok "(c) Rust test $t is not dead-code"; fi
 done
-has unused_prod && ok "(d) Rust control unused_prod still reported dead-code" || no "(d) Rust control unused_prod lost its dead-code row"
-[ "$rc" -eq 0 ] && ok "(e) exit 0" || { no "(e) exit $rc"; cat "$TMP/err"; }
+if has unused_prod; then ok "(d) Rust control unused_prod still reported dead-code"; else no "(d) Rust control unused_prod lost its dead-code row"; fi
+if [ "$rc" -eq 0 ]; then ok "(e) exit 0"; else no "(e) exit $rc"; cat "$TMP/err"; fi
 
 echo
-[ "$fail" -eq 0 ] && { echo "ALL PASS"; exit 0; } || { echo "SOME CHECKS FAILED"; exit 1; }
+if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; fi
+echo "SOME CHECKS FAILED"; exit 1
