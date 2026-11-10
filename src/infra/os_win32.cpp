@@ -2264,6 +2264,9 @@ pid_t spawn_sh( const std::string& command, const int pipeFds[ 2 ] )
 // kill: a negative pid is the process group — TerminateJobObject ends the whole tree; a positive pid ends that
 // process. Only children spawn_sh started are known (ESRCH otherwise). Signal 0 asks whether the child still runs. The
 // signal is recorded so waitpid reports the death as that signal.
+// fork_session: Windows has no fork. The one caller (--help-task --deadline-ms) answers synchronously on -1.
+pid_t fork_session() { return fail( ENOSYS ); }
+
 int kill( pid_t pid, int sig )
 {
     const std::lock_guard<std::mutex> lock( childMutex() );

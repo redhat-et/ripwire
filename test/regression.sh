@@ -601,6 +601,7 @@ for _g in \
     headbinstagecheck \
     headsnapcachecheck \
     helpbudgetcheck \
+    helptaskdeadlinecheck \
     hermesinstallcheck \
     historyoraclecheck \
     historywalkcheck \

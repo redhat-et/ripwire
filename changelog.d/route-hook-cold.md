@@ -1,0 +1,9 @@
+### Fixed — the prompt-routing hooks no longer time out on every prompt in a cold directory (#594, thanks @WingedGuardian)
+
+The Claude Code and Codex prompt hooks run `ripwire DIR --help-task=…` under the harness's hook timeout (8 s in Claude Code). On a cold index of a mid-sized repository that run took longer, the harness killed it, and a killed run saved no cache, so the next prompt was cold again and every prompt in that directory timed out. Fresh git worktrees hit it first. @WingedGuardian reported it with measurements and three candidate fixes.
+
+New: `--help-task=TASK --deadline-ms=N`. When the answer is ready within N milliseconds, the output and exit code are byte-for-byte what they are without the flag, so a warm or small repository sees no change. When it is not, ripwire prints the usual abstention and exits 0 by the deadline, and a background copy of the same run (forked before any thread starts) finishes the index and writes the cache, so the next prompt is warm. Only one index runs per directory: a second prompt while it runs abstains at once, and a concurrent cold call waits for the lock until its own deadline and then abstains. No call exits 2. Windows runs synchronously, as before.
+
+There is no user notification. The background run writes a per-directory status file (running, then finished with its exit code, time and file count) and, in the routing meter log, `deferred` rows when a call abstains on time and a `warm-done` row when the deferred index finishes. A background run that dies before it finishes is recorded as `warm-crashed` by the next call, and a stale `running` record is ignored. These rows carry `agent="ripwire"` and are never pooled into the prompt-router A/B readout.
+
+Both hooks pass `--deadline-ms=6000` only to a binary whose `--help` lists the flag, so an older binary runs exactly as before. Gate: `test/helptaskdeadlinecheck.sh`.

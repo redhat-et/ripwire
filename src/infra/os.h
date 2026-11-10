@@ -423,6 +423,23 @@ inline long pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int ti
     return child;
 }
 
+// fork_session: fork a child that leaves the caller's session and process group (setsid), so a hook runner that kills
+// its group on a timeout ends the parent and never the child, and that ignores SIGPIPE, so a write to a pipe whose
+// reader has exited fails with EPIPE instead of ending it. fork's contract: the child's pid in the parent, 0 in the
+// child, -1 with errno set and no child. Only a single-threaded caller may use it (fork copies the calling thread
+// alone; --help-task --deadline-ms forks before any thread exists). Windows has no fork: -1 with ENOSYS, and the
+// caller runs synchronously instead.
+[[gnu::always_inline]] inline pid_t fork_session()
+{
+    const pid_t child = ::fork();
+    if( child == 0 )
+    {
+        ::setsid();
+        ::signal( SIGPIPE, SIG_IGN );
+    }
+    return child;
+}
+
 // ── threads ────────────────────────────────────────────────────────────────────────────────────────────────
 // gettid: the 64-bit kernel thread id a tracer shows (Darwin's pthread_threadid_np, Linux's SYS_gettid).
 // pthread_main_np: nonzero on the process's initial thread. Linux: the thread whose tid EQUALS the pid — the exact
@@ -1124,6 +1141,7 @@ int        system( const char* command );
 inline constexpr long kPipeNothingYet = -2;
 long       pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs );   // the POSIX half's comment
 pid_t      spawn_sh( const std::string& command, const int pipeFds[ 2 ] );
+pid_t      fork_session();   // no fork on Windows: -1 with ENOSYS (the POSIX half's comment)
 
 // ── threads ────────────────────────────────────────────────────────────────────────────────────────────────
 pthread_t     pthread_self();
