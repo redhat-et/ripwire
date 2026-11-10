@@ -4,7 +4,7 @@ const JS_RATE_LIMITS = { requestsPerSecond: 100, burst: 250 };
 
 var JS_LEGACY_LIMIT = 7;
 
-// lowercase — must stay unindexed
+// lowercase, literal value — a t="var" def since TS-CONST-DEFS (was unindexed under r3 q10)
 const helperBudget = 2;
 
 function applyLimits() {

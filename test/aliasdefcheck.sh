@@ -134,9 +134,16 @@ defs "$F/c" Real; n=$( grep -oE '<name q="Real" defs="[0-9]+"' "$TMP/rows" | gre
 if [ "$drc" -eq 0 ] && [ "${n:-x}" = "1" ]; then ok "using lib::Real; adds no second Real (defs=1)"; else no "using-declaration: rc=$drc defs=${n:-<none>}"; fi
 absent "$F/c" lib "using namespace lib; is no definition of lib"
 
-# TypeScript module consts are NOT definitions here (as on main): neither alias- nor table-shaped values, nor the near misses
-for n in aliasIdent aliasMember loaded lazyMod shape handlers list destructA counter localConst called notLoader greeting emptyBag ambientThing; do
-    absent "$F/t" "$n" "TS const (TS arm carded)"
+# TypeScript module consts: alias-shaped values (an identifier, a member chain, require/import()), call values, a non-exported
+# destructure and a function-local const are NOT definitions (the alias arm stays carded; aliasIdent etc. carry no to=)
+for n in aliasIdent aliasMember loaded lazyMod destructA localConst called notLoader ambientThing; do
+    absent "$F/t" "$n" "TS const (TS alias arm carded)"
+done
+# RE-PINNED 2026-11-08 (TS-CONST-DEFS, test/tsshapecheck.sh §8): a LITERAL-valued module binding (object, array, string, a
+# number `let`) is a t="var" definition — still with no to= (the alias target rides C++ rows only)
+for n in shape handlers list counter greeting emptyBag; do
+    defs "$F/t" "$n"; r=$( row )
+    if [ "$drc" -eq 0 ] && printf '%s' "$r" | grep -q 't="var"' && ! printf '%s' "$r" | grep -q ' to'; then ok "TS literal const (TS-CONST-DEFS): --defs=$n t=var, no to="; else no "TS literal const $n: rc=$drc row=${r:-<none>}"; fi
 done
 # a SCREAMING const stays a def exactly as on main: no to= (the alias target rides C++ rows only)
 defs "$F/t" SCREAMING_ALIAS; r=$( row )

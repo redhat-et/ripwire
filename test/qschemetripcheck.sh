@@ -34,6 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-09, merge of main e0eefc292 into lane ts-const-defs: RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 305 (rich 306), above main's 303 (proto-index); this lane's TS/JS literal-valued module consts are t="var" defs
+#   (test/tsshapecheck.sh §8); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 50 and kQSnapCacheScheme stays.
+# 2026-11-08, lane ts-const-defs (base main 45c2deb24; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 301 -> 303 (rich 304): a TS/JS module-level const/let/var with a literal value is a t="var" def and an
+#   exported destructure binds each name (test/tsshapecheck.sh §8); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 50
+#   and kQSnapCacheScheme stays: no record changes shape and no watched quality.h function moved.
 # 2026-11-08, merge of main 45c2deb24 (#572 docs-units, #577 clones-persist) into lane proto-index: RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: both sides' bumps together, kParserVer 303 (this lane, .proto indexed) and kCacheVersion 50 (#577, def record clone key);
 #   quality.h carries kIngestParserVerMirror 303 and kIngestCacheVersionMirror 50. kQSnapCacheScheme stays: neither side moved a watched function.

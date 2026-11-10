@@ -94,21 +94,51 @@
 ; --for structurally could not surface it (the r3 head-to-head's only unrecoverable loss).
 ; Shape verified with --match: the (program …) wrapper keeps function-local consts out; the export
 ; form nests (program (export_statement (lexical_declaration …))) so it needs its own pattern.
-; "const"-keyword-anchored (a top-level `let` is a mutable counter, not config). Scoped to
-; SCREAMING_SNAKE names in ingest.cpp (constCaptureNeedsScreamingGate — tags predicates never run),
-; so `const retryBudget = 3` stays unindexed and an ALL-CAPS arrow const dedups to its Function def.
+; TS-CONST-DEFS (2026-11-08, test/tsshapecheck.sh §8): `const`, `let` and `var` alike. A SCREAMING_SNAKE name keeps
+; whatever its value; any other name keeps only when its value is a LITERAL (string, template, number, object, array,
+; unary/binary, under as/as const/satisfies/!) — src/ingest_names.h jsModuleBindingKept, since tags predicates never
+; run. So `export const versionMajorMinor = "6.0"` and `const retryBudget = 3` are t="var" defs, while a call-valued
+; `const fs = require("fs")` and an uninitialized `let x;` stay out, and an ALL-CAPS arrow const dedups to its Function def.
 
 (program
   (lexical_declaration
-    "const"
     (variable_declarator
       name: (identifier) @name)) @definition.constant)
 
 (export_statement
   (lexical_declaration
-    "const"
     (variable_declarator
       name: (identifier) @name)) @definition.constant)
+
+(program
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
+(export_statement
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name)) @definition.constant)
+
+; TS-CONST-DEFS (test/tsshapecheck.sh §8): an EXPORTED destructuring publishes each name it binds (`export const { a, b: c,
+; d = 1, ...rest } = x`, `export const [ p, q ] = pair`). One level deep; a nested pattern's inner names are not bound (a
+; disclosed floor). A non-exported destructure is not captured: it is an import-shaped alias of another module's names.
+(export_statement
+  (lexical_declaration
+    (variable_declarator
+      name: (object_pattern
+              [ (shorthand_property_identifier_pattern) @name
+                (pair_pattern value: (identifier) @name)
+                (object_assignment_pattern left: (shorthand_property_identifier_pattern) @name)
+                (rest_pattern (identifier) @name) ]))) @definition.constant)
+
+(export_statement
+  (lexical_declaration
+    (variable_declarator
+      name: (array_pattern
+              [ (identifier) @name
+                (assignment_pattern left: (identifier) @name)
+                (rest_pattern (identifier) @name) ]))) @definition.constant)
 
 ; declaration-file signatures (kept so .d.ts still yields symbols)
 (function_signature

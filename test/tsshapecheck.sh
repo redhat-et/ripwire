@@ -250,6 +250,78 @@ EOF
                       || no "$ext: --callers=ne got [$got], want [n4]"
 done
 
+# ── 8) TS-CONST-DEFS: module-level value bindings are definitions (test/tsconstfix/) ─────────────────
+# Before this arm a module-level TS/JS `const`/`let`/`var` whose value is not a function was no symbol unless its
+# name was SCREAMING_SNAKE (r3 q10): on microsoft/TypeScript `--defs=versionMajorMinor` (a string const) and
+# `--defs=commandOptionsWithoutBuild` (a 1 050-line array const) found 0, and `--at` on a line inside that array
+# refused ("no indexed symbol spans line"). A literal-valued binding — string, number, template, object or array,
+# under `as` / `as const` / `satisfies` / `!` / parentheses — is now a t="var" definition whose span is its whole
+# declaration, and an EXPORTED destructuring binds each name. Kept out, pinned here: function-local consts, a
+# non-exported destructure (an import-shaped alias of another module's names), and a call-valued const (a scope
+# choice: `require(...)`, factories and singletons are not literal tables; disclosed, not silent).
+CF="$ROOT/test/tsconstfix"
+defsT(){ "$BIN" "$CF" --no-cache --defs="$1" 2>/dev/null | grep -oE "<d n=\"$1\" t=\"[a-z]+\" p=\"[^\"]*\"" | grep -oE 't="[a-z]+" p="[^"]*"' | tr '\n' ' ' | sed 's/ $//'; }
+for pair in 'versionMajorMinor options.ts:18' 'version options.ts:19' 'retryLimit options.ts:22' 'emptyArray options.ts:25' \
+            'commandOptionsWithoutBuild options.ts:28' 'diagnosticCategoryNames options.ts:44' 'defaultSettings options.ts:45' \
+            'versionBanner options.ts:48' 'moduleCounter options.ts:51' 'legacyFlag options.ts:52' \
+            'jsDefaultLocale legacy.js:2' 'jsRetryTable legacy.js:3' 'jsMutableCount legacy.js:4' 'jsExportedLimits legacy.js:5'; do
+    set -- $pair
+    got="$( defsT "$1" )"
+    [ "$got" = "t=\"var\" p=\"$2\"" ] && ok "module value binding is a t=var def: $1 ($2)" \
+                                    || no "module value binding $1: --defs got [$got], want [t=\"var\" p=\"$2\"]"
+done
+for pair in 'pickedAlpha options.ts:55' 'renamedBeta options.ts:55' 'pickedGamma options.ts:55' 'pickedRest options.ts:55' \
+            'firstSlot options.ts:56' 'secondSlot options.ts:56'; do
+    set -- $pair
+    got="$( defsT "$1" )"
+    [ "$got" = "t=\"var\" p=\"$2\"" ] && ok "exported destructure binds a def: $1 ($2)" \
+                                    || no "exported destructure $1: --defs got [$got], want [t=\"var\" p=\"$2\"]"
+done
+for sym in functionLocalName functionLocalTable jsFunctionLocal privateExtra optionRegistry fs pickedBeta; do
+    got="$( defsT "$sym" )"
+    [ -z "$got" ] && ok "not a definition, as scoped: $sym" \
+                  || no "over-capture: $sym became a def [$got] (function-local / non-exported destructure / call-valued / the key of a renamed destructure)"
+done
+AT="$( "$BIN" "$CF" --no-cache --at=options.ts:33 2>/dev/null )"
+printf '%s' "$AT" | grep -q 'sym="commandOptionsWithoutBuild"' && printf '%s' "$AT" | grep -q '<s n="commandOptionsWithoutBuild" t="var" l="28" el="41"/>' \
+    && ok "--at on a line inside the multi-line array const resolves to it (l=28 el=41)" \
+    || no "--at=options.ts:33 does not resolve to commandOptionsWithoutBuild l=28 el=41: $( printf '%s' "$AT" | tail -c 300 )"
+AT="$( "$BIN" "$CF" --no-cache --at=options.ts:65 2>/dev/null )"
+printf '%s' "$AT" | grep -q 'sym="countOptions"' \
+    && ok "--at on a function-local const's line resolves to its function, not to the local" \
+    || no "--at=options.ts:65 does not resolve to countOptions: $( printf '%s' "$AT" | tail -c 300 )"
+
+# ── 9) TS-CONST-DEFS V1c: a literal const takes a ranked --for row only when the question names it (test/tsconstrank/) ──
+# §8 made every literal module binding a def; measured on microsoft/TypeScript the new rows then took the rank slots of the rows that
+# answered (`versionRegExp` pushed printVersion's lead out on "--version", `notImplementedResolver` pushed createResolver out of the
+# 40 on a resolver question). The rule (forowner.h forTierMultipliers): a non-SCREAMING literal binding keeps its score only when
+# every subtoken of its name is a subtoken of the question (its words and its identifiers' subtokens); otherwise it ranks after
+# every row the rule leaves alone, and stays a def (--defs). Red when the fold is off, when one shared word is enough (any_of), when
+# every const is demoted, or when SCREAMING_SNAKE loses its exemption.
+CR="$ROOT/test/tsconstrank"
+rankOf(){ printf '%s' "$1" | grep -oE "<d [^>]*>" | grep " n=\"$2\"" | grep -oE ' r="[0-9]+"' | head -1 | grep -oE '[0-9]+'; }
+forCR(){ "$BIN" "$CR" --no-cache --for="$1" 2>/dev/null; }
+before(){   # before OUT A B WHY: row A ranks above row B
+    local a b; a="$( rankOf "$1" "$2" )"; b="$( rankOf "$1" "$3" )"
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "$4 ($2 r=$a above $3 r=$b)" || no "$4: $2 r=[${a}] is not above $3 r=[${b}]"
+}
+Q1="$( forCR 'how is the version printed?' )"
+before "$Q1" parseSemver versionRegExp "a const sharing one question word ranks after a function that only mentions it"
+before "$Q1" formatBanner versionRegExp "a const sharing one question word ranks after a body-only match"
+before "$Q1" version parseSemver "a const the question names keeps its row"
+before "$Q1" VERSION_PATTERN parseSemver "a SCREAMING_SNAKE const keeps the score it had before TS-CONST-DEFS"
+Q2="$( forCR 'where is versionRegExp matched?' )"
+[ "$( rankOf "$Q2" versionRegExp )" = 1 ] && ok "an identifier in the question names the const (its subtokens are question words): r=1" \
+                                       || no "versionRegExp named by identifier is r=[$( rankOf "$Q2" versionRegExp )], want 1"
+Q3="$( forCR 'what does the version reg exp match?' )"
+[ "$( rankOf "$Q3" versionRegExp )" = 1 ] && ok "plain question words that cover every name subtoken name the const: r=1" \
+                                       || no "versionRegExp named by plain words is r=[$( rankOf "$Q3" versionRegExp )], want 1"
+Q4="$( forCR 'how does the resolver resolve a name?' )"
+before "$Q4" createResolver notImplementedResolver "a resolver question ranks the resolver function above the unnamed resolver const"
+before "$Q4" formatBanner notImplementedResolver "the unnamed const ranks after every row the rule leaves alone"
+got="$( "$BIN" "$CR" --no-cache --defs=versionRegExp 2>/dev/null | grep -oE '<d n="versionRegExp" t="[a-z]+"' )"
+[ "$got" = '<d n="versionRegExp" t="var"' ] && ok "the demoted const is still a t=var def (--defs)" || no "--defs=versionRegExp got [$got]"
+
 # ── 6) determinism + well-formedness on this fixture ──────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache --top-k=500 >"$TMP/map2" 2>/dev/null
 if cmp -s "$TMP/map" "$TMP/map2"; then ok "two cold runs byte-identical"; else no "cold runs DIFFER on the TS shape fixture"; fi
