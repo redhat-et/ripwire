@@ -227,9 +227,9 @@ int same_left_right_driver( int n ) { return same_left_value( n ) + same_right_v
 struct SameQ { int run( int n ) { return same_left_value( n ); } }; struct SameP { int run( int n ) { return same_left_value( n ) + same_right_value( n ); } };
 EOF
 ident f 'path_root_go + path_sink_end'
-grep -q 'n="path_b4"' "$TMP/f.on" && ok "(f) path_b4 (on the shortest path not picked) is a row" || no "(f) path_b4 is not a row"
+if grep -q 'n="path_b4"' "$TMP/f.on"; then ok "(f) path_b4 (on the shortest path not picked) is a row"; else no "(f) path_b4 is not a row"; fi
 ident g 'many_left_value + many_right_value'
-grep -q 'n="many_mid_10"' "$TMP/g.on" && ok "(g) many_mid_10 (the 10th common caller's path) is a row" || no "(g) many_mid_10 is not a row"
+if grep -q 'n="many_mid_10"' "$TMP/g.on"; then ok "(g) many_mid_10 (the 10th common caller's path) is a row"; else no "(g) many_mid_10 is not a row"; fi
 twin h 'same_left_value + same_right_value' SameQ::run
 arm h ptr SameQ::run "reaches the left sink only; its scope from its own qualifier"
 arm h row SameP::run "reaches both, on the same line as SameQ::run"
