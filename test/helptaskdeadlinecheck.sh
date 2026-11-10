@@ -358,6 +358,25 @@ else
 fi
 wait_children "$TMPDIR" || no "(K) the child never finished"
 
+# ── (L) each prompt hook's deadline fits the timeout skills/install.sh registers for it ─────────────────────────
+# deadline + helpdeadline.h kStartedWaitMs (the bounded handoff past N) + 1000 ms for the rest of the hook <= timeout.
+# The Codex hook once passed 6000 ms under a 6 s timeout: a cold index was still killed before the abstention printed.
+started=$( sed -nE 's/.*kStartedWaitMs *= *([0-9]+);.*/\1/p' "$ROOT/src/helpdeadline.h" )
+for pair in "claude:Ripwire routing hook" "codex:Selecting a focused Ripwire CLI route"; do
+    agent=${pair%%:*}
+    dl=$( sed -nE 's/.*--deadline-ms=([0-9]+) \).*/\1/p' "$ROOT/hooks/ripwire-$agent-route.sh" | head -1 )
+    if [ "$agent" = claude ]; then
+        to=$( grep -E 'UserPromptSubmit \+=' "$ROOT/skills/install.sh" | sed -nE 's/.*timeout: *([0-9]+).*/\1/p' | head -1 )
+    else
+        to=$( grep -E -B1 "statusMessage: \"${pair#*:}\"" "$ROOT/skills/install.sh" | sed -nE 's/.*timeout: *([0-9]+).*/\1/p' | head -1 )
+    fi
+    if [ -n "$dl" ] && [ -n "$to" ] && [ -n "$started" ] && [ $(( dl + started + 1000 )) -le $(( to * 1000 )) ]; then
+        ok "(L) $agent hook: --deadline-ms=$dl + ${started} ms handoff + 1000 ms fits its ${to} s timeout"
+    else
+        no "(L) $agent hook: deadline '${dl}' ms + '${started}' ms handoff + 1000 ms does not fit timeout '${to}' s"
+    fi
+done
+
 # ── (H) ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 if [ "$saw2" = 0 ]; then
     ok "(H) no call in this gate exited 2"

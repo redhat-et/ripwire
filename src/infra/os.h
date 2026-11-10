@@ -52,6 +52,10 @@
 #include <initializer_list>
 #include <string>
 #include <string_view>
+#if defined( __linux__ )
+  #include <filesystem>   // liveThreadCount: /proc/self/task
+  #include <system_error>
+#endif
 
 #include "shquote.h"   // rw::shSingleQuote: path_prepend_hint quotes its directory as a shell literal
 
@@ -492,6 +496,38 @@ inline int pthread_main_np()
     static const std::thread::id firstCaller = std::this_thread::get_id();
     return std::this_thread::get_id() == firstCaller ? 1 : 0;
 }
+#endif
+// liveThreadCount: the threads alive in this process right now; 0 = this platform cannot say. For debug checks only
+// (helpdeadline.h's fork seam: only the forking thread survives into the child, so the process must be single-threaded).
+#if defined( __APPLE__ )
+inline std::size_t liveThreadCount()
+{
+    thread_act_array_t     threads = nullptr;
+    mach_msg_type_number_t count   = 0;
+    if( ::task_threads( ::mach_task_self(), &threads, &count ) != KERN_SUCCESS )
+    {
+        return 0;
+    }
+    for( mach_msg_type_number_t i = 0; i < count; ++i )
+    {
+        (void)::mach_port_deallocate( ::mach_task_self(), threads[i] );
+    }
+    (void)::vm_deallocate( ::mach_task_self(), reinterpret_cast<vm_address_t>( threads ), count * sizeof( thread_act_t ) );
+    return count;
+}
+#elif defined( __linux__ )
+inline std::size_t liveThreadCount()
+{
+    std::error_code ec;
+    std::size_t     count = 0;
+    for( std::filesystem::directory_iterator it( "/proc/self/task", ec ), end; !ec && it != end; it.increment( ec ) )
+    {
+        ++count;
+    }
+    return ec ? 0 : count;
+}
+#else
+inline std::size_t liveThreadCount() { return 0; }
 #endif
 #if defined( __APPLE__ ) || defined( __linux__ )
 [[gnu::always_inline]] inline int pthread_getname_np( ::pthread_t thread, char* name, std::size_t nameCount ) { return ::pthread_getname_np( thread, name, nameCount ); }

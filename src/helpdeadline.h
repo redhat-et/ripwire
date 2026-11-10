@@ -545,6 +545,9 @@ template<class PrepareAbstain, class EmitAbstain>
 std::optional<int> superviseHelpTask( const std::string& root, int deadlineMs, PrepareAbstain&& prepareAbstain, EmitAbstain&& emitAbstain )
 {
     EXPECTS( deadlineMs > 0, "the caller asks only with a deadline" );
+    // fork() copies only the calling thread: a lock any other thread holds (malloc's included) stays locked in the child
+    // forever. main() calls this before it starts a thread; a thread started earlier must move after this call.
+    ASSUME( os::liveThreadCount() <= 1, "superviseHelpTask forks: the process must be single-threaded here" );
     const Clock::time_point t0       = Clock::now();
     const Clock::time_point deadline = t0 + std::chrono::milliseconds( deadlineMs );
     const WarmPaths         paths    = warmPaths( root );
