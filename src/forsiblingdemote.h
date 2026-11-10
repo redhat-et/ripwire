@@ -174,10 +174,6 @@ inline std::string_view fileOf( const AnswerRow& r )
 }
 // K1 mem= (a type with its member list) and K7 slot_by= / slot_fields= (FN-VALUED-SLOT's call facts): a row carrying one stays a row.
 inline constexpr std::array<std::string_view, 3> kKeepRowAttrs = { " mem=\"", " slot_by=\"", " slot_fields=\"" };
-inline bool carriesKeepAttr( const AnswerRow& r ) noexcept
-{
-    return std::ranges::any_of( kKeepRowAttrs, [&]( std::string_view a ) { return r.attrs.contains( a ); } );
-}
 // The identifier-syntax words of the task (camelCase, snake_case, Owner::name / pkg.Name), trimmed, stopwords left out.
 inline std::vector<std::string_view> taskNames( std::string_view task )
 {
@@ -344,7 +340,8 @@ inline std::vector<const AnswerRow*> pickByBytes( const AnswerScan& scan, const 
     std::vector<const AnswerRow*> picked;
     for( const AnswerRow* r : dRows )
     {
-        if( !r->inSigs || r->dpos <= kDemoteMinRank || carriesKeepAttr( *r ) || r->noted )
+        const auto carries = [&]( std::string_view attr ) { return r->attrs.contains( attr ); };
+        if( !r->inSigs || r->dpos <= kDemoteMinRank || r->noted || std::ranges::any_of( kKeepRowAttrs, carries ) )
         {
             continue;
         }
