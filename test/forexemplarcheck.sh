@@ -71,6 +71,11 @@
 #   (i6) a holder with no X-macro list: its fields (the field side table) are the rows, by="field", two fields are n="2"
 #   (i7) a larger X-macro list whose name column is unknown (type and name columns tie) does not hide a smaller list with a known one
 #   (i8) `key` → `Keys` holders (vowel + y plural); a brace inside a comment does not move the property-line depth; two rows are n="2"
+#
+# ARMS (EXEMPLAR-RESIDUAL-2)
+#   (r1) a directory-local touch row: the typical member's directory aggregator (filters/__init__.py) names all four members in that
+#        directory but four of the family's ten: <touch .. share="4/4" scope="dir">, after the family-wide rows, and the legend then
+#        defines scope="dir"; (r1n) a directory whose aggregator names one of its four members prints no such row and no such clause
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -678,6 +683,35 @@ if block "$TMP/i8.xml" | grep -q ' into="ServerKeys" into_p="src/keys/server.ts:
     ok "(i8) key -> Keys holders; braces in comments are not depth; two property lines are n=\"2\""
 else no "(i8) Keys holders: $( block "$TMP/i8.xml" | head -c 400 )"; fi
 
+# r1 / r1n: RESIDUAL-2 dir-local touch rows. Ten Command subclasses in three directories (none holds half, so the scope is app):
+# four in app/filters (3 lines each, the median size: the typical member is one of them), three in app/strings (1 line), three in
+# app/math (6 lines). filters/__init__.py imports the four filters (4 of 10: not half the family); app/registry.py lists all ten.
+mkdir -p "$F/dirloc/app/filters" "$F/dirloc/app/strings" "$F/dirloc/app/math"
+printf 'class Command:\n    def run(self):\n        raise NotImplementedError\n' > "$F/dirloc/app/base.py"
+for c in where select reject uniq; do
+    printf 'from app.base import Command\n\n\nclass %sCommand(Command):\n    def run(self):\n        return "%s"\n' "$( cap "$c" )" "$c" > "$F/dirloc/app/filters/$c.py"
+done
+for c in upcase downcase trim; do printf 'from app.base import Command\nclass %sCommand(Command): pass\n' "$( cap "$c" )" > "$F/dirloc/app/strings/$c.py"; done
+for c in floor ceil round; do
+    printf 'from app.base import Command\n\n\nclass %sCommand(Command):\n    def run(self):\n        a = 1\n        b = 2\n        c = 3\n        return "%s"\n' "$( cap "$c" )" "$c" > "$F/dirloc/app/math/$c.py"
+done
+printf 'from .where import WhereCommand\nfrom .select import SelectCommand\nfrom .reject import RejectCommand\nfrom .uniq import UniqCommand\n' > "$F/dirloc/app/filters/__init__.py"
+printf 'ALL = [\n    "WhereCommand", "SelectCommand", "RejectCommand", "UniqCommand",\n    "UpcaseCommand", "DowncaseCommand", "TrimCommand",\n    "FloorCommand", "CeilCommand", "RoundCommand",\n]\n' > "$F/dirloc/app/registry.py"
+cp -R "$F/dirloc" "$F/dirneg"
+printf 'from .where import WhereCommand\n' > "$F/dirneg/app/filters/__init__.py"
+run dirloc "--for=add a new command" >"$TMP/r1.xml"
+b="$( block "$TMP/r1.xml" )"
+if printf '%s' "$b" | grep -q '<m n="\(Where\|Select\|Reject\|Uniq\)Command" p="app/filters/'; then ok "(r1) the typical member is a filter (the median size)"
+else no "(r1) typical: $( printf '%s' "$b" | head -c 400 )"; fi
+if printf '%s' "$b" | grep -q '<touch p="app/registry.py:[0-9]*"[^>]* share="10/10"[^>]*>[^<]*</touch><touch p="app/filters/__init__.py:[0-9]*" share="4/4" scope="dir">'; then
+    ok "(r1) filters/__init__.py: share=\"4/4\" scope=\"dir\", after the family-wide registry.py row"
+else no "(r1) dir-local row: $( touchrows "$TMP/r1.xml" | head -c 500 )"; fi
+if grep -q 'scope="dir"[^<]*<touch>: a file in the typical member' "$TMP/r1.xml"; then ok "(r1) the legend defines scope=\"dir\" when a row carries it"; else no "(r1) legend: scope=\"dir\" clause missing"; fi
+run dirneg "--for=add a new command" >"$TMP/r1n.xml"
+if [ -n "$( block "$TMP/r1n.xml" )" ] && ! grep -q 'scope="dir"' "$TMP/r1n.xml" && has_touch r1n "$TMP/r1n.xml" app/registry.py 10/10 | grep -q PASS; then
+    ok "(r1n) an aggregator naming one of its four members: no dir-local row, no scope=\"dir\" clause"
+else no "(r1n) $( touchrows "$TMP/r1n.xml" | head -c 400 )"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
@@ -696,7 +730,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M

@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1628,6 +1629,7 @@ struct ExemplarTouch
     std::uint32_t line = 0; // the line to copy: the first naming the typical member, else the first code line, an import, a comment
     std::string text; // that line, trimmed
     std::uint32_t byte = 0; // TOUCH-SYM: the file offset of text's first byte (the definition holding the line is looked up by it)
+    bool dirLocal = false; // RESIDUAL-2: the share counts the members in the typical member's directory, not the family (scope="dir")
 };
 
 namespace exemplar_detail
@@ -1950,8 +1952,43 @@ struct ExemplarTouchList
     std::uint32_t unread = 0;
 };
 
+namespace exemplar_detail
+{
+// RESIDUAL-2 dir-local share: the members in the typical member's directory (typical first), when they are a strict part of the family
+// and at least kExemplarFamilyMin; empty otherwise (one directory holding every member already has the family-wide share).
+inline std::vector<ExemplarMember> typicalDirMembers( const IngestResult& ing, const ExemplarFamily& fam, std::string_view dir )
+{
+    std::vector<ExemplarMember> out;
+    for( const ExemplarMember& m : fam.members )
+    {
+        if( includerDir( rootRelPath( ing, m.fileId ) ) == dir )
+        {
+            out.push_back( m ); // members[0] is in `dir` by construction, so it stays first: the typical member of the subset too
+        }
+    }
+    return out.size() >= kExemplarFamilyMin && out.size() < fam.members.size() ? out : std::vector<ExemplarMember> {};
+}
+
+// Larger share first (cross-multiplied), then the larger count, then the path.
+inline void sortTouchRows( const IngestResult& ing, std::vector<ExemplarTouch>& rows )
+{
+    std::ranges::sort( rows, [&]( const ExemplarTouch& a, const ExemplarTouch& b )
+                       {
+        const std::size_t fa = a.mentioned * b.of, fb = b.mentioned * a.of; // a's share over b's, cross-multiplied
+        if( fa != fb )
+        {
+            return fa > fb;
+        }
+        return a.mentioned != b.mentioned ? a.mentioned > b.mentioned : sortutil::svLess( rootRelPath( ing, a.fileId ), rootRelPath( ing, b.fileId ) ); } );
+}
+} // namespace exemplar_detail
+
 // The touch list of a family: every file that names at least half of the distinct names, or of the distinct file stems, by the larger
-// share, then the count, then the path.
+// share, then the count, then the path. RESIDUAL-2: then the files IN the typical member's directory that fall short of half the
+// family but name at least half of the members in that directory (an aggregator: nushell's filters/mod.rs names 62 of its 63
+// siblings, 62 of the family's 376), share= over those members and scope="dir"; they rank after every family-wide row.
+// HOISTING: each file is read once; a file in the typical directory is scanned a second time over the dir forms only when the
+// family-wide share fails.
 inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const ExemplarFamily& fam )
 {
     using namespace exemplar_detail;
@@ -1964,6 +2001,13 @@ inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const Exemp
     {
         return list; // too few distinct names and stems to call a mention a pattern
     }
+    const std::string_view typicalDir = includerDir( rootRelPath( ing, fam.members.front().fileId ) );
+    ExemplarFamily dirFam { .rule = fam.rule };
+    dirFam.members = typicalDirMembers( ing, fam, typicalDir );
+    const TouchForms dirForms( dirFam.members.empty() ? TouchUnits {} : touchUnits( ing, dirFam ) );
+    const TouchUnits& du = dirForms.units;
+    std::vector<std::uint32_t> dirStamp( std::size_t( du.names ) + du.stems, 0 );
+    std::vector<ExemplarTouch> dirRows;
     std::vector<std::uint32_t> memberFiles; // a member's file is where the members are, not where they are listed
     std::ranges::transform( fam.members, std::back_inserter( memberFiles ), &ExemplarMember::fileId );
     std::ranges::sort( memberFiles );
@@ -1983,16 +2027,22 @@ inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const Exemp
         if( settleShare( t, u ) )
         {
             rows.push_back( std::move( t ) );
+            continue;
+        }
+        if( du.names + du.stems == 0 || includerDir( rel ) != typicalDir )
+        {
+            continue;
+        }
+        ExemplarTouch d = scanTouchFile( f, *txt, dirForms, dirStamp );
+        d.dirLocal = true;
+        if( settleShare( d, du ) )
+        {
+            dirRows.push_back( std::move( d ) );
         }
     }
-    std::ranges::sort( rows, [&]( const ExemplarTouch& a, const ExemplarTouch& b )
-                       {
-        const std::size_t fa = a.mentioned * b.of, fb = b.mentioned * a.of; // a's share over b's, cross-multiplied
-        if( fa != fb )
-        {
-            return fa > fb;
-        }
-        return a.mentioned != b.mentioned ? a.mentioned > b.mentioned : sortutil::svLess( rootRelPath( ing, a.fileId ), rootRelPath( ing, b.fileId ) ); } );
+    sortTouchRows( ing, rows );
+    sortTouchRows( ing, dirRows );
+    std::ranges::move( dirRows, std::back_inserter( rows ) ); // the family-wide rows first: a dir-local 100 % never pushes one out of the cap
     return list;
 }
 
@@ -2016,7 +2066,9 @@ inline constexpr std::string_view kForExemplarFamilyLegend =
     "else the first other code line mentioning one, an import line or a comment only when no code line does; n= the innermost definition holding "
     "that line (a member as Owner.name, as the <d> rows spell it; no n= when no definition holds it); share=named/of the distinct "
     "member names the file mentions out of the distinct names (by=\"stem\": the distinct file stems it mentions out of the distinct stems), "
-    "its text that line, cut=\"1\" when cut to 120 bytes. Test, docs, vendored, generated, frozen and baseline files are not read. The "
+    "its text that line, cut=\"1\" when cut to 120 bytes. "
+    "scope=\"dir\" on a <touch>: the file sits in the typical member's directory and names fewer than half of the family but at least half of the members in that directory (share= counts those), listed after the family-wide rows. "
+    "Test, docs, vendored, generated, frozen and baseline files are not read. The "
     "answer above is unchanged, and these bytes are not in est_tokens -->";
 // The --legend=compact posture (the CLI default); the long text rides --legend=full and the MCP tool. Both define every attribute printed.
 inline constexpr std::string_view kForExemplarFamilyCompactLegend =
@@ -2026,7 +2078,9 @@ inline constexpr std::string_view kForExemplarFamilyCompactLegend =
     "half of them; n= members (tests, samples, examples, benchmarks out); <m> p= file:line, loc= lines, the first nearest the median size (registry: "
     "listing order); shown=/capped=\"1\": rows cut; oversized=N registry candidates over 4000 lines and unread=N files not read were skipped (a family may hide there; found=\"0\": none resolved). <touch_list> total= files outside the members' own naming at least half of them (by name, "
     "registered name or file stem; a shared name or stem counts once): where siblings are registered; shown=/capped=\"1\": cut; floor=\"1\" unread=K: K files unreadable or over 4 MiB, total= is a floor. <touch> p= "
-    "the line to copy, n= the innermost def holding it (a member: Owner.name), share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. Tests, docs, "
+    "the line to copy, n= the innermost def holding it (a member: Owner.name), share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. "
+    "scope=\"dir\" <touch>: a file in the typical member's dir naming half of that dir's members (share= over them), not half the family. "
+    "Tests, docs, "
     "vendored, generated, frozen, baseline files unread. -->";
 // E3a-INTO: the legend of into= and <rows>, spliced in before <touch_list> only when the family prints into= (familyLegend), so a family
 // that is not one of holders keeps its legend bytes.
@@ -2153,6 +2207,7 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchLis
         out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\"" + ( holderName[i].empty() ? "" : " n=\"" + e( holderName[i] ) + "\"" );
         out += " share=\"" + std::to_string( r.mentioned ) + "/" + std::to_string( r.of ) + "\"";
         out += r.byStem ? " by=\"stem\"" : "";
+        out += r.dirLocal ? " scope=\"dir\"" : "";
         out += ( keep < r.text.size() ? " cut=\"1\">" : ">" ) + e( std::string_view( r.text ).substr( 0, keep ) ) + "</touch>";
     }
     out += touch.empty() ? "" : "</touch_list>";
@@ -2168,6 +2223,14 @@ inline constexpr std::string_view kExemplarCompactScanSkipClause =
     "oversized=N registry candidates over 4000 lines and unread=N files not read were skipped (a family may hide there; found=\"0\": none resolved). ";
 static_assert( kForExemplarFamilyLegend.contains( kExemplarScanSkipClause ) && kForExemplarFamilyCompactLegend.contains( kExemplarCompactScanSkipClause ),
                "the scan-skip clauses are spelled as the family legends carry them" );
+
+// RESIDUAL-2: the scope="dir" reading of the <touch> rows, present-only (erased unless a dir-local row is printed).
+inline constexpr std::string_view kExemplarDirTouchClause =
+    "scope=\"dir\" on a <touch>: the file sits in the typical member's directory and names fewer than half of the family but at least half of the members in that directory (share= counts those), listed after the family-wide rows. ";
+inline constexpr std::string_view kExemplarCompactDirTouchClause =
+    "scope=\"dir\" <touch>: a file in the typical member's dir naming half of that dir's members (share= over them), not half the family. ";
+static_assert( kForExemplarFamilyLegend.contains( kExemplarDirTouchClause ) && kForExemplarFamilyCompactLegend.contains( kExemplarCompactDirTouchClause ),
+               "the dir-touch clauses are spelled as the family legends carry them" );
 
 inline std::string scanSkipAttrs( std::uint32_t unread, std::uint32_t oversized )
 {
@@ -2227,6 +2290,10 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
     { return e( rootRelPath( ing, f ) ) + ":" + std::to_string( l ); };
     std::string out( compactLegend ? kForExemplarFamilyCompactLegend : kForExemplarFamilyLegend );
     eraseAbsentClause( out, compactLegend ? kExemplarCompactScanSkipClause : kExemplarScanSkipClause, fam.unread + fam.oversized > 0 );   // SIZE-1
+    const bool holders = fam.into.member != SIZE_MAX; // an into= family lists its rows' touch list, which has no dir-local rows (one file)
+    const ExemplarTouchList touch = holders ? ExemplarTouchList {} : exemplarTouchList( ing, fam );
+    eraseAbsentClause( out, compactLegend ? kExemplarCompactDirTouchClause : kExemplarDirTouchClause,
+                       std::ranges::any_of( touch.rows | std::views::take( kExemplarTouchRows ), &ExemplarTouch::dirLocal ) ); // RESIDUAL-2: present-only
     exemplar_detail::addIntoLegend( out, fam, compactLegend );
     out += "<exemplar_family of=\"" + e( t.phrase ) + "\" rule=\"" + std::string( kExemplarRuleTags[std::size_t( fam.rule )] ) + "\" key=\"" + e( fam.key ) + "\"";
     if( fam.keyAt )
@@ -2234,7 +2301,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
         out += " key_p=\"" + loc( fam.keyFile, fam.keyLine ) + "\"";
     }
     out += " matched=\"" + e( fam.matched ) + "\" scope=\"" + e( fam.scope ) + "\" n=\"" + std::to_string( fam.members.size() ) + "\"" + scanSkipAttrs( fam.unread, fam.oversized );
-    if( fam.into.member != SIZE_MAX )
+    if( holders )
     {
         return exemplar_detail::intoFamilyXml( ing, fam, e, loc, std::move( out ) ); // into= prints no member rows, so no shown=/capped=
     }
@@ -2253,7 +2320,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
         out += "<m n=\"" + e( m.name ) + "\" p=\"" + loc( m.fileId, m.line ) + "\"";
         out += fam.rule != ExemplarRule::Registry ? " loc=\"" + std::to_string( m.loc ) + "\"/>" : std::string( "/>" );
     }
-    out += touchListXml( ing, exemplarTouchList( ing, fam ) );
+    out += touchListXml( ing, touch );
     return out + "</exemplar_family>";
 }
 
