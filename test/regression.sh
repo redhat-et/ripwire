@@ -1022,6 +1022,7 @@ for _g in \
     testrowruncheck \
     testscopecheck \
     textdocscheck \
+    textpoolcheck \
     timsortcheck \
     tokenbudgetcheck \
     tomllangcheck \
