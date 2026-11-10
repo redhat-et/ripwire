@@ -34,6 +34,7 @@
 // BM25 workspace ranking. Each has a stated reason in docs/LSP.md; do not "helpfully" add one here.
 
 #include "infra/os.h"        // rw::os::realpath / getcwd / stat — the root-is-a-directory check at initialize, the launch-cwd base for relative index paths
+#include "infra/pctenc.h"    // rw::appendPercentEncoded — the file-URI path escape
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -195,21 +196,9 @@ inline std::string lspUriToPath( std::string_view uri )
 
 inline std::string lspEncodeUriPath( const std::string& p )
 {
-    static constexpr char kHex[] = "0123456789ABCDEF";
     std::string out;
     out.reserve( p.size() + 8 );
-    for( const char c : p )
-    {
-        const unsigned char u = static_cast<unsigned char>( c );
-        if( c == '%' || c == ' ' || c == '#' || c == '?' || u < 0x20 || u == 0x7F )
-        {
-            out += '%'; out += kHex[ u >> 4 ]; out += kHex[ u & 0xF ];
-        }
-        else
-        {
-            out.push_back( c );
-        }
-    }
+    rw::appendPercentEncoded( out, p, []( unsigned char c ) { return c == ' ' || c == '#' || c == '?'; } );
     return out;
 }
 

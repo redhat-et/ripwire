@@ -30,8 +30,8 @@ struct RestLinkIndex
 inline RestLinkIndex buildRestLinkIndex( const IngestResult& ing )
 {
     RestLinkIndex rx;
-    const bool    wantsLabel = std::any_of( ing.references.begin(), ing.references.end(), []( const Reference& r ) { return r.memberPath.starts_with( kRestLabelMark ); } );
-    const bool    wantsRoot  = std::any_of( ing.references.begin(), ing.references.end(), []( const Reference& r ) { return r.memberPath.starts_with( kRestDocRootMark ); } );
+    const bool    wantsLabel = std::any_of( ing.references.begin(), ing.references.end(), []( const Reference& r ) { return r.memberPath().starts_with( kRestLabelMark ); } );
+    const bool    wantsRoot  = std::any_of( ing.references.begin(), ing.references.end(), []( const Reference& r ) { return r.memberPath().starts_with( kRestDocRootMark ); } );
     if( wantsLabel )
     {
         for( const Symbol& sym : ing.symbols )

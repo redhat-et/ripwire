@@ -49,6 +49,7 @@
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
+#include "foronesidereach.h" // ONE-SIDE-REACH: the CLI twin's answer edit, one renderer
 #include "forsiblingdemote.h" // SIBLING-DEMOTE: the CLI twin's answer edit, one renderer
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
@@ -2080,8 +2081,8 @@ inline void spliceForLegoCountLegend( std::string& doc, bool carries )
 // forbudget-soft: budget_tokens= is a SOFT target here too (the CLI twin's rule) — est_tokens may exceed it and nothing is
 // labelled "over" for it. The one over_ceiling this surface can carry is the runaway guard's (`guardOver`: the default head
 // passed kForRunawayGuardBytes); its reading (forRunawayGuardNote) was spliced with the <sigs> clauses by the assembly.
-// Returns the answer's est_tokens (FOR-DOC-BODY serves into the budget left after it) and what it was converged from (the <syms>
-// cut re-prices through it, FileSymsArgs::price).
+// Returns the answer's est_tokens (FOR-DOC-BODY serves into the budget left after it) and what it was converged from (the
+// ONE-SIDE-REACH demote pass re-prices through it, insertFileSyms).
 inline std::pair<std::size_t, rw::PricedRootInputs> priceForTaskRoot( std::string& doc, bool guardOver )
 {
     if( doc.empty() )
@@ -2239,7 +2240,8 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
                         &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings;
                                                               //   knob-honesty-068: carries mcpSigsNext IN
-                        SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the CLI twin's row spelling
+                        SigRowSpelling{ .elideZeroMetrics = true, .foldRepeatedText = true } );   // lean-answers lane: the CLI twin's row
+                                                              //   spelling; SIZE-3a: repeated text folded to same_as= (mcpattrparitycheck)
     };
     std::string sigsStr = renderToString( renderSigs );
     const std::optional<RedactCounts> redactAfterSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
@@ -2446,6 +2448,10 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     {
         rw::spliceClauseAfter( out, rw::kForFileTailWideLegend, rw::kForFileTailFoldedLegend );   // SIZE-2: the CLI twin's clause
     }
+    if( sigsStr.contains( " same_as=\"" ) )
+    {
+        rw::spliceClauseAfter( out, std::string_view(), rw::kForSameAsLegend );   // SIZE-3a: the CLI twin's full-dialect clause (end of the first comment)
+    }
     // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
     // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
     // bytes: pricedRootAttr's ≤4-pass fixpoint at kBytesPerTokenDefault, spliced onto the <ctx> root by the
@@ -2475,19 +2481,36 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 
 // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms>, read off this answer's own bytes (every block before it), before </ctx>, not priced;
 // held under budget_tokens.
-inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args )
+// ONE-SIDE-REACH (src/foronesidereach.h): then the CLI twin's demote pass over the answer and the block, re-priced on `price` (the root's
+// inputs, null: no re-price); held under budget_tokens. R-DEDUP's <syms> cut (forfilesyms.h tailRowsWithoutPicks) lands first, the
+// demote pass reads the cut answer; SIBLING-DEMOTE (src/forsiblingdemote.h) then reads that one, and the root is re-priced once on the
+// result.
+inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
 {
     if( out.ends_with( "</ctx>" ) )
     {
         std::string cut; // R-DEDUP: <syms> has priority over the head files' tail rows (forfilesyms.h tailRowsWithoutPicks); SIBLING-DEMOTE (forsiblingdemote.h)
         args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
         args.answerOut = &cut;
-        const std::string syms = renderForFileSymsAndDemote( ing, g, args );
-        if( !cut.empty() )
+        std::string syms = renderForFileSyms( ing, g, args );
+        const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
+        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
+        std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
+        if( !args.held )
         {
-            out = std::move( cut ) + "</ctx>";
+            demoteSiblingRowsInto( ing, g, args.answer, answer );
         }
-        out.insert( out.size() - 6, syms );
+        if( !answer.empty() )
+        {
+            if( price != nullptr )
+            {
+                // once, on the final bytes: the <syms> cut and the demote rewrites are all priced markup (signed: the pointers and
+                // legend may outweigh the rows they replace)
+                repriceRootAfterCut( answer, *price, args.answer.size() );
+            }
+            out = std::move( answer ) + "</ctx>";
+        }
+        out.insert( out.size() - 6, edit.syms.empty() ? syms : edit.syms );
     }
 }
 
@@ -3025,7 +3048,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         {
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
-            insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ), .price = &answerPrice } );
+            insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
             return out;
         }
         std::string verb;
@@ -3052,7 +3075,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, opts ) + verb + std::string( kGraphSubjectCloseXml ) );
         }
     }
-    insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ), .price = &answerPrice } );
+    insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
     return out;
 }
 

@@ -2940,8 +2940,8 @@ struct ReceiverEvidence
         if( r.memberCall )
         {
             c.root  = r.memberRoot;
-            c.path  = r.memberPath;
-            c.ctor  = r.memberCtor;
+            c.path  = r.memberPath();
+            c.ctor  = r.memberCtor();
             c.valid = !c.root.empty() || !c.ctor.empty();
             return c;
         }
@@ -2949,8 +2949,8 @@ struct ReceiverEvidence
         {
             case RecvKind::ThisObj:     c.root = "self";     c.valid = true; break;
             case RecvKind::NamedVar:    c.root = r.recvVar;  c.valid = !r.recvVar.empty(); break;
-            case RecvKind::FieldOfThis: c.root = "self";     c.path = r.fieldName; c.valid = !r.fieldName.empty(); break;
-            case RecvKind::FieldOfVar:  c.root = r.recvVar;  c.path = r.fieldName; c.valid = !r.recvVar.empty() && !r.fieldName.empty(); break;
+            case RecvKind::FieldOfThis: c.root = "self";     c.path = r.fieldName(); c.valid = !r.fieldName().empty(); break;
+            case RecvKind::FieldOfVar:  c.root = r.recvVar;  c.path = r.fieldName(); c.valid = !r.recvVar.empty() && !r.fieldName().empty(); break;
             case RecvKind::SuperObj:    c.root = "super";    c.valid = true; break;
             default: break;
         }

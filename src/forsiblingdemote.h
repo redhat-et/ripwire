@@ -20,13 +20,13 @@
 //   (K5) a kept <d> row's same_as= names it (its doc+signature text is the one that row points to).
 // The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. A token budget (CLI --token-budget /
 // --max-tokens, MCP budget_tokens) leaves the answer as shaped. The demoted bytes are priced markup, so the root's est_tokens= is
-// re-priced once over both post-passes (R-DEDUP's tail cut, then this one: serialize.h repriceRootAfterCut) — the net change is
+// re-priced once over the post-passes (R-DEDUP's tail cut, ONE-SIDE-REACH, then this one: serialize.h repriceRootAfterCut) — the net change is
 // signed: on short rows the legend and pointers can ADD bytes, and est_tokens= then goes up.
 // RIPWIRE_NO_SIBLING_DEMOTE=1 turns it off (byte identity and the gate's twins).
-#include "forfilesyms.h" // FileSymsArgs, renderForFileSyms, filesyms_detail::FileLookup / leafName / unescapeXmlAttr
+#include "forfilesyms.h" // filesyms_detail::FileLookup / leafName / unescapeXmlAttr
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / inEdges, edgeIndex, edgeKindByte
 #include "model.h"
-#include "serialize.h" // attrOf, PricedRootInputs, repriceRootAfterCut
+#include "serialize.h" // attrOf
 
 #include <algorithm>
 #include <charconv>
@@ -432,28 +432,19 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
 }
 } // namespace demote_detail
 
-// The <syms> block for one answer (forfilesyms.h renderForFileSyms), and in *a.answerOut the answer's own bytes after both post-passes —
-// R-DEDUP's head-file tail cut, then SIBLING-DEMOTE — re-priced once ("" when neither changed a byte). CLI appendForFileSyms and MCP
-// insertFileSyms both call this.
-inline std::string renderForFileSymsAndDemote( const IngestResult& ing, const Graph& g, FileSymsArgs a )
+// SIBLING-DEMOTE over the answer as the earlier post-passes left it: `edited` holds those passes' bytes ("" when they left `answer`
+// unchanged) and, when this pass demotes a row, its result. Not priced: the caller re-prices the root once on the final bytes (signed:
+// the pointers and legend may outweigh the rows they replace). CLI shapedForFileSymsAnswer and MCP insertFileSyms both call this.
+inline void demoteSiblingRowsInto( const IngestResult& ing, const Graph& g, std::string_view answer, std::string& edited )
 {
-    std::string* const answerOut = a.answerOut;
-    const PricedRootInputs* const price = a.price;
-    std::string cut;
-    a.answerOut = answerOut != nullptr ? &cut : nullptr;
-    a.price = nullptr; // priced once below, over both cuts
-    std::string syms = renderForFileSyms( ing, g, a );
-    if( answerOut == nullptr || a.answer.empty() )
+    if( !siblingDemoteOn() )
     {
-        return syms;
+        return;
     }
-    std::string demoted = a.held || !siblingDemoteOn() ? std::string() : demote_detail::demoteSiblingRows( ing, g, cut.empty() ? a.answer : std::string_view( cut ) );
-    std::string& done = demoted.empty() ? cut : demoted;
-    if( price != nullptr && !done.empty() ) // the cuts are priced markup: est_tokens= prices the bytes sent
+    std::string demoted = demote_detail::demoteSiblingRows( ing, g, edited.empty() ? answer : std::string_view( edited ) );
+    if( !demoted.empty() )
     {
-        repriceRootAfterCut( done, *price, a.answer.size() ); // signed: the pointers and legend may outweigh the rows they replace
+        edited = std::move( demoted );
     }
-    *answerOut = std::move( done );
-    return syms;
 }
 } // namespace rw

@@ -136,7 +136,7 @@ claim cannot quietly drift. The row-by-row ledger is
 </details>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · JSON · TOML · YAML · Markdown — see
+JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
 **Latest: 0.6.10** — more complete `--for` answers, warm runs on large repositories that use 35 to 67 % less CPU, and about half the peak memory of an index on macOS. [Release notes](#release-notes) ·
@@ -2141,9 +2141,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>778 gate scripts</b> (counts snapshot 2026-11-08), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>782 gate scripts</b> (counts snapshot 2026-11-10), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **778 gate scripts** at the counts snapshot 2026-11-08 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **782 gate scripts** at the counts snapshot 2026-11-10 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2903,7 +2903,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-08 the tool had 403 compile-time caps and 9 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-10 the tool had 407 compile-time caps and 9 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of the caps the sweep has measured, and names the ones it has not.
@@ -2986,7 +2986,7 @@ The CLI write verbs and the MCP write verbs use the same safety contract:
 
 ### 12. Supported languages and formats
 
-The tool vendors 26 tree-sitter grammars. A table maps a file extension to a grammar and a query
+The tool vendors 27 tree-sitter grammars. A table maps a file extension to a grammar and a query
 file. One query engine runs over every language. A new language requires a vendored grammar, a query
 file, and one row in the extension table.
 
@@ -2998,7 +2998,7 @@ file, and one row in the extension table.
 | Metal (MSL) | `.metal` | Indexed with the C++ grammar. |
 | CUDA | `.cu`, `.cuh` | `<<<>>>` launch sites are call edges. |
 | Python | `.py` | |
-| TypeScript / JavaScript | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Named imports and default imports resolve. One vendored dependency supplies two of the 26 grammars, `typescript` and `tsx`. `.astro` frontmatter rides this same `Lang` — see its own row below. |
+| TypeScript / JavaScript | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Named imports and default imports resolve. One vendored dependency supplies two of the 27 grammars, `typescript` and `tsx`. `.astro` frontmatter rides this same `Lang` — see its own row below. |
 | Java | `.java` | Qualified `new` calls resolve in a precise tier. |
 | Kotlin | `.kt` | Shares one call graph with Java. A file with string templates past 128 levels is refused and listed by `--skipped`. |
 | Clojure | `.clj`, `.cljs`, `.cljc`, `.bb` | Structural defining forms and direct symbolic list-head calls; quoted/discarded syntax is excluded. Macro expansion and namespace/import resolution are not inferred. |
@@ -3015,6 +3015,7 @@ file, and one row in the extension table.
 | Astro | `.astro` | **Frontmatter only.** The `---`-fenced block is parsed as TypeScript, through one `ts_parser_set_included_ranges` call; the template half — including `<script>` bodies and `{…}` interpolations — is NOT indexed, so a call made only from the template produces no edge. An `.astro` file reports `lang="ts"` because it rides `Lang::TypeScript` (that is what lets a frontmatter call resolve into a `.ts` service). A top-level frontmatter call is module-scope code, so `--callers` names `<file-scope>` rather than a function. No Astro grammar is vendored. |
 | GDScript | `.gd` | A file is a class body: `class_name` names it and file-scope `func`/`var` are its members. A signal is indexed as a member. `preload`/`load` produce no dependency edge. `.tscn`, `.tres`, and `.gdshader` are not indexed. |
 | JSON | `.json` | Config keys become symbols. The lane emits no call edges. |
+| Protocol Buffers | `.proto` | A schema: messages (and proto2 groups), enums, oneofs, services, rpcs and enum values are definitions, nested ones scoped to their owner. No call or file edges; fields, `package`, `import`, `option` and `extend` are not read. A `--for` name that resolves to no definition but names generated code (`use x_pb::m::outer::Leaf as X`, Go `Outer_Leaf`) links to the `.proto` definition by name only (`<rung n="gen" via="name">`), never as a proven edge. |
 | TOML | `.toml` | A table header is one symbol. Keys below it are one level down. |
 | YAML | `.yml`, `.yaml` | Mapping depth 2 is the cut. Sequence levels are transparent. |
 | Markdown | `.md`, `.markdown` | Every heading is a section symbol. The span runs to the next heading of the same or higher level. |

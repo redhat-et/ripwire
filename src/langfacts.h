@@ -116,6 +116,12 @@ struct LangFacts
     /// declared inheritance chain (graph.h).
     bool mixinAncestry = false;
 
+    /// C++ (#446): a class definition reads its base-clause types as @reference.base tags captures
+    /// (queries/cpp/tags.scm), not through captureBases' kind chain — captureSpecializationHeader
+    /// still walks for template specializations. The languages this port has not reached yet keep
+    /// the walk.
+    bool basesAsCaptures = false;
+
     /// Ruby: an element access `recv[ k ]` whose receiver the shape rules cannot classify (a call result, a richer expression) is
     /// still recorded as a site on that receiver, because the typing walk may type it later (`Report.new[ :x ]`). Python and the
     /// rest record nothing for such a receiver (ingest_binds.h subscriptOperatorRef).
@@ -132,6 +138,11 @@ struct LangFacts
     /// Not a code language — prose, configuration or data (and no recognised language at all): a bare basename with such an
     /// extension (`book.toml`, `SUMMARY.md`) named in a --for task is context, never a file anchor (mention.h isCodeExtension).
     bool notCode = false;
+
+    /// Protocol Buffers (PROTO-INDEX): an interface-definition schema whose definitions other languages reach only through GENERATED
+    /// modules, usually not in the tree. Its grammar names no `body:` field (ingest_sidecap.h reads the *_body child or the `{`), and
+    /// the --for not-found ladder links a generated name to these definitions by name only (forreexport.h gen rung).
+    bool generatedSchema = false;
 
     /// C++: defect-shape's whole-tree input is the macro-name set, and a changed C++ file (a .h reads as C++) can only be
     /// judged against the base's whole set. A changed C or Objective-C file does not need it, by today's behaviour
@@ -390,7 +401,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
       .typedInstanceRows = true, .xMacroRows = true },
@@ -436,6 +447,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::GDScript, .hashComment = true },
     { .lang = Lang::Clojure },
+    { .lang = Lang::Proto, .generatedSchema = true, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
 } };
 
 /// The index of the first row that is not at its own Lang index, or the table size when every row is.

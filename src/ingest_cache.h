@@ -53,17 +53,19 @@ struct RawDef
                                    //   C++ method inside one); 0 ⇒ no recovery claim. Feeds the `error` reason at load.
     std::uint8_t  internalLinkage = 0;   // C/C++: anonymous-namespace or namespace-scope `static` def (model.h Symbol::internalLinkage)
     std::uint8_t  scopeRootsStd = 0;     // #150: 1 ⇒ this def's full enclosing-namespace chain roots at std (model.h Symbol::scopeRootsStd)
+    std::uint8_t  rankFlags = 0;         // kRankFlag* (model.h Symbol::rankFlags): set by the doc post-pass on every load, never in the cache record
     std::uint32_t fnScopeStart = 0;      // a FUNCTION-LOCAL def (ingest_names.h enclosingFunctionScope): the byte span of the
     std::uint32_t fnScopeEnd   = 0;      //   function whose body binds its name; End 0 ⇒ not function-local (model.h fnLocalScopes)
     SymKind       kind      = SymKind::Other;
     Lang          lang      = Lang::Unknown;
     std::string   name;
     std::string   scope;               // enclosing class/namespace name (C++), for canonical scope::name
+    std::uint64_t cloneKey  = 0;       // CLONES-PERSIST (ingest_parsepool.h rawDefCloneKey): Function/Method body's exact-clone key; 0 = none
     RawDefLex     lex;                 // B0.2: doc+body weighted subtoken stats (rich ingests only; rides the
                                        //   cache record so a warm --for never re-reads/re-tokenizes the file)
 };
 
-struct RawRef
+struct RawRef : RefColdFields   // fieldName, composeRel, memberPath, memberCtor, memberVia: model.h RefColdFields
 {
     std::uint32_t fileId    = 0;
     std::uint32_t startByte = 0;   // span start of the @reference node (for enclosing lookup)
@@ -83,19 +85,17 @@ struct RawRef
     std::string   name;
     std::string   qualifier;           // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
     std::string   recvVar;             // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
-    std::string   fieldName;           // member variable name when isCompose (e.g. "m_pool"); ALSO the intermediate
-                                       //   field of a depth-2 chained receiver (recv FieldOfThis/FieldOfVar); "" otherwise
-    std::string   composeRel;          // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     std::string   memberRoot;          // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
-    std::string   memberPath;          // FE-B: the member names between memberRoot and the callee, '.'-joined ("" = `root.m()`); see model.h
-    std::string   memberCtor;          // FE-B: the class a constructed receiver names (`new X().m()`, Go `X{}.m()`); see model.h
-    std::string   memberVia;           // FE-B on #373: the method a Ruby typed receiver was built by (`new`, a finder); see model.h
     bool          memberFactory = false;   // FE-B on #373: memberCtor names a FactoryBot factory, not a class
     bool          forwarded = false;       // lane fcall-forward fix 1: a JS/TS `f.call/f.apply` site standing for `f( … )` (model.h Reference::forwarded)
     bool          trailingLambda = false;  // #155: a Kotlin call whose lambda is written after its argument list (model.h Reference::trailingLambda)
     std::uint32_t baseBind = 0;          // lane lego-transitive fix 1, an inherit ref only: 1 + the name byte of the same-file
                                          //   declaration the base binds to (ingest_relations.h localBaseBinding); 0 none, ~0u unknown
 };
+
+// MEM-REF-SHRINK (model.h, beside Reference's own budget): four inline strings, the cold block's pointer and 32 B of ids and
+// flags: 136 B on libc++ (was 248). Every worker's vector<RawRef> and the merged one hold these rows at the parse-pool peak.
+static_assert( sizeof( RawRef ) <= 4 * sizeof( std::string ) + 40, "RawRef grew: see the MEM-REF-SHRINK note in model.h" );
 
 // P2-D Rule 2 raw local-variable type binding (pre-attribution). startByte sits inside the enclosing
 // function body so the enclosing-def attribution (the same byte-span scan as RawRef) assigns the binding's
@@ -151,7 +151,8 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 49;           // 49: lane warm-direct — the FILE record's head gains the eight family counts
+constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
+                                                      // 49: lane warm-direct — the FILE record's head gains the eight family counts
                                                       //    (FileFactCounts, right after FileHealth) so a warm run can size and plan every
                                                       //    record from its head alone and decode the body in the parse worker.
                                                       // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
@@ -370,7 +371,11 @@ constexpr std::uint32_t kCacheVersion = 49;           // 49: lane warm-direct �
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 301;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 305;          // bump on any grammar/.scm/extraction change
+                                                      // 305 = 2026-11-10 (#446 round 1, @SeddonShen; above main's 303 and the PR head's 304): C++ base clauses read as @reference.base tags captures
+                                                      //   (queries/cpp/tags.scm, LangFacts::basesAsCaptures). Rich file tag 306. kCacheVersion unchanged.
+                                                      // 303 = 2026-11-06 (lane proto-index, PLACEHOLDER: the train renumbers; above main's 301 and open #538's 302;
+                                                      //   rich file tag 304): .proto files are indexed (Lang::Proto, queries/proto/tags.scm). kCacheVersion stays 49.
                                                       // 301 = 2026-11-04 (#478 gap 2, PLACEHOLDER: the train renumbers; above main's 299/300, rich file tag 302;
                                                       //   test/pyimportprecisecheck.sh): `import a.b as c` records the Include target `a.b`, not the aliased_import span
                                                       //   `a.b as c` no resolver could find. kCacheVersion stays 48: no record changes shape.
@@ -2489,10 +2494,16 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 {
     return dictCount <= 0x100 ? 1u : dictCount <= 0x10000 ? 2u : 4u;   // indices go up to dictCount-1
 }
+// v50 (CLONES-PERSIST): the def kinds that get a clone key — the kinds findClones compares — as a bit per SymKind
+// (ingest_parsepool.h rawDefCloneKey). The record does not depend on it: every def record carries a presence byte.
+inline constexpr std::uint32_t kCloneKeyKindBits = ( 1u << unsigned( SymKind::Function ) ) | ( 1u << unsigned( SymKind::Method ) );
+static_assert( kSymKindCount <= 32, "kCloneKeyKindBits holds one bit per SymKind" );
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
     w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
+    w.u8( d.cloneKey != 0 ? 1 : 0 );                                     // v50: clone-key presence byte (0 = no key), then the key
+    if( d.cloneKey != 0 ) { w.u64( d.cloneKey ); }
     if( withLex )
     {
         ASSUME( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
@@ -2576,7 +2587,7 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         }
     }
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); w.str( r.memberVia ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2601,7 +2612,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 92;   // 17×u32 + 16×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 93;   // 17×u32 + 17×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
 
@@ -2642,6 +2653,16 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
         r.ok = false;
     }
     for( std::uint8_t& tagCount : d.evWhy ) { tagCount = r.u8(); }   // mirrors writeDef's fixed 8×u8 order
+    // v50: mirrors writeDef. The presence byte is 0 or 1; any other value is corruption and takes the one refusal path. Any
+    // u64 is a valid key: findClones re-reads and compares every shared key, so a wrong key costs a read, never an answer.
+    const std::uint8_t hasCloneKey = r.u8();
+    if( r.ok && !VALIDATE( hasCloneKey <= 1 ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache def record carries a clone-key presence byte other than 0/1 — cache treated as corrupt" );
+        r.ok = false;
+    }
+    if( r.ok && hasCloneKey == 1 ) { d.cloneKey = r.u64(); }
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();
@@ -2720,7 +2741,7 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.flagU8(); x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.str(); x.memberPath = r.str(); x.memberCtor = r.str(); x.memberVia = r.str(); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.flagU8(); x.setFieldName( r.str() ); x.setComposeRel( r.str() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.str(); x.setMemberPath( r.str() ); x.setMemberCtor( r.str() ); x.setMemberVia( r.str() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u8( b.resultIndex ); w.u8( b.unwrapDepth ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
 inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }

@@ -17,9 +17,12 @@
 #   3  next:     next= pages from at most the first folded row's page offset (the --limit=100000 page), so it serves every one
 #   4  legend:   the folded= clause rides the compact and the full dialect beside folded=, and neither rides the ablated answer
 #   5  asked:    a task naming config keeps the config rows (no config= in folded=, a conf/ path-only row listed);
-#                test code: the default tail lists tests/ path-only rows and folded= has no test= (round 2)
+#                test code: the default tail lists tests/ path-only rows and folded= has no test= (round 2); a shell test file
+#                (tests/*.sh) is test code too, listed, not counted as testdata (CodeRabbit 4505000649, 2026-11-08)
 #   6  JSON:     "tail"."folded" is the XML folded= as an object, with "folded_why"
-#   7  MCP:      the `for` verb's tail carries folded= and the clause
+#   7  MCP:      the `for` verb's tail carries folded= and the clause; the clause is a session-dictionary entry (CodeRabbit
+#                4505000658, 2026-11-08): `--legend-dict` defines it, and a second identical call in the session carries folded= but
+#                not the clause again (served once)
 #   8  docs:     a docs question folds nothing (plain walk) / the code question does (arm 1)
 #   9  add-new:  an add-a-new-X task lists its doc and config path-only rows (no doc= or config= in folded=) and still folds
 #                scripts (script= in folded=: the exemption is those two classes, not the whole fold)
@@ -54,6 +57,9 @@ while [ $i -lt 60 ]; do
     if [ $i -lt 40 ]; then   # 40 scripts: past the old 40-code-row cut they are widened p= rows, so a script class folds
         printf 'frobnicate_%s() {\n  echo "widget"\n}\n' "$n" > "$F/scripts/w$n.sh"   # weaker match: ranks past the code rows
     fi
+    if [ $i -lt 10 ]; then   # 10 shell tests: test code, so they stay listed (arm 5)
+        printf 'test_widget_frobnicate_%s() {\n  echo "widget frobnicate helper"\n}\n' "$n" > "$F/tests/test_w$n.sh"   # ranks inside the walk
+    fi
     i=$(( i + 1 ))
 done
 Q="widget frobnicate helper"
@@ -86,6 +92,11 @@ LQ='where does the widget frobnicate helper error get its "Link dropped by remot
 ( cd "$F" || exit 9; printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$F" "$Q" \
     | HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" --mcp ) > "$TMP/m.def" 2> "$TMP/m.def.err"
 echo $? > "$TMP/m.def.rc"
+( cd "$F" || exit 9; for id in 1 2; do printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$id" "$F" "$Q"; done \
+    | HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" --mcp ) > "$TMP/m.two" 2> "$TMP/m.two.err"
+echo $? > "$TMP/m.two.rc"
+( cd "$F" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" --legend-dict ) > "$TMP/dict" 2> "$TMP/dict.err"
+echo $? > "$TMP/dict.rc"
 
 python3 - "$TMP" <<'PY'
 import html, json, re, sys
@@ -110,6 +121,7 @@ def tail_of(tx):
 def klass(p):
     if p.endswith(".md"): return "doc"
     if p.endswith((".yaml", ".json")): return "config"
+    if p.startswith("tests/") and p.endswith((".py", ".sh")): return "test"   # test code, a shell test included
     if p.endswith(".sh"): return "script"
     if p.startswith("tests/"): return "test"
     return "code"
@@ -151,6 +163,9 @@ say(tt is not None and "config" not in folded(tt[0]) and any(klass(p) == "config
     f"5 asked: a config task keeps its config rows (folded={tt[0].get('folded') if tt else None!r})")
 say(td is not None and "test" not in folded(td[0]) and any(klass(p) == "test" and not s for p, s in td[1]),
     f"5 test code: the default tail lists tests/ path-only rows, no test= (folded={td[0].get('folded') if td else None!r})")
+say(td is not None and ta is not None and "testdata" not in folded(td[0]) and any(p.endswith(".sh") and p.startswith("tests/") for p, s in ta[1])
+    and {p for p, s in ta[1] if p.startswith("tests/") and p.endswith(".sh")} <= {p for p, s in td[1]},
+    f"5 shell test: every tests/*.sh row of the ablated tail is listed, no testdata= (folded={td[0].get('folded') if td else None!r})")
 try:
     jt = json.loads(json_tx)["tail"] if json_tx else None
 except (ValueError, KeyError, TypeError):
@@ -162,6 +177,13 @@ try:
 except (ValueError, KeyError, IndexError, TypeError):
     mt = ""
 say('folded="' in mt and "; tail folded=class=N:" in mt, "7 MCP: the for verb's tail carries folded= and its clause")
+two = load("m.two")
+try:
+    second = "".join(c.get("text", "") for c in json.loads(two.splitlines()[-1])["result"]["content"]) if two else ""
+except (ValueError, KeyError, IndexError, TypeError):
+    second = ""
+say("for: tail folded=class=N:" in (load("dict") or ""), "7 dictionary: --legend-dict defines the folded= clause")
+say('folded="' in second and "tail folded=class=N:" not in second, "7 served once: the session's second call carries folded=, not the clause")
 tn = tail_of(load("f.new"))
 fn = folded(tn[0]) if tn else {}
 say(tn is not None and "doc" not in fn and "config" not in fn and any(klass(p) == "doc" and not s for p, s in tn[1])

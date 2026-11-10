@@ -229,6 +229,7 @@ struct Graph
                                                // for every other symbol. Rendered as bind="..." by serialize
                                                // (see serialize.h's `bind` param). Empty vector ⇒ no JNI defs
                                                // (byte-identical to pre-R5 output).
+    std::uint32_t              unrankedNodeCount = 0;   // symbols carrying kRankFlagNotNamed (model.h): prior weight 0, outside rankGraph's uniform share
     std::vector<float>         priorWeight;   // per-symbol name-quality multiplier for the PageRank
                                               // personalization/teleport prior (aider-style repomap weights).
                                               // A PURE function of names + def-counts (byName), so it is
@@ -2089,13 +2090,13 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
     const SmartAliasPeel aliasPeel( ing );
     for( const Reference& cr : ing.references )
     {
-        if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName.empty() || cr.calleeName.empty() )
+        if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName().empty() || cr.calleeName.empty() )
         {
             continue;
         }
         key.clear();
         key.append( ing.symbols[ cr.fromSymbol ].name ).push_back( '#' );
-        key.append( cr.fieldName );
+        key.append( cr.fieldName() );
         recordMemberTypeFact( t.fieldTypeByClass, key, cr, aliasPeel );
     }
     t.localNameSet.reserve( ing.bindings.size() );
@@ -2378,7 +2379,32 @@ struct ExternalVetoTables
     HashMap<std::string, std::uint32_t> submoduleBindFile;  // PY-MOD-CALL-SITES: "<fileId>#y" → the SUBMODULE file `from p import x [as y]`
                                                             //   binds y to (p/x.py or p/x/__init__.py); kNoFile = a from-import of y names
                                                             //   an in-tree submodule but nothing proves y is it (finalizePythonSubmoduleBinds)
+    // PY-LOCAL-BIND: the def-scoped twins of importBindFile / submoduleBindFile, keyed "<defId>#y" (pythonBindScope: the enclosing def
+    // or class). An import inside a def binds a LOCAL, read only by calls whose own symbol is that def; kNoFile = y names no one module
+    // there (two imports disagree, or the def also assigns, receives or otherwise binds y: finalizePythonScopedBinds)
+    HashMap<std::string, std::uint32_t> scopedImportBindFile;
+    HashMap<std::string, std::uint32_t> scopedSubmoduleBindFile;
+    HashMap<std::string, char>          scopedImportNames;   // "<fileId>#y": some def or class in the file imports y (pythonEnclosingDefBinds' pre-test)
 };
+
+// the ONE module file `import X [as y]` binds y to (Step-A's `resolved`, else the root-scoped suffix match of an absolute spec), kNoFile when
+// none or when the record cannot say which (ind4b fix 5, E3) — recordImportBindFile's and PY-LOCAL-BIND's scoped twin's shared reading
+inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                           const std::vector<std::uint32_t>* fileRoot )
+{
+    EXPECTS( !b.typeName.empty(), "typeName.front() below needs a spec: both callers (recordImportBindFile, recordScopedImportBindFile) take bindings buildPythonImportVetoes already filtered for an empty typeName" );
+    // ind4b fix 5 (E3): `import pkg.x` binds the ROOT `pkg` (pkg/__init__.py), not pkg.x, but `import pkg.x as pkg` binds pkg.x and the
+    // record cannot tell them apart (same var, same typeName): a dotted spec whose first segment is the bound name names no ONE file.
+    if( b.typeName.starts_with( b.var ) && b.typeName.size() > b.var.size() && b.typeName[ b.var.size() ] == '.' )
+    {
+        return kNoFile;
+    }
+    if( resolved == kNoFile && b.typeName.front() != '.' )
+    {
+        return resolvePythonModuleSuffix( b.typeName, fileIndex, fileRoot, b.fileId );   // absolute spec only, root-scoped to b.fileId's own root
+    }
+    return resolved;
+}
 
 // issue #287: populate ExternalVetoTables::importBindFile for ONE Python Import binding — split out of
 // buildExternalVetoTables's own loop to keep ITS branching flat (--quality-delta flagged the inlined form
@@ -2409,18 +2435,7 @@ inline void recordImportBindFile( const Binding& b, std::uint32_t resolved, cons
     {
         return;   // issue #287 round 2: something else in this file rebinds `b.var` at module scope — never trust the alias
     }
-    std::uint32_t moduleFile = resolved;
-    if( moduleFile == kNoFile && b.typeName.front() != '.' )
-    {
-        // absolute spec only (never relative); root-scoped to b.fileId's own root in a multi-root workspace
-        moduleFile = resolvePythonModuleSuffix( b.typeName, fileIndex, fileRoot, b.fileId );
-    }
-    // ind4b fix 5 (E3): `import pkg.x` binds the ROOT `pkg` (pkg/__init__.py), not pkg.x, but `import pkg.x as pkg` binds pkg.x and the
-    // record cannot tell them apart (same var, same typeName): a dotted spec whose first segment is the bound name names no ONE file.
-    if( b.typeName.starts_with( b.var ) && b.typeName.size() > b.var.size() && b.typeName[ b.var.size() ] == '.' )
-    {
-        moduleFile = kNoFile;
-    }
+    const std::uint32_t moduleFile = pythonModuleFormFile( b, resolved, fileIndex, fileRoot );
     // issue #287 round 3 (review rv-p6.md HIGH): try_emplace runs even when THIS import is unresolved
     // (moduleFile==kNoFile) — an import whose target is outside the indexed tree (stdlib/third-party/
     // unknown) is STILL a rebinding of `b.var`, not an absence of one. Skipping the emplace here (the
@@ -2618,6 +2633,9 @@ struct PythonSubmoduleBind
 struct PythonImportVetoes
 {
     HashMap<std::string, PythonSubmoduleBind> submodules;
+    HashMap<std::string, PythonSubmoduleBind> scopedSubmodules;       // PY-LOCAL-BIND: "<defId>#y", a def-scoped from-import's facts
+    HashMap<std::string, std::uint32_t>       scopedImportBindFile;   // PY-LOCAL-BIND: "<defId>#y" → a def-scoped `import X as y`'s file
+    HashMap<std::string, char>                scopedImportNames;      // PY-LOCAL-BIND: "<fileId>#y" of every def-scoped import
     HashMap<std::string, char>              importBind;
     HashMap<std::string, std::uint32_t>     importBindFile;
     HashMap<std::string, std::uint32_t>     memberImportFile;
@@ -2679,12 +2697,14 @@ inline void recordMemberImportFile( const Binding& b, std::uint32_t resolved, co
 // directory is read without a corpus scan: a relative p from the importer's own directory (one level up per extra dot), an absolute p
 // from the ONE file memberImportFile already resolved for it, when that file is a package's __init__.py (a module m.py has no
 // submodules). Every from-import of y is recorded, a non-submodule one as kNoFile, so a name bound twice never reads as one module.
+// `keyId` is the key's scope: the importer's fileId for a module-scope from-import, the enclosing def or class for a def-scoped one
+// (PY-LOCAL-BIND: that one binds a local, kept in its own table, so it neither proves nor contests the module-level y).
 inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std::uint32_t moduleFile, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                 std::string& key, HashMap<std::string, PythonSubmoduleBind>& out )
+                                 std::string& key, std::uint32_t keyId, HashMap<std::string, PythonSubmoduleBind>& out )
 {
-    if( b.importedName == "module" || b.typeName.empty() || b.var.empty() || b.var == "*" || pythonBindScope( ing, b ) != kNoNode )
+    if( b.importedName == "module" || b.typeName.empty() || b.var.empty() || b.var == "*" )
     {
-        return;   // a function-local from-import binds a local (hasLocal), not the module-level name: it neither proves nor contests y
+        return;
     }
     const std::string_view member = b.importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() )
                                                                                        : std::string_view( b.var );
@@ -2736,7 +2756,7 @@ inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std:
         sub = sub != kNoFile ? sub : look( std::string( member ).append( ".py" ) );
         pkg = look( "__init__.py" );
     }
-    key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
+    key.clear();  Narrower::appendUint( key, keyId );  key.push_back( '#' );  key.append( b.var );
     const auto [ it, fresh ] = out.try_emplace( key, PythonSubmoduleBind{ sub, pkg, sub != kNoFile, sub != kNoFile ? std::string( member ) : std::string{}, b.startByte } );
     if( !fresh )
     {
@@ -2756,6 +2776,40 @@ inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std:
 // than the submodule, no star import, no module `__getattr__` (it answers `from p import x` before the submodule loads) and no
 // `globals()` / `setattr` write. Anything else records kNoFile: the call is declined and counted, never picked.
 inline bool pythonStarMayBind( const ExternalVetoTables& v, std::uint32_t f, std::string_view name, std::uint32_t fromByte = 0 );
+
+// "<id>#name" into the caller's reused buffer — the key the Phase-5 and FE-A tables are spelled in (no allocation).
+inline const std::string& fileNameKey( std::string& key, std::uint32_t id, std::string_view name )
+{
+    key.clear();
+    Narrower::appendUint( key, id );
+    key.append( 1, '#' ).append( name );
+    return key;
+}
+
+// does package `sb.pkg`'s own namespace (may) bind the member x a from-import of its submodule `file` names? A def, class, assignment or
+// global of x, a dynamic namespace marker, any star import, an `import m as x` of another file, or a module-scope from-import of x naming
+// another submodule (a function-local one binds no package attribute) — finalizePythonSubmoduleBinds' and finalizePythonScopedBinds' test
+inline bool pythonPackageMayBindMember( const HashMap<std::string, PythonSubmoduleBind>& pending, const ExternalVetoTables& t,
+                                        const PythonSubmoduleBind& sb, std::uint32_t file, std::string& pk )
+{
+    const std::uint32_t p = sb.pkg;
+    if( p == kNoFile )
+    {
+        return false;
+    }
+    const auto marked = [ & ]( std::string_view name ) { return t.pythonModuleRebind.contains( fileNameKey( pk, p, name ) ); };
+    if( marked( sb.member ) || marked( kPythonDynamicBind ) || marked( kPythonDynamicWrite )
+        || ( p < t.pythonScopes.starTargets.size() && !t.pythonScopes.starTargets[ p ].empty() ) )
+    {
+        return true;
+    }
+    if( const auto own = t.importBindFile.find( fileNameKey( pk, p, sb.member ) ); own != t.importBindFile.end() && own->second != file )
+    {
+        return true;
+    }
+    const auto own = pending.find( fileNameKey( pk, p, sb.member ) );
+    return own != pending.end() && own->second.file != file;
+}
 
 inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBind>& pending, ExternalVetoTables& t )
 {
@@ -2789,28 +2843,88 @@ inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBi
             mit->second = kNoFile;   // `import a as y` and `from p import y` in one file: y names two modules
             file        = kNoFile;
         }
-        if( file != kNoFile && sb.pkg != kNoFile )
+        if( file != kNoFile && pythonPackageMayBindMember( pending, t, sb, file, pk ) )
         {
-            const std::uint32_t p = sb.pkg;
-            bool mayBind = marked( p, sb.member ) || marked( p, kPythonDynamicBind ) || marked( p, kPythonDynamicWrite )
-                        || ( p < t.pythonScopes.starTargets.size() && !t.pythonScopes.starTargets[ p ].empty() );
-            if( !mayBind )
-            {
-                const auto own = t.importBindFile.find( mk( p, sb.member ) );
-                mayBind = own != t.importBindFile.end() && own->second != file;
-            }
-            if( !mayBind )
-            {
-                // the package's module-scope from-import of x must name this submodule too (a function-local one binds no package attribute)
-                const auto own = pending.find( mk( p, sb.member ) );
-                mayBind = own != pending.end() && own->second.file != file;
-            }
-            if( mayBind )
-            {
-                file = kNoFile;
-            }
+            file = kNoFile;
         }
         t.submoduleBindFile.emplace( key, file );
+    }
+}
+
+// PY-LOCAL-BIND: the def or class an import inside a Python def or class binds a local of (never the module-level name), else kNoNode
+inline NodeId pythonImportScope( const IngestResult& ing, const Binding& b )
+{
+    const NodeId scope = pythonBindScope( ing, b );
+    return scope != kNoNode && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) ? scope : kNoNode;
+}
+
+// PY-LOCAL-BIND: the def or class whose scoped entry for b.var binding record b withholds, else kNoNode — any other binding of y with
+// the def as its symbol, and the def's own import of y when the file rebinds y at module scope (pythonModuleRebind): a `global y` or
+// `nonlocal y` is sited at byte 0 and names no def, and in the def that declares it the import writes the OUTER y, which a call still
+// reads when the import is conditional (CodeRabbit #592). NameAlias restates a from-import's own `x as y` (its one producer,
+// ingest_binds.h): the import itself, not a rebinding. A def importing y in a file with a module-scope `y = …` withholds too, a floor.
+inline NodeId pythonScopedBindPoisonScope( const IngestResult& ing, const ExternalVetoTables& t, const Binding& b, std::string& key )
+{
+    if( b.var.empty() || b.kind == LocalBindKind::NameAlias )
+    {
+        return kNoNode;
+    }
+    if( b.kind != LocalBindKind::Import )
+    {
+        return b.fromSymbol;
+    }
+    const NodeId scope = pythonImportScope( ing, b );
+    return scope != kNoNode && t.pythonModuleRebind.contains( fileNameKey( key, b.fileId, b.var ) ) ? scope : kNoNode;
+}
+
+// PY-LOCAL-BIND: ExternalVetoTables' scoped tables from the def-scoped imports — a from-import's submodule passes the same package test
+// as a module-scope one (the package's own namespace must not bind x), and y is that def's module only when nothing else binds y there:
+// every other binding record of y with the def as its symbol (a parameter, an assignment such as `except ImportError: y = None`, a
+// comprehension target; an `import X as y` naming another file and a from-import of a member are read above) poisons it to kNoFile, so the call keeps the
+// unchanged ladder or is declined, never picked. A guard (`if`, `try`) needs no mark: an unbound local raises, it reads nothing else.
+// No star check: `from m import *` is a SyntaxError inside a def. A nested def reads the enclosing def's local by closure: not read here
+// (its calls carry the nested def's own symbol), a floor; such a call is not proven through the module's y either (pythonEnclosingDefBinds).
+inline void finalizePythonScopedBinds( const IngestResult& ing, PythonImportVetoes& iv, ExternalVetoTables& t )
+{
+    std::string pk;
+    for( auto& [ key, sb ] : iv.scopedSubmodules )
+    {
+        std::uint32_t file = sb.file;
+        if( file != kNoFile && pythonPackageMayBindMember( iv.submodules, t, sb, file, pk ) )
+        {
+            file = kNoFile;
+        }
+        if( const auto mit = iv.scopedImportBindFile.find( key ); mit != iv.scopedImportBindFile.end() )
+        {
+            mit->second = kNoFile;   // `import a as y` and `from p import y` in one def: y names two modules (or a member)
+            file        = kNoFile;
+        }
+        if( sb.anySub )
+        {
+            t.scopedSubmoduleBindFile.emplace( key, file );
+        }
+    }
+    t.scopedImportBindFile = std::move( iv.scopedImportBindFile );
+    t.scopedImportNames    = std::move( iv.scopedImportNames );
+    if( t.scopedImportBindFile.empty() && t.scopedSubmoduleBindFile.empty() )
+    {
+        return;
+    }
+    for( const Binding& b : ing.bindings )
+    {
+        const NodeId scope = pythonScopedBindPoisonScope( ing, t, b, pk );
+        if( scope == kNoNode )
+        {
+            continue;
+        }
+        fileNameKey( pk, scope, b.var );
+        for( HashMap<std::string, std::uint32_t>* table : { &t.scopedImportBindFile, &t.scopedSubmoduleBindFile } )
+        {
+            if( const auto it = table->find( pk ); it != table->end() )
+            {
+                it->second = kNoFile;
+            }
+        }
     }
 }
 
@@ -2935,6 +3049,66 @@ inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult
     return names;
 }
 
+// PY-LOCAL-BIND: a def-scoped `import X [as y]` into ExternalVetoTables::scopedImportBindFile, keyed "<scope>#y" — the module file
+// recordImportBindFile would read; two that disagree in one def record kNoFile. A from-import is recordSubmoduleBind's.
+inline void recordScopedImportBindFile( const IngestResult& ing, const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        NodeId scope, std::string& key, HashMap<std::string, std::uint32_t>& out )
+{
+    if( b.importedName != "module" )
+    {
+        return;
+    }
+    const std::uint32_t file = pythonModuleFormFile( b, resolved, fileIndex, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+    const auto [ it, inserted ] = out.try_emplace( fileNameKey( key, scope, b.var ), file );
+    if( !inserted && it->second != file )
+    {
+        it->second = kNoFile;   // two modules bound to y in one def: neither
+    }
+}
+
+// PY-LOCAL-BIND: pythonSubmoduleCalleeNames' twin for the def-scoped from-imports — `y.f()` whose y a from-import inside the caller's
+// own def binds to a submodule asks f of it, under the caller's symbol. Nothing to read (and no pass over the references) when no def imports one.
+inline void addScopedSubmoduleCalleeNames( const IngestResult& ing, const HashMap<std::string, PythonSubmoduleBind>& scoped, HashMap<std::string, char>& names )
+{
+    if( scoped.empty() )
+    {
+        return;
+    }
+    std::string key;
+    for( const Reference& r : ing.references )
+    {
+        if( r.recv == RecvKind::NamedVar && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.calleeName.empty() )
+        {
+            const auto it = scoped.find( fileNameKey( key, r.fromSymbol, r.recvVar ) );
+            if( it != scoped.end() && it->second.anySub )
+            {
+                names.try_emplace( r.calleeName, '\0' );
+            }
+        }
+    }
+}
+
+// one Import binding's file tables: the module-form file, the member file and the submodule facts. PY-LOCAL-BIND: an import inside a
+// Python def or class (pythonImportScope) fills the scoped twins keyed by that scope, never the module-level tables.
+inline void recordPythonImportFiles( const IngestResult& ing, const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                     const HashMap<std::string, char>& pythonModuleRebind, std::string& key, PythonSuffixMemo& memo, PythonImportVetoes& t )
+{
+    const NodeId scope = pythonImportScope( ing, b );
+    if( scope == kNoNode )
+    {
+        recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile, ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
+    }
+    else
+    {
+        recordScopedImportBindFile( ing, b, resolved, fileIndex, scope, key, t.scopedImportBindFile );
+        t.scopedImportNames.try_emplace( fileNameKey( key, b.fileId, b.var ), '\0' );
+    }
+    recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
+    const bool atModule = scope == kNoNode;
+    recordSubmoduleBind( ing, b, pythonFromImportModuleFile( b, resolved, fileIndex, memo ), fileIndex, key, atModule ? b.fileId : scope,
+                         atModule ? t.submodules : t.scopedSubmodules );
+}
+
 inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
                                                     const HashMap<std::string, char>& moduleNames,
                                                     const HashMap<std::string, char>& pythonModuleRebind )
@@ -2954,10 +3128,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // not just verdict's "cannot leave the package" evidence.
         const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
         const char verdict = pythonImportVerdict( b, resolved, moduleNames );
-        recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile,
-                              ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
-        recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
-        recordSubmoduleBind( ing, b, pythonFromImportModuleFile( b, resolved, fileIndex, memo ), fileIndex, key, t.submodules );
+        recordPythonImportFiles( ing, b, resolved, fileIndex, pythonModuleRebind, key, memo, t );
         key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
         const auto [ it, inserted ] = t.importBind.try_emplace( key, verdict );
         if( !inserted && it->second == 'x' && verdict != 'x' )
@@ -2967,7 +3138,9 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     }
     t.importFiles  = buildPythonImportFiles( ing, fileIndex, memo );
     t.scopes             = buildPythonStarTargets( ing, fileIndex, memo );
-    t.scopes.nameBinds   = buildPythonNameBinds( ing, pythonSubmoduleCalleeNames( ing, t.submodules ) );
+    HashMap<std::string, char> callees = pythonSubmoduleCalleeNames( ing, t.submodules );
+    addScopedSubmoduleCalleeNames( ing, t.scopedSubmodules, callees );
+    t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ) );
     return t;
 }
 
@@ -3040,6 +3213,7 @@ inline ExternalVetoTables buildExternalVetoTables( const IngestResult& ing )
         t.importFiles         = std::move( iv.importFiles );
         t.pythonScopes        = std::move( iv.scopes );
         finalizePythonSubmoduleBinds( iv.submodules, t );
+        finalizePythonScopedBinds( ing, iv, t );
     }
     for( const Symbol& sy : ing.symbols )
     {
@@ -3060,15 +3234,6 @@ inline ExternalVetoTables buildExternalVetoTables( const IngestResult& ing )
         }
     }
     return t;
-}
-
-// "<id>#name" into the caller's reused buffer — the key the Phase-5 and FE-A tables are spelled in (no allocation).
-inline const std::string& fileNameKey( std::string& key, std::uint32_t id, std::string_view name )
-{
-    key.clear();
-    Narrower::appendUint( key, id );
-    key.append( 1, '#' ).append( name );
-    return key;
 }
 
 // does Python file `f` carry either dynamic module-namespace marker (a module `__getattr__`, or a `globals()` / `setattr(...)` write)?
@@ -5104,7 +5269,7 @@ inline std::string_view rubyConstantReceiver( const Reference& r ) noexcept
 {
     const bool constant = r.lang == Lang::Ruby && r.role == RefRole::Call && r.recv == RecvKind::NamedVar && r.qualifier.empty()
                        && rubyIsConstantName( r.recvVar ) && !rubyTypedRecvOf( r );
-    const std::string_view written = !constant ? std::string_view {} : r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName );
+    const std::string_view written = !constant ? std::string_view {} : r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() );
     return written.substr( written.starts_with( "::" ) ? 2 : 0 );
 }
 
@@ -5142,7 +5307,7 @@ inline RubyClassObject RubyClassObjects::of( const Reference& r ) const
 // every class; external when the constant resolves to nothing the tree opens.
 inline RubyClassObject RubyClassObjects::ofIndexed( const Reference& r ) const
 {
-    std::string       fqn  = fqnOfWritten( r, r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName ) );
+    std::string       fqn  = fqnOfWritten( r, r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() ) );
     const std::size_t last = fqn.rfind( "::" );
     const auto        cls  = fqn.empty() ? typed.reach.classNames.end() : typed.reach.classNames.find( fqn.substr( last == std::string::npos ? 0 : last + 2 ) );
     return cls != typed.reach.classNames.end() ? RubyClassObject { &cls->first, std::move( fqn ), false } : RubyClassObject { nullptr, {}, true };
@@ -8469,6 +8634,42 @@ inline std::vector<NodeId> pythonClassScopeChain( const IngestResult& ing, NodeI
     return chain;
 }
 
+// PY-LOCAL-BIND: does a def enclosing r's caller bind r.recvVar? Python then reads that def's y by closure, never the module's, so the
+// module-level tables must not prove the call (CodeRabbit #592). Only files where some def imports y are scanned (scopedImportNames).
+inline bool pythonEnclosingDefBinds( const IngestResult& ing, const ExternalVetoTables& t, const ExternalVeto& veto, const Reference& r, std::string& key )
+{
+    if( r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size() || !t.scopedImportNames.contains( fileNameKey( key, r.fileId, r.recvVar ) ) )
+    {
+        return false;
+    }
+    return std::ranges::any_of( pythonClassScopeChain( ing, r.fromSymbol ), [ & ]( NodeId a ) {
+        const SymKind k = ing.symbols[ a ].kind;
+        return ( k == SymKind::Function || k == SymKind::Method ) && veto.localNameSet.contains( fileNameKey( key, a, r.recvVar ) );
+    } );
+}
+
+// PY-LOCAL-BIND: the tables a Python `y.f()` reads y's module from, `key` spelled for them. A local y (hasLocal): the caller's own
+// def-scoped tables, keyed by that def — none for a call in the def's signature (a default runs in the enclosing scope, before the body's
+// import binds). A module-level y: the file's tables — none when an enclosing def binds y. None keeps the unchanged ladder.
+struct PythonRecvBindTables
+{
+    const HashMap<std::string, std::uint32_t>& alias;
+    const HashMap<std::string, std::uint32_t>& sub;
+};
+inline PythonRecvBindTables pythonRecvBindTables( const IngestResult& ing, const ExternalVetoTables& t, const ExternalVeto& veto, const Reference& r, std::string& key )
+{
+    static const HashMap<std::string, std::uint32_t> kNone;
+    if( veto.hasLocal( r, r.recvVar ) )
+    {
+        const bool inSignature = r.fromSymbol < ing.symbols.size() && r.startByte < ing.symbols[ r.fromSymbol ].sigEndByte;
+        fileNameKey( key, r.fromSymbol, r.recvVar );
+        return inSignature ? PythonRecvBindTables{ kNone, kNone } : PythonRecvBindTables{ t.scopedImportBindFile, t.scopedSubmoduleBindFile };
+    }
+    const bool closure = pythonEnclosingDefBinds( ing, t, veto, r, key );
+    fileNameKey( key, r.fileId, r.recvVar );
+    return closure ? PythonRecvBindTables{ kNone, kNone } : PythonRecvBindTables{ t.importBindFile, t.submoduleBindFile };
+}
+
 // can package file `pkg` (its __init__.py) bind `name` itself? `from pkg import name` reads the package's attribute FIRST and falls back
 // to the submodule `name` only when there is none, so the submodule is the answer only when nothing in the package binds the name: no
 // import, def, class or assignment of it at module scope (a `global` anywhere counts, pythonModuleRebind), no module `__getattr__`
@@ -8527,6 +8728,13 @@ inline const PythonNameBind* pythonBaseNameProven( const BaseEvidenceTables& t, 
     return here == 1 && importOnly && ( qualified ? !outsideForm : !moduleForm ) && !pythonStarMayBind( t.extVeto, r.fileId, name ) ? sole : nullptr;
 }
 
+// the module file a qualifier's `import X as q` binds q to where the class statement runs: the file's table for a module-scope import,
+// else the scoped table keyed by the def or class body that holds it (PY-LOCAL-BIND, CodeRabbit #592); kNoFile when none
+inline std::uint32_t pythonBaseQualifierFile( const ExternalVetoTables& v, const PythonNameBind& bind, std::uint32_t fileId, std::string_view qual, std::string& key )
+{
+    return bind.scope == kNoNode ? pythonImportFileOf( v.importBindFile, fileId, qual, key ) : pythonImportFileOf( v.scopedImportBindFile, bind.scope, qual, key );
+}
+
 // tier 2, Python: `from m import X` (X bare), `import pkg.mod as q` (q.X), `from pkg import q` (q.X: q is pkg's submodule,
 // or a class q that pkg defines or re-exports and X sits in). The name the clause starts with (X, else q) proves nothing unless
 // the import is its ONLY binding where the class statement runs (pythonBaseNameProven); a module-scope rebinding is also in
@@ -8554,7 +8762,7 @@ inline void pythonImportedBases( const BaseEvidenceTables& t, const Reference& r
     {
         return;   // a dotted qualifier (`a.b.X`): not read
     }
-    if( const std::uint32_t f = pythonImportFileOf( t.extVeto.importBindFile, r.fileId, qual, key ); f != kNoFile )
+    if( const std::uint32_t f = pythonBaseQualifierFile( t.extVeto, *bind, r.fileId, qual, key ); f != kNoFile )
     {
         pythonReexportChain( t, cand, f, r.calleeName, out );
         return;
@@ -8740,7 +8948,7 @@ inline void writtenTraitBases( const BaseEvidenceTables& t, const Reference& r, 
     {
         return;
     }
-    const NodeId trait = t.recvEv->types.rustResultClass( r.fileId, r.startByte, r.memberPath, r.calleeName );
+    const NodeId trait = t.recvEv->types.rustResultClass( r.fileId, r.startByte, r.memberPath(), r.calleeName );
     if( trait != kNoNode && std::find( cand.begin(), cand.end(), trait ) != cand.end() )
     {
         out.push_back( trait );
@@ -9041,7 +9249,7 @@ inline bool isMarkdownLinkRef( const Reference& r ) noexcept
     {
         return false;
     }
-    return !r.memberPath.empty();
+    return !r.memberPath().empty();
 }
 
 // Link-ness is where the reference came from: lang Markdown and not a doc mention. isMarkdownLinkRef also requires a
@@ -9081,6 +9289,13 @@ inline bool isMarkdownFileNode( const Symbol& sym, std::uint32_t widestEnd ) noe
     return sym.sigStartByte == 0 && sym.sigEndByte >= sym.endByte && sym.endByte >= widestEnd;
 }
 
+// A section a markdown link can bind: a link-section language's Section in an indexed file, not a --recall-only unit (model.h
+// kRankFlagNotNamed: a link to its page binds the page's file node, as it did before the page had units).
+inline bool isLinkableSection( const IngestResult& ing, const Symbol& sym ) noexcept
+{
+    return langFacts( sym.lang ).linkSections && sym.kind == SymKind::Section && sym.fileId < ing.files.size() && !notNamed( sym );
+}
+
 // Headings, and each file's own node (the first matching symbol in id order). The file node is not a heading.
 inline void indexMarkdownSections( MdLinkIndex& ix, const IngestResult& ing )
 {
@@ -9090,14 +9305,14 @@ inline void indexMarkdownSections( MdLinkIndex& ix, const IngestResult& ing )
     std::vector<std::uint32_t> widest( ing.files.size(), 0 );
     for( const Symbol& sym : ing.symbols )
     {
-        if( langFacts( sym.lang ).linkSections && sym.kind == SymKind::Section && sym.fileId < ing.files.size() )
+        if( isLinkableSection( ing, sym ) )
         {
             widest[ sym.fileId ] = std::max( widest[ sym.fileId ], sym.endByte );
         }
     }
     for( const Symbol& sym : ing.symbols )
     {
-        if( !langFacts( sym.lang ).linkSections || sym.kind != SymKind::Section || sym.fileId >= ing.files.size() )
+        if( !isLinkableSection( ing, sym ) )
         {
             continue;
         }
@@ -9251,8 +9466,8 @@ inline MdLinkPins bindMarkdownLinks( const IngestResult& ing )
         const Reference& r = ing.references[ i ];
         if( isMarkdownLinkRef( r ) && r.fileId < ing.files.size() )
         {
-            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath, out.pin[ i ] ) ) { continue; }
-            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath, ing.crawlRoot );
+            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath(), out.pin[ i ] ) ) { continue; }
+            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath(), ing.crawlRoot );
             out.pin[ i ]      = t.id;
             out.slugMiss[ i ] = t.slugMiss ? 1 : 0;
         }
@@ -9464,6 +9679,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                             // caller, and 200 `name` columns must not damp a model's real `def name`.
                             // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
                             // later behind an evidence rule (receiver proven to be the owning model).
+            }
+            if( notNamed( s ) )
+            {
+                continue;   // a --recall-only unit (model.h kRankFlagNotNamed): no call binds it, no namesake is damped by it
             }
             byName[ s.name ].push_back( s.id );
         }
@@ -10454,7 +10673,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( std::uint32_t i = 0; i < std::uint32_t( ing.references.size() ); ++i )
         {
             const Reference& r = ing.references[ i ];
-            if( r.isCompose && r.composeRel == "elem" && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.memberPath.empty() )
+            if( r.isCompose && r.composeRel() == "elem" && r.fromSymbol != kNoNode && !r.recvVar.empty() && !r.memberPath().empty() )
             {
                 key.assign( ing.symbols[ r.fromSymbol ].name ).push_back( '#' );
                 key.append( r.recvVar );
@@ -10479,9 +10698,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( const std::uint32_t i : it->second )
         {
             const Reference& r = ing.references[ i ];
-            if( !r.memberPath.empty() )
+            if( !r.memberPath().empty() )
             {
-                addElementOfText( out, r.memberPath );
+                addElementOfText( out, r.memberPath() );
             }
             else if( !fieldTypeWrittenInStd( r ) && r.calleeName != type )
             {
@@ -10502,7 +10721,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             for( const std::uint32_t i : eit->second )
             {
-                addElementOfText( out, ing.references[ i ].memberPath );
+                addElementOfText( out, ing.references[ i ].memberPath() );
             }
         }
         const FlatRecvType* field = fieldTypeIn( std::string( cls ), member );
@@ -10515,7 +10734,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     Reference stdElemProbe;   // reused: the container root of an element receiver, as a NamedVar receiver of the same call
     const auto addElementReceiver = [ & ]( StdMemberGate::Receiver& out, const Reference& ref, const std::string& callerScope )
     {
-        const std::string_view shape = std::string_view( ref.memberPath ).substr( kCppElementMark.size() );
+        const std::string_view shape = std::string_view( ref.memberPath() ).substr( kCppElementMark.size() );
         const std::size_t      dot   = shape.find( '.' );
         if( shape.starts_with( "this." ) )
         {
@@ -10563,16 +10782,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             addNamed( out, ref, callerScope, ref.viaArrow );
         }
-        else if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName.empty() )
+        else if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName().empty() )
         {
-            addField( out, fieldTypeIn( callerScope, ref.fieldName ), ref.viaArrow );   // `this->items_.m()`
+            addField( out, fieldTypeIn( callerScope, ref.fieldName() ), ref.viaArrow );   // `this->items_.m()`
         }
-        else if( ref.recv == RecvKind::FieldOfVar && ref.recvVar.empty() && !ref.memberCall && ref.memberPath.size() > kCppElementMark.size()
-                 && ref.memberPath.starts_with( kCppElementMark ) )
+        else if( ref.recv == RecvKind::FieldOfVar && ref.recvVar.empty() && !ref.memberCall && ref.memberPath().size() > kCppElementMark.size()
+                 && ref.memberPath().starts_with( kCppElementMark ) )
         {
             addElementReceiver( out, ref, callerScope );   // `m[ k ].empty()`: the container's element type
         }
-        else if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName.empty() )
+        else if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName().empty() )
         {
             // one hop off a typed root (`b.items_.m()`, `up->items_.m()`): the root's written classes, then each one's field.
             // A root written as a std smart pointer or optional reaches its fields through `->` alone, so its pointee is read.
@@ -10580,7 +10799,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             addNamed( stdRecvRoot, ref, callerScope, /*viaArrow=*/true );
             for( const std::string_view r : stdRecvRoot.types )
             {
-                addField( out, fieldTypeIn( std::string( r ), ref.fieldName ), ref.viaArrow );
+                addField( out, fieldTypeIn( std::string( r ), ref.fieldName() ), ref.viaArrow );
             }
         }
     };
@@ -11130,13 +11349,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             for( std::size_t i = cb; i < ce; ++i )
             {
                 const NodeId to = scip->coveredFrom[ i ].to;
-                if( to != r.fromSymbol && to < N )
+                // a schema definition (.proto) is linked to the code that uses it by name only, never a call edge: an index that
+                // resolves a call to one leaves the site pinned with no edge (PROTO-INDEX; the shortkey gen rung is the link)
+                if( to != r.fromSymbol && to < N && !langFacts( ing.symbols[ to ].lang ).generatedSchema )
                 {
                     tier.push_back( to ); // precise target (self-loops dropped, as the fallback ladder below does)
                 }
             }
             scipPinned = !tier.empty();
-            // a covered site whose precise targets are all self / out-of-range yields no edge — treat as pinned
+            // a covered site whose precise targets are all self / out-of-range / schema yields no edge — treat as pinned
             // (the index HAS resolved it) so we do NOT fall back to a name-based guess for a site SCIP resolved.
             if( cb != ce )
             {
@@ -11713,16 +11934,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // — that shape read as a clone of both (--quality-delta), being the same two lines a third time.
         bool modAttrUnproven = false;   // PY-MOD-CALL-SITES: `y.f()` through a from-imported submodule y that Rule 2d could not prove
         if( !scipPinned && !canonical && !narrowed && it != byName.end()
-            && r.lang == Lang::Python && r.recv == RecvKind::NamedVar && !r.recvVar.empty()
-            && !externalVeto.hasLocal( r, r.recvVar ) )
+            && r.lang == Lang::Python && r.recv == RecvKind::NamedVar && !r.recvVar.empty() )
         {
-            bindKey.clear();  Narrower::appendUint( bindKey, r.fileId );  bindKey.push_back( '#' );  bindKey.append( r.recvVar );
+            // PY-LOCAL-BIND: a local y (hasLocal) is a module only through an import inside the caller's own def, in the scoped tables
+            // keyed by that def (a parameter or assignment of y there poisoned the entry); a module-level y uses the file's tables
+            const PythonRecvBindTables tabs     = pythonRecvBindTables( ing, extVeto, externalVeto, r, bindKey );
+            const auto&                aliasTab = tabs.alias;
+            const auto&                subTab   = tabs.sub;
             // PY-MOD-CALL-SITES: else `from p import y` naming p's submodule y (ExternalVetoTables::submoduleBindFile) — the same narrow.
             // A site it cannot prove (unproven binding, a dynamic namespace in the submodule, none or two module-scope defs there) keeps
             // the ladder; only where the ladder would read the module attribute as no in-tree def (external=) is it declined instead
-            const auto ait = extVeto.importBindFile.find( bindKey );
-            const auto sit = ait == extVeto.importBindFile.end() || ait->second == kNoFile ? extVeto.submoduleBindFile.find( bindKey ) : extVeto.submoduleBindFile.end();
-            const bool fromSub = sit != extVeto.submoduleBindFile.end();
+            const auto ait = aliasTab.find( bindKey );
+            const auto sit = ait == aliasTab.end() || ait->second == kNoFile ? subTab.find( bindKey ) : subTab.end();
+            const bool fromSub = sit != subTab.end();
             if( fromSub && !narrowed && pythonSubmoduleAttrProven( extVeto, sit->second, r.calleeName, bindKey ) )
             {
                 NodeId      only  = kNoNode;
@@ -11747,7 +11971,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
             modAttrUnproven = fromSub && !narrowed;
-            if( ait != extVeto.importBindFile.end() && ait->second != kNoFile )
+            if( ait != aliasTab.end() && ait->second != kNoFile )
             {
                 const std::uint32_t aliasFile = ait->second;
                 NodeId              only      = kNoNode;
@@ -13154,10 +13378,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             ComposeEdge ce;
             ce.ownerSym  = r.fromSymbol;
             ce.typeSym   = typeId;
-            ce.fieldName = r.fieldName;
+            ce.fieldName = r.fieldName();
             ce.typeName  = r.calleeName;
             ce.ownerName = ing.symbols[ r.fromSymbol ].name;
-            ce.rel       = r.composeRel;
+            ce.rel       = r.composeRel();
             // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
             // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
             // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
@@ -13290,6 +13514,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     g.priorWeight.resize( N, 1.f );
     for( const Symbol& s : ing.symbols )
     {
+        if( notNamed( s ) )
+        {
+            g.priorWeight[ s.id ] = 0.f;   // a --recall-only unit draws no teleport mass: PageRank ranks the rest as if it were absent
+            ++g.unrankedNodeCount;
+            continue;
+        }
         const auto it = byName.find( s.name );
         const std::size_t defCount = ( it != byName.end() ) ? it->second.size() : 0;
         g.priorWeight[ s.id ] = priorwt::weight( s.name, defCount );
@@ -13388,10 +13618,13 @@ inline std::vector<float> takeRank( RankedGraph ranked, RankDisclosure& disclosu
 }
 
 // uniform-teleport PageRank (the default).
+// A kRankFlagNotNamed unit (model.h) has no edge and a 0 prior weight, so the uniform share is over the ranked nodes: every other
+// node's teleport is the value it has in an index without those units, bit for bit.
 inline RankedGraph rankGraph( const Graph& g, float alpha = 0.85f )
 {
-    const std::size_t N = g.wOutDeg.size();
-    return rankGraphTeleport( g, std::vector<float>( N, N ? 1.0f / float( N ) : 0.f ), alpha );
+    const std::size_t N      = g.wOutDeg.size();
+    const std::size_t ranked = N - std::min<std::size_t>( N, g.unrankedNodeCount );
+    return rankGraphTeleport( g, std::vector<float>( N, ranked ? 1.0f / float( ranked ) : 0.f ), alpha );
 }
 
 // out-edge SpMV: h[j] = Σ_{j→i} w·a[i] (the HITS hub step; out-degree is capped, scalar is fine).
@@ -14316,7 +14549,7 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( elixirNameMatches( s, name ) )
+        if( elixirNameMatches( s, name ) && !notNamed( s ) )   // a --recall-only unit is no bare-name target (model.h kRankFlagNotNamed)
         {
             out.push_back( s.id );
         }
@@ -15392,6 +15625,13 @@ inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std:
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
 // on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
 // bare name), so a reader never has to ask whether the number is stale.
+// The file half of a `file:name` selector: a bare name (no file) admits every definition but a --recall-only unit (model.h
+// kRankFlagNotNamed), which answers a file-qualified selector only; a file admits the definitions in a file whose path contains it.
+inline bool nameSpecFileAdmits( const IngestResult& ing, const Symbol& s, std::string_view file )
+{
+    return file.empty() ? !notNamed( s ) : filePathContainsRootRel( ing, s.fileId, file );
+}
+
 inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,
                                                       std::size_t* unprovenDefCountOut = nullptr )
 {
@@ -15433,7 +15673,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( elixirNameMatches( s, name ) && ( file.empty() || filePathContainsRootRel( ing, s.fileId, file ) ) )
+        if( elixirNameMatches( s, name ) && nameSpecFileAdmits( ing, s, file ) )
         {
             out.push_back( s.id );
         }
@@ -15784,7 +16024,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             break;
             case RecvKind::FieldOfThis:
             {
-                candidatesIn( fieldTypeOf( ctxOwner, r.fieldName ), r.lang );
+                candidatesIn( fieldTypeOf( ctxOwner, r.fieldName() ), r.lang );
                 if( cand.empty() )
                 {
                     everyCompatibleOwner( r.lang );
@@ -15793,7 +16033,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             break;
             case RecvKind::FieldOfVar:
             {
-                candidatesIn( fieldTypeOf( receiverTypeOf( r.fromSymbol, r.recvVar, ctxOwner ), r.fieldName ), r.lang );
+                candidatesIn( fieldTypeOf( receiverTypeOf( r.fromSymbol, r.recvVar, ctxOwner ), r.fieldName() ), r.lang );
                 if( cand.empty() )
                 {
                     everyCompatibleOwner( r.lang );   // includes the "receiver too rich to classify" shape (empty recvVar)
