@@ -2496,7 +2496,7 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
         const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
         OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
         std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
-        demoteSiblingRowsInto( ing, g, args.answer, answer, args.held );
+        demoteSiblingRowsInto( ing, g, args.task, args.answer, answer, args.held );
         if( !answer.empty() )
         {
             if( price != nullptr )

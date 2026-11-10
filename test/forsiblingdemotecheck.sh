@@ -2,7 +2,8 @@
 # forsiblingdemotecheck.sh — SIBLING-DEMOTE (src/forsiblingdemote.h): a ranked <sigs> <d> row with <d> rank > 10 (kDemoteMinRank; its
 # answer-row position — the <d>, <y>, <s> and non-`used` <u> rows in output order — is then past 10 too) and a higher <d> row of the same
 # file is printed in its place as a tail pointer <t p="FILE" sym="NAME"/>, unless a keep guard holds (K1 mem=, K2 a <c> callee of a <h> hop row, K3 Owner.member under its
-# Owner row, K4 a proven call path of <= 2 edges to one of the first three resolved answer rows, K5 a kept row's same_as= names it).
+# Owner row, K4 a proven call path of <= 2 edges to one of the first three resolved answer rows or a row the task names, K5 a kept
+# row's same_as= names it, K6 the row carries a <note>, K7 it carries slot_by= / slot_fields=).
 #
 # ONE Python tree (the rule reads answer bytes; K4 reads the index graph): widget.py holds the head parse_widget_config and 14 plain
 # same-file siblings (widget_config_variant_NN), a name-only member callee of the head (WidgetConfigSink.widget_config_flush), a 2-hop proven
@@ -21,8 +22,12 @@
 #   (k3) WidgetShelf.widget_shelf_row (WidgetShelf right above) stays a row
 #   (k4) widget_config_far_caller (proven 2-hop caller of the head) stays a row; twin: widget_config_farther_caller (3 hops) is a pointer
 #   (k5) widget_shelf_row stays a row: the kept WidgetShelf.widget_shelf_row says same_as="widget_shelf_row"
+#   (k6) a copy of the tree (a git repo) with a --note-add note on widget_config_variant_07: that row stays a row, its note intact,
+#        and (a) holds on it; twin: widget_config_variant_08 (no note) is still a pointer. K7 (slot facts) is driven by fnslotcheck
+#        (F1b/K2/K3/X2b/F4) and K4's task-named seeds by pymodcallsitescheck (X7/X7b/X7c), whose rows sit past rank 10.
 #   (e)  est_tokens= is re-priced down (estchargecheck holds its value to the bytes); (w) well formed; (l) one legend comment, no "--" in it
 #   (b)  --token-budget leaves the answer as shaped: no pointer in <sigs>, no legend comment
+#   (b2) a bare --max-tokens (not read by --for: its notice says nothing was dropped) does not hold the demote: byte-identical to (a)'s
 #   (g)  GROWTH (sit 11-08: 4 aborts): a second tree of ten one-row files and z.py's four short undocumented rows. The legend comment
 #        and three pointers outweigh the rows they replace, so the answer GROWS: the run exits 0 and answers, (a) holds on it (default
 #        and --signatures-only), and on --signatures-only (markup only) est_tokens = round(bytes/2.50) exactly and is above the off
@@ -156,7 +161,8 @@ def rule( t, keep4 ):
     R = rows( t ); C = calls( t ); D = [ r for r in R if r["tag"] == "d" ]; pick = []
     for r in D:
         n = r["a"].get( "n", "" ); f = r["a"].get( "p", "" ).split( ":" )[0]
-        if not r["sigs"] or r["dpos"] <= 10 or "mem" in r["a"]: continue
+        if not r["sigs"] or r["dpos"] <= 10 or "mem" in r["a"] or "slot_by" in r["a"] or "slot_fields" in r["a"]: continue
+        if "<note " in t[r["s"]:r["e"]]: continue   # K6
         if not any( x["a"].get( "p", "" ).split( ":" )[0] == f for x in D[: r["dpos"] - 1] ): continue
         if n in C or last( n ) in C: continue
         if ( "." in n or "::" in n ) and any( x["a"].get( "n" ) == re.split( r"\.|::", n )[0] for x in D[max( 0, r["dpos"] - 5 ): r["dpos"] - 1] ): continue
@@ -213,6 +219,22 @@ arm k4 ptr widget_config_farther_caller "3 hops from the head: no guard"
 arm k5 row widget_shelf_row "the kept WidgetShelf.widget_shelf_row says same_as= it"
 grep -q 'same_as="widget_shelf_row"' "$TMP/on.xml" || no "(k5) the fixture no longer prints same_as=\"widget_shelf_row\""
 
+# (k6) NOTED: a row carrying a --note-add note stays a row (a pointer would drop the note)
+cp -R "$TMP/py" "$TMP/py6"
+( cd "$TMP/py6" && git init -q -b main . && git add -A && git -c user.email=gate@example.invalid -c user.name=gate commit -qm fx ) || no "(k6) could not make the fixture copy a git repo"
+"$BIN" "$TMP/py6" --note-add="widget_config_variant_07: keep the variant table in step with the parser" >/dev/null 2>&1
+( cd "$TMP/py6" && "$BIN" . --no-cache "--for=$TASK" ) >"$TMP/k6.on"
+( cd "$TMP/py6" && RIPWIRE_NO_SIBLING_DEMOTE=1 "$BIN" . --no-cache "--for=$TASK" ) >"$TMP/k6.off"
+python3 "$TMP/check.py" "$TMP/k6.off" "$TMP/k6.on" "$KEEP4" >"$TMP/k6.res" 2>&1
+python3 "$TMP/names.py" "$TMP/k6.on" >"$TMP/k6.names"
+ptr="$( sed -n 's/^ptr //p' "$TMP/k6.names" ),"; rws="$( sed -n 's/^rows //p' "$TMP/k6.names" ),"
+grep -q 'keep the variant table in step' "$TMP/k6.off" || no "(k6) the off answer carries no note on widget_config_variant_07 — the arm cannot see K6"
+arm k6 row widget_config_variant_07 "it carries a --note-add note"
+arm k6 ptr widget_config_variant_08 "no note: the twin is still a pointer"
+grep -q 'keep the variant table in step' "$TMP/k6.on" && grep -q '^PASS (a)' "$TMP/k6.res" && ok "(k6) the note is printed and (a) holds ($( grep -o '[0-9]* rows' "$TMP/k6.res" ))" \
+  || no "(k6) note missing from the answer or (a): $( head -c 300 "$TMP/k6.res" )"
+ptr="$( sed -n 's/^ptr //p' "$TMP/on.names" ),"; rws="$( sed -n 's/^rows //p' "$TMP/on.names" ),"
+
 eon="$( grep -o '^<ctx [^>]*' "$TMP/on.xml" | grep -o ' est_tokens="[0-9]*"' | grep -o '[0-9]*' )"
 eoff="$( grep -o '^<ctx [^>]*' "$TMP/off.xml" | grep -o ' est_tokens="[0-9]*"' | grep -o '[0-9]*' )"
 if [ -n "$eon" ] && [ -n "$eoff" ] && [ "$eon" -lt "$eoff" ]; then ok "(e) est_tokens re-priced: $eoff -> $eon"; else no "(e) est_tokens off=$eoff on=$eon"; fi
@@ -237,6 +259,8 @@ arm r ptr widget_config_variant_06 "a same-file decoy at <d> rank 11"
 run "--for=$TASK" --token-budget=4000 >"$TMP/b.xml"
 python3 "$TMP/names.py" "$TMP/b.xml" >"$TMP/b.names"
 if grep -q '^ptr $' "$TMP/b.names" && ! grep -q '<!-- demote:' "$TMP/b.xml"; then ok "(b) --token-budget: no pointer in <sigs>"; else no "(b) $( head -c 300 "$TMP/b.names" )"; fi
+run "--for=$TASK" --max-tokens=4000 >"$TMP/m.xml" 2>/dev/null
+if cmp -s "$TMP/m.xml" "$TMP/on.xml"; then ok "(b2) a bare --max-tokens (not read by --for) leaves the demoted answer byte-identical to the flagless one"; else no "(b2) --max-tokens=4000 changed the answer (it is not read by --for: forbodyfoldcheck F8m)"; fi
 
 # (g) GROWTH: short rows, the answer grows (the legend comment and three pointers outweigh the rows they replace)
 python3 - "$TMP/g" <<'PY' || { echo "fixture generator failed"; exit 2; }

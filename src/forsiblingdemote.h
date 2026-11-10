@@ -18,16 +18,22 @@
 //   (K4) CALL-PATH: the index holds a call path of at most two PROVEN edges (a call: not bound by name alone, not a link) between it and
 //        one of the first kCallPathSeeds resolved answer rows, either way round (ROW-FEATURES-2: a tail rule lost credited call-site
 //        rows that are proven callers of the head);
-//   (K5) a kept <d> row's same_as= names it (its doc+signature text is the one that row points to).
-// The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. A token budget (CLI --token-budget /
-// --max-tokens, MCP budget_tokens) leaves the answer as shaped. The demoted bytes are priced markup, so the root's est_tokens= is
+//   (K5) a kept <d> row's same_as= names it (its doc+signature text is the one that row points to);
+//   (K6) NOTED: the row carries a <note> (a gotcha someone saved with --note-add on that symbol: a pointer would drop it);
+//   (K7) SLOT-FACT: the row carries slot_by= / slot_fields= (FN-VALUED-SLOT's cross-file call facts ride on the row, not the pointer).
+// K4's seeds are the first kCallPathSeeds resolved answer rows AND every answer row the task names (an identifier-syntax word of
+// the task spelled as the row's last segment): a proven caller or callee of the symbol a `who calls X` task names is its answer.
+// The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. A token budget (CLI --token-budget, MCP
+// budget_tokens; a bare --max-tokens is not read by --for) leaves the answer as shaped. The demoted bytes are priced markup, so the root's est_tokens= is
 // re-priced once over the post-passes (R-DEDUP's tail cut, ONE-SIDE-REACH, then this one: serialize.h repriceRootAfterCut) — the net change is
 // signed: on short rows the legend and pointers can ADD bytes, and est_tokens= then goes up.
 // RIPWIRE_NO_SIBLING_DEMOTE=1 turns it off (byte identity and the gate's twins).
 #include "forfilesyms.h" // filesyms_detail::FileLookup / leafName / unescapeXmlAttr
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / inEdges, edgeIndex, edgeKindByte
+#include "lexical.h" // splitRouteWords, isRouteStopword, routeLower, detail::graphSubjectTrimWord
 #include "model.h"
 #include "serialize.h" // attrOf
+#include "subjectanchor.h" // subject_detail::hasNameSyntax
 
 #include <algorithm>
 #include <charconv>
@@ -66,6 +72,7 @@ struct AnswerRow
     std::size_t pos = 0; // 1-based answer-row position
     std::size_t dpos = 0; // 1-based <d> rank (0: not a <d> row)
     bool inSigs = false;
+    bool noted = false; // (K6): a <note> rides inside the row
 };
 struct AnswerScan
 {
@@ -150,6 +157,7 @@ inline AnswerScan scanAnswer( std::string_view text )
                 r.dpos = ++dRows;
                 const std::size_t endTag = selfClosing ? std::string_view::npos : text.find( "</d>", close );
                 r.end = endTag == std::string_view::npos ? r.end : endTag + 4;
+                r.noted = text.substr( close, r.end - close ).contains( "<note " );
             }
             out.rows.push_back( r );
         }
@@ -166,6 +174,24 @@ inline std::string_view fileOf( const AnswerRow& r )
 inline bool hasMembers( const AnswerRow& r ) noexcept
 {
     return r.attrs.contains( " mem=\"" );
+}
+inline bool hasSlotFacts( const AnswerRow& r ) noexcept
+{
+    return r.attrs.contains( " slot_by=\"" ) || r.attrs.contains( " slot_fields=\"" );
+}
+// The identifier-syntax words of the task (camelCase, snake_case, Owner::name / pkg.Name), trimmed, stopwords left out.
+inline std::vector<std::string_view> taskNames( std::string_view task )
+{
+    std::vector<std::string_view> names;
+    for( const std::string_view w : splitRouteWords( task ) )
+    {
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        if( !isRouteStopword( routeLower( t ) ) && subject_detail::hasNameSyntax( t ) )
+        {
+            names.push_back( filesyms_detail::leafName( t ) );
+        }
+    }
+    return names;
 }
 inline bool hopCallee( const AnswerScan& scan, std::string_view name )
 {
@@ -313,13 +339,13 @@ inline bool provenPathToSeed( const Graph& g, const SeedReach& sr, NodeId id )
     return found;
 }
 
-// The <d> rows (r), (p) and (f) pick that K1-K3 (the answer's own bytes) do not keep, in answer order.
+// The <d> rows (r) and (f) pick that K1-K3, K6 and K7 (the answer's own bytes) do not keep, in answer order.
 inline std::vector<const AnswerRow*> pickByBytes( const AnswerScan& scan, const std::vector<const AnswerRow*>& dRows )
 {
     std::vector<const AnswerRow*> picked;
     for( const AnswerRow* r : dRows )
     {
-        if( !r->inSigs || r->dpos <= kDemoteMinRank || hasMembers( *r ) )
+        if( !r->inSigs || r->dpos <= kDemoteMinRank || hasMembers( *r ) || r->noted || hasSlotFacts( *r ) )
         {
             continue;
         }
@@ -334,8 +360,9 @@ inline std::vector<const AnswerRow*> pickByBytes( const AnswerScan& scan, const 
     return picked;
 }
 // K4: demote[pos - 1] = 1 for each picked row with no proven <= 2-hop path to a seed. Every answer row is resolved in one pass; the
-// seeds are the first kCallPathSeeds distinct resolved ones.
-inline void markWithoutCallPath( const IngestResult& ing, const Graph& g, const AnswerScan& scan, const std::vector<const AnswerRow*>& picked, std::vector<char>& demote )
+// seeds are the first kCallPathSeeds distinct resolved ones, then every resolved row the task names.
+inline void markWithoutCallPath( const IngestResult& ing, const Graph& g, std::string_view task, const AnswerScan& scan,
+                                 const std::vector<const AnswerRow*>& picked, std::vector<char>& demote )
 {
     filesyms_detail::FileLookup files( ing );
     std::vector<RowWant> wants;
@@ -350,6 +377,14 @@ inline void markWithoutCallPath( const IngestResult& ing, const Graph& g, const 
         if( wants[k].id != kNoNode && !std::ranges::contains( seeds, wants[k].id ) )
         {
             seeds.push_back( wants[k].id );
+        }
+    }
+    const std::vector<std::string_view> named = taskNames( task );
+    for( const RowWant& w : wants )
+    {
+        if( w.id != kNoNode && std::ranges::contains( named, std::string_view( w.leaf ) ) && !std::ranges::contains( seeds, w.id ) )
+        {
+            seeds.push_back( w.id );
         }
     }
     const SeedReach reach = seedReach( g, std::move( seeds ) );
@@ -395,7 +430,7 @@ inline std::string pointerAnswer( std::string_view answer, const std::vector<con
 }
 
 // The answer with the demoted rows rewritten as tail pointers; "" when none is.
-inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view answer )
+inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer )
 {
     const AnswerScan scan = scanAnswer( answer );
     std::vector<const AnswerRow*> dRows;
@@ -412,7 +447,7 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
         return {};
     }
     std::vector<char> demote( scan.rows.size(), 0 );
-    markWithoutCallPath( ing, g, scan, picked, demote );
+    markWithoutCallPath( ing, g, task, scan, picked, demote );
     keepSameAsTargets( dRows, picked, demote );
     return pointerAnswer( answer, picked, demote );
 }
@@ -422,13 +457,13 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
 // unchanged) and, when this pass demotes a row, its result. Not priced: the caller re-prices the root once on the final bytes (signed:
 // the pointers and legend may outweigh the rows they replace). `held` (a token budget) leaves the answer as shaped. CLI
 // shapedForFileSymsAnswer and MCP insertFileSyms both call this.
-inline void demoteSiblingRowsInto( const IngestResult& ing, const Graph& g, std::string_view answer, std::string& edited, bool held )
+inline void demoteSiblingRowsInto( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, std::string& edited, bool held )
 {
     if( held || !siblingDemoteOn() )
     {
         return;
     }
-    std::string demoted = demote_detail::demoteSiblingRows( ing, g, edited.empty() ? answer : std::string_view( edited ) );
+    std::string demoted = demote_detail::demoteSiblingRows( ing, g, task, edited.empty() ? answer : std::string_view( edited ) );
     if( !demoted.empty() )
     {
         edited = std::move( demoted );
