@@ -2178,6 +2178,13 @@ inline std::vector<std::string> touchHolderNames( const IngestResult& ing, std::
     return names;
 }
 
+// A <touch> row's share= and the channel it counts: by="stem" (file stems, not names), scope="dir" (RESIDUAL-2: the members in the
+// typical member's directory, not the family).
+inline std::string touchShareAttrs( const ExemplarTouch& r )
+{
+    return " share=\"" + std::to_string( r.mentioned ) + "/" + std::to_string( r.of ) + "\"" + ( r.byStem ? " by=\"stem\"" : "" ) + ( r.dirLocal ? " scope=\"dir\"" : "" );
+}
+
 // The <touch_list> element of a family: total=, the cap, and one <touch> row per listing file (see the legend).
 inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchList& list )
 {
@@ -2206,9 +2213,7 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchLis
             --keep; // never split a UTF-8 sequence
         }
         out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\"" + ( holderName[i].empty() ? "" : " n=\"" + e( holderName[i] ) + "\"" );
-        out += " share=\"" + std::to_string( r.mentioned ) + "/" + std::to_string( r.of ) + "\"";
-        out += r.byStem ? " by=\"stem\"" : "";
-        out += r.dirLocal ? " scope=\"dir\"" : "";
+        out += touchShareAttrs( r );
         out += ( keep < r.text.size() ? " cut=\"1\">" : ">" ) + e( std::string_view( r.text ).substr( 0, keep ) ) + "</touch>";
     }
     out += touch.empty() ? "" : "</touch_list>";
@@ -2237,7 +2242,7 @@ namespace exemplar_detail
 {
 inline bool goTypeNameOk( std::string_view s ) noexcept
 {
-    return !s.empty() && std::ranges::all_of( s, []( char c ) { return isIdentChar( c ); } );
+    return !s.empty() && namesplit::isIdentStart( s.front() ) && std::ranges::find_if_not( s, &namesplit::isIdentChar ) == s.end();
 }
 
 // One Go value spec `_ I = &T{}` / `_ I = (*T)(nil)` / `_ I = T{}`: (I, T), or two empty views when it is not an interface assertion.
@@ -2313,20 +2318,16 @@ inline void goAssertionsOf( std::uint32_t f, std::string_view txt, std::vector<G
 }
 } // namespace exemplar_detail
 
-// The contract row of a Go family's typical member (see the banner); type="" when its file or package asserts nothing.
-inline ExemplarContract typicalContract( const IngestResult& ing, const ExemplarFamily& fam )
+namespace exemplar_detail
 {
-    using namespace exemplar_detail;
-    const ExemplarMember& m = fam.members.front();
-    const std::string_view memberRel = rootRelPath( ing, m.fileId );
-    if( !memberRel.ends_with( ".go" ) )
-    {
-        return {};
-    }
-    const std::string_view memberDir = includerDir( memberRel );
+// Every interface assertion in the typical member's home: its own file (a definition), or the non-test Go files of the package
+// directory a registry entry is named for, beside the registry (`dynamicresources.Name` in plugins/registry.go: plugins/dynamicresources).
+inline std::vector<GoAssertion> goAssertionsAtHome( const IngestResult& ing, const ExemplarMember& m )
+{
+    const std::string_view memberDir = includerDir( rootRelPath( ing, m.fileId ) );
     const std::string pkgDir = m.sym != kNoNode ? std::string() : memberDir.empty() ? m.name : std::string( memberDir ) + "/" + m.name;
     std::vector<GoAssertion> found;
-    std::uint32_t unread = 0; // not printed: a row that could not be read is no row
+    std::uint32_t unread = 0; // not printed: a file that could not be read holds no row
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         const std::string_view rel = rootRelPath( ing, f );
@@ -2340,18 +2341,38 @@ inline ExemplarContract typicalContract( const IngestResult& ing, const Exemplar
             goAssertionsOf( f, *txt, found );
         }
     }
-    // the type asserting the most interfaces; a tie: the earliest (file id, line), which is the order `found` is in
+    return found;
+}
+
+// The type asserting the most interfaces; a tie is the earliest (file id, line), the order `found` is in. HOISTING: `found` is one
+// file's or one package directory's assertions (a handful), so the count per entry is not a hot loop.
+inline std::string_view mostAssertingType( const std::vector<GoAssertion>& found )
+{
     std::string_view best;
     std::size_t bestN = 0;
     for( const GoAssertion& a : found )
     {
-        const std::size_t n = std::size_t( std::ranges::count( found, a.type, &GoAssertion::type ) );
-        if( n > bestN )
+        if( const std::size_t n = std::size_t( std::ranges::count( found, a.type, &GoAssertion::type ) ); n > bestN )
         {
             best = a.type;
             bestN = n;
         }
     }
+    return best;
+}
+} // namespace exemplar_detail
+
+// The contract row of a Go family's typical member (see the banner); type="" when its file or package asserts nothing.
+inline ExemplarContract typicalContract( const IngestResult& ing, const ExemplarFamily& fam )
+{
+    using namespace exemplar_detail;
+    const ExemplarMember& m = fam.members.front();
+    if( !rootRelPath( ing, m.fileId ).ends_with( ".go" ) )
+    {
+        return {};
+    }
+    const std::vector<GoAssertion> found = goAssertionsAtHome( ing, m );
+    const std::string_view best = mostAssertingType( found );
     ExemplarContract out;
     for( const GoAssertion& a : found )
     {
@@ -2361,7 +2382,7 @@ inline ExemplarContract typicalContract( const IngestResult& ing, const Exemplar
         }
         if( out.type.empty() )
         {
-            out = ExemplarContract { a.type, a.fileId, a.line, {} };
+            out = ExemplarContract { a.type, a.fileId, a.line, {} }; // the first assertion line of that type is p=
         }
         out.ifaces.push_back( a.iface );
     }
