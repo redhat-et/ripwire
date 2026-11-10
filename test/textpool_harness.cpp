@@ -8,6 +8,8 @@
 //   E  segment creation races: 40 fresh pools, 8 threads released together, each interning its own 600 texts, so several
 //      threads make the same segment at once (the CAS loser frees its copy and writes into the winner's); under TSan a relaxed
 //      publish is a reported race. Every text reads back.
+//   F  the per-thread front cache (internRefText): 8 threads build InternedTexts of the same 30,000 texts twice (the second pass
+//      hits the cache) plus 4,096-apart colliding indices; every thread's names equal thread 0's and read back their text.
 #include "internedtext.h"
 
 #include <algorithm>
@@ -143,6 +145,37 @@ int main()
         }
     }
     check( raced, "E", "40 pools with 8 threads making segments together: every text reads back" );
+
+    // F. The front cache on the process-wide pool.
+    std::vector<std::vector<rw::InternedText>> names( kThreads, std::vector<rw::InternedText>( kTexts ) );
+    std::vector<std::thread> namers;
+    for( std::size_t t = 0; t < kThreads; ++t )
+    {
+        namers.emplace_back( [ &, t ] {
+            for( int pass = 0; pass < 2; ++pass )
+            {
+                for( std::size_t k = 0; k < kTexts; ++k )
+                {
+                    const std::size_t i = ( k * kStride[ t ] ) % kTexts;
+                    names[ t ][ i ]     = texts[ i ];
+                }
+            }
+        } );
+    }
+    for( std::thread& n : namers )
+    {
+        n.join();
+    }
+    bool cached = true;
+    for( std::size_t i = 0; i < kTexts; ++i )
+    {
+        cached = cached && names[ 0 ][ i ] == std::string_view( texts[ i ] );
+        for( std::size_t t = 1; t < kThreads; ++t )
+        {
+            cached = cached && names[ t ][ i ] == names[ 0 ][ i ];
+        }
+    }
+    check( cached, "F", "front-cached names from 8 threads agree and read back" );
 
     std::printf( "textpool: %s\n", gFails == 0 ? "ALL PASS" : "FAILURES" );
     return gFails == 0 ? 0 : 1;

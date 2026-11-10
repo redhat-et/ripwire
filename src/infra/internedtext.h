@@ -56,13 +56,13 @@ public:
         }
     }
 
-    std::uint32_t intern( std::string_view text )
+    static std::uint64_t hashOf( std::string_view text ) noexcept { return ankerl::unordered_dense::hash<std::string_view>{}( text ); }
+
+    std::uint32_t intern( std::string_view text ) { return text.empty() ? kEmptyId : intern( text, hashOf( text ) ); }
+
+    // `hash` = hashOf( text ), for a caller that already has it (internRefText's front cache); text is non-empty.
+    std::uint32_t intern( std::string_view text, std::uint64_t hash )
     {
-        if( text.empty() )
-        {
-            return kEmptyId;
-        }
-        const std::uint64_t hash  = ankerl::unordered_dense::hash<std::string_view>{}( text );
         Shard&              shard = shards_[ hash >> ( 64 - kShardBits ) ];
         const std::uint32_t tag   = std::uint32_t( hash );
         std::lock_guard     lock( shard.mutex );
@@ -178,16 +178,45 @@ private:
 // constexpr only recently.
 inline TextPool gRefTextPool;
 
+// gRefTextPool.intern behind a per-thread, direct-mapped front cache of the ids this thread interned last: most names repeat (1.2 M
+// references, 59 K distinct callee names on envoy), and a hit skips the shard lock. A hit is proven, not guessed: the cached id's
+// text must equal `text`. Every cached id came from gRefTextPool on this thread, so its slot was published to this thread under the
+// shard lock (the read is race-free), and the pool is never destroyed before the last thread that uses it. Measured cause: the
+// warm (--cache) path re-interns every cached row's names, and without this cache envoy's warm instructions rose 2.7 %.
+inline std::uint32_t internRefText( std::string_view text )
+{
+    if( text.empty() )
+    {
+        return TextPool::kEmptyId;
+    }
+    struct FrontSlot
+    {
+        std::uint32_t tag = 0;
+        std::uint32_t id  = TextPool::kEmptyId;
+    };
+    constexpr std::size_t kFrontSlots = 4096;   // 32 KB per thread
+    thread_local FrontSlot front[ kFrontSlots ];
+    const std::uint64_t hash = TextPool::hashOf( text );
+    FrontSlot&          slot = front[ hash & ( kFrontSlots - 1 ) ];
+    const std::uint32_t tag  = std::uint32_t( hash >> 32 );
+    if( slot.id != TextPool::kEmptyId && slot.tag == tag && std::string_view( gRefTextPool.text( slot.id ) ) == text )
+    {
+        return slot.id;
+    }
+    slot = { tag, gRefTextPool.intern( text, hash ) };
+    return slot.id;
+}
+
 // A reference name: 4 B, read like a const std::string, assigned from any text. No mutation in place: an edit builds the new text
 // and assigns it (`r.qualifier = std::string( r.qualifier ) + "::x"`). See the DETERMINISM note above for why no id is exposed.
 class InternedText
 {
 public:
     InternedText() noexcept = default;
-    explicit InternedText( std::string_view text ) : id_( gRefTextPool.intern( text ) ) {}   // explicit: no text converts to a name behind a comparison
+    explicit InternedText( std::string_view text ) : id_( internRefText( text ) ) {}   // explicit: no text converts to a name behind a comparison
     InternedText& operator=( std::string_view text )
     {
-        id_ = gRefTextPool.intern( text );
+        id_ = internRefText( text );
         return *this;
     }
     InternedText& operator=( const std::string& text ) { return *this = std::string_view( text ); }
