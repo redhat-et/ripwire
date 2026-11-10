@@ -82,9 +82,9 @@ struct RawRef : RefColdFields   // fieldName, composeRel, memberPath, memberCtor
                                        //   of a std smart pointer member, which only `->` reaches (see Reference::viaArrow)
     bool          qualifierRootsStd = false;   // #150: the FULL written qualifier chain is rooted at namespace std (model.h Reference::qualifierRootsStd)
     bool          memberCall = false;   // FE-A: a Go/JS/TS/Rust call written on a receiver (`x.f()`), whose recv stays None (model.h Reference::memberCall)
-    std::string   name;
-    std::string   qualifier;           // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
-    std::string   recvVar;             // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
+    rw::InternedText name;             // MEM-REF-SHRINK step 2: name / qualifier / recvVar are 4 B pool ids (infra/internedtext.h)
+    rw::InternedText qualifier;        // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
+    rw::InternedText recvVar;          // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
     std::string   memberRoot;          // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
     bool          memberFactory = false;   // FE-B on #373: memberCtor names a FactoryBot factory, not a class
     bool          forwarded = false;       // lane fcall-forward fix 1: a JS/TS `f.call/f.apply` site standing for `f( … )` (model.h Reference::forwarded)
@@ -93,9 +93,10 @@ struct RawRef : RefColdFields   // fieldName, composeRel, memberPath, memberCtor
                                          //   declaration the base binds to (ingest_relations.h localBaseBinding); 0 none, ~0u unknown
 };
 
-// MEM-REF-SHRINK (model.h, beside Reference's own budget): four inline strings, the cold block's pointer and 32 B of ids and
-// flags: 136 B on libc++ (was 248). Every worker's vector<RawRef> and the merged one hold these rows at the parse-pool peak.
-static_assert( sizeof( RawRef ) <= 4 * sizeof( std::string ) + 40, "RawRef grew: see the MEM-REF-SHRINK note in model.h" );
+// MEM-REF-SHRINK (model.h, beside Reference's own budget): one inline string, three 4 B pool ids, the cold block's pointer and
+// 36 B of ids and flags: 80 B on libc++ (step 1 136, before it 248). Every worker's vector<RawRef> and the merged one hold these
+// rows at the parse-pool peak.
+static_assert( sizeof( RawRef ) <= sizeof( std::string ) + 56, "RawRef grew: see the MEM-REF-SHRINK note in model.h" );
 
 // P2-D Rule 2 raw local-variable type binding (pre-attribution). startByte sits inside the enclosing
 // function body so the enclosing-def attribution (the same byte-span scan as RawRef) assigns the binding's

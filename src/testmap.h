@@ -723,9 +723,9 @@ struct ClassNewSpelling
     static std::string written( const Reference& r )
     {
         std::string out( 1, char( '0' + int( r.recv ) ) );
-        for( const std::string* part : { &r.qualifier, &r.recvVar, &r.memberRoot, &r.memberPath() } )
+        for( const std::string_view part : { std::string_view( r.qualifier ), std::string_view( r.recvVar ), std::string_view( r.memberRoot ), std::string_view( r.memberPath() ) } )
         {
-            out.append( 1, '|' ).append( *part );
+            out.append( 1, '|' ).append( part );
         }
         return out;
     }

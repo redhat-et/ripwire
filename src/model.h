@@ -14,6 +14,7 @@
 #include "infra/sortutil.h"  // svLess — JS/TS builtin-member tables below (binary_search, no signed-char wrap)
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 #include "structlayout.h"   // cross-translation-unit sizeof/alignof tripwire for the shared model
+#include "infra/internedtext.h"   // rw::InternedText — Reference::calleeName / qualifier / recvVar (MEM-REF-SHRINK step 2)
 #include "infra/sharedOnce.h"   // rw::sharedOnce — RefColdFields::block, the cold text block made on its first write
 
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember
@@ -1260,9 +1261,9 @@ struct Reference : RefColdFields
                                           //   every bare/unqualified call and on every non-Cpp language (ObjC gets no `qualifier` at all today —
                                           //   see keepStdQualifiedCandidates' stated floor — so this stays false there too, by construction).
     bool          memberCall = false;     // FE-A: a Go/JS/TS/Rust/C call written on a receiver (`x.f()`), whose recv stays None; see memberRoot below
-    std::string   calleeName;             // referenced name (final identifier segment)
-    std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
-    std::string   recvVar;                // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
+    rw::InternedText calleeName;          // referenced name (final identifier segment)
+    rw::InternedText qualifier;           // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
+    rw::InternedText recvVar;             // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
                                           //   A Ruby receiver the code BUILDS leaves it empty: its type is memberCtor/memberVia (rubyTypedRecvOf).
     // fieldName() (RefColdFields): member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
                                           //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
@@ -1324,10 +1325,11 @@ struct Reference : RefColdFields
     //   Sits in memberFactory's alignment padding: sizeof(Reference) is unchanged.
     std::uint32_t baseBind = 0;
 };
-// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. Four inline strings (calleeName, qualifier,
-// recvVar, memberRoot), the cold block's pointer and 40 B of ids and flags: 144 B on libc++ (was 264), 176 B on libstdc++.
-// A new std::string member, or a flag placed where it adds a padding slot, fails here; move cold text into RefColdText instead.
-static_assert( sizeof( Reference ) <= 4 * sizeof( std::string ) + 48, "Reference grew: see the MEM-REF-SHRINK note above" );
+// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. One inline string (memberRoot), three 4 B pool
+// ids (calleeName, qualifier, recvVar: step 2, infra/internedtext.h), the cold block's pointer and 36 B of ids and flags: 80 B on
+// libc++ (step 1 144, before it 264), 88 B on libstdc++. A new std::string member, or a flag placed where it adds a padding slot,
+// fails here; move cold text into RefColdText, or a name into rw::InternedText, instead.
+static_assert( sizeof( Reference ) <= sizeof( std::string ) + 56, "Reference grew: see the MEM-REF-SHRINK note above" );
 // The sentinels Reference::baseBind holds besides a real binding (1 + a name byte): ONE definition for the writer (ingest_relations.h
 // localBaseBinding) and every reader (graph.h provenBasesOf, valuerefindex.h inheritEdges / ClassFamilies::bindBase).
 inline constexpr std::uint32_t kBaseBindNone          = 0;            // no enclosing scope declares the name
