@@ -92,7 +92,7 @@ if mode == "crawl":
                   "Php": ["PHP"], "Lua": ["Lua"], "Elixir": ["Elixir"], "Dart": ["Dart"], "Kotlin": ["Kotlin"],
                   "Clojure": ["Clojure"], "Bash": ["Bash"], "Go": ["Go"], "Rust": ["Rust"], "Swift": ["Swift"],
                   "CSharp": ["C#"], "GDScript": ["GDScript"], "Json": ["JSON"], "Toml": ["TOML"], "Yaml": ["YAML"],
-                  "Markdown": ["Markdown"]}
+                  "Markdown": ["Markdown"], "Proto": ["Protocol Buffers"]}
     src = open(files[0], encoding="utf-8", errors="replace").read()
     langs = sorted(set(re.findall(r"\{\s*(?:\"[^\"]*\"|k\w+)\s*,\s*Lang::(\w+)\s*,", src)))
     if len(langs) < 20:

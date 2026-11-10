@@ -2764,6 +2764,27 @@ inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t t
     return render( shown );
 }
 
+// What the trailing sections of a soft-target answer serve however little the target leaves them: the <tail> shell (its share
+// floors at the shell) and, on the compact route, the <hops> first row (buildForCompactHops serves one at a 1 B room). The rows
+// at the target cut are a floor the refill never goes below, so a whole <lego>/<compose> served out of bytes these floors then
+// take puts the answer past T (forsoftbudgetcheck (ST)/(ST-L): measured 2026-11-08 on this repo's src/, 68-77 B past the
+// rows' room at N=3000-3600). The opt-in's share is net of them. The hops render here only measures: the run's redaction
+// tally is left untouched.
+inline std::size_t forSoftTrailingFloorBytes( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                              const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
+                                              const ForEnrichmentPlan& plan, std::size_t bundleBudget, const rw::RedactCounts* redactPtr,
+                                              const ForSectionPromises& promised, const rw::FileTail& tailAtCut )
+{
+    std::size_t floorBytes = renderForFileTailXml( tailAtCut, cfg.tokenBudget, bundleBudget, bundleBudget ).size();
+    if( plan.compact && bundleBudget > 0 )
+    {
+        std::optional<rw::RedactCounts> scratch = redactPtr != nullptr ? std::optional<rw::RedactCounts>( *redactPtr ) : std::nullopt;
+        floorBytes += buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, bundleBudget - 1, bundleBudget,
+                                           scratch ? &*scratch : nullptr, promised ).section.xml.size();
+    }
+    return floorBytes;
+}
+
 
 // R2-AF (round 2, S4): render the task's named-file/decl-impl-partner rows (rw::forNamedHeaderRows,
 // mention.h — the resolution rule and its rationale live there) as `<hdr p= of=/>`, root-relative like
@@ -4388,9 +4409,21 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // round C (reserve first): a soft target serves the sections whole when they fit what the rows at its cut left
         const std::size_t sigsAtCutBytes = sigsStr.size() - std::min( sigsStr.size(), forSigsCut.pastTargetBytes );
         const std::size_t sectionsShare  = bundleBudget - std::min( bundleBudget, forHdrXml.size() + sigsAtCutBytes + routeStr.size() + graphSection.xml.size() );
+        // DEEP-TAIL d2's tail, its rank rows excluding the shown rows' files — under a soft target the rows AT THE CUT, the ones a
+        // refill below keeps (rendered after the bodies decision; computed here so the opt-in can reserve its shell)
+        const FileTail    forFileTailShown = sigsPreRendered ? computeFileTail( ing, lensRank, lr.evidence,
+                                                                                forSoftTarget ? rowsAtTargetIds( shownSigIds, lensRank, forSigsCut.pastTarget )
+                                                                                              : shownSigIds,
+                                                                                flRootArg, cfg.forTask )
+                                                             : forFileTail;
+        const bool        softOptInCandidate = forSoftTarget && legoPreRendered && composePreRendered && legoStr.size() + composeStr.size() <= sectionsShare;
+        const std::size_t trailingFloor      = softOptInCandidate && autoBundleMode && sigsPreRendered
+            ? forSoftTrailingFloorBytes( cfg, ing, g, lensSurfaceIds, lensRank, plan, bundleBudget, redactPtr,
+                                         ForSectionPromises{ headerParts.viaPresent, &ownerPlan, headerParts.splitPresent }, forFileTailShown )
+            : 0u;
         const rw::ForSectionStubPlan stubPlan = rw::planForSectionStubs(
-            forSoftTarget && legoPreRendered && composePreRendered ? rw::forSoftSectionsOptIn( cfg.sections, legoStr.size(), composeStr.size(), sectionsShare )
-                                                                   : std::string_view( cfg.sections ),
+            softOptInCandidate ? rw::forSoftSectionsOptIn( cfg.sections, legoStr.size(), composeStr.size(), sectionsShare - std::min( sectionsShare, trailingFloor ) )
+                               : std::string_view( cfg.sections ),
             cfg.forTask,
             rw::ForStubbableSection{ .hasContent = legoPreRendered ? !legoStr.empty() : legoStubTotal > 0, .preCapTotal = legoStubTotal,
                                      .rendered = legoPreRendered, .renderedBytes = legoStr.size() },
@@ -4699,12 +4732,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // Rendered after the bodies decision. Default regime: the full 40 rows ride on top — the sigs and the bodies are
         // byte-identical to a tail-less bundle by construction (nothing above charges these bytes). A soft target: the tail is
         // the last trailing section, funded from what the rows AT THE CUT and the sections before it left (reserve first).
-        // its rank rows exclude the shown rows' files — under a soft target the rows AT THE CUT, the ones a refill below keeps
-        const FileTail    forFileTailShown = sigsPreRendered ? computeFileTail( ing, lensRank, lr.evidence,
-                                                                                forSoftTarget ? rowsAtTargetIds( shownSigIds, lensRank, forSigsCut.pastTarget )
-                                                                                              : shownSigIds,
-                                                                                flRootArg, cfg.forTask )
-                                                             : forFileTail;
+        // (forFileTailShown, the tail scoped to the rows at the cut, is computed above the sections' opt-in, which reserves its shell)
         // round C: the --detail bodies are the caller's own request under their own ceiling (--max-tokens / the pack budget), so
         // they neither fund nor are funded by the reserved sections: the tail's share and the rows' refill both leave them out,
         // and a body ceiling never moves a row (formaxtokenscheck (E))
@@ -5079,8 +5107,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot )
         {
             const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = sigsPreRendered && shownSigIds.empty(),
-                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .rootArg = flRootArg,
-                                                                                             .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
+                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .compress = cfg.compress,
+                                                                                             .rootArg = flRootArg, .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }
         // XF-ALIAS-HOP (foraliashop.h): a printed row the task names is an alias definition: its chain to what it names; "" otherwise.
