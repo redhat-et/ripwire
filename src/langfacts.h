@@ -98,6 +98,10 @@ enum class FileEdges : std::uint8_t
 /// What proves a call Rule 3 narrowed (LangFacts::rule3NameProof): nothing (Rule 3 decides), a Rust `use` or module qualifier, a Python import binding.
 enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
 
+/// How the language's own test runner finds the tests it calls (LangFacts::testRunnerEntry; quality.h testRunnerInvokedSymbol): no rule,
+/// Go's `go test` naming (Test*/Benchmark*/Example*/Fuzz* in a `_test.go` file), Rust's test attribute (the in-file testScope bit).
+enum class TestRunnerEntry : std::uint8_t { None, GoTestName, RustTestAttr };
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -389,6 +393,11 @@ struct LangFacts
 
     /// JSON, TOML, YAML: a configuration or data format; --for's tail counts a widened row of one as `config` (forpage.h tailFoldClass).
     bool configFormat = false;
+
+    /// Go, Rust: the test runner calls a test by its naming or attribute, with no call in the tree (TestRunnerEntry above), so the
+    /// dead-code kind's zero in-edges says nothing about it (quality.h testRunnerInvokedSymbol). Python's runner hooks are
+    /// frameworkEntryHooks; JS/TS tests are anonymous callbacks and C++ test macros are register macros, so neither needs a rule here.
+    TestRunnerEntry testRunnerEntry = TestRunnerEntry::None;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -412,9 +421,11 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
-      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
+      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
+      .testRunnerEntry = TestRunnerEntry::GoTestName },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow },
+      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,

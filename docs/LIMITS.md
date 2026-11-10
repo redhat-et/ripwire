@@ -1177,6 +1177,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kClonePairExpandCap` | `512` | — | — |
 | `kMaxCacheBlobAgeDays` | `30.0` | BOUNDARY | — |
 | `kMaxCacheBlobCount` | `4096` | BOUNDARY | bound every future hygiene scan |
 | `kMaxEditLockAgeDays` | `1.0` | BOUNDARY | — |
