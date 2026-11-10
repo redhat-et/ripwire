@@ -162,12 +162,8 @@ public:
 
     const std::string& boundOf( const std::string& spec )
     {
-        for( const Resolved& r : m_memo )
-        {
-            if( r.spelling == spec ) { return r.bound; }
-        }
-        m_memo.push_back( { spec, bind( spec ) } );
-        return m_memo.back().bound;
+        const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling );
+        return seen != m_memo.end() ? seen->bound : m_memo.emplace_back( Resolved{ spec, bind( spec ) } ).bound;
     }
     const std::vector<Resolved>& tried() const noexcept { return m_memo; }
 
