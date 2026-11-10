@@ -857,6 +857,37 @@ inline bool pythonFrameworkInvokedSymbol( const Symbol& s, std::string_view p ) 
     return isTestPath( p ) || fn == "tests.py";
 }
 
+// QD-TEST-DEAD (P5 pilot 2026-11-10): Go and Rust tests are called by their language's test runner, never by name from the tree,
+// so zero in-edges says nothing about them — every new Go or Rust test printed a dead-code row (Python's runner hooks are
+// pythonFrameworkInvokedSymbol above; JS/TS tests are anonymous callbacks; C++ test macros are register macros). Rules:
+//   Go    `go test` runs a top-level func named Test, Benchmark, Example or Fuzz, bare or followed by a character that is not a
+//         lowercase letter (TestMain, Test_x, ExampleT_M; `Testify` is no test), in a `_test.go` file. Name-level like the Python
+//         rule: a helper in a _test.go file and a TestX in production code stay candidates.
+//   Rust  a def the ingest marked testScope: a `#[test]`-family fn, or a `#[cfg(test)]` module and everything inside it (the
+//         in-file half of filter.h isTestSymbol). FLOOR, stated: a never-called helper inside a test module is not reported —
+//         the bit does not say which item carries the attribute, and the rule errs toward live, as a deletion candidate must.
+inline bool goTestEntryName( std::string_view n ) noexcept
+{
+    for( std::string_view prefix : { std::string_view( "Test" ), std::string_view( "Benchmark" ), std::string_view( "Example" ), std::string_view( "Fuzz" ) } )
+    {
+        if( n.starts_with( prefix ) && ( n.size() == prefix.size() || !( n[ prefix.size() ] >= 'a' && n[ prefix.size() ] <= 'z' ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+inline bool testRunnerInvokedSymbol( const Symbol& s, std::string_view p ) noexcept
+{
+    switch( langFacts( s.lang ).testRunnerEntry )
+    {
+        case TestRunnerEntry::GoTestName:   return s.kind == SymKind::Function && p.ends_with( "_test.go" ) && goTestEntryName( s.name );
+        case TestRunnerEntry::RustTestAttr: return s.testScope != 0;
+        case TestRunnerEntry::None:         return false;
+    }
+    return false;
+}
+
 // A "dead deletion-candidate": has a body, no caller in the indexed tree, not invoked from file scope, not
 // invoked by the LANGUAGE itself (languageInvokedSymbol, above), not a test fixture, not produced by a
 // registered self-registering macro. A SIMPLE,
@@ -908,6 +939,10 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
     {
         return false; // #228: unittest/Django/pytest call this by protocol (see pythonFrameworkInvokedSymbol)
     }
+    if( testRunnerInvokedSymbol( s, p ) )
+    {
+        return false; // QD-TEST-DEAD: `go test` / the Rust test harness calls this (see testRunnerInvokedSymbol)
+    }
     if( isFixturePath( p ) )
     {
         return false; // fixtures are dead by design (noise rules)
@@ -952,6 +987,13 @@ struct CloneIdiomFact
 // group's stable identity (adding a 3rd copy changes the set ⇒ a new group ⇒ reported as new duplication).
 // S2: member ids are the root-RELATIVE baselineCanonId so a committed clone baseline is root-spelling-portable
 // (member set identity is unchanged; only the path prefix inside each id is normalized). Deterministic.
+inline std::uint64_t cloneMemberSetHash( std::vector<std::string> ids )
+{
+    std::sort( ids.begin(), ids.end() );
+    std::string joined;
+    for( const std::string& x : ids ) { joined += x; joined.push_back( '\n' ); }
+    return fnv1a64( joined );
+}
 inline std::uint64_t cloneGroupHash( const CloneGroup& cg, const IngestResult& ing, std::string_view root )
 {
     std::vector<std::string> ids;
@@ -962,10 +1004,7 @@ inline std::uint64_t cloneGroupHash( const CloneGroup& cg, const IngestResult& i
             ids.push_back( baselineCanonId( ing, m, root ) );
         }
     }
-    std::sort( ids.begin(), ids.end() );
-    std::string joined;
-    for( const std::string& x : ids ) { joined += x; joined.push_back( '\n' ); }
-    return fnv1a64( joined );
+    return cloneMemberSetHash( std::move( ids ) );
 }
 
 // The ONE body-hash identity rule: fnv1a64( path \0 scope \0 name ), path root-relative (relForHash).
@@ -3808,7 +3847,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
 // other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
 // dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
-constexpr std::uint32_t kQSnapCacheScheme = 25;
+// v26 (2026-11-10, lane qd-fixes-1) — no blob shape change; two record SETS moved. The dead set: isDeadCandidate exempts Go and Rust
+// test-runner entry points (testRunnerInvokedSymbol). The clone set: baselineCloneGroupHashes also holds every pair its clone
+// relation implies (appendHeldClonePairHashes, QD-CLONE-FALSE-GATE), so a v25 blob holds neither. Bumped 25 -> 26.
+constexpr std::uint32_t kQSnapCacheScheme = 26;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -5429,19 +5471,148 @@ inline void dropNonBaselineKeys( Snapshot& snap, const IngestResult& ing, std::s
 // The duplication baseline = both exact (Type-1/2) AND gapped (Type-3) groups, folded into one set. A Type-3
 // pair hashes by its sorted member canonIds exactly like an exact group, so introducing a NEW near-clone
 // changes the set and the delta flags it. Both passes are deterministic, so the set is stable.
+//
+// QD-CLONE-FALSE-GATE (P5 pilot 2026-11-10, reports/qd-catch-rate-pilot-1110.md: 7/410 seeded runs gated on a clone pair the
+// edit did not make): the SET identity alone reads two re-shapes of the SAME baseline duplication as new.
+//   (1) A group SHRINKS. Exact {a,b,c}; an edit to a leaves exact {b,c} (and a near pair {a,b}): neither set is {a,b,c}, so both
+//       gated, on b and c the edit never touched (tmux options_get_*).
+//   (2) A near pair's member is an EXACT TWIN. findClonesType3 keeps one representative per distinct token stream (the first id),
+//       so with f1 == f2 exact and g near f1 the baseline holds {f1,g} and never {f2,g}; an edit to f1 makes f2 its own stream and
+//       {f2,g} reads as new although f2 was g's near clone all along (promgo NewConst*: 8 gating rows from one 3-line insert).
+// So the baseline also holds every PAIR its clone relation implies: each pair inside an exact group, and each near pair widened
+// to the exact twins of both members. The delta then treats a current group as held when its own set is in the baseline or every
+// pair of its members is (cloneGroupHeldAtBaseline). Same hash space: a pair hashes exactly like a two-member group, so a pair
+// row in the set means "these two were clones at the baseline". A NEW member still makes a pair the baseline never held, so a
+// third copy, a copy of a function and a near clone of an untouched function still gate. Bounded: a group or widened pair with
+// more than kClonePairExpandCap pairs adds none (its re-shapes keep the set identity, a floor).
+inline constexpr std::size_t kClonePairExpandCap = 512;
+inline void appendHeldClonePairHashes( std::vector<std::uint64_t>& out, const std::vector<CloneGroup>& exact, const std::vector<CloneGroup>& type3,
+                                       const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline )
+{
+    constexpr std::uint32_t   kNoGroup = ~0u;
+    std::vector<std::uint32_t> exactGroupOf( ing.symbols.size(), kNoGroup );
+    for( std::uint32_t gi = 0; gi < exact.size(); ++gi )
+    {
+        for( NodeId m : exact[gi].members )
+        {
+            if( m < exactGroupOf.size() )
+            {
+                exactGroupOf[m] = gi;
+            }
+        }
+    }
+    const auto pushPair = [ & ]( NodeId x, NodeId y )
+    {
+        if( x == y || x >= ing.symbols.size() || y >= ing.symbols.size() || !fileIsInBaseline( fileInBaseline, ing.symbols[x].fileId )
+            || !fileIsInBaseline( fileInBaseline, ing.symbols[y].fileId ) )
+        {
+            return;
+        }
+        out.push_back( cloneMemberSetHash( { baselineCanonId( ing, x, root ), baselineCanonId( ing, y, root ) } ) );
+    };
+    for( const CloneGroup& cg : exact )
+    {
+        const std::size_t n = cg.members.size();
+        if( n < 3 || n * ( n - 1 ) / 2 > kClonePairExpandCap )
+        {
+            continue;   // a pair's own hash is already its group's
+        }
+        for( std::size_t a = 0; a < n; ++a )
+        {
+            for( std::size_t b = a + 1; b < n; ++b )
+            {
+                pushPair( cg.members[a], cg.members[b] );
+            }
+        }
+    }
+    const auto twinsOf = [ & ]( NodeId m ) -> std::span<const NodeId>
+    {
+        const std::uint32_t gi = m < exactGroupOf.size() ? exactGroupOf[m] : kNoGroup;
+        return gi == kNoGroup ? std::span<const NodeId>() : std::span<const NodeId>( exact[gi].members );
+    };
+    for( const CloneGroup& cg : type3 )
+    {
+        if( cg.members.size() != 2 )
+        {
+            continue;
+        }
+        const std::span<const NodeId> ta = twinsOf( cg.members[0] ), tb = twinsOf( cg.members[1] );
+        if( ta.empty() && tb.empty() )
+        {
+            continue;   // no twin: the pair's own hash is the whole relation
+        }
+        const NodeId                  soleA[1] = { cg.members[0] }, soleB[1] = { cg.members[1] };
+        const std::span<const NodeId> sa = ta.empty() ? std::span<const NodeId>( soleA ) : ta, sb = tb.empty() ? std::span<const NodeId>( soleB ) : tb;
+        if( sa.size() * sb.size() > kClonePairExpandCap )
+        {
+            continue;
+        }
+        for( NodeId x : sa )
+        {
+            for( NodeId y : sb )
+            {
+                pushPair( x, y );
+            }
+        }
+    }
+}
+
 inline std::vector<std::uint64_t> baselineCloneGroupHashes( const IngestResult& ing, std::string_view root,
                                                             const std::vector<char>* fileInBaseline )
 {
-    std::vector<std::uint64_t> out;
-    for( const CloneGroup& cg : findClones( ing, int( kMinCloneTokens ) ) )
+    std::vector<std::uint64_t>    out;
+    const std::vector<CloneGroup> exact = findClones( ing, int( kMinCloneTokens ) );
+    const std::vector<CloneGroup> type3 = findClonesType3( ing, int( kMinCloneTokens ) );
+    for( const CloneGroup& cg : exact )
     {
         if( cloneGroupIsInBaseline( cg, ing, fileInBaseline ) ) { out.push_back( cloneGroupHash( cg, ing, root ) ); }
     }
-    for( const CloneGroup& cg : findClonesType3( ing, int( kMinCloneTokens ) ) )
+    for( const CloneGroup& cg : type3 )
     {
         if( cloneGroupIsInBaseline( cg, ing, fileInBaseline ) ) { out.push_back( cloneGroupHash( cg, ing, root ) ); }
     }
+    appendHeldClonePairHashes( out, exact, type3, ing, root, fileInBaseline );
+    std::sort( out.begin(), out.end() );
+    out.erase( std::unique( out.begin(), out.end() ), out.end() );
     return out;
+}
+
+// The delta's side of QD-CLONE-FALSE-GATE (see appendHeldClonePairHashes): a current clone group is the baseline's when its own
+// member set is in the baseline set, or when every pair of its members is (a group the edit only shrank or re-paired). A
+// two-member group's pair IS its set, so only a group of three or more reads the pairs. `h` = cloneGroupHash( cg ).
+inline bool cloneGroupHeldAtBaseline( const CloneGroup& cg, std::uint64_t h, const std::vector<std::uint64_t>& baseCloneGroups,
+                                      const IngestResult& ing, std::string_view root )
+{
+    if( std::binary_search( baseCloneGroups.begin(), baseCloneGroups.end(), h ) )
+    {
+        return true;
+    }
+    const std::size_t n = cg.members.size();
+    if( n < 3 || n * ( n - 1 ) / 2 > kClonePairExpandCap )
+    {
+        return false;
+    }
+    std::vector<std::string> ids;
+    ids.reserve( n );
+    for( NodeId m : cg.members )
+    {
+        if( m >= ing.symbols.size() )
+        {
+            return false;
+        }
+        ids.push_back( baselineCanonId( ing, m, root ) );
+    }
+    for( std::size_t a = 0; a < n; ++a )
+    {
+        for( std::size_t b = a + 1; b < n; ++b )
+        {
+            if( !std::binary_search( baseCloneGroups.begin(), baseCloneGroups.end(), cloneMemberSetHash( { ids[a], ids[b] } ) ) )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 // Every defect-shape site in the tree, anchored on the innermost enclosing definition (byte-span containment,
@@ -9721,7 +9892,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             const CloneGroup&        cg = cgs[ci];
             const CloneIdiomVerdict& vd = vx[ci];
             const std::uint64_t h = cloneGroupHash( cg, ing, root );
-            if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) )
+            if( cloneGroupHeldAtBaseline( cg, h, base.cloneGroups, ing, root ) )
             {
                 continue;
             }
@@ -10121,7 +10292,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 const CloneGroup&        cg = cgs[ci];
                 const CloneIdiomVerdict& vd = vx[ci];
                 const std::uint64_t h = cloneGroupHash( cg, ing, root );
-                if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) )
+                if( cloneGroupHeldAtBaseline( cg, h, base.cloneGroups, ing, root ) )
                 {
                     continue; // group already existed → not new
                 }

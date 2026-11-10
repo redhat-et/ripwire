@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-10, lane qd-fixes-1 (base main b8032471f): RE-PINNED ONCE with UPDATE_GOLDEN=1, kQSnapCacheScheme 25 -> 26.
+#   Watched text: isDeadCandidate exempts Go/Rust test-runner entry points (testRunnerInvokedSymbol, QD-TEST-DEAD), and the clone
+#   set computeSnapshot stores also holds every pair the baseline's clone relation implies (appendHeldClonePairHashes,
+#   QD-CLONE-FALSE-GATE): both record SETS a v25 blob holds moved, so the scheme moved with them.
 # 2026-11-10, #538 (#446 round 1, C++ base clauses as @reference.base captures) merged with main 45caf6a00: RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 305 (above main's 303 and the PR head's 304); quality.h carries kIngestParserVerMirror 305. kQSnapCacheScheme stays: no watched function moved.
 # 2026-11-08, merge of main 45c2deb24 (#572 docs-units, #577 clones-persist) into lane proto-index: RE-PINNED ONCE with UPDATE_GOLDEN=1.

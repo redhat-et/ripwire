@@ -836,9 +836,11 @@ for _g in \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
+    qdclonepaircheck \
     qddegradecheck \
     qddialscheck \
     qdrefpaircheck \
+    qdtestdeadcheck \
     qextractionkeycheck \
     qoriginoraclecheck \
     qrevtokencheck \
