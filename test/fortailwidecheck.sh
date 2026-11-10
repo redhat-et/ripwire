@@ -36,6 +36,14 @@
 #                clause); without a budget it serves the widened tail (p_only= and the clause, the positive twin)
 #   12 p_only (F3): p_only= / "p_only" = the shown rows without sym= past the old prefix, with "p_only_why" in JSON; absent
 #                when no such row is shown
+#   TAIL-SYM-WIDE (2026-11-10): the widened rows carry sym= too (the page row's own top symbols, the pick page 0 rows use), the
+#                first kForFileTailSymWideRows (120) of them; p_only= counts the rows past that. Arms 1-13 above pin the WALK (which
+#                rows, in which order, where next= continues) and run with RIPWIRE_TAIL_SYM_WIDE_ROWS=0, the pre-card tail, so their
+#                p=-only reading is unchanged; arm 14 pins the default against that ablation:
+#   14 sym wide: the default tail lists the same rows in the same order as the ablation (same total/shown/capped/next=); a row with
+#                sym= there keeps it; the j-th p=-only row there carries the raised page's sym= for that file when j < 120 and
+#                none past it; p_only= (XML and JSON) = the rows past 120; with RIPWIRE_TAIL_SYM_WIDE_ROWS=10 the first 10 only
+#                (red before: every widened row is p= only); the MCP `for` twin's default tail carries them too
 #   R-DEDUP re-pin (2026-11-08): a tail row of a file the head shows drops the names that file's <d> rows print and the names the
 #                <syms> block prints (want() below; these fixtures hold at most 2 positive symbols a file, so no refill name comes
 #                from past the page row's own top 3). Such a row may print p= only: it is not a p_only= row (it sits in the old
@@ -108,6 +116,14 @@ run() {   # run DIR OUTFILE ARGS... -> rc file beside the output; HOME/TMPDIR pr
     echo $? > "$o.rc"
 }
 mkdir -p "$TMP/home"
+# arm 14 (TAIL-SYM-WIDE): the default tail, before the ablation below takes over every other arm
+run "$W" "$TMP/w.sym"   "--for=$Q"
+run "$W" "$TMP/w.symj"  "--for=$Q" --json
+run "$W" "$TMP/w.symf"  "--for=$Q" --legend=full
+run "$W" "$TMP/w.symb"  "--for=$Q" --token-budget=3000
+( export RIPWIRE_TAIL_SYM_WIDE_ROWS=10; run "$W" "$TMP/w.k10" "--for=$Q"; run "$W" "$TMP/w.k10j" "--for=$Q" --json )
+( export RIPWIRE_NO_TAIL_FOLD=1; run "$DD" "$TMP/d.sym" "--for=$Q"; run "$DD" "$TMP/d.symj" "--for=$Q" --json )
+export RIPWIRE_TAIL_SYM_WIDE_ROWS=0   # arms 1-13: the walk, read on the pre-card tail (every widened row p= only)
 run "$W" "$TMP/w.xml"   "--for=$Q"
 run "$W" "$TMP/w.page"  "--for=$Q" --limit=100000
 run "$W" "$TMP/w.json"  "--for=$Q" --json
@@ -137,6 +153,7 @@ mcpfor() {   # mcpfor OUTFILE [BUDGET]: the MCP `for` verb on fixture W -> the J
 }
 mcpfor "$TMP/m.def"
 mcpfor "$TMP/m.bud" 3000
+( unset RIPWIRE_TAIL_SYM_WIDE_ROWS; mcpfor "$TMP/m.sym" )
 run "$P1" "$TMP/p1.j6000" "--for=$Q" --token-budget=6000 --json
 run "$P2" "$TMP/p2.j6000" "--for=$Q" --token-budget=6000 --json
 
@@ -305,6 +322,41 @@ for nm, budgeted in (("m.bud", True), ("m.def", False)):
             f"13 MCP budget_tokens: {len(t13['rows'])} rows, all with sym=, no p_only=, no walk clause, cut with next=")
     else:
         say(nos > 0 and t13["p_only"] == nos and clause, f"13 MCP default (twin): {len(t13['rows'])} rows, p_only={t13['p_only']} = {nos}, walk clause present")
+# 14 sym wide (TAIL-SYM-WIDE): default vs the ablation (RIPWIRE_TAIL_SYM_WIDE_ROWS=0) on the same fixture and flags
+K14 = 120
+def symwide(nm, abl, k, pagerows, jnm=None, ajnm=None):
+    rc, txt = load(nm); t, a = tail_of(txt), tail_of(rcs[abl][1])
+    if rc != "0" or t is None or a is None:
+        say(False, f"14 sym wide {nm}: exit 0 and a <tail> (rc={rc})"); return
+    ps = dict(pagerows); names = shown_names(rcs[abl][1])
+    same = [p for p, _ in t["rows"]] == [p for p, _ in a["rows"]] and (t["total"], t["shown"], t["capped"], t["next"]) == (a["total"], a["shown"], a["capped"], a["next"])
+    say(same, f"14 sym wide {nm}: the same {len(t['rows'])} rows in the same order as the ablation, same total/shown/capped/next=")
+    bare = [i for i, (p, s) in enumerate(a["rows"]) if not has(p, s, names)]   # the ablation's p=-only rows (a suffix)
+    keep = all(t["rows"][i][1] == s for i, (p, s) in enumerate(a["rows"]) if i not in set(bare)) if same else False
+    say(keep, f"14 sym wide {nm}: every row with sym= in the ablation keeps it")
+    got = [t["rows"][i][1] for i in bare] if same else []
+    exp = [ps.get(a["rows"][i][0]) or None for i in bare[:k]] + [None] * max(0, len(bare) - k)
+    say(same and len(bare) > 0 and got == exp and any(got), f"14 sym wide {nm}: {min(k, len(bare))} of {len(bare)} widened rows carry the page row's sym=, {max(0, len(bare) - k)} p= only (k={k})")
+    say(t["p_only"] == (len(bare) - k if len(bare) > k else None), f"14 sym wide {nm}: p_only={t['p_only']} = the {max(0, len(bare) - k)} rows past {k}")
+    if jnm:
+        try:
+            jt = json.loads(load(jnm)[1]).get("tail") or {}
+        except Exception:
+            jt = {}
+        say(jt.get("files") == [p for p, _ in t["rows"]] and jt.get("sym") == [s or "" for _, s in t["rows"]] and jt.get("p_only") == t["p_only"]
+            and (jt.get("p_only") is None) == (jt.get("p_only_why") is None), f"14 sym wide {jnm}: JSON files/sym = the XML rows, p_only={jt.get('p_only')}")
+symwide("w.sym", "w.xml", K14, page, "w.symj")
+symwide("w.k10", "w.xml", 10, page, "w.k10j")
+if dt is not None:
+    symwide("d.sym", "d.xml", K14, dpage, "d.symj")
+sb = tail_of(load("w.symb")[1]); st14 = tail_of(load("w.sym")[1])
+say(sb is not None and st14 is not None and 0 < len(sb["rows"]) < len(st14["rows"]) and sb["rows"] == st14["rows"][:len(sb["rows"])] and sb["capped"] == "1",
+    f"14 sym wide budget: the --token-budget tail is a strict prefix of the default tail ({0 if sb is None else len(sb['rows'])} rows)")
+rc14, tx14 = mcp_text("m.sym"); t14 = tail_of(tx14) if rc14 == "0" else None
+say(t14 is not None and st14 is not None and t14["rows"] == st14["rows"] and t14["p_only"] is None and "tail walk:" in tx14,
+    f"14 sym wide MCP: the default `for` tail = the CLI rows with their sym= ({0 if t14 is None else len(t14['rows'])} rows), no p_only=, walk clause")
+say("carries sym= too; past 120 such rows p= only" in load("w.symf")[1] and "past 120 of those p= only" in load("w.sym")[1],
+    "14 sym wide legend: the full and compact walk clauses say the widened rows carry sym= up to 120")
 lg = rcs["w.xml"][1]
 say("t page rows go on to file-page row 160" in lg, "7 legend: the wide answer's compact legend carries the walk clause (present)")
 say("file-page row 160" not in rcs["s.xml"][1] and "tail walk:" not in rcs["s.xml"][1], "7 legend: the no-cut answer (page fits page 0) carries no walk clause (absent)")
