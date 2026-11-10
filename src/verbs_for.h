@@ -3161,6 +3161,39 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     return cap && cap->failed ? 1 : 0;
 }
 
+// GV-ASSEMBLY M3 MET-BRIDGE (src/forgraphverb.h metBridgePlan): the path verb's unreached answer `doc` met a caller of to= whose declined
+// call holds that very definition → <met_bridge>: the proven path from= -> that caller (the path verb's own answer, only when it is reached)
+// and the one hedged crossing. No plan, or an unreached prefix → nothing (byte-identical).
+inline void appendMetBridge( const MainDispatch& d, const rw::Config& sub, std::span<const rw::NodeId> served, const rw::GraphSubjectArgs& args, std::string_view doc )
+{
+    const std::optional<rw::MetBridgePlan> bridge = rw::metBridgePlan( d.ing, d.g, args, doc );
+    if( !bridge )
+    {
+        return;
+    }
+    const std::string preSpec = args.endpoints[0] + "," + bridge->inSel;   // Config::pathSpec is a view: the bytes live here
+    rw::Config        pre     = sub;
+    pre.pathSpec              = preSpec;
+    const MainDispatch pd{ pre, d.ing, d.g, d.root, d.multiRoot, d.ws, d.fanIn, d.fanInPtr, d.qmetrics, d.ampPtr, d.cboPtr, d.testedPtr,
+                           d.lcom4Ptr, d.impurePtr, d.forChurn, d.redactCounts, d.redactPtr, d.notesPtr, d.notesDegraded, d.grepPhases, d.valueUses };
+    const std::optional<std::string> prefix = captureGraphVerbDoc( pre, [ & ] { (void)runPathServed( pd, served, /*inForBlock=*/true ); } );
+    rw::MetBridgeShown               shown;
+    if( !prefix )
+    {
+        DISCLOSE( shown, rw::MetBridgeShown::DisclosureWhy::PrefixUncaptured, "appendMetBridge: no capture buffer for the met_bridge prefix" );
+    }
+    else if( !rw::graphSubjectPathReached( *prefix ) )
+    {
+        return;   // the rule needs the proven prefix: an unreached one is no bridge
+    }
+    rw::emitRaw( stdout, rw::metBridgeOpenXml( d.ing, *bridge, shown.prefixMissing ).c_str() );
+    if( prefix )
+    {
+        std::fwrite( prefix->data(), 1, prefix->size(), stdout );
+    }
+    rw::emitRaw( stdout, ( rw::metBridgeCrossingXml( d.ing, *bridge ) + std::string( rw::kMetBridgeCloseXml ) ).c_str() );
+}
+
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
@@ -3234,29 +3267,7 @@ inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
         if( args->form == rw::GraphSubjectForm::Path && rw::graphSubjectPathUnreachable( *doc ) )
         {
             appendPathGapSides( sd, *args );
-            // GV-ASSEMBLY M3 MET-BRIDGE (src/forgraphverb.h metBridgePlan): the search reached a caller of to= whose declined call holds
-            // that very definition → the proven path from= -> that caller (the path verb's own answer, only when it is reached) and the
-            // one hedged crossing. No plan, or an unreached prefix → nothing (byte-identical).
-            if( const std::optional<rw::MetBridgePlan> bridge = rw::metBridgePlan( d.ing, d.g, *args, *doc ) )
-            {
-                const std::string preSpec = args->endpoints[0] + "," + bridge->inSel;   // Config::pathSpec is a view: the bytes live here
-                rw::Config        pre     = sub;
-                pre.pathSpec              = preSpec;
-                const MainDispatch pd{ pre, d.ing, d.g, d.root, d.multiRoot, d.ws, d.fanIn, d.fanInPtr, d.qmetrics, d.ampPtr, d.cboPtr, d.testedPtr,
-                                       d.lcom4Ptr, d.impurePtr, d.forChurn, d.redactCounts, d.redactPtr, d.notesPtr, d.notesDegraded, d.grepPhases, d.valueUses };
-                const std::optional<std::string> prefix = captureGraphVerbDoc( pre, [ & ] { (void)runPathServed( pd, served, /*inForBlock=*/true ); } );
-                rw::MetBridgeShown               shown;
-                if( !prefix )
-                {
-                    DISCLOSE( shown, rw::MetBridgeShown::DisclosureWhy::PrefixUncaptured, "appendSubjectGraphVerbBlock: no capture buffer for the met_bridge prefix" );
-                }
-                if( !prefix || rw::graphSubjectPathReached( *prefix ) )
-                {
-                    rw::emitRaw( stdout, rw::metBridgeOpenXml( d.ing, *bridge, shown.prefixMissing ).c_str() );
-                    if( prefix ) { std::fwrite( prefix->data(), 1, prefix->size(), stdout ); }
-                    rw::emitRaw( stdout, ( rw::metBridgeCrossingXml( d.ing, *bridge ) + std::string( rw::kMetBridgeCloseXml ) ).c_str() );
-                }
-            }
+            appendMetBridge( d, sub, served, *args, *doc );   // GV-ASSEMBLY M3: "" unless the search reached a caller of to= (src/forgraphverb.h metBridgePlan)
         }
     }
     rw::emitRaw( stdout, std::string( rw::kGraphSubjectCloseXml ).c_str() );
