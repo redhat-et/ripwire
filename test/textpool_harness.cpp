@@ -10,7 +10,7 @@
 //      publish is a reported race. Every text reads back.
 //   F  the per-thread front cache (internRefText): 8 threads build InternedTexts of the same 30,000 texts twice (30,000 texts over
 //      512 slots: hits, misses and evictions); every thread's names equal thread 0's and read back their text.
-#include "internedtext.h"
+#include "infra/internedtext.h"
 
 #include <algorithm>
 #include <atomic>

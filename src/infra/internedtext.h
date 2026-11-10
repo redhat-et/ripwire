@@ -1,12 +1,12 @@
 #pragma once
-// internedtext.h — MEM-REF-SHRINK step 2: a reference's NAME texts (Reference::calleeName / qualifier / recvVar, RawRef::name /
-// qualifier / recvVar) as a 4 B id into ONE process-wide, append-only text pool instead of a 24 B (libc++) / 32 B (libstdc++)
+// internedtext.h — MEM-REF-SHRINK step 2: a row's NAME texts (the use-site rows' callee name / qualifier / receiver, model.h and
+// ingest_cache.h say which) as a 4 B id into ONE process-wide, append-only text pool instead of a 24 B (libc++) / 32 B (libstdc++)
 // std::string header each. Step 1's Stage 0 counts (reports/mem-ref-shrink.md): 59-116 K distinct callee names over 1.2-2.0 M
 // references on envoy / cockroach / vscode, and two row copies live at the parse-pool peak, so the header bytes, not the text, are
 // the cost.
 //
-// WHY ONE POOL, NOT PER-THREAD TABLES REMAPPED AT MERGE. Most readers hold only a `const Reference&` (no IngestResult, no table),
-// and the parse workers both write and READ their RawRefs' names while they extract (erase_if passes, suffix tests, re-splits). A
+// WHY ONE POOL, NOT PER-THREAD TABLES REMAPPED AT MERGE. Most readers hold only a const reference to one row (no result, no table),
+// and the parse workers both write and READ their raw rows' names while they extract (erase_if passes, suffix tests, re-splits). A
 // per-thread table would need a thread-local "current table" for every one of those reads, a remap pass over every row at the
 // parse-pool join, a second one for cache-hit rows, and a rule for rows copied between results. One shared pool needs none: an id
 // means the same text in every thread for the life of the process, so a row moves, copies and merges as four plain bytes.

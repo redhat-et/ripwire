@@ -20,7 +20,7 @@ fail=0
 build_run()
 {
     local LABEL="$1"; shift
-    if ! "$CXX" "$CXXSTD" -O2 -g -Wall -Wextra "$@" -I"$ROOT/src/infra" -I"$ROOT/third_party" "$HARNESS" -o "$WORK/h_$LABEL" -pthread 2> "$WORK/cc_$LABEL.log"; then
+    if ! "$CXX" "$CXXSTD" -O2 -g -Wall -Wextra "$@" -I"$ROOT/src" -I"$ROOT/third_party" "$HARNESS" -o "$WORK/h_$LABEL" -pthread 2> "$WORK/cc_$LABEL.log"; then
         return 3
     fi
     "$WORK/h_$LABEL" > "$WORK/out_$LABEL.log" 2>&1
