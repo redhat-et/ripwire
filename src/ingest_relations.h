@@ -1085,8 +1085,8 @@ void rustImplVisitNode( RustImplCtx& cx, TSNode node, const char* t )
         const std::string_view path    = written.substr( 0, std::min( written.find( '<' ), written.size() ) );
         if( path.find( "::" ) != std::string_view::npos )
         {
-            r.memberPath.assign( path );
-            std::erase_if( r.memberPath, []( char ch ) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; } );
+            r.memberPathMut().assign( path );
+            std::erase_if( r.memberPathMut(), []( char ch ) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; } );
         }
         cx.refs->push_back( std::move( r ) );
     }
@@ -1303,11 +1303,11 @@ inline void emitTypeAlias( TypeAliasCtx& cx, TSNode aliasNode, TSNode spec, std:
     r.line       = ts_node_start_point( aliasNode ).row + 1;
     r.lang       = cx.lang;
     r.isCompose  = true;
-    r.composeRel = "alias";
+    r.setComposeRel( "alias" );
     r.name       = target;
     r.recvVar    = alias;
     r.qualifier  = writtenTypeNamespace( spec, cx.src );
-    r.memberPath = stdElementContainerText( spec, cx.src );   // `typedef std::map<K, V> Bindings;`: the text its element type is read from
+    r.setMemberPath( stdElementContainerText( spec, cx.src ) );   // `typedef std::map<K, V> Bindings;`: the text its element type is read from
     if( langFacts( cx.lang ).aliasPeelsSmartPointer )
     {
         // lane iface-peel: `using FilterSharedPtr = std::shared_ptr<Filter>;` — the pointee `->` reaches (memberCtor) and the
@@ -1320,12 +1320,12 @@ inline void emitTypeAlias( TypeAliasCtx& cx, TSNode aliasNode, TSNode spec, std:
             const std::vector<std::string> params = enclosingTemplateParameterNames( aliasNode, cx.src );
             if( pointee.qualifier.empty() && std::ranges::find( params, std::string( pointee.name ) ) != params.end() )
             {
-                r.memberCtor.clear();
+                r.setMemberCtor( std::string_view() );
             }
             else
             {
-                r.memberCtor = pointee.name;
-                r.memberVia  = pointee.qualifier;
+                r.setMemberCtor( pointee.name );
+                r.setMemberVia( pointee.qualifier );
             }
         }
         r.memberRoot = cppScopePath( aliasNode, cx.src );   // fix round 1: the lexical scope the alias is declared in (its target is looked up there)
@@ -1514,11 +1514,11 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
                     r.startByte  = ts_node_start_byte( fdecl );
                     r.lang       = lang;
                     r.isCompose  = true;
-                    r.composeRel = "elem";
+                    r.setComposeRel( "elem" );
                     r.name       = std::string( nodeFieldText( fieldChild( typeNode, NodeField::Name ), NodeField::Name, src ) );
                     r.qualifier  = "std";
                     r.recvVar    = std::string( nodeTextOf( elemDecl, src ) );
-                    r.memberPath = std::string( containerText );
+                    r.setMemberPath( std::string( containerText ) );
                     refs.push_back( std::move( r ) );
                 }
                 continue;
@@ -1619,16 +1619,16 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
             r.isCompose  = true;
             r.name       = typeName;        // the member-type name (SpherePool, SoundEngine, ...)
             r.qualifier  = writtenTypeNamespace( typeNode, src );   // `std` for `std::string name_;`, "" unqualified
-            r.fieldName  = std::move( fieldName );
-            r.composeRel = ( isRefOrPtr || declIsRefOrPtr ) ? "uses" : "creates";
+            r.setFieldName( std::move( fieldName ) );
+            r.setComposeRel( ( isRefOrPtr || declIsRefOrPtr ) ? "uses" : "creates" );
             r.memberRoot = classScope;   // the lexical scope the written type is looked up in (model.h kAnonScopeElement)
             if( pointee.name.empty() && kindIs( dt, "pointer_declarator" ) )
             {
-                r.memberVia = std::string( kPointerMemberType );   // CR (review 5712563408, :1612): `FilterSharedPtr* p_;` — `p_->` reaches the smart pointer
+                r.setMemberVia( std::string( kPointerMemberType ) );   // CR (review 5712563408, :1612): `FilterSharedPtr* p_;` — `p_->` reaches the smart pointer
             }
             else if( pointee.name.empty() && std::ranges::find( templateParams, r.name ) != templateParams.end() )
             {
-                r.memberVia = std::string( kTemplateParamMemberType );   // `Handle h_;` under `template <class Handle>`: the parameter, not an alias
+                r.setMemberVia( std::string( kTemplateParamMemberType ) );   // `Handle h_;` under `template <class Handle>`: the parameter, not an alias
             }
             if( !pointee.name.empty() )
             {

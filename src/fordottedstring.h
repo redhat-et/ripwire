@@ -64,6 +64,16 @@ inline constexpr std::string_view kForDottedStringsLegend =
     "passed to such a call, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
     "tests= sites in test paths, counted only (with no row, s= is the first such string, next= a grep for it); unresolved= external= strings ending in a shown name that resolve to no one definition, "
     "or to no in-tree module; rows_capped=1 next= the list was cut. -->";
+// SIZE-1 (size-trim): the row-attribute clauses, present-only on the rows this answer printed (renderDottedStrings erases a clause
+// whose attribute no row carries). Spelled exactly as the legend carries them.
+inline constexpr std::string_view kForDottedSinkClause = "sink= it is the argument of a call whose tail name is that (the callee is not resolved); ";
+inline constexpr std::string_view kForDottedLoaderClause =
+    "loader= lp= a function in which the constant's name reaches the argument of a call whose tail name is an import sink's (the callee is not resolved) through its own assignments (names only, not a proof of the value) (loaders= how many do; over 3 none is named, a generic word; loaders_floor=1 a sink call in a file that can name the constant traced no names, too many assignments or none, so loaders= may be short); ";
+inline constexpr std::string_view kForDottedTemplateClause =
+    "tmpl= a %-template passed to such a call, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. ";
+static_assert( kForDottedStringsLegend.contains( kForDottedSinkClause ) && kForDottedStringsLegend.contains( kForDottedLoaderClause )
+                   && kForDottedStringsLegend.contains( kForDottedTemplateClause ),
+               "the dotted_strings row clauses are spelled as the legend carries them" );
 
 struct DottedTarget
 {
@@ -162,15 +172,15 @@ struct Row
 inline std::string siteInName( const IngestResult& ing, const Reference& r )
 {
     const bool haveOwner = r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size();
-    if( r.memberCtor.empty() )
+    if( r.memberCtor().empty() )
     {
         return haveOwner ? displayName( ing.symbols[ r.fromSymbol ] ) : std::string();
     }
-    if( haveOwner && ing.symbols[ r.fromSymbol ].name != r.memberCtor )
+    if( haveOwner && ing.symbols[ r.fromSymbol ].name != r.memberCtor() )
     {
-        return displayName( ing.symbols[ r.fromSymbol ] ) + "." + r.memberCtor;
+        return displayName( ing.symbols[ r.fromSymbol ] ) + "." + r.memberCtor();
     }
-    return r.memberCtor;
+    return r.memberCtor();
 }
 
 // The template's fixed text around its one hole ("django.db.%s.base" → "django.db.", ".base"); nullopt unless exactly one %s.
@@ -247,11 +257,11 @@ inline DottedFacts dottedFactsFor( const IngestResult& ing, const std::set<std::
         {
             continue;
         }
-        if( r.composeRel == kDottedShapeVariable )
+        if( r.composeRel() == kDottedShapeVariable )
         {
             loaders.push_back( &r );
         }
-        else if( r.composeRel == kDottedShapeFormat )
+        else if( r.composeRel() == kDottedShapeFormat )
         {
             templates.push_back( &r );
         }
@@ -392,7 +402,7 @@ inline DottedSites sitesNamingShown( const IngestResult& ing, std::span<const Re
             continue;
         }
         Row row;
-        row.rankClass = r->composeRel == kDottedShapeSink ? 0 : t.state == DottedTarget::State::Def ? 4 : 5;
+        row.rankClass = r->composeRel() == kDottedShapeSink ? 0 : t.state == DottedTarget::State::Def ? 4 : 5;
         row.shownAt   = *at;
         row.site      = r;
         row.targetDef = t.def;
@@ -585,13 +595,13 @@ inline bool siteIsModuleLevel( const IngestResult& ing, const Reference& site )
     {
         return true;
     }
-    return site.fromSymbol < ing.symbols.size() && ing.symbols[ site.fromSymbol ].name == site.memberCtor && ing.symbols[ site.fromSymbol ].scope.empty();
+    return site.fromSymbol < ing.symbols.size() && ing.symbols[ site.fromSymbol ].name == site.memberCtor() && ing.symbols[ site.fromSymbol ].scope.empty();
 }
 inline bool loaderReachesConstant( const IngestResult& ing, const Reference& loaderFact, const Reference& site, const ImportedNames& imports )
 {
-    const std::string_view name = site.memberCtor;
+    const std::string_view name = site.memberCtor();
     const std::string_view flow = loaderFact.recvVar;
-    if( site.composeRel == kDottedShapeLocalListed )
+    if( site.composeRel() == kDottedShapeLocalListed )
     {
         return loaderFact.fromSymbol == site.fromSymbol && ( flowHasToken( flow, name ) || flowHasToken( flow, std::string( 1, kDottedFlowBound ) + std::string( name ) ) );
     }
@@ -614,12 +624,12 @@ inline bool loaderReachesConstant( const IngestResult& ing, const Reference& loa
 // constant. Could it have named this one, by the visibility rules of loaderReachesConstant? Then loaders= is a floor for the row.
 inline bool untracedLoaderCouldReach( const IngestResult& ing, const Reference& loaderFact, const Reference& site, const ImportedNames& imports )
 {
-    if( site.composeRel == kDottedShapeLocalListed )
+    if( site.composeRel() == kDottedShapeLocalListed )
     {
         return loaderFact.fromSymbol == site.fromSymbol;
     }
     return loaderFact.fileId == site.fileId
-           || ( siteIsModuleLevel( ing, site ) && fileImportsNameFrom( ing, imports, loaderFact.fileId, site.memberCtor, site.fileId ) );
+           || ( siteIsModuleLevel( ing, site ) && fileImportsNameFrom( ing, imports, loaderFact.fileId, site.memberCtor(), site.fileId ) );
 }
 
 // Loaders of the constants: a non-test function that calls a sink on a computed value that the constant's name reaches.
@@ -633,7 +643,7 @@ inline void attachLoaders( const IngestResult& ing, std::span<const Reference* c
     const ImportedNames imports( ing, loaderFiles );
     for( Row& row : rows )
     {
-        if( row.site->memberCtor.empty() || row.site->composeRel == kDottedShapeSink || row.site->composeRel == kDottedShapeFormat )
+        if( row.site->memberCtor().empty() || row.site->composeRel() == kDottedShapeSink || row.site->composeRel() == kDottedShapeFormat )
         {
             continue;
         }
@@ -700,9 +710,9 @@ inline void appendDsRow( std::string& x, const IngestResult& ing, const Row& row
     {
         epdetail::appendAttr( x, "in", in, esc );
     }
-    if( !r.memberPath.empty() )
+    if( !r.memberPath().empty() )
     {
-        epdetail::appendAttr( x, "sink", r.memberPath, esc );
+        epdetail::appendAttr( x, "sink", r.memberPath(), esc );
     }
     if( row.loader != kNoNode )
     {
@@ -753,7 +763,7 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
     } );
     // the element
     std::vector<char> esc;
-    std::string       x( kForDottedStringsLegend );
+    std::string       x;
     const std::size_t shownRows = std::min( rows.size(), kForDottedStringRows );
     x += std::format( "<dotted_strings sites=\"{}\" rows=\"{}\"", rows.size(), shownRows );
     x += " hedge=\"a string in the source names this symbol; whether any import sink loads it is not traced\"";   // on the element: --callers' legend layer keeps no comment
@@ -785,7 +795,11 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
         appendDsRow( x, ing, rows[k], esc );
     }
     x += "</dotted_strings>";
-    return x;
+    std::string legend( kForDottedStringsLegend );   // SIZE-1: present-only on the printed rows
+    eraseAbsentClause( legend, kForDottedSinkClause, x.contains( " sink=\"" ) );
+    eraseAbsentClause( legend, kForDottedLoaderClause, x.contains( " loader=\"" ) || x.contains( " loaders=\"" ) || x.contains( " loaders_floor=\"" ) );
+    eraseAbsentClause( legend, kForDottedTemplateClause, x.contains( " tmpl=\"" ) );
+    return legend + x;
 }
 
 }   // namespace rw

@@ -11,6 +11,8 @@
 // best score of any symbol it holds (the markdown file-node, which indexes the whole body, dominates). The
 // graph half ([[links]]/PageRank) is intentionally NOT fused — the eval showed importance ≠ relatedness.
 
+#include "infra/sortutil.h"    // sortutil::svLess — the byte order the mirror-tree path tables sort and search by
+#include "infra/pctenc.h"      // rw::appendPercentEncoded — the path-list attributes (demoted_names=, mirror_dirs=)
 #include "infra/Diagnostics.h" // ASSUME_NO_ALIAS_BUF — waterFillRecallShares reads demand[] while writing alloc[]
 #include "docparse.h"    // §P2b: the generated-document signals (marker / size+fences) + the ONE markdown
                          //       fence scanner — a doc-side property, computed from the file's own bytes
@@ -24,6 +26,7 @@
                          //      — recall budgets and estimates with the SAME calibration as the map family
 
 #include <algorithm>
+#include <cmath>         // HTML-CUT: std::log / std::llround — the window scorer's fixed-point idf
 #include <cstdio>
 #include <cstdint>
 #include <fstream>
@@ -219,14 +222,28 @@ inline bool recallOrderLess( const Recalled& a, const Recalled& b, const IngestR
     return ing.files[ a.fileId ] < ing.files[ b.fileId ];   // deterministic tiebreak
 }
 
-inline RecallSelection recallTopFiles( const IngestResult& ing, const std::vector<float>& scores, int k, bool docsOnly )
+// The doc mask less the files `skipped` marks (per fileId; null or all-zero: the mask itself, copied).
+inline std::vector<char> docsLessSkipped( const std::vector<char>& isDoc, const std::vector<char>* skipped )
+{
+    std::vector<char> out = isDoc;
+    for( std::size_t f = 0; skipped != nullptr && f < out.size() && f < skipped->size(); ++f )
+    {
+        out[ f ] = char( out[ f ] != 0 && ( *skipped )[ f ] == 0 );
+    }
+    return out;
+}
+
+// `skipped` (per fileId, may be null): documents the scorer left out (a mirror tree, recallMirrorTrees). They take no part in
+// the generated-doc verdicts either, so many small mirror copies cannot drag the median that demotes the documents kept.
+inline RecallSelection recallTopFiles( const IngestResult& ing, const std::vector<float>& scores, int k, bool docsOnly,
+                                       const std::vector<char>* skipped = nullptr )
 {
     // docsOnly: restrict to DOCUMENT files (docFileMask, above) — recall = "what I already KNOW" (notes / plans /
     // designs), not code (that's --for / --grep). Over a mixed code+docs tree this keeps code files from
     // swamping the docs (which the lexical scorer down-weights ×0.30 anyway). The generated-doc verdicts are
     // taken over that same doc corpus, and only there: a caller ranking code gets the untouched ordering.
     const std::vector<char>    isDoc    = docFileMask( ing );
-    const GeneratedDocVerdicts verdicts = docsOnly ? classifyGeneratedDocs( ing, isDoc ) : GeneratedDocVerdicts{};
+    const GeneratedDocVerdicts verdicts = docsOnly ? classifyGeneratedDocs( ing, docsLessSkipped( isDoc, skipped ) ) : GeneratedDocVerdicts{};
 
     std::vector<float> best( ing.files.size(), 0.f );
     for( std::size_t i = 0; i < ing.symbols.size() && i < scores.size(); ++i )
@@ -291,6 +308,9 @@ struct RecallShape
     std::size_t shownCount     = 0;       // docs actually emitted
     std::size_t truncatedCount = 0;       // emitted docs whose body was CUT to fit the budget
     std::size_t demotedCount   = 0;       // §P2b: MATCHING docs de-prioritized as generated artifacts
+    std::string mirrorAttr;               // DOCS-UNITS: " mirror_skipped=N mirror_dirs=…" when the scorer left mirror
+                                          // trees out of the corpus, then " terms_capped=1 terms_total=N" when it left
+                                          // query terms past kMaxUniqueQueryTerms out; "" when it left nothing out
     std::string demotedNamesAttr;         // DOCS-DEMOTE-FP: " generated_demoted_paths=…" (and _named= when the
                                           // list is cut), built once from the selection; "" when none demoted
     std::size_t bytes          = 0;       // total emitted bytes (header + bodies + markers)
@@ -326,6 +346,12 @@ inline constexpr std::size_t kRecallHeaderReserveBytes = 320;
 inline constexpr std::size_t kRecallTruncNoteBytes     = 128;
 inline constexpr std::size_t kRecallMinBodyBytes       = 240;
 inline constexpr std::size_t kDefaultRecallMaxTokens   = 8000;
+// DOCS-TOPK6: how many docs --recall and MCP memory_recall serve when the caller names no --top-k/top_k.
+// ONE constant for both doors (it was a literal 8 in verbs_for.h and mcp.h, a drift risk). 6, not 8: the
+// 8000-token budget is water-filled across the served docs, so fewer docs means a bigger share each, and
+// the measured misses at 8 were mostly "right file, answering section past its ~2.9 KB share"
+// (reports/docs-quick-s0.md: dev 34 rows Complete 11 -> 13 at k=6, held 14 rows 3 -> 4, bytes +2.5 %).
+inline constexpr int         kDefaultRecallTopK        = 6;
 
 // §C4 — the smallest slice worth giving a document A SHARE OF THE BUDGET for: ~350 tokens, one screen of
 // prose. Distinct from kRecallMinBodyBytes above, and the distinction is the whole point. kRecallMinBodyBytes
@@ -426,8 +452,9 @@ inline std::size_t findRecallBoundaryCut( std::string_view body, std::size_t cut
 // off-spec, which is a worse failure than over-protecting a pipe-heavy paragraph run.
 struct RecallProtectedRange
 {
-    std::size_t start = 0;
-    std::size_t end   = 0;   // exclusive
+    std::size_t start   = 0;
+    std::size_t end     = 0;       // exclusive
+    bool        isFence = false;   // a fenced block (start = its opener line); false = a pipe-table run, which has no opener
 };
 
 inline std::vector<RecallProtectedRange> findRecallProtectedRanges( std::string_view body )
@@ -471,7 +498,7 @@ inline std::vector<RecallProtectedRange> findRecallProtectedRanges( std::string_
             }
             else
             {
-                ranges.push_back( { fenceStart, lineFullEnd } );
+                ranges.push_back( { fenceStart, lineFullEnd, true } );
             }
         }
         else if( wasInside )
@@ -496,7 +523,7 @@ inline std::vector<RecallProtectedRange> findRecallProtectedRanges( std::string_
     }
     if( fence.isInside() )
     {
-        ranges.push_back( { fenceStart, body.size() } );   // unterminated fence protects through EOF
+        ranges.push_back( { fenceStart, body.size(), true } );   // unterminated fence protects through EOF
     }
     flushTable( body.size() );
     return ranges;
@@ -553,15 +580,44 @@ struct RecallTruncation
     std::size_t sourceKeptBytes = 0;   // INPUT bytes that survived: pre-ellipsis, pre-fence-repair
 };
 
-inline RecallTruncation truncateRecallBody( std::string& body, std::size_t keepBytes )
+// The cut itself, shared by the head cut below and the windowed cut (truncateRecallBodyWindow): the cascade
+// lands the tail on a readable boundary, appends the visible "…", repairs an open fence, and reports the
+// INPUT bytes that survived plus whether a fence had to be closed. The two callers differ only in what they
+// cut FROM (byte 0, or a window start) and so in what their markers say.
+struct RecallTailCut
 {
-    const std::size_t fullBytes = body.size();
+    std::size_t sourceKeptBytes = 0;     // INPUT bytes that survived: pre-ellipsis, pre-fence-repair
+    bool        isFenceClosed   = false;
+};
 
-    std::size_t cut = std::min( keepBytes, fullBytes );
+// `isWindowCut`: the windowed cut below. A window was CHOSEN for what it holds, so §L4.2's whole-or-nothing
+// rule would cost it exactly that: a fence or table that straddles the window's end (or that the window
+// opens inside) retreats the cut behind it and drops the matched lines — to an empty body when the window
+// opens inside one. A window cut therefore lands on the window's own last line end, inside such a range if
+// need be, and fence repair closes a torn fence, disclosed as fence_closed.
+inline RecallTailCut cutRecallBodyTail( std::string& body, std::size_t keepBytes, bool isWindowCut = false )
+{
+    std::size_t cut = std::min( keepBytes, body.size() );
     while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) { --cut; }   // UTF-8-safe backoff
 
-    cut = findRecallBoundaryCut( body, cut, kRecallBoundaryLookbackBytes );
-    cut = adjustCutForProtectedRanges( cut, findRecallProtectedRanges( body ) );
+    if( isWindowCut )
+    {
+        // The window was sized in whole lines, so its end is a line end, or the end of the body (a converted page
+        // ends without a newline): keep it. §L4.1's cascade would prefer an EARLIER sentence end and drop the
+        // window's last line — often the very line it was chosen for. Only a cut that landed mid-line (the
+        // allowance ended inside one) steps back to the line before.
+        if( cut < body.size() )
+        {
+            std::size_t lineCut = cut;
+            while( lineCut > 0 && body[lineCut - 1] != '\n' ) { --lineCut; }
+            cut = lineCut > 0 ? lineCut : cut;   // one line longer than the window: the byte cut, as before
+        }
+    }
+    else
+    {
+        cut = findRecallBoundaryCut( body, cut, kRecallBoundaryLookbackBytes );
+        cut = adjustCutForProtectedRanges( cut, findRecallProtectedRanges( body ) );
+    }
 
     while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) { --cut; }   // re-verify: both
                                                                                                   // moves above land
@@ -571,19 +627,44 @@ inline RecallTruncation truncateRecallBody( std::string& body, std::size_t keepB
                                                                                                   // assumption
                                                                                                   // costs nothing
                                                                                                   // to re-check.
-    const std::size_t actualKeepBytes = cut;
+    truncateUtf8WithEllipsis( body, cut );                       // deterministic UTF-8-safe prefix + a visible "…"
+    const bool isFenceClosed = closeOpenMarkdownFence( body );   // §B2 — never hand back an open fence
+    return { cut, isFenceClosed };
+}
 
-    truncateUtf8WithEllipsis( body, actualKeepBytes );                                // deterministic UTF-8-safe prefix + a visible "…"
-    const char* fenceNote = closeOpenMarkdownFence( body ) ? ", fence_closed" : "";    // §B2 — never hand back an open fence
+inline RecallTruncation truncateRecallBody( std::string& body, std::size_t keepBytes )
+{
+    const std::size_t   fullBytes = body.size();
+    const RecallTailCut cut       = cutRecallBodyTail( body, keepBytes );
 
     // CA4 H1 sibling sweep: this one was PROVABLY bounded (fixed prose + two %zu + the two-valued fenceNote =
     // 79 bytes worst case in a 160-byte buffer), so it never overflowed. It is composed on std::string anyway,
     // because the SHAPE is the defect, not the arithmetic: "snprintf into a fixed buffer, then append its
     // WOULD-BE return length" is safe only for as long as nobody widens the prose or adds an interpoland, and
     // that safety is invisible at the call site. Byte-identical to the format string it replaces.
-    return { "  [truncated: " + std::to_string( actualKeepBytes ) + " of " + std::to_string( fullBytes ) + " bytes"
-                 + fenceNote + "]",
-             actualKeepBytes };
+    return { "  [truncated: " + std::to_string( cut.sourceKeptBytes ) + " of " + std::to_string( fullBytes ) + " bytes"
+                 + ( cut.isFenceClosed ? ", fence_closed" : "" ) + "]",
+             cut.sourceKeptBytes };
+}
+
+// An extracted HTML page is LINE-PRESERVING (htmldoc.h): a raw line of pure markup is an empty line of text, so a unit
+// can hold long runs of them. What is served keeps one blank line where there were several; lines= still names the
+// file's own range, which is what the empty lines were kept for.
+inline void squeezeBlankLineRuns( std::string& text )
+{
+    std::size_t w       = 0;
+    int         newlines = 0;
+    for( std::size_t r = 0; r < text.size(); ++r )
+    {
+        const char c = text[ r ];
+        newlines     = c == '\n' ? newlines + 1 : 0;
+        if( newlines > 2 )
+        {
+            continue;
+        }
+        text[ w++ ] = c;
+    }
+    text.resize( w );
 }
 
 // One recalled doc's emitted text, redacted. P1-B: for a document file this is its EXTRACTED text (the
@@ -596,6 +677,7 @@ inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::
     if( const auto it = ing.docText.find( fileId ); it != ing.docText.end() )
     {
         body = it->second;
+        squeezeBlankLineRuns( body );   // a line-preserving page's markup-only lines (htmldoc.h)
     }
     else
     {
@@ -630,6 +712,22 @@ inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::
 inline std::string optionalRecallAttr( std::string_view name, std::size_t value )
 {
     return value == 0 ? std::string() : " " + std::string( name ) + "=" + std::to_string( value );
+}
+
+// A quoted, comma-separated path list for a header attribute: '%', '"', ',', space and control bytes percent-encoded
+// (%25 %22 %2C %20 %XX), so the list splits on ',' whatever a path spells and a space-splitting reader keeps it whole.
+inline void appendRecallPathList( std::string& attr, const std::vector<std::string_view>& paths )
+{
+    attr += '"';
+    for( std::size_t i = 0; i < paths.size(); ++i )
+    {
+        if( i > 0 )
+        {
+            attr += ',';
+        }
+        appendPercentEncoded( attr, paths[ i ], []( unsigned char c ) { return c == '"' || c == ',' || c == ' '; } );
+    }
+    attr += '"';
 }
 
 // DOCS-DEMOTE-FP: the demoted docs BY NAME, so a header that tallies generated_demoted=N also says which N —
@@ -717,7 +815,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // §B9.2: "document files" is docFileMask()'s population and says so — it is a SUPERSET of
     // --doc-drift's docs= (markdown by extension), and the two must not share a noun.
     std::string line;
-    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + shape.demotedNamesAttr.size() + overCeilingAttr.size()
+    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + shape.demotedNamesAttr.size() + shape.mirrorAttr.size() + overCeilingAttr.size()
                   + maxTokensAttr.size() + budgetTokensAttr.size() + shareBytesAttr.size() );
     line += "ripwire recall — \"";
     line += task;
@@ -734,6 +832,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     line += truncAttr;
     line += demotedAttr;
     line += shape.demotedNamesAttr;
+    line += shape.mirrorAttr;
     line += overCeilingAttr;
     line += maxTokensAttr;
     line += budgetTokensAttr;
@@ -803,7 +902,7 @@ inline std::string formatRecallCappedNote( const RecallShape& shape, std::size_t
     {
         // cut-fix E: the note is ONE byte string on both doors (recallparitycheck), so it names both spellings of
         // each knob — the CLI flag and the MCP memory_recall argument — rather than handing an MCP caller a flag.
-        why += "raise --top-k/top_k (default 8) for " + std::to_string( topKOmitted ) + " more";
+        why += "raise --top-k/top_k (default " + std::to_string( kDefaultRecallTopK ) + ") for " + std::to_string( topKOmitted ) + " more";
     }
     if( budgetOmitted > 0 )
     {
@@ -825,82 +924,24 @@ inline std::string formatRecallCappedNote( const RecallShape& shape, std::size_t
 // §G3 (the markdown section tier) — the SECTION-GRANULAR recall body. When a matched document has
 // heading sections of its own and at least one of them matched the query, serve those sections'
 // bodies instead of the whole doc: the residual this deletes is "find the section inside the doc".
-// Whole-doc remains the path for heading-less docs and extracted-text documents (notebooks/html via
-// docparse, which only ever carry a whole-file node) — DISCLOSED by the absence of the
-// `[sections: …]` note, and its presence names the cut: emitted of selected, plus the whole doc's
-// byte size so the reader knows what was not loaded.
+// Whole-doc remains the path for heading-less docs (and notebooks/CSV, which carry only a whole-file node) —
+// DISCLOSED by the absence of the `[sections: …]` note, and its presence names the cut: emitted of selected, plus
+// the whole doc's byte size so the reader knows what was not loaded. An HTML page has units since DOCS-UNITS
+// (htmldoc.h), so it is served section by section like markdown.
 //
-// Which sections: every positive-scoring heading section, score descending with byte position as the
-// deterministic tiebreak. Returns nullopt whenever the whole-doc path is the right answer; a file
-// that changed on disk since ingest (span past EOF) also returns nullopt rather than serving a wrong
-// slice — the whole-doc path re-reads it honestly.
+// Which sections: every positive-scoring UNIT (DOCS-UNITS, below: a heading's own prose, or the preamble), score
+// descending with byte position as the deterministic tiebreak. Returns nullopt whenever the whole-doc path is the
+// right answer.
 //
-// ─── §RP3.1 — a section's emitted UNIT is its OWN PROSE, and what that replaced ──────────────────
-//
-// This used to serve each picked section's whole SUBTREE — `[sigStartByte, endByte)`, where ingest
-// sets endByte to the next same-or-higher heading's start (src/ingest_docs.h, "(2) section spans +
-// hierarchy") — and then dropped any candidate OVERLAPPING an already-kept one, so an ancestor and
-// its descendants could never both be served. The comment that justified keeping the ancestor
-// claimed "BM25's length normalization puts the tight matching section above its diluted parent".
-// MEASURED, it does not: on docs/ARCHITECTURE.md, `## 1. The pipeline` (lines 12-336) outranks all
-// seven `###`/`####` subsections nested inside it, wins the overlap, and one retrievable unit then
-// costs 325 lines. Which unit an agent could get back was decided by heading depth, not relevance.
-//
-// A unit is now [heading, next heading of ANY depth) — its own prose. Units therefore TILE the
-// document instead of nesting, and that is what deletes the overlap loop outright: there is no
-// overlap left to resolve. `## 1. The pipeline` becomes a ~9-line unit and its subsections become
-// seven units of their own, each independently admissible.
-//
-// THE SPAN MISMATCH, and what it costs. Scores are NOT recomputed over the narrowed span. A Section
-// symbol's indexed body field is `[sigStartByte, endByte)` — src/lexical.h's scanFileSymbols hands
-// scanField exactly that span — i.e. the SUBTREE, and it stays the subtree: narrowing it would reach
-// into the field --expand, --grep's enclosing symbol, the quality metrics and the edit verbs all read,
-// which is a different change to a different file. So an ancestor RANKS on the words of a subtree that
-// other units serve, while the unit it contributes is only its own prose.
-//
-// §RP3.3 CORRECTS WHAT THIS COMMENT USED TO CLAIM. It said the residual was "bounded and
-// self-correcting … the worst case is a heading-plus-intro admitted one slot early". That is false, and
-// the counter-example is the documented way to call this verb — CLAUDE.md tells agents to phrase
-// --recall as the task IN WORDS. This ranker has no query-side stopword list (the SIRA corpus-statistics
-// margin, src/lexical.h's `marginBits`, ships DISARMED), so "the", "does", "are" are live query terms.
-// An ancestor's subtree contains every one of them, everywhere, and tf is additive: on
-// docs/ARCHITECTURE.md, `crawl order sorted before ids assigned` serves lines 353-369 — the answer —
-// while `how does the crawl order get sorted before the ids are assigned` served lines 1-11 and 12-20,
-// two heading-plus-intro stubs, at 800, 1200 and 1600 tokens, with the answer appearing only at 2400 and
-// third. Not one slot early: the answer was gone at every ceiling an agent would use.
-//
-// THE FIX IS AT THE RANK, NOT AT ADMISSION, and that was measured rather than assumed. Both cheaper
-// repairs are ADMISSION rules and neither works:
-//   - a corpus-statistics term margin (keep the ancestor only on a query term with df <= S/2) leaves
-//     the reproduction bit-identical. Measured: of the three ancestors it must drop, `# ripwire —
-//     architecture` keeps "how" (df 2 of 13 own-prose units) and `## 1. The pipeline` keeps "order"
-//     (df 4 of 13). Both are genuine, separating terms genuinely present in the ancestor's own prose.
-//   - "keep it only if its own-prose SCORE is positive" is INERT, provably: BM25's idf is
-//     ln((S-n+0.5)/(n+0.5)+1) > 0 for every n <= S, so a positive own-prose score is exactly "own prose
-//     carries a query term" — the rule already shipping below, restated.
-// `## 1. The pipeline`'s own prose really does say "in that order". Admission was right to keep it. What
-// was wrong is that it outranked the answer, on evidence held by the seven subsections nested inside it.
-//
-// SO THE RANK KEY IS ATTRIBUTED: rank = scorer score × (this unit's own-prose evidence ÷ the strongest
-// own-prose evidence anywhere in its subtree). A leaf's subtree IS its own prose, so its maximum is
-// itself and its key is its score bit-for-bit — the keyword path this verb is strongest at does not
-// move. An ancestor whose own prose is the best evidence under it is likewise untouched. Only an
-// ancestor ranking on words a descendant carries better is demoted, in proportion to how much better.
-// Measured against the shipped ranker on two independent harnesses (details in the round's report):
-// heading-as-query over docs/, 456 trials at 800 tokens — NL answer served 76%→80%, served FIRST
-// 73%→79%, NL/keyword agreement 75%→80%, keyword answers byte-identical on 98% of trials; and
-// unique-term queries, 72 trials at 1600 tokens — NL served FIRST 43%→79%, agreement 42%→78%, keyword
-// output byte-identical on 100%. A full own-prose re-rank (discard the scorer's number, rank every unit
-// by its own-prose BM25) scores higher still on the first harness — which QUERIES HEADINGS, the field
-// that re-rank weighs ×3, so it grades its own bias — and it is a ranking replacement, not a defect fix:
-// it moves 9% of keyword answers for no measured keyword gain and belongs to a pre-registered ranking
-// round, not to this one.
-struct RecallSectionPick
-{
-    std::uint32_t symIndex = 0;
-    std::uint32_t ownEndByte = 0;   // §RP3.1 — the next heading of ANY depth, else this section's own end
-    float         score      = 0.f;   // §RP3.3 — the attributed RANK KEY, not a score anything prints
-};
+// History, kept short because the code it explains is gone: §RP3.1 narrowed the served span from a heading's
+// SUBTREE to its own prose (units tile, so no overlap pass), while the ranking still scored subtrees; §RP3.3 then
+// demoted an ancestor that ranked on its descendants' words with an attributed rank key, and the ancestor rule kept
+// a parent only when its own prose carried a query term. That round named "a full own-prose re-rank" as the better
+// ranking and left it to a pre-registered ranking round. DOCS-LAB (reports/docs-lab.md) was that round, and
+// DOCS-UNITS ships it: every unit is scored on its own prose against the corpus of units, so both repairs have
+// nothing left to repair. The two fixtures the ancestor rule was built from keep their answers by construction
+// (test/mdsectioncheck.sh): a parent whose own prose lacks the query term scores 0, and one whose own prose holds the
+// only occurrence scores on it.
 
 // One emitted section unit: where its text sits inside the document-order body, and which source
 // lines it is. Byte offsets rather than a second copy of the text — the body is the storage.
@@ -910,6 +951,7 @@ struct RecallSectionUnit
     std::uint32_t bodyLength = 0;   // its length there
     std::uint32_t lineLo     = 0;   // 1-based first source line of the unit
     std::uint32_t lineHi     = 0;   // 1-based last source line of the unit
+    std::uint32_t symIndex   = 0;   // its heading symbol (FOR-DOC-BODY names the section it serves by this heading)
 };
 
 // What LOAD hands to EMIT. `body` is every selected unit concatenated in DOCUMENT order — which is
@@ -926,15 +968,6 @@ struct RecallSectionBody
     std::size_t                    wholeBytes   = 0;   // the document's own size on disk
 };
 
-// §RP3.1 — does this span's OWN PROSE carry any of the query's terms? Tokenized with lexical.h's
-// `subtokens`, which is the very state machine lexicalScores runs the query through, so "a query term"
-// cannot come to mean two different things inside one binary — the rule this file already keeps for
-// "inside a fence" (docparse::scanMarkdownFences, the ONE scanner). An empty query never demotes
-// anything: there is nothing to have earned a rank against.
-// It walks `forEachLexSubtoken` — the state machine `subtokens` itself delegates to — rather than
-// calling `subtokens` and intersecting two vectors. Same tokens, same ≥2-byte drop, but no allocation
-// and an early exit on the first hit: this runs once per ambiguous ancestor per recalled document, and
-// the answer is almost always decided inside the heading line.
 // WHICH query term one already-delimited token equals, or `terms.size()` for none. The ONE place a doc
 // token is compared against the query table, shared by the boolean test below and §RP3.3's weighted
 // counter — two callers that ask different questions of the identical comparison, which is exactly the
@@ -963,46 +996,6 @@ inline std::size_t recallMatchedTermIndex( std::string_view text, std::size_t to
     return terms.size();
 }
 
-inline bool ownProseCarriesQueryTerm( std::string_view prose, const std::vector<std::string>& queryToks )
-{
-    if( queryToks.empty() )
-    {
-        return true;
-    }
-    bool isFound = false;
-    forEachLexSubtoken( prose, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
-    {
-        const std::size_t tokLen = tokEndByte - tokStartByte;
-        if( isFound || tokLen < 2 )
-        {
-            return;   // the ≥2-byte drop subtokens() applies — the query was tokenized under it too
-        }
-        isFound = recallMatchedTermIndex( prose, tokStartByte, tokLen, queryToks ) < queryToks.size();
-    } );
-    return isFound;
-}
-
-// §RP3.3 — HOW MUCH of the query each own-prose span carries, on one scale, for one document. BM25 over
-// a collection of this document's own-prose units: the same formula src/lexical.h scores symbols with
-// (idf = ln((S-n+0.5)/(n+0.5)+1), the same saturating tf and length normalisation, the same
-// resolveBm25Params so RIPWIRE_BM25_K1/B move both together), the same forEachLexSubtoken tokenizer and
-// the same ≥2-byte drop, and the same field split — the heading construct is the Section symbol's NAME
-// and is weighted ×kwName, the rest of the span ×kwBody, exactly as scanFileSymbols weighs them.
-//
-// The COLLECTION is this document's own units, not the repo, and that is the whole point: the question
-// being asked is which section of THIS document the query is about, so the document's own sections are
-// the population the term statistics must come from. A word in every section of a document separates
-// none of them — idf goes to ~0 for "the" (df = every unit) without a stopword list, which is the same
-// idea the SIRA margin registers at corpus level (docs/EVALS.md), derived from the tree in front of it.
-//
-// This is a RATIO's numerator and denominator, never a printed number and never compared across
-// documents, which is what makes the local collection sound: only ratios of two values from THIS call
-// are ever read. The ×3/×1 field split was checked for load-bearingness rather than assumed — rerunning
-// both harnesses with the heading weighted ×1 gives byte-identical results on every trial at both
-// budgets, because a ratio of two spans of the same document is insensitive to it. It mirrors the
-// scorer because there is no reason for it not to, not because it was tuned.
-//
-// Deterministic by construction: integer tf/df in fixed document order, one pass, no map, no clock.
 // One field of one unit, weighted into that unit's tf row and its length. Split out of the evidence pass
 // below rather than written as a lambda inside it: the tokenizer callback is where all that routine's
 // nesting lived, and lifting it leaves both halves flat. Same shape as lexicalScores' `scanTextInto` —
@@ -1026,316 +1019,235 @@ inline void accumulateRecallTermFreqs( std::string_view text, int fieldWeight, c
     } );
 }
 
-inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const std::vector<std::uint32_t>& headingSyms,
-                                                  const std::vector<std::uint32_t>& ownEnds, std::string_view raw,
-                                                  const std::vector<std::string>& queryToks )
+// The query's DISTINCT terms, first-occurrence order: duplicate query words must not double-count df. Used
+// by HTML-CUT's window scorer, and spelled through lexical.h's dedupeQueryTerms — the scorer's own dedupe — with a cap of the query's own
+// length, so no term is ever dropped (the window scorer indexes by every query token).
+inline std::vector<std::string> uniqueRecallQueryTerms( const std::vector<std::string>& queryToks )
 {
-    const std::size_t  unitCount = headingSyms.size();
-    std::vector<float> evidence( unitCount, 0.f );
-
-    std::vector<std::string> uniqueToks;   // duplicate query words must not double-count df
-    for( const std::string& q : queryToks )
-    {
-        if( std::find( uniqueToks.begin(), uniqueToks.end(), q ) == uniqueToks.end() )
-        {
-            uniqueToks.push_back( q );
-        }
-    }
-    const std::size_t termCount = uniqueToks.size();
-    if( termCount == 0 || unitCount == 0 )
-    {
-        return evidence;   // nothing to attribute; every caller reads this as "no demotion"
-    }
-
-    // SoA, the house layout: tf[unit*termCount + term] weighted, dl[unit] weighted to match.
-    constexpr int    kwHeading = 3, kwProse = kLexWeightBody;   // = lexicalScores' kwName / kwBody
-    std::vector<int> tf( unitCount * termCount, 0 );
-    std::vector<int> dl( unitCount, 0 );
-    std::vector<int> df( termCount, 0 );
-    for( std::size_t u = 0; u < unitCount; ++u )
-    {
-        const Symbol& s = ing.symbols[ headingSyms[u] ];
-        if( ownEnds[u] <= s.sigStartByte || ownEnds[u] > raw.size() )
-        {
-            continue;   // a zero-width unit, or a span past a file that moved — no evidence, no demotion
-        }
-        int* const          tfRow      = tf.data() + u * termCount;
-        const std::uint32_t headingEnd = std::min( s.sigEndByte, ownEnds[u] );
-        accumulateRecallTermFreqs( raw.substr( s.sigStartByte, headingEnd - s.sigStartByte ), kwHeading, uniqueToks, tfRow, dl[u] );
-        if( headingEnd < ownEnds[u] )
-        {
-            accumulateRecallTermFreqs( raw.substr( headingEnd, ownEnds[u] - headingEnd ), kwProse, uniqueToks, tfRow, dl[u] );
-        }
-        for( std::size_t t = 0; t < termCount; ++t )
-        {
-            df[t] += tfRow[t] > 0 ? 1 : 0;
-        }
-    }
-
-    const Bm25Params bm25Params = resolveBm25Params();   // A4: the ONE definition, shared with the scorer
-    double           totalDl    = 0.0;
-    for( const int unitDl : dl )
-    {
-        totalDl += unitDl;
-    }
-    const double avgdl = totalDl > 0.0 ? totalDl / double( unitCount ) : 1.0;
-    for( std::size_t u = 0; u < unitCount; ++u )
-    {
-        double sum = 0.0;
-        for( const std::string& q : queryToks )   // occurrence order: BM25 adds one contribution per occurrence
-        {
-            const std::size_t t = std::size_t( std::find( uniqueToks.begin(), uniqueToks.end(), q ) - uniqueToks.begin() );
-            const double      termFreq = tf[ u * termCount + t ];
-            if( termFreq <= 0.0 )
-            {
-                continue;
-            }
-            const double idf = std::log( ( double( unitCount ) - df[t] + 0.5 ) / ( df[t] + 0.5 ) + 1.0 );
-            sum += idf * ( termFreq * ( bm25Params.k1 + 1.0 ) )
-                   / ( termFreq + bm25Params.k1 * ( 1.0 - bm25Params.b + bm25Params.b * dl[u] / avgdl ) );
-        }
-        evidence[u] = float( sum );
-    }
-    return evidence;
+    return dedupeQueryTerms( queryToks, queryToks.size() ).uniqueToks;
 }
 
-// §RP3.1 — WHICH sections become units, and where each one ends. Split out of buildSectionGranularBody
-// so the span rule and the ancestor rule read on their own, ahead of the assembly that turns them into
-// text.
-struct RecallSectionSelection
+// ── DOCS-UNITS (D3): the document's own units, ranked one by one ───────────────────────────────────────────
+//
+// A UNIT is a heading's OWN PROSE — the heading line through the byte before the next heading of ANY depth (§RP3.1's
+// tiling) — plus, for the text in front of the first heading, a PREAMBLE unit carried by the file node. Before this,
+// every heading was scored on its whole SUBTREE and the file node on the whole document, so a long page's file node
+// won on length-normalised mass, and the ancestor rule and the attributed rank key (§RP3.1, §RP3.3) existed to repair
+// what subtree scoring did to the order inside one document. Scoring each unit on its own prose removes both causes:
+// a parent's prose earns a rank only with its own words, and no whole-file entry competes with its own sections. The
+// lab that picked this (reports/docs-lab.md, arm A0u) measured Complete 25 -> 51 of 79 dev rows at 8 % fewer bytes.
+//
+// The preamble is a unit only when it carries prose (kRecallPreambleMinBytes non-blank bytes), or when the document
+// has no headings at all, where it is the whole document — the heading-less path that stays whole-doc at serve time.
+// A shorter preamble is FOLDED into the first section's unit rather than dropped: a title line or a one-line note
+// would make a unit that wins on the file name alone (the name field of a preamble is the stem, ×3), but its words
+// must stay findable.
+
+inline constexpr std::size_t kRecallPreambleMinBytes = 80;   // the lab's threshold: a title line and a badge row are not prose
+
+struct RecallUnitSpan
 {
-    std::vector<RecallSectionPick> picks;              // DOCUMENT order
-    std::size_t                    sectionCount = 0;   // N — every heading section in the document
+    std::uint32_t symIndex  = 0;   // the heading's Section symbol; the file node for the preamble
+    std::uint32_t startByte = 0;
+    std::uint32_t headEnd   = 0;   // end of the heading construct (== startByte for the preamble)
+    std::uint32_t endByte   = 0;   // exclusive
 };
 
-// EVERY heading section in one markdown file, in BYTE order. ing.symbols is not ordered by byte within a
-// file, so byte order is ESTABLISHED here rather than assumed — §RP3.1's unit boundary is "the next
-// heading", which is a question about order and would otherwise inherit whatever order the global symbol
-// sort left behind.
-//
-// §RP3.3 — "every" is now literal, and the filter this replaces is why it had to change. It dropped any
-// heading whose section body is EMPTY (`sigEndByte >= endByte`), which is a real markdown shape: a heading
-// immediately followed, with no blank line, by a same-or-shallower heading. Such a heading was then
-// neither counted in N nor treated as a unit boundary, so `--help`'s "up to the next heading of any depth"
-// was false twice over — a 4-heading doc reported `3 of 3`, and the served range for the heading BEFORE
-// the empty one ran through the empty one's heading line. Both are disclosure defects, not cosmetics: N is
-// a denominator and lines= names emitted bytes.
-//
-// The whole-file node is what that filter was really excluding, and it is excluded by NAMING it rather
-// than by a side effect. ingest_docs.h's extractMarkdown builds it with `bodyByte = 0` over `[0, size)`,
-// so ingest_model.h's `sigEndByte = (bodyByte > startByte) ? bodyByte : endByte` leaves it with sigStart 0
-// and sigEnd == endByte == the file's span; a heading's sigEnd is its heading construct and is strictly
-// inside its span unless the section is empty. So "starts at byte 0, has no signature/body split, and ends
-// no earlier than any heading in the file" is the file node — and the one heading that can collide is a
-// document whose ENTIRE content is a single heading line, which the old filter dropped too. The last
-// clause is measured against the file's own SYMBOLS, never against the file's size on disk: the file may
-// have grown since it was indexed, and a staleness-dependent test would then admit the file node as a unit
-// overlapping every other one, silently breaking the tiling in the one case nothing downstream re-checks.
-inline std::vector<std::uint32_t> recallHeadingSections( const IngestResult& ing, std::size_t scoredCount, std::uint32_t fileId )
+// One document's Section symbols split into its file node and its headings (byte order). The file node is named,
+// not inferred from a side effect: ingest builds it over [0, size) with no signature/body split, so it starts at
+// byte 0, its signature runs to its end, and it ends no earlier than any heading in the file (measured against the
+// file's own SYMBOLS, never its size on disk, which may have moved since indexing). A heading that is the WHOLE
+// document — a file of one heading line — is the one shape that also passes, and it is the file node then.
+struct RecallDocSections
 {
-    std::vector<std::uint32_t> headingSyms;
-    std::uint32_t              widestEndByte = 0;
+    std::vector<std::uint32_t> headingSyms;                  // byte order; ties by symbol index (a total order)
+    std::uint32_t              fileNode = kNoRecallFileNode;   // kNoRecallFileNode when the document has none
+    static constexpr std::uint32_t kNoRecallFileNode = 0xFFFFFFFFu;
+};
+
+inline RecallDocSections splitRecallDocSections( const IngestResult& ing, std::vector<std::uint32_t> secs )
+{
+    RecallDocSections out;
+    std::uint32_t     widestEndByte = 0;
+    for( const std::uint32_t i : secs )
+    {
+        widestEndByte = std::max( widestEndByte, ing.symbols[ i ].endByte );
+    }
+    for( const std::uint32_t i : secs )
+    {
+        const Symbol& s = ing.symbols[ i ];
+        const bool isFileNode = s.sigStartByte == 0 && s.sigEndByte >= s.endByte && s.endByte >= widestEndByte;
+        if( isFileNode && out.fileNode == RecallDocSections::kNoRecallFileNode )
+        {
+            out.fileNode = i;
+            continue;
+        }
+        if( !isFileNode )
+        {
+            out.headingSyms.push_back( i );
+        }
+    }
+    std::sort( out.headingSyms.begin(), out.headingSyms.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
+    {
+        if( ing.symbols[ a ].sigStartByte != ing.symbols[ b ].sigStartByte )
+        {
+            return ing.symbols[ a ].sigStartByte < ing.symbols[ b ].sigStartByte;
+        }
+        return a < b;
+    } );
+    return out;
+}
+
+// One file's Section symbols (Markdown-lang: markdown, reST, and the extracted HTML/notebook docs), for the serve path,
+// which looks at a handful of files. The corpus scorer below groups every file in one sorted pass instead.
+// A document's heading section: markdown, reST and extracted pages all carry their sections as Markdown Section symbols.
+inline bool isRecallDocSection( const IngestResult& ing, const Symbol& s ) noexcept
+{
+    return s.kind == SymKind::Section && s.lang == Lang::Markdown && s.fileId < ing.files.size();
+}
+
+inline RecallDocSections recallDocSections( const IngestResult& ing, std::size_t scoredCount, std::uint32_t fileId )
+{
+    std::vector<std::uint32_t> secs;
     for( std::size_t i = 0; i < ing.symbols.size() && i < scoredCount; ++i )
     {
         const Symbol& s = ing.symbols[ i ];
-        if( s.fileId == fileId && s.kind == SymKind::Section && s.lang == Lang::Markdown )
+        if( s.fileId == fileId && isRecallDocSection( ing, s ) )
         {
-            widestEndByte = std::max( widestEndByte, s.endByte );
-            headingSyms.push_back( std::uint32_t( i ) );
+            secs.push_back( std::uint32_t( i ) );
         }
     }
-    headingSyms.erase( std::remove_if( headingSyms.begin(), headingSyms.end(), [ & ]( std::uint32_t i ) noexcept
+    return splitRecallDocSections( ing, std::move( secs ) );
+}
+
+inline std::size_t recallNonBlankBytes( std::string_view text ) noexcept
+{
+    return std::size_t( std::count_if( text.begin(), text.end(), []( char c ) noexcept { return c != ' ' && c != '\n' && c != '\t' && c != '\r'; } ) );
+}
+
+// The units of one document, in byte order, over `text` (the bytes the symbols' offsets index: the extracted text
+// for an extracted doc, the file for the rest). A span past the text's end (the file moved since indexing) is cut
+// to it; a zero-width one (two headings at one byte) is no unit. `isExtracted`: the text is a docparse extraction
+// (an HTML page), whose units end at their last line of text (below).
+inline std::vector<RecallUnitSpan> recallDocUnits( const IngestResult& ing, const RecallDocSections& doc, std::string_view text, bool isExtracted )
+{
+    std::vector<RecallUnitSpan> units;
+    const auto                  textEnd          = std::uint32_t( std::min<std::size_t>( text.size(), 0xFFFFFFFFu ) );
+    bool                        isPreambleFolded = false;
+    if( doc.fileNode != RecallDocSections::kNoRecallFileNode )
     {
-        const Symbol& s = ing.symbols[i];
-        return s.sigStartByte == 0 && s.sigEndByte >= s.endByte && s.endByte >= widestEndByte;
-    } ), headingSyms.end() );
-    std::sort( headingSyms.begin(), headingSyms.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
-    {
-        if( ing.symbols[a].sigStartByte != ing.symbols[b].sigStartByte )
+        const std::uint32_t preambleEnd = doc.headingSyms.empty() ? textEnd
+                                                                  : std::min( ing.symbols[ doc.headingSyms.front() ].sigStartByte, textEnd );
+        const std::size_t preambleBytes = preambleEnd > 0 ? recallNonBlankBytes( text.substr( 0, preambleEnd ) ) : 0;
+        if( preambleEnd > 0 && ( doc.headingSyms.empty() || preambleBytes >= kRecallPreambleMinBytes ) )
         {
-            return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte;
+            units.push_back( { doc.fileNode, 0, 0, preambleEnd } );
         }
-        return a < b;   // two headings at one byte cannot be ordered by position; index keeps the sort TOTAL
-    } );
-    return headingSyms;
-}
-
-// §RP3.1 — each heading's OWN-PROSE end: the next heading of ANY depth, else its own section end. Computed
-// over EVERY heading and not only the matching ones, because a unit's boundary is the next heading whether
-// or not that heading scored — which is what makes the units TILE, and why no overlap pass follows them.
-inline std::vector<std::uint32_t> recallOwnEndBytes( const IngestResult& ing, const std::vector<std::uint32_t>& headingSyms )
-{
-    std::vector<std::uint32_t> ownEnds( headingSyms.size(), 0 );
-    for( std::size_t p = 0; p < headingSyms.size(); ++p )
-    {
-        const Symbol& s = ing.symbols[ headingSyms[p] ];
-        ownEnds[p]      = ( p + 1 < headingSyms.size() )
-                              ? std::min( ing.symbols[ headingSyms[ p + 1 ] ].sigStartByte, s.endByte )
-                              : s.endByte;
+        else if( preambleBytes > 0 )
+        {
+            isPreambleFolded = true;   // a short preamble (a title line, a badge, a one-line note) rides with the first section
+        }
     }
-    return ownEnds;
-}
-
-// §RP3.3 — ATTRIBUTE one section's rank. The denominator is the strongest own-prose evidence anywhere in
-// this section's SUBTREE, itself included, so a leaf — and any ancestor that is the best evidence under
-// itself — divides by its own value and keeps the scorer's number bit-for-bit. `headingSyms` is in byte
-// order and a section's descendants are the contiguous run starting inside its span, which is the same
-// walk the admission test above makes. A subtree carrying no evidence at all is possible, since the scorer
-// also reads the path and basename fields, which are not prose; it demotes nothing, because there is no
-// attribution to make and inventing one would be a guess.
-inline float recallAttributedScore( const IngestResult& ing, const std::vector<std::uint32_t>& headingSyms,
-                                    const std::vector<float>& ownEvidence, std::size_t p, float scorerScore )
-{
-    const std::uint32_t subtreeEnd         = ing.symbols[ headingSyms[p] ].endByte;
-    double              strongestInSubtree = ownEvidence[p];
-    for( std::size_t q = p + 1; q < headingSyms.size() && ing.symbols[ headingSyms[q] ].sigStartByte < subtreeEnd; ++q )
+    for( std::size_t p = 0; p < doc.headingSyms.size(); ++p )
     {
-        strongestInSubtree = std::max( strongestInSubtree, double( ownEvidence[q] ) );
-    }
-    if( strongestInSubtree <= 0.0 )
-    {
-        return scorerScore;
-    }
-    return float( double( scorerScore ) * ( double( ownEvidence[p] ) / strongestInSubtree ) );
-}
-
-inline RecallSectionSelection selectRecallSectionPicks( const IngestResult& ing, const std::vector<float>& scores,
-                                                        std::uint32_t fileId, std::string_view raw,
-                                                        const std::vector<std::string>& queryToks )
-{
-    const std::vector<std::uint32_t> headingSyms = recallHeadingSections( ing, scores.size(), fileId );
-    const std::vector<std::uint32_t> ownEnds     = recallOwnEndBytes( ing, headingSyms );
-    const std::vector<float>         ownEvidence = recallOwnProseEvidence( ing, headingSyms, ownEnds, raw, queryToks );
-
-    // §RP3.1 — own-prose spans, computed over EVERY heading and not only the matching ones: a unit's
-    // boundary is the next heading in the document whether or not that heading scored. The result is a
-    // TILING, which is why no overlap pass follows it.
-    //
-    // THE ANCESTOR RULE, and it is the crux of §RP3.1. A section's score is computed over its SUBTREE
-    // (see the residual note above), so an ancestor can score on words that live only in a child. Two
-    // rules were built and measured before this one, and each broke a real gate by getting exactly one
-    // of the two cases wrong:
-    //
-    //   - keep every positive-scoring section (a plain tiling). test/mdsectionfix/guide.md then answers
-    //     the single-token query `zqcachewarmbody` with `# Orientation Guide`'s prose attached, whose
-    //     own marker is a DIFFERENT token — the sibling/parent prose that section-granular recall exists
-    //     to stop serving (test/mdsectioncheck.sh).
-    //   - drop every section that has a positive-scoring descendant (most-specific-wins). That one makes
-    //     score and emitted text agree exactly, and it loses answers: on test/fixture/notes.md it drops
-    //     `# Geometry Fixture`, whose own prose is the ONLY place the query term "geometry" occurs, for
-    //     a `## Symbols` child that matched "perimeter" alone. Across this repo's docs it lost 9,577
-    //     source lines and gained none.
-    //
-    // Neither is guessing at the same thing: the question both were approximating is whether the
-    // ancestor's OWN PROSE earned its rank, and that is answerable exactly rather than by proxy. An
-    // ancestor with a scoring descendant is kept only when its own prose carries a query term of its
-    // own; otherwise the descendant holds the answer and the ancestor is the diluted parent the old
-    // overlap rule used to serve INSTEAD of it. Both fixtures above come out right, for the reason they
-    // are right, and no unit is ever emitted whose own prose has nothing to do with the query.
-    //
-    // §RP3.3 leaves this ADMISSION rule exactly as it stands, and the measurement above is why: the two
-    // ancestors the natural-language reproduction serves both carry a genuine query term of their own
-    // ("order" is literally in `## 1. The pipeline`'s "Five stages, in that order"), so no term-presence
-    // test can drop them without becoming the most-specific-wins rule that already lost 9,577 lines.
-    // What §RP3.3 changes is the RANK KEY below. It changes no admission decision at all: for any fixed
-    // heading population the SET of picks is what it always was and only the ORDER can move, which is why
-    // both fixtures named above keep their behaviour by construction rather than by re-measurement.
-    std::vector<char> isScoring( headingSyms.size(), 0 );
-    for( std::size_t p = 0; p < headingSyms.size(); ++p )
-    {
-        isScoring[p] = scores[ headingSyms[p] ] > 0.f ? 1 : 0;
-    }
-    std::vector<RecallSectionPick> picks;
-    for( std::size_t p = 0; p < headingSyms.size(); ++p )
-    {
-        if( !isScoring[p] )
+        const Symbol&       s      = ing.symbols[ doc.headingSyms[ p ] ];
+        const std::uint32_t ownEnd = std::min( { p + 1 < doc.headingSyms.size() ? ing.symbols[ doc.headingSyms[ p + 1 ] ].sigStartByte : s.endByte,
+                                                 s.endByte, textEnd } );
+        if( ownEnd <= s.sigStartByte )
         {
             continue;
         }
-        const Symbol&       s      = ing.symbols[ headingSyms[p] ];
-        const std::uint32_t ownEnd = ownEnds[p];
-        if( ownEnd <= s.sigStartByte || ownEnd > raw.size() )
-        {
-            continue;   // a zero-width unit (two headings at one byte), or a span past a file that moved
-        }
-        // a section's descendants are the run of headings starting inside its SUBTREE span, contiguous in
-        // byte order — so this stops at the first heading past the subtree, not at the end of the file.
-        bool hasScoringDescendant = false;
-        for( std::size_t q = p + 1; q < headingSyms.size() && ing.symbols[ headingSyms[q] ].sigStartByte < s.endByte; ++q )
-        {
-            if( isScoring[q] )
-            {
-                hasScoringDescendant = true;
-                break;
-            }
-        }
-        if( hasScoringDescendant
-            && !ownProseCarriesQueryTerm( raw.substr( s.sigStartByte, ownEnd - s.sigStartByte ), queryToks ) )
-        {
-            continue;   // it ranked on a child's words; that child is a pick in its own right
-        }
-
-        picks.push_back( { headingSyms[p], ownEnd,
-                           recallAttributedScore( ing, headingSyms, ownEvidence, p, scores[ headingSyms[p] ] ) } );
+        const std::uint32_t start = ( isPreambleFolded && p == 0 ) ? 0 : s.sigStartByte;   // never lose the words before it
+        units.push_back( { doc.headingSyms[ p ], start, std::min( std::max( s.sigEndByte, s.sigStartByte ), ownEnd ), ownEnd } );
     }
-    return { std::move( picks ), headingSyms.size() };
+    if( !isExtracted )
+    {
+        return units;
+    }
+    // On an extracted page a unit ends at its last non-blank byte (plus that line's newline): the line-preserving text
+    // leaves a blank line for every line of stripped chrome or markup after the last paragraph, and lines= then names the
+    // lines that hold text. A file's own units keep §RP3.1's tiling (heading up to the next heading, blank lines included).
+    for( RecallUnitSpan& u : units )
+    {
+        std::uint32_t end = u.endByte;
+        while( end > u.startByte + 1 && ( text[ end - 1 ] == '\n' || text[ end - 1 ] == ' ' || text[ end - 1 ] == '\t' || text[ end - 1 ] == '\r' ) )
+        {
+            --end;
+        }
+        u.endByte = ( end < u.endByte && text[ end ] == '\n' ) ? end + 1 : end;   // keep the last line's own newline
+        u.headEnd = std::min( u.headEnd, u.endByte );
+    }
+    return units;
+}
+
+// The text a document's Section offsets index: its extracted text when it has one, else the file. nullopt when the
+// file cannot be read (the caller skips it, never serves a stub).
+inline std::optional<std::string> recallDocText( const IngestResult& ing, std::uint32_t fileId )
+{
+    if( const auto it = ing.docText.find( fileId ); it != ing.docText.end() )
+    {
+        return it->second;
+    }
+    return docparse::detail::readWholeFile( diskPath( ing, fileId ) );
 }
 
 inline std::optional<RecallSectionBody> buildSectionGranularBody(
         const IngestResult& ing, const std::vector<float>& scores, std::uint32_t fileId, RedactCounts* redact,
         const std::vector<std::string>& queryToks )
 {
-    if( ing.docText.find( fileId ) != ing.docText.end() )
+    (void)queryToks;   // the units carry their own scores now (recallUnitScores); kept for the callers' one signature
+    const RecallDocSections doc = recallDocSections( ing, scores.size(), fileId );
+    if( doc.headingSyms.empty() )
     {
-        return std::nullopt;   // extracted-text docs have no markdown heading sections
+        return std::nullopt;   // a heading-less document is one unit: served whole (or cut by its window), never as a "section"
     }
-    // the file is read BEFORE the selection, because §RP3.1's ancestor rule is a question about the
-    // document's TEXT (does this heading's own prose carry a query term) and not only about the index.
-    std::ifstream in( diskPath( ing, fileId ), std::ios::binary );
-    if( !in )
+    const std::optional<std::string> text = recallDocText( ing, fileId );
+    if( !text )
     {
         return std::nullopt;
     }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    const std::string raw = ss.str();
+    const bool                        isExtracted = ing.docText.find( fileId ) != ing.docText.end();
+    const std::vector<RecallUnitSpan> all         = recallDocUnits( ing, doc, *text, isExtracted );
 
-    const RecallSectionSelection          selection = selectRecallSectionPicks( ing, scores, fileId, raw, queryToks );
-    const std::vector<RecallSectionPick>& picks     = selection.picks;
+    std::vector<RecallUnitSpan> picks;   // every scoring unit, document order
+    for( const RecallUnitSpan& u : all )
+    {
+        if( u.symIndex < scores.size() && scores[ u.symIndex ] > 0.f )
+        {
+            picks.push_back( u );
+        }
+    }
     if( picks.empty() )
     {
         return std::nullopt;
     }
-
-    // the ranking, kept as a permutation rather than applied to `picks`: EMIT needs the units in DOCUMENT
-    // order to read and in SCORE order to choose, and materializing both beats re-deriving either.
     std::vector<std::uint32_t> rankOrder( picks.size() );
     for( std::uint32_t r = 0; r < std::uint32_t( rankOrder.size() ); ++r )
     {
-        rankOrder[r] = r;
+        rankOrder[ r ] = r;
     }
     std::sort( rankOrder.begin(), rankOrder.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
     {
-        if( picks[a].score != picks[b].score )
+        const float sa = scores[ picks[ a ].symIndex ], sb = scores[ picks[ b ].symIndex ];
+        if( sa != sb )
         {
-            return picks[a].score > picks[b].score;
+            return sa > sb;
         }
-        return a < b;   // `picks` is already in byte order, so its index IS the byte-position tiebreak
+        return a < b;   // `picks` is in byte order, so its index IS the byte-position tiebreak
     } );
 
     RecallSectionBody out;
-    out.sectionCount = selection.sectionCount;
-    out.wholeBytes   = raw.size();
+    out.sectionCount = all.size();
+    out.wholeBytes   = text->size();
     out.rankOrder    = std::move( rankOrder );
     out.units.reserve( picks.size() );
-    for( const RecallSectionPick& p : picks )   // document order — `picks` was built in it
+    for( const RecallUnitSpan& p : picks )
     {
-        const Symbol& s = ing.symbols[ p.symIndex ];
-        if( p.ownEndByte > raw.size() || s.sigStartByte >= p.ownEndByte )
+        std::string slice = text->substr( p.startByte, p.endByte - p.startByte );
+        if( isExtracted )
         {
-            return std::nullopt;   // the file moved under us — fall back to the honest whole-doc re-read
+            squeezeBlankLineRuns( slice );
         }
-        std::string slice = raw.substr( s.sigStartByte, p.ownEndByte - s.sigStartByte );
         redactInPlace( slice, redact );
         if( !out.body.empty() && out.body.back() != '\n' )
         {
@@ -1344,8 +1256,9 @@ inline std::optional<RecallSectionBody> buildSectionGranularBody(
         RecallSectionUnit unit;
         unit.bodyOffset = std::uint32_t( out.body.size() );
         unit.bodyLength = std::uint32_t( slice.size() );
-        unit.lineLo     = layout::lineOf( raw, s.sigStartByte );
-        unit.lineHi     = layout::lineOf( raw, p.ownEndByte - 1 );   // last INCLUDED byte — ownEndByte is exclusive
+        unit.lineLo     = layout::lineOf( *text, p.startByte );
+        unit.lineHi     = layout::lineOf( *text, p.endByte - 1 );   // last INCLUDED byte — endByte is exclusive
+        unit.symIndex   = p.symIndex;   // the heading; the file node for a preamble unit
         out.body += slice;
         out.units.push_back( unit );
     }
@@ -1742,6 +1655,599 @@ inline RecallShares allocateRecallShares( const std::vector<std::size_t>& overhe
     return out;
 }
 
+// ── DOCS-UNITS (D3, D5): the recall lens's own scorer — BM25 over document UNITS ────────────────────────────
+//
+// --recall used to rank with lexicalScores, the code lens's scorer: every symbol in the repository (code included)
+// was a BM25 document, a heading was scored on its whole subtree and the file node on the whole page. For a lens
+// that only ever returns documents, that population was wrong twice: code symbols set the idf and the average
+// length a document is normalised against, and a document's own file node competed with its sections and won on
+// mass. This scorer's collection is the corpus of document UNITS (recallDocUnits: each heading's own prose, plus a
+// preamble), so the statistics are the statistics of the thing being ranked:
+//   fields   the unit's NAME (heading text, or the file stem for a preamble) ×3, its PATH (root-relative) ×1, and its
+//            whole TEXT ×1 — lexicalScores' name and body weights, and the path weight recallFor always used;
+//   formula  lexical.h's: idf = ln((N-n+0.5)/(n+0.5)+1) over N units, the same saturating tf and length
+//            normalisation under resolveBm25Params (RIPWIRE_BM25_K1/B move both scorers together), one contribution
+//            per query-token OCCURRENCE, the forEachLexSubtoken tokenizer with its ≥2-byte drop;
+//   result   one score per Section symbol: a heading's unit score, the file node's preamble score. recallTopFiles
+//            then ranks a file by its best unit — nothing else in the bundle changes.
+// The lab port of this arm (A0u) measured Complete 25 -> 51 of 79 dev rows and 2 -> 13 of 28 held rows at 8 % fewer
+// bytes; tmp/docs-lab is the spec, and the shipped numbers are in the lane report.
+//
+// MIRROR TREES (D5's de-duplication rule). A rendered docs site often ships the same pages again under a version or
+// language directory (`25.07.1/`, `master/`, `pre-release/`, `fr/`), and every query then finds each answer two or
+// three times over, spending the --top-k slots on copies. The rule is structural, never a name: a directory is a
+// MIRROR when at least kRecallMirrorMinDocs of its documents sit under it AND at least three quarters of them have a
+// twin at the same relative path one level up (`master/keymap.html` beside `keymap.html`). A mirror tree's documents
+// are left out of the unit corpus (statistics included); the header says how many and names the directories
+// (mirror_skipped=, mirror_dirs=), and every other verb still sees them. The parent copy is the one kept: it is
+// the one a reader reaches without choosing a version. Measured over every in-sample checkout: it fires on the four
+// rendered-site trees the docs rows were built around and on one more (two four-template form directories in django
+// that mirror each other's parent), and on nothing else.
+
+inline constexpr std::size_t kRecallMirrorMinDocs = 4;
+
+struct RecallMirrorTrees
+{
+    std::vector<char>        isMirror;    // per fileId: a document inside a mirror tree
+    std::vector<std::string> dirs;        // the outermost mirror directories, in path order
+    std::size_t              fileCount = 0;
+};
+
+inline RecallMirrorTrees recallMirrorTrees( const IngestResult& ing, const std::vector<char>& isDoc )
+{
+    RecallMirrorTrees out;
+    out.isMirror.assign( ing.files.size(), 0 );
+    std::vector<std::string_view> docPaths;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( f < isDoc.size() && isDoc[ f ] )
+        {
+            docPaths.push_back( ing.files[ f ] );
+        }
+    }
+    std::sort( docPaths.begin(), docPaths.end(), sortutil::svLess );
+    const auto isDocPath = [ & ]( std::string_view p ) { return std::binary_search( docPaths.begin(), docPaths.end(), p, sortutil::svLess ); };
+
+    struct DirCounts
+    {
+        std::uint32_t docs  = 0;
+        std::uint32_t twins = 0;
+    };
+    HashMap<std::string_view, DirCounts> counts;
+    std::string                          twin;
+    for( const std::string_view p : docPaths )
+    {
+        std::size_t parentEnd = std::string_view::npos;   // end of D's parent directory (npos: D is top-level)
+        for( std::size_t slash = p.find( '/' ); slash != std::string_view::npos; slash = p.find( '/', slash + 1 ) )
+        {
+            const std::string_view dir = p.substr( 0, slash );
+            const std::string_view rel = p.substr( slash + 1 );
+            twin.assign( parentEnd == std::string_view::npos ? std::string_view() : p.substr( 0, parentEnd + 1 ) );
+            twin += rel;
+            DirCounts& c = counts[ dir ];
+            ++c.docs;
+            const bool isInside = twin.size() > dir.size() && std::string_view( twin ).starts_with( dir ) && twin[ dir.size() ] == '/';
+            c.twins += ( !isInside && isDocPath( twin ) ) ? 1u : 0u;
+            parentEnd = slash;
+        }
+    }
+    std::vector<std::string_view> mirrorDirs;
+    for( const auto& [ dir, c ] : counts )
+    {
+        if( c.docs >= kRecallMirrorMinDocs && std::size_t( c.twins ) * 4 >= std::size_t( c.docs ) * 3 )
+        {
+            mirrorDirs.push_back( dir );
+        }
+    }
+    std::sort( mirrorDirs.begin(), mirrorDirs.end(), sortutil::svLess );
+    const auto isUnder = []( std::string_view path, std::string_view dir ) noexcept
+    {
+        return path.size() > dir.size() && path.starts_with( dir ) && path[ dir.size() ] == '/';
+    };
+    for( const std::string_view dir : mirrorDirs )
+    {
+        if( out.dirs.empty() || !isUnder( dir, out.dirs.back() ) )   // sorted: a nested mirror follows its outer one
+        {
+            out.dirs.emplace_back( dir );
+        }
+    }
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( f < isDoc.size() && isDoc[ f ]
+            && std::any_of( out.dirs.begin(), out.dirs.end(), [ & ]( const std::string& d ) { return isUnder( ing.files[ f ], d ); } ) )
+        {
+            out.isMirror[ f ] = 1;
+            ++out.fileCount;
+        }
+    }
+    return out;
+}
+
+struct RecallUnitScoring
+{
+    std::vector<float> scores;   // per symbol; 0 for every non-unit symbol and for a unit sharing no query term
+    RecallMirrorTrees  mirror;
+    bool               termsCapped = false;   // the query held more distinct terms than kMaxUniqueQueryTerms; the rest score nothing
+    std::size_t        termsTotal  = 0;       // every distinct term the query held (kept or not)
+};
+
+inline RecallUnitScoring recallUnitScores( const IngestResult& ing, std::string_view task, std::string_view rootPrefix )
+{
+    RecallUnitScoring out;
+    out.scores.assign( ing.symbols.size(), 0.f );
+    const std::vector<char> isDoc = docFileMask( ing );
+    out.mirror                    = recallMirrorTrees( ing, isDoc );
+
+    std::vector<std::string> queryToks;
+    subtokens( task, queryToks );
+    // unique, first-occurrence order, capped exactly as lexicalScores caps them (its own dedupe)
+    DedupedQueryTerms              dedup = dedupeQueryTerms( queryToks, kMaxUniqueQueryTerms );
+    out.termsCapped                      = dedup.capped;
+    out.termsTotal                       = dedup.uniqueSeenTotal;
+    const std::vector<std::string> terms = std::move( dedup.uniqueToks );
+    if( terms.empty() )
+    {
+        return out;
+    }
+    const std::size_t termCount = terms.size();
+
+    // every Section of every ranked document, grouped by file in one sort (a per-file symbol scan is O(files × symbols))
+    std::vector<std::uint32_t> secs;
+    for( std::uint32_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[ i ];
+        if( isRecallDocSection( ing, s ) && s.fileId < isDoc.size() && isDoc[ s.fileId ] && !out.mirror.isMirror[ s.fileId ] )
+        {
+            secs.push_back( i );
+        }
+    }
+    std::sort( secs.begin(), secs.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
+    {
+        return ing.symbols[ a ].fileId != ing.symbols[ b ].fileId ? ing.symbols[ a ].fileId < ing.symbols[ b ].fileId : a < b;
+    } );
+
+    // SoA over units: dl[u], and the sparse tf entries (most units carry no query term at all, so a dense
+    // units × terms table would be almost all zeros and, at the term cap, hundreds of MB).
+    struct TfEntry
+    {
+        std::uint32_t unit = 0;
+        std::uint32_t term = 0;
+        int           tf   = 0;
+    };
+    constexpr int              kwName = 3, kwPath = 1, kwText = kLexWeightBody;   // = lexicalScores' kwName / kwBody
+    std::vector<std::uint32_t> unitSym;
+    std::vector<int>           dl;
+    std::vector<TfEntry>       entries;
+    std::vector<int>           df( termCount, 0 );
+    std::vector<int>           row( termCount, 0 );
+    std::vector<int>           pathRow( termCount, 0 );
+    for( std::size_t g = 0; g < secs.size(); )
+    {
+        const std::uint32_t fileId = ing.symbols[ secs[ g ] ].fileId;
+        std::size_t         h      = g;
+        while( h < secs.size() && ing.symbols[ secs[ h ] ].fileId == fileId )
+        {
+            ++h;
+        }
+        const RecallDocSections doc = splitRecallDocSections( ing, std::vector<std::uint32_t>( secs.begin() + std::ptrdiff_t( g ), secs.begin() + std::ptrdiff_t( h ) ) );
+        g = h;
+        const std::optional<std::string> text = recallDocText( ing, fileId );
+        if( !text )
+        {
+            continue;   // unreadable: no units, so it cannot be recalled — the same as the serve path skipping it
+        }
+        std::fill( pathRow.begin(), pathRow.end(), 0 );
+        int              pathLen = 0;
+        const std::string_view path = rootPrefix.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+        accumulateRecallTermFreqs( path, kwPath, terms, pathRow.data(), pathLen );
+        for( const RecallUnitSpan& u : recallDocUnits( ing, doc, *text, ing.docText.find( fileId ) != ing.docText.end() ) )
+        {
+            row        = pathRow;
+            int length = pathLen;
+            accumulateRecallTermFreqs( ing.symbols[ u.symIndex ].name, kwName, terms, row.data(), length );
+            accumulateRecallTermFreqs( std::string_view( *text ).substr( u.startByte, u.endByte - u.startByte ), kwText, terms, row.data(), length );
+            const auto unitIndex = std::uint32_t( unitSym.size() );
+            unitSym.push_back( u.symIndex );
+            dl.push_back( length );
+            for( std::size_t t = 0; t < termCount; ++t )
+            {
+                if( row[ t ] > 0 )
+                {
+                    entries.push_back( { unitIndex, std::uint32_t( t ), row[ t ] } );
+                    ++df[ t ];
+                }
+            }
+        }
+    }
+    const std::size_t unitCount = unitSym.size();
+    if( unitCount == 0 || entries.empty() )
+    {
+        return out;
+    }
+
+    // occurrences per unique term: BM25 adds one contribution per query-token OCCURRENCE (lexical.h)
+    std::vector<int> occurrences( termCount, 0 );
+    for( const std::string& q : queryToks )
+    {
+        const auto t = std::size_t( std::find( terms.begin(), terms.end(), q ) - terms.begin() );
+        if( t < termCount )
+        {
+            ++occurrences[ t ];
+        }
+    }
+    double totalDl = 0.0;
+    for( const int unitDl : dl )
+    {
+        totalDl += unitDl;
+    }
+    const double     avgdl      = totalDl > 0.0 ? totalDl / double( unitCount ) : 1.0;
+    const Bm25Params bm25Params = resolveBm25Params();
+    std::vector<double> idf( termCount, 0.0 );
+    for( std::size_t t = 0; t < termCount; ++t )
+    {
+        idf[ t ] = std::log( ( double( unitCount ) - df[ t ] + 0.5 ) / ( df[ t ] + 0.5 ) + 1.0 );
+    }
+    std::vector<double> unitScore( unitCount, 0.0 );
+    for( const TfEntry& e : entries )   // entries are unit-major, terms ascending: a fixed summation order
+    {
+        const double tf = e.tf;
+        unitScore[ e.unit ] += occurrences[ e.term ] * idf[ e.term ] * ( tf * ( bm25Params.k1 + 1.0 ) )
+                             / ( tf + bm25Params.k1 * ( 1.0 - bm25Params.b + bm25Params.b * dl[ e.unit ] / avgdl ) );
+    }
+    for( std::size_t u = 0; u < unitCount; ++u )
+    {
+        out.scores[ unitSym[ u ] ] = float( unitScore[ u ] );
+    }
+    return out;
+}
+
+// " mirror_skipped=N mirror_dirs=\"a,b\"" — which mirror trees the scorer left out, display-relative; "" when none.
+// The directory list is capped like the demoted names (kRecallDemotedNamedMax); mirror_dirs_named= says when it is cut.
+inline std::string formatRecallMirrorAttr( const RecallMirrorTrees& mirror, std::string_view rootPrefix )
+{
+    if( mirror.fileCount == 0 )
+    {
+        return {};
+    }
+    std::vector<std::string_view> shown;
+    for( const std::string& d : mirror.dirs )
+    {
+        if( shown.size() == kRecallDemotedNamedMax )
+        {
+            break;
+        }
+        shown.push_back( rootPrefix.empty() ? std::string_view( d ) : rw::sarif::rootRelativeUri( d, rootPrefix ) );
+    }
+    std::string attr = " mirror_skipped=" + std::to_string( mirror.fileCount );
+    if( shown.size() < mirror.dirs.size() )
+    {
+        attr += " mirror_dirs_named=" + std::to_string( shown.size() );
+    }
+    attr += " mirror_dirs=";
+    appendRecallPathList( attr, shown );
+    return attr;
+}
+
+// HTML-CUT (DOCS-XS, 2026-11-05) — WHERE a whole-doc body is cut, when it must be cut. A document with no
+// section units (an HTML page's converted text, a heading-less .txt, any docparse'd extraction) takes the
+// whole-doc path, and its water-fill share used to keep the HEAD: on an HTML page that is the nav list and
+// the contents block, and the paragraph the query matched sat past the ~2.9 KB share
+// (reports/docs-quick-s0.md: 6 dev anchors lost this way). It now keeps the window of the same byte size
+// that carries the most query evidence, in whole lines.
+//
+// Scoring is §RP3.3's local-collection idea at line grain: the LINES of this one document are the
+// collection, so a term on every line (a stopword, the product name) separates none of them and earns ~0.
+// A line scores the BM25 idf, ln((N-df+0.5)/(df+0.5)+1), of each DISTINCT query term it carries (the same
+// tokenizer and term comparison as recallMatchedTermIndex); a window scores the sum of its lines. Scores are
+// fixed-point integers so a window sum is exact and two equal windows compare equal: the tie-break is the
+// EARLIEST start, and a head window that ties the best is kept as the head. startByte 0 (= the old head
+// cut) when nothing in the document carries a query term, or the head already scores best.
+inline constexpr double kRecallWindowScoreScale = 1024.0;   // fixed point: idf × 1024, rounded
+
+struct RecallWindow
+{
+    std::size_t startByte = 0;   // a line start; 0 = no window beats the head
+    std::size_t endByte   = 0;   // a line end (exclusive): the window holds whole lines
+};
+
+// Per line, the DISTINCT query terms it carries, as CSR rows: line l is bytes lineStart[l] .. lineStart[l+1]
+// (lineStart has lineCount+1 entries), its terms lineTerms[termStart[l] .. termStart[l+1]); df[t] counts the
+// lines carrying term t.
+struct RecallLineTerms
+{
+    std::vector<std::size_t>   lineStart;
+    std::vector<std::uint32_t> termStart{ 0 };
+    std::vector<std::uint32_t> lineTerms;
+    std::vector<std::uint32_t> df;
+};
+
+inline RecallLineTerms collectRecallLineTerms( std::string_view body, const std::vector<std::string>& terms )
+{
+    RecallLineTerms   out;
+    std::vector<char> isOnLine( terms.size(), 0 );
+    out.df.assign( terms.size(), 0 );
+    for( std::size_t at = 0; at < body.size(); )
+    {
+        const std::size_t      nl        = body.find( '\n', at );
+        const std::size_t      lineEnd   = nl == std::string_view::npos ? body.size() : nl + 1;
+        const std::string_view line      = body.substr( at, lineEnd - at );
+        const std::size_t      firstTerm = out.lineTerms.size();
+        forEachLexSubtoken( line, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
+        {
+            const std::size_t tokLen = tokEndByte - tokStartByte;
+            if( tokLen < 2 )
+            {
+                return;   // the ≥2-byte drop subtokens() applies — the query was tokenized under it too
+            }
+            const std::size_t t = recallMatchedTermIndex( line, tokStartByte, tokLen, terms );
+            if( t < terms.size() && !isOnLine[t] )
+            {
+                isOnLine[t] = 1;
+                out.lineTerms.push_back( std::uint32_t( t ) );
+            }
+        } );
+        for( std::size_t k = firstTerm; k < out.lineTerms.size(); ++k )
+        {
+            ++out.df[ out.lineTerms[k] ];
+            isOnLine[ out.lineTerms[k] ] = 0;
+        }
+        out.lineStart.push_back( at );
+        out.termStart.push_back( std::uint32_t( out.lineTerms.size() ) );
+        at = lineEnd;
+    }
+    out.lineStart.push_back( body.size() );
+    return out;
+}
+
+// prefix[l] = the summed fixed-point score of lines [0, l): every window sum is one subtraction, exact.
+inline std::vector<std::uint64_t> recallLineScorePrefix( const RecallLineTerms& lt )
+{
+    const std::size_t          lineCount = lt.lineStart.size() - 1;
+    std::vector<std::uint64_t> idfFixed( lt.df.size(), 0 );
+    for( std::size_t t = 0; t < lt.df.size(); ++t )
+    {
+        const double idf = std::log( ( double( lineCount ) - lt.df[t] + 0.5 ) / ( lt.df[t] + 0.5 ) + 1.0 );
+        idfFixed[t] = std::uint64_t( std::llround( idf * kRecallWindowScoreScale ) );
+    }
+    std::vector<std::uint64_t> prefix( lineCount + 1, 0 );
+    for( std::size_t l = 0; l < lineCount; ++l )
+    {
+        std::uint64_t lineScore = 0;
+        for( std::uint32_t k = lt.termStart[l]; k < lt.termStart[l + 1]; ++k )
+        {
+            lineScore += idfFixed[ lt.lineTerms[k] ];
+        }
+        prefix[l + 1] = prefix[l] + lineScore;
+    }
+    return prefix;
+}
+
+// The line a window that starts inside a FENCED block repeats above its served lines, so they still read as
+// code: the fence's own opener, whole. A pipe-table run (`!isFence`) has none, even when its first row begins
+// with a backtick or tilde. An opener over kRecallFenceOpenerMaxBytes (an info string of prose, a run of
+// hundreds of fence characters) is repeated in its bare form (indent, fence run, the info string's first word
+// when that fits) and not at all when even the bare run is over the cap: a copy that large would take the
+// window's bytes for a line the reader needs only as a "this is code" signal.
+inline constexpr std::size_t kRecallFenceOpenerMaxBytes = 64;
+
+inline std::string recallFenceOpenerOf( std::string_view body, const RecallProtectedRange& r )
+{
+    if( !r.isFence )
+    {
+        return {};
+    }
+    const std::size_t      newline   = body.find( '\n', r.start );
+    const std::size_t      openerEnd = newline == std::string_view::npos ? body.size() : newline + 1;
+    const std::string_view opener    = body.substr( r.start, openerEnd - r.start );
+    const std::size_t      lead      = opener.find_first_not_of( " \t" );
+    if( lead == std::string_view::npos || ( opener[lead] != '`' && opener[lead] != '~' ) )
+    {
+        return {};
+    }
+    if( opener.size() <= kRecallFenceOpenerMaxBytes )
+    {
+        return std::string( opener );
+    }
+    std::size_t runEnd = lead;
+    while( runEnd < opener.size() && opener[runEnd] == opener[lead] ) { ++runEnd; }
+    std::string bare( opener.substr( 0, runEnd ) );
+    const std::size_t wordStart = opener.find_first_not_of( " \t", runEnd );
+    const std::size_t wordEnd   = wordStart == std::string_view::npos ? wordStart : opener.find_first_of( " \t\r\n", wordStart );
+    if( wordStart != std::string_view::npos && wordEnd != std::string_view::npos
+        && bare.size() + 1 + ( wordEnd - wordStart ) + 1 <= kRecallFenceOpenerMaxBytes )
+    {
+        bare += ' ';
+        bare += opener.substr( wordStart, wordEnd - wordStart );
+    }
+    bare += '\n';
+    return bare.size() <= kRecallFenceOpenerMaxBytes ? bare : std::string();
+}
+
+// The opener of the fenced block `at` falls strictly inside, or "" (outside any fence, or inside a table).
+// `ranges` are findRecallProtectedRanges( body ), computed once.
+inline std::string recallFenceOpenerAround( std::string_view body, std::size_t at, const std::vector<RecallProtectedRange>& ranges )
+{
+    for( const RecallProtectedRange& r : ranges )
+    {
+        if( at > r.start && at < r.end )
+        {
+            return recallFenceOpenerOf( body, r );
+        }
+    }
+    return {};
+}
+
+// What a window starting at `at` pays for its repeated opener, for the ASCENDING starts selectRecallWindow
+// walks: one cursor over the (sorted, disjoint) ranges instead of a scan per line.
+class RecallOpenerCost
+{
+public:
+    RecallOpenerCost( std::string_view body, const std::vector<RecallProtectedRange>& ranges )
+        : ranges_( ranges )
+    {
+        sizes_.reserve( ranges.size() );
+        for( const RecallProtectedRange& r : ranges )
+        {
+            sizes_.push_back( recallFenceOpenerOf( body, r ).size() );
+        }
+    }
+    std::size_t costAt( std::size_t start )   // calls must not go backwards; not named at(): hazard C reads .at( as the throwing std call
+    {
+        while( next_ < ranges_.size() && ranges_[next_].end <= start ) { ++next_; }
+        return next_ < ranges_.size() && ranges_[next_].start < start ? sizes_[next_] : 0;
+    }
+private:
+    const std::vector<RecallProtectedRange>& ranges_;
+    std::vector<std::size_t>                 sizes_;
+    std::size_t                              next_ = 0;
+};
+
+// The two sizes a window is chosen under. `headKeptBytes`: the source bytes the plain head cut would keep
+// (truncateRecallWholeDoc measures them): the window must out-score the whole lines of THAT head, not a head
+// sized like the window (which is smaller by the title and lead the window pays for).
+struct RecallWindowBudget
+{
+    std::size_t windowBytes   = 0;
+    std::size_t headKeptBytes = 0;
+};
+
+// A window that starts inside a fence has its repeated opener charged before its lines are counted, so the
+// lines scored are the lines served.
+inline RecallWindow selectRecallWindow( std::string_view body, const RecallWindowBudget& budgetOf, const std::vector<std::string>& queryToks )
+{
+    const std::size_t windowBytes   = budgetOf.windowBytes;
+    const std::size_t headKeptBytes = budgetOf.headKeptBytes;
+    const std::vector<std::string> terms = uniqueRecallQueryTerms( queryToks );
+    if( terms.empty() || body.size() <= windowBytes )
+    {
+        return {};
+    }
+    const RecallLineTerms            lt        = collectRecallLineTerms( body, terms );
+    const std::vector<std::uint64_t> prefix    = recallLineScorePrefix( lt );
+    const std::size_t                lineCount = lt.lineStart.size() - 1;
+    const std::vector<RecallProtectedRange> ranges = findRecallProtectedRanges( body );
+    RecallOpenerCost                        opener( body, ranges );
+
+    std::size_t headLines = 0;
+    while( headLines < lineCount && lt.lineStart[headLines + 1] <= headKeptBytes ) { ++headLines; }
+
+    RecallWindow  best;
+    std::uint64_t bestScore = prefix[headLines];   // a window must beat the head it replaces
+    std::size_t   endLine   = 0;                   // the window [first, endLine) holds whole lines within its budget
+    for( std::size_t first = 0; first < lineCount; ++first )
+    {
+        const std::size_t budget = windowBytes - std::min( windowBytes, opener.costAt( lt.lineStart[first] ) );
+        endLine = std::max( endLine, first );
+        while( endLine > first && lt.lineStart[endLine] - lt.lineStart[first] > budget )   // a fence opener costs this start more
+        {
+            --endLine;
+        }
+        while( endLine < lineCount && lt.lineStart[endLine + 1] - lt.lineStart[first] <= budget )
+        {
+            ++endLine;
+        }
+        const std::uint64_t score = prefix[endLine] - prefix[first];
+        if( score > bestScore )   // strict: the earliest of equal windows wins
+        {
+            bestScore = score;
+            best      = { lt.lineStart[first], lt.lineStart[endLine] };
+        }
+    }
+    return best;
+}
+
+// The windowed form of truncateRecallBody: serve the window selectRecallWindow chose (whole lines, within
+// `keepBytes`) and SAY SO. A start inside a fenced
+// block or table stays there — moving back to the range's start would spend the window on the range's head
+// and push the matched lines out of its tail — and a fence's opening line is repeated above the served lines
+// so they still read as code (`fence_reopened`). The tail may land inside a range too (cutRecallBodyTail's
+// isWindowCut), closed by fence repair (`fence_closed`). The body opens with a
+// "…" line so the reader sees text was skipped above, and the marker names the served byte range:
+//   [truncated: K of N bytes[, fence_reopened][, fence_closed]; served bytes LO-HI, best query-term window]
+// (≤ 127 bytes for any document under 100 MB, inside kRecallTruncNoteBytes, which the allowance reserves.)
+// The byte range indexes the text recall served — the converted text for an HTML page, not its markup — and
+// excludes the repeated opener and the repeated title line, which are this function's copies, not the window.
+// An HTML page's title line sits above the "…" line when the window starts past it.
+inline constexpr std::string_view kRecallWindowLead = "\xE2\x80\xA6\n";   // "…" + newline: text skipped above
+
+inline RecallTruncation truncateRecallBodyWindow( std::string& body, std::size_t keepBytes, const RecallWindow& window,
+                                                  std::string_view title = {}, std::size_t titleEndByte = 0 )
+{
+    const std::size_t fullBytes = body.size();
+    std::size_t       start     = std::min( window.startByte, fullBytes );
+    if( start == 0 )
+    {
+        return truncateRecallBody( body, keepBytes );   // no window past the head: a head cut, said as one
+    }
+    const std::vector<RecallProtectedRange> ranges    = findRecallProtectedRanges( body );
+    // A title line the window itself starts after is repeated above it (truncateRecallWholeDoc passes it for an
+    // HTML page): a window past the title would otherwise not say which page it is from. The caller sized the
+    // window net of the title.
+    const std::string                       titleText = start > std::max( title.size(), titleEndByte ) ? std::string( title ) : std::string();
+    const std::size_t                       reserved  = kRecallWindowLead.size() + titleText.size();
+    const std::size_t                       allowance = keepBytes > reserved ? keepBytes - reserved : 0;
+    const std::size_t                       windowEnd = std::max( window.endByte, start );
+    std::string                             reopen    = recallFenceOpenerAround( body, start, ranges );
+    // selectRecallWindow already charged the opener to the window, so this loop is a safety net for a caller
+    // that hands in a window it did not size: the window's HEAD (its lowest-value lines) gives up whole lines
+    // until the opener fits beside it — the tail is never what the opener crowds out. When even one line does
+    // not fit beside the opener, the opener is the thing left out (no fence_reopened is said): the served
+    // source bytes are never traded for a copy of a line.
+    while( reopen.size() + ( windowEnd - start ) > allowance )
+    {
+        const std::size_t newline = body.find( '\n', start );
+        if( newline == std::string::npos || newline + 1 >= windowEnd )
+        {
+            break;   // one line left: nothing more to give
+        }
+        start  = newline + 1;
+        reopen = recallFenceOpenerAround( body, start, ranges );
+    }
+    if( reopen.size() + ( windowEnd - start ) > allowance )
+    {
+        reopen.clear();
+    }
+    const std::size_t windowLen = windowEnd - start;
+    body.erase( 0, start );
+    body.insert( 0, reopen );
+    const RecallTailCut cut = cutRecallBodyTail( body, std::min( allowance, reopen.size() + windowLen ), true );
+    const std::size_t   kept = cut.sourceKeptBytes > reopen.size() ? cut.sourceKeptBytes - reopen.size() : 0;
+    body.insert( 0, kRecallWindowLead );
+    body.insert( 0, titleText );
+    return { "  [truncated: " + std::to_string( kept ) + " of " + std::to_string( fullBytes ) + " bytes"
+                 + ( reopen.empty() ? "" : ", fence_reopened" ) + ( cut.isFenceClosed ? ", fence_closed" : "" )
+                 + "; served bytes " + std::to_string( start ) + "-" + std::to_string( start + kept )
+                 + ", best query-term window]",
+             kept };
+}
+
+// An HTML page's converted text opens with its <title> line ("Renderers - mdBook Documentation"), after the blank lines
+// of the markup above it (the text is line-preserving: the title sits on its own raw line); a window past it is
+// otherwise anonymous. A first text line this long is not a title and is not repeated.
+inline constexpr std::size_t kRecallTitleMaxBytes = 120;
+
+// HTML-CUT: a whole-doc body over its allowance — the best query-term window of that size when one beats the
+// head, else the head cut it always had. `isHtml`: the page's title line rides above the window.
+inline RecallTruncation truncateRecallWholeDoc( std::string& body, std::size_t keepBytes, const std::vector<std::string>& queryToks, bool isHtml )
+{
+    const std::size_t      lead     = isHtml ? body.find_first_not_of( '\n' ) : std::string::npos;   // the first text line
+    const std::size_t      titleEnd = lead == std::string::npos ? std::string::npos : body.find( '\n', lead );   // its '\n'
+    const bool             isTitled = titleEnd != std::string::npos && titleEnd - lead < kRecallTitleMaxBytes;
+    const std::string_view title    = isTitled ? std::string_view( body ).substr( lead, titleEnd + 1 - lead ) : std::string_view();
+    const std::size_t      titleEndByte = isTitled ? titleEnd + 1 : 0;
+    const std::size_t      reserved = std::min( keepBytes, kRecallWindowLead.size() + title.size() );
+    // The head the window must beat is the head cut as it would be SERVED (boundary cascade and protected
+    // ranges included), at the full allowance — not a head shrunk by the title and lead only the window pays.
+    std::size_t headKept = 0;
+    if( !queryToks.empty() )
+    {
+        std::string headCopy = body;
+        headKept = cutRecallBodyTail( headCopy, keepBytes ).sourceKeptBytes;
+    }
+    const RecallWindow     window   = selectRecallWindow( body, { keepBytes - reserved, headKept }, queryToks );
+    return window.startByte > 0 ? truncateRecallBodyWindow( body, keepBytes, window, title, titleEndByte ) : truncateRecallBody( body, keepBytes );
+}
+
 // Build the recall bundle IN MEMORY: each top file's path + relevance + body, best-first. `maxBytes` (0 =
 // no cap) SHAPES it — the budget is DIVIDED across the selected docs by allocateRecallShares above (docs
 // past the served rank prefix are dropped from the BOTTOM of the ranking; any doc may be truncated within
@@ -1756,13 +2262,15 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
                                  std::string_view task, int k, std::size_t maxTokens, bool docsOnly,
                                  RedactCounts* redact,
                                  std::string_view rootArg = {},        // R-R: the separator line's path root
-                                 std::size_t budgetTokens = 0 )        // F4: --token-budget's GATING ceiling, named on the header
+                                 std::size_t budgetTokens = 0,         // F4: --token-budget's GATING ceiling, named on the header
+                                 const RecallUnitScoring* scored = nullptr )   // DOCS-UNITS: what the unit scorer left out (mirrors, terms)
 {
     const std::size_t maxBytes = recallBytesForTokens( maxTokens );
     // R-R: same convention every other lens's pathRel uses — the "━━ <path>" separator is a DISPLAY path and
     // was the last CLI surface still printing the checkout prefix once per recalled doc.
     const std::string recallRootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
-    const RecallSelection        selected = recallTopFiles( ing, scores, k, docsOnly );
+    const RecallMirrorTrees*     mirror   = scored ? &scored->mirror : nullptr;
+    const RecallSelection        selected = recallTopFiles( ing, scores, k, docsOnly, mirror ? &mirror->isMirror : nullptr );
     const std::vector<Recalled>& top      = selected.files;
     // the display path, one spelling for the separator line and the header's demoted names
     const auto displayPath = [ & ]( std::uint32_t fileId ) -> std::string_view {
@@ -1780,7 +2288,13 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
 
     // the payload's own share of the budget — the header and the closing capped note are charged first so
     // the TOTAL artifact (not just its bodies) honours maxBytes. The demoted names are header bytes too.
-    const std::size_t headerReserve = maxBytes ? kRecallHeaderReserveBytes + task.size() + demotedNamesAttr.size() : 0;
+    std::string mirrorAttr = scored ? formatRecallMirrorAttr( *mirror, rootArg.empty() ? std::string_view() : std::string_view( recallRootPrefix ) )
+                                    : std::string();
+    if( scored && scored->termsCapped )
+    {
+        mirrorAttr += " terms_capped=1 terms_total=" + std::to_string( scored->termsTotal );   // --for's spelling of the same cap
+    }
+    const std::size_t headerReserve = maxBytes ? kRecallHeaderReserveBytes + task.size() + demotedNamesAttr.size() + mirrorAttr.size() : 0;
     const std::size_t payloadBudget = ( maxBytes > headerReserve ) ? maxBytes - headerReserve : 0;
 
     std::string payload;
@@ -1792,6 +2306,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     shape.selectedCount = top.size();             // post-top-k, pre-budget (bookkeeping for the capped note)
     shape.demotedCount  = selected.demotedMatchCount;
     shape.demotedNamesAttr = demotedNamesAttr;
+    shape.mirrorAttr    = mirrorAttr;
     shape.maxTokens     = maxTokens;              // H9: the ceiling applied, whatever it is (0 = unbounded)
     shape.budgetTokens  = budgetTokens;           // F4: the GATING ceiling beside the shaping one (0 = none)
 
@@ -1812,6 +2327,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         std::string                      wholeBody;     // the whole-doc path's prose
         std::optional<RecallSectionBody> sections;      // the section path's prose AND its units
         std::size_t                      demandBytes = 0;   // what serving it WHOLE costs the budget
+        bool                             isHtml      = false;   // an HTML page's converted text (its first line is the <title>)
 
         // The emitted prose, wherever it lives. An accessor rather than a second member holding a copy of a
         // 600 KB string that then has to be kept in step with the units indexing into it.
@@ -1850,6 +2366,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         {
             doc.wholeBody   = std::move( *loaded );
             doc.demandBytes = doc.wholeBody.size();
+            doc.isHtml      = docparse::docKindOf( docparse::lowerExtOf( ing.files[ r.fileId ] ) ) == docparse::DocKind::Html;
         }
         else
         {
@@ -1899,7 +2416,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
             // under-used rather than overshot — the ceiling direction the whole budget path holds to.
             const std::size_t keepBytes = shares.alloc[i] > kRecallTruncNoteBytes ? shares.alloc[i] - kRecallTruncNoteBytes
                                                                                   : kRecallMinBodyBytes;
-            truncNote  = truncateRecallBody( doc.body(), keepBytes ).marker;   // this path names no lines=, so only the marker
+            truncNote  = truncateRecallWholeDoc( doc.body(), keepBytes, queryToks, doc.isHtml ).marker;   // this path names no lines=, so only the marker
             wasReduced = true;
         }
 
@@ -2150,6 +2667,17 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
 // the recall lens's measured choice, not a default — bench/recalleval measured +0.03 lenient MRR for it
 // (gate: test/recallevalcheck.sh) and test/recallrankdepthcheck.sh ARM 4 is its kill tripwire. Parity is
 // gated by test/recallparitycheck.sh, which asserts the two doors return the same bundle byte for byte.
+// The recall lens's per-symbol scores for `task`: its section-unit scorer (recallUnitScores) over the root prefix buildRecall
+// relativizes against (see recallFor below). FOR-DOC-BODY (fordocbody.h) picks a doc file's sections with the same scores, so its
+// sections are the units --recall picks, HTML section units (kRankFlagRecallOnly) included; the graph arguments keep one signature.
+inline std::vector<float> recallLensScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                                            const std::vector<NodeId>& outTargets, std::string_view task, std::string_view rootArg )
+{
+    (void)outOff;
+    (void)outTargets;
+    return recallUnitScores( ing, task, rw::sarif::rootPrefixOf( rootArg ) ).scores;
+}
+
 inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                const std::vector<NodeId>& outTargets, std::string_view task, int k,
                                std::size_t maxTokens, RedactCounts* redact, std::string_view rootArg,   // R-R
@@ -2158,10 +2686,12 @@ inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::u
     // R-R: one root fact, spent twice — the ranker scores the root-relative path spelling, buildRecall
     // prints it. Unguarded because rootPrefixOf( "" ) is "" (its trailing-slash loop needs size() > 1), so
     // the multi-root path (empty rootArg, ing.files already labelled) needs no branch.
-    const std::string        prefix = rw::sarif::rootPrefixOf( rootArg );
-    const std::vector<float> scores = lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0,
-                                                     /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
-    return buildRecall( ing, scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg, budgetTokens );
+    // DOCS-UNITS: the lens's own unit scorer (above) — the graph arguments stay so both doors keep one signature.
+    (void)outOff;
+    (void)outTargets;
+    const std::string       prefix = rw::sarif::rootPrefixOf( rootArg );
+    const RecallUnitScoring scored = recallUnitScores( ing, task, prefix );
+    return buildRecall( ing, scored.scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg, budgetTokens, &scored );
 }
 
 // (`writeRecall( out, ing, scores, … )` used to live here — a "render it and hand it over" wrapper that took

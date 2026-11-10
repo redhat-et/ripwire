@@ -292,8 +292,7 @@ SCANPY
 
 cat > "$TMP/registry.tsv" <<'REGISTRY'
 ccjson.h	ccCountLoc	fopen	1	closes	the only early exit is the failed open; nothing between open and fclose allocates
-clones.h	findClones	fopen	1	closes	skips only a failed open; fclose right after the sized read
-clones.h	findClonesType3	fopen	1	closes	same shape as findClones
+clones.h	readCloneSourceFile	fopen	1	closes	the one read both clone passes share: false on a failed open; fclose right after the sized read
 crossref.h	catFileBatch	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	catFileBatch	popen	1	closes	the read loop leaves by break or its own condition only; pclose then unlink
 crossref.h	evalStray	fopen	1	closes	returns only on a failed open; fclose after the read loop
@@ -328,7 +327,6 @@ main.cpp	scipIndexUnreadableReason	open	1	closes	close right after fstat, before
 mcpedit.h	EditLock	open	1	owned	EditLock's destructor unlocks and closes
 mcpindex.h	arm	open	1	owned	held in FsWatcher::dirFds, closed by reset and the destructor
 mcpindex.h	readFileBytes	fopen	1	closes	fclose before both returns
-mcpverbs.h	packConnect	fopen	1	closes	if-scoped; fclose after the read
 mcpverbs.h	sliceText	fopen	1	closes	if-scoped; fclose after the read loop
 naminglens.h	namingLensChecks	fopen	1	closes	if-scoped; fclose after the sized read
 packtask.h	d1ReadSrcCached	fopen	1	closes	if-scoped; fclose after the read loop

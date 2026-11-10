@@ -106,6 +106,13 @@ inline constexpr std::string_view kForCompactBodyFoldLegend =
     "; fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; "
     "slice/skip p= n= l=; slice members= of=: a big class's ctor, question-word members; skip bytes= next=; "
     "a skip makes sigs next= it, sigs_next= the signatures-only re-call";
+// SIZE-1: the member-slice reading of each clause, present-only on a <slice members=> row (runForLens erases it from a legend
+// whose fold printed none). Spelled exactly as the clauses carry it.
+inline constexpr std::string_view kForBodyFoldMembersClause =
+    "slice members= of=: a class too big for the rest, its constructor and question-word members; ";
+inline constexpr std::string_view kForCompactBodyFoldMembersClause = "slice members= of=: a big class's ctor, question-word members; ";
+static_assert( kForBodyFoldLegend.contains( kForBodyFoldMembersClause ) && kForCompactBodyFoldLegend.contains( kForCompactBodyFoldMembersClause ),
+               "the member-slice clauses are spelled as the fold legends carry them" );
 // WRAPPER-FOLLOW: present-only beside a <b follow_of=> (BodyFoldRender::follows > 0), after the fold clause. No "--".
 inline constexpr std::string_view kForFoldFollowLegend =
     "; b follow_of=W: the body of the one call W makes, W a thin wrapper served just before it (a function whose text holds one call "

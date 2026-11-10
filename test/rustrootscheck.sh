@@ -1,0 +1,423 @@
+#!/usr/bin/env bash
+# rustrootscheck.sh — RUST-ROOTS-A gate: the Rust import probe (resolve.h resolveRustImport, buildRustCrateRoots,
+# resolveRustUseTree) reads every path from the INCLUDER's own crate and module, by Rust's module-file rule.
+#   F1  `crate::` anchors at the crate the file is compiled in: the nearest Cargo.toml's target (a 2-crate workspace,
+#       a custom `[lib] path`, a `src/bin/` binary crate), never the first lib.rs of the tree.
+#   F2  `mod b;` in a non-mod.rs file `a.rs` is `a/b.rs`, never a same-named `src/b.rs`.
+#   F3  `super::` in a plain file `a/x.rs` is module `a`; `super::super::` climbs twice; `self::` is the file's module.
+#   SUB `use crate::a::b` where a/b.rs exists draws a/b.rs although a.rs exists too (tiers: full path first, parent
+#       module file second; unique-or-degrade inside a tier, never across one).
+#   BR  brace groups resolve each member; an `as` rename resolves the path it renames.
+#   IN  a directive inside an INLINE `mod x { }` (`#[cfg(test)] mod tests { use super::*; }`) reads from the inline module:
+#       the first `super`s and `self::` stay inside the file (no edge), `super` past the inline depth climbs from the file's
+#       module, and `mod y;` lives in the inline module's own directory (`mod outer { mod y; }` in lib.rs is src/outer/y.rs).
+#   IN2 the path written after those (`mod helper { use self::child::run; }` is helper/child.rs; `mod t { use super::sib::Thing; }`
+#       in a.rs is a/sib.rs) is read from the module they reach; an item of the file itself (`use super::own_item;`) names no file and draws none.
+#   VW  a virtual workspace (`[workspace]` with no `[package]`) is a boundary that assigns no crate root.
+#   TM  a `[lib]` / `path = ...` line inside a multi-line TOML string (a `description = """..."""`) is text, not a target.
+#   DT  a `use` tree nested deeper than kMaxRustUseTreeDepth is not read (it draws no edge) and costs no more than a shallow one:
+#       the twin at depth 5 resolves, depth 32 (the cap) resolves and 33 does not, and a 30000-deep tree is answered with no edge (it was quadratic: 11 s for 30000 levels; no wall-clock bound, the exact cap is the guard).
+#   CR  `self::child` in a custom-named crate root (`[lib] path = "src/custom.rs"`) is the root's own directory, never src/custom/.
+# Every arm reads `--impact=FILE` (the file's importers) and checks the command's exit code and that the answer
+# parsed (an <impact> element), so a crash or an empty answer is RED, never a pass. Absence arms each have a positive
+# twin in the same fixture.
+#
+# RED-first (2026-11-05): against the base binary (main 292a26dec) arms F1a F1b F1c F2a F3a F3b SUBa BRa BRb ALa are
+# RED; the positive twins and degrade arms pass on both. Two mutants, each RED: (1) one global crate root (the first
+# lib.rs's directory for every file); (2) parent-wins (tier 2 probed before tier 1).
+#
+#   test/rustrootscheck.sh                 # uses build/ripwire
+#   RIPWIRE_BIN=asan/ripwire test/rustrootscheck.sh
+set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
+TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+fail=0
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+echo "rustrootscheck: BIN=$BIN"
+
+mk(){ mkdir -p "$( dirname "$1" )" && printf '%s\n' "$2" > "$1"; }
+
+# ── fixture W: a 3-crate workspace (F1) ─────────────────────────────────────────────────────────────
+W="$TMP/w"
+mk "$W/Cargo.toml"            '[workspace]
+members = ["aaa", "bbb", "ccc"]'
+mk "$W/aaa/Cargo.toml"        '[package]
+name = "aaa"'
+mk "$W/aaa/src/lib.rs"        'pub mod x;'
+mk "$W/aaa/src/x.rs"          'pub fn x() {}'
+mk "$W/aaa/src/helper.rs"     'pub fn h() {}'
+mk "$W/bbb/Cargo.toml"        '[package]
+name = "bbb"'
+mk "$W/bbb/src/lib.rs"        'pub mod x;
+pub mod y;
+pub mod helper;'
+mk "$W/bbb/src/x.rs"          'pub fn x() {}'
+mk "$W/bbb/src/y.rs"          'use crate::x::x;
+pub fn y() { x(); }'
+mk "$W/bbb/src/helper.rs"     'pub fn h() {}'
+mk "$W/bbb/src/bin/tool.rs"   'mod helper;
+mod other;
+fn main() {}'
+mk "$W/bbb/src/bin/helper.rs" 'pub fn h() {}'
+mk "$W/bbb/src/bin/other.rs"  'use crate::helper::h;
+pub fn o() { h(); }'
+mk "$W/ccc/Cargo.toml"        '[package]
+name = "ccc"
+
+[lib]
+path = "lib.rs"'
+mk "$W/ccc/lib.rs"            'pub mod u;
+pub mod w;'
+mk "$W/ccc/u.rs"              'pub fn u() {}'
+mk "$W/ccc/w.rs"              'use crate::u::u;
+pub fn w() { u(); }'
+
+# ── fixture M: one crate, the module rules (F2 F3 SUB BR) ─────────────────────────────────────────────
+M="$TMP/m"
+mk "$M/Cargo.toml"            '[package]
+name = "m"'
+mk "$M/src/lib.rs"            'pub mod a;
+pub mod b;
+pub mod c;
+pub mod d;
+pub mod e;
+pub mod f;
+pub mod q;
+pub mod amb;
+pub mod p;'
+mk "$M/src/b.rs"              'pub fn g() {}'
+mk "$M/src/a.rs"              'pub mod b;
+pub mod s1;
+pub fn af() {}'
+mk "$M/src/a/b.rs"            'pub fn g() {}'
+mk "$M/src/a/s1.rs"           'pub mod k;
+use super::b::g;
+use super::af;
+use self::k::kf;
+pub fn s() { g(); af(); kf(); }'
+mk "$M/src/a/s1/k.rs"         'use super::super::af;
+pub fn kf() { af(); }'
+mk "$M/src/c.rs"              'use crate::a::b;
+use crate::a::af;
+use crate::amb::z;
+use crate::q::r;
+pub fn c() { b::g(); af(); }'
+mk "$M/src/d.rs"              'use crate::{a::b::g, e::{self, E}};
+pub fn d() { g(); }'
+mk "$M/src/e.rs"              'pub struct E;'
+mk "$M/src/f.rs"              'use crate::e::E as EE;
+pub fn f(_: EE) {}'
+mk "$M/src/amb.rs"            'pub fn z() {}'
+mk "$M/src/amb/mod.rs"        'pub fn z() {}'
+mk "$M/src/p.rs"              '#[path = "pp.rs"]
+mod pp;'
+mk "$M/src/pp.rs"             'pub fn pp() {}'
+mk "$M/src/q.rs"              'pub mod r;'
+mk "$M/src/q/r.rs"            'pub fn r() {}'
+mk "$M/src/q/r/mod.rs"        'pub fn r() {}'
+
+# ── fixture I: directives inside inline modules (RV-RUST-ROOTS-A) ──
+I="$TMP/i"
+mk "$I/Cargo.toml"            '[package]
+name = "i"'
+mk "$I/src/lib.rs"            'pub mod a;
+pub mod b;
+pub mod k;
+mod outer {
+    mod inner;
+    mod deep {
+        mod z;
+    }
+}'
+mk "$I/src/b.rs"              'pub fn g() {}'
+mk "$I/src/inner.rs"          'pub fn decoy() {}'
+mk "$I/src/z.rs"              'pub fn decoy() {}'
+mk "$I/src/outer/z.rs"        'pub fn decoy() {}'
+mk "$I/src/outer/inner.rs"    'pub fn truth() {}'
+mk "$I/src/outer/deep/z.rs"   'pub fn truth() {}'
+mk "$I/src/a/mod.rs"          'pub mod x;
+pub mod y;
+pub struct Foo;'
+mk "$I/src/a/x.rs"            'pub fn bar() {}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::bar;
+    use self::helper;
+}'
+mk "$I/src/a/x/helper.rs"     'pub fn helper() {}'
+mk "$I/src/a/y.rs"            'use super::Foo;
+use self::helper;'
+mk "$I/src/a/y/helper.rs"     'pub fn helper() {}'
+mk "$I/src/k.rs"              'pub mod j;
+pub mod m;
+pub fn kf() {}
+mod outer2 {
+    mod inn;
+}'
+mk "$I/src/k/b.rs"            'pub fn g() {}'
+mk "$I/src/k/inn.rs"          'pub fn decoy() {}'
+mk "$I/src/inn.rs"            'pub fn decoy() {}'
+mk "$I/src/k/outer2/inn.rs"   'pub fn truth() {}'
+mk "$I/src/k/j.rs"            'use super::kf;
+#[cfg(test)]
+mod tests {
+    use super::super::b::g;
+}'
+mk "$I/src/k/m.rs"            'mod t1 {
+    mod t2 {
+        use super::super::super::b::g;
+    }
+}
+mod t3 {
+    use super::kf;
+}'
+
+# ── fixture N: a path written after self/super inside an inline module (CR #557) ──
+N="$TMP/n"
+mk "$N/Cargo.toml"            '[package]
+name = "n"'
+mk "$N/src/lib.rs"            'pub mod a;'
+mk "$N/src/a.rs"              'mod helper {
+    use self::child::run;
+    use self::lone;
+}
+#[cfg(test)]
+mod t {
+    use super::sib::Thing;
+    use super::own_item;
+}
+pub fn own_item() {}'
+mk "$N/src/a/helper/child.rs" 'pub fn run() {}'
+mk "$N/src/a/child.rs"        'pub fn decoy() {}'
+mk "$N/src/a/sib.rs"          'pub struct Thing;'
+mk "$N/src/sib.rs"            'pub struct Thing;'
+
+# ── fixture V: a virtual workspace (a [workspace] with no [package]) is a boundary, not a crate (CR #557) ──
+V="$TMP/v"
+mk "$V/Cargo.toml"            '[workspace]
+members = ["m"]'
+mk "$V/src/lib.rs"            'pub fn incidental() {}'
+mk "$V/src/x.rs"              'use crate::q;'
+mk "$V/src/q.rs"              'pub fn q() {}'
+mk "$V/m/Cargo.toml"          '[package]
+name = "m"'
+mk "$V/m/src/lib.rs"          'pub fn real() {}'
+mk "$V/m/src/x.rs"            'use crate::q;'
+mk "$V/m/src/q.rs"            'pub fn q() {}'
+
+# ── fixtures T1 / T2: a `[lib]` header and a `path` inside a multi-line TOML string are text (CR #562) ──
+T1="$TMP/t1"
+mk "$T1/Cargo.toml"           '[package]
+name = "t1"
+description = """
+[lib]
+path = "alt/root.rs"
+"""'
+mk "$T1/src/lib.rs"           'pub mod q;
+pub mod x;'
+mk "$T1/src/q.rs"             'pub fn q() {}'
+mk "$T1/src/x.rs"             'use crate::q::q;'
+mk "$T1/alt/root.rs"          'pub fn r() {}'
+T2="$TMP/t2"
+mk "$T2/Cargo.toml"           "[package]
+name = \"t2\"
+description = '''
+[workspace]
+'''
+note = \"'''\"
+
+[lib]
+path = \"root.rs\""
+mk "$T2/root.rs"              'pub mod u;
+pub mod w;'
+mk "$T2/u.rs"                 'pub fn u() {}'
+mk "$T2/w.rs"                 'use crate::u::u;'
+# CR #567: a backslash in a basic multi-line string escapes the next character, so `\"""` is text and the string runs on to its real closer
+T3="$TMP/t3"
+mk "$T3/Cargo.toml"           '[package]
+name = "t3"
+description = """
+a quote \""" is text, the string is still open
+[lib]
+path = "alt/root.rs"
+"""'
+mk "$T3/src/lib.rs"           'pub mod q;
+pub mod x;'
+mk "$T3/src/q.rs"             'pub fn q() {}'
+mk "$T3/src/x.rs"             'use crate::q::q;'
+mk "$T3/alt/root.rs"          'pub fn r() {}'
+T4="$TMP/t4"
+mk "$T4/Cargo.toml"           '[package]
+name = "t4"
+description = """
+say \"""hi\""" now
+"""
+note = "one \" line"
+
+[lib]
+path = "root.rs"'
+mk "$T4/root.rs"              'pub mod u;
+pub mod w;'
+mk "$T4/u.rs"                 'pub fn u() {}'
+mk "$T4/w.rs"                 'use crate::u::u;'
+
+# ── fixture D: use trees nested deeper than the cap (CR #562) ──
+D="$TMP/d"
+braces(){ head -c "$2" /dev/zero | tr '\0' "$1"; }   # braces <char> <count>
+mk "$D/Cargo.toml"            '[package]
+name = "d"'
+mk "$D/src/lib.rs"            'pub mod x;
+pub mod y;
+pub mod z;
+pub mod e;
+pub mod f;'
+mk "$D/src/x.rs"              'pub fn f() {}'
+mk "$D/src/y.rs"              "use crate::$( braces '{' 5 )x::f$( braces '}' 5 );"
+mk "$D/src/z.rs"              "use crate::$( braces '{' 40 )x::f$( braces '}' 40 );"
+mk "$D/src/e.rs"              "use crate::$( braces '{' 32 )x::f$( braces '}' 32 );"   # exactly the cap: still read
+mk "$D/src/f.rs"              "use crate::$( braces '{' 33 )x::f$( braces '}' 33 );"   # one level over: refused
+D2="$TMP/d2"
+mk "$D2/Cargo.toml"           '[package]
+name = "d2"'
+mk "$D2/src/lib.rs"           'pub mod x;
+pub mod w;'
+mk "$D2/src/x.rs"             'pub fn f() {}'
+mk "$D2/src/w.rs"             "use $( yes 'crate::{' | head -n 30000 | tr -d '\n' )x::f$( braces '}' 30000 );"   # every level adds a prefix segment
+
+# ── fixture C: a custom-named crate root and a `self::` path in it (CR #562) ──
+C="$TMP/c"
+mk "$C/Cargo.toml"            '[package]
+name = "c"
+
+[lib]
+path = "src/custom.rs"'
+mk "$C/src/custom.rs"         'use self::child::run;
+pub mod other;'
+mk "$C/src/child.rs"          'pub fn run() {}'
+mk "$C/src/custom/child.rs"   'pub fn decoy() {}'
+mk "$C/src/other.rs"          'pub fn o() {}'
+
+# importers <tree> <file> -> "$TMP/imp" holds one importer path per line; RED on a nonzero exit or no <impact> answer
+importers(){
+  local out="$TMP/imp.xml" rc
+  ( cd "$1" || exit 9; "$BIN" "$1" --impact="$2" --no-cache >"$out" 2>"$TMP/imp.err" ); rc=$?
+  : > "$TMP/imp"
+  if [ "$rc" -ne 0 ] || ! grep -q '<impact ' "$out"; then
+    no "--impact=$2 on $(basename "$1"): exit $rc or no <impact> answer"; sed -n '1,5p' "$TMP/imp.err"; return 1
+  fi
+  grep -oE '<f via="[a-z]+" p="[^"]+"' "$out" | sed -E 's/.* p="([^"]+)"/\1/' | sort > "$TMP/imp"
+  return 0
+}
+has(){   # arm tree file importer
+  importers "$2" "$3" || return
+  if grep -qxF "$4" "$TMP/imp"; then ok "$1: $4 imports $3"; else no "$1: $4 does not import $3 (got: $(tr '\n' ' ' < "$TMP/imp"))"; fi
+}
+hasnt(){ # arm tree file importer
+  importers "$2" "$3" || return
+  if grep -qxF "$4" "$TMP/imp"; then no "$1: $4 imports $3 (a false edge)"; else ok "$1: $4 does not import $3"; fi
+}
+
+echo "-- F1: per-crate roots"
+has   F1a  "$W" bbb/src/x.rs        bbb/src/y.rs          # crate:: in bbb is bbb's crate
+hasnt F1a- "$W" aaa/src/x.rs        bbb/src/y.rs          # ... never aaa's (the first lib.rs in sorted order)
+has   F1b  "$W" ccc/u.rs            ccc/w.rs              # [lib] path = "lib.rs": the crate root is ccc/
+has   F1c  "$W" bbb/src/bin/helper.rs bbb/src/bin/other.rs   # src/bin/tool.rs is its own crate: crate:: is src/bin/
+hasnt F1c- "$W" bbb/src/helper.rs   bbb/src/bin/other.rs  # ... not the lib's src/helper.rs
+hasnt F1c2 "$W" aaa/src/helper.rs   bbb/src/bin/other.rs
+has   F1d  "$W" bbb/src/bin/helper.rs bbb/src/bin/tool.rs    # twin: `mod helper;` in a bin root resolves beside it
+
+echo "-- F2: mod b; in a non-mod.rs file"
+has   F2a  "$M" src/a/b.rs          src/a.rs              # src/a.rs `mod b;` is src/a/b.rs
+hasnt F2a- "$M" src/b.rs            src/a.rs              # ... never src/b.rs
+has   F2b  "$M" src/b.rs            src/lib.rs            # twin: lib.rs owns src/
+has   F2c  "$M" src/a/s1/k.rs       src/a/s1.rs           # nested: s1.rs `mod k;` is a/s1/k.rs
+has   F2d  "$M" src/pp.rs           src/p.rs              # #[path] shape: no src/p/pp.rs, the includer's directory is read
+
+echo "-- F3: super / self in a plain file"
+has   F3a  "$M" src/a/b.rs          src/a/s1.rs           # super::b::g in a/s1.rs is module a's b
+hasnt F3a- "$M" src/b.rs            src/a/s1.rs
+has   F3b  "$M" src/a.rs            src/a/s1.rs           # super::af: an item of module a's own file
+has   F3c  "$M" src/a.rs            src/a/s1/k.rs         # super::super::af from a/s1/k.rs
+hasnt F3c- "$M" src/lib.rs          src/a/s1/k.rs
+
+echo "-- SUB: the full-path module file is the dependency"
+has   SUBa "$M" src/a/b.rs          src/c.rs              # use crate::a::b with a.rs + a/b.rs
+has   SUBb "$M" src/a.rs            src/c.rs              # twin: use crate::a::af stays a.rs (tier 2)
+hasnt SUBc "$M" src/amb.rs          src/c.rs              # tier 2 ambiguous (amb.rs + amb/mod.rs): degrade
+hasnt SUBc2 "$M" src/amb/mod.rs     src/c.rs
+hasnt SUBd "$M" src/q.rs            src/c.rs              # tier 1 ambiguous (q/r.rs + q/r/mod.rs): never falls to q.rs
+hasnt SUBd2 "$M" src/q/r.rs         src/c.rs
+
+echo "-- BR: brace groups and as renames"
+has   BRa  "$M" src/a/b.rs          src/d.rs              # crate::{a::b::g, ...}
+has   BRb  "$M" src/e.rs            src/d.rs              # ... e::{self, E}
+has   ALa  "$M" src/e.rs            src/f.rs              # crate::e::E as EE
+hasnt BRc  "$M" src/b.rs            src/d.rs              # twin: a member names a::b, not src/b.rs
+
+echo "-- IN: directives inside an inline mod read from the inline module"
+hasnt INa  "$I" src/a/mod.rs        src/a/x.rs            # mod tests { use super::*; } in a/x.rs is module a::x itself
+has   INb  "$I" src/a/mod.rs        src/a/y.rs            # twin: a file-level use super::Foo in a/y.rs is module a
+hasnt INc  "$I" src/a/x/helper.rs   src/a/x.rs            # self:: inside mod tests is the inline module, not a::x
+has   INd  "$I" src/a/y/helper.rs   src/a/y.rs            # twin: a file-level use self::helper in a/y.rs is a/y/helper.rs
+has   INe  "$I" src/k/b.rs          src/k/j.rs            # super::super:: across one inline boundary: k's b
+hasnt INe- "$I" src/b.rs            src/k/j.rs            # ... not the crate root's b (the file-level super::super)
+has   INf  "$I" src/k.rs            src/k/j.rs            # twin: file-level use super::kf in k/j.rs is k.rs
+has   ING  "$I" src/k/b.rs          src/k/m.rs            # super^3 across two nested inline mods climbs one: k's b
+hasnt ING- "$I" src/b.rs            src/k/m.rs
+hasnt INh  "$I" src/k.rs            src/k/m.rs            # mod t3 { use super::kf; } names m itself: no edge to k.rs
+has   INi  "$I" src/outer/inner.rs  src/lib.rs            # mod outer { mod inner; } in lib.rs is src/outer/inner.rs
+hasnt INi- "$I" src/inner.rs        src/lib.rs            # ... never a same-named src/inner.rs
+has   INj  "$I" src/outer/deep/z.rs src/lib.rs            # two inline levels: src/outer/deep/z.rs
+hasnt INj- "$I" src/z.rs            src/lib.rs
+hasnt INj2 "$I" src/outer/z.rs      src/lib.rs
+has   INk  "$I" src/k/outer2/inn.rs src/k.rs              # in a plain file k.rs: src/k/outer2/inn.rs
+hasnt INk- "$I" src/k/inn.rs        src/k.rs
+hasnt INk2 "$I" src/inn.rs          src/k.rs
+has   INl  "$I" src/b.rs            src/lib.rs            # twin: a plain `pub mod b;` in lib.rs
+
+echo "-- IN2: a path after self/super inside an inline mod is read from the module it reaches"
+has   INm  "$N" src/a/helper/child.rs src/a.rs            # mod helper { use self::child::run; } is a/helper/child.rs
+hasnt INm- "$N" src/a/child.rs      src/a.rs              # ... not a/child.rs (the file-level self::)
+has   INn  "$N" src/a/sib.rs        src/a.rs              # mod t { use super::sib::Thing; }: super is a itself, so a/sib.rs
+hasnt INn- "$N" src/sib.rs          src/a.rs              # ... not the crate root's sib.rs
+
+echo "-- VW: a virtual workspace assigns no crate roots"
+hasnt VWa  "$V" src/q.rs            src/x.rs              # [workspace]-only manifest: its incidental src/lib.rs is no target
+has   VWb  "$V" m/src/q.rs          m/src/x.rs            # twin: a member crate with [package] anchors normally
+
+echo "-- TM: a multi-line TOML string is text"
+has   TMa  "$T1" src/q.rs           src/x.rs              # the string's [lib] path = "alt/root.rs" is no target: src/lib.rs stays the root
+has   TMb  "$T2" u.rs               w.rs                  # twin: the real [lib] path = "root.rs" after triple-quoted strings is read
+hasnt TMc- "$T3" alt/root.rs         src/x.rs             # `\"""` inside the string does not close it: the string's [lib] path is no target ...
+has   TMc  "$T3" src/q.rs           src/x.rs              # ... src/lib.rs stays the root
+has   TMd  "$T4" u.rs               w.rs                  # twin: escaped quotes in a multi-line and a one-line string, then the real [lib] path
+
+echo "-- DT: a use tree nested deeper than the cap is not read"
+has   DTa  "$D" src/x.rs            src/y.rs              # depth 5 resolves
+hasnt DTb  "$D" src/x.rs            src/z.rs              # depth 40 draws nothing (the cap is 32)
+has   DTd  "$D" src/x.rs            src/e.rs              # depth 32 (the cap itself) resolves
+hasnt DTe  "$D" src/x.rs            src/f.rs              # depth 33 draws nothing: the cap is exact
+# DTc: the 30000-deep tree is refused whatever the machine's speed. No wall-clock bound (a loaded runner would fail it with the cap intact):
+# the cap is pinned exactly by DTd/DTe, and this arm checks that the huge tree is answered (a hang guard only) and draws no edge.
+if command -v timeout >/dev/null 2>&1; then GUARD="timeout 300"; else GUARD=""; fi
+( cd "$D2" && $GUARD "$BIN" "$D2" --impact=src/x.rs --no-cache >"$TMP/dtc.xml" 2>"$TMP/dtc.err" ); rc=$?
+if [ "$rc" -eq 0 ] && grep -q '<impact ' "$TMP/dtc.xml" && ! grep -q 'p="src/w.rs"' "$TMP/dtc.xml"; then ok "DTc: a 30000-deep use tree is answered and draws no edge (rc 0)"
+else no "DTc: a 30000-deep use tree: exit $rc, or the answer carries src/w.rs as an importer"; fi
+
+echo "-- CR: self:: in a custom-named crate root"
+has   CRa  "$C" src/child.rs        src/custom.rs         # the root's directory is src/
+hasnt CRa- "$C" src/custom/child.rs src/custom.rs         # ... not src/custom/ (the module directory of a non-root custom.rs)
+
+echo "-- determinism"
+( cd "$M" && "$BIN" "$M" --deps --no-cache > "$TMP/d1.xml" 2>/dev/null ); r1=$?
+( cd "$M" && "$BIN" "$M" --deps --no-cache > "$TMP/d2.xml" 2>/dev/null ); r2=$?
+if [ "$r1" -eq 0 ] && [ "$r2" -eq 0 ] && grep -q '<deps ' "$TMP/d1.xml" && cmp -s "$TMP/d1.xml" "$TMP/d2.xml"; then ok "--deps twice: byte-identical"
+else no "--deps not deterministic or failed (exit $r1/$r2)"; fi
+
+if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fi
+exit "$fail"

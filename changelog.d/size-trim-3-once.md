@@ -1,0 +1,3 @@
+### Changed — repeated `<d>` text and tail names print once
+
+A `--for` `<d>` row whose doc and signature text (40 bytes or more) repeats an earlier row's keeps all of its attributes and prints `same_as="<n of that row>"` instead of the text (a run of constants or overloads with one shared comment), with a present-only legend clause; a row whose `n=` an earlier row of other text also carries (an overload, a same-named function in another file) keeps its text, so `same_as=` names one row. The MCP `for` tool folds the same way, and the clause is a session legend-dictionary entry. A tail row's `sym=` no longer repeats a name it already lists.

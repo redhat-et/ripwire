@@ -106,6 +106,23 @@ inline int utf8SeqLen( const char* s, std::size_t i, std::size_t n ) noexcept
     return 0;
 }
 
+// The inverse: a code point's UTF-8 bytes appended to `out`. `cp` must be a valid scalar value (callers map bad
+// input to U+FFFD, or to whatever their format wants, first). Shared by the MCP JSON reader's \uXXXX decode and
+// the HTML reader's numeric character references (htmldoc.h).
+inline void appendUtf8( std::string& out, std::uint32_t cp )
+{
+    if( cp < 0x80 )
+    {
+        out += char( cp );
+    }
+    else if( cp < 0x800 )
+    { out += char( 0xC0 | ( cp >> 6 ) );  out += char( 0x80 | ( cp & 0x3F ) ); }
+    else if( cp < 0x10000 )
+    { out += char( 0xE0 | ( cp >> 12 ) ); out += char( 0x80 | ( ( cp >> 6 ) & 0x3F ) );  out += char( 0x80 | ( cp & 0x3F ) ); }
+    else
+    { out += char( 0xF0 | ( cp >> 18 ) ); out += char( 0x80 | ( ( cp >> 12 ) & 0x3F ) ); out += char( 0x80 | ( ( cp >> 6 ) & 0x3F ) ); out += char( 0x80 | ( cp & 0x3F ) ); }
+}
+
 // Canonical escape core. Appends the escaped form of `s` to `out` (never returns by value — every
 // call site controls its own allocation/reuse, matching ccjson's reused-scratch-buffer posture).
 // Escapes `"` `\` and the C0 controls (\n \r \t as short forms, everything else as \u00XX) always;

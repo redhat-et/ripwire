@@ -45,7 +45,11 @@
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
 #include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
+#include "fordocbody.h"     // FOR-DOC-BODY: the `for` verb's doc sections (the CLI twin's renderer)
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
+#include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
+#include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
+#include "foronesidereach.h" // ONE-SIDE-REACH: the CLI twin's answer edit, one renderer
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2076,20 +2080,20 @@ inline void spliceForLegoCountLegend( std::string& doc, bool carries )
 // forbudget-soft: budget_tokens= is a SOFT target here too (the CLI twin's rule) — est_tokens may exceed it and nothing is
 // labelled "over" for it. The one over_ceiling this surface can carry is the runaway guard's (`guardOver`: the default head
 // passed kForRunawayGuardBytes); its reading (forRunawayGuardNote) was spliced with the <sigs> clauses by the assembly.
-inline void priceForTaskRoot( std::string& doc, bool guardOver )
+// Returns the answer's est_tokens (FOR-DOC-BODY serves into the budget left after it) and what it was converged from (the
+// ONE-SIDE-REACH demote pass re-prices through it, insertFileSyms).
+inline std::pair<std::size_t, rw::PricedRootInputs> priceForTaskRoot( std::string& doc, bool guardOver )
 {
     if( doc.empty() )
     {
-        return;
+        return {};
     }
+    constexpr std::string_view kOverAttr = " over_ceiling=\"1\"";
+    const rw::PricedRootInputs inputs { .markupBytes = doc.size() + ( guardOver ? kOverAttr.size() : 0 ), .bodyTokens = 0 };
     std::size_t estTokens = 0;
-    std::string rootAttrs = rw::pricedRootAttr( doc.size(), rw::kBytesPerTokenDefault, 0, &estTokens );
-    if( guardOver )
-    {
-        rootAttrs = rw::pricedRootAttr( doc.size() + sizeof( " over_ceiling=\"1\"" ) - 1, rw::kBytesPerTokenDefault, 0, &estTokens );
-        rootAttrs += " over_ceiling=\"1\"";
-    }
-    rw::spliceRootAttrs( doc, rootAttrs );
+    const std::string rootAttrs = rw::pricedRootAttrTokens( inputs.markupBytes, rw::kBytesPerTokenDefault, 0, &estTokens );
+    rw::spliceRootAttrs( doc, rootAttrs + std::string( guardOver ? kOverAttr : std::string_view() ) );
+    return { estTokens, inputs };
 }
 
 // knob-honesty-068 (orchestrator ruling C3, 2026-10-07): MCP `for`'s ASSEMBLY — everything from the sigs render to the
@@ -2102,6 +2106,7 @@ struct McpForAssembly
 {
     std::optional<std::string> doc;   // nullopt: the answer buffer lost bytes (internal error)
     rw::SigsCutReport          cut;
+    ForDocBodyPick             docPick;   // FOR-DOC-BODY: read off the rows and tail this pass printed (fordocbody.h)
 };
 struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by reference; all outlive the call
 {
@@ -2214,6 +2219,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // R2-AF (round 2, S4): first rows inside the root, right after the legend (forHdrRowsXml); rendered before the rows so the
     // round C refill below prices them
     const std::string mcpHdrXml = forHdrRowsXml( ing, mcpForHdrRows, flRootArg );   // forpage.h: the CLI twin's one render
+    ForDocBodyPick          mcpDocPick;    // FOR-DOC-BODY: set beside the tail below
     std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail's rank rows exclude these files
     // round C: the render is named so a soft target can narrow its rows past the cut once the sections are served (below); the
     // redaction tally around it is snapshotted so a second render replaces this one's count instead of adding to it
@@ -2233,7 +2239,8 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
                         &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings;
                                                               //   knob-honesty-068: carries mcpSigsNext IN
-                        SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the CLI twin's row spelling
+                        SigRowSpelling{ .elideZeroMetrics = true, .foldRepeatedText = true } );   // lean-answers lane: the CLI twin's row
+                                                              //   spelling; SIZE-3a: repeated text folded to same_as= (mcpattrparitycheck)
     };
     std::string sigsStr = renderToString( renderSigs );
     const std::optional<RedactCounts> redactAfterSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
@@ -2409,11 +2416,18 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // DEEP-TAIL d2, MCP twin: the same model + renderer the CLI --for uses (forpage.h; FOLD C: page 0 of the file page) —
     // it rides on top at the default row cap in every regime here, as it did before (this twin funds no trailing section
     // from budget_tokens but <lego>/<compose>), and a cut tail carries the page after its last row as next=.
+    bool mcpTailFolded = false;   // SIZE-2: the tail folded widened rows, so its clause rides (spliced below, before pricing)
     {
         std::vector<char> tailEsc;
-        const FileTail    mcpTail = computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
+        // FOR-TAIL-WIDE (review F8): this twin has no tail fill, so under budget_tokens it serves the old 40-row walk's tail (its
+        // pre-widening size, byte for byte; a cut tail's next= continues the page) and the widened rows only without a budget
+        const FileTail    mcpTail = in.budgetTokens > 0 ? fileTailOldWalk( computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task ) )
+                                                        : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
+        mcpTailFolded = tailStr.contains( " folded=\"" );
+        mcpDocPick = pickForDocBody( ing, task, mcpShownIds, [ & ]
+                                    { return computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, /*rankOrder=*/true ); }, flRootArg, &mcpTail.paths );   // mcpTail: the rows printed above
     }
     std::fwrite( mcpSlot.xml.data(), 1, mcpSlot.xml.size(), mem );   // for-body-slot: "" when no body rides
     rw::emitRaw( mem, "</ctx>" );
@@ -2429,6 +2443,14 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // so the clause's bytes are part of the est_tokens price exactly as the CLI's own version is.
     spliceForSectionStubLegend( out, mcpSectionsWillStub );
     spliceForLegoCountLegend( out, mcpLegoCountAttrs );   // count-floor: present-only, the CLI twin's clause
+    if( mcpTailFolded )
+    {
+        rw::spliceClauseAfter( out, rw::kForFileTailWideLegend, rw::kForFileTailFoldedLegend );   // SIZE-2: the CLI twin's clause
+    }
+    if( sigsStr.contains( " same_as=\"" ) )
+    {
+        rw::spliceClauseAfter( out, std::string_view(), rw::kForSameAsLegend );   // SIZE-3a: the CLI twin's full-dialect clause (end of the first comment)
+    }
     // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
     // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
     // bytes: pricedRootAttr's ≤4-pass fixpoint at kBytesPerTokenDefault, spliced onto the <ctx> root by the
@@ -2440,7 +2462,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // reading — BEFORE pricing, so est_tokens= prices the bytes served, and after the sigs budget, so the rows are unchanged.
     closeRosterGaps( out );
     mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
-    return McpForAssembly{ std::move( out ), mcpSigsCut };
+    return McpForAssembly{ std::move( out ), mcpSigsCut, std::move( mcpDocPick ) };
 }
 
 // #362 review round 4, follow-up (quality bar): the twins' B2 rank-flags fragment, named once -
@@ -2452,9 +2474,32 @@ inline std::string_view mcpPageRankFlags( bool noRoute )
 }
 
 // defined below; forTaskText's FOR-ROUTE-DECLINED block calls them (the path_between / connect twins)
-inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, bool inForBlock = false );
+inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, RedactCounts* redact, bool inForBlock = false );
 inline std::string connectText( const std::string& root, const std::vector<std::string>& symbolSpecs, std::uint32_t radius, std::string& err, RedactCounts* redact );
 inline std::string batchCdata( const std::string& s );   // the callers twin's JSON rides as CDATA
+
+// K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms>, read off this answer's own bytes (every block before it), before </ctx>, not priced;
+// held under budget_tokens.
+// ONE-SIDE-REACH (src/foronesidereach.h): then the CLI twin's demote pass over the answer and the block, re-priced on `price` (the root's
+// inputs, null: no re-price); held under budget_tokens.
+inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
+{
+    if( out.ends_with( "</ctx>" ) )
+    {
+        args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
+        std::string syms = renderForFileSyms( ing, g, args );
+        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, args.answer, syms );
+        if( !edit.answer.empty() )
+        {
+            if( price != nullptr )
+            {
+                repriceRootAfterCut( edit.answer, *price, args.answer.size() ); // signed: the pointers and legend may outweigh the rows they replace
+            }
+            out = std::move( edit.answer ) + "</ctx>";
+        }
+        out.insert( out.size() - 6, edit.syms.empty() ? syms : edit.syms );
+    }
+}
 
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
@@ -2684,6 +2729,20 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     std::sort( lensSurfaceIds.begin(), lensSurfaceIds.end(),
                [ &lensRank ]( NodeId a, NodeId b ) { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );   // id tiebreak → deterministic (most lens scores tie at 0)
     lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
+    // FRAME-HIGH-CONFIDENCE, the CLI twin's rule (verbs_for.h): on a name-exact route high needs the anchor at the head of the rows
+    std::string mcpRouteNote = routeNoteOf( rc, shape, noRoute );
+    // (the head is the row printed as r=1: code above docs moves Markdown rows below the code rows, routeEmittedHead)
+    const bool mcpDocsAfterCode = !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
+                                  && docsAfterCodeFitsCeiling( budgetTokens, /*bodyCeiling=*/false );
+    if( std::string_view( mcpForConf.level ) == "high" && !lensSurfaceIds.empty() )
+    {
+        const NodeId emittedHead = routeEmittedHead( ing, lensSurfaceIds, mcpDocsAfterCode );
+        if( !routeAnchorHeadsRows( ing, subjectRoute.anchorKeys, emittedHead ) )
+        {
+            mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, /*anchorUnproven=*/true );
+            mcpRouteNote += routeAnchorNotHeadClause( ing, emittedHead );
+        }
+    }
     // L-W: coverage= joins the pair on this root on a THIN answer only (present-only, the CLI twin's rule in
     // forpage.h) — same clause, same byte exemption (mcpConfidenceExemptBytes reads the sizes below); the same
     // verdict puts the widening page on the r=1 row's next=.
@@ -2736,8 +2795,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // §L10b + verify-wave2 F6: same trim as the CLI --for twin (verbs_for.h) — no leading " [" and no
     // trailing "]"; the value lands only in route=, where the attribute quote is the delimiter.
     const std::string mcpForAtAttrStr = gitstamp::atAttr( root );   // M10's at=, computed once: spliced onto the root AND exempted from the sigs charge below
-    std::string rootOpenStr = ctxRootOpen( task, routeNoteOf( rc, shape, noRoute ),   // row 6: the route CODE, ONE producer (filter.h)
-                                           flRootArg );   // §B1.7: same root attrs as the CLI twin (no route= under no_route, as --no-route)
+    std::string rootOpenStr = ctxRootOpen( task, mcpRouteNote, // row 6: the route CODE, ONE producer (filter.h)
+                                           flRootArg ); // §B1.7: same root attrs as the CLI twin (no route= under no_route, as --no-route)
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
         // Attribute ORDER matches the CLI twin's: confidence/margin_pct, then at=, then this dialect's own
@@ -2820,6 +2879,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::string_view mcpBundleLegend   = mcpSlotOwner.any() ? rw::kMcpForBundleSigsOwnerLegend : rw::kMcpForBundleSigsLegend;
     const std::string_view mcpBodySlotLegend = mcpSlotOwner.any() ? rw::kForBodySlotLegend : std::string_view();
     const std::string_view mcpTailCodeFirstLegend = tailOrdersCodeFirst( ing, task ) ? rw::kForFileTailCodeFirstLegend : std::string_view();   // the CLI twin's clause
+    // FOR-TAIL-WIDE, the CLI twin's clause; absent under budget_tokens, where this twin serves the old 40-row walk's tail (below)
+    const std::string_view mcpTailWideLegend = budgetTokens == 0 && fileTailWalksPastPage0( ing, lensRank ) ? rw::kForFileTailWideLegend : std::string_view();
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + termsCapNote + mentionNote + boostNote + docMentionNote + floorNote
                           + std::string( rw::kMcpForBuildingBlocksLegend )
@@ -2836,6 +2897,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                           + std::string( rw::kMcpForLensColumnsLegend )
                           + std::string( rw::kForFileTailLegend )   // deep-tail: r= + <tail> definitions, the CLI twin's exact clause (sigs-charge-exempt below)
                           + std::string( mcpTailCodeFirstLegend )   // docs-rest: the tail's order on a code question (exempt below)
+                          + std::string( mcpTailWideLegend )        // FOR-TAIL-WIDE: present-only, the walk past page 0 (exempt below)
                           + ( mcpForHdrRows.empty() ? std::string() : std::string( rw::kForHdrLegend ) )   // R2-AF: present-only
                           + std::string( mcpEndLineLegend )   // e=: present-only, the CLI twin's full clause (sig-charge exempt below)
                           + " -->"
@@ -2894,7 +2956,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const ForStubbableSection mcpComposeChargeIn{ .hasContent = !composeStr.empty(), .preCapTotal = composePreCapCount, .rendered = true,
                                                   .renderedBytes = composeStr.size() };
     const ForSectionStubPlan  mcpSigChargePlan = forSectionsSigChargePlan( sections, /*explicitCeiling=*/false, task, mcpLegoChargeIn, mcpComposeChargeIn );
-    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpTailCodeFirstLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
+    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpTailCodeFirstLegend.size() - mcpTailWideLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
                                  - mcpEndLineExemptBytes
                                  - ( mcpBundleLegend.size() + mcpBodySlotLegend.size() - rw::kMcpForBundleSigsLegend.size() )   // for-body-slot: 0 when not asked
                                  - rw::forZeroNoteBytes( headerStr )   // lean-answers: the zero reading never costs a row
@@ -2920,8 +2982,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const McpForAssemblyInputs assemblyIn{ ing, lensRank, forTopN, fanIn, impure, redact, sigsBudget, mcpSigsBudgets.rowDrop, fixedBytes, budgetTokens,
                                            noteIndex, notesPtr, flRootArg, task, mcpTopRowNext, mcpForHdrRows, routeStr,
                                            composePreCapCount, sections,
-                                           rw::forLensRules( !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
-                                                                 && rw::docsAfterCodeFitsCeiling( budgetTokens, /*bodyCeiling=*/false ),
+                                           rw::forLensRules( mcpDocsAfterCode,
                                                              rw::endLinesFitCeiling( budgetTokens, /*bodyCeiling=*/false ),
                                                              // the CLI twin's head round-robin verdict (serialize.h forHeadRoundRobinOn)
                                                              rw::forHeadRoundRobinOn( std::strcmp( mcpRouteTag, "subtoken+body" ) == 0,
@@ -2953,11 +3014,18 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + hooks );   // the clause beside it, as <dispatch>: the header's are fixed
         }
     }
-    priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    const auto [answerEstTokens, answerPrice] = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 ); // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
+        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
+    }
+    // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
+    if( out.ends_with( "</ctx>" ) )
+    {
+        out.insert( out.size() - 6, renderForDocBody( ForDocBodyInputs{ ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg }, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens }, ForDocDialect::Xml ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
@@ -2967,13 +3035,14 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         {
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
+            insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
             return out;
         }
         std::string verb;
         GraphSubjectOpen opts;
         if( gsa->form == GraphSubjectForm::Path )
         {
-            verb              = pathText( root, gsa->endpoints[0], gsa->endpoints[1], /*inForBlock=*/true ).value_or( std::string() );
+            verb              = pathText( root, gsa->endpoints[0], gsa->endpoints[1], redact, /*inForBlock=*/true ).value_or( std::string() );
             opts.nameTestHops = graphSubjectNameTestHops( verb );
         }
         else if( gsa->form == GraphSubjectForm::Common )
@@ -2993,6 +3062,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, opts ) + verb + std::string( kGraphSubjectCloseXml ) );
         }
     }
+    insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
     return out;
 }
 
@@ -3803,7 +3873,7 @@ inline McpAffectedResult affectedText( const std::string& root, std::string_view
 // resolveFocus + shortestPath, exactly as the CLI --path=A,B. Returns the <path>…</path> XML fragment (with
 // reachable="0" hops="0" and no <s> children when B is NOT reachable from A — a valid answer, not an error),
 // or "" (caller → not-found error) when EITHER endpoint fails to resolve.
-inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, bool inForBlock )
+inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, RedactCounts* redact, bool inForBlock )
 {
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
@@ -3876,6 +3946,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     const std::vector<NodeId>& ptBind   = ptChains.bind;
     const NodeId               srcUsed  = ptChains.from;
     const NodeId               dstUsed  = ptChains.to;
+    const HopFacts             ptHops   = pathHopFacts( ing, g, ptPairs, ptRows, redact );   // HOP-CONTEXT-1, as on the CLI
     const PathBridge          ptBridge     = pth.empty() ? pathBridge( ing, g, srcDefs, dstDefs, valueRefIndexOf( ix ), *ptBackHops ) : PathBridge{};      // ix2-slice, as on the CLI
     const std::string         ptSinkCallers = pth.empty() && ptGaps.any() && !dstGlob ? pathSinkCallersSelector( ing, *ptBackHops, dstDefs, to, ptSingleRoot, ptRootPrefix ) : std::string();   // HOP1 #6, as on the CLI
     const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, ptRows );   // TRACE-EP: the CLI's legend marks, by the same call
@@ -3905,7 +3976,8 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                                                            + splitArmLegend( ptHasSplit ) + pathUnboundLegend( !ptBound.from || !ptBound.to )
                                                            + memberOwnerLegend( ptHasOwner ) + memberOwnerContainedLegend( ptMarks.ownerContained ) + std::string( pathPairsLegend( ptPairs ) ) + pathOrderLegend( ptPairs, ptTwin )
                                                            + std::string( pathHopBodiesLegend( !ptHopBodies.empty() ) ) + std::string( pathHopNextLegend( !ptHopNext.empty() ) )
-                                                           + std::string( routeBodyHedgeLegend( ptHopBodyEl.hedged || ptRouteEl.hedged ) ) + std::string( pathRouteLegend( ptRoute ) ) ).c_str(),
+                                                           + std::string( routeBodyHedgeLegend( ptHopBodyEl.hedged || ptRouteEl.hedged ) ) + std::string( pathRouteLegend( ptRoute ) )
+                                                           + hopLegend( ptHops, "s" ) ).c_str(),
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
                   ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
                     + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
@@ -3916,7 +3988,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
                   srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
                   ptRows.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
-                  ( ptRootAttrs + ptRootAttr ).c_str(),
+                  ( ptRootAttrs + hopRootAttrsXml( ptHops ) + ptRootAttr ).c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
     rw::emitTo( mem, "{}{}", countAttrXmlOrEmpty( "to_value_refs", ptToValueRefs.count ),   // absent at zero, as on the CLI
                   valueRefsDepthAttrXml( ing, ptToValueRefs.depthCut, VrRender{ ptSingleRoot, ptRootPrefix } ).c_str() );   // + the depth cut, as the CLI
@@ -3926,7 +3998,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     rw::emitTo( mem, "{}>{}{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
                   pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ),
                   pth.empty() ? pathHandlerRuleXml( ing, ptBackHops->names(), ptHandler, ptSingleRoot, ptRootPrefix ) : std::string() );
-    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
+    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix, ptHops );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
     rw::emitRaw( mem, ptHopBodies.c_str() );      // PATH-HOP-BODY, as on the CLI
     rw::emitRaw( mem, ptRouteEl.xml.c_str() );    // BODY-ON-ROUTE, as on the CLI
     rw::emitRaw( mem, ptAlts.xml.c_str() );   // D2 part 5, as on the CLI
@@ -4232,31 +4304,23 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
     const std::uint32_t hubFloor = connectHubFloor( g );
 
-    // per-file content cache for the Steiner sig= attributes (each needed file read at most once).
-    HashMap<std::uint32_t, std::string> contents;
-    const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
+    // the shared per-answer file reader (filetext.h): the Steiner sig= attributes and the hop record read through it, each file once
+    FileTextCache files( ing );
+    // HOP-CONTEXT-1 (src/hoprecord.h): every edge any pass can print (a leg-dropped pass prints a subset of grp.edges,
+    // connectemit::rebuildFromLegs), ONE reference pass, before the trim loop (a trim pass re-renders, it never re-scans)
+    std::vector<HopWant> hopWant;
+    for( const ConnectGroup& grp : res.groups )
     {
-        const auto it = contents.find( fid );
-        if( it != contents.end() )
+        if( grp.terminals.size() > 1 )
         {
-            return it->second;
-        }
-        std::string s;
-        if( fid < ing.files.size() )
-        {
-            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            for( const ConnectEdge& e : grp.edges )
             {
-                char b[4096];
-                std::size_t n;
-                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
-                {
-                    s.append( b, n );
-                }
-                std::fclose( in );
+                hopWant.push_back( HopWant{ e.from, e.to, true } );
             }
         }
-        return contents.emplace( fid, std::move( s ) ).first->second;
-    };
+    }
+    // deferRedactTally: a hop call=/sig= redaction counts only on the pass whose payload is delivered (hopEdgeXml adds it)
+    const HopFacts hops = hopFacts( ing, g, std::move( hopWant ), redact, &files, /*deferRedactTally=*/true );
 
     // one <t>/<s>/<e> writer set appending to a payload string (built BEFORE the root so est_tokens is honest).
     const auto symAttr = [ & ]( std::string& p, const char* tag, NodeId id )
@@ -4280,6 +4344,9 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                { return x.dist != y.dist ? x.dist > y.dist : x.a != y.a ? x.a < y.a : x.b < y.b; } );
 
     bool          withSigs    = true;
+    HopShed       hopShed     = HopShed::Full;   // HOP-CONTEXT-1: hop sig=, hop call=, hop site=, then (as before) the join sigs, the legs
+    bool          hopEndpointRows = false;       // some <e> printed fp=/tp= (its legend clause rides then)
+    std::string   hopLegendXml, hopRootXml;      // charged in the fit check, written below: the same objects
     std::size_t   legsDropped = 0;
     std::string   payload;
     std::uint32_t nodeTotal = 0, edgeTotal = 0, connectedGroups = 0;
@@ -4287,6 +4354,13 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         payload.clear();
         nodeTotal = 0;  edgeTotal = 0;  connectedGroups = 0;
+        hopEndpointRows = false;
+        // a discarded pass's redactions (its join sig= and hop call=/sig= texts) come back out of the run's tally (CodeRabbit #535)
+        const std::optional<RedactCounts> redactBefore = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+        // the root's hop counts describe the hops THIS pass prints (a dropped leg's hops are not the answer's)
+        HopTally          hopShown;
+        std::vector<char> hopShownMark( hops.recs.size(), 0 );
+        hopShown.on = hops.on;
 
         // retained-leg mask per group for this pass. One byte per leg, so N=8 is free — rw::svector's inline
         // array shares storage with the 8-byte heap pointer it unions with, and <char,8> is 16 B, the same
@@ -4363,7 +4437,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                 if( withSigs )
                 {
                     const Symbol&      sy  = ing.symbols[ sN ];
-                    const std::string& src = contentOf( sy.fileId );
+                    const std::string& src = files.contentOf( sy.fileId );
                     if( sy.sigStartByte < sy.sigEndByte && sy.sigEndByte <= src.size() )
                     {
                         payload.append( " sig=\"" ).append( ex( cleanSig( src.data(), sy.sigStartByte, sy.sigEndByte, redact ) ) ).append( "\"" );
@@ -4371,12 +4445,18 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                 }
                 payload.append( "/>" );
             }
+            // HOP-CONTEXT-1: a callee's sig= prints once per group (not where its join row printed it); alike rows print fp=/tp=
+            std::vector<NodeId>             sigShown = hopSigShown( steiner, withSigs );
+            const std::vector<std::uint8_t> alike    = hops.on ? hopAlikeRows( ing, std::span<const ConnectEdge>( edges ) ) : std::vector<std::uint8_t>( edges.size(), 0 );
             for( const ConnectEdge& e : edges )
             {
                 payload.append( "<e f=\"" ).append( ex( ing.symbols[ e.from ].name ) )
                        .append( "\" t=\"" ).append( ex( ing.symbols[ e.to ].name ) ).append( "\"" )
                        .append( viaEdgeAttr( edgeNameOnly( g, e.from, e.to ), edgeIsLink( g, e.from, e.to ) ) )
-                       .append( anchorMissAttr( edgeAnchorMiss( g, e.from, e.to ) ) ).append( "/>" );   // FE-B, or via="link"
+                       .append( anchorMissAttr( edgeAnchorMiss( g, e.from, e.to ) ) );   // FE-B, or via="link"
+                payload.append( hopEdgeXml( ing, hops, e.from, e.to, alike[ std::size_t( &e - edges.data() ) ], hopShed, sigShown, !rootArg.empty(), rootPrefix, hopEndpointRows,
+                                           redact, &hopShown, &hopShownMark ) );
+                payload.append( "/>" );
             }
             payload.append( "</g>" );
         }
@@ -4402,13 +4482,19 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
         // fit check against --max-tokens (0 = no budget) — over the WHOLE document (§P9.3, see kConnectHeader
         // above): the same estimator that produces the printed est_tokens, so the budget the caller sets and
         // the number the caller reads can never disagree.
-        const std::size_t est = connectEstTokens( payload.size(), connectExtraBytes );
+        const std::string hopClause = hopLegend( hopShown, "e", hopShed, hopEndpointRows );
+        hopLegendXml = hopClause.empty() ? std::string() : "<!-- ripwire connect: " + hopClause + "-->";
+        hopRootXml   = hopRootAttrsXml( hopShown, hopShed );
+        const std::size_t est = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() );
         if( maxTokens <= 0 || est <= std::size_t( maxTokens ) )
         {
             break;
         }
-        if( withSigs )                    { withSigs = false;  continue; }   // trim 1: sigs -> name-only
-        if( legsDropped < legOrder.size() ) { ++legsDropped;   continue; }   // trim 2: drop whole legs
+        const std::optional<RedactCounts> redactAfter = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+        const auto discardPass = [ & ] { redactTakeBack( redact, redactBefore, redactAfter ); };   // only a pass another replaces
+        if( hopShedNext( hops, hopShed ) ) { discardPass(); continue; }   // trim 0: hop sig=, call=, site= — before anything printed before them
+        if( withSigs )                    { discardPass(); withSigs = false;  continue; }   // trim 1: sigs -> name-only
+        if( legsDropped < legOrder.size() ) { discardPass(); ++legsDropped;   continue; }   // trim 2: drop whole legs
         break;                                                               // trim 3 does not exist: terminals + <unconnected> stay
     }
 
@@ -4416,7 +4502,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // §P8 vocabulary: `est_tokens="~191"` was the tool's only NON-NUMERIC token estimate — the `~` made
     // `int(...)` throw in the one field whose whole purpose is arithmetic against a budget, and no other
     // verb apologises for an estimate being an estimate. Dropped.
-    std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
+    std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() );
     // H9: the ceiling this bundle was SHAPED against, named on the root. The trim loop above really does
     // drop sigs and then whole legs to fit `maxTokens`, and until this attribute existed the only evidence
     // was `truncated="paths"` — which says something was cut but not what it was cut to. Absent when no
@@ -4437,16 +4523,16 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     const char* const connectOverAttr = connectOver ? " over_ceiling=\"1\"" : "";
     if( connectOver )
     {
-        estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
+        estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
-                connectViaLegend, rootRelPathsLegend( !rootArg.empty() ) );
-    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}>",
+    rw::emitTo( out, "{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
                   connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero
                   connectAmbiguousAttr,          // 0.6.6 D1: absent when no many-definition pick tied
                   estTokens, hubFloor,
-                  rw::cstr( connectCeiling ), connectOverAttr,
+                  rw::cstr( connectCeiling ), connectOverAttr, hopRootXml,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
     std::fwrite( payload.data(), 1, payload.size(), out );
@@ -6337,7 +6423,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "path_between" ) );
         }
-        std::optional<std::string> pathAnswer = pathText( root, from, to );
+        std::optional<std::string> pathAnswer = pathText( root, from, to, redactPtr );
         if( !pathAnswer )
         {
             return bad( "internal error: the path_between answer buffer lost bytes — no answer served" );

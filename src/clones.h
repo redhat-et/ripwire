@@ -386,6 +386,65 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
     return out;
 }
 
+// CLONES-PERSIST: the exact-clone KEY of one body, packed in one u64 so the cache can carry it per Function/Method def
+// and a warm findClones groups bodies with no file I/O. High 40 bits: FNV-1a over the SAME byte stream normalizeSpan
+// builds (each normalized form plus its ' '), top bit forced so a computed key is never kCloneKeyNone; low 24 bits:
+// the token count, SATURATING at 2^24-1 (a floor the minTokens test can still pass; the verify step re-counts).
+// Equal normalized strings give equal keys, so grouping by key yields a SUPERSET of every true clone group;
+// findClones then re-reads only the members of keys with >= 2 bodies and compares the real strings, so a hash
+// collision can never print a false clone.
+inline constexpr unsigned      kCloneKeyTokenBits = 24;
+inline constexpr std::uint64_t kCloneKeyTokenMask = ( std::uint64_t( 1 ) << kCloneKeyTokenBits ) - 1;
+inline constexpr std::uint64_t kCloneKeyNone      = 0;   // not computed (old record, keyless def, oversized body)
+
+inline std::uint32_t cloneKeyTokens( std::uint64_t key ) noexcept
+{
+    return std::uint32_t( key & kCloneKeyTokenMask );
+}
+
+inline std::uint64_t cloneBodyKey( const std::string& src, std::uint32_t a, std::uint32_t b, bool stripHashComments )
+{
+    std::uint64_t hash   = 14695981039346656037ull;   // FNV-1a 64 offset basis
+    std::uint64_t tokens = 0;
+    scanCodeTokens( src, a, b, stripHashComments, false,
+                    [ & ]( std::string_view token, CodeTokenKind kind )
+                    {
+                        for( const char c : cloneNormalizedForm( token, kind ) )
+                        {
+                            hash = hashutil::fnv1aAbsorb( hash, c );
+                        }
+                        hash = hashutil::fnv1aAbsorb( hash, ' ' );
+                        ++tokens;
+                    } );
+    const std::uint64_t tokenField = tokens < kCloneKeyTokenMask ? tokens : kCloneKeyTokenMask;   // saturates: findClones re-counts on verify
+    return ( hash & ~kCloneKeyTokenMask ) | ( std::uint64_t( 1 ) << 63 ) | tokenField;
+}
+
+// Read one indexed file whole, the way both clone passes always have. false (and `bytes` empty) when it cannot be
+// opened or read, or is empty: such a file contributes no bodies (never a crash).
+inline bool readCloneSourceFile( const IngestResult& ing, std::uint32_t fileId, std::string& bytes )
+{
+    bytes.clear();
+    std::FILE* fp = std::fopen( diskPath( ing, fileId ).c_str(), "rb" );
+    if( !fp )
+    {
+        return false;
+    }
+    std::fseek( fp, 0, SEEK_END );
+    const long sz = std::ftell( fp );
+    std::fseek( fp, 0, SEEK_SET );
+    if( sz > 0 )
+    {
+        bytes.resize( std::size_t( sz ) );
+        if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
+        {
+            bytes.clear();
+        }
+    }
+    std::fclose( fp );
+    return !bytes.empty();
+}
+
 // type: 2 = exact normalized-stream match (Type-1/2, similarity==1); 3 = near-miss (Type-3, similarity in
 // [kType3MinSimilarity,1)). Defaults keep every existing consumer (main.cpp --clones emit, quality.h duplication
 // delta) byte-identical: they read only .members/.tokens, and findClones() still returns ONLY type==2 groups.
@@ -412,88 +471,194 @@ struct CloneGroup
     float               similarity = 1.0f;   // 1.0 for exact; LCS-ratio in [kType3MinSimilarity,1) for Type-3
 };
 
-// Find function/method bodies with identical normalized token streams (≥ minTokens, ≥2 members).
-inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minTokens )
+// CLONES-PERSIST: findClones runs in two passes over flat arrays (no per-body string, no node map).
+//   (1) KEY every candidate body: from ing.cloneKeys (written at ingest, carried by the cache) with no file I/O; a
+//       body without a key (a def no parse worker keyed, an IngestResult built without the side array) reads its
+//       file once and is keyed here.
+//   (2) VERIFY: only bodies whose key is shared by >= 2 bodies (clone groups are ~2 % of keys) are re-read and their
+//       real normalized strings compared, exactly as the one-pass detector compared them, so a key collision splits
+//       into its true groups and never prints a false clone.
+namespace clonepass
 {
-    // Require a real body (a [sigEndByte,endByte) region exists): excludes prototypes AND the
-    // most-vexing-parse phantoms — block-scope `Type name(args);` variable decls the grammar shapes like a
-    // function declarator (they have no body, so sigEndByte==endByte). We compare the BODY, so
-    // same-implementation / different-name still matches.
+struct KeyRow
+{
+    std::uint64_t key;
+    std::uint32_t seq;   // the one-pass detector's visiting order (file, then id): a group's member order
+    NodeId        id;
+};
+
+struct VerifyRow
+{
+    std::uint32_t seq;
+    std::uint32_t run;           // which shared key this body belongs to
+    NodeId        id;
+    std::uint32_t tokens = 0;
+    bool          read   = false;   // false: the file could not be read now, or the body is under minTokens — no part
+    std::string   norm;
+};
+
+// Pass 1. Same candidate set as the one-pass detector: a Function/Method with a real body region [sigEndByte,endByte)
+// — this excludes prototypes AND the most-vexing-parse phantoms (block-scope `Type name(args);` variable decls the
+// grammar shapes like a function declarator have no body, so sigEndByte==endByte). We compare the BODY, so
+// same-implementation / different-name still matches.
+inline std::vector<KeyRow> keyBodies( const IngestResult& ing, int minTokens )
+{
     const SymbolsByFile byFile = symbolsByFileInIdOrder(
         ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
-
-    // normalized body → member symbol ids. N=2 is FREE: rw::svector<NodeId,1> and <NodeId,2> are both 16 B
-    // (the union's inline array can never be smaller than the heap pointer it shares storage with), so the
-    // second slot costs nothing and lifts inline coverage from 97.8%/94.9% to 99.5%/98.8% across the two
-    // census corpora. Almost every distinct body is unique — the whole point of the pass is that the rare
-    // key with ≥2 members is a clone — so this replaces ~2.4K/7.2K one-element heap blocks with none.
-    HashMap<std::string, rw::SmallVec<NodeId, 2>> groups;
-    HashMap<NodeId, std::uint32_t>                tok;   // symbol → token count (for ranking)
-    std::string bytes;
+    const bool keysFit = ing.cloneKeys.size() == ing.symbols.size();
+    std::vector<KeyRow> rows;
+    std::string         bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( byFile[f].empty() )
-        {
-            continue;
-        }
-        std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !fp )
-        {
-            continue;
-        }
-        std::fseek( fp, 0, SEEK_END );
-        const long sz = std::ftell( fp );
-        std::fseek( fp, 0, SEEK_SET );
-        bytes.clear();
-        if( sz > 0 )
-        {
-            bytes.resize( std::size_t( sz ) );
-            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
-            {
-                bytes.clear();
-            }
-        }
-        std::fclose( fp );
-        if( bytes.empty() )
-        {
-            continue;
-        }
-
+        bool loaded = false;
+        bool ok     = false;
         for( NodeId id : byFile[f] )
         {
-            const Symbol& s = ing.symbols[id];
-            std::uint32_t tc = 0;
-            const bool    hash = usesHashLineComments( s.lang );   // `#` line comments
-            std::string   norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, tc, hash );   // the BODY only [sigEndByte,endByte)
-            if( int( tc ) < minTokens )
+            std::uint64_t key = keysFit ? ing.cloneKeys[id] : kCloneKeyNone;
+            if( key == kCloneKeyNone )
             {
-                continue;
+                if( !loaded )
+                {
+                    ok     = readCloneSourceFile( ing, f, bytes );
+                    loaded = true;
+                }
+                if( !ok )
+                {
+                    continue;
+                }
+                const Symbol& s = ing.symbols[id];
+                key             = cloneBodyKey( bytes, s.sigEndByte, s.endByte, usesHashLineComments( s.lang ) );
             }
-            tok[id] = tc;
-            groups[ std::move( norm ) ].push_back( id );
+            // A saturated token field is a floor, not a count: keep the body for the verify step, which re-counts.
+            const std::uint32_t keyTokens = cloneKeyTokens( key );
+            if( keyTokens == kCloneKeyTokenMask || int( keyTokens ) >= minTokens )
+            {
+                rows.push_back( { key, std::uint32_t( rows.size() ), id } );
+            }
         }
     }
+    return rows;
+}
 
-    std::vector<CloneGroup> out;
-    for( auto& [norm, members] : groups )
+// The rows of keys shared by >= 2 bodies, numbered by run (one run per shared key), in seq order.
+inline std::vector<VerifyRow> sharedKeyRows( std::vector<KeyRow> rows )
+{
+    std::sort( rows.begin(), rows.end(), []( const KeyRow& x, const KeyRow& y ) { return x.key != y.key ? x.key < y.key : x.seq < y.seq; } );
+    std::vector<VerifyRow> shared;
+    std::uint32_t          runCount = 0;
+    for( std::size_t i = 0; i < rows.size(); )
     {
-        if( members.size() >= 2 )
+        std::size_t j = i + 1;
+        while( j < rows.size() && rows[j].key == rows[i].key )
         {
-            // CloneGroup::members stays a std::vector — it is the RETURNED type, read by four verbs and by
-            // quality.h, and it is materialized only for the ≥2-member groups (2.2%/1.1% of keys), so the
-            // one allocation per emitted group is not what this conversion was about.
-            out.push_back( { std::vector<NodeId>( members.begin(), members.end() ), tok[members[0]] } );
+            ++j;
+        }
+        if( j - i >= 2 )
+        {
+            for( std::size_t k = i; k < j; ++k )
+            {
+                shared.push_back( { rows[k].seq, runCount, rows[k].id } );
+            }
+            ++runCount;
+        }
+        i = j;
+    }
+    std::sort( shared.begin(), shared.end(), []( const VerifyRow& x, const VerifyRow& y ) { return x.seq < y.seq; } );
+    return shared;
+}
+
+// Pass 2's reads: in seq order, so each file is read once; fills norm/tokens/read.
+inline void normalizeShared( const IngestResult& ing, int minTokens, std::vector<VerifyRow>& shared )
+{
+    std::string   bytes;
+    std::uint32_t loadedFile = std::numeric_limits<std::uint32_t>::max();
+    bool          fileOk     = false;
+    for( VerifyRow& v : shared )
+    {
+        const Symbol& s = ing.symbols[v.id];
+        if( s.fileId != loadedFile )
+        {
+            fileOk     = readCloneSourceFile( ing, s.fileId, bytes );
+            loadedFile = s.fileId;
+        }
+        if( fileOk )
+        {
+            v.norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, v.tokens, usesHashLineComments( s.lang ) );
+            v.read = int( v.tokens ) >= minTokens;
         }
     }
-    std::sort( out.begin(), out.end(), [ & ]( const CloneGroup& x, const CloneGroup& y ) { // biggest clones first; stable tiebreak by first member's file:line
+}
+
+// One shared key's rows [first, last) (seq order): split by the real normalized string, keep every split of >= 2.
+inline void appendVerifiedGroups( const std::vector<VerifyRow>& shared, std::size_t first, std::size_t last, std::vector<CloneGroup>& out )
+{
+    std::vector<std::size_t>         heads;   // the first row of each distinct normalized string
+    std::vector<std::vector<NodeId>> split;   // parallel to heads
+    for( std::size_t k = first; k < last; ++k )
+    {
+        if( !shared[k].read )
+        {
+            continue;
+        }
+        std::size_t h = 0;
+        while( h < heads.size() && shared[heads[h]].norm != shared[k].norm )
+        {
+            ++h;
+        }
+        if( h == heads.size() )
+        {
+            heads.push_back( k );
+            split.emplace_back();
+        }
+        split[h].push_back( shared[k].id );
+    }
+    for( std::size_t h = 0; h < heads.size(); ++h )
+    {
+        if( split[h].size() >= 2 )
+        {
+            out.push_back( { std::move( split[h] ), shared[heads[h]].tokens } );
+        }
+    }
+}
+
+// Biggest clones first; tiebreak by first member's file:line, then its id (a total order: two groups never share a
+// first member).
+inline void sortGroups( const IngestResult& ing, std::vector<CloneGroup>& groups )
+{
+    std::sort( groups.begin(), groups.end(), [ & ]( const CloneGroup& x, const CloneGroup& y ) {
         if( x.tokens != y.tokens )
         {
             return x.tokens > y.tokens;
         }
         const Symbol& sx = ing.symbols[x.members[0]];
         const Symbol& sy = ing.symbols[y.members[0]];
-        return ing.files[sx.fileId] != ing.files[sy.fileId] ? ing.files[sx.fileId] < ing.files[sy.fileId] : sx.line < sy.line;
+        if( ing.files[sx.fileId] != ing.files[sy.fileId] )
+        {
+            return ing.files[sx.fileId] < ing.files[sy.fileId];
+        }
+        return sx.line != sy.line ? sx.line < sy.line : x.members[0] < y.members[0];
     } );
+}
+}   // namespace clonepass
+
+// Find function/method bodies with identical normalized token streams (≥ minTokens, ≥2 members).
+inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minTokens )
+{
+    std::vector<clonepass::VerifyRow> shared = clonepass::sharedKeyRows( clonepass::keyBodies( ing, minTokens ) );
+    clonepass::normalizeShared( ing, minTokens, shared );
+    std::sort( shared.begin(), shared.end(), []( const clonepass::VerifyRow& x, const clonepass::VerifyRow& y ) { return x.run != y.run ? x.run < y.run : x.seq < y.seq; } );
+    std::vector<CloneGroup> out;
+    for( std::size_t i = 0; i < shared.size(); )
+    {
+        std::size_t j = i + 1;
+        while( j < shared.size() && shared[j].run == shared[i].run )
+        {
+            ++j;
+        }
+        clonepass::appendVerifiedGroups( shared, i, j, out );
+        i = j;
+    }
+    clonepass::sortGroups( ing, out );
     return out;
 }
 
@@ -749,27 +914,9 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
         {
             continue;
         }
-        std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !fp )
+        if( !readCloneSourceFile( ing, f, bytes ) )
         {
-            continue; // degrade: unreadable file just contributes no candidates (never a crash)
-        }
-        std::fseek( fp, 0, SEEK_END );
-        const long sz = std::ftell( fp );
-        std::fseek( fp, 0, SEEK_SET );
-        bytes.clear();
-        if( sz > 0 )
-        {
-            bytes.resize( std::size_t( sz ) );
-            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
-            {
-                bytes.clear();
-            }
-        }
-        std::fclose( fp );
-        if( bytes.empty() )
-        {
-            continue;
+            continue; // degrade: an unreadable or empty file just contributes no candidates (never a crash)
         }
 
         for( NodeId id : byFile[f] )

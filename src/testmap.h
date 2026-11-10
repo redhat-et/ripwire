@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <string>
@@ -722,7 +723,7 @@ struct ClassNewSpelling
     static std::string written( const Reference& r )
     {
         std::string out( 1, char( '0' + int( r.recv ) ) );
-        for( const std::string* part : { &r.qualifier, &r.recvVar, &r.memberRoot, &r.memberPath } )
+        for( const std::string* part : { &r.qualifier, &r.recvVar, &r.memberRoot, &r.memberPath() } )
         {
             out.append( 1, '|' ).append( *part );
         }
@@ -785,7 +786,7 @@ struct ClassNewJsBinds
     // The definition the construction `r` builds, or kNoNode when the resolver cannot say.
     NodeId resolve( const Reference& r ) const
     {
-        if( r.memberCall && ( r.memberRoot.empty() || !r.memberPath.empty() ) )
+        if( r.memberCall && ( r.memberRoot.empty() || !r.memberPath().empty() ) )
         {
             return kNoNode;   // `new (f()).X()`, `new a.b.X()`: no one-hop module member
         }
@@ -1025,6 +1026,13 @@ public:
             }
         }
         std::sort( runners_.begin(), runners_.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+        for( std::uint32_t i = 0; i < std::uint32_t( runners_.size() ); ++i )
+        {
+            if( isDriverCandidate( runners_[i] ) )
+            {
+                drivers_.push_back( i );
+            }
+        }
     }
 
     // The pasteable command for `fileId`, or "" when no REAL runner is derivable.
@@ -1174,16 +1182,17 @@ private:
     /// fileId must be valid; byStem selects stem matching, otherwise loadTexts must have run first.
     std::string matchingRunner( std::uint32_t fileId, bool byStem ) const
     {
-        const std::string_view target = ing_->files[fileId];
-        for( std::size_t i = 0; i < runners_.size(); ++i )
+        const std::string_view target     = ing_->files[fileId];
+        const std::string_view targetStem = stemOf( target );
+        const std::string_view targetBase = mention_detail::baseNameOf( target );
+        for( const std::uint32_t i : drivers_ )   // the driver subset of runners_, path order kept: a row asks only these
         {
             const std::uint32_t candidate = runners_[i];
-            if( !sameRoot( fileId, candidate ) || !isDriverCandidate( candidate ) )
+            if( !sameRoot( fileId, candidate ) )
             {
                 continue;
             }
-            const bool matches = byStem ? stemOf( ing_->files[candidate] ) == stemOf( target )
-                : texts_[i].find( mention_detail::baseNameOf( target ) ) != std::string::npos;
+            const bool matches = byStem ? stemOf( ing_->files[candidate] ) == targetStem : texts_[i].find( targetBase ) != std::string::npos;
             if( matches )
             {
                 if( std::string command = spell( candidate ); !command.empty() )
@@ -1285,10 +1294,11 @@ private:
         {
             return nullptr;
         }
-        const jsrunner::PackageManifests manifests = jsrunner::nearestPackageManifests( disk, evidenceRoot( runnerFile ) );   // train20-cr C8: + Node's package scope
+        const DirManifests&              dirFacts  = manifestsOfDir( disk, evidenceRoot( runnerFile ) );   // train20-cr C8: + Node's package scope
+        const jsrunner::PackageManifests& manifests = dirFacts.manifests;
         const std::string&               manifest  = manifests.evidence;
         climbs                                     = manifests.evidenceClimbs;   // #335: the package directory, for spellJsRun's cd
-        const jsrunner::Framework        fw        = jsrunner::detectFramework( manifest );
+        const jsrunner::Framework        fw        = dirFacts.framework;
         if( fw == jsrunner::Framework::NodeTest )
         {
             // #60: node's own runner needs a Node-version decision (see jsrunner.h's own banner) whether it
@@ -1312,6 +1322,29 @@ private:
             return nullptr;   // no package.json evidence, and the file's own bytes name no runner either
         }
         return jsrunner::nodeTestVerb( relPath, manifests, source, disk );
+    }
+
+    // The package.json walk and the framework it names, once per DIRECTORY: the walk starts at the test file's own directory
+    // (dirwalk::ascendToRoot), so every test file of one directory reads the same manifests. Keyed by the disk path's filesystem
+    // parent (std::filesystem's own separator rule, the one the walk climbs by: on POSIX `dir\b.test.ts` is a file in `.`, not
+    // in `dir`) plus the root; two spellings of one directory only cost a second walk.
+    struct DirManifests
+    {
+        jsrunner::PackageManifests manifests;
+        jsrunner::Framework        framework = jsrunner::Framework::None;
+    };
+    const DirManifests& manifestsOfDir( const std::string& disk, std::string_view root ) const
+    {
+        std::string key = std::filesystem::path( disk ).parent_path().string();
+        key += '\0';
+        key += root;
+        auto [ entry, fresh ] = manifestsByDir_.try_emplace( std::move( key ) );
+        if( fresh )
+        {
+            entry->second.manifests = jsrunner::nearestPackageManifests( disk, root );
+            entry->second.framework = jsrunner::detectFramework( entry->second.manifests.evidence );
+        }
+        return entry->second;
     }
 
     /// #335: the first `n` '/'-separated components of a root-relative path (n >= 1; the whole path when it has
@@ -1452,10 +1485,12 @@ private:
     const IngestResult*                         ing_;
     std::string                                 rootPrefix_;   // A3: "" ⇒ the command keeps its stored spelling
     std::vector<std::uint32_t>                  runners_;
+    std::vector<std::uint32_t>                  drivers_;   // indices into runners_ of the shell/Python drivers (isDriverCandidate), ascending
     mutable std::vector<std::string>            texts_;
     mutable bool                                textsLoaded_ = false;
     mutable HashMap<std::uint32_t, std::string> cache_;
     mutable HashMap<std::uint32_t, std::string> scriptCache_;
+    mutable HashMap<std::string, DirManifests>  manifestsByDir_;   // manifestsOfDir's memo
 };
 
 // The ` run="…"` attribute for one test row, or "" — the ONE spelling, so the four emitters (--affected,

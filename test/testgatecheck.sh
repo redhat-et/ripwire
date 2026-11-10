@@ -621,6 +621,22 @@ zwant '(z25) R2: the legacy module keyword, even with a type-only body' "$Z/z25"
 fxts "$Z/z26" 'namespace N { declare const a: number; }
 export function bounded( t: string ): string { return t; }'
 zwant '(z26) R2: a namespace holding only a declare statement' "$Z/z26" src/bounded.ts run_unknown
+# assume-audit jsrunner.h engineClause: a contradictory clause (ceiling at or below its floor) is input, not an invariant.
+# It reads as "admits anything", like an upper-bound-led clause, so the --test floor cannot be proven. RED before the
+# fix: `<0` made upperBoundCeil return 0 and ENSURES( ceil > 0 ) trapped the dev build (release: silent UB).
+fxcjs "$Z/z27" '{ "engines": { "node": ">=18 <0" } }'
+zwant '(z27) assume-audit: contradictory ">=18 <0" reads as admits-anything' "$Z/z27" src/bounded.js run_unknown
+fxcjs "$Z/z28" '{ "engines": { "node": "^18 <0.0.0 || >=18.1" } }'
+zwant '(z28) assume-audit: a contradictory "^18 <0.0.0" alternative still refuses the whole range' "$Z/z28" src/bounded.js run_unknown
+# CodeRabbit on #586: equal bounds are empty too (a `<` guard would let ">=20 <20" derive a command), and a prerelease
+# floor is NOT empty under an exclusive ceiling at its own X.Y.0: ">=22.0.0-rc.1 <22.0.0" admits the 22.0.0 release
+# candidates, read as 22.0. RED on ecba09cd2: z30 read as contradictory, so it fell to run_unknown.
+fxcjs "$Z/z29" '{ "engines": { "node": ">=20 <20" } }'
+zwant '(z29) CR #586: equal bounds ">=20 <20" admit nothing, read as admits-anything' "$Z/z29" src/bounded.js run_unknown
+fxcjs "$Z/z30" '{ "engines": { "node": ">=22.0.0-rc.1 <22.0.0" } }'
+zwant '(z30) CR #586: ">=22.0.0-rc.1 <22.0.0" admits the 22.0.0 prereleases, which have --test' "$Z/z30" src/bounded.js "$JSCMD"
+fxcjs "$Z/z31" '{ "engines": { "node": ">=22.0.5-rc.1 <22.0.0" } }'
+zwant '(z31) CR #586 control: a prerelease past X.Y.0 under "<X.Y.0" is still empty' "$Z/z31" src/bounded.js run_unknown
 
 # (n1) #335: a TS/JS package BELOW root= runs from its own directory. run= is `(cd <pkg> && ...)`, a subshell (still
 #      pasteable from root=), and the path after it is package-relative. Before the fix it was `npx vitest run
@@ -731,6 +747,25 @@ N9O="$( cd "$ROOT/test/testgatenestedfix" && bash -c "$N9C; pwd" 2>&1 )"
       && [ "$( printf '%s\n' "$N9O" | sed -n 2p )" = "$ROOT/test/testgatenestedfix" ]; } \
     && ok '(n9) #442: the cd is a subshell: the next command still starts at root=' \
     || no "(n9) #442 the cd leaked or the row is not a subshell: ROW=$N9R OUT=$N9O"
+
+# (n10) CR #576 4503286347: the per-directory package.json memo is keyed by the FILESYSTEM parent. On POSIX a file named
+#       `web\b.test.ts` sits at root=, not in web/, so it must not inherit web/package.json's vitest evidence (the key cut at
+#       the last '/' or '\' gave both files the key `web`). Positive twin: web/a.test.ts keeps its vitest command.
+N10D="$TMP/n10"; mkdir -p "$N10D/web"
+if : > "$N10D/web\\b.test.ts" 2>/dev/null && [ -f "$N10D/web\\b.test.ts" ]; then
+    printf '%s\n' '{ "name": "w", "scripts": { "test": "vitest run" }, "devDependencies": { "vitest": "3.2.4" } }' > "$N10D/web/package.json"
+    printf 'export function lib(): number { return 1; }\n' > "$N10D/lib.ts"
+    printf 'import { lib } from "../lib";\nit("x", () => { lib(); });\n' > "$N10D/web/a.test.ts"
+    printf 'import { lib } from "./lib";\nit("x", () => { lib(); });\n' > "$N10D/web\\b.test.ts"
+    N10="$( cd "$N10D" && perl -e 'alarm 15; exec @ARGV' "$BIN" "$N10D" --test-gate=lib.ts --no-cache 2>/dev/null )"; N10EC=$?
+    { [ "$N10EC" = 4 ] || [ "$N10EC" = 0 ]; } \
+        && printf '%s' "$N10" | grep -qF 'p="web/a.test.ts" hops="1" run="(cd web &amp;&amp; npx vitest run a.test.ts)"' \
+        && printf '%s' "$N10" | grep -qF 'p="web\b.test.ts" hops="1" run_unknown="1"' \
+        && ok '(n10) CR #576: a root-level file named web\b.test.ts does not inherit web/package.json (memo keyed by the filesystem parent)' \
+        || no "(n10) CR #576 the manifest memo shared web/'s evidence with a root-level web\\b.test.ts (exit=$N10EC): $N10"
+else
+    printf '  SKIP  (n10) a file name with a backslash cannot be created on this filesystem\n'
+fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

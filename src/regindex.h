@@ -55,6 +55,7 @@
 #include "serialize.h"         // escapeXml
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -522,7 +523,7 @@ private:
             {
                 continue;
             }
-            const std::string_view into = r.fieldName;
+            const std::string_view into = r.fieldName();
             const std::size_t      hash = into.rfind( "#arg" );
             const std::size_t      dot  = hash == std::string_view::npos ? std::string_view::npos : into.rfind( '.', hash );
             if( dot == std::string_view::npos || into.substr( hash + 4 ) != std::to_string( r.argCount ) )
@@ -570,13 +571,13 @@ private:
         {
             const Reference& r   = m_ing.references[i];
             const RegLang*   row = r.role == RefRole::Value ? regLang( r.lang ) : nullptr;
-            if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel.size() < 2
-                || r.composeRel[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
+            if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel().size() < 2
+                || r.composeRel()[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
             {
                 continue;
             }
-            const std::string_view field = std::string_view( r.composeRel ).substr( 1 );
-            if( !std::string_view( r.fieldName ).ends_with( r.composeRel ) )
+            const std::string_view field = std::string_view( r.composeRel() ).substr( 1 );
+            if( !std::string_view( r.fieldName() ).ends_with( r.composeRel() ) )
             {
                 continue;   // the written slot was capped (vrClean): its object is not provable
             }
@@ -648,9 +649,9 @@ private:
             if( row->form == RegForm::ProviderRecord && r.role == RefRole::Value )
             {
                 const auto it = byName.find( r.calleeName );
-                const std::size_t hash = std::string_view( r.fieldName ).rfind( "#arg" );
+                const std::size_t hash = std::string_view( r.fieldName() ).rfind( "#arg" );
                 if( it == byName.end() || hash == std::string::npos
-                    || std::ranges::find( row->consumerCalls, std::string_view( r.fieldName ).substr( 0, hash ) ) == row->consumerCalls.end() )
+                    || std::ranges::find( row->consumerCalls, std::string_view( r.fieldName() ).substr( 0, hash ) ) == row->consumerCalls.end() )
                 {
                     continue;
                 }
@@ -665,14 +666,14 @@ private:
             }
             else if( row->form == RegForm::ReceiverMethod && r.role == RefRole::Call && !r.recvVar.empty() )
             {
-                const std::string_view leaf = r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName );
+                const std::string_view leaf = r.fieldName().empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName() );
                 const auto             it   = byName.find( std::string( leaf ) );
                 if( it == byName.end() || std::ranges::find( row->consumerSkip, std::string_view( r.calleeName ) ) != row->consumerSkip.end() )
                 {
                     continue;
                 }
                 const NodeId def = shadowed( r.fileId, r.recvVar.substr( 0, r.recvVar.find( '.' ) ), r.startByte, r.fromSymbol )
-                                       ? kNoNode : resolveDotted( r.fileId, r.fieldName.empty() ? r.recvVar : r.recvVar + "." + r.fieldName );
+                                       ? kNoNode : resolveDotted( r.fileId, r.fieldName().empty() ? r.recvVar : r.recvVar + "." + r.fieldName() );
                 for( const std::size_t k : it->second )
                 {
                     const RegKey& key = keys[k];
@@ -772,6 +773,59 @@ inline bool sharesWord( std::string_view key, const std::vector<std::string>& wo
     {
         return sub.size() >= 3 && std::ranges::any_of( words, [ & ]( const std::string& w ) { return normWord( w ) == sub; } );
     } );
+}
+// REGISTRAR-2 (forliteral.h shape=table): a callee that SAYS it registers, the registrar family's one name vocabulary. The last segment of a
+// callee chain (`component.async_register_entity_service`, `decorators.websocket_command`, `r.add_route`) split on `_` and on lower-to-upper
+// case changes into words. An allowlist of three shapes, never a substring and never a noun alone (REG2-FIX1, rv-reg2 F2):
+//   (A) a registration verb word (`register`, `registers`, or `reg` as the last word or right before a noun word) and no access word (`read`, `write`,
+//       `get`, `set`, `peek`, `poke`, `load`, `store`, `dump`): `async_register_entity_service`, `registerCommand`, `async_reg`, `reg_handler`; not
+//       `write_reg`, `reg_read`, `get_registry`, `is_registered`, `reg_value`, `reg_field` (a hardware register, rv-reg2-delta D1);
+//   (B) an adding verb word (`add`, `on`, `install`, `bind`, `map`, `connect`, `subscribe`, `mount`, `attach`; not `use`, the hook prefix of `useRouter`)
+//       and, after it, a noun word (`route(s)`, `router`, `command(s)`, `handler(s)`) that is the name's LAST word: `add_route`, `addEventHandler`,
+//       `on_command`; not `get_handler`, `run_command`, `logging.FileHandler`, `ParseCommandLine`, `handler`, `addCommandLineOption`;
+//   (C) a decorator (`@x.websocket_command(`, `@app.route(`, `@click.command(`) whose name holds a noun word.
+// A name is no proof the call registers; the shape=table row that reads it says what it is.
+inline bool isRegistrationCallee( std::string_view callee, bool decorator = false ) noexcept
+{
+    static constexpr std::array<std::string_view, 3>  kRegVerbs{ "register", "registers", "reg" };
+    static constexpr std::array<std::string_view, 9>  kAddVerbs{ "add", "on", "install", "bind", "map", "connect", "subscribe", "mount", "attach" };
+    static constexpr std::array<std::string_view, 7>  kNouns{ "route", "routes", "router", "command", "commands", "handler", "handlers" };
+    static constexpr std::array<std::string_view, 9>  kAccess{ "read", "write", "get", "set", "peek", "poke", "load", "store", "dump" };
+    const auto in = []( const auto& list, std::string_view w ) { return std::find( list.begin(), list.end(), w ) != list.end(); };
+    const std::size_t sep = callee.find_last_of( ".:" );
+    const std::string_view name = sep == std::string_view::npos ? callee : callee.substr( sep + 1 );
+    bool        regVerb = false, access = false, noun = false, addThenNoun = false, adding = false;
+    bool        pendingReg = false;   // the word before was `reg`: a verb only if the name ends there or a noun word follows (`async_reg`, `reg_handler`)
+    std::array<char, 32> word{};
+    std::size_t          n = 0;
+    const auto           take = [ & ]()
+    {
+        const std::string_view w( word.data(), n );
+        const bool isNoun = in( kNouns, w );
+        regVerb     = regVerb || ( pendingReg && isNoun ) || ( in( kRegVerbs, w ) && w != "reg" );
+        pendingReg  = w == "reg";
+        access      = access || in( kAccess, w );
+        noun        = noun || isNoun;
+        addThenNoun = adding && isNoun;   // the noun after an adding verb is the name's last word: a later word resets it (`addCommandLineOption`)
+        adding      = adding || in( kAddVerbs, w );
+    };
+    for( std::size_t i = 0; i <= name.size(); ++i )
+    {
+        const char c     = i < name.size() ? name[i] : '_';
+        const bool upper = c >= 'A' && c <= 'Z';
+        const bool split = c == '_' || ( upper && i > 0 && name[i - 1] >= 'a' && name[i - 1] <= 'z' );
+        if( split && n > 0 )
+        {
+            take();
+            n = 0;
+        }
+        if( c != '_' && n < word.size() )
+        {
+            word[n++] = upper ? static_cast<char>( c - 'A' + 'a' ) : c;
+        }
+    }
+    regVerb = regVerb || pendingReg;   // `reg` as the last word (`async_reg`)
+    return ( regVerb && !access ) || addThenNoun || ( decorator && noun );
 }
 }   // namespace reg_detail
 

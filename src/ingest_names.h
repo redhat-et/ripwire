@@ -1184,10 +1184,41 @@ inline std::string kotlinEnclosingScopeOf( TSNode nameNode, std::string_view src
     return {};
 }
 
+// Proto (PROTO-INDEX): the enclosing message, enum or service of a definition: a nested message's or enum's owner, an
+// enum value's enum, an rpc's service. The grammar names none of these by field, so the name is the one named child of the
+// owner's *_name kind. The definition's own node is walked through (its name node lies inside it). "" at file level.
+inline std::string protoEnclosingScopeOf( TSNode nameNode, std::string_view src )
+{
+    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    {
+        const char* t        = ts_node_type( p );
+        const char* nameKind = ( kindIs( t, "message" ) || kindIs( t, "group" ) ) ? "message_name"
+                             : kindIs( t, "enum" )                               ? "enum_name"
+                             : kindIs( t, "service" )                            ? "service_name"
+                                                                                 : nullptr;
+        if( nameKind == nullptr )
+        {
+            continue;
+        }
+        const TSNode nm = firstChildOfKind( p, /*namedOnly=*/true, { nameKind } );
+        if( ts_node_is_null( nm ) )
+        {
+            return {};
+        }
+        const std::uint32_t a = ts_node_start_byte( nm ), b = ts_node_end_byte( nm );
+        if( a <= ts_node_start_byte( nameNode ) && ts_node_end_byte( nameNode ) <= b )
+        {
+            continue;   // this IS the definition being scoped
+        }
+        return ( a <= b && b <= src.size() ) ? std::string( src.substr( a, b - a ) ) : std::string{};
+    }
+    return {};
+}
+
 // Which walker gives a definition its scope at capture (ingest_sidecap.h captureTagsFacts), one row per language. None =
 // the language has no row here: C++ (an out-of-line qualifier comes first, then this walker), Ruby, Elixir and the JS/TS
 // built-in prototype methods keep their own arms there; every other language records no scope.
-enum class DefScopeWalker : std::uint8_t { None, Shared, Rust, Kotlin };
+enum class DefScopeWalker : std::uint8_t { None, Shared, Rust, Kotlin, Proto };
 inline constexpr std::array<DefScopeWalker, kLangCount> kDefScopeWalkerOfLang = []
 {
     std::array<DefScopeWalker, kLangCount> table {};   // value-initialised: every language None unless routed below
@@ -1198,6 +1229,7 @@ inline constexpr std::array<DefScopeWalker, kLangCount> kDefScopeWalkerOfLang = 
     // same-named methods from colliding under the Kotlin<->Java langCompatible bridge (graph.h) — an unqualified
     // name-only match is exactly the false-candidate risk that bridge's own comment names.
     table[ static_cast<std::size_t>( Lang::Kotlin ) ] = DefScopeWalker::Kotlin;
+    table[ static_cast<std::size_t>( Lang::Proto ) ]  = DefScopeWalker::Proto;    // a nested message's, enum value's or rpc's owner
     return table;
 }();
 
@@ -1209,6 +1241,7 @@ inline std::string defScopeOf( Lang lang, TSNode nameNode, std::string_view src 
     case DefScopeWalker::Shared: return enclosingScopeOf( nameNode, src );
     case DefScopeWalker::Rust:   return rustEnclosingScopeOf( nameNode, src, /*includeModules=*/true );
     case DefScopeWalker::Kotlin: return kotlinEnclosingScopeOf( nameNode, src );
+    case DefScopeWalker::Proto:  return protoEnclosingScopeOf( nameNode, src );
     case DefScopeWalker::None:   break;
     }
     return {};

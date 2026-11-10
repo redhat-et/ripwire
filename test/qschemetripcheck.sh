@@ -34,6 +34,25 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-08, merge of main 45c2deb24 (#572 docs-units, #577 clones-persist) into lane proto-index: RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: both sides' bumps together, kParserVer 303 (this lane, .proto indexed) and kCacheVersion 50 (#577, def record clone key);
+#   quality.h carries kIngestParserVerMirror 303 and kIngestCacheVersionMirror 50. kQSnapCacheScheme stays: neither side moved a watched function.
+# 2026-11-07, lane clones-persist (base main e4432b48; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 49 -> 50: a def record ends with a clone-key presence u8 and, for a keyed Function/Method, its u64 clone key (src/ingest_parsepool.h rawDefCloneKey), so a warm
+#   findClones keys bodies with no file I/O; quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no
+#   extraction changes and findClones returns the same groups (it re-reads and compares the real strings of every shared key).
+# 2026-11-06, lane proto-index (merged over main bb1806df1 at 301/49; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 301 -> 303 (rich 304; above #538's 302): .proto files are indexed (Lang::Proto, queries/proto/tags.scm);
+#   quality.h's kIngestParserVerMirror with it. kCacheVersion stays 49 (no record changes shape) and kQSnapCacheScheme stays as main has
+#   it: no watched quality.h function moved.
+# 2026-11-05, lane warm-direct (base lane/warm-rewrite 630a90e3d, merged over main at kParserVer 301; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 48 -> 49: the FILE record's head gains the eight family counts (a warm run plans from heads and decodes in
+#   the parse worker); quality.h's kIngestCacheVersionMirror with it. kParserVer and kQSnapCacheScheme stay: no extraction or watched
+#   quality.h function moved.
+# 2026-11-04, #478 gap 2 (rebased onto main 50bc05e8 at 299/300; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 299 -> 301 (rich 302): an aliased Python `import a.b as c` records the Include target `a.b`, not `a.b as c`;
+#   quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays as main has it: no record changes shape
+#   and no watched quality.h function moved. Supersedes the branch's 2026-11-01 entry (base b0f7e2fc, 283 -> 285).
 # 2026-11-03, lane index-alias-const (base main 824847bd, merged over main 6bae81c6 at 291/292; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 289 -> 293 (rich 294; above 285-292 taken by #504 #506 #512 #513): C++ alias forms are definitions
 #   (src/aliasdef.h); quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 (no record changes shape) and kQSnapCacheScheme

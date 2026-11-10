@@ -371,6 +371,7 @@ for _g in \
     clonededupcheck \
     cloneidiomcheck \
     clonelexcheck \
+    clonepersistcheck \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \
@@ -448,6 +449,7 @@ for _g in \
     docmdcachecheck \
     docmentioncheck \
     docscommandscheck \
+    docsunitscheck \
     doctorcheck \
     donelegendcheck \
     dottedstringcheck \
@@ -516,6 +518,7 @@ for _g in \
     fnliteralcheck \
     fnptrcheck \
     fnslotcheck \
+    foranchornscheck \
     forautobodycheck \
     forblowupcheck \
     forbodyfoldcheck \
@@ -528,7 +531,10 @@ for _g in \
     fordeclrowcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
+    fordocbodycheck \
+    forexemplarcheck \
     forfileanchorcheck \
+    forfilesymscheck \
     forhdrshapecheck \
     forheadrrcheck \
     forinitslotscheck \
@@ -539,13 +545,18 @@ for _g in \
     formembernamescheck \
     fornotesbudgetcheck \
     fornotesjsoncheck \
+    foronesidecheck \
     forrankordercheck \
+    forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsigspancheck \
+    forsizetrimcheck \
     forsoftbudgetcheck \
+    fortailfoldcheck \
+    fortailwidecheck \
     forunusedcheck \
     forwidencheck \
     freshclonecheck \
@@ -568,6 +579,7 @@ for _g in \
     gointerfacecheck \
     gokindcheck \
     goscopecheck \
+    graphformendpointscheck \
     graphlegendbudgetcheck \
     graphqueryrefusecheck \
     grepanchorcheck \
@@ -596,6 +608,7 @@ for _g in \
     hookcheck \
     hop1check \
     hopbodycheck \
+    hopcontextcheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \
@@ -809,6 +822,7 @@ for _g in \
     prnestedcapcheck \
     probecheck \
     propcostcheck \
+    protoindexcheck \
     prrefsafecheck \
     prrenamecheck \
     pyaliascallcheck \
@@ -871,6 +885,7 @@ for _g in \
     recallshapecheck \
     recalltablecheck \
     recalltotalcheck \
+    recallwindowcheck \
     receiptpostcheck \
     receiverevidencecheck \
     receiverfixescheck \
@@ -928,6 +943,7 @@ for _g in \
     rustanccheck \
     rustimportprecisecheck \
     rustqualcheck \
+    rustrootscheck \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
@@ -1038,6 +1054,7 @@ for _g in \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \
+    warmpeakcheck \
     weaksignalcheck \
     withgraphcheck \
     withprofilecheck \
@@ -1045,6 +1062,7 @@ for _g in \
     wrapverbscheck \
     writetargetcheck \
     writtenspellingcheck \
+    xfaliashopcheck \
     xmlwellformed \
     yamllangcheck \
     zonecheck \

@@ -50,9 +50,11 @@ echo "testrowruncheck: BIN=$BIN"
 # Every site that prints a tests_to_run row. The list is the CONTRACT: a site added to src/ and not added
 # here fails, which is the only way a family gate stays a family gate. forpage.h (forbudget-soft round C) renders the --for
 # answer's FILE tail rows (`<t p=… sym=…/>`, moved there from serialize.h, already excluded): file rows, not tests_to_run.
+# foronesidereach.h (ONE-SIDE-REACH) rewrites a --for answer's demoted <sigs>/<callers> rows as the same `<t p= sym= r=/>`
+# FILE tail pointers (pointerText): file rows naming a file and a symbol, never a tests_to_run row, so it is excluded like forpage.h.
 EXPECTED_SITES="src/verbs_change.h src/situ.h src/prcontext.h src/packtask.h src/handoff.h src/flipimpact.h src/mcpverbs.h src/mcpedit.h"
 FOUND_SITES="$( cd "$ROOT" && grep -lE 'testRows(Rendered|Joined|List)\(|"<(t|test) p=\\"|\{\\"test\\":|\{\\"p\\":\\"%s\\"%s\}' src/*.h src/*.cpp 2>/dev/null \
-                | grep -vE 'src/(serialize|testmap|forpage)\.h' | sort | tr '\n' ' ' | sed 's/ $//' )"
+                | grep -vE 'src/(serialize|testmap|forpage|foronesidereach)\.h' | sort | tr '\n' ' ' | sed 's/ $//' )"
 WANT_SITES="$( printf '%s\n' $EXPECTED_SITES | sort | tr '\n' ' ' | sed 's/ $//' )"
 [ "$FOUND_SITES" = "$WANT_SITES" ] \
     && ok "(0) the tests_to_run row emitters are exactly the census this gate drives" \

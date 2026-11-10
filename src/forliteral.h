@@ -25,8 +25,10 @@
 //   * <b> the whole body of the function or method holding a shown site when it is kForLiteralWholeBodyLines lines or fewer
 //     (at most kForLiteralBodies owners in row order), or <x> an excerpt of a longer one: its signature line plus one window
 //     [site-1, site+5] per shown site (windows merged only where they touch; l= lists the ranges, an ellipsis line sits between
-//     them; of= is the body's lines; next= names the whole body); a body this answer already printed is not repeated
-//     (body="above" on its rows); an owner past the cap prints no body and its rows say body="held".
+//     them; of= is the body's lines; next= names the whole body); EXCERPT-ARM: a window that leaves out the head of the match arm
+//     or case holding its site starts at that head, kForLiteralArmLines up at most (arm="1"); a body this answer already printed
+//     WHOLE in a <b> is not repeated (body="above" on its rows; a hop row, a fold skip or a truncated <b> is no body above);
+//     an owner past the cap prints no body and its rows say body="held".
 // Several sites are always listed with counts: the block never picks one. floor="1" when the scan stopped early (budget,
 // unreadable files) or a source site was left unclassified (k="?": comment= cannot see it): every count is then a floor. No source site, nothing printed (a literal met only in tests, docs or comments
 // anchors nothing; never a "the literal is unused" claim).
@@ -68,6 +70,34 @@
 // cap, or with no room left, is counted by <lit_capped>, never dropped. A row whose line reads as a table row (lit_detail::tableRowOf) ranks first
 // and carries tbl= (the line that opens the table, "item" at top level) and the lines after it: the members beside it. Inside a function body a
 // call is a statement, never a row; every row needs an opener the allowlist proves (classifyOpener). Hits stand on word edges.
+//
+// REGISTRAR-2 (reports/registrar-2.md; ORCH Stage 0: 5 rows of 380 gain, 0 lose). A registration is a table with one row per call: the same block
+// reads more of them, present-only, three ways. (1) Trigger: defined/declared (not after not/never: an error message), build/builds/built, handled,
+// turned into and get(s) to are TableRowOnly cues (kForTableSiteCues), so they print only beside a table row. (2) A site no table holds is a row
+// when it is an argument of a call that SAYS it registers (registrationCallOf; the name allowlist is regindex.h reg_detail::isRegistrationCallee: a
+// register verb, or an adding verb before route/command/handler, or a decorator's noun): a Python decorator `@websocket_command({...: "get_states"})`,
+// `component.async_register_entity_service(SERVICE_TURN_ON, None, "async_turn_on")` over several lines, `async_reg(hass, handle_get_states)` (a hit
+// inside a longer name is a row only here); in a function body too; reg= (not tbl=: no table opener) is the callee's line up to its paren. Not a call:
+// a declaration of the same name (a constructor, a method, a GNU-style definition), a member of a type, a member-initializer list, a closure body.
+// The top-level Rust macro row and the macro-table brace row were rows already (T2, T5); the cue was what the Stage 0 rows lacked.
+// (3) Rows of generated and JSON files rank after source rows of the same nearness (isGeneratedOrDataPath), and never hold the home table. A callee's
+// name is no proof the call registers: the row quotes it. (4) A dotted name that finds no site is retried by its last part, which lists quoted-key
+// rows and its definition only (keepTailKeyRows).
+//
+// G-STORED-B (ORCH reports/os5-g-stored-s0.md). A stored subject is bare (`new_boxed_executor for HashJoinNode`, `light.turn_on hue async_turn_on`): no
+// cue word, so the walk above never ran. With no cue the same walk runs on the task's anchors (none: no scan), but lists STRONG rows only (TableCue::
+// StrongRowOnly, lit_detail::isStrongRow): a registration call's argument (reg=), a top-level macro or call row (tbl="item"), a macro-table brace row
+// (a `name! {` or `$macro! {` opener). Weak rows (a dict, list, __all__, #define or const-array table, a site that is no row) are counted in weak=,
+// never listed; none strong, no block. The legend clause rides only on such an answer. The callee vocabulary narrowed with it (rv-reg2-delta D1):
+// `use` is a hook prefix, an adding verb's noun is the name's last word, `reg` is a verb only last or before a noun. The table legend lost the bytes
+// no attribute of the answer needs (D4): the vocabulary list and the rank sentence; the tail= sentence rides only beside a tail=.
+//
+// FLAG-SHAPE-LIT (ORCH reports/os6-flag-default-s0.md OS-6b). A task naming a `--flag` (`kubelet --max-pods`; flagNamesOf: a kebab `--a-b`, or
+// `--name` before a flag/option word) scans the bare name, after the shapes above, as shape="flag": a site is the whole quoted name (flagHitAt:
+// `"max-pods"`, `"--workers"`), any other hit a mention (mention=). On the first string row whose call has one, def= is the default argument
+// (flagDefaultAt: default=/default_value=, else the argument after the name, two after for a pflag `...P(` shorthand form; a sentence is a
+// usage text, no default). When def= names a field (`c.MaxPods`), the field's CONSTANT writes (isConstantWriteAt: `x.F = 110`, `F: 110`; never
+// `out.F = in.F`) are ld rows, functions and files named for defaults first, at most kForFlagWriteRows, writes= counting all read.
 
 #include "infra/namesplit.h" // isIdentChar
 #include "infra/sortutil.h"  // svLess — AnchorSet::dirs sort and search in byte order, never through operator<
@@ -81,9 +111,10 @@
 #include "receiverevidence.h"   // ReceiverEvidence::callableKind
 #include "resolve.h"       // tsimport::isAssetSpecifier — an asset extension is no key segment
 #include "redact.h"          // redactInPlace — raw source text is redacted before it is emitted
+#include "regindex.h"        // reg_detail::isRegistrationCallee — the registrar family's callee vocabulary (REGISTRAR-2 rows)
 #include "sarif.h"           // rootPrefixOf / rootRelativeUri
 #include "search.h"          // grepCollect / grepEnrich / isBareWordCodePath
-#include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis
+#include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis / lineBreaksOf
 #include "taskroute.h"       // taskroute::identifierRunOf
 #include "siblift.h"         // siblift_detail::dirOf — a path's directory
 #include "subjectanchor.h"   // subject_detail::sourceClassDef / isToolOrVendoredPath — the answer's source-class anchors
@@ -113,6 +144,7 @@ inline constexpr std::size_t kForLiteralBodyCapBytes  = 3000;   // a short body 
 inline constexpr std::uint32_t kForLiteralWholeBodyLines = 10;  // a body of at most this many lines is served whole; a longer one as an excerpt
 inline constexpr std::uint32_t kForLiteralExcerptBefore = 1;    // lines before a site in its excerpt window
 inline constexpr std::uint32_t kForLiteralExcerptAfter  = 5;    // lines after it: what the code does with a literal follows the read (+2/+3 drops fzf R2)
+inline constexpr std::uint32_t kForLiteralArmLines      = 12;   // EXCERPT-ARM: a window widens up to the head of the match arm or case holding its site, at most this many lines up
 inline constexpr std::size_t kForLiteralTierFiles     = 64;     // source hit files classified (k=); past it k="?"
 inline constexpr std::size_t kForLiteralLineBytes     = 200;    // the matched line's text, cut on a UTF-8 boundary
 inline constexpr std::size_t kForLiteralMinQuoted     = 6;
@@ -138,6 +170,17 @@ inline constexpr std::size_t kForTableOpenerLines     = 2000;   // the line that
 inline constexpr std::size_t kForTableOpenerBytes     = 80;     // tbl= text
 inline constexpr std::size_t kForTableMinAnchor       = 3;      // a shorter word is no anchor
 inline constexpr std::size_t kForTableMaxAnchor       = 60;     // a longer backticked span is no anchor
+inline constexpr std::size_t kForRegCallLines         = 4;      // shape=table: a registration call's open paren is looked for this many lines above a site
+inline constexpr std::size_t kForRegCallBytes         = 512;    // ...and this many bytes
+inline constexpr std::size_t kForRegLineHits          = 8;      // shape=table: later hits on one line kept to try as a registration argument (the first is the site)
+inline constexpr std::size_t kForFlagMinName          = 3;      // FLAG-SHAPE-LIT: a `--flag` name shorter than this is no flag; a name with no inner hyphen needs kForLiteralMinConst bytes and a flag/option word
+inline constexpr std::size_t kForFlagDefaultMaxBytes     = 80;     // def= text
+inline constexpr std::size_t kForFlagWriteRows        = 2;      // constant writes of the default's field listed (ld rows)
+inline constexpr std::size_t kForFlagWriteHits        = 4096;   // the field's sites read for a constant write (past it: floor=1)
+inline constexpr std::size_t kForFlagOwnerMaxLines       = 8;      // a constant write outside any function names the owner type within this many lines above it
+inline constexpr std::size_t kForTableReaderRows      = 2;      // REG-READER: <lr> reads of a subscript row's table listed (readers= counts all)
+inline constexpr std::size_t kForTableReaderFiles     = 16;     // REG-READER: caller files read for them, by path (past it: readers= is a floor)
+inline constexpr std::size_t kForRegIdentBytes        = 128;    // shape=table: an identifier run longer than this around a hit is no argument name (a blob, not a name)
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
 // text rides --legend=full. Both name every attribute the element prints.
@@ -179,10 +222,48 @@ static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size
 // present only with shape=table (the first of its elements), so the bytes of every other fire do not move
 inline constexpr std::string_view kForLiteralTableLegend =
     "<!-- ripwire for lit: shape=table a task about a table, registration or new sibling: the identifier it names, one lit per identifier, "
-    "after the other shapes found no site. Table rows first: tbl= the line that opens the table (item: a top level macro or call row), read from the text; no tbl= is no "
-    "claim. lines=a-b with the lines after it. read=N: only the first N source sites of src= in path order were read for a table row. longer= source sites inside a longer "
-    "word, counted, never rows. A cut on a row boundary says capped=1. -->";
+    "after the other shapes found no site. Table rows first: tbl= the line that opens the table (item: a top level macro or call row), read from the text; no tbl= or "
+    "reg= is no claim. reg= instead: the row is an argument of a call whose name says it registers (the name, not proof), also inside a longer name, and reg= is that "
+    "call up to its paren, looked for 4 lines and 512 bytes above the site. lines=a-b with the lines after it. read=N: only the first N source sites of src= in path "
+    "order were read for a table row. longer= source sites inside a longer word, counted, never rows. A cut on a row boundary says capped=1. -->";
 static_assert( kForLiteralTableLegend.find( "--", 4 ) == kForLiteralTableLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForRegCallLines == 4 && kForRegCallBytes == 512, "the table legend says how far a registration call is looked for: 4 lines and 512 bytes" );
+// G-STORED-B: present only when the task has no table, registration or handler word (TableCue::StrongRowOnly), with the first element
+inline constexpr std::string_view kForLiteralStrongLegend =
+    "<!-- ripwire for lit: the task has no table or registration word, so only strong rows are listed: a registration call's direct argument (reg=), a top level macro or "
+    "call row (tbl=item), a macro table row (tbl= a name! opener). weak=N source sites read that are other table rows or no row, not listed. -->";
+static_assert( kForLiteralStrongLegend.find( "--", 4 ) == kForLiteralStrongLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+// FLAG-SHAPE-LIT: the clause of shape=flag (policy legend), present only on a flag fire
+inline constexpr std::string_view kForLiteralFlagLegend =
+    "<!-- ripwire for lit: shape=flag a flag the task names (s= without its leading dashes): rows are the sites where it is a whole quoted string (its "
+    "definition among them, also an invocation or a lookup); mention= other source sites (usage text, a longer flag name), counted, never rows. def= on a "
+    "row: the default of a flag-definition call (default= or the flag API's default slot), read from the text, no claim it is the value in effect. ld = a "
+    "constant write (x.F = 110, F: 110) of the field def= names, in a function whose text or a literal's lines name the type of the receiver in def= (a "
+    "name match, no type check), functions and files named for defaults first, at most 2; writes=N all such writes read; none is no claim. -->";
+// the try=N sentence of the flag clause rides only beside a try= (the other shapes carry it in their own legend)
+inline constexpr std::string_view kForLiteralFlagTryLegend =
+    "<!-- ripwire for lit: try=N: the task's Nth literal anchored; the ones before it had no source site. -->";
+static_assert( kForLiteralFlagTryLegend.find( "--", 4 ) == kForLiteralFlagTryLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForLiteralFlagLegend.find( "--", 4 ) == kForLiteralFlagLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForFlagWriteRows == 2, "the flag legend says at most 2 ld rows" );
+
+// EXCERPT-ARM: present only with arm= on an <x> (the first element that prints it)
+inline constexpr std::string_view kForLiteralArmLegend =
+    "<!-- ripwire for lit: x arm=1: a window starts at the head of the match arm or case holding its site (12 lines up at most), not one line above it. -->";
+static_assert( kForLiteralArmLegend.find( "--", 4 ) == kForLiteralArmLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForLiteralArmLines == 12, "the arm legend says how far up a window may widen: 12 lines" );
+// rv-reg2-delta D4: present only with tail= (the first element that prints it)
+inline constexpr std::string_view kForLiteralTailLegend =
+    "<!-- ripwire for lit: tail=N: a dotted name found no site; its last part lists quoted keys and its definition, N sites not listed. -->";
+static_assert( kForLiteralTailLegend.find( "--", 4 ) == kForLiteralTailLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+// REG-READER: present only with a subscript reg= row (the first element that prints one)
+inline constexpr std::string_view kForLiteralSubscriptLegend =
+    "<!-- ripwire for lit: reg= ending in `] =`: the site is the key or value of a write into a table with a computed key, in a function named New*, new_*, "
+    "Register* or register_* (the name, not proof); reg= is the table and key. lr = a read of that table (t[k] not assigned, t.get(), also a caller's local "
+    "bound to that function's call) in the row's file or its callers' files, listed only when the answer above names the table; reads sharing a quoted part "
+    "of the key first, at most 2; readers=N all reads found (floor=1 if a file was unread or callers past 16 files were not read). -->";
+static_assert( kForLiteralSubscriptLegend.find( "--", 4 ) == kForLiteralSubscriptLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+static_assert( kForTableReaderRows == 2 && kForTableReaderFiles == 16, "the subscript legend says at most 2 lr rows and 16 caller files" );
 
 // present only with lit_cut= (LIT-SITE-DECOY), so the bytes of a block whose cut moved no row do not change; the compact form rides the default
 // --legend=compact posture, the long one --legend=full
@@ -206,7 +287,7 @@ inline bool forLiteralOn()
 struct ForLiteral
 {
     std::string text;
-    std::string_view shape;   // "quoted" | "const" | "dotted" | "message"
+    std::string_view shape;   // "quoted" | "const" | "dotted" | "message" | "flag"
     bool             frag = false;   // shape=message: `text` is a fragment of the task's words, the whole text has no site
     std::size_t      tryNo = 1;      // the task's Nth literal (earlier ones were scanned and have no source site): try="N" when > 1
 };
@@ -608,6 +689,58 @@ inline std::vector<std::string> constWordsOf( std::string_view task )
     return out;
 }
 
+// FLAG-SHAPE-LIT: the `--flag` names of the task (`kubelet --max-pods` -> max-pods), in order, each once: a token `--a-b` (kebab: an inner hyphen),
+// or `--name` of kForLiteralMinConst bytes or more right before a flag/option word. Lower-case letters, digits and hyphens only; a trailing `=value`
+// or punctuation is cut. Backticked or not (a flag is no code name the ranked answer reads).
+inline std::vector<std::string> flagNamesOf( std::string_view task )
+{
+    std::vector<std::string>            out;
+    const std::vector<std::string_view> words = lit_detail::taskWords( task );
+    for( std::size_t i = 0; i < words.size(); ++i )
+    {
+        std::string_view w = words[i];
+        while( !w.empty() && std::string_view( "`'\"([{<" ).find( w.front() ) != std::string_view::npos )
+        {
+            w.remove_prefix( 1 );
+        }
+        if( !w.starts_with( "--" ) )
+        {
+            continue;
+        }
+        w.remove_prefix( 2 );
+        const std::size_t eq = w.find( '=' );
+        w = eq == std::string_view::npos ? w : w.substr( 0, eq );
+        while( !w.empty() && std::string_view( "`'\")]}>,;:.!?" ).find( w.back() ) != std::string_view::npos )
+        {
+            w.remove_suffix( 1 );
+        }
+        const bool bytesOk = !w.empty() && std::islower( static_cast<unsigned char>( w.front() ) ) != 0 && w.back() != '-'
+                             && std::all_of( w.begin(), w.end(), []( char c ) { return std::islower( static_cast<unsigned char>( c ) ) != 0 || std::isdigit( static_cast<unsigned char>( c ) ) != 0 || c == '-'; } )
+                             && w.find( "--" ) == std::string_view::npos;
+        const bool kebab = w.find( '-' ) != std::string_view::npos;
+        const bool cued  = i + 1 < words.size() && lit_detail::wordIsOneOf( lit_detail::stripWordPunct( words[i + 1] ), std::array<std::string_view, 4>{ "flag", "flags", "option", "options" } );
+        if( bytesOk && w.size() >= kForFlagMinName && ( kebab || ( cued && w.size() >= kForLiteralMinConst ) ) && std::find( out.begin(), out.end(), w ) == out.end() )
+        {
+            out.emplace_back( w );
+        }
+    }
+    return out;
+}
+
+// The task quotes a message literal: a "double-quoted" span (the quoted shape's own reading, lit_detail::quotedSpan) or a
+// 'single-quoted' one (lit_detail::delimitedSpan: `wasn't` is no quote) of the same message-fragment shape (quotedSpan read on that
+// span). SIZE-2 (forpage.h tailFoldKept): such a task keeps its tail's config and doc rows listed — a quoted message's text lives in a
+// string table or a doc, not only in code.
+inline bool taskQuotesLiteral( std::string_view task )
+{
+    if( lit_detail::quotedSpan( task, '"' ) )
+    {
+        return true;
+    }
+    const std::optional<std::string_view> span = lit_detail::delimitedSpan( task, '\'' );   // its delimiters included
+    return span && lit_detail::quotedSpan( *span, '\'' );
+}
+
 // The literals the task names, in the order they are tried: a quoted span (the task's own quoting is the strongest evidence), the
 // CONST_SHAPED words, the dotted keys (the one beside a setting cue first), then a message. The caller scans them in order until one
 // has a source site (kForLiteralCandidates scans, a message's own tries besides): the first literal with no site no longer hides the next.
@@ -636,6 +769,10 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     {
         out.push_back( ForLiteral{ std::move( *m ), "message" } );
     }
+    for( std::string& f : flagNamesOf( task ) )
+    {
+        out.push_back( ForLiteral{ std::move( f ), "flag" } );   // FLAG-SHAPE-LIT: after every shape that was here before it, the message too, so none of them moves
+    }
     for( std::size_t i = 0; i < out.size(); ++i )
     {
         out[i].tryNo = i + 1;
@@ -643,13 +780,15 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     return out;
 }
 
-// shape=table: which trigger a task pulled. None: no block. AnySite: a registration, table or compile-time word, or "add a new". TableRowOnly:
-// default/handler, words of many tasks, so the block prints only when a site reads as a table row.
+// shape=table: which trigger a task pulled. AnySite: a registration, table or compile-time word, or "add a new". TableRowOnly: default/handler,
+// words of many tasks, so the block prints only when a site reads as a table row. StrongRowOnly (G-STORED-B): no such word at all (a bare subject,
+// `new_boxed_executor for HashJoinNode`), so only a STRONG row prints: a registration call (reg=), a top-level macro or call row (tbl="item"), a
+// macro-table brace row (a `name! {` / `$macro! {` opener). A dict, list, __all__, #define or const-array row is weak here: counted (weak=), not listed.
 enum class TableCue : std::uint8_t
 {
-    None,
     AnySite,
-    TableRowOnly
+    TableRowOnly,
+    StrongRowOnly
 };
 
 namespace lit_detail
@@ -658,6 +797,10 @@ inline constexpr auto kForTableRegistrationCues = std::to_array<std::string_view
     { "register", "registers", "registered", "registering", "registration", "registrations", "registry", "registries", "registrar", "registrars", "table", "tables",
       "compile-time" } );
 inline constexpr std::array<std::string_view, 4> kForTableValueCues{ "default", "defaults", "handler", "handlers" };
+// REGISTRAR-2: where a registered thing is defined, built or handled (`Where is barrier_interval_ms defined`, `How does new_boxed_executor build an
+// executor for HashJoinNode`, `where is it handled`), and the two-word forms `turned into`, `get(s) to`: words of many tasks, so like the value cues
+// they print only beside a table row or a registration call. Only the words the gold-blind Stage 0 rule fired on (reports/registrar-2.md); no more.
+inline constexpr std::array<std::string_view, 6> kForTableSiteCues{ "defined", "declared", "build", "builds", "built", "handled" };
 inline constexpr std::array<std::string_view, 3> kForTableExemplarLeads{ "like", "alongside", "following" };
 
 // the task with every backticked span blanked (a cue inside code quotes is code, not the task's word)
@@ -721,6 +864,19 @@ inline bool isTableAnchorSpan( std::string_view w ) noexcept
     return bytesOk && ( dot == std::string_view::npos || !isFileOrHostSuffix( w.substr( dot + 1 ) ) );
 }
 
+// REGISTRAR-2: words[i] is a site cue: one of kForTableSiteCues (not right after a negation: `is not defined`), or the first word of `turned into` / `get(s) to`
+inline bool isSiteCueAt( std::span<const std::string_view> words, std::size_t i )
+{
+    static constexpr std::array<std::string_view, 1> kTurned{ "turned" }, kInto{ "into" }, kTo{ "to" };
+    static constexpr std::array<std::string_view, 2> kGet{ "get", "gets" };
+    static constexpr std::array<std::string_view, 6> kNegators{ "not", "never", "isn't", "wasn't", "aren't", "weren't" };
+    const std::string_view w    = stripWordPunct( words[i] );
+    const std::string_view next = i + 1 < words.size() ? stripWordPunct( words[i + 1] ) : std::string_view();
+    // `name x is not defined`, `x was not declared in this scope`: an error message quoting the word, no question about a definition (REG2-FIX1)
+    const bool negated = i > 0 && wordIsOneOf( stripWordPunct( words[i - 1] ), std::span<const std::string_view>( kNegators ) );
+    return ( wordIsOneOf( w, std::span<const std::string_view>( kForTableSiteCues ) ) && !negated ) || ( wordIsOneOf( w, kTurned ) && wordIsOneOf( next, kInto ) )
+           || ( wordIsOneOf( w, kGet ) && wordIsOneOf( next, kTo ) );
+}
 }   // namespace lit_detail
 
 // the trigger of shape=table, read from the task's own words outside code quotes
@@ -728,7 +884,7 @@ inline TableCue forTableCueOf( std::string_view task )
 {
     const std::string prose = lit_detail::withoutBackticks( task );
     const std::vector<std::string_view> words = lit_detail::taskWords( prose );
-    TableCue cue = TableCue::None;
+    TableCue cue = TableCue::StrongRowOnly;   // no cue word: the strong rows alone (G-STORED-B)
     std::size_t addAt = SIZE_MAX;
     for( std::size_t i = 0; i < words.size(); ++i )
     {
@@ -750,7 +906,7 @@ inline TableCue forTableCueOf( std::string_view task )
         {
             return TableCue::AnySite;
         }
-        if( lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForTableValueCues ) ) )
+        if( lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForTableValueCues ) ) || lit_detail::isSiteCueAt( words, i ) )
         {
             cue = TableCue::TableRowOnly;
         }
@@ -838,6 +994,9 @@ struct ForLiteralRender
     bool        noRoom = false;   // shape=table: sites exist, but not one row fit the bytes left
     bool        unread = false;   // shape=table: a table-rows-only anchor with more sites than are read for a row, none of those read a row: unknown, not "no table"
     bool        cutLegend = false;   // this element carries the lit_cut legend
+    bool        tailLegend = false;  // this element carries the tail= legend
+    bool        armLegend  = false;  // this element carries the arm= legend
+    bool        subLegend  = false;  // this element carries the subscript reg= / lr legend (REG-READER)
 };
 
 // LIT-SITE-DECOY: what the ranked answer above the block stands on, read to order the literal's sites by nearness to it
@@ -991,6 +1150,14 @@ struct Site
     char       k = '?';   // 's' string, 'c' code, '?' unclassified
     bool       quotedKey = false;   // shape=dotted: quotes delimit the key on both sides (`'files.autoSave'`), not a mention inside a sentence
     std::string tbl;                // shape=table: the line that opens the table this site is a row of ("item" at top level); "" = not a table row
+    bool        longer = false;     // shape=table: the hit sits inside a longer name; a row only as a registration call's argument (registrationCallOf)
+    bool        regCall = false;    // shape=table: tbl holds a registration call's callee (registrationCallOf), printed as reg=, not as a table opener
+    bool        regDirect = false;  // regCall: the site is a direct argument of that call (registrationCallOf's direct), no inner call, index or object between
+    bool        itemNested = false; // tbl="item" (a top-level call row) whose hit is NOT a direct argument of a registration call on it (`register(wrap(x))`): not strong
+    bool        subscript = false;  // REG-READER (a): regCall from a subscript write with a computed key (`storage[resource+"/log"] = x`) in a New*/Register* function
+    bool        leadInString = false;   // k='s' and the line's first non-blank byte is in a string too: a line of a multi-line string, no statement of its own
+    std::string table;              // subscript: the table written (`storage`, `hass.data[DOMAIN]`), the text before its last `[`
+    std::vector<std::uint32_t> more;   // shape=table: the byte offsets of the later hits on this line (the first is raw.byteOffset), at most kForRegLineHits
 };
 
 // LIT-SITE-DECOY: the sort tier of each ranked site (0 a near or kept table row, 1 another table row, 2 a near site, 3 a far one) or kCutTier
@@ -1008,9 +1175,20 @@ inline bool declaresTable( std::string_view opener ) noexcept
     return lintdetail::ltrim( opener ).starts_with( "#define" );
 }
 
+// REGISTRAR-2: a generated or data file (filter.h isDemoOrGeneratedPath, a `.json` file, a `zz_generated`, `_generated.`, `.generated.` or `.pb.`
+// file name): its table rows rank after the source's, as a docs or examples path does (isSecondaryPath). Ranked last, never dropped.
+inline bool isGeneratedOrDataPath( std::string_view p ) noexcept
+{
+    const std::size_t      slash = p.rfind( '/' );
+    const std::string_view base  = slash == std::string_view::npos ? p : p.substr( slash + 1 );
+    return isDemoOrGeneratedPath( p ) || base.ends_with( ".json" ) || base.starts_with( "zz_generated" ) || base.find( "_generated." ) != std::string_view::npos
+           || base.find( ".generated." ) != std::string_view::npos || base.find( ".pb." ) != std::string_view::npos;
+}
+
 // the home table, when several table files hold the literal and none of their rows stands near the answer: the file with the most table rows of
 // the literal; on a tie, the one that declares it (declaresTable); then the one with the most of its sites outside any function (the declaration
-// text: doc strings, a registration; a reader in a function body does not count). A tie past these: no home (nothing is cut by it).
+// text: doc strings, a registration; a reader in a function body does not count). A tie past these: no home (nothing is cut by it). A generated or
+// data file (isGeneratedOrDataPath) holds no home.
 inline std::uint32_t homeTableFile( const IngestResult& ing, const std::vector<Site>& rows, const std::vector<GrepHit>& enriched, const std::vector<Prox>& prox )
 {
     struct Cand
@@ -1022,9 +1200,9 @@ inline std::uint32_t homeTableFile( const IngestResult& ing, const std::vector<S
     std::vector<Cand> cands;
     for( std::size_t i = 0; i < enriched.size(); ++i )
     {
-        if( rows[i].tbl.empty() || prox[i] == Prox::Off )
+        if( rows[i].tbl.empty() || prox[i] == Prox::Off || isGeneratedOrDataPath( rootRelPath( ing, rows[i].raw.fileId ) ) )
         {
-            continue;
+            continue;   // a generated or data file is never the home table (REG2-FIX1, CodeRabbit 4478248365): its rows only rank after the source's
         }
         const auto at = std::ranges::find( cands, rows[i].raw.fileId, &Cand::file );
         Cand& c = at != cands.end() ? *at : cands.emplace_back( Cand{ rows[i].raw.fileId } );
@@ -1237,12 +1415,192 @@ inline std::vector<std::size_t> pickRows( const std::vector<char>& reg, std::siz
     return pick;
 }
 
+// FLAG-SHAPE-LIT: the `(` of the call whose argument list holds the quoted name at `at`: scanned back from the name's own opening quote and dashes,
+// over its line and at most kForRegCallBytes bytes, past the strings and groups it meets. npos when a `[` or `{` opens first or no `(` does.
+inline std::size_t openParenBefore( std::string_view text, std::size_t at ) noexcept
+{
+    if( at > text.size() )
+    {
+        return std::string_view::npos;
+    }
+    const std::size_t nl = at == 0 ? std::string_view::npos : text.rfind( '\n', at - 1 );
+    const std::size_t ls = nl == std::string_view::npos ? 0 : nl + 1;
+    std::size_t from = at;   // the scan back starts before the name's own opening quote and dashes
+    while( from > ls && text[from - 1] == '-' )
+    {
+        --from;
+    }
+    from -= from > ls && ( text[from - 1] == '"' || text[from - 1] == '\'' || text[from - 1] == '`' ) ? 1 : 0;
+    const std::size_t stop = std::max( ls, from > kForRegCallBytes ? from - kForRegCallBytes : std::size_t( 0 ) );
+    int  depth = 0;
+    char quote = 0;
+    for( std::size_t i = from; i-- > stop; )
+    {
+        const char c = text[i];
+        if( quote != 0 )
+        {
+            quote = c == quote ? 0 : quote;
+        }
+        else if( c == '"' || c == '\'' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == ')' || c == ']' || c == '}' )
+        {
+            ++depth;
+        }
+        else if( ( c == '(' || c == '[' || c == '{' ) && depth-- == 0 )
+        {
+            return c == '(' ? i : std::string_view::npos;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// the identifier run right before the `(` at `open`: the call's callee (`StringVarP`, `add_argument`; a qualifier before a `.` or `::` is not part of it)
+inline std::string_view calleeBefore( std::string_view text, std::size_t open ) noexcept
+{
+    std::size_t end = open;
+    while( end > 0 && ( text[end - 1] == ' ' || text[end - 1] == '\t' ) )
+    {
+        --end;   // `quiet ("q", ...)`: blanks between the callee and its `(`
+    }
+    const auto stop = std::find_if_not( std::make_reverse_iterator( text.begin() + std::ptrdiff_t( end ) ), std::make_reverse_iterator( text.begin() ), namesplit::isIdentChar );
+    const std::size_t from = std::size_t( stop.base() - text.begin() );
+    return text.substr( from, end - from );
+}
+
+// C++ TCLAP: the call at `open` constructs a command-line argument object, `ValueArg<uint32_t> concurrency(...)`, `SwitchArg quiet(...)`: the type
+// before the object's name ends the line's text up to it with `Arg` or `Arg<...>`
+inline bool constructsArgObject( std::string_view text, std::size_t open ) noexcept
+{
+    const std::size_t      calleeAt = std::size_t( calleeBefore( text, open ).data() - text.data() );
+    const std::size_t      nl       = calleeAt == 0 ? std::string_view::npos : text.rfind( '\n', calleeAt - 1 );
+    const std::size_t      ls       = nl == std::string_view::npos ? 0 : nl + 1;
+    std::string_view       head     = text.substr( ls, calleeAt - ls );
+    while( !head.empty() && ( head.back() == ' ' || head.back() == '\t' ) )
+    {
+        head.remove_suffix( 1 );
+    }
+    return head.ends_with( "Arg" ) || ( head.ends_with( '>' ) && head.rfind( "Arg<" ) != std::string_view::npos );
+}
+
+// What a callee says about a flag's default (FLAG-SHAPE-LIT; the library's own default slot, never a guess from position):
+enum class FlagSlot : std::uint8_t
+{
+    Absent,          // not a flag-definition call (exec.Command, a lookup, a dict, a message)
+    NoDefault,       // one, with no positional default: pflag Count/Var/Func, clap `.long(`, nushell `.named(`; a default= keyword may still stand
+    AfterName,       // Go flag, pflag, cobra: `String("name", def, usage)`, `StringVar(&v, "name", def, usage)`
+    AfterShorthand   // pflag's `P` form: `StringP("name", "n", def, usage)`, `StringVarP(&v, "name", "n", def, usage)`
+};
+inline FlagSlot flagSlotOf( std::string_view callee ) noexcept
+{
+    static constexpr auto kTyped = std::to_array<std::string_view>(
+        { "String", "Bool", "Int", "Int8", "Int16", "Int32", "Int64", "Uint", "Uint8", "Uint16", "Uint32", "Uint64", "Float32", "Float64", "Duration",
+          "StringSlice", "StringArray", "IntSlice", "Int32Slice", "Int64Slice", "UintSlice", "Float32Slice", "Float64Slice", "BoolSlice", "DurationSlice",
+          "BytesHex", "BytesBase64", "IP", "IPSlice", "IPMask", "IPNet", "StringToString", "StringToInt", "StringToInt64" } );
+    static constexpr auto kBare = std::to_array<std::string_view>(
+        { "Count", "CountP", "CountVar", "CountVarP", "Func", "FuncP", "BoolFunc", "BoolFuncP", "Var", "VarP", "long", "named", "switch", "flag", "Flag", "add_flag", "add_option" } );
+    const auto typed = [ & ]( std::string_view n )
+    {
+        n = n.ends_with( "Var" ) ? n.substr( 0, n.size() - 3 ) : n;
+        return std::find( kTyped.begin(), kTyped.end(), n ) != kTyped.end();
+    };
+    if( callee.ends_with( 'P' ) && typed( callee.substr( 0, callee.size() - 1 ) ) )
+    {
+        return FlagSlot::AfterShorthand;
+    }
+    if( typed( callee ) )
+    {
+        return FlagSlot::AfterName;
+    }
+    return std::find( kBare.begin(), kBare.end(), callee ) != kBare.end() ? FlagSlot::NoDefault : FlagSlot::Absent;
+}
+
+// FLAG-SHAPE-LIT: the 0-based index of the top-level argument of the call opened at `open` that holds `at` (commas outside strings and groups between them)
+inline std::size_t argIndexAt( std::string_view text, std::size_t open, std::size_t at ) noexcept
+{
+    std::size_t index = 0;
+    int         depth = 0;
+    char        quote = 0;
+    for( std::size_t i = open + 1; i < at && i < text.size(); ++i )
+    {
+        const char c = text[i];
+        if( quote != 0 )
+        {
+            i += c == '\\' ? 1 : 0;
+            quote = c == quote ? 0 : quote;
+        }
+        else if( c == '"' || c == '\'' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == '(' || c == '[' || c == '{' )
+        {
+            ++depth;
+        }
+        else if( c == ')' || c == ']' || c == '}' )
+        {
+            --depth;
+        }
+        else if( c == ',' && depth == 0 )
+        {
+            ++index;
+        }
+    }
+    return index;
+}
+
+// FLAG-SHAPE-LIT: the hit at `at` stands in the NAME argument of the flag-definition call opened at `open`, not in its default or usage string
+// (`fs.String("backendmode", "cachemode", "Backend mode")` has no `cachemode` flag): the first argument, or the second when the first is the variable the flag binds
+// (`StringVar(&v, "name", ...)`, `VarP`, `CountVar`); a TCLAP argument object's constructor takes (short, long, ...), so either of its first two
+inline bool holdsFlagName( std::string_view text, std::size_t open, std::size_t at ) noexcept
+{
+    const std::string_view callee    = calleeBefore( text, open );
+    const std::size_t      index     = argIndexAt( text, open, at );
+    const std::size_t      nameIndex = callee.ends_with( "Var" ) || callee.ends_with( "VarP" ) ? 1 : 0;
+    return flagSlotOf( callee ) != FlagSlot::Absent ? index == nameIndex : ( constructsArgObject( text, open ) && index <= 1 );
+}
+
+// FLAG-SHAPE-LIT: the hit at `at` of `text` is the whole quoted flag name: a quote before it (after an optional `-` or `--`) and the same quote,
+// or a `=` (`"--workers=4"`), right after it. `"max-pods-per-core"` and `use --max-pods to cap` are mentions, not sites. A name with no inner hyphen
+// is a common word (`compress`, `cache`): it is a site only in its dashed form (`"--compress"`) or as a flag-definition call's argument
+// (flagSlotOf, or a TCLAP argument object's constructor), never a dict value, an `__all__` entry or an error message.
+inline bool flagHitAt( std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    if( at == 0 || at > text.size() || n > text.size() - at )
+    {
+        return false;
+    }
+    std::size_t b = at;
+    for( int dashes = 0; dashes < 2 && b > 0 && text[b - 1] == '-'; ++dashes )
+    {
+        --b;
+    }
+    if( b == 0 || ( text[b - 1] != '"' && text[b - 1] != '\'' && text[b - 1] != '`' ) )
+    {
+        return false;
+    }
+    const char q = text[b - 1];
+    if( at + n >= text.size() || ( text[at + n] != q && text[at + n] != '=' ) )
+    {
+        return false;
+    }
+    if( b < at || text.substr( at, n ).find( '-' ) != std::string_view::npos )
+    {
+        return true;   // dashed, or a kebab name (an inner hyphen discriminates on its own)
+    }
+    const std::size_t open = openParenBefore( text, at );
+    return open != std::string_view::npos && holdsFlagName( text, open, at );
+}
+
 // How a shape of <lit> reads its sites: one row of this table per shape, so a new shape is a new row, never a new bool through renderForLiteral.
 enum class LitBoundary : std::uint8_t
 {
     None,   // shape=quoted|const: every byte-exact hit is a site
     Key,    // shape=dotted: keyHitAt, a hit inside a longer name or a child key is `longer`, quotes around the key rank it
-    Word    // shape=message: wordBounded, a hit inside a longer word is `longer`
+    Word,   // shape=message: wordBounded, a hit inside a longer word is `longer`
+    Flag    // shape=flag: a site is the whole quoted string, `--` allowed before it (`"max-pods"`, `"--workers"`); any other hit is a mention
 };
 struct LitPolicy
 {
@@ -1269,6 +1627,10 @@ inline LitPolicy litPolicyOf( std::string_view shape ) noexcept
     {
         return LitPolicy{ LitBoundary::Word, false, kForTableRows, 0, kForLiteralTableLegend, true, kForTableContextRows, kForTableRankedRows };
     }
+    if( shape == "flag" )
+    {
+        return LitPolicy{ LitBoundary::Flag, false, kForLiteralSiteRows, 0, kForLiteralFlagLegend };
+    }
     return LitPolicy{};
 }
 
@@ -1279,8 +1641,13 @@ inline KeyHit literalHitAt( LitBoundary boundary, std::string_view text, std::si
     {
         return keyHitAt( text, at, n );
     }
+    if( boundary == LitBoundary::Flag )
+    {
+        return KeyHit{ false, flagHitAt( text, at, n ) };
+    }
     KeyHit h;
     h.longer = boundary == LitBoundary::Word && !wordBounded( text, at, n );
+    h.quoted = boundary == LitBoundary::Word && keyHitAt( text, at, n ).quoted;   // shape=table's dotted-tail retry lists quoted keys only
     return h;
 }
 
@@ -1444,6 +1811,7 @@ inline bool isDataWrapperValue( std::string_view v ) noexcept
 // `name! {`, `name![`, `a::name!{`: a macro invocation with a data bracket. `name!(`, the shape of `assert_eq!(` and `println!(`, only when allowParen
 inline bool isMacroOpener( std::string_view v, bool allowParen ) noexcept
 {
+    v = v.starts_with( '$' ) ? v.substr( 1 ) : v;   // REGISTRAR-2: `$macro! {` inside a macro_rules arm, the table a `for_all_params!(m)` hands its rows to
     const std::size_t bang = v.find( '!' );
     if( bang == std::string_view::npos || bang == 0 || !std::all_of( v.begin(), v.begin() + std::ptrdiff_t( bang ), []( char c ) { return namesplit::isIdentChar( c ) || c == ':'; } ) )
     {
@@ -1866,29 +2234,614 @@ inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bo
     return opener.kind == OpenerKind::Transparent ? std::string( "item" ) : opener.text;
 }
 
-// shape=table: read each ranked site for a table row; true when one is
-template<typename LoadFile>
-inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, const std::vector<GrepHit>& enriched, LoadFile&& loadFile, const std::string& loadedText )
+// REGISTRAR-2: where a hit stands, for telling a call's argument from a declaration. Built once per file (lang flags) and per hit (the enclosing symbol).
+struct RegHitCtx
 {
-    bool any = false;
+    std::string_view enclosingName;           // the symbol whose span holds the hit ("" = none): a call named like it is its own signature
+    bool             enclosedByType = false;  // that symbol is a class, struct, interface or named type: a call-shaped line in its body is a member, not a call
+    bool             cFamily        = false;  // C, C++, Objective-C: a `: a_(x),` member-initializer list looks like calls
+    bool             rust           = false;  // `'` opens a char literal or a lifetime
+    bool             hashComments   = false;  // `#` starts a comment (Python, Ruby, shell, YAML, TOML, Elixir, GDScript)
+};
+inline RegHitCtx regLangCtxOf( Lang lang ) noexcept
+{
+    RegHitCtx c;
+    switch( lang )
+    {
+        case Lang::Cpp: case Lang::C: case Lang::ObjC: c.cFamily = true; break;
+        case Lang::Rust: c.rust = true; break;
+        case Lang::Python: case Lang::Ruby: case Lang::Bash: case Lang::Yaml: case Lang::Toml: case Lang::Elixir: case Lang::GDScript: c.hashComments = true; break;
+        default: break;
+    }
+    return c;
+}
+
+// REGISTRAR-2: the open paren at `paren` is a registration call that opens its line: the callee chain right before it (`a.b.name` or `a::b::name`, blanks
+// allowed before the paren, an `@` before the chain for a decorator, only blanks before that) is named for a registration. Its line up to the paren,
+// or nothing. Not a call, whatever its name (REG2-FIX1, rv-reg2 F1): (a) the callee is the name of the symbol the hit sits in (its own signature:
+// `CommandRunner(const BuildConfig& c);`, `Registry::RegisterHandler(Handler h)`, a JS method `registerHandler(h) {`); (b) the hit sits in the body
+// of a type, outside a decorator (a Rust enum's tuple variant, a TypeScript interface member); (c) in C and C++, the line follows a `:` or `,`
+// (a member-initializer list).
+inline std::optional<std::string_view> registrationOpenerAt( std::string_view text, std::size_t paren, const RegHitCtx& ctx = {} ) noexcept
+{
+    std::size_t e = paren;
+    while( e > 0 && ( text[e - 1] == ' ' || text[e - 1] == '\t' ) )
+    {
+        --e;   // `register_handler (x)`
+    }
+    std::size_t b = e;
+    while( b > 0 )
+    {
+        if( namesplit::isIdentChar( text[b - 1] ) || text[b - 1] == '.' )
+        {
+            --b;
+        }
+        else if( text[b - 1] == ':' && b > 1 && text[b - 2] == ':' )
+        {
+            b -= 2;   // `registry::register_handler(`
+        }
+        else
+        {
+            break;
+        }
+    }
+    const std::string_view callee = text.substr( b, e - b );
+    const bool decorator = b > 0 && text[b - 1] == '@';
+    std::size_t ls = decorator ? b - 1 : b;
+    while( ls > 0 && ( text[ls - 1] == ' ' || text[ls - 1] == '\t' ) )
+    {
+        --ls;
+    }
+    const bool opensLine = ls == 0 || text[ls - 1] == '\n';
+    if( !opensLine || callee.empty() || ( std::isalpha( static_cast<unsigned char>( callee.front() ) ) == 0 && callee.front() != '_' )
+        || !reg_detail::isRegistrationCallee( callee, decorator ) )
+    {
+        return std::nullopt;
+    }
+    const std::size_t      sep  = callee.find_last_of( ".:" );
+    const std::string_view last = sep == std::string_view::npos ? callee : callee.substr( sep + 1 );
+    if( ( !ctx.enclosingName.empty() && last == ctx.enclosingName ) || ( ctx.enclosedByType && !decorator ) )
+    {
+        return std::nullopt;
+    }
+    if( ctx.cFamily )
+    {
+        std::size_t p = ls;
+        while( p > 0 && ( text[p - 1] == ' ' || text[p - 1] == '\t' || text[p - 1] == '\n' || text[p - 1] == '\r' ) )
+        {
+            --p;
+        }
+        if( p > 0 && ( text[p - 1] == ',' || ( text[p - 1] == ':' && !( p > 1 && text[p - 2] == ':' ) ) ) )
+        {
+            return std::nullopt;
+        }
+    }
+    return trimWs( text.substr( ls, paren + 1 - ls ) );
+}
+
+// a `{` that opens a block body (a function, an arrow function, a closure), not a dict, an object or a struct literal: the byte before it, past
+// blanks and newlines, is `)` (`function (a) {`, `func(w, r) {`), the `>` of `=>` or `->`, or a Rust closure's `|`
+inline bool opensBlockBody( std::string_view text, std::size_t brace ) noexcept
+{
+    std::size_t p = brace;
+    while( p > 0 && ( text[p - 1] == ' ' || text[p - 1] == '\t' || text[p - 1] == '\n' || text[p - 1] == '\r' ) )
+    {
+        --p;
+    }
+    if( p == 0 )
+    {
+        return false;
+    }
+    const char c = text[p - 1];
+    return c == ')' || c == '|' || ( c == '>' && p > 1 && ( text[p - 2] == '=' || text[p - 2] == '-' ) );
+}
+
+// the call parens and braces still open where the window of `registrationCallOf` ends, read forward from a line start: strings, char literals and
+// comments are skipped (a `(` inside one opens nothing), `;` ends the statement (every open paren before it is closed)
+struct RegScan
+{
+    struct Open
+    {
+        std::size_t pos;
+        char        c;
+    };
+    std::vector<Open> open;
+    char              quote = 0;       // the quote byte of the string being read, or 0
+    bool              triple = false;  // a triple-quoted string (Python): it ends at the next triple, not at a newline
+    bool              lineComment = false, blockComment = false;
+
+    // a `'` that opens a char literal (`'('`, `'\n'`) and not a Rust lifetime (`'a`)
+    static bool isCharLiteral( std::string_view text, std::size_t i ) noexcept
+    {
+        return i + 2 < text.size() && ( text[i + 1] == '\\' || text[i + 2] == '\'' );
+    }
+    void closeTo( char opener )
+    {
+        const auto at = std::find_if( open.rbegin(), open.rend(), [ & ]( const Open& o ) { return o.c == opener; } );
+        if( at != open.rend() )
+        {
+            open.erase( ( at + 1 ).base(), open.end() );
+        }
+    }
+    void step( std::string_view text, std::size_t& i, std::size_t end, const RegHitCtx& ctx )
+    {
+        const char c = text[i];
+        if( lineComment )
+        {
+            lineComment = c != '\n';
+            return;
+        }
+        if( blockComment )
+        {
+            if( c == '*' && i + 1 < end && text[i + 1] == '/' )
+            {
+                blockComment = false;
+                ++i;
+            }
+            return;
+        }
+        if( quote != 0 )
+        {
+            if( c == '\\' )
+            {
+                ++i;
+            }
+            else if( triple )
+            {
+                if( c == quote && i + 2 < end && text[i + 1] == quote && text[i + 2] == quote )
+                {
+                    quote = 0;
+                    i += 2;
+                }
+            }
+            else if( c == quote || ( c == '\n' && quote != '`' ) )
+            {
+                quote = 0;
+            }
+            return;
+        }
+        switch( c )
+        {
+            case '"': case '\'': case '`':
+                if( c == '\'' && ctx.rust && !isCharLiteral( text, i ) )
+                {
+                    return;   // a lifetime
+                }
+                quote  = c;
+                triple = c != '`' && i + 2 < end && text[i + 1] == c && text[i + 2] == c;
+                i += triple ? 2 : 0;
+                return;
+            case '#':
+                lineComment = ctx.hashComments && ( i == 0 || text[i - 1] == ' ' || text[i - 1] == '\t' || text[i - 1] == '\n' );
+                return;
+            case '/':
+                if( !ctx.hashComments && i + 1 < end && text[i + 1] == '/' )
+                {
+                    lineComment = true;
+                }
+                else if( !ctx.hashComments && i + 1 < end && text[i + 1] == '*' )
+                {
+                    blockComment = true;
+                    ++i;
+                }
+                return;
+            case ';': open.clear(); return;
+            case '(': case '{': case '[': open.push_back( Open{ i, c } ); return;
+            case ')': closeTo( '(' ); return;
+            case '}': closeTo( '{' ); return;
+            case ']': closeTo( '[' ); return;
+            default: return;
+        }
+    }
+};
+
+// the innermost call still open at the hit (`scan`) that is a registration call: its opener line, or "". A block body `{` ends the walk (a closure's
+// statements are not the call's arguments); `[` groups are passed. `*direct`: no group opened between that call's `(` and the hit.
+inline std::string innermostRegistration( std::string_view text, const RegScan& scan, const RegHitCtx& ctx, bool* direct )
+{
+    // a 1-based cursor counts down to zero: `k-- > 0` wraps k to SIZE_MAX on its final test, which -fsanitize=integer reports (ingest_names.h)
+    for( std::size_t cursor = scan.open.size(); cursor > 0; --cursor )
+    {
+        const std::size_t    k = cursor - 1;
+        const RegScan::Open& o = scan.open[k];
+        if( o.c == '{' && opensBlockBody( text, o.pos ) )
+        {
+            return {};
+        }
+        const std::optional<std::string_view> opener = o.c == '(' ? registrationOpenerAt( text, o.pos, ctx ) : std::nullopt;
+        if( opener )
+        {
+            if( direct != nullptr )
+            {
+                *direct = k + 1 == scan.open.size();
+            }
+            return std::string( *opener );
+        }
+    }
+    return {};
+}
+
+// REGISTRAR-2: the registration call whose arguments hold the hit at `at`, or "": the text from at most kForRegCallLines lines and kForRegCallBytes
+// bytes above the hit (from a line start, after the last `;`) is read forward; each '(' left open is a call the hit is an argument of, innermost
+// first; the first whose callee chain opens its line and is named for a registration (registrationOpenerAt) is the row's opener: its line up to
+// that '('. The walk ends at an open `{` that starts a block body (opensBlockBody: a closure's statements are not the arguments of the call that
+// holds the closure). `*direct` (when given): the hit is a whole argument of that call, no `(`, `[` or `{` opened between them (a hit nested in
+// another call, an index or an object literal is an argument of that one). A definition (`func NewHandler(`, `def register(`) is no call: a keyword stands before the name. Parens in strings and
+// comments are skipped (RegScan). A call opened above the window is not found: the row's absence is no claim (the table legend says how far it reads).
+inline std::string registrationCallOf( std::string_view text, std::size_t at, const RegHitCtx& ctx = {}, bool* direct = nullptr )
+{
+    if( at > text.size() )
+    {
+        return {};
+    }
+    std::size_t start = at > kForRegCallBytes ? at - kForRegCallBytes : 0;
+    for( std::size_t i = at, lines = 0; i > start; --i )
+    {
+        if( text[i - 1] == '\n' && ++lines > kForRegCallLines )
+        {
+            start = i;
+            break;
+        }
+    }
+    if( start > 0 && text[start - 1] != '\n' )
+    {
+        const std::size_t nl = text.find( '\n', start );
+        start = nl == std::string_view::npos ? at : nl + 1;   // read from a line start: a string's quote state is unknown mid-line
+    }
+    RegScan scan;
+    for( std::size_t i = start; i < at; ++i )
+    {
+        scan.step( text, i, at, ctx );
+    }
+    return innermostRegistration( text, scan, ctx, direct );
+}
+
+// REGISTRAR-2: the name holding the hit at `at` is a whole argument of a call: the identifier run around it stands between `(` or `,` and `,` or `)`
+// (`async_reg(hass, handle_get_states)`), never a callee (`async_get_turn_on_trigger(x)`) or a member of a chain (`self._turn_on.async_register(`).
+// An identifier run longer than kForRegIdentBytes either side is a blob, not a name: no argument, and the walk stays bounded however often a short
+// anchor repeats inside it.
+inline bool isArgumentName( std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    if( at > text.size() || n > text.size() - at )
+    {
+        return false;
+    }
+    std::size_t b = at, e = at + n;
+    while( b > 0 && namesplit::isIdentChar( text[b - 1] ) )
+    {
+        if( at - b >= kForRegIdentBytes )
+        {
+            return false;
+        }
+        --b;
+    }
+    while( e < text.size() && namesplit::isIdentChar( text[e] ) )
+    {
+        if( e - ( at + n ) >= kForRegIdentBytes )
+        {
+            return false;
+        }
+        ++e;
+    }
+    while( b > 0 && ( text[b - 1] == ' ' || text[b - 1] == '\t' || text[b - 1] == '\n' || text[b - 1] == '\r' ) )
+    {
+        --b;
+    }
+    while( e < text.size() && ( text[e] == ' ' || text[e] == '\t' || text[e] == '\n' || text[e] == '\r' ) )
+    {
+        ++e;
+    }
+    return b > 0 && ( text[b - 1] == '(' || text[b - 1] == ',' ) && e < text.size() && ( text[e] == ',' || text[e] == ')' );
+}
+
+// remove the ranked rows flagged in `drop` (parallel to `enriched`, and to the first rows of `rows`); the count removed
+inline std::size_t dropRows( std::vector<Site>& rows, std::vector<GrepHit>& enriched, const std::vector<char>& drop )
+{
+    std::size_t out = 0, n = 0;
+    for( std::size_t i = 0; i < enriched.size(); ++i )
+    {
+        if( drop[i] == 0 )
+        {
+            if( out != i )
+            {
+                rows[out]     = std::move( rows[i] );
+                enriched[out] = std::move( enriched[i] );
+            }
+            ++out;
+        }
+        else
+        {
+            ++n;
+        }
+    }
+    if( n > 0 )
+    {
+        rows.erase( rows.begin() + std::ptrdiff_t( out ), rows.begin() + std::ptrdiff_t( enriched.size() ) );
+        enriched.resize( out );
+    }
+    return n;
+}
+
+// the symbol kinds whose body holds members, not statements
+inline bool isTypeKind( SymKind k ) noexcept
+{
+    static constexpr std::array<SymKind, 4> kTypeBodyKinds{ SymKind::Class, SymKind::Struct, SymKind::Interface, SymKind::NamedType };
+    return std::find( kTypeBodyKinds.begin(), kTypeBodyKinds.end(), k ) != kTypeBodyKinds.end();
+}
+
+// REG-READER (a): a function whose name says it builds or registers (New*, new_*, Register*, register_*, an async_ prefix aside): the table it fills
+// with computed keys is a registry. The name, not proof; a qualified name is read by its last part.
+inline bool isRegistrarFnName( std::string_view name ) noexcept
+{
+    const std::size_t cut = name.find_last_of( ".:" );
+    std::string_view  n   = cut == std::string_view::npos ? name : name.substr( cut + 1 );
+    n                     = n.starts_with( "async_" ) ? n.substr( 6 ) : n;
+    const auto lead       = [ & ]( std::string_view p )
+    {
+        return n.starts_with( p ) && ( n.size() == p.size() || n[p.size()] == '_' || std::isupper( static_cast<unsigned char>( n[p.size()] ) ) != 0 );
+    };
+    return lead( "New" ) || lead( "new" ) || lead( "Register" ) || lead( "register" );
+}
+
+// the first byte of `t` from `from` on, outside quotes, at which `stop( i, c )` says true, or npos when the line ends first
+template <class Stop>
+inline std::size_t firstUnquotedWhere( std::string_view t, std::size_t from, Stop&& stop ) noexcept
+{
+    for( std::size_t i = from; i < t.size(); ++i )
+    {
+        const char c = t[i];
+        if( c == '"' || c == '\'' || c == '`' )
+        {
+            for( ++i; i < t.size() && t[i] != c; i += t[i] == '\\' ? 2 : 1 )
+            {
+            }
+            continue;
+        }
+        if( stop( i, c ) )
+        {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// the close of the bracket group opened at `open` (quotes skipped), or npos when the line ends first
+inline std::size_t bracketCloseOf( std::string_view t, std::size_t open ) noexcept
+{
+    int depth = 0;
+    return firstUnquotedWhere( t, open, [ & ]( std::size_t, char c ) { depth += c == '[' ? 1 : ( c == ']' ? -1 : 0 ); return depth == 0; } );
+}
+
+// one subscript write a line opens with: `recv[key] = v` (recv a name chain: `a.b`, `a->b`, `a::b`, earlier index groups `hass.data[DOMAIN]`). Offsets are
+// into `t`; `open`/`close` bracket the key. Allowlist: a keyword or a declaration first (`return x[k] = `, `const a = b[k]`), an annotation (`x: T = `), a
+// compound or a comparison (`+=`, `==`) is none.
+struct SubscriptWrite
+{
+    std::size_t open = 0, close = 0, eq = 0;
+};
+inline std::optional<SubscriptWrite> subscriptWriteOf( std::string_view t ) noexcept
+{
+    std::size_t    i = 0;
+    SubscriptWrite w;
+    bool           indexed = false;
+    while( i < t.size() )
+    {
+        const std::size_t run = taskroute::identifierRunOf( t.substr( i ) ).size();
+        if( run == 0 || std::isdigit( static_cast<unsigned char>( t[i] ) ) != 0 )
+        {
+            return std::nullopt;
+        }
+        i += run;
+        indexed = false;
+        while( i < t.size() && t[i] == '[' )
+        {
+            const std::size_t close = bracketCloseOf( t, i );
+            if( close == std::string_view::npos )
+            {
+                return std::nullopt;
+            }
+            w.open  = i;
+            w.close = close;
+            indexed = true;
+            i       = close + 1;
+        }
+        const std::size_t sep = t.substr( i ).starts_with( "->" ) || t.substr( i ).starts_with( "::" ) ? 2 : ( i < t.size() && t[i] == '.' ? 1 : 0 );
+        if( sep == 0 )
+        {
+            break;
+        }
+        i += sep;
+    }
+    while( i < t.size() && ( t[i] == ' ' || t[i] == '\t' ) )
+    {
+        ++i;
+    }
+    if( !indexed || i >= t.size() || t[i] != '=' || ( i + 1 < t.size() && t[i + 1] == '=' ) )
+    {
+        return std::nullopt;
+    }
+    w.eq = i;
+    return w;
+}
+
+// the end of the statement that starts at `t` (a `;` outside quotes and bracket groups), or t.size(): a later statement on the line is not the write
+inline std::size_t statementEndOf( std::string_view t ) noexcept
+{
+    static constexpr std::string_view kOpens = "([{", kCloses = ")]}";
+    int                               depth  = 0;
+    const std::size_t                 end    = firstUnquotedWhere( t, 0,
+                                                    [ & ]( std::size_t, char c )
+                                                    {
+                                                        depth += kOpens.find( c ) != std::string_view::npos ? 1 : ( kCloses.find( c ) != std::string_view::npos ? -1 : 0 );
+                                                        return c == ';' && depth <= 0;
+                                                    } );
+    return end == std::string_view::npos ? t.size() : end;
+}
+
+// a key that is one literal (`"pods"`, `'k'`, `3`, `-1`, `0x10`, `1_000`, `2.5`): the table rule's own business, not a computed key
+inline bool isLiteralKey( std::string_view key ) noexcept
+{
+    key = trimWs( key );
+    if( key.empty() )
+    {
+        return true;
+    }
+    std::size_t close = 1;
+    while( close < key.size() && key[close] != key.front() )
+    {
+        close += key[close] == '\\' ? 2 : 1;
+    }
+    const bool substituted = key.front() == '`' && key.find( "${" ) != std::string_view::npos;   // a template literal with a substitution is computed
+    const bool quoted    = key.size() >= 2 && ( key.front() == '"' || key.front() == '\'' || key.front() == '`' ) && close == key.size() - 1 && !substituted;
+    const std::size_t sign   = key.front() == '-' || key.front() == '+' ? 1 : 0;   // a number token: a digit first, then digits, letters (0x, e, L), `_` or `.`
+    const bool        number = sign < key.size() && std::isdigit( static_cast<unsigned char>( key[sign] ) ) != 0
+                        && std::all_of( key.begin() + std::ptrdiff_t( sign ), key.end(),
+                                        []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '.'; } );
+    return quoted || number;
+}
+
+// REG-READER (a): a row whose hit is the key or the value of a subscript write with a computed key, in a function named for building or registering,
+// is a registration: reg= `table[key] =`. A hit in the table's own name is none (every write of it would be a row).
+inline void subscriptRowOf( std::string_view text, Site& row, std::string_view enclosingName )
+{
+    if( row.longer || row.leadInString || !isRegistrarFnName( enclosingName ) || row.raw.byteOffset >= text.size() )
+    {
+        return;
+    }
+    const std::size_t nl    = row.raw.byteOffset == 0 ? std::string_view::npos : text.rfind( '\n', row.raw.byteOffset - 1 );
+    const std::size_t start = nl == std::string_view::npos ? 0 : nl + 1;
+    const std::string_view line = lineAt( text, start );
+    const std::size_t lead      = line.find_first_not_of( " \t" );
+    if( lead == std::string_view::npos )
+    {
+        return;
+    }
+    const std::string_view               t = line.substr( lead );
+    const std::optional<SubscriptWrite> w  = subscriptWriteOf( t );
+    if( !w )
+    {
+        return;
+    }
+    const std::size_t keyAt   = start + lead + w->open;
+    const std::size_t stmtEnd = start + lead + statementEndOf( t );   // `storage[k] = v; consume(x)`: a hit in `consume(x)` is not the write's
+    const auto        inWrite = [ & ]( std::size_t at ) { return at >= keyAt && at < stmtEnd; };
+    const bool hitPast = inWrite( row.raw.byteOffset ) || std::any_of( row.more.begin(), row.more.end(), [ & ]( std::uint32_t m ) { return inWrite( m ); } );
+    if( !hitPast || isLiteralKey( t.substr( w->open + 1, w->close - w->open - 1 ) ) )
+    {
+        return;
+    }
+    row.tbl       = std::string( trimWs( t.substr( 0, w->eq + 1 ) ) );
+    row.table     = std::string( t.substr( 0, w->open ) );
+    row.regCall   = true;
+    row.regDirect = true;
+    row.subscript = true;
+}
+
+// the registration call a row's hit is an argument of (tbl, regDirect): the first hit's call stays the fallback, and a later hit of the line that is a DIRECT argument of one
+// is preferred (`r.register(wrap(f), f)`)
+inline void registrationOfRow( std::string_view text, Site& row, const RegHitCtx& ctx )
+{
+    row.tbl = registrationCallOf( text, row.raw.byteOffset, ctx, &row.regDirect );
+    for( std::size_t m = 0; m < row.more.size() && ( row.tbl.empty() || !row.regDirect ); ++m )
+    {
+        bool        direct = false;
+        std::string call   = registrationCallOf( text, row.more[m], ctx, &direct );
+        if( !call.empty() && ( row.tbl.empty() || direct ) )
+        {
+            row.tbl       = std::move( call );
+            row.regDirect = direct;
+        }
+    }
+    if( row.tbl.empty() && !ctx.enclosedByType )
+    {
+        subscriptRowOf( text, row, ctx.enclosingName );   // REG-READER (a): else a subscript write into a registry, in a function named for one
+    }
+}
+
+// a top-level call row (tbl="item") is strong (G-STORED-B) as a registration call's DIRECT argument only: `register(wrap(x))` at module level is the same nested shape the
+// in-function registration rejects
+inline bool itemIsNested( std::string_view text, std::size_t at, const RegHitCtx& ctx )
+{
+    bool direct = true;
+    return !registrationCallOf( text, at, ctx, &direct ).empty() && !direct;
+}
+
+// shape=table: read each ranked site for a table row; true when one is. A site that is no row of a table may be an argument of a registration
+// call (registrationCallOf, tried at every hit of its line), anywhere: in a function body too, and a hit inside a longer name (`handle_get_states`)
+// only so. A site of a longer name that is no such argument is dropped from `rows` and `enriched` (counted in `longerDropped`, said as longer=).
+template<typename LoadFile>
+inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, std::vector<GrepHit>& enriched, LoadFile&& loadFile, const std::string& loadedText,
+                           std::size_t& longerDropped )
+{
+    bool              any = false;
+    std::vector<char> drop( enriched.size(), 0 );
     for( std::size_t i = 0; i < enriched.size(); ++i )
     {
         loadFile( rows[i].raw.fileId );
-        const bool callableOwner = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        rows[i].tbl = tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner, bracketReadingOf( langOfPath( ing.files[rows[i].raw.fileId] ) ) );
-        any         = any || !rows[i].tbl.empty();
+        const NodeId     owner         = enriched[i].enclosingId;
+        const bool       callableOwner = owner != kNoNode && ReceiverEvidence::callableKind( ing.symbols[owner].kind );
+        const Lang       lang          = langOfPath( ing.files[rows[i].raw.fileId] );
+        rows[i].tbl = rows[i].longer ? std::string() : tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner, bracketReadingOf( lang ) );
+        if( rows[i].tbl.empty() )
+        {
+            RegHitCtx ctx = regLangCtxOf( lang );
+            if( owner != kNoNode )
+            {
+                ctx.enclosingName  = ing.symbols[owner].name;
+                ctx.enclosedByType = isTypeKind( ing.symbols[owner].kind );
+            }
+            registrationOfRow( loadedText, rows[i], ctx );
+            rows[i].regCall = !rows[i].tbl.empty();
+            drop[i]         = rows[i].longer && rows[i].tbl.empty();
+        }
+        else if( rows[i].tbl == "item" )
+        {
+            rows[i].itemNested = itemIsNested( loadedText, rows[i].raw.byteOffset, regLangCtxOf( lang ) );
+        }
+        any = any || !rows[i].tbl.empty();
     }
+    longerDropped += dropRows( rows, enriched, drop );
     return any;
 }
 
+// REG2-FIX1 (rv-reg2 F3): the last part of a dotted name (`editor.mode` -> `mode`), tried after the name itself found nothing, lists only the rows where it is
+// a quoted key (`'ValidationError': (...)`, `.method('redirect')`) and the tail's own definition: any other site of a common word is a mention, not the thing
+// the task named. False when no site is a quoted key (nothing is listed). `dropped` counts the sites left out (said as tail=).
+inline bool keepTailKeyRows( const IngestResult& ing, std::string_view tail, std::vector<Site>& rows, std::vector<GrepHit>& enriched, std::size_t& dropped )
+{
+    std::vector<char> drop( enriched.size(), 0 );
+    bool              anyKey = false;
+    for( std::size_t i = 0; i < enriched.size(); ++i )
+    {
+        const NodeId owner = enriched[i].enclosingId;
+        const bool   def   = owner != kNoNode && ing.symbols[owner].name == tail && ing.symbols[owner].line == enriched[i].line;
+        anyKey             = anyKey || rows[i].quotedKey;
+        drop[i]            = !( rows[i].quotedKey || def );
+    }
+    if( !anyKey )
+    {
+        return false;
+    }
+    dropped += dropRows( rows, enriched, drop );
+    return true;
+}
+
+// G-STORED-B: a STRONG row, the only kind a task with no cue word lists: a registration call's direct argument (reg=; a site nested in an inner call, an index
+// or an object literal is not one), a top-level macro or call row
+// (tbl="item"), or a row of a macro table (`for_all_params! {`, `$macro! {`). Allowlist: a dict, list, __all__, #define, enum or const-array row is weak.
+inline bool isStrongRow( const Site& r ) noexcept
+{
+    return ( r.regCall && r.regDirect ) || ( r.tbl == "item" && !r.itemNested ) || ( !r.tbl.empty() && isMacroOpener( openerCode( r.tbl ), /*allowParen=*/false ) );
+}
+
 // a table row's tbl= attribute onto its <ls>; the opener is raw source text. No opener, no attribute.
-inline void appendTblAttr( std::string& xml, std::string opener, RedactCounts* redact, std::vector<char>& esc )
+inline void appendTblAttr( std::string& xml, std::string opener, RedactCounts* redact, std::vector<char>& esc, std::string_view attr = " tbl=\"" )
 {
     if( !opener.empty() )
     {
         redactInPlace( opener, redact );
         truncateUtf8WithEllipsis( opener, kForTableOpenerBytes );
-        xml.append( " tbl=\"" ).append( escapeXml( opener, esc ) ).push_back( '"' );
+        xml.append( attr ).append( escapeXml( opener, esc ) ).push_back( '"' );
     }
 }
 
@@ -2031,16 +2984,307 @@ inline bool isPythonDocstringAt( const std::string& text, std::size_t start ) no
     return t.starts_with( "def " ) || t.starts_with( "async def " ) || t.starts_with( "class " );
 }
 
+// FLAG-SHAPE-LIT: [begin, end) of each top-level argument of the call opened at `open`; empty when it does not close within kForRegCallBytes bytes
+inline std::vector<std::pair<std::size_t, std::size_t>> callArgsAt( std::string_view text, std::size_t open )
+{
+    std::vector<std::pair<std::size_t, std::size_t>> args;
+    std::size_t argStart = open + 1;
+    int         depth    = 0;
+    char        quote    = 0;
+    const std::size_t end = std::min( text.size(), open + 1 + kForRegCallBytes );
+    for( std::size_t i = open + 1; i < end; ++i )
+    {
+        const char c = text[i];
+        if( quote != 0 )
+        {
+            i += c == '\\' ? 1 : 0;
+            quote = c == quote ? 0 : quote;
+            continue;
+        }
+        if( c == '"' || c == '\'' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == '(' || c == '[' || c == '{' )
+        {
+            ++depth;
+        }
+        else if( ( c == ')' || c == ']' || c == '}' ) && depth-- == 0 )
+        {
+            args.emplace_back( argStart, i );
+            return args;
+        }
+        else if( c == ',' && depth == 0 )
+        {
+            args.emplace_back( argStart, i );
+            argStart = i + 1;
+        }
+    }
+    return {};
+}
+
+// both ends trimmed of every whitespace byte, newlines included (a default may start on the line after the name)
+inline std::string_view trimAllWs( std::string_view v ) noexcept
+{
+    constexpr std::string_view kBlanks = " \t\r\n\f\v";
+    const std::size_t          first   = v.find_first_not_of( kBlanks );
+    return first == std::string_view::npos ? std::string_view() : v.substr( first, v.find_last_not_of( kBlanks ) - first + 1 );
+}
+
+// boost's `po::value<int>()->default_value(10)`: the text inside the call's parens, a paren inside a string default (`default_value(")")`) not counted
+inline std::optional<std::string_view> boostDefaultOf( std::string_view arg ) noexcept
+{
+    const std::size_t call = arg.find( "default_value(" );
+    char quote = 0;
+    for( std::size_t i = call == std::string_view::npos ? arg.size() : call + 14, depth = 1; i < arg.size(); ++i )
+    {
+        const char c = arg[i];
+        if( quote != 0 )
+        {
+            i += c == '\\' ? 1 : 0;
+            quote = c == quote ? 0 : quote;
+            continue;
+        }
+        quote = c == '"' || c == '\'' ? c : quote;
+        depth += c == '(' ? 1 : 0;
+        depth -= c == ')' ? 1 : 0;
+        if( depth == 0 )
+        {
+            return trimAllWs( arg.substr( call + 14, i - call - 14 ) );
+        }
+    }
+    return std::nullopt;
+}
+
+// the default a keyword argument names: `default=8` (argparse, click), `default_value = "info"` / `default_value_t = 64` (clap derive), `default: 8`
+// (a JS option object), or boost's `po::value<int>()->default_value(10)`; nullopt when the argument is none of these
+inline std::optional<std::string_view> keywordDefaultOf( std::string_view arg ) noexcept
+{
+    for( const std::string_view key : { std::string_view( "default_value_t" ), std::string_view( "default_value" ), std::string_view( "default" ) } )
+    {
+        if( arg.starts_with( key ) )
+        {
+            const std::string_view rest = trimWs( arg.substr( key.size() ) );
+            if( !rest.empty() && ( rest.front() == '=' || rest.front() == ':' ) && !rest.starts_with( "==" ) )
+            {
+                return trimAllWs( rest.substr( 1 ) );
+            }
+        }
+    }
+    return boostDefaultOf( arg );
+}
+
+// FLAG-SHAPE-LIT: a Rust clap/structopt derive attribute that defines a flag, `#[arg(long = "cache-size", default_value_t = 64)]`, `#[clap(...)]`, `#[structopt(...)]`:
+// the callee right after `#[`. A plain `arg(...)` call, or another attribute (`#[serde(default = ...)]`), is no flag definition.
+inline bool isRustFlagAttribute( std::string_view text, std::string_view callee ) noexcept
+{
+    static constexpr auto kAttrs = std::to_array<std::string_view>( { "arg", "clap", "structopt" } );
+    if( std::find( kAttrs.begin(), kAttrs.end(), callee ) == kAttrs.end() )
+    {
+        return false;
+    }
+    std::size_t before = std::size_t( callee.data() - text.data() );
+    while( before > 0 && ( text[before - 1] == ' ' || text[before - 1] == '\t' ) )
+    {
+        --before;
+    }
+    return before >= 2 && text[before - 1] == '[' && text[before - 2] == '#';
+}
+
+// FLAG-SHAPE-LIT: a call outside the typed flag APIs (flagSlotOf) that still DEFINES a flag and may carry its `default=` keyword: argparse `add_argument`, click and typer
+// `option` / `Option` / `argument` / `Argument`, optparse `add_option`, a JS `.option(`, and boost's `("name", po::value<T>()->default_value(x), "usage")` chain, whose
+// call has no callee name (the `(` follows an `add_options()` or the previous `)`)
+inline bool definesFlagByKeyword( std::string_view text, std::size_t open, std::string_view callee ) noexcept
+{
+    static constexpr auto kDefiners = std::to_array<std::string_view>( { "add_argument", "add_option", "option", "Option", "argument", "Argument", "addOption", "addArgument" } );
+    if( std::find( kDefiners.begin(), kDefiners.end(), callee ) != kDefiners.end() )
+    {
+        return true;
+    }
+    if( isRustFlagAttribute( text, callee ) )
+    {
+        return true;
+    }
+    std::size_t before = open;
+    while( before > 0 && std::isspace( static_cast<unsigned char>( text[before - 1] ) ) != 0 )
+    {
+        --before;
+    }
+    return callee.empty() && before > 0 && text[before - 1] == ')';
+}
+
+// FLAG-SHAPE-LIT: the argument in the default slot is the default: a quoted string there is the default whatever it holds (`"hello world"`, `"key=value"`) when the usage
+// text is the last argument (Go flag and pflag take exactly name, default, usage); with more arguments after the slot a quoted sentence reads as usage text, and an unquoted
+// `k=v` is a keyword argument
+inline bool isDefaultSlotText( std::string_view d, bool usageLast ) noexcept
+{
+    const bool quoted = !d.empty() && ( d.front() == '"' || d.front() == '\'' );
+    return !d.empty() && !( quoted && !usageLast && d.find( ' ' ) != std::string_view::npos ) && !( !quoted && d.find( '=' ) != std::string_view::npos );
+}
+
+// FLAG-SHAPE-LIT: the default argument of the call whose argument list holds the flag name at `at` (a whole quoted argument): a `default=`-style
+// keyword argument of any call (keywordDefaultOf), else the flag API's own default slot (flagSlotOf: the argument right after the name, two after it
+// for pflag's `P` form) when one more argument (the usage text) follows it. A call that is no flag-definition call (flagSlotOf: exec.Command, a nushell
+// `.named`, a click alias `"-v"`) has no default here. Read from the text over at most kForRegCallBytes bytes; "" when none.
+inline std::string flagDefaultAt( std::string_view text, std::size_t at )
+{
+    const std::size_t open = openParenBefore( text, at );
+    if( open == std::string_view::npos )
+    {
+        return {};
+    }
+    const std::vector<std::pair<std::size_t, std::size_t>> args = callArgsAt( text, open );
+    const auto argText = [ & ]( std::size_t k ) { return trimAllWs( text.substr( args[k].first, args[k].second - args[k].first ) ); };
+    const std::string_view callee  = calleeBefore( text, open );
+    const FlagSlot         slot    = flagSlotOf( callee );
+    const bool             defines = slot != FlagSlot::Absent || definesFlagByKeyword( text, open, callee );   // `lookup("max-pods", default=64)` is no flag definition
+    std::size_t nameArg = SIZE_MAX;
+    for( std::size_t k = 0; k < args.size(); ++k )
+    {
+        nameArg = at >= args[k].first && at < args[k].second ? k : nameArg;
+        if( const std::optional<std::string_view> kw = defines ? keywordDefaultOf( argText( k ) ) : std::nullopt )
+        {
+            return std::string( *kw );
+        }
+    }
+    if( nameArg == SIZE_MAX || ( slot != FlagSlot::AfterName && slot != FlagSlot::AfterShorthand ) )
+    {
+        return {};
+    }
+    const std::size_t defArg = nameArg + ( slot == FlagSlot::AfterShorthand ? 2 : 1 );
+    if( defArg + 1 >= args.size() )
+    {
+        return {};   // no argument after the default (the usage text): not the flag-set shape
+    }
+    const std::string_view d = argText( defArg );
+    return isDefaultSlotText( d, defArg + 2 == args.size() ) ? std::string( d ) : std::string();
+}
+
+// FLAG-SHAPE-LIT: the field a default argument names (`c.MaxPods` -> MaxPods), or "": a dotted chain of identifiers whose last link is at least
+// kForFlagMinName bytes. A literal, a call, a CONST word or a bare name is no field.
+inline std::string_view defaultFieldOf( std::string_view def ) noexcept
+{
+    const std::size_t dot = def.rfind( '.' );
+    if( dot == std::string_view::npos || dot == 0 || def.size() - dot - 1 < kForFlagMinName || std::isdigit( static_cast<unsigned char>( def.front() ) ) != 0 )
+    {
+        return {};
+    }
+    const bool chain = std::all_of( def.begin(), def.end(), []( char c ) { return namesplit::isIdentChar( c ) || c == '.' || c == '&' || c == '*'; } );
+    const std::string_view f = def.substr( dot + 1 );
+    return chain && std::isalpha( static_cast<unsigned char>( f.front() ) ) != 0 ? f : std::string_view();
+}
+
+// the text is ONE quoted literal: its closing quote (escapes skipped) is the last byte, so `"a" + input + "b"` is an expression
+inline bool isOneQuotedLiteral( std::string_view v ) noexcept
+{
+    std::size_t close = 1;
+    while( close < v.size() && v[close] != v.front() )
+    {
+        close += v[close] == '\\' ? 2 : 1;
+    }
+    return v.size() >= 2 && close == v.size() - 1;
+}
+
+// FLAG-SHAPE-LIT: the right side of an assignment is a constant: a number, a quoted string, true/false, a CONST word, or a name that says it is a
+// default (`DefaultMaxPods`). A field or a call (`in.MaxPods`, `f()`) is not.
+inline bool isConstantValue( std::string_view v ) noexcept
+{
+    v = trimWs( v );
+    while( !v.empty() && ( v.back() == ',' || v.back() == ';' ) )
+    {
+        v = trimWs( v.substr( 0, v.size() - 1 ) );
+    }
+    if( v.empty() )
+    {
+        return false;
+    }
+    if( v.front() == '"' || v.front() == '\'' )
+    {
+        return isOneQuotedLiteral( v );
+    }
+    if( std::isdigit( static_cast<unsigned char>( v.front() ) ) != 0 || ( v.front() == '-' && v.size() > 1 && std::isdigit( static_cast<unsigned char>( v[1] ) ) != 0 ) )
+    {
+        return std::all_of( v.begin() + 1, v.end(), []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '.'; } );
+    }
+    if( v == "true" || v == "false" || v == "True" || v == "False" )
+    {
+        return true;
+    }
+    const bool ident = std::all_of( v.begin(), v.end(), []( char c ) { return namesplit::isIdentChar( c ); } );
+    return ident && ( isConstShaped( v ) || v.starts_with( "Default" ) || v.starts_with( "default" ) );
+}
+
+// FLAG-SHAPE-LIT: the assigned expression at the start of `rest` (the line after `=` or `:`): up to the first `;`, `//`, `/*` or ` #` outside a string, so a trailing
+// comment or a second statement on the line does not hide a constant (`obj.MaxPods = 110 // default`)
+inline std::string_view assignedExprOf( std::string_view rest ) noexcept
+{
+    char quote = 0;
+    for( std::size_t i = 0; i < rest.size(); ++i )
+    {
+        const char c = rest[i];
+        if( quote != 0 )
+        {
+            i += c == '\\' ? 1 : 0;
+            quote = c == quote ? 0 : quote;
+        }
+        else if( c == '"' || c == '\'' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == ';' || ( c == '/' && i + 1 < rest.size() && ( rest[i + 1] == '/' || rest[i + 1] == '*' ) ) || ( c == '#' && i > 0 && ( rest[i - 1] == ' ' || rest[i - 1] == '\t' ) ) )
+        {
+            return rest.substr( 0, i );
+        }
+    }
+    return rest;
+}
+
+// FLAG-SHAPE-LIT: the line at `at` (a hit of `field`) writes a constant to the field: `x.F = <const>` (not `==`) or a struct-literal key `F: <const>`
+inline bool isConstantWriteAt( std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    if( at + n > text.size() || ( at + n < text.size() && namesplit::isIdentChar( text[at + n] ) ) )
+    {
+        return false;
+    }
+    const std::size_t ls  = at == 0 ? 0 : ( text.rfind( '\n', at - 1 ) == std::string_view::npos ? 0 : text.rfind( '\n', at - 1 ) + 1 );
+    const std::size_t nl  = text.find( '\n', at );
+    const std::string_view after = trimWs( text.substr( at + n, ( nl == std::string_view::npos ? text.size() : nl ) - at - n ) );
+    const bool dotted = at > 0 && text[at - 1] == '.';
+    if( dotted && after.starts_with( '=' ) && !after.starts_with( "==" ) )
+    {
+        return isConstantValue( assignedExprOf( after.substr( 1 ) ) );
+    }
+    const bool opensLine = trimWs( text.substr( ls, at - ls ) ).empty();
+    if( opensLine && after.starts_with( ':' ) && !after.starts_with( "::" ) && !after.starts_with( ":=" ) )
+    {
+        return isConstantValue( assignedExprOf( after.substr( 1 ) ) );
+    }
+    return false;
+}
+
 using LineRange = std::pair<std::uint32_t, std::uint32_t>;   // inclusive, 1-based
 
 // the excerpt of a body: its signature line `first` plus a window [site-before, site+after] per site line, clipped to
-// [first, last], overlapping or touching windows merged; ascending and disjoint
-inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& siteLines, std::uint32_t first, std::uint32_t last )
+// [first, last], overlapping or touching windows merged; ascending and disjoint. `armHeads` (parallel to siteLines, 0 = none): a window
+// starts there instead, at the head of the match arm or case that holds its site (armHeadAbove)
+// the first line of site line `l`'s window: the arm head `head` above it when there is one (0 = none), else kForLiteralExcerptBefore up
+inline std::uint32_t excerptWindowStart( std::uint32_t l, std::uint32_t head ) noexcept
+{
+    if( head > 0 && head < l )
+    {
+        return head;
+    }
+    return l > kForLiteralExcerptBefore ? l - kForLiteralExcerptBefore : 1u;
+}
+
+inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& siteLines, std::uint32_t first, std::uint32_t last,
+                                             const std::vector<std::uint32_t>& armHeads = {} )
 {
     std::vector<LineRange> w{ LineRange{ first, first } };
-    for( const std::uint32_t l : siteLines )
+    for( std::size_t i = 0; i < siteLines.size(); ++i )
     {
-        const std::uint32_t a = std::max( first, l > kForLiteralExcerptBefore ? l - kForLiteralExcerptBefore : 1u );
+        const std::uint32_t l = siteLines[i];
+        const std::uint32_t a = std::max( first, excerptWindowStart( l, i < armHeads.size() ? armHeads[i] : 0 ) );
         const std::uint32_t b = std::min( last, l + kForLiteralExcerptAfter );
         if( a <= b )
         {
@@ -2063,18 +3307,19 @@ inline std::vector<LineRange> excerptRanges( const std::vector<std::uint32_t>& s
     return merged;
 }
 
-// the lines of every range of `text`, each range newline-joined (the grep verb's own slicing core, search.h grepLineRangeText),
-// the ranges joined by a line holding one ellipsis
-inline std::string linesOfRanges( const std::string& text, const std::vector<LineRange>& ranges )
+// the byte offset where each line of `text` starts (line 1 at index 0)
+inline std::vector<std::size_t> lineStartsOf( std::string_view text )
 {
-    std::vector<std::size_t> starts{ 0 };
-    for( std::size_t i = 0; i < text.size(); ++i )
-    {
-        if( text[i] == '\n' )
-        {
-            starts.push_back( i + 1 );
-        }
-    }
+    const std::vector<std::uint32_t> breaks = lineBreaksOf( text );   // serialize.h: the newline offsets
+    std::vector<std::size_t>         starts( breaks.size() + 1, 0 );
+    std::transform( breaks.begin(), breaks.end(), starts.begin() + 1, []( std::uint32_t b ) { return std::size_t( b ) + 1; } );
+    return starts;
+}
+
+// the lines of every range of `text`, each range newline-joined (the grep verb's own slicing core, search.h grepLineRangeText),
+// the ranges joined by a line holding one ellipsis. `starts` = lineStartsOf( text ), computed once by a caller that also reads lines by number
+inline std::string linesOfRangesAt( const std::string& text, const std::vector<LineRange>& ranges, const std::vector<std::size_t>& starts )
+{
     const std::uint32_t count = grepRealLineCount( text, starts );
     std::string         out;
     for( const LineRange& r : ranges )
@@ -2088,6 +3333,10 @@ inline std::string linesOfRanges( const std::string& text, const std::vector<Lin
         out += grepLineRangeText( text, starts, count, r.first, b );
     }
     return out;
+}
+inline std::string linesOfRanges( const std::string& text, const std::vector<LineRange>& ranges )
+{
+    return linesOfRangesAt( text, ranges, lineStartsOf( text ) );
 }
 
 // cut every line of `lines` longer than `cap` bytes on a UTF-8 boundary (an ellipsis marks the cut); true when one was cut
@@ -2130,21 +3379,193 @@ inline std::string rangesAttr( const std::vector<LineRange>& ranges )
     }
     return out;
 }
+// BODY-ABOVE-CHECK (OS-6 finding 1): `head` (` l= p= n=`) stands in a <b> element of `served`, the body printed whole above. A hop row
+// (`<h l= p= n=>`) or a fold's skip carries the same attributes and printed no body: it is no `body="above"` (rw-02 P1 said above for a body
+// the answer never served). Neither is a <b truncated="1">, whose lines may stop before the site (a 115-line body cut at line 87).
+inline bool servedBodyHead( std::string_view served, std::string_view head ) noexcept
+{
+    for( std::size_t at = served.find( head ); at != std::string_view::npos; at = served.find( head, at + 1 ) )
+    {
+        const std::size_t open  = served.rfind( '<', at );
+        const std::size_t close = open == std::string_view::npos ? std::string_view::npos : served.find( '>', open );
+        if( open != std::string_view::npos && served.substr( open, 3 ) == "<b " && close > at && close != std::string_view::npos
+            && served.substr( open, close - open ).find( " truncated=\"1\"" ) == std::string_view::npos )
+        {
+            return true;   // a whole <b>; a truncated one (lines=1-87/115) may leave the site out, so this answer serves its own excerpt
+        }
+    }
+    return false;
+}
+
+// EXCERPT-ARM: the line opens a match arm or a case of `lang` (allowlist): a Rust, C# or PHP `Pat => {` / `Pat =>` (its pattern's parens
+// balanced, no assignment or declaration before the arrow: never a JS `x => {` callback), a `case X:` / `default:` (C, C++, Java, JS, TS, Go,
+// C#, Swift, Python `match`), a Python `elif`/`else:`, a Ruby `when`/`elsif`/`else`, a C-family or Go `else if (...) {` / `} else {`. An `if`,
+// a loop, a function or anything else is no arm.
+inline bool isArmHead( std::string_view code, Lang lang ) noexcept
+{
+    const std::string_view t = trimWs( code );
+    if( t.empty() )
+    {
+        return false;
+    }
+    const auto startsWord = [ & ]( std::string_view w ) { return t.starts_with( w ) && ( t.size() == w.size() || !namesplit::isIdentChar( t[w.size()] ) ); };
+    const ArmOpeners  family = langFacts( lang ).armOpeners;
+    const std::size_t arrow  = t.find( "=>" );
+    if( family == ArmOpeners::FatArrow && arrow != std::string_view::npos && arrow > 0 && ( t.ends_with( "=>" ) || t.ends_with( "{" ) ) )
+    {
+        int depth = 0;
+        for( std::size_t i = 0; i < arrow; ++i )
+        {
+            depth += t[i] == '(' || t[i] == '[' ? 1 : ( t[i] == ')' || t[i] == ']' ? -1 : 0 );
+            const bool assign = t[i] == '=' && ( i == 0 || std::string_view( "=!<>" ).find( t[i - 1] ) == std::string_view::npos ) && ( i + 1 >= t.size() || t[i + 1] != '=' );
+            if( depth < 0 || assign )
+            {
+                return false;
+            }
+        }
+        return depth == 0 && !startsWord( "let" ) && !startsWord( "const" ) && !startsWord( "var" ) && !startsWord( "return" ) && !startsWord( "fn" ) && !startsWord( "pub" );
+    }
+    // `case X:`; a `case: {` is a JS or TS object key (no label has nothing between `case` and the colon)
+    const bool caseLabel = startsWord( "case" ) && !trimWs( t.substr( 4 ) ).starts_with( ':' );
+    if( ( caseLabel || startsWord( "default" ) ) && ( t.ends_with( ':' ) || t.ends_with( ": {" ) || t.ends_with( ":{" ) ) )
+    {
+        return true;
+    }
+    if( family == ArmOpeners::PythonElif )
+    {
+        return ( startsWord( "elif" ) || startsWord( "else" ) ) && t.ends_with( ':' );
+    }
+    if( family == ArmOpeners::RubyWhen )
+    {
+        return startsWord( "when" ) || startsWord( "elsif" ) || t == "else";
+    }
+    const std::string_view e = t.starts_with( '}' ) ? trimWs( t.substr( 1 ) ) : t;
+    return ( e.starts_with( "else if" ) || e == "else {" || e == "else{" ) && t.ends_with( '{' );
+}
+
+// the `n` bytes at `p` of `t` stand as a whole identifier (not inside a longer one, not a member after a `.`)
+inline bool wholeWordAt( std::string_view t, std::size_t p, std::size_t n ) noexcept
+{
+    return ( p == 0 || ( !namesplit::isIdentChar( t[p - 1] ) && t[p - 1] != '.' ) ) && ( p + n >= t.size() || !namesplit::isIdentChar( t[p + n] ) );
+}
+inline std::string_view lineAtNumber( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l ) noexcept
+{
+    const std::size_t b = starts[l - 1];
+    const std::size_t e = l < starts.size() ? starts[l] - 1 : text.size();
+    return std::string_view( text ).substr( b, e > b ? e - b : 0 );
+}
+
+// the line `l` heads an arm of a block that a line above it opens with one of `words` (`switch`, `select`, `match`): the nearest line above (below `first`) that is
+// less indented than `l`, or, with `aligned`, that stands at its indent and is no `case X:` / `default:` label of the same block (gofmt and many C++ styles align the
+// labels with the `switch` header). A JS or TS object literal's `default: {` key (`return {`, `x = {`, `f({`) opens no such block.
+inline bool opensBlockAbove( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l, std::uint32_t first, std::span<const std::string_view> words, bool aligned )
+{
+    const std::size_t in = lintdetail::indentOf( lineAtNumber( text, starts, l ) );
+    for( std::uint32_t k = l; k-- > first && k > 0; )
+    {
+        const std::string_view line = lineAtNumber( text, starts, k );
+        const std::string_view t    = trimWs( line );
+        if( t.empty() )
+        {
+            continue;
+        }
+        const std::size_t ind  = lintdetail::indentOf( line );
+        const std::string_view code = openerCode( line );
+        const auto has = [ & ]() { return std::any_of( words.begin(), words.end(), [ & ]( std::string_view w ) { return namesplit::containsWordBoundedBy( code, w, namesplit::isIdentChar ); } ); };
+        if( ind < in )
+        {
+            return has();
+        }
+        if( aligned && ind == in )
+        {
+            const std::string_view c = trimWs( code );
+            const auto word = [ & ]( std::string_view w ) { return c.starts_with( w ) && ( c.size() == w.size() || !namesplit::isIdentChar( c[w.size()] ) ); };
+            const bool label = ( word( "case" ) && !trimWs( c.substr( 4 ) ).starts_with( ':' ) ) || ( word( "default" ) && c.ends_with( ':' ) );
+            if( !label && has() )
+            {
+                return true;   // the `switch (x) {` header standing at the labels' own indent
+            }
+            // a label, a closing brace or a body line at the labels' indent: on up
+        }
+    }
+    return false;
+}
+
+// the line `l` (the head `code` of an arm, per isArmHead) holds up as one: a `default:` needs a `switch` or `select` block above it (not a JS or TS object key), and a
+// `pat => {` (Rust, C#, PHP) a `match` or `switch` block above it (a standalone `x => {` callback is no arm)
+inline bool armHeadHoldsUp( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l, std::uint32_t first, std::string_view code, Lang lang )
+{
+    static constexpr std::array<std::string_view, 2> kSwitchWords{ "switch", "select" };
+    static constexpr std::array<std::string_view, 2> kMatchWords{ "match", "switch" };
+    const std::string_view t = trimWs( code );
+    if( t.starts_with( "default" ) )
+    {
+        return opensBlockAbove( text, starts, l, first, kSwitchWords, /*aligned=*/true );
+    }
+    return langFacts( lang ).armOpeners != ArmOpeners::FatArrow || t.find( "=>" ) == std::string_view::npos || opensBlockAbove( text, starts, l, first, kMatchWords, /*aligned=*/false );
+}
+
+// EXCERPT-ARM: the head line of the match arm or case that holds the site at `site` (1-based), when the window [site-1, ...] leaves it out
+// and it stands at most kForLiteralArmLines lines up, below `first` (the signature); 0 otherwise. The walk climbs the lines that open a less
+// indented block: one already inside the window is shown, so the walk goes on to the next (rw-02: an `else {` at site-1 inside the arm
+// `(Table, Source) => {` seven lines up); the first one above the window must be an arm (isArmHead), anything else ends it with no widening.
+inline std::uint32_t armHeadAbove( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t site, std::uint32_t first, Lang lang )
+{
+    const auto lineText = [ & ]( std::uint32_t l ) { return lineAtNumber( text, starts, l ); };
+    if( site < 2 || site > starts.size() )
+    {
+        return 0;
+    }
+    const std::uint32_t windowStart = site > kForLiteralExcerptBefore ? site - kForLiteralExcerptBefore : 1u;
+    std::size_t         cur         = lintdetail::indentOf( lineText( site ) );
+    for( std::uint32_t l = site - 1; l > first && l + kForLiteralArmLines >= site; --l )
+    {
+        const std::string_view line = lineText( l );
+        const std::string_view t    = trimWs( line );
+        const std::size_t      in   = lintdetail::indentOf( line );
+        if( t.empty() || in >= cur || openerWalkSkips( t ) )
+        {
+            continue;
+        }
+        cur = in;
+        if( l >= windowStart )
+        {
+            continue;   // an opener the window already shows: the arm, if any, is further up
+        }
+        const std::string_view code = openerCode( line );
+        return isArmHead( code, lang ) && armHeadHoldsUp( text, starts, l, first, code, lang ) ? l : 0;
+    }
+    return 0;
+}
+
 // <x> for the body [first, last] of `s` in `text`: the signature line and one window per site line (l= lists the ranges, of= the body,
-// next= the whole body)
+// next= the whole body); arm="1" when a window starts at the head of the match arm or case holding its site (armHeadAbove)
 inline std::string excerptElement( const std::string& text, const std::string& path, const Symbol& s, std::uint32_t first, std::uint32_t last,
-                                   const std::vector<std::uint32_t>& siteLines, RedactCounts* redact )
+                                   const std::vector<std::uint32_t>& siteLines, RedactCounts* redact, bool* armWidened = nullptr )
 {
     std::vector<char>      esc;
-    const std::vector<LineRange> ranges = excerptRanges( siteLines, first, last );
+    const std::vector<std::size_t> starts = lineStartsOf( text );   // once per body: armHeadAbove reads lines by number, linesOfRanges slices them
+    std::vector<std::uint32_t> heads( siteLines.size(), 0 );
+    bool                       widened = false;
+    for( std::size_t i = 0; i < siteLines.size(); ++i )
+    {
+        heads[i] = armHeadAbove( text, starts, siteLines[i], first, s.lang );
+        widened  = widened || heads[i] > 0;
+    }
+    const std::vector<LineRange> ranges = excerptRanges( siteLines, first, last, heads );
     std::string x = "<x p=\"";
     x += escapeXml( path, esc );
     x += "\" n=\"";
     x += escapeXml( s.name, esc );
     x += "\" l=\"" + rangesAttr( ranges ) + "\" of=\"" + std::to_string( first ) + "-" + std::to_string( last ) + "\"";
+    x += widened ? " arm=\"1\"" : "";
+    if( armWidened != nullptr )
+    {
+        *armWidened = *armWidened || widened;
+    }
     // train 42b T-3: each window line is cut at kForLiteralLineBytes like an <ls> row (a minified one-line body printed 48.9 KB
     // whole); cut="1" says a line was cut, next= prints the whole body
-    std::string lines = linesOfRanges( text, ranges );
+    std::string lines = linesOfRangesAt( text, ranges, starts );
     redactInPlace( lines, redact );   // CR 4423843223: a window of raw source is a body-emission seam; redact BEFORE the cut so a key is never half-cut
     const bool  cut   = capLineBytes( lines, kForLiteralLineBytes );
     x += cut ? " cut=\"1\"" : "";
@@ -2163,7 +3584,559 @@ struct ForLiteralLimits
     bool        withLegend = true;       // only the first element of a task carries the legend comments
     bool        tableOnly  = false;      // TableCue::TableRowOnly: no table row, no block
     bool        cutLegendAbove = false;  // an earlier element of the task carries the lit_cut legend
+    bool        tailKeysOnly   = false;  // the last part of a dotted name, tried after the name found nothing: only quoted-key rows and its definition are listed
+    bool        strongOnly     = false;  // TableCue::StrongRowOnly: only registration calls, top-level macro/call rows and macro-table rows are listed (weak=)
+    bool        tailLegendAbove = false; // an earlier element of the task carries the tail= legend
+    bool        armLegendAbove  = false; // an earlier element of the task carries the arm= legend
+    bool        subLegendAbove  = false; // an earlier element of the task carries the subscript reg= / lr legend
 };
+
+namespace lit_detail
+{
+// FLAG-SHAPE-LIT: the default a flag row names (def=, on row `row`) and the constant writes of the field it names (ld rows)
+struct FlagDefault
+{
+    std::size_t row = SIZE_MAX;   // the row that carries def=; SIZE_MAX = none
+    std::string text;             // def=, cut to kForFlagDefaultMaxBytes and redacted
+    std::string writesXml;        // the <ld> rows, at most kForFlagWriteRows
+    std::size_t writeCount = 0;   // writes=: every constant write read
+    bool        writesFloor = false;   // the field's scan was partial or past kForFlagWriteHits: writes= is a floor
+};
+
+// one file's text at a time, read once per run of hits in it
+struct OneFileText
+{
+    std::uint32_t file = UINT32_MAX;
+    std::string   text;
+    std::vector<std::size_t> starts;   // lineStartsOf( text ), built on first use per file
+    bool          haveStarts = false;
+    bool          useMemo    = true;    // the span-tier memo may be read and written (false under --no-cache)
+    bool          curFailed  = false;   // the file now held could not be read
+    bool          unread     = false;   // a read failed since last cleared: its empty text is "could not read", not "no hits"
+    const std::string& of( const IngestResult& ing, std::uint32_t fileId )
+    {
+        if( file != fileId )
+        {
+            file       = fileId;
+            haveStarts = false;
+            std::optional<std::string> read = docparse::detail::readWholeFile( diskPath( ing, fileId ) );
+            curFailed  = !read.has_value();
+            text       = std::move( read ).value_or( std::string() );
+        }
+        unread = unread || curFailed;   // every use of a file that could not be read counts, not only the first
+        return text;
+    }
+    const std::vector<std::size_t>& startsOfText()
+    {
+        if( !haveStarts )
+        {
+            starts     = lineStartsOf( text );
+            haveStarts = true;
+        }
+        return starts;
+    }
+};
+
+// the type spelling next to a name in a signature: after it (`c *kubeletconfig.Config`, `c: &mut Config`, `c Config`; `at` = the byte after the name) or
+// before it (C++ and Java `const Config& c`; `at` = the name's first byte). The last segment of a qualified type; "" when nothing stands there.
+// A word that stands between a name and its type (`mut`, `const`) or before a declared name (`var x`) is passed over.
+inline std::string_view typeNextTo( std::string_view sig, std::size_t at, bool after ) noexcept
+{
+    static constexpr auto kNoise = std::to_array<std::string_view>( { "mut", "const", "struct", "dyn", "var", "let", "val", "static", "final", "pub", "auto", "func", "fn", "def" } );
+    const auto            isRun  = []( char c ) { return namesplit::isIdentChar( c ) || c == '.' || c == ':'; };
+    const std::string_view skip  = after ? std::string_view( " \t:*&[]" ) : std::string_view( " \t*&" );
+    std::string_view       id;
+    do
+    {
+        while( after ? at < sig.size() && skip.find( sig[at] ) != std::string_view::npos : at > 0 && skip.find( sig[at - 1] ) != std::string_view::npos )
+        {
+            after ? ++at : --at;
+        }
+        const std::size_t from = at;
+        while( after ? at < sig.size() && isRun( sig[at] ) : at > 0 && isRun( sig[at - 1] ) )
+        {
+            after ? ++at : --at;
+        }
+        id = after ? sig.substr( from, at - from ) : sig.substr( at, from - at );
+    } while( std::find( kNoise.begin(), kNoise.end(), id ) != kNoise.end() );
+    const std::size_t k = id.find_last_of( ".:" );
+    return k == std::string_view::npos ? id : id.substr( k + 1 );
+}
+
+// the type name of the parameter or receiver `name` in a signature; "" when it names none (an untyped parameter, a type shared by a list `a, b *T`)
+inline std::string_view paramTypeIn( std::string_view sig, std::string_view name ) noexcept
+{
+    for( std::size_t p = sig.find( name ); !name.empty() && p != std::string_view::npos; p = sig.find( name, p + 1 ) )
+    {
+        if( !wholeWordAt( sig, p, name.size() ) )
+        {
+            continue;
+        }
+        for( const std::string_view type : { typeNextTo( sig, p + name.size(), true ), typeNextTo( sig, p, false ) } )
+        {
+            if( !type.empty() )
+            {
+                return type;
+            }
+        }
+    }
+    return {};
+}
+
+// the candidates that stand in code: a write in a comment or a string is no write (the span tier says which). A candidate in a file the span tier did not parse (or past
+// kForLiteralTierFiles files) is kept and `floor` is set: the count is then not a verified total.
+inline std::vector<GrepRawHit> codeWritesOf( const IngestResult& ing, const std::vector<GrepRawHit>& candidates, bool useMemo, bool& floor )
+{
+    std::vector<std::uint32_t> tierFiles;
+    std::vector<std::string>   tierPaths;
+    for( const GrepRawHit& r : candidates )
+    {
+        if( tierFiles.size() < kForLiteralTierFiles && std::find( tierFiles.begin(), tierFiles.end(), r.fileId ) == tierFiles.end() )
+        {
+            tierFiles.push_back( r.fileId );
+            tierPaths.push_back( diskPath( ing, r.fileId ) );
+        }
+    }
+    const SpanTierBatch     batch = spanTiersOfFiles( std::span<const std::string>( tierPaths ), useMemo );
+    std::vector<GrepRawHit> writes;
+    for( const GrepRawHit& r : candidates )
+    {
+        const std::size_t idx = std::size_t( std::find( tierFiles.begin(), tierFiles.end(), r.fileId ) - tierFiles.begin() );
+        const bool        classified = idx < batch.perFile.size() && batch.perFile[idx].isParsed;
+        const SpanTier    tier       = classified ? spanTierAt( batch.perFile[idx], r.byteOffset ) : SpanTier::Code;
+        floor = floor || !classified;
+        if( tier != SpanTier::Comment && tier != SpanTier::String )
+        {
+            writes.push_back( r );
+        }
+    }
+    return writes;
+}
+
+// the source-tier constant writes of `field` (isConstantWriteAt), the scan's first kForFlagWriteHits hits, those in code (codeWritesOf); floor when the scan was cut or
+// a candidate could not be classified
+inline std::pair<std::vector<GrepRawHit>, bool> constantWritesOf( const IngestResult& ing, const std::string& field, OneFileText& files )
+{
+    const GrepCollection    fc    = grepCollect( ing, field, /*regex=*/false, /*noPrefilter=*/false );
+    bool                    floor = !fc.cleanScan() || fc.raw.size() > kForFlagWriteHits;
+    std::vector<GrepRawHit> candidates;
+    for( std::size_t k = 0; k < fc.raw.size() && k < kForFlagWriteHits; ++k )
+    {
+        const GrepRawHit&      r = fc.raw[k];
+        const std::string_view p = rootRelPath( ing, r.fileId );
+        if( pathTierOf( p ) == PathTier::Source && !isBareWordCodePath( p ) && isConstantWriteAt( files.of( ing, r.fileId ), r.byteOffset, field.size() ) )
+        {
+            candidates.push_back( r );
+        }
+    }
+    std::vector<GrepRawHit> writes = codeWritesOf( ing, candidates, files.useMemo, floor );
+    return { std::move( writes ), floor };
+}
+
+// the order the write rows print in: a write in a function or file named for defaults first (SetDefaults_*, defaults.go), else scan order
+inline std::vector<std::size_t> defaultsFirstOrder( const IngestResult& ing, const std::vector<GrepHit>& wh )
+{
+    std::vector<int> rank( wh.size() );   // computed once per row, not per comparison
+    for( std::size_t k = 0; k < wh.size(); ++k )
+    {
+        std::string w = wh[k].enclosing + " " + std::string( rootRelPath( ing, wh[k].fileId ) );
+        std::transform( w.begin(), w.end(), w.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        rank[k] = w.find( "default" ) != std::string::npos ? 0 : 1;
+    }
+    std::vector<std::size_t> order( wh.size() );
+    for( std::size_t k = 0; k < order.size(); ++k )
+    {
+        order[k] = k;
+    }
+    std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b ) { return rank[a] < rank[b]; } );
+    return order;
+}
+
+// one <ld p= l= in= ink=> row: the write's line, leading blanks dropped, redacted and cut to kForLiteralLineBytes
+template <class RelPath>
+inline void appendWriteRow( std::string& xml, const IngestResult& ing, const GrepHit& w, const RelPath& relPath, RedactCounts* redact, std::vector<char>& esc,
+                            std::string_view tag = "ld" )
+{
+    xml.append( "<" ).append( tag ).append( " p=\"" );
+    xml += escapeXml( relPath( w.fileId ), esc );
+    xml += "\" l=\"" + std::to_string( w.line ) + "\"";
+    if( w.enclosingId != kNoNode )
+    {
+        xml += " in=\"";
+        xml += escapeXml( w.enclosing, esc );
+        xml += "\" ink=\"";
+        xml += symTag( ing.symbols[w.enclosingId].kind );
+        xml += "\"";
+    }
+    const std::size_t lead = w.text.find_first_not_of( " \t" );
+    std::string       line = lead == std::string::npos ? std::string() : w.text.substr( lead );
+    redactInPlace( line, redact );
+    truncateUtf8WithEllipsis( line, kForLiteralLineBytes );
+    xml += "><![CDATA[";
+    appendCdataSafe( line, xml );
+    xml.append( "]]></" ).append( tag ).push_back( '>' );
+}
+
+// the owner of the field `def` names (`c.MaxPods`), as a name the code around its writes spells: the type of the receiver `c` in the signature of the
+// function holding the flag row (`c *kubeletconfig.Config` -> Config), else for a package-level variable `config` its declared type, else its own name
+// (an anonymous struct's declaration spells it); "" when nothing says (no enclosing function, an untyped parameter, a chain `a.b.F`, `this`/`self`)
+inline std::string ownerTypeOf( const IngestResult& ing, const GrepHit& row, std::string_view def, OneFileText& files )
+{
+    while( !def.empty() && ( def.front() == '&' || def.front() == '*' ) )
+    {
+        def.remove_prefix( 1 );
+    }
+    const std::size_t dot = def.rfind( '.' );
+    if( dot == std::string_view::npos || row.enclosingId == kNoNode )
+    {
+        return {};
+    }
+    const std::string_view recv = def.substr( 0, dot );
+    if( !std::all_of( recv.begin(), recv.end(), []( char c ) { return namesplit::isIdentChar( c ); } ) )
+    {
+        return {};
+    }
+    const auto sigTypeOf = [ & ]( const Symbol& s ) -> std::string
+    {
+        const std::string& t = files.of( ing, s.fileId );
+        return s.sigStartByte < s.sigEndByte && s.sigEndByte <= t.size() ? std::string( paramTypeIn( std::string_view( t ).substr( s.sigStartByte, s.sigEndByte - s.sigStartByte ), recv ) ) : std::string();
+    };
+    if( std::string type = sigTypeOf( ing.symbols[row.enclosingId] ); !type.empty() )
+    {
+        return type;
+    }
+    const auto var = std::find_if( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.kind == SymKind::Var && s.name == recv; } );
+    if( var == ing.symbols.end() || recv.size() < kForFlagMinName )
+    {
+        return {};
+    }
+    std::string type = sigTypeOf( *var );
+    return type.empty() ? std::string( recv ) : type;
+}
+
+// the write `w` belongs to the owner type: the function holding it names the type (signature or body), or, outside any function, one of the
+// kForFlagOwnerMaxLines lines above it does (a struct literal `Config{`). A name match: no type check.
+inline bool writeNamesOwner( const IngestResult& ing, const GrepHit& w, std::string_view type, OneFileText& files )
+{
+    const std::string& t = files.of( ing, w.fileId );
+    if( w.enclosingId != kNoNode )
+    {
+        const Symbol& s = ing.symbols[w.enclosingId];
+        return s.fileId == w.fileId && s.sigStartByte < s.endByte && s.endByte <= t.size() && namesplit::containsWordBoundedBy( std::string_view( t ).substr( s.sigStartByte, s.endByte - s.sigStartByte ), type, namesplit::isIdentChar );
+    }
+    const std::vector<std::size_t>& starts = files.startsOfText();
+    if( w.line < 1 || w.line > starts.size() )
+    {
+        return false;
+    }
+    const std::size_t lo = starts[w.line > kForFlagOwnerMaxLines ? w.line - 1 - kForFlagOwnerMaxLines : 0];
+    const std::size_t hi = w.line < starts.size() ? starts[w.line] : t.size();
+    return namesplit::containsWordBoundedBy( std::string_view( t ).substr( lo, hi - lo ), type, namesplit::isIdentChar );
+}
+
+// the first of `hits` (the shown rows, `rows` parallel) that is no comment and whose call names a default (flagDefaultAt), and when that default names a
+// field (defaultFieldOf) of a receiver whose type is known (ownerTypeOf), the field's constant writes in code that names that type
+template <class RelPath>
+inline FlagDefault flagDefaultOfRows( const IngestResult& ing, const std::vector<Site>& rows, const std::vector<GrepHit>& hits, const RelPath& relPath,
+                                      RedactCounts* redact, std::vector<char>& esc, bool useMemo )
+{
+    FlagDefault out;
+    OneFileText files;
+    files.useMemo = useMemo;
+    for( std::size_t i = 0; i < hits.size() && out.row == SIZE_MAX; ++i )
+    {
+        if( rows[i].k != 'c' )
+        {
+            out.text = flagDefaultAt( files.of( ing, rows[i].raw.fileId ), rows[i].raw.byteOffset );
+            out.row  = out.text.empty() ? SIZE_MAX : i;
+        }
+    }
+    redactInPlace( out.text, redact );   // before the cut: a key is never half-cut
+    const std::string field( defaultFieldOf( out.text ) );
+    const std::string owner = field.empty() ? std::string() : ownerTypeOf( ing, hits[out.row], out.text, files );
+    out.writesFloor = !field.empty() && owner.empty();   // def= names a field whose receiver type is unknown: no write scan ran, so writes="0" is not a total
+    if( !owner.empty() )
+    {
+        files.unread            = false;
+        auto [ writes, floor ]  = constantWritesOf( ing, field, files );
+        out.writesFloor         = floor;
+        std::vector<GrepHit> wh = grepEnrich( ing, std::span<const GrepRawHit>( writes ) );
+        wh.erase( std::remove_if( wh.begin(), wh.end(), [ & ]( const GrepHit& w ) { return !writeNamesOwner( ing, w, owner, files ); } ), wh.end() );
+        out.writesFloor = out.writesFloor || files.unread;   // a write file that could not be read again is an omitted write
+        out.writeCount                       = wh.size();
+        const std::vector<std::size_t> order = defaultsFirstOrder( ing, wh );
+        for( std::size_t k = 0; k < order.size() && k < kForFlagWriteRows; ++k )
+        {
+            appendWriteRow( out.writesXml, ing, wh[order[k]], relPath, redact, esc );
+        }
+    }
+    truncateUtf8WithEllipsis( out.text, kForFlagDefaultMaxBytes );
+    return out;
+}
+
+// REG-READER (b): `name` at `at` of `line` reads the table: `name[k]` that is not the left side of `=`, or `name.get(` / `name.Get(`. A longer name or a
+// field of another receiver (`p.storage[`) is not this table.
+inline bool readsTableAt( std::string_view line, std::size_t at, std::string_view name ) noexcept
+{
+    if( at > 0 && ( taskroute::wordByte( line[at - 1] ) || line[at - 1] == '.' || line[at - 1] == '>' || line[at - 1] == ':' ) )
+    {
+        return false;
+    }
+    const std::size_t      after = at + name.size();
+    const std::string_view rest  = line.substr( after );
+    if( rest.starts_with( ".get(" ) || rest.starts_with( ".Get(" ) )
+    {
+        return true;
+    }
+    if( rest.empty() || rest.front() != '[' )
+    {
+        return false;
+    }
+    const std::size_t close = bracketCloseOf( line, after );
+    if( close == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::size_t j = line.find_first_not_of( " \t", close + 1 );
+    return !( j != std::string_view::npos && line[j] == '=' && ( j + 1 >= line.size() || line[j + 1] != '=' ) );
+}
+
+// `v` (an assigned value, `await` aside) IS a call of `fn`: a receiver chain (`p.`, `self->`, `ns::`) and then `fn(`
+inline bool valueIsCallOf( std::string_view v, std::string_view fn ) noexcept
+{
+    v = v.starts_with( "await " ) ? trimWs( v.substr( 6 ) ) : v;
+    while( !v.empty() && std::isdigit( static_cast<unsigned char>( v.front() ) ) == 0 )
+    {
+        const std::string_view run  = taskroute::identifierRunOf( v );
+        const std::string_view rest = v.substr( run.size() );
+        if( run.empty() || ( run == fn && trimWs( rest ).starts_with( "(" ) ) )
+        {
+            return !run.empty();
+        }
+        const std::size_t sep = rest.starts_with( "->" ) || rest.starts_with( "::" ) ? 2 : ( rest.starts_with( "." ) ? 1 : 0 );
+        if( sep == 0 )
+        {
+            return false;
+        }
+        v = rest.substr( sep );
+    }
+    return false;
+}
+
+// a line's statement with a leading declaration word (`const`, `let`, `var`, `auto`, `final`, `val`) stepped over: the declared name comes first
+inline std::string_view pastDeclWord( std::string_view t ) noexcept
+{
+    static constexpr std::array<std::string_view, 6> kDeclWords{ "auto", "const", "final", "let", "val", "var" };
+    const std::string_view                           word = taskroute::identifierRunOf( t );
+    const bool decl = std::find( kDeclWords.begin(), kDeclWords.end(), word ) != kDeclWords.end() && word.size() < t.size() && ( t[word.size()] == ' ' || t[word.size()] == '\t' );
+    return decl ? trimWs( t.substr( word.size() ) ) : t;
+}
+
+// a caller's local that holds what the builder returns: `s := p.NewRESTStorage(`, `s, err := NewX(`, `s = await register_x(`, `const s = registerX(`; "" when the
+// line is none. The call must BE the assigned value (a receiver chain before it, `await` aside): `s = choose(NewX())` binds what choose returns, not the table.
+inline std::string_view boundToCallOf( std::string_view line, std::string_view fn ) noexcept
+{
+    const std::string_view t    = pastDeclWord( trimWs( line ) );
+    const std::string_view name = taskroute::identifierRunOf( t );
+    std::size_t            i    = name.size();
+    while( i < t.size() && ( t[i] == ' ' || t[i] == ',' || taskroute::wordByte( t[i] ) ) )
+    {
+        ++i;   // `s, err` before the assignment
+    }
+    const std::size_t op = t.substr( i ).starts_with( ":=" ) ? 2 : ( i < t.size() && t[i] == '=' && ( i + 1 >= t.size() || t[i + 1] != '=' ) ? 1 : 0 );
+    return !name.empty() && op != 0 && !fn.empty() && valueIsCallOf( trimWs( t.substr( i + op ) ), fn ) ? name : std::string_view();
+}
+
+// the quoted parts of a computed key (`resource+"/log"` -> "/log"), which a reader's literal key shares
+inline std::vector<std::string_view> quotedPartsOf( std::string_view key )
+{
+    std::vector<std::string_view> out;
+    for( std::size_t i = 0; i < key.size(); ++i )
+    {
+        const char q = key[i];
+        if( q != '"' && q != '\'' )
+        {
+            continue;
+        }
+        const std::size_t e = key.find( q, i + 1 );
+        if( e == std::string_view::npos )
+        {
+            break;
+        }
+        if( e > i + 1 )
+        {
+            out.push_back( key.substr( i + 1, e - i - 1 ) );
+        }
+        i = e;
+    }
+    return out;
+}
+
+struct TableReaders
+{
+    std::string xml;            // the <lr> rows, at most kForTableReaderRows
+    std::size_t count = 0;      // readers=: every read found in the files read
+    bool        floor = false;  // a file could not be read, or callers past kForTableReaderFiles were not read: readers= is a floor
+};
+
+// REG-READER (b): the files a subscript row's table may be read in: the row's own, then the files of its function's callers by path, at most
+// kForTableReaderFiles of them (`floor` when more were left)
+inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const Graph* g, NodeId owner, std::uint32_t rowFile, bool& floor )
+{
+    std::vector<std::uint32_t> files{ rowFile };
+    if( g == nullptr || std::size_t( owner ) >= g->inEdges.rows() )
+    {
+        floor = true;   // no graph to find the callers on: their files went unread, so readers= cannot be a total
+        return files;
+    }
+    const auto*                ro = g->inEdges.rowOffsets();
+    const auto*                ci = g->inEdges.colIndices();
+    std::vector<std::uint32_t> callerFiles;
+    for( std::uint32_t e = ro[owner]; e < ro[owner + 1]; ++e )
+    {
+        callerFiles.push_back( ing.symbols[ci[e]].fileId );
+    }
+    std::sort( callerFiles.begin(), callerFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return std::tie( ing.files[a], a ) < std::tie( ing.files[b], b ); } );
+    callerFiles.erase( std::unique( callerFiles.begin(), callerFiles.end() ), callerFiles.end() );
+    callerFiles.erase( std::remove( callerFiles.begin(), callerFiles.end(), rowFile ), callerFiles.end() );
+    floor = callerFiles.size() > kForTableReaderFiles;
+    files.insert( files.end(), callerFiles.begin(), callerFiles.begin() + std::ptrdiff_t( std::min( callerFiles.size(), kForTableReaderFiles ) ) );
+    return files;
+}
+
+// the first read of any of `names` on `line` at or past `from` (npos: none): a walk over the line's identifier runs, each run that is a name tried as a read
+inline std::size_t tableReadOnLine( std::string_view line, const std::vector<std::string>& names, std::size_t from = 0 ) noexcept
+{
+    std::size_t i = from;
+    while( i < line.size() )
+    {
+        const std::size_t run = taskroute::identifierRunOf( line.substr( i ) ).size();
+        if( run == 0 )
+        {
+            ++i;
+            continue;
+        }
+        const std::string_view from = line.substr( i );   // a name may be a chain (`self._handlers`, `hass.data[DOMAIN]`)
+        if( std::any_of( names.begin(), names.end(), [ & ]( const std::string& n ) { return from.starts_with( n ) && readsTableAt( line, i, n ); } ) )
+        {
+            return i;
+        }
+        i += run;
+    }
+    return std::string_view::npos;
+}
+
+// the reads of `names` on the line at byte `ls` that stand in code (a comment or a string holds none), each one added to `count` (`consume(t[a], t[b])` is
+// two); the first one's offset in the line, or npos
+inline std::size_t codeReadsOnLine( std::string_view line, std::size_t ls, const std::vector<std::string>& names, const SpanTierMap& tiers, std::size_t& count ) noexcept
+{
+    std::size_t first = std::string_view::npos;
+    for( std::size_t at = tableReadOnLine( line, names ); at != std::string_view::npos; at = tableReadOnLine( line, names, at + 1 ) )
+    {
+        const SpanTier tier = spanTierAt( tiers, std::uint32_t( ls + at ) );
+        if( tier != SpanTier::Comment && tier != SpanTier::String )
+        {
+            ++count;
+            first = std::min( first, at );
+        }
+    }
+    return first;
+}
+
+// one file's reads of the table (a local bound to the call of `fn` reads it too, in the writer's file as in a caller's), the reads in a comment or a string
+// (`tiers`) left out: every read is counted in `count`, and each line holding one is a row, with 0 when the line shares a quoted part of the key
+inline void tableReadsInFile( std::string_view text, std::uint32_t fileId, const SpanTierMap& tiers, std::string_view fn, const std::string& table,
+                              std::span<const std::string_view> parts, std::vector<std::pair<int, GrepRawHit>>& found, std::size_t& count )
+{
+    std::vector<std::string> names{ table };
+    std::uint32_t            lineNo = 1;
+    for( std::size_t ls = 0; ls < text.size(); ++lineNo )
+    {
+        const std::size_t      le    = std::min( text.find( '\n', ls ), text.size() );
+        const std::string_view line  = text.substr( ls, le - ls );
+        const std::string_view bound = boundToCallOf( line, fn );
+        if( !bound.empty() && std::find( names.begin(), names.end(), bound ) == names.end() )
+        {
+            names.emplace_back( bound );
+        }
+        const std::size_t first = codeReadsOnLine( line, ls, names, tiers, count );
+        if( first != std::string_view::npos )
+        {
+            const bool shares = std::any_of( parts.begin(), parts.end(), [ & ]( std::string_view p ) { return line.find( p ) != std::string_view::npos; } );
+            found.emplace_back( shares ? 0 : 1, GrepRawHit{ fileId, lineNo, std::uint32_t( ls + first ) } );
+        }
+        ls = le + 1;
+    }
+}
+
+// the answer above the block names `table`: raw in a CDATA body, or escaped in an attribute (`p-&gt;storage` in a signature)
+inline bool answerNamesTable( std::string_view served, const std::string& table, std::vector<char>& esc )
+{
+    const std::string escaped( escapeXml( table, esc ) );
+    return taskHasCue( served, std::array<DocNoiseCue, 1>{ DocNoiseCue{ table, false } } )
+           || ( escaped != table && taskHasCue( served, std::array<DocNoiseCue, 1>{ DocNoiseCue{ escaped, false } } ) );
+}
+
+// the reads of `table` in `files` (each read once, its comment/string spans from the span tier: a file it did not parse keeps every read); `out.count` counts
+// them, `out.floor` is set when a file could not be read
+inline std::vector<std::pair<int, GrepRawHit>> tableReadsInFiles( const IngestResult& ing, const std::vector<std::uint32_t>& files, bool useMemo, std::string_view fn,
+                                                                  const std::string& table, std::span<const std::string_view> parts, TableReaders& out )
+{
+    std::vector<std::string> paths;
+    for( const std::uint32_t f : files )
+    {
+        paths.push_back( diskPath( ing, f ) );
+    }
+    const SpanTierBatch                     tiers = spanTiersOfFiles( std::span<const std::string>( paths ), useMemo );
+    const SpanTierMap                       unparsed;   // Code everywhere: a read is kept where the tier is unknown
+    std::vector<std::pair<int, GrepRawHit>> found;
+    for( std::size_t f = 0; f < files.size(); ++f )
+    {
+        const std::optional<std::string> read = docparse::detail::readWholeFile( paths[f] );
+        out.floor                            = out.floor || !read.has_value();
+        tableReadsInFile( read ? std::string_view( *read ) : std::string_view(), files[f], f < tiers.perFile.size() ? tiers.perFile[f] : unparsed, fn, table, parts, found,
+                          out.count );
+    }
+    return found;
+}
+
+// REG-READER (b): the reads of the table the first shown subscript row writes, in the row's file and the files of its function's callers. Only for a table the
+// answer above the block already names (`served`): elsewhere the block keeps its bytes. Reads whose line shares a quoted part of the written key come
+// first, then file (the row's own, then callers' by path) and line order.
+template <class RelPath>
+inline TableReaders tableReadersOf( const IngestResult& ing, const Graph* g, const std::vector<Site>& rows, const std::vector<GrepHit>& hits, std::size_t shown,
+                                    std::string_view served, const RelPath& relPath, RedactCounts* redact, std::vector<char>& esc, bool useMemo )
+{
+    TableReaders out;
+    std::size_t  pick = 0;
+    while( pick < shown && !( rows[pick].subscript && hits[pick].enclosingId != kNoNode && answerNamesTable( served, rows[pick].table, esc ) ) )
+    {
+        ++pick;
+    }
+    if( pick >= shown )
+    {
+        return out;
+    }
+    const Site&                         row   = rows[pick];
+    const std::string&                  name  = ing.symbols[hits[pick].enclosingId].name;
+    const std::size_t                   dot   = name.find_last_of( ".:" );   // npos + 1 would wrap (-fsanitize=integer)
+    const std::string_view              fn    = std::string_view( name ).substr( dot == std::string::npos ? 0 : dot + 1 );
+    const std::vector<std::uint32_t>    files = readerFilesOf( ing, g, hits[pick].enclosingId, row.raw.fileId, out.floor );
+    const std::vector<std::string_view> parts = quotedPartsOf( std::string_view( row.tbl ).substr( row.table.size() ) );
+    std::vector<std::pair<int, GrepRawHit>> found = tableReadsInFiles( ing, files, useMemo, fn, row.table, parts, out );
+    std::stable_sort( found.begin(), found.end(), []( const auto& a, const auto& b ) { return a.first < b.first; } );
+    std::vector<GrepRawHit> raw;
+    for( std::size_t k = 0; k < found.size() && k < kForTableReaderRows; ++k )
+    {
+        raw.push_back( found[k].second );
+    }
+    for( const GrepHit& h : grepEnrich( ing, std::span<const GrepRawHit>( raw ) ) )
+    {
+        appendWriteRow( out.xml, ing, h, relPath, redact, esc, "lr" );
+    }
+    return out;
+}
+}   // namespace lit_detail
 
 // THE BLOCK. `served` = the answer's own bytes after <sigs> (bodies, fold, slot, hops): a body whose <b … l= p= n=> head is in it
 // is not printed again. `useMemo` = the span-tier memo (false under --no-cache). `compactLegend` = the default --legend=compact dialect.
@@ -2198,7 +4171,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             loadedText = docparse::detail::readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );
         }
     };
-    std::size_t testHits = 0, docHits = 0, commentHits = 0, longerHits = 0;
+    std::size_t testHits = 0, docHits = 0, commentHits = 0, longerHits = 0, mentionHits = 0;
     std::vector<lit_detail::Site> src;
     std::vector<std::uint32_t>    srcFiles;
     for( const GrepRawHit& r : collected.raw )
@@ -2220,7 +4193,14 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 loadFile( r.fileId );
                 keyHit = lit_detail::literalHitAt( policy.boundary, loadedText, r.byteOffset, lit.text.size() );
-                if( keyHit.longer )
+                if( policy.boundary == lit_detail::LitBoundary::Flag && !keyHit.quoted )
+                {
+                    ++mentionHits;   // shape=flag: not the whole quoted name (usage text, a longer flag): a mention, counted, never a row
+                    continue;
+                }
+                if( keyHit.longer
+                    && !( policy.tableRows && lit_detail::isArgumentName( loadedText, r.byteOffset, lit.text.size() )
+                          && !lit_detail::registrationCallOf( loadedText, r.byteOffset, lit_detail::regLangCtxOf( langOfPath( ing.files[r.fileId] ) ) ).empty() ) )
                 {
                     ++longerHits;
                     continue;
@@ -2230,7 +4210,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 srcFiles.push_back( r.fileId );
             }
-            src.push_back( lit_detail::Site{ r, '?', keyHit.quoted } );
+            src.push_back( lit_detail::Site{ r, '?', keyHit.quoted, {}, keyHit.longer } );
         }
     }
     std::vector<std::string> tierPaths;
@@ -2274,6 +4254,13 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                 }
             }
             s.k = t == SpanTier::String ? 's' : 'c';
+            if( s.k == 's' )
+            {
+                loadFile( s.raw.fileId );
+                const std::size_t nl   = s.raw.byteOffset == 0 ? std::string::npos : loadedText.rfind( '\n', s.raw.byteOffset - 1 );
+                const std::size_t lead = loadedText.find_first_not_of( " \t", nl == std::string::npos ? 0 : nl + 1 );
+                s.leadInString         = lead != std::string::npos && spanTierAt( m, std::uint32_t( lead ) ) == SpanTier::String;
+            }
         }
         else
         {
@@ -2292,13 +4279,18 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 lines.push_back( r );
             }
-            else if( r.k == 's' )
+            else
             {
-                lines.back().k = 's';
+                lines.back().k = r.k == 's' ? 's' : lines.back().k;
+                if( policy.tableRows && lines.back().more.size() < kForRegLineHits )
+                {
+                    lines.back().more.push_back( r.raw.byteOffset );   // a later hit of the line may be the registration's argument (`h.register(h)`)
+                }
             }
             if( lines.back().raw.fileId == r.raw.fileId && lines.back().raw.line == r.raw.line )
             {
                 lines.back().quotedKey = lines.back().quotedKey || r.quotedKey;
+                lines.back().longer    = lines.back().longer && r.longer;   // one whole-word hit makes the line a whole-word site
             }
         }
         rows = std::move( lines );
@@ -2312,29 +4304,57 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         return out;   // no source site: nothing to anchor on (test/doc/comment counts alone answer nothing; measured as noise, ld2-django-09)
     }
-    const std::size_t ranked = std::min( rows.size(), policy.rankedRows );
+    std::size_t ranked = std::min( rows.size(), policy.rankedRows );
     for( std::size_t i = 0; i < ranked; ++i )
     {
         all.push_back( rows[i].raw );
     }
     std::vector<GrepHit> enriched = grepEnrich( ing, std::span<const GrepRawHit>( all ) );
     ASSUME( enriched.size() == all.size(), "grepEnrich returns one row per windowed hit" );
-    if( policy.tableRows && !lit_detail::markTableRows( ing, rows, enriched, loadFile, loadedText ) && limits.tableOnly )
+    std::size_t tailDropped = 0;   // limits.tailKeysOnly: sites of the tail that are no quoted key and no definition, not listed
+    std::size_t weakDropped = 0;   // limits.strongOnly: read sites that are no strong row, not listed (weak=)
+    std::size_t readSites   = 0;   // shape=table: the source sites read for a table row (read= when fewer than src=)
+    if( policy.tableRows )
     {
-        ForLiteralRender none;
-        none.unread = rows.size() > ranked;   // the sites past the cap were not read: the caller says so
-        return none;
+        const bool anyMarked = lit_detail::markTableRows( ing, rows, enriched, loadFile, loadedText, longerHits );
+        const bool keysOk    = !limits.tailKeysOnly || lit_detail::keepTailKeyRows( ing, lit.text, rows, enriched, tailDropped );
+        const bool anyRow    = keysOk && ( limits.tailKeysOnly ? std::any_of( rows.begin(), rows.begin() + std::ptrdiff_t( enriched.size() ), []( const lit_detail::Site& r ) { return !r.tbl.empty(); } ) : anyMarked );
+        ranked    = enriched.size();
+        readSites = ranked;
+        out.sites = rows.size();
+        if( keysOk && anyRow && limits.strongOnly )
+        {
+            std::vector<char> weak( enriched.size(), 0 );   // G-STORED-B: no cue word, so only the strong rows are listed; the rest is weak=
+            for( std::size_t i = 0; i < weak.size(); ++i )
+            {
+                weak[i] = lit_detail::isStrongRow( rows[i] ) ? 0 : 1;
+            }
+            weakDropped = lit_detail::dropRows( rows, enriched, weak );
+            ranked      = enriched.size();
+        }
+        if( !keysOk || ranked == 0 || ( !anyRow && limits.tableOnly ) )
+        {
+            ForLiteralRender none;
+            none.unread = out.sites > readSites;   // the sites past the cap were not read: the caller says so
+            return none;
+        }
     }
     std::vector<std::size_t> order( enriched.size() );
     for( std::size_t i = 0; i < order.size(); ++i )
     {
         order[i] = i;
     }
-    const auto rankOf = [ & ]( std::size_t i )
+    const auto rankSite = [ & ]( std::size_t i )
     {
         const bool callable = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        return ( policy.tableRows && lit_detail::isSecondaryPath( rootRelPath( ing, rows[i].raw.fileId ) ) ? 6 : 0 ) + ( policy.tableRows && rows[i].tbl.empty() ? 12 : 0 ) + ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable != policy.tableRows ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
+        const std::string_view path = rootRelPath( ing, rows[i].raw.fileId );
+        return ( policy.tableRows && ( lit_detail::isSecondaryPath( path ) || lit_detail::isGeneratedOrDataPath( path ) ) ? 6 : 0 ) + ( policy.tableRows && rows[i].tbl.empty() ? 12 : 0 ) + ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable != policy.tableRows ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
     };
+    std::vector<int> rank( enriched.size() );   // hoisted out of the comparators: each site's path scans run once (rv-reg2 F7)
+    for( std::size_t i = 0; i < rank.size(); ++i )
+    {
+        rank[i] = rankSite( i );
+    }
     // LIT-SITE-DECOY: nearness to the answer above the block (its rows and bodies, and the literal's own definitions) orders the sites and,
     // when they do not all fit, cuts the far ones (lit_cut=). A CI, vendored or generated copy is never a row beside a product site.
     // the registrations the reserve keeps (pickRows: kForLiteralRegistrationRows quoted keys outside any function, property keys first, in rank
@@ -2349,7 +4369,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             const char m = lit_detail::registrationMark( ing, rows[i], enriched[i].enclosingId, enriched[i].text, lit.text );
             if( m > 0 )
             {
-                marked.emplace_back( -int( m ) * 1000 + rankOf( i ), i );
+                marked.emplace_back( -int( m ) * 1000 + rank[i], i );
             }
         }
         std::ranges::stable_sort( marked, {}, &std::pair<int, std::size_t>::first );
@@ -2361,10 +4381,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     const lit_detail::SiteCut cut = lit_detail::cutSites( ing, anchors, lit.text, rows, enriched, reserved, policy.tableRows, rows.size() > policy.rows );
     std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b )
                       {
-                          const auto key = [ & ]( std::size_t i ) { return std::pair{ cut.tier[i], rankOf( i ) }; };
+                          const auto key = [ & ]( std::size_t i ) { return std::pair{ cut.tier[i], rank[i] }; };
                           return key( a ) < key( b );
                       } );
-    // lit_cut= is said when the cut moved a row: a cut site the old order (rankOf alone) would have listed; otherwise capped= already says it
+    // lit_cut= is said when the cut moved a row: a cut site the old order (rank alone) would have listed; otherwise capped= already says it
     bool cutMovedRow = false;
     if( cut.count > 0 )
     {
@@ -2373,7 +4393,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         {
             old[i] = i;
         }
-        std::stable_sort( old.begin(), old.end(), [ & ]( std::size_t a, std::size_t b ) { return rankOf( a ) < rankOf( b ); } );
+        std::stable_sort( old.begin(), old.end(), [ & ]( std::size_t a, std::size_t b ) { return rank[a] < rank[b]; } );
         std::vector<char> oldRegistration( old.size(), 0 );   // the old pick, registration slots and all (pickRows below, on the old order)
         for( std::size_t i = 0; policy.reserve > 0 && i < old.size(); ++i )
         {
@@ -2403,6 +4423,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     std::vector<NodeId> owners;
     std::vector<char>   ownerAbove;   // parallel: 1 = already printed by the answer, 2 = body held by the kForLiteralBodies cap, 0 = otherwise
     std::string         bodiesXml;
+    bool                armWindow = false;   // an excerpt window starts at the head of the arm holding its site: arm="1", its legend clause
     for( const GrepHit& h : hits )
     {
         if( h.enclosingId == kNoNode || !ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind )
@@ -2417,7 +4438,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         head += "\" n=\"";
         head += escapeXml( s.name, esc );
         head += "\"";
-        const bool above = served.find( head ) != std::string_view::npos;
+        const bool above = lit_detail::servedBodyHead( served, head );
         owners.push_back( h.enclosingId );
         ownerAbove.push_back( above ? 1 : ( out.bodies >= kForLiteralBodies ? 2 : 0 ) );
         if( above || out.bodies >= kForLiteralBodies )
@@ -2450,7 +4471,8 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                 siteLines.push_back( o.line );
             }
         }
-        std::string excerpt = lit_detail::excerptElement( text, path, s, first, last, siteLines, redact );
+        bool        armed   = false;
+        std::string excerpt = lit_detail::excerptElement( text, path, s, first, last, siteLines, redact, &armed );
         if( bodiesXml.size() + excerpt.size() > limits.byteCap )
         {
             ownerAbove.back() = 2;   // past the byte cap, as past the body cap: the row says body="held"
@@ -2458,6 +4480,14 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         }
         bodiesXml += excerpt;
         ++out.bodies;
+        armWindow = armWindow || armed;
+    }
+
+    // ── FLAG-SHAPE-LIT: the first shown string row whose call names a default (def=), and the constant writes of the field it names (ld) ──
+    lit_detail::FlagDefault flag;
+    if( policy.boundary == lit_detail::LitBoundary::Flag )
+    {
+        flag = lit_detail::flagDefaultOfRows( ing, rows, hits, relPath, redact, esc, useMemo );
     }
 
     // ── the rows ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -2494,7 +4524,13 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         redactInPlace( line, redact );   // CR 4423843223: the matched line is raw source text; redact before the cut
         lit_detail::cutAround( line, needle, kForLiteralLineBytes );
         const bool callableOwner = h.enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind );
-        lit_detail::appendTblAttr( rowsXml, rows[i].tbl, redact, esc );
+        lit_detail::appendTblAttr( rowsXml, rows[i].tbl, redact, esc, rows[i].regCall ? std::string_view( " reg=\"" ) : std::string_view( " tbl=\"" ) );
+        if( i == flag.row )
+        {
+            rowsXml += " def=\"";
+            rowsXml += escapeXml( flag.text, esc );
+            rowsXml += "\"";
+        }
         if( ( policy.tableRows ? !rows[i].tbl.empty() : rows[i].k == 's' && !callableOwner ) && contextRows < policy.contextRows )
         {
             // a string site outside any function (a table entry, an error-code map): the lines after it hold what it builds
@@ -2521,6 +4557,16 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         }
         ++shownRowCount;
     }
+    lit_detail::TableReaders readers;
+    if( policy.tableRows )
+    {
+        readers = lit_detail::tableReadersOf( ing, anchors.g, rows, hits, shownRowCount, served, relPath, redact, esc, useMemo );
+        if( rowsXml.size() + bodiesXml.size() + readers.xml.size() > limits.byteCap )
+        {
+            readers.xml.clear();   // the lr rows do not fit what the cap left: readers= still counts every read, so none listed says they were cut
+        }
+    }
+    const bool subscriptShown = policy.tableRows && std::any_of( rows.begin(), rows.begin() + std::ptrdiff_t( shownRowCount ), []( const lit_detail::Site& r ) { return r.subscript; } );
     if( byteCut && shownRowCount == 0 )
     {
         ForLiteralRender none;
@@ -2533,6 +4579,23 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
         x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
+        x += policy.boundary == lit_detail::LitBoundary::Flag && lit.tryNo > 1 ? kForLiteralFlagTryLegend : std::string_view();   // the flag clause carries no try= sentence of its own
+        x += limits.strongOnly ? kForLiteralStrongLegend : std::string_view();   // the whole task has no cue word: every element of it lists strong rows only
+    }
+    if( armWindow && !limits.armLegendAbove )
+    {
+        x += kForLiteralArmLegend;   // present only with arm= (EXCERPT-ARM)
+        out.armLegend = true;
+    }
+    if( tailDropped > 0 && !limits.tailLegendAbove )
+    {
+        x += kForLiteralTailLegend;   // present only with tail= (rv-reg2-delta D4: not on every shape=table answer)
+        out.tailLegend = true;
+    }
+    if( subscriptShown && !limits.subLegendAbove )
+    {
+        x += kForLiteralSubscriptLegend;   // present only with a subscript reg= row (REG-READER)
+        out.subLegend = true;
     }
     if( cutMovedRow && !limits.cutLegendAbove )
     {
@@ -2549,18 +4612,23 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         x += " capped=\"1\"";
     }
-    x += policy.tableRows && out.sites > ranked ? " read=\"" + std::to_string( ranked ) + "\"" : std::string();
+    x += policy.tableRows && out.sites > readSites ? " read=\"" + std::to_string( readSites ) + "\"" : std::string();
     x += longerHits > 0 ? " longer=\"" + std::to_string( longerHits ) + "\"" : std::string();
+    x += tailDropped > 0 ? " tail=\"" + std::to_string( tailDropped ) + "\"" : std::string();
+    x += weakDropped > 0 ? " weak=\"" + std::to_string( weakDropped ) + "\"" : std::string();
+    x += mentionHits > 0 ? " mention=\"" + std::to_string( mentionHits ) + "\"" : std::string();
+    x += !lit_detail::defaultFieldOf( flag.text ).empty() ? " writes=\"" + std::to_string( flag.writeCount ) + "\"" : std::string();
+    x += readers.count > 0 || readers.floor ? " readers=\"" + std::to_string( readers.count ) + "\"" : std::string();
     x += lit.frag ? " frag=\"1\"" : "";
     x += lit.tryNo > 1 ? " try=\"" + std::to_string( lit.tryNo ) + "\"" : std::string();
     x += cutMovedRow ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
     x += " comment=\"" + std::to_string( commentHits ) + "\" test=\"" + std::to_string( testHits ) + "\" doc=\"" + std::to_string( docHits ) + "\"";
-    if( !collected.cleanScan() || anyUnclassified )
+    if( !collected.cleanScan() || anyUnclassified || flag.writesFloor || readers.floor )
     {
         x += " floor=\"1\"";
     }
     x += nextAttrXml( nextFlag( "--grep=", lit.text ) );
-    const std::string inner = rowsXml + bodiesXml + "</lit>";
+    const std::string inner = rowsXml + flag.writesXml + readers.xml + bodiesXml + "</lit>";
     // bytes= is the element's own size from its open tag on (the legend comment excluded): a fixed point over its own digits
     const std::size_t openAt = x.find( "<lit " );
     const std::size_t fixed  = ( x.size() - openAt ) + std::string_view( " bytes=\"\">" ).size() + inner.size();
@@ -2600,6 +4668,13 @@ inline ForLiteralRender renderMessageTries( const IngestResult& ing, const ForLi
     return {};
 }
 
+// G-STORED-B: a no-cue task scans a compound name (a type, a snake_case or qualified name), never a plain English word (`register`, `open`, `index`): one
+// lower-case word, with no `_`, `::`, `.`, digit or inner capital, names too many sites to be the one the task means (rv-forliteral-3 section 2)
+inline bool isOneLowerWord( std::string_view w ) noexcept
+{
+    return !w.empty() && std::count_if( w.begin(), w.end(), []( char c ) { return c >= 'a' && c <= 'z'; } ) == std::ptrdiff_t( w.size() );
+}
+
 // a word of the task is an anchor of shape=table when the index holds a symbol of that name (a backticked span stands on its own quoting)
 inline bool forTableAnchorKeeps( const IngestResult& ing, std::string_view word, bool quoted )
 {
@@ -2616,49 +4691,58 @@ inline bool forTableAnchorKeeps( const IngestResult& ing, std::string_view word,
     return tail.size() >= kForTableMinAnchor && std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == tail; } );
 }
 
-// shape=table, the last try: every kept anchor with a site prints its own <lit>, all under one byte cap. `capped` = what the earlier shapes
-// left unscanned, which stays said. An anchor the cap left out is counted the way a literal past the scan cap is.
-inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
-                                              RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
+// shape=table: the walk over a task's anchors, one try each, under the caps on work done (scans: an anchor with no site costs one too; elements printed;
+// one byte cap). An anchor past a cap is counted (skipped), never dropped.
+enum class TableTry : std::uint8_t
 {
-    ForLiteralRender out;
-    const TableCue cue = forTableCueOf( task );
-    if( cue == TableCue::None )
-    {
-        return out;
-    }
-    std::size_t printed = 0, scanned = 0, skipped = 0, used = 0;
-    std::string firstSkipped;
-    const auto skip = [ & ]( const std::string& word )
+    Unkept,   // not an anchor here: a file's name, or a word the index holds no symbol of
+    Empty,    // tried: no element (no site, no row, or past a cap)
+    Printed
+};
+struct TableWalk
+{
+    const IngestResult& ing;
+    std::string_view    rootArg, served;
+    RedactCounts*       redact;
+    bool                useMemo, compactLegend;
+    const LitAnchors&   anchors;
+    TableCue            cue;
+    ForLiteralRender    out;
+    std::size_t         printed = 0, scanned = 0, skipped = 0, used = 0;
+    std::string         firstSkipped;
+
+    void skip( const std::string& word )
     {
         ++skipped;
         firstSkipped = firstSkipped.empty() ? word : firstSkipped;
-    };
-    for( const TableAnchor& anchor : forTableAnchorsOf( task ) )
+    }
+    // `late`: an anchor the index holds no symbol of, tried on the cue's row-only reading alone. `tail`: the last part of a dotted name (lateTableAnchor),
+    // which lists only quoted-key rows and its definition
+    TableTry tryAnchor( const TableAnchor& anchor, bool late, bool tail = false )
     {
         const std::string& word = anchor.text;
-        if( namesIndexedFile( ing, word ) || !forTableAnchorKeeps( ing, word, anchor.quoted ) )
+        if( namesIndexedFile( ing, word ) || ( !late && !forTableAnchorKeeps( ing, word, anchor.quoted ) ) || ( cue == TableCue::StrongRowOnly && isOneLowerWord( word ) ) )
         {
-            continue;
+            return TableTry::Unkept;
         }
-        // the caps are on work done: scans (an anchor with no site costs one too) and elements printed. An anchor past either is counted, never dropped.
         if( printed >= kForTableAnchors || scanned >= kForLiteralCandidates || used + kForTableElementBytes >= kForTableByteCap )
         {
             skip( word );
-            continue;
+            return TableTry::Empty;
         }
         ++scanned;
-        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm, out.cutLegend };
+        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue != TableCue::AnySite || !anchor.firm, out.cutLegend, tail,
+                                 cue == TableCue::StrongRowOnly, out.tailLegend, out.armLegend, out.subLegend };
         ForLiteral lit{ word, "table" };
         ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits, anchors );
         if( r.noRoom || r.unread )
         {
             skip( word );   // scanned, and counted once more as skipped: it printed nothing
-            continue;
+            return TableTry::Empty;
         }
         if( r.xml.empty() )
         {
-            continue;
+            return TableTry::Empty;
         }
         ++printed;
         used += r.xml.size() - r.xml.find( "<lit " );   // element bytes: the legend comments before the first are not
@@ -2666,17 +4750,89 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
         out.sites += r.sites;
         out.bodies += r.bodies;
         out.cutLegend = out.cutLegend || r.cutLegend;
+        out.tailLegend = out.tailLegend || r.tailLegend;
+        out.armLegend  = out.armLegend || r.armLegend;
+        out.subLegend  = out.subLegend || r.subLegend;
+        return TableTry::Printed;
     }
-    if( skipped > 0 )
+};
+
+// REGISTRAR-2: the second pass of the walk. A dotted anchor (`pydantic.ValidationError`, `light.turn_on`) that printed nothing is tried by its last
+// segment, the name a registration row writes (`'ValidationError': (...)`), unless the task names that segment itself. An identifier-shaped word the
+// index holds no symbol of (a generated type, `HashJoinNode` from a .proto; a key only a macro or a decorator writes) is tried when the cue prints only
+// beside a table row (a row-only or strong-only cue). Both after every anchor of the task, so neither takes an earlier anchor's scan.
+inline std::optional<TableAnchor> lateTableAnchor( const IngestResult& ing, const TableAnchor& a, TableTry tried, TableCue cue, std::span<const TableAnchor> own )
+{
+    const std::string_view word = a.text;
+    const std::size_t      dot  = word.rfind( '.' );
+    if( tried == TableTry::Unkept )
     {
-        out.xml += std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scanned ) + "\" skipped=\"" + std::to_string( skipped )
-                   + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>";
+        const bool unindexed = cue != TableCue::AnySite && !a.quoted && dot == std::string_view::npos && !namesIndexedFile( ing, word ) && lit_detail::isIdentifierShaped( word );
+        return unindexed ? std::optional<TableAnchor>( a ) : std::nullopt;
+    }
+    if( tried != TableTry::Empty || dot == std::string_view::npos || word.find( "::" ) != std::string_view::npos || dot + 1 + kForTableMinAnchor > word.size() )
+    {
+        return std::nullopt;
+    }
+    const std::string_view tail = word.substr( dot + 1 );
+    const bool named = std::any_of( own.begin(), own.end(), [ & ]( const TableAnchor& o ) { return o.text == tail; } );
+    return named ? std::nullopt : std::optional<TableAnchor>( TableAnchor{ std::string( tail ), a.quoted, a.firm } );
+}
+
+// shape=table, the last try: every kept anchor with a site prints its own <lit>, all under one byte cap. `capped` = what the earlier shapes
+// left unscanned, which stays said. An anchor the cap left out is counted the way a literal past the scan cap is.
+inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
+                                              RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
+{
+    const std::vector<TableAnchor> own = forTableAnchorsOf( task );
+    if( own.empty() )
+    {
+        return {};   // no backticked span and no identifier-shaped word: nothing to scan (a bare-prose task costs no scan)
+    }
+    const TableCue cue = forTableCueOf( task );
+    TableWalk walk{ ing, rootArg, served, redact, useMemo, compactLegend, anchors, cue, {} };
+    std::vector<std::pair<TableAnchor, bool>> later;   // (anchor, unindexed)
+    for( const TableAnchor& anchor : own )
+    {
+        const TableTry tried = walk.tryAnchor( anchor, false );
+        std::optional<TableAnchor> l = lateTableAnchor( ing, anchor, tried, cue, own );
+        if( l && std::none_of( later.begin(), later.end(), [ & ]( const auto& e ) { return e.first.text == l->text; } ) )   // `a.k` and `b.k` retry `k` once
+        {
+            later.emplace_back( std::move( *l ), tried == TableTry::Unkept );
+        }
+    }
+    for( const auto& [anchor, unindexed] : later )
+    {
+        walk.tryAnchor( anchor, unindexed, /*tail=*/!unindexed );
+    }
+    ForLiteralRender out = std::move( walk.out );
+    if( walk.skipped > 0 && ( cue != TableCue::StrongRowOnly || !out.xml.empty() ) )   // a no-cue walk that listed no strong row leaves the answer as it was
+    {
+        out.xml += std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( walk.scanned ) + "\" skipped=\"" + std::to_string( walk.skipped )
+                   + "\"" + nextAttrXml( nextFlag( "--grep=", walk.firstSkipped ) ) + "/>";
     }
     return out;
 }
 
 // the block of the task's literals: each in order (forLiteralCandidates) until one has a source site, at most kForLiteralCandidates scans
 // besides a message, which walks its tries
+// SIZE-1 (size-trim): the row-attribute clauses of the lit legends, present-only on the task's printed elements. The first element
+// carries the legends for all of them (ForLiteralLimits::withLegend), so the whole block is read, once, after the last element.
+inline constexpr std::string_view kForLiteralBodyClause = "; body=above: printed above, held: its owner body is past the 3-body cap, not printed";
+inline constexpr std::string_view kForCompactLiteralBodyClause = "; body=above|held: printed above|past the 3-body cap";
+inline constexpr std::string_view kForLiteralLongerClause = "; longer= source sites inside a longer name, child key or word, counted, never rows";
+inline constexpr std::string_view kForLiteralTryClause = " try=N: the task's Nth literal anchored; the ones before it had no source site or were not scanned.";
+static_assert( kForLiteralLegend.contains( kForLiteralBodyClause ) && kForCompactLiteralLegend.contains( kForCompactLiteralBodyClause )
+                   && kForLiteralKeyLegend.contains( kForLiteralLongerClause ) && kForLiteralKeyLegend.contains( kForLiteralTryClause ),
+               "the lit row clauses are spelled as the legends carry them" );
+inline ForLiteralRender litLegendPresentOnly( ForLiteralRender r, bool compactLegend )
+{
+    eraseAbsentClause( r.xml, compactLegend ? kForCompactLiteralBodyClause : kForLiteralBodyClause, r.xml.contains( " body=\"" ) );
+    eraseAbsentClause( r.xml, kForLiteralLongerClause, r.xml.contains( " longer=\"" ) );
+    eraseAbsentClause( r.xml, kForLiteralTryClause, r.xml.contains( " try=\"" ) );
+    return r;
+}
+
 inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
                                                 RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors = {} )
 {
@@ -2700,7 +4856,7 @@ inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::st
                                      : renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, {}, anchors );
         if( !r.xml.empty() )
         {
-            return r;
+            return litLegendPresentOnly( std::move( r ), compactLegend );
         }
     }
     // no earlier shape anchored: the last try, shape=table (it never prints beside them)
@@ -2711,6 +4867,6 @@ inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::st
         table.xml = std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scans ) + "\" skipped=\"" + std::to_string( skipped )
                     + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>" + table.xml;
     }
-    return table;
+    return litLegendPresentOnly( std::move( table ), compactLegend );
 }
 }   // namespace rw

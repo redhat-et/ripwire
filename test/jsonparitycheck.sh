@@ -290,7 +290,10 @@ grep -q -- '--with-graph is not applied under --json' "$TMP/e_wg_pack" \
 # each cross-checked against ITS OWN XML sibling's row count so the assertion survives repo content drift.
 echo
 echo "=== §B1.4 --for --json lego_total/compose_total/routes_total ==="
-LOFF="$( "$BIN" "$ROOT" --for="cache invalidation" --json --no-cache 2>/dev/null | jsonok "--for --json (off-task, no lego surface)" )"
+# The off-task task must land on a surface of this checkout with no base class that has implementors. "cache invalidation" did until
+# MEM-REF-SHRINK made RawRef (ingest_cache.h) and Reference derive from model.h RefColdFields (lego_total 1 there); this task reads
+# 0 on the trees before and after that change.
+LOFF="$( "$BIN" "$ROOT" --for="terminal color escape codes" --json --no-cache 2>/dev/null | jsonok "--for --json (off-task, no lego surface)" )"
 for k in lego_total compose_total routes_total; do
     V="$( printf '%s' "$LOFF" | jget "$k" )"
     case "$V" in ''|*[!0-9]*) no "§B1.4: off-task payload's \"$k\" is missing or non-numeric (got '$V')" ;;

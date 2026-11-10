@@ -80,6 +80,7 @@ struct SubjectRoute
     std::string         rankQuery;     // non-empty only when the words were dropped from the route
     std::vector<std::vector<NodeId>> callerCandidates;   // conceptual route: each exact symbol's definitions, for <callers by="subject">
     bool                anchorNoSource = false;   // CONFIDENCE-ANCHOR: name-exact, and no source-class definition backs the anchor
+    RouteAnchorKeys anchorKeys; // FRAME-HIGH-CONFIDENCE: what counts as the anchor heading the ranked rows
 };
 
 namespace subject_detail
@@ -515,6 +516,130 @@ inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice&
     return false;
 }
 
+// A FILE subject ("DynamicScreen.c", "src/x.cc") anchors that file: the files whose path ends with the word at a path-segment boundary,
+// so any row in them is the anchor's. None when the word spells a symbol the index holds (`FooBar.py` as the method `py` of FooBar): it
+// names that symbol, and a file of the same spelling is a namesake, not the anchor.
+inline std::vector<std::uint32_t> fileSubjectFiles( const IngestResult& ing, std::string_view t, const subject_detail::Spelling& sp )
+{
+    std::vector<std::uint32_t> named;
+    if( t.find( '.' ) == std::string_view::npos && t.find( '/' ) == std::string_view::npos )
+    {
+        return named;
+    }
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view path = rootRelPath( ing, f );
+        if( path.ends_with( t ) && ( path.size() == t.size() || path[path.size() - t.size() - 1] == '/' ) )
+        {
+            named.push_back( f );
+        }
+    }
+    if( !named.empty() && sp.valid && !subject_detail::placeCandidates( ing, std::vector<subject_detail::Spelling>{ sp } )[0].empty() )
+    {
+        named.clear();
+    }
+    return named;
+}
+
+// FRAME-HIGH-CONFIDENCE: the keys a ranked head row is matched against (routeAnchorHeadsRows). Name-exact routes only.
+inline RouteAnchorKeys routeAnchorKeys( const IngestResult& ing, const RouteChoice& rc, std::string_view rankQuery )
+{
+    using namespace subject_detail;
+    RouteAnchorKeys out;
+    if( rc.which != LexMode::NameExact )
+    {
+        return out;
+    }
+    const auto addName = [&]( std::string lower )
+    {
+        if( !lower.empty() && std::ranges::find( out.lowerNames, lower ) == out.lowerNames.end() )
+        {
+            out.lowerNames.push_back( std::move( lower ) );
+        }
+    };
+    const auto addFile = [&]( std::uint32_t f )
+    {
+        if( std::ranges::find( out.fileIds, f ) == out.fileIds.end() )
+        {
+            out.fileIds.push_back( f );
+        }
+    };
+    for( const RouteAnchorDef& a : rc.anchorDefs )
+    {
+        addName( a.lowerName );
+        addFile( a.fileId );
+    }
+    // The words' leaves, judged as routeAnchorHasSourceDef judges them: a subject that spells a name is about that name, so its plain
+    // words (`where`, `defined`) are not the anchor; with no identifier-syntax word, the plain words are.
+    std::vector<std::string> leaves;
+    std::vector<std::string> idLeaves;
+    for( const std::string_view w : splitRouteWords( rankQuery ) )
+    {
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        const Spelling sp = parseSpelling( t );
+        if( sp.valid )
+        {
+            leaves.push_back( routeLower( sp.leaf ) );
+            if( hasNameSyntax( t ) )
+            {
+                idLeaves.push_back( routeLower( sp.leaf ) );
+            }
+        }
+        for( const std::uint32_t f : fileSubjectFiles( ing, t, sp ) )
+        {
+            addFile( f );
+        }
+    }
+    for( std::string& l : idLeaves.empty() ? leaves : idLeaves )
+    {
+        addName( std::move( l ) );
+    }
+    return out;
+}
+
+// FRAME-HIGH-CONFIDENCE: does the anchor head the ranked rows? confidence= measures the score drop below the head, so it vouches for the
+// anchor only when the head IS the anchor: a symbol of the anchor's name (an Elixir `name/N` by its base), or a row in a file the anchor
+// is defined in. No keys (no name-exact route, or nothing to match): true, the check says nothing.
+inline bool routeAnchorHeadsRows( const IngestResult& ing, const RouteAnchorKeys& keys, NodeId head )
+{
+    if( keys.lowerNames.empty() && keys.fileIds.empty() )
+    {
+        return true;
+    }
+    const Symbol& s = ing.symbols[head];
+    if( std::ranges::find( keys.fileIds, s.fileId ) != keys.fileIds.end() )
+    {
+        return true;
+    }
+    const std::string lower = routeLower( s.name );
+    const std::string base = routeLower( elixirBaseName( s.name ) );
+    return std::ranges::any_of( keys.lowerNames, [&]( const std::string& n )
+                                { return n == lower || n == base; } );
+}
+
+// The row the answer prints as r=1. confidence= and the route= clause read the score head, but code above docs (serialize.h
+// reorderDocsAfterCode) moves the Markdown rows of the shown set below its code rows, so when that reorder applies the first row printed is
+// the first non-Markdown one of the surface. Same predicate on the CLI and MCP twins (their `docsAfterCode` verdicts).
+inline NodeId routeEmittedHead( const IngestResult& ing, std::span<const NodeId> surface, bool docsAfterCode )
+{
+    if( docsAfterCode )
+    {
+        const auto code = std::ranges::find_if( surface, [&]( NodeId id ) { return !isDocsAfterCodeRow( ing, id ); } );
+        if( code != surface.end() )
+        {
+            return *code;
+        }
+    }
+    return surface.front();
+}
+
+// The route= clause a head that is not the anchor appends, beside the confidence it lowers: the reader sees which row heads instead.
+inline std::string routeAnchorNotHeadClause( const IngestResult& ing, NodeId head )
+{
+    const Symbol& s = ing.symbols[head];
+    return "; anchor is not the ranked head (r=1 is " + s.name + " in " + std::string( rootRelPath( ing, s.fileId ) ) + ")";
+}
+
 // Is a plain word among a name-exact route's anchors?
 inline bool subjectAnchoredPlainWord( const IngestResult& ing, const RouteChoice& whole, const SubjectReading& r )
 {
@@ -669,16 +794,69 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
     return out;
 }
 
+// ANCHOR-TEST-ONLY: does a name-exact route with no source-backed anchor stay committed to it? It does when the anchors name ONE
+// definition in all (a test helper, a data key, a CI script that is the only thing by that name: the subject can only mean it) or none
+// (an env var or literal the index stores no definition of: the <shortkey> ladder and the <lit> block serve that route). With two or
+// more definitions none of which is source, the route picked one non-source copy among several (gtest_threading.cpp's max_threads of
+// three, a .github action before the real one): the words' ranking is the honest answer, and the anchors ride on as a hint.
+inline bool routeAnchorUncommitted( const RouteChoice& rc )
+{
+    if( rc.which != LexMode::NameExact || rc.anchorDefs.empty() )
+    {
+        return false;
+    }
+    // each distinct anchor name once: a repeated word (`lonely_helper ... lonely_helper`) resolves the same definitions again
+    std::size_t defs = 0;
+    for( std::size_t i = 0; i < rc.anchorDefs.size(); ++i )
+    {
+        const RouteAnchorDef& a = rc.anchorDefs[i];
+        const auto earlier = rc.anchorDefs.begin() + std::ptrdiff_t( i );
+        if( std::find_if( rc.anchorDefs.begin(), earlier, [ & ]( const RouteAnchorDef& b ) { return b.lowerName == a.lowerName; } ) == earlier )
+        {
+            defs += 1u + a.extraDefs;
+        }
+    }
+    return defs >= 2;
+}
+
+// The ranker an uncommitted anchor falls through to: the conceptual one, coded as chooseForRanker codes it for the same word count.
+inline RouteChoice routeAnchorFallThrough( std::string_view query, const RouteChoice& anchored )
+{
+    std::size_t nWords = 0;
+    for( const std::string_view w : splitRouteWords( query ) )
+    {
+        nWords += isRouteStopword( routeLower( w ) ) ? 0 : 1;
+    }
+    RouteChoice rc;
+    rc.which  = LexMode::SubtokenBody;
+    rc.reason = nWords >= 3 ? "subtoken+body" : "subtoken+body:broad";
+    // the hint: the anchors: evidence as the anchored route printed it (word(defining file+N) per anchor). Not the name-exact(X) code:
+    // route= starts with the ranker that ran, and no reader may find a second ranker code in it.
+    const std::size_t at = anchored.reason.find( "; anchors: " );
+    rc.reason += "; anchor has no source definition (test, doc, data, CI or vendored only, or not indexed), not committed: ranked as words";
+    if( at != std::string::npos )
+    {
+        rc.reason += "; hint " + anchored.reason.substr( at + 2 );
+    }
+    return rc;
+}
+
 // THE entry point both the CLI lens and the MCP verbs call in place of chooseForRanker. No reading and a source-backed anchor: exactly
 // chooseForRanker. confidence= reads low on anchorNoSource, and route= says why, so the answer explains itself in every legend dialect.
 inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
 {
     SubjectRoute out = chooseSubjectRouteUnchecked( ing, g, task, servesBodiesAndCallers );
-    out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, out.rankQuery.empty() ? task : std::string_view( out.rankQuery ) );
-    if( out.anchorNoSource )
+    const std::string_view rankQuery = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
+    out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, rankQuery );
+    if( out.anchorNoSource && routeAnchorUncommitted( out.route ) )
+    {
+        out.route = routeAnchorFallThrough( rankQuery, out.route );   // the words rank; no anchorDefs restrict the bodies
+    }
+    else if( out.anchorNoSource )
     {
         out.route.reason += "; anchor has no source definition (test, doc, data, CI or vendored only, or not indexed)";
     }
+    out.anchorKeys = routeAnchorKeys( ing, out.route, rankQuery );
     return out;
 }
 

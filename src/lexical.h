@@ -470,6 +470,25 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
     return &scratch;
 }
 
+// The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
+// without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
+inline std::vector<char> notLexRankedMask( const IngestResult& ing )
+{
+    std::vector<char> mask;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( notLexRanked( ing.symbols[i] ) )
+        {
+            if( mask.empty() )
+            {
+                mask.assign( ing.symbols.size(), 0 );
+            }
+            mask[i] = 1;
+        }
+    }
+    return mask;
+}
+
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
@@ -480,6 +499,22 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
+    // kRankFlagNotLexRanked units (model.h): out of the statistics like a statsOut unit, and never scored (0 below)
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    std::vector<char>       statsOutMerged;
+    if( !unranked.empty() )
+    {
+        statsOutMerged = unranked;
+        for( std::size_t i = 0; statsOut != nullptr && i < statsOut->size() && i < S; ++i )
+        {
+            statsOutMerged[i] = char( statsOutMerged[i] | ( *statsOut )[i] );
+        }
+        statsOut = &statsOutMerged;
+    }
+    const auto isUnranked = [ &unranked ]( std::size_t i ) noexcept { return !unranked.empty() && unranked[i] != 0; };
+    // the WHOLE corpus an OUT unit scores against (avgdlAll, allS, dfOut below) is the ranked one: a kRankFlagNotLexRanked
+    // unit is no document there either, so a Sphinx .txt section scores as it did before HTML units existed
+    const std::size_t allS = S - std::size_t( std::count( unranked.begin(), unranked.end(), char( 1 ) ) );
     // statsOut (filter.h sphinxTxtStatsExclusion): units SCORED like any other but kept out of the corpus statistics —
     // the symbol count, every document frequency and the average length. Null: every unit counts, the historical pass.
     const auto  statsWeight = [ statsOut ]( std::size_t i ) noexcept -> int
@@ -717,7 +752,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         scanField( i, ing.symbols[i].name, kwName );
-        if( evidenceOut )
+        if( evidenceOut && !isUnranked( i ) )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
             std::uint64_t*   words   = evidenceOut->nameMask.data() + i * evidenceWords;
@@ -732,7 +767,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         if( marginArmed )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
-            for( std::size_t m = 0; m < matchCount; ++m )
+            for( std::size_t m = 0; m < matchCount && !isUnranked( i ); ++m )
             {
                 nameDf[m] += nameRow[m] > 0 ? 1 : 0;
             }
@@ -756,7 +791,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     //
     // R-R RANKING (2026-08-25): the scanned string is the ROOT-RELATIVE VIEW, never ing.files[f] itself,
     // which stays absolute because the emission lane proved it must (g.canonId, Regression::key, every
-    // pathQualifiedKey and the ingest cache's reAbsolutize all key off it). Scanning it verbatim indexed
+    // pathQualifiedKey and the ingest cache's relForHash compare all key off it). Scanning it verbatim indexed
     // every directory ABOVE the corpus as corpus vocabulary — and a directory that spelled a query word
     // then matched EVERY document and collapsed that word's idf — so two clones of ONE commit at different
     // checkout depths ranked --recall differently: 11 of 42 frozen queries reordered, 5 of them returning a
@@ -1085,7 +1120,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // code operating on the historical layout.
     if( variantCount > 0 )
     {
-        const std::uint32_t sOver64    = std::uint32_t( S / 64 );
+        const std::uint32_t sOver64    = std::uint32_t( allS / 64 );   // the ranked corpus: an unranked unit does not widen the cap
         const std::uint32_t variantCap = sOver64 > 8u ? sOver64 : 8u;
         if( std::getenv( "RIPWIRE_QSTEM_DEBUG" ) != nullptr )
         {
@@ -1146,7 +1181,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* const row   = tfFlat.data() + i * uniqueCount;
             std::uint64_t*   words = evidenceOut->anyMask.data() + i * evidenceWords;
             const int        w     = statsWeight( i );
-            for( std::size_t u = 0; u < uniqueCount; ++u )
+            for( std::size_t u = 0; u < uniqueCount && !isUnranked( i ); ++u )
             {
                 if( row[u] > 0 )
                 {
@@ -1265,10 +1300,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         avgdl += statsWeight( i ) != 0 ? dl[i] : 0;
-        avgdlAll += dl[i];
+        avgdlAll += isUnranked( i ) ? 0 : dl[i];
     }
     avgdl /= double( statsS ? statsS : 1 );
-    avgdlAll /= double( S ? S : 1 );
+    avgdlAll /= double( allS ? allS : 1 );
     std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
     const auto       countOut = [ & ]( const int* tfRow )
     {
@@ -1298,7 +1333,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* tfRow = tfFlat.data() + i * uniqueCount;
             bool       any   = false;
             const int  w     = statsWeight( i );
-            if( w == 0 )
+            if( w == 0 && !isUnranked( i ) )
             {
                 countOut( tfRow );
             }
@@ -1353,7 +1388,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const int    n    = dfreq[u];
                 const int    nAll = n + dfOut[u];   // an OUT unit's idf: the larger of the two bounds the contribution
                 const double idfIn  = n > 0 ? std::log( ( double( statsS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 ) : 0.0;
-                const double idfAll = dfOut[u] > 0 ? std::log( ( double( S ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
+                const double idfAll = dfOut[u] > 0 ? std::log( ( double( allS ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
                 const double idf  = std::max( idfIn, idfAll );
                 const double T    = double( tfMaxOf[u] );
                 const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
@@ -1381,6 +1416,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     ub += capOcc[u];
                 }
             }
+            if( isUnranked( i ) )
+            {
+                continue; // a kRankFlagNotLexRanked unit scores 0, the value a skipped symbol keeps
+            }
             const bool mustScore = alwaysExact && i < alwaysExact->size() && (*alwaysExact)[i] != 0;
             if( !mustScore && ub < theta )
             {
@@ -1389,7 +1428,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
             // exact score — the IDENTICAL expressions, in the IDENTICAL order, as the exhaustive branch
             const bool   outI = statsWeight( i ) == 0;
-            const double Si   = outI ? double( S ) : double( statsS );
+            const double Si   = outI ? double( allS ) : double( statsS );
             const double avgI = outI ? avgdlAll : avgdl;
             double sc = 0;
             for( std::size_t qi = 0; qi < qToks.size(); ++qi )
@@ -1442,7 +1481,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         const int w = statsWeight( i );
-        if( w == 0 )
+        if( w == 0 && !isUnranked( i ) )
         {
             countOut( tfFlat.data() + i * uniqueCount );
         }
@@ -1457,8 +1496,12 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
     for( std::size_t i = 0; i < S; ++i )
     {
+        if( isUnranked( i ) )
+        {
+            continue; // a kRankFlagNotLexRanked unit scores 0 (model.h)
+        }
         const bool   outI = statsWeight( i ) == 0;
-        const double Si   = outI ? double( S ) : double( statsS );
+        const double Si   = outI ? double( allS ) : double( statsS );
         const double avgI = outI ? avgdlAll : avgdl;
         double sc = 0;
         for( std::size_t qi = 0; qi < qToks.size(); ++qi )
@@ -1599,9 +1642,16 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         }
     };
 
+    // kRankFlagNotLexRanked units (model.h) are no document: no tf, no length, not in the corpus size; they score 0
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    const std::size_t       rankedS  = S - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
     // document = whole name (+ container::name as a second whole token, when a scope exists)
     for( std::size_t i = 0; i < S; ++i )
     {
+        if( !unranked.empty() && unranked[i] != 0 )
+        {
+            continue;
+        }
         const Symbol&          s    = ing.symbols[i];
         const std::string_view base = ( s.lang == Lang::Elixir ) ? elixirBaseName( s.name ) : std::string_view( s.name );
         const std::string_view alt  = ( base.size() != s.name.size() ) ? base : std::string_view{};
@@ -1628,7 +1678,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     {
         avgdl += d;
     }
-    avgdl /= double( S ? S : 1 );
+    avgdl /= double( rankedS ? rankedS : 1 );
     std::vector<int> dfreq( uniqueCount, 0 );
     for( std::size_t i = 0; i < S; ++i )
     {
@@ -1660,7 +1710,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
                 continue;
             }
             const int    n   = dfreq[u];
-            const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+            const double idf = std::log( ( double( rankedS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
         if( ing.symbols[i].kind == SymKind::Section )
@@ -1874,6 +1924,13 @@ struct RouteAnchorDef
                                       // definition in NodeId order; see noteWholeNameDef), i.e. the same one
                                       // routeAnchorEvidence prints the path of
     std::uint32_t extraDefs = 0;      // further definitions sharing the name — the "+N" the reason discloses
+};
+
+// FRAME-HIGH-CONFIDENCE: the anchor of a name-exact route, in the two forms a ranked head row can match. Empty on every other route.
+struct RouteAnchorKeys
+{
+    std::vector<std::string> lowerNames; // each subject word's leaf, lowercased (`a.b.C::d` gives d), and each resolved anchor name
+    std::vector<std::uint32_t> fileIds; // the files the anchors are defined in, and a FILE subject's own file
 };
 
 struct RouteChoice
@@ -2171,6 +2228,10 @@ inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult&
     std::vector<std::string> parts;
     for( const Symbol& s : ing.symbols )
     {
+        if( notLexRanked( s ) )
+        {
+            continue;   // a unit no lexical lens ranks names no route (model.h kRankFlagNotLexRanked)
+        }
         noteWholeNameDef( names, s );
         parts.clear();
         subtokens( s.name, parts );
@@ -2202,7 +2263,9 @@ inline constexpr std::uint32_t kMaxAnchorDefs = 3;
 // "common" name — test/routecheck.sh (g) covers the floored regime, the r7 webpack corpus the scaled one.
 inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept
 {
-    const std::uint32_t sOver128 = std::uint32_t( ing.symbols.size() / 128 );
+    // the ranked corpus: a kRankFlagNotLexRanked unit (model.h) is no carrier and does not widen the cap
+    const std::size_t   ranked   = ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
+    const std::uint32_t sOver128 = std::uint32_t( ranked / 128 );
     return sOver128 > 8u ? sOver128 : 8u;
 }
 
@@ -2843,13 +2906,15 @@ struct ForConfidence
 // stamp is the same defect wearing a different hat). marginPct is left as the TRUE measured drop even
 // when declined — 0 means "no cliff found" (non-negotiable #3: a zero must mean none found, never none
 // exists), and a real 25% tie-break drop is not that; the note's extra clause is what says not to trust it.
-// anchorNoSource (CONFIDENCE-ANCHOR, subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file. The
-// drop may be real, but it says the name matched, not that the answer is here: low, and route= says why.
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorNoSource = false )
+// anchorUnproven (subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file (CONFIDENCE-ANCHOR), or
+// whose ranked head is not the anchor (FRAME-HIGH-CONFIDENCE). The drop may be real, but it says the name matched, not that the answer
+// is here: low, and route= says why.
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false )
 {
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
-    out.level     = ( homonymDecline || anchorNoSource ) ? "low" : ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
+    const bool sharpHead = !cut.hitCeiling || servedComplete;
+    out.level = ( homonymDecline || anchorUnproven || !sharpHead ) ? "low" : "high";
     out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
     char attrBuf[ 48 ];
     rw::formatTo( attrBuf, sizeof( attrBuf ), " confidence=\"{}\" margin_pct=\"{}\"", out.level, out.marginPct );

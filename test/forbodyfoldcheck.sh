@@ -301,8 +301,10 @@ else:
     fail("unknown check " + cmd)
 PY
 chk(){ python3 "$TMP/chk.py" "$@"; }
-run(){ local out="$1"; shift; "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
-off(){ local out="$1"; shift; RIPWIRE_NO_BODY_FOLD=1 "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
+# K-WRONGSYM: the <syms> block names what the answer does not, and a fold body names more, so the fold-on and fold-off answers carry different blocks;
+# this gate is about the fold, so both sides run without the block (forfilesymscheck owns it)
+run(){ local out="$1"; shift; RIPWIRE_NO_FILE_SYMS=1 "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
+off(){ local out="$1"; shift; RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_BODY_FOLD=1 "$BIN" "${ROOTDIR:-$FIX}" --no-cache "$@" >"$out" 2>"$out.err"; }
 
 run "$TMP/router" --for="$T_ROUTER";            off "$TMP/router.off" --for="$T_ROUTER"
 run "$TMP/resp"   --for="$T_RESP";              off "$TMP/resp.off"   --for="$T_RESP"
@@ -367,8 +369,8 @@ if r=$( chk prefix "$TMP/src" "$TMP/src.off" ); then ok "(F5) src: the answer be
 # F5n (member-names twin): with the names off on both sides the pre-names premise holds byte for byte (est_tokens masked)
 # (train 32a, N1: all six of F5's questions, each with F5's own root and legend)
 namesoff(){ local q="$1" rd="$2" qq="$3"; shift 3
-    RIPWIRE_NO_MEMBER_NAMES=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n" 2>/dev/null
-    RIPWIRE_NO_MEMBER_NAMES=1 RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n.off" 2>/dev/null; }
+    RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_MEMBER_NAMES=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n" 2>/dev/null
+    RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_MEMBER_NAMES=1 RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$rd" --no-cache --for="$qq" "$@" >"$TMP/$q.n.off" 2>/dev/null; }
 for q in router resp respf slot slice src; do
     case "$q" in
         router) namesoff "$q" "$FIX" "$T_ROUTER";;

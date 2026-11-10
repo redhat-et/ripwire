@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # The version string lives in exactly ONE place — this project() call. --version (main.cpp)
 # reads it via the generated version.h below; test/versioncheck.sh asserts the two never drift.
-project(ripwire VERSION 0.6.9 LANGUAGES C CXX)
+project(ripwire VERSION 0.6.10 LANGUAGES C CXX)
 
 # ---- language standards (C++23 for our own code / C11 for the vendored C dependencies) ----
 set(CMAKE_CXX_STANDARD 23)
@@ -309,6 +309,7 @@ set(_ripwire_query_names
   lua
   objc
   php
+  proto
   python
   ruby
   rust
@@ -582,6 +583,12 @@ add_ts_grammar(gdscript https://github.com/PrestonKnopp/tree-sitter-gdscript.git
 # generated parser repeatedly stalled on the same corpus. CC0; no scanner.
 add_ts_grammar(clojure https://github.com/yogthos/tree-sitter-clojure.git 8ec8407eada5f29728d746a46cbe6115938b5422)  # v0.0.14, ABI 15
 
+# Protocol Buffers (.proto): the definitions generated Rust/Go/C++/Python/TS modules are built from (PROTO-INDEX).
+# coder3101's grammar is the maintained one (proto2, proto3 and editions, ABI 15, MIT). On the 1227 .proto files
+# of seven corpus repositories (envoy 896, cockroach 183, clickhouse 62, risingwave 43, zed 25, terraform 17,
+# helix 1) it parsed every file with zero ERROR or MISSING nodes, comments and aggregate options included. No scanner.
+add_ts_grammar(proto https://github.com/coder3101/tree-sitter-proto.git 6c878d18628ebbff3474479d2fdd6d8ba1954c3e)  # v0.6.0, ABI 15
+
 # PHP (.php): the official tree-sitter org grammar. Like TypeScript this repo hosts TWO sub-grammars
 # in subdirectories — `php/` (the full one: HTML text interleaved with `<?php … ?>` blocks) and
 # `php_only/` (no surrounding text). ONLY `php/` is vendored and built: a real .php file in a real
@@ -688,6 +695,7 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_kotlin>
   $<TARGET_OBJECTS:ts_gdscript>
   $<TARGET_OBJECTS:ts_clojure>
+  $<TARGET_OBJECTS:ts_proto>
   $<TARGET_OBJECTS:ts_elixir>
   $<TARGET_OBJECTS:ts_php>
   $<TARGET_OBJECTS:ts_toml>
@@ -942,7 +950,7 @@ endif()
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown
-  ts_php ts_lua ts_elixir ts_dart ts_kotlin ts_gdscript ts_clojure)
+  ts_php ts_lua ts_elixir ts_dart ts_kotlin ts_gdscript ts_clojure ts_proto)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
@@ -1510,6 +1518,7 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(kotlin     tree_sitter_kotlin     kotlin)
   add_ripwire_fuzzer(gdscript   tree_sitter_gdscript   gdscript)
   add_ripwire_fuzzer(clojure    tree_sitter_clojure    clojure)
+  add_ripwire_fuzzer(proto      tree_sitter_proto      proto)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
 
   # ---- reader fuzzers: ripwire's OWN parsers of bytes it did not create (test/fuzz/readers/) ----
