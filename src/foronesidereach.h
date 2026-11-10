@@ -21,8 +21,8 @@
 //       looks one-sided, and the rule stays off (no answer byte changes).
 //   (D) a <sigs> <d>, <callers> <s> or <syms> <y> row is demoted when it is on exactly one side (root/sink: it reaches S and R does
 //       not reach it; a direct caller of S stays), and it is not an endpoint and not on a shortest path between them: two sinks —
-//       every node of a shortest path from a both-sides row to A and to B (the first kOneSideMaxPathSources such rows); root/sink —
-//       the nodes of the shortest R -> S path.
+//       every node of a shortest path from a both-sides row to A and to B (every such row); root/sink — every node of every
+//       shortest R -> S path.
 // The pointer keeps the row's file, name and r= bytes; a short legend comment rides before the first one. A token budget (CLI
 // --token-budget / --max-tokens, MCP budget_tokens) leaves the answer as shaped. The <d>/<s> rows are priced markup, so the root's
 // est_tokens= is re-priced over the rewritten bytes (serialize.h repriceRootAfterCut, signed); <syms> is outside the price.
@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -49,12 +50,12 @@ namespace rw
 {
 inline constexpr std::uint32_t kOneSideReachHops = 3; // (S): calls a side walk follows from an endpoint
 inline constexpr std::size_t kOneSideRootPathMaxHops = 6; // (M): the longest A -> B path read as a root/sink question (two side walks)
-inline constexpr std::size_t kOneSideMaxPathSources = 8; // (D): both-sides rows whose shortest paths to A and B are kept
 inline constexpr std::size_t kOneSideMaxEndpointDefs = 32; // (E): definitions one endpoint name may place (more: a namesake flood, the rule is off)
 
 inline constexpr std::string_view kOneSideReachLegend =
-    "<!-- one-side: a <t> among sigs, callers or syms rows reaches only one of the two named endpoints within 3 calls and is on no shortest "
-    "path between them, a pointer (p= file, sym= name, r= rank), not the answer -->";
+    "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+    "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
+    "not the answer -->";
 
 inline bool oneSideReachOn()
 {
@@ -108,16 +109,16 @@ inline std::optional<Endpoints> twoNamedEndpoints( const IngestResult& ing, std:
     return Endpoints { .a = std::move( placed[0] ), .b = std::move( placed[1] ) };
 }
 
-// Hop distance of every node from `seeds` within kOneSideReachHops calls (kUnreached past it): callers (`forward` false: who reaches a
-// seed, the --impact walk, graph.h expandCallers one level at a time) or callees (`forward`: what a seed reaches).
-inline std::vector<std::uint32_t> boundedReach( const Graph& g, std::span<const NodeId> seeds, bool forward )
+// Hop distance of every node from `seeds` within `hops` calls (kUnreached past it): callers (`forward` false: who reaches a seed, the
+// --impact walk, graph.h expandCallers one level at a time) or callees (`forward`: what a seed reaches).
+inline std::vector<std::uint32_t> boundedReach( const Graph& g, std::span<const NodeId> seeds, bool forward, std::size_t hops = kOneSideReachHops )
 {
     const std::size_t N = g.wOutDeg.size();
     std::vector<char> seen( N, 0 );
     std::vector<std::uint32_t> depth( N, 0 );
     std::vector<NodeId> q;
     enqueueUnseen( seeds, 0, seen, depth, q );
-    for( std::size_t head = 0, level = 0; level < kOneSideReachHops && head < q.size(); ++level )
+    for( std::size_t head = 0, level = 0; level < hops && head < q.size(); ++level )
     {
         const std::size_t end = q.size();
         if( !forward )
@@ -199,18 +200,53 @@ inline void scanRows( std::string_view text, bool inSyms, std::vector<Row>& out 
     }
 }
 
+// A row's identity: its file, line, leaf name and the qualifier its n= spells (`Owner` of `Owner.run`, "" for a bare name), and the
+// definitions of that name at its line (the one that fixes the row's scope).
+struct SeedWant
+{
+    std::uint32_t file = UINT32_MAX, line = 0;
+    std::string leaf, qual;
+    NodeId atLine = kNoNode, fitLine = kNoNode; // the first definition at the line; the first whose scope the qualifier names
+    bool atLineMixed = false, fitLineMixed = false; // a second definition at the line (that fits) has another scope
+};
+// Does the qualifier an n= spells name `scope` (equal, or one ends the other at a separator: `ns::Owner` and `Owner`)?
+inline bool qualifierNames( std::string_view scope, std::string_view qual ) noexcept
+{
+    const auto endsAtSep = []( std::string_view lng, std::string_view sht ) {
+        return lng.size() > sht.size() && lng.ends_with( sht ) && ( lng[lng.size() - sht.size() - 1] == '.' || lng[lng.size() - sht.size() - 1] == ':' );
+    };
+    return !scope.empty() && ( scope == qual || endsAtSep( scope, qual ) || endsAtSep( qual, scope ) );
+}
+// Record `s`, a definition of the row's name at the row's line.
+inline void noteAtLine( const IngestResult& ing, SeedWant& w, const Symbol& s )
+{
+    const auto note = [&]( NodeId& at, bool& mixed ) {
+        mixed = mixed || ( at != kNoNode && ing.symbols[at].scope != s.scope );
+        at = at == kNoNode ? s.id : at;
+    };
+    note( w.atLine, w.atLineMixed );
+    if( !w.qual.empty() && qualifierNames( s.scope, w.qual ) )
+    {
+        note( w.fitLine, w.fitLineMixed );
+    }
+}
+// The definition that fixes the row's scope: the one its qualifier names, else the one at its line; `ambiguous` when two definitions of
+// different scopes share the line and the qualifier does not tell them apart (the row then stands for nothing: no guessing).
+inline NodeId scopeAnchor( const SeedWant& w, bool& ambiguous ) noexcept
+{
+    const bool fit = w.fitLine != kNoNode;
+    ambiguous = fit ? w.fitLineMixed : w.atLineMixed;
+    return fit ? w.fitLine : w.atLine;
+}
+
 // Every definition each row stands for, in ONE pass over the symbols: the definitions of its leaf name in its file (the one at its line
-// first fixes the scope: an overload's declaration and implementation, a member's in-class declaration and its definition), and for a
-// C/C++ header declaration the same (scope, name) in each file that answers the header (DeclHome).
+// first fixes the scope: an overload's declaration and implementation, a member's in-class declaration and its definition; members of
+// two classes on one line are told apart by the n= qualifier), and for a C/C++ header declaration the same (scope, name) in each file
+// that answers the header (DeclHome).
 inline void resolveSeeds( const IngestResult& ing, const Graph& g, std::vector<Row>& rows )
 {
     filesyms_detail::FileLookup files( ing );
-    struct Want
-    {
-        std::uint32_t file = UINT32_MAX, line = 0;
-        std::string leaf;
-        NodeId atLine = kNoNode;
-    };
+    using Want = SeedWant;
     std::vector<Want> wants;
     for( const Row& r : rows )
     {
@@ -225,7 +261,13 @@ inline void resolveSeeds( const IngestResult& ing, const Graph& g, std::vector<R
             p.resize( colon );
         }
         w.file = p.empty() ? UINT32_MAX : files.of( p );
-        w.leaf = std::string( filesyms_detail::leafName( filesyms_detail::unescapeXmlAttr( filesyms_detail::attrOf( r.attrs, "n" ) ) ) );
+        const std::string n = filesyms_detail::unescapeXmlAttr( filesyms_detail::attrOf( r.attrs, "n" ) );
+        w.leaf = std::string( filesyms_detail::leafName( n ) );
+        w.qual = n.substr( 0, n.size() - w.leaf.size() );
+        while( !w.qual.empty() && ( w.qual.back() == '.' || w.qual.back() == ':' || w.qual.back() == '#' ) )
+        {
+            w.qual.pop_back();
+        }
         wants.push_back( std::move( w ) );
     }
     std::vector<std::uint32_t> wantedFiles;
@@ -246,17 +288,21 @@ inline void resolveSeeds( const IngestResult& ing, const Graph& g, std::vector<R
             if( wants[k].file == s.fileId && s.name == wants[k].leaf )
             {
                 sameName[k].push_back( s.id );
-                wants[k].atLine = wants[k].atLine == kNoNode && s.line == wants[k].line ? s.id : wants[k].atLine;
+                if( s.line == wants[k].line )
+                {
+                    noteAtLine( ing, wants[k], s );
+                }
             }
         }
     }
     std::vector<std::size_t> headerRows; // rows with a C/C++ header declaration among their seeds
     for( std::size_t k = 0; k < rows.size(); ++k )
     {
-        const NodeId at = wants[k].atLine;
+        bool ambiguous = false;
+        const NodeId at = scopeAnchor( wants[k], ambiguous );
         for( const NodeId id : sameName[k] )
         {
-            if( at == kNoNode || ing.symbols[id].scope == ing.symbols[at].scope )
+            if( !ambiguous && ( at == kNoNode || ing.symbols[id].scope == ing.symbols[at].scope ) )
             {
                 rows[k].seeds.push_back( id );
             }
@@ -353,6 +399,20 @@ inline void addShortestPathNodes( const Graph& g, std::span<const NodeId> from, 
     }
 }
 
+// Every node of every shortest R -> S path, not only the one shortestPathAny picked (`rootPath`, kept too): from each root definition at
+// the path's length, one hop nearer the sink per step (distances over the path's length, not the side walk's kOneSideReachHops).
+inline std::vector<NodeId> everyShortestRootSinkNode( const Graph& g, std::span<const NodeId> root, std::span<const NodeId> sink,
+                                                      const std::vector<NodeId>& rootPath )
+{
+    const std::size_t len = rootPath.size() - 1;
+    const std::vector<std::uint32_t> toSink = boundedReach( g, sink, /*forward=*/false, len );
+    std::vector<NodeId> roots;
+    std::ranges::copy_if( root, std::back_inserter( roots ), [&]( NodeId id ) { return toSink[id] == len; } );
+    std::vector<NodeId> out = rootPath;
+    addShortestPathNodes( g, roots, toSink, out );
+    return out;
+}
+
 // (M) + (S) + (G) + the path nodes of (D); nullopt when the gate keeps the rule off.
 inline std::optional<Sides> computeSides( const Graph& g, const Endpoints& ep, const std::vector<Row>& rows )
 {
@@ -372,30 +432,31 @@ inline std::optional<Sides> computeSides( const Graph& g, const Endpoints& ep, c
     {
         s.one = boundedReach( g, aIsRoot ? ep.a : ep.b, /*forward=*/true );
         s.two = boundedReach( g, aIsRoot ? ep.b : ep.a, /*forward=*/false );
-        s.onPath = std::move( rootPath );
+        s.onPath = everyShortestRootSinkNode( g, aIsRoot ? ep.a : ep.b, aIsRoot ? ep.b : ep.a, rootPath );
     }
     else
     {
         s.one = boundedReach( g, ep.a, /*forward=*/false );
         s.two = boundedReach( g, ep.b, /*forward=*/false );
     }
-    std::size_t sources = 0; // printed rows on both sides
+    std::vector<NodeId> sources; // the seeds of every printed row on both sides
     for( const Row& r : rows )
     {
-        if( !hopsOf( s, r ).both() )
+        if( hopsOf( s, r ).both() )
         {
-            continue;
+            sources.insert( sources.end(), r.seeds.begin(), r.seeds.end() );
         }
-        if( !s.rootSink && sources < kOneSideMaxPathSources )
-        {
-            addShortestPathNodes( g, r.seeds, s.one, s.onPath );
-            addShortestPathNodes( g, r.seeds, s.two, s.onPath );
-        }
-        ++sources;
     }
-    if( sources == 0 )
+    if( sources.empty() )
     {
         return std::nullopt; // (G): no printed row reaches both endpoints
+    }
+    if( !s.rootSink ) // one walk per side from all of them: the union of their shortest paths, however many rows reach both
+    {
+        std::ranges::sort( sources );
+        sources.erase( std::ranges::unique( sources ).begin(), sources.end() );
+        addShortestPathNodes( g, sources, s.one, s.onPath );
+        addShortestPathNodes( g, sources, s.two, s.onPath );
     }
     std::ranges::sort( s.onPath );
     return s;

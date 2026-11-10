@@ -23,9 +23,16 @@
 #   (t)  --token-budget leaves the answer as shaped: no pointer, no legend
 #   (x)  MCP `for` (one renderer): its answer equals its RIPWIRE_NO_ONE_SIDE_REACH=1 twin with the same rows as pointers, and they are the
 #        CLI's pointers
+# A SECOND tree (paths.ts, many.ts, same.cpp), so its rows do not move the first tree's answers:
+#   (f)  root/sink with TWO shortest 6-call paths: no row of either path is a pointer (path_b4, 4 calls from the root and 2 from the sink
+#        on the path shortestPathAny did not pick, was one before), so the answer is byte-identical to the rule disabled
+#   (g)  two sinks with 10 common callers (more than the 8 whose paths were once kept): no caller's middle row is a pointer, byte-identical
+#   (h)  two C++ members named run on ONE line (SameQ::run reaches the left sink only, SameP::run both): SameQ::run is a pointer and
+#        SameP::run a row — each row's scope comes from its own n= qualifier, not from the first `run` at the line
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+unset RIPWIRE_NO_ONE_SIDE_REACH # an inherited value (even 0) would turn the rule off in both twins
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "foronesidecheck: BIN=$BIN"
@@ -108,8 +115,9 @@ EOF
 # legend before the first, est_tokens= aside; then `ptr`/`rows` lines (the pointer names and the row names of ON, in order).
 cat >"$TMP/check.py" <<'PY'
 import re, sys
-LEG = ( "<!-- one-side: a <t> among sigs, callers or syms rows reaches only one of the two named endpoints within 3 calls and is on no "
-        "shortest path between them, a pointer (p= file, sym= name, r= rank), not the answer -->" )
+LEG = ( "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+        "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
+        "not the answer -->" )
 ATTR = re.compile( r'([\w:-]+)="([^"]*)"' )
 def mask( t ): return re.sub( r"<!--.*?-->|<!\[CDATA\[.*?\]\]>", lambda m: " " * len( m.group( 0 ) ), t, flags = re.S )
 def rows( t ):
@@ -135,7 +143,8 @@ print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^",]*)"(?: r="\d+")?
 print( "rows " + ",".join( a.get( "n", "" ) for _, _, a in rows( on ) ) )
 PY
 
-run(){ ( cd "$TMP/ts" && "$BIN" . --no-cache "$@" ); }
+TREE=ts
+run(){ ( cd "$TMP/$TREE" && "$BIN" . --no-cache "$@" ); }
 estof(){ grep -o '^<ctx [^>]*' "$1" | grep -o ' est_tokens="[0-9]*"' | grep -o '[0-9]*'; }
 names(){ ptr="$( sed -n 's/^ptr //p' "$1" ),"; rws="$( sed -n 's/^rows //p' "$1" ),"; }
 isptr(){ case ",$ptr" in *",$1,"*) return 0;; esac; return 1; }
@@ -202,6 +211,30 @@ for line in sys.stdin:
     if d.get( "id" ) == 1:
         print( d["result"]["content"][0]["text"], end="" )
 '; }
+TREE=t2; mkdir -p "$TMP/t2"
+{ printf 'export function path_root_go(n: number): number { return path_a1(n) + path_b1(n); }\n'
+  for side in a b; do for k in 1 2 3 4; do printf 'export function path_%s%s(n: number): number { return path_%s%s(n); }\n' "$side" "$k" "$side" "$(( k + 1 ))"; done
+    printf 'export function path_%s5(n: number): number { return path_sink_end(n); }\n' "$side"; done
+  printf 'export function path_sink_end(n: number): number { return n; }\n'; } >"$TMP/t2/paths.ts"
+{ printf 'export function many_left_value(n: number): number { return n; }\nexport function many_right_value(n: number): number { return n + 4; }\n'
+  for k in 1 2 3 4 5 6 7 8 9 10; do
+    printf 'export function many_mid_%s(n: number): number { return many_left_value(n); }\n' "$k"
+    printf 'export function many_driver_%s(n: number): number { return many_mid_%s(n) + many_right_value(n); }\n' "$k" "$k"; done; } >"$TMP/t2/many.ts"
+cat >"$TMP/t2/same.cpp" <<'EOF'
+int same_left_value( int n ) { return n; }
+int same_right_value( int n ) { return n + 3; }
+int same_left_right_driver( int n ) { return same_left_value( n ) + same_right_value( n ); }
+struct SameQ { int run( int n ) { return same_left_value( n ); } }; struct SameP { int run( int n ) { return same_left_value( n ) + same_right_value( n ); } };
+EOF
+ident f 'path_root_go + path_sink_end'
+grep -q 'n="path_b4"' "$TMP/f.on" && ok "(f) path_b4 (on the shortest path not picked) is a row" || no "(f) path_b4 is not a row"
+ident g 'many_left_value + many_right_value'
+grep -q 'n="many_mid_10"' "$TMP/g.on" && ok "(g) many_mid_10 (the 10th common caller's path) is a row" || no "(g) many_mid_10 is not a row"
+twin h 'same_left_value + same_right_value' SameQ::run
+arm h ptr SameQ::run "reaches the left sink only; its scope from its own qualifier"
+arm h row SameP::run "reaches both, on the same line as SameQ::run"
+TREE=ts
+
 for arm in a a2; do
     task='alpha_start + beta_finish'; want=alpha_start_wrapper
     [ "$arm" = a2 ] && { task='sink_left_value + sink_right_value'; want=sink_left_only_caller,sink_left_only_outer; }
