@@ -104,6 +104,11 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): docdemotegolden_for.xml 6709 -> 6431 B and
+# docdemotegolden_noroute.xml 10216 -> 9939 B. The moves: the tail legend clause (sym= minus names a sigs row or the syms block
+# shows) and est_tokens; every tail row of a file whose positive-score names the sigs rows all show now prints p= only
+# (pagecache.py, evictor.py, the .md pages); and SIZE-3a's same_as= on the second tier_probe <d> row (its text repeats the
+# first's), which SIZE-TRIM's own test fix (next note) re-pins on its side; this golden carries both.
 # RE-PIN 2026-11-08 (SIZE-TRIM test fix; rule 4): docdemotegolden_for.xml 6709 -> 6624 B (est_tokens "2684" -> "2650") and
 # docdemotegolden_noroute.xml 10216 -> 10131 B ("3650" -> "3616"). SIZE-3a's same_as= on the second tier_probe <d> row (its text
 # repeats the first's) and the legend clause that explains it are the whole diff (checked mechanically against the previous goldens).

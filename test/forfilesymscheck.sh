@@ -12,7 +12,9 @@
 #   (q1) a member row is Scope.name in its language's spelling (`.` Python/TS/Go, `::` C++/Rust, `#` Ruby)
 #   (ns1) Python: namesakes of two head rows (same names, a test file) are the only callers of a shown-file function: by="callee" via="name"
 #   (d1) dedupe: no <y> row's name is a word anywhere else in the answer
-#   (e1) the answer with RIPWIRE_NO_FILE_SYMS=1 equals the answer minus the block (legend comment + element), byte for byte
+#   (e1) the answer with RIPWIRE_NO_FILE_SYMS=1 equals the answer minus the block (legend comment + element), byte for byte, but
+#        for the one edit the block makes (R-DEDUP: <syms> has priority): a name it prints is cut from the sym= of a tail row whose
+#        file a <d> row shows (a row left with none prints p= only)
 #   (w1) well formed XML, the block's legend holds no double hyphen, the block is last before </ctx>, one per answer
 #   (l1) every attribute the block prints (<syms> and each <y>, the core p= n= aside) is defined `name=` in the legend comment right
 #        before it (the legendcoveragecheck predicate): the compact legend on the CLI rows, the full one on x1 (MCP); (h1) the held stub's
@@ -187,6 +189,13 @@ def leafOf( n ):
 leaked = [ r["n"] for r in rows if leafOf( r["n"] ) in words ]
 say( not leaked, "d1", "rows named elsewhere in the answer: %s" % leaked )
 mask = lambda t: re.sub( r' at="[^"]*"| est_tokens="\d+"', '', t )
+heads = set( re.findall( r'<d [^>]*?\bp="([^"]*)"', off ) )
+def cutRow( t ):
+    if t.group( 1 ) not in heads:
+        return t.group( 0 )
+    kept = [ y for y in t.group( 2 ).split( "," ) if y not in { r["n"] for r in rows } | { leafOf( r["n"] ) for r in rows } ]
+    return '<t p="%s"%s' % ( t.group( 1 ), ' sym="%s"' % ",".join( kept ) if kept else "" )
+off = re.sub( r'<t p="([^"]*)" sym="([^"]*)"', cutRow, off )   # R-DEDUP: the block's names leave the head files' tail rows
 say( mask( rest ) == mask( off ) and len( off ) > 0, "e1", "answer minus block vs RIPWIRE_NO_FILE_SYMS=1 (%d vs %d bytes)" % ( len( rest ), len( off ) ) )
 try:
     M.parseString( s ); wf = True

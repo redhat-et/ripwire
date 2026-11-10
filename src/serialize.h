@@ -1162,7 +1162,7 @@ inline constexpr std::string_view kForFileTailLegend =
     "; tail: file-grain rows, WEAKER evidence than the ranked rows: first the positive-score files NOT among the "
     "shown sigs rows, the files of trimmed rows first, best-symbol rank order; then the file page's first 40 rows "
     "not listed above, file-first (the IDF share of the query's subtokens its top 8 symbols cover); "
-    "sym= its top symbols by lens rank (a pointer, not the answer); "
+    "sym= its top symbols by lens rank, minus names a sigs row or the syms block shows (a pointer, not the answer); "
     "total=every positive-score file, shown=printed, capped=1 when they differ, next= the page from its first unprinted row. "
     "r= on a ranked row is its 1-based rank in this lens ranking, rows in r= order, p= the file (a gap = a budget-trimmed row)";
 // docs-rest CI fix 2: the order the tail really uses on a CODE question (filter.h taskAsksForDocText false; forpage.h
@@ -1319,7 +1319,8 @@ struct PricedRootInputs
     std::size_t bodyTokens = 0; // the body-rate sections, already priced
 };
 
-// ONE-SIDE-REACH (foronesidereach.h) rewrites printed <sigs>/<callers> rows as tail pointers after the root was priced. `doc` is the
+// ONE-SIDE-REACH (foronesidereach.h) rewrites printed <sigs>/<callers> rows as tail pointers, and R-DEDUP's <syms> (forfilesyms.h
+// tailRowsWithoutPicks) cuts names from the head files' tail rows, after the root was priced. `doc` is the
 // answer after that markup rewrite and `pricedBytes` the size of the answer the root was priced on (the same est_tokens= digits in
 // both), so the priced markup is now in.markupBytes + doc.size() - pricedBytes. The difference is SIGNED: the legend comment plus
 // short pointers can outweigh the short rows they replace. The root's est_tokens= value is replaced with the fixpoint over the
