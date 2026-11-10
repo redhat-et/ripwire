@@ -7,7 +7,7 @@
 # It is a pure cost change: every answer must be byte-identical, and RIPWIRE_NO_PARENT_CACHE=1 (any value) is the A/B
 # handle that runs the same binary on plain ts_node_parent.
 #
-# ARMS (fixture test/parentcachefix: the shapes a wrong parent changes)
+# ARMS (fixture test/parentcachefix + deep.py, written into a temp copy at run time: the shapes a wrong parent changes)
 #   (A) facts a wrong parent would move, on the default run: C++ nested namespace / class members keep their scopes and
 #       the qualified + nested calls keep their caller and sites; a Rust method in an impl inside a mod, and a call from a
 #       nested mod; Go calls in a `for` header and a `select` communication case; a Python call nested 600 deep (deeper
@@ -16,7 +16,7 @@
 #   (B) the fixture's map, --deps and --callers answers are byte-identical with the cache off (RIPWIRE_NO_PARENT_CACHE=1).
 #   (C) the same differential over other parent-sensitive fixtures (Go scopes, C++ qualified calls and template calls).
 #   (D) cold and warm (cached) runs answer the same, cache on.
-# The proof that the rule holds on real trees is the verify build (-DRIPWIRE_VERIFY_PARENT_CACHE, the header note): it
+# The proof that the rule holds on real trees is the checked build (-DTSPARENT_CHECK_AGAINST_TS, the header note): it
 # checks every answer against ts_node_parent and is run per grammar on large repos, not here.
 #
 # Usage: test/parentcachecheck.sh [BIN]   (BIN defaults to RIPWIRE_BIN, then build/ripwire)
@@ -25,8 +25,17 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
-FIX="$ROOT/test/parentcachefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+FIX="$TMP/parentcachefix"
+# deep.py is GENERATED, never committed: its 600-deep call nest trips the value walk's depth cap (ingest_valuerefs.h
+# kVrMaxDepth), whose plain-build DISCLOSE line would then ride every whole-repo run's stderr (readabilitycheck (H),
+# xmlwellformed --owners 2>&1 caught it on #604).
+if [ -d "$ROOT/test/parentcachefix" ] && cp -R "$ROOT/test/parentcachefix" "$FIX"; then
+    python3 -c 'import sys
+open( sys.argv[ 1 ], "w" ).write( "def leaf(x):\n    return x\n\ndef deep():\n    return " + "leaf(" * 600 + "1" + ")" * 600
+    + "\n\n\nclass Outer:\n    class Inner:\n        def m(self, a, b=2):\n            return leaf(a)\n\n    def call(self):\n        self.Inner().m(1, b=3)\n" )' "$FIX/deep.py" \
+        || { echo "could not write the generated deep.py"; exit 2; }
+fi
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }

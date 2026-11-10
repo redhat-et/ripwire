@@ -22,7 +22,7 @@
 // never touches the chain. The cache only reads a scope's own tree, which outlives the scope: a re-parse tree freed and
 // reallocated inside the scope cannot share the live tree's address, so no entry can dangle.
 //
-// VERIFY BUILD. -DRIPWIRE_VERIFY_PARENT_CACHE (e.g. CMAKE_CXX_FLAGS) makes every parentOf also call ts_node_parent and
+// CHECKED BUILD. -DTSPARENT_CHECK_AGAINST_TS (e.g. CMAKE_CXX_FLAGS) makes every parentOf also call ts_node_parent and
 // DASSERT that both are the same node (id, tree and the position/alias context), and prints the number of answers it
 // checked at exit. It is how the lane proved the rule above per grammar on the measured repos; it is never a shipped mode.
 //
@@ -31,12 +31,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <vector>
 
 #include <tree_sitter/api.h>
 
-#if defined( RIPWIRE_VERIFY_PARENT_CACHE )
+#if defined( TSPARENT_CHECK_AGAINST_TS )
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -142,7 +141,7 @@ inline TSNode cachedParentOf( AncestorCache& cache, TSNode n ) noexcept
     return resumeDescent( cache, n );
 }
 
-#if defined( RIPWIRE_VERIFY_PARENT_CACHE )
+#if defined( TSPARENT_CHECK_AGAINST_TS )
 struct ParentCacheVerifyCount
 {
     std::atomic<std::uint64_t> checked{ 0 };
@@ -157,7 +156,7 @@ inline TSNode parentOf( TSNode n ) noexcept
 {
     AncestorCache* const cache  = tAncestorCache;
     const TSNode         parent = cache != nullptr && n.tree == cache->tree && !ts_node_is_null( n ) ? detail::cachedParentOf( *cache, n ) : ts_node_parent( n );
-#if defined( RIPWIRE_VERIFY_PARENT_CACHE )
+#if defined( TSPARENT_CHECK_AGAINST_TS )
     const TSNode truth = ts_node_parent( n );
     DASSERT( std::memcmp( &truth, &parent, sizeof( TSNode ) ) == 0, "parentOf disagrees with ts_node_parent" );
     detail::gParentCacheVerifyCount.checked.fetch_add( 1, std::memory_order_relaxed );
@@ -165,24 +164,18 @@ inline TSNode parentOf( TSNode n ) noexcept
     return parent;
 }
 
-// RIPWIRE_NO_PARENT_CACHE (any value) turns the cache off: same answers, the pre-cache cost. Read once per process.
-inline bool parentCacheOn()
-{
-    static const bool on = std::getenv( "RIPWIRE_NO_PARENT_CACHE" ) == nullptr;
-    return on;
-}
-
 // Installs a cache for `root`'s tree for one file's capture, and restores whatever was installed before on every exit path.
-// `root`'s tree must outlive the scope (the capture functions receive it alive and free it after they return).
+// `root`'s tree must outlive the scope (the capture functions receive it alive and free it after they return). `enabled`
+// false installs nothing: every parentOf in the scope is then ts_node_parent (the caller's same-answers A/B switch).
 struct AncestorCacheScope
 {
     AncestorCache  cache;
     AncestorCache* previous;
-    explicit AncestorCacheScope( TSNode root ) : previous( tAncestorCache )
+    AncestorCacheScope( TSNode root, bool enabled ) : previous( tAncestorCache )
     {
-        if( !parentCacheOn() )
+        if( !enabled )
         {
-            return;   // RIPWIRE_NO_PARENT_CACHE: every parentOf in the scope is ts_node_parent (the A/B handle the gate diffs against)
+            return;
         }
         cache.tree = root.tree;
         cache.chain.reserve( AncestorCache::kChainCapacity );
