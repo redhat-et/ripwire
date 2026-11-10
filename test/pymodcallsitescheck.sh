@@ -20,7 +20,7 @@ trap 'rm -rf "$T"' EXIT
 fail=0
 w() { mkdir -p "$(dirname "$1")"; printf '%b' "$2" > "$1"; }
 # row ID CALLEE PATH CALLER WANT: in `--callers=CALLEE`, the caller row CALLER at file PATH is `proven` (no via), `name` (via="name")
-# or `none`; WANT `declined` = no such row AND the header counts at least one declined call. A run that exits nonzero or prints no
+# or `none`; WANT `declined` = no such row AND the header counts at least one declined call; WANT `notproven` = `none` or `name`. A run that exits nonzero or prints no
 # schema is `failed-run`, an answer with no CALLEE definition (defs="0") is `no-callee`: neither passes any arm.
 row() {
     local id=$1 callee=$2 path=$3 caller=$4 want=$5 got out rc
@@ -46,6 +46,7 @@ dc=re.search(r" declined_calls=\"([0-9]+)\"",doc)
 if want=="declined" and got=="none" and dc and int(dc.group(1))>0: got="declined"
 print(got)' "$path" "$caller" "$want" )
     fi
+    if [ "$want" = notproven ] && { [ "$got" = none ] || [ "$got" = name ]; }; then got=notproven; fi
     if [ "$got" = "$want" ]; then echo "PASS $id"; else echo "FAIL $id --callers=$callee row $path:$caller want $want got $got"; fail=1; fi
 }
 
@@ -164,13 +165,17 @@ w "$P/use_c23.py" 'import sys\nif sys.argv:\n    from sp import n23\n\ndef run_n
 # in a sibling def or in a method of a class whose body holds the import. A local rebinding (an `except` that assigns the name, a later
 # assignment, a parameter) withholds; a guard (`if`) does not (the name is unbound otherwise). The local binding wins over a module-level one.
 w "$P/app/lb/__init__.py" ''
-w "$P/app/lb/cfg.py" 'def lb_safe(x):\n    return x\n\ndef lb_run(x):\n    return x\n\ndef lb_try(x):\n    return x\n\ndef lb_if(x):\n    return x\n\ndef lb_cls(x):\n    return x\n'
+w "$P/app/lb/cfg.py" 'def lb_safe(x):\n    return x\n\ndef lb_run(x):\n    return x\n\ndef lb_try(x):\n    return x\n\ndef lb_if(x):\n    return x\n\ndef lb_cls(x):\n    return x\n\ndef lb_gl(x):\n    return x\n\ndef lb_dflt(x):\n    return x\n'
 w "$P/app/lb/runner.py" 'def lb_go(x):\n    return x\n\ndef lb_as(x):\n    return x\n'
-w "$P/app/lb/other.py" 'def lb_safe(x):\n    return x\n\ndef lb_go(x):\n    return x\n\ndef lb_as(x):\n    return x\n\ndef lb_run(x):\n    return x\n\ndef lb_try(x):\n    return x\n\ndef lb_if(x):\n    return x\n\ndef lb_cls(x):\n    return x\n\ndef lb_up(x):\n    return x\n'
+w "$P/app/lb/other.py" 'def lb_safe(x):\n    return x\n\ndef lb_go(x):\n    return x\n\ndef lb_as(x):\n    return x\n\ndef lb_run(x):\n    return x\n\ndef lb_try(x):\n    return x\n\ndef lb_if(x):\n    return x\n\ndef lb_cls(x):\n    return x\n\ndef lb_up(x):\n    return x\n\ndef lb_gl(x):\n    return x\n\ndef lb_dflt(x):\n    return x\n'
 w "$P/app/lb/__main__.py" 'import sys\n\ndef main():\n    from . import cfg, runner\n    if cfg.lb_safe(1):\n        return runner.lb_go(2)\n    return 0\n\ndef sibling():\n    return cfg.lb_safe(3)\n\ndef modas():\n    import app.lb.runner as rn\n    return rn.lb_as(1)\n\ndef sibas():\n    return rn.lb_as(2)\n\ndef tryer():\n    try:\n        from . import cfg\n    except ImportError:\n        cfg = None\n    return cfg.lb_try(4)\n\ndef iffer():\n    if sys.argv:\n        from . import cfg\n    return cfg.lb_if(5)\n\ndef rebound():\n    from . import cfg\n    cfg = sys\n    return cfg.lb_safe(6)\n\nclass Holder:\n    from . import cfg\n\n    def meth(self):\n        return cfg.lb_cls(7)\n\ncfg.lb_safe(8)\n'
 w "$P/app/lb/both.py" 'from . import cfg\nfrom . import other as rc\n\ndef top():\n    return cfg.lb_run(1)\n\ndef both():\n    from . import cfg\n    return cfg.lb_run(2)\n\ndef wins():\n    from . import runner as rc\n    return rc.lb_go(3)\n'
 w "$P/app/lb/deep/__init__.py" ''
 w "$P/app/lb/deep/up.py" 'def climb():\n    from .. import other\n    return other.lb_up(1)\n'
+# PY-LOCAL-BIND CR round (#592): `global cfg` makes a def's import write the module's cfg (the old one survives a false guard); a default
+# runs in the enclosing scope, before the body's import; a nested def reads the enclosing def's cfg by closure, not the module's.
+w "$P/app/lb/edge.py" 'import sys\nfrom . import other as cfg\n\ndef gl():\n    global cfg\n    if sys.argv:\n        from . import cfg\n    return cfg.lb_gl(1)\n\ndef dflt(x=cfg.lb_dflt(2)):\n    from . import cfg\n    return x\n'
+w "$P/app/lb/edge2.py" 'import app.lb.other as cfg\n\ndef outer():\n    from . import runner as cfg\n    def inner():\n        return cfg.lb_go(3)\n    return inner\n'
 ( cd "$P" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
 
 # ---- S: the accepted spellings bind the call (S3 is the module form Rule 2d already read: the twin)
@@ -253,6 +258,10 @@ row L10.ifguard     app/lb/cfg.py:lb_if      app/lb/__main__.py iffer   proven
 row L11.rebound     app/lb/cfg.py:lb_safe    app/lb/__main__.py rebound none
 row L12.classbody   app/lb/cfg.py:lb_cls     app/lb/__main__.py meth    none
 row L13.dotdot      app/lb/other.py:lb_up    app/lb/deep/up.py  climb   proven
+row L15.global      app/lb/cfg.py:lb_gl      app/lb/edge.py     gl      notproven
+row L16.default     app/lb/cfg.py:lb_dflt    app/lb/edge.py     dflt    notproven
+row L17.closure     app/lb/other.py:lb_go    app/lb/edge2.py    inner   notproven
+row L18.filescope   app/lb/cfg.py:lb_safe    app/lb/__main__.py '&lt;file-scope&gt;' notproven
 # L14: the module-level and the local binding of one name both name cfg: `both` is ONE caller row of lb_run, at one site
 out=$( cd "$P" && "$BIN" "$P" "--callers=app/lb/cfg.py:lb_run" --no-cache --legend=compact </dev/null 2>/dev/null ); rc=$?
 n=$( printf '%s' "$out" | grep -o '<s [^>]* n="both"[^>]*>' | wc -l | tr -d ' ' )

@@ -583,9 +583,10 @@ done
 #   dottedroot:  `import pkg.x` binds the ROOT package pkg: pkg.Base is pkg/__init__.py's class, not pkg/x/__init__.py's re-export (E3)
 #   tpclass/tpdef: `class Sub[Base](Base)` / `def make[Base](): class Sub(Base)` - the type parameter is the name (TypeError, no base) (N8)
 #   Controls (stay a way in): sameas (`import Base as Base`), qualok (`from pkg.x import a as q` + q.Base is pkg/x/a.py), outform (an
-#   unrelated function's `import pkg.y.base2 as Base` does not touch the bare member import), dotted2 (`import pkg.x.a as q` + q.Base)
+#   unrelated function's `import pkg.y.base2 as Base` does not touch the bare member import), dotted2 (`import pkg.x.a as q` + q.Base),
+#   fnqual/clsqual (PY-LOCAL-BIND, CodeRabbit #592: the same import inside the def or class body that holds the class statement)
 # K19 begin
-for v in memberalias qualalias dottedroot tpclass tpdef sameas qualok outform dotted2; do d="$TMP/c5_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+for v in memberalias qualalias dottedroot tpclass tpdef sameas qualok outform dotted2 fnqual clsqual; do d="$TMP/c5_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
     printf 'class Base:\n    def render_line(self):\n        return 1\n' > "$d/pkg/x/a.py"
     printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
     printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
@@ -606,6 +607,8 @@ for v in memberalias qualalias dottedroot tpclass tpdef sameas qualok outform do
         qualok)      out="from pkg.x import a as q\n\n${tgt}$(sub q.Base)\n" ;;
         outform)     out="from pkg.x.a import Base\ndef g():\n    import pkg.y.base2 as Base\n    return Base\n\n${tgt}$(sub Base)\n" ;;
         dotted2)     out="import pkg.x.a as q\n\n${tgt}$(sub q.Base)\n" ;;
+        fnqual)      out="${tgt}def make():\n    import pkg.x.a as q\n    class Sub(q.Base):\n        def render_line(self):\n            return target()\n    return Sub\n" ;;
+        clsqual)     out="${tgt}class Outer:\n    import pkg.x.a as q\n    class Sub(q.Base):\n        def render_line(self):\n            return target()\n" ;;
     esac
     printf "$out" > "$d/other/b.py"
 done
@@ -1263,7 +1266,7 @@ for fx in memberalias:7 qualalias:7 dottedroot:7 tpclass:7 tpdef:8; do v=${fx%%:
         "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" withheld=\"name:1\"/>"
     brArm "(K19b) 2c import/type-parameter binding ($v): no namesake bridge to it either" "$TMP/c5_$v" "run,target" ''
 done
-for fx in sameas:7:3 qualok:7:3 outform:10:6 dotted2:7:3; do v=${fx%%:*}; rest=${fx#*:}; ln=${rest%%:*}; tl=${rest##*:}
+for fx in sameas:7:3 qualok:7:3 outform:10:6 dotted2:7:3 fnqual:7:1 clsqual:7:1; do v=${fx%%:*}; rest=${fx#*:}; ln=${rest%%:*}; tl=${rest##*:}
     nsArm "(K20) 2c import binding ($v): Base is still pkg/x/a.py's class where Sub is defined — a way in" "$TMP/c5_$v" "run,target" \
         '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
         "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" why=\"name:1\" in=\"run\" site=\"pkg/x/c.py:3\" met=\"1\"/>"
