@@ -116,6 +116,12 @@ struct LangFacts
     /// declared inheritance chain (graph.h).
     bool mixinAncestry = false;
 
+    /// C++ (#446): a class definition reads its base-clause types as @reference.base tags captures
+    /// (queries/cpp/tags.scm), not through captureBases' kind chain — captureSpecializationHeader
+    /// still walks for template specializations. The languages this port has not reached yet keep
+    /// the walk.
+    bool basesAsCaptures = false;
+
     /// Ruby: an element access `recv[ k ]` whose receiver the shape rules cannot classify (a call result, a richer expression) is
     /// still recorded as a site on that receiver, because the typing walk may type it later (`Report.new[ :x ]`). Python and the
     /// rest record nothing for such a receiver (ingest_binds.h subscriptOperatorRef).
@@ -395,7 +401,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
       .typedInstanceRows = true, .xMacroRows = true },
