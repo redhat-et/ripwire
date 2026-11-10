@@ -796,6 +796,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kMaxBlockBytes` | `32` | — | — |
 
+### `src/infra/tsparent.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kChainCapacity` | `512` | — | deeper than any real file's nesting but the adversarial ones |
+
 ### `src/ingest.h`
 
 Discloses: `ellipsis_capped`, `hits_capped`
