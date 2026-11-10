@@ -52,6 +52,7 @@
 # Usage: test/fortailwidecheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
 set -u
+unset RIPWIRE_TAIL_SYM_WIDE_ROWS   # the default-capture arms (w.sym, f.sw) must see the shipped default, not a caller's override (CodeRabbit #601)
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
