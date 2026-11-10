@@ -76,6 +76,9 @@
 #   (r1) a directory-local touch row: the typical member's directory aggregator (filters/__init__.py) names all four members in that
 #        directory but four of the family's ten: <touch .. share="4/4" scope="dir">, after the family-wide rows, and the legend then
 #        defines scope="dir"; (r1n) a directory whose aggregator names one of its four members prints no such row and no such clause
+#   (r2) Go contract lines: the typical registry entry's package (plugins/alpha) asserts three interfaces for Alpha (`&T{}`,
+#        `(*T)(nil)`, a `var (` group's `T{}`): <asserts type="Alpha" p=.. n="3"> after the touch list; a helper type's single assertion
+#        and a _test.go file's are not printed; the legend defines <asserts>; (r2n) a Go registry whose packages assert nothing: no row
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -712,6 +715,50 @@ if [ -n "$( block "$TMP/r1n.xml" )" ] && ! grep -q 'scope="dir"' "$TMP/r1n.xml" 
     ok "(r1n) an aggregator naming one of its four members: no dir-local row, no scope=\"dir\" clause"
 else no "(r1n) $( touchrows "$TMP/r1n.xml" | head -c 400 )"; fi
 
+# r2 / r2n: RESIDUAL-2 Go contract lines. A registry of four plugin packages (gofx/plugins/registry.go); the typical entry (the first,
+# alpha) is named for its package plugins/alpha, whose alpha.go asserts three interfaces for Alpha (`&T{}`, `(*T)(nil)`, a `var (`
+# group's `T{}`) and one for a helper type; alpha_test.go asserts one more (a test file: not read).
+mkdir -p "$F/gofx/plugins"
+for p in alpha beta gamma delta; do
+    P="$( cap "$p" )"; mkdir -p "$F/gofx/plugins/$p"
+    printf 'package %s\n\nconst Name = "%s"\n\ntype %s struct{}\n\nfunc New() (*%s, error) { return &%s{}, nil }\n' "$p" "$P" "$P" "$P" "$P" > "$F/gofx/plugins/$p/$p.go"
+done
+cat >> "$F/gofx/plugins/alpha/alpha.go" <<'GO'
+
+type helper struct{}
+
+var _ fw.FilterPlugin = &Alpha{}
+var _ fw.ScorePlugin = (*Alpha)(nil) // checked by the compiler
+var (
+	_ fw.PreFilterPlugin = Alpha{}
+)
+var _ fw.Lister = &helper{}
+var answer = 42
+GO
+printf 'package alpha\n\nvar _ fw.TestOnlyPlugin = &Alpha{}\n' > "$F/gofx/plugins/alpha/alpha_test.go"
+cat > "$F/gofx/plugins/registry.go" <<'GO'
+package plugins
+
+type Registry map[string]func() (interface{}, error)
+
+func NewInTreeRegistry() Registry {
+	return Registry{
+		alpha.Name: alpha.New,
+		beta.Name:  beta.New,
+		gamma.Name: gamma.New,
+		delta.Name: delta.New,
+	}
+}
+GO
+run gofx "--for=add a new in-tree plugin" >"$TMP/r2.xml"
+b="$( block "$TMP/r2.xml" )"
+if printf '%s' "$b" | grep -q '\(</touch_list>\|<touch_list total="0"/>\)<asserts type="Alpha" p="plugins/alpha/alpha.go:11" n="3">fw.FilterPlugin fw.ScorePlugin fw.PreFilterPlugin</asserts></exemplar_family>' \
+   && ! printf '%s' "$b" | grep -q 'TestOnlyPlugin\|fw.Lister'; then ok "(r2) the typical entry's package asserts three interfaces for Alpha: <asserts type=\"Alpha\" n=\"3\">, after the touch list"
+else no "(r2) contract row: $( printf '%s' "$b" | head -c 600 )"; fi
+if grep -q '<asserts> (Go)' "$TMP/r2.xml"; then ok "(r2) the legend defines <asserts> when the row prints"; else no "(r2) legend: <asserts> clause missing"; fi
+if [ -n "$( block "$TMP/e_go.xml" )" ] && ! grep -q '<asserts' "$TMP/e_go.xml" && ! grep -q '<asserts> (Go)' "$TMP/e_go.xml"; then ok "(r2n) a Go registry whose packages assert nothing: no <asserts> row, no clause"
+else no "(r2n) e_go: $( block "$TMP/e_go.xml" | head -c 400 )"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
@@ -730,7 +777,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n r2; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
@@ -741,7 +788,7 @@ legend = s[ i: s.index( "-->", i ) ]
 if "--" in legend[ 4: ]: sys.exit( "double hyphen in the legend" )
 m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))</ctx>$', s, re.S )
 if not m: sys.exit( "the block does not close right before </ctx>" )
-for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows) ([^>]*?)/?>', m.group( 1 ) ):
+for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows|asserts) ([^>]*?)/?>', m.group( 1 ) ):
     for a in re.findall( r'(\w+)="', attrs ):
         if not re.search( r'(?<![\w])' + a + r'=', legend ): sys.exit( "attribute %s= on <%s> is not in the legend" % ( a, tag ) )
 PY
