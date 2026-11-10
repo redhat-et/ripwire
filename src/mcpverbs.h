@@ -2481,21 +2481,28 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms>, read off this answer's own bytes (every block before it), before </ctx>, not priced;
 // held under budget_tokens.
 // ONE-SIDE-REACH (src/foronesidereach.h): then the CLI twin's demote pass over the answer and the block, re-priced on `price` (the root's
-// inputs, null: no re-price); held under budget_tokens.
+// inputs, null: no re-price); held under budget_tokens. R-DEDUP's <syms> cut (forfilesyms.h tailRowsWithoutPicks) lands first, the
+// demote pass reads the cut answer, and the root is re-priced once on the result.
 inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
 {
     if( out.ends_with( "</ctx>" ) )
     {
+        std::string cut; // R-DEDUP: <syms> has priority over the head files' tail rows (forfilesyms.h tailRowsWithoutPicks)
         args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
+        args.answerOut = &cut;
         std::string syms = renderForFileSyms( ing, g, args );
-        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, args.answer, syms );
-        if( !edit.answer.empty() )
+        const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
+        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
+        std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
+        if( !answer.empty() )
         {
             if( price != nullptr )
             {
-                repriceRootAfterCut( edit.answer, *price, args.answer.size() ); // signed: the pointers and legend may outweigh the rows they replace
+                // once, on the final bytes: the <syms> cut and the demote rewrite are both priced markup (signed: the pointers and
+                // legend may outweigh the rows they replace)
+                repriceRootAfterCut( answer, *price, args.answer.size() );
             }
-            out = std::move( edit.answer ) + "</ctx>";
+            out = std::move( answer ) + "</ctx>";
         }
         out.insert( out.size() - 6, edit.syms.empty() ? syms : edit.syms );
     }

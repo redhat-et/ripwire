@@ -187,6 +187,11 @@ a_bytes="$( printf '%s' "$A_OUT" | wc -c | tr -d ' ' )"
 # 3967); (4d) is the twin: the answer minus the hop equals RIPWIRE_NO_CALLER_HOP=1, the pre-hop answer, under (4b)'s old 3400 B.
 # RE-PIN 2026-11-06 (lane d2-via-inherit, by design; budget serves answers): the caller-hop legend clause defines via=name on d=2 rows
 # (" (via=name if every path has a by-name hop)", 43 B), 4066 -> 4109 B; (4b) moves 4100 -> 4200 B. (4) and (4d) are unchanged.
+# RE-PIN 2026-11-08 (lane r-dedup, by design; PR #584 CI): a tail row no longer repeats names its file's sigs rows or <syms> show,
+# so the one <t> row loses sym="FLOORANCHOR_uniquefn" (-27 B) and the full tail legend's sym= clause gains ", minus names a sigs
+# row or the syms block shows" (+46 B): the hop-off answer is 3384 -> 3405 B on macOS (4109 -> 4130 B with the hop; (4b) holds).
+# (4d) moves 3400 -> 3500 B. The answer embeds the fixture's absolute root=, so the same bytes are ~45 B shorter under Linux /tmp
+# (~3360 B) — why only the macOS legs crossed 3400. (4) and the strip-equality half of (4d) are unchanged.
 a_norm_bytes="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); sys.stdout.write(s)' | sed -E 's/ e="[0-9]+"//g; s/; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known \(extent_suspect, docs, config\), never 0; l= is the line of the definition.s name, so a definition can start above l=//' \
                  | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<t p=\"[^\"]*\" sym=\"[^\"]*\"/>","",s); m=re.search(r"; tail: [^\]]*?budget-trimmed row\)",s); s=s.replace(m.group(0),"x"*391) if m and len(m.group(0))>391 else s; sys.stdout.write(s)' | wc -c | tr -d ' ' )"
 case "$a_bytes$a_norm_bytes" in *[!0-9]*|'') no "(4) byte counts are not numeric ('$a_bytes' / '$a_norm_bytes')"; a_bytes=999999; a_norm_bytes=999999 ;; esac
@@ -198,10 +203,10 @@ A_OFF="$( RIPWIRE_NO_CALLER_HOP=1 rw --for=FLOORANCHOR_uniquefn --legend=full )"
 a_off_bytes="$( printf '%s' "$A_OFF" | wc -c | tr -d ' ' )"
 a_on_strip="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); s=re.sub(r" est_tokens=\"[0-9]+\"","",s); sys.stdout.write(s)' )"
 a_off_strip="$( printf '%s' "$A_OFF" | sed -E 's/ est_tokens="[0-9]+"//g' )"
-if [ -n "$A_OFF" ] && [ "$a_on_strip" = "$a_off_strip" ] && [ "$a_off_bytes" -lt 3400 ]; then
-    ok "(4d) the answer minus the caller hop is the RIPWIRE_NO_CALLER_HOP=1 answer ($a_off_bytes B, < the old 3400 B ceiling)"
+if [ -n "$A_OFF" ] && [ "$a_on_strip" = "$a_off_strip" ] && [ "$a_off_bytes" -lt 3500 ]; then
+    ok "(4d) the answer minus the caller hop is the RIPWIRE_NO_CALLER_HOP=1 answer ($a_off_bytes B, < the 3500 B ceiling)"
 else
-    no "(4d) the answer minus the caller hop differs from RIPWIRE_NO_CALLER_HOP=1, or that answer is $a_off_bytes B (>= 3400)"
+    no "(4d) the answer minus the caller hop differs from RIPWIRE_NO_CALLER_HOP=1, or that answer is $a_off_bytes B (>= 3500)"
 fi
 if printf '%s' "$A_OUT" | grep -q ' e="'; then
     [ "$a_norm_bytes" -lt "$a_bytes" ] \

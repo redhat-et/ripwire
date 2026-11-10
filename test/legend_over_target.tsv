@@ -12,3 +12,4 @@ ripwire.connect/v1	defs-spelling	155	 defs="	spellings that pick one def share a
 ripwire.connect/v1	hop-site	76	 site="	e site=: a call of t= in f=	HOP-CONTEXT-1: a <e> row carries the call site in f= (the agent's next read, R1); present-only, on every connect answer with a reached hop
 ripwire.connect/v1	hop-call	48	 call="	e call=: its text	HOP-CONTEXT-1: a <e> row carries the call's text (arguments at the site); present-only beside call=
 ripwire.connect/v1	hop-sig	50	 sig="	e sig=: t='s signature	HOP-CONTEXT-1: a <e> row carries the callee's signature once per callee (the agent's R2 read); present-only beside <e sig=>
+ripwire.for/v1	tail-sym-skip	17	<tail	its top symbols not in sigs/syms	R-DEDUP: a tail row skips the names a sigs row or the syms block shows; the compact legend says so (verbs_for.h kForCompactLegendTail, 17 B); present-only beside <tail

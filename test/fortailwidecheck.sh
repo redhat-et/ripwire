@@ -36,6 +36,10 @@
 #                clause); without a budget it serves the widened tail (p_only= and the clause, the positive twin)
 #   12 p_only (F3): p_only= / "p_only" = the shown rows without sym= past the old prefix, with "p_only_why" in JSON; absent
 #                when no such row is shown
+#   R-DEDUP re-pin (2026-11-08): a tail row of a file the head shows drops the names that file's <d> rows print and the names the
+#                <syms> block prints (want() below; these fixtures hold at most 2 positive symbols a file, so no refill name comes
+#                from past the page row's own top 3). Such a row may print p= only: it is not a p_only= row (it sits in the old
+#                prefix), so arms 3, 4, 8, 9, 12 and 13 read it through want() / has() instead of "every row with sym=".
 #
 # Usage: test/fortailwidecheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -154,6 +158,23 @@ def tail_of(txt):
 def head_files(txt):
     m = re.search(r'<sigs[ >].*?</sigs>', txt, re.S)
     return set() if not m else {html.unescape(p) for p in re.findall(r'<d [^>]*?\bp="([^"]*)"', m.group(0))}
+def shown_names(txt):
+    """R-DEDUP: per head file the names its <d> rows print, and the names the <syms> block prints (leaf spellings too)."""
+    m = re.search(r'<sigs[ >].*?</sigs>', txt, re.S); d = {}
+    for tag in re.findall(r'<d [^>]*>', m.group(0) if m else ""):
+        a = dict(re.findall(r'(\w+)="([^"]*)"', tag))
+        if "p" in a and "n" in a:
+            n = html.unescape(a["n"]); d.setdefault(html.unescape(a["p"]), set()).update({n, re.split(r'::|\.', n)[-1]})
+    ys = {html.unescape(n) for n in re.findall(r'<y [^>]*?\bn="([^"]*)"', txt)}
+    return d, ys | {re.split(r'::|\.', n)[-1] for n in ys}
+def want(p, sym, names):
+    """the sym= a tail row prints for a page row whose own sym= is `sym`: a head file's row without the shown names (None: p= only)"""
+    d, ys = names
+    if p not in d: return sym
+    return ",".join(n for n in (sym or "").split(",") if n and n not in d[p] and n not in ys) or None
+def has(p, s, names):
+    """a row of the old prefix: it carries sym=, or it is a head file's row (R-DEDUP: p= only once every name is shown; arms 3/4 pin its value)"""
+    return s is not None or p in names[0]
 def page_of(txt):
     return [(html.unescape(p), html.unescape(s) if s is not None else "") for p, s in re.findall(r'<f p="([^"]*)"[^>]*?(?: sym="([^"]*)")?/>', txt)]
 def split(rows, page, walk, head=frozenset()):
@@ -173,7 +194,7 @@ say(wt is not None and len(page) >= 200, f"wide fixture: a <tail> and a raised p
 if wt is None or len(page) < 200:
     print("fortailwidecheck: FAIL (no tail or short page)"); sys.exit(1)
 pidx = {p: k for k, (p, _) in enumerate(page)}; psym = dict(page)
-whead = head_files(rcs["w.xml"][1])
+whead = head_files(rcs["w.xml"][1]); wnames = shown_names(rcs["w.xml"][1])
 k = split(wt["rows"], page, 160, whead)
 say(k is not None, f"1 widened: the page part is page[0:160] minus the rank rows (and, past index 40, the head's files), in page order (rank rows={k}; old walk 40 split={split(wt['rows'], page, 40)})")
 kv = k is not None
@@ -190,16 +211,17 @@ say(len(whead) > 0 and any(pidx[p] >= 40 for p, _ in pagepart), f"11 head files 
 say("--offset=160" in wt["next"] and "--limit=40" in wt["next"], f"2 counts: next= continues the page at offset 160 ({wt['next'][-40:]!r})")
 past = [(p, s) for p, s in pagepart if pidx[p] >= 40]; within = [(p, s) for p, s in pagepart if pidx[p] < 40]
 say(kv and len(past) > 0 and all(s is None for _, s in past), f"3 sym absence: {len(past)} page rows past index 40, none with sym=")
-say(kv and len(within) > 0 and all(s == psym[p] and s for p, s in within), f"3 sym twin: {len(within)} page rows within index 40 carry the page row's sym=")
+say(kv and len(within) > 0 and all(s == want(p, psym[p], wnames) and (s or p in whead) for p, s in within), f"3 sym twin: {len(within)} page rows within index 40 carry the page row's sym= (a head file's without its shown names)")
 say(k > 0 and all(s == psym[p] and s for p, s in wt["rows"][:k]), f"3 sym twin: {k} rank rows carry the page row's sym=")
 st, spage = tail_of(rcs["s.xml"][1]), page_of(rcs["s.page"][1])
-ok4 = st is not None and st["capped"] == "0" and not st["next"] and st["shown"] == st["total"] == len(spage) and all(s for _, s in st["rows"]) and st["p_only"] is None
+snames = shown_names(rcs["s.xml"][1])
+ok4 = st is not None and st["capped"] == "0" and not st["next"] and st["shown"] == st["total"] == len(spage) and all(has(p, s, snames) for p, s in st["rows"]) and st["p_only"] is None
 say(ok4, "4 no cut: capped=0, no next=, shown=total=page rows, every row with sym=")
 if st is not None:
     ks = split(st["rows"], spage, 160)
     rebuilt = f'<tail total="{len(spage)}" shown="{len(st["rows"])}" capped="0">' + "".join(
-        f'<t p="{html.escape(p, quote=True)}" sym="{html.escape(psym_s, quote=True)}"/>' for p, psym_s in
-        [(p, dict(spage)[p]) for p, _ in st["rows"]]) + "</tail>"
+        f'<t p="{html.escape(p, quote=True)}"' + ("" if psym_s is None else f' sym="{html.escape(psym_s, quote=True)}"') + "/>" for p, psym_s in
+        [(p, want(p, dict(spage)[p], snames)) for p, _ in st["rows"]]) + "</tail>"
     say(ks is not None and st["raw"].replace("&apos;", "'").replace("&#x27;", "'") == rebuilt.replace("&#x27;", "'"), "4 no cut: the tail element is byte-identical to the one rebuilt from the page")
 try:
     j = json.loads(rcs["w.json"][1]); jt = j.get("tail") or {}
@@ -207,9 +229,9 @@ except Exception as e:
     jt = {}; print("  json parse error:", e)
 say(jt.get("files") == [p for p, _ in wt["rows"]], f"5 JSON: tail.files is the XML rows in order ({len(jt.get('files') or [])} vs {len(wt['rows'])})")
 say(jt.get("sym") == [s or "" for _, s in wt["rows"]] and "" in (jt.get("sym") or []), "5 JSON: sym is \"\" exactly where the XML row has no sym=")
-nosym = sum(1 for _, s in wt["rows"] if s is None)
+nosym = sum(1 for p, s in wt["rows"] if not has(p, s, wnames))
 say(wt["p_only"] == nosym > 0 and all(s is None for _, s in wt["rows"][len(wt["rows"]) - nosym:]), f"12 p_only: XML p_only={wt['p_only']} = the {nosym} trailing rows without sym=")
-say(jt.get("p_only") == nosym and bool(jt.get("p_only_why")) and jt.get("sym", []).count("") == nosym, f"12 p_only: JSON p_only={jt.get('p_only')} with p_only_why, = its \"\" sym entries")
+say(jt.get("p_only") == nosym and bool(jt.get("p_only_why")) and sum(1 for p, y in zip(jt.get("files") or [], jt.get("sym") or []) if y == "" and p not in whead) == nosym, f"12 p_only: JSON p_only={jt.get('p_only')} with p_only_why, = its \"\" sym entries")
 bt = tail_of(rcs["w.bud"][1])
 say(bt is not None and 0 < len(bt["rows"]) < len(wt["rows"]) and [p for p, _ in bt["rows"]] == [p for p, _ in wt["rows"][:len(bt["rows"])]] and bt["capped"] == "1" and "--limit=40" in bt["next"],
     f"6 budget: the --token-budget tail is a non-empty strict prefix with capped=1 and next= ({0 if bt is None else len(bt['rows'])} rows)")
@@ -219,12 +241,12 @@ if dt is None:
 else:
     isdoc = lambda p: p.endswith(".md")
     code = [p for p, _ in dpage if not isdoc(p)]; crank = {p: k for k, p in enumerate(code)}; drank = {p: k for k, (p, _) in enumerate(dpage)}
-    rows = dt["rows"]; k8 = 0
+    rows = dt["rows"]; k8 = 0; dnames = shown_names(rcs["d.xml"][1]); hs = lambda p, s: has(p, s, dnames)
     while k8 < len(rows) and k8 < 24 and rows[k8][1] is not None and not isdoc(rows[k8][0]): k8 += 1   # rank rows lead, all with sym=
     crow = [(p, s) for p, s in rows[k8:] if not isdoc(p)]; drow = [(p, s) for p, s in rows if isdoc(p)]
-    nsym = sum(1 for _, s in rows if s is not None); symrows = rows[:nsym]; wide = rows[nsym:]
+    nsym = sum(1 for p, s in rows if hs(p, s)); symrows = rows[:nsym]; wide = rows[nsym:]
     firstdoc = next((j for j, (p, _) in enumerate(symrows) if isdoc(p)), len(symrows))
-    say(all(s is None for _, s in wide) and len(wide) > 0 and any(isdoc(p) for p, _ in symrows) and all(isdoc(p) for p, _ in symrows[firstdoc:]),
+    say(all(not hs(p, s) for p, s in wide) and len(wide) > 0 and any(isdoc(p) for p, _ in symrows) and all(isdoc(p) for p, _ in symrows[firstdoc:]),
         f"8 code first: the old walk's {nsym} rows lead (its doc rows after its code rows), then {len(wide)} p=-only rows")
     say([drank[p] for p, _ in wide] == sorted(drank[p] for p, _ in wide) and any(isdoc(p) for p, _ in wide) and any(not isdoc(p) for p, _ in wide),
         "8 code first: the widened rows (code and doc) follow in page order")
@@ -234,21 +256,21 @@ else:
     except Exception:
         djt = {}
     say(djt.get("files") == [p for p, _ in rows] and djt.get("p_only") == len(wide), f"12 p_only: code first JSON files = XML rows, p_only={djt.get('p_only')}")
-    dsym = [p for p, s in rows if s is not None]
+    dsym = [p for p, s in rows if hs(p, s)]
     for nm in ("d.b3000", "d.b4000"):
         bt9 = tail_of(rcs[nm][1])
         if bt9 is None:
             say(False, f"9 budget order {nm}: a <tail>"); continue
-        shown9 = {p for p, _ in bt9["rows"]}; bare = sum(1 for _, s in bt9["rows"] if s is None); miss = [p for p in dsym if p not in shown9]
+        shown9 = {p for p, _ in bt9["rows"]}; bare = sum(1 for p, s in bt9["rows"] if not has(p, s, shown_names(rcs[nm][1]))); miss = [p for p in dsym if p not in shown9]
         say(bare == 0 or not miss, f"9 budget order {nm}: {len(bt9['rows'])} rows, {bare} p=-only shown while {len(miss)} sym= rows of the default tail are cut")
         say(bt9["p_only"] == (bare or None), f"12 p_only: {nm} p_only={bt9['p_only']} = {bare} shown p=-only rows (absent at 0)")
         say([p for p, _ in bt9["rows"]] == [p for p, _ in rows[:len(bt9["rows"])]], f"9 budget order {nm}: the budgeted tail is a prefix of the default tail")
     late = [(p, s) for p, s in crow if crank[p] >= 40]; early = [(p, s) for p, s in crow if crank[p] < 40 and drank[p] >= 40]
     say(len(late) > 0 and all(s is None for _, s in late), f"8 code first: {len(late)} code rows past the page's first 40 code rows carry no sym=")
-    say(len(early) > 0 and all(s for _, s in early), f"8 code first (twin): {len(early)} code rows within the first 40 code rows but past page index 40 keep sym=")
+    say(len(early) > 0 and all(hs(p, s) for p, s in early), f"8 code first (twin): {len(early)} code rows within the first 40 code rows but past page index 40 keep sym=")
     dl = [(p, s) for p, s in drow if drank[p] >= 40]; de = [(p, s) for p, s in drow if drank[p] < 40]
     dls = sum(1 for _, s in dl if s)   # a doc the rank walk listed (at most kForFileTailShownCap of them) keeps its rank row's sym=
-    say(len(de) > 0 and all(s for _, s in de), f"8 code first (twin): {len(de)} doc rows within page index 40 keep sym=")
+    say(len(de) > 0 and all(hs(p, s) for p, s in de), f"8 code first (twin): {len(de)} doc rows within page index 40 keep sym=")
     say(len(dl) - dls > 0 and dls <= 24, f"8 code first: doc rows past page index 40: {len(dl) - dls} without sym=, {dls} with it (rank-walk docs, <= 24)")
 def sigs_el(txt):
     m = re.search(r'<sigs[ >].*?</sigs>', txt, re.S); return None if not m else m.group(0)
@@ -277,7 +299,7 @@ for nm, budgeted in (("m.bud", True), ("m.def", False)):
     rc13, tx13 = mcp_text(nm); t13 = tail_of(tx13) if rc13 == "0" else None
     if t13 is None:
         say(False, f"13 MCP {nm}: rc={rc13} and a <tail> ({tx13[:80]!r})"); continue
-    nos = sum(1 for _, s in t13["rows"] if s is None); clause = "tail walk:" in tx13
+    nos = sum(1 for p, s in t13["rows"] if not has(p, s, shown_names(tx13))); clause = "tail walk:" in tx13
     if budgeted:
         say(len(t13["rows"]) > 0 and nos == 0 and t13["p_only"] is None and not clause and t13["capped"] == "1" and "--limit=40" in t13["next"],
             f"13 MCP budget_tokens: {len(t13['rows'])} rows, all with sym=, no p_only=, no walk clause, cut with next=")
