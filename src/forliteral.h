@@ -727,6 +727,20 @@ inline std::vector<std::string> flagNamesOf( std::string_view task )
     return out;
 }
 
+// The task quotes a message literal: a "double-quoted" span (the quoted shape's own reading, lit_detail::quotedSpan) or a
+// 'single-quoted' one (lit_detail::delimitedSpan: `wasn't` is no quote) of the same message-fragment shape (quotedSpan read on that
+// span). SIZE-2 (forpage.h tailFoldKept): such a task keeps its tail's config and doc rows listed — a quoted message's text lives in a
+// string table or a doc, not only in code.
+inline bool taskQuotesLiteral( std::string_view task )
+{
+    if( lit_detail::quotedSpan( task, '"' ) )
+    {
+        return true;
+    }
+    const std::optional<std::string_view> span = lit_detail::delimitedSpan( task, '\'' );   // its delimiters included
+    return span && lit_detail::quotedSpan( *span, '\'' );
+}
+
 // The literals the task names, in the order they are tried: a quoted span (the task's own quoting is the strongest evidence), the
 // CONST_SHAPED words, the dotted keys (the one beside a setting cue first), then a message. The caller scans them in order until one
 // has a source site (kForLiteralCandidates scans, a message's own tries besides): the first literal with no site no longer hides the next.
@@ -4802,6 +4816,23 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
 
 // the block of the task's literals: each in order (forLiteralCandidates) until one has a source site, at most kForLiteralCandidates scans
 // besides a message, which walks its tries
+// SIZE-1 (size-trim): the row-attribute clauses of the lit legends, present-only on the task's printed elements. The first element
+// carries the legends for all of them (ForLiteralLimits::withLegend), so the whole block is read, once, after the last element.
+inline constexpr std::string_view kForLiteralBodyClause = "; body=above: printed above, held: its owner body is past the 3-body cap, not printed";
+inline constexpr std::string_view kForCompactLiteralBodyClause = "; body=above|held: printed above|past the 3-body cap";
+inline constexpr std::string_view kForLiteralLongerClause = "; longer= source sites inside a longer name, child key or word, counted, never rows";
+inline constexpr std::string_view kForLiteralTryClause = " try=N: the task's Nth literal anchored; the ones before it had no source site or were not scanned.";
+static_assert( kForLiteralLegend.contains( kForLiteralBodyClause ) && kForCompactLiteralLegend.contains( kForCompactLiteralBodyClause )
+                   && kForLiteralKeyLegend.contains( kForLiteralLongerClause ) && kForLiteralKeyLegend.contains( kForLiteralTryClause ),
+               "the lit row clauses are spelled as the legends carry them" );
+inline ForLiteralRender litLegendPresentOnly( ForLiteralRender r, bool compactLegend )
+{
+    eraseAbsentClause( r.xml, compactLegend ? kForCompactLiteralBodyClause : kForLiteralBodyClause, r.xml.contains( " body=\"" ) );
+    eraseAbsentClause( r.xml, kForLiteralLongerClause, r.xml.contains( " longer=\"" ) );
+    eraseAbsentClause( r.xml, kForLiteralTryClause, r.xml.contains( " try=\"" ) );
+    return r;
+}
+
 inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
                                                 RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors = {} )
 {
@@ -4825,7 +4856,7 @@ inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::st
                                      : renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, {}, anchors );
         if( !r.xml.empty() )
         {
-            return r;
+            return litLegendPresentOnly( std::move( r ), compactLegend );
         }
     }
     // no earlier shape anchored: the last try, shape=table (it never prints beside them)
@@ -4836,6 +4867,6 @@ inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::st
         table.xml = std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scans ) + "\" skipped=\"" + std::to_string( skipped )
                     + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>" + table.xml;
     }
-    return table;
+    return litLegendPresentOnly( std::move( table ), compactLegend );
 }
 }   // namespace rw

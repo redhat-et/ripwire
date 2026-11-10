@@ -93,6 +93,15 @@ inline constexpr std::string_view kForFileSymsLegend =
 inline constexpr std::string_view kForFileSymsLegendCompact =
     "<!-- syms: leads, not the answer: first 6 shown files' symbols it lacks, p=file:line n=Owner.name; by=name task word, by=callee a head <d> row calls it "
     "(via=name name-only, prov=split one arm); test=1 test code; name_total= callee_total= files_total= cut by the 3-row, 6-file cap; files= head= if under 6, 8 -->";
+// SIZE-1: the clauses of the two legends above that define an attribute a block may not print, erased from a block without it
+// (blockXml). Each is spelled exactly as its legend carries it.
+inline constexpr std::string_view kForFileSymsTestClause = "test=\"1\": a test or fixture symbol; ";
+inline constexpr std::string_view kForFileSymsTestClauseCompact = "test=1 test code; ";
+inline constexpr std::string_view kForFileSymsReadClause = "; files= head= the files or <d> rows read when fewer than 6 or 8";
+inline constexpr std::string_view kForFileSymsReadClauseCompact = "; files= head= if under 6, 8";
+static_assert( kForFileSymsLegend.contains( kForFileSymsTestClause ) && kForFileSymsLegend.contains( kForFileSymsReadClause )
+                   && kForFileSymsLegendCompact.contains( kForFileSymsTestClauseCompact ) && kForFileSymsLegendCompact.contains( kForFileSymsReadClauseCompact ),
+               "the present-only syms clauses are spelled as their legends carry them" );
 // The held stub's own legend (both dialects): the reader meets held= and next= beside the tag, not in the block legend it replaces.
 inline constexpr std::string_view kForFileSymsHeldLegend =
     "<!-- ripwire for syms: held=\"budget\": a token budget is set, so the symbol rows of the shown files are not printed; next= repeats this call "
@@ -296,21 +305,6 @@ inline std::string unescapeXmlAttr( std::string_view v )
         out += v[i++];
     }
     return out;
-}
-
-// The value of ` name="…"` inside one tag's attribute text, or "" (the answer's own markup: no attribute holds a raw quote).
-inline std::string_view attrOf( std::string_view tag, std::string_view name )
-{
-    for( std::size_t at = tag.find( name ); at != std::string_view::npos; at = tag.find( name, at + 1 ) )
-    {
-        const std::size_t eq = at + name.size();
-        if( at > 0 && tag[at - 1] == ' ' && eq + 1 < tag.size() && tag[eq] == '=' && tag[eq + 1] == '"' )
-        {
-            const std::size_t close = tag.find( '"', eq + 2 );
-            return close == std::string_view::npos ? std::string_view() : tag.substr( eq + 2, close - eq - 2 );
-        }
-    }
-    return {};
 }
 
 struct ShownRow
@@ -984,6 +978,20 @@ inline Picks pickRows( const IngestResult& ing, const Graph& g, std::vector<Cand
     return out;
 }
 
+// SIZE-1: the block closed, its legend (the prefix before <syms) without the two clauses whose attributes its rows do not carry:
+// test=1 unless a row is a test symbol, files= head= unless the <syms> tag printed either one
+inline std::string presentOnlySymsBlock( const std::string& block, bool compactLegend )
+{
+    const std::size_t      legendEnd = block.find( "<syms" );
+    std::string            legend    = block.substr( 0, legendEnd );
+    const std::string_view rows      = std::string_view( block ).substr( legendEnd );
+    const std::string_view tag       = rows.substr( 0, rows.find( '>' ) );
+    const bool             readAttrs = !attrOf( tag, "files" ).empty() || !attrOf( tag, "head" ).empty();
+    eraseAbsentClause( legend, compactLegend ? kForFileSymsTestClauseCompact : kForFileSymsTestClause, rows.contains( " test=\"1\"" ) );
+    eraseAbsentClause( legend, compactLegend ? kForFileSymsReadClauseCompact : kForFileSymsReadClause, readAttrs );
+    return legend + std::string( rows ) + "</syms>";
+}
+
 // ── by="bind" (VR-BINDER-ROW): the picks ──
 // The head rows' definition names, sorted unique (svLess): the narrow index's names and the cost pre-check's lookup.
 inline std::vector<std::string_view> headDefNames( const IngestResult& ing, const Head& head )
@@ -1160,7 +1168,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
         row( *c, true );
     }
     appendBindRows( out, ing, owners, binds, esc );
-    return out + "</syms>";
+    return presentOnlySymsBlock( out, compactLegend );
 }
 } // namespace filesyms_detail
 

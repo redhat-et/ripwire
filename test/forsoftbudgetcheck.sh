@@ -155,7 +155,9 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            r'implementors_shown=K only K impl rows|implementors_floor=# an extends clause|'
                            # the <c> row readings ride only with a row that carries them: a spent target's hops cut marker
                            # leaves none (via="name" since forbudget-soft, attrib-multidef's prov="split" since train 28)
-                           r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false', re.I )
+                           r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false|'
+                           # SIZE-1/2/3 (size-trim): judged on the FINAL rows, so fewer rows can legitimately not carry them
+                           r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=', re.I )
 def clauses( path ):
     s = open( path ).read()
     head = s.split( '<sigs', 1 )[ 0 ]
@@ -752,11 +754,13 @@ PY
         no "(C1) default tail: page rows $( lines "$TMP/c1.page" ) vs the page's $( lines "$TMP/c1.want" ), total=$C1T vs page $C1PT, $C1DUP rank row(s) in the head"
     fi
     # (C1t) tail-sym (train 30): every rank row names sym=, the file page's own sym= for that file (a pointer, reused); a
-    #       rank-row file can sit past page row 40, so the names are read off the WHOLE page (--limit=total=)
+    #       rank-row file can sit past page row 40, so the names are read off the WHOLE page (--limit=total=). SIZE-3b: a tail sym=
+    #       names each name once (src/forpage.h appendTailSymName) while the page's <f sym=> may repeat an overload's, so the page
+    #       names are read once each, first by rank
     "$BIN" "$CORPUS" --for="$Q" --limit="$C1T" "$CF" 2>/dev/null > "$TMP/c1.pageall"
     C1TS="$( python3 "$TMP/tail.py" "$TMP/def.xml" ranksym "$TMP/c1.pagexml" | python3 -c '
 import html, re, sys
-want = { html.unescape( p ): html.unescape( y ) for p, y in re.findall( r"<f p=\"([^\"]*)\"[^>]*? sym=\"([^\"]*)\"", open( sys.argv[ 1 ] ).read() ) }
+want = { html.unescape( p ): ",".join( dict.fromkeys( html.unescape( y ).split( "," ) ) ) for p, y in re.findall( r"<f p=\"([^\"]*)\"[^>]*? sym=\"([^\"]*)\"", open( sys.argv[ 1 ] ).read() ) }
 rows = [ l.rstrip( "\n" ).split( "\t" ) for l in sys.stdin if "\t" in l ]
 print( len( rows ), sum( 1 for p, y in rows if not y or want.get( p ) != y ) )' "$TMP/c1.pageall" )"
     # an explicit PASS shape ("N 0", N >= 1): an empty or malformed reading (the reader crashed) fails, never passes
