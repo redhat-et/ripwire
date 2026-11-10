@@ -31,6 +31,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 
 #include <tree_sitter/api.h>
@@ -65,66 +66,80 @@ inline bool tsRangeHolds( TSNode outer, std::uint32_t start, std::uint32_t end )
     return ts_node_start_byte( outer ) <= start && end <= ts_node_end_byte( outer );
 }
 
-inline TSNode cachedParentOf( AncestorCache& cache, TSNode n ) noexcept
+struct ChainAnswer
+{
+    bool   onChain = false;
+    TSNode parent{};
+};
+
+// n's parent when n is on the chain (the root answers null), trying the climb's next entry before a scan
+inline ChainAnswer answerFromChain( AncestorCache& cache, TSNode n ) noexcept
+{
+    const std::vector<TSNode>& chain = cache.chain;
+    std::size_t                at    = cache.next;
+    if( at >= chain.size() || !ts_node_eq( chain[ at ], n ) )
+    {
+        at = chain.size();
+        while( at > 0 && !ts_node_eq( chain[ at - 1 ], n ) )
+        {
+            --at;
+        }
+        if( at == 0 )
+        {
+            return {};
+        }
+        --at;
+    }
+    cache.next = at == 0 ? 0 : at - 1;   // a climb asks for this answer's parent next: O(1) per step, not a scan per step
+    return { true, at == 0 ? TSNode{} : chain[ at - 1 ] };
+}
+
+// n's parent by ts_node_parent's own descent, resumed at the deepest chain entry holding n's (non-empty) range; the chain
+// becomes the path to n. Entries past kChainCapacity are descended but not kept, so the chain stays a root-descent prefix.
+inline TSNode resumeDescent( AncestorCache& cache, TSNode n ) noexcept
 {
     std::vector<TSNode>& chain = cache.chain;
-    const auto answerAt = [ & ]( std::size_t i ) noexcept
-    {   cache.next = i == 0 ? 0 : i - 1;
-        return i == 0 ? TSNode{} : chain[ i - 1 ]; };
-    if( cache.next < chain.size() && ts_node_eq( chain[ cache.next ], n ) )
+    const std::uint32_t  start = ts_node_start_byte( n );
+    const std::uint32_t  end   = ts_node_end_byte( n );
+    std::size_t          keep  = chain.size();
+    while( keep > 1 && !tsRangeHolds( chain[ keep - 1 ], start, end ) )
     {
-        return answerAt( cache.next );   // a climb: O(1) per step instead of a scan of the chain per step
-    }
-    for( std::size_t i = chain.size(); i-- > 0; )
-    {
-        if( ts_node_eq( chain[ i ], n ) )
-        {
-            return answerAt( i );
-        }
-    }
-    const std::uint32_t start = ts_node_start_byte( n );
-    const std::uint32_t end   = ts_node_end_byte( n );
-    if( start == end )
-    {
-        return ts_node_parent( n );   // the empty-descendant branch: see the header note
-    }
-    std::size_t keep = chain.size();
-    while( keep > 0 && !tsRangeHolds( chain[ keep - 1 ], start, end ) )
-    {
-        --keep;
-    }
-    if( keep == 0 )
-    {
-        const TSNode root = ts_tree_root_node( n.tree );
-        if( ts_node_eq( root, n ) )
-        {
-            return TSNode{};
-        }
-        chain.clear();
-        chain.push_back( root );   // the root holds every node of its tree, so the loop below never meets keep == 0 again
-        keep = 1;
+        --keep;   // chain[0] is the root, where ts_node_parent itself starts
     }
     chain.resize( keep );
     TSNode node = chain.back();
-    while( true )
+    for( TSNode next = ts_node_child_with_descendant( node, n ); !ts_node_is_null( next ) && next.id != n.id; next = ts_node_child_with_descendant( node, n ) )
     {
-        const TSNode next = ts_node_child_with_descendant( node, n );
-        if( ts_node_is_null( next ) || next.id == n.id )
-        {
-            break;   // ts_node_parent's own stop: the node reached, or no child holds it (then the deepest node met answers)
-        }
-        node = next;
+        node = next;   // ts_node_parent's own stop: n reached, or no child holds it (then the deepest node met answers)
         if( chain.size() < AncestorCache::kChainCapacity )
         {
             chain.push_back( node );
         }
     }
-    if( ts_node_eq( chain.back(), node ) && chain.size() < AncestorCache::kChainCapacity )
+    const bool whole = ts_node_eq( chain.back(), node );   // every step was kept
+    if( whole && chain.size() < AncestorCache::kChainCapacity )
     {
         chain.push_back( n );   // n itself, so its own parent and the climb above it answer from the chain
     }
-    cache.next = chain.empty() ? 0 : chain.size() - ( ts_node_eq( chain.back(), n ) ? 2 : 1 );   // the parent's entry, when cached
+    cache.next = whole ? chain.size() - ( ts_node_eq( chain.back(), n ) ? 2 : 1 ) : 0;
     return node;
+}
+
+inline TSNode cachedParentOf( AncestorCache& cache, TSNode n ) noexcept
+{
+    if( cache.chain.empty() )
+    {
+        cache.chain.push_back( ts_tree_root_node( n.tree ) );
+    }
+    if( const ChainAnswer hit = answerFromChain( cache, n ); hit.onChain )
+    {
+        return hit.parent;
+    }
+    if( ts_node_start_byte( n ) == ts_node_end_byte( n ) )
+    {
+        return ts_node_parent( n );   // the empty-descendant branch: see the header note
+    }
+    return resumeDescent( cache, n );
 }
 
 #if defined( RIPWIRE_VERIFY_PARENT_CACHE )
@@ -150,6 +165,13 @@ inline TSNode parentOf( TSNode n ) noexcept
     return parent;
 }
 
+// RIPWIRE_NO_PARENT_CACHE (any value) turns the cache off: same answers, the pre-cache cost. Read once per process.
+inline bool parentCacheOn()
+{
+    static const bool on = std::getenv( "RIPWIRE_NO_PARENT_CACHE" ) == nullptr;
+    return on;
+}
+
 // Installs a cache for `root`'s tree for one file's capture, and restores whatever was installed before on every exit path.
 // `root`'s tree must outlive the scope (the capture functions receive it alive and free it after they return).
 struct AncestorCacheScope
@@ -158,6 +180,10 @@ struct AncestorCacheScope
     AncestorCache* previous;
     explicit AncestorCacheScope( TSNode root ) : previous( tAncestorCache )
     {
+        if( !parentCacheOn() )
+        {
+            return;   // RIPWIRE_NO_PARENT_CACHE: every parentOf in the scope is ts_node_parent (the A/B handle the gate diffs against)
+        }
         cache.tree = root.tree;
         cache.chain.reserve( AncestorCache::kChainCapacity );
         tAncestorCache = &cache;
