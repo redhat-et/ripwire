@@ -761,7 +761,7 @@ def rowOk( a, b ):
     y = a[ 1 ] if len( a ) > 1 else ""
     if a[ 0 ] in shown:
         return not ( set( y.split( "," ) ) & ( shown[ a[ 0 ] ] | ys ) )
-    return not y or y == ",".join( dict.fromkeys( b[ 1 ].split( "," ) ) )   # SIZE-3b: a tail sym= names each name once (C1t's rule)
+    return not y or y == ",".join( dict.fromkeys( b[ 1 ].split( "," ) ) )   # SIZE-3b: a tail sym= names each name once (the C1t rule)
 ok = len( t ) == len( w ) and len( t ) > 0 and all( a[ 0 ] == b[ 0 ] and rowOk( a, b ) for a, b in zip( t, w ) ) and ( ( len( t[ 0 ] ) > 1 and t[ 0 ][ 1 ] ) or t[ 0 ][ 0 ] in shown )
 print( "OK" if ok else "BAD" )
 PY
