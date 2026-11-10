@@ -46,6 +46,12 @@
 #   (e4) the line to copy: the first naming the typical member (names.go:4), a code line before a comment that names a member
 #        (list.go:4, not its doc comment on line 1), an import line only when no code line does (index.ts:2); cut="1" past 120 bytes
 #   (e5) CAP-DISCLOSE: seven listing files print five <touch> rows, total="7" shown="5" capped="1"
+#   (e6) TOUCH-SYM: a <touch> row names the innermost indexed definition holding its line, n= as the other rows spell it: a Go
+#        function body (defaults.go:4 n="defaultPlugins"), a Rust match arm (pure.rs:3 n="is_pure"), a TS method in a class
+#        (registry.ts:3 n="DialectRegistry.all", the method and not its class); a line no definition holds (an `export *` line, an
+#        import line) prints no n=; a Go `const (` group stores the group's span on every constant, so a line inside it names the
+#        constant declared on it (kinds.go:5 n="Second") or nothing, never the group's first or last constant; a continuation
+#        line inside the group, where no constant is declared, prints no n= (kinds2.go:6: the span tie stands); own fixture gok
 #   (s1) --json carries no block; (s2) a token budget holds it (held="budget", no rows); (x1) MCP `for`: the same element bytes
 #   (a1) the block's own legend defines every attribute it prints; the answer is well-formed XML; the block closes right before </ctx>
 
@@ -173,6 +179,7 @@ for d in postgres mysql sqlite mssql; do
     D="$( cap "$d" )"; mkdir -p "$F/ts/src/dialects/$d"
     printf "import { Dialect } from '../../dialect'\n\nexport class %sDialect implements Dialect {\n  createDriver(): unknown {\n    return '%s'\n  }\n}\n" "$D" "$d" > "$F/ts/src/dialects/$d/$d-dialect.ts"
 done
+printf 'export class DialectRegistry {\n  all(): unknown[] {\n    return [PostgresDialect, MysqlDialect, SqliteDialect, MssqlDialect]\n  }\n}\n' > "$F/ts/src/registry.ts"
 
 mkdir -p "$F/cap/ui"
 printf 'class Widget:\n    pass\n' > "$F/cap/ui/base.py"
@@ -194,6 +201,12 @@ mkdir -p "$F/go/baseline" "$F/go/vendor/x"
 printf 'package baseline\n\nvar frozen = "%s"\n' "$all_go" > "$F/go/baseline/list.go"
 printf 'package x\n\nvar v = "%s"\n' "$all_go" > "$F/go/vendor/x/list.go"
 for i in 1 2 3 4 5 6 7; do printf 'from ui.a import AWidget\nREG%s = [AWidget, "BWidget", "CWidget", "DWidget", "EWidget", "FWidget"]\n' "$i" > "$F/cap/list$i.py"; done
+
+# TOUCH-SYM (e6) Go const groups: a copy of the Go fixture plus two listers inside a `const (` group (own copy: the e_go row cap)
+cp -R "$F/go" "$F/gok"
+mkdir -p "$F/gok/kinds"
+printf 'package kinds\n\nconst (\n\tFirst  = 1\n\tSecond = names.Alpha + names.Beta + names.Gamma + names.Delta\n\tThird  = 3\n)\n' > "$F/gok/kinds/kinds.go"
+printf 'package kinds\n\nconst (\n\tOne = 1\n\tTwo =\n\t\tnames.Alpha + names.Beta + names.Gamma + names.Delta\n\tThree = 3\n)\n' > "$F/gok/kinds/kinds2.go"
 
 # E3a-INTO fixtures: C++ settings holders with X-macro lists; TS option-bag interfaces
 mkdir -p "$F/hold/src/Core" "$F/hold/src/Server" "$F/hold/src/Tree" "$F/hold/docs/site" "$F/hold2/src/A" "$F/hold2/src/B" "$F/hold2/src/C" "$F/tsh/src/compiler"
@@ -463,10 +476,26 @@ no_touch e3 "$TMP/e_go.xml" vendor/x/list.go "vendored"
 has_touch e4 "$TMP/e_go.xml" names/names.go:4 4/4
 has_touch e4 "$TMP/e_ts.xml" src/index.ts:2 4/4
 has_touch e4 "$TMP/e_go.xml" plugins/list.go:4 3/4
-if touchrows "$TMP/e_go.xml" | grep -q '<touch p="plugins/defaults.go:4" share="4/4" cut="1">'; then ok "(e4) a line past 120 bytes is cut: cut=\"1\""; else no "(e4) cut: $( touchrows "$TMP/e_go.xml" | head -c 400 )"; fi
+if touchrows "$TMP/e_go.xml" | grep -q '<touch p="plugins/defaults.go:4"[^>]* share="4/4" cut="1">'; then ok "(e4) a line past 120 bytes is cut: cut=\"1\""; else no "(e4) cut: $( touchrows "$TMP/e_go.xml" | head -c 400 )"; fi
 run cap "--for=add a new widget" >"$TMP/e_cap.xml"
 if touchrows "$TMP/e_cap.xml" | grep -q '^<touch_list total="7" shown="5" capped="1">' && [ "$( touchrows "$TMP/e_cap.xml" | grep -o '<touch ' | wc -l | tr -d ' ' )" = 5 ]; then ok "(e5) seven listers: five rows, total=7 shown=5 capped=1"
 else no "(e5) cap: $( touchrows "$TMP/e_cap.xml" | head -c 300 )"; fi
+touch_n(){ # ARM FILE P:LINE NAME — the <touch> row at p= carries n="NAME" (NAME empty: the row carries no n=)
+    local row; row="$( touchrows "$2" | grep -o "<touch p=\"$3\"[^>]*>" )"
+    if [ -z "$row" ]; then no "($1) no touch row at $3: $( touchrows "$2" | head -c 400 )"
+    elif [ -n "$4" ] && printf '%s' "$row" | grep -q " n=\"$4\""; then ok "($1) touch $3 n=\"$4\""
+    elif [ -z "$4" ] && ! printf '%s' "$row" | grep -q ' n='; then ok "($1) touch $3: no definition holds the line, no n="
+    else no "($1) touch $3 want n=\"$4\": $row"; fi
+}
+touch_n e6 "$TMP/e_go.xml" plugins/defaults.go:4 defaultPlugins
+touch_n e6 "$TMP/e_rs.xml" src/pure.rs:3 is_pure
+touch_n e6 "$TMP/e_ts.xml" src/registry.ts:3 DialectRegistry.all
+touch_n e6 "$TMP/e_ts.xml" src/index.ts:2 ""
+touch_n e6 "$TMP/e_py.xml" app/handlers/__init__.py:1 ""
+run gok "--for=add a new in-tree plugin" >"$TMP/e_gok.xml"
+if touchrows "$TMP/e_gok.xml" | grep -q '<touch p="kinds/kinds.go:5"\( n="Second"\)\? share='; then ok "(e6) kinds.go:5 inside a const group: n=\"Second\" or none, never First/Third"
+else no "(e6) kinds.go:5 const group: $( touchrows "$TMP/e_gok.xml" | grep -o '<touch p="kinds/kinds.go[^>]*>' || touchrows "$TMP/e_gok.xml" | head -c 400 )"; fi
+touch_n e6 "$TMP/e_gok.xml" kinds/kinds2.go:6 ""
 cp "$TMP/e_go.xml" "$TMP/e_goa.xml"
 
 # t1 / t2: wordings

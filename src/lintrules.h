@@ -269,7 +269,7 @@ inline bool dependencyCapable( Lang lang ) noexcept
         case Lang::Dart:   // no import capture yet — see the DART paragraph above
         case Lang::GDScript:   // no preload/load capture yet — the same paragraph
         case Lang::Clojure:    // no namespace/import extraction yet
-        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
+        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Proto: case Lang::Markdown: case Lang::Unknown:
             return false;
     }
     return false;   // a byte past the enum

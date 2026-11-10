@@ -820,6 +820,7 @@ for _g in \
     prnestedcapcheck \
     probecheck \
     propcostcheck \
+    protoindexcheck \
     prrefsafecheck \
     prrenamecheck \
     pyaliascallcheck \

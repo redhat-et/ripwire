@@ -9350,6 +9350,9 @@ inline ForSectionStubPlan planForSectionStubs( std::string_view sections, std::s
 // because a stub there serves less than the retired ceiling did (forbudget-soft §B5: s078/s083, a 1-interface <lego> became a
 // stub once the soft target's wider rows widened its scope). Otherwise the caller's --sections= stands and the priced
 // collapse (planForSectionStubs) decides. The default regime never calls this: its stub posture is unchanged.
+// `shareBytes` is net of what the sections after them serve at a spent share: the CLI passes its share less the <tail> shell
+// and compact <hops> first row (verbs_for.h forSoftTrailingFloorBytes), because the rows at the cut never give way and a whole
+// section plus those floors would serve past the target (forsoftbudgetcheck (ST-L), 2026-11-08).
 inline std::string_view forSoftSectionsOptIn( std::string_view sections, std::size_t legoBytes, std::size_t composeBytes,
                                               std::size_t shareBytes ) noexcept
 {
