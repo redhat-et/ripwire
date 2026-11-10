@@ -171,12 +171,41 @@ static_assert( requires( const stat_t& st ) { st.st_mode; st.st_size; st.st_mtim
 [[gnu::always_inline]] inline int     fcntl( int fd, int cmd )                                     { return ::fcntl( fd, cmd ); }
 [[gnu::always_inline]] inline int     fcntl( int fd, int cmd, int arg )                            { return ::fcntl( fd, cmd, arg ); }
 [[gnu::always_inline]] inline int     dup( int fd )                                                { return ::dup( fd ); }
+// dup_cloexec: dup, marked close-on-exec — a saved copy of stdout must not reach a git child that could outlive the run.
+[[gnu::always_inline]] inline int     dup_cloexec( int fd )                                        { return ::fcntl( fd, F_DUPFD_CLOEXEC, 0 ); }
+// write_nosigpipe: one write to a pipe whose reader may be gone, failing with EPIPE instead of ending the process.
+// The SIGPIPE disposition is swapped around the call, so only a single-threaded caller may use it (helpdeadline.h's
+// supervising parent, which never starts a thread).
+inline ssize_t write_nosigpipe( int fd, const void* buf, std::size_t count )
+{
+    void ( *const previous )( int ) = ::signal( SIGPIPE, SIG_IGN );
+    const ssize_t written           = ::write( fd, buf, count );
+    ::signal( SIGPIPE, previous );
+    return written;
+}
 [[gnu::always_inline]] inline int     dup2( int fd, int fd2 )                                      { return ::dup2( fd, fd2 ); }
 [[gnu::always_inline]] inline int     ftruncate( int fd, off_t length )                            { return ::ftruncate( fd, length ); }
 [[gnu::always_inline]] inline int     fsync( int fd )                                              { return ::fsync( fd ); }
 [[gnu::always_inline]] inline int     fchmod( int fd, mode_t mode )                                { return ::fchmod( fd, mode ); }
 [[gnu::always_inline]] inline int     flock( int fd, int operation )                               { return ::flock( fd, operation ); }
 [[gnu::always_inline]] inline int     pipe( int fds[ 2 ] )                                         { return ::pipe( fds ); }
+// pipe_cloexec: pipe's two descriptors marked close-on-exec, so a fork keeps them and an exec (a git child, a
+// spawn_sh command) does not — a pipe end or flock a long-lived grandchild inherited would outlive its owner. macOS has
+// no pipe2, so the flag is set right after the pipe; the one caller (helpdeadline.h) is single-threaded at that point.
+inline int pipe_cloexec( int fds[ 2 ] )
+{
+    if( ::pipe( fds ) != 0 )
+    {
+        return -1;
+    }
+    if( ::fcntl( fds[ 0 ], F_SETFD, FD_CLOEXEC ) != 0 || ::fcntl( fds[ 1 ], F_SETFD, FD_CLOEXEC ) != 0 )
+    {
+        ::close( fds[ 0 ] );
+        ::close( fds[ 1 ] );
+        return -1;
+    }
+    return 0;
+}
 [[gnu::always_inline]] inline int     poll( pollfd* fds, nfds_t count, int timeoutMs )             { return ::poll( fds, count, timeoutMs ); }
 
 // ── streams over descriptors and memory ────────────────────────────────────────────────────────────────────
@@ -1058,12 +1087,15 @@ int     lstat( const char* path, stat_t* st );
 int     fcntl( int fd, int cmd );
 int     fcntl( int fd, int cmd, int arg );
 int     dup( int fd );
+int     dup_cloexec( int fd );   // _dup: every handle here is non-inheritable already
+ssize_t write_nosigpipe( int fd, const void* buf, std::size_t count );   // = write(): Windows has no SIGPIPE
 int     dup2( int fd, int fd2 );
 int     ftruncate( int fd, off_t length );
 int     fsync( int fd );
 int     fchmod( int fd, mode_t mode );
 int     flock( int fd, int operation );
 int     pipe( int fds[ 2 ] );
+int     pipe_cloexec( int fds[ 2 ] );   // = pipe(): every handle here is non-inheritable already
 int     poll( pollfd* fds, nfds_t count, int timeoutMs );
 
 // ── streams over descriptors and memory ────────────────────────────────────────────────────────────────────

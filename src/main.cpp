@@ -4202,7 +4202,7 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         std::fputs( "ripwire: compact legend: could not open a capture buffer — emitting the full legend instead\n", stderr );
         return dispatchMain( cfg, argv );
     }
-    const int savedStdout = rw::os::dup( STDOUT_FILENO );
+    const int savedStdout = rw::os::dup_cloexec( STDOUT_FILENO );   // never inherited: a lingering git child would hold stdout open
     if( savedStdout < 0 || rw::os::dup2( rw::os::fileno( capture ), STDOUT_FILENO ) < 0 )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "the full legend is a correct superset of the compact one, and stderr says so: only the cost grows",
@@ -4312,8 +4312,12 @@ int main( int argc, char** argv )
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
     // #594: --help-task --deadline-ms forks HERE, the last point before any thread exists. The parent returns the answer
-    // (or the on-time abstention); the child, and every run without the flag, falls through to the verb.
-    if( cfg.helpTaskDeadlineMs > 0 && cfg.roots.size() == 1 && !isGitUrl( cfg.roots[0] ) )
+    // (or the on-time abstention); the child, and every run without the flag, falls through to the verb. Only a run that
+    // --help-task ANSWERS is supervised: a verb that dispatches ahead of it (--index-out) runs in this process, so it never
+    // keeps writing in a detached child after a help-task abstention.
+    const char* const answeringVerb = scanReportVerbPrecedence( cfg ).winner;
+    if( cfg.helpTaskDeadlineMs > 0 && cfg.roots.size() == 1 && !isGitUrl( cfg.roots[0] ) && answeringVerb != nullptr
+        && std::string_view( answeringVerb ) == "--help-task" )
     {
         const std::string deadlineRoot( cfg.roots[0] );
         const auto        prepare = [&cfg, &deadlineRoot]() { return deadlineAbstainDoc( cfg, deadlineRoot ); };

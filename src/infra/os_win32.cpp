@@ -1168,6 +1168,8 @@ int fcntl( int fd, int cmd, int )
 }
 
 int dup( int fd )           { return ::_dup( fd ); }
+int dup_cloexec( int fd )   { return ::_dup( fd ); }
+ssize_t write_nosigpipe( int fd, const void* buf, std::size_t count ) { return write( fd, buf, count ); }
 int dup2( int fd, int fd2 ) { return ::_dup2( fd, fd2 ); }
 
 int ftruncate( int fd, off_t length )
@@ -1224,6 +1226,7 @@ int flock( int fd, int operation )
 
 // pipe: the CRT's anonymous pipe, both ends non-inheritable (spawn_sh hands the write end to its child explicitly).
 int pipe( int fds[ 2 ] ) { return ::_pipe( fds, 65536, _O_BINARY | _O_NOINHERIT ); }
+int pipe_cloexec( int fds[ 2 ] ) { return pipe( fds ); }   // _O_NOINHERIT is already close-on-exec's meaning
 
 // poll: pipes only — the one caller waits on a spawn_sh pipe. POLLIN when bytes are waiting, POLLHUP once every writer
 // has closed (the read that follows returns 0, POSIX's EOF), POLLNVAL for a descriptor with no handle. There is no

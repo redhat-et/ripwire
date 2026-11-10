@@ -211,7 +211,7 @@ $ ./build/ripwire . --help-task="write a cheerful release announcement"
 
 **Answers:** with --help-task: answer within N milliseconds, or abstain while the index warms A cold index past N prints the abstention (exit 0) while a detached background run finishes the index, so the next call is warm;
 
-a warm or in-time run prints exactly what it prints without the flag. Built for prompt hooks with a hard timeout.
+a warm or in-time run prints exactly what it prints without the flag. Built for prompt hooks with a hard timeout. Native Windows has no fork: there the run is synchronous and N is not enforced.
 
 ### `--for=TASK`
 

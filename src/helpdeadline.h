@@ -38,6 +38,7 @@
 // makes the child sleep N ms before it runs the verb, so a gate can build a "slow index" on a tiny fixture. It is
 // read only in the deadline child, never on the plain path.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -52,6 +53,7 @@
 #include "infra/Diagnostics.h"
 #include "infra/emit.h"
 #include "infra/os.h"
+#include "infra/ownedfile.h"   // rw::OwnedFile — the status and marker reads close on every return
 #include "gitmine.h"   // rw::civilFromDays — the UTC calendar date of the meter row's `at`
 #include "pathguard.h"   // pathguard::OwnedFd — the pipe ends close themselves on every return
 #include "quality.h"   // cacheDirLadder / cacheRootKeyHex / resolveCacheBlobPath — the per-user cache dir and the root key
@@ -95,7 +97,10 @@ inline std::int64_t unixNow()
 
 inline std::string utcStamp( std::int64_t epoch )
 {
-    ASSUME( epoch >= 0, "the wall clock reads after 1970" );
+    if( !VALIDATE( epoch >= 0, "the wall clock reads after 1970 (std::time is -1 on failure)" ) )
+    {
+        epoch = 0;   // a misset clock costs the row its `at`, never the row
+    }
     const std::int64_t days = epoch / 86400;
     const std::int64_t sec  = epoch % 86400;
     std::int64_t       y    = 0;
@@ -117,15 +122,14 @@ struct WarmStatus
 
 inline std::string readSmallFile( const std::string& path )
 {
-    std::string text;
-    std::FILE*  f = std::fopen( path.c_str(), "rb" );
-    if( f == nullptr )
+    std::string     text;
+    const OwnedFile f = openOwnedFile( path.c_str(), "rb" );
+    if( !f )
     {
         return text;
     }
-    char        buf[ 512 ];
-    std::size_t got = std::fread( buf, 1, sizeof( buf ), f );
-    std::fclose( f );
+    char              buf[ 512 ];
+    const std::size_t got = std::fread( buf, 1, sizeof( buf ), f.file );
     text.assign( buf, got );
     return text;
 }
@@ -229,14 +233,13 @@ inline void appendMeterRow( const std::string& rootKey, const MeterRow& row )
         "\"cause\":\"{}\",\"root_hash\":\"{}\",\"deadline_ms\":{},\"ms\":{},\"rc\":{},\"files\":{}}}\n",
         utcStamp( unixNow() ), row.status, row.cause, rootKey, row.deadlineMs, row.ms, row.rc, row.files );
     const std::string log = dir + "/routing.jsonl";
-    const int         fd  = os::open( log.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644 );
-    if( fd < 0 )
+    const pathguard::OwnedFd fd( os::open( log.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644 ) );
+    if( !fd.valid() )
     {
         return;
     }
     // One write of one short line on an O_APPEND descriptor: rows from concurrent writers never interleave.
-    (void)os::write( fd, line.data(), line.size() );
-    os::close( fd );
+    (void)os::write( fd.get(), line.data(), line.size() );
 }
 
 // ── the child's side ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -244,6 +247,7 @@ struct ChildSession
 {
     bool              active = false;
     int               downFd = -1;   // the parent writes 'D' here at the overrun; EOF means the parent is gone
+    int               lockFd = -1;   // the inherited warm lock: open (flock held) until this process exits
     int               deadlineMs = 0;
     std::string       statusPath;
     std::string       rootKey;
@@ -351,7 +355,8 @@ inline void recordCrashedChild( const WarmPaths& paths, int deadlineMs )
     writeStatus( paths.status, *st );
 }
 
-// The four pipes, each end an owned descriptor (pathguard::OwnedFd), so every return path closes what it holds.
+// The four pipes, each end an owned descriptor (pathguard::OwnedFd), so every return path closes what it holds, and
+// each close-on-exec (os::pipe_cloexec): the fork keeps them, and no git or shell the child starts later inherits one.
 struct ChildPipes
 {
     using Fd = pathguard::OwnedFd;
@@ -363,7 +368,7 @@ struct ChildPipes
     static bool openPair( Fd& readEnd, Fd& writeEnd )
     {
         int fds[ 2 ] = { -1, -1 };
-        if( os::pipe( fds ) != 0 )
+        if( os::pipe_cloexec( fds ) != 0 )
         {
             return false;
         }
@@ -374,8 +379,15 @@ struct ChildPipes
     bool open() { return openPair( outR, outW ) && openPair( errR, errW ) && openPair( upR, upW ) && openPair( downR, downW ); }
 };
 
+// The lock descriptor leaves `lock` (which would close it when superviseHelpTask returns) for the rest of this process:
+// the flock stays held until exit, and, opened close-on-exec, no git child that outlives this process inherits it.
+inline void keepLockUntilExit( pathguard::OwnedFd& lock )
+{
+    childSession().lockFd = lock.release();
+}
+
 // In the child, right after the fork: stdout/stderr onto the pipes, the status record, then 'S' to the parent.
-inline void becomeChild( ChildPipes& pipes, const WarmPaths& paths, int deadlineMs, Clock::time_point t0 )
+inline void becomeChild( ChildPipes& pipes, pathguard::OwnedFd& lock, const WarmPaths& paths, int deadlineMs, Clock::time_point t0 )
 {
     os::dup2( pipes.outW.get(), STDOUT_FILENO );
     os::dup2( pipes.errW.get(), STDERR_FILENO );
@@ -386,7 +398,8 @@ inline void becomeChild( ChildPipes& pipes, const WarmPaths& paths, int deadline
 
     ChildSession& s = childSession();
     s.active        = true;
-    s.downFd        = os::dup( pipes.downR.get() );   // outlives `pipes`: finishChild reads it at the end of main
+    s.downFd        = pipes.downR.release();   // outlives `pipes`: finishChild reads it at the end of main
+    keepLockUntilExit( lock );
     s.deadlineMs    = deadlineMs;
     s.statusPath    = paths.status;
     s.rootKey       = paths.rootKey;
@@ -451,13 +464,11 @@ inline bool relayUntil( ChildPipes& pipes, std::string& out, bool& started, Cloc
 {
     while( pipes.outR.valid() || pipes.errR.valid() )
     {
-        const long long left = std::chrono::ceil<std::chrono::milliseconds>( deadline - Clock::now() ).count();
-        if( left <= 0 )
-        {
-            return false;
-        }
-        os::pollfd fds[ 3 ] = { { pipes.outR.get(), POLLIN, 0 }, { pipes.errR.get(), POLLIN, 0 }, { pipes.upR.get(), POLLIN, 0 } };
-        const int  n        = os::poll( fds, pipes.upR.valid() ? 3 : 2, int( left ) );
+        // Past the deadline the poll does not wait, but what is already in the pipes still drains: a child that finished
+        // in time is relayed even when the caller reached this loop late (the abstention's git facts took that long).
+        const long long left = std::max( 0LL, (long long)std::chrono::ceil<std::chrono::milliseconds>( deadline - Clock::now() ).count() );
+        os::pollfd      fds[ 3 ] = { { pipes.outR.get(), POLLIN, 0 }, { pipes.errR.get(), POLLIN, 0 }, { pipes.upR.get(), POLLIN, 0 } };
+        const int       n        = os::poll( fds, pipes.upR.valid() ? 3 : 2, int( left ) );
         if( n < 0 && errno != EINTR )
         {
             return false;
@@ -465,6 +476,10 @@ inline bool relayUntil( ChildPipes& pipes, std::string& out, bool& started, Cloc
         if( n > 0 )
         {
             drainReady( fds, pipes, out, started );
+        }
+        else if( left == 0 )
+        {
+            return false;
         }
     }
     return true;
@@ -493,11 +508,15 @@ inline std::optional<int> relayChild( ChildPipes& pipes, long long childPid, Clo
     {
         return std::nullopt;
     }
-    int status = 0;
-    os::waitpid( os::pid_t( childPid ), &status, 0 );
+    int       status = 0;
+    os::pid_t reaped = -1;
+    do
+    {
+        reaped = os::waitpid( os::pid_t( childPid ), &status, 0 );
+    } while( reaped < 0 && errno == EINTR );
     std::fwrite( out.data(), 1, out.size(), stdout );
     std::fflush( stdout );
-    return exitCodeOf( status );
+    return reaped < 0 ? 1 : exitCodeOf( status );   // a failed wait leaves the code unknown: 1, never the initial 0
 }
 
 // The overrun: make sure the child is in its own session (it said 'S'), tell it, leave the marker, record the row.
@@ -510,7 +529,7 @@ inline void deferChild( ChildPipes& pipes, long long childPid, const WarmPaths& 
     }
     pipes.upR.reset( -1 );
     writeSmallFile( paths.marker, std::format( "{}\n", childPid ) );
-    (void)os::write( pipes.downW.get(), "D", 1 );
+    (void)os::write_nosigpipe( pipes.downW.get(), "D", 1 );   // a child that just exited reads nothing: EPIPE, never SIGPIPE
     pipes.downW.reset( -1 );
     pipes.outR.reset( -1 );
     pipes.errR.reset( -1 );
@@ -538,17 +557,19 @@ std::optional<int> superviseHelpTask( const std::string& root, int deadlineMs, P
         return std::optional<int>( 0 );
     };
 
-    const int lockFd = os::open( paths.lock.c_str(), O_RDWR | O_CREAT, 0644 );
-    if( lockFd < 0 )
+    // Close-on-exec: a git child that outlives the indexing child (git's own background maintenance) must not keep the
+    // flock, or every later call waits out its deadline on a lock nobody is indexing under.
+    pathguard::OwnedFd lock( os::open( paths.lock.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644 ) );
+    if( !lock.valid() )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "without the lock the verb runs synchronously, exactly as without --deadline-ms",
                   "helpdeadline: the warm lock file could not be opened; answering synchronously" );
         return std::nullopt;
     }
-    switch( acquireWarmLock( lockFd, paths, deadline ) )
+    switch( acquireWarmLock( lock.get(), paths, deadline ) )
     {
-        case LockOutcome::Busy:     os::close( lockFd ); return abstain( "busy" );
-        case LockOutcome::TimedOut: os::close( lockFd ); return abstain( "lock-wait" );
+        case LockOutcome::Busy:     lock.reset( -1 ); return abstain( "busy" );
+        case LockOutcome::TimedOut: lock.reset( -1 ); return abstain( "lock-wait" );
         case LockOutcome::Held:     break;
     }
     recordCrashedChild( paths, deadlineMs );
@@ -557,23 +578,33 @@ std::optional<int> superviseHelpTask( const std::string& root, int deadlineMs, P
     ChildPipes pipes;
     std::fflush( stdout );
     std::fflush( stderr );
+    // The synchronous fallbacks below keep the lock for the run that follows, so a concurrent call still waits or abstains.
     if( !pipes.open() )
     {
-        return std::nullopt;   // synchronous, the lock still held (its descriptor closes when this process exits)
+        keepLockUntilExit( lock );
+        DISCLOSE( Diagnostics::answerUnchanged, "without the relay pipes the verb runs synchronously, exactly as without --deadline-ms",
+                  "helpdeadline: the relay pipes could not be opened; answering synchronously, with no deadline" );
+        return std::nullopt;
     }
     const auto pid = os::fork_session();
     if( pid < 0 )
     {
-        return std::nullopt;   // Windows (ENOSYS), or no process slot: synchronous, as without the flag
+        if( errno != ENOSYS )   // Windows has no fork: synchronous by design, documented in --help, nothing to disclose
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "without a child the verb runs synchronously, exactly as without --deadline-ms",
+                      "helpdeadline: fork failed (no process slot?); answering synchronously, with no deadline" );
+        }
+        keepLockUntilExit( lock );
+        return std::nullopt;
     }
     if( pid == 0 )
     {
-        becomeChild( pipes, paths, deadlineMs, t0 );
-        return std::nullopt;   // the child runs the verb; the inherited lock descriptor stays open until it exits
+        becomeChild( pipes, lock, paths, deadlineMs, t0 );
+        return std::nullopt;   // the child runs the verb; its copy of the lock descriptor stays open until it exits
     }
     // The parent. Its copy of the lock descriptor closes WITHOUT LOCK_UN: the child shares the open file description,
     // and the flock stays held until the child's copy closes.
-    os::close( lockFd );
+    lock.reset( -1 );
     std::string doc = prepareAbstain();   // the child's output waits in the pipes meanwhile
     if( const std::optional<int> rc = relayChild( pipes, (long long)pid, deadline ) )
     {

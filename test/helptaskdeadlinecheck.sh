@@ -17,6 +17,15 @@
 #   (G)  a stale `running` record (started long ago) with the lock held is ignored: the call waits for the lock up to
 #        its deadline (cause=lock-wait), never takes the busy shortcut
 #   (H)  no call in this gate exited 2
+#   (I)  a verb that dispatches AHEAD of --help-task (--index-out) is never supervised: it runs in-process to the end
+#        (both blobs written when the call returns), never a help-task abstention while a detached child keeps writing
+#   (J)  the relay pipes and the warm lock are close-on-exec: git grandchildren that outlive their git (a fake git on
+#        PATH that backgrounds a sleep) keep neither the parent's pipe write ends (the in-time answer would wait out N)
+#        nor the child's flock (every later call would wait on a lock nobody indexes under)
+#   (K)  an abstention whose git facts outlast the deadline (a fake git whose `status` sleeps in the parent) still relays a
+#        child that finished in time: the answer, byte-identical to the plain run, not the abstention
+#   (I), (J) and (K) are red on f9079aa56 (before the CodeRabbit round 1 fixes on #598); (K) there exits 141: the
+#        parent's 'D' to a child that had already exited raised SIGPIPE (os::write_nosigpipe now).
 #
 # TEST KNOB, test-only: RIPWIRE_TEST_HELPTASK_DELAY_MS=N makes the deadline child sleep N ms before the verb runs.
 # Each arm runs under its own TMPDIR (the cache dir) and RIPWIRE_HOME (the meter log) inside a private temp tree.
@@ -76,8 +85,9 @@ fresh_env(){
     export TMPDIR="$E/tmp" RIPWIRE_HOME="$E/home"
     unset RIPWIRE_ROUTE_METER RIPWIRE_TEST_HELPTASK_DELAY_MS
 }
-rows(){ grep -c "\"status\":\"$1\"" "$RIPWIRE_HOME/routing.jsonl" 2>/dev/null || true; }
-causes(){ grep -c "\"cause\":\"$1\"" "$RIPWIRE_HOME/routing.jsonl" 2>/dev/null || true; }
+# counts print 0, not nothing, when no row was ever written (no routing.jsonl yet)
+rows(){ cat "$RIPWIRE_HOME/routing.jsonl" 2>/dev/null | grep -c "\"status\":\"$1\"" || true; }
+causes(){ cat "$RIPWIRE_HOME/routing.jsonl" 2>/dev/null | grep -c "\"cause\":\"$1\"" || true; }
 note_rc(){ [ "$1" = 2 ] && saw2=1; return 0; }
 TASK_NAMED="who calls parseConfig"
 TASK_RECOMMEND="plan a feature"
@@ -281,6 +291,71 @@ if [ -n "$st" ] && [ -n "$lock" ] && [ -n "$marker" ]; then
 else
     no "(G) setup: status '$st' lock '$lock' marker '$marker'"
 fi
+
+# ── (I) a verb ahead of --help-task is not supervised ─────────────────────────────────────────────────────────────
+fresh_env i
+RIPWIRE_TEST_HELPTASK_DELAY_MS=3000 "$BIN" "$WORK/repo" --help-task="$TASK_NAMED" --index-out="$E/idx" --deadline-ms=300 \
+    >"$E/i.out" 2>"$E/i.err"; rc=$?; note_rc $rc
+if [ "$rc" = 0 ] && [ -s "$E/idx.lean.ripwirecache" ] && [ -s "$E/idx.rich.ripwirecache" ] && ! grep -q '<task-route' "$E/i.out" \
+    && [ ! -s "$RIPWIRE_HOME/routing.jsonl" ]; then
+    ok "(I) --index-out with --help-task --deadline-ms runs in-process: both blobs written at exit, no abstention, no row"
+else
+    no "(I) --index-out under --deadline-ms: exit $rc, stdout $( head -c 200 "$E/i.out" ), blobs $( ls "$E" | grep -c ripwirecache )"
+fi
+wait_children "$TMPDIR" || no "(I) a deadline child never finished"
+
+# fake_git DIR MODE: a `git` on PATH that runs the real one; MODE=linger backgrounds an 8 s sleep that inherits every
+# descriptor not marked close-on-exec; MODE=slowstatus makes every `status` call in THIS gate's process group sleep 2 s —
+# the supervising parent's (the abstention's facts), never the deadline child's, which setsid moved to a group of its own.
+REAL_GIT="$( command -v git )"
+GATE_PGID="$( ps -o pgid= -p $$ | tr -d ' ' )"
+fake_git(){
+    mkdir -p "$1"
+    cat >"$1/git" <<EOF
+#!/bin/sh
+case "$2" in
+    linger) ( sleep 8 ) </dev/null >/dev/null 2>&1 & ;;
+    slowstatus) case " \$* " in *" status "*)
+        [ "\$( ps -o pgid= -p \$\$ | tr -d ' ' )" = "$GATE_PGID" ] && { mkdir -p "$1/slept"; sleep 2; } ;; esac ;;
+esac
+exec "$REAL_GIT" "\$@"
+EOF
+    chmod +x "$1/git"
+}
+
+# ── (J) no descriptor leaks into a git grandchild ─────────────────────────────────────────────────────────────────
+# The lingering sleeps start under BOTH processes' git calls: the parent's (the abstention's facts) would hold its relay
+# pipes' write ends, so the child's answer never reads as finished; the child's would hold the flock past its exit.
+fresh_env j
+"$BIN" "$WORK/repo" --help-task="$TASK_NAMED" >"$E/j.plain" 2>/dev/null   # warm: the child answers in well under N
+fake_git "$E/bin" linger
+t0=$( now_ms )
+PATH="$E/bin:$PATH" "$BIN" "$WORK/repo" --help-task="$TASK_NAMED" --deadline-ms=3000 >"$E/j.out" 2>/dev/null; rc=$?; note_rc $rc
+t1=$( now_ms ); wall=$(( t1 - t0 ))
+lock="$( find "$TMPDIR/ripwire/locks" -name 'ripwire-warm-*.lock' | head -1 )"
+held="$( python3 -c 'import fcntl, sys
+f = open(sys.argv[1], "a")
+try:
+    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB); print("free")
+except OSError:
+    print("held")' "$lock" 2>&1 )"
+if [ "$rc" = 0 ] && cmp -s "$E/j.plain" "$E/j.out" && [ "$wall" -lt 3000 ] && [ "$held" = free ]; then
+    ok "(J) lingering git grandchildren hold no relay pipe and no warm lock: answered in ${wall} ms, byte-identical; lock free"
+else
+    no "(J) lingering git grandchildren: exit $rc in ${wall} ms, lock $held, stdout $( head -c 200 "$E/j.out" )"
+fi
+
+# ── (K) slow abstention facts never cost an in-time answer ────────────────────────────────────────────────────────
+fresh_env k
+"$BIN" "$WORK/repo" --help-task="$TASK_NAMED" >"$E/k.plain" 2>/dev/null   # warm: the child answers in well under N
+fake_git "$E/bin" slowstatus
+PATH="$E/bin:$PATH" "$BIN" "$WORK/repo" --help-task="$TASK_NAMED" --deadline-ms=1000 >"$E/k.out" 2>/dev/null; rc=$?; note_rc $rc
+if [ -d "$E/bin/slept" ] && [ "$rc" = 0 ] && cmp -s "$E/k.plain" "$E/k.out"; then
+    ok "(K) git facts slower than N: the child's in-time answer is relayed, byte-identical to the plain run"
+else
+    no "(K) slow git facts: slept=$( [ -d "$E/bin/slept" ] && echo 1 || echo 0 ) exit $rc, stdout $( head -c 200 "$E/k.out" )"
+fi
+wait_children "$TMPDIR" || no "(K) the child never finished"
 
 # ── (H) ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 if [ "$saw2" = 0 ]; then

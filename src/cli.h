@@ -928,6 +928,7 @@ inline constexpr char kHelpHead[] =
         "                               A cold index past N prints the abstention (exit 0) while a detached background run\n"
         "                               finishes the index, so the next call is warm; a warm or in-time run prints exactly\n"
         "                               what it prints without the flag. Built for prompt hooks with a hard timeout.\n"
+        "                               Native Windows has no fork: there the run is synchronous and N is not enforced.\n"
         "    --for=TASK                 the task lens: say what you are doing, get the signatures and bodies to read first\n"
         "                               the task lens: ranked signatures + metrics framed for reuse. STOPS WHEN COMPLETE: the\n"
         "                               ranked head (<sigs total=>: the relevance floor within the top 40, or --pack-top-n) is\n"
