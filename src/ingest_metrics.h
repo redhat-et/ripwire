@@ -1700,7 +1700,7 @@ inline TSNode callArgumentList( TSNode nameNode ) noexcept
     TSNode n = nameNode;
     for( int hop = 0; hop < 4 && !ts_node_is_null( n ); ++hop )
     {
-        const TSNode p = ts_node_parent( n );
+        const TSNode p = parentOf( n );   // the climb reads the file's cached ancestor path (infra/tsparent.h)
         if( ts_node_is_null( p ) )
         {
             break;

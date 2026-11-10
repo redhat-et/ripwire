@@ -1861,15 +1861,15 @@ inline RecvKind classifyJsTsLiteralRecv( TSNode node, std::string_view src, int 
 // that is no member access, which every caller already reads as "not a member call".
 inline TSNode calleeAccessParent( TSNode nameNode ) noexcept
 {
-    TSNode parent = ts_node_parent( nameNode );
+    TSNode parent = parentOf( nameNode );
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "template_method" ) )
     {
         return parent;
     }
-    parent = ts_node_parent( parent );
+    parent = parentOf( parent );
     if( !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "dependent_name" ) )
     {
-        parent = ts_node_parent( parent );
+        parent = parentOf( parent );
     }
     return parent;
 }
