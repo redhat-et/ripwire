@@ -79,6 +79,7 @@
 #   (r2) Go contract lines: the typical registry entry's package (plugins/alpha) asserts three interfaces for Alpha (`&T{}`,
 #        `(*T)(nil)`, a `var (` group's `T{}`): <asserts type="Alpha" p=.. n="3"> after the touch list; a helper type's single assertion
 #        and a _test.go file's are not printed; the legend defines <asserts>; (r2n) a Go registry whose packages assert nothing: no row
+#   (r2u) an unreadable Go file of that package: n= is a floor, floor="1" unread="1" (r2u0: the asserting file itself: <asserts n="0" ../>)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -736,6 +737,7 @@ var _ fw.Lister = &helper{}
 var answer = 42
 GO
 printf 'package alpha\n\nvar _ fw.TestOnlyPlugin = &Alpha{}\n' > "$F/gofx/plugins/alpha/alpha_test.go"
+printf 'package alpha\n' > "$F/gofx/plugins/alpha/extra.go" # asserts nothing: the r2u arm makes it unreadable
 cat > "$F/gofx/plugins/registry.go" <<'GO'
 package plugins
 
@@ -758,6 +760,27 @@ else no "(r2) contract row: $( printf '%s' "$b" | head -c 600 )"; fi
 if grep -q '<asserts> (Go)' "$TMP/r2.xml"; then ok "(r2) the legend defines <asserts> when the row prints"; else no "(r2) legend: <asserts> clause missing"; fi
 if [ -n "$( block "$TMP/e_go.xml" )" ] && ! grep -q '<asserts' "$TMP/e_go.xml" && ! grep -q '<asserts> (Go)' "$TMP/e_go.xml"; then ok "(r2n) a Go registry whose packages assert nothing: no <asserts> row, no clause"
 else no "(r2n) e_go: $( block "$TMP/e_go.xml" | head -c 400 )"; fi
+# r2u / r2u0: a home Go file the contract scan cannot read makes n= a floor, never a silent total or a silent "none" (CodeRabbit
+# #600). r2u: extra.go unreadable, alpha.go still asserts three: n="3" floor="1" unread="1". r2u0: alpha.go itself unreadable, no
+# type asserts anything in what could be read: <asserts n="0" floor="1" unread="1"/>. The clean r2 run above carries neither.
+runc gofx "--for=add a new in-tree plugin" >"$TMP/r2uprime.xml"
+if unreadable "$F/gofx/plugins/alpha/extra.go"; then
+    runc gofx "--for=add a new in-tree plugin" >"$TMP/r2u.xml"; chmod 644 "$F/gofx/plugins/alpha/extra.go"
+    if block "$TMP/r2u.xml" | grep -q '<asserts type="Alpha" p="plugins/alpha/alpha.go:11" n="3" floor="1" unread="1">fw.FilterPlugin fw.ScorePlugin fw.PreFilterPlugin</asserts></exemplar_family>' \
+       && grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2u.xml"; then ok "(r2u) an unreadable package file: <asserts n=\"3\" floor=\"1\" unread=\"1\">, the legend says n= is a floor"
+    else no "(r2u) unreadable package file: $( block "$TMP/r2u.xml" | grep -o '<asserts.*' | head -c 400 )"; fi
+else
+    echo "  SKIP  (r2u) cannot make a file unreadable here (root?): the unread-contract arm did not run"
+fi
+if unreadable "$F/gofx/plugins/alpha/alpha.go"; then
+    runc gofx "--for=add a new in-tree plugin" >"$TMP/r2u0.xml"; chmod 644 "$F/gofx/plugins/alpha/alpha.go"
+    if block "$TMP/r2u0.xml" | grep -q '<asserts n="0" floor="1" unread="1"/></exemplar_family>' && ! grep -q '<asserts> (Go)' "$TMP/r2u0.xml" \
+       && grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2u0.xml"; then ok "(r2u0) the asserting file itself unreadable: <asserts n=\"0\" floor=\"1\" unread=\"1\"/>, not a silent none"
+    else no "(r2u0) unreadable asserting file: $( block "$TMP/r2u0.xml" | grep -o '</touch_list>.*\|<touch_list total="0"/>.*' | head -c 400 )"; fi
+else
+    echo "  SKIP  (r2u0) cannot make a file unreadable here (root?): the unread-contract arm did not run"
+fi
+if ! grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2.xml"; then ok "(r2u) positive twin: the clean r2 run carries no contract-unread clause"; else no "(r2u) twin: clean run carries the contract-unread clause"; fi
 
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
@@ -777,7 +800,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n r2; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n r2 r2u r2u0; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M

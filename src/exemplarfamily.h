@@ -2069,7 +2069,8 @@ inline constexpr std::string_view kForExemplarFamilyLegend =
     "its text that line, cut=\"1\" when cut to 120 bytes. "
     "scope=\"dir\" on a <touch>: the file sits in the typical member's directory and names fewer than half of the family but at least half of the members in that directory (share= counts those), listed after the family-wide rows. "
     "Test, docs, vendored, generated, frozen and baseline files are not read. "
-    "<asserts> (Go) the interfaces the typical member asserts, copied as text from Go source (not index edges: Go implements edges are not extracted): the `var _ I = &T{}` / `(*T)(nil)` lines of its own file, or for a registry entry of its package directory beside the registry, which the Go compiler checks; type= the type asserting the most, p= its first such line, n= the interfaces it asserts (shown=/capped=\"1\" when fewer are printed), the text those interfaces as written: the contract a new sibling implements. The "
+    "<asserts> (Go) the interfaces the typical member asserts, copied as text from Go source (not index edges: Go implements edges are not extracted): the `var _ I = &T{}` / `(*T)(nil)` lines of its own file, or for a registry entry of its package directory beside the registry, which the Go compiler checks; type= the type asserting the most, p= its first such line, n= the interfaces it asserts (shown=/capped=\"1\" when fewer are printed), the text those interfaces as written: the contract a new sibling implements. "
+    "floor=\"1\" unread=K on <asserts>: K Go files where that row is read (the typical member's file or its package directory) could not be read or are over 4 MiB, so n= counts only the others and an interface may be missing; n=\"0\" with no type=: none found in the files that could be read. The "
     "answer above is unchanged, and these bytes are not in est_tokens -->";
 // The --legend=compact posture (the CLI default); the long text rides --legend=full and the MCP tool. Both define every attribute printed.
 inline constexpr std::string_view kForExemplarFamilyCompactLegend =
@@ -2082,7 +2083,8 @@ inline constexpr std::string_view kForExemplarFamilyCompactLegend =
     "the line to copy, n= the innermost def holding it (a member: Owner.name), share=named/of distinct names (by=\"stem\": distinct file stems), cut=\"1\": text cut to 120 bytes. "
     "scope=\"dir\" <touch>: a file in the typical member's dir naming half of that dir's members (share= over them), not half the family. "
     "Tests, docs, "
-    "vendored, generated, frozen, baseline files unread. <asserts> (Go) the typical member's `var _ I = &T{}` lines as text (its file, a registry entry's package dir; not index edges): type= the asserting type, p= its first line, n= interfaces (shown=/capped=\"1\": cut), text the interfaces. -->";
+    "vendored, generated, frozen, baseline files unread. <asserts> (Go) the typical member's `var _ I = &T{}` lines as text (its file, a registry entry's package dir; not index edges): type= the asserting type, p= its first line, n= interfaces (shown=/capped=\"1\": cut), text the interfaces. "
+    "<asserts> floor=\"1\" unread=K: K Go files of that file or package dir unreadable or over 4 MiB, n= a floor (n=\"0\" no type=: none in the rest). -->";
 // E3a-INTO: the legend of into= and <rows>, spliced in before <touch_list> only when the family prints into= (familyLegend), so a family
 // that is not one of holders keeps its legend bytes.
 inline constexpr std::string_view kForExemplarIntoLegend =
@@ -2236,6 +2238,7 @@ struct ExemplarContract
     std::uint32_t fileId = 0;
     std::uint32_t line = 0; // its first assertion line
     std::vector<std::string> ifaces; // as written (`fwk.FilterPlugin`), in file then line order
+    std::uint32_t unread = 0; // home Go files unreadable or over kDefaultMaxFileBytes: n= is then a floor (printed as floor= unread=)
 };
 
 namespace exemplar_detail
@@ -2322,12 +2325,12 @@ namespace exemplar_detail
 {
 // Every interface assertion in the typical member's home: its own file (a definition), or the non-test Go files of the package
 // directory a registry entry is named for, beside the registry (`dynamicresources.Name` in plugins/registry.go: plugins/dynamicresources).
-inline std::vector<GoAssertion> goAssertionsAtHome( const IngestResult& ing, const ExemplarMember& m )
+// `unread` counts the home files that could not be read (an assertion may sit in one of them).
+inline std::vector<GoAssertion> goAssertionsAtHome( const IngestResult& ing, const ExemplarMember& m, std::uint32_t& unread )
 {
     const std::string_view memberDir = includerDir( rootRelPath( ing, m.fileId ) );
     const std::string pkgDir = m.sym != kNoNode ? std::string() : memberDir.empty() ? m.name : std::string( memberDir ) + "/" + m.name;
     std::vector<GoAssertion> found;
-    std::uint32_t unread = 0; // not printed: a file that could not be read holds no row
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         const std::string_view rel = rootRelPath( ing, f );
@@ -2371,7 +2374,8 @@ inline ExemplarContract typicalContract( const IngestResult& ing, const Exemplar
     {
         return {};
     }
-    const std::vector<GoAssertion> found = goAssertionsAtHome( ing, m );
+    std::uint32_t unread = 0;
+    const std::vector<GoAssertion> found = goAssertionsAtHome( ing, m, unread );
     const std::string_view best = mostAssertingType( found );
     ExemplarContract out;
     for( const GoAssertion& a : found )
@@ -2386,20 +2390,23 @@ inline ExemplarContract typicalContract( const IngestResult& ing, const Exemplar
         }
         out.ifaces.push_back( a.iface );
     }
+    out.unread = unread;
     return out;
 }
 
-// The <asserts> element of a contract row ("" when there is none).
+// The <asserts> element of a contract row: "" when there is none and every home file was read; `<asserts n="0" floor="1" unread=K/>`
+// when there is none but K home files could not be read (a missing row is then not "none").
 inline std::string contractXml( const IngestResult& ing, const ExemplarContract& c )
 {
+    const std::string skip = c.unread > 0 ? " floor=\"1\" unread=\"" + std::to_string( c.unread ) + "\"" : std::string();
     if( c.type.empty() )
     {
-        return {};
+        return skip.empty() ? std::string() : "<asserts n=\"0\"" + skip + "/>";
     }
     std::vector<char> esc;
     const auto e = [&]( std::string_view s )
     { return std::string( escapeXml( s, esc ) ); };
-    std::string out = "<asserts type=\"" + e( c.type ) + "\" p=\"" + e( rootRelPath( ing, c.fileId ) ) + ":" + std::to_string( c.line ) + "\" n=\"" + std::to_string( c.ifaces.size() ) + "\"";
+    std::string out = "<asserts type=\"" + e( c.type ) + "\" p=\"" + e( rootRelPath( ing, c.fileId ) ) + ":" + std::to_string( c.line ) + "\" n=\"" + std::to_string( c.ifaces.size() ) + "\"" + skip;
     out += c.ifaces.size() > kExemplarContractRows ? " shown=\"" + std::to_string( kExemplarContractRows ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
     for( std::size_t i = 0; i < c.ifaces.size() && i < kExemplarContractRows; ++i )
     {
@@ -2433,6 +2440,13 @@ inline constexpr std::string_view kExemplarCompactContractClause =
     "<asserts> (Go) the typical member's `var _ I = &T{}` lines as text (its file, a registry entry's package dir; not index edges): type= the asserting type, p= its first line, n= interfaces (shown=/capped=\"1\": cut), text the interfaces. ";
 static_assert( kForExemplarFamilyLegend.contains( kExemplarContractClause ) && kForExemplarFamilyCompactLegend.contains( kExemplarCompactContractClause ),
                "the contract clauses are spelled as the family legends carry them" );
+// The <asserts> floor= unread= reading, present-only (erased unless a home Go file of the contract row could not be read).
+inline constexpr std::string_view kExemplarContractUnreadClause =
+    "floor=\"1\" unread=K on <asserts>: K Go files where that row is read (the typical member's file or its package directory) could not be read or are over 4 MiB, so n= counts only the others and an interface may be missing; n=\"0\" with no type=: none found in the files that could be read. ";
+inline constexpr std::string_view kExemplarCompactContractUnreadClause =
+    "<asserts> floor=\"1\" unread=K: K Go files of that file or package dir unreadable or over 4 MiB, n= a floor (n=\"0\" no type=: none in the rest). ";
+static_assert( kForExemplarFamilyLegend.contains( kExemplarContractUnreadClause ) && kForExemplarFamilyCompactLegend.contains( kExemplarCompactContractUnreadClause ),
+               "the contract-unread clauses are spelled as the family legends carry them" );
 
 inline std::string scanSkipAttrs( std::uint32_t unread, std::uint32_t oversized )
 {
@@ -2498,6 +2512,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
                        std::ranges::any_of( touch.rows | std::views::take( kExemplarTouchRows ), &ExemplarTouch::dirLocal ) ); // RESIDUAL-2: present-only
     const ExemplarContract contract = holders ? ExemplarContract {} : typicalContract( ing, fam );
     eraseAbsentClause( out, compactLegend ? kExemplarCompactContractClause : kExemplarContractClause, !contract.type.empty() ); // RESIDUAL-2: present-only
+    eraseAbsentClause( out, compactLegend ? kExemplarCompactContractUnreadClause : kExemplarContractUnreadClause, contract.unread > 0 );
     exemplar_detail::addIntoLegend( out, fam, compactLegend );
     out += "<exemplar_family of=\"" + e( t.phrase ) + "\" rule=\"" + std::string( kExemplarRuleTags[std::size_t( fam.rule )] ) + "\" key=\"" + e( fam.key ) + "\"";
     if( fam.keyAt )
