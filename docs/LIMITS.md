@@ -29,7 +29,7 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-09 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-10 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
