@@ -49,6 +49,7 @@
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
+#include "foronesidereach.h" // ONE-SIDE-REACH: the CLI twin's answer edit, one renderer
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2079,21 +2080,20 @@ inline void spliceForLegoCountLegend( std::string& doc, bool carries )
 // forbudget-soft: budget_tokens= is a SOFT target here too (the CLI twin's rule) — est_tokens may exceed it and nothing is
 // labelled "over" for it. The one over_ceiling this surface can carry is the runaway guard's (`guardOver`: the default head
 // passed kForRunawayGuardBytes); its reading (forRunawayGuardNote) was spliced with the <sigs> clauses by the assembly.
-inline std::size_t priceForTaskRoot( std::string& doc, bool guardOver )
+// Returns the answer's est_tokens (FOR-DOC-BODY serves into the budget left after it) and what it was converged from (the
+// ONE-SIDE-REACH demote pass re-prices through it, insertFileSyms).
+inline std::pair<std::size_t, rw::PricedRootInputs> priceForTaskRoot( std::string& doc, bool guardOver )
 {
     if( doc.empty() )
     {
-        return 0;
+        return {};
     }
+    constexpr std::string_view kOverAttr = " over_ceiling=\"1\"";
+    const rw::PricedRootInputs inputs { .markupBytes = doc.size() + ( guardOver ? kOverAttr.size() : 0 ), .bodyTokens = 0 };
     std::size_t estTokens = 0;
-    std::string rootAttrs = rw::pricedRootAttr( doc.size(), rw::kBytesPerTokenDefault, 0, &estTokens );
-    if( guardOver )
-    {
-        rootAttrs = rw::pricedRootAttr( doc.size() + sizeof( " over_ceiling=\"1\"" ) - 1, rw::kBytesPerTokenDefault, 0, &estTokens );
-        rootAttrs += " over_ceiling=\"1\"";
-    }
-    rw::spliceRootAttrs( doc, rootAttrs );
-    return estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
+    const std::string rootAttrs = rw::pricedRootAttrTokens( inputs.markupBytes, rw::kBytesPerTokenDefault, 0, &estTokens );
+    rw::spliceRootAttrs( doc, rootAttrs + std::string( guardOver ? kOverAttr : std::string_view() ) );
+    return { estTokens, inputs };
 }
 
 // knob-honesty-068 (orchestrator ruling C3, 2026-10-07): MCP `for`'s ASSEMBLY — everything from the sigs render to the
@@ -2239,7 +2239,8 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
                         &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings;
                                                               //   knob-honesty-068: carries mcpSigsNext IN
-                        SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the CLI twin's row spelling
+                        SigRowSpelling{ .elideZeroMetrics = true, .foldRepeatedText = true } );   // lean-answers lane: the CLI twin's row
+                                                              //   spelling; SIZE-3a: repeated text folded to same_as= (mcpattrparitycheck)
     };
     std::string sigsStr = renderToString( renderSigs );
     const std::optional<RedactCounts> redactAfterSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
@@ -2415,6 +2416,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // DEEP-TAIL d2, MCP twin: the same model + renderer the CLI --for uses (forpage.h; FOLD C: page 0 of the file page) —
     // it rides on top at the default row cap in every regime here, as it did before (this twin funds no trailing section
     // from budget_tokens but <lego>/<compose>), and a cut tail carries the page after its last row as next=.
+    bool mcpTailFolded = false;   // SIZE-2: the tail folded widened rows, so its clause rides (spliced below, before pricing)
     {
         std::vector<char> tailEsc;
         // FOR-TAIL-WIDE (review F8): this twin has no tail fill, so under budget_tokens it serves the old 40-row walk's tail (its
@@ -2423,6 +2425,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                                                         : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
+        mcpTailFolded = tailStr.contains( " folded=\"" );
         mcpDocPick = pickForDocBody( ing, task, mcpShownIds, [ & ]
                                     { return computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, /*rankOrder=*/true ); }, flRootArg, &mcpTail.paths );   // mcpTail: the rows printed above
     }
@@ -2440,6 +2443,14 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // so the clause's bytes are part of the est_tokens price exactly as the CLI's own version is.
     spliceForSectionStubLegend( out, mcpSectionsWillStub );
     spliceForLegoCountLegend( out, mcpLegoCountAttrs );   // count-floor: present-only, the CLI twin's clause
+    if( mcpTailFolded )
+    {
+        rw::spliceClauseAfter( out, rw::kForFileTailWideLegend, rw::kForFileTailFoldedLegend );   // SIZE-2: the CLI twin's clause
+    }
+    if( sigsStr.contains( " same_as=\"" ) )
+    {
+        rw::spliceClauseAfter( out, std::string_view(), rw::kForSameAsLegend );   // SIZE-3a: the CLI twin's full-dialect clause (end of the first comment)
+    }
     // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
     // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
     // bytes: pricedRootAttr's ≤4-pass fixpoint at kBytesPerTokenDefault, spliced onto the <ctx> root by the
@@ -2469,12 +2480,24 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 
 // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms>, read off this answer's own bytes (every block before it), before </ctx>, not priced;
 // held under budget_tokens.
-inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args )
+// ONE-SIDE-REACH (src/foronesidereach.h): then the CLI twin's demote pass over the answer and the block, re-priced on `price` (the root's
+// inputs, null: no re-price); held under budget_tokens.
+inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
 {
     if( out.ends_with( "</ctx>" ) )
     {
         args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
-        out.insert( out.size() - 6, renderForFileSyms( ing, g, args ) );
+        std::string syms = renderForFileSyms( ing, g, args );
+        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, args.answer, syms );
+        if( !edit.answer.empty() )
+        {
+            if( price != nullptr )
+            {
+                repriceRootAfterCut( edit.answer, *price, args.answer.size() ); // signed: the pointers and legend may outweigh the rows they replace
+            }
+            out = std::move( edit.answer ) + "</ctx>";
+        }
+        out.insert( out.size() - 6, edit.syms.empty() ? syms : edit.syms );
     }
 }
 
@@ -2991,7 +3014,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + hooks );   // the clause beside it, as <dispatch>: the header's are fixed
         }
     }
-    const std::size_t answerEstTokens = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    const auto [answerEstTokens, answerPrice] = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 ); // R1: est_tokens=; over_ceiling="1" only past the runaway guard
     // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
     if( out.ends_with( "</ctx>" ) )
@@ -3012,7 +3035,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         {
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
-            insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) } );
+            insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
             return out;
         }
         std::string verb;
@@ -3039,7 +3062,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, opts ) + verb + std::string( kGraphSubjectCloseXml ) );
         }
     }
-    insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) } );
+    insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
     return out;
 }
 

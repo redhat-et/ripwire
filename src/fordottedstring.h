@@ -64,6 +64,16 @@ inline constexpr std::string_view kForDottedStringsLegend =
     "passed to such a call, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
     "tests= sites in test paths, counted only (with no row, s= is the first such string, next= a grep for it); unresolved= external= strings ending in a shown name that resolve to no one definition, "
     "or to no in-tree module; rows_capped=1 next= the list was cut. -->";
+// SIZE-1 (size-trim): the row-attribute clauses, present-only on the rows this answer printed (renderDottedStrings erases a clause
+// whose attribute no row carries). Spelled exactly as the legend carries them.
+inline constexpr std::string_view kForDottedSinkClause = "sink= it is the argument of a call whose tail name is that (the callee is not resolved); ";
+inline constexpr std::string_view kForDottedLoaderClause =
+    "loader= lp= a function in which the constant's name reaches the argument of a call whose tail name is an import sink's (the callee is not resolved) through its own assignments (names only, not a proof of the value) (loaders= how many do; over 3 none is named, a generic word; loaders_floor=1 a sink call in a file that can name the constant traced no names, too many assignments or none, so loaders= may be short); ";
+inline constexpr std::string_view kForDottedTemplateClause =
+    "tmpl= a %-template passed to such a call, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. ";
+static_assert( kForDottedStringsLegend.contains( kForDottedSinkClause ) && kForDottedStringsLegend.contains( kForDottedLoaderClause )
+                   && kForDottedStringsLegend.contains( kForDottedTemplateClause ),
+               "the dotted_strings row clauses are spelled as the legend carries them" );
 
 struct DottedTarget
 {
@@ -753,7 +763,7 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
     } );
     // the element
     std::vector<char> esc;
-    std::string       x( kForDottedStringsLegend );
+    std::string       x;
     const std::size_t shownRows = std::min( rows.size(), kForDottedStringRows );
     x += std::format( "<dotted_strings sites=\"{}\" rows=\"{}\"", rows.size(), shownRows );
     x += " hedge=\"a string in the source names this symbol; whether any import sink loads it is not traced\"";   // on the element: --callers' legend layer keeps no comment
@@ -785,7 +795,11 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
         appendDsRow( x, ing, rows[k], esc );
     }
     x += "</dotted_strings>";
-    return x;
+    std::string legend( kForDottedStringsLegend );   // SIZE-1: present-only on the printed rows
+    eraseAbsentClause( legend, kForDottedSinkClause, x.contains( " sink=\"" ) );
+    eraseAbsentClause( legend, kForDottedLoaderClause, x.contains( " loader=\"" ) || x.contains( " loaders=\"" ) || x.contains( " loaders_floor=\"" ) );
+    eraseAbsentClause( legend, kForDottedTemplateClause, x.contains( " tmpl=\"" ) );
+    return legend + x;
 }
 
 }   // namespace rw

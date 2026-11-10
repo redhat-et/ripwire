@@ -54,6 +54,7 @@ extern "C"
     const TSLanguage* tree_sitter_kotlin( void );
     const TSLanguage* tree_sitter_gdscript( void );
     const TSLanguage* tree_sitter_clojure( void );
+    const TSLanguage* tree_sitter_proto( void );
 }
 
 // This process's own executable path, realpath'd. The platform's own answer comes first (rw::os::exepath) because
@@ -626,6 +627,7 @@ inline DoctorGrammarProbe doctorProbeGrammars()
         { "kotlin",     &tree_sitter_kotlin,     "kotlin"     },
         { "gdscript",   &tree_sitter_gdscript,   "gdscript"   },
         { "clojure",    &tree_sitter_clojure,    "clojure"    },
+        { "proto",      &tree_sitter_proto,      "proto"      },
         // markdown carries NO tags.scm — ingest extracts sections by a custom tree walk, so the honest
         // probe is the pairing ingest actually uses: set_language + a real parse, not a query compile.
         { nullptr,      &tree_sitter_markdown,   "markdown"   },

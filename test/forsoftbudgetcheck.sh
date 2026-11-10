@@ -155,7 +155,9 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            r'implementors_shown=K only K impl rows|implementors_floor=# an extends clause|'
                            # the <c> row readings ride only with a row that carries them: a spent target's hops cut marker
                            # leaves none (via="name" since forbudget-soft, attrib-multidef's prov="split" since train 28)
-                           r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false', re.I )
+                           r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false|'
+                           # SIZE-1/2/3 (size-trim): judged on the FINAL rows, so fewer rows can legitimately not carry them
+                           r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=', re.I )
 def clauses( path ):
     s = open( path ).read()
     head = s.split( '<sigs', 1 )[ 0 ]
@@ -412,6 +414,50 @@ cli_for --token-budget=20000 --legend=full > "$TMP/wide_full.xml"
 cli_for --token-budget=20000 --legend=compact > "$TMP/wide_compact.xml"
 rows "$TMP/wide.xml" "$TMP/wide.rows"
 "$BIN" "$CORPUS" --for="$Q" --signatures-only "$CF" > "$TMP/so_def.xml" 2>/dev/null
+# (ST)'s reader: st.py ANSWER REF T -> "OK ..." | "BAD ... -- detail" (the sweep below and (ST-L) after it)
+cat > "$TMP/st.py" <<'PY'
+import subprocess, sys, re
+# a row's CHARGE is the ladder's (serialize.h entryCost): its printed bytes plus the zero cx=/ccx=/in= the lean spelling elides
+# (SigEntry::elidedBytes — charged so the kept rows are the ones kept before the elision)
+def charge( a, printed ):
+    return printed + sum( n for k, n in ( ( 'cx', 7 ), ( 'ccx', 8 ), ( 'in', 7 ) ) if not re.search( r'\b' + k + r'="', a ) )
+def rb( p ):
+    s = open( p ).read()
+    m = re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S )
+    if not m: return None
+    inner = m.group( 1 ); rows = []; elided = 0
+    for d in re.finditer( r'<d ([^>]*)>.*?</d>|<d ([^>]*)/>', inner, re.S ):
+        a = d.group( 1 ) or d.group( 2 )
+        r = re.search( r'\br="(\d+)"', a )
+        printed = len( d.group( 0 ).encode() ); c = charge( a, printed ); elided += c - printed
+        rows.append( ( int( r.group( 1 ) ) if r else 10**9, c ) )
+    rows.sort()
+    return len( inner.encode() ) + elided, rows
+a, ref, T = rb( sys.argv[ 1 ] ), rb( sys.argv[ 2 ] ), int( sys.argv[ 3 ] )
+# round C (owner decision 2026-10-14: RESERVE SECTIONS FIRST): the trailing sections (and the <hdr> rows) are served first
+# and the rows past the target cut fill what they leave of T — the maximality bound is T less the bytes of those sections (U, read
+# off the answer: everything after </sigs> but </ctx>, plus the <hdr> rows before it)
+import os as _os0, sys as _sys0; _sys0.path.insert( 0, _os0.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended
+ans = strip_appended( open( sys.argv[ 1 ] ).read() )   # K-LEGEND: the <syms> block / held stub is not reserved from T
+U = ( len( ans.split( '</sigs>', 1 )[ 1 ].encode() ) - len( '</ctx>' ) if '</sigs>' in ans else 0 )
+U += sum( len( h.encode() ) for h in re.findall( r'<hdr [^>]*/>', ans.split( '<sigs', 1 )[ 0 ] ) )
+# the tail size: test/lib/softbudget.py, shared by the five soft-target readers (the FIX1 R1 tail floor)
+import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import tail_size
+U += max( 0, tail_size( open( sys.argv[ 2 ] ).read() ) - tail_size( ans ) )
+if a is None or ref is None: print( "ERR no <sigs>" ); sys.exit( 0 )
+ab, ar = a; rr = ref[ 1 ]
+k = len( ar )
+fits = ab <= T or k <= 4
+if k >= len( rr ): print( "OK fits=%d rows=%d/%d charged=%d T=%d complete" % ( fits, k, len( rr ), ab, T ) ); sys.exit( 0 )
+nxt = rr[ k ][ 1 ]
+maximal = ab + nxt > T - U - 160
+# FIX2 C1 (rule 4): the upper-bound twin of maximality (test/lib/softbudget.py upper_bound): rows past the floor stop where T less
+# the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve
+from softbudget import upper_bound
+upper, udet = upper_bound( ans, open( sys.argv[ 2 ] ).read(), T, k, len( rr ), U )
+print( "%s fits=%d maximal=%d upper=%d rows=%d/%d charged=%d next=%d T=%d U=%d%s" % ( "OK" if fits and maximal and upper else "BAD", fits, maximal, upper,
+       k, len( rr ), ab, nxt, T, U, "" if upper else " -- " + udet ) )
+PY
 SWEEP=( 300 1000 2000 3000 6000 )
 prev=""
 for n in "${SWEEP[@]}"; do
@@ -472,50 +518,7 @@ for n in "${SWEEP[@]}"; do
     "$BIN" "$CORPUS" --for="$Q" --signatures-only --token-budget="$n" "$CF" > "$TMP/so_$n.xml" 2>/dev/null
     for mode in def so; do
         if [ "$mode" = def ]; then a="$f"; ref="$TMP/def.xml"; else a="$TMP/so_$n.xml"; ref="$TMP/so_def.xml"; fi
-        st="$( python3 - "$a" "$ref" "$T" <<'PY'
-import subprocess, sys, re
-# a row's CHARGE is the ladder's (serialize.h entryCost): its printed bytes plus the zero cx=/ccx=/in= the lean spelling elides
-# (SigEntry::elidedBytes — charged so the kept rows are the ones kept before the elision)
-def charge( a, printed ):
-    return printed + sum( n for k, n in ( ( 'cx', 7 ), ( 'ccx', 8 ), ( 'in', 7 ) ) if not re.search( r'\b' + k + r'="', a ) )
-def rb( p ):
-    s = open( p ).read()
-    m = re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S )
-    if not m: return None
-    inner = m.group( 1 ); rows = []; elided = 0
-    for d in re.finditer( r'<d ([^>]*)>.*?</d>|<d ([^>]*)/>', inner, re.S ):
-        a = d.group( 1 ) or d.group( 2 )
-        r = re.search( r'\br="(\d+)"', a )
-        printed = len( d.group( 0 ).encode() ); c = charge( a, printed ); elided += c - printed
-        rows.append( ( int( r.group( 1 ) ) if r else 10**9, c ) )
-    rows.sort()
-    return len( inner.encode() ) + elided, rows
-a, ref, T = rb( sys.argv[ 1 ] ), rb( sys.argv[ 2 ] ), int( sys.argv[ 3 ] )
-# round C (owner decision 2026-10-14: RESERVE SECTIONS FIRST): the trailing sections (and the <hdr> rows) are served first
-# and the rows past the target cut fill what they leave of T — the maximality bound is T less the bytes of those sections (U, read
-# off the answer: everything after </sigs> but </ctx>, plus the <hdr> rows before it)
-import os as _os0, sys as _sys0; _sys0.path.insert( 0, _os0.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended
-ans = strip_appended( open( sys.argv[ 1 ] ).read() )   # K-LEGEND: the <syms> block / held stub is not reserved from T
-U = ( len( ans.split( '</sigs>', 1 )[ 1 ].encode() ) - len( '</ctx>' ) if '</sigs>' in ans else 0 )
-U += sum( len( h.encode() ) for h in re.findall( r'<hdr [^>]*/>', ans.split( '<sigs', 1 )[ 0 ] ) )
-# the tail size: test/lib/softbudget.py, shared by the five soft-target readers (the FIX1 R1 tail floor)
-import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import tail_size
-U += max( 0, tail_size( open( sys.argv[ 2 ] ).read() ) - tail_size( ans ) )
-if a is None or ref is None: print( "ERR no <sigs>" ); sys.exit( 0 )
-ab, ar = a; rr = ref[ 1 ]
-k = len( ar )
-fits = ab <= T or k <= 4
-if k >= len( rr ): print( "OK fits=%d rows=%d/%d charged=%d T=%d complete" % ( fits, k, len( rr ), ab, T ) ); sys.exit( 0 )
-nxt = rr[ k ][ 1 ]
-maximal = ab + nxt > T - U - 160
-# FIX2 C1 (rule 4): the upper-bound twin of maximality (test/lib/softbudget.py upper_bound): rows past the floor stop where T less
-# the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve
-from softbudget import upper_bound
-upper, udet = upper_bound( ans, open( sys.argv[ 2 ] ).read(), T, k, len( rr ), U )
-print( "%s fits=%d maximal=%d upper=%d rows=%d/%d charged=%d next=%d T=%d U=%d%s" % ( "OK" if fits and maximal and upper else "BAD", fits, maximal, upper,
-       k, len( rr ), ab, nxt, T, U, "" if upper else " -- " + udet ) )
-PY
-)"
+        st="$( python3 "$TMP/st.py" "$a" "$ref" "$T" )"
         case "$st" in
             OK*)  ok "(ST) N=$n $mode: $st" ;;
             *)    no "(ST) N=$n $mode: $st — the rows must fit the target and stop only where the next row would cross it, never past T less the sections and the tail reserve" ;;
@@ -523,6 +526,26 @@ PY
     done
     prev="$n"
 done
+
+# (ST-L) the soft opt-in of a whole <lego>/<compose> leaves the trailing sections' floors (RED-FIRST, 2026-11-08, PR #571).
+#        Under a soft target the two sections ride whole when they fit what the rows at the cut left (serialize.h
+#        forSoftSectionsOptIn), and the rows at the cut never give way. The <tail> shell and the compact <hops> first row
+#        ship however little is left, so an opt-in that spent them served the answer past T: measured on this repo's src/ at
+#        N=3400/3600 on main (rows 74-77 B past their room), and at N=3000 once PR #571's src/ brings model.h's lego in. The
+#        rungs here bracket where the whole <lego> first rides; (ST) must hold at each, and one rung must serve it whole.
+LWHOLE=0
+for n in 3000 3200 3400 3600 4000; do
+    T="$( tbytes "$n" )"
+    cli_for --token-budget="$n" --legend=full > "$TMP/stl_$n.xml"
+    grep -q '<lego>' "$TMP/stl_$n.xml" && LWHOLE=$(( LWHOLE + 1 ))
+    st="$( python3 "$TMP/st.py" "$TMP/stl_$n.xml" "$TMP/def.xml" "$T" )"
+    case "$st" in
+        OK*)  ok "(ST-L) N=$n: $st" ;;
+        *)    no "(ST-L) N=$n: $st — a whole <lego>/<compose> was served out of the bytes the <tail> shell and <hops> first row take" ;;
+    esac
+done
+if [ "$LWHOLE" -ge 1 ]; then ok "(ST-L) premise: $LWHOLE of 5 rungs serve the <lego> whole (the opt-in is exercised)"
+else no "(ST-L) premise: no rung serves a whole <lego> — the arm no longer reaches the soft opt-in; widen its rungs"; fi
 
 # (E2b) a 900-char task at a tight target: the task stays verbatim and its echo is never dropped
 Q900="$Q $( printf 'with the symbol graph and the teleport vector over the whole index %.0s' $( seq 1 14 ) )"
@@ -731,11 +754,13 @@ PY
         no "(C1) default tail: page rows $( lines "$TMP/c1.page" ) vs the page's $( lines "$TMP/c1.want" ), total=$C1T vs page $C1PT, $C1DUP rank row(s) in the head"
     fi
     # (C1t) tail-sym (train 30): every rank row names sym=, the file page's own sym= for that file (a pointer, reused); a
-    #       rank-row file can sit past page row 40, so the names are read off the WHOLE page (--limit=total=)
+    #       rank-row file can sit past page row 40, so the names are read off the WHOLE page (--limit=total=). SIZE-3b: a tail sym=
+    #       names each name once (src/forpage.h appendTailSymName) while the page's <f sym=> may repeat an overload's, so the page
+    #       names are read once each, first by rank
     "$BIN" "$CORPUS" --for="$Q" --limit="$C1T" "$CF" 2>/dev/null > "$TMP/c1.pageall"
     C1TS="$( python3 "$TMP/tail.py" "$TMP/def.xml" ranksym "$TMP/c1.pagexml" | python3 -c '
 import html, re, sys
-want = { html.unescape( p ): html.unescape( y ) for p, y in re.findall( r"<f p=\"([^\"]*)\"[^>]*? sym=\"([^\"]*)\"", open( sys.argv[ 1 ] ).read() ) }
+want = { html.unescape( p ): ",".join( dict.fromkeys( html.unescape( y ).split( "," ) ) ) for p, y in re.findall( r"<f p=\"([^\"]*)\"[^>]*? sym=\"([^\"]*)\"", open( sys.argv[ 1 ] ).read() ) }
 rows = [ l.rstrip( "\n" ).split( "\t" ) for l in sys.stdin if "\t" in l ]
 print( len( rows ), sum( 1 for p, y in rows if not y or want.get( p ) != y ) )' "$TMP/c1.pageall" )"
     # an explicit PASS shape ("N 0", N >= 1): an empty or malformed reading (the reader crashed) fails, never passes
