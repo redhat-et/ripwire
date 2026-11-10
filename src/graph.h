@@ -8727,6 +8727,13 @@ inline const PythonNameBind* pythonBaseNameProven( const BaseEvidenceTables& t, 
     return here == 1 && importOnly && ( qualified ? !outsideForm : !moduleForm ) && !pythonStarMayBind( t.extVeto, r.fileId, name ) ? sole : nullptr;
 }
 
+// the module file a qualifier's `import X as q` binds q to where the class statement runs: the file's table for a module-scope import,
+// else the scoped table keyed by the def or class body that holds it (PY-LOCAL-BIND, CodeRabbit #592); kNoFile when none
+inline std::uint32_t pythonBaseQualifierFile( const ExternalVetoTables& v, const PythonNameBind& bind, std::uint32_t fileId, std::string_view qual, std::string& key )
+{
+    return bind.scope == kNoNode ? pythonImportFileOf( v.importBindFile, fileId, qual, key ) : pythonImportFileOf( v.scopedImportBindFile, bind.scope, qual, key );
+}
+
 // tier 2, Python: `from m import X` (X bare), `import pkg.mod as q` (q.X), `from pkg import q` (q.X: q is pkg's submodule,
 // or a class q that pkg defines or re-exports and X sits in). The name the clause starts with (X, else q) proves nothing unless
 // the import is its ONLY binding where the class statement runs (pythonBaseNameProven); a module-scope rebinding is also in
@@ -8754,10 +8761,7 @@ inline void pythonImportedBases( const BaseEvidenceTables& t, const Reference& r
     {
         return;   // a dotted qualifier (`a.b.X`): not read
     }
-    // PY-LOCAL-BIND: an import in the class's own def or class body is in the scoped table, keyed by that scope (CodeRabbit #592)
-    const bool atModule = bind->scope == kNoNode;
-    if( const std::uint32_t f = pythonImportFileOf( atModule ? t.extVeto.importBindFile : t.extVeto.scopedImportBindFile, atModule ? r.fileId : bind->scope, qual, key );
-        f != kNoFile )
+    if( const std::uint32_t f = pythonBaseQualifierFile( t.extVeto, *bind, r.fileId, qual, key ); f != kNoFile )
     {
         pythonReexportChain( t, cand, f, r.calleeName, out );
         return;
