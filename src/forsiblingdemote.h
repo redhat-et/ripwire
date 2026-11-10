@@ -36,6 +36,7 @@
 #include "subjectanchor.h" // subject_detail::hasNameSyntax
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -171,13 +172,11 @@ inline std::string_view fileOf( const AnswerRow& r )
     const std::string_view p = attrOf( r.attrs, "p" );
     return p.substr( 0, p.find( ':' ) );
 }
-inline bool hasMembers( const AnswerRow& r ) noexcept
+// K1 mem= (a type with its member list) and K7 slot_by= / slot_fields= (FN-VALUED-SLOT's call facts): a row carrying one stays a row.
+inline constexpr std::array<std::string_view, 3> kKeepRowAttrs = { " mem=\"", " slot_by=\"", " slot_fields=\"" };
+inline bool carriesKeepAttr( const AnswerRow& r ) noexcept
 {
-    return r.attrs.contains( " mem=\"" );
-}
-inline bool hasSlotFacts( const AnswerRow& r ) noexcept
-{
-    return r.attrs.contains( " slot_by=\"" ) || r.attrs.contains( " slot_fields=\"" );
+    return std::ranges::any_of( kKeepRowAttrs, [&]( std::string_view a ) { return r.attrs.contains( a ); } );
 }
 // The identifier-syntax words of the task (camelCase, snake_case, Owner::name / pkg.Name), trimmed, stopwords left out.
 inline std::vector<std::string_view> taskNames( std::string_view task )
@@ -345,7 +344,7 @@ inline std::vector<const AnswerRow*> pickByBytes( const AnswerScan& scan, const 
     std::vector<const AnswerRow*> picked;
     for( const AnswerRow* r : dRows )
     {
-        if( !r->inSigs || r->dpos <= kDemoteMinRank || hasMembers( *r ) || r->noted || hasSlotFacts( *r ) )
+        if( !r->inSigs || r->dpos <= kDemoteMinRank || carriesKeepAttr( *r ) || r->noted )
         {
             continue;
         }
