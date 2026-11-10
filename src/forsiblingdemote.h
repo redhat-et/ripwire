@@ -73,10 +73,7 @@ struct AnswerScan
     std::vector<std::string> callees; // n= of every <c> under a <h> hop row, unescaped
 };
 
-inline bool tagStarts( std::string_view rest, std::string_view name ) noexcept
-{
-    return rest.size() > name.size() + 1 && rest.substr( 1, name.size() ) == name && ( rest[name.size() + 1] == ' ' || rest[name.size() + 1] == '>' );
-}
+using filesyms_detail::tagIs;
 
 using OpenElements = std::vector<std::pair<std::string_view, std::string_view>>; // (element name, its p=) of the open elements
 inline void closeElement( OpenElements& open, std::string_view name )
@@ -133,11 +130,11 @@ inline AnswerScan scanAnswer( std::string_view text )
         {
             open.emplace_back( text.substr( i + 1, nameEnd - i - 1 ), attrOf( attrs, "p" ) );
         }
-        if( tagStarts( rest, "sigs" ) )
+        if( tagIs( rest, "sigs" ) )
         {
             inSigs = !selfClosing;
         }
-        else if( tagStarts( rest, "h" ) )
+        else if( tagIs( rest, "h" ) )
         {
             inHop = !selfClosing;
         }
@@ -386,26 +383,15 @@ inline void keepSameAsTargets( const std::vector<const AnswerRow*>& dRows, const
 // answer's rows stay a rank prefix of this one's), the legend comment before the first; "" when none is.
 inline std::string pointerAnswer( std::string_view answer, const std::vector<const AnswerRow*>& picked, const std::vector<char>& demote )
 {
-    std::string out;
-    std::size_t from = 0;
+    std::vector<filesyms_detail::TailPointerSpan> spans;
     for( const AnswerRow* r : picked )
     {
-        if( demote[r->pos - 1] == 0 )
+        if( demote[r->pos - 1] != 0 )
         {
-            continue;
+            spans.push_back( { .at = r->at, .end = r->end, .p = attrOf( r->attrs, "p" ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ) } );
         }
-        const std::string_view rank = attrOf( r->attrs, "r" );
-        out.append( answer.substr( from, r->at - from ) );
-        out += from == 0 ? kSiblingDemoteLegend : std::string_view();
-        out += "<t p=\"";
-        out += attrOf( r->attrs, "p" );
-        out += "\" sym=\"";
-        out += attrOf( r->attrs, "n" );
-        out += rank.empty() ? std::string() : "\" r=\"" + std::string( rank );
-        out += "\"/>";
-        from = r->end;
     }
-    return from == 0 ? std::string() : out.append( answer.substr( from ) );
+    return filesyms_detail::tailPointerText( answer, spans, kSiblingDemoteLegend );
 }
 
 // The answer with the demoted rows rewritten as tail pointers; "" when none is.
@@ -434,10 +420,11 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
 
 // SIBLING-DEMOTE over the answer as the earlier post-passes left it: `edited` holds those passes' bytes ("" when they left `answer`
 // unchanged) and, when this pass demotes a row, its result. Not priced: the caller re-prices the root once on the final bytes (signed:
-// the pointers and legend may outweigh the rows they replace). CLI shapedForFileSymsAnswer and MCP insertFileSyms both call this.
-inline void demoteSiblingRowsInto( const IngestResult& ing, const Graph& g, std::string_view answer, std::string& edited )
+// the pointers and legend may outweigh the rows they replace). `held` (a token budget) leaves the answer as shaped. CLI
+// shapedForFileSymsAnswer and MCP insertFileSyms both call this.
+inline void demoteSiblingRowsInto( const IngestResult& ing, const Graph& g, std::string_view answer, std::string& edited, bool held )
 {
-    if( !siblingDemoteOn() )
+    if( held || !siblingDemoteOn() )
     {
         return;
     }

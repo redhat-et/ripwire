@@ -3126,10 +3126,7 @@ inline std::string shapedForFileSymsAnswer( const MainDispatch& d, const std::st
     {
         out = std::move( cut );
     }
-    if( !held )
-    {
-        rw::demoteSiblingRowsInto( d.ing, d.g, captured, out );
-    }
+    rw::demoteSiblingRowsInto( d.ing, d.g, captured, out, held );
     if( !out.empty() && price )
     {
         rw::repriceRootAfterCut( out, *price, captured.size() );   // signed: the pointers and legend may outweigh the rows they replace
