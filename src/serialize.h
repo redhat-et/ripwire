@@ -1156,7 +1156,7 @@ inline constexpr std::size_t kForFileTailPageWalk     = 160;  // FOR-TAIL-WIDE: 
 // kForPageSymNameCount symbols by lens rank, names the ranker already scored for that file). 120 = every widened row a plain walk
 // lists (arm B of s0-unnamed-concept-1110 M1; arm A was 40); a code-first walk may list more (its doc rows ride beside 160 code
 // rows), and those print p= only, counted by p_only=. The legend clauses below spell this number: move them with it.
-inline constexpr std::size_t kForFileTailSymWideRows  = 120;
+inline constexpr std::size_t kForFileTailSymWideRows  = 120;  // TAIL-SYM-WIDE: widened rows (past page 0) that carry sym=; the rest p= only
 static_assert( kForFileTailSymWideRows <= kForFileTailPageWalk && kForFileTailSymWideRows == 120,
                "kForFileTailWideLegend, its compact twin and kForFileTailPathOnlyWhy spell 120: move them with the constant" );
 inline constexpr std::size_t kForFileTailShellReserve = 48;
