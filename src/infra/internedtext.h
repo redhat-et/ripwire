@@ -19,7 +19,9 @@
 // THREADING. intern() takes one of kShards mutexes (picked by the text's hash), so two threads interning the same text serialise
 // and get the same id. text() takes no lock: slots live in segments that never move or shrink (segment k holds kFirst << k
 // slots), a slot is written once, before its id is published under the shard lock, and every reader got the id from that lock
-// or from a row handed across a thread join. A segment pointer is published with a release CAS and read with acquire.
+// or from a row handed across a thread join. A segment pointer is published with a release CAS and read with acquire. Each shard
+// (and the id counter) sits on its own 128 B line: measured, paired x5 cockroach cold, shards packed two to a line cost +2 s user
+// with flat instructions (lock lines bouncing between parse workers); aligned, the lane ran 2.6 % under the base.
 //
 // LIFETIME. The pool lives for the process and never frees a text: a long-running server keeps every name it has interned, which is
 // bounded by the distinct names of the trees it indexed (about 3 MB of headers per 100 K names), not by the rows.
@@ -108,7 +110,7 @@ private:
         std::uint32_t tag = 0;          // the low 32 bits of the text's hash: most probes stop here
         std::uint32_t id  = kEmptyId;   // kEmptyId = a free slot (no text is interned under it)
     };
-    struct Shard
+    struct alignas( 128 ) Shard   // one shard per 128 B line (Apple M-series line size): no false sharing between shards' locks
     {
         std::mutex        mutex;
         std::vector<Slot> slots;   // open addressing, linear probe, a power of two at most half full
@@ -168,7 +170,7 @@ private:
     }
 
     std::atomic<std::string*>  segments_[ kSegments ] = {};
-    std::atomic<std::uint32_t> next_{ 1 };
+    alignas( 128 ) std::atomic<std::uint32_t> next_{ 1 };
     Shard                      shards_[ std::size_t( 1 ) << kShardBits ];
     std::string                emptyText_;
 };
@@ -194,7 +196,7 @@ inline std::uint32_t internRefText( std::string_view text )
         std::uint32_t tag = 0;
         std::uint32_t id  = TextPool::kEmptyId;
     };
-    constexpr std::size_t kFrontSlots = 4096;   // 32 KB per thread
+    constexpr std::size_t kFrontSlots = 512;   // 4 KB per thread
     thread_local FrontSlot front[ kFrontSlots ];
     const std::uint64_t hash = TextPool::hashOf( text );
     FrontSlot&          slot = front[ hash & ( kFrontSlots - 1 ) ];

@@ -8,8 +8,8 @@
 //   E  segment creation races: 40 fresh pools, 8 threads released together, each interning its own 600 texts, so several
 //      threads make the same segment at once (the CAS loser frees its copy and writes into the winner's); under TSan a relaxed
 //      publish is a reported race. Every text reads back.
-//   F  the per-thread front cache (internRefText): 8 threads build InternedTexts of the same 30,000 texts twice (the second pass
-//      hits the cache) plus 4,096-apart colliding indices; every thread's names equal thread 0's and read back their text.
+//   F  the per-thread front cache (internRefText): 8 threads build InternedTexts of the same 30,000 texts twice (30,000 texts over
+//      512 slots: hits, misses and evictions); every thread's names equal thread 0's and read back their text.
 #include "internedtext.h"
 
 #include <algorithm>
