@@ -112,11 +112,14 @@ run "$S" "$TMP/s.xml"   "--for=$Q"
 run "$S" "$TMP/s.page"  "--for=$Q" --limit=100000
 run "$W" "$TMP/w.full"  "--for=$Q" --legend=full
 run "$S" "$TMP/s.full"  "--for=$Q" --legend=full
+# fixture D measures the code-first WALK (arms 8, 9): run with SIZE-2's fold off, which counts the widened doc rows instead of
+# listing them (test/fortailfoldcheck.sh is that fold's gate)
+( export RIPWIRE_NO_TAIL_FOLD=1
 run "$DD" "$TMP/d.xml"  "--for=$Q"
 run "$DD" "$TMP/d.page" "--for=$Q" --limit=100000
 run "$DD" "$TMP/d.json" "--for=$Q" --json
 run "$DD" "$TMP/d.b3000" "--for=$Q" --token-budget=3000
-run "$DD" "$TMP/d.b4000" "--for=$Q" --token-budget=4000
+run "$DD" "$TMP/d.b4000" "--for=$Q" --token-budget=4000 )
 for tb in 5000 6000 8000; do
     run "$P1" "$TMP/p1.$tb" "--for=$Q" --token-budget=$tb
     run "$P2" "$TMP/p2.$tb" "--for=$Q" --token-budget=$tb

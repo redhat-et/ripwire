@@ -137,6 +137,34 @@ using jsonesc::utf8SeqLen;
 // reference (xmlControlCharRef — see M2 above: G4 + attribute-value normalization); an invalid UTF-8 sequence
 // (A4-F20) is scrubbed to '?' so the emitted name/path/doc-comment/sig text is always well-formed XML AND
 // valid UTF-8 regardless of source bytes.
+// SIZE-1 (size-trim): a legend clause is present-only on the FINAL payload, not on a bit decided before the rows were
+// rendered. A header built ahead of its sections over-approximates on purpose (an undefined attribute costs the meaning);
+// once the rows are final, the clause whose attribute no emitted row carries is erased here, before the document is priced.
+// `clause` must be spelled exactly as the legend appended it; a clause that is not there is a no-op (the other dialect).
+inline void eraseAbsentClause( std::string& legend, std::string_view clause, bool present )
+{
+    if( present || clause.empty() )
+    {
+        return;
+    }
+    if( const std::size_t at = legend.find( clause ); at != std::string::npos )
+    {
+        legend.erase( at, clause.size() );
+    }
+}
+
+// The present-only clause of an attribute a late fold added (SIZE-2 folded=, SIZE-3a same_as=): spliced after `anchor` (the
+// clause it qualifies), or before the first comment's " -->" when the anchor is empty or absent (the other dialect, a dropped clause).
+inline void spliceClauseAfter( std::string& legend, std::string_view anchor, std::string_view clause )
+{
+    std::size_t at = anchor.empty() ? std::string::npos : legend.find( anchor );
+    at             = at == std::string::npos ? legend.find( " -->" ) : at + anchor.size();
+    if( at != std::string::npos )
+    {
+        legend.insert( at, clause );
+    }
+}
+
 // S5 — THE BYTE SET IS THE CONTRACT. Everything below that is NOT in this set is copied through
 // unchanged by the switch's `default:` arm, so the run loop may memcpy it in bulk without looking at it;
 // everything that IS in the set still goes through the SAME switch, one byte at a time, unchanged. The
@@ -1156,6 +1184,17 @@ inline constexpr std::string_view kForFileTailWideLegend =
     "; tail walk: the page rows go on to the file page's first 160 rows (a code question: its first 160 code rows, plus the "
     "doc rows within its first 160 rows); a row past page 0 (a code question: past its first 40 code rows, a doc past row 40) "
     "prints p= only, after every row with sym=, and skips files the head shows; p_only= counts them";
+// SIZE-2 (size-trim): present-only beside a tail that folded widened rows (forpage.h FileTail::folded); after the walk clause.
+inline constexpr std::string_view kForFileTailFoldedLegend =
+    "; tail folded=class=N: on a code question, N rows past page 0 of that file class (doc, config, script, testdata, other) "
+    "are not listed, unless the task names the class (adding a new X, or a quoted message, keeps doc and config); next= pages from the first one";
+inline constexpr std::string_view kForCompactFileTailFoldedLegend =
+    "; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them";
+inline constexpr std::string_view kForFileTailFoldedWhy = "rows past page 0 of these non-code file classes are counted, not listed; next pages to them";
+// SIZE-3a (size-trim): present-only beside a <d same_as=> row (packSignatures SigRowSpelling::foldRepeatedText)
+inline constexpr std::string_view kForSameAsLegend =
+    "; d same_as=N: this row's doc and signature text equal the earlier row n=N's, so they are not repeated (every other attribute is its own)";
+inline constexpr std::string_view kForCompactSameAsLegend = "; d same_as=N: doc+sig text as row n=N (not repeated)";
 // The JSON twin of that clause's p_only= (the JSON answer carries no legend): "p_only_why" beside "p_only" (forpage.h)
 inline constexpr std::string_view kForFileTailPathOnlyWhy = "rows past page 0 of the file page print the path only (sym empty)";
 
@@ -1251,9 +1290,10 @@ inline std::size_t tokensForEmittedBytes( std::size_t emittedBytes, double bytes
 // prices, so the digits are converged the way --for's header splice converges them (≤4 passes). `markupBytes`
 // are priced at `markupRate`, `bodyBytes` at kBytesPerTokenBody. Returns the attribute string; `outTokens`
 // receives the number, so the caller's own --token-budget gate reads the SAME value the root shows.
-inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, std::size_t bodyBytes, std::size_t* outTokens )
+// The body-rate sections may come already priced (`bodyTokens`, --for's per-section charge): pricedRootAttrTokens is the
+// same fixpoint over them, and pricedRootAttr its byte-count reader.
+inline std::string pricedRootAttrTokens( std::size_t markupBytes, double markupRate, std::size_t bodyTokens, std::size_t* outTokens )
 {
-    const std::size_t bodyTokens = bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0;
     std::size_t estTokens = tokensForEmittedBytes( markupBytes, markupRate ) + bodyTokens;
     std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
     for( int pass = 0; pass < 4; ++pass )
@@ -1265,6 +1305,36 @@ inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, s
     }
     if( outTokens ) { *outTokens = estTokens; }
     return attr;
+}
+inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, std::size_t bodyBytes, std::size_t* outTokens )
+{
+    return pricedRootAttrTokens( markupBytes, markupRate, bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0, outTokens );
+}
+
+// What a --for root's number was converged from, at kBytesPerTokenDefault: kept so a pass that later rewrites markup inside the
+// priced span re-prices the root through the same fixpoint (repriceRootAfterCut) — no second estimator, no second pass.
+struct PricedRootInputs
+{
+    std::size_t markupBytes = 0; // every markup byte the number priced, its own est_tokens= attribute excluded
+    std::size_t bodyTokens = 0; // the body-rate sections, already priced
+};
+
+// ONE-SIDE-REACH (foronesidereach.h) rewrites printed <sigs>/<callers> rows as tail pointers after the root was priced. `doc` is the
+// answer after that markup rewrite and `pricedBytes` the size of the answer the root was priced on (the same est_tokens= digits in
+// both), so the priced markup is now in.markupBytes + doc.size() - pricedBytes. The difference is SIGNED: the legend comment plus
+// short pointers can outweigh the short rows they replace. The root's est_tokens= value is replaced with the fixpoint over the
+// rewritten markup. Only the number moves; every other byte stays.
+inline void repriceRootAfterCut( std::string& doc, const PricedRootInputs& in, std::size_t pricedBytes )
+{
+    constexpr std::string_view kKey = " est_tokens=\"";
+    const std::size_t lt = doc.find( '<' );
+    const std::size_t gt = lt == std::string::npos ? std::string::npos : doc.find( '>', lt );
+    const std::size_t at = gt == std::string::npos ? std::string::npos : doc.find( kKey, lt );
+    const std::size_t end = at == std::string::npos ? std::string::npos : doc.find( '"', at + kKey.size() );
+    // the caller priced this root itself (CLI finishForLensHeaderPriced, MCP priceForTaskRoot) and rewrote only what it priced
+    EXPECTS( end != std::string::npos && end < gt, "repriceRootAfterCut: the root carries the est_tokens= its caller priced" );
+    EXPECTS( pricedBytes <= in.markupBytes + doc.size(), "repriceRootAfterCut: the cut removed only priced markup" );
+    doc.replace( at, end + 1 - at, pricedRootAttrTokens( in.markupBytes + doc.size() - pricedBytes, kBytesPerTokenDefault, in.bodyTokens, nullptr ) );
 }
 // R1 (terminality round A 2026-09-05): the ONE definition of over_ceiling=, hoisted to sit beside the
 // estimator whose number it qualifies. It was a function-local constant in verbs_for.h, which is why the
@@ -6014,7 +6084,38 @@ inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<
 struct SigRowSpelling
 {
     bool elideZeroMetrics = false;   // omit a zero cx=/ccx=/in= on a row (SigRowFacts::elideZero); the legend says absent = 0
+    bool foldRepeatedText = false;   // SIZE-3a: a row whose doc+signature text repeats an earlier row's prints same_as= instead of it
 };
+// SIZE-3a (size-trim): the shortest doc+signature text a row folds (shorter text costs less than the attribute naming its twin)
+inline constexpr std::size_t kSigFoldTextMinBytes = 40;
+// SIZE-3a: the n= a repeat of `text` names, or "" to print the text: the first earlier row that printed it, unless another earlier
+// row with that n= printed a different text (an overload, or a same-named function in another file: same_as= names its source by
+// n=, so the reader could take the wrong signature; CodeRabbit 4505000660). `printed` is every row that printed its text, in order.
+inline std::string_view sameAsSourceOf( const std::vector<std::pair<std::string, std::string_view>>& printed, std::string_view text )
+{
+    const auto src = std::ranges::find_if( printed, [ & ]( const auto& row ) { return row.first == text; } );
+    if( src == printed.end() )
+    {
+        return {};
+    }
+    const bool ambiguous = std::ranges::any_of( printed, [ & ]( const auto& row ) { return row.second == src->second && row.first != text; } );
+    return ambiguous ? std::string_view() : src->second;
+}
+// The value of ` name="…"` inside one tag's attribute text, or "" (SIZE-3a moved it here from forfilesyms.h: the <d> head too; the answer's own markup: no attribute holds a raw quote).
+inline std::string_view attrOf( std::string_view tag, std::string_view name )
+{
+    for( std::size_t at = tag.find( name ); at != std::string_view::npos; at = tag.find( name, at + 1 ) )
+    {
+        const std::size_t eq = at + name.size();
+        if( at > 0 && tag[at - 1] == ' ' && eq + 1 < tag.size() && tag[eq] == '=' && tag[eq + 1] == '"' )
+        {
+            const std::size_t close = tag.find( '"', eq + 2 );
+            return close == std::string_view::npos ? std::string_view() : tag.substr( eq + 2, close - eq - 2 );
+        }
+    }
+    return {};
+}
+
 
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                             int topN, std::size_t budgetBytes,
@@ -6485,6 +6586,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             w.write( kExtentSuspectRowLegend );
         }
         std::vector<char> fileNotesPending( sigFiles.size(), 1 );   // P7: a file's notes ride its FIRST live row
+        std::vector<std::pair<std::string, std::string_view>> printedText;   // SIZE-3a: (doc+sig text, n=) of each row that printed its text
         for( const SigEntry& e : entries )
         {
             if( e.dropped )
@@ -6496,9 +6598,30 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             // id mapping must subtract rankBase or it reads past the window into the masked tail
             // (the #362 review round's next_offset=2^32 seam).
             pushShownSigId( shownIdsOut, order, std::uint32_t( e.globalRank - rankBase ) );
-            writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
-            if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
-            w.write( escapeXml( e.sig, esc ) );
+            // SIZE-3a: a repeat of an earlier row's text keeps every attribute (n= l= p= r= …) and names that row instead of the text
+            std::string      key = spelling.foldRepeatedText ? e.doc + '\0' + e.sig : std::string();   // tens of rows: linear scans
+            std::string_view sameAs;
+            if( spelling.foldRepeatedText && e.doc.size() + e.sig.size() >= kSigFoldTextMinBytes )
+            {
+                sameAs = sameAsSourceOf( printedText, key );
+            }
+            if( sameAs.empty() )
+            {
+                writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
+                if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
+                w.write( escapeXml( e.sig, esc ) );
+                if( spelling.foldRepeatedText )
+                {
+                    printedText.emplace_back( std::move( key ), attrOf( e.head, "n" ) );   // e.head outlives the loop (entries is not touched)
+                }
+            }
+            else
+            {
+                std::string head = e.head;
+                head.pop_back();   // the '>'
+                head += " same_as=\"" + std::string( sameAs ) + "\">";
+                writeSigHeadWithEnd( w, head, e.endLine );
+            }
             w.write( e.notes );                                                // L3: symbol notes on this <d> (inert when null)
             if( fileNotesPending[ e.fileSlot ] )
             {

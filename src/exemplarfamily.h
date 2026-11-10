@@ -2160,6 +2160,15 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchLis
 }
 
 // The ` unread=` / ` oversized=` attributes of a scan that skipped something ("" when it skipped nothing).
+// SIZE-1 (size-trim): the scan-skip reading of each family legend, present-only beside the family row's unread=/oversized=
+// (forExemplarFamilyXml erases it when the scan skipped nothing). Spelled exactly as the legends carry it.
+inline constexpr std::string_view kExemplarScanSkipClause =
+    "A registry or instance candidate over 4000 lines is not read: oversized=N counts the registry candidates (a function or variable named for a task word or a registry word) skipped for it, and unread=N the files the scan could not read; either may hide a family, and found=\"0\" with one of them means none resolved and a skipped one may be why. ";
+inline constexpr std::string_view kExemplarCompactScanSkipClause =
+    "oversized=N registry candidates over 4000 lines and unread=N files not read were skipped (a family may hide there; found=\"0\": none resolved). ";
+static_assert( kForExemplarFamilyLegend.contains( kExemplarScanSkipClause ) && kForExemplarFamilyCompactLegend.contains( kExemplarCompactScanSkipClause ),
+               "the scan-skip clauses are spelled as the family legends carry them" );
+
 inline std::string scanSkipAttrs( std::uint32_t unread, std::uint32_t oversized )
 {
     return ( unread > 0 ? " unread=\"" + std::to_string( unread ) + "\"" : std::string() )
@@ -2217,6 +2226,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
     const auto loc = [&]( std::uint32_t f, std::uint32_t l )
     { return e( rootRelPath( ing, f ) ) + ":" + std::to_string( l ); };
     std::string out( compactLegend ? kForExemplarFamilyCompactLegend : kForExemplarFamilyLegend );
+    eraseAbsentClause( out, compactLegend ? kExemplarCompactScanSkipClause : kExemplarScanSkipClause, fam.unread + fam.oversized > 0 );   // SIZE-1
     exemplar_detail::addIntoLegend( out, fam, compactLegend );
     out += "<exemplar_family of=\"" + e( t.phrase ) + "\" rule=\"" + std::string( kExemplarRuleTags[std::size_t( fam.rule )] ) + "\" key=\"" + e( fam.key ) + "\"";
     if( fam.keyAt )

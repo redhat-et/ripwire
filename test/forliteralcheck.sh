@@ -196,14 +196,16 @@ if python3 -I -c 'import sys,re;s=sys.argv[1];m=re.search(r" bytes=\"(\d+)\"",s)
     ok "L9 bytes= is the element's own size"
 else no "L9 bytes= disagrees with the element"; fi
 # ── L11 ──
+# SIZE-1 (size-trim): a row clause rides iff its attribute does — iffHas TEXT ATTR LEGEND CLAUSE
+iffHas(){ if has "$1" "$2"; then has "$3" "$4"; else ! has "$3" "$4"; fi; }
 legendOf(){ python3 -I -c 'import sys,re;m=re.search(r"<!-- ripwire for lit:.*?-->",sys.stdin.read(),re.S);print(m.group(0) if m else "MISSING",end="")'; }
 noLegend(){ python3 -I -c 'import sys,re;print(re.sub(r"<!-- ripwire for lit:.*?-->","",sys.stdin.read(),flags=re.S),end="")'; }
 LC="$( run --for=APPTOOL_RENDER_MODE | legendOf )"; LF="$( run --for=APPTOOL_RENDER_MODE --legend=full | legendOf )"
 PC="$( run --for=APPTOOL_RENDER_MODE | lit | noLegend )"; PF="$( run --for=APPTOOL_RENDER_MODE --legend=full | lit | noLegend )"
 # train 42b T-4 (rv-mf1-lit-delta N3): the compact form names every attribute the element prints (hits= src= shown= capped= shape=
-# bytes= next= and T-3's cut=) and says of= is the body's line range, never "whole": the ceiling moved 340 -> 450 for those names only; CR harvest 42b: 450 -> 470 for body=held (the cap's disclosure)
+# bytes= next= and T-3's cut=) (SIZE-1: body=above|held only beside a body= row) and says of= is the body's line range, never "whole": the ceiling moved 340 -> 450 for those names only; CR harvest 42b: 450 -> 470 for body=held (the cap's disclosure)
 if [ "${#LC}" -le 470 ] && [ "${#LC}" -ge 250 ] && [ "${#LF}" -ge 700 ] && has "$LF" 'docs, shell, config' && [ "$LC" != "MISSING" ] \
-   && has "$LC" 'k=' && has "$LC" 'comment=' && has "$LC" 'floor=' && has "$LC" 'body=above' && has "$LC" 'held' && [ -n "$PC" ] && [ "$PC" = "$PF" ] \
+   && has "$LC" 'k=' && has "$LC" 'comment=' && has "$LC" 'floor=' && iffHas "$PC" ' body="' "$LC" 'body=above|held' && [ -n "$PC" ] && [ "$PC" = "$PF" ] \
    && has "$LC" 'hits=' && has "$LC" 'src=' && has "$LC" 'shown=' && has "$LC" 'capped=' && has "$LC" 'shape=' && has "$LC" 'bytes=' \
    && has "$LC" 'next=' && has "$LC" 'cut=' && has "$LF" 'cut=' && has "$LC" 'of= body lines' && ! has "$LC" 'of= whole'; then
     ok "L11 compact legend ${#LC} B (the default); --legend=full keeps ${#LF} B naming docs, shell, config; same payload"
@@ -498,8 +500,8 @@ R="$( rrun '--for=svc.rf.key tasks.rake setting' | lit )"
 if has "$R" 's="svc.rf.key"' && ! has "$R" 'try='; then ok "R3c [P] try= counts only literals the task names as keys: tasks.rake is no literal, so svc.rf.key is the first"; else no "R3c try= after a refused file: ${R:0:300}"; fi
 # F5: the legend clauses say what is printed
 R="$( rrun '--for=svc.rf.key setting' )"
-if ! has "$R" 'the earlier ones have no source site' && ! has "$R" 'two row slots kept for a quoted site outside any function' && has "$R" 'were not scanned' && has "$R" 'C #define'; then
-    ok "R4 [P] legend: try= says the earlier literals had no site or were not scanned; the slot clause names its limits"; else no "R4 legend clauses still overstate: $( grep -o 'try=N[^.]*' <<<"$R" | head -1 )"; fi
+if ! has "$R" 'the earlier ones have no source site' && ! has "$R" 'two row slots kept for a quoted site outside any function' && iffHas "$R" ' try="' "$R" 'were not scanned' && has "$R" 'C #define'; then
+    ok "R4 [P] legend: try= (present-only) says the earlier literals had no site or were not scanned; the slot clause names its limits"; else no "R4 legend clauses still overstate: $( grep -o 'try=N[^.]*' <<<"$R" | head -1 )"; fi
 # ── X1-X3 ──
 if [ "$A" = "$( run --for=APPTOOL_RENDER_MODE )" ]; then ok "X1 deterministic"; else no "X1 two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then

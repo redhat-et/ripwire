@@ -545,6 +545,7 @@ for _g in \
     formembernamescheck \
     fornotesbudgetcheck \
     fornotesjsoncheck \
+    foronesidecheck \
     forrankordercheck \
     forregrowcheck \
     forrootlegendcheck \
@@ -552,7 +553,9 @@ for _g in \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsigspancheck \
+    forsizetrimcheck \
     forsoftbudgetcheck \
+    fortailfoldcheck \
     fortailwidecheck \
     forunusedcheck \
     forwidencheck \
