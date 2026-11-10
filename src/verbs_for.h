@@ -15,6 +15,7 @@
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
+#include "foronesidereach.h"  // ONE-SIDE-REACH: rows that reach one of two named endpoints become tail pointers (read off the captured answer)
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -1444,6 +1445,7 @@ struct ForLensPricedHeader
 {
     std::string header;
     std::size_t estTokens = 0;   // 0 on the unmeasured degrade path (`f.measured` false — no number is printed there)
+    std::optional<rw::PricedRootInputs> inputs; // what estTokens was converged from; empty where no number is printed
 };
 
 inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const ForLensRootFinish& f )
@@ -1488,23 +1490,10 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     // EACH KIND OF BYTE AT ITS OWN RATE: markup (header, <sigs>, <lego>, <compose>, <routes>, the mermaid graph
     // block, the tail, a compact <hops>) at kBytesPerTokenDefault, and the --detail / auto bodies at the
     // kBytesPerTokenBody rate chargeSection already charged them at (one rate for both kinds is §H7's defect).
-    const auto priceFixpoint = [ & ]( std::size_t markup, std::size_t overBytes )
-    {
-        std::size_t est = rw::tokensForEmittedBytes( markup + overBytes, rw::kBytesPerTokenDefault ) + f.bodyTokens;
-        std::string a   = " est_tokens=\"" + std::to_string( est ) + "\"";
-        for( int pass = 0; pass < 4; ++pass )
-        {
-            const std::size_t next = rw::tokensForEmittedBytes( markup + a.size() + overBytes, rw::kBytesPerTokenDefault ) + f.bodyTokens;
-            if( next == est )
-            {
-                break;
-            }
-            est = next;
-            a   = " est_tokens=\"" + std::to_string( est ) + "\"";
-        }
-        return std::pair<std::size_t, std::string>{ est, a };
-    };
-    auto        priced = priceFixpoint( header.size() + f.nonHeaderMarkupBytes, 0 );
+    // ONE-SIDE-REACH: the inputs ride back with the number, so the demote pass (foronesidereach.h) re-prices through this fixpoint.
+    rw::PricedRootInputs inputs { .markupBytes = header.size() + f.nonHeaderMarkupBytes, .bodyTokens = f.bodyTokens };
+    std::size_t est = 0;
+    std::string estAttr = rw::pricedRootAttrTokens( inputs.markupBytes, rw::kBytesPerTokenDefault, inputs.bodyTokens, &est );
     std::string overAttr;
 
     // F2 (capture-audit verify-wave2 2026-09-05): over_ceiling= is a PROPERTY OF THE EMITTED DOCUMENT, not of a
@@ -1514,20 +1503,21 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     // clause unconditionally would charge every budgeted bundle for an attribute it does not carry. Monotone —
     // adding bytes only RAISES est_tokens — so one extra stage is exact and the flag never oscillates. The
     // definition rides the legend of the document that carries the attribute.
-    const bool namedCeilingOver = forLensOverCeiling( f.tokenBudget, f.maxTokens, f.bodyCeiling, priced.first );
+    const bool namedCeilingOver = forLensOverCeiling( f.tokenBudget, f.maxTokens, f.bodyCeiling, est );
     if( namedCeilingOver || f.guardOver )
     {
         // each clause rides only where its reading is true: the est_tokens one when that predicate holds; the runaway guard's
         // reading rode the <sigs> clauses already (sigsCeilingNote) — both when both hold
         spliceBefore( header, " -->", /*fromEnd=*/true, namedCeilingOver ? f.overCeilingLegend : std::string_view() );
         overAttr = " over_ceiling=\"1\"";
-        priced   = priceFixpoint( header.size() + f.nonHeaderMarkupBytes, overAttr.size() );
+        inputs.markupBytes = header.size() + f.nonHeaderMarkupBytes + overAttr.size();
+        estAttr = rw::pricedRootAttrTokens( inputs.markupBytes, rw::kBytesPerTokenDefault, inputs.bodyTokens, &est );
     }
 
     // N1: onto the <ctx> root — the same "><!--" boundary the bundle= attributes above use — where --pack-task /
     // --from-trace / --handoff / --expand put theirs (M11), not inside the comment.
-    spliceBefore( header, "><!--", /*fromEnd=*/false, priced.second + overAttr );
-    return { std::move( header ), priced.first };
+    spliceBefore( header, "><!--", /*fromEnd=*/false, estAttr + overAttr );
+    return { std::move( header ), est, inputs };
 }
 
 // DEEP-TAIL d2, JSON dialect — the tail stanza and its explicit-regime fill, as a free function over
@@ -2989,7 +2979,7 @@ inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectAr
 inline bool forFileSymsWanted( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
-    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || !rw::forFileSymsOn() );
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || ( !rw::forFileSymsOn() && !rw::oneSideReachOn() ) );
 }
 
 // What StdoutCapture::finish() hands back.
@@ -3056,6 +3046,8 @@ public:
         }
     }
     bool wanted() const noexcept { return wanted_; }
+    // ONE-SIDE-REACH: what the captured answer's root est_tokens= was converged from (null when the root prints none): the demote pass
+    // (foronesidereach.h) rewrites priced rows in these bytes, and re-prices the root through it.
     // The captured bytes, stdout restored; nullopt when nothing was captured. A failed flush or a stream error is `failed`: the bytes read are
     // kept, never dropped and never taken for the whole answer. A failed restore keeps the saved descriptor (the only handle on the real
     // stdout) and writes the bytes to it; the caller reports `restored == false`.
@@ -3109,8 +3101,33 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
 }
 
 // The run's exit code: 1 when the answer was not written whole (the buffer failed, or stdout could not be restored), else 0.
-inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
+// ONE-SIDE-REACH (foronesidereach.h): rows reaching one of two named endpoints become pointers, in the answer and in `syms`; "" when none is.
+// The caller skips it under a budget, which leaves both as shaped.
+inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string& answer, std::string& syms, const std::optional<rw::PricedRootInputs>& price )
 {
+    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, d.cfg.forTask, answer, syms );
+    if( !edit.answer.empty() && price )
+    {
+        rw::repriceRootAfterCut( edit.answer, *price, answer.size() );   // signed: the pointers and legend may outweigh the rows they replace
+    }
+    if( !edit.syms.empty() )
+    {
+        syms = std::move( edit.syms );
+    }
+    return std::move( edit.answer );
+}
+
+// The captured answer and the inputs its root's est_tokens was priced from (nullopt: no priced root to re-price).
+struct CapturedForAnswer
+{
+    StdoutCapture&                      capture;
+    std::optional<rw::PricedRootInputs> price;
+};
+
+inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
+{
+    StdoutCapture&                             capture = answer.capture;
+    const std::optional<rw::PricedRootInputs>& price   = answer.price;
     if( !capture.wanted() )
     {
         return 0;
@@ -3131,19 +3148,16 @@ inline int appendForFileSyms( const MainDispatch& d, StdoutCapture& capture )
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const bool        whole = cap && !cap->failed;
-    const std::string syms  = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = cfg.tokenBudget > 0 || cfg.maxTokens > 0,
+    const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;
+    std::string       syms  = rw::renderForFileSyms(
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = held,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole } );
-    const std::size_t at = cap ? forSymsInsertAt( cap->bytes, cfg.withGraph ) : 0;   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
-    if( cap )
-    {
-        std::fwrite( cap->bytes.data(), 1, at, stdout );
-    }
+    const std::string  edited = whole && !held ? oneSideReachAnswer( d, cap->bytes, syms, price ) : std::string();
+    const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
+    const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
+    std::fwrite( bytes.data(), 1, at, stdout );
     std::fwrite( syms.data(), 1, syms.size(), stdout );
-    if( cap )
-    {
-        std::fwrite( cap->bytes.data() + at, 1, cap->bytes.size() - at, stdout );
-    }
+    std::fwrite( bytes.data() + at, 1, bytes.size() - at, stdout );
     return cap && cap->failed ? 1 : 0;
 }
 
@@ -5149,7 +5163,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
-        const int answerRc = appendForFileSyms( d, forAnswerBytes );
+        const int answerRc = appendForFileSyms( d, CapturedForAnswer{ forAnswerBytes, pricedHeader.inputs } );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
