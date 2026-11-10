@@ -6,9 +6,10 @@
 //
 // THE RULE, read off the answer's own bytes (every block before <syms>, as the CLI and MCP `for` emit them — one renderer, both surfaces):
 // a <d> row inside <sigs> is demoted when ALL hold
-//   (r) its <d> rank (place among the answer's <d> rows) is past kDemoteMinRank,
-//   (p) its answer-row position (the <d>, <y>, <s> and non-`used` <u> rows in output order) is past kDemoteMinPos — the first 10 answer
-//       rows are never touched, so nothing moves up into them,
+//   (r) its <d> rank (place among the answer's <d> rows) is past kDemoteMinRank (10). Its answer-row position (the <d>, <y>, <s> and
+//       non-`used` <u> rows in output order) is then past 10 too, so the first 10 answer rows are never touched and nothing moves up
+//       into them (PRECISION-LAB 11-10: a demote at <d> rank 6-10 pulled deeper rows into the top 10 and raised its Wrong count, and
+//       cleared no picked row the rank > 10 rule does not),
 //   (f) a higher <d> row shows the same file,
 // and no keep guard holds:
 //   (K1) TYPE-WITH-MEMBERS: the row carries mem= (a type with its member list is a definition the reader follows, not a sibling decoy);
@@ -42,8 +43,7 @@
 
 namespace rw
 {
-inline constexpr std::size_t kDemoteMinRank = 5; // (r): rows past the 5th <d> row
-inline constexpr std::size_t kDemoteMinPos = 10; // (p): rows past the first 10 answer rows
+inline constexpr std::size_t kDemoteMinRank = 10; // (r): rows past the 10th <d> row (so past the first 10 answer rows)
 inline constexpr std::size_t kOwnerNearRows = 4; // (K3): the <d> rows right above that may name the owner
 inline constexpr std::size_t kCallPathSeeds = 3; // (K4): the first resolved answer rows a call path may reach
 
@@ -322,7 +322,7 @@ inline std::vector<const AnswerRow*> pickByBytes( const AnswerScan& scan, const 
     std::vector<const AnswerRow*> picked;
     for( const AnswerRow* r : dRows )
     {
-        if( !r->inSigs || r->dpos <= kDemoteMinRank || r->pos <= kDemoteMinPos || hasMembers( *r ) )
+        if( !r->inSigs || r->dpos <= kDemoteMinRank || hasMembers( *r ) )
         {
             continue;
         }

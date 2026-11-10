@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# forsiblingdemotecheck.sh — SIBLING-DEMOTE (src/forsiblingdemote.h): a ranked <sigs> <d> row with <d> rank > 5, answer-row position > 10
-# (the <d>, <y>, <s> and non-`used` <u> rows in output order) and a higher <d> row of the same file is printed in its place as a tail
-# pointer <t p="FILE" sym="NAME"/>, unless a keep guard holds (K1 mem=, K2 a <c> callee of a <h> hop row, K3 Owner.member under its
+# forsiblingdemotecheck.sh — SIBLING-DEMOTE (src/forsiblingdemote.h): a ranked <sigs> <d> row with <d> rank > 10 (kDemoteMinRank; its
+# answer-row position — the <d>, <y>, <s> and non-`used` <u> rows in output order — is then past 10 too) and a higher <d> row of the same
+# file is printed in its place as a tail pointer <t p="FILE" sym="NAME"/>, unless a keep guard holds (K1 mem=, K2 a <c> callee of a <h> hop row, K3 Owner.member under its
 # Owner row, K4 a proven call path of <= 2 edges to one of the first three resolved answer rows, K5 a kept row's same_as= names it).
 #
 # ONE Python tree (the rule reads answer bytes; K4 reads the index graph): widget.py holds the head parse_widget_config and 14 plain
@@ -14,7 +14,9 @@
 #        off answer; K4's proven-path rows named) rewritten as <t p= sym= r=/> and the legend comment before the first, est_tokens= aside
 #   (a2) a plain deep sibling is a pointer: widget_config_variant_04 (pos 11) and other.py's deep rows
 #   (p)  position: the rows at answer positions <= 10 stay rows (widget_config_variant_03 at pos 10, rank 10)
-#   (r)  rank: an unused-in-file table puts 28 <u> rows first; the <d> rows of rank <= 5 (all past position 10) stay rows, rank 6+ go
+#   (r)  rank (PRECISION-LAB 11-10: a demote at rank 6-10 pulls deeper rows into the top 10): an unused-in-file table puts 28 <u> rows
+#        first, so every <d> row is past position 10; the decoys of rank <= 10 stay rows (rank 5, 6 and 10), rank 11 goes; on the plain
+#        answer a decoy at rank 15 is a pointer
 #   (k1) WidgetVault (mem=) stays a row          (k2) WidgetConfigSink.widget_config_flush (a <c> under the head's <h>) stays a row
 #   (k3) WidgetShelf.widget_shelf_row (WidgetShelf right above) stays a row
 #   (k4) widget_config_far_caller (proven 2-hop caller of the head) stays a row; twin: widget_config_farther_caller (3 hops) is a pointer
@@ -154,7 +156,7 @@ def rule( t, keep4 ):
     R = rows( t ); C = calls( t ); D = [ r for r in R if r["tag"] == "d" ]; pick = []
     for r in D:
         n = r["a"].get( "n", "" ); f = r["a"].get( "p", "" ).split( ":" )[0]
-        if not r["sigs"] or r["dpos"] <= 5 or r["pos"] <= 10 or "mem" in r["a"]: continue
+        if not r["sigs"] or r["dpos"] <= 10 or "mem" in r["a"]: continue
         if not any( x["a"].get( "p", "" ).split( ":" )[0] == f for x in D[: r["dpos"] - 1] ): continue
         if n in C or last( n ) in C: continue
         if ( "." in n or "::" in n ) and any( x["a"].get( "n" ) == re.split( r"\.|::", n )[0] for x in D[max( 0, r["dpos"] - 5 ): r["dpos"] - 1] ): continue
@@ -201,7 +203,8 @@ arm(){ # arm ID want(row|ptr) NAME WHAT
 }
 arm a2 ptr widget_config_variant_04 "a plain same-file sibling at position 11"
 arm a2 ptr widget_config_other_03 "a deep row of the second file"
-arm p row widget_config_variant_03 "answer position 10 is never demoted"
+arm p row widget_config_variant_03 "answer position 10, <d> rank 10, is never demoted"
+arm r ptr widget_config_variant_08 "a same-file decoy at <d> rank 15"
 arm k1 row WidgetVault "it carries mem="
 arm k2 row WidgetConfigSink.widget_config_flush "a <c> callee under the head's <h> row"
 arm k3 row WidgetShelf.widget_shelf_row "its owner row WidgetShelf sits right above"
@@ -225,9 +228,11 @@ python3 "$TMP/names.py" "$TMP/u.xml" >"$TMP/u.names"
 ptr="$( sed -n 's/^ptr //p' "$TMP/u.names" ),"; rws="$( sed -n 's/^rows //p' "$TMP/u.names" ),"
 nu="$( grep -o '<u [^>]*v="unknown"' "$TMP/u.xml" | wc -l | tr -d ' ' )"
 [ "$nu" -gt 10 ] || no "(r) the unused-in-file table no longer leads with > 10 rows ($nu)"
-arm r row widget_config_reader "<d> rank 5, answer position $(( nu + 5 ))"
+arm r row widget_config_reader "a same-file decoy at <d> rank 5, answer position $(( nu + 5 ))"
 arm r row WidgetConfigSink "<d> rank 3"
-arm r ptr widget_config_variant_01 "<d> rank 6"
+arm r row widget_config_variant_01 "a same-file decoy at <d> rank 6, answer position $(( nu + 6 ))"
+arm r row widget_config_variant_05 "a same-file decoy at <d> rank 10, answer position $(( nu + 10 ))"
+arm r ptr widget_config_variant_06 "a same-file decoy at <d> rank 11"
 
 run "--for=$TASK" --token-budget=4000 >"$TMP/b.xml"
 python3 "$TMP/names.py" "$TMP/b.xml" >"$TMP/b.names"
