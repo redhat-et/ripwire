@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # qdclonepaircheck.sh — QD-CLONE-FALSE-GATE gate: --quality-delta must not gate on a clone pair the baseline already held,
-# only re-shaped by a small edit (quality.h appendHeldClonePairHashes / cloneGroupHeldAtBaseline).
+# only re-shaped by a small edit (quality.h pushExactGroupPairs, pushTwinWidenedPairs, cloneGroupHeldAtBaseline).
 #
 # Found by the P5 seeded-defect pilot (2026-11-10): 7/410 seeded runs exited 2 on a duplication row whose pair the edit did not
 # create. Two identity re-shapes of ONE baseline duplication read as new member sets:

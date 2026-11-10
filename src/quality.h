@@ -935,13 +935,9 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
         return false; // Q-DIAL-2: the LANGUAGE calls it — see languageInvokedSymbol (this replaced a blanket header exclusion)
     }
     const std::string_view p = rootRelPath( ing, s.fileId );   // #228: a directory above the root never decides this
-    if( pythonFrameworkInvokedSymbol( s, p ) )
+    if( pythonFrameworkInvokedSymbol( s, p ) || testRunnerInvokedSymbol( s, p ) )
     {
-        return false; // #228: unittest/Django/pytest call this by protocol (see pythonFrameworkInvokedSymbol)
-    }
-    if( testRunnerInvokedSymbol( s, p ) )
-    {
-        return false; // QD-TEST-DEAD: `go test` / the Rust test harness calls this (see testRunnerInvokedSymbol)
+        return false; // #228 unittest/Django/pytest, QD-TEST-DEAD `go test` / the Rust harness: the test runner calls this
     }
     if( isFixturePath( p ) )
     {
@@ -3849,7 +3845,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
 // v26 (2026-11-10, lane qd-fixes-1) — no blob shape change; two record SETS moved. The dead set: isDeadCandidate exempts Go and Rust
 // test-runner entry points (testRunnerInvokedSymbol). The clone set: baselineCloneGroupHashes also holds every pair its clone
-// relation implies (appendHeldClonePairHashes, QD-CLONE-FALSE-GATE), so a v25 blob holds neither. Bumped 25 -> 26.
+// relation implies (pushExactGroupPairs / pushTwinWidenedPairs, QD-CLONE-FALSE-GATE), so a v25 blob holds neither. Bumped 25 -> 26.
 constexpr std::uint32_t kQSnapCacheScheme = 26;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
@@ -5486,11 +5482,50 @@ inline void dropNonBaselineKeys( Snapshot& snap, const IngestResult& ing, std::s
 // third copy, a copy of a function and a near clone of an untouched function still gate. Bounded: a group or widened pair with
 // more than kClonePairExpandCap pairs adds none (its re-shapes keep the set identity, a floor).
 inline constexpr std::size_t kClonePairExpandCap = 512;
-inline void appendHeldClonePairHashes( std::vector<std::uint64_t>& out, const std::vector<CloneGroup>& exact, const std::vector<CloneGroup>& type3,
-                                       const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline )
+
+// Where the held pairs go: one pair hash per two members, both in baseline files (the cloneGroupIsInBaseline rule, per pair).
+struct HeldClonePairSink
 {
-    constexpr std::uint32_t   kNoGroup = ~0u;
-    std::vector<std::uint32_t> exactGroupOf( ing.symbols.size(), kNoGroup );
+    std::vector<std::uint64_t>& out;
+    const IngestResult&         ing;
+    std::string_view            root;
+    const std::vector<char>*    fileInBaseline;
+
+    void push( NodeId x, NodeId y ) const
+    {
+        const bool known = x != y && x < ing.symbols.size() && y < ing.symbols.size();
+        if( known && fileIsInBaseline( fileInBaseline, ing.symbols[x].fileId ) && fileIsInBaseline( fileInBaseline, ing.symbols[y].fileId ) )
+        {
+            out.push_back( cloneMemberSetHash( { baselineCanonId( ing, x, root ), baselineCanonId( ing, y, root ) } ) );
+        }
+    }
+};
+
+// (1) every pair inside an exact group of three or more (a two-member group's pair hash is already its own).
+inline void pushExactGroupPairs( const HeldClonePairSink& sink, const std::vector<CloneGroup>& exact )
+{
+    for( const CloneGroup& cg : exact )
+    {
+        const std::size_t n = cg.members.size();
+        if( n < 3 || n * ( n - 1 ) / 2 > kClonePairExpandCap )
+        {
+            continue;
+        }
+        for( std::size_t a = 0; a < n; ++a )
+        {
+            for( std::size_t b = a + 1; b < n; ++b )
+            {
+                sink.push( cg.members[a], cg.members[b] );
+            }
+        }
+    }
+}
+
+// (2) every near pair widened to the exact twins of both members: twins of a x twins of b (a member with no twin stands alone).
+inline void pushTwinWidenedPairs( const HeldClonePairSink& sink, const std::vector<CloneGroup>& exact, const std::vector<CloneGroup>& type3 )
+{
+    constexpr std::uint32_t    kNoGroup = ~0u;
+    std::vector<std::uint32_t> exactGroupOf( sink.ing.symbols.size(), kNoGroup );
     for( std::uint32_t gi = 0; gi < exact.size(); ++gi )
     {
         for( NodeId m : exact[gi].members )
@@ -5501,34 +5536,10 @@ inline void appendHeldClonePairHashes( std::vector<std::uint64_t>& out, const st
             }
         }
     }
-    const auto pushPair = [ & ]( NodeId x, NodeId y )
-    {
-        if( x == y || x >= ing.symbols.size() || y >= ing.symbols.size() || !fileIsInBaseline( fileInBaseline, ing.symbols[x].fileId )
-            || !fileIsInBaseline( fileInBaseline, ing.symbols[y].fileId ) )
-        {
-            return;
-        }
-        out.push_back( cloneMemberSetHash( { baselineCanonId( ing, x, root ), baselineCanonId( ing, y, root ) } ) );
-    };
-    for( const CloneGroup& cg : exact )
-    {
-        const std::size_t n = cg.members.size();
-        if( n < 3 || n * ( n - 1 ) / 2 > kClonePairExpandCap )
-        {
-            continue;   // a pair's own hash is already its group's
-        }
-        for( std::size_t a = 0; a < n; ++a )
-        {
-            for( std::size_t b = a + 1; b < n; ++b )
-            {
-                pushPair( cg.members[a], cg.members[b] );
-            }
-        }
-    }
-    const auto twinsOf = [ & ]( NodeId m ) -> std::span<const NodeId>
+    const auto twinsOf = [ & ]( const NodeId& m RW_LIFETIMEBOUND ) -> std::span<const NodeId>
     {
         const std::uint32_t gi = m < exactGroupOf.size() ? exactGroupOf[m] : kNoGroup;
-        return gi == kNoGroup ? std::span<const NodeId>() : std::span<const NodeId>( exact[gi].members );
+        return gi == kNoGroup ? std::span<const NodeId>( &m, 1 ) : std::span<const NodeId>( exact[gi].members );
     };
     for( const CloneGroup& cg : type3 )
     {
@@ -5536,22 +5547,16 @@ inline void appendHeldClonePairHashes( std::vector<std::uint64_t>& out, const st
         {
             continue;
         }
-        const std::span<const NodeId> ta = twinsOf( cg.members[0] ), tb = twinsOf( cg.members[1] );
-        if( ta.empty() && tb.empty() )
+        const std::span<const NodeId> sa = twinsOf( cg.members[0] ), sb = twinsOf( cg.members[1] );
+        if( ( sa.size() == 1 && sb.size() == 1 ) || sa.size() * sb.size() > kClonePairExpandCap )
         {
-            continue;   // no twin: the pair's own hash is the whole relation
-        }
-        const NodeId                  soleA[1] = { cg.members[0] }, soleB[1] = { cg.members[1] };
-        const std::span<const NodeId> sa = ta.empty() ? std::span<const NodeId>( soleA ) : ta, sb = tb.empty() ? std::span<const NodeId>( soleB ) : tb;
-        if( sa.size() * sb.size() > kClonePairExpandCap )
-        {
-            continue;
+            continue;   // no twin: the pair's own hash is the whole relation; over the cap: a floor
         }
         for( NodeId x : sa )
         {
             for( NodeId y : sb )
             {
-                pushPair( x, y );
+                sink.push( x, y );
             }
         }
     }
@@ -5571,13 +5576,15 @@ inline std::vector<std::uint64_t> baselineCloneGroupHashes( const IngestResult& 
     {
         if( cloneGroupIsInBaseline( cg, ing, fileInBaseline ) ) { out.push_back( cloneGroupHash( cg, ing, root ) ); }
     }
-    appendHeldClonePairHashes( out, exact, type3, ing, root, fileInBaseline );
+    const HeldClonePairSink sink{ out, ing, root, fileInBaseline };
+    pushExactGroupPairs( sink, exact );
+    pushTwinWidenedPairs( sink, exact, type3 );
     std::sort( out.begin(), out.end() );
     out.erase( std::unique( out.begin(), out.end() ), out.end() );
     return out;
 }
 
-// The delta's side of QD-CLONE-FALSE-GATE (see appendHeldClonePairHashes): a current clone group is the baseline's when its own
+// The delta's side of QD-CLONE-FALSE-GATE (see HeldClonePairSink and the two passes after it): a current clone group is the baseline's when its own
 // member set is in the baseline set, or when every pair of its members is (a group the edit only shrank or re-paired). A
 // two-member group's pair IS its set, so only a group of three or more reads the pairs. `h` = cloneGroupHash( cg ).
 inline bool cloneGroupHeldAtBaseline( const CloneGroup& cg, std::uint64_t h, const std::vector<std::uint64_t>& baseCloneGroups,
