@@ -738,12 +738,25 @@ print( sum( 1 for p in open( sys.argv[ 2 ] ).read().split( "\n" ) if p in head )
 PY
 )"
     # FOR-TAIL-WIDE: a tail page row is the page's row (same path, same order); its sym= is the page's own or absent (path-only past the old
-    # 40-row walk, pinned by fortailwidecheck arm 3); the first row always names its sym=
-    C1PV="$( python3 - "$TMP/c1.page" "$TMP/c1.want" <<'PY'
-import sys
+    # 40-row walk, pinned by fortailwidecheck arm 3); the first row always names its sym=. R-DEDUP (2026-11-08): a row of a file the
+    # head shows names none of that file's <d> names nor a <syms> name (it refills from the file's next ranks, or prints p= only), so
+    # its sym= is checked for that, not for equality, and it may be the first row without sym=
+    C1PV="$( python3 - "$TMP/c1.page" "$TMP/c1.want" "$TMP/def.xml" <<'PY'
+import html, re, sys
 t = [ l.rstrip( "\n" ).split( "\t" ) for l in open( sys.argv[ 1 ] ) if l.strip( "\n" ) ]
 w = [ l.rstrip( "\n" ).split( "\t" ) for l in open( sys.argv[ 2 ] ) if l.strip( "\n" ) ]
-ok = len( t ) == len( w ) and len( t ) > 0 and all( a[ 0 ] == b[ 0 ] and ( len( a ) < 2 or not a[ 1 ] or a[ 1 ] == b[ 1 ] ) for a, b in zip( t, w ) ) and len( t[ 0 ] ) > 1 and t[ 0 ][ 1 ]
+s = open( sys.argv[ 3 ] ).read(); shown = {}
+for tag in re.findall( r'<d [^>]*>', s ):
+    a = dict( re.findall( r'(\w+)="([^"]*)"', tag ) )
+    if "p" in a and "n" in a:
+        n = html.unescape( a[ "n" ] ); shown.setdefault( html.unescape( a[ "p" ] ), set() ).update( { n, re.split( r'::|\.', n )[ -1 ] } )
+ys = { html.unescape( n ) for n in re.findall( r'<y [^>]*?\bn="([^"]*)"', s ) }; ys |= { re.split( r'::|\.', n )[ -1 ] for n in ys }
+def rowOk( a, b ):
+    y = a[ 1 ] if len( a ) > 1 else ""
+    if a[ 0 ] in shown:
+        return not ( set( y.split( "," ) ) & ( shown[ a[ 0 ] ] | ys ) )
+    return not y or y == b[ 1 ]
+ok = len( t ) == len( w ) and len( t ) > 0 and all( a[ 0 ] == b[ 0 ] and rowOk( a, b ) for a, b in zip( t, w ) ) and ( ( len( t[ 0 ] ) > 1 and t[ 0 ][ 1 ] ) or t[ 0 ][ 0 ] in shown )
 print( "OK" if ok else "BAD" )
 PY
 )"
@@ -790,14 +803,18 @@ print( len( rows ), sum( 1 for p, y in rows if not y or want.get( p ) != y ) )' 
 else
     no "(C1) the default answer carries no <tail>"
 fi
-# (C4) the JSON twin: the same tail rows (files + sym index-aligned), total=, next present exactly when cut
+# (C4) the JSON twin: the same tail rows (files + sym index-aligned), total=, next present exactly when cut. R-DEDUP: the XML
+#      <syms> block cuts the names it prints from a head file's tail row; JSON carries no block, so its head rows are read without them
 cli_for --json > "$TMP/def.json"
 C4="$( python3 - "$TMP/def.json" "$TMP/def.xml" <<'PY'
 import json, re, sys, html
 t = json.load( open( sys.argv[ 1 ] ) ).get( "tail", {} ); x = open( sys.argv[ 2 ] ).read()
 xa = dict( re.findall( r'(\w+)="([^"]*)"', re.search( r'<tail\b([^>]*)>', x ).group( 1 ) ) )
 xr = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?/>', x ) ]
-ok = list( zip( t.get( "files", [] ), t.get( "sym", [] ) ) ) == xr and str( t.get( "total" ) ) == xa.get( "total" ) \
+heads = { html.unescape( p ) for p in re.findall( r'<d [^>]*?\bp="([^"]*)"', x ) }
+ys = { html.unescape( n ) for n in re.findall( r'<y [^>]*?\bn="([^"]*)"', x ) }; ys |= { re.split( r'::|\.', n )[ -1 ] for n in ys }
+jr = [ ( p, ",".join( n for n in y.split( "," ) if n and n not in ys ) if p in heads else y ) for p, y in zip( t.get( "files", [] ), t.get( "sym", [] ) ) ]
+ok = jr == xr and str( t.get( "total" ) ) == xa.get( "total" ) \
      and ( "next" in t ) == ( xa.get( "capped" ) == "1" ) and ( t.get( "next" ) or "" ) == html.unescape( xa.get( "next", "" ) )
 print( "OK" if ok else "BAD json rows=%d xml rows=%d total %s/%s" % ( len( t.get( "files", [] ) ), len( xr ), t.get( "total" ), xa.get( "total" ) ) )
 PY

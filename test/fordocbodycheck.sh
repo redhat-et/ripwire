@@ -152,7 +152,9 @@ assert d["in_est_tokens"] is False and d["capped"] is True and d["next"].startsw
 assert xs and xs == js, ( "path, line, heading and text of every section", [ x[:3] for x in xs ], [ j[:3] for j in js ] )
 PY
 then ok "(j1) --json: a doc_body key with the XML block's passages, capped and next="; else no "(j1) --json doc_body"; fi
-run "$DFX" "--for=$TASK" --json --token-budget=4000 >"$TMP/j2.json"; j2rc=$?
+# R-DEDUP (2026-11-08): the head files' tail rows no longer repeat their shown headings, so the JSON answer at 4000 fell from
+# est_tokens 4070 to 3632 and the doc-body allowance cleared its floor (2 capped passages served). 3500 holds the block on both.
+run "$DFX" "--for=$TASK" --json --token-budget=3500 >"$TMP/j2.json"; j2rc=$?
 if [ "$j2rc" = 0 ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["doc_body"]; assert d["held"]=="budget" and d["match"]=="lexical" and "passages" not in d and len(d["files"])==3' "$TMP/j2.json" 2>/dev/null
 then ok "(j2) --json under a token budget: held, files named, no passages"; else no "(j2) --json held"; fi
 
