@@ -58,6 +58,7 @@ inline DepDialect dependencyDialect( Lang lang ) noexcept
         case Lang::Lua:                                 return DepDialect::Lua;
         case Lang::Elixir:                              return DepDialect::Elixir;
         case Lang::Clojure:                             // no namespace/import extraction yet
+        case Lang::Smali:                               // no import syntax
         case Lang::Dart:                                // not dependency-capable (dependencyCapable's DART paragraph)
         case Lang::GDScript:                            // not dependency-capable (the same paragraph)
         case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Proto: case Lang::Markdown: case Lang::Unknown:

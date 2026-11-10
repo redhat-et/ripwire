@@ -136,7 +136,7 @@ static_assert( kLangCount <= std::numeric_limits<decltype( langBit( Lang::Cpp ) 
 // bodies must agree on their COMMENTS too before they clone-match, which can only ever miss a clone.)
 // Kotlin is not in this mask: its line comment is `//`, handled unconditionally by the scanner below.
 inline constexpr std::uint32_t kHashLineCommentLangMask = langBit( Lang::Python ) | langBit( Lang::Bash ) | langBit( Lang::Ruby ) | langBit( Lang::Toml ) | langBit( Lang::Yaml )
-                                                       | langBit( Lang::Php ) | langBit( Lang::Elixir ) | langBit( Lang::GDScript );
+                                                       | langBit( Lang::Php ) | langBit( Lang::Elixir ) | langBit( Lang::GDScript ) | langBit( Lang::Smali );
 static_assert( kLangCount <= std::numeric_limits<decltype( kHashLineCommentLangMask )>::digits,
                "Lang outgrew a 32-bit mask — widen kHashLineCommentLangMask" );
 

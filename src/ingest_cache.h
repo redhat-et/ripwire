@@ -371,7 +371,9 @@ constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 303;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 305;          // bump on any grammar/.scm/extraction change
+                                                      // 305 = smali method body span, and an invoke key joined from its class and signature tokens.
+                                                      // 304 = smali language row, above main's proto-index 303 (both sides bumped; the merged value goes above both).
                                                       // 303 = 2026-11-06 (lane proto-index, PLACEHOLDER: the train renumbers; above main's 301 and open #538's 302;
                                                       //   rich file tag 304): .proto files are indexed (Lang::Proto, queries/proto/tags.scm). kCacheVersion stays 49.
                                                       // 301 = 2026-11-04 (#478 gap 2, PLACEHOLDER: the train renumbers; above main's 299/300, rich file tag 302;

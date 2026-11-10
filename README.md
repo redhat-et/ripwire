@@ -136,7 +136,7 @@ claim cannot quietly drift. The row-by-row ledger is
 </details>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — see
+JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Smali · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
 **Latest: 0.6.10** — more complete `--for` answers, warm runs on large repositories that use 35 to 67 % less CPU, and about half the peak memory of an index on macOS. [Release notes](#release-notes) ·
@@ -2986,7 +2986,7 @@ The CLI write verbs and the MCP write verbs use the same safety contract:
 
 ### 12. Supported languages and formats
 
-The tool vendors 27 tree-sitter grammars. A table maps a file extension to a grammar and a query
+The tool vendors 28 tree-sitter grammars. A table maps a file extension to a grammar and a query
 file. One query engine runs over every language. A new language requires a vendored grammar, a query
 file, and one row in the extension table.
 
@@ -2998,10 +2998,11 @@ file, and one row in the extension table.
 | Metal (MSL) | `.metal` | Indexed with the C++ grammar. |
 | CUDA | `.cu`, `.cuh` | `<<<>>>` launch sites are call edges. |
 | Python | `.py` | |
-| TypeScript / JavaScript | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Named imports and default imports resolve. One vendored dependency supplies two of the 27 grammars, `typescript` and `tsx`. `.astro` frontmatter rides this same `Lang` — see its own row below. |
+| TypeScript / JavaScript | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Named imports and default imports resolve. One vendored dependency supplies two of the 28 grammars, `typescript` and `tsx`. `.astro` frontmatter rides this same `Lang` — see its own row below. |
 | Java | `.java` | Qualified `new` calls resolve in a precise tier. |
 | Kotlin | `.kt` | Shares one call graph with Java. A file with string templates past 128 levels is refused and listed by `--skipped`. |
 | Clojure | `.clj`, `.cljs`, `.cljc`, `.bb` | Structural defining forms and direct symbolic list-head calls; quoted/discarded syntax is excluded. Macro expansion and namespace/import resolution are not inferred. |
+| Smali | `.smali` | Class and method names keep the class and the JVM descriptor, including `<init>`. An invoke whose class is not in the tree stays unresolved. Fields, strings, switches, annotations, `.super`, and `.implements` are not symbols. |
 | Ruby | `.rb` | Superclasses, mixins, `autoload`, and constant receivers are read. |
 | PHP | `.php`, `.phtml` | Dynamic dispatch is a stated floor. |
 | Lua | `.lua` | Metatable inheritance produces no inheritance edge. `require` is a function call. A string-literal `require` that names exactly one file in the tree adds a dependency edge. |

@@ -442,6 +442,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::GDScript, .hashComment = true },
     { .lang = Lang::Clojure },
     { .lang = Lang::Proto, .generatedSchema = true, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
+    { .lang = Lang::Smali, .hashComment = true },
 } };
 
 /// The index of the first row that is not at its own Lang index, or the table size when every row is.
@@ -477,7 +478,7 @@ static_assert( []() constexpr
                                                 l == Lang::CSharp || l == Lang::Swift );
         const bool expectedHashComment = ( l == Lang::Python || l == Lang::Bash || l == Lang::Ruby ||
                                            l == Lang::Elixir || l == Lang::Toml || l == Lang::Yaml ||
-                                           l == Lang::GDScript );
+                                           l == Lang::GDScript || l == Lang::Smali );
 
         const auto& f = kLangFacts[ i ];
         if( f.implicitReceiver != expectedImplicit ) return false;

@@ -2168,6 +2168,7 @@ inline constexpr const char* kLangColors[] = {
                  // the Elixir and Kotlin rows above applied to the purples.
     "#63b132",   // Clojure — green, distinct from Bash's lighter yellow-green.
     "#9a8c6a",   // Proto — a muted khaki: a schema, not code, kept apart from the saturated code hues.
+    "#8d6e63",   // Smali — a dry brown, off Java's #b07219 and Toml's #a0703c so bytecode stays separable.
 };
 inline constexpr std::size_t kLangColorCount = sizeof( kLangColors ) / sizeof( kLangColors[0] );
 // NB the bound names the LAST enumerator, so appending one to Lang leaves this assert TRUE and silently

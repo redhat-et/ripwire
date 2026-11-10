@@ -990,6 +990,7 @@ for _g in \
     sliceflowcheck \
     sliceflowsenscheck \
     slotjoincheck \
+    smalicheck \
     spectimingcheck \
     staleackcheck \
     statgatecheck \
