@@ -1036,8 +1036,35 @@ struct BinderFilter
             && !nameInAnswer( tokens, answer, s.name ) && !std::ranges::any_of( picks.byName, is ) && !std::ranges::any_of( picks.byCallee, is );
     }
 };
-// The binders of the head rows' definitions, head by head (head.ids order), each head's binds in served order. A binder already
-// counted for an earlier head is no second row; kForFileSymsBindPerHead rows per head, the rest counted in total.
+// The binders pickBinds has met, one state byte per symbol (indexed membership: a head with thousands of binders stays linear). A
+// binder counts once in total and prints at most one row; one counted under an earlier head whose rows were full may still print
+// under a later head's free slot.
+struct BinderTally
+{
+    enum : std::uint8_t { kUnseen = 0, kCounted = 1, kPrinted = 2 };
+    std::vector<std::uint8_t> state;
+    BindPicks&                out;
+    // Counts `from` (bind ref v) once; prints its row when the head has a free slot. True when a row printed.
+    bool take( NodeId from, std::uint32_t v, bool slotFree )
+    {
+        if( state[from] == kPrinted )
+        {
+            return false;
+        }
+        if( state[from] == kUnseen )
+        {
+            ++out.total;
+        }
+        state[from] = slotFree ? kPrinted : kCounted;
+        if( slotFree )
+        {
+            out.rows.push_back( BindRow { from, v } );
+        }
+        return slotFree;
+    }
+};
+// The binders of the head rows' definitions, head by head (head.ids order), each head's binds in served order. A binder prints one row
+// at most and counts once in total; kForFileSymsBindPerHead rows per head, the rest counted in total.
 inline BindPicks pickBinds( const IngestResult& ing, const ShownFiles& sf, const Head& head, const Picks& picks, std::string_view answer )
 {
     BindPicks out;
@@ -1053,22 +1080,15 @@ inline BindPicks pickBinds( const IngestResult& ing, const ShownFiles& sf, const
     const ValueRefIndex                 vri    = ValueRefIndex::narrowFor( ing, names );
     const std::vector<std::string_view> tokens = answerTokens( answer );
     const BinderFilter                  filter { ing, sf, picks, answer, tokens };
-    std::vector<NodeId>                 seen;   // binders counted (one row per binder, however many heads it binds)
+    BinderTally                         tally { std::vector<std::uint8_t>( ing.symbols.size(), BinderTally::kUnseen ), out };
     for( const NodeId h : head.ids )
     {
         std::size_t perHead = 0;
         for( const std::uint32_t v : headBindsInOrder( ing, vri, h ) )
         {
             const NodeId from = ing.references[v].fromSymbol;
-            if( std::ranges::contains( seen, from ) || !filter.admits( from, h ) )
+            if( filter.admits( from, h ) && tally.take( from, v, perHead < kForFileSymsBindPerHead ) )   // admits() range-checks from
             {
-                continue;
-            }
-            seen.push_back( from );
-            ++out.total;
-            if( perHead < kForFileSymsBindPerHead )
-            {
-                out.rows.push_back( BindRow { from, v } );
                 ++perHead;
             }
         }

@@ -46,7 +46,8 @@
 #        the slot as the callers' <vr> row spells it, from any file. (b1) the factory in another file is the row; (b2) a head nobody
 #        binds, in a block a by="name" row prints, has no by="bind" row and no bind clause in its legend (bytes only when a bind exists); (b3) three binders of one
 #        head: two rows (kForFileSymsBindPerHead) and bind_total="3", the cap stated in the legend; (b4) Python: a dict's value binds
-#        the same way; (b5) the legend right before the block defines by="bind", into= and bind_total=; RIPWIRE_NO_BIND_ROWS=1 drops them
+#        the same way; (b5) the legend right before the block defines by="bind", into= and bind_total=; RIPWIRE_NO_BIND_ROWS=1 drops them; (b6) a binder an
+#        earlier head counted past its cap prints once under a later head's free slot
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -389,6 +390,28 @@ export function runIt(n: number): number {
     return plainHelper(n) + 1;
 }
 TS
+# (b6) CR 4507663235: a binder an earlier head counted past its cap still prints under a later head with a free slot
+mkdir -p "$TMP/bind2/src"
+cat >"$TMP/bind2/src/vis.ts" <<'TS'
+export function alphaPred(x: number): boolean {
+    return x % 3 === 0;
+}
+export function betaPred(x: number): boolean {
+    return x % 5 === 0;
+}
+TS
+cat >"$TMP/bind2/src/table.ts" <<'TS'
+import { alphaPred, betaPred } from "./vis";
+export function wireAlphaOne() {
+    return { check: alphaPred };
+}
+export function wireAlphaTwo() {
+    return { check: alphaPred };
+}
+export function wireBoth() {
+    return { first: alphaPred, second: betaPred };
+}
+TS
 cat >"$TMP/bindpy/handlers.py" <<'PYF'
 def on_resize_event(ev):
     return ev + 1
@@ -426,6 +449,9 @@ if [ "$rc" = 0 ] && [ "$( sed -n 1p <<<"$b3" | tr ';' '\n' | grep -c '@(return).
 run bindpy "--for=on_resize_event" >"$TMP/b4.xml"; rc=$?
 b4="$( bindrows "$TMP/b4.xml" )"
 if [ "$rc" = 0 ] && sed -n 1p <<<"$b4" | grep -q '^make_dispatch@[^@]*resize[^@]*@registry.py$'; then ok "(b4) Python: the function returning {\"resize\": on_resize_event} is a by=\"bind\" row"; else no "(b4) rc=$rc: $( tr '\n' '|' <<<"$b4" ) $( grep -o '<syms.*' "$TMP/b4.xml" | head -c 400 )"; fi
+run bind2 "--for=alphaPred betaPred" >"$TMP/b6.xml"; rc=$?
+b6="$( bindrows "$TMP/b6.xml" )"
+if [ "$rc" = 0 ] && sed -n 1p <<<"$b6" | tr ';' '\n' | grep -q '^wireBoth@(return).second@src/table.ts$' && [ "$( sed -n 1p <<<"$b6" | tr ';' '\n' | grep -c '^wireBoth@' )" = 1 ]; then ok "(b6) a binder alphaPred counted past its cap prints once under betaPred's free slot"; else no "(b6) rc=$rc: $( tr '\n' '|' <<<"$b6" ) $( grep -o '<syms.*' "$TMP/b6.xml" | head -c 400 )"; fi
 RIPWIRE_NO_BIND_ROWS=1 run bind "--for=isNodeShown" >"$TMP/b5.off.xml"
 if [ "$( sed -n 3,4p <<<"$b1" | tr '\n' ' ' )" = "clause defs " ] && ! grep -q 'by="bind"' "$TMP/b5.off.xml"; then ok "(b5) the legend before the block defines by=\"bind\" into= bind_total=; RIPWIRE_NO_BIND_ROWS=1 drops the rows"; else no "(b5) legend: $( sed -n 3,4p <<<"$b1" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/b5.off.xml" | head -c 300 )"; fi
 
