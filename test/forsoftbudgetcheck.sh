@@ -418,6 +418,11 @@ cli_for --token-budget=20000 --legend=full > "$TMP/wide_full.xml"
 cli_for --token-budget=20000 --legend=compact > "$TMP/wide_compact.xml"
 rows "$TMP/wide.xml" "$TMP/wide.rows"
 "$BIN" "$CORPUS" --for="$Q" --signatures-only "$CF" > "$TMP/so_def.xml" 2>/dev/null
+# TAIL-SYM-WIDE (2026-11-10): the widened tail rows carry sym= now, so a reader can no longer find the old 40-row walk's part of a
+# tail as "the rows before the p_only= ones"; the reserve's cap is read off the same answer on the pre-card tail
+# (RIPWIRE_TAIL_SYM_WIDE_ROWS=0: the same rows, the widened ones path-only; test/fortailwidecheck.sh arm 14 pins the equality)
+RIPWIRE_TAIL_SYM_WIDE_ROWS=0 cli_for > "$TMP/def0.xml"
+RIPWIRE_TAIL_SYM_WIDE_ROWS=0 "$BIN" "$CORPUS" --for="$Q" --signatures-only "$CF" > "$TMP/so_def0.xml" 2>/dev/null
 # (ST)'s reader: st.py ANSWER REF T -> "OK ..." | "BAD ... -- detail" (the sweep below and (ST-L) after it)
 cat > "$TMP/st.py" <<'PY'
 import subprocess, sys, re
@@ -458,7 +463,7 @@ maximal = ab + nxt > T - U - 160
 # FIX2 C1 (rule 4): the upper-bound twin of maximality (test/lib/softbudget.py upper_bound): rows past the floor stop where T less
 # the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve
 from softbudget import upper_bound
-upper, udet = upper_bound( ans, open( sys.argv[ 2 ] ).read(), T, k, len( rr ), U )
+upper, udet = upper_bound( ans, open( sys.argv[ 2 ] ).read(), T, k, len( rr ), U, open( sys.argv[ 4 ] ).read() if len( sys.argv ) > 4 else None )
 print( "%s fits=%d maximal=%d upper=%d rows=%d/%d charged=%d next=%d T=%d U=%d%s" % ( "OK" if fits and maximal and upper else "BAD", fits, maximal, upper,
        k, len( rr ), ab, nxt, T, U, "" if upper else " -- " + udet ) )
 PY
@@ -522,7 +527,7 @@ for n in "${SWEEP[@]}"; do
     "$BIN" "$CORPUS" --for="$Q" --signatures-only --token-budget="$n" "$CF" > "$TMP/so_$n.xml" 2>/dev/null
     for mode in def so; do
         if [ "$mode" = def ]; then a="$f"; ref="$TMP/def.xml"; else a="$TMP/so_$n.xml"; ref="$TMP/so_def.xml"; fi
-        st="$( python3 "$TMP/st.py" "$a" "$ref" "$T" )"
+        st="$( python3 "$TMP/st.py" "$a" "$ref" "$T" "${ref%.xml}0.xml" )"
         case "$st" in
             OK*)  ok "(ST) N=$n $mode: $st" ;;
             *)    no "(ST) N=$n $mode: $st — the rows must fit the target and stop only where the next row would cross it, never past T less the sections and the tail reserve" ;;
@@ -542,7 +547,7 @@ for n in 3000 3200 3400 3600 4000; do
     T="$( tbytes "$n" )"
     cli_for --token-budget="$n" --legend=full > "$TMP/stl_$n.xml"
     grep -q '<lego>' "$TMP/stl_$n.xml" && LWHOLE=$(( LWHOLE + 1 ))
-    st="$( python3 "$TMP/st.py" "$TMP/stl_$n.xml" "$TMP/def.xml" "$T" )"
+    st="$( python3 "$TMP/st.py" "$TMP/stl_$n.xml" "$TMP/def.xml" "$T" "$TMP/def0.xml" )"
     case "$st" in
         OK*)  ok "(ST-L) N=$n: $st" ;;
         *)    no "(ST-L) N=$n: $st — a whole <lego>/<compose> was served out of the bytes the <tail> shell and <hops> first row take" ;;
@@ -744,7 +749,8 @@ PY
     # FOR-TAIL-WIDE: a tail page row is the page's row (same path, same order); its sym= is the page's own or absent (path-only past the old
     # 40-row walk, pinned by fortailwidecheck arm 3); the first row always names its sym=. R-DEDUP (2026-11-08): a row of a file the
     # head shows names none of that file's <d> names nor a <syms> name (it refills from the file's next ranks, or prints p= only), so
-    # its sym= is checked for that, not for equality, and it may be the first row without sym=
+    # its sym= is checked for that, not for equality, and it may be the first row without sym=. TAIL-SYM-WIDE (2026-11-10): a row past
+    # page 0 carries the page row's sym= too (fortailwidecheck arm 14), compared each name once like (C1t)
     C1PV="$( python3 - "$TMP/c1.page" "$TMP/c1.want" "$TMP/def.xml" <<'PY'
 import html, re, sys
 t = [ l.rstrip( "\n" ).split( "\t" ) for l in open( sys.argv[ 1 ] ) if l.strip( "\n" ) ]
@@ -759,7 +765,7 @@ def rowOk( a, b ):
     y = a[ 1 ] if len( a ) > 1 else ""
     if a[ 0 ] in shown:
         return not ( set( y.split( "," ) ) & ( shown[ a[ 0 ] ] | ys ) )
-    return not y or y == b[ 1 ]
+    return not y or y == ",".join( dict.fromkeys( b[ 1 ].split( "," ) ) )   # SIZE-3b: a tail sym= names each name once (the C1t rule)
 ok = len( t ) == len( w ) and len( t ) > 0 and all( a[ 0 ] == b[ 0 ] and rowOk( a, b ) for a, b in zip( t, w ) ) and ( ( len( t[ 0 ] ) > 1 and t[ 0 ][ 1 ] ) or t[ 0 ][ 0 ] in shown )
 print( "OK" if ok else "BAD" )
 PY

@@ -69,6 +69,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "pattern.h"               // R2: the pattern surface's compiler + disclosures (the matcher runs inside the ingest walk)
 #include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
 #include "forpage.h"               // forWidenNext — the ONE spelling of the --for widening page
+#include "helpdeadline.h"          // --help-task --deadline-ms: answer in time or abstain while a detached child warms the index (#594)
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
 #include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
@@ -3548,17 +3549,9 @@ inline bool isJsonShapeModifier( std::string_view flag ) noexcept
     return std::ranges::find( kJsonShapeModifiers, flag ) != std::end( kJsonShapeModifiers );
 }
 
-int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
+// The --help-task document for one decided route — the classifier's answer, or the deadline's abstention (#594).
+std::string renderHelpTask( const rw::Config& cfg, const rw::taskroute::TaskRouteResult& route )
 {
-    const std::string stamp = rw::gitstamp::stampAt( root );
-    const bool        git   = !stamp.empty();
-    const bool        dirty = stamp.ends_with( "+dirty" );
-    // What this build can actually parse, read off the flag table itself (cli.h shipsViewFlag) rather than
-    // asserted here: the router composes the directory scope only on a binary that has the row for it.
-    rw::taskroute::RouterCaps caps;
-    caps.dirScope = rw::shipsViewFlag( rw::taskroute::kDirScopeFlag );
-    const rw::taskroute::TaskRouteResult route = rw::taskroute::classifyRoutes( cfg.helpTask, root, ing, git, dirty, caps );
-
     std::vector<char> esc;
     const auto ex = [&]( std::string_view s ) { return std::string( rw::escapeXml( s, esc ) ); };
     // THE LEGEND. Until 2026-09-13 this document had none in the default dialect: every attribute a reader
@@ -3601,7 +3594,21 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
         out += "><run>" + ex( choice.command ) + "</run></choice>";
     }
     out += "</task-route>\n";
-    std::fputs( out.c_str(), stdout );
+    return out;
+}
+
+int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
+{
+    const std::string stamp = rw::gitstamp::stampAt( root );
+    const bool        git   = !stamp.empty();
+    const bool        dirty = stamp.ends_with( "+dirty" );
+    // What this build can actually parse, read off the flag table itself (cli.h shipsViewFlag) rather than
+    // asserted here: the router composes the directory scope only on a binary that has the row for it.
+    rw::taskroute::RouterCaps caps;
+    caps.dirScope = rw::shipsViewFlag( rw::taskroute::kDirScopeFlag );
+    const rw::taskroute::TaskRouteResult route = rw::taskroute::classifyRoutes( cfg.helpTask, root, ing, git, dirty, caps );
+    rw::helpdeadline::noteIndexedFiles( ing.files.size() );   // the warm-done meter row's files= (a no-op off the deadline child)
+    std::fputs( renderHelpTask( cfg, route ).c_str(), stdout );
     return 0;
 }
 
@@ -4148,10 +4155,41 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
     rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
 }
 
+// Does this run's stdout pass through the compact dialect? The one test runWithCompactLegend and the #594 deadline
+// abstention (which prints without running the verb) both ask.
+static bool compactCaptures( const rw::Config& cfg, char** argv ) noexcept
+{
+    return cfg.legend == "compact" && !nativeCompactLegendVerb( cfg ) && !certainlyNonXmlAnswer( cfg, argv );
+}
+
+// #594: the abstention --deadline-ms prints when the index is not ready in time — the classifier's own Abstain shape with
+// the facts it can read without an index (git/dirty from the stamp, the trace shape from the text; resolved_symbols=0,
+// since nothing was resolved), in the dialect the run would have printed it in.
+static std::string deadlineAbstainDoc( const rw::Config& cfg, const std::string& root )
+{
+    const std::string              stamp = rw::gitstamp::stampAt( root );
+    rw::taskroute::TaskRouteResult route;
+    route.facts.git   = !stamp.empty();
+    route.facts.dirty = stamp.ends_with( "+dirty" );
+    route.facts.trace = !rw::taskroute::looksLikeSystemEvent( cfg.helpTask ) && rw::taskroute::looksLikeTrace( rw::taskroute::lowerAscii( cfg.helpTask ) );
+    return renderHelpTask( cfg, route );
+}
+
+static void emitDeadlineAbstain( const rw::Config& cfg, char** argv, std::string& doc )
+{
+    if( compactCaptures( cfg, argv ) )
+    {
+        (void)finishCompactCapture( cfg, doc, 0 );
+        return;
+    }
+    std::fputs( doc.c_str(), stdout );
+    std::fflush( stdout );
+}
+
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 {
     EXPECTS( !cfg.legendDefaulted || cfg.legend == rw::kDefaultLegendPosture, "a defaulted posture is the registered default" );
-    if( cfg.legend != "compact" || nativeCompactLegendVerb( cfg ) || certainlyNonXmlAnswer( cfg, argv ) )
+    if( !compactCaptures( cfg, argv ) )
     {
         return dispatchMain( cfg, argv );
     }
@@ -4164,7 +4202,7 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         std::fputs( "ripwire: compact legend: could not open a capture buffer — emitting the full legend instead\n", stderr );
         return dispatchMain( cfg, argv );
     }
-    const int savedStdout = rw::os::dup( STDOUT_FILENO );
+    const int savedStdout = rw::os::dup_cloexec( STDOUT_FILENO );   // never inherited: a lingering git child would hold stdout open
     if( savedStdout < 0 || rw::os::dup2( rw::os::fileno( capture ), STDOUT_FILENO ) < 0 )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "the full legend is a correct superset of the compact one, and stderr says so: only the cost grows",
@@ -4211,6 +4249,8 @@ static bool installMemoryGuard( const rw::Config& cfg )
     rw::memguard::install( bytes, source );
     return true;
 }
+
+static int finishMainRun( const rw::Config& cfg, char** argv );
 
 int main( int argc, char** argv )
 {
@@ -4271,6 +4311,31 @@ int main( int argc, char** argv )
     // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
+    // #594: --help-task --deadline-ms forks HERE, the last point before any thread exists. The parent returns the answer
+    // (or the on-time abstention); the child, and every run without the flag, falls through to the verb. Only a run that
+    // --help-task ANSWERS is supervised: a verb that dispatches ahead of it (--index-out) runs in this process, so it never
+    // keeps writing in a detached child after a help-task abstention.
+    const char* const answeringVerb = scanReportVerbPrecedence( cfg ).winner;
+    if( cfg.helpTaskDeadlineMs > 0 && cfg.roots.size() == 1 && !isGitUrl( cfg.roots[0] ) && answeringVerb != nullptr
+        && std::string_view( answeringVerb ) == "--help-task" )
+    {
+        const std::string deadlineRoot( cfg.roots[0] );
+        const auto        prepare = [&cfg, &deadlineRoot]() { return deadlineAbstainDoc( cfg, deadlineRoot ); };
+        const auto        emit    = [&cfg, argv]( std::string& doc ) { emitDeadlineAbstain( cfg, argv, doc ); };
+        if( const std::optional<int> answered = rw::helpdeadline::superviseHelpTask( deadlineRoot, cfg.helpTaskDeadlineMs, prepare, emit ) )
+        {
+            return *answered;
+        }
+    }
+    const int rc = finishMainRun( cfg, argv );
+    rw::helpdeadline::finishChild( rc );
+    return rc;
+}
+
+// Everything main() does after the fork seam: the verb, then the memory guard's backstop and peak disclosure.
+static int finishMainRun( const rw::Config& cfg, char** argv )
+{
+    using namespace rw;
     const int rc = runWithCompactLegend( cfg, argv );
     discloseGitWalkCuts( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).

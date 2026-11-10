@@ -596,12 +596,14 @@ for _g in \
     grepseamcheck \
     greptiercheck \
     guardmsgcheck \
+    gvassemblycheck \
     handlerrulecheck \
     hasacheck \
     hazardpatterncheck \
     headbinstagecheck \
     headsnapcachecheck \
     helpbudgetcheck \
+    helptaskdeadlinecheck \
     hermesinstallcheck \
     historyoraclecheck \
     historywalkcheck \
@@ -837,9 +839,11 @@ for _g in \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
+    qdclonepaircheck \
     qddegradecheck \
     qddialscheck \
     qdrefpaircheck \
+    qdtestdeadcheck \
     qextractionkeycheck \
     qoriginoraclecheck \
     qrevtokencheck \

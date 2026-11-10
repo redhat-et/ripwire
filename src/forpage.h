@@ -53,7 +53,10 @@
 #include "testmap.h"     // splitChangedFilesOfSymbols — the ONE "distinct files of a symbol set" walk (--affected's)
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
+#include <cstdlib>
+#include <system_error>
 #include <numeric>
 #include <ranges>
 #include <span>
@@ -781,6 +784,7 @@ struct FileTail
     // order. `oldRows` counts that prefix; oldPageSeen/oldPageSkip are what that walk's own counters read, so fileTailOldWalk
     // rebuilds the 40-row walk's tail byte for byte (the soft-target reserve charges THAT, never the widened rows).
     std::size_t               oldRows = 0;
+    std::size_t               wideSymRows = 0;   // TAIL-SYM-WIDE: the widened rows right after the prefix that carry sym= too
     std::size_t               oldPageSeen = 0;
     std::size_t               oldPageSkip = SIZE_MAX;
     // SIZE-2 (size-trim): widened rows (past the old cut, p= only) of a NON-code file class the code question did not ask for are
@@ -1153,7 +1157,27 @@ struct TailPageWalkInputs
     const std::vector<char>& inHead;   // the shown head's files (computeFileTail): skipped past the old cut
     const TailHeadFileSyms& headSyms; // R-DEDUP: a head file's sym= without the names its shown sigs rows print
     const std::array<bool, 5>* foldKept = nullptr;   // SIZE-2: a code question folds widened non-code rows except these classes
+    std::size_t wideSymRows = kForFileTailSymWideRows; // TAIL-SYM-WIDE: the first this many widened rows listed carry sym= too
 };
+// TAIL-SYM-WIDE: the widened rows that carry sym= — kForFileTailSymWideRows, or RIPWIRE_TAIL_SYM_WIDE_ROWS=N (0..that constant;
+// the measurement / ablation arm of test/fortailwidecheck.sh: 0 is the pre-card tail, 40 is arm A). Anything else reads the default.
+inline std::size_t tailSymWideRows()
+{
+    const char* v = std::getenv( "RIPWIRE_TAIL_SYM_WIDE_ROWS" );
+    if( v == nullptr )
+    {
+        return kForFileTailSymWideRows;
+    }
+    const std::string_view text( v );
+    std::size_t n = 0;
+    const auto [end, ec] = std::from_chars( text.data(), text.data() + text.size(), n );
+    if( ec != std::errc() || end != text.data() + text.size() || text.empty() || n > kForFileTailSymWideRows )
+    {
+        rw::emitTo( stderr, "ripwire: RIPWIRE_TAIL_SYM_WIDE_ROWS is set but not a count 0-{} — default tail\n", kForFileTailSymWideRows );
+        return kForFileTailSymWideRows;
+    }
+    return n;
+}
 // SIZE-2: a widened row (p= only) of a non-code class the task did not name is counted, not listed, and next= pages from the
 // first one (pageSkip). True when the row folded.
 inline bool foldTailRow( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, const ForFileRow& row, std::size_t r,
@@ -1201,7 +1225,8 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         else if( ( bits & kTailFateListed ) != 0 && !foldTailRow( out, listed, in, row, r, fate ) )
         {
             listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
-                         symRow ? tailPageRowSym( ing, row, in.headSyms ) : std::string(), r + 1, symRow ? nullptr : &wide );
+                         symRow || wide.paths.size() < in.wideSymRows ? tailPageRowSym( ing, row, in.headSyms ) : std::string(), r + 1,
+                         symRow ? nullptr : &wide );   // TAIL-SYM-WIDE: a widened row names its file's top symbols too, up to wideSymRows
         }
     }
 }
@@ -1266,9 +1291,12 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     const TailHeadFileSyms headSyms = tailHeadFileSyms( ing, rank, headIds ); // R-DEDUP: the head files' own sym=
     fileTailRankRows( out, listed, ing, rank, page, inHead, rootArg, docs );
     const std::array<bool, 5> foldKept = tailFoldKept( task );
-    fileTailPageRows( out, listed, TailPageWalkInputs { ing, page, rootArg, inHead, headSyms, docs != nullptr && tailFoldOn() ? &foldKept : nullptr }, wideRows, docs );
+    const std::size_t wideSym = tailSymWideRows();
+    fileTailPageRows( out, listed, TailPageWalkInputs { ing, page, rootArg, inHead, headSyms, docs != nullptr && tailFoldOn() ? &foldKept : nullptr, wideSym },
+                      wideRows, docs );
     appendFileTailRows( out, docRows );
-    out.oldRows = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
+    out.oldRows     = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
+    out.wideSymRows = std::min( wideRows.paths.size(), wideSym );
     appendFileTailRows( out, wideRows );
     ENSURES( out.paths.size() == out.syms.size() && out.paths.size() == out.pageNext.size() && out.paths.size() <= out.total,
              "computeFileTail: the rows, their sym= and their continuations disagree, or more rows than positive-score files" );
@@ -1292,11 +1320,12 @@ inline FileTail fileTailOldWalk( const FileTail& t )
     return old;
 }
 
-// FOR-TAIL-WIDE (review F3): the shown rows that print p= only because they sit past the old walk's cut (a suffix). The tail
-// discloses the count (`p_only=` / "p_only"), present only when it is above zero.
+// FOR-TAIL-WIDE (review F3): the shown rows that print p= only because they sit past the old walk's cut and past the widened rows
+// that carry sym= (TAIL-SYM-WIDE; a suffix). The tail discloses the count (`p_only=` / "p_only"), present only when it is above zero.
 inline std::size_t fileTailPathOnlyShown( const FileTail& t, std::size_t shown ) noexcept
 {
-    return shown > t.oldRows ? shown - t.oldRows : 0;
+    const std::size_t named = t.oldRows + t.wideSymRows;
+    return shown > named ? shown - named : 0;
 }
 
 // The shown sigs rows a soft target's trailing sections are funded from (round C, reserve first): the shown ids without the
