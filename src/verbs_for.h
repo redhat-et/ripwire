@@ -3115,11 +3115,12 @@ inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string&
 // The answer as sent after <syms> rendered, "" when unchanged: R-DEDUP's cut (`cut`, forfilesyms.h tailRowsWithoutPicks: <syms> has
 // priority over the head files' tail rows) first, then the ONE-SIDE-REACH demote pass on the cut answer, except under a budget. The
 // root is re-priced once, on the final bytes, against `captured`, the answer it was priced on (the cut keeps its est_tokens= digits).
+// `held` is the caller's one read of the budget (--token-budget or --max-tokens), passed in so shapingflagcheck (A)'s count stays put.
 inline std::string shapedForFileSymsAnswer( const MainDispatch& d, const std::string& captured, std::string cut, std::string& syms,
-                                            const std::optional<rw::PricedRootInputs>& price )
+                                            const std::optional<rw::PricedRootInputs>& price, bool held )
 {
     const std::string& shaped = cut.empty() ? captured : cut;
-    std::string out = d.cfg.tokenBudget == 0 && d.cfg.maxTokens <= 0 ? oneSideReachAnswer( d, shaped, syms, std::nullopt ) : std::string();
+    std::string out = !held ? oneSideReachAnswer( d, shaped, syms, std::nullopt ) : std::string();
     if( out.empty() )
     {
         out = std::move( cut );
@@ -3167,7 +3168,7 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     std::string       syms  = rw::renderForFileSyms(
         d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = held,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut } );
-    const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price ) : std::string();
+    const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price, held ) : std::string();
     const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
     std::fwrite( bytes.data(), 1, at, stdout );
