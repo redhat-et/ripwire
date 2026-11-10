@@ -2517,6 +2517,11 @@ int pthread_main_np()
     return ::GetCurrentThreadId() == firstCaller ? 1 : 0;
 }
 
+// liveThreadCount: 0, "this platform cannot say". Its one caller guards fork(), and fork_session is ENOSYS here, so
+// there is no fork for the count to protect. A real count (CreateToolhelp32Snapshot) would not answer the question
+// either: the loader starts thread-pool workers before main, so a single-threaded program reads more than 1.
+std::size_t liveThreadCount() { return 0; }
+
 int pthread_getname_np( pthread_t, char* name, std::size_t nameCount )
 {
     if( nameCount > 0 )

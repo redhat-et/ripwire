@@ -497,8 +497,9 @@ inline int pthread_main_np()
     return std::this_thread::get_id() == firstCaller ? 1 : 0;
 }
 #endif
-// liveThreadCount: the threads alive in this process right now; 0 = this platform cannot say. For debug checks only
-// (helpdeadline.h's fork seam: only the forking thread survives into the child, so the process must be single-threaded).
+// liveThreadCount: the threads alive in this process right now; 0 = this platform cannot say (Windows always says 0:
+// see its body). For debug checks only (helpdeadline.h's fork seam: only the forking thread survives into the child,
+// so the process must be single-threaded).
 #if defined( __APPLE__ )
 inline std::size_t liveThreadCount()
 {
@@ -1215,6 +1216,7 @@ pid_t      fork_session();   // no fork on Windows: -1 with ENOSYS (the POSIX ha
 pthread_t     pthread_self();
 std::uint64_t gettid();
 int           pthread_main_np();
+std::size_t   liveThreadCount();   // always 0: no fork on Windows, so nothing to check (the body's comment)
 int           pthread_getname_np( pthread_t thread, char* name, std::size_t nameCount );
 int           pthread_attr_init( pthread_attr_t* attr );
 int           pthread_attr_setstacksize( pthread_attr_t* attr, std::size_t stackBytes );
