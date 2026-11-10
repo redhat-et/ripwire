@@ -1150,7 +1150,15 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 //     empty shell `<tail total="NNNNN" shown="0" capped="1"></tail>`.
 inline constexpr std::size_t kForFileTailShownCap     = 24;   // the rank rows (deep-tail d2): files outside the shown head
 inline constexpr std::size_t kForFileTailPageRows     = 40;   // FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault)
-inline constexpr std::size_t kForFileTailPageWalk     = 160;  // FOR-TAIL-WIDE: page rows the tail walks (4 pages); rows past kForFileTailPageRows print p= only
+inline constexpr std::size_t kForFileTailPageWalk     = 160;  // FOR-TAIL-WIDE: page rows the tail walks (4 pages)
+// TAIL-SYM-WIDE (2026-11-10, the parked FTW-SYM follow-on of #536): the widened rows (past page 0, listed after every page 0 row)
+// that carry sym= too, in their listed order — the same pick as a page 0 row (forpage.h tailPageRowSym: the file's top
+// kForPageSymNameCount symbols by lens rank, names the ranker already scored for that file). 120 = every widened row a plain walk
+// lists (arm B of s0-unnamed-concept-1110 M1; arm A was 40); a code-first walk may list more (its doc rows ride beside 160 code
+// rows), and those print p= only, counted by p_only=. The legend clauses below spell this number: move them with it.
+inline constexpr std::size_t kForFileTailSymWideRows  = 120;  // TAIL-SYM-WIDE: widened rows (past page 0) that carry sym=; the rest p= only
+static_assert( kForFileTailSymWideRows <= kForFileTailPageWalk && kForFileTailSymWideRows == 120,
+               "kForFileTailWideLegend, its compact twin and kForFileTailPathOnlyWhy spell 120: move them with the constant" );
 inline constexpr std::size_t kForFileTailShellReserve = 48;
 inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h)
 
@@ -1183,7 +1191,7 @@ inline constexpr std::string_view kForFileTailCodeFirstLegend =
 inline constexpr std::string_view kForFileTailWideLegend =
     "; tail walk: the page rows go on to the file page's first 160 rows (a code question: its first 160 code rows, plus the "
     "doc rows within its first 160 rows); a row past page 0 (a code question: past its first 40 code rows, a doc past row 40) "
-    "prints p= only, after every row with sym=, and skips files the head shows; p_only= counts them";
+    "comes after every page 0 row, skips files the head shows and carries sym= too; past 120 such rows p= only, p_only= counts them";
 // SIZE-2 (size-trim): present-only beside a tail that folded widened rows (forpage.h FileTail::folded); after the walk clause.
 inline constexpr std::string_view kForFileTailFoldedLegend =
     "; tail folded=class=N: on a code question, N rows past page 0 of that file class (doc, config, script, testdata, other) "
@@ -1196,7 +1204,7 @@ inline constexpr std::string_view kForSameAsLegend =
     "; d same_as=N: this row's doc and signature text equal the earlier row n=N's, so they are not repeated (every other attribute is its own)";
 inline constexpr std::string_view kForCompactSameAsLegend = "; d same_as=N: doc+sig text as row n=N (not repeated)";
 // The JSON twin of that clause's p_only= (the JSON answer carries no legend): "p_only_why" beside "p_only" (forpage.h)
-inline constexpr std::string_view kForFileTailPathOnlyWhy = "rows past page 0 of the file page print the path only (sym empty)";
+inline constexpr std::string_view kForFileTailPathOnlyWhy = "rows past the first 120 rows after page 0 of the file page print the path only (sym empty)";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,

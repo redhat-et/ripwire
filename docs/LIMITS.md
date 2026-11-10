@@ -35,10 +35,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 407 | 139 | 272 | **135** |
+| 408 | 139 | 273 | **135** |
 
 Plus 9 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 407 + 9 is the 416 constants this generator parses out of `src/`.
+are not counted as caps, and 408 + 9 is the 417 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 407 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 265 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 408 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 266 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -379,6 +379,7 @@ Discloses: `capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kExemplarBodyScanMaxLoc` | `4000` | — | a registry or instance candidate longer than this is not read (runaway guard) |
+| `kExemplarContractRows` | `8` | — | interfaces printed; n= counts all |
 | `kExemplarMemberRows` | `4` | — | <m> rows printed (typical first); the rest are counted in n= |
 | `kExemplarPhraseWordsMax` | `4` | — | words of X read after the trigger |
 | `kExemplarTouchLineMax` | `120` | — | bytes of the mentioning line printed (cut="1" when longer) |
@@ -1184,6 +1185,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kClonePairExpandCap` | `512` | — | — |
 | `kMaxCacheBlobAgeDays` | `30.0` | BOUNDARY | — |
 | `kMaxCacheBlobCount` | `4096` | BOUNDARY | bound every future hygiene scan |
 | `kMaxEditLockAgeDays` | `1.0` | BOUNDARY | — |
@@ -1323,6 +1325,7 @@ Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importer
 | `kForFileTailPageRows` | `40` | — | FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault) |
 | `kForFileTailShownCap` | `24` | — | the rank rows (deep-tail d2): files outside the shown head |
 | `kForFileTailSphinxTxtRows` | `24` | — | code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h) |
+| `kForFileTailSymWideRows` | `120` | — | TAIL-SYM-WIDE: widened rows (past page 0) that carry sym=; the rest p= only |
 | `kForLensDefaultTopN` | `40` | — | — |
 | `kForPayloadBudgetBytes` | `7500` | — | — |
 | `kForTailSigBytes` | `160` | — | — |
