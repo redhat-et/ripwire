@@ -49,6 +49,7 @@
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
+#include "rowfeatures.h"    // ROW-FEATURE-DUMP: RIPWIRE_ROW_FEATURES=<path>, the CLI --for twin (dev-only)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2539,6 +2540,11 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     {
         lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
     }
+    rw::rowfeat::stage( rw::rowfeat::Stage::Lexical, lensRank );   // ROW-FEATURE-DUMP: the CLI twin's snapshots (inert unless set)
+    rw::rowfeat::tier( tierMul );
+    rw::rowfeat::noteRoute( noRoute ? std::string_view() : ( rc.which == LexMode::NameExact ? std::string_view( "name-exact" ) : std::string_view( "subtoken+body" ) ),
+                            rc.anchorDefs );
+    rw::rowfeat::stage( rw::rowfeat::Stage::Anchor, lensRank );
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
     // Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1
@@ -2580,6 +2586,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             mentionNote += fileSubjectNote( moved );
         }
     }
+    rw::rowfeat::stage( rw::rowfeat::Stage::Mention, lensRank );
     if( !noRoute )   // PATH-FROM-UPSTREAM: the CLI twin's rule (forgraphverb.h)
     {
         if( const std::uint32_t moved = applyPathFromUpstreamCut( ing, ix.g, task, lensRank ); moved > 0 )
@@ -2597,6 +2604,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // has no per-call flags — RIPWIRE_COCHANGE=1 (the shared opt-in env) enables it here.
     // Inert without usable history (depth-1 / non-git ⇒ support threshold unreachable ⇒ byte-identical output).
     std::string boostNote;
+    rw::rowfeat::stage( rw::rowfeat::Stage::PathCut, lensRank );
+    rw::rowfeat::stage( rw::rowfeat::Stage::Experimental, lensRank );
     if( !noRoute && std::getenv( "RIPWIRE_COCHANGE" ) && hasEnclosingGitRepo( root ) )
     {
         CommitWindowCensus coCensus;   // the kCoBoostMaxFilesPerCommit census (gitmine.h)
@@ -2621,6 +2630,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // that names one of the task's top-resolved symbols in a `backtick` (g.mentions, the same edges the
     // `mentions` MCP verb reads) is lifted into the bundle, strictly below that symbol's own score.
     // RIPWIRE_NO_DOC_MENTION=1 disables it here too (the shared ablation env, same as RIPWIRE_NO_MENTION).
+    rw::rowfeat::stage( rw::rowfeat::Stage::CoChange, lensRank );
     std::string   docMentionNote;
     std::uint32_t docMentions = 0;   // §L10b (wave-2 merge): the CLI twin's lr.docMentionCount — doc_mentions= on the root
     if( !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
@@ -2637,6 +2647,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
         absorbCapDisclosure( docMentionInfo.caps, docMentionNote, capAttrs );
     }
+    rw::rowfeat::stage( rw::rowfeat::Stage::DocMention, lensRank );
 
     // LB-A (r10 §5) — THE RELEVANCE FLOOR, the CLI --for's own call (serialize.h relevanceFloorCut): one
     // bundle-composition contract may not have two behaviours. lensRank is final at this point.
@@ -3041,6 +3052,17 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     }
     insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) } );
     return out;
+}
+
+// ROW-FEATURE-DUMP (rowfeatures.h, dev-only): when RIPWIRE_ROW_FEATURES is set, one TSV line per printed answer row of the `for`
+// verb's finished answer, read from its bytes (the CLI --for twin: verbs_for.h runForLensRowFeatures). The answer is not touched.
+inline void forTaskRowFeatures( const std::string& root, const std::string& task, const std::optional<std::string>& answer )
+{
+    if( answer && rw::rowfeat::on() )
+    {
+        const McpIndex& ix = getIndex( root );
+        rw::rowfeat::emitRows( *answer, task, ix.ing, ix.g );
+    }
 }
 
 // `lego` verb: the TARGETED interface→impls "Lego" view for ONE named interface/base — its signature,
@@ -6238,6 +6260,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
             return bad( missingField( "for" ) );
         }
         std::optional<std::string> forAnswer = forTaskText( root, task, redactPtr, 0, false, pageParse.page );   // L-W: the batch arm pages the file page too
+        forTaskRowFeatures( root, task, forAnswer );   // ROW-FEATURE-DUMP (inert unless set)
         if( !forAnswer )
         {
             return bad( "internal error: the for answer buffer lost bytes — no answer served" );

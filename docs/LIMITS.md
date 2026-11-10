@@ -1269,6 +1269,14 @@ Discloses: **none**
 | `kMaxDepth` | `64` | — | — |
 | `kMaxRustUseTreeDepth` | `32` | — | — |
 
+### `src/rowfeatures.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxHops` | `6` | — | — |
+
 ### `src/search.h`
 
 Discloses: `hits_capped`

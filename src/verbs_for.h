@@ -28,6 +28,7 @@
 #include "foraliashop.h"    // XF-ALIAS-HOP: an alias row the task names, followed to what it names
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
+#include "rowfeatures.h"    // ROW-FEATURE-DUMP: RIPWIRE_ROW_FEATURES=<path>, one TSV line per printed answer row (dev-only)
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -212,6 +213,10 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
     }
 
+    rw::rowfeat::stage( rw::rowfeat::Stage::Lexical, lensRank );   // ROW-FEATURE-DUMP: score snapshots per lift stage (inert unless set)
+    rw::rowfeat::tier( tierMul );
+    rw::rowfeat::noteRoute( out.routeTag, out.anchorDefs );
+
     // input blow-up guard disclosure (lexical.h kMaxUniqueQueryTerms/dedupeQueryTerms): a task string with
     // more distinct terms than the cap allows still scores — on the terms it kept — rather than refusing, so
     // the cut rides the SAME CapDisclosure channel every other indexing cap on this bundle uses (mention.h),
@@ -236,6 +241,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank = anchoredLexicalRank( g, lensRank );
     }
+    rw::rowfeat::stage( rw::rowfeat::Stage::Anchor, lensRank );
 
     // B8 query-mention anchoring: lift a file / dotted module / Scope.symbol the task literally NAMES near the
     // top (inert — byte-identical — when the text names nothing indexed). Routed path only.
@@ -260,6 +266,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             out.mentionNote += fileSubjectNote( moved );
         }
     }
+    rw::rowfeat::stage( rw::rowfeat::Stage::Mention, lensRank );
     // PATH-FROM-UPSTREAM (forgraphverb.h): `path from A to B` — a caller of A never outranks the path's own rows. Routed path only.
     if( !cfg.noRoute )
     {
@@ -269,6 +276,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
     }
 
+    rw::rowfeat::stage( rw::rowfeat::Stage::PathCut, lensRank );
     // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the
     // strongest query-relevant same-directory siblings of the top-ranked files into the slot ladder. INERT
     // (byte-identical) unless RIPWIRE_SIBLIFT="<seed>,<sib>" parses in range. Routed path only.
@@ -306,6 +314,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
     }
 
+    rw::rowfeat::stage( rw::rowfeat::Stage::Experimental, lensRank );
     // B3 co-change prior boost (OPT-IN, EXPERIMENTAL): files that historically change WITH the top seeds get a
     // bounded secondary boost. Inert (byte-identical) without usable git history. Routed path only.
     if( !cfg.noRoute && ( cfg.cochangeBoost || std::getenv( "RIPWIRE_COCHANGE" ) ) )
@@ -349,6 +358,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         absorbCapDisclosure( boostInfo.caps, out.capNote, out.capAttrs, out.capJson );
     }
 
+    rw::rowfeat::stage( rw::rowfeat::Stage::CoChange, lensRank );
     // R5 — doc-mention surfacing (default-on, route-agnostic; see mention.h applyDocMentionBoost):
     // reuses g.mentions (the same doc<->code backtick edges `--mentions=SYM` already exposes) to lift docs
     // that discuss the query's top-resolved symbols, strictly below those symbols' own scores. Runs LAST
@@ -367,6 +377,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
         absorbCapDisclosure( docMentionInfo.caps, out.capNote, out.capAttrs, out.capJson );
     }
+    rw::rowfeat::stage( rw::rowfeat::Stage::DocMention, lensRank );
     return out;
 }
 
@@ -2882,11 +2893,10 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
 }
 
-// Runs `run` with stdout pointed at a temporary file and returns what it printed, compacted by the same applyCompactDialect +
-// compactLegendHint main.cpp's whole-stdout layer gives the bare call (that layer skips --for). nullopt: no capture could be set up,
-// and `run` did NOT run (the caller decides what to print instead).
+// Runs `run` with stdout pointed at a temporary file and returns exactly what it printed. nullopt: no capture could be set up,
+// and `run` did NOT run (the caller decides what to do instead). Shared by the graph-verb block and ROW-FEATURE-DUMP.
 template <class Run>
-std::optional<std::string> captureGraphVerbDoc( const rw::Config& sub, Run&& run )
+std::optional<std::string> captureStdout( Run&& run )
 {
     std::fflush( stdout );   // everything before the block is out before stdout is pointed at the capture
     std::FILE* const capture = std::tmpfile();
@@ -2909,9 +2919,19 @@ std::optional<std::string> captureGraphVerbDoc( const rw::Config& sub, Run&& run
         doc.append( buf, got );
     }
     std::fclose( capture );
-    if( sub.legend == "compact" )
+    return doc;
+}
+
+// Runs `run` under captureStdout and returns what it printed, compacted by the same applyCompactDialect +
+// compactLegendHint main.cpp's whole-stdout layer gives the bare call (that layer skips --for). nullopt: no capture could be set up,
+// and `run` did NOT run (the caller decides what to print instead).
+template <class Run>
+std::optional<std::string> captureGraphVerbDoc( const rw::Config& sub, Run&& run )
+{
+    std::optional<std::string> doc = captureStdout( std::forward<Run>( run ) );
+    if( doc && sub.legend == "compact" )
     {
-        (void)rw::applyCompactDialect( doc, ::compactLegendHint( sub, doc ) );   // not shaped → the bytes as emitted (the DEFAULT posture's rule)
+        (void)rw::applyCompactDialect( *doc, ::compactLegendHint( sub, *doc ) );   // not shaped → the bytes as emitted (the DEFAULT posture's rule)
     }
     return doc;
 }
@@ -5139,6 +5159,25 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
 
 // The --for lens: the ranking runs once, the render once (forbudget-soft: no payment-mode re-renders — the lens has no hard
 // ceiling left to land a charged continuation under).
+// ROW-FEATURE-DUMP (rowfeatures.h, dev-only): run the pass with stdout captured to a temporary file, write the captured bytes
+// to the real stdout unchanged, then hand the same bytes to the row reader. A capture that cannot be set up runs the pass
+// plainly and says so on stderr (no rows written), so the switch never costs the answer.
+template< class Pass >
+std::optional<int> runForLensRowFeatures( const MainDispatch& d, Pass&& pass )
+{
+    std::optional<int>               rc;
+    const std::optional<std::string> answer = captureStdout( [ & ] { rc = pass(); } );
+    if( !answer )
+    {
+        std::fputs( "ripwire: RIPWIRE_ROW_FEATURES: cannot capture the answer; no rows written\n", stderr );
+        return pass();
+    }
+    std::fwrite( answer->data(), 1, answer->size(), stdout );
+    std::fflush( stdout );
+    rw::rowfeat::emitRows( *answer, d.cfg.forTask, d.ing, d.g );
+    return rc;
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
@@ -5151,7 +5190,11 @@ std::optional<int> runForLens( const MainDispatch& d )
     // the at= stamp (gitstamp.h): one read per run — every payment-mode render below shares it, like the ranking
     const bool        forSingleRoot = d.ing.realPaths.empty() && cfg.roots.size() == 1;
     const std::string forAtStamp    = forSingleRoot ? rw::gitstamp::stampAt( d.root ) : std::string();
-    return runForLensPass( d, std::move( lr ), ForLensPassMode{ .forAtStamp = forAtStamp } );
+    if( !rw::rowfeat::on() )
+    {
+        return runForLensPass( d, std::move( lr ), ForLensPassMode{ .forAtStamp = forAtStamp } );
+    }
+    return runForLensRowFeatures( d, [ & ] { return runForLensPass( d, std::move( lr ), ForLensPassMode{ .forAtStamp = forAtStamp } ); } );
 }
 
 std::optional<int> runTargetedViews( const MainDispatch& d )

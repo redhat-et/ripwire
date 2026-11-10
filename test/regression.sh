@@ -914,6 +914,7 @@ for _g in \
     routehookcheck \
     routeoncecheck \
     routingreportcheck \
+    rowfeaturescheck \
     rubyargcheck \
     rubyattrscheck \
     rubybarecallcheck \
