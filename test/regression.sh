@@ -456,6 +456,7 @@ for _g in \
     droppedpositivecheck \
     duprowcheck \
     dynmapsimdcheck \
+    edgemarkcheck \
     editcheckanswercheck \
     editcheckcheck \
     editcheckdeclcheck \

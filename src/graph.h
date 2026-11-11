@@ -641,7 +641,7 @@ inline const char* provLabel( std::uint8_t prov ) noexcept
     return "";
 }
 // lane L6: the attribute a provenance value is spelled under — via="impl" (how the receiver reached the target, like FE-B's
-// via="name"), prov= for every other value. kProvImpl is the value buildGraph writes for an implEdges edge.
+// via="name"), prov= for every other value. kProvImpl is the value buildGraph writes for an ImplOnly-marked edge.
 inline constexpr std::uint8_t kProvImpl = 6u;
 inline const char* provAttrName( std::uint8_t prov ) noexcept
 {
@@ -9310,31 +9310,9 @@ inline bool isMarkdownLinkRef( const Reference& r ) noexcept
 
 // Link-ness is where the reference came from: lang Markdown and not a doc mention. isMarkdownLinkRef also requires a
 // path, which an in-file anchor and a wikilink do not have. A markdown doc mention is neither.
-inline void noteMarkdownLinkSite( HashSet<std::uint64_t>& linkEdges, std::uint64_t ekey, const Reference& r )
+inline bool isMarkdownLinkSite( const Reference& r ) noexcept
 {
-    if( langFacts( r.lang ).linkSections && !r.isDocLink )
-    {
-        linkEdges.insert( ekey );
-    }
-}
-
-template <class Edge>
-inline bool graphHasMarkdownLink( const std::vector<Edge>& edges, const HashSet<std::uint64_t>& linkEdges )
-{
-    for( const Edge& e : edges )
-    {
-        const std::uint64_t key = hashutil::packPair( e.from, e.to );
-        if( linkEdges.find( key ) != linkEdges.end() )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-inline std::uint8_t markdownLinkBit( const HashSet<std::uint64_t>& linkEdges, std::uint64_t key ) noexcept
-{
-    return linkEdges.find( key ) != linkEdges.end() ? 1u : 0u;
+    return langFacts( r.lang ).linkSections && !r.isDocLink;
 }
 
 // The file node is the Section extractMarkdown builds with bodyByte 0 over [0, size). assignSymbols then
@@ -9991,7 +9969,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // accumulate per (from,to): summed per-ref confidence + an integer ref count (key = from<<32|to).
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
-    struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; };
+    struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint8_t marks = 0; };   // marks: resolve.h EdgeMark (EDGE-FLAGS)
     HashMap<std::uint64_t, EdgeAcc> acc;
     acc.reserve( N );   // past the 4-bucket / 0.8-load rehash cascade. G1a: one edge per SYMBOL, not per reference — the table ends at 1.5-8 edges
                         // a symbol, and reserve( references ) zero-filled 16-32 MiB of buckets on envoy and vscode that no edge reached
@@ -10017,37 +9995,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     };
     std::vector<NodeId>      bindingTier;   // A4-R5 reused FFI-alias fallback candidate buffer
     std::string              bindKey;       // A4-R5 reused "<fileId>#var" key buffer for the ctypes-handle gate
-    HashSet<std::uint64_t>        bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
-                                                 // consumed below to stamp prov (outProv=2) + the amb honesty mark
-    HashSet<std::uint64_t>        importEdges;    // (from<<32|to) keys of edges an ES named-import binding pinned,
-                                                 // consumed below to stamp prov (outProv=4). Same argument as
-                                                 // bindingEdges: an ABSENT prov= is defined by the map legend as
-                                                 // "uniquely-resolved-name-based", and these edges are neither —
-                                                 // the target was read out of a module's export table. Leaving them
-                                                 // unmarked would let a NEW resolution mechanism inherit the
-                                                 // confidence label of the old one, silently. Not reserved, for the
-                                                 // reason spelled out for splitEdges below.
-    HashSet<std::uint64_t>        finalSegmentEdges;   // (from<<32|to) keys of edges a receiver's QUALIFIED written type chose by
-                                                      // its last name alone (Rule 2, or CHA-lite pruning by that type) —
-                                                      // consumed below to stamp prov (outProv=5). The qualifier was never
-                                                      // checked against the class's namespace, so such an edge can be a
-                                                      // precise-looking WRONG one (test/narrowcheck.sh arm 24); an absent
-                                                      // prov= would call it uniquely resolved. Not reserved, like splitEdges.
-    HashSet<std::uint64_t>        splitEdges;     // C1: (from<<32|to) keys of edges that are an ARM of a k-way split the
-                                                 // resolver could not choose between — the per-EDGE half of the per-SYMBOL
-                                                 // ambOut counter, consumed below to stamp prov (outProv=3). ambOut says K
-                                                 // of this symbol's CALLS were guesses; this says WHICH EDGES they were,
-                                                 // which the aggregate cannot express and a consumer deciding what to
-                                                 // re-read from source is exactly asking. Filled from the SAME predicate
-                                                 // that increments ambOut, so the two can never disagree.
-                                                 // NOT reserved, deliberately, and the same call bindingEdges above makes:
-                                                 // there is no cheap prior for the split count at declaration time (it is
-                                                 // an OUTPUT of the resolve loop), the map is find-only and never iterated
-                                                 // so its bucket layout cannot reach output, and it is filled inside a loop
-                                                 // whose per-reference tier work dominates the growth cascade by orders of
-                                                 // magnitude. A guessed reserve would be a made-up number in a hot struct.
-    HashSet<std::uint64_t>       linkEdges;      // (from<<32|to) a markdown link bound. The section that holds the link is the edge's from.
-    HashSet<std::uint64_t>        anchorMissEdges; // (from<<32|to) a link whose slug named no heading, so the target is the file node.
+    bool                     anyImplSite = false;   // lane L6: some site committed an edge by one-implementor dispatch — outProv is
+                                                    // allocated then even when a site of another kind later took every such edge
     std::vector<NodeId>      rule3Out;   // reused Rule-3 output buffer (candidates from the single included file)
     Rule3FileMemo            rule3Memo;  // Rule 3's answer per (caller file, byName entry): one walk per name per file, not per call
     Rule3FileMemo            rule3MemoMember;   // the same for a member call, which reads the includer-directory closure (EXTQUAL-FIX1)
@@ -10326,8 +10275,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     };
-    HashSet<std::uint64_t>        nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
-    HashSet<std::uint64_t>        provenEdges;     // … and of an edge some call bound WITH evidence: a proven site wins the merged row
     std::vector<NodeId>      provedScratch;   // reused: the name-ladder candidates the language's own lookup proves
     std::vector<NodeId>      memberRule3;     // reused: Rule 3's included-file candidates for a MEMBER call — a hedge tier, never a proof
     // FE-B: which of a call's name-ladder candidates the language's own lookup PROVES (receiverevidence.h, point 2). A
@@ -11256,7 +11203,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // lane L6: the interface-typed dispatch tier (ifacedispatch.h) over the map just built, and the edges its one-implementor
     // answer committed (outProv=6, rendered via="impl"); the arity rule it shares with the name tiers' B2.2 filter below.
     const IfaceDispatch          ifaceTier( ing, recvEv, g.implementors, g.implementorBound, implementorsOpen );   // reads ing.bindings' ImplBlock spans too
-    HashMap<std::uint64_t, char> implEdges;
     std::vector<NodeId>          ifaceCand;   // reused: one call's dispatch candidates
     const auto arityCannotTake = [ & ]( const Reference& ref, NodeId c ) noexcept
     {
@@ -13032,7 +12978,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // source". This is where canonical resolution SUPPRESSES amb that the old pre-tier count raised.
         //
         // C1 (Round C lane B): `splitPick` is set by the SAME predicate, and is read by the edge-emission loop
-        // below to key `splitEdges`. One predicate, two granularities — the per-symbol count and the per-edge
+        // below to set the edge's kEdgeMarkSplit. One predicate, two granularities — the per-symbol count and the per-edge
         // marks are derived from one decision, so the biconditional the gate asserts (a symbol carries amb= iff
         // at least one of its edges carries prov="split") holds by construction rather than by agreement.
         bool splitPick = false;
@@ -13149,48 +13095,28 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            const std::uint64_t ekey = hashutil::packPair( r.fromSymbol, to );
-            EdgeAcc& e = acc[ ekey ];
+            EdgeAcc&   e     = acc[ hashutil::packPair( r.fromSymbol, to ) ];
+            const bool fresh = e.nref == 0;
             e.confSum += classic( to ) ? base : 0.f;
             e.nref    += 1;
-            if( splitPick )
-            {
-                splitEdges.insert( ekey );   // C1: remember (from,to) for prov="split" — every arm of the split, never a subset
-            }
-            if( bindingPinned )
-            {
-                bindingEdges.insert( ekey ); // A4-R5: remember (from,to) for prov="binding"
-            }
-            if( importPinned )
-            {
-                importEdges.insert( ekey ); // remember (from,to) for prov="import"
-            }
-            if( finalSegmentType )
-            {
-                finalSegmentEdges.insert( ekey );   // remember (from,to) for prov="final-segment"
-            }
-            if( ifaceImpl )
-            {
-                // lane L6: remember (from,to) for via="impl" (outProv=6); 2 once a site of another kind committed it too (here, earlier)
-                const auto [ it, fresh ] = implEdges.try_emplace( ekey, char( 1 ) );
-                it->second = ( fresh && e.nref > 1 ) ? char( 2 ) : it->second;
-            }
-            else if( !implEdges.empty() )
-            {
-                if( const auto it = implEdges.find( ekey ); it != implEdges.end() )
-                {
-                    it->second = char( 2 );   // … or later: a site that proved the edge another way wins its label
-                }
-            }
-            ( nameOnly ? nameOnlyEdges : provenEdges ).insert( ekey );   // FE-B: a proven site wins the merged row (Graph::outNameOnly)
+            // EDGE-FLAGS: what this site says about the edge, ORed into the row (resolve.h EdgeMark). split: C1, every arm of the split,
+            // never a subset; binding: A4-R5; import: an ES named import; final-segment; proven: FE-B, a proven site wins the merged
+            // row (Graph::outNameOnly); link / anchor-miss: a markdown link and its missed slug.
+            std::uint8_t marks = ( splitPick ? kEdgeMarkSplit : 0u ) | ( bindingPinned ? kEdgeMarkBinding : 0u ) | ( importPinned ? kEdgeMarkImport : 0u )
+                               | ( finalSegmentType ? kEdgeMarkFinalSegment : 0u ) | ( nameOnly ? 0u : kEdgeMarkProven );
             if( anyMarkdownLink )
             {
-                noteMarkdownLinkSite( linkEdges, ekey, r );
+                marks |= isMarkdownLinkSite( r ) ? kEdgeMarkLink : 0u;
                 if( siteIndex < mdSlugMiss.size() && mdSlugMiss[ siteIndex ] != 0 && siteIndex < mdLinkPin.size() && to == mdLinkPin[ siteIndex ] )
                 {
-                    anchorMissEdges.insert( ekey );
+                    marks |= kEdgeMarkAnchorMiss;
                 }
             }
+            // lane L6 via="impl": the first site sets ImplOnly when it is a one-implementor dispatch; a site of any other kind, before
+            // or after, leaves it clear for good
+            anyImplSite = anyImplSite || ifaceImpl;
+            const std::uint8_t implOnly = ( fresh && ifaceImpl ) ? kEdgeMarkImplOnly : 0u;
+            e.marks = std::uint8_t( ( ( e.marks | marks ) & ( ifaceImpl ? 0xFFu : std::uint8_t( ~kEdgeMarkImplOnly ) ) ) | implOnly );
         }
         // (L) the call committed exactly ONE unsplit target WITH evidence — a receiver rule, a resolved qualifier, the language's
         // own lookup, an import or SCIP pin, or the ladder's unhedged pick of the one definition a hedge-eligible call reaches by
@@ -13271,7 +13197,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
     // flatten + cap + sort by (from, to) — deterministic regardless of map order
-    struct E { NodeId from, to; float w; };
+    struct E { NodeId from, to; float w; std::uint8_t marks; };   // marks: the accumulator's EdgeMark bits, carried through the sort
     std::vector<E> edges;
     edges.reserve( acc.size() );
     for( const auto& [ k, e ] : acc )
@@ -13281,7 +13207,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             w = 8.f;
         }
-        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w } );
+        edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w, e.marks } );
     }
     releaseStorage( acc );   // G1c: flattened; the sort and the CSR arrays below stack on the edge list alone
     std::vector<E> edgeScratch;
@@ -13309,26 +13235,42 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     //   5 = a receiver's QUALIFIED written type chose this edge by its last name alone → prov="final-segment".
     //   6 = lane L6: the ONE implementor in the tree of the receiver's interface owns the callee → via="impl".
     // The value per edge comes from resolve.h edgeProvenance, which owns the precedence between them.
-    if( scip || !bindingEdges.empty() || !splitEdges.empty() || !importEdges.empty() || !finalSegmentEdges.empty() || !implEdges.empty() )
+    std::uint8_t anyMarks = 0;   // EDGE-FLAGS: the OR of every edge's marks — which per-edge arrays this graph needs
+    for( const E& e : edges )
+    {
+        anyMarks |= e.marks;
+    }
+    if( memstats::enabled() )   // M0 + EDGE-FLAGS: how many flattened edges carry each mark (test/edgemarkcheck.sh counts them)
+    {
+        std::array<std::size_t, 8> perBit{};
+        std::size_t                nameOnlyRows = 0;   // the kEdgeName rows: no proven site, not a link
+        for( const E& e : edges )
+        {
+            for( std::size_t b = 0; b < perBit.size(); ++b )
+            {
+                perBit[ b ] += ( e.marks >> b ) & 1u;
+            }
+            nameOnlyRows += ( e.marks & ( kEdgeMarkProven | kEdgeMarkLink ) ) == 0 ? 1u : 0u;
+        }
+        rw::emitTo( stderr, "[mem] edge marks edges={} split={} binding={} import={} final-segment={} impl-only={} proven={} link={} anchor-miss={} name-only={}\n",
+                    edges.size(), perBit[ 0 ], perBit[ 1 ], perBit[ 2 ], perBit[ 3 ], perBit[ 4 ], perBit[ 5 ], perBit[ 6 ], perBit[ 7 ], nameOnlyRows );
+    }
+    if( scip || ( anyMarks & kEdgeMarksProv ) != 0 || anyImplSite )
     {
         g.outProv.assign( edges.size(), 0u );
     }
-    const auto anchorMissed = [ & ]( std::uint64_t k )
+    const auto anchorMissed = []( const E& e ) noexcept
     {
-        return markdownLinkBit( linkEdges, k ) != 0 && anchorMissEdges.contains( k );
+        return ( e.marks & ( kEdgeMarkLink | kEdgeMarkAnchorMiss ) ) == ( kEdgeMarkLink | kEdgeMarkAnchorMiss );
     };
-    if( std::any_of( edges.begin(), edges.end(), [ & ]( const E& e ) { return anchorMissed( hashutil::packPair( e.from, e.to ) ); } ) )
+    if( std::any_of( edges.begin(), edges.end(), anchorMissed ) )
     {
         g.outAnchorMiss.assign( edges.size(), 0u );
     }
-    const EdgeProvenanceSets provSets{ bindingEdges, importEdges, splitEdges, finalSegmentEdges, implEdges };   // lane L6: + implEdges
-    // Kind byte, allocated when some edge is name-only or a markdown link. Empty ⇒ every edge is a plain call.
-    const auto hedged = [ & ]( std::uint64_t k ) { return nameOnlyEdges.contains( k ) && !provenEdges.contains( k ); };
-    const auto marked = [ & ]( const E& e )
-    {
-        const std::uint64_t k = hashutil::packPair( e.from, e.to );
-        return hedged( k ) || markdownLinkBit( linkEdges, k ) != 0;
-    };
+    // Kind byte, allocated when some edge is name-only or a markdown link. Empty ⇒ every edge is a plain call. Every edge has a
+    // committing site and every site is name-only or proven, so an edge no proven site committed is name-only.
+    const auto hedged = []( const E& e ) noexcept { return ( e.marks & kEdgeMarkProven ) == 0; };
+    const auto marked = [ & ]( const E& e ) noexcept { return hedged( e ) || ( e.marks & kEdgeMarkLink ) != 0; };
     if( std::any_of( edges.begin(), edges.end(), marked ) )
     {
         g.outNameOnly.assign( edges.size(), 0u );
@@ -13347,18 +13289,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // the symbol's amb= counts it either way, so nothing is lost by the ordering.
             if( !g.outProv.empty() )
             {
-                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), provSets, hashutil::packPair( e.from, e.to ) );
+                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), e.marks );
             }
             if( !g.outNameOnly.empty() )
             {
                 ASSUME( pos < g.outNameOnly.size(), "outNameOnly is allocated one slot per flattened edge" );
-                const std::uint64_t key = hashutil::packPair( e.from, e.to );
-                std::uint8_t        kind = 0;
-                if( markdownLinkBit( linkEdges, key ) != 0 )
+                std::uint8_t kind = 0;
+                if( ( e.marks & kEdgeMarkLink ) != 0 )
                 {
-                    kind = anchorMissed( key ) ? std::uint8_t( kEdgeLink | 0x80 ) : kEdgeLink;
+                    kind = anchorMissed( e ) ? std::uint8_t( kEdgeLink | 0x80 ) : kEdgeLink;
                 }
-                else if( hedged( key ) )
+                else if( hedged( e ) )
                 {
                     kind = kEdgeName;
                 }
@@ -13366,7 +13307,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             if( !g.outAnchorMiss.empty() )
             {
-                g.outAnchorMiss[ pos ] = anchorMissed( hashutil::packPair( e.from, e.to ) ) ? 1u : 0u;
+                g.outAnchorMiss[ pos ] = anchorMissed( e ) ? 1u : 0u;
             }
         }
     }

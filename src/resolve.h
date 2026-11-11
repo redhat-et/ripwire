@@ -6395,43 +6395,51 @@ struct RecvVarType
     const Binding*   declared         = nullptr;
 };
 
-// The provenance value of one resolved edge (Graph::outProv; graph.h provLabel spells it) from the edge sets the resolve loop
-// filled. The precedence is deliberate: scip PINS an edge (precise); binding and import NAME the mechanism that resolved it;
-// split says the resolver could not choose; impl (lane L6) that the one implementor in the tree of the receiver's interface
-// owns the callee; final-segment says it chose by a qualified written type's last name alone (test/narrowcheck.sh arm 25). prov= is single-valued and a symbol's amb= counts a split arm either way, so nothing is
-// lost by the ordering. 0 = a uniquely resolved name-based edge, which no emitter writes.
-struct EdgeProvenanceSets
+// EDGE-FLAGS (speed audit card 6, mem-audit-fable-1111): what the sites that committed one (from, to) edge said about it, one bit
+// each, ORed over those sites into buildGraph's edge accumulator (graph.h EdgeAcc::marks) — nine per-edge key tables before
+// (one hash insert per mark per site, one lookup per mark per flattened edge, all alive through the CSR build).
+enum EdgeMark : std::uint8_t
 {
-    const HashSet<std::uint64_t>&       binding;
-    const HashSet<std::uint64_t>&       import;
-    const HashSet<std::uint64_t>&       split;
-    const HashSet<std::uint64_t>&       finalSegment;
-    const HashMap<std::uint64_t, char>& impl;           // lane L6: 1 = every site committing the edge was a one-implementor dispatch
+    kEdgeMarkSplit        = 1u << 0,   // C1: an ARM of a k-way split the resolver could not choose between (prov="split")
+    kEdgeMarkBinding      = 1u << 1,   // A4-R5: resolved via an FFI alias (prov="binding")
+    kEdgeMarkImport       = 1u << 2,   // an ES named-import binding pinned it (prov="import")
+    kEdgeMarkFinalSegment = 1u << 3,   // a receiver's QUALIFIED written type chose it by its last name alone (prov="final-segment")
+    kEdgeMarkImplOnly     = 1u << 4,   // lane L6: EVERY committing site was a one-implementor dispatch (via="impl"); the first site
+                                       // sets it, any site of another kind clears it for good
+    kEdgeMarkProven       = 1u << 5,   // FE-B: some site bound it WITH evidence; without it every site was name-only (kEdgeName)
+    kEdgeMarkLink         = 1u << 6,   // a markdown link bound it (kEdgeLink)
+    kEdgeMarkAnchorMiss   = 1u << 7,   // … whose slug named no heading, so the target is the file node (anchor="missing")
 };
-inline std::uint8_t edgeProvenance( bool scipPrecise, const EdgeProvenanceSets& sets, std::uint64_t edgeKey ) noexcept
+inline constexpr std::uint8_t kEdgeMarksProv = kEdgeMarkSplit | kEdgeMarkBinding | kEdgeMarkImport | kEdgeMarkFinalSegment;
+
+// The provenance value of one resolved edge (Graph::outProv; graph.h provLabel spells it) from its marks. The precedence is
+// deliberate: scip PINS an edge (precise); binding and import NAME the mechanism that resolved it; split says the resolver could
+// not choose; impl (lane L6) that the one implementor in the tree of the receiver's interface owns the callee; final-segment says
+// it chose by a qualified written type's last name alone (test/narrowcheck.sh arm 25). prov= is single-valued and a symbol's amb=
+// counts a split arm either way, so nothing is lost by the ordering. 0 = a uniquely resolved name-based edge, which no emitter writes.
+inline std::uint8_t edgeProvenance( bool scipPrecise, std::uint8_t marks ) noexcept
 {
-    const auto holds = [ edgeKey ]( const auto& set ) { return set.find( edgeKey ) != set.end(); };
     if( scipPrecise )
     {
         return 1u;
     }
-    if( holds( sets.binding ) )
+    if( ( marks & kEdgeMarkBinding ) != 0 )
     {
         return 2u;
     }
-    if( holds( sets.import ) )
+    if( ( marks & kEdgeMarkImport ) != 0 )
     {
         return 4u;
     }
-    if( holds( sets.split ) )
+    if( ( marks & kEdgeMarkSplit ) != 0 )
     {
         return 3u;
     }
-    if( const auto it = sets.impl.find( edgeKey ); it != sets.impl.end() && it->second == 1 )
+    if( ( marks & kEdgeMarkImplOnly ) != 0 )
     {
         return 6u;   // lane L6: graph.h kProvImpl, via="impl" — only when no other kind of site committed the edge
     }
-    return holds( sets.finalSegment ) ? 5u : 0u;
+    return ( marks & kEdgeMarkFinalSegment ) != 0 ? 5u : 0u;
 }
 
 // P2-D Rule 2, PARAMETER receivers (2026-09-16, test/narrowcheck.sh arms 7-18): one DECLARATION of a receiver
