@@ -36,6 +36,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 # pass prints move those ranks, so its on/off twins would differ in rows that are not this rule's. This gate pins ONE-SIDE-REACH alone;
 # SIBLING-DEMOTE's rule is pinned in forsiblingdemotecheck.
 export RIPWIRE_NO_SIBLING_DEMOTE=1
+export RIPWIRE_NO_DECL_TWIN=1 RIPWIRE_NO_DECL_SINK=1   # DECL-TWIN / DECL-SINK (fordeclsink.h) run after it; pinned in fordeclsinkcheck
 unset RIPWIRE_NO_ONE_SIDE_REACH # an inherited value (even 0) would turn the rule off in both twins
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

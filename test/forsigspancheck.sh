@@ -94,6 +94,7 @@ set -u
 # <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the <sigs> span and its shown= / docs_after_code= disclosure (counted before the demote pass),
 # so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
 export RIPWIRE_NO_SIBLING_DEMOTE=1
+export RIPWIRE_NO_DECL_TWIN=1 RIPWIRE_NO_DECL_SINK=1   # DECL-TWIN / DECL-SINK (fordeclsink.h) run after it; pinned in fordeclsinkcheck
 export PYTHONDONTWRITEBYTECODE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"   # a gate that indexes a repo must not inherit GIT_DIR/GIT_WORK_TREE (gitenvhermeticcheck D)

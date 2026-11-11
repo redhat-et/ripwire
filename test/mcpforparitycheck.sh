@@ -38,6 +38,7 @@ set -u
 # <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the CLI and MCP candidate pools and ladder heads (the pre-demote head both dialects start from; MCP's <h> rows differ from the CLI's, so its K2 keeps differ by design),
 # so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
 export RIPWIRE_NO_SIBLING_DEMOTE=1
+export RIPWIRE_NO_DECL_TWIN=1 RIPWIRE_NO_DECL_SINK=1   # DECL-TWIN / DECL-SINK (fordeclsink.h) run after it; pinned in fordeclsinkcheck
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
