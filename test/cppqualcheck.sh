@@ -384,10 +384,14 @@ rrun US --uses=selectBaseline \
 # 58 -> 60 2026-11-08 (lane/docs-units, DOCS-UNITS, measured after merging main at fc0e35967: the two new <u> rows): a document's bytes are read
 # through the canonical helper in src/ingest_docpass.h docTextOfDoc (an HTML page's bytes, read once in the doc post-pass) and src/recall.h
 # recallDocText (a document with no extracted text, read for its section offsets). No new fopen/fread. #571 stacks on this pin.
+# 60 -> 63 2026-11-11 (lane/import-spelling, IMPORT-SPELLING, measured after merging main at ea25a7888: the three new <u> rows, all in
+# src/forimportspec.h): resolveWebSpec reads each in-tree package.json whose text may name the spelled package (an unreadable one is
+# counted, never read as empty), and walkImportSpec reads a state's file once (textOf, memoised) and a Python module's file once
+# (pyCache). Only when a --for task spells an import. No new fopen/fread.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 60 ] \
-    && ok "repo: --uses=readWholeFile count=60 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 60, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 63 ] \
+    && ok "repo: --uses=readWholeFile count=63 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 63, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
