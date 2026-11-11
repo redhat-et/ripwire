@@ -47,6 +47,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# DECL-TWIN (fordecltwin.h) prints the gold's one-line constructor Frobnicator::Frobnicator as a <t> pointer (its last segment names the
+# bodied class row); this gate counts the ranked candidate rows the head fix reorders, so it reads the pre-rule answer. fordecltwincheck
+# pins the rule.
+export RIPWIRE_NO_DECL_TWIN=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
