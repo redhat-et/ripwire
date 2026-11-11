@@ -888,6 +888,215 @@ inline std::size_t cloneLcsLen( std::span<const std::uint32_t> a, std::span<cons
     return prev[nb];
 }
 
+// One Type-3 candidate: one representative per DISTINCT normalized stream (findClonesType3 below collects them).
+struct Type3Cand
+{
+    NodeId                     id;
+    std::vector<std::uint32_t> toks;    // normalized token sequence (interned ids; LCS input)
+    std::vector<std::uint64_t> fp;      // sorted, de-duplicated k-gram fingerprint set
+};
+// fingerprint gram → the candidates holding it, in ascending candidate order (see findClonesType3 on N=4)
+using Type3Buckets = HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 4>>;
+
+// THE PAIR SEARCH of findClonesType3: every distinct candidate pair that shares a usable bucket and is in the length
+// band goes through the cap, the sketch, the Jaccard merge and the LCS, once. run() returns the kept pairs (unsorted;
+// the caller sorts) and leaves the counters in `st`.
+//
+// THE WALK (T3-PAIRSEEN, QD-ENVOY-TIME): candidate-major, with no global pair table. Candidate ia's partners are every
+// ib > ia that shares a usable bucket with it and is in its length band; they are gathered from ia's own grams into one
+// scratch list, sorted and de-duplicated, then gated in ascending ib. That visits exactly the raw pairs the bucket walk
+// visits (each bucket's every a < b once) and gates exactly the same distinct pairs, so every Type3Stats count and —
+// after the caller's id sort — the emitted vector are the same. What it drops is the `pairSeen` hash the bucket walk
+// de-duplicates through: one find (and, for a new pair, an emplace with rehash growth) per length-band survivor, 31 %
+// of the pass on envoy and the bulk of its 1.68 GB peak.
+//
+// THE CAP is the one place the two walks can differ. kType3MaxPairs keeps the FIRST N gated pairs, and "first" is a
+// visit order: ascending (ia, ib) in the candidate walk, bucket order in the bucket walk. A pass that reaches the cap
+// is therefore re-run by the bucket walk from the start, so the pairs a capped corpus keeps — and the disclosure — are
+// the ones it always kept. Shipped corpora do not reach the cap, and test/clonebandcheck.sh runs both walks, capped and
+// uncapped, against each other (-DCTX_TYPE3_BUCKET_WALK compiles the candidate walk out).
+class Type3PairSearch
+{
+public:
+    Type3PairSearch( const std::vector<Type3Cand>& cands, const std::vector<std::uint32_t>& candTokens, const std::vector<std::uint8_t>& candSig,
+                     const Type3Buckets& buckets, Type3Stats& st ) noexcept
+        : cands_( cands ), candTokens_( candTokens ), candSig_( candSig ), buckets_( buckets ), st_( st )
+    {
+    }
+
+    std::vector<CloneGroup> run()
+    {
+        for( const auto& [g, idxs] : buckets_ )
+        {
+            (void)g;
+            ASSUME( std::is_sorted( idxs.begin(), idxs.end() ) && std::adjacent_find( idxs.begin(), idxs.end() ) == idxs.end(),
+                    "a bucket lists each candidate once, in candidate order" );
+        }
+#ifndef CTX_TYPE3_BUCKET_WALK
+        if( walkByCandidate() )
+        {
+            return std::move( out_ );
+        }
+#endif
+        // The bucket walk, as it has always run: every counter restarts, and the cap's "first N" are bucket order.
+        out_.clear();
+        comparedPairs_    = 0;
+        st_.rawPairVisits = st_.distinctPairs = st_.sketchRejects = st_.jaccardMerges = st_.lcsRuns = 0;
+        walkByBucket();
+        return std::move( out_ );
+    }
+
+private:
+    // (a) length band FIRST (B1) — O(1) and a PURE function of the pair, so it runs ahead of any de-dup bookkeeping and
+    // drops the common length-mismatched pair with a single float compare. The Jaccard gate (b) is O(|fp|) and
+    // DELIBERATELY stays behind the de-dup: a pair recurs in every bucket it shares a k-gram with, so re-running the
+    // merge per recurrence is a large net loss (measured ~3× slower). Emitted SET is unchanged by where either sits: the
+    // gates are pure. Outside the band an LCS-ratio ≥ kType3MinSimilarity is impossible, so dropping here is exact.
+    // Reads the SoA candTokens array ONLY (Y3): two 4-byte loads from a cache-resident array per raw visit.
+    bool inLengthBand( std::uint32_t ia, std::uint32_t ib ) const noexcept
+    {
+        const std::uint32_t lo = std::min( candTokens_[ia], candTokens_[ib] ), hi = std::max( candTokens_[ia], candTokens_[ib] );
+        return hi != 0 && !( float( lo ) / float( hi ) < kType3LenBand );
+    }
+    // Stop-gram cut (A4-P2): a bucket bigger than kType3MaxBucket is a ubiquitous k-gram — O(size²) pairs of pure
+    // boilerplate. Skipped by both walks; any real near-clone in it shares a rarer gram and is compared via a smaller
+    // bucket. A fixed threshold, decided before any per-pair work, so the decision is fully deterministic.
+    static bool usableBucket( const rw::SmallVec<std::uint32_t, 4>& idxs ) noexcept { return idxs.size() >= 2 && idxs.size() <= kType3MaxBucket; }
+
+    // One DISTINCT length-band-surviving pair (ia < ib) through the cap, the sketch, the Jaccard merge and the LCS, in
+    // the order the pass has always run them; false = the cap stops the pass before this pair.
+    bool gatePair( std::uint32_t ia, std::uint32_t ib )
+    {
+        if( comparedPairs_ >= kType3MaxPairs )
+        {
+            return false;
+        }
+        ++st_.distinctPairs;
+#ifndef CTX_TYPE3_SKETCH_OFF
+        // (a′) Y3 minhash pre-gate — O(kSketchHashes) byte compares against the operating point; the grossly
+        // dissimilar pairs that dominate real corpora (99 % at J < 0.20 on llama.cpp) die here without ever
+        // paying the O(|fp|) exact merge. Pure + deterministic (fixed constants); recall bound at the top.
+        if( cloneSketchMatches( candSig_.data() + std::size_t( ia ) * kSketchHashes, candSig_.data() + std::size_t( ib ) * kSketchHashes ) < kSketchMinMatches )
+        {
+            ++st_.sketchRejects;
+            return true;
+        }
+#endif
+        const Type3Cand& ca = cands_[ia];
+        const Type3Cand& cb = cands_[ib];
+        // (b) fingerprint Jaccard — lexical lower bound on similarity, both fp sets sorted → merge count. Behind the
+        // de-dup, so it runs once per distinct length-band-surviving pair, not once per recurrence.
+        ++st_.jaccardMerges;
+        std::size_t inter = 0;
+        for( std::size_t i = 0, j = 0; i < ca.fp.size() && j < cb.fp.size(); )
+        {
+            if( ca.fp[i] == cb.fp[j] ) { ++inter; ++i; ++j; }
+            else if( ca.fp[i] < cb.fp[j] ) { ++i; }
+            else
+            {
+                ++j;
+            }
+        }
+        const std::size_t uni = ca.fp.size() + cb.fp.size() - inter;
+        if( uni == 0 || float( inter ) / float( uni ) < kType3MinFpJaccard )
+        {
+            return true;
+        }
+        // (c) the expensive compare: LCS over token sequences, each a view of its first kType3MaxTokensForLcs (T3-LCS).
+        ++comparedPairs_;
+        ++st_.lcsRuns;
+        const std::span<const std::uint32_t> pa( ca.toks.data(), std::min( ca.toks.size(), kType3MaxTokensForLcs ) );
+        const std::span<const std::uint32_t> pb( cb.toks.data(), std::min( cb.toks.size(), kType3MaxTokensForLcs ) );
+        const std::size_t lcs = cloneLcsLen( pa, pb, lcsPrevRow_, lcsCurRow_ );
+        const std::size_t den = pa.size() + pb.size();
+        const float       sim = den == 0 ? 0.0f : 2.0f * float( lcs ) / float( den );
+        if( den == 0 || sim < kType3MinSimilarity || sim >= 1.0f )
+        {
+            return true; // < 1.0: exact would be Type-1/2
+        }
+        // member order stable by symbol id (small id first) → deterministic emit.
+        out_.push_back( { { std::min( ca.id, cb.id ), std::max( ca.id, cb.id ) }, std::max( candTokens_[ia], candTokens_[ib] ), std::uint8_t( 3 ), sim } );
+        return true;
+    }
+
+    // The candidate walk (see the class comment); false = it reached the cap and the bucket walk must answer.
+    bool walkByCandidate()
+    {
+        std::vector<std::uint32_t> partners;
+        for( std::uint32_t ia = 0; ia < cands_.size(); ++ia )
+        {
+            partners.clear();
+            for( const std::uint64_t g : cands_[ia].fp )
+            {
+                const auto it = buckets_.find( g );   // every gram of every candidate was bucketed
+                if( it == buckets_.end() || !usableBucket( it->second ) )
+                {
+                    continue;
+                }
+                for( auto p = std::upper_bound( it->second.begin(), it->second.end(), ia ); p != it->second.end(); ++p )
+                {
+                    ++st_.rawPairVisits;
+                    if( inLengthBand( ia, *p ) )
+                    {
+                        partners.push_back( *p );
+                    }
+                }
+            }
+            std::sort( partners.begin(), partners.end() );
+            partners.erase( std::unique( partners.begin(), partners.end() ), partners.end() );
+            for( const std::uint32_t ib : partners )
+            {
+                if( !gatePair( ia, ib ) )
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // The bucket walk: every usable bucket's a < b pairs in bucket order, de-duplicated through `pairSeen` (pure
+    // membership; the walk is insertion-ordered, so the kept/dropped split on a cap-hitting corpus is deterministic).
+    void walkByBucket()
+    {
+        HashMap<std::uint64_t, std::uint8_t> pairSeen;
+        for( const auto& [g, idxs] : buckets_ )
+        {
+            (void)g;
+            if( !usableBucket( idxs ) )
+            {
+                continue;
+            }
+            for( std::size_t a = 0; a < idxs.size(); ++a )
+            {
+                for( std::size_t b = a + 1; b < idxs.size(); ++b )
+                {
+                    const std::uint32_t ia = idxs[a], ib = idxs[b];   // ia < ib: the bucket is in candidate order
+                    ++st_.rawPairVisits;
+                    if( !inLengthBand( ia, ib ) || !pairSeen.emplace( ( std::uint64_t( ia ) << 32 ) | ib, std::uint8_t( 1 ) ).second )
+                    {
+                        continue;
+                    }
+                    if( !gatePair( ia, ib ) )
+                    {
+                        DISCLOSE( st_, Type3Stats::DisclosureWhy::PairCapHit, "clones: Type-3 pair cap hit — first N compared (both-gate-surviving) near-misses kept, rest skipped" );
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    const std::vector<Type3Cand>&     cands_;
+    const std::vector<std::uint32_t>& candTokens_;   // SoA token counts (the length band's only read)
+    const std::vector<std::uint8_t>&  candSig_;      // SoA minhash bytes, kSketchHashes per candidate
+    const Type3Buckets&               buckets_;
+    Type3Stats&                       st_;
+    std::vector<CloneGroup>           out_;
+    std::size_t                       comparedPairs_ = 0;
+    std::vector<std::uint32_t>        lcsPrevRow_, lcsCurRow_;   // cloneLcsLen's two DP rows, reused by every pair (T3-LCS)
+};
+
 // Find Type-3 (gapped) clone PAIRS: normalized streams highly similar (LCS-ratio ≥ kType3MinSimilarity) but not
 // identical. Each returned group has exactly two members {loId,hiId} with type==3 and the measured similarity.
 // Deterministic; bounded (see the header block). Does NOT alter findClones() — callers opt into this pass.
@@ -910,13 +1119,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     // A4-P2: token streams are interned to u32 ids (one repo-wide HashMap) so the LCS DP and the k-gram
     // fingerprints compare/hash scalars, not std::strings. Interning order is process-local and never leaks:
     // ids feed only equality-compares, hashes, and set membership — every emitted field stays name/path/line-based.
-    struct Cand
-    {
-        NodeId                     id;
-        std::vector<std::uint32_t> toks;    // normalized token sequence (interned ids; LCS input)
-        std::vector<std::uint64_t> fp;      // sorted, de-duplicated k-gram fingerprint set
-    };
-    std::vector<Cand>                     cands;
+    std::vector<Type3Cand>                cands;
     std::vector<std::uint32_t>            candTokens;   // SoA: token count per candidate — the ONLY field the hot
                                                         // length-band check reads (flat u32 array ⇒ cache-resident
                                                         // across the tens of millions of raw pair visits, instead of
@@ -1018,7 +1221,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     // adds 850 KB of inline slots to spare ~225 KB of heap, so total footprint is ~5.1 MB against N=4's
     // ~4.5 MB (std::vector today: ~5.3 MB). N=4 is also exactly the 24 bytes a std::vector header already
     // costs, so the array itself does not grow at all and two thirds of the heap blocks simply stop.
-    HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 4>> buckets;
+    Type3Buckets buckets;
     for( std::uint32_t ci = 0; ci < cands.size(); ++ci )
     {
         for( std::uint64_t g : cands[ci].fp )
@@ -1027,197 +1230,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
         }
     }
 
-    // ── THE PAIR GATES, after the length band and the de-dup ──────────────────────────────────────────────────
-    // `gateDistinct` takes one DISTINCT length-band-surviving pair (ia < ib) through the cap, the sketch, the Jaccard
-    // merge and the LCS, in the order the bucket walk always ran them; false = the cap stops the pass before this pair.
-    std::vector<CloneGroup>    out;
-    std::size_t                comparedPairs = 0;
-    std::vector<std::uint32_t> lcsPrevRow, lcsCurRow;   // cloneLcsLen's two DP rows, reused by every pair (T3-LCS)
-    const auto gateDistinct = [ & ]( std::uint32_t ia, std::uint32_t ib ) -> bool
-    {
-        if( comparedPairs >= kType3MaxPairs )
-        {
-            return false;
-        }
-        ++st.distinctPairs;
-
-#ifndef CTX_TYPE3_SKETCH_OFF
-        // (a′) Y3 minhash pre-gate — O(kSketchHashes) byte compares against the operating point; the grossly
-        // dissimilar pairs that dominate real corpora (99 % at J < 0.20 on llama.cpp) die here without ever
-        // paying the O(|fp|) exact merge. Pure + deterministic (fixed constants); recall bound at the top.
-        if( cloneSketchMatches( candSig.data() + std::size_t( ia ) * kSketchHashes,
-                                candSig.data() + std::size_t( ib ) * kSketchHashes ) < kSketchMinMatches )
-        {
-            ++st.sketchRejects;
-            return true;
-        }
-#endif
-
-        const Cand& ca = cands[ia];
-        const Cand& cb = cands[ib];
-
-        // (b) fingerprint Jaccard — lexical lower bound on similarity, both fp sets sorted → merge count. Behind the
-        // de-dup, so it runs once per distinct length-band-surviving pair, not once per recurrence.
-        ++st.jaccardMerges;
-        std::size_t inter = 0;
-        {
-            std::size_t i = 0, j = 0;
-            while( i < ca.fp.size() && j < cb.fp.size() )
-            {
-                if( ca.fp[i] == cb.fp[j] ) { ++inter; ++i; ++j; }
-                else if( ca.fp[i] < cb.fp[j] ) { ++i; }
-                else
-                {
-                    ++j;
-                }
-            }
-        }
-        const std::size_t uni = ca.fp.size() + cb.fp.size() - inter;
-        if( uni == 0 || float( inter ) / float( uni ) < kType3MinFpJaccard )
-        {
-            return true;
-        }
-
-        // (c) the expensive compare: LCS over token sequences (clamped to the cost cap).
-        ++comparedPairs;
-        ++st.lcsRuns;
-        // the clamp is a view of the first kType3MaxTokensForLcs tokens, not a copy of them (T3-LCS)
-        const std::span<const std::uint32_t> pa( ca.toks.data(), std::min( ca.toks.size(), kType3MaxTokensForLcs ) );
-        const std::span<const std::uint32_t> pb( cb.toks.data(), std::min( cb.toks.size(), kType3MaxTokensForLcs ) );
-        const std::size_t lcs = cloneLcsLen( pa, pb, lcsPrevRow, lcsCurRow );
-        const std::size_t den = pa.size() + pb.size();
-        if( den == 0 )
-        {
-            return true;
-        }
-        const float sim = 2.0f * float( lcs ) / float( den );
-        if( sim < kType3MinSimilarity || sim >= 1.0f )
-        {
-            return true; // < 1.0: exact would be Type-1/2
-        }
-
-        // member order stable by symbol id (small id first) → deterministic emit.
-        const NodeId x = std::min( ca.id, cb.id ), y = std::max( ca.id, cb.id );
-        out.push_back( { { x, y }, std::max( candTokens[ia], candTokens[ib] ), std::uint8_t( 3 ), sim } );
-        return true;
-    };
-
-    // (a) length band FIRST (B1) — O(1) and a PURE function of the pair, so it runs ahead of any de-dup bookkeeping and
-    // drops the common length-mismatched pair with a single float compare. The Jaccard gate (b) is O(|fp|) and
-    // DELIBERATELY stays behind the de-dup: a pair recurs in every bucket it shares a k-gram with, so re-running the
-    // merge per recurrence is a large net loss (measured ~3× slower). Emitted SET is unchanged by where either sits: the
-    // gates are pure. Outside the band an LCS-ratio ≥ kType3MinSimilarity is impossible, so dropping here is exact.
-    // Reads the SoA candTokens array ONLY (Y3): two 4-byte loads from a cache-resident array per raw visit.
-    const auto inLengthBand = [ & ]( std::uint32_t ia, std::uint32_t ib ) noexcept
-    {
-        const std::uint32_t lo = std::min( candTokens[ia], candTokens[ib] ), hi = std::max( candTokens[ia], candTokens[ib] );
-        return hi != 0 && !( float( lo ) / float( hi ) < kType3LenBand );
-    };
-    // Stop-gram cut (A4-P2): a bucket bigger than kType3MaxBucket is a ubiquitous k-gram — O(size²) pairs of pure
-    // boilerplate. Skipped by both walks; any real near-clone in it shares a rarer gram and is compared via a smaller
-    // bucket. A fixed threshold, decided before any per-pair work, so the decision is fully deterministic.
-    const auto usableBucket = []( const rw::SmallVec<std::uint32_t, 4>& idxs ) noexcept { return idxs.size() >= 2 && idxs.size() <= kType3MaxBucket; };
-
-    // THE WALK (T3-PAIRSEEN, QD-ENVOY-TIME): candidate-major, with no global pair table. Candidate ia's partners are
-    // every ib > ia that shares a usable bucket with it and is in its length band; they are gathered from ia's own
-    // grams into one scratch list, sorted and de-duplicated, then gated in ascending ib. That visits exactly the raw
-    // pairs the bucket walk visits (each bucket's every a < b once) and gates exactly the same distinct pairs, so
-    // every Type3Stats count and — after the final id sort — the emitted vector are the same. What it drops is the
-    // `pairSeen` hash the bucket walk de-duplicated through: one find (and, for a new pair, an emplace with rehash
-    // growth) per length-band survivor, 31 % of the pass on envoy and the bulk of its 1.68 GB peak.
-    //
-    // THE CAP is the one place the two walks can differ. kType3MaxPairs keeps the FIRST N gated pairs, and "first"
-    // is a visit order: ascending (ia, ib) here, bucket order in the walk below. A pass that reaches the cap is
-    // therefore re-run by the bucket walk from the start, so the pairs a capped corpus keeps — and the disclosure —
-    // are the ones it always kept. Shipped corpora do not reach the cap, and test/clonebandcheck.sh runs both walks,
-    // capped and uncapped, against each other.
-    // Buckets were filled in ascending candidate order, one entry per candidate per (de-duplicated) gram.
-    for( const auto& [g, idxs] : buckets )
-    {
-        (void)g;
-        ASSUME( std::is_sorted( idxs.begin(), idxs.end() ) && std::adjacent_find( idxs.begin(), idxs.end() ) == idxs.end(),
-                "a bucket lists each candidate once, in candidate order" );
-    }
-    bool capReached = false;
-#ifndef CTX_TYPE3_BUCKET_WALK   // test hook: compile the candidate walk out, so the gate can run the bucket walk alone
-    {
-        std::vector<std::uint32_t> partners;
-        for( std::uint32_t ia = 0; ia < cands.size() && !capReached; ++ia )
-        {
-            partners.clear();
-            for( const std::uint64_t g : cands[ia].fp )
-            {
-                const auto it = buckets.find( g );   // every gram of every candidate was bucketed above
-                if( it == buckets.end() || !usableBucket( it->second ) )
-                {
-                    continue;
-                }
-                const rw::SmallVec<std::uint32_t, 4>& idxs = it->second;
-                for( auto p = std::upper_bound( idxs.begin(), idxs.end(), ia ); p != idxs.end(); ++p )
-                {
-                    ++st.rawPairVisits;
-                    if( inLengthBand( ia, *p ) )
-                    {
-                        partners.push_back( *p );
-                    }
-                }
-            }
-            std::sort( partners.begin(), partners.end() );
-            partners.erase( std::unique( partners.begin(), partners.end() ), partners.end() );
-            for( const std::uint32_t ib : partners )
-            {
-                if( !gateDistinct( ia, ib ) )
-                {
-                    capReached = true;
-                    break;
-                }
-            }
-        }
-    }
-#else
-    capReached = true;
-#endif
-    if( capReached )
-    {
-        // The bucket walk, as it has always run: every counter restarts, and the cap's "first N" are bucket order.
-        out.clear();
-        comparedPairs    = 0;
-        st.rawPairVisits = st.distinctPairs = st.sketchRejects = st.jaccardMerges = st.lcsRuns = 0;
-        HashMap<std::uint64_t, std::uint8_t> pairSeen;
-        const auto pairKey = []( std::uint32_t x, std::uint32_t y ) noexcept { return ( std::uint64_t( x ) << 32 ) | std::uint64_t( y ); };
-        for( const auto& [g, idxs] : buckets )
-        {
-            (void)g;
-            if( !usableBucket( idxs ) )
-            {
-                continue;
-            }
-            for( std::size_t a = 0; a < idxs.size(); ++a )
-            {
-                for( std::size_t b = a + 1; b < idxs.size(); ++b )
-                {
-                    const std::uint32_t ia = idxs[a], ib = idxs[b];   // ia < ib: the bucket is in candidate order
-                    ++st.rawPairVisits;
-                    if( !inLengthBand( ia, ib ) )
-                    {
-                        continue;
-                    }
-                    // De-dup the length-band survivors (once per distinct pair). `pairSeen` is pure membership and the
-                    // bucket walk is insertion-ordered, so the kept/dropped split on a cap-hitting corpus is deterministic.
-                    if( !pairSeen.emplace( pairKey( ia, ib ), std::uint8_t( 1 ) ).second )
-                    {
-                        continue;
-                    }
-                    if( !gateDistinct( ia, ib ) )
-                    {
-                        DISCLOSE( st, Type3Stats::DisclosureWhy::PairCapHit, "clones: Type-3 pair cap hit — first N compared (both-gate-surviving) near-misses kept, rest skipped" );
-                        goto done;
-                    }
-                }
-            }
-        }
-    }
-done:
+    std::vector<CloneGroup> out = Type3PairSearch( cands, candTokens, candSig, buckets, st ).run();
     // Deterministic order: by (first member id, second member id). Similarity is a pure function of the streams,
     // so ties are impossible for a fixed pair; the id sort fully determines the sequence.
     std::sort( out.begin(), out.end(), []( const CloneGroup& p, const CloneGroup& q )
