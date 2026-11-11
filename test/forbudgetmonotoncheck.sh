@@ -47,6 +47,10 @@
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
+# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
+# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the sig/body section split across ceilings (a budget-held answer is never demoted, so the default's sigs would be the only demoted side),
+# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
+export RIPWIRE_NO_SIBLING_DEMOTE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away

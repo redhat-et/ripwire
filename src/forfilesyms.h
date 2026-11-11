@@ -283,6 +283,40 @@ inline bool nameInAnswer( const std::vector<std::string_view>& tokens, std::stri
     return !name.empty() && ( spelledIn( text, name ) || spelledIn( text, escapeXml( name, esc ) ) );
 }
 
+// `rest` (text from a '<') opens element `name`: the name is followed by a space, '>' or '/'.
+inline bool tagIs( std::string_view rest, std::string_view name ) noexcept
+{
+    return rest.size() > name.size() + 1 && rest.substr( 1, name.size() ) == name
+        && ( rest[name.size() + 1] == ' ' || rest[name.size() + 1] == '>' || rest[name.size() + 1] == '/' );
+}
+
+// One printed row a --for post-pass rewrites as a FILE tail pointer: its bytes [at, end) and the pointer's p=, sym= and r= values.
+struct TailPointerSpan
+{
+    std::size_t at = 0, end = 0;
+    std::string_view p, sym, rank;
+};
+// `text` with each span (in text order) rewritten in place as <t p= sym= r=/> (r= only when the row had one), `legend` before the
+// first; "" when `spans` is empty. ONE-SIDE-REACH (foronesidereach.h) and SIBLING-DEMOTE (forsiblingdemote.h) both print through it.
+inline std::string tailPointerText( std::string_view text, std::span<const TailPointerSpan> spans, std::string_view legend )
+{
+    std::string out;
+    std::size_t from = 0;
+    for( const TailPointerSpan& s : spans )
+    {
+        out.append( text.substr( from, s.at - from ) );
+        out += &s == &spans.front() ? legend : std::string_view();
+        out += "<t p=\"";
+        out += s.p;
+        out += "\" sym=\"";
+        out += s.sym;
+        out += s.rank.empty() ? std::string() : "\" r=\"" + std::string( s.rank );
+        out += "\"/>";
+        from = s.end;
+    }
+    return spans.empty() ? std::string() : out.append( text.substr( from ) );
+}
+
 // The five XML entities the answer escapes, and the three control-character references escapeXml writes for a path or name holding a tab,
 // newline or carriage return (serialize.h xmlControlCharRef), decoded (a name like `operator<` or a path with `&`).
 inline std::string unescapeXmlAttr( std::string_view v )

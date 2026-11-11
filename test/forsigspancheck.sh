@@ -90,6 +90,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
+# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the <sigs> span and its shown= / docs_after_code= disclosure (counted before the demote pass),
+# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
+export RIPWIRE_NO_SIBLING_DEMOTE=1
 export PYTHONDONTWRITEBYTECODE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"   # a gate that indexes a repo must not inherit GIT_DIR/GIT_WORK_TREE (gitenvhermeticcheck D)

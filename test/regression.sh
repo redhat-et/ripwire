@@ -552,6 +552,7 @@ for _g in \
     forroutecheck \
     forsectioncollapsecheck \
     forselfhookcheck \
+    forsiblingdemotecheck \
     forsigspancheck \
     forsizetrimcheck \
     forsoftbudgetcheck \

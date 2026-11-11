@@ -1327,8 +1327,8 @@ struct PricedRootInputs
     std::size_t bodyTokens = 0; // the body-rate sections, already priced
 };
 
-// ONE-SIDE-REACH (foronesidereach.h) rewrites printed <sigs>/<callers> rows as tail pointers, and R-DEDUP's <syms> (forfilesyms.h
-// tailRowsWithoutPicks) cuts names from the head files' tail rows, after the root was priced. `doc` is the
+// ONE-SIDE-REACH (foronesidereach.h) and SIBLING-DEMOTE (forsiblingdemote.h) rewrite printed <sigs>/<callers> rows as tail pointers,
+// and R-DEDUP's <syms> (forfilesyms.h tailRowsWithoutPicks) cuts names from the head files' tail rows, after the root was priced. `doc` is the
 // answer after that markup rewrite and `pricedBytes` the size of the answer the root was priced on (the same est_tokens= digits in
 // both), so the priced markup is now in.markupBytes + doc.size() - pricedBytes. The difference is SIGNED: the legend comment plus
 // short pointers can outweigh the short rows they replace. The root's est_tokens= value is replaced with the fixpoint over the
