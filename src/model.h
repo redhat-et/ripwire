@@ -1221,6 +1221,7 @@ public:
     RefColdFields& operator=( RefColdFields&& ) noexcept = default;
     ~RefColdFields()                                     = default;
 
+    bool hasColdBlock() const noexcept { return cold_ != nullptr; }   // RIPWIRE_STATS counts the rows that carry a block
     const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName : kNoRefColdText; }
     const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel : kNoRefColdText; }
     const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath : kNoRefColdText; }

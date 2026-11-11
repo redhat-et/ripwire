@@ -5511,6 +5511,8 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             }
         }
         rw::emitTo( stderr, "[mem] bindings by kind (kind=all/in-a-def):{}\n", kinds );
+        const std::size_t coldBlocks = std::size_t( std::count_if( ing.references.begin(), ing.references.end(), []( const Reference& r ) { return r.hasColdBlock(); } ) );
+        rw::emitTo( stderr, "[mem] textpool ids={} reference cold blocks={} ({} B each)\n", RefNames::pool().idCount(), coldBlocks, sizeof( RefColdText ) );
     }
     // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to buildGraph as an optional
     // parameter. An unreadable/corrupt/mismatched index yields an EMPTY overlay (one DISCLOSE + stderr note) and
