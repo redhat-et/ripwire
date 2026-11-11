@@ -1200,7 +1200,10 @@ inline std::vector<std::string_view> splitDeclarators( std::string_view stmt )
 // The parsed shape of ONE declarator, before any type resolution.
 struct Declarator
 {
-    std::string_view              typeSpec;        // empty on a follow-on declarator (inherits the first's)
+    std::string_view              typeSpec;        // everything left of the name, AS WRITTEN (`char *`, `char*`, `int *const`)
+    std::string_view              baseSpec;        // typeSpec up to its first top-level `*`/`&` (`char`); empty on a
+                                                   // follow-on declarator, which inherits the first one's base
+    std::string_view              declPart;        // typeSpec from that `*`/`&` on (`*`, `**`, `*const`); "" for a plain one
     std::string_view              name;
     std::vector<std::string_view> extents;         // one entry per `[…]`, left to right
     std::vector<std::string_view> attrGroups;      // A3: peeled `__attribute__((…))` inner text, source order
@@ -1382,6 +1385,29 @@ inline std::vector<std::string_view> peelExtents( std::string_view& s )
     return { reversed.rbegin(), reversed.rend() };
 }
 
+// The first `*` or `&` of `spec` outside any `<…>` / `(…)` / `[…]`, or spec.size() when there is none.
+inline std::size_t topLevelDeclaratorMark( std::string_view spec )
+{
+    int depth = 0;
+    for( std::size_t i = 0; i < spec.size(); ++i )
+    {
+        const char c = spec[i];
+        if( c == '<' || c == '(' || c == '[' )
+        {
+            ++depth;
+        }
+        else if( ( c == '>' || c == ')' || c == ']' ) && depth > 0 )
+        {
+            --depth;
+        }
+        else if( depth == 0 && ( c == '*' || c == '&' ) )
+        {
+            return i;
+        }
+    }
+    return spec.size();
+}
+
 inline Declarator parseDeclarator( std::string_view text )
 {
     Declarator       d;
@@ -1439,7 +1465,14 @@ inline Declarator parseDeclarator( std::string_view text )
 
     d.name     = s.substr( nameStart, nameEnd - nameStart );
     d.typeSpec = trimView( s.substr( 0, nameStart ) );
-    for( char c : s.substr( 0, nameStart ) )
+    // Only a TOP-LEVEL `*`/`&` makes this declarator a pointer/reference: the one in `std::vector<int*> v` or
+    // `Fn<void(int&)> f` belongs to a template argument. The first such byte splits the written type into the
+    // shared BASE (`char` in `char *a, b;`) and this declarator's own part (`*`), so a follow-on `b` is a plain
+    // `char` and the label never repeats a `*` the source wrote once (LAYOUT-PTR-STAR, 2026-11-11).
+    const std::size_t declAt = topLevelDeclaratorMark( d.typeSpec );
+    d.baseSpec = trimView( d.typeSpec.substr( 0, declAt ) );
+    d.declPart = ( declAt < d.typeSpec.size() ) ? trimView( d.typeSpec.substr( declAt ) ) : std::string_view();
+    for( char c : d.declPart )
     {
         if( c == '*' )
         {
@@ -1814,24 +1847,17 @@ struct BodyWalk
 };
 
 // Fold ONE parsed declarator into the def's field list, advancing the offset cursor when it still can.
-inline void appendField( BodyWalk& w, const Declarator& d, std::string_view typeSpec )
+// `written` is the label (the type as the source spells it for THIS declarator); `baseSpec` is what is sized.
+inline void appendField( BodyWalk& w, const Declarator& d, std::string_view written, std::string_view baseSpec )
 {
     // Every string here reaches an XML ATTRIBUTE, which may not carry a raw newline under G4 — a member
     // declaration wrapped over two lines would otherwise emit one.
     FieldRow f;
     f.name = std::string( d.name );
-    f.type = flattenSpace( typeSpec, 160 );
-    if( d.isPointer )
-    {
-        f.type += "*";
-    }
-    if( d.isRef )
-    {
-        f.type += "&";
-    }
+    f.type = flattenSpace( written, 160 );
 
     const TypeScope    scope{ w.ctx, w.consts, w.fileId };
-    const ResolvedType r = resolveFieldType( scope, typeSpec, d.isPointer, d.isRef );
+    const ResolvedType r = resolveFieldType( scope, baseSpec, d.isPointer, d.isRef );
     TypeSize           t = r.size;
     f.resolved = flattenSpace( r.resolved, 160 );
     if( !r.note.empty() )
@@ -2054,14 +2080,18 @@ inline void modelStatement( BodyWalk& w, std::string_view stmt )
         const Declarator d = parseDeclarator( parts[i] );
         if( d.isBitfield )
         { w.refuse( "bitfield", "the bit allocation unit and packing order are implementation-defined" ); return; }
-        if( !d.ok || ( i == 0 && d.typeSpec.empty() ) )
+        if( !d.ok || ( i == 0 && d.baseSpec.empty() ) )
         { w.refuse( "unparsed-member", flattenSpace( parts[i], 160 ) ); return; }
 
         if( i == 0 )
         {
-            baseType = d.typeSpec;
+            baseType = d.baseSpec;
+            appendField( w, d, d.typeSpec, baseType );
+            continue;
         }
-        appendField( w, d, ( i == 0 ) ? d.typeSpec : baseType );
+        // A follow-on declarator shares only the BASE: `char *a, b;` makes b a `char`, `int *p, *q;` makes q an `int *`.
+        const std::string written = d.declPart.empty() ? std::string( baseType ) : std::string( baseType ) + " " + std::string( d.declPart );
+        appendField( w, d, written, baseType );
     }
 }
 

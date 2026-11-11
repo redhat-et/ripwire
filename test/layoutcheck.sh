@@ -391,6 +391,34 @@ has 'f n="cb"' \
     && ok "StdFunctionFieldCase: the std::function field is still COUNTED (not silently dropped)" \
     || no "StdFunctionFieldCase: field 'cb' vanished with no trace: $( printf '%s' "$L" | tr '<' '\n' | grep '^f ' )"
 
+# ── 15) LAYOUT-PTR-STAR (2026-11-11 audit): ty= is the type AS WRITTEN for THIS declarator. `char *name` printed
+#        `char **` (the `*` stayed in the type text and appendField added another), and `char *a, b;` labelled the
+#        plain `b` as `char *`. Sizes were right; the label was not.
+# fty NAME -> the ty= on the <f n="NAME"> row, unescaped enough for a compare
+fty(){ field "$1" ty; }
+run PtrStarCase
+PTR_SEEN="$( printf '%s' "$L" | tr '<' '\n' | grep '^f n=' | grep -c 'ty="[^"]*\*' )"
+[ "$PTR_SEEN" -ge 1 ] \
+    && ok "PtrStarCase premise: $PTR_SEEN pointer field rows seen" \
+    || no "PtrStarCase premise: no pointer field rows seen — the arms below would pass blind: $( printf '%s' "$L" | head -c 400 )"
+for pair in 'name|char *' 'a|char *' 'b|char' 'c|char*' 'argv|char **' 'p|int *' 'q|int *'; do
+    fn="${pair%%|*}"; want="${pair#*|}"
+    [ "$( fty "$fn" )" = "$want" ] \
+        && ok "PtrStarCase.$fn: ty=\"$want\" (as written)" \
+        || no "PtrStarCase.$fn: ty=\"$( fty "$fn" )\" (want \"$want\")"
+done
+expect_size  PtrStarCase 56 8
+expect_field PtrStarCase b 16 1
+expect_field PtrStarCase q 48 8
+
+# ── 16) a #define line inside a struct body is not part of the next field (tmux window_pane.sync_dirty) ──────────────
+run DefineLeakCase
+[ "$( fty sync_dirty )" = "unsigned int" ] \
+    && ok "DefineLeakCase.sync_dirty: ty=\"unsigned int\" (the #define lines above it, one continued, are not glued on)" \
+    || no "DefineLeakCase.sync_dirty: ty=\"$( fty sync_dirty )\" (want \"unsigned int\")"
+expect_size  DefineLeakCase 8 4
+expect_field DefineLeakCase sync_dirty 4 4
+
 # ── UNREADABLE DEFINITION: a mirror whose second half could not be read is DISCLOSED, in every build flavour ──────
 # A definition indexed from a warm cache whose file is unreadable when the verb runs used to be dropped with a
 # one-argument DISCLOSE — a debug trace, nothing at all in a Release binary — so a drifting mirror read
