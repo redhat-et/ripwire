@@ -1522,7 +1522,7 @@ private:
             }
             const bool             named = std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess );
             const std::string_view sep   = slotPathSep( r.lang );
-            const std::size_t      at    = sep.empty() ? std::string::npos : r.recvVar.rfind( sep );
+            const std::size_t      at    = sep.empty() ? std::string::npos : r.recvVar.str().rfind( sep );
             const std::string      leaf  = at == std::string::npos ? r.recvVar : r.recvVar.substr( at + sep.size() );   // resolveCallee's name
             if( !named && r.memberPath().empty() && !( sc == 'a' && registrars.contains( leaf ) ) )
             {
@@ -1896,7 +1896,7 @@ private:
     std::vector<NodeId> resolveCallee( const Reference& v ) const
     {
         const std::string_view sep = slotPathSep( v.lang );
-        const std::size_t      at  = sep.empty() ? std::string::npos : v.recvVar.rfind( sep );
+        const std::size_t      at  = sep.empty() ? std::string::npos : v.recvVar.str().rfind( sep );
         if( at == std::string::npos )
         {
             return valueRefFamily( v.lang ) == VrLangFamily::Rust ? resolveIn( v, v.recvVar, {} ) : resolveName( v, v.recvVar );

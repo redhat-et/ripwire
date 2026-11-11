@@ -267,7 +267,7 @@ inline DottedFacts dottedFactsFor( const IngestResult& ing, const std::set<std::
         }
         else
         {
-            const std::size_t dot = r.recvVar.rfind( '.' );
+            const std::size_t dot = r.recvVar.str().rfind( '.' );
             if( dot != std::string::npos && wanted.contains( r.recvVar.substr( dot + 1 ) ) )
             {
                 cand.push_back( &r );
