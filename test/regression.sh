@@ -551,6 +551,7 @@ for _g in \
     forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
+    forrowfeaturescheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsiblingdemotecheck \
