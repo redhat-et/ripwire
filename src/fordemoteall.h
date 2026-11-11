@@ -13,6 +13,7 @@
 // every dialect.
 #include "fordecltwin.h" // demoteAndPointRowsInto, siblingDemoteOn, declTwinOn, filesyms_detail::unescapeXmlAttr
 #include "memberowner.h" // MemberOwners / qualifiedMemberName: the row's n= as the XML dialect spells it
+#include "infra/jsonesc.h" // jsonesc::appendUtf8
 #include "serialize.h" // attrOf, jsonStr
 
 #include <span>
@@ -162,31 +163,6 @@ inline std::string_view topValue( std::string_view obj, std::string_view key )
     }
     return {};
 }
-inline void appendUtf8( std::string& out, std::uint32_t cp )
-{
-    if( cp < 0x80 )
-    {
-        out += char( cp );
-    }
-    else if( cp < 0x800 )
-    {
-        out += char( 0xC0 | ( cp >> 6 ) );
-        out += char( 0x80 | ( cp & 0x3F ) );
-    }
-    else if( cp < 0x10000 )
-    {
-        out += char( 0xE0 | ( cp >> 12 ) );
-        out += char( 0x80 | ( ( cp >> 6 ) & 0x3F ) );
-        out += char( 0x80 | ( cp & 0x3F ) );
-    }
-    else
-    {
-        out += char( 0xF0 | ( cp >> 18 ) );
-        out += char( 0x80 | ( ( cp >> 12 ) & 0x3F ) );
-        out += char( 0x80 | ( ( cp >> 6 ) & 0x3F ) );
-        out += char( 0x80 | ( cp & 0x3F ) );
-    }
-}
 inline std::uint32_t hex4( std::string_view s )
 {
     std::uint32_t v = 0;
@@ -220,7 +196,7 @@ inline std::string unquote( std::string_view q )
                 cp = lo >= 0xDC00 && lo < 0xE000 ? 0x10000 + ( ( cp - 0xD800 ) << 10 ) + ( lo - 0xDC00 ) : cp;
                 i += lo >= 0xDC00 && lo < 0xE000 ? 6 : 0;
             }
-            appendUtf8( out, cp );
+            jsonesc::appendUtf8( out, cp );
             continue;
         }
         out += e == 'n' ? '\n' : e == 't' ? '\t' : e == 'r' ? '\r' : e == 'b' ? '\b' : e == 'f' ? '\f' : e;
@@ -257,13 +233,10 @@ inline std::string xmlRowOf( std::string_view obj, std::string_view name )
 inline std::vector<std::string> pointerRanks( std::string_view answer )
 {
     std::vector<std::string> ranks;
-    for( std::size_t at = answer.find( "<t " ); at != std::string_view::npos; at = answer.find( "<t ", at + 1 ) )
+    for( std::string_view rest = answer; rest.contains( "<t " ); )
     {
-        const std::size_t close = answer.find( '>', at );
-        if( close != std::string_view::npos )
-        {
-            ranks.emplace_back( attrOf( answer.substr( at + 2, close - at - 2 ), "r" ) );
-        }
+        rest.remove_prefix( rest.find( "<t " ) + 2 ); // keep the space before the first attribute
+        ranks.emplace_back( attrOf( rest.substr( 0, rest.find( '>' ) ), "r" ) );
     }
     return ranks;
 }

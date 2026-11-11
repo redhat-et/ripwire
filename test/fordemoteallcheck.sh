@@ -135,7 +135,7 @@ for o in on:
 print( ";".join( bad ) or "ok" )
 PY
 )"
-[ "$j2" = ok ] && ok "(j2) --json: each pointer is the twin's row (p, r, the XML n= as sym), every other row unchanged" || no "(j2) $j2"
+if [ "$j2" = ok ]; then ok "(j2) --json: each pointer is the twin's row (p, r, the XML n= as sym), every other row unchanged"; else no "(j2) $j2"; fi
 
 # (b) the soft target sweep
 prev=0; plus=""; bok=1
@@ -152,7 +152,7 @@ for N in 1000 1300 1600 2000; do
     prev="$ent"
 done
 [ "$bok" = 1 ] && ok "(bp/b>=/bm/bw) --token-budget 1000..2000: rank prefixes, never fewer than the twin's rows, monotone in N, well formed"
-[ -n "$plus" ] && ok "(b+) the freed bytes buy rows:$plus" || no "(b+) no budget served more ranked entries than its undemoted twin"
+if [ -n "$plus" ]; then ok "(b+) the freed bytes buy rows:$plus"; else no "(b+) no budget served more ranked entries than its undemoted twin"; fi
 
 # (jb) --json under a soft target
 run --json --token-budget=1300 >"$TMP/jb.json"; runoff --json --token-budget=1300 >"$TMP/jb.off"
