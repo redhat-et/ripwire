@@ -220,7 +220,7 @@ else no "(t2) WidgetParser.parseWidgetConfig pointer=$( python3 "$TMP/pos.py" pt
 NTASK='how is WidgetParser.parseWidgetConfig used when the widget config value is checked'
 run ts "--for=$NTASK" >"$TMP/n5.on"; runoff ts "--for=$NTASK" >"$TMP/n5.off"
 python3 "$TMP/ref.py" "$TMP/n5.off" "$TMP/n5.on" "$NTASK" >"$TMP/n5.res" 2>&1
-grep -q '^PASS (a)' "$TMP/n5.res" && ok "(a) n5: $( grep -o '[0-9]* pointers' "$TMP/n5.res" )" || no "(a) n5: $( head -c 500 "$TMP/n5.res" )"
+if grep -q '^PASS (a)' "$TMP/n5.res"; then ok "(a) n5: $( grep -o '[0-9]* pointers' "$TMP/n5.res" )"; else no "(a) n5: $( head -c 500 "$TMP/n5.res" )"; fi
 [ "$( pos parseWidgetConfig "$TMP/n5.off" )" -gt 0 ] || no "(n5) the fixture's body row parseWidgetConfig is not in the n5 answer — the arm cannot see K4"
 stays n5 WidgetParser.parseWidgetConfig "$TMP/n5.off" "$TMP/n5.on" n5 "the task names WidgetParser.parseWidgetConfig"
 OTASK='how is Other.parseWidgetConfig used when the widget config value is checked'
@@ -244,7 +244,8 @@ cp -R "$TMP/ts" "$TMP/ts4"
 run ts4 "--for=$TTASK" >"$TMP/n4.on"; runoff ts4 "--for=$TTASK" >"$TMP/n4.off"
 grep -q 'already validated by the loader' "$TMP/n4.off" || no "(n4) the off answer carries no note on WidgetParser.parseWidgetConfig — the arm cannot see K6"
 python3 "$TMP/ref.py" "$TMP/n4.off" "$TMP/n4.on" "$TTASK" >"$TMP/n4.res" 2>&1
-grep -q '^PASS (a)' "$TMP/n4.res" && grep -q 'already validated by the loader' "$TMP/n4.on" && ok "(a) n4: the note is printed ($( grep -o '[0-9]* pointers' "$TMP/n4.res" ))" || no "(a) n4: $( head -c 500 "$TMP/n4.res" )"
+if grep -q '^PASS (a)' "$TMP/n4.res" && grep -q 'already validated by the loader' "$TMP/n4.on"; then ok "(a) n4: the note is printed ($( grep -o '[0-9]* pointers' "$TMP/n4.res" ))"
+else no "(a) n4: $( head -c 500 "$TMP/n4.res" )"; fi
 stays n4 WidgetParser.parseWidgetConfig "$TMP/n4.off" "$TMP/n4.on" n4 "it carries a --note-add note"
 
 # ---- cpp tree
