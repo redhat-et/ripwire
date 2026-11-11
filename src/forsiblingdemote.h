@@ -85,11 +85,13 @@ struct AnswerRow
     std::size_t dpos = 0; // 1-based <d> rank (0: not a <d> row)
     bool inSigs = false;
     bool noted = false; // (K6): a <note> rides inside the row
+    std::string_view section; // the element right under the root that holds the row (sigs, callers, syms, ...): ROW-FEATURE-DUMP's row source
 };
 struct AnswerScan
 {
     std::vector<AnswerRow> rows; // the answer rows in output order
     std::vector<std::string> callees; // n= of every <c> under a <h> hop row, unescaped
+    std::vector<AnswerRow> tails; // with scanAnswer's withTails only: every <t> (a tail entry, or a pointer that keeps its r=), in output order
 };
 
 using filesyms_detail::tagIs;
@@ -106,8 +108,14 @@ inline std::string_view nearestP( const OpenElements& open )
     return withP == open.rend() ? std::string_view() : withP->second;
 }
 
-// One walk over the answer's tags outside comments and CDATA.
-inline AnswerScan scanAnswer( std::string_view text )
+// The element right under the root among the open ones ("" outside any).
+inline std::string_view sectionOf( const OpenElements& open )
+{
+    return open.size() > 1 ? open[1].first : std::string_view();
+}
+
+// One walk over the answer's tags outside comments and CDATA. withTails: the <t> rows too (ROW-FEATURE-DUMP reads pointers and tails).
+inline AnswerScan scanAnswer( std::string_view text, bool withTails = false )
 {
     AnswerScan out;
     bool inSigs = false, inHop = false;
@@ -145,6 +153,7 @@ inline AnswerScan scanAnswer( std::string_view text )
         const std::size_t nameEnd = std::min( text.find_first_of( " />", i + 1 ), close );
         const std::string_view attrs = text.substr( nameEnd, close - nameEnd - ( selfClosing ? 1 : 0 ) );
         const std::string_view parentP = nearestP( open );
+        const std::string_view section = sectionOf( open ); // read before this element opens, like parentP
         if( !selfClosing && rest[1] != '?' && rest[1] != '!' )
         {
             open.emplace_back( text.substr( i + 1, nameEnd - i - 1 ), attrOf( attrs, "p" ) );
@@ -163,7 +172,7 @@ inline AnswerScan scanAnswer( std::string_view text )
         }
         else if( const char k = rest[1]; ( k == 'd' || k == 'y' || k == 's' || k == 'u' ) && rest[2] == ' ' && !( k == 'u' && attrOf( attrs, "v" ) == "used" ) )
         {
-            AnswerRow r { .tag = k, .at = i, .end = close + 1, .attrs = attrs, .parentP = parentP, .pos = out.rows.size() + 1, .inSigs = inSigs };
+            AnswerRow r { .tag = k, .at = i, .end = close + 1, .attrs = attrs, .parentP = parentP, .pos = out.rows.size() + 1, .inSigs = inSigs, .section = section };
             if( k == 'd' )
             {
                 r.dpos = ++dRows;
@@ -172,6 +181,10 @@ inline AnswerScan scanAnswer( std::string_view text )
                 r.noted = text.substr( close, r.end - close ).contains( "<note " );
             }
             out.rows.push_back( r );
+        }
+        else if( withTails && rest[1] == 't' && rest[2] == ' ' )
+        {
+            out.tails.push_back( AnswerRow { .tag = 't', .at = i, .end = close + 1, .attrs = attrs, .parentP = parentP, .inSigs = inSigs, .section = section } );
         }
         i = close;
     }
@@ -288,15 +301,15 @@ inline bool provenEdge( const Graph& g, std::size_t edge ) noexcept
 {
     return edge != SIZE_MAX && ( g.outNameOnly.empty() || ( edge < g.outNameOnly.size() && edgeKindByte( g.outNameOnly[edge] ) == 0 ) );
 }
-// Proven out-neighbours (forward) or in-neighbours (!forward) of `u`, itself left out.
+// Out-neighbours (forward) or in-neighbours (!forward) of `u`, itself left out; provenOnly: over proven edges only.
 template<class F>
-inline void forProvenNeighbours( const Graph& g, NodeId u, bool forward, F&& visit )
+inline void forNeighbours( const Graph& g, NodeId u, bool forward, bool provenOnly, F&& visit )
 {
     if( forward )
     {
         for( std::uint32_t k = std::size_t( u ) + 1 < g.outOff.size() ? g.outOff[u] : 0; std::size_t( u ) + 1 < g.outOff.size() && k < g.outOff[u + 1]; ++k )
         {
-            if( g.outTargets[k] != u && provenEdge( g, k ) )
+            if( g.outTargets[k] != u && ( !provenOnly || provenEdge( g, k ) ) )
             {
                 visit( g.outTargets[k] );
             }
@@ -311,11 +324,17 @@ inline void forProvenNeighbours( const Graph& g, NodeId u, bool forward, F&& vis
     }
     for( std::uint32_t k = ro[u]; k < ro[u + 1]; ++k )
     {
-        if( ci[k] != u && provenEdge( g, edgeIndex( g, ci[k], u ) ) )
+        if( ci[k] != u && ( !provenOnly || provenEdge( g, edgeIndex( g, ci[k], u ) ) ) )
         {
             visit( NodeId( ci[k] ) );
         }
     }
+}
+// Proven out-neighbours (forward) or in-neighbours (!forward) of `u`, itself left out.
+template<class F>
+inline void forProvenNeighbours( const Graph& g, NodeId u, bool forward, F&& visit )
+{
+    forNeighbours( g, u, forward, /*provenOnly=*/true, visit );
 }
 // The seeds' one-hop proven neighbourhoods, each way round: a row is within two proven hops of a seed when the seed, or a node one hop
 // from it in the same direction, is its own neighbour.
@@ -352,21 +371,56 @@ inline bool provenPathToSeed( const Graph& g, const SeedReach& sr, NodeId id )
     return found;
 }
 
+// Why a <d> row stays a row, or that it goes (ROW-FEATURE-DUMP prints it per row): the rule's checks in the order it reads them.
+enum class DemoteVerdict : std::uint8_t
+{
+    NotInSigs, // not a <sigs> row
+    TopRank, // (r): <d> rank <= kDemoteMinRank
+    Noted, // (K6)
+    TypeWithMembers, // (K1) mem=
+    SlotFact, // (K7) slot_by= / slot_fields=
+    NoSameFileAbove, // (f) fails
+    HopCallee, // (K2)
+    OwnerNear, // (K3)
+    Picked, // (r) and (f) hold and no byte guard keeps it: K4 and K5 decide
+    CallPath, // (K4)
+    SameAs, // (K5)
+    TermHit, // (K8): a task term hits the row's text, under a budget
+    Demoted, // printed as a tail pointer
+};
+inline constexpr std::array<std::string_view, 13> kDemoteVerdictNames = { "not_sigs", "top_rank", "K6_noted", "K1_mem", "K7_slot", "no_same_file",
+                                                                          "K2_hop_callee", "K3_owner_near", "picked", "K4_call_path", "K5_same_as",
+                                                                          "K8_term_hit", "demoted" };
+static_assert( kDemoteVerdictNames.size() == std::size_t( DemoteVerdict::Demoted ) + 1, "one name per verdict" );
+
+// The verdict the answer's own bytes give a <d> row: (r), (f), K1-K3, K6 and K7; Picked leaves K4 and K5 to the graph.
+inline DemoteVerdict verdictByBytes( const AnswerScan& scan, const std::vector<const AnswerRow*>& dRows, const AnswerRow& r )
+{
+    const auto carries = [&]( std::string_view attr ) { return r.attrs.contains( attr ); };
+    if( !r.inSigs || r.dpos <= kDemoteMinRank || r.noted )
+    {
+        return !r.inSigs ? DemoteVerdict::NotInSigs : r.dpos <= kDemoteMinRank ? DemoteVerdict::TopRank : DemoteVerdict::Noted;
+    }
+    if( std::ranges::any_of( kKeepRowAttrs, carries ) )
+    {
+        return carries( kKeepRowAttrs[0] ) ? DemoteVerdict::TypeWithMembers : DemoteVerdict::SlotFact;
+    }
+    const std::string_view file = fileOf( r );
+    const std::string name = filesyms_detail::unescapeXmlAttr( attrOf( r.attrs, "n" ) );
+    if( !std::any_of( dRows.begin(), dRows.begin() + std::ptrdiff_t( r.dpos - 1 ), [&]( const AnswerRow* x ) { return fileOf( *x ) == file; } ) )
+    {
+        return DemoteVerdict::NoSameFileAbove;
+    }
+    return hopCallee( scan, name ) ? DemoteVerdict::HopCallee : ownerNear( dRows, r, name ) ? DemoteVerdict::OwnerNear : DemoteVerdict::Picked;
+}
+
 // The <d> rows (r) and (f) pick that K1-K3, K6 and K7 (the answer's own bytes) do not keep, in answer order.
 inline std::vector<const AnswerRow*> pickByBytes( const AnswerScan& scan, const std::vector<const AnswerRow*>& dRows )
 {
     std::vector<const AnswerRow*> picked;
     for( const AnswerRow* r : dRows )
     {
-        const auto carries = [&]( std::string_view attr ) { return r->attrs.contains( attr ); };
-        if( !r->inSigs || r->dpos <= kDemoteMinRank || r->noted || std::ranges::any_of( kKeepRowAttrs, carries ) )
-        {
-            continue;
-        }
-        const std::string_view file = fileOf( *r );
-        const bool sameFileAbove = std::any_of( dRows.begin(), dRows.begin() + std::ptrdiff_t( r->dpos - 1 ), [&]( const AnswerRow* x ) { return fileOf( *x ) == file; } );
-        const std::string name = filesyms_detail::unescapeXmlAttr( attrOf( r->attrs, "n" ) );
-        if( sameFileAbove && !hopCallee( scan, name ) && !ownerNear( dRows, *r, name ) )
+        if( verdictByBytes( scan, dRows, *r ) == DemoteVerdict::Picked )
         {
             picked.push_back( r );
         }
@@ -455,6 +509,48 @@ inline bool termHitsRow( std::string_view answer, const AnswerRow& r, const std:
                                 { return !t.empty() && ( darkflags::containsWord( name, t ) || darkflags::containsWord( scope, t ) || darkflags::containsWord( text, t ) ); } );
 }
 
+// ROW-FEATURE-DUMP (src/forrowfeatures.h): one <d> row's verdict, keyed by the row's p=, n= and r= bytes (a pointer keeps all three).
+struct DemoteVerdictRow
+{
+    std::string p, n, r;
+    DemoteVerdict verdict = DemoteVerdict::NotInSigs;
+};
+// Where demoteSiblingRows records its verdicts: null on every run but a RIPWIRE_ROW_FEATURES one, which records nothing.
+inline std::vector<DemoteVerdictRow>*& demoteVerdictSink() noexcept
+{
+    static std::vector<DemoteVerdictRow>* sink = nullptr;
+    return sink;
+}
+// Every <d> row's verdict into `sink`. afterK4 / demote: the demote marks after K4 and after K5 (null: nothing was picked).
+inline void recordDemoteVerdicts( std::vector<DemoteVerdictRow>& sink, const AnswerScan& scan, const std::vector<const AnswerRow*>& dRows,
+                                  const std::vector<char>* afterK4, const std::vector<char>* demote )
+{
+    for( const AnswerRow* r : dRows )
+    {
+        DemoteVerdict v = verdictByBytes( scan, dRows, *r );
+        if( v == DemoteVerdict::Picked && afterK4 != nullptr && demote != nullptr )
+        {
+            v = ( *demote )[r->pos - 1] != 0 ? DemoteVerdict::Demoted : ( *afterK4 )[r->pos - 1] != 0 ? DemoteVerdict::SameAs : DemoteVerdict::CallPath;
+        }
+        sink.push_back( { std::string( attrOf( r->attrs, "p" ) ), std::string( attrOf( r->attrs, "n" ) ), std::string( attrOf( r->attrs, "r" ) ), v } );
+    }
+}
+
+// (K8) the verdict of each row K8 kept whole (recordDemoteVerdicts read it as a picked row K4 kept).
+inline void markTermKept( std::vector<DemoteVerdictRow>& sink, const std::vector<const AnswerRow*>& termKept )
+{
+    for( const AnswerRow* r : termKept )
+    {
+        for( DemoteVerdictRow& v : sink )
+        {
+            if( v.p == attrOf( r->attrs, "p" ) && v.n == attrOf( r->attrs, "n" ) && v.r == attrOf( r->attrs, "r" ) )
+            {
+                v.verdict = DemoteVerdict::TermHit;
+            }
+        }
+    }
+}
+
 // The answer with the demoted rows rewritten as tail pointers, read as `regime` says (Budgeted: K8 holds too); "" when none is.
 inline std::string demoteSiblingRowsAs( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, DemoteRegime regime )
 {
@@ -468,18 +564,31 @@ inline std::string demoteSiblingRowsAs( const IngestResult& ing, const Graph& g,
         }
     }
     std::vector<const AnswerRow*> picked = pickByBytes( scan, dRows );
+    std::vector<const AnswerRow*> termKept; // (K8): picked rows a task term hits, kept whole under a budget
     if( regime == DemoteRegime::Budgeted )
     {
         const std::vector<std::string_view> terms = taskNames( task );
-        std::erase_if( picked, [&]( const AnswerRow* r ) { return termHitsRow( answer, *r, terms ); } );
+        std::erase_if( picked, [&]( const AnswerRow* r ) { return termHitsRow( answer, *r, terms ) && ( termKept.push_back( r ), true ); } );
     }
+    std::vector<DemoteVerdictRow>* const sink = demoteVerdictSink();
     if( picked.empty() )
     {
+        if( sink != nullptr )
+        {
+            recordDemoteVerdicts( *sink, scan, dRows, nullptr, nullptr );
+            markTermKept( *sink, termKept );
+        }
         return {};
     }
     std::vector<char> demote( scan.rows.size(), 0 );
     markWithoutCallPath( ing, g, task, scan, picked, demote );
+    const std::vector<char> afterK4 = sink != nullptr ? demote : std::vector<char>();
     keepSameAsTargets( dRows, picked, demote );
+    if( sink != nullptr )
+    {
+        recordDemoteVerdicts( *sink, scan, dRows, &afterK4, &demote );
+        markTermKept( *sink, termKept );
+    }
     return pointerAnswer( answer, picked, demote );
 }
 } // namespace demote_detail
