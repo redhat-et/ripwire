@@ -42,6 +42,7 @@
 #include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
 #include "forliteral.h"          // lit_detail::isConstShaped; hopbody.h renderBodyElement — a CONST-shaped key is <lit>'s; search.h grepCollect/grepEnrich, redact, nextverb
 #include "crossref.h"            // crossref::identEndingAt — the gen rung reads a path segment off a line
+#include "forimportspec.h"       // IMPORT-SPELLING: importSpecOf, resolveWebSpec/resolvePythonSpec, walkImportSpec, tsOrderFile
 #include "graph.h"               // tomlSectionNames, resolveJsNamedImportFile, lexicalNormalize
 #include "infra/namesplit.h"     // isIdentChar
 #include "model.h"
@@ -528,8 +529,11 @@ struct Walk
         auto [ it, fresh ] = webTargets.try_emplace( b, kNoFile );
         if( fresh )
         {
-            const auto [ file, ambiguous ] = resolveJsNamedImportFile( lexicalNormalize( rootRelPath( ing, b->fileId ) ), b->typeName, files, nullptr, b->fileId );
-            it->second = ambiguous ? kNoFile : file;
+            const std::string importer = lexicalNormalize( rootRelPath( ing, b->fileId ) );
+            const auto [ file, ambiguous ] = resolveJsNamedImportFile( importer, b->typeName, files, nullptr, b->fileId );
+            // IMPORT-SPELLING: a relative extensionless specifier that names both a file and a directory (`./di` beside `di.ts`
+            // and `di/`) is the FILE, as tsc reads it (forimportspec.h tsOrderFile), not a silent end of the walk
+            it->second = !ambiguous && file != kNoFile ? file : importspec_detail::tsOrderFile( importer, b->typeName, files );
         }
         return it->second;
     }
@@ -1006,6 +1010,10 @@ inline std::vector<ReexportTaskName> reexportTaskNames( std::string_view task )
 {
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
     std::vector<ReexportTaskName>       out;
+    // IMPORT-SPELLING: the name an import spelling binds (`inject` in `inject imported from @angular/core`; the cue words between it
+    // and `from` are skipped), never the cue word itself
+    const std::optional<ImportSpecTask> spec   = importSpecOf( tokens );
+    const std::size_t                   specAt = spec ? std::size_t( std::ranges::find( tokens, std::string_view( spec->name ) ) - tokens.begin() ) : tokens.size();
     const auto add = [ & ]( std::string_view w, std::vector<std::string> q )
     {
         if( out.size() < kReexportNameCap && w.size() >= 3 && std::ranges::none_of( out, [ & ]( const ReexportTaskName& n ) { return n.name == w; } ) )
@@ -1029,7 +1037,7 @@ inline std::vector<ReexportTaskName> reexportTaskNames( std::string_view task )
             // the LEAF of a qualified spelling is a name whatever its case (`Utils.formatDate`, `api.v1.handler`): the qualified form
             // is itself the code shape. A file or host suffix (`main.go`, `pkg.json`) is not a leaf.
             const bool leaf = !segs.empty() && end == tok.size() && !lit_detail::isFileOrHostSuffix( w );
-            if( code || leaf || ( end == tok.size() && at == 0 && reexportFromModule( tokens, i ) ) )
+            if( code || leaf || ( end == tok.size() && at == 0 && spec && i == specAt ) )
             {
                 add( w, leaf ? std::vector<std::string>( segs.begin(), segs.end() - 1 ) : std::vector<std::string>{} );
             }
@@ -1451,6 +1459,112 @@ inline std::size_t printReexportChains( ReexportXml& xml, const std::vector<Chai
 
 }   // namespace reexport_detail
 
+// IMPORT-SPELLING: what the spelled import contributes to <reexports>. xml: its spec row (and the walked chain); name: the spelled
+// name; dropName: the definition-side chains skip that name (the walk served it, or the spec is ambiguous or external); narrow:
+// the definition-side chains keep only definitions under pkgDir (the package the spec names); defs: def rows printed.
+struct ImportSpecBlock
+{
+    std::string xml;
+    std::string name;
+    std::string pkgDir;
+    bool        dropName = false;
+    bool        narrow   = false;
+    std::size_t defs     = 0;
+};
+
+inline ImportSpecBlock renderImportSpecBlock( const IngestResult& ing, const std::vector<std::string_view>& tokens )
+{
+    using namespace reexport_detail;
+    ImportSpecBlock                     out;
+    const std::optional<ImportSpecTask> spec = forImportSpecOn() ? importSpecOf( tokens ) : std::nullopt;
+    if( !spec || spec->spec.starts_with( '.' ) )
+    {
+        return out;   // no spelled import, or a relative one (no package to resolve): the definition-side chains as before
+    }
+    const HashMap<std::string, std::uint32_t> files = webFileMap( ing );
+    const SpecEntry e = spec->python ? resolvePythonSpec( ing, spec->spec ) : resolveWebSpec( ing, files, spec->spec );
+    out.name = spec->name;
+    if( spec->python && e.kind != SpecEntry::Kind::Resolved && e.kind != SpecEntry::Kind::Ambiguous )
+    {
+        return out;   // a dotted word that names no in-tree module (`asyncio.run` in a tree without asyncio, `Handle._run`)
+    }
+    std::vector<char> esc;
+    Sources           src{ ing, {} };
+    const auto        attr = [ & ]( std::string_view k, std::string_view v ) { out.xml.append( " " ).append( k ).append( "=\"" ).append( escapeXml( v, esc ) ).append( "\"" ); };
+    const auto        num  = [ & ]( std::string_view k, std::size_t v ) { out.xml.append( " " ).append( k ).append( "=\"" ).append( std::to_string( v ) ).append( "\"" ); };
+    out.xml.append( "<spec" );
+    attr( "m", spec->spec );
+    attr( "n", spec->name );
+    if( e.kind == SpecEntry::Kind::External && !spec->python && !jsModuleIsForeign( spec->spec, jsModuleVocabulary( ing ) ) )
+    {
+        return {};   // no package.json declares it, but a segment names this tree (a tsconfig path alias, an undeclared workspace dir): as before
+    }
+    if( e.kind == SpecEntry::Kind::External )
+    {
+        out.dropName = true;
+        out.xml.append( " external=\"1\"/>" );
+        return out;
+    }
+    if( e.kind == SpecEntry::Kind::Ambiguous )
+    {
+        out.dropName = true;
+        num( "cands", e.cands );
+        out.xml.append( "/>" );
+        return out;
+    }
+    attr( "p", rootRelPath( ing, e.manifest ) );
+    if( e.line != 0 )
+    {
+        num( "l", e.line );
+    }
+    out.pkgDir = e.pkgDir;
+    out.narrow = !spec->python;
+    if( e.entry == kNoFile )
+    {
+        out.xml.append( " found=\"0\"/>" );
+        return out;
+    }
+    attr( "entry", rootRelPath( ing, e.entry ) );
+    const auto webTarget = [ & ]( const Binding* b )
+    {
+        const std::string importer = lexicalNormalize( rootRelPath( ing, b->fileId ) );
+        const auto [ file, ambiguous ] = resolveJsNamedImportFile( importer, b->typeName, files, nullptr, b->fileId );
+        return !ambiguous && file != kNoFile ? file : importspec_detail::tsOrderFile( importer, b->typeName, files );
+    };
+    const SpecWalk w = walkImportSpec( ing, files, e.entry, spec->name, spec->python, webTarget );
+    if( w.defs > 1 )
+    {
+        num( "defs", w.defs );
+    }
+    out.xml.append( w.capped ? " capped=\"1\"" : "" );
+    if( w.def == nullptr )
+    {
+        out.xml.append( " found=\"0\"/>" );
+        return out;
+    }
+    out.dropName = true;
+    out.defs     = 1;
+    out.xml.append( "/><def" );
+    attr( "n", w.def->name );
+    attr( "p", rootRelPath( ing, w.def->fileId ) );
+    num( "l", w.def->line );
+    num( "total", w.hops.size() );
+    out.xml.append( "/>" );
+    for( const SpecHop& h : w.hops )
+    {
+        out.xml.append( "<rx" );
+        attr( "p", rootRelPath( ing, h.file ) );
+        num( "l", src.lineOf( h.file, h.byte ) );
+        attr( "from", h.from );
+        if( !h.glob && h.taken != h.bound )
+        {
+            attr( "as", h.bound );
+        }
+        out.xml.append( h.glob ? " glob=\"1\"/>" : "/>" );
+    }
+    return out;
+}
+
 // CR pre-pass 42b: a token budget is a request the block must obey, so under one the rows are NOT printed (they sit outside
 // est_tokens). A one-line marker names how many definitions carry a chain; the legend sentence holds no double dash.
 inline std::string reexportHeldMarker( std::size_t defs )
@@ -1465,12 +1579,24 @@ inline std::string reexportHeldMarker( std::size_t defs )
 inline std::string renderForReexports( const IngestResult& ing, std::string_view task, bool held = false )
 {
     using namespace reexport_detail;
-    const std::vector<ReexportTaskName> names  = reexportTaskNames( task );
+    std::vector<ReexportTaskName>       names  = reexportTaskNames( task );
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
-    const std::vector<const Symbol*>    defs   = names.empty() ? std::vector<const Symbol*>{} : reexportDefs( ing, names, reexportFromPackage( tokens ) );
+    // IMPORT-SPELLING: the chain FROM the spelled import, ahead of the definition-side chains; it may also drop the spelled name
+    // from them (served, ambiguous or external) and narrow them to the package's own directory
+    ImportSpecBlock spec = renderImportSpecBlock( ing, tokens );
+    if( spec.dropName )
+    {
+        std::erase_if( names, [ & ]( const ReexportTaskName& n ) { return n.name == spec.name; } );
+    }
+    std::vector<const Symbol*> defs = names.empty() ? std::vector<const Symbol*>{} : reexportDefs( ing, names, spec.narrow ? std::string_view() : reexportFromPackage( tokens ) );
+    if( spec.narrow )
+    {
+        const std::string under = spec.pkgDir.empty() ? std::string() : spec.pkgDir + "/";
+        std::erase_if( defs, [ & ]( const Symbol* d ) { return !rootRelPath( ing, d->fileId ).starts_with( under ); } );
+    }
     if( defs.empty() )
     {
-        return {};
+        return spec.xml.empty() ? std::string() : held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
     }
     // CR nitpick (review 5712563408, forreexport.h:1025): no cue word and no task-named file means no chain can print (a chain prints
     // when cued, or when it carries a use row, and a use row is only noted from a task-named file): return before the file map and
@@ -1485,7 +1611,7 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     std::vector<char> taskFiles = reexportTaskFiles( ing, tokens );
     if( !cued && !qualified && std::ranges::none_of( taskFiles, []( char c ) { return c != 0; } ) )
     {
-        return {};
+        return spec.xml.empty() ? std::string() : held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
     }
     const auto dialectOf = []( DepDialect want ) { return [ want ]( const Symbol* d ) { return dependencyDialect( d->lang ) == want; }; };
     const bool rust      = std::ranges::any_of( defs, dialectOf( DepDialect::Rust ) );
@@ -1503,15 +1629,19 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     }
     if( xml.out.empty() )
     {
-        return xml.out;
+        return spec.xml.empty() ? std::string() : held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
     }
     if( held )
     {
-        return reexportHeldMarker( printedDefs );
+        return reexportHeldMarker( printedDefs + spec.defs );
     }
     for( const auto& [ attrSpelling, clause ] : kReexportAttrClauses )   // SIZE-1: the legend rides the first def; the rows are all printed now
     {
         eraseAbsentClause( xml.out, clause, xml.out.contains( attrSpelling ) );
+    }
+    if( !spec.xml.empty() )   // the spelled import's chain first, under its own legend; the definition-side chains keep theirs
+    {
+        xml.out.insert( std::string_view( "<reexports>" ).size(), std::string( kImportSpecLegend ) + spec.xml );
     }
     return xml.out.append( "</reexports>" );
 }
