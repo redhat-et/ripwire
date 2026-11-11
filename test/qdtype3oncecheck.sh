@@ -115,9 +115,13 @@ fi
 # ── M1: one edited tracked file, archived-HEAD basis; the second call reads the HEAD side from the cache ────
 printf 'int other_helper2( int y )\n{\n    return y * 2;\n}\n' >> "$REPO/src/other.c"
 run_qd mod1
-if grep -q 'head_basis=' "$TMP/mod1.out"; then no "M1: premise — a modified tree still carried head_basis= (expected the archived basis)"; else ok "M1: premise — archived-HEAD basis (no head_basis=)"; fi
+# each modified-tree call must answer (rc 0, a non-empty <qd> answer) before its output is read (CodeRabbit 4542253228): an
+# empty mod1.out would pass the absence check below, and a failing mod2 that still printed its stats line would pass M1
+modok(){ [ "$( cat "$TMP/$1.rc" )" = 0 ] && grep -q '<quality-delta' "$TMP/$1.out"; }
+if ! modok mod1; then no "M1: the first modified-tree call exited $( cat "$TMP/mod1.rc" ) with $( wc -c < "$TMP/mod1.out" | tr -d ' ' ) B of answer (want rc 0 and a <quality-delta> answer)"
+elif grep -q 'head_basis=' "$TMP/mod1.out"; then no "M1: premise — a modified tree still carried head_basis= (expected the archived basis)"; else ok "M1: premise — archived-HEAD basis (no head_basis=)"; fi
 run_qd mod2
-check_arm mod2 M1
+if modok mod2; then check_arm mod2 M1; else no "M1: the second modified-tree call exited $( cat "$TMP/mod2.rc" ) with $( wc -c < "$TMP/mod2.out" | tr -d ' ' ) B of answer (want rc 0 and a <quality-delta> answer)"; fi
 
 if [ "$fail" -ne 0 ]; then echo "qdtype3oncecheck: FAIL"; exit 1; fi
 echo "qdtype3oncecheck: OK"
