@@ -896,14 +896,6 @@ inline constexpr MemberCallShape kMemberCallShapes[] = {
     { "csharp",     "invocation_expression", "member_access_expression", "name" },
 };
 
-// The row for this compiled program, or null when its grammar has none or the pattern is not a call. kMemberCallShapes
-// holds ONE row per grammarName, so a lookup by grammar is the whole search.
-inline const MemberCallShape* memberCallShapeFor( std::string_view grammarName, std::string_view rootKind ) noexcept
-{
-    const MemberCallShape* row = findByField( kMemberCallShapes, &MemberCallShape::grammarName, grammarName );   // one row per grammar
-    return ( row != nullptr && row->callKind == rootKind ) ? row : nullptr;
-}
-
 // V-2 (adversarial verification 2026-08-20). The ellipsis probe ABANDONS a candidate node when the run of
 // siblings it would have to absorb exceeds kEllipsisBound — and before this struct existed, that abandon
 // was indistinguishable from "this node does not match". A 400-argument `foo(0,…,399, zzz)` that LITERALLY
@@ -1163,7 +1155,9 @@ inline void findMatches( const PatternProgram& prog, TSNode root, std::string_vi
         return;
     }
     const std::uint16_t rootKindId = prog.nodes[0].kindId;
-    stats.memberShape              = memberCallShapeFor( prog.grammarName, prog.rootKind );
+    // the program's member-call row: kMemberCallShapes holds ONE row per grammar, and it applies only to a CALL pattern
+    const MemberCallShape* shape   = findByField( kMemberCallShapes, &MemberCallShape::grammarName, std::string_view( prog.grammarName ) );
+    stats.memberShape              = ( shape != nullptr && shape->callKind == prog.rootKind ) ? shape : nullptr;
     std::vector<TSNode> stack;
     std::vector<TSNode> kids;     // reused across nodes — a warm walk allocates nothing per node
     ChildCursor         cursor( root );
