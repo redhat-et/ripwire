@@ -173,7 +173,9 @@ inline constexpr const char* kExemplarSelectionRule =
     "chosen by ROLE, NEVER by text similarity to your task: candidates are first filtered to cognitive "
     "complexity at or under the ccx ceiling (4x the complexity bar), then ordered non-fixture path before "
     "test-fixture path, tested before untested, higher fan-in, lower complexity, fewer lines, lowest id. "
-    "low_confidence=1 marks a weak task-to-kind match that fell back to fn; over_ccx_bar=1 marks a corpus "
+    "low_confidence=1 marks a weak task-to-kind match that fell back to fn, or (with off_task=1) a task that did "
+    "match the corpus while the role pick shares no word with it or with the names it matched, so it is a shape "
+    "to copy, not the code your task is about; over_ccx_bar=1 marks a corpus "
     "where nothing was under the ceiling, so the pick is the least bad rather than a clean one; candidates= "
     "counts the ELIGIBLE instances of the kind (post-ceiling), not every instance";
 
@@ -186,7 +188,26 @@ struct ExemplarPick
     bool        fromTask       = false;  // the arg was a task string, not a kind token
     bool        lowConfidence  = false;  // INVARIANT 3: weak task→kind, fell back to Function
     bool        overCcxBar     = false;  // INVARIANT 1 relaxed: nothing under the ceiling, winner is over it
+    bool        offTask        = false;  // INVARIANT 4: a trusted task match, but the role winner shares no word with it
+    // INVARIANT 4's vocabulary: the task's content subtokens plus those of the window's corroborating names. Filled on
+    // the task path only, read once by hedgeOffTaskPick, and at most kExemplarConfWindow names' worth of short words.
+    std::vector<std::string> onTaskToks;
 };
+
+// A CONTENT subtoken: a lexical subtoken (>= 2 bytes, lexical.h subtokens) that is not a route stopword (`the`, `of`,
+// `how` ...). Appended to `out` only when it is not there already, so the vocabulary stays a short, duplicate-free list.
+inline void appendContentSubtokens( std::string_view text, std::vector<std::string>& out )
+{
+    std::vector<std::string> toks;
+    subtokens( text, toks );
+    for( std::string& t : toks )
+    {
+        if( !isRouteStopword( t ) && std::ranges::find( out, t ) == out.end() )
+        {
+            out.push_back( std::move( t ) );
+        }
+    }
+}
 
 // does the winner's NAME share at least one subtoken with the task? (INVARIANT 3 confidence gate.)
 inline bool shareNameSubtoken( std::string_view name, const std::vector<std::string>& taskToks )
@@ -265,6 +286,18 @@ inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::s
     }
     const float shareOfWindow = window ? float( corroborating ) / float( window ) : 0.f;
     const bool  trustworthy   = bestScore > 0.f && shareOfWindow > kExemplarConfMinShare;
+    if( trustworthy )
+    {
+        appendContentSubtokens( kindOrTask, pick.onTaskToks );
+        for( std::size_t j = 0; j < window; ++j )
+        {
+            const std::string& name = ing.symbols[ranked[j].second].name;
+            if( shareNameSubtoken( name, taskToks ) )
+            {
+                appendContentSubtokens( name, pick.onTaskToks );   // the corroborating names only: the matched cluster's words
+            }
+        }
+    }
 
     pick.targetKind    = trustworthy ? ing.symbols[best].kind : SymKind::Function;
     pick.lowConfidence = !trustworthy;
@@ -312,6 +345,27 @@ inline void pickWinnerOfKind( const IngestResult& ing, const std::vector<std::ui
     }
 }
 
+// INVARIANT 4 (the off-task hedge, audit EXEMPLAR-VERB-TASK-BLIND 2026-11-11). The winner is chosen by ROLE over EVERY
+// candidate of the donated kind, so a task that matches the corpus well still gets a pick unrelated to the match: hono
+// `a middleware` returned `useState` (src/jsx/hooks) with no hedge, while `basicAuth middleware` returned the same pick
+// flagged low_confidence. A confident pick the task never touched is the confident-wrong case, and the write-moment
+// skills tell agents to run this verb before writing code. So when the kind WAS trusted but the winner's name shares
+// no content subtoken with the task or with the window's corroborating names, the pick is hedged: lowConfidence plus
+// offTask, which says WHY. The pick itself is unchanged — restricting the ranking to the matched cluster is the
+// larger follow-up this hedge does not attempt.
+inline void hedgeOffTaskPick( const IngestResult& ing, ExemplarPick& pick )
+{
+    if( !pick.fromTask || pick.lowConfidence || pick.winner == kNoNode )
+    {
+        return;   // a kind token, an already-hedged weak match, or no pick: nothing to judge
+    }
+    std::vector<std::string> winnerToks;
+    appendContentSubtokens( ing.symbols[pick.winner].name, winnerToks );
+    const bool onTask = std::ranges::any_of( winnerToks, [ & ]( const std::string& t ) { return std::ranges::find( pick.onTaskToks, t ) != pick.onTaskToks.end(); } );
+    pick.offTask       = !onTask;
+    pick.lowConfidence = !onTask;
+}
+
 // selectExemplar — resolve the target kind, then pick the best-in-class instance by ROLE under the three
 // A3-F5 invariants. `fanIn` = in-edge CSR row lengths (reused-count), `tested` = the computeQMetrics flag;
 // both indexed by NodeId (short/absent vectors degrade to 0 — no crash). The ccx ceiling is tried FIRST;
@@ -334,6 +388,7 @@ inline ExemplarPick selectExemplar( const IngestResult& ing, const Graph& g,
         pickWinnerOfKind( ing, fanIn, tested, /*eligibleOnly=*/false, pick );   // pass B: nothing was under it
         pick.overCcxBar = pick.winner != kNoNode;
     }
+    hedgeOffTaskPick( ing, pick );
     return pick;
 }
 
