@@ -894,13 +894,6 @@ inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& 
     return out;
 }
 
-// ANCHOR-HONESTY: the plain words a short "what does X call" question frames X with. Beside a source syntax anchor they are the
-// question, not a second subject: a test-only `call` must not veto X, and a source `invoke` elsewhere must not anchor the answer.
-inline bool isCallFrameVerb( std::string_view w )
-{
-    return detail::graphSubjectWordIs( w, { "call", "calls", "invoke", "invokes" } );
-}
-
 // The query without the words `drop` selects (sentence order kept), the dropped words that are not route stopwords (the ones a reader
 // needs named), and whether any word went at all.
 struct QueryWithout
@@ -930,7 +923,13 @@ inline QueryWithout queryWithout( std::string_view query, bool ( *drop )( std::s
     return out;
 }
 
-inline bool isFrameOrQuestionWord( std::string_view w ) { return isCallFrameVerb( w ) || subject_detail::isQuestionLead( w ); }
+// ANCHOR-HONESTY: the words a short "what does X call" question frames X with: the call-frame verbs and the question leads. Beside a
+// source syntax anchor they are the question, not a second subject: a test-only `call` must not veto X, and a source `invoke` elsewhere
+// must not anchor the answer.
+inline bool isFrameOrQuestionWord( std::string_view w )
+{
+    return detail::graphSubjectWordIs( w, { "call", "calls", "invoke", "invokes" } ) || subject_detail::isQuestionLead( w );
+}
 inline bool isQuestionLeadWord( std::string_view w ) { return subject_detail::isQuestionLead( w ); }
 
 // ANCHOR-HONESTY R1b: a docs-file tie never beats a source definition. An anchor whose word is a source syntax anchor but whose
