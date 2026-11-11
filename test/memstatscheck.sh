@@ -24,8 +24,8 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
-no(){ fail=1; printf '  FAIL  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
+no(){ fail=1; printf '  FAIL  %s\n' "$*"; return 0; }
 kPlateauMib=20   # M2 2026-11-11, plain build, 3 runs each: 23.8-23.9 MiB with reserve( ing.bindings.size() ), 16.6-16.8 by kind
 
 if ! "$BIN" --version 2>/dev/null | grep -q '^ripwire '; then
