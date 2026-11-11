@@ -621,20 +621,16 @@ inline void bindDeclinedSite( const IngestResult& ing, const Graph& g, std::stri
     std::vector<char>       esc;
     for( std::uint32_t k = 0; k < g.declinedSiteList.size() && plan.in == kNoNode; ++k )
     {
-        const std::uint32_t list = g.declinedSiteList[k];
         const Reference&    ref  = ing.references[ g.declinedSiteRef[k] ];
         const NodeId        by   = g.declinedSiteCaller[k];
-        if( list == kNoDeclinedList || list + 1 >= g.declinedListOff.size() || by >= ing.symbols.size() || by == plan.to
-            || !namesPlace( ing, plan.site, ref.fileId, ref.line ) || escapeXml( ing.symbols[ by ].name, esc ) != inName )
+        if( by >= ing.symbols.size() || !namesPlace( ing, plan.site, ref.fileId, ref.line ) || escapeXml( ing.symbols[ by ].name, esc ) != inName )
         {
             continue;
         }
-        const auto first = g.declinedListCand.begin() + std::ptrdiff_t( g.declinedListOff[ list ] );
-        const auto last  = g.declinedListCand.begin() + std::ptrdiff_t( g.declinedListOff[ list + 1 ] );
-        if( std::find( first, last, plan.to ) != last && !rule.builtinSpelled( k ) )
+        if( const std::uint32_t cands = declinedCrossingCands( g, rule, k, plan.to ); cands > 0 )   // backhops.h: the one by-id crossing test
         {
             plan.in    = by;
-            plan.cands = std::uint32_t( last - first );
+            plan.cands = cands;
         }
     }
 }

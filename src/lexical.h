@@ -81,6 +81,15 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
     } );
 }
 
+// Does `text` carry one of `words` (lowercased subtokens) as a subtoken? `words` is a handful, read by linear find. Shared by the
+// --for fold's member slice (forfold.h) and the path owner-word key (pathroute.h).
+inline bool holdsSubtokenWord( std::string_view text, const std::vector<std::string>& words )
+{
+    std::vector<std::string> toks;
+    subtokens( text, toks );
+    return std::ranges::any_of( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+}
+
 // ── L-W (routing-loop round 2026-09-12): what the BM25 pass saw, read back out ──────────────────────────
 // Per symbol, which of the query's unique terms it matched, and per term, how many symbols matched it — the
 // integers lexicalScoresTiered accumulates anyway, exposed rather than re-derived by a second tokenizer that
