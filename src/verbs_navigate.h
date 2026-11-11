@@ -3221,26 +3221,29 @@ std::optional<int> runPath( const MainDispatch& d )
 }
 
 
-// GV-PATH-BIND: the --connect terminals' spellings after the M1 rule. resolve() is a terminal's node as --around/--lego resolve it
-// (resolveFocus); a spelling that binds nothing and that the rule narrows to one source definition (src/forgraphverb.h
-// narrowRefusedSpelling) resolves as that definition's own spelling: `bound` holds it (a deque, so `spec` may view it), `spec` is
-// moved onto it and `narrowed` gains the spelling as typed. kNoNode = refused as before, `spec` as typed.
+// The --connect terminals as resolved. resolve() is a terminal's node as --around/--lego resolve it (resolveFocus), its decl→def residue
+// summed into `unprovenDefs` (H1). GV-PATH-BIND: a spelling that binds nothing and that the M1 rule narrows to one source definition
+// (src/forgraphverb.h narrowRefusedSpelling) resolves as that definition's own spelling: `bound` holds it (a deque, so `spec` may view
+// it), `spec` is moved onto it and `narrowed` gains the spelling as typed. kNoNode = refused as before, `spec` as typed.
 struct ConnectTerminalSpellings
 {
+    std::size_t              unprovenDefs = 0;
     std::deque<std::string>  bound;
     std::vector<std::string> narrowed;
 
-    rw::NodeId resolve( const rw::IngestResult& ing, std::string_view& spec, std::size_t& unprovenDefs )
+    rw::NodeId resolve( const rw::IngestResult& ing, std::string_view& spec )
     {
-        const rw::NodeId id = rw::resolveFocus( ing, spec, &unprovenDefs );
+        std::size_t                termUnprovenDefs = 0;
+        rw::NodeId                 id   = rw::resolveFocus( ing, spec, &termUnprovenDefs );
         std::optional<std::string> pick = id == rw::kNoNode ? rw::narrowRefusedSpelling( ing, spec, rw::GraphSubjectForm::Common ) : std::nullopt;
-        if( !pick )
+        if( pick )
         {
-            return id;
+            narrowed.emplace_back( spec );
+            spec = bound.emplace_back( std::move( *pick ) );
+            id   = rw::resolveFocus( ing, spec, &termUnprovenDefs );
         }
-        narrowed.emplace_back( spec );
-        spec = bound.emplace_back( std::move( *pick ) );
-        return rw::resolveFocus( ing, spec, &unprovenDefs );
+        unprovenDefs += termUnprovenDefs;
+        return id;
     }
 };
 
@@ -3294,13 +3297,10 @@ std::optional<int> runConnect( const MainDispatch& d )
         // H1: each terminal's decl→def residue, SUMMED onto the root as --path sums its endpoints: the remedy is the same for
         // any terminal (widen its file:name spelling), and a bare-name terminal always adds 0. Unreported, a drop reached the
         // reader as edges="0" groups="0" between a declaration and the caller of the definition it could not be tied to.
-        std::size_t cnUnprovenDefs = 0;
-        ConnectTerminalSpellings cnSpell;   // GV-PATH-BIND: a terminal refused over several fitting definitions runs as its ONE source definition
+        ConnectTerminalSpellings cnSpell;   // + GV-PATH-BIND: a terminal refused over several fitting definitions runs as its ONE source definition
         for( std::string_view& spec : specs )
         {
-            std::size_t  termUnprovenDefs = 0;
-            const NodeId id = cnSpell.resolve( ing, spec, termUnprovenDefs );   // "name" or "file:name" — exactly --around/--lego
-            cnUnprovenDefs += termUnprovenDefs;
+            const NodeId id = cnSpell.resolve( ing, spec );   // "name" or "file:name" — exactly --around/--lego
             if( id == kNoNode )
             {
                 // §M7 (W3FIX): resolveFocus is the SAME file:name resolver --around/--lego use, so this arm
@@ -3320,7 +3320,7 @@ std::optional<int> runConnect( const MainDispatch& d )
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
         // 0.6.6 D1: a many-definition name is searched from the definition that JOINS (graph.h joinTerminalPicks)
         const rw::ConnectPicks cnPicks = rw::joinTerminalPicks( ing, g, specs, terminals, std::uint32_t( cfg.connectRadius ) );
-        rw::packConnect( stdout, ing, g, rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnUnprovenDefs, cnPicks, cnSpell.narrowed );
+        rw::packConnect( stdout, ing, g, rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnSpell.unprovenDefs, cnPicks, cnSpell.narrowed );
         return 0;
     }
     return std::nullopt;
