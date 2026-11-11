@@ -8,6 +8,7 @@
 #include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
+#include "forgraphverb.h" // GV-PATH-BIND: narrowRefusedSpelling — the --for block's M1 rule on the direct --path/--connect/--callers
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
 #include "infra/sortutil.h"   // svLess: the explicit byte order the alias-name table is sorted and binary-searched by (portablebuildcheck #6)
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
@@ -183,7 +184,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     if( cfg.columnar )
     {
         std::vector<NodeId> page( result.begin() + pw.begin, result.begin() + pw.end );
-        const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( matches.size() )
+        const std::string attr = "of=\"" + ex( sym ) + "\"" + rw::narrowedAttrXml( chRows.narrowed ) + " defs=\"" + std::to_string( matches.size() )
                                + "\" count=\"" + std::to_string( result.size() ) + "\""
                                + ( !wantCallers && bodylessDefsCount > 0 ? " bodyless_defs=\"" + std::to_string( bodylessDefsCount ) + "\"" : "" )
                                + chUnprovenAttr
@@ -217,7 +218,8 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                                                        chAttr.groups.multi() ? &pageOfDef : nullptr, &chDefRows, &pageSplit, &chDcInRows } );   // + the <dc> and <in> rows verbatim
         return 0;
     }
-    rw::emitTo( stdout, "{{\"of\":\"{}\",\"defs\":{},\"count\":{}", jsonStr( sym ).c_str(), matches.size(), result.size() );
+    rw::emitTo( stdout, "{{\"of\":\"{}\"{},\"defs\":{},\"count\":{}", jsonStr( sym ).c_str(),
+                chRows.narrowed.empty() ? std::string() : ",\"narrowed\":\"" + jsonStr( chRows.narrowed.front() ) + "\"", matches.size(), result.size() );   // GV-PATH-BIND
     if( !wantCallers && bodylessDefsCount > 0 )
     {
         rw::emitTo( stdout, ",\"bodyless_defs\":{}", bodylessDefsCount );
@@ -265,6 +267,30 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     return 0;
 }
 
+// GV-PATH-BIND: the one-hop rows of `sym`; for a CALLERS selector that binds nothing as typed and that the M1 rule narrows to one source
+// definition (src/forgraphverb.h narrowRefusedSpelling), the rows of that definition's own spelling: `bound` holds it, `sym` is moved
+// onto it and the rows' `narrowed` names the selector as typed. Otherwise the rows as typed (empty matches: the caller refuses as before).
+inline rw::CallHierarchyRows callHierarchyRowsNarrowed( const rw::IngestResult& ing, const rw::Graph& g, std::string_view& sym, bool wantCallers,
+                                                        std::string& bound )
+{
+    rw::CallHierarchyRows rows = rw::callHierarchyRows( ing, g, sym, wantCallers );
+    std::optional<std::string> pick = wantCallers && rows.matches.empty() ? rw::narrowRefusedSpelling( ing, sym, rw::GraphSubjectForm::Callers )
+                                                                          : std::nullopt;
+    if( !pick )
+    {
+        return rows;
+    }
+    rw::CallHierarchyRows narrowedRows = rw::callHierarchyRows( ing, g, *pick, wantCallers );
+    if( narrowedRows.matches.empty() )
+    {
+        return rows;
+    }
+    narrowedRows.narrowed.emplace_back( sym );
+    bound = std::move( *pick );
+    sym   = bound;
+    return narrowedRows;
+}
+
 std::optional<int> runCallHierarchy( const MainDispatch& d )
 {
     using namespace rw;
@@ -282,11 +308,13 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
     if( !cfg.callers.empty() || !cfg.callees.empty() )
     {
         const bool             wantCallers = !cfg.callers.empty();
-        const std::string_view sym         = wantCallers ? cfg.callers : cfg.callees;
+        std::string_view       sym         = wantCallers ? cfg.callers : cfg.callees;
         // callhierarchy.h owns the resolution, the neighbour union, the bodyless-def count and the
         // tier-then-path order — the MCP twins run the identical call, so the two surfaces cannot disagree
-        // about WHICH rows the question has.
-        const CallHierarchyRows   chRows  = rw::callHierarchyRows( ing, g, sym, wantCallers );
+        // about WHICH rows the question has. GV-PATH-BIND: a callers selector refused over several fitting definitions answers as
+        // the ONE source definition's own spelling (sym moves onto it; chRows.narrowed names it as typed).
+        std::string               chBound;
+        const CallHierarchyRows   chRows  = callHierarchyRowsNarrowed( ing, g, sym, wantCallers, chBound );
         // lane ix2-slice (IX-2 P2, src/closures.h): callees only — the functions written inside the matches' bodies, any depth
         const std::vector<NodeId> chClosures = wantCallers ? std::vector<NodeId>{} : rw::ClosureIndex( ing ).closuresOf( chRows.matches );
         const std::vector<NodeId>& matches = chRows.matches;
@@ -430,7 +458,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::valueRefsDepthLegendFor( chRows.valueRefs )   // exactly when the root carries the depth disclosure
                            + rw::patternDispatchLegend( !chRows.valueRefs.patternSites.empty() || !chRows.valueRefs.patternWideSites.empty(), wantCallers )
                            + std::string( rw::slotJoinLegend( wantCallers ? chRows.valueRefs.slotCallers : !chRows.valueRefs.slotSites.empty(), wantCallers, wantCallers && chRows.valueRefs.slotCands ) )   // IX-1: exactly when a slot join rides
-                           + std::string( rw::closureBlocksLegend( !chClosures.empty() ) ) ).c_str(),   // IX-3: exactly when pattern_dispatch= rides; ix2-slice: exactly when an <in> block rides
+                           + std::string( rw::closureBlocksLegend( !chClosures.empty() ) ) + std::string( rw::narrowedVerbLegend( !chRows.narrowed.empty() ) ) ).c_str(),   // IX-3: exactly when pattern_dispatch= rides; ix2-slice: exactly when an <in> block rides
                          rw::rootRelPathsLegend( chSingleRoot ),
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
             if( cfg.columnar && chHasLink )
@@ -473,7 +501,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
 
         // §P10.6: defs= = resolved definitions this name matched (matches.size()) — the rows below UNION the
         // neighbors of every def, which --uses/--impact already disclose and these two verbs silently hid.
-        rw::emitTo( stdout, "<{} of=\"{}\" defs=\"{}\" count=\"{}\"{}", tag, ex( sym ).c_str(), matches.size(), result.size(), chRootAttr.c_str() );
+        rw::emitTo( stdout, "<{} of=\"{}\"{} defs=\"{}\" count=\"{}\"{}", tag, ex( sym ).c_str(), rw::narrowedAttrXml( chRows.narrowed ), matches.size(), result.size(),
+                    chRootAttr.c_str() );   // GV-PATH-BIND: narrowed= beside the of= it qualifies
         if( !wantCallers && bodylessDefsCount > 0 )
         {
             rw::emitTo( stdout, " bodyless_defs=\"{}\"", bodylessDefsCount );
@@ -2898,6 +2927,72 @@ std::optional<int> runDefs( const MainDispatch& d )
     return 0;
 }
 
+// GV-PATH-BIND: the --path endpoints, resolved, after the M1 rule (src/forgraphverb.h narrowRefusedSpelling). When an endpoint binds
+// nothing as typed and EVERY such endpoint narrows to its one source definition, src/dst/spec are the spellings the verb runs with (the
+// explicit call's) and `narrowed` names the spellings as typed, from= first; otherwise everything is as typed, defs as resolved (the
+// verb then refuses exactly as before). H1: each *Unproven is that endpoint's decl→def residue (graph.h declToDefFollowThrough).
+struct PathEndpointsBound
+{
+    std::string              src;
+    std::string              dst;
+    std::string              spec;   // "src,dst": the --path= value of the call that runs
+    std::vector<rw::NodeId>  srcDefs;
+    std::vector<rw::NodeId>  dstDefs;
+    std::size_t              srcUnproven = 0;
+    std::size_t              dstUnproven = 0;
+    bool                     srcGlob     = false;
+    bool                     dstGlob     = false;
+    std::vector<std::string> narrowed;
+};
+
+// The narrowed spellings of the endpoints that bound nothing, slot order; nullopt when one of them is still refused.
+inline std::optional<std::vector<std::string>> narrowedPathSpellings( const rw::IngestResult& ing, PathEndpointsBound& ep )
+{
+    std::vector<std::string> narrowed;
+    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
+    {
+        if( !defs->empty() )
+        {
+            continue;
+        }
+        std::optional<std::string> pick = rw::narrowRefusedSpelling( ing, *slot, rw::GraphSubjectForm::Path );
+        if( !pick )
+        {
+            return std::nullopt;
+        }
+        narrowed.push_back( std::exchange( *slot, std::move( *pick ) ) );
+    }
+    return narrowed;
+}
+
+inline PathEndpointsBound bindPathEndpoints( const rw::IngestResult& ing, std::string_view srcN, std::string_view dstN )
+{
+    PathEndpointsBound ep;
+    ep.src = srcN;
+    ep.dst = dstN;
+    const auto resolve = [ & ]
+    {
+        ep.srcDefs = rw::resolvePathEndpoint( ing, ep.src, &ep.srcUnproven, &ep.srcGlob );
+        ep.dstDefs = rw::resolvePathEndpoint( ing, ep.dst, &ep.dstUnproven, &ep.dstGlob );
+    };
+    resolve();
+    if( ep.srcDefs.empty() || ep.dstDefs.empty() )
+    {
+        PathEndpointsBound typed = ep;
+        if( std::optional<std::vector<std::string>> narrowed = narrowedPathSpellings( ing, ep ) )
+        {
+            ep.narrowed = std::move( *narrowed );
+            resolve();
+        }
+        else
+        {
+            ep = std::move( typed );   // still refused: the spellings as typed
+        }
+    }
+    ep.spec = ep.src + "," + ep.dst;
+    return ep;
+}
+
 // served: bodies the enclosing answer already carries (the --for graph-verb block passes its fold's and slot's); a middle hop among them
 // prints no second copy (hopbody.h). The bare --path passes none.
 std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::NodeId> served, bool inForBlock )
@@ -2915,14 +3010,14 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
     // --path=SRC,DST: shortest directed call-path (how does SRC reach DST through calls?)
     if( !cfg.pathSpec.empty() )
     {
-        const std::string_view spec  = cfg.pathSpec;
+        std::string_view        spec  = cfg.pathSpec;
         const std::size_t       comma = spec.find( ',' );
         // §B8.2: the bare-arg-count refusal goes through the same helper as every other value refusal —
         // it used to answer `--path=zzq` with a bare "needs SRC,DST", naming neither what it got nor what
         // to type, while the flag's own kViewFlags row already carries both for the EMPTY case.
         if( comma == std::string_view::npos )
         { rw::refuseFlagValue( "--path", "two symbol names, FROM,TO", spec, "--path=main,rankGraph" );  return 1; }
-        const std::string_view srcN = spec.substr( 0, comma ), dstN = spec.substr( comma + 1 );
+        std::string_view srcN = spec.substr( 0, comma ), dstN = spec.substr( comma + 1 );
         // F10: an EMPTY endpoint used to be RESOLVED — and the near-miss suggester, asked for the closest
         // name to "", answered with the shortest symbol in the corpus ("endpoint not found:  (did you mean
         // 'A'?)"). An empty item is not a selector; say which one is empty before anything is resolved.
@@ -2944,15 +3039,20 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         // root: the remedy is the same for either endpoint (widen its file:name spelling), a bare-name endpoint always
         // adds 0, and the one existing attribute keeps the vocabulary where it is. Unreported, a drop reached the
         // reader as a bare reachable="0".
-        std::size_t               srcUnprovenDefs = 0;
-        std::size_t               dstUnprovenDefs = 0;
         // ix2-slice (IX-2 P4, src/pathgaps.h): an endpoint naming no definition that holds a `*` stands for every function or
-        // method definition whose name fits it (from_glob=/to_glob= say so); every resolvable spelling resolves as before
-        bool                      srcGlob         = false;
-        bool                      dstGlob         = false;
-        const std::vector<NodeId> srcDefs         = rw::resolvePathEndpoint( ing, srcN, &srcUnprovenDefs, &srcGlob );
-        const std::vector<NodeId> dstDefs         = rw::resolvePathEndpoint( ing, dstN, &dstUnprovenDefs, &dstGlob );
-        const std::size_t         pthUnprovenDefs = srcUnprovenDefs + dstUnprovenDefs;
+        // method definition whose name fits it (from_glob=/to_glob= say so); every resolvable spelling resolves as before.
+        // GV-PATH-BIND (bindPathEndpoints): an endpoint refused over several fitting definitions runs as the ONE source definition's
+        // own spelling, so the answer is the explicit call's plus narrowed=; while either endpoint binds nothing, every name below is
+        // the spelling as typed and the refusal is byte-for-byte as before.
+        const PathEndpointsBound    pthEp           = bindPathEndpoints( ing, srcN, dstN );
+        srcN                                        = pthEp.src;
+        dstN                                        = pthEp.dst;
+        spec                                        = pthEp.spec;
+        const std::vector<NodeId>&  srcDefs         = pthEp.srcDefs;
+        const std::vector<NodeId>&  dstDefs         = pthEp.dstDefs;
+        const bool                  srcGlob         = pthEp.srcGlob;
+        const bool                  dstGlob         = pthEp.dstGlob;
+        const std::size_t           pthUnprovenDefs = pthEp.srcUnproven + pthEp.dstUnproven;
         if( srcDefs.empty() || dstDefs.empty() )
         {
             // §M7 (W3FIX): both endpoints resolve through resolveAllByNameQualified, i.e. the shared file:name
@@ -3078,12 +3178,13 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                      ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
                      ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + rw::pathBridgeLegend( pthBridge )
                        + rw::nearSinkLegend( pthNear ) + std::string( rw::pathHandlerRuleLegend( pthHandler ) ) + std::string( rw::pathRouteBodiesLegend( !pthRouteEl.xml.empty() ) )
-                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
+                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) + std::string( rw::narrowedVerbLegend( !pthEp.narrowed.empty() ) ) ).c_str(),
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), pthBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                      pthBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                     srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint
+                     srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob )
+                                                       + rw::narrowedAttrXml( pthEp.narrowed ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint; GV-PATH-BIND
                      pthRows.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
                      ( pthRootAttrs + rw::hopRootAttrsXml( pthHops ) + pthRootAttr ).c_str(),
                      rw::graphCountFloorAttrXml( g ).c_str() );
@@ -3118,6 +3219,24 @@ std::optional<int> runPath( const MainDispatch& d )
     return runPathServed( d, {}, /*inForBlock=*/false );
 }
 
+
+// GV-PATH-BIND: a --connect terminal's node, as --around/--lego resolve it (resolveFocus); a spelling that binds nothing and that the M1
+// rule narrows to one source definition (src/forgraphverb.h narrowRefusedSpelling) resolves as that definition's own spelling: `bound`
+// holds it, `spec` is moved onto it and `narrowed` gains the spelling as typed. kNoNode = refused as before, `spec` as typed.
+inline rw::NodeId resolveConnectTerminal( const rw::IngestResult& ing, std::string_view& spec, std::size_t& unprovenDefs, std::string& bound,
+                                          std::vector<std::string>& narrowed )
+{
+    const rw::NodeId id = rw::resolveFocus( ing, spec, &unprovenDefs );
+    std::optional<std::string> pick = id == rw::kNoNode ? rw::narrowRefusedSpelling( ing, spec, rw::GraphSubjectForm::Common ) : std::nullopt;
+    if( !pick )
+    {
+        return id;
+    }
+    narrowed.emplace_back( spec );
+    bound = std::move( *pick );
+    spec  = bound;
+    return rw::resolveFocus( ing, spec, &unprovenDefs );
+}
 std::optional<int> runConnect( const MainDispatch& d )
 {
     using namespace rw;
@@ -3169,10 +3288,15 @@ std::optional<int> runConnect( const MainDispatch& d )
         // any terminal (widen its file:name spelling), and a bare-name terminal always adds 0. Unreported, a drop reached the
         // reader as edges="0" groups="0" between a declaration and the caller of the definition it could not be tied to.
         std::size_t cnUnprovenDefs = 0;
-        for( const std::string_view spec : specs )
+        // GV-PATH-BIND: a terminal refused over several fitting definitions runs as the ONE source definition's own spelling (held in
+        // cnBound, sized once so the views stay valid); cnNarrowed names those terminals as typed (the root's narrowed=)
+        std::vector<std::string> cnBound( specs.size() );
+        std::vector<std::string> cnNarrowed;
+        for( std::size_t k = 0; k < specs.size(); ++k )
         {
-            std::size_t  termUnprovenDefs = 0;
-            const NodeId id = resolveFocus( ing, spec, &termUnprovenDefs );   // "name" or "file:name" — exactly --around/--lego
+            const std::string_view spec             = specs[k];
+            std::size_t            termUnprovenDefs = 0;
+            const NodeId id = resolveConnectTerminal( ing, specs[k], termUnprovenDefs, cnBound[k], cnNarrowed );   // "name" or "file:name" — exactly --around/--lego
             cnUnprovenDefs += termUnprovenDefs;
             if( id == kNoNode )
             {
@@ -3193,7 +3317,8 @@ std::optional<int> runConnect( const MainDispatch& d )
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
         // 0.6.6 D1: a many-definition name is searched from the definition that JOINS (graph.h joinTerminalPicks)
         const rw::ConnectPicks cnPicks = rw::joinTerminalPicks( ing, g, specs, terminals, std::uint32_t( cfg.connectRadius ) );
-        rw::packConnect( stdout, ing, g, rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnUnprovenDefs, cnPicks );
+        rw::packConnect( stdout, ing, g, rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnUnprovenDefs, cnPicks,
+                         cnNarrowed );
         return 0;
     }
     return std::nullopt;
