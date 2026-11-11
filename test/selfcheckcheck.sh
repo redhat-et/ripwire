@@ -159,6 +159,7 @@ ALLOW = {
     "inertDeclinedMadeBy":    "read-only count of the sources among Graph::inertDeclinedCaller (graph.h); no state — the <dc> record postconditions with PR #380's inert quoted sites (train 28)",
     "std::ranges::is_sorted": "read-only walk of the given range (graph.h rubyMainObjectMixins: the rows legoMainRowsOf binary-searches; lane ruby-pair)",
     "has_value":              "read-only std::optional state test (verbs_grep.h: grepReadsIngest named its stop; lane grep-carrier)",
+    "active":                 "read-only member predicate (pathpairs.h PathPairs::active: pairs.size() >= 2); no state — pathHopFacts' precondition that only a single-chain answer ends on a declined hop (lane path-fewest-unproven)",
     "inCheckout":             "read-only member predicate (crossref.h WhereHit::inCheckout: fromWorktree || ref == \"HEAD\"); no state — labelJobRows' precondition that a parse job holds no checkout row",
 }
 # (T) ASSUMED-THEN-TESTED allowlist: "site -> reason", one line each. A site lands here only when the equality
