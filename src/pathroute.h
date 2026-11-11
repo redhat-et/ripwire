@@ -293,7 +293,8 @@ private:
                 continue;   // not one layer down, or the last layer away from a to= definition
             }
             const PathChainKey kv = pathHopKey( m_g, m_best[u], u, v, [ & ] { return byNameCands( u, v ); },
-                                                PathHopMarks{ !last && m_reading.testsOn && inTests( v ), !last && offWord( v ) } );
+                                                PathHopMarks{ !last && m_reading.testsOn && once( m_inTests, v, [ & ] { return pathDefInTests( m_ing, v ); } ),
+                                                              !last && once( m_offWord, v, [ & ] { return pathNameOffWord( m_ing, v, m_reading.ownerWords ); } ) } );
             if( m_prev[v] == kNoNode || kv < m_best[v] )
             {
                 m_best[v] = kv;
@@ -322,8 +323,6 @@ private:
         memo[v] = memo[v] < 0 ? std::int8_t( read() ? 1 : 0 ) : memo[v];
         return memo[v] == 1;
     }
-    bool inTests( NodeId v ) { return once( m_inTests, v, [ & ] { return pathDefInTests( m_ing, v ); } ); }
-    bool offWord( NodeId v ) { return once( m_offWord, v, [ & ] { return pathNameOffWord( m_ing, v, m_reading.ownerWords ); } ); }
     // byNameCandidates( u, v ) from ONE sorted list of u's by-name targets' names, built on u's first by-name edge (byNameCandidates
     // per edge rescans the out-edges: O(degree^2) on a by-name hub)
     std::uint64_t byNameCands( NodeId u, NodeId v )
