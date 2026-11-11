@@ -9,7 +9,8 @@
 #   (o)  the printed=row lines, in file order, are the answer's rows (grader_fix_1107: <d>, <y>, <s>, non-`used` <u> outside
 #        comments) in output order: same tag, n= and file, ans_pos 1..K
 #   (c)  the ranked candidates: lens_rank 1..(number of cand=1 lines) each once, cand=1 exactly on them
-#   (s)  score = lex + the d_* lift columns (tolerance band)
+#   (s)  score = lex + the d_* lift columns (tolerance band); (s2) on a task naming widget.py and a symbol, the mention anchor's lift
+#        rides d_mention / d_file_subject (non-zero on some line) and the sum still holds
 #   (p)  every tail pointer that kept its r= has a printed=pointer line; the SIBLING-DEMOTE ones read demote=demoted
 #   (k)  every <sigs> <d> row line carries a SIBLING-DEMOTE verdict from the closed set; d_pos <= 10 reads top_rank
 #   (a)  a second call appends its lines under the same two header lines (the header is written once)
@@ -153,6 +154,19 @@ drows = [ r for r in rows if r["printed"] == "row" and r["ans_tag"] == "d" and r
 check( drows and all( r["demote"] in VERD for r in drows ), "(k) every <sigs> <d> line carries a verdict from the closed set" )
 check( all( r["demote"] == "top_rank" for r in drows if 0 < int( r["d_pos"] ) <= 10 ), "(k) d_pos <= 10 reads top_rank" )
 sys.exit( 1 if bad else 0 )
+PY
+
+# (s2) a task the mention anchor lifts: its lift is a column, and the sum holds
+TASK3='how does widget.py parse_widget_config work'
+run on4 "RIPWIRE_ROW_FEATURES=$TMP/rows4.tsv" . --no-cache "--for=$TASK3"
+python3 - "$TMP/rows4.tsv" <<'PY' || fail=1
+import csv, sys
+rows = list( csv.DictReader( [ l for l in open( sys.argv[1] ).read().split( "\n" ) if l and not l.startswith( "# " ) ], delimiter = "\t", quoting = csv.QUOTE_NONE ) )
+lifts = [ c for c in rows[0] if c.startswith( "d_" ) and c != "d_pos" ]
+moved = [ r for r in rows if any( float( r[c] ) != 0.0 for c in ( "d_mention", "d_file_subject" ) ) ]
+ok = all( abs( float( r["lex"] ) + sum( float( r[c] ) for c in lifts ) - float( r["score"] ) ) <= 1e-4 * max( 1.0, abs( float( r["score"] ) ) ) for r in rows if r["node"] != "-1" )
+print( "  %s  (s2) %d lines carry a mention-anchor lift and score = lex + the lifts on all %d" % ( "PASS" if moved and ok else "FAIL", len( moved ), len( rows ) ) )
+sys.exit( 0 if moved and ok else 1 )
 PY
 
 # (a) a second call appends under one header
