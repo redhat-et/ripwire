@@ -19,10 +19,8 @@
 // (the twin's before its first pointer, the sink's before the moved rows). Both run where SIBLING-DEMOTE runs — the no-budget XML answer
 // of CLI --for and MCP `for`; a token budget leaves the answer as shaped; --json never reaches them.
 // RIPWIRE_NO_DECL_TWIN=1 / RIPWIRE_NO_DECL_SINK=1 turn each off (byte identity and the gate's twins).
-#include "forsiblingdemote.h" // demote_detail::scanAnswer / AnswerRow / kKeepRowAttrs, filesyms_detail::tailPointerText / leafName
-#include "lexical.h" // splitRouteWords, isRouteStopword, routeLower, detail::graphSubjectTrimWord
+#include "forsiblingdemote.h" // demote_detail::scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
 #include "serialize.h" // attrOf
-#include "subjectanchor.h" // subject_detail::hasNameSyntax
 
 #include <algorithm>
 #include <array>
@@ -53,40 +51,17 @@ namespace decl_detail
 using demote_detail::AnswerRow;
 using demote_detail::AnswerScan;
 
-// The identifier-syntax words of the task as spelled (Owner.member kept whole), trimmed, stopwords left out.
-inline std::vector<std::string_view> taskWords( std::string_view task )
+// `s` with `::` and `#` spelled `.`: Owner::name, Owner#name and Owner.name compare equal.
+inline std::string dotted( std::string_view s )
 {
-    std::vector<std::string_view> words;
-    for( const std::string_view w : splitRouteWords( task ) )
+    std::string out;
+    for( std::size_t i = 0; i < s.size(); ++i )
     {
-        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
-        if( !isRouteStopword( routeLower( t ) ) && subject_detail::hasNameSyntax( t ) )
-        {
-            words.push_back( t );
-        }
+        const bool scope = s[i] == ':' && i + 1 < s.size() && s[i + 1] == ':';
+        out += scope || s[i] == '#' ? '.' : s[i];
+        i += scope ? 1 : 0;
     }
-    return words;
-}
-// `a` and `b` spell the same qualified name, `.`, `::` and `#` read as one separator.
-inline bool sameQualified( std::string_view a, std::string_view b )
-{
-    const auto sep = []( std::string_view s, std::size_t i ) -> std::size_t
-    {
-        return s[i] == '.' || s[i] == '#' ? 1 : s.substr( i ).starts_with( "::" ) ? 2
-                                                                                  : 0;
-    };
-    std::size_t i = 0, j = 0;
-    while( i < a.size() && j < b.size() )
-    {
-        const std::size_t sa = sep( a, i ), sb = sep( b, j );
-        if( ( sa == 0 ) != ( sb == 0 ) || ( sa == 0 && a[i] != b[j] ) )
-        {
-            return false;
-        }
-        i += sa == 0 ? 1 : sa;
-        j += sb == 0 ? 1 : sb;
-    }
-    return i == a.size() && j == b.size();
+    return out;
 }
 // K4 (task-named): a qualified task word names the row when the row's name is it or ends with it (`ts.LanguageService.x` for
 // `LanguageService.x`); a bare task word names the row's last segment. `Completions.getCompletionsAtPosition` does not name
@@ -94,21 +69,15 @@ inline bool sameQualified( std::string_view a, std::string_view b )
 inline bool taskNamesRow( const std::vector<std::string_view>& words, std::string_view name )
 {
     const std::string_view leaf = filesyms_detail::leafName( name );
+    const std::string full = dotted( name );
     return std::ranges::any_of( words, [&]( std::string_view w )
                                 {
                                     if( filesyms_detail::leafName( w ).size() == w.size() )
                                     {
                                         return w == leaf;
                                     }
-                                    for( std::size_t at = 0; at + w.size() <= name.size(); ++at )
-                                    {
-                                        const bool boundary = at == 0 || name[at - 1] == '.' || name[at - 1] == ':' || name[at - 1] == '#';
-                                        if( boundary && sameQualified( name.substr( at ), w ) )
-                                        {
-                                            return true;
-                                        }
-                                    }
-                                    return false;
+                                    const std::string q = dotted( w );
+                                    return full == q || full.ends_with( "." + q );
                                 } );
 }
 
@@ -156,7 +125,7 @@ inline std::string rowName( const AnswerRow& r )
 inline std::string sinkDeclRows( std::string_view task, std::string_view answer )
 {
     const AnswerScan scan = demote_detail::scanAnswer( answer );
-    const std::vector<std::string_view> words = taskWords( task );
+    const std::vector<std::string_view> words = demote_detail::taskNameWords( task );
     std::vector<const AnswerRow*> sink;
     const AnswerRow* after = nullptr; // the kDeclSinkRank-th <d> row that stays
     std::size_t stay = 0;
@@ -202,7 +171,7 @@ inline std::string sinkDeclRows( std::string_view task, std::string_view answer 
 inline std::string pointDeclTwins( std::string_view task, std::string_view answer )
 {
     const AnswerScan scan = demote_detail::scanAnswer( answer );
-    const std::vector<std::string_view> words = taskWords( task );
+    const std::vector<std::string_view> words = demote_detail::taskNameWords( task );
     std::vector<std::string> bodied; // last segments of the bodied <sigs> <d> rows (a <shortkey> rung's <d n= l=/> names, it is no body)
     for( const AnswerRow& r : scan.rows )
     {
@@ -236,9 +205,8 @@ inline void declRowsInto( std::string_view task, std::string_view answer, std::s
     {
         return;
     }
-    const auto apply = [&]( auto rule )
+    const auto keep = [&]( std::string next )
     {
-        std::string next = rule( task, edited.empty() ? answer : std::string_view( edited ) );
         if( !next.empty() )
         {
             edited = std::move( next );
@@ -246,11 +214,11 @@ inline void declRowsInto( std::string_view task, std::string_view answer, std::s
     };
     if( declTwinOn() )
     {
-        apply( decl_detail::pointDeclTwins );
+        keep( decl_detail::pointDeclTwins( task, edited.empty() ? answer : std::string_view( edited ) ) );
     }
     if( declSinkOn() )
     {
-        apply( decl_detail::sinkDeclRows );
+        keep( decl_detail::sinkDeclRows( task, edited.empty() ? answer : std::string_view( edited ) ) );
     }
 }
 } // namespace rw

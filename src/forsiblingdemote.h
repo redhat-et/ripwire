@@ -174,18 +174,25 @@ inline std::string_view fileOf( const AnswerRow& r )
 }
 // K1 mem= (a type with its member list) and K7 slot_by= / slot_fields= (FN-VALUED-SLOT's call facts): a row carrying one stays a row.
 inline constexpr std::array<std::string_view, 3> kKeepRowAttrs = { " mem=\"", " slot_by=\"", " slot_fields=\"" };
-// The identifier-syntax words of the task (camelCase, snake_case, Owner::name / pkg.Name), trimmed, stopwords left out.
-inline std::vector<std::string_view> taskNames( std::string_view task )
+// The identifier-syntax words of the task (camelCase, snake_case, Owner::name / pkg.Name) as spelled, trimmed, stopwords left out.
+inline std::vector<std::string_view> taskNameWords( std::string_view task )
 {
-    std::vector<std::string_view> names;
+    std::vector<std::string_view> words;
     for( const std::string_view w : splitRouteWords( task ) )
     {
         const std::string_view t = detail::graphSubjectTrimWord( w ).text;
         if( !isRouteStopword( routeLower( t ) ) && subject_detail::hasNameSyntax( t ) )
         {
-            names.push_back( filesyms_detail::leafName( t ) );
+            words.push_back( t );
         }
     }
+    return words;
+}
+// Those words' last segments (the member after `.`, `::` or `#`).
+inline std::vector<std::string_view> taskNames( std::string_view task )
+{
+    std::vector<std::string_view> names = taskNameWords( task );
+    std::ranges::transform( names, names.begin(), filesyms_detail::leafName );
     return names;
 }
 inline bool hopCallee( const AnswerScan& scan, std::string_view name )
