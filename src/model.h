@@ -14,7 +14,7 @@
 #include "infra/sortutil.h"  // svLess — JS/TS builtin-member tables below (binary_search, no signed-char wrap)
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 #include "structlayout.h"   // cross-translation-unit sizeof/alignof tripwire for the shared model
-#include "infra/internedtext.h"   // rw::InternedText — Reference::calleeName / qualifier / recvVar (MEM-REF-SHRINK step 2)
+#include "refnames.h"   // rw::InternedText — Reference::calleeName / qualifier / recvVar (MEM-REF-SHRINK step 2)
 #include "infra/sharedOnce.h"   // rw::sharedOnce — RefColdFields::block, the cold text block made on its first write
 
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember

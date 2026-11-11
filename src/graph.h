@@ -10483,7 +10483,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // whole qualified text with its template arguments); a declared local hides a same-named field, and a field hides a
     // namespace-scope variable, as C++'s own lookup orders them.
     std::string stdRecvKey;   // reused "<fromSymbol>#<recvVar>" buffer
-    Reference   stdFieldProbe;   // reused: fieldEntryAt reads only recvVar, the member name it looks up
     // the declaration texts the exception reads beyond Rule 2's tables: each C++ definition's QUALIFIED declarations, std ones
     // included ("<fromSymbol>#<var>" -> binding indices; Rule 2's tables keep "" for a std one), and every namespace-scope
     // declaration (var -> binding indices). Empty on a tree with no C++ definition.
@@ -10516,8 +10515,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }();
     const auto fieldTypeIn = [ & ]( const std::string& className, std::string_view member ) -> const FlatRecvType*
     {
-        stdFieldProbe.recvVar.assign( member );
-        return narrower.fieldEntryAt( stdFieldProbe, className, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } );
+        return narrower.fieldEntryOf( member, className, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } );
     };
     // every C/C++ type alias record (`typedef std::shared_ptr<ns::List> ListSP;` and `using ListSP2 = std::shared_ptr<ns::List>;`
     // alike, ingest_relations.h captureTypeAlias): alias name -> its recorded targets (the reference indices). A typedef is ALSO

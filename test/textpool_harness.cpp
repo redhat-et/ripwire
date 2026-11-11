@@ -1,16 +1,28 @@
-// textpool_harness.cpp — test/textpoolcheck.sh's driver for src/infra/internedtext.h (MEM-REF-SHRINK step 2).
+// textpool_harness.cpp — test/textpoolcheck.sh's driver for src/infra/internedtext.h and src/refnames.h (MEM-REF-SHRINK step 2).
 // Arms (each prints PASS or FAIL and the run exits 1 on any FAIL):
 //   A  canonical under concurrency: 8 threads intern the same 30,000 texts in 8 different orders (crossing three segment
 //      boundaries); every thread got the same id for a text, distinct texts got distinct ids, and text(id) gives the text back.
 //   B  the empty text is id 0 and never takes a slot; an InternedText of "" is empty().
 //   C  InternedText's comparisons are the TEXT's: sorting InternedTexts gives std::string's order, == agrees with text equality.
 //   D  edits (+=, push_back, assign, clear, operator+) give std::string's answers.
-//   E  segment creation races: 40 fresh pools, 8 threads released together, each interning its own 600 texts, so several
-//      threads make the same segment at once (the CAS loser frees its copy and writes into the winner's); under TSan a relaxed
-//      publish is a reported race. Every text reads back.
-//   F  the per-thread front cache (internRefText): 8 threads build InternedTexts of the same 30,000 texts twice (30,000 texts over
+//   E  segment creation under concurrency: 40 fresh pools, 8 threads released together, each interning its own 600 texts, so
+//      several threads make the same segment at once (the CAS loser frees its copy and writes into the winner's). Proves no crash,
+//      no lost text and (under TSan) no race on what the harness touches. It does NOT observe the segment pointer's
+//      acquire/release: a fully relaxed mutant passes, because the shard locks order every access a test can make. That
+//      ordering is the formal guarantee only.
+//   F  the per-thread front cache (rw::internCached): 8 threads build InternedTexts of the same 30,000 texts twice (30,000 texts over
 //      512 slots: hits, misses and evictions); every thread's names equal thread 0's and read back their text.
-#include "infra/internedtext.h"
+//   G  hash collisions are resolved by TEXT, not by tag: fixed pairs found by brute force against the vendored
+//      ankerl::unordered_dense::hash<std::string_view> (unseeded wyhash). "n85186" / "n1381407" share a pool shard and its
+//      32-bit tag (38 bits); "n900597" / "n2694216" share a front-cache slot and its tag. Each pair must get two ids and read
+//      back its own text. The arm first re-checks that each pair still collides and FAILS if not (a changed hash must re-derive
+//      the pairs, never pass blind). Kills the tag-only-equality mutants of TextPool::intern and internCached.
+//   H  (run as `textpool_harness exitrace`, by the gate, several times) a DETACHED thread keeps interning reference names while
+//      main returns: the process pool must outlive static destruction (refnames.h NoDestroy). Under ASan a destroyed pool is a
+//      heap-use-after-free (seen in 4 of 5 runs of the mutant; the gate runs it 5 times).
+#include "refnames.h"
+
+#include <chrono>
 
 #include <algorithm>
 #include <atomic>
@@ -31,8 +43,35 @@ void check( bool ok, const char* arm, const char* what )
 std::string textOf( std::size_t i ) { return "name_" + std::to_string( i * 7919 % 100003 ) + ( i % 3 == 0 ? std::string( 30, 'x' ) : "" ); }
 }
 
-int main()
+int exitRace()
 {
+    std::atomic<bool> started{ false };
+    std::thread( [ &started ] {
+        for( std::uint64_t i = 0;; ++i )
+        {
+            rw::InternedText name( std::string_view( "exit_" + std::to_string( i ) ) );
+            started.store( true );
+            if( name.str().empty() )
+            {
+                std::abort();
+            }
+        }
+    } ).detach();
+    while( !started.load() )
+    {
+        std::this_thread::yield();
+    }
+    std::this_thread::sleep_for( std::chrono::milliseconds( 80 ) );
+    std::printf( "textpool: exitrace returning while the detached thread interns\n" );
+    return 0;   // static destruction runs now, with the thread still interning
+}
+
+int main( int argc, char** argv )
+{
+    if( argc > 1 && std::string_view( argv[ 1 ] ) == "exitrace" )
+    {
+        return exitRace();
+    }
     // A. Eight threads, the same texts, eight orders.
     static rw::TextPool   pool;
     constexpr std::size_t kTexts = 30000, kThreads = 8;
@@ -176,6 +215,19 @@ int main()
         }
     }
     check( cached, "F", "front-cached names from 8 threads agree and read back" );
+
+    // G. Fixed colliding pairs.
+    {
+        const auto h = []( std::string_view t ) { return rw::TextPool::hashOf( t ); };
+        const bool poolPair  = ( h( "n85186" ) >> 58 ) == ( h( "n1381407" ) >> 58 ) && std::uint32_t( h( "n85186" ) ) == std::uint32_t( h( "n1381407" ) );
+        const bool frontPair = ( h( "n900597" ) & 511 ) == ( h( "n2694216" ) & 511 ) && ( h( "n900597" ) >> 32 ) == ( h( "n2694216" ) >> 32 );
+        check( poolPair && frontPair, "G", "the fixed pairs still collide under the vendored hash (else re-derive them)" );
+        rw::TextPool        g;
+        const std::uint32_t a = g.intern( "n85186" ), b = g.intern( "n1381407" );
+        check( a != b && g.text( a ) == "n85186" && g.text( b ) == "n1381407", "G", "pool: a shard+tag collision gets two ids" );
+        const rw::InternedText x( std::string_view( "n900597" ) ), y( std::string_view( "n2694216" ) ), x2( std::string_view( "n900597" ) );
+        check( !( x == y ) && x == x2 && x.str() == "n900597" && y.str() == "n2694216", "G", "front cache: a slot+tag collision gets two ids" );
+    }
 
     std::printf( "textpool: %s\n", gFails == 0 ? "ALL PASS" : "FAILURES" );
     return gFails == 0 ? 0 : 1;

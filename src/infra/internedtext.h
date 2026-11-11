@@ -1,30 +1,24 @@
 #pragma once
-// internedtext.h — MEM-REF-SHRINK step 2: a row's NAME texts (the use-site rows' callee name / qualifier / receiver, model.h and
-// ingest_cache.h say which) as a 4 B id into ONE process-wide, append-only text pool instead of a 24 B (libc++) / 32 B (libstdc++)
-// std::string header each. Step 1's Stage 0 counts (reports/mem-ref-shrink.md): 59-116 K distinct callee names over 1.2-2.0 M
-// references on envoy / cockroach / vscode, and two row copies live at the parse-pool peak, so the header bytes, not the text, are
-// the cost.
-//
-// WHY ONE POOL, NOT PER-THREAD TABLES REMAPPED AT MERGE. Most readers hold only a const reference to one row (no result, no table),
-// and the parse workers both write and READ their raw rows' names while they extract (erase_if passes, suffix tests, re-splits). A
-// per-thread table would need a thread-local "current table" for every one of those reads, a remap pass over every row at the
-// parse-pool join, a second one for cache-hit rows, and a rule for rows copied between results. One shared pool needs none: an id
-// means the same text in every thread for the life of the process, so a row moves, copies and merges as four plain bytes.
+// internedtext.h — a text as a 4 B id into an append-only, thread-safe text pool (TextPool), and InternedTextOf<Domain>, a
+// string-like value that holds one. A host picks one process-wide pool per Domain (a type with `static TextPool& pool()`); the
+// pool's texts are never freed while the process runs, so a row that carries an id moves, copies and merges as four plain bytes.
 //
 // DETERMINISM. Ids are assigned in first-intern order, which depends on thread timing, so an id must never reach output, an order
-// or a hash. That is enforced by the type, not by convention: InternedText exposes no id; ordering is the TEXT's
-// (operator<=>), and equality of two InternedTexts is id equality only because interning is canonical (one text, one id), which
-// gives exactly the text answer. No std::hash is provided, so a hash container keyed by one must name its text.
+// or a hash. That is enforced by the type, not by convention: InternedTextOf exposes no id; ordering is the TEXT's (operator<=>),
+// and equality of two values is id equality only because interning is canonical (one text, one id), which gives exactly the text
+// answer. No std::hash is provided, so a hash container keyed by one must name its text.
 //
 // THREADING. intern() takes one of kShards mutexes (picked by the text's hash), so two threads interning the same text serialise
 // and get the same id. text() takes no lock: slots live in segments that never move or shrink (segment k holds kFirst << k
 // slots), a slot is written once, before its id is published under the shard lock, and every reader got the id from that lock
-// or from a row handed across a thread join. A segment pointer is published with a release CAS and read with acquire. Each shard
-// (and the id counter) sits on its own 128 B line: measured, paired x5 cockroach cold, shards packed two to a line cost +2 s user
-// with flat instructions (lock lines bouncing between parse workers); aligned, the lane ran 2.6 % under the base.
+// or from a row handed across a thread join. A segment pointer is published with a release CAS and read with acquire: the formal
+// guarantee for a reader that reaches an id some other way. No gate observes that ordering (the shard locks order every access a
+// test can make). Each shard and the id counter sit on their own destructive-interference line: shards packed two to a line
+// bounced lock lines between threads (measured: flat instructions, more cycles).
 //
-// LIFETIME. The pool lives for the process and never frees a text: a long-running server keeps every name it has interned, which is
-// bounded by the distinct names of the trees it indexed (about 3 MB of headers per 100 K names), not by the rows.
+// LIFETIME. A host's process-wide pool must outlive every thread that can intern, including a DETACHED one still running when main
+// returns: hold it in NoDestroy (below), which keeps constant initialisation and never runs the destructor. TextPool's own
+// destructor frees its segments, for a pool with a scope (a test's). The pool grows with the distinct texts interned, never shrinks.
 
 #include <atomic>
 #include <bit>
@@ -37,6 +31,8 @@
 #include <string_view>
 #include <vector>
 
+#include "Diagnostics.h"     // EXPECTS / DASSERT / PANIC — intern's preconditions and the pool's capacity
+#include "platform.h"        // infra::platform::hardware_destructive_interference_size — one shard per line
 #include "unordered_dense.h"   // ankerl::unordered_dense::hash<std::string_view> — the pool's text hash
 
 namespace rw
@@ -62,9 +58,12 @@ public:
 
     std::uint32_t intern( std::string_view text ) { return text.empty() ? kEmptyId : intern( text, hashOf( text ) ); }
 
-    // `hash` = hashOf( text ), for a caller that already has it (internRefText's front cache); text is non-empty.
+    // For a caller that already hashed the text (internCached's front cache). Preconditions: `text` is non-empty and `hash` is
+    // exactly hashOf( text ); a wrong hash would give one text two ids and break canonicality (and so == and determinism).
     std::uint32_t intern( std::string_view text, std::uint64_t hash )
     {
+        EXPECTS( !text.empty() );
+        DASSERT( hash == hashOf( text ) );
         Shard&              shard = shards_[ hash >> ( 64 - kShardBits ) ];
         const std::uint32_t tag   = std::uint32_t( hash );
         std::lock_guard     lock( shard.mutex );
@@ -79,6 +78,10 @@ public:
             if( slot.id == kEmptyId )
             {
                 const std::uint32_t id = next_.fetch_add( 1, std::memory_order_relaxed );
+                if( id == kEmptyId || id > kCapacity ) [[unlikely]]
+                {
+                    PANIC( "text pool full: more than kCapacity distinct texts" );   // ~4.29 G texts (100+ GB): no row can hold a past-the-end id
+                }
                 makeSlot( id ) = std::string( text );
                 slot = { tag, id };
                 ++shard.used;
@@ -103,19 +106,23 @@ public:
 
 private:
     static constexpr std::uint32_t kFirst     = 4096;   // segment 0's slots; segment k holds kFirst << k
-    static constexpr std::size_t   kSegments  = 20;     // ~4.3 G slots: past any u32 id the counter can hand out in practice
+    static constexpr std::size_t   kSegments  = 20;
+    static constexpr std::uint64_t kCapacity  = std::uint64_t( kFirst ) * ( ( std::uint64_t( 1 ) << kSegments ) - 1 );   // 4,294,963,200 ids
+    static_assert( kCapacity < std::uint64_t( 1 ) << 32, "every slot has a u32 id; the counter's wrap (to kEmptyId) is past the end too" );
     static constexpr unsigned      kShardBits = 6;
+    static constexpr std::size_t   kLine      = infra::platform::hardware_destructive_interference_size;
     struct Slot
     {
         std::uint32_t tag = 0;          // the low 32 bits of the text's hash: most probes stop here
         std::uint32_t id  = kEmptyId;   // kEmptyId = a free slot (no text is interned under it)
     };
-    struct alignas( 128 ) Shard   // one shard per 128 B line (Apple M-series line size): no false sharing between shards' locks
+    struct alignas( kLine ) Shard   // one shard per destructive-interference line: no false sharing between shards' locks
     {
         std::mutex        mutex;
         std::vector<Slot> slots;   // open addressing, linear probe, a power of two at most half full
         std::size_t       used = 0;
     };
+    static_assert( sizeof( Shard ) == kLine, "a Shard outgrew one line (a fatter std::mutex?): it now spans two, so re-measure the bounce" );
 
     static void growShard( Shard& shard )
     {
@@ -170,22 +177,27 @@ private:
     }
 
     std::atomic<std::string*>  segments_[ kSegments ] = {};
-    alignas( 128 ) std::atomic<std::uint32_t> next_{ 1 };
+    alignas( kLine ) std::atomic<std::uint32_t> next_{ 1 };
     Shard                      shards_[ std::size_t( 1 ) << kShardBits ];
     std::string                emptyText_;
 };
 
-// The one pool every reference name lives in. The constexpr constructor makes it constant-initialised (no guard on the read path,
-// built before any dynamic initialiser could intern); `constinit` is not spelled because MSVC's STL made std::mutex's constructor
-// constexpr only recently.
-inline TextPool gRefTextPool;
+// A value that is constructed (constant-initialised when T's constructor is constexpr) and never destroyed: a process-wide pool
+// must outlive every thread that can still use it, including a detached one running while static destructors run. Its storage
+// stays reachable from the global, so LeakSanitizer does not report it.
+template <class T> union NoDestroy
+{
+    T value;
+    constexpr NoDestroy() : value() {}
+    ~NoDestroy() {}
+    NoDestroy( const NoDestroy& )            = delete;
+    NoDestroy& operator=( const NoDestroy& ) = delete;
+};
 
-// gRefTextPool.intern behind a per-thread, direct-mapped front cache of the ids this thread interned last: most names repeat (1.2 M
-// references, 59 K distinct callee names on envoy), and a hit skips the shard lock. A hit is proven, not guessed: the cached id's
-// text must equal `text`. Every cached id came from gRefTextPool on this thread, so its slot was published to this thread under the
-// shard lock (the read is race-free), and the pool is never destroyed before the last thread that uses it. Measured cause: the
-// warm (--cache) path re-interns every cached row's names, and without this cache envoy's warm instructions rose 2.7 %.
-inline std::uint32_t internRefText( std::string_view text )
+// Domain::pool().intern behind a per-thread, direct-mapped front cache of the ids this thread interned last: when texts repeat, a
+// hit skips the shard lock. A hit is proven, not guessed: the cached id's text must equal `text`. Every cached id came from the
+// same pool on this thread, so its slot was published to this thread under the shard lock (the read is race-free).
+template <class Domain> std::uint32_t internCached( std::string_view text )
 {
     if( text.empty() )
     {
@@ -198,38 +210,40 @@ inline std::uint32_t internRefText( std::string_view text )
     };
     constexpr std::size_t kFrontSlots = 512;   // 4 KB per thread
     thread_local FrontSlot front[ kFrontSlots ];
+    TextPool&           pool = Domain::pool();
     const std::uint64_t hash = TextPool::hashOf( text );
     FrontSlot&          slot = front[ hash & ( kFrontSlots - 1 ) ];
     const std::uint32_t tag  = std::uint32_t( hash >> 32 );
-    if( slot.id != TextPool::kEmptyId && slot.tag == tag && std::string_view( gRefTextPool.text( slot.id ) ) == text )
+    if( slot.id != TextPool::kEmptyId && slot.tag == tag && std::string_view( pool.text( slot.id ) ) == text )
     {
         return slot.id;
     }
-    slot = { tag, gRefTextPool.intern( text, hash ) };
+    slot = { tag, pool.intern( text, hash ) };
     return slot.id;
 }
 
-// A reference name: 4 B, read like a const std::string, assigned from any text. No mutation in place: an edit builds the new text
-// and assigns it (`r.qualifier = std::string( r.qualifier ) + "::x"`). See the DETERMINISM note above for why no id is exposed.
-class InternedText
+// A text in Domain's pool: 4 B, read like a const std::string, assigned from any text. No mutation in place: an edit builds the new
+// text and assigns it. `+=` and push_back do that per call (copy, re-intern), so build a long text in a std::string and assign once.
+// See the DETERMINISM note above for why no id is exposed.
+template <class Domain> class InternedTextOf
 {
 public:
-    InternedText() noexcept = default;
-    explicit InternedText( std::string_view text ) : id_( internRefText( text ) ) {}   // explicit: no text converts to a name behind a comparison
-    InternedText& operator=( std::string_view text )
+    InternedTextOf() noexcept = default;
+    explicit InternedTextOf( std::string_view text ) : id_( internCached<Domain>( text ) ) {}   // explicit: no text converts to a name behind a comparison
+    InternedTextOf& operator=( std::string_view text )
     {
-        id_ = internRefText( text );
+        id_ = internCached<Domain>( text );
         return *this;
     }
-    InternedText& operator=( const std::string& text ) { return *this = std::string_view( text ); }
-    InternedText& operator=( const char* text ) { return *this = std::string_view( text ); }
-    InternedText& assign( std::string_view text ) { return *this = text; }
+    InternedTextOf& operator=( const std::string& text ) { return *this = std::string_view( text ); }
+    InternedTextOf& operator=( const char* text ) { return *this = std::string_view( text ); }
+    InternedTextOf& assign( std::string_view text ) { return *this = text; }
     // The edits a writer makes build the new text and intern it (the pool's texts never change): same result as std::string's.
-    InternedText& operator+=( std::string_view tail ) { return *this = std::string( str() ).append( tail ); }
-    InternedText& operator+=( char tail ) { return *this = std::string( str() ) + tail; }
+    InternedTextOf& operator+=( std::string_view tail ) { return *this = std::string( str() ).append( tail ); }
+    InternedTextOf& operator+=( char tail ) { return *this = std::string( str() ) + tail; }
     void          push_back( char tail ) { *this += tail; }
 
-    const std::string& str() const noexcept { return gRefTextPool.text( id_ ); }
+    const std::string& str() const noexcept { return Domain::pool().text( id_ ); }
     operator const std::string&() const noexcept { return str(); }
     operator std::string_view() const noexcept { return str(); }
 
@@ -246,27 +260,30 @@ public:
     std::string substr( std::size_t pos = 0, std::size_t n = std::string::npos ) const { return str().substr( pos, n ); }
     void clear() noexcept { id_ = TextPool::kEmptyId; }
 
-    friend std::string operator+( std::string lhs, const InternedText& rhs ) { return lhs.append( rhs.str() ); }
-    friend std::string operator+( const InternedText& lhs, std::string_view rhs ) { return std::string( lhs.str() ).append( rhs ); }
-    friend std::string operator+( const InternedText& lhs, const InternedText& rhs ) { return lhs + std::string_view( rhs.str() ); }
-    friend std::string operator+( const InternedText& lhs, char rhs ) { return std::string( lhs.str() ) + rhs; }
+    friend std::string operator+( std::string lhs, const InternedTextOf& rhs ) { return lhs.append( rhs.str() ); }
+    friend std::string operator+( const InternedTextOf& lhs, std::string_view rhs ) { return std::string( lhs.str() ).append( rhs ); }
+    friend std::string operator+( const InternedTextOf& lhs, const InternedTextOf& rhs ) { return lhs + std::string_view( rhs.str() ); }
+    friend std::string operator+( const InternedTextOf& lhs, char rhs ) { return std::string( lhs.str() ) + rhs; }
 
-    friend bool operator==( const InternedText& a, const InternedText& b ) noexcept { return a.id_ == b.id_; }   // canonical: same text, same id
-    friend bool operator==( const InternedText& a, std::string_view b ) noexcept { return std::string_view( a.str() ) == b; }
-    friend std::strong_ordering operator<=>( const InternedText& a, const InternedText& b ) noexcept
+    friend bool operator==( const InternedTextOf& a, const InternedTextOf& b ) noexcept { return a.id_ == b.id_; }   // canonical: same text, same id
+    friend bool operator==( const InternedTextOf& a, std::string_view b ) noexcept { return std::string_view( a.str() ) == b; }
+    friend std::strong_ordering operator<=>( const InternedTextOf& a, const InternedTextOf& b ) noexcept
     {
         return a.id_ == b.id_ ? std::strong_ordering::equal : std::string_view( a.str() ) <=> std::string_view( b.str() );
     }
-    friend std::strong_ordering operator<=>( const InternedText& a, std::string_view b ) noexcept { return std::string_view( a.str() ) <=> b; }
+    friend std::strong_ordering operator<=>( const InternedTextOf& a, std::string_view b ) noexcept { return std::string_view( a.str() ) <=> b; }
 
 private:
     std::uint32_t id_ = TextPool::kEmptyId;
 };
-static_assert( sizeof( InternedText ) == 4, "a reference name is one u32 id: the whole point of the pool" );
+
+// A pool id's VALUE depends on thread timing: a raw-bytes writer (a blob's POD put) must refuse one. Checked by quality.h qsnapPut.
+template <class T> inline constexpr bool isPoolId = false;
+template <class Domain> inline constexpr bool isPoolId<InternedTextOf<Domain>> = true;
 
 }   // namespace rw
 
-template <> struct std::formatter<rw::InternedText, char> : std::formatter<std::string_view, char>
+template <class Domain> struct std::formatter<rw::InternedTextOf<Domain>, char> : std::formatter<std::string_view, char>
 {
-    auto format( const rw::InternedText& t, std::format_context& ctx ) const { return std::formatter<std::string_view, char>::format( t.str(), ctx ); }
+    auto format( const rw::InternedTextOf<Domain>& t, std::format_context& ctx ) const { return std::formatter<std::string_view, char>::format( t.str(), ctx ); }
 };
