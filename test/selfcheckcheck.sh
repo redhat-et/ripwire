@@ -140,6 +140,7 @@ ALLOW = {
     "key_is_finite":          "dynamic_map's finiteness test on a key copy; no state",
     "keyIsSortable":          "radix key classification of a value; no state",
     "std::is_sorted":         "read-only walk of the given range",
+    "std::adjacent_find":     "read-only walk of the given range (clones.h Type3PairSearch::run: a bucket lists each candidate once, in order; lane qd-envoy-time)",
     "std::has_single_bit":    "bit arithmetic on an integer",
     "std::isfinite":          "classification of a floating-point value",
     "std::fabs":              "arithmetic on a value",
