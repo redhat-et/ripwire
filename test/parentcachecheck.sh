@@ -45,7 +45,7 @@ echo "parentcachecheck: BIN=$BIN  FIX=$FIX"
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 
 # run DIR OUT ARGS... → the answer in OUT, rc in $rc (cache on); runoff: the same with RIPWIRE_NO_PARENT_CACHE=1
-run(){    local d="$1" o="$2"; shift 2; "$BIN" "$d" --no-cache "$@" >"$o" 2>"$o.err"; rc=$?; }
+run(){    local d="$1" o="$2"; shift 2; env -u RIPWIRE_NO_PARENT_CACHE "$BIN" "$d" --no-cache "$@" >"$o" 2>"$o.err"; rc=$?; }   # a caller's RIPWIRE_NO_PARENT_CACHE must not turn the cache-on arm off (CodeRabbit #604)
 runoff(){ local d="$1" o="$2"; shift 2; RIPWIRE_NO_PARENT_CACHE=1 "$BIN" "$d" --no-cache "$@" >"$o" 2>"$o.err"; rc=$?; }
 
 echo "=== (A) facts a wrong parent moves ==="
@@ -64,6 +64,7 @@ callers_has(){
     local sym="$1" count="$2"; shift 2
     run "$FIX" "$TMP/c.xml" --callers="$sym"
     local root; root="$( grep -o '<callers [^>]*>' "$TMP/c.xml" | head -1 )"
+    if [ "$rc" -ne 0 ]; then no "(A) --callers=$sym exited rc=$rc: $( head -c 300 "$TMP/c.xml.err" )"; return 0; fi   # content checks only for a successful run (CodeRabbit #604)
     case "$root" in *" count=\"$count\""*) ok "(A) --callers=$sym count=\"$count\"" ;; *) no "(A) --callers=$sym wanted count=\"$count\" (rc=$rc): $root" ;; esac
     local want
     for want in "$@"; do
@@ -81,13 +82,13 @@ callers_has h      1 'n="g" p="missing.c:3" sites_at="missing.c:5 missing.c:6"'
 callers_has k      1 'n="g" p="missing.c:3" sites_at="missing.c:6"'
 callers_has render 2 'n="Panel.refresh" p="shapes.ts:3" sites_at="shapes.ts:5"' 'n="mount" p="shapes.ts:9" sites_at="shapes.ts:11"'
 
-# same DIR LABEL ARGS... → the answer is byte-identical with the cache on and off, and not empty
+# same DIR LABEL ARGS... → the answer (stdout and stderr) is byte-identical with the cache on and off, and not empty
 same(){
     local d="$1" label="$2"; shift 2
     run "$d" "$TMP/on.xml" "$@";  local r1=$rc
     runoff "$d" "$TMP/off.xml" "$@"; local r2=$rc
-    if [ "$r1" -eq 0 ] && [ "$r2" -eq 0 ] && [ -s "$TMP/on.xml" ] && cmp -s "$TMP/on.xml" "$TMP/off.xml"; then ok "$label $* : identical cache on/off ($( wc -c <"$TMP/on.xml" | tr -d ' ' ) B)"
-    else no "$label $* : rc on=$r1 off=$r2, answers differ or are empty"; fi
+    if [ "$r1" -eq 0 ] && [ "$r2" -eq 0 ] && [ -s "$TMP/on.xml" ] && cmp -s "$TMP/on.xml" "$TMP/off.xml" && cmp -s "$TMP/on.xml.err" "$TMP/off.xml.err"; then ok "$label $* : identical cache on/off, stdout and stderr ($( wc -c <"$TMP/on.xml" | tr -d ' ' ) B)"
+    else no "$label $* : rc on=$r1 off=$r2, answers or diagnostics differ, or the answer is empty"; fi
 }
 
 echo "=== (B) the fixture answers the same with the cache off ==="
@@ -108,8 +109,8 @@ for d in goscopefix cppqualfix cppqualtmplfix cppqualdeffix; do
 done
 
 echo "=== (D) cold and warm runs agree, cache on ==="
-"$BIN" "$FIX" --cache="$TMP/cache" >"$TMP/cold.xml" 2>/dev/null; c1=$?
-"$BIN" "$FIX" --cache="$TMP/cache" >"$TMP/warm.xml" 2>/dev/null; c2=$?
+env -u RIPWIRE_NO_PARENT_CACHE "$BIN" "$FIX" --cache="$TMP/cache" >"$TMP/cold.xml" 2>/dev/null; c1=$?
+env -u RIPWIRE_NO_PARENT_CACHE "$BIN" "$FIX" --cache="$TMP/cache" >"$TMP/warm.xml" 2>/dev/null; c2=$?
 if [ "$c1" -eq 0 ] && [ "$c2" -eq 0 ] && [ -s "$TMP/warm.xml" ] && cmp -s "$TMP/cold.xml" "$TMP/warm.xml" && cmp -s "$TMP/cold.xml" "$TMP/map.xml"; then
     ok "(D) cold == warm == --no-cache map"
 else
