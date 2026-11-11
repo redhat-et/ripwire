@@ -17,6 +17,9 @@
 #       away; the same-named decorator (src/widget.decorator.ts) is not in the block.
 #   S3  `signToken from hx/jwt`: exports target ./dist/middleware/jwt/index.js mapped to src/middleware/jwt/index.ts; the aliased
 #       re-export `sign as signToken` is a row as="signToken" and the def is `sign`.
+#   S6  VALUE-HOP (increment 2): `verify from hv/jwt` where middleware/jwt/jwt.ts does `export const verify = Jwt.verify` and
+#       utils/jwt/index.ts `export const Jwt = { sign, verify }` over `import { sign, verify } from './jwt'`: two val= rows, then
+#       the function in utils/jwt/jwt.ts.
 #   S4  card (c) on the definition-side walk: `where injectAll is defined` reaches src/core.ts, public_api.ts and index.ts.
 #   S5  Python: `where acme.pkg.Thing is defined` -> `lazy from .impl import Thing` in acme/pkg/__init__.py; `Thing2 imported from
 #       acme.pkg` -> the parenthesised `Other as Thing2` (as="Thing2", def Other).
@@ -96,6 +99,19 @@ w packages/hx/src/middleware/jwt/jwt.ts "export function verify(token: string): 
 export function sign(payload: string): string {
   return payload + '.sig';
 }"
+# VALUE-HOP: the subpath's name is a value built from an import (`export const verify = Jwt.verify`, `Jwt = { sign, verify }`)
+w packages/hv/package.json '{ "name": "hv", "exports": { "./jwt": "./dist/middleware/jwt/index.js" } }'
+w packages/hv/src/middleware/jwt/index.ts "export { verify } from './jwt';"
+w packages/hv/src/middleware/jwt/jwt.ts "import { Jwt } from '../../utils/jwt';
+export const verify = Jwt.verify;"
+w packages/hv/src/utils/jwt/index.ts "import { sign, verify } from './jwt';
+export const Jwt = { sign, verify };"
+w packages/hv/src/utils/jwt/jwt.ts "export function verify(token: string): boolean {
+  return token.length > 1;
+}
+export function sign(payload: string): string {
+  return payload + '.hv';
+}"
 # two manifests that spell one package name: ambiguous, disclosed
 w packages/dup-a/package.json '{ "name": "@acme/dup", "exports": { ".": "./index.js" } }'
 w packages/dup-a/index.ts "export function Gadget(): number {
@@ -139,6 +155,9 @@ hasnt "$TMP/s2.xml" "S2 the same-named decorator is not in the block" 'widget.de
 ask "--for=signToken from hx/jwt" >"$TMP/s3.xml"
 has "$TMP/s3.xml" "S3 dist target mapped to its source" 'entry="packages/hx/src/middleware/jwt/index.ts"'
 has "$TMP/s3.xml" "S3 the aliased re-export is a row, def sign" '<def n="sign" p="packages/hx/src/middleware/jwt/jwt.ts" l="4" total="1"/><rx p="packages/hx/src/middleware/jwt/index.ts" l="1" from="./jwt" as="signToken"/>'
+
+ask "--for=verify from hv/jwt" >"$TMP/s6.xml"
+has "$TMP/s6.xml" "S6 value hops: Jwt.verify, then the object member, to the function" '<def n="verify" p="packages/hv/src/utils/jwt/jwt.ts" l="1" total="3"/><rx p="packages/hv/src/middleware/jwt/index.ts" l="1" from="./jwt"/><rx p="packages/hv/src/middleware/jwt/jwt.ts" l="2" from="../../utils/jwt" val="Jwt.verify"/><rx p="packages/hv/src/utils/jwt/index.ts" l="2" from="./jwt" val="{ verify }"/>'
 
 ask "--for=where injectAll is defined" >"$TMP/s4.xml"
 has "$TMP/s4.xml" "S4 definition-side walk passes ./di (file before index)" '<rx p="packages/core/src/core.ts" l="1" from="./di" glob="1"/>'

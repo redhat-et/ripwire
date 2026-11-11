@@ -61,7 +61,8 @@ inline constexpr std::string_view kImportSpecLegend =
     "files (or module files) answer it: nothing is guessed; external=1 no in-tree package declares it (no in-tree row is printed for "
     "it); found=0 the walk from entry reached no definition (the definition-side chains below are leads); capped=1 the walk stopped "
     "early. The def row after it is the definition the walk reached; its rx rows are the statements from entry to it, in import order "
-    "(from= the module each one names, as= the name it renames, glob=1 a star / wildcard hop, hedged) -->";
+    "(from= the module each one names, as= the name it renames, glob=1 a star / wildcard hop, hedged; val= a VALUE hop: the name is a value built from an import, `export const "
+    "verify = Jwt.verify` or a member of an exported object literal `{ verify }`, not a re-export statement) -->";
 
 namespace importspec_detail
 {
@@ -443,6 +444,7 @@ struct SpecHop
     std::string   taken;      // the name the statement takes from `from` (== the name it binds unless renamed)
     std::string   bound;      // the name it binds in `file`
     bool          glob  = false;
+    std::string   val;        // VALUE-HOP: the value expression that hands the name on (`Jwt.verify`, `{ verify }`); empty for a statement
 };
 
 // The walk's result: the definition reached and the statements from the entry to it, in import order.
@@ -579,6 +581,78 @@ inline std::uint32_t pythonModuleFile( const IngestResult& ing, const HashMap<st
     return kNoFile;
 }
 
+// VALUE-HOP: a top-level `export const NAME = Q.M` (also let/var) in `text`: (Q, M, the statement's byte); nullopt when absent.
+struct MemberAlias
+{
+    std::string   q, m;
+    std::size_t   byte = 0;
+};
+
+inline std::optional<MemberAlias> memberAliasOf( const std::string& text, std::string_view name )
+{
+    for( const std::string_view kw : { "export const ", "export let ", "export var " } )
+    {
+        const std::string head = std::string( kw ) + std::string( name ) + " = ";
+        for( std::size_t at = text.find( head ); at != std::string::npos; at = text.find( head, at + 1 ) )
+        {
+            if( at != 0 && text[ at - 1 ] != '\n' )
+            {
+                continue;
+            }
+            const std::size_t eol  = std::min( text.find( '\n', at ), text.size() );
+            std::string_view  expr = std::string_view( text ).substr( at + head.size(), eol - at - head.size() );
+            while( !expr.empty() && ( expr.back() == ';' || expr.back() == ' ' || expr.back() == '\r' ) )
+            {
+                expr.remove_suffix( 1 );
+            }
+            const std::size_t dot = expr.find( '.' );
+            if( dot != std::string_view::npos && identWord( expr.substr( 0, dot ) ) && identWord( expr.substr( dot + 1 ) ) )
+            {
+                return MemberAlias{ std::string( expr.substr( 0, dot ) ), std::string( expr.substr( dot + 1 ) ), at };
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// VALUE-HOP: the local name an object literal binds member `m` to, inside [from, to) of `text` (`{ sign, verify }` -> verify;
+// `{ verify: verifyImpl }` -> verifyImpl); empty when the span holds no top-level object member m.
+inline std::string objectMemberLocal( const std::string& text, std::size_t from, std::size_t to, std::string_view m )
+{
+    const std::size_t open = text.find( '{', from );
+    if( open == std::string::npos || open >= to )
+    {
+        return {};
+    }
+    int         depth = 0;
+    std::size_t item  = open + 1;
+    for( std::size_t i = open; i < std::min( to, text.size() ); ++i )
+    {
+        const char ch = text[ i ];
+        depth += ( ch == '{' || ch == '(' || ch == '[' ) ? 1 : ( ch == '}' || ch == ')' || ch == ']' ) ? -1 : 0;
+        if( ( depth == 1 && ch == ',' ) || depth == 0 )
+        {
+            std::string_view e = std::string_view( text ).substr( item, i - item );
+            const std::size_t b = e.find_first_not_of( " \t\r\n" );
+            e = b == std::string_view::npos ? std::string_view() : e.substr( b, e.find_last_not_of( " \t\r\n" ) - b + 1 );
+            const std::size_t colon = e.find( ':' );
+            const std::string_view key = colon == std::string_view::npos ? e : e.substr( 0, e.find_last_not_of( " \t", colon - 1 ) + 1 );
+            if( key == m )
+            {
+                std::string_view v = colon == std::string_view::npos ? e : e.substr( colon + 1 );
+                v = v.substr( std::min( v.find_first_not_of( " \t" ), v.size() ) );
+                return identWord( v ) ? std::string( v ) : std::string();
+            }
+            item = i + 1;
+            if( depth == 0 )
+            {
+                break;
+            }
+        }
+    }
+    return {};
+}
+
 }   // namespace importspec_detail
 
 // Breadth-first from (entry, name): a top-level definition of the name in the file ends the walk; otherwise each statement that
@@ -602,6 +676,7 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
         }
     }
     HashMap<std::uint32_t, std::vector<const Binding*>> reexports;   // Web ReExport records by file
+    HashMap<std::string, const Binding*>                imports;     // VALUE-HOP: "<file>#<local>" -> the named ES import binding it
     if( !python )
     {
         for( const Binding& b : ing.bindings )
@@ -610,8 +685,22 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
             {
                 reexports[ b.fileId ].push_back( &b );
             }
+            else if( b.kind == LocalBindKind::JsImport && !b.importedName.empty() )
+            {
+                imports.try_emplace( std::to_string( b.fileId ) + "#" + b.var, &b );
+            }
         }
     }
+    HashMap<std::uint32_t, std::optional<std::string>> texts;
+    const auto textOf = [ & ]( std::uint32_t f ) -> const std::string&
+    {
+        auto [ it, fresh ] = texts.try_emplace( f );
+        if( fresh )
+        {
+            it->second = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() );
+        }
+        return *it->second;
+    };
     struct State
     {
         std::uint32_t file;
@@ -619,8 +708,9 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
         int           parent;
         SpecHop       hop;
         std::size_t   depth;
+        std::string   member;   // VALUE-HOP: the member of `name` (an object) the walk is after; empty: name itself
     };
-    std::vector<State>         states{ State{ entry, std::string( name ), -1, {}, 0 } };
+    std::vector<State>         states{ State{ entry, std::string( name ), -1, {}, 0, {} } };
     HashMap<std::string, char> seen;
     seen.try_emplace( std::to_string( entry ) + "#" + std::string( name ), '\0' );
     HashMap<std::uint32_t, std::vector<PyFrom>> pyCache;
@@ -633,7 +723,34 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
         {
             break;
         }
-        if( const auto d = defs.find( std::to_string( st.file ) + "#" + st.name ); d != defs.end() )
+        const auto d = defs.find( std::to_string( st.file ) + "#" + st.name );
+        std::vector<SpecHop> next;
+        std::string          nextMember;
+        if( !python && !st.member.empty() )   // VALUE-HOP: the object's member, imported into this file
+        {
+            const std::string& text = textOf( st.file );
+            // the object: its definition's span, else (an object-literal const is no indexed definition) its `[export] const X = {` line
+            std::size_t from = d != defs.end() ? d->second->sigStartByte : std::string::npos;
+            const std::size_t end = d != defs.end() ? d->second->endByte : text.size();
+            for( const std::string_view kw : { "export const ", "const " } )
+            {
+                const std::string head = std::string( kw ) + st.name + " = ";
+                for( std::size_t at = text.find( head ); from == std::string::npos && at != std::string::npos; at = text.find( head, at + 1 ) )
+                {
+                    from = at == 0 || text[ at - 1 ] == '\n' ? at : std::string::npos;
+                }
+            }
+            const std::string   local = from == std::string::npos ? std::string() : objectMemberLocal( text, from, end, st.member );
+            const auto          imp   = local.empty() ? imports.end() : imports.find( std::to_string( st.file ) + "#" + local );
+            const std::uint32_t to    = imp == imports.end() ? kNoFile : webTarget( imp->second );
+            if( to != kNoFile )
+            {
+                const std::size_t bol = text.rfind( '\n', std::min( from, text.size() ) );
+                next.push_back( SpecHop{ to, std::uint32_t( bol == std::string::npos || bol + 1 > from ? from : bol + 1 ), imp->second->typeName, imp->second->importedName, st.member, false,
+                                         "{ " + st.member + ( local == st.member ? std::string() : ": " + local ) + " }" } );
+            }
+        }
+        if( next.empty() && d != defs.end() )
         {
             if( found < 0 )
             {
@@ -648,7 +765,6 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
         {
             continue;
         }
-        std::vector<SpecHop> next;
         if( python )
         {
             auto [ it, fresh ] = pyCache.try_emplace( st.file );
@@ -665,7 +781,7 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
                         const std::uint32_t to = pythonModuleFile( ing, files, st.file, pf.module );
                         if( to != kNoFile )
                         {
-                            next.push_back( SpecHop{ to, std::uint32_t( pf.byte ), pf.module, taken == "*" ? st.name : taken, st.name, taken == "*" } );
+                            next.push_back( SpecHop{ to, std::uint32_t( pf.byte ), pf.module, taken == "*" ? st.name : taken, st.name, taken == "*", {} } );
                         }
                     }
                 }
@@ -683,7 +799,21 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
                 const std::uint32_t to = webTarget( b );
                 if( to != kNoFile )
                 {
-                    next.push_back( SpecHop{ to, b->startByte, b->typeName, star ? st.name : b->importedName, st.name, star } );
+                    next.push_back( SpecHop{ to, b->startByte, b->typeName, star ? st.name : b->importedName, st.name, star, {} } );
+                }
+            }
+        }
+        if( !python && next.empty() && st.member.empty() )   // VALUE-HOP: `export const NAME = Q.M`, Q a named import of this file
+        {
+            const std::string& text = textOf( st.file );
+            if( const std::optional<MemberAlias> a = memberAliasOf( text, st.name ) )
+            {
+                const auto imp = imports.find( std::to_string( st.file ) + "#" + a->q );
+                const std::uint32_t to = imp == imports.end() ? kNoFile : webTarget( imp->second );
+                if( to != kNoFile )
+                {
+                    next.push_back( SpecHop{ to, std::uint32_t( a->byte ), imp->second->typeName, imp->second->importedName, st.name, false, a->q + "." + a->m } );
+                    nextMember = a->m;
                 }
             }
         }
@@ -702,7 +832,8 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
             const std::uint32_t to = h.file;
             std::string         taken = h.taken;
             h.file = st.file;   // the statement sits in the state's file; the next state is the file it names
-            states.push_back( State{ to, std::move( taken ), int( at ), std::move( h ), st.depth + 1 } );
+            const std::string member = h.val.empty() || h.val.starts_with( '{' ) ? std::string() : nextMember;
+            states.push_back( State{ to, std::move( taken ), int( at ), std::move( h ), st.depth + 1, member } );
         }
     }
     for( int i = found; i > 0; i = states[ std::size_t( i ) ].parent )

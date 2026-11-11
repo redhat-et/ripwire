@@ -1556,7 +1556,11 @@ inline ImportSpecBlock renderImportSpecBlock( const IngestResult& ing, const std
         attr( "p", rootRelPath( ing, h.file ) );
         num( "l", src.lineOf( h.file, h.byte ) );
         attr( "from", h.from );
-        if( !h.glob && h.taken != h.bound )
+        if( !h.val.empty() )
+        {
+            attr( "val", h.val );
+        }
+        else if( !h.glob && h.taken != h.bound )
         {
             attr( "as", h.bound );
         }
