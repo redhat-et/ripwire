@@ -215,11 +215,20 @@ struct Graph
     // unaccounted alert and copied into pinCensus when a census is armed; its external/unresolved/declined buckets
     // equal those header gauges by construction.
     CallDispositionCounts      callDispositions{};
-    std::vector<std::string>   localityKey; // per-symbol S6-C SCORING key (resolve.h::localityKeyOf): canonId when scoped,
-                                            // `path::name` when not. Read ONLY by the S6-C block; never an identity.
+    std::vector<std::string>   localityKey; // per-symbol S6-C SCORING key (resolve.h::localityKeyOf) for an UNSCOPED symbol,
+                                            // `path::name`; EMPTY for a scoped one, whose key is its canonId. Read ONLY through
+                                            // localityKeyAt, by the S6-C block; never an identity. G1b (mem-audit-fable-1111):
+                                            // storing the scoped key too was a second copy of canonId (21 MiB on envoy).
     std::vector<std::string>   canonId;     // per-symbol canonical SCIP-style id `path::scope::name` (S6-C); the
                                             // bare name when no scope is known. The resolution locality tie-break
                                             // and serialize's `id=` attribute both read this. Built in buildGraph.
+    // the S6-C scoring key of symbol `id`: canonId when it is scoped (localityKey holds no copy), else `path::name` — never
+    // empty for a built symbol, since an unscoped key always carries its "::"
+    const std::string& localityKeyAt( NodeId id ) const noexcept
+    {
+        const std::string& own = localityKey[ id ];
+        return own.empty() ? canonId[ id ] : own;
+    }
     std::vector<ComposeEdge>   composeEdges;  // S5-E HAS-A edges (sorted by ownerSym, then typeSym) — OUTSIDE the
                                               // call graph; PageRank and the default map are UNCHANGED by these.
     std::vector<RouteEdge>     routeEdges;    // B6.3 HTTP-route USE→DEF edges (sorted by fromSym, toSym, path) —
@@ -9648,8 +9657,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         PROFILE_SCOPE_DESCRIBE( "buildGraph/1a: canonId + localityKey (per symbol)" );
         for( const Symbol& s : ing.symbols )
         {
-            g.canonId[ s.id ]     = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
-            g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );   // == canonId when scoped
+            g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+            if( s.scope.empty() )   // scoped: localityKeyOf is canonicalId verbatim, so Graph::localityKeyAt reads canonId (G1b)
+            {
+                g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );
+            }
         }
     }
 
@@ -12811,7 +12823,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
          && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly )   // FE-B: a name-only call keeps every candidate
         {
-            const std::string& callerCanon = g.localityKey[ r.fromSymbol ];   // == canonId here (the caller is scoped)
+            const std::string& callerCanon = g.localityKeyAt( r.fromSymbol );   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );
             // memoize each survivor's shared-locality ONCE (was computed twice: once for bestShare, once inside the
             // stable_partition predicate). locShare[i] parallels tier[i]; the compaction below reads the memo.
@@ -12843,7 +12855,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 // FE-B narrows that floor to calls WITH receiver evidence: a NAME-ONLY call never reaches this
                 // block (its tier keeps every same-file and same-directory candidate, receiverevidence.h), so
                 // there the cross-file candidate IS listed — hedged via="name", never as a confident edge.
-                const std::size_t sh = ( c == r.fromSymbol ) ? 0 : localityRank( callerCanon, g.localityKey[c], ( r.recv == RecvKind::None && r.qualifier.empty() ) || r.recv == RecvKind::ThisObj, localityCap );   // path-scoped even for a free function
+                const std::size_t sh = ( c == r.fromSymbol ) ? 0 : localityRank( callerCanon, g.localityKeyAt( c ), ( r.recv == RecvKind::None && r.qualifier.empty() ) || r.recv == RecvKind::ThisObj, localityCap );   // path-scoped even for a free function
                 locShare.push_back( sh );
                 if( sh > bestShare )
                 {
@@ -14347,8 +14359,8 @@ inline std::vector<float> anchoredLexicalRank( const Graph& g, const std::vector
                        [ & ]( NodeId a, NodeId b )
                        {
                            if( lex[a] != lex[b] ) { return lex[a] > lex[b]; }
-                           const std::string& ka = g.localityKey[a];
-                           const std::string& kb = g.localityKey[b];
+                           const std::string& ka = g.localityKeyAt( a );
+                           const std::string& kb = g.localityKeyAt( b );
                            return ka != kb ? ka < kb : a < b;   // id only disambiguates true duplicate identities
                        } );
     anchorIds.resize( anchorCount );
