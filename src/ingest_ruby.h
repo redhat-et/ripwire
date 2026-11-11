@@ -180,7 +180,7 @@ inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_vie
     // content-gated (still no path heuristic): a migration file next to the schema contributes ZERO defs.
     // Checked FIRST — the cheapest gate — before the argument/block walks.
     {
-        for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+        for( TSNode p = parentOf( n ); !ts_node_is_null( p ); p = parentOf( p ) )
         {
             const std::string_view k( ts_node_type( p ) );
             if( k == "class" || k == "module" )   // a locals distilled walk — no cross-helper dependency
@@ -356,7 +356,7 @@ inline void typeRubyJbuilderLocal( std::uint32_t fileId, std::vector<RawRef>& re
 // Does `call` sit at class-body position — its nearest enclosing def-or-class a class or module, any blocks between?
 inline bool rubyAtClassBody( TSNode call ) noexcept
 {
-    for( TSNode p = ts_node_parent( call ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( call ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         if( kindIs( t, "class" ) || kindIs( t, "module" ) )
@@ -455,7 +455,7 @@ inline bool rubyIsSingletonDef( TSNode defNode ) noexcept
         const TSNode object = fieldChild( defNode, NodeField::Object );
         return !ts_node_is_null( object ) && kindIs( ts_node_type( object ), "self" );
     }
-    for( TSNode n = ts_node_parent( defNode ); !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    for( TSNode n = parentOf( defNode ); !ts_node_is_null( n ); n = parentOf( n ) )
     {
         const char* t = ts_node_type( n );
         if( kindIs( t, "singleton_class" ) )
@@ -489,7 +489,7 @@ inline constexpr std::array<std::string_view, 2> kRubyIncluderBlocks = { "includ
 // The concern hook (kRubyIncluderBlocks) whose block `n` is, written at class-body level, or empty.
 inline std::string_view rubyIncluderHook( TSNode n, std::string_view src ) noexcept
 {
-    const TSNode owner = kindIs( ts_node_type( n ), "do_block" ) || kindIs( ts_node_type( n ), "block" ) ? ts_node_parent( n ) : TSNode {};
+    const TSNode owner = kindIs( ts_node_type( n ), "do_block" ) || kindIs( ts_node_type( n ), "block" ) ? parentOf( n ) : TSNode {};
     if( ts_node_is_null( owner ) || !kindIs( ts_node_type( owner ), "call" ) )
     {
         return {};
@@ -522,7 +522,7 @@ inline RubyDefSide rubyDefSide( TSNode defNode, std::string_view src ) noexcept
         return RubyDefSide::Instance;   // `def obj.m` is another object's
     }
     bool singleton = selfDef;
-    for( TSNode n = ts_node_parent( defNode ); !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    for( TSNode n = parentOf( defNode ); !ts_node_is_null( n ); n = parentOf( n ) )
     {
         const char* t = ts_node_type( n );
         if( kindIs( t, "singleton_class" ) )
