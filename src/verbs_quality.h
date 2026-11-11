@@ -526,6 +526,10 @@ struct DeltaBasis
     // and never looks at it, which keeps the two runs' reported findings identical.
     std::vector<rw::quality::CloneIdiomFact> cloneIdioms;
     rw::quality::HistoryUnread               historyUnread;   // hwh-fix4 (N1): history a gating kind could not read (unread_history=, exit 6)
+    // QD-IDENTITY-ONCE: the working-tree form's pure passes over d.ing — the identity-basis snapshot, the delta and the
+    // --show-stale snapshot all read the same ingest, so the clone and construct passes run once between them. Unbound
+    // (never read) in the ref-pair form, whose two trees are other ingests.
+    rw::quality::TreePasses                  passes;
 };
 
 // The REF-PAIR floor's comparison, once loadRefPairDelta has both sides: the base snapshot is the floor, tree B the judged
@@ -610,7 +614,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
         // #228 part 1 — the IDENTITY BASIS (quality.h): when the tracked tree already IS HEAD, the baseline is
         // this tree's own snapshot, so a no-op diff is empty by construction instead of by luck. Falls back to
         // the archived HEAD snapshot on any modified tree, unchanged.
-        quality::HeadBasis basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes );
+        quality::HeadBasis basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes, &out.passes );
         if( !basis.ok )
         {
             // w1 MED: this used to say "no <file>" in BOTH cases — factually false when the file is a STALE
@@ -657,7 +661,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, d.ing, d.g,
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
-                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread );
+                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread, &out.passes );
     // hwh-fix4 (N1): against a pinned sidecar the rename record re-files baseline rows; refused on a partial clone, it is unread history
     out.historyUnread.renames = out.healing.renames.refusedPartial && out.baseSel.marker == std::string_view( "sidecar" );
     return std::nullopt;
@@ -1496,7 +1500,8 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
     // statement about the delta, so computing it another way is how the two would come to disagree. #228: on a
     // tree whose tracked files are HEAD this now absorbs nothing, which is what unblocks --quality-baseline on
     // exactly the repositories that needed the escape hatch.
-    quality::HeadBasis basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes );
+    quality::TreePasses passes;   // QD-IDENTITY-ONCE: one clone/construct pass for the identity snapshot and the delta below
+    quality::HeadBasis  basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes, &passes );
     if( !basis.ok )
     {
         return verdict;   // no HEAD tree to compare against — nothing can be absorbed, so nothing is claimed
@@ -1505,7 +1510,7 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
     quality::healIdentity( basis.snapshot, acks, d.ing, d.g, std::string( cfg.rootPath ), root, /*wantContentIds=*/false );
     std::vector<quality::Regression> regs =
         quality::computeDelta( d.ing, d.g, basis.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, nullptr, nullptr, nullptr, nullptr, nullptr,
-                               quality::KindScope{}, &verdict.historyUnread );
+                               quality::KindScope{}, &verdict.historyUnread, &passes );
     quality::applyAckRatchet( regs, acks );
 
     for( const quality::Regression& r : regs )
@@ -2063,7 +2068,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // kind selection judges its own kinds' acks only).
         const std::vector<quality::StaleAck> staleAcks = acks.empty() ? std::vector<quality::StaleAck>{}
                                                          : refPair ? refPairStaleAcks( acks, refs )
-                                                         : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath ) );
+                                                         : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath, nullptr, {}, &basis.passes ) );
         if( std::getenv( "RIPWIRE_STATS" ) )   // QD-ENVOY-TIME cost bound: Type-3 passes this call ran (test/qdtype3oncecheck.sh)
         {
             rw::emitTo( stderr, "ripwire: quality-passes type3_runs={} type3_pairs={}\n", gType3PassRuns.load( std::memory_order_relaxed ),

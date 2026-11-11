@@ -1117,6 +1117,60 @@ inline ConstructCounts constructCountsBySym( const IngestResult& ing, std::strin
     return counts;
 }
 
+// QD-IDENTITY-ONCE — the whole-tree passes that are PURE functions of one ingest, computed at most once per
+// `--quality-delta` call however many consumers read them. Under the IDENTITY BASIS (computeHeadBasis) the HEAD
+// snapshot is taken from the very ingest computeDelta then judges, so the clone passes (findClones +
+// findClonesType3, two thirds of the verb on envoy) and the construct re-parse used to run twice on one input,
+// and a third time for the --show-stale snapshot. Each accessor computes on first use and hands back the same
+// value after, which is byte-identical BY CONSTRUCTION: the passes are deterministic and read nothing but `ing`
+// (and `root`, for the construct keys). One instance serves ONE ingest; binding a second one is a plumbing bug.
+// A caller with nothing to share passes nullptr and each consumer computes its own, exactly as before.
+class TreePasses
+{
+public:
+    const std::vector<CloneGroup>& exactClones( const IngestResult& ing )
+    {
+        bind( ing );
+        if( !exact_ )
+        {
+            exact_ = findClones( ing, int( kMinCloneTokens ) );
+        }
+        return *exact_;
+    }
+    const std::vector<CloneGroup>& type3Clones( const IngestResult& ing )
+    {
+        bind( ing );
+        if( !type3_ )
+        {
+            type3_ = findClonesType3( ing, int( kMinCloneTokens ) );
+        }
+        return *type3_;
+    }
+    // The keys are root-relative, so a second root is a second value: recomputed, never served from the first.
+    const ConstructCounts& constructCounts( const IngestResult& ing, std::string_view root )
+    {
+        bind( ing );
+        if( !constructs_ || constructsRoot_ != root )
+        {
+            constructs_     = constructCountsBySym( ing, root );
+            constructsRoot_ = std::string( root );
+        }
+        return *constructs_;
+    }
+
+private:
+    void bind( const IngestResult& ing )
+    {
+        ASSUME( ing_ == nullptr || ing_ == &ing, "TreePasses: one instance serves one ingest" );
+        ing_ = &ing;
+    }
+    const IngestResult*                    ing_ = nullptr;
+    std::optional<std::vector<CloneGroup>> exact_;
+    std::optional<std::vector<CloneGroup>> type3_;
+    std::optional<ConstructCounts>         constructs_;
+    std::string                            constructsRoot_;
+};
+
 
 // THE quality key, for a symbol in the CURRENT tree — the one rule computeSnapshot and computeDelta must
 // agree on, living ONCE so they cannot drift (the §B1.3 discipline baselineCanonId above follows for the
@@ -4516,7 +4570,8 @@ inline RefSpec resolveRefSpec( const std::string& root, std::string_view spec )
 // quotepath=false — no injection, deterministic path handling.
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root,
                                  const std::vector<char>* fileInBaseline = nullptr,     // fwd — defined below; computeHeadSnapshot reuses it
-                                 const KindScope& scope = KindScope() );   // no braces here: qschemetripcheck's extractor reads them as a body
+                                 const KindScope& scope = KindScope(),
+                                 TreePasses* passes = nullptr );   // QD-IDENTITY-ONCE: pure passes shared with the delta side (see TreePasses)   // no braces here: qschemetripcheck's extractor reads them as a body
 // `excludes` MUST mirror the working-tree side's cfg.excludes (A4-F5): the HEAD snapshot is compared key-for-key
 // against the working tree, and any in-edge-derived kind (dead-code, api-surface) diverges if one side honors
 // --exclude and the other does not — e.g. a helper called only from tests/ is dead on a --exclude=tests working
@@ -5563,11 +5618,11 @@ inline void pushTwinWidenedPairs( const HeldClonePairSink& sink, const std::vect
 }
 
 inline std::vector<std::uint64_t> baselineCloneGroupHashes( const IngestResult& ing, std::string_view root,
-                                                            const std::vector<char>* fileInBaseline )
+                                                            const std::vector<char>* fileInBaseline, TreePasses& passes )
 {
-    std::vector<std::uint64_t>    out;
-    const std::vector<CloneGroup> exact = findClones( ing, int( kMinCloneTokens ) );
-    const std::vector<CloneGroup> type3 = findClonesType3( ing, int( kMinCloneTokens ) );
+    std::vector<std::uint64_t>     out;
+    const std::vector<CloneGroup>& exact = passes.exactClones( ing );
+    const std::vector<CloneGroup>& type3 = passes.type3Clones( ing );
     for( const CloneGroup& cg : exact )
     {
         if( cloneGroupIsInBaseline( cg, ing, fileInBaseline ) ) { out.push_back( cloneGroupHash( cg, ing, root ) ); }
@@ -5740,16 +5795,19 @@ inline void addDeadSet( Snapshot& snap, const IngestResult& ing, const Graph& g,
 
 // The snapshot's whole-file passes, each only for the kinds it feeds (see computeSnapshot): clone groups, construct
 // counts, defect sites, body hashes.
-inline void addKindPasses( Snapshot& snap, const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline, const KindScope& scope )
+inline void addKindPasses( Snapshot& snap, const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline, const KindScope& scope,
+                           TreePasses* shared )
 {
+    TreePasses  own;
+    TreePasses& passes = shared != nullptr ? *shared : own;   // QD-IDENTITY-ONCE: the caller's, when the delta side reads the same ingest
     if( ( scope.kinds & ( kindBit( "duplication" ) | kindBit( "new-clone-of-reused-helper" ) ) ) != 0 )
     {
-        snap.cloneGroups = baselineCloneGroupHashes( ing, root, fileInBaseline );
+        snap.cloneGroups = baselineCloneGroupHashes( ing, root, fileInBaseline, passes );
     }
     // §D#4 error-masking + placeholder baseline: per-canonId counts (the SUMs the delta compares), from one pass.
     if( ( scope.kinds & ( kindBit( "error-masking" ) | kindBit( "placeholder" ) ) ) != 0 )
     {
-        ConstructCounts counts = constructCountsBySym( ing, root );
+        ConstructCounts counts = passes.constructCounts( ing, root );   // a copy: a shared value is read again by the delta
         snap.maskBySym         = std::move( counts.mask );
         snap.maskReportBySym   = std::move( counts.maskReport );
         snap.placeholderBySym  = std::move( counts.placeholder );
@@ -5776,7 +5834,7 @@ inline void addKindPasses( Snapshot& snap, const IngestResult& ing, std::string_
 // short-horizon-churn. The per-symbol metric maps always run (locBySym is every kind's existence oracle). The default
 // scope is every pass, the snapshot this function has always returned; its macroOverride: see defectSitesOf.
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root,
-                                 const std::vector<char>* fileInBaseline, const KindScope& scope )
+                                 const std::vector<char>* fileInBaseline, const KindScope& scope, TreePasses* passes )
 {
     Snapshot snap;
     const std::vector<std::uint32_t> codeLoc = codeLocByNode( ing );                     // Q-DIAL-3: the verbosity kind's metric is CODE lines
@@ -5815,7 +5873,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
     {
         addDeadSet( snap, ing, g, root, fileInBaseline );   // sorted below with the rest; its order of insertion never reaches a reader
     }
-    addKindPasses( snap, ing, root, fileInBaseline, scope );
+    addKindPasses( snap, ing, root, fileInBaseline, scope, passes );
 
     dropNonBaselineKeys( snap, ing, root, fileInBaseline );   // IDENTITY BASIS membership, on the two key-built maps
 
@@ -6052,9 +6110,11 @@ struct HeadBasis
     std::size_t notAtHead = 0;       // crawled files HEAD does not track (identity basis only); 0 = none
 };
 
+// `passes` (QD-IDENTITY-ONCE): under the identity basis the snapshot reads `ing` itself, so a caller that will
+// computeDelta over the same `ing` hands one TreePasses to both and the clone and construct passes run once.
 inline HeadBasis computeHeadBasis( const std::string& root, const IngestResult& ing, const Graph& g,
                                    std::string_view rootPath, std::size_t maxFileBytes = kDefaultMaxFileBytes,
-                                   const std::vector<std::string>& excludes = {} )
+                                   const std::vector<std::string>& excludes = {}, TreePasses* passes = nullptr )
 {
     HeadBasis out;
     // THREE conditions, cheapest first, and all three are required. The third — indexHidesTrackedContent — is
@@ -6077,7 +6137,7 @@ inline HeadBasis computeHeadBasis( const std::string& root, const IngestResult& 
                 out.identity = true;
                 out.ok       = true;
                 out.basis    = "identity";
-                out.snapshot = computeSnapshot( ing, g, rootPath, out.notAtHead != 0 ? &mask : nullptr );
+                out.snapshot = computeSnapshot( ing, g, rootPath, out.notAtHead != 0 ? &mask : nullptr, KindScope(), passes );
                 ENSURES( out.notAtHead <= ing.files.size(), "the not-at-HEAD count is a subset of the crawled files it was counted over" );
                 return out;
             }
@@ -9513,8 +9573,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                              std::size_t* declinedCallExcludedOut = nullptr,          // symbols kept out of dead-code ONLY by a declined call (declinedCallMayReach)
                                              std::size_t* valueRefExcludedOut = nullptr,              // ... ONLY because a table/field/argument holds them as a VALUE
                                              const KindScope& scope = {},                             // qd-memory-degrade: the kinds to report (see computeSnapshot)
-                                             HistoryUnread* historyUnreadOut = nullptr )              // hwh-fix4 (N1): history a gating kind could not read
+                                             HistoryUnread* historyUnreadOut = nullptr,               // hwh-fix4 (N1): history a gating kind could not read
+                                             TreePasses* sharedPasses = nullptr )                     // QD-IDENTITY-ONCE: pure passes over `ing` another consumer may already hold
 {
+    TreePasses  ownPasses;
+    TreePasses& passes = sharedPasses != nullptr ? *sharedPasses : ownPasses;
     HistoryUnread historyUnread;
     if( declinedCallExcludedOut )
     {
@@ -9789,8 +9852,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // qd-memory-degrade: the clone passes feed only the two clone kinds (and the --quality-ack backfill export, which is
     // never asked with a kind mask) — not run when neither is selected, the largest saving a kind selection buys.
     const bool                    wantClones  = ( scope.kinds & ( kindBit( "duplication" ) | kindBit( "new-clone-of-reused-helper" ) ) ) != 0 || cloneIdiomsOut != nullptr;
-    const std::vector<CloneGroup> exactClones = wantClones ? findClones( ing, int( kMinCloneTokens ) ) : std::vector<CloneGroup>{};
-    const std::vector<CloneGroup> type3Clones = wantClones ? findClonesType3( ing, int( kMinCloneTokens ) ) : std::vector<CloneGroup>{};
+    // QD-IDENTITY-ONCE carries the same rule one level up: `passes` may already hold them from the identity-basis snapshot.
+    const std::vector<CloneGroup>  noClones;
+    const std::vector<CloneGroup>& exactClones = wantClones ? passes.exactClones( ing ) : noClones;
+    const std::vector<CloneGroup>& type3Clones = wantClones ? passes.type3Clones( ing ) : noClones;
 
     // duplication: a clone group (exact Type-1/2 OR gapped Type-3) whose member-set is not in the
     // baseline set. Both passes hash by the same sorted-member-canonId identity, so a change that
@@ -10093,8 +10158,9 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // gates, whatever symbol it lands in (the same way short-horizon-churn is preexisting by construction).
     {
         // qd-memory-degrade: the construct pass only for its two kinds — without them every count reads 0 and no row is made
-        const ConstructCounts nowCounts = ( scope.kinds & ( kindBit( "error-masking" ) | kindBit( "placeholder" ) ) ) != 0
-                                        ? constructCountsBySym( ing, root ) : ConstructCounts{};
+        const ConstructCounts  noCounts;
+        const ConstructCounts& nowCounts = ( scope.kinds & ( kindBit( "error-masking" ) | kindBit( "placeholder" ) ) ) != 0
+                                         ? passes.constructCounts( ing, root ) : noCounts;
         const auto countIn = []( const gtl::btree_map<std::uint64_t, std::uint32_t>& m, std::uint64_t key )
         {
             const auto it = m.find( key );
