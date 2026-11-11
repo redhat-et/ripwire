@@ -47,6 +47,7 @@
 #include "backhops.h"    // DeclinedCrossRule, declinedCrossingCands — the met-bridge's by-id declined crossing test (the declined last hop)
 #include "graph.h"
 #include "hopbody.h"     // byNameCandidates — the hop hedge's cands= (how many same-named definitions a by-name call could bind)
+#include "lexical.h"     // subtokens — the owner-word key
 #include "model.h"
 #include "nextverb.h"    // nextAttrXml
 #include "pathpairs.h"   // PathPairs, pathPairSelector
@@ -77,6 +78,7 @@ enum class PathTie : std::uint8_t
     FewerUnproven,
     FewerCands,
     SourceFirst,
+    OwnerWord,
 };
 
 struct PathRouteVerdict
@@ -91,21 +93,26 @@ struct PathRouteVerdict
     PathTie       tie           = PathTie::None;   // the plain search's chain was replaced by an equal-length one (shown chain only)
     std::uint32_t tieOther      = 0;           // that replaced chain's unproven hops
     std::uint32_t testHops      = 0;           // intermediates of the shown chain in a test or fixture path (neither endpoint is)
+    std::uint32_t tieEqual      = 0;           // other final-step chains as proven as the shown one (same unproven hops and route_cands), a floor
     std::size_t   unproven() const noexcept { return byName + ( declinedCands > 0 ? 1u : 0u ); }
 };
 
 // ---- PATH-FEWEST-UNPROVEN: the equal-length chain with the fewest unproven hops --------------------------------------------------
 // A chain's key, compared lexicographically: unproven hops (pathHopHedged, or the declined last hop), route_cands (the verdict's product:
-// a by-name hop's cands=, the declined hop's candidate count), then test-path intermediates (counted only when testsOn).
+// a by-name hop's cands=, the declined hop's candidate count), test-path intermediates (counted only when testsOn), then (increment 2)
+// intermediates whose name shares no subtoken with a to= definition's owner name (offWord: the django-07 tie of _do_update/_update
+// against _do_insert/_insert, to= SQLInsertCompiler.execute_sql).
 struct PathChainKey
 {
     std::uint32_t unproven = 0;
     std::uint64_t cands    = 1;
     std::uint32_t tests    = 0;
+    std::uint32_t offWord  = 0;
     friend bool operator<( const PathChainKey& a, const PathChainKey& b ) noexcept
     {
-        return std::tie( a.unproven, a.cands, a.tests ) < std::tie( b.unproven, b.cands, b.tests );
+        return std::tie( a.unproven, a.cands, a.tests, a.offWord ) < std::tie( b.unproven, b.cands, b.tests, b.offWord );
     }
+    bool asProven( const PathChainKey& b ) const noexcept { return unproven == b.unproven && cands == b.cands; }
 };
 inline std::uint64_t pathCandsTimes( std::uint64_t acc, std::uint64_t k ) noexcept
 {
@@ -113,21 +120,56 @@ inline std::uint64_t pathCandsTimes( std::uint64_t acc, std::uint64_t k ) noexce
 }
 // The key of hop from -> to added to a prefix key: `byNameCands` is byNameCandidates( from, to ) (read only on a by-name edge),
 // `intermediateInTests` whether `to` is a test-path intermediate that counts.
+// `to` is an intermediate: `intermediateInTests` / `intermediateOffWord` say whether it counts toward tests / offWord.
+struct PathHopMarks
+{
+    bool intermediateInTests = false;
+    bool intermediateOffWord = false;
+};
 template<class ByNameCands>
-inline PathChainKey pathHopKey( const Graph& g, PathChainKey k, NodeId from, NodeId to, ByNameCands&& byNameCands, bool intermediateInTests )
+inline PathChainKey pathHopKey( const Graph& g, PathChainKey k, NodeId from, NodeId to, ByNameCands&& byNameCands, PathHopMarks marks )
 {
     k.unproven += pathHopHedged( g, from, to ) ? 1u : 0u;
     k.cands = edgeNameOnly( g, from, to ) ? pathCandsTimes( k.cands, byNameCands() ) : k.cands;
-    k.tests += intermediateInTests ? 1u : 0u;
+    k.tests += marks.intermediateInTests ? 1u : 0u;
+    k.offWord += marks.intermediateOffWord ? 1u : 0u;
     return k;
 }
-inline PathChainKey pathChainKey( const IngestResult& ing, const Graph& g, std::span<const NodeId> chain, bool testsOn )
+// The subtokens of the to= definitions' owner names (lexical.h subtokens: >= 2 bytes, lowercased), sorted and distinct.
+inline std::vector<std::string> pathToOwnerWords( const IngestResult& ing, const std::vector<NodeId>& dstDefs )
 {
-    PathChainKey k;
+    std::vector<std::string> words;
+    for( const NodeId d : dstDefs )
+    {
+        if( d < ing.symbols.size() && !ing.symbols[d].scope.empty() )
+        {
+            subtokens( scopeLastSegment( ing.symbols[d].scope ), words );
+        }
+    }
+    std::ranges::sort( words );
+    words.erase( std::unique( words.begin(), words.end() ), words.end() );
+    return words;
+}
+// Does `n`'s name share no subtoken with `ownerWords`? (false when there are no owner words: the key then never differs)
+inline bool pathNameOffWord( const IngestResult& ing, NodeId n, const std::vector<std::string>& ownerWords, std::vector<std::string>& scratch )
+{
+    if( ownerWords.empty() )
+    {
+        return false;
+    }
+    scratch.clear();
+    subtokens( ing.symbols[n].name, scratch );
+    return std::ranges::none_of( scratch, [ & ]( const std::string& w ) { return std::ranges::binary_search( ownerWords, w ); } );
+}
+inline PathChainKey pathChainKey( const IngestResult& ing, const Graph& g, std::span<const NodeId> chain, bool testsOn, const std::vector<std::string>& ownerWords )
+{
+    PathChainKey             k;
+    std::vector<std::string> scratch;
     for( std::size_t i = 1; i < chain.size(); ++i )
     {
+        const bool mid = i + 1 < chain.size();
         k = pathHopKey( g, k, chain[i - 1], chain[i], [ & ] { return byNameCandidates( ing, g, chain[i - 1], chain[i] ); },
-                        testsOn && i + 1 < chain.size() && pathDefInTests( ing, chain[i] ) );
+                        PathHopMarks{ testsOn && mid && pathDefInTests( ing, chain[i] ), mid && pathNameOffWord( ing, chain[i], ownerWords, scratch ) } );
     }
     return k;
 }
@@ -147,6 +189,7 @@ struct FewestUnprovenChain
     std::uint32_t       declinedCands = 0;   // > 0: its last hop is a declined call with that many candidates
     PathTie             tie           = PathTie::None;
     std::uint32_t       otherUnproven = 0;   // today's chain's unproven hops
+    std::uint32_t       equalCount    = 0;   // other final-step candidates as proven as the winner (same unproven, route_cands)
 };
 
 // `path` = the plain BFS chain (shortestPathAny, L hops). One layered BFS from srcDefs over every out-edge to depth L, the same edge
@@ -166,7 +209,8 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
     }
     const bool         testsOn = std::ranges::none_of( srcDefs, [ & ]( NodeId n ) { return n < N && pathDefInTests( ing, n ); } )
                               && std::ranges::none_of( dstDefs, [ & ]( NodeId n ) { return n < N && pathDefInTests( ing, n ); } );
-    const PathChainKey today   = pathChainKey( ing, g, path, testsOn );
+    const std::vector<std::string> ownerWords = pathToOwnerWords( ing, dstDefs );
+    const PathChainKey             today      = pathChainKey( ing, g, path, testsOn, ownerWords );
     if( today.unproven == 0 && today.tests == 0 )
     {
         return out;
@@ -178,6 +222,8 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
     std::vector<PathChainKey>  best( N );
     std::vector<char>          isDst( N, 0 );
     std::vector<std::int8_t>   inTests( N, -1 );   // pathDefInTests, read once per node (-1 = not read yet)
+    std::vector<std::int8_t>   offWord( N, -1 );   // pathNameOffWord, read once per node
+    std::vector<std::string>   wordScratch;
     for( const NodeId d : dstDefs )
     {
         if( d < N )
@@ -192,6 +238,14 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
             inTests[v] = pathDefInTests( ing, v ) ? 1 : 0;
         }
         return inTests[v] == 1;
+    };
+    const auto intermediateOffWord = [ & ]( NodeId v ) -> bool
+    {
+        if( offWord[v] < 0 )
+        {
+            offWord[v] = pathNameOffWord( ing, v, ownerWords, wordScratch ) ? 1 : 0;
+        }
+        return offWord[v] == 1;
     };
     // byNameCandidates( u, v ) for every by-name out-edge of the node being expanded, from ONE sorted list of its by-name targets' names
     // (built on its first by-name edge): byNameCandidates per edge rescans the out-edges, O(degree^2) on a by-name hub.
@@ -248,7 +302,9 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
             {
                 continue;   // the last layer matters only at a to= definition
             }
-            const PathChainKey kv = pathHopKey( g, best[u], u, v, [ & ] { return byNameCands( u, v ); }, testsOn && !( dist[v] == L && isDst[v] ) && intermediateInTests( v ) );
+            const bool         mid = !( dist[v] == L && isDst[v] );
+            const PathChainKey kv  = pathHopKey( g, best[u], u, v, [ & ] { return byNameCands( u, v ); },
+                                                 PathHopMarks{ testsOn && mid && intermediateInTests( v ), mid && intermediateOffWord( v ) } );
             if( prev[v] == kNoNode || kv < best[v] )
             {
                 best[v] = kv;
@@ -256,17 +312,22 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
             }
         }
     }
-    // the least candidate at depth L, in a fixed order: edge-reached to= definitions in discovery order, then declined records in record order
-    PathChainKey  win      = today;
-    NodeId        winEnd   = kNoNode;   // an edge-reached to= definition
-    NodeId        winVia   = kNoNode;   // the caller of a declined last call into winTo
-    NodeId        winTo    = kNoNode;
-    std::uint32_t winCands = 0;
+    // the final-step candidates, in a fixed order: edge-reached to= definitions in discovery order, then declined records in record order;
+    // the least key wins (today's chain on a tie), and the others as proven as the winner are counted (route_equal=)
+    struct FinalCand
+    {
+        PathChainKey  key;
+        NodeId        end   = kNoNode;   // an edge-reached to= definition
+        NodeId        via   = kNoNode;   // the caller of a declined last call into `to`
+        NodeId        to    = kNoNode;
+        std::uint32_t cands = 0;
+    };
+    std::vector<FinalCand> finals;
     for( const NodeId v : q )
     {
-        if( dist[v] == L && isDst[v] && best[v] < win )
+        if( dist[v] == L && isDst[v] )
         {
-            win = best[v];  winEnd = v;
+            finals.push_back( FinalCand{ best[v], v, kNoNode, kNoNode, 0 } );
         }
     }
     const DeclinedCrossRule rule( ing, g );
@@ -287,29 +348,39 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
             PathChainKey kd = best[u];
             ++kd.unproven;
             kd.cands = pathCandsTimes( kd.cands, c );
-            if( kd < win )
-            {
-                win = kd;  winEnd = kNoNode;  winVia = u;  winTo = d;  winCands = c;
-            }
+            finals.push_back( FinalCand{ kd, kNoNode, u, d, c } );
         }
     }
-    if( winEnd == kNoNode && winVia == kNoNode )
+    const FinalCand* win = nullptr;
+    for( const FinalCand& f : finals )
+    {
+        if( f.key < ( win != nullptr ? win->key : today ) )
+        {
+            win = &f;
+        }
+    }
+    if( win == nullptr )
     {
         return out;   // today's chain has the least key (ties keep it)
     }
-    if( winVia != kNoNode )
+    if( win->via != kNoNode )
     {
-        out.chain.push_back( winTo );
-        out.declinedCands = winCands;
+        out.chain.push_back( win->to );
+        out.declinedCands = win->cands;
     }
-    for( NodeId at = winVia != kNoNode ? winVia : winEnd; at != kNoNode; at = prev[at] )
+    for( NodeId at = win->via != kNoNode ? win->via : win->end; at != kNoNode; at = prev[at] )
     {
         out.chain.push_back( at );
     }
     std::reverse( out.chain.begin(), out.chain.end() );
     ENSURES( out.chain.size() == path.size(), "the replacing chain has the found length" );
-    out.tie           = win.unproven < today.unproven ? PathTie::FewerUnproven : win.cands < today.cands ? PathTie::FewerCands : PathTie::SourceFirst;
+    const PathChainKey& w = win->key;
+    out.tie           = w.unproven < today.unproven ? PathTie::FewerUnproven
+                      : w.cands < today.cands       ? PathTie::FewerCands
+                      : w.tests < today.tests       ? PathTie::SourceFirst
+                                                    : PathTie::OwnerWord;
     out.otherUnproven = today.unproven;
+    out.equalCount    = std::uint32_t( std::ranges::count_if( finals, [ & ]( const FinalCand& f ) { return &f != win && f.key.asProven( w ); } ) );
     return out;
 }
 
@@ -385,6 +456,7 @@ inline PathRouteChains pathRouteChains( const IngestResult& ing, const Graph& g,
     {
         c.verdict.tie      = fewest.tie;   // the shown chain replaced the plain search's: route_tie= says so
         c.verdict.tieOther = fewest.otherUnproven;
+        c.verdict.tieEqual = fewest.equalCount;
         c.verdict.testHops = pathTestIntermediates( ing, c.shown );
     }
     c.bind = c.verdict.refused ? found : c.shown;
@@ -419,11 +491,12 @@ inline std::string pathRouteVerdictAttrs( const IngestResult& ing, const PathRou
 // last hop), route_tests= (test-path intermediates).
 inline std::string pathFewestRootAttrs( const PathRouteVerdict& v )
 {
-    static constexpr std::string_view kTieName[] = { "", "fewer-unproven", "fewer-cands", "source-first" };
+    static constexpr std::string_view kTieName[] = { "", "fewer-unproven", "fewer-cands", "source-first", "owner-word" };
     std::string out;
     if( v.tie != PathTie::None )
     {
         out += " route_tie=\"" + std::string( kTieName[ std::size_t( v.tie ) ] ) + "\" route_tie_other=\"" + std::to_string( v.tieOther ) + "\"";
+        out += v.tieEqual > 0 ? " route_equal=\"" + std::to_string( v.tieEqual ) + "\"" : std::string();
     }
     out += v.declinedCands > 0 ? " route_declined=\"1\"" : "";
     out += v.testHops > 0 ? " route_tests=\"" + std::to_string( v.testHops ) + "\"" : std::string();
@@ -475,10 +548,14 @@ inline std::string pathFewestLegend( const PathRouteVerdict& v )
     std::string out;
     if( v.tie != PathTie::None )
     {
-        out += "route_tie=fewer-unproven|fewer-cands|source-first route_tie_other=K: the plain search met another chain of the same length "
+        out += "route_tie=fewer-unproven|fewer-cands|source-first|owner-word route_tie_other=K: the plain search met another chain of the same length "
                "first, with K unproven hops (via=name, link, split, impl or declined rows); this one is shown instead because it has fewer unproven "
-               "hops (fewer-unproven), else a smaller route_cands (fewer-cands), else fewer intermediates in test or fixture paths (source-first). "
+               "hops (fewer-unproven), else a smaller route_cands (fewer-cands), else fewer intermediates in test or fixture paths (source-first), "
+               "else more intermediates whose name shares a word with to='s owner name (owner-word, a reading of names, not of the graph). "
                "The other chain is not printed and is no more proven than this one; the connect verb on from=,to= shows both. ";
+        out += v.tieEqual > 0 ? "route_equal=N: at least N other chains of the same length are exactly as proven (same unproven hops and route_cands) "
+                                "and not printed: the shown one is a pick among equals, the true route may be one of them. "
+                              : "";
     }
     if( v.declinedCands > 0 )
     {

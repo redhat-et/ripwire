@@ -225,7 +225,7 @@ for a in T C2 C2B D D3 D4 DX S SL W W0; do
 done
 [ "$lfail" = 0 ] && ok "(L) every clause rides exactly with its attribute; every answer parses"
 DF="$( run d --path=start_entry,Sink.fin --legend=full )"; SLF="$( run sl --path=start_entry,Sink.fin --legend=full )"; CF="$( run c2 --path=start_entry,Sink.fin --legend=full )"
-if grep -qF 'route_tie=fewer-unproven|fewer-cands|source-first route_tie_other=K: the plain search' <<<"$( legend <<<"$DF" )" \
+if grep -qF 'route_tie=fewer-unproven|fewer-cands|source-first|owner-word route_tie_other=K: the plain search' <<<"$( legend <<<"$DF" )" \
    && grep -qF 'route_declined=1: the last row' <<<"$( legend <<<"$DF" )" && grep -qF 'route_tests=N: N intermediate rows' <<<"$( legend <<<"$SLF" )" \
    && ! grep -qE 'route_tie=|route_declined=|route_tests=' <<<"$( legend <<<"$CF" )"; then
     ok "(L) --legend=full carries the full clauses exactly when they fire"
