@@ -432,6 +432,7 @@ for _g in \
     defoverdeclcheck \
     defslookupcheck \
     degradedhintcheck \
+    demoterefillcheck \
     dependencypincheck \
     deplangscheck \
     depsprecisecheck \

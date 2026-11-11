@@ -11,6 +11,7 @@
 // print no mem= / same_as= / slot_by= (the default regime's XML splices) and a budgeted or MCP answer no <h> hop rows, so the
 // guards those feed (K1, K5, K7, K2) hold nothing there. RIPWIRE_NO_SIBLING_DEMOTE=1 / RIPWIRE_NO_DECL_TWIN=1 turn each rule off in
 // every dialect.
+#include "demoterefill.h" // refillRowsForDemote: the soft target's refill walk (a unit gate compiles it alone)
 #include "fordecltwin.h" // demoteAndPointRowsInto, siblingDemoteOn, declTwinOn, filesyms_detail::unescapeXmlAttr
 #include "memberowner.h" // MemberOwners / qualifiedMemberName: the row's n= as the XML dialect spells it
 #include "infra/jsonesc.h" // jsonesc::appendUtf8
@@ -54,33 +55,6 @@ inline std::string demoteAndPointBlock( const IngestResult& ing, const Graph& g,
     ASSUME( edited.size() >= before.size() + after.size() && edited.starts_with( before ) && edited.ends_with( after ),
             "demoteAndPointBlock: the rules rewrite <sigs> rows only" );
     return edited.substr( before.size(), edited.size() - before.size() - after.size() );
-}
-
-// A soft target's rows past the cut get the bytes the rules free: `pointed` is the rules' result on the rendered block (`block()`), and
-// while rows were cut (`rowsCut()`) and the rules shrink the block, the rows are rendered again at `baseRowDrop` plus the bytes the
-// rules free on the latest render (`renderAt( budget )`: false when that render failed, the block then stays as it was). The freed
-// bytes are those of the whole latest render, so the rows that ship after the rules cost about `baseRowDrop`; a render that serves
-// no more rows than the one before stops the walk. Returns the rules' result on the block as it finally is ("" when none moves).
-inline constexpr int kDemoteRefillPasses = 3;
-template<class Block, class RowsCut, class RowsShown, class RenderAt, class Point>
-inline std::string refillRowsForDemote( std::size_t baseRowDrop, const Block& block, const RowsCut& rowsCut, const RowsShown& rowsShown,
-                                        const RenderAt& renderAt, const Point& point )
-{
-    std::string pointed = point();
-    for( int pass = 0; pass < kDemoteRefillPasses && !pointed.empty() && rowsCut() && pointed.size() < block().size(); ++pass )
-    {
-        const std::size_t shownBefore = rowsShown();
-        if( !renderAt( baseRowDrop + ( block().size() - pointed.size() ) ) )
-        {
-            break;
-        }
-        pointed = point();
-        if( rowsShown() <= shownBefore )
-        {
-            break;
-        }
-    }
-    return pointed;
 }
 
 namespace demote_json_detail
