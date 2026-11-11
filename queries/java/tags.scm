@@ -89,3 +89,21 @@
 (import_declaration
   (scoped_identifier
     name: (identifier) @name)) @reference.import
+
+; #446 round 2 (Java): base-clause types as @reference.base captures — the
+; superclass (extends) and super_interfaces (implements) clauses under a named
+; class declaration. The inner type_identifier is @name so the RawRef stays
+; identical to the walk's. Anonymous classes (no name:) do not match, matching
+; the C++ round's nameless-struct exclusion.
+(class_declaration
+  name: (identifier)
+  (superclass
+    [ (type_identifier) @name
+      (generic_type (type_identifier) @name) ])) @reference.base
+
+(class_declaration
+  name: (identifier)
+  (super_interfaces
+    (type_list
+      [ (type_identifier) @name
+        (generic_type (type_identifier) @name) ]))) @reference.base
