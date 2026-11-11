@@ -15,7 +15,7 @@
 // rides before the first pointer, only when the rule fires. It runs where SIBLING-DEMOTE runs — the no-budget XML answer of CLI --for
 // and MCP `for`; a token budget leaves the answer as shaped; --json never reaches it. RIPWIRE_NO_DECL_TWIN=1 turns it off (byte
 // identity and the gate's twin).
-#include "forsiblingdemote.h" // demote_detail::scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
+#include "forsiblingdemote.h" // editAnswerInto, demote_detail::scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
 #include "serialize.h" // attrOf
 
 #include <algorithm>
@@ -23,7 +23,6 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace rw
@@ -127,14 +126,9 @@ inline std::string pointDeclTwins( std::string_view task, std::string_view answe
 // budget) leaves the answer as shaped. CLI shapedForFileSymsAnswer and MCP insertFileSyms both call this, after SIBLING-DEMOTE.
 inline void declTwinInto( std::string_view task, std::string_view answer, std::string& edited, bool held )
 {
-    if( held || !declTwinOn() )
+    if( !held && declTwinOn() )
     {
-        return;
-    }
-    std::string next = decl_detail::pointDeclTwins( task, edited.empty() ? answer : std::string_view( edited ) );
-    if( !next.empty() )
-    {
-        edited = std::move( next );
+        editAnswerInto( answer, edited, [&]( std::string_view shaped ) { return decl_detail::pointDeclTwins( task, shaped ); } );
     }
 }
 } // namespace rw
