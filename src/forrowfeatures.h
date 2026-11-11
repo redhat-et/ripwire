@@ -232,9 +232,25 @@ struct Context
     std::vector<std::pair<std::string, std::size_t>> defCounts; // definitionCountOfName by bare name, memoized
 };
 
-inline float at( const std::vector<float>& v, NodeId id ) noexcept
+// Every neighbour of `u` either way round (out-edges, then in-edges).
+template<class F>
+inline void forEachNeighbour( const Graph& g, NodeId u, F&& visit )
 {
-    return id < v.size() ? v[id] : 0.0f;
+    const std::size_t outEnd = std::size_t( u ) + 1 < g.outOff.size() ? g.outOff[u + 1] : 0;
+    for( std::size_t k = std::size_t( u ) + 1 < g.outOff.size() ? g.outOff[u] : 0; k < outEnd; ++k )
+    {
+        visit( g.outTargets[k] );
+    }
+    const std::uint32_t* ro = g.inEdges.rowOffsets();
+    const std::uint32_t* ci = g.inEdges.colIndices();
+    if( ro == nullptr || ci == nullptr || std::size_t( u ) >= g.inEdges.rows() )
+    {
+        return;
+    }
+    for( std::uint32_t k = ro[u]; k < ro[u + 1]; ++k )
+    {
+        visit( NodeId( ci[k] ) );
+    }
 }
 
 // Undirected breadth-first distances from `seeds`, at most kRowFeaturesMaxHops (kRowFeaturesMaxHops + 1 = not reached).
@@ -250,10 +266,7 @@ inline std::vector<std::uint8_t> hopDistances( const Graph& g, std::size_t n, co
             queue.push_back( s );
         }
     }
-    const std::uint32_t* ro = g.inEdges.rowOffsets();
-    const std::uint32_t* ci = g.inEdges.colIndices();
-    std::size_t visited = 0;
-    while( !queue.empty() && visited++ < kRowFeaturesMaxVisit )
+    for( std::size_t visited = 0; !queue.empty() && visited < kRowFeaturesMaxVisit; ++visited )
     {
         const NodeId u = queue.front();
         queue.pop_front();
@@ -261,23 +274,14 @@ inline std::vector<std::uint8_t> hopDistances( const Graph& g, std::size_t n, co
         {
             continue;
         }
-        const auto reach = [&]( NodeId v )
+        forEachNeighbour( g, u, [&]( NodeId v )
         {
             if( v < n && dist[v] > dist[u] + 1 )
             {
                 dist[v] = std::uint8_t( dist[u] + 1 );
                 queue.push_back( v );
             }
-        };
-        for( std::uint32_t k = std::size_t( u ) + 1 < g.outOff.size() ? g.outOff[u] : 0; std::size_t( u ) + 1 < g.outOff.size() && k < g.outOff[u + 1]; ++k )
-        {
-            reach( g.outTargets[k] );
-        }
-        for( std::uint32_t k = ro != nullptr && ci != nullptr && std::size_t( u ) < g.inEdges.rows() ? ro[u] : 0;
-             ro != nullptr && ci != nullptr && std::size_t( u ) < g.inEdges.rows() && k < ro[u + 1]; ++k )
-        {
-            reach( NodeId( ci[k] ) );
-        }
+        } );
     }
     return dist;
 }
@@ -508,33 +512,47 @@ inline Prov reachProv( const Context& c, const std::vector<Line>& lines, std::si
     return best;
 }
 
-inline std::string rowSource( const Context& c, const Line& l )
+// The score as the ranker summed it: the lexical score (tier folded in), the tier, each lift pass's change, the final score.
+struct ScoreParts
+{
+    double score = 0.0, lex = 0.0, tier = 1.0;
+    std::array<double, std::size_t( RowStage::Count )> lift {};
+};
+inline ScoreParts scoreParts( const RowFeatureRecorder& rec, NodeId id )
+{
+    ScoreParts p;
+    const auto valueOf = [id]( const std::vector<float>& v ) { return id < v.size() ? double( v[id] ) : 0.0; };
+    p.score = valueOf( rec.finalRank );
+    p.lex = valueOf( rec.lex );
+    p.tier = id < rec.tier.size() ? double( rec.tier[id] ) : 1.0;
+    double prev = p.lex;
+    for( std::size_t st = 0; st < p.lift.size(); ++st )
+    {
+        if( !rec.after[st].empty() )
+        {
+            p.lift[st] = valueOf( rec.after[st] ) - prev;
+            prev = valueOf( rec.after[st] );
+        }
+    }
+    return p;
+}
+
+inline std::string rowSource( const Line& l, const ScoreParts& parts )
 {
     std::string src = l.row != nullptr ? sectionSource( l.row->section ) : "CORE";
-    for( std::size_t s = 0; l.id != kNoNode && s < std::size_t( RowStage::Count ); ++s )
+    for( std::size_t st = 0; st < parts.lift.size(); ++st )
     {
-        const std::vector<float>& after = c.rec.after[s];
-        if( !after.empty() && at( after, l.id ) != at( before( c.rec, s ), l.id ) )
-        {
-            src += "+";
-            src += kRowStageSources[s];
-        }
+        src += parts.lift[st] != 0.0 ? "+" + std::string( kRowStageSources[st] ) : std::string();
     }
     src += l.headRR ? "+HEAD_RR" : "";
     return src;
 }
 
-inline std::string renderLine( Context& c, std::string_view task, const std::vector<Line>& lines, std::size_t k )
+// Columns task .. cand: who the row is and where the answer placed it.
+inline void renderPlacement( std::string& out, const Context& c, const Line& l, const Symbol* s )
 {
-    const Line& l = lines[k];
     const AnswerRow* placed = l.row != nullptr ? l.row : l.pointer;
-    const bool known = l.id != kNoNode && l.id < c.ing.symbols.size();
-    const Symbol* s = known ? &c.ing.symbols[l.id] : nullptr;
-    std::string out;
-    out.reserve( 512 );
-    field( out, task );
-    out.erase( 0, 1 ); // the first column has no leading tab
-    count( out, known ? (long long)l.id : -1 );
+    count( out, s != nullptr ? (long long)l.id : -1 );
     const std::string printedName = placed != nullptr ? filesyms_detail::unescapeXmlAttr( attrOf( placed->attrs, placed->tag == 't' ? "sym" : "n" ) ) : std::string();
     field( out, !printedName.empty() ? std::string_view( printedName ) : s != nullptr ? std::string_view( s->name ) : std::string_view() );
     field( out, s != nullptr ? std::string_view( s->scope ) : std::string_view() );
@@ -549,91 +567,94 @@ inline std::string renderLine( Context& c, std::string_view task, const std::vec
     field( out, placed != nullptr ? placed->section : std::string_view() );
     count( out, l.row != nullptr ? (long long)l.row->dpos : 0 );
     field( out, placed != nullptr ? attrOf( placed->attrs, "r" ) : std::string_view() );
-    const std::uint32_t lensPos = known && l.id < c.lensPos.size() ? c.lensPos[l.id] : 0;
+    const std::uint32_t lensPos = s != nullptr && l.id < c.lensPos.size() ? c.lensPos[l.id] : 0;
     count( out, lensPos );
     count( out, lensPos != 0 && lensPos <= c.rec.surface.size() ? 1 : 0 );
-    number( out, known ? at( c.rec.finalRank, l.id ) : 0.0 );
-    number( out, known ? at( c.rec.lex, l.id ) : 0.0 );
-    number( out, known && l.id < c.rec.tier.size() ? c.rec.tier[l.id] : 1.0 );
-    for( std::size_t st = 0; st < std::size_t( RowStage::Count ); ++st )
-    {
-        const std::vector<float>& after = c.rec.after[st];
-        number( out, known && !after.empty() ? double( at( after, l.id ) ) - double( at( before( c.rec, st ), l.id ) ) : 0.0 );
-    }
-    count( out, known ? hops( c.headDist, l.id ) : -1 );
-    count( out, known && c.anchored ? hops( c.anchorDist, l.id ) : -1 );
-    field( out, headEdge( c, l.id ) );
-    field( out, known && c.head != kNoNode && l.id != c.head ? kProvNames[std::size_t( pairProv( c, l.id, c.head ) )] : std::string_view() );
-    field( out, known ? kProvNames[std::size_t( reachProv( c, lines, k ) )] : std::string_view() );
-    const bool headKnown = known && c.head != kNoNode;
+}
+
+// Columns head_dist .. file_rank: the row against the head, the anchors and the rows above it.
+inline void renderGraph( std::string& out, const Context& c, const std::vector<Line>& lines, std::size_t k, const Symbol* s )
+{
+    const NodeId id = lines[k].id;
+    const bool headKnown = s != nullptr && c.head != kNoNode;
+    count( out, s != nullptr ? hops( c.headDist, id ) : -1 );
+    count( out, s != nullptr && c.anchored ? hops( c.anchorDist, id ) : -1 );
+    field( out, headEdge( c, id ) );
+    field( out, headKnown && id != c.head ? kProvNames[std::size_t( pairProv( c, id, c.head ) )] : std::string_view() );
+    field( out, s != nullptr ? kProvNames[std::size_t( reachProv( c, lines, k ) )] : std::string_view() );
     const std::string_view headPath = headKnown ? rootRelPath( c.ing, c.ing.symbols[c.head].fileId ) : std::string_view();
-    const std::string_view rowPath = known ? rootRelPath( c.ing, s->fileId ) : std::string_view();
+    const std::string_view rowPath = s != nullptr ? rootRelPath( c.ing, s->fileId ) : std::string_view();
+    const auto dirOf = []( std::string_view p ) { return p.substr( 0, p.rfind( '/' ) + 1 ); };
     count( out, headKnown && s->fileId == c.ing.symbols[c.head].fileId ? 1 : 0 );
-    count( out, headKnown && headPath.substr( 0, headPath.rfind( '/' ) + 1 ) == rowPath.substr( 0, rowPath.rfind( '/' ) + 1 ) ? 1 : 0 );
-    count( out, known && s->fileId < c.fileRank.size() ? c.fileRank[s->fileId] : 0 );
-    const TermHits t = known ? termHits( c, l.id ) : TermHits {};
-    count( out, t.name );
-    count( out, t.any );
+    count( out, headKnown && dirOf( headPath ) == dirOf( rowPath ) ? 1 : 0 );
+    count( out, s != nullptr && s->fileId < c.fileRank.size() ? c.fileRank[s->fileId] : 0 );
+}
+
+inline std::string renderLine( Context& c, std::string_view task, const std::vector<Line>& lines, std::size_t k )
+{
+    const Line& l = lines[k];
+    const Symbol* s = l.id != kNoNode && l.id < c.ing.symbols.size() ? &c.ing.symbols[l.id] : nullptr;
+    const ScoreParts parts = s != nullptr ? scoreParts( c.rec, l.id ) : ScoreParts {};
+    std::string out;
+    out.reserve( 512 );
+    field( out, task );
+    out.erase( 0, 1 ); // the first column has no leading tab
+    renderPlacement( out, c, l, s );
+    number( out, parts.score );
+    number( out, parts.lex );
+    number( out, parts.tier );
+    std::ranges::for_each( parts.lift, [&]( double v ) { number( out, v ); } );
+    renderGraph( out, c, lines, k, s );
+    const TermHits t = s != nullptr ? termHits( c, l.id ) : TermHits {};
+    for( const long long v : { t.name, t.any } )
+    {
+        count( out, v );
+    }
     number( out, t.nameIdf );
     number( out, t.anyIdf );
     count( out, t.path );
     count( out, c.rec.evidence != nullptr ? (long long)c.rec.evidence->terms.size() : 0 );
-    count( out, known ? (long long)defCount( c, l.id ) : 0 );
+    count( out, s != nullptr ? (long long)defCount( c, l.id ) : 0 );
     field( out, demoteVerdictOf( c.rec, l.row != nullptr && l.row->tag == 'd' ? l.row : l.pointer ) );
-    field( out, rowSource( c, l ) );
+    field( out, rowSource( l, parts ) );
     count( out, l.headRR ? 1 : 0 );
     out += '\n';
     return out;
 }
 
-// The lines in output order: answer rows, pointers, then the ranked candidates (and kRowFeaturesBeyondRows more) not listed yet.
-inline std::vector<Line> collectLines( const IngestResult& ing, const RowFeatureRecorder& rec, const demote_detail::AnswerScan& scan,
-                                       const std::vector<std::uint32_t>& lensPos )
+// The answer's <t> rows: a pointer (it kept its r=) is a row to resolve, a plain tail entry lists (file, leaf) names.
+struct TailRead
 {
-    filesyms_detail::FileLookup files( ing );
-    std::vector<demote_detail::RowWant> wants;
     std::vector<const AnswerRow*> pointers;
-    for( const AnswerRow& r : scan.rows )
-    {
-        wants.push_back( demote_detail::rowWant( files, r ) );
-    }
-    std::vector<std::pair<std::uint32_t, std::string>> tailed; // (file, leaf) of every plain <t> entry
+    std::vector<std::pair<std::uint32_t, std::string>> tailed; // sorted
+};
+inline TailRead readTails( filesyms_detail::FileLookup& files, const demote_detail::AnswerScan& scan, std::vector<demote_detail::RowWant>& wants )
+{
+    TailRead out;
     for( const AnswerRow& t : scan.tails )
     {
         const std::uint32_t f = files.of( filesyms_detail::unescapeXmlAttr( demote_detail::fileOf( t ) ) );
         const std::string syms = filesyms_detail::unescapeXmlAttr( attrOf( t.attrs, "sym" ) );
         if( !attrOf( t.attrs, "r" ).empty() )
         {
-            pointers.push_back( &t );
+            out.pointers.push_back( &t );
             wants.push_back( demote_detail::RowWant { .file = f, .leaf = std::string( filesyms_detail::leafName( syms ) ) } );
             continue;
         }
         for( std::size_t from = 0; from <= syms.size(); )
         {
             const std::size_t comma = std::min( syms.find( ',', from ), syms.size() );
-            tailed.emplace_back( f, std::string( filesyms_detail::leafName( std::string_view( syms ).substr( from, comma - from ) ) ) );
+            out.tailed.emplace_back( f, std::string( filesyms_detail::leafName( std::string_view( syms ).substr( from, comma - from ) ) ) );
             from = comma + 1;
         }
     }
-    demote_detail::resolveWants( ing, wants );
-    std::ranges::sort( tailed );
-    std::vector<Line> lines;
-    std::vector<NodeId> listed;
-    for( std::size_t k = 0; k < scan.rows.size(); ++k )
-    {
-        lines.push_back( Line { .id = wants[k].id, .row = &scan.rows[k], .printed = "row" } );
-        listed.push_back( wants[k].id );
-    }
-    const auto unlisted = [&]( NodeId id ) { return id != kNoNode && !std::ranges::contains( listed, id ); };
-    for( std::size_t k = 0; k < pointers.size(); ++k )
-    {
-        const NodeId id = wants[scan.rows.size() + k].id;
-        if( unlisted( id ) || id == kNoNode )
-        {
-            lines.push_back( Line { .id = id, .pointer = pointers[k], .printed = "pointer" } );
-            listed.push_back( id );
-        }
-    }
+    std::ranges::sort( out.tailed );
+    return out;
+}
+
+// The ranked candidates (lensSurfaceIds), then the kRowFeaturesBeyondRows next ones by score.
+inline std::vector<NodeId> rankedCandidates( const RowFeatureRecorder& rec, const std::vector<std::uint32_t>& lensPos )
+{
     std::vector<NodeId> ranked = rec.surface;
     for( NodeId id = 0; id < lensPos.size(); ++id )
     {
@@ -643,12 +664,44 @@ inline std::vector<Line> collectLines( const IngestResult& ing, const RowFeature
         }
     }
     std::sort( ranked.begin() + std::ptrdiff_t( rec.surface.size() ), ranked.end(), [&]( NodeId a, NodeId b ) { return lensPos[a] < lensPos[b]; } );
-    for( const NodeId id : ranked )
+    return ranked;
+}
+
+// The lines in output order: answer rows, pointers, then the ranked candidates (and kRowFeaturesBeyondRows more) not listed yet.
+inline std::vector<Line> collectLines( const IngestResult& ing, const RowFeatureRecorder& rec, const demote_detail::AnswerScan& scan,
+                                       const std::vector<std::uint32_t>& lensPos )
+{
+    filesyms_detail::FileLookup files( ing );
+    std::vector<demote_detail::RowWant> wants;
+    for( const AnswerRow& r : scan.rows )
+    {
+        wants.push_back( demote_detail::rowWant( files, r ) );
+    }
+    const TailRead tails = readTails( files, scan, wants );
+    demote_detail::resolveWants( ing, wants );
+    std::vector<Line> lines;
+    std::vector<NodeId> listed;
+    for( std::size_t k = 0; k < scan.rows.size(); ++k )
+    {
+        lines.push_back( Line { .id = wants[k].id, .row = &scan.rows[k], .printed = "row" } );
+        listed.push_back( wants[k].id );
+    }
+    const auto unlisted = [&]( NodeId id ) { return id == kNoNode || !std::ranges::contains( listed, id ); };
+    for( std::size_t k = 0; k < tails.pointers.size(); ++k )
+    {
+        const NodeId id = wants[scan.rows.size() + k].id;
+        if( unlisted( id ) )
+        {
+            lines.push_back( Line { .id = id, .pointer = tails.pointers[k], .printed = "pointer" } );
+            listed.push_back( id );
+        }
+    }
+    for( const NodeId id : rankedCandidates( rec, lensPos ) )
     {
         if( unlisted( id ) && id < ing.symbols.size() )
         {
             const Symbol& s = ing.symbols[id];
-            const bool tail = std::ranges::binary_search( tailed, std::pair<std::uint32_t, std::string>( s.fileId, s.name ) );
+            const bool tail = std::ranges::binary_search( tails.tailed, std::pair<std::uint32_t, std::string>( s.fileId, s.name ) );
             lines.push_back( Line { .id = id, .printed = tail ? "tail" : "none" } );
             listed.push_back( id );
         }
