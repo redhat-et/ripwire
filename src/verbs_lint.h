@@ -1302,13 +1302,58 @@ struct PatternSearchOutcome
     bool                      ellipsisCapped = false;   // an ellipsis probe abandoned a node at the bound (V-2)
     std::uint64_t             ellipsisSkipped = 0;      // how many times — a floor on the nodes left unevaluated
     std::uint64_t             qualifiedUnmatched = 0;   // nodes only a qualified spelling of a pattern leaf matches (not hits)
+    std::uint64_t             memberUnmatched    = 0;   // member calls only the bare callee names (kMemberCallShapes; not hits)
 };
 
-// unmatched_qualified= (present only when non-zero): its reading rides the answer that carries it, beside the root.
+// unmatched_qualified= / unmatched_member= (present only when non-zero): their reading rides the answer that carries
+// either, beside the root. ONE comment for both near-miss counts, emitted once.
 inline constexpr std::string_view kPatternQualifiedLegend =
     "<!-- unmatched_qualified=N: N more nodes match only when a name in q= is read as the last segment of a "
     "scope-qualified name (ns::name, a::b::name) - NOT in hits=; spell the qualifier in the pattern to match them. "
+    "unmatched_member=N: N more calls match only when the called name is read as a member (obj.f(x), self.f(x)) "
+    "- NOT in hits=; next= is the pattern with a receiver metavariable that matches them (C, C++, Go, Rust, "
+    "JS/TS, Python, C#; Java, Swift and ObjC member calls are not counted). "
     "A floor when the hit budget stops the walk (hits_capped=1): nodes past the stop are not counted -->";
+
+// unmatched_member='s next=: the same pattern with a receiver metavariable in front of its leading callee name, or ""
+// when the pattern does not start with `name(` (then the count still rides, with no follow-up to offer). The receiver
+// is `$O` unless the pattern already spells that text, then the next free spelling.
+inline std::string memberPatternNext( std::string_view pattern )
+{
+    std::size_t start = 0;
+    while( start < pattern.size() && ( pattern[start] == ' ' || pattern[start] == '\t' ) )
+    {
+        ++start;
+    }
+    std::size_t end = start;
+    while( end < pattern.size() && rw::namesplit::isIdentChar( pattern[end] ) )
+    {
+        ++end;
+    }
+    std::size_t paren = end;
+    while( paren < pattern.size() && pattern[paren] == ' ' )
+    {
+        ++paren;
+    }
+    if( end == start || !rw::namesplit::isIdentStart( pattern[start] ) || paren >= pattern.size() || pattern[paren] != '(' )
+    {
+        return {};
+    }
+    std::string_view receiver = "$O";
+    for( std::string_view candidate : { std::string_view( "$O" ), std::string_view( "$RECV" ), std::string_view( "$RW_RECEIVER" ) } )
+    {
+        receiver = candidate;
+        if( pattern.find( candidate ) == std::string_view::npos )
+        {
+            break;
+        }
+    }
+    std::string next( pattern.substr( 0, start ) );
+    next += receiver;
+    next += '.';
+    next += pattern.substr( start );
+    return rw::nextFlag( "--pattern=", next );
+}
 
 // Compile the pattern for every served grammar, decide refusal-or-proceed, run the walk, and assemble the
 // disclosures. The refusal path is the load-bearing half: §P0.1's rule one level out — a pattern nothing
@@ -1330,6 +1375,7 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
 
     std::atomic<std::uint64_t> ellipsisCapped{ 0 };
     std::atomic<std::uint64_t> qualifiedUnmatched{ 0 };
+    std::atomic<std::uint64_t> memberUnmatched{ 0 };
 
     rw::AstQueryGroup grp;
     grp.walk              = rw::AstWalk::Pattern;
@@ -1337,11 +1383,13 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
     grp.maxMatches        = rw::pattern::kMaxHits;
     grp.ellipsisCappedOut = &ellipsisCapped;
     grp.qualifiedUnmatchedOut = &qualifiedUnmatched;
+    grp.memberUnmatchedOut    = &memberUnmatched;
     out.matches           = std::move( rw::astQueryGrouped( ing, { grp } )[0] );
 
     out.ellipsisSkipped = ellipsisCapped.load( std::memory_order_relaxed );
     out.ellipsisCapped  = out.ellipsisSkipped != 0;
     out.qualifiedUnmatched = qualifiedUnmatched.load( std::memory_order_relaxed );
+    out.memberUnmatched    = memberUnmatched.load( std::memory_order_relaxed );
 
     out.grammarsAttr                 = joinOwned( rw::pattern::resolvedNames( progs ), "," );
     out.shapesAttr                   = joinOwned( rw::pattern::resolvedShapes( progs ), "," );
@@ -1581,7 +1629,7 @@ std::optional<int> runLint( const MainDispatch& d )
             const std::size_t patShown = patPage.end - patPage.begin;
             char              ppab[ kPageDisclosureCap ];
             lintPrintOut( "{}", kPatternLegend );
-            if( ps.qualifiedUnmatched > 0 )
+            if( ps.qualifiedUnmatched > 0 || ps.memberUnmatched > 0 )
             {
                 lintPrintOut( "{}", kPatternQualifiedLegend );
             }
@@ -1595,7 +1643,9 @@ std::optional<int> runLint( const MainDispatch& d )
             const std::string patNestRefusedAttr = ( ing.crawlSkips.nestRefusedFiles > 0
                 ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\""
                 : std::string() )
-                + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() );
+                + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() )
+                + ( ps.memberUnmatched > 0 ? " unmatched_member=\"" + std::to_string( ps.memberUnmatched ) + "\""
+                                             + rw::nextAttrXml( memberPatternNext( cfg.pattern ) ) : std::string() );
             lintPrintOut( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}{}>",
                         ps.matches.size(),
                         pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,

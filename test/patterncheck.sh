@@ -393,5 +393,80 @@ QN="$( "$BIN" "$QF" --pattern='use_plain($X)' --no-cache 2>/dev/null )"
 printf '%s' "$QN" | grep -q 'unmatched_qualified' \
     && no "a pattern with no qualified near miss carries unmatched_qualified" || ok "no near miss, no attribute and no reading (0 B)"
 
+# -- 7b) a MEMBER spelling of the callee is counted too (PATTERN-MEMBER-ZERO, audit-verify 2026-11-11) ----------------
+# textual `post_message($X)` answered hits="0" while `$O.post_message($X)` found 173: Python attribute calls, JS/TS
+# member calls, Rust/Go/C++ field and selector calls carry a member callee the bare identifier never matches, and
+# nothing said so. They are still not hits; the root counts them as unmatched_member=N and next= spells the pattern
+# that matches them. Per grammar through pattern.h's kMemberCallShapes.
+MF="$TMP/memberfix"; mkdir -p "$MF"
+cat >"$MF/w.py" <<'PY'
+def post_message(m):
+    return m
+
+class Widget:
+    def a(self, m):
+        return self.post_message(m)
+
+    def b(self, m):
+        self.app.post_message(m)
+        return post_message(m)
+
+    def c(self, post_message):
+        return log(self.post_message)
+PY
+cat >"$MF/w.ts" <<'TS'
+export function emit(x: number): number { return x }
+export class Bus {
+  fire(x: number): number { return this.emit(x) + emit(x) }
+  fire2(o: Bus, x: number): number { return o.emit(x) }
+  emit(x: number): number { return x }
+}
+TS
+cat >"$MF/w.rs" <<'RS'
+struct S { v: Vec<u32> }
+fn push(x: u32) -> u32 { x }
+fn grow(s: &mut S, x: u32) { s.v.push(x); push(x); }
+RS
+cat >"$MF/w.go" <<'GO'
+package w
+
+type Q struct{}
+
+func (q Q) Push(x int) int { return x }
+func Push(x int) int { return x }
+func use(q Q) int { return q.Push(1) + Push(2) }
+GO
+# PREMISE: count the member-call sites in the fixture by text and FAIL on zero, so the arms below cannot pass vacuously.
+memberSites="$( grep -cE '\.(post_message|emit|push|Push)\(' "$MF"/w.py "$MF"/w.ts "$MF"/w.rs "$MF"/w.go | awk -F: '{ n += $2 } END { print n + 0 }' )"
+[ "${memberSites:-0}" -gt 0 ] && ok "member premise: the fixture carries $memberSites member-call sites (py 2, ts 2, rs 1, go 1)" \
+    || no "member premise: the fixture carries no member-call site — the unmatched_member arms below would be vacuous"
+mroot(){ "$BIN" "$MF" --no-cache --pattern="$1" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }
+MP="$( mroot 'post_message($X)' )"
+printf '%s' "$MP" | grep -q ' hits="1"' && printf '%s' "$MP" | grep -q ' unmatched_member="2"' \
+    && ok "post_message(\$X): hits=\"1\" (the bare call) and unmatched_member=\"2\" (self.post_message, self.app.post_message)" \
+    || no "post_message(\$X) should read hits=\"1\" unmatched_member=\"2\" (a bare-name ARGUMENT self.post_message is not a call): $MP"
+printf '%s' "$MP" | grep -qF " next=\"--pattern=&apos;\$O.post_message(\$X)&apos;\"" \
+    && ok "unmatched_member= rides with next=\"--pattern='\$O.post_message(\$X)'\"" || no "unmatched_member= should carry the receiver spelling as next=: $MP"
+MPN="$( mroot '$O.post_message($X)' )"
+printf '%s' "$MPN" | grep -q ' hits="2"' \
+    && ok "pasting next= matches exactly the counted calls: \$O.post_message(\$X) hits=\"2\"" || no "\$O.post_message(\$X) should hit the 2 member calls: $MPN"
+"$BIN" "$MF" --no-cache --pattern='post_message($X)' 2>/dev/null | grep -qE '<!-- unmatched_qualified=N: [^>]*unmatched_member=N: ' \
+    && ok "the same document defines unmatched_member= (kPatternQualifiedLegend)" || no "unmatched_member= rides with no reading"
+for pc in 'emit($X)|1|2' 'push($X)|1|1' 'Push($X)|1|1'; do
+    pq="${pc%%|*}"; rest="${pc#*|}"; ph="${rest%%|*}"; pm="${rest#*|}"
+    PR="$( mroot "$pq" )"
+    printf '%s' "$PR" | grep -q " hits=\"$ph\"" && printf '%s' "$PR" | grep -q " unmatched_member=\"$pm\"" \
+        && ok "$pq: hits=\"$ph\" unmatched_member=\"$pm\" (per grammar through the call-shape table)" \
+        || no "$pq should read hits=\"$ph\" unmatched_member=\"$pm\": $PR"
+done
+# the relaxation is the CALLEE only: an argument spelled as a member is not a near miss of a bare argument
+MA="$( mroot 'log(post_message)' )"
+printf '%s' "$MA" | grep -q 'unmatched_member' \
+    && no "an ARGUMENT member (log(self.post_message)) was counted as a member near miss of log(post_message): $MA" \
+    || ok "only the callee is relaxed: log(self.post_message) is no near miss of log(post_message)"
+QN2="$( "$BIN" "$QF" --pattern='ping($X)' --no-cache 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1 )"
+printf '%s' "$QN2" | grep -q 'unmatched_member' \
+    && no "a fixture with no member call carries unmatched_member: $QN2" || ok "no member near miss, no unmatched_member= (the qualified fixture)"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

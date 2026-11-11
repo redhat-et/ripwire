@@ -868,6 +868,46 @@ inline bool nodesMatchExactly( TSNode a, TSNode b, std::string_view src, unsigne
     return same;
 }
 
+// THE CALL-SHAPE TABLE (PATTERN-MEMBER-ZERO, audit-verify 2026-11-11). A bare `f($X)` compiles to a call whose callee
+// is an identifier, so it never matches a MEMBER call `obj.f(x)`, whose callee is a member node: textual
+// `post_message($X)` answered hits="0" while `$O.post_message($X)` found 173, and nothing said so. Per grammar, the
+// node kind a bare call compiles to, the callee kind of the member spelling, and the field of that callee holding the
+// member's name. A grammar missing here gets no member count: Java's `obj.f(x)` is the SAME method_invocation node with
+// an extra object child, Swift's is a navigation suffix and ObjC's a message expression — each needs matcher work of
+// its own, not a row.
+struct MemberCallShape
+{
+    std::string_view grammarName;   // kLangTable querySub, as PatternProgram::grammarName
+    std::string_view callKind;      // what a bare `f($X)` became (shapes=)
+    std::string_view memberKind;    // the callee node of `$O.f($X)`
+    std::string_view nameField;     // the field of memberKind that holds `f`
+};
+
+inline constexpr MemberCallShape kMemberCallShapes[] = {
+    { "c",          "call_expression",       "field_expression",         "field" },
+    { "cpp",        "call_expression",       "field_expression",         "field" },
+    { "go",         "call_expression",       "selector_expression",      "field" },
+    { "rust",       "call_expression",       "field_expression",         "field" },
+    { "javascript", "call_expression",       "member_expression",        "property" },
+    { "typescript", "call_expression",       "member_expression",        "property" },
+    { "tsx",        "call_expression",       "member_expression",        "property" },
+    { "python",     "call",                  "attribute",                "attribute" },
+    { "csharp",     "invocation_expression", "member_access_expression", "name" },
+};
+
+// The row for this compiled program, or null when its grammar has none or the pattern is not a call.
+inline const MemberCallShape* memberCallShapeFor( std::string_view grammarName, std::string_view rootKind ) noexcept
+{
+    for( const MemberCallShape& row : kMemberCallShapes )
+    {
+        if( row.grammarName == grammarName && row.callKind == rootKind )
+        {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
 // V-2 (adversarial verification 2026-08-20). The ellipsis probe ABANDONS a candidate node when the run of
 // siblings it would have to absorb exceeds kEllipsisBound — and before this struct existed, that abandon
 // was indistinguishable from "this node does not match". A 400-argument `foo(0,…,399, zzz)` that LITERALLY
@@ -892,6 +932,12 @@ struct MatchStats
     std::uint64_t qualifiedUnmatchedCount = 0;
     bool          relaxQualified          = false;   // set by findMatches for the second ask only
     bool          relaxedLeafHit          = false;   // the second ask used the relaxation at least once
+    // MEMBER-CALL NEAR MISSES (PATTERN-MEMBER-ZERO): the third ask, for a node neither the exact match nor the qualified
+    // relaxation took. The CALLEE leaf of a call pattern may match the member name of `memberShape`'s callee kind. Never
+    // hits; disclosed as unmatched_member= with the `$O.f($X)` spelling as next=. Null shape: the grammar has no row.
+    const MemberCallShape* memberShape          = nullptr;
+    std::uint64_t          memberUnmatchedCount = 0;
+    bool                   relaxMember          = false;   // set for the third ask only
 };
 
 bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode cand, std::string_view src, MatchEnv& env, MatchStats& stats, unsigned depth );
@@ -1014,6 +1060,28 @@ inline bool relaxedQualifiedLeaf( const PatternProgram& prog, const PatNode& pat
     return true;
 }
 
+// The third ask's one relaxation: the call pattern's CALLEE leaf (depth 1, the only childless child of a call root)
+// matches a member callee — `memberShape->memberKind` — whose name field spells the same text. Records that it did.
+inline bool relaxedMemberLeaf( const PatternProgram& prog, const PatNode& pat, TSNode cand, std::string_view src, MatchStats& stats, unsigned depth )
+{
+    if( !stats.relaxMember || stats.memberShape == nullptr || depth != 1 || pat.childCount != 0 )
+    {
+        return false;
+    }
+    if( std::string_view( ts_node_type( cand ) ) != stats.memberShape->memberKind )
+    {
+        return false;
+    }
+    const std::string_view field = stats.memberShape->nameField;
+    const TSNode           name  = ts_node_child_by_field_name( cand, field.data(), std::uint32_t( field.size() ) );
+    if( ts_node_is_null( name ) || nodeText( name, src ) != prog.textOf( pat ) )
+    {
+        return false;
+    }
+    stats.relaxedLeafHit = true;
+    return true;
+}
+
 // Does the candidate node satisfy pattern node `patIndex`?
 inline bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode cand, std::string_view src, MatchEnv& env, MatchStats& stats, unsigned depth )
 {
@@ -1042,7 +1110,7 @@ inline bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode 
     }
     if( ts_node_symbol( cand ) != pat.kindId )
     {
-        return relaxedQualifiedLeaf( prog, pat, cand, src, stats );   // false outside the second ask
+        return relaxedQualifiedLeaf( prog, pat, cand, src, stats ) || relaxedMemberLeaf( prog, pat, cand, src, stats, depth );   // false outside the second/third ask
     }
     if( pat.childCount == 0 )
     {
@@ -1053,15 +1121,37 @@ inline bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode 
 
 // The second ask for a node the exact match refused: would a qualified spelling of a pattern leaf have matched it?
 // Counted, never a hit. Its ellipsis abandons are not the exact answer's, so they are rolled back, not double counted.
-inline void countQualifiedNearMiss( const PatternProgram& prog, TSNode n, std::string_view src, MatchStats& stats )
+// Returns whether it counted the node, so the member ask below never counts the same node twice.
+inline bool countQualifiedNearMiss( const PatternProgram& prog, TSNode n, std::string_view src, MatchStats& stats )
 {
     const std::uint64_t ellipsisBefore = stats.ellipsisCappedCount;
     MatchEnv            relaxedEnv;
     stats.relaxQualified = true;
     stats.relaxedLeafHit = false;
     const bool relaxedMatch = matchAt( prog, 0, n, src, relaxedEnv, stats, 0 );
-    stats.qualifiedUnmatchedCount += ( relaxedMatch && stats.relaxedLeafHit ) ? 1u : 0u;
+    const bool counted      = relaxedMatch && stats.relaxedLeafHit;
+    stats.qualifiedUnmatchedCount += counted ? 1u : 0u;
     stats.relaxQualified      = false;
+    stats.ellipsisCappedCount = ellipsisBefore;
+    return counted;
+}
+
+// The third ask (PATTERN-MEMBER-ZERO), same contract as the second: counted, never a hit, ellipsis abandons rolled back.
+// Asked only when the node's callee IS the grammar's member kind, so an ordinary refused call costs one type compare.
+inline void countMemberNearMiss( const PatternProgram& prog, TSNode n, std::string_view src, MatchStats& stats )
+{
+    if( stats.memberShape == nullptr || ts_node_named_child_count( n ) == 0
+        || std::string_view( ts_node_type( ts_node_named_child( n, 0 ) ) ) != stats.memberShape->memberKind )
+    {
+        return;
+    }
+    const std::uint64_t ellipsisBefore = stats.ellipsisCappedCount;
+    MatchEnv            relaxedEnv;
+    stats.relaxMember    = true;
+    stats.relaxedLeafHit = false;
+    const bool relaxedMatch = matchAt( prog, 0, n, src, relaxedEnv, stats, 0 );
+    stats.memberUnmatchedCount += ( relaxedMatch && stats.relaxedLeafHit ) ? 1u : 0u;
+    stats.relaxMember         = false;
     stats.ellipsisCappedCount = ellipsisBefore;
 }
 
@@ -1077,6 +1167,7 @@ inline void findMatches( const PatternProgram& prog, TSNode root, std::string_vi
         return;
     }
     const std::uint16_t rootKindId = prog.nodes[0].kindId;
+    stats.memberShape              = memberCallShapeFor( prog.grammarName, prog.rootKind );
     std::vector<TSNode> stack;
     std::vector<TSNode> kids;     // reused across nodes — a warm walk allocates nothing per node
     ChildCursor         cursor( root );
@@ -1092,9 +1183,9 @@ inline void findMatches( const PatternProgram& prog, TSNode root, std::string_vi
             {
                 out.emplace_back( ts_node_start_byte( n ), ts_node_end_byte( n ) );
             }
-            else
+            else if( !countQualifiedNearMiss( prog, n, src, stats ) )
             {
-                countQualifiedNearMiss( prog, n, src, stats );
+                countMemberNearMiss( prog, n, src, stats );
             }
         }
         // Collected once, then pushed in REVERSE so the stack pops left to right — the same visit order

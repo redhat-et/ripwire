@@ -627,6 +627,9 @@ struct AstQueryGroup
     // AstWalk::Pattern only, optional: calls only a QUALIFIED spelling of a pattern leaf would have matched
     // (pattern.h MatchStats::qualifiedUnmatchedCount) — never hits; the emitter discloses unmatched_qualified=.
     std::atomic<std::uint64_t>*       qualifiedUnmatchedOut = nullptr;
+    // AstWalk::Pattern only, optional: member calls (`obj.f(x)`) only the bare callee of a call pattern names
+    // (pattern.h MatchStats::memberUnmatchedCount, kMemberCallShapes) — never hits; disclosed as unmatched_member=.
+    std::atomic<std::uint64_t>*       memberUnmatchedOut = nullptr;
 
     // §L3: a query that DID compile (for at least one grammar) still tells the caller nothing about WHICH
     // grammars accepted it, or how much of the corpus could even ask it the question. `(interface_declaration)

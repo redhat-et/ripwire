@@ -634,7 +634,8 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
 // its own reasons to grow) lives next to itself.
 inline void pat_walkTree( const pattern::PatternProgramSet* set, TSNode root, std::uint32_t fileId, std::string_view bytes,
                           const std::vector<std::uint32_t>& nlOffsets, const TSLanguage* grammar, std::vector<AstMatch>& hits,
-                          std::atomic<std::uint64_t>* ellipsisCappedOut, std::atomic<std::uint64_t>* qualifiedUnmatchedOut )
+                          std::atomic<std::uint64_t>* ellipsisCappedOut, std::atomic<std::uint64_t>* qualifiedUnmatchedOut,
+                          std::atomic<std::uint64_t>* memberUnmatchedOut )
 {
     if( set == nullptr )
     {
@@ -657,6 +658,10 @@ inline void pat_walkTree( const pattern::PatternProgramSet* set, TSNode root, st
     if( qualifiedUnmatchedOut != nullptr && stats.qualifiedUnmatchedCount != 0 )
     {
         qualifiedUnmatchedOut->fetch_add( stats.qualifiedUnmatchedCount, std::memory_order_relaxed );   // same reduction, same reason
+    }
+    if( memberUnmatchedOut != nullptr && stats.memberUnmatchedCount != 0 )
+    {
+        memberUnmatchedOut->fetch_add( stats.memberUnmatchedCount, std::memory_order_relaxed );   // same reduction, same reason
     }
     for( const auto& [a, b] : spans )
     {
@@ -706,7 +711,7 @@ inline void runWalkGroups( const std::vector<AstQueryGroup>& groups, TSNode root
         else if( groups[groupIndex].walk == AstWalk::Pattern )
         {
             pat_walkTree( groups[groupIndex].patternPrograms, root, fileId, bytes, nlOffsets, grammar, perGroupHits[groupIndex],
-                          groups[groupIndex].ellipsisCappedOut, groups[groupIndex].qualifiedUnmatchedOut );
+                          groups[groupIndex].ellipsisCappedOut, groups[groupIndex].qualifiedUnmatchedOut, groups[groupIndex].memberUnmatchedOut );
         }
     }
 }
