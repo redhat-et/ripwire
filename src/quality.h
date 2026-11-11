@@ -1979,13 +1979,22 @@ inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, 
 inline std::string cacheDirLadder()
 {
     std::string d;
-    const char* tmpDir = std::getenv( "TMPDIR" );
-    if( tmpDir && *tmpDir )
+    // #303: an explicit override wins, exactly for the constrained-TMPDIR case the issue measured. An unusable
+    // override fails closed like every other rung (the mkdir/lstat/chmod verification below).
+    if( const char* overrideDir = std::getenv( "RIPWIRE_CACHE_DIR" ); overrideDir && *overrideDir )
+    {
+        d = overrideDir;
+        while( d.size() > 1 && d.back() == '/' )
+        {
+            d.pop_back();
+        }
+    }
+    else if( const char* tmpDir = std::getenv( "TMPDIR" ); tmpDir && *tmpDir )
     {
         d = tmpDir;
         while( d.size() > 1 && d.back() == '/' )
         {
-            d.pop_back();
+          d.pop_back();
         }
         d += "/ripwire";
     }
@@ -2017,6 +2026,16 @@ inline std::string cacheDirLadder()
     // unopenable there; the raw "/dev/null/..." spelling is only fail-closed by accident (drive-relative,
     // usually absent) the way the bug this file exists for relied on.
     return os::rebased_path( "/dev/null/ripwire-cache-unavailable" );
+}
+
+// #303: which ladder rung picked the cache dir, for --doctor's cache-dir row (src= attribute). Reads the same
+// environment in the same order cacheDirLadder() does, so the two can never disagree.
+inline std::string cacheDirSource()
+{
+    if( const char* v = std::getenv( "RIPWIRE_CACHE_DIR" ); v && *v ) return "override";
+    if( const char* v = std::getenv( "TMPDIR" ); v && *v ) return "tmpdir";
+    if( const char* v = std::getenv( "XDG_CACHE_HOME" ); v && *v ) return "xdg";
+    return "fallback";
 }
 
 // popen a shell command and return its trimmed stdout ("" on any failure — never crashes). THE one copy of
@@ -3570,9 +3589,39 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
 // both call fs::remove, and a double-remove is a benign no-op (the second just gets ENOENT via the error_code
 // overload). This sweep matches "ripwire-" (not a narrower family prefix), so it also backstops qsnap/qheadsnap
 // blobs that outlive their own keep-2 cap between runs — one dir-wide safety net under the per-family caps.
-constexpr double         kMaxCacheBlobAgeDays = 30.0;
-constexpr std::uintmax_t kMaxCacheDirBytes    = 2ull * 1024 * 1024 * 1024;   // 2 GB
-constexpr std::size_t    kMaxCacheBlobCount   = 4096;                         // bound every future hygiene scan
+// #303: each hygiene bound is env-settable (RIPWIRE_CACHE_MAX_BYTES, RIPWIRE_CACHE_MAX_AGE_DAYS,
+// RIPWIRE_CACHE_MAX_BLOBS) — the issue's 500 MB-scratch-volume host needs a smaller cap without a rebuild.
+// Unset or unparsable falls back to the shipped default; a zero or negative override is ignored the same way.
+inline double cacheMaxBlobAgeDays()
+{
+    if( const char* v = std::getenv( "RIPWIRE_CACHE_MAX_AGE_DAYS" ); v && *v )
+    {
+        char* end = nullptr;
+        const double parsed = std::strtod( v, &end );
+        if( end != v && parsed > 0.0 ) return parsed;
+    }
+    return 30.0;
+}
+inline std::uintmax_t cacheMaxDirBytes()
+{
+    if( const char* v = std::getenv( "RIPWIRE_CACHE_MAX_BYTES" ); v && *v )
+    {
+        char* end = nullptr;
+        const unsigned long long parsed = std::strtoull( v, &end, 10 );
+        if( end != v && parsed > 0 ) return parsed;
+    }
+    return 2ull * 1024 * 1024 * 1024;   // 2 GB
+}
+inline std::size_t cacheMaxBlobCount()
+{
+    if( const char* v = std::getenv( "RIPWIRE_CACHE_MAX_BLOBS" ); v && *v )
+    {
+        char* end = nullptr;
+        const unsigned long long parsed = std::strtoull( v, &end, 10 );
+        if( end != v && parsed > 0 ) return static_cast<std::size_t>( parsed );
+    }
+    return 4096;   // bound every future hygiene scan
+}
 
 // 2026-09-06 stranger audit: the advisory edit locks (mcpedit.h editLockPath — <cacheDir>/locks/<xx>/ripwire-edit-
 // <hash>.lock, one per distinct target path ever edited) are deliberately never unlinked by their holder, and the
@@ -3634,7 +3683,7 @@ inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string&
         return; // only the first saveCache in this process sweeps
     }
 
-    evictOldCacheFamily( dir, "ripwire-", keepPath, kMaxCacheBlobCount, kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
+    evictOldCacheFamily( dir, "ripwire-", keepPath, cacheMaxBlobCount(), cacheMaxBlobAgeDays(), cacheMaxDirBytes() );
     sweepStaleEditLocks( dir );
 }
 

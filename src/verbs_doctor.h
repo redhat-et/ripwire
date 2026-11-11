@@ -1008,6 +1008,16 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         // dependent, so it silently stopped scrubbing once the scan cap spliced blobs_floor= mid-row.
         // Declaring the list HERE makes it a fact of the output that test/lib/doctorvolatile.sh reads; no gate
         // keeps a copy. Removing the fields instead is worse: cache size is this check's whole content.
+        // #303: the ladder rung that picked the dir, and the effective hygiene caps (env-settable since #303).
+        attrs += " source=\"" + std::string( escapeXml( cacheDirSource().c_str(), esc ) ) + "\"";
+        {
+            char capBuf[64];
+            std::snprintf( capBuf, sizeof( capBuf ), "%llu", static_cast<unsigned long long>( cacheMaxDirBytes() ) );
+            attrs += " cap_bytes=\"" + std::string( capBuf ) + "\"";
+            std::snprintf( capBuf, sizeof( capBuf ), "%.0f", cacheMaxBlobAgeDays() );
+            attrs += " cap_age_days=\"" + std::string( capBuf ) + "\"";
+            attrs += " cap_blobs=\"" + std::to_string( cacheMaxBlobCount() ) + "\"";
+        }
         attrs += " volatile=\"blobs,blobs_floor,bytes,many,truncated,locks\"";
         attrs += doctorCacheDirHint( writable, dir, esc );
         row( "cache-dir", writable, attrs );
