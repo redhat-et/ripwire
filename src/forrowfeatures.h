@@ -42,7 +42,6 @@ namespace rw
 inline constexpr std::string_view kRowFeaturesSchema = "ripwire.row_features/v1";
 inline constexpr std::size_t kRowFeaturesBeyondRows = 20; // ranked candidates past the cut, listed so a near miss has a line
 inline constexpr std::uint8_t kRowFeaturesMaxHops = 4; // graph distance is walked this far (undirected); further reads -1
-inline constexpr std::size_t kRowFeaturesMaxVisit = 2'000'000; // a walk stops after this many nodes (a hub on a huge graph)
 inline constexpr std::size_t kRowFeaturesMaxPath = 4096;
 
 // The lift passes computeLensRanking runs after the lexical score, in order; each one's d_<name> column is its score change.
@@ -139,7 +138,7 @@ inline void armRowFeatures( bool captured )
     if( !captured )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "the dump is a side file; the answer never reads it", "RIPWIRE_ROW_FEATURES: posture not captured" );
-        rowfeat_detail::notice( "this --for posture (--json, --format=, a --limit/--offset page or several roots) is not dumped: nothing written" );
+        rowfeat_detail::notice( "this --for call does not print the captured XML answer the dump reads: nothing written" );
         return;
     }
     rec.armed = true;
@@ -233,7 +232,9 @@ struct Context
     std::vector<std::pair<std::string, std::size_t>> defCounts; // definitionCountOfName by bare name, memoized
 };
 
-// Undirected breadth-first distances from `seeds`, at most kRowFeaturesMaxHops (kRowFeaturesMaxHops + 1 = not reached).
+// Undirected breadth-first distances from `seeds`, at most kRowFeaturesMaxHops (kRowFeaturesMaxHops + 1 = not reached). No visit cap, so
+// no silent cut: the queue is FIFO over unit hops, so the distances it pops never decrease and a node is queued at most once (its first
+// distance is its least). The walk is bounded by the graph, O(nodes + edges), and runs only when the variable is set.
 inline std::vector<std::uint8_t> hopDistances( const Graph& g, std::size_t n, const std::vector<NodeId>& seeds )
 {
     std::vector<std::uint8_t> dist( n, std::uint8_t( kRowFeaturesMaxHops + 1 ) );
@@ -246,7 +247,7 @@ inline std::vector<std::uint8_t> hopDistances( const Graph& g, std::size_t n, co
             queue.push_back( s );
         }
     }
-    for( std::size_t visited = 0; !queue.empty() && visited < kRowFeaturesMaxVisit; ++visited )
+    while( !queue.empty() )
     {
         const NodeId u = queue.front();
         queue.pop_front();
@@ -326,8 +327,10 @@ inline std::vector<std::uint32_t> fileRanks( const IngestResult& ing, const std:
     std::vector<float> best( ing.files.size(), 0.0f );
     for( std::size_t i = 0; i < ing.symbols.size() && i < rank.size(); ++i )
     {
-        const std::uint32_t f = ing.symbols[i].fileId;
-        best[f] = f < best.size() ? std::max( best[f], rank[i] ) : 0.0f;
+        if( const std::uint32_t f = ing.symbols[i].fileId; f < best.size() )   // a file id past the table has no rank, and no slot
+        {
+            best[f] = std::max( best[f], rank[i] );
+        }
     }
     std::vector<std::uint32_t> files( best.size() );
     for( std::uint32_t f = 0; f < files.size(); ++f )
@@ -740,6 +743,21 @@ inline bool appendFile( const std::string& path, const std::string& text )
     return out.close() && wrote && flushed;
 }
 } // namespace rowfeat_detail
+
+// The answer was not captured whole (no buffer, a failed flush or read-back, stdout not restored): a dump of its bytes would place rows
+// that are not the answer, so nothing is written, and stderr says so. Disarms.
+inline void rowFeaturesSkipUncaptured()
+{
+    RowFeatureRecorder& rec = rowFeatures();
+    if( !rec.armed )
+    {
+        return;
+    }
+    rec.armed = false;
+    demote_detail::demoteVerdictSink() = nullptr;
+    DISCLOSE( Diagnostics::answerUnchanged, "the dump is a side file; the answer never reads it", "RIPWIRE_ROW_FEATURES: answer not captured whole" );
+    rowfeat_detail::notice( "the answer was not captured whole (its buffer failed), so its rows are not known: nothing written" );
+}
 
 // The final answer's bytes (everything the run printed inside the root): place every line and write the file. Disarms.
 inline void rowFeaturesFinish( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer )

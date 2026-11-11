@@ -3,7 +3,7 @@
 # ranked or printed, the ranker's internals beside the answer's placement; the answer itself never changes.
 #
 # ONE generated Python tree (widget.py: a head and 14 same-file siblings, so SIBLING-DEMOTE turns deep rows into pointers; a type with
-# members; other.py: more helpers). ARMS
+# members; other.py: 40 more helpers, so some ranked rows fall past the candidate cut). ARMS
 #   (u)  byte identity: stdout, stderr and rc are the same with the variable unset and set, on two tasks
 #   (h)  schema: line 1 is `# ripwire.row_features/v1 columns=N`, line 2 the N column names (this list), every line N fields
 #   (o)  the printed=row lines, in file order, are the answer's rows (grader_fix_1107: <d>, <y>, <s>, non-`used` <u> outside
@@ -16,10 +16,18 @@
 #   (a)  a second call appends its lines under the same two header lines (the header is written once)
 #   (v)  VALIDATE: a directory or an empty value writes nothing, says so on stderr, and stdout + rc are the unset run's
 #   (w)  a write that fails (the directory does not exist) is disclosed on stderr; stdout + rc are the unset run's
-#   (j)  a posture the dump does not read (--json) says so on stderr and writes nothing; stdout + rc are the unset run's
+#   (j)  a posture the dump does not read (--json; j2: the three RIPWIRE_NO_ switches that turn the capture off, a posture the old
+#        notice's list did not name) says so in one generic notice and writes nothing; stdout + rc are the unset run's
+#   (x)  an answer not captured whole (RIPWIRE_FAULT_CHARGE_BUFFER=1: no buffer) writes nothing and says so; stdout + rc are the
+#        fault-only run's. The switch exists only on a non-NDEBUG build: the arm detects it from the fault-only run's own notice and
+#        SKIPs (never PASSes) without it
+#   (U)  test/forrowfeatures_unit.cpp: rowfeat_detail::fileRanks with a fileId past the file table, compiled with the standard
+#        library's bounds checks on (an out-of-range index aborts the driver), plus an in-range control
+# Every negative arm counts what it saw (notices, lines, cases) and FAILs on zero.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+. "$ROOT/test/lib/cxxflags.sh"   # the ONE flags.make parse, for (U)
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forrowfeaturescheck: BIN=$BIN"
@@ -72,7 +80,7 @@ def widget_config_variant_%02d(path):
 ''' % ( i, i )
 open( os.path.join( d, "widget.py" ), "w" ).write( s )
 o = ""
-for i in range( 1, 6 ):
+for i in range( 1, 41 ):
     o += '''
 def other_widget_config_helper_%d(x):
     """Widget config helper %d."""
@@ -136,23 +144,27 @@ check( [ int( r["ans_pos"] ) for r in rows if r["printed"] == "row" ] == list( r
 cand = [ r for r in rows if r["cand"] == "1" ]
 ranks = sorted( int( r["lens_rank"] ) for r in cand )
 check( cand and ranks == list( range( 1, len( cand ) + 1 ) ), "(c) the %d cand=1 lines hold lens_rank 1..%d once each" % ( len( cand ), len( cand ) ) )
-check( all( int( r["lens_rank"] ) > len( cand ) or r["lens_rank"] == "0" for r in rows if r["cand"] == "0" ), "(c) cand=0 lines rank past the cut" )
+past = [ r for r in rows if r["cand"] == "0" ]
+check( past and all( int( r["lens_rank"] ) > len( cand ) or r["lens_rank"] == "0" for r in past ), "(c) the %d cand=0 lines rank past the cut" % len( past ) )
 # (s) the sum
 lifts = [ c for c in COLS if c.startswith( "d_" ) and c != "d_pos" ]
 def summed( r ):
     return float( r["lex"] ) + sum( float( r[c] ) for c in lifts )
-check( all( abs( summed( r ) - float( r["score"] ) ) <= 1e-4 * max( 1.0, abs( float( r["score"] ) ) ) for r in rows if r["node"] != "-1" ),
-       "(s) score = lex + the d_* lifts on every resolved line" )
+resolved = [ r for r in rows if r["node"] != "-1" ]
+check( resolved and all( abs( summed( r ) - float( r["score"] ) ) <= 1e-4 * max( 1.0, abs( float( r["score"] ) ) ) for r in resolved ),
+       "(s) score = lex + the d_* lifts on all %d resolved lines" % len( resolved ) )
 # (p) pointers
 ptrs = re.findall( r'<t p="([^"]*)" sym="([^"]*)" r="(\d+)"', text )
 pl = { ( r["name"], r["r"] ): r for r in rows if r["printed"] == "pointer" }
 check( ptrs and all( ( s, rk ) in pl for p, s, rk in ptrs ), "(p) each of the %d pointers with r= has a printed=pointer line" % len( ptrs ) )
-check( all( pl[( s, rk )]["demote"] == "demoted" for p, s, rk in ptrs if ( s, rk ) in pl ), "(p) the SIBLING-DEMOTE pointers read demote=demoted" )
+dem = [ pl[( s, rk )] for p, s, rk in ptrs if ( s, rk ) in pl ]
+check( dem and all( r["demote"] == "demoted" for r in dem ), "(p) the %d SIBLING-DEMOTE pointers read demote=demoted" % len( dem ) )
 # (k) verdicts
 VERD = { "not_sigs", "top_rank", "K6_noted", "K1_mem", "K7_slot", "no_same_file", "K2_hop_callee", "K3_owner_near", "K4_call_path", "K5_same_as", "demoted" }
 drows = [ r for r in rows if r["printed"] == "row" and r["ans_tag"] == "d" and r["section"] == "sigs" ]
-check( drows and all( r["demote"] in VERD for r in drows ), "(k) every <sigs> <d> line carries a verdict from the closed set" )
-check( all( r["demote"] == "top_rank" for r in drows if 0 < int( r["d_pos"] ) <= 10 ), "(k) d_pos <= 10 reads top_rank" )
+check( drows and all( r["demote"] in VERD for r in drows ), "(k) all %d <sigs> <d> lines carry a verdict from the closed set" % len( drows ) )
+top = [ r for r in drows if 0 < int( r["d_pos"] ) <= 10 ]
+check( top and all( r["demote"] == "top_rank" for r in top ), "(k) the %d lines at d_pos <= 10 read top_rank" % len( top ) )
 sys.exit( 1 if bad else 0 )
 PY
 
@@ -174,17 +186,60 @@ run on3 "RIPWIRE_ROW_FEATURES=$TSV" . --no-cache "--for=$TASK2"
 heads="$( grep -c '^# ripwire.row_features/v1' "$TSV" )"; names="$( grep -c '^task	node	' "$TSV" )"
 if [ "$heads" = 1 ] && [ "$names" = 1 ] && grep -q "^$TASK2	" "$TSV" && grep -q "^$TASK	" "$TSV"; then ok "(a) the second call appended its lines under the one header"; else no "(a) header lines $heads/$names or a call's lines missing"; fi
 
-# (v) VALIDATE, (w) write failure, (j) a posture not dumped
+# (v) VALIDATE, (w) write failure, (j) a posture not dumped, (x) an answer not captured whole: each counts the notices it saw
+seen(){ grep -c "$2" "$TMP/$1.err" | tr -d ' '; }   # seen STEM TEXT: how many stderr lines of run STEM carry TEXT
 mkdir -p "$TMP/adir"
 run dir "RIPWIRE_ROW_FEATURES=$TMP/adir" . --no-cache "--for=$TASK"
-if same2 off dir && grep -q 'RIPWIRE_ROW_FEATURES: the path is a directory' "$TMP/dir.err" && [ -z "$( ls -A "$TMP/adir" )" ]; then ok "(v) a directory: stdout + rc unchanged, disclosed, nothing written"; else no "(v) the directory path"; fi
+n="$( seen dir 'RIPWIRE_ROW_FEATURES: the path is a directory' )"
+if same2 off dir && [ "$n" -ge 1 ] && [ -z "$( ls -A "$TMP/adir" )" ]; then ok "(v) a directory: stdout + rc unchanged, $n notice(s), nothing written"; else no "(v) the directory path ($n notices)"; fi
 run empty "RIPWIRE_ROW_FEATURES=" . --no-cache "--for=$TASK"
-if same2 off empty && grep -q 'RIPWIRE_ROW_FEATURES: the value is not a file path' "$TMP/empty.err"; then ok "(v) an empty value: stdout + rc unchanged, disclosed"; else no "(v) the empty value"; fi
+n="$( seen empty 'RIPWIRE_ROW_FEATURES: the value is not a file path' )"
+if same2 off empty && [ "$n" -ge 1 ]; then ok "(v) an empty value: stdout + rc unchanged, $n notice(s)"; else no "(v) the empty value ($n notices)"; fi
 run wfail "RIPWIRE_ROW_FEATURES=$TMP/no/such/dir/rows.tsv" . --no-cache "--for=$TASK"
-if same2 off wfail && grep -q 'RIPWIRE_ROW_FEATURES: could not write the file' "$TMP/wfail.err"; then ok "(w) a failed write: stdout + rc unchanged, disclosed"; else no "(w) the failed write (rc $( cat "$TMP/wfail.rc" ), stderr: $( head -c 300 "$TMP/wfail.err" ))"; fi
+n="$( seen wfail 'RIPWIRE_ROW_FEATURES: could not write the file' )"
+if same2 off wfail && [ "$n" -ge 1 ]; then ok "(w) a failed write: stdout + rc unchanged, $n notice(s)"; else no "(w) the failed write (rc $( cat "$TMP/wfail.rc" ), $n notices, stderr: $( head -c 300 "$TMP/wfail.err" ))"; fi
+NOTDUMPED='does not print the captured XML answer the dump reads: nothing written'
 run joff "" . --no-cache --json "--for=$TASK"
 run jon "RIPWIRE_ROW_FEATURES=$TMP/json.tsv" . --no-cache --json "--for=$TASK"
-if same2 joff jon && grep -q 'is not dumped: nothing written' "$TMP/jon.err" && [ ! -e "$TMP/json.tsv" ]; then ok "(j) --json: stdout + rc unchanged, disclosed, nothing written"; else no "(j) the --json posture"; fi
+n="$( seen jon "$NOTDUMPED" )"
+if same2 joff jon && [ "$n" -ge 1 ] && [ ! -e "$TMP/json.tsv" ]; then ok "(j) --json: stdout + rc unchanged, $n notice(s), nothing written"; else no "(j) the --json posture ($n notices)"; fi
+SW='RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_ONE_SIDE_REACH=1 RIPWIRE_NO_SIBLING_DEMOTE=1'
+env $SW "$BIN" . --no-cache "--for=$TASK" >"$TMP/swoff.out" 2>"$TMP/swoff.err"; echo $? >"$TMP/swoff.rc"
+env $SW "RIPWIRE_ROW_FEATURES=$TMP/sw.tsv" "$BIN" . --no-cache "--for=$TASK" >"$TMP/swon.out" 2>"$TMP/swon.err"; echo $? >"$TMP/swon.rc"
+n="$( seen swon "$NOTDUMPED" )"
+if same2 swoff swon && [ "$n" -ge 1 ] && [ ! -e "$TMP/sw.tsv" ]; then ok "(j2) the capture switched off: stdout + rc unchanged, $n generic notice(s), nothing written"; else no "(j2) the switched-off capture ($n notices)"; fi
+RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" . --no-cache "--for=$TASK" >"$TMP/xoff.out" 2>"$TMP/xoff.err"; echo $? >"$TMP/xoff.rc"
+if [ "$( seen xoff 'could not buffer the answer' )" -ge 1 ]; then
+    RIPWIRE_FAULT_CHARGE_BUFFER=1 RIPWIRE_ROW_FEATURES="$TMP/x.tsv" "$BIN" . --no-cache "--for=$TASK" >"$TMP/xon.out" 2>"$TMP/xon.err"; echo $? >"$TMP/xon.rc"
+    n="$( seen xon 'RIPWIRE_ROW_FEATURES: the answer was not captured whole' )"
+    if same2 xoff xon && [ "$n" -ge 1 ] && [ ! -e "$TMP/x.tsv" ]; then ok "(x) an uncaptured answer: stdout + rc are the fault-only run's, $n notice(s), nothing written"
+    else no "(x) an uncaptured answer: $n notice(s), file $( [ -e "$TMP/x.tsv" ] && echo "written ($( grep -vc '^#' "$TMP/x.tsv" | tr -d ' ' ) lines)" || echo absent )"; fi
+else
+    printf '  SKIP  (x) RIPWIRE_FAULT_CHARGE_BUFFER injects nothing in this binary (NDEBUG): CI'"'"'s plain leg proves this arm\n'
+fi
+
+# (U) the fileRanks unit driver, compiled with the flags CMake used for $BIN plus the standard library's bounds checks
+BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
+FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"; LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
+if [ ! -f "$FLAGS_MK" ] || [ ! -f "$LINK_TXT" ]; then
+    no "(U) cannot find CMake flags under $BUILD_DIR: the unit arm needs a CMake-built binary"
+elif ! cxxflags_load "$FLAGS_MK"; then
+    no "(U) cannot parse $FLAGS_MK without executing it"
+else
+    CXX="$( awk 'NR==1{ print $1; exit }' "$LINK_TXT" )"
+    [ -n "$CXX" ] && command -v "$CXX" >/dev/null 2>&1 || CXX="$( command -v c++ || command -v clang++ )"
+    DIAG_OBJ="$BUILD_DIR/CMakeFiles/ripwire.dir/src/infra/diagnostics.cpp.o"
+    DIAG_LINK=(); [ -f "$DIAG_OBJ" ] && DIAG_LINK=( "$DIAG_OBJ" )
+    if "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -D_GLIBCXX_ASSERTIONS \
+         "${CXX_INCLUDES[@]}" -I"$ROOT/src" "$ROOT/test/forrowfeatures_unit.cpp" "${DIAG_LINK[@]}" -o "$TMP/rowfeat_unit" >"$TMP/u_build.log" 2>&1; then
+        "$TMP/rowfeat_unit" >"$TMP/u_run.log" 2>&1; urc=$?
+        n="$( grep -c '  PASS' "$TMP/u_run.log" | tr -d ' ' )"
+        if [ "$urc" = 0 ] && [ "$n" -ge 1 ]; then ok "(U) forrowfeatures_unit: $n case(s) hold"
+        else no "(U) forrowfeatures_unit rc=$urc, $n case(s) passed:"; grep -E 'FAIL|assert|Assertion|out of bounds|out-of-range|index' "$TMP/u_run.log" | head -4 | sed 's/^/        /'; fi
+    else
+        no "(U) forrowfeatures_unit does not compile:"; grep -m4 -E 'error' "$TMP/u_build.log" | sed 's/^/        /'
+    fi
+fi
 
 [ "$fail" = 0 ] && echo "forrowfeaturescheck: OK" || echo "forrowfeaturescheck: FAIL"
 exit "$fail"

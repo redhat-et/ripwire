@@ -3165,6 +3165,10 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     }
     const rw::Config&                      cfg = d.cfg;
     const std::optional<StdoutCaptured>    cap = capture.finish();
+    if( !cap || cap->failed || !cap->restored )
+    {
+        rw::rowFeaturesSkipUncaptured();   // ROW-FEATURE-DUMP reads only a whole answer
+    }
     if( cap && !cap->restored )
     {
         rw::emitTo( stderr, "ripwire: --for: could not restore stdout after the <syms> capture — the answer so far was written to the original stdout, the rest is lost\n" );
