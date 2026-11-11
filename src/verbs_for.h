@@ -31,6 +31,7 @@
 #include "foraliashop.h"    // XF-ALIAS-HOP: an alias row the task names, followed to what it names
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
+#include "forrowfeatures.h" // ROW-FEATURE-DUMP: RIPWIRE_ROW_FEATURES=<path>, the ranker's per-row internals beside the answer's placement (dev only)
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -215,6 +216,8 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
     }
 
+    rw::rowFeaturesLexical( lensRank, tierMul );   // ROW-FEATURE-DUMP: inert unless armed
+
     // input blow-up guard disclosure (lexical.h kMaxUniqueQueryTerms/dedupeQueryTerms): a task string with
     // more distinct terms than the cap allows still scores — on the terms it kept — rather than refusing, so
     // the cut rides the SAME CapDisclosure channel every other indexing cap on this bundle uses (mention.h),
@@ -239,6 +242,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank = anchoredLexicalRank( g, lensRank );
     }
+    rw::rowFeaturesStage( rw::RowStage::Anchor, lensRank );
 
     // B8 query-mention anchoring: lift a file / dotted module / Scope.symbol the task literally NAMES near the
     // top (inert — byte-identical — when the text names nothing indexed). Routed path only.
@@ -254,6 +258,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             out.mentionNote  = nb;
             out.anchorLifts  = mentionInfo.fileCount + mentionInfo.symbolCount;   // §A4f: the count the candidates root emits
         }
+        rw::rowFeaturesStage( rw::RowStage::Mention, lensRank );
         // Collected whether or not the anchor MOVED anything: a task whose named file fell outside the
         // extraction window lifts nothing, and is the run that most needs telling.
         absorbCapDisclosure( mentionInfo.caps, out.capNote, out.capAttrs, out.capJson );
@@ -262,6 +267,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         {
             out.mentionNote += fileSubjectNote( moved );
         }
+        rw::rowFeaturesStage( rw::RowStage::FileSubject, lensRank );
     }
     // PATH-FROM-UPSTREAM (forgraphverb.h): `path from A to B` — a caller of A never outranks the path's own rows. Routed path only.
     if( !cfg.noRoute )
@@ -270,6 +276,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         {
             out.mentionNote += pathFromUpstreamNote( moved );
         }
+        rw::rowFeaturesStage( rw::RowStage::PathUpstream, lensRank );
     }
 
     // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the
@@ -280,6 +287,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( const auto [ sibSeed, sibPer ] = sibliftParams(); sibSeed > 0 )
         {
             out.sibliftNote = applySiblingLiftNoted( ing, lensRank, sibSeed, sibPer );
+            rw::rowFeaturesStage( rw::RowStage::SibLift, lensRank );
         }
     }
 
@@ -293,6 +301,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( const auto [ poolK, poolBlend ] = filePoolParams(); poolK > 0 )
         {
             applyFilePooling( ing, lensRank, poolK, poolBlend );
+            rw::rowFeaturesStage( rw::RowStage::Pool, lensRank );
         }
     }
 
@@ -306,6 +315,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( const auto [ expSeeds, expPer ] = expandParams(); expSeeds > 0 )
         {
             out.expandNote = applyStructuralExpansionNoted( ing, lensRank, expSeeds, expPer );
+            rw::rowFeaturesStage( rw::RowStage::Expand, lensRank );
         }
     }
 
@@ -350,6 +360,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             out.boostNote = nb;
         }
         absorbCapDisclosure( boostInfo.caps, out.capNote, out.capAttrs, out.capJson );
+        rw::rowFeaturesStage( rw::RowStage::CoChange, lensRank );
     }
 
     // R5 — doc-mention surfacing (default-on, route-agnostic; see mention.h applyDocMentionBoost):
@@ -369,6 +380,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             out.docMentionCount = docMentionInfo.docCount;   // §L10b: machine form for the doc_mentions= root attribute
         }
         absorbCapDisclosure( docMentionInfo.caps, out.capNote, out.capAttrs, out.capJson );
+        rw::rowFeaturesStage( rw::RowStage::DocMention, lensRank );
     }
     return out;
 }
@@ -3144,6 +3156,12 @@ struct CapturedForAnswer
     std::optional<rw::PricedRootInputs> price;
 };
 
+// The capture holds the whole answer: a buffer, flushed and read back without error, and stdout restored.
+inline bool capturedWhole( const std::optional<StdoutCaptured>& cap )
+{
+    return cap && !cap->failed && cap->restored;
+}
+
 inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
 {
     StdoutCapture&                             capture = answer.capture;
@@ -3154,6 +3172,7 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     }
     const rw::Config&                      cfg = d.cfg;
     const std::optional<StdoutCaptured>    cap = capture.finish();
+    rw::rowFeaturesNoteCapture( capturedWhole( cap ) );   // ROW-FEATURE-DUMP reads only a whole answer
     if( cap && !cap->restored )
     {
         rw::emitTo( stderr, "ripwire: --for: could not restore stdout after the <syms> capture — the answer so far was written to the original stdout, the rest is lost\n" );
@@ -3167,7 +3186,7 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     {
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
-    const bool        whole = cap && !cap->failed;
+    const bool        whole = capturedWhole( cap );   // restored: the branch above returned otherwise
     const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;
     std::string       cut;   // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
     std::string       syms  = rw::renderForFileSyms(
@@ -3179,6 +3198,10 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     std::fwrite( bytes.data(), 1, at, stdout );
     std::fwrite( syms.data(), 1, syms.size(), stdout );
     std::fwrite( bytes.data() + at, 1, bytes.size() - at, stdout );
+    if( rw::rowFeatures().armed )   // ROW-FEATURE-DUMP: the final answer, as written (the bytes above in their order)
+    {
+        rw::rowFeaturesFinish( d.ing, d.g, cfg.forTask, std::string( bytes ).insert( at, syms ) );
+    }
     return cap && cap->failed ? 1 : 0;
 }
 
@@ -3514,6 +3537,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::size_t cap = std::min<std::size_t>( std::size_t( forTopN ), S );
             lensSurfaceIds.resize( cap );
         }
+        rw::rowFeaturesSurface( { .rank = lensRank, .surface = lensSurfaceIds, .evidence = lr.evidence, .anchors = routeAnchorDefs, .rootArg = flRootArg } );   // ROW-FEATURE-DUMP
 
         ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
         // FRAME-HIGH-CONFIDENCE: high says the head is the answer; on a name-exact route that holds only when the anchor heads the rows.
@@ -5236,6 +5260,7 @@ std::optional<int> runForLens( const MainDispatch& d )
     {
         return std::nullopt;
     }
+    rw::armRowFeatures( forFileSymsWanted( d ) && cfg.pageLimit == 0 && cfg.pageOffset == 0 );   // ROW-FEATURE-DUMP: one getenv when unset
     rw::LensRanking lr = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
                                              /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
     // the at= stamp (gitstamp.h): one read per run — every payment-mode render below shares it, like the ranking

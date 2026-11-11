@@ -255,6 +255,22 @@ private:
     mutable HashMap<std::string, std::string_view> m_recvTypes;   // "functionId#name" → its parameter's or local's stated class
 };
 
+// THE DECLINED CROSSING TEST, by id (GV-ASSEMBLY M3 met-bridge, PATH-FEWEST-UNPROVEN's declined last hop): declined record `site`
+// could have meant definition `to` — its stored candidate list holds `to`, it is no self-call of `to`, and it does not read as
+// the builtin method its name spells (DeclinedCrossRule). Returns the list's candidate count (>= 1), or 0 when it is no crossing.
+inline std::uint32_t declinedCrossingCands( const Graph& g, const DeclinedCrossRule& rule, std::uint32_t site, NodeId to )
+{
+    EXPECTS( site < g.declinedSiteList.size(), "a declined record index from the graph's own record list" );
+    const std::uint32_t list = g.declinedSiteList[ site ];
+    if( list == kNoDeclinedList || list + 1 >= g.declinedListOff.size() || g.declinedSiteCaller[ site ] == to )
+    {
+        return 0;
+    }
+    const auto first = g.declinedListCand.begin() + std::ptrdiff_t( g.declinedListOff[ list ] );
+    const auto last  = g.declinedListCand.begin() + std::ptrdiff_t( g.declinedListOff[ list + 1 ] );
+    return std::find( first, last, to ) != last && !rule.builtinSpelled( site ) ? std::uint32_t( last - first ) : 0u;
+}
+
 // ── the provider ─────────────────────────────────────────────────────────────────────────────────────────────────────
 // THE HOP KINDS, as data (composed hops). Each kind is one row of kHopKinds: its printed name, whether it is a call through a
 // struct FIELD (a chain of field calls only may go one hop deeper: the bridge's kBridgeSlotCrossings, the ring's
