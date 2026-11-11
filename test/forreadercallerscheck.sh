@@ -12,6 +12,7 @@
 #          unproven caller of a two-definition name (run_flags -> load_flags) is no row while --callers names it via="name"
 #   R4 [P] fan-in gate: a reader with 7 callers lists none: <lcn of="hub_reader" n="7" next="--callers=hub_reader"/>
 #   K1 [P] kebab trigger: --for="widget-time option" fires <lit s="widget-time" shape="flag"> with lc rows keys_callback, read_callback
+#   K1b [G] a reader with two callers takes no d=2 hop (premise: --callers=keys_callback lists main_loop)
 #   K2 [G] near misses: "widget-time" with no option word, and "wide-spread option" (9 quoted sites) print no flag <lit>
 #   T1 [P] raise site: --for="Widget can't resolve parts of the" fires <lit shape="message"> (no cue word), its reader's caller is the
 #          exception constructor (ctor="1") and d=2 is the throw site Injector::lookup
@@ -116,6 +117,10 @@ int keys_callback(int fd)
 {
 	return keys_next(fd);
 }
+int main_loop(int fd)
+{
+	return keys_callback(fd);
+}
 ''' )
 w( "c/tty.c", '''extern int keys_next(int c);
 int read_callback(int fd)
@@ -186,6 +191,10 @@ has "$TMP/r4" '<lcn of="hub_reader" n="7" next="--callers=hub_reader"/>' && [ "$
 run c "--for=widget-time option" >"$TMP/k1"
 has "$TMP/k1" '<lit s="widget-time" shape="flag"' && has "$TMP/k1" '<lc d="1" of="keys_next" n="keys_callback"' && has "$TMP/k1" '<lc d="1" of="keys_next" n="read_callback"' \
     && ok "K1 bare kebab + option word fires shape=flag with reader callers" || no "K1 kebab trigger or its lc rows missing"
+run c --callers=keys_callback >"$TMP/k1c"
+if has "$TMP/k1c" 'n="main_loop"'; then
+    has "$TMP/k1" '<lc d="2"' && no "K1b a d=2 row above a two-caller reader" || ok "K1b two callers: no d=2 hop (premise: --callers=keys_callback lists main_loop)"
+else no "K1b premise: --callers=keys_callback does not list main_loop"; fi
 run c "--for=widget-time" >"$TMP/k2a"; run c "--for=wide-spread option" >"$TMP/k2b"
 run c --grep=wide-spread >"$TMP/k2g"
 has "$TMP/k2a" '<lit ' && no "K2 no cue word still fired a lit" || ok "K2 no option word: no <lit"
