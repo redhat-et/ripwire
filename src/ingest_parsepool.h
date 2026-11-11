@@ -5,6 +5,7 @@
 
 #include "clones.h"     // cloneBodyKey — CLONES-PERSIST: the per-def clone key the cache carries
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/memstats.h" // M0 MEM-STATS: RIPWIRE_STATS footprint readings at the pool join and after the cache write
 
 // ingest_parsepool.h — the parallel parse pool, moved VERBATIM out of ingest() in the 2026-08-30
 // decomposition: the per-thread raw-fact accumulators (one RawFacts each), the cold-path reserve
@@ -1066,6 +1067,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         // cache write and before returning to the model-build tail; keeping these empty-but-capacious vectors
         // alive needlessly raises the cold-run peak on large trees.
         std::vector<RawFacts>().swap( tFacts );
+        memstats::mark( "pool-join" );   // M0 MEM-STATS: the merged families, per-thread storage released (infra/memstats.h)
 
         // P1-15: the SAME drift count, carried out of the function instead of only to stderr. The MCP
         // server discloses it per incremental pass (`_reingest`), which it could not do from an env-gated
@@ -1099,6 +1101,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         {
             forgetNestRefusalsForCache( scan );   // a refused file is written UNKNOWN, so a warm run re-refuses it (ingest_prewarm.h)
             saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, captureValueUses );
+            memstats::mark( "save-cache" );   // M0: peak_mib holds the cache blob's own peak (card C1)
         }
     }
     return raw;

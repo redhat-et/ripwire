@@ -1,4 +1,5 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/memstats.h" // M0 MEM-STATS: rw::memstats::mib — the RIPWIRE_STATS family table's capacity in MiB
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <exception>         // std::uncaught_exceptions: the stopped fold's unwind abandons the history walks
@@ -5465,6 +5466,51 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             "        references/callees = {} ({} B)\n"
             "        includes/targets   = {} ({} B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
+        // M0 MEM-STATS (mem-audit-fable-1111): every model family's size, capacity and row bytes (capacity x sizeof — the
+        // reserved row storage, not the strings it points at), then the bindings by LocalBindKind (model.h, by enumerator
+        // value) with how many of each sit inside a definition — what buildGraph's per-kind side tables are sized by
+        const auto family = [ & ]( std::string_view name, const auto& v )
+        {
+            using Row = typename std::decay_t<decltype( v )>::value_type;
+            rw::emitTo( stderr, "[mem] family {} size={} cap={} row_b={} cap_mib={:.1f}\n", name, v.size(), v.capacity(), sizeof( Row ),
+                        rw::memstats::mib( v.capacity() * sizeof( Row ) ) );
+        };
+        family( "files", ing.files );
+        family( "fileHealth", ing.fileHealth );
+        family( "symbols", ing.symbols );
+        family( "fields", ing.fields );
+        family( "aliasTargets", ing.aliasTargets );
+        family( "fnLocalScopes", ing.fnLocalScopes );
+        family( "cloneKeys", ing.cloneKeys );
+        family( "references", ing.references );
+        family( "includes", ing.includes );
+        family( "constOpens", ing.constOpens );
+        family( "bindings", ing.bindings );
+        family( "bindingAliases", ing.bindingAliases );
+        family( "routeDefs", ing.routeDefs );
+        family( "routeUses", ing.routeUses );
+        family( "lexTokenHashes", ing.lexTokenHashes );
+        family( "lexTokenTfs", ing.lexTokenTfs );
+        std::array<std::size_t, kLocalBindKindCount> kindAll {};
+        std::array<std::size_t, kLocalBindKindCount> kindScoped {};
+        for( const Binding& b : ing.bindings )
+        {
+            const std::size_t kind = std::size_t( b.kind );
+            if( kind < kLocalBindKindCount )
+            {
+                ++kindAll[ kind ];
+                kindScoped[ kind ] += b.fromSymbol != kNoNode ? 1u : 0u;
+            }
+        }
+        std::string kinds;
+        for( std::size_t kind = 0; kind < kLocalBindKindCount; ++kind )
+        {
+            if( kindAll[ kind ] != 0 )
+            {
+                kinds += std::format( " {}={}/{}", kind, kindAll[ kind ], kindScoped[ kind ] );
+            }
+        }
+        rw::emitTo( stderr, "[mem] bindings by kind (kind=all/in-a-def):{}\n", kinds );
     }
     // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to buildGraph as an optional
     // parameter. An unreadable/corrupt/mismatched index yields an EMPTY overlay (one DISCLOSE + stderr note) and

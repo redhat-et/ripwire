@@ -33,6 +33,7 @@
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "cppscopechain.h"       // EditCheckBraceLexer / editCheckWrittenQualifier — the written-spelling tier's C/C++ full chain
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/memstats.h"      // M0 MEM-STATS: RIPWIRE_STATS footprint readings at buildGraph's tables-built, resolve-done and end
 
 #include <algorithm>
 #include <array>
@@ -11210,6 +11211,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         return ref.argCountKnown && ( ( cs.arityExact != 0 && ref.argCount > cs.params ) || ref.argCount < paramsMinOf[ c ] );
     };
 
+    // M0 MEM-STATS: the side-table plateau (the headline peak's base), and how full the tables sized at declaration are —
+    // size / bucket count, where a bucket is 8 zero-filled bytes the reserve touched whether or not an entry ever lands in it
+    memstats::mark( "graph-tables" );
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[mem] tables varType={}/{} localNameSet={}/{} localShadowSpans={}/{} jsImportTargets={}/{} jsShadows={}/{} acc=0/{}\n",
+                    varType.size(), varType.bucket_count(), fieldNarrow.localNameSet.size(), fieldNarrow.localNameSet.bucket_count(),
+                    fieldNarrow.localShadowSpans.size(), fieldNarrow.localShadowSpans.bucket_count(), jsImports.targets.size(),
+                    jsImports.targets.bucket_count(), jsImports.shadows.size(), jsImports.shadows.bucket_count(), acc.bucket_count() );
+    }
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/3: resolve loop (per reference)" );
     const MdLinkPins                mdLinks    = bindMarkdownLinks( ing );   // empty unless the tree holds a cross-file markdown link
@@ -13165,6 +13176,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     }
 
+    memstats::mark( "graph-resolved" );   // M0: the resolve loop done, every side table still alive (card G1c)
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[mem] edges acc={}/{}\n", acc.size(), acc.bucket_count() );
+    }
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
     // flatten + cap + sort by (from, to) — deterministic regardless of map order
@@ -13526,6 +13542,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
 
     g.importAdj = std::move( includeAdj );   // last use: the by-name hedge's rule 2b reads it from here (pathgaps.h NamesakeRule)
+    memstats::mark( "graph-end" );   // M0: the graph built, the side tables not yet freed (they die at this return)
     return g;
 }
 
