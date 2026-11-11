@@ -482,10 +482,5 @@ inline std::string demoteSiblingRowsAs( const IngestResult& ing, const Graph& g,
     keepSameAsTargets( dRows, picked, demote );
     return pointerAnswer( answer, picked, demote );
 }
-// The default (no budget) answer with the demoted rows rewritten as tail pointers; "" when none is.
-inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer )
-{
-    return demoteSiblingRowsAs( ing, g, task, answer, DemoteRegime::Default );
-}
 } // namespace demote_detail
 } // namespace rw

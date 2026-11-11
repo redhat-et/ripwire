@@ -15,7 +15,7 @@
 // rides before the first pointer, only when the rule fires. It runs where SIBLING-DEMOTE runs — every dialect of CLI --for and MCP
 // `for` (DEMOTE-ALL-DIALECTS, fordemoteall.h: the no-budget XML answer here, a soft target's <sigs> before its rows settle, the --json
 // "sigs" array). RIPWIRE_NO_DECL_TWIN=1 turns it off (byte identity and the gate's twin).
-#include "forsiblingdemote.h" // siblingDemoteOn, demote_detail::demoteSiblingRows / scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
+#include "forsiblingdemote.h" // siblingDemoteOn, demote_detail::demoteSiblingRowsAs / scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
 #include "serialize.h" // attrOf
 
 #include <algorithm>
@@ -145,11 +145,7 @@ inline void demoteAndPointRowsInto( const IngestResult& ing, const Graph& g, std
     };
     if( siblingDemoteOn() )
     {
-        apply( [&]( std::string_view shaped )
-               {
-                   return regime == DemoteRegime::Default ? demote_detail::demoteSiblingRows( ing, g, task, shaped )
-                                                          : demote_detail::demoteSiblingRowsAs( ing, g, task, shaped, regime );
-               } );
+        apply( [&]( std::string_view shaped ) { return demote_detail::demoteSiblingRowsAs( ing, g, task, shaped, regime ); } );
     }
     if( declTwinOn() )
     {
