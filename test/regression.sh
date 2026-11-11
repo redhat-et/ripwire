@@ -548,9 +548,9 @@ for _g in \
     foronesidecheck \
     forrankordercheck \
     forregrowcheck \
-    forrowfeaturescheck \
     forrootlegendcheck \
     forroutecheck \
+    forrowfeaturescheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsiblingdemotecheck \
