@@ -820,6 +820,8 @@ struct Type3Stats
     std::uint64_t jaccardMerges  = 0;   // exact fingerprint merges run
     std::uint64_t lcsRuns        = 0;   // pairs that cleared every gate and reached the LCS DP
     std::uint64_t emittedPairs   = 0;   // final Type-3 pairs returned
+    std::uint64_t lcsComputed    = 0;   // LCS DPs actually run (a cap re-run reuses the candidate walk's; never a parity counter)
+    std::uint64_t partnersPeak   = 0;   // the candidate walk's largest partner list (distinct candidates: <= candidateCount)
     bool          pairCapHit     = false;   // kType3MaxPairs fired: the pair list (and every count built on it) is a FLOOR
 
     // The DISCLOSE sink for the pass's one degrade. Until 2026-09-24 the cap used the one-argument DISCLOSE, whose
@@ -913,7 +915,11 @@ using Type3Buckets = HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 4>>;
 // THE CAP is the one place the two walks can differ. kType3MaxPairs keeps the FIRST N gated pairs, and "first" is a
 // visit order: ascending (ia, ib) in the candidate walk, bucket order in the bucket walk. A pass that reaches the cap
 // is therefore re-run by the bucket walk from the start, so the pairs a capped corpus keeps — and the disclosure — are
-// the ones it always kept. Shipped corpora do not reach the cap, and test/clonebandcheck.sh runs both walks, capped and
+// the ones it always kept. The re-run does not pay the LCS twice (CodeRabbit 4542253199): the candidate walk records
+// each LCS it ran, (pair, similarity) in ascending pair order (its visit order), and the bucket walk looks a pair up
+// there before running the DP. The record is at most kType3MaxPairs entries (12 B each) and dies with the search.
+// The partner list holds each partner ONCE (CodeRabbit 4542253208): a per-candidate stamp drops a repeat as it is
+// visited, so the list is bounded by the candidate count, not by ia's raw bucket visits. Shipped corpora do not reach the cap, and test/clonebandcheck.sh runs both walks, capped and
 // uncapped, against each other (-DCTX_TYPE3_BUCKET_WALK compiles the candidate walk out).
 class Type3PairSearch
 {
@@ -938,8 +944,10 @@ public:
             return std::move( out_ );
         }
 #endif
-        // The bucket walk, as it has always run: every counter restarts, and the cap's "first N" are bucket order.
+        // The bucket walk, as it has always run: every counter restarts, and the cap's "first N" are bucket order. The LCS
+        // ratios the candidate walk computed are read back, not recomputed (similarityOf).
         out_.clear();
+        rerun_            = true;
         comparedPairs_    = 0;
         st_.rawPairVisits = st_.distinctPairs = st_.sketchRejects = st_.jaccardMerges = st_.lcsRuns = 0;
         walkByBucket();
@@ -1007,9 +1015,8 @@ private:
         ++st_.lcsRuns;
         const std::span<const std::uint32_t> pa( ca.toks.data(), std::min( ca.toks.size(), kType3MaxTokensForLcs ) );
         const std::span<const std::uint32_t> pb( cb.toks.data(), std::min( cb.toks.size(), kType3MaxTokensForLcs ) );
-        const std::size_t lcs = cloneLcsLen( pa, pb, lcsPrevRow_, lcsCurRow_ );
         const std::size_t den = pa.size() + pb.size();
-        const float       sim = den == 0 ? 0.0f : 2.0f * float( lcs ) / float( den );
+        const float       sim = similarityOf( ia, ib, pa, pb );
         if( den == 0 || sim < kType3MinSimilarity || sim >= 1.0f )
         {
             return true; // < 1.0: exact would be Type-1/2
@@ -1019,10 +1026,37 @@ private:
         return true;
     }
 
+    // The LCS ratio of (ia, ib): the candidate walk computes and records it; the bucket walk's cap re-run reads the record
+    // first (the walk recorded in ascending pair order, so the record is sorted) and computes only a pair it lacks.
+    float similarityOf( std::uint32_t ia, std::uint32_t ib, std::span<const std::uint32_t> pa, std::span<const std::uint32_t> pb )
+    {
+        const std::uint64_t key = ( std::uint64_t( ia ) << 32 ) | ib;
+        if( rerun_ )
+        {
+            const auto it = std::lower_bound( lcsKeys_.begin(), lcsKeys_.end(), key );
+            if( it != lcsKeys_.end() && *it == key )
+            {
+                return lcsSims_[ std::size_t( it - lcsKeys_.begin() ) ];
+            }
+        }
+        ++st_.lcsComputed;
+        const std::size_t lcs = cloneLcsLen( pa, pb, lcsPrevRow_, lcsCurRow_ );
+        const std::size_t den = pa.size() + pb.size();
+        const float       sim = den == 0 ? 0.0f : 2.0f * float( lcs ) / float( den );
+        if( !rerun_ )
+        {
+            ASSUME( lcsKeys_.empty() || lcsKeys_.back() < key, "the candidate walk gates pairs in ascending (ia, ib)" );
+            lcsKeys_.push_back( key );
+            lcsSims_.push_back( sim );
+        }
+        return sim;
+    }
+
     // The candidate walk (see the class comment); false = it reached the cap and the bucket walk must answer.
     bool walkByCandidate()
     {
         std::vector<std::uint32_t> partners;
+        std::vector<std::uint32_t> stamp( cands_.size(), 0 );   // stamp[ib] == ia + 1: ib is already in ia's list
         for( std::uint32_t ia = 0; ia < cands_.size(); ++ia )
         {
             partners.clear();
@@ -1036,14 +1070,15 @@ private:
                 for( auto p = std::upper_bound( it->second.begin(), it->second.end(), ia ); p != it->second.end(); ++p )
                 {
                     ++st_.rawPairVisits;
-                    if( inLengthBand( ia, *p ) )
+                    if( stamp[ *p ] != ia + 1 && inLengthBand( ia, *p ) )
                     {
+                        stamp[ *p ] = ia + 1;
                         partners.push_back( *p );
                     }
                 }
             }
+            st_.partnersPeak = std::max<std::uint64_t>( st_.partnersPeak, partners.size() );
             std::sort( partners.begin(), partners.end() );
-            partners.erase( std::unique( partners.begin(), partners.end() ), partners.end() );
             for( const std::uint32_t ib : partners )
             {
                 if( !gatePair( ia, ib ) )
@@ -1095,6 +1130,9 @@ private:
     std::vector<CloneGroup>           out_;
     std::size_t                       comparedPairs_ = 0;
     std::vector<std::uint32_t>        lcsPrevRow_, lcsCurRow_;   // cloneLcsLen's two DP rows, reused by every pair (T3-LCS)
+    std::vector<std::uint64_t>        lcsKeys_;   // the candidate walk's LCS record: (ia << 32 | ib), ascending
+    std::vector<float>                lcsSims_;   // ... and each pair's similarity
+    bool                              rerun_ = false;   // the bucket walk is re-running a capped pass: read the record first
 };
 
 // Find Type-3 (gapped) clone PAIRS: normalized streams highly similar (LCS-ratio ≥ kType3MinSimilarity) but not

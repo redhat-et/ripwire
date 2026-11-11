@@ -220,6 +220,9 @@ int main( int argc, char** argv )
                  (unsigned long long)st.sketchRejects, (unsigned long long)st.jaccardMerges, (unsigned long long)st.lcsRuns,
                  (unsigned long long)st.emittedPairs );
     std::printf( "CAP %d\n", st.pairCapHit ? 1 : 0 );   // T3-PAIRSEEN: the walk-parity arms diff this line too
+    // CodeRabbit 4542253199 / 4542253208: the LCS DPs actually run (a capped re-run reads the candidate walk's back) and the
+    // candidate walk's largest partner list. Not a parity line: the walks differ here by design (clonebandcheck W3 / W4).
+    std::printf( "LCSDP %llu PARTNERS %llu\n", (unsigned long long)st.lcsComputed, (unsigned long long)st.partnersPeak );
     check( st.distinctPairs >= 1770, "S4) chaff pairs really reached the pre-gate (distinctPairs >= C(60,2))" );
     check( st.emittedPairs == t3.size(), "S4) stats emitted count matches the returned vector" );
 #ifdef CTX_TYPE3_SKETCH_OFF
