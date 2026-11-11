@@ -28,7 +28,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forreadercallerscheck: BIN=$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
@@ -162,68 +162,62 @@ count(){ grep -oF -- "$2" "$1" | wc -l | tr -d ' '; }
 
 # R1-R3
 run py --for=WIDGET_DISABLE_ALL >"$TMP/r1"
-has "$TMP/r1" '<lc d="1" of="get_widgets" n="make_validator" t="fn" p="widgets/validator.py:3"' && ok "R1 reader caller row" || no "R1 no d=1 row for get_widgets <- make_validator"
-has "$TMP/r1" '<lc d="2" of="make_validator" n="build_adapter"' && has "$TMP/r1" '<lc d="2" of="make_validator" n="build_model"' \
-    && ok "R2 single-caller extra hop (d=2 build_adapter, build_model)" || no "R2 d=2 rows missing"
+if has "$TMP/r1" '<lc d="1" of="get_widgets" n="make_validator" t="fn" p="widgets/validator.py:3"'; then ok "R1 reader caller row"; else no "R1 no d=1 row for get_widgets <- make_validator"; fi
+if has "$TMP/r1" '<lc d="2" of="make_validator" n="build_adapter"' && has "$TMP/r1" '<lc d="2" of="make_validator" n="build_model"'; then ok "R2 single-caller extra hop (d=2 build_adapter, build_model)"; else no "R2 d=2 rows missing"; fi
 run py --callers=build_model >"$TMP/r2c"
 if has "$TMP/r2c" 'n="run_all"'; then
-    has "$TMP/r1" 'n="run_all"' && no "R2 a d=3 row (run_all) printed" || ok "R2 no d=3 row (premise: --callers=build_model lists run_all)"
+    if has "$TMP/r1" 'n="run_all"'; then no "R2 a d=3 row (run_all) printed"; else ok "R2 no d=3 row (premise: --callers=build_model lists run_all)"; fi
 else no "R2 premise: --callers=build_model does not list run_all"; fi
 run py --callers=get_widgets >"$TMP/r3c"
 if has "$TMP/r3c" 'test_get_widgets_disabled'; then
-    has "$TMP/r1" 'n="test_get_widgets_disabled"' && no "R3 a test caller is a row" || ok "R3 test caller not a row (premise: --callers lists it)"
+    if has "$TMP/r1" 'n="test_get_widgets_disabled"'; then no "R3 a test caller is a row"; else ok "R3 test caller not a row (premise: --callers lists it)"; fi
 else no "R3 premise: --callers=get_widgets does not list the test caller"; fi
-n=$( count "$TMP/r1" '<lc ' ); [ "$n" = 3 ] && ok "R3 exactly 3 lc rows ($n)" || no "R3 expected 3 lc rows, saw $n"
+n=$( count "$TMP/r1" '<lc ' ); if [ "$n" = 3 ]; then ok "R3 exactly 3 lc rows ($n)"; else no "R3 expected 3 lc rows, saw $n"; fi
 run py --for=WIDGET_TABLE_ONLY >"$TMP/r3t"
 if has "$TMP/r3t" '<lit s="WIDGET_TABLE_ONLY"'; then
-    has "$TMP/r3t" '<lc' && no "R3 a literal with no reader function prints callers" || ok "R3 no-reader literal: <lit> printed, no <lc (premise: 1 lit)"
+    if has "$TMP/r3t" '<lc'; then no "R3 a literal with no reader function prints callers"; else ok "R3 no-reader literal: <lit> printed, no <lc (premise: 1 lit)"; fi
 else no "R3 premise: WIDGET_TABLE_ONLY printed no <lit>"; fi
 run py --for=WIDGET_FLAG_MODE >"$TMP/r3u"
 run py --callers=load_flags >"$TMP/r3uc"
 if has "$TMP/r3uc" 'n="run_flags" p="widgets/flags_run.py:1" via="name"' && has "$TMP/r3u" '<lit s="WIDGET_FLAG_MODE"'; then
-    has "$TMP/r3u" 'n="run_flags"' && no "R3 unproven caller run_flags printed" || ok "R3 unproven caller (two load_flags defs) not a row (premise: --callers lists it)"
+    if has "$TMP/r3u" 'n="run_flags"'; then no "R3 unproven caller run_flags printed"; else ok "R3 unproven caller (two load_flags defs) not a row (premise: --callers lists it)"; fi
 else no "R3 premise: --callers=load_flags lists no run_flags or no <lit> fired"; fi
 # R4
 run py --for=WIDGET_HUB_VALUE >"$TMP/r4"
-has "$TMP/r4" '<lcn of="hub_reader" n="7" next="--callers=hub_reader"/>' && [ "$( count "$TMP/r4" '<lc ' )" = 0 ] \
-    && ok "R4 fan-in gate: lcn n=7, no rows" || no "R4 fan-in gate row missing or rows listed"
+if has "$TMP/r4" '<lcn of="hub_reader" n="7" next="--callers=hub_reader"/>' && [ "$( count "$TMP/r4" '<lc ' )" = 0 ]; then ok "R4 fan-in gate: lcn n=7, no rows"; else no "R4 fan-in gate row missing or rows listed"; fi
 # K1-K2
 run c "--for=widget-time option" >"$TMP/k1"
-has "$TMP/k1" '<lit s="widget-time" shape="flag"' && has "$TMP/k1" '<lc d="1" of="keys_next" n="keys_callback"' && has "$TMP/k1" '<lc d="1" of="keys_next" n="read_callback"' \
-    && ok "K1 bare kebab + option word fires shape=flag with reader callers" || no "K1 kebab trigger or its lc rows missing"
+if has "$TMP/k1" '<lit s="widget-time" shape="flag"' && has "$TMP/k1" '<lc d="1" of="keys_next" n="keys_callback"' && has "$TMP/k1" '<lc d="1" of="keys_next" n="read_callback"'; then ok "K1 bare kebab + option word fires shape=flag with reader callers"; else no "K1 kebab trigger or its lc rows missing"; fi
 run c --callers=keys_callback >"$TMP/k1c"
 if has "$TMP/k1c" 'n="main_loop"'; then
-    has "$TMP/k1" '<lc d="2"' && no "K1b a d=2 row above a two-caller reader" || ok "K1b two callers: no d=2 hop (premise: --callers=keys_callback lists main_loop)"
+    if has "$TMP/k1" '<lc d="2"'; then no "K1b a d=2 row above a two-caller reader"; else ok "K1b two callers: no d=2 hop (premise: --callers=keys_callback lists main_loop)"; fi
 else no "K1b premise: --callers=keys_callback does not list main_loop"; fi
 run c "--for=widget-time" >"$TMP/k2a"; run c "--for=wide-spread option" >"$TMP/k2b"
 run c --grep=wide-spread >"$TMP/k2g"
-has "$TMP/k2a" '<lit ' && no "K2 no cue word still fired a lit" || ok "K2 no option word: no <lit"
+if has "$TMP/k2a" '<lit '; then no "K2 no cue word still fired a lit"; else ok "K2 no option word: no <lit"; fi
 if [ "$( count "$TMP/k2g" '<hit ' )" -ge 9 ]; then
-    has "$TMP/k2b" '<lit s="wide-spread"' && no "K2 a 9-site kebab fired" || ok "K2 9 quoted sites: no flag <lit (premise: grep sees 9)"
+    if has "$TMP/k2b" '<lit s="wide-spread"'; then no "K2 a 9-site kebab fired"; else ok "K2 9 quoted sites: no flag <lit (premise: grep sees 9)"; fi
 else no "K2 premise: --grep sees fewer than 9 wide-spread sites"; fi
 # T1-T2
 run ts "--for=Widget can't resolve parts of the" >"$TMP/t1"
-has "$TMP/t1" 'shape="message"' && has "$TMP/t1" 'n="UnknownWidgetException::constructor" t="method"' && has "$TMP/t1" 'ctor="1"' \
-    && has "$TMP/t1" '<lc d="2" of="UnknownWidgetException::constructor" n="Injector::lookup"' \
-    && ok "T1 cue-less verbatim message fires; ctor hop reaches the throw site" || no "T1 verbatim trigger or the raise-site hop missing"
+if has "$TMP/t1" 'shape="message"' && has "$TMP/t1" 'n="UnknownWidgetException::constructor" t="method"' && has "$TMP/t1" 'ctor="1"' && has "$TMP/t1" '<lc d="2" of="UnknownWidgetException::constructor" n="Injector::lookup"'; then ok "T1 cue-less verbatim message fires; ctor hop reaches the throw site"; else no "T1 verbatim trigger or the raise-site hop missing"; fi
 run ts "--for=resolve parts of" >"$TMP/t2a"; run ts "--for=gadget parts are often spread" >"$TMP/t2b"
-has "$TMP/t2a" 'shape="message"' && no "T2 3-word task fired" || ok "T2 3-word cue-less task: no message <lit"
+if has "$TMP/t2a" 'shape="message"'; then no "T2 3-word task fired"; else ok "T2 3-word cue-less task: no message <lit"; fi
 run ts "--grep=gadget parts are often spread" >"$TMP/t2g"
 if [ "$( count "$TMP/t2g" '<hit ' )" -ge 4 ]; then
-    has "$TMP/t2b" 'shape="message"' && no "T2 a 4-site cue-less text fired" || ok "T2 4 string sites: no message <lit (premise: grep sees 4)"
+    if has "$TMP/t2b" 'shape="message"'; then no "T2 a 4-site cue-less text fired"; else ok "T2 4 string sites: no message <lit (premise: grep sees 4)"; fi
 else no "T2 premise: --grep sees fewer than 4 sites"; fi
 # O1
 RIPWIRE_NO_READER_CALLERS=1 run py --for=WIDGET_DISABLE_ALL >"$TMP/o1"
-has "$TMP/o1" '<lit s="WIDGET_DISABLE_ALL"' && ! has "$TMP/o1" '<lc' && ! has "$TMP/o1" 'for lit callers' && ok "O1 off switch: lit kept, no callers" || no "O1 off switch"
+if has "$TMP/o1" '<lit s="WIDGET_DISABLE_ALL"' && ! has "$TMP/o1" '<lc' && ! has "$TMP/o1" 'for lit callers'; then ok "O1 off switch: lit kept, no callers"; else no "O1 off switch"; fi
 # X1-X3
-run py --for=WIDGET_DISABLE_ALL >"$TMP/x1"; cmp -s "$TMP/r1" "$TMP/x1" && ok "X1 deterministic" || no "X1 two runs differ"
+run py --for=WIDGET_DISABLE_ALL >"$TMP/x1"; if cmp -s "$TMP/r1" "$TMP/x1"; then ok "X1 deterministic"; else no "X1 two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then
     bad=0; for f in r1 r4 k1 t1; do xmllint --noout "$TMP/$f" 2>/dev/null || bad=1; done
-    [ $bad = 0 ] && ok "X2 well formed" || no "X2 xmllint failed"
+    if [ $bad = 0 ]; then ok "X2 well formed"; else no "X2 xmllint failed"; fi
 else ok "X2 skipped (no xmllint)"; fi
 leg=$( grep -o '<!-- ripwire for lit callers.*-->' "$TMP/r1" | head -1 | sed 's/-->.*/-->/' )
-[ "$( count "$TMP/r1" 'ripwire for lit callers' )" = 1 ] && [ -n "$leg" ] && ! printf '%s' "${leg:4:${#leg}-7}" | grep -q -- '--' \
-    && ok "X3 callers legend once, no -- inside" || no "X3 callers legend"
+if [ "$( count "$TMP/r1" 'ripwire for lit callers' )" = 1 ] && [ -n "$leg" ] && ! printf '%s' "${leg:4:${#leg}-7}" | grep -q -- '--'; then ok "X3 callers legend once, no -- inside"; else no "X3 callers legend"; fi
 
 [ $fail = 0 ] && echo "forreadercallerscheck: ALL PASS" || echo "forreadercallerscheck: FAIL"
 exit $fail

@@ -541,6 +541,7 @@ Discloses: `capped`, `lit_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kForBareFlagMaxSites` | `8` | — | WHOLE-TOKEN: a bare kebab token with more source sites is prose, not one option |
 | `kForFlagDefaultMaxBytes` | `80` | — | def= text |
 | `kForFlagOwnerMaxLines` | `8` | — | a constant write outside any function names the owner type within this many lines above it |
 | `kForFlagWriteHits` | `4096` | — | the field's sites read for a constant write (past it: floor=1) |
@@ -561,6 +562,7 @@ Discloses: `capped`, `lit_capped`
 | `kForTableReaderFiles` | `16` | — | REG-READER: caller files read for them, by path (past it: readers= is a floor) |
 | `kForTableReaderRows` | `2` | — | REG-READER: <lr> reads of a subscript row's table listed (readers= counts all) |
 | `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
+| `kForVerbatimMaxSites` | `3` | — | MSG-VERBATIM: a cue-less whole text with more source sites is no single message |
 
 ### `src/formembers.h`
 
@@ -597,6 +599,14 @@ Discloses: `capped`
 | `kForPageRowsDefault` | `40` | OUTPUT | `--for --limit=N` with no N is never accepted (the flag refuses 0); |
 | `kForPageUnionSymbolCap` | `8` | INDEXING | symbols per file whose term masks join that file's union |
 | `kForThinMinFiles` | `3` | — | a ranked head over fewer files than this ⇒ thin |
+
+### `src/forreadercallers.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kReaderCallerRows` | `12` | — | <lc> rows per <lit> |
 
 ### `src/forreexport.h`
 
