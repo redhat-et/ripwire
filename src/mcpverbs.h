@@ -3956,10 +3956,10 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     const std::vector<NodeId>& ptBind   = ptChains.bind;
     const NodeId               srcUsed  = ptChains.from;
     const NodeId               dstUsed  = ptChains.to;
-    const HopFacts             ptHops   = pathHopFacts( ing, g, ptPairs, ptRows, redact );   // HOP-CONTEXT-1, as on the CLI
+    const HopFacts             ptHops   = pathHopFacts( ing, g, ptPairs, ptRows, redact, ptRoute.declinedRef );   // HOP-CONTEXT-1, as on the CLI
     const PathBridge          ptBridge     = pth.empty() ? pathBridge( ing, g, srcDefs, dstDefs, valueRefIndexOf( ix ), *ptBackHops ) : PathBridge{};      // ix2-slice, as on the CLI
     const std::string         ptSinkCallers = pth.empty() && ptGaps.any() && !dstGlob ? pathSinkCallersSelector( ing, *ptBackHops, dstDefs, to, ptSingleRoot, ptRootPrefix ) : std::string();   // HOP1 #6, as on the CLI
-    const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, ptRows );   // TRACE-EP: the CLI's legend marks, by the same call
+    const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, ptRows, ptRoute.declinedCands > 0 );   // TRACE-EP: the CLI's legend marks, by the same call
     const std::string         ptKindLegend = std::string( viaNameLegend( ptMarks.via ) ) + viaLinkLegend( ptMarks.link ) + anchorMissLegend( ptMarks.miss );
     const PathEndpointBinding ptBound      = pathEndpointBinding( g, endpointDefinitionCount( ing, srcDefs ), endpointDefinitionCount( ing, dstDefs ), ptBind );   // attrib-multidef, as on the CLI
     const bool                ptHasSplit = ptMarks.split;

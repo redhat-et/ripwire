@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <span>
 #include <compare>
 #include <utility>
@@ -96,6 +97,7 @@ struct PathRouteVerdict
     std::uint32_t tieOther      = 0;           // that replaced chain's unproven hops
     std::uint32_t testHops      = 0;           // intermediates of the shown chain in a test or fixture path (neither endpoint is)
     std::uint32_t tieEqual      = 0;           // other final-step chains as proven as the shown one (same unproven hops and route_cands), a floor
+    std::uint32_t declinedRef   = UINT32_MAX;  // declinedCands > 0: the declined call's ing.references index (its row's site=; kHopNoRef spelling)
     std::size_t   unproven() const noexcept { return byName + ( declinedCands > 0 ? 1u : 0u ); }
 };
 
@@ -183,9 +185,10 @@ struct FewestUnprovenChain
 {
     std::vector<NodeId> chain;               // empty: today's chain stands
     std::uint32_t       declinedCands = 0;   // > 0: its last hop is a declined call with that many candidates
+    std::uint32_t       declinedRef   = UINT32_MAX;   // that call's ing.references index (Graph::declinedSiteRef of the record)
     PathTie             tie           = PathTie::None;
     std::uint32_t       otherUnproven = 0;   // today's chain's unproven hops
-    std::uint32_t       equalCount    = 0;   // other final-step candidates as proven as the winner (same unproven, route_cands)
+    std::uint32_t       equalCount    = 0;   // other DISTINCT chains as proven as the winner (same unproven, route_cands)
 };
 
 namespace pathfewest_detail
@@ -198,6 +201,7 @@ struct FinalCand
     NodeId        via   = kNoNode;
     NodeId        to    = kNoNode;
     std::uint32_t cands = 0;
+    std::uint32_t site  = UINT32_MAX;   // a declined step: its record (Graph::declinedSite*)
 };
 
 // THE LAYERED SEARCH: one BFS from srcDefs over every out-edge to depth L, in the plain search's edge order; each node keeps the least
@@ -313,7 +317,7 @@ private:
                 PathChainKey kd = m_best[u];
                 ++kd.unproven;
                 kd.cands = pathCandsTimes( kd.cands, c );
-                out.push_back( FinalCand{ kd, kNoNode, u, d, c } );
+                out.push_back( FinalCand{ kd, kNoNode, u, d, c, site } );
             }
         }
     }
@@ -376,6 +380,11 @@ inline PathTie tieOf( const PathChainKey& w, const PathChainKey& today ) noexcep
 // declined call made at depth L-1 whose list holds a to= definition (declinedCrossingCands, <= kPathDeclinedLastCands); the least key
 // wins, today's chain on a tie. Run only when today's chain has an unproven hop or a test intermediate (an all-proven, all-source
 // chain already has the least key that matters).
+// ONE SEARCH PER ENDPOINT CLASS (CodeRabbit #612): test intermediates count only on a chain whose two endpoints are both outside tests,
+// so a source-to-source chain is searched with the key on, and only when an endpoint has a test definition, the chains from a test
+// from= (to any to=) and from a source from= to a test to= with it off. The classes split the (from, to) pairs, so no chain is in two;
+// every chain of the found length L keeps its layering (L is the least over all pairs). An endpoint with no test definition (the common
+// case) runs the one search it always ran.
 inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& path,
                                                const std::vector<NodeId>& srcDefs, const std::vector<NodeId>& dstDefs )
 {
@@ -386,31 +395,74 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
     {
         return out;
     }
-    const auto           anyInTests = [ & ]( const std::vector<NodeId>& defs ) { return std::ranges::any_of( defs, [ & ]( NodeId n ) { return n < N && pathDefInTests( ing, n ); } ); };
-    const PathKeyReading reading{ !anyInTests( srcDefs ) && !anyInTests( dstDefs ), pathToOwnerWords( ing, dstDefs ) };
-    const PathChainKey   today = pathChainKey( ing, g, path, reading );
+    const auto inTests = [ & ]( NodeId n ) { return n < N && pathDefInTests( ing, n ); };
+    std::vector<NodeId> srcSource, srcTest, dstSource, dstTest;
+    for( const NodeId n : srcDefs )
+    {
+        ( inTests( n ) ? srcTest : srcSource ).push_back( n );
+    }
+    for( const NodeId n : dstDefs )
+    {
+        ( inTests( n ) ? dstTest : dstSource ).push_back( n );
+    }
+    const std::vector<std::string> ownerWords = pathToOwnerWords( ing, dstDefs );
+    const PathKeyReading           testsOn{ true, ownerWords }, testsOff{ false, ownerWords };
+    const PathChainKey             today = pathChainKey( ing, g, path, inTests( path.front() ) || inTests( path.back() ) ? testsOff : testsOn );
     if( today.unproven == 0 && today.tests == 0 )
     {
         return out;
     }
-    LayeredSearch search( ing, g, std::uint32_t( path.size() - 1 ), reading );
-    search.run( srcDefs, dstDefs );
-    const std::vector<FinalCand> finals = search.finals( dstDefs );
-    const FinalCand*             win    = nullptr;
-    for( const FinalCand& f : finals )
+    const std::uint32_t L = std::uint32_t( path.size() - 1 );
+    struct EndpointClass
     {
-        win = f.key < ( win != nullptr ? win->key : today ) ? &f : win;
+        const std::vector<NodeId>& src;
+        const std::vector<NodeId>& dst;
+        const PathKeyReading&      reading;
+    };
+    const EndpointClass classes[] = { { srcSource, dstSource, testsOn }, { srcTest, dstDefs, testsOff }, { srcSource, dstTest, testsOff } };
+    std::vector<LayeredSearch>                          searches;
+    std::vector<std::pair<std::size_t, FinalCand>>      finals;   // (search, candidate), in class order then each search's own order
+    searches.reserve( std::size( classes ) );
+    for( const EndpointClass& cl : classes )
+    {
+        if( cl.src.empty() || cl.dst.empty() )
+        {
+            continue;
+        }
+        LayeredSearch& search = searches.emplace_back( ing, g, L, cl.reading );
+        search.run( cl.src, cl.dst );
+        for( const FinalCand& f : search.finals( cl.dst ) )
+        {
+            finals.emplace_back( searches.size() - 1, f );
+        }
+    }
+    const std::pair<std::size_t, FinalCand>* win = nullptr;
+    for( const auto& f : finals )
+    {
+        win = f.second.key < ( win != nullptr ? win->second.key : today ) ? &f : win;
     }
     if( win == nullptr )
     {
         return out;   // today's chain has the least key (ties keep it)
     }
-    out.chain = search.chainOf( *win );
+    out.chain = searches[ win->first ].chainOf( win->second );
     ENSURES( out.chain.size() == path.size(), "the replacing chain has the found length" );
-    out.declinedCands = win->cands;
-    out.tie           = tieOf( win->key, today );
+    out.declinedCands = win->second.cands;
+    out.declinedRef   = win->second.site < g.declinedSiteRef.size() ? g.declinedSiteRef[ win->second.site ] : UINT32_MAX;
+    out.tie           = tieOf( win->second.key, today );
     out.otherUnproven = today.unproven;
-    out.equalCount    = std::uint32_t( std::ranges::count_if( finals, [ & ]( const FinalCand& f ) { return &f != win && f.key.proof() == win->key.proof(); } ) );
+    // route_equal= counts other CHAINS: two declined records of one caller into one to= reconstruct one chain (CodeRabbit #612)
+    std::vector<std::vector<NodeId>> equal;
+    for( const auto& f : finals )
+    {
+        if( &f != win && f.second.key.proof() == win->second.key.proof() )
+        {
+            equal.push_back( searches[ f.first ].chainOf( f.second ) );
+        }
+    }
+    std::ranges::sort( equal );
+    equal.erase( std::unique( equal.begin(), equal.end() ), equal.end() );
+    out.equalCount = std::uint32_t( equal.size() - std::size_t( std::ranges::binary_search( equal, out.chain ) ? 1 : 0 ) );
     return out;
 }
 
@@ -428,7 +480,9 @@ inline PathRouteVerdict pathRouteVerdict( const IngestResult& ing, const Graph& 
     }
     v.hops          = chain.size() - 1;
     v.declinedCands = declinedCands;
-    for( std::size_t i = 1; i < chain.size(); ++i )
+    // a declined last hop is no graph edge: a by-name edge the same caller has into to= is ANOTHER call (CodeRabbit #612), not this hop
+    const std::size_t edged = declinedCands > 0 ? chain.size() - 1 : chain.size();
+    for( std::size_t i = 1; i < edged; ++i )
     {
         if( edgeNameOnly( g, chain[i - 1], chain[i] ) )
         {
@@ -484,6 +538,7 @@ inline PathRouteChains pathRouteChains( const IngestResult& ing, const Graph& g,
     }
     else
     {
+        c.verdict.declinedRef = fewest.declinedRef;   // the declined row's site= is the call that supplied its cands=
         c.verdict.tie      = fewest.tie;   // the shown chain replaced the plain search's: route_tie= says so
         c.verdict.tieOther = fewest.otherUnproven;
         c.verdict.tieEqual = fewest.equalCount;
@@ -550,24 +605,28 @@ inline std::string_view pathRouteVerdictLegend( const PathRouteVerdict& v ) noex
     if( v.refused )
     {
         return "route_hedged=not-proven route_len=N route_by_name=K route_cands=P: the shortest chain the search found is N hops, K of them "
-               "bound by name alone (receiver unproven), standing for P same-named candidate chains (route_cands counts in-repo same-named definitions "
-               "along the route; builtin and external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P), so it is NOT printed as the answer: "
+               "bound by name alone (receiver unproven), plus its last call when that call was declined (no edge; 4 or more such unproven hops "
+               "with P at least 64 refuse it), standing for P candidate chains (route_cands multiplies each by-name hop's in-repo same-named "
+               "definitions and a declined last call's candidates; builtin and external receivers are not counted, so a low count is no proof; "
+               "route_cands_capped=1: at least P), so it is NOT printed as the answer: "
                "reachable=0 here means not proven, never no route, and the true route may be another; next= follows from='s callees "
                "(the callers verb walks back from to=; connect on from=,to= shows the edges with their via= marks). ";
     }
     if( v.hedged && v.unproven() >= kPathRouteRefuseNameHops )
     {
         return "route_hedged=unlikely route_by_name=K route_cands=P: K of the shown chain's hops are bound by name alone (the via=name "
-               "rows; receiver unproven), standing for P same-named candidate chains (route_cands counts in-repo same-named definitions "
-               "along the route; builtin and external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P): "
-               "with 4 or more by-name hops this chain is UNLIKELY to be the real route, and the true route may be another; "
+               "rows; receiver unproven), plus the last row when it is via=declined, standing for P candidate chains "
+               "(route_cands multiplies each by-name hop's in-repo same-named definitions and a declined last call's cands=; builtin and "
+               "external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P): "
+               "with 4 or more unproven hops (by-name rows plus a declined last call) this chain is UNLIKELY to be the real route, and the true route may be another; "
                "next= names the step that verifies it (from='s callees, or a hop body to read) before relying on the chain. ";
     }
     if( v.hedged )
     {
         return "route_hedged=name-stitched route_by_name=K route_cands=P: K of the shown chain's hops are bound by name alone (the via=name "
-               "rows; receiver unproven), standing for P same-named candidate chains (route_cands counts in-repo same-named definitions "
-               "along the route; builtin and external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P): the route is a hedge, and the true route may be another. ";
+               "rows; receiver unproven), plus the last row when it is via=declined: 2 or more such unproven hops, standing "
+               "for P candidate chains (route_cands multiplies each by-name hop's in-repo same-named definitions and a declined last call's "
+               "cands=; builtin and external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P): the route is a hedge, and the true route may be another. ";
     }
     return "";
 }

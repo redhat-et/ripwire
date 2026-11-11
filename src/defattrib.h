@@ -1081,7 +1081,8 @@ inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Grap
         const HopRecord* const rec = hop && hops.on ? hops.find( path[ i - 1 ], path[i] ) : nullptr;
         const std::string      ctx = rec != nullptr ? hopAttrsXml( ing, *rec, shed, /*withSig=*/true, singleRoot, rootPrefix ) : std::string();
         emitTo( out, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), name, escapeXml( rp, esc ), s.line,
-                mark, splitArmAttrXml( pathHopSplitArm( g, path, i ) ), viaImplAttr( hop && edgeViaImpl( g, path[ i - 1 ], path[i] ) ), ctx );   // lane L6: via="impl"
+                mark, splitArmAttrXml( !declinedHop && pathHopSplitArm( g, path, i ) ), viaImplAttr( hop && !declinedHop && edgeViaImpl( g, path[ i - 1 ], path[i] ) ),
+                ctx );   // lane L6: via="impl"; a declined hop's row reads no graph edge (CodeRabbit #612: a same-caller by-name edge is another call)
     }
 }
 

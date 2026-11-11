@@ -37,6 +37,14 @@
 #        b_update defined first: the b_insert chain prints (its name shares "insert" with to='s owner InsertCompiler), route_equal="1"
 #        discloses the equally proven b_update chain.
 #   (W0) the same with no owner word in either name (b_one / b_two): the first found prints, route_equal="1".
+#   fix1 (CodeRabbit #612), each red on b06156262:
+#   (E2) b3 makes two declined calls of fin (two records, one chain): no route_equal= (distinct chains only), and the declined row's
+#        site=/call= are the selected record's (line 15), not the hop record's own owner-qualified pick (line 16).
+#   (DE) TS: b3 has by-name edges to fin (o: any) AND a declined x.fin() (gate=iface, cands=2): the declined hop wins on route_cands
+#        (route_tie="fewer-cands") and its caller's by-name edge is not counted (no route_by_name=, no hedge, no via=name row or clause).
+#   (SB) the S fixture plus an unused tests/ definition of start_entry (from_defs="2"): source-first still picks the source chain.
+#   (U)  3 by-name hops + a declined last call: route_hedged="unlikely"; the full and compact legends say unproven hops (by-name
+#        plus a declined last call), not "4 or more by-name hops" / "K>=4".
 #   (L)  the legend clauses (compact by default; full has its own) ride exactly when route_tie= / route_declined= / route_tests= do; every answer parses (xmllint).
 #   (M)  MCP path_between carries the CLI's root attributes and rows on T, D and SL.
 #   (F)  --for "path from start_entry to Sink.fin" on D: the <graph_verb> block's <path> is the declined chain.
@@ -168,6 +176,25 @@ word_fixture(){ local d=$1 first=$2 second=$3; mkdir -p "$TMP/$d/app" "$TMP/$d/l
 }
 word_fixture w b_update b_insert
 word_fixture w0 b_one b_two
+# (E2) fix1 (CodeRabbit #612): b3 makes TWO declined calls of fin (two records, one chain); the second, `Sink.fin(o)`, spells the
+# callee's owner, so the hop record's own pick (owner qualifier first) would be line 16 while the selected record is line 15
+decl_fixture e2 2 fin
+python3 - "$TMP/e2/app/m.py" <<'PYEOF'
+import sys
+p = sys.argv[1]; t = open(p).read()
+t = t.replace("def b3(o):\n    return o.fin(o)\n", "def b3(o, Sink):\n    o.fin(o)\n    return Sink.fin(o)\n")
+open(p, "w").write(t)
+PYEOF
+# (DE) fix1: one caller has BOTH by-name edges to fin (o: any, 3 definitions) and a declined call x.fin() (gate=iface, 2
+# implementors, its list holds Sink.fin): the declined hop wins on route_cands, and its graph edge is no hop of the shown chain
+mkdir -p "$TMP/de"; printf 'interface Fin { fin(): number; }\nclass Sink implements Fin { fin(): number { return 1; } }\nclass Other2 implements Fin { fin(): number { return 2; } }\nclass Other3 { fin(): number { return 3; } }\nexport function b3(x: Fin, o: any): number {\n    x.fin();\n    return o.fin();\n}\nexport function start_entry(x: Fin, o: any): number {\n    return b3(x, o);\n}\n' > "$TMP/de/m.ts"
+# (SB) fix1: the S fixture plus an UNUSED test definition of the from= name (tests/test_entry.py:start_entry)
+src_fixture sb 1
+printf 'def start_entry(o):\n    return 0\n' > "$TMP/sb/tests/test_entry.py"
+# (U) fix1: a 5-hop chain of 3 by-name hops plus a declined last call (4 unproven) beats one of 5 by-name hops: route_hedged="unlikely"
+mkdir -p "$TMP/u/app" "$TMP/u/lib"
+printf 'def start_entry(o):\n    o.a1(o)\n    b1(o)\n\nclass A:\n    def a1(self, o):\n        return o.w2(o)\n\ndef b1(o):\n    return o.bx2(o)\n\nclass BX:\n    def bx2(self, o):\n        return o.bx3(o)\n    def bx3(self, o):\n        return o.bx4(o)\n    def bx4(self, o):\n        return o.fin(o)\n' > "$TMP/u/app/m.py"
+printf 'class W:\n    def w2(self, o):\n        return o.w3(o)\n    def w3(self, o):\n        return o.w4(o)\n    def w4(self, o):\n        return o.fin(o)\n\nclass Sink:\n    def fin(self, o):\n        return 1\n\nclass Other2:\n    def fin(self, o):\n        return 2\n' > "$TMP/u/lib/k.py"
 
 run(){ local d=$1; shift; ( cd "$TMP/$d" || exit 1; env -u RIPWIRE_LEGEND HOME="$TMP/home" "$BIN" "$TMP/$d" --no-cache "$@" < /dev/null 2>/dev/null ); }
 root(){ grep -o '<path [^>]*>' | head -1; }
@@ -228,9 +255,48 @@ W0="$( run w0 --path=start_entry,InsertCompiler.fin )"
 check W0 "$W0" "start_entry b1 b_one InsertCompiler.fin" fewer-unproven 2 1 ""
 if [ "$( attr route_equal <<<"$W0" )" = 1 ]; then ok "(W0) route_equal=\"1\""; else no "(W0) route_equal=[$( attr route_equal <<<"$W0" )]"; fi
 
+# (E2) two declined records from one caller reconstruct ONE chain: route_equal= counts distinct chains only (absent here), and the
+# declined row's site= is the record that supplied cands= (line 15, `o.fin(o)`), not the hop record's own pick (line 16)
+E2="$( run e2 --path=start_entry,Sink.fin )"
+check E2 "$E2" "start_entry b1 b2 b3 Sink.fin" fewer-unproven 3 1 ""
+e2dc="$( run e2 --callees=b3 | grep -o '<dc n="fin"' | wc -l | tr -d ' ' )"
+if [ "$e2dc" -ge 2 ] && [ -z "$( attr route_equal <<<"$E2" )" ]; then ok "(E2) premise: b3 has $e2dc declined calls; no route_equal= (one distinct chain)"
+else no "(E2) premise b3 declined rows=$e2dc (want >= 2); route_equal=[$( attr route_equal <<<"$E2" )] (want absent)"; fi
+e2last="$( lastrow <<<"$E2" )"
+if grep -qF 'via="declined"' <<<"$e2last" && grep -qF 'site="app/m.py:15"' <<<"$e2last" && grep -qF 'call="o.fin(o)"' <<<"$e2last"; then
+    ok "(E2) the declined row's site= and call= are the selected record's (app/m.py:15, o.fin(o))"
+else
+    no "(E2) declined row site/call: $e2last"
+fi
+# (DE) the declined hop's own graph edge is not counted: one unproven hop (below the hedge), no route_by_name=, its row no via="name"
+DE="$( run de --path=start_entry,Sink.fin )"
+dedc="$( run de --callees=b3 | grep -o '<dc n="fin"[^>]*gate="iface"' | wc -l | tr -d ' ' )"; devia="$( run de --callees=b3 | grep -o '<s [^>]*n="Sink.fin"[^>]*via="name"' | wc -l | tr -d ' ' )"
+check DE "$DE" "start_entry b3 Sink.fin" fewer-cands 1 1 ""
+if [ "$dedc" -ge 1 ] && [ "$devia" -ge 1 ] && [ -z "$( attr route_by_name <<<"$DE" )" ] && ! grep -qF 'via="name"' <<<"$( lastrow <<<"$DE" )" \
+   && ! grep -qF 'via=name:' <<<"$( legend <<<"$DE" )"; then
+    ok "(DE) premise: b3 has $dedc declined iface call and $devia by-name edge to Sink.fin; the verdict, row and legend count the declined hop alone"
+else
+    no "(DE) premise declined=$dedc by-name=$devia (want >= 1 each); route_by_name=[$( attr route_by_name <<<"$DE" )] last row: $( lastrow <<<"$DE" )"
+fi
+# (SB) an unused test definition of a bare endpoint does not turn source-first off for the source-only chain
+SB="$( run sb --path=start_entry,Sink.fin )"
+sbdefs="$( attr from_defs <<<"$SB" )"
+check SB "$SB" "start_entry b1 ph Sink.fin" source-first 1 "" ""
+if [ "${sbdefs:-0}" -ge 2 ] && grep -qF 'p="tests/test_entry.py:1"' <<<"$SB"; then ok "(SB) premise: from_defs=\"$sbdefs\", one in tests/"; else no "(SB) premise: from_defs=[$sbdefs] (want >= 2, one tests/test_entry.py)"; fi
+# (U) the verdict legend names unproven hops (by-name plus a declined last call), not by-name hops alone
+U="$( run u --path=start_entry,Sink.fin )"; UF="$( run u --path=start_entry,Sink.fin --legend=full )"
+check U "$U" "start_entry b1 BX.bx2 BX.bx3 BX.bx4 Sink.fin" fewer-unproven 5 1 "" unlikely
+ul="$( legend <<<"$U" )"; ufl="$( legend <<<"$UF" )"
+if [ "$( attr route_by_name <<<"$U" )" = 3 ] && grep -qF 'with 4 or more unproven hops (by-name rows plus a declined last call)' <<<"$ufl" \
+   && grep -qF '=unlikely K+D>=4' <<<"$ul" && ! grep -qF '4 or more by-name hops' <<<"$ufl" && ! grep -qF 'K>=4' <<<"$ul"; then
+    ok "(U) route_by_name=\"3\" + route_declined: the full and compact legends say unproven hops (by-name plus declined)"
+else
+    no "(U) route_by_name=[$( attr route_by_name <<<"$U" )]; full: $( grep -o 'with 4 or more[^:;]*' <<<"$ufl" ) compact: $( grep -o '=unlikely[^:]*' <<<"$ul" )"
+fi
+
 # (L) legends ride exactly with their attributes; well-formed
 lfail=0
-for a in T T2 C2 C2B D D3 DH D4 DX S SL W W0; do
+for a in T T2 C2 C2B D D3 DH D4 DX S SL W W0 E2 DE SB U; do
     out="${!a}"; lg="$( legend <<<"$out" )"
     for pair in "route_tie:route_tie=" "route_declined:route_declined=1" "route_tests:route_tests=N" "route_equal:route_equal=N"; do
         at="${pair%%:*}"; cl="${pair#*:}"

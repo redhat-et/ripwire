@@ -712,7 +712,8 @@ inline void emitPathAnswerRows( std::FILE* out, const IngestResult& ing, const G
 
 // HOP-CONTEXT-1: the edges emitPathAnswerRows prints, in the shape it prints them (pair 1 and today's single path in full,
 // later pairs site only; a bridge pair prints no hop rows) — the one input of the answer's single hopFacts() pass.
-inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const NodeId> path )
+// `lastHopRef` != kHopNoRef: today's single path ends on a declined call (PATH-FEWEST-UNPROVEN), that call's reference — its row's site=.
+inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const NodeId> path, std::uint32_t lastHopRef = kHopNoRef )
 {
     std::vector<HopWant> want;
     const auto add = [ & ]( std::span<const NodeId> rows, bool full )
@@ -725,6 +726,10 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
     if( !pp.active() )
     {
         add( path, true );
+        if( !want.empty() )
+        {
+            want.back().pinRef = lastHopRef;
+        }
         return want;
     }
     for( std::size_t i = 0; i < pp.pairs.size() && i < kPathPairChains; ++i )
@@ -739,9 +744,10 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
 }
 
 // The one call both --path transports make: the answer's hop facts, before its root is written (the root carries the disclosures).
-inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact )
+inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact,
+                              std::uint32_t lastHopRef = kHopNoRef )
 {
-    return hopFacts( ing, g, pathHopWants( pp, path ), redact );   // no reader lent: hopFacts makes one for the answer
+    return hopFacts( ing, g, pathHopWants( pp, path, lastHopRef ), redact );   // no reader lent: hopFacts makes one for the answer
 }
 
 // What the answer's hop rows carry, for the legend: today's path, or every printed chain when pairs are listed — the CLI and
@@ -750,15 +756,17 @@ struct PathShownMarks
 {
     bool via = false, link = false, miss = false, split = false, owner = false, ownerContained = false;
 };
-inline PathShownMarks pathShownMarks( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path )
+// `lastHopDeclined`: today's single path ends on a declined call, whose row prints via="declined", never the graph edge's own marks.
+inline PathShownMarks pathShownMarks( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, bool lastHopDeclined = false )
 {
     PathShownMarks m;
     const auto add = [ & ]( std::span<const NodeId> c )
     {
-        m.via   = m.via || pathHasNameOnlyHop( g, c );
-        m.link  = m.link || pathHasNameOnlyHop( g, c, kEdgeLink );
-        m.miss  = m.miss || pathHasNameOnlyHop( g, c, 0 );
-        m.split = m.split || pathEndpointBinding( g, 1, 1, c ).splitHop;
+        const std::span<const NodeId> edged = lastHopDeclined && !pp.active() && !c.empty() ? c.first( c.size() - 1 ) : c;   // the hops whose row reads its edge
+        m.via   = m.via || pathHasNameOnlyHop( g, edged );
+        m.link  = m.link || pathHasNameOnlyHop( g, edged, kEdgeLink );
+        m.miss  = m.miss || pathHasNameOnlyHop( g, edged, 0 );
+        m.split = m.split || pathEndpointBinding( g, 1, 1, edged ).splitHop;
         const MemberOwnerRows owners = memberOwnerRows( ing, c );   // the rows pathHopOwners prints, and whether a TS/JS owner was read by containment
         m.owner          = m.owner || owners.any;
         m.ownerContained = m.ownerContained || owners.contained;

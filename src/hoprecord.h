@@ -75,9 +75,10 @@ enum class HopShed : std::uint8_t
 
 struct HopWant
 {
-    NodeId from;
-    NodeId to;
-    bool   full;   // false: the answer prints site= only for it (a later --path pair), so no text is read for it
+    NodeId        from;
+    NodeId        to;
+    bool          full;                // false: the answer prints site= only for it (a later --path pair), so no text is read for it
+    std::uint32_t pinRef = kHopNoRef;  // != kHopNoRef: the hop IS this call (a --path declined last hop's record): site= is it, no pick
 };
 
 enum class HopGap : std::uint8_t
@@ -523,7 +524,7 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
     }
     out.on = true;
     std::sort( wanted.begin(), wanted.end(), []( const HopWant& a, const HopWant& b )
-               { return a.from != b.from ? a.from < b.from : a.to != b.to ? a.to < b.to : a.full > b.full; } );
+               { return a.from != b.from ? a.from < b.from : a.to != b.to ? a.to < b.to : a.full != b.full ? a.full > b.full : a.pinRef < b.pinRef; } );
     wanted.erase( std::unique( wanted.begin(), wanted.end(), []( const HopWant& a, const HopWant& b ) { return a.from == b.from && a.to == b.to; } ), wanted.end() );
     out.recs.resize( wanted.size() );
     std::vector<char> callerSel( ing.symbols.size(), 0 );
@@ -633,8 +634,14 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
             }
             out.recs[k].siteBy = ( c.front().rank & 2 ) != 0 ? HopSiteBy::NoFit : namesake ? HopSiteBy::Tie : HopSiteBy::Decided;
         }
+        if( wanted[k].pinRef != kHopNoRef && wanted[k].pinRef < ing.references.size() )
+        {
+            out.recs[k].ref    = wanted[k].pinRef;   // the declined call that supplied the row's cands= (CodeRabbit #612): never another line's
+            out.recs[k].siteBy = HopSiteBy::Decided;
+        }
         std::sort( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return std::tie( a.file, a.line ) < std::tie( b.file, b.line ); } );
-        out.recs[k].nSites = std::uint32_t( std::unique( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return a.file == b.file && a.line == b.line; } ) - c.begin() );
+        out.recs[k].nSites = std::max<std::uint32_t>( std::uint32_t( std::unique( c.begin(), c.end(), []( const Cand& a, const Cand& b ) { return a.file == b.file && a.line == b.line; } ) - c.begin() ),
+                                                      out.recs[k].ref != kHopNoRef ? 1u : 0u );   // a pinned call the name scan missed (Ruby `new`) is one site
         if( out.recs[k].ref != kHopNoRef )   // a site-only hop reads its site's file too: a stale line is withheld, never printed
         {
             (void)files.text( ing.references[ out.recs[k].ref ].fileId );
