@@ -1,42 +1,38 @@
 #!/usr/bin/env bash
-# fordeclsinkcheck.sh — DECL-SINK and DECL-TWIN (src/fordeclsink.h, precision card B14): a ONE-LINE OWNER-QUALIFIED DECLARATION row of
-# <sigs> (l= equals e=, n= Owner.member / Owner::member) is a signature, not the definition. DECL-TWIN (first) prints such a row whose
-# last segment names a BODIED <sigs> <d> row of the answer (l= and e= present, unequal) as a tail pointer <t p= sym= r=/> in its place;
-# DECL-SINK (then) moves such a row among the first 10 answer rows (not a constant, no in=) to just after the 10th other <d> row. Keep guards (SIBLING-DEMOTE's): K1/K7 mem= / slot_by= /
-# slot_fields=, K6 a <note>, K4 the task names the row (a qualified task word names the full name, a bare one the last segment).
+# fordecltwincheck.sh — DECL-TWIN (src/fordecltwin.h, precision card B14): a ONE-LINE OWNER-QUALIFIED DECLARATION row of <sigs>
+# (l= equals e=, n= Owner.member / Owner::member) is a signature, not the definition. Such a row whose last segment names a BODIED
+# <sigs> <d> row of the answer (l= and e= present, unequal) is printed as a tail pointer <t p= sym= r=/> in its place, at any rank.
+# Keep guards (SIBLING-DEMOTE's): K1/K7 mem= / slot_by= / slot_fields=, K6 a <note>, K4 the task names the row (a qualified task word
+# names the full name, a bare one the last segment).
 #
-# TWO trees. ts/: an interface WidgetService (readWidgetConfig at answer row 2, checkWidgetConfig), an interface WidgetParser whose
-# parseWidgetConfig has a bodied twin in impl.ts, a one-line method with a caller (WidgetConfigUser.useWidgetConfig: in=1), a bodied
-# check function at row 1 and 14 helpers (ten in a file each). cpp/: an in-class prototype WidgetConfigHdr::parse_widget_config with an out-of-line body, a
-# prototype a member-pointer table calls (stop_widget_config: slot_by=), a static const member (WidgetConfigLimits::widget_config_max).
-# ARMS (RED on a binary without the rules: (s), (s2), (t), (t2), (a) with rows, (l), (x); the negatives hold on both)
-#   (a)  each answer equals its RIPWIRE_NO_DECL_SINK=1 RIPWIRE_NO_DECL_TWIN=1 twin with exactly the rows the rules pick (recomputed here
-#        from the off answer) moved / rewritten, the legend comment of each rule that fired before its rows, est_tokens= aside
-#   (s)  a TypeScript interface member at answer row 2 (WidgetService.readWidgetConfig) sinks to answer row 11, its bytes intact
-#   (s2) WidgetService.checkWidgetConfig (row 10) sinks too, to row 12
+# TWO trees. ts/: an interface WidgetService (readWidgetConfig, checkWidgetConfig: no bodied twin), an interface WidgetParser whose
+# parseWidgetConfig has a bodied twin in impl.ts, a bodied check function at row 1 and 14 helpers (ten in a file each). cpp/: an
+# in-class prototype WidgetConfigHdr::parse_widget_config with an out-of-line body, a prototype a member-pointer table calls
+# (WidgetConfigHdr::stop_widget_config: slot_by=) whose last segment also names a bodied free function stop_widget_config.
+# ARMS (RED on a binary without the rule: (t), (t2), (a) with pointers, (l), (x), (n5o); the negatives hold on both)
+#   (a)  each answer equals its RIPWIRE_NO_DECL_TWIN=1 twin with exactly the rows the rule picks (recomputed here from the off answer)
+#        rewritten as pointers, the legend comment before the first, est_tokens= aside
 #   (t)  a twinned declaration goes to the tail: cpp WidgetConfigHdr::parse_widget_config (a first-10 row, its cfg.cc body row in the
 #        answer) is a pointer in its place;  (t2) ts WidgetParser.parseWidgetConfig (its body parseWidgetConfig printed) too
-#   NEGATIVES, each a one-line owner-qualified row in the first 10 answer rows of the off answer, that stays a row and keeps its place
-#        among the unmoved rows:
-#   (n1) a constant: WidgetConfigLimits::widget_config_max (static const)     (n2) an in= row: WidgetConfigUser.useWidgetConfig
-#   (n3) a slot row: WidgetConfigHdr::stop_widget_config (slot_by=)          (n4) a noted row: a --note-add note on readWidgetConfig
-#   (n5) a task-named row: a task naming WidgetService.readWidgetConfig keeps it; the twin task naming another owner's member
-#        (Checker.readWidgetConfig) does not keep WidgetService.readWidgetConfig
+#   NEGATIVES, each a one-line owner-qualified row of the off answer whose last segment names a bodied row of it, that stays a row in
+#        its place among the unmoved rows (except (n5r), which has no bodied twin):
+#   (n3) a slot row: WidgetConfigHdr::stop_widget_config (slot_by=)          (n4) a noted row: a --note-add note on WidgetParser.parseWidgetConfig
+#   (n5) a task-named row: a task naming WidgetParser.parseWidgetConfig keeps it; (n5o) a task naming another owner's member
+#        (Other.parseWidgetConfig) does not keep it; (n5r) a <shortkey> rung's <d n= l=/> (task Checker.readWidgetConfig) is no bodied twin
 #   (n6) a mem= row: every extractor names a type row bare (C++, C#, Java, Kotlin, Swift, Scala, TypeScript, Python, Ruby probed), and
 #        mem= rides only on class/struct/interface rows, so a mem= row is never owner-qualified: the arm checks that every mem= row of
 #        both trees stays put (structural; the guard is SIBLING-DEMOTE's K1, kept for one guard set)
 #   (b)  --token-budget leaves the answer as shaped: no decl legend, byte-identical to the off twin under the same budget
-#   (b2) a bare --max-tokens (not read by --for) does not hold the rules: byte-identical to the flagless answer
-#   (j)  --json never reaches the rules: byte-identical to the off twin
-#   (e)  est_tokens= is re-priced on the final bytes (estchargecheck holds the rate); (w) well formed; (l) each legend once, no "--" inside
-#   (x)  MCP `for` (one renderer): (a) on the MCP answer and its off twin
-#   (o)  off twins: RIPWIRE_NO_DECL_SINK=1 alone leaves only pointers, RIPWIRE_NO_DECL_TWIN=1 alone only the sink
+#   (b2) a bare --max-tokens (not read by --for) does not hold the rule: byte-identical to the flagless answer
+#   (j)  --json never reaches the rule: byte-identical to the off twin
+#   (e)  est_tokens= is re-priced on the final bytes (estchargecheck holds the rate); (w) well formed; (l) the legend once, no "--" inside
+#   (sd) with SIBLING-DEMOTE on, (a) on its result;  (x) MCP `for` (one renderer): (a) on the MCP answer and its off twin
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-echo "fordeclsinkcheck: BIN=$BIN"
+echo "fordecltwincheck: BIN=$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -44,7 +40,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
-export RIPWIRE_NO_SIBLING_DEMOTE=1   # the decl rules alone (forsiblingdemotecheck owns the demote; (sd) below runs both)
+export RIPWIRE_NO_SIBLING_DEMOTE=1   # the decl rule alone (forsiblingdemotecheck owns the demote; (sd) below runs both)
 TTASK='how is the widget config value checked'
 CTASK='how is the widget config parsed and stopped'
 
@@ -108,11 +104,16 @@ int go_widget_config(int k) {
   box.slot = &kWidgetConfigSlots[k];
   return (box.hdr.*box.slot->fn)(k);
 }
+static int stop_widget_config(int k) {
+  int z = k - 1;
+  return z;
+}
+int halt_widget_config(int k) { return stop_widget_config(k); }
 ''' )
 PY
 
 cat >"$TMP/ref.py" <<'PY'
-"""ref.py OFF ON TASK [twin,sink] -> the DECL rules recomputed on OFF (independent of the C++): `sunk`, `ptr` names and PASS/FAIL (a)."""
+"""ref.py OFF ON TASK -> DECL-TWIN recomputed on OFF (independent of the C++): `ptr` names and PASS/FAIL (a)."""
 import re, sys
 ATTR = re.compile( r'([\w:-]+)="([^"]*)"' )
 def unesc( v ): return v.replace( "&lt;", "<" ).replace( "&gt;", ">" ).replace( "&quot;", '"' ).replace( "&apos;", "'" ).replace( "&amp;", "&" )
@@ -144,27 +145,6 @@ def decl( r ):
     return r["tag"] == "d" and r["sigs"] and r["a"].get( "l" ) and r["a"].get( "l" ) == r["a"].get( "e" ) and i > 0
 def kept( r, t, task ):
     return "<note " in t[r["s"]:r["e"]] or any( k in r["a"] for k in ( "mem", "slot_by", "slot_fields" ) ) or named( r["a"].get( "n", "" ), task )
-def const( r, t ):
-    b = t[r["s"]:r["e"]]; b = b[b.find( ">" ) + 1:]
-    if b.startswith( "<doc>" ): b = b[b.find( "</doc>" ) + 6:]
-    return re.match( r"[ \t]*(const|var|enum|#define|static const|let |export const)", b ) is not None
-def sink( t, task ):
-    R = rows( t ); S = []; stay = 0; after = None
-    for r in R:
-        if r["tag"] != "d": continue
-        if r["pos"] <= 10 and decl( r ) and "in" not in r["a"] and not const( r, t ) and not kept( r, t, task ): S.append( r )
-        else:
-            stay += 1
-            if stay == 10: after = r; break
-    if not S or after is None or not after["sigs"]: return t, []
-    out, at = [], 0
-    for r in S: out.append( t[at:r["s"]] ); at = r["e"]
-    out.append( t[at:after["e"]] )
-    out.append( ( "<!-- decl-sink: the next <d> row is a one-line Owner.member declaration" if len( S ) == 1 else
-                  "<!-- decl-sink: the next %d <d> rows are one-line Owner.member declarations" % len( S ) )
-                + " moved down from the first 10 answer rows (r= keeps its rank; none removed) -->" )
-    out += [ t[r["s"]:r["e"]] for r in S ]
-    return "".join( out ) + t[after["e"]:], [ r["a"]["n"] for r in S ]
 LEG = ( "<!-- decl-twin: a <t> in sigs is a one-line Owner.member declaration whose bodied same-name row is in this answer, a pointer "
         "(p= file, sym= name, r= rank), not the answer -->" )
 def twin( t, task ):
@@ -177,14 +157,10 @@ def twin( t, task ):
         at = r["e"]
     return "".join( exp ) + t[at:], [ r["a"]["n"] for r in P ]
 off, on, task = open( sys.argv[1] ).read(), open( sys.argv[2] ).read(), sys.argv[3]
-modes = sys.argv[4] if len( sys.argv ) > 4 else "twin,sink"
-exp, S, P = off, [], []
-if "twin" in modes: exp, P = twin( exp, task )
-if "sink" in modes: exp, S = sink( exp, task )
+exp, P = twin( off, task )
 est = lambda s: re.sub( r' est_tokens="\d+"', "", s, count = 1 )
-print( "sunk " + ",".join( S ) )
 print( "ptr " + ",".join( P ) )
-print( ( "PASS" if est( exp ) == est( on ) else "FAIL" ) + " (a) %d sunk %d pointers" % ( len( S ), len( P ) ) )
+print( ( "PASS" if est( exp ) == est( on ) else "FAIL" ) + " (a) %d pointers" % len( P ) )
 PY
 # pos NAME FILE: the answer-row position of the <d> row NAME (0 when it is not a <d> row); ptr NAME FILE: 1 when it is an in-sigs pointer
 cat >"$TMP/pos.py" <<'PY'
@@ -203,15 +179,15 @@ print( 0 )
 PY
 pos(){ python3 "$TMP/pos.py" pos "$2" "$1"; }
 isptr(){ [ "$( python3 "$TMP/pos.py" ptr "$2" "$1" )" = 1 ]; }
-OFFENV=( env RIPWIRE_NO_DECL_SINK=1 RIPWIRE_NO_DECL_TWIN=1 )
+OFFENV=( env RIPWIRE_NO_DECL_TWIN=1 )
 run(){ local tree="$1"; shift; ( cd "$TMP/$tree" && "$BIN" . --no-cache "$@" ); }
 runoff(){ local tree="$1"; shift; ( cd "$TMP/$tree" && "${OFFENV[@]}" "$BIN" . --no-cache "$@" ); }
-check_a(){ # check_a ID OFF ON TASK [modes]
-    python3 "$TMP/ref.py" "$2" "$3" "$4" "${5:-twin,sink}" >"$TMP/$1.res" 2>&1
-    if grep -q '^PASS (a)' "$TMP/$1.res" && ! grep -q '^PASS (a) 0 sunk 0 pointers' "$TMP/$1.res"; then ok "(a) $1: the off answer with exactly the rules' rows moved ($( grep -o '[0-9]* sunk [0-9]* pointers' "$TMP/$1.res" ))"
+check_a(){ # check_a ID OFF ON TASK
+    python3 "$TMP/ref.py" "$2" "$3" "$4" >"$TMP/$1.res" 2>&1
+    if grep -q '^PASS (a)' "$TMP/$1.res" && ! grep -q '^PASS (a) 0 pointers' "$TMP/$1.res"; then ok "(a) $1: the off answer with exactly the rule's rows rewritten ($( grep -o '[0-9]* pointers' "$TMP/$1.res" ))"
     else no "(a) $1: $( head -c 700 "$TMP/$1.res" )"; fi
 }
-# stays NAME OFF ON WHAT: a row of the off answer's first 10 that keeps its place among the unmoved rows
+# stays ID NAME OFF ON RES WHAT: a row of the off answer that keeps its place among the unmoved rows
 stays(){
     local id="$1" n="$2" po pn moved
     po="$( pos "$n" "$3" )"; pn="$( pos "$n" "$4" )"
@@ -219,17 +195,17 @@ stays(){
 import re, sys
 t = re.sub( r"<!--.*?-->|<!\[CDATA\[.*?\]\]>", "", open( sys.argv[1] ).read(), flags = re.S )
 res = open( sys.argv[2] ).read().split( "\n" )
-sunk = [ x for x in res[0][5:].split( "," ) + res[1][4:].split( "," ) if x ]   # sunk rows and pointers both leave the rows above it
+ptrs = [ x for x in res[0][4:].split( "," ) if x ]   # pointers leave the rows above it
 names = []
 for m in re.finditer( r'<(d|y|s|u) ([^>]*?)/?>', t ):
     if m.group( 1 ) == "u" and 'v="used"' in m.group( 2 ): continue
     names.append( ( re.search( r'\bn="([^"]*)"', m.group( 2 ) ) or re.search( r'p="([^"]*)"', m.group( 2 ) ) ).group( 1 ) if m.group( 1 ) == "d" else "" )
 k = names.index( sys.argv[3] ) if sys.argv[3] in names else -1
-print( sum( 1 for x in names[:k] if x in sunk ) )
+print( sum( 1 for x in names[:k] if x in ptrs ) )
 PY
 )"
-    if [ "$po" -ge 1 ] && [ "$po" -le 10 ] && [ "$pn" = "$(( po - moved ))" ] && ! isptr "$n" "$4"; then ok "($id) $n stays a row in place: $6 (off row $po, on row $pn, $moved moved from above it)"
-    else no "($id) $n: $6 — off row $po, on row $pn ($moved moved from above it; a negative must sit in the first 10 of the off answer)"; fi
+    if [ "$po" -ge 1 ] && [ "$pn" = "$(( po - moved ))" ] && ! isptr "$n" "$4"; then ok "($id) $n stays a row in place: $6 (off row $po, on row $pn, $moved pointers above it)"
+    else no "($id) $n: $6 — off row $po, on row $pn ($moved pointers above it)"; fi
 }
 
 # ---- ts tree
@@ -237,38 +213,39 @@ run ts "--for=$TTASK" >"$TMP/ts.on"; rc1=$?
 runoff ts "--for=$TTASK" >"$TMP/ts.off"; rc2=$?
 [ "$rc1" = 0 ] && [ "$rc2" = 0 ] || no "ts runs exited $rc1 / $rc2"
 check_a ts "$TMP/ts.off" "$TMP/ts.on" "$TTASK"
-p2="$( pos WidgetService.readWidgetConfig "$TMP/ts.off" )"; p11="$( pos WidgetService.readWidgetConfig "$TMP/ts.on" )"
-if [ "$p2" = 2 ] && [ "$p11" = 11 ]; then ok "(s) the TypeScript interface member WidgetService.readWidgetConfig sinks from answer row 2 to row 11"; else no "(s) WidgetService.readWidgetConfig off row $p2, on row $p11 (want 2 -> 11)"; fi
-p7="$( pos WidgetService.checkWidgetConfig "$TMP/ts.off" )"; p12="$( pos WidgetService.checkWidgetConfig "$TMP/ts.on" )"
-if [ "${p7:-99}" -le 10 ] && [ "$p12" = 12 ]; then ok "(s2) WidgetService.checkWidgetConfig sinks from row $p7 to row 12, after readWidgetConfig"; else no "(s2) WidgetService.checkWidgetConfig off row $p7, on row $p12 (want <= 10 -> 12)"; fi
 if isptr WidgetParser.parseWidgetConfig "$TMP/ts.on" && [ "$( pos parseWidgetConfig "$TMP/ts.on" )" -gt 0 ]; then ok "(t2) the twinned WidgetParser.parseWidgetConfig is a tail pointer; its body row parseWidgetConfig is printed"
 else no "(t2) WidgetParser.parseWidgetConfig pointer=$( python3 "$TMP/pos.py" ptr "$TMP/ts.on" WidgetParser.parseWidgetConfig ) body row=$( pos parseWidgetConfig "$TMP/ts.on" )"; fi
-stays n2 WidgetConfigUser.useWidgetConfig "$TMP/ts.off" "$TMP/ts.on" ts "it has in=1 (a caller reuses it)"
-grep -q 'n="WidgetConfigUser.useWidgetConfig"[^>]* in="1"' "$TMP/ts.off" || no "(n2) the fixture's WidgetConfigUser.useWidgetConfig row lost in=1"
 
-# (n5) task-named: the qualified name keeps the row; a bare name of another owner's member keeps only its own owner's row
-NTASK='how is WidgetService.readWidgetConfig used when the widget config value is checked'
+# (n5) task-named: the qualified name keeps the twinned row; another owner's member does not; a <shortkey> rung is no bodied twin
+NTASK='how is WidgetParser.parseWidgetConfig used when the widget config value is checked'
 run ts "--for=$NTASK" >"$TMP/n5.on"; runoff ts "--for=$NTASK" >"$TMP/n5.off"
 python3 "$TMP/ref.py" "$TMP/n5.off" "$TMP/n5.on" "$NTASK" >"$TMP/n5.res" 2>&1
-grep -q '^PASS (a)' "$TMP/n5.res" && ok "(a) n5: $( grep -o '[0-9]* sunk [0-9]* pointers' "$TMP/n5.res" )" || no "(a) n5: $( head -c 500 "$TMP/n5.res" )"
-stays n5 WidgetService.readWidgetConfig "$TMP/n5.off" "$TMP/n5.on" n5 "the task names WidgetService.readWidgetConfig"
-OTASK='how is Checker.readWidgetConfig used when the widget config value is checked'
+grep -q '^PASS (a)' "$TMP/n5.res" && ok "(a) n5: $( grep -o '[0-9]* pointers' "$TMP/n5.res" )" || no "(a) n5: $( head -c 500 "$TMP/n5.res" )"
+[ "$( pos parseWidgetConfig "$TMP/n5.off" )" -gt 0 ] || no "(n5) the fixture's body row parseWidgetConfig is not in the n5 answer — the arm cannot see K4"
+stays n5 WidgetParser.parseWidgetConfig "$TMP/n5.off" "$TMP/n5.on" n5 "the task names WidgetParser.parseWidgetConfig"
+OTASK='how is Other.parseWidgetConfig used when the widget config value is checked'
 run ts "--for=$OTASK" >"$TMP/o5.on"; runoff ts "--for=$OTASK" >"$TMP/o5.off"
 python3 "$TMP/ref.py" "$TMP/o5.off" "$TMP/o5.on" "$OTASK" >"$TMP/o5.res" 2>&1
-if grep -q '^PASS (a)' "$TMP/o5.res" && grep -q '^sunk .*WidgetService.readWidgetConfig' "$TMP/o5.res" && grep -q '<shortkey [^>]*of="Checker.readWidgetConfig"' "$TMP/o5.on" \
-   && ! isptr WidgetService.readWidgetConfig "$TMP/o5.on"; then
-    ok "(n5) a task naming Checker.readWidgetConfig (another owner) does not keep WidgetService.readWidgetConfig: it sinks (and the <shortkey> rung's <d n= l=/> is no bodied twin)"
-else no "(n5) other-owner task: $( head -c 500 "$TMP/o5.res" )"; fi
+if grep -q '^PASS (a)' "$TMP/o5.res" && isptr WidgetParser.parseWidgetConfig "$TMP/o5.on"; then
+    ok "(n5o) a task naming Other.parseWidgetConfig (another owner) does not keep WidgetParser.parseWidgetConfig: it is a pointer"
+else no "(n5o) other-owner task: $( head -c 500 "$TMP/o5.res" )"; fi
+RTASK='how is Checker.readWidgetConfig used when the widget config value is checked'
+run ts "--for=$RTASK" >"$TMP/r5.on"; runoff ts "--for=$RTASK" >"$TMP/r5.off"
+python3 "$TMP/ref.py" "$TMP/r5.off" "$TMP/r5.on" "$RTASK" >"$TMP/r5.res" 2>&1
+if grep -q '^PASS (a)' "$TMP/r5.res" && grep -q '<shortkey [^>]*of="Checker.readWidgetConfig"' "$TMP/r5.on" && [ "$( pos WidgetService.readWidgetConfig "$TMP/r5.on" )" -gt 0 ] \
+   && ! isptr WidgetService.readWidgetConfig "$TMP/r5.on"; then
+    ok "(n5r) the <shortkey> rung's <d n=\"readWidgetConfig\" l=/> is no bodied twin: WidgetService.readWidgetConfig stays a row"
+else no "(n5r) shortkey task: $( head -c 500 "$TMP/r5.res" )"; fi
 
-# (n4) NOTED: a --note-add note on readWidgetConfig keeps it in place
+# (n4) NOTED: a --note-add note on the twinned WidgetParser.parseWidgetConfig keeps it in place
 cp -R "$TMP/ts" "$TMP/ts4"
 ( cd "$TMP/ts4" && git init -q -b main . && git add -A && git -c user.email=gate@example.invalid -c user.name=gate commit -qm fx ) || no "(n4) could not make the fixture copy a git repo"
-"$BIN" "$TMP/ts4" --note-add="WidgetService.readWidgetConfig: the path is already validated by the loader" >/dev/null 2>&1
+"$BIN" "$TMP/ts4" --note-add="WidgetParser.parseWidgetConfig: the text is already validated by the loader" >/dev/null 2>&1
 run ts4 "--for=$TTASK" >"$TMP/n4.on"; runoff ts4 "--for=$TTASK" >"$TMP/n4.off"
-grep -q 'already validated by the loader' "$TMP/n4.off" || no "(n4) the off answer carries no note on readWidgetConfig — the arm cannot see K6"
+grep -q 'already validated by the loader' "$TMP/n4.off" || no "(n4) the off answer carries no note on WidgetParser.parseWidgetConfig — the arm cannot see K6"
 python3 "$TMP/ref.py" "$TMP/n4.off" "$TMP/n4.on" "$TTASK" >"$TMP/n4.res" 2>&1
-grep -q '^PASS (a)' "$TMP/n4.res" && grep -q 'already validated by the loader' "$TMP/n4.on" && ok "(a) n4: the note is printed ($( grep -o '[0-9]* sunk [0-9]* pointers' "$TMP/n4.res" ))" || no "(a) n4: $( head -c 500 "$TMP/n4.res" )"
-stays n4 WidgetService.readWidgetConfig "$TMP/n4.off" "$TMP/n4.on" n4 "it carries a --note-add note"
+grep -q '^PASS (a)' "$TMP/n4.res" && grep -q 'already validated by the loader' "$TMP/n4.on" && ok "(a) n4: the note is printed ($( grep -o '[0-9]* pointers' "$TMP/n4.res" ))" || no "(a) n4: $( head -c 500 "$TMP/n4.res" )"
+stays n4 WidgetParser.parseWidgetConfig "$TMP/n4.off" "$TMP/n4.on" n4 "it carries a --note-add note"
 
 # ---- cpp tree
 run cpp "--for=$CTASK" >"$TMP/cpp.on"; rc1=$?
@@ -279,9 +256,9 @@ pt="$( pos WidgetConfigHdr::parse_widget_config "$TMP/cpp.off" )"
 if isptr WidgetConfigHdr::parse_widget_config "$TMP/cpp.on" && [ "$pt" -le 10 ] && grep -q 'n="WidgetConfigHdr::parse_widget_config" p="src/cfg.cc"' "$TMP/cpp.on"; then
     ok "(t) the twinned prototype WidgetConfigHdr::parse_widget_config (off row $pt) is a tail pointer in its place; its cfg.cc body row stays"
 else no "(t) WidgetConfigHdr::parse_widget_config off row $pt, pointer=$( python3 "$TMP/pos.py" ptr "$TMP/cpp.on" WidgetConfigHdr::parse_widget_config )"; fi
-stays n1 WidgetConfigLimits::widget_config_max "$TMP/cpp.off" "$TMP/cpp.on" cpp "a static const member"
 stays n3 WidgetConfigHdr::stop_widget_config "$TMP/cpp.off" "$TMP/cpp.on" cpp "it carries slot_by="
 grep -q 'n="WidgetConfigHdr::stop_widget_config"[^>]* slot_by=' "$TMP/cpp.off" || no "(n3) the fixture's stop_widget_config row lost slot_by="
+grep -q '<d l="[0-9]*" e="[0-9]*" n="stop_widget_config"' "$TMP/cpp.off" || no "(n3) the bodied stop_widget_config row is not in the answer — the arm cannot see K7"
 
 # (n6) mem= rows: never owner-qualified, and none moves
 nm="$( python3 - "$TMP/ts.off" "$TMP/ts.on" "$TMP/cpp.off" "$TMP/cpp.on" <<'PY'
@@ -299,7 +276,7 @@ PY
 )"
 case "$nm" in *" ") ok "(n6) mem= rows: ${nm% } seen, none owner-qualified, none moved (K1 kept for one guard set)";; *) no "(n6) mem= rows: $nm";; esac
 
-# (b) --token-budget holds both rules; (b2) a bare --max-tokens does not; (j) --json never reaches them
+# (b) --token-budget holds the rule; (b2) a bare --max-tokens does not; (j) --json never reaches it
 run ts "--for=$TTASK" --token-budget=4000 >"$TMP/b.on"; runoff ts "--for=$TTASK" --token-budget=4000 >"$TMP/b.off"
 if cmp -s "$TMP/b.on" "$TMP/b.off" && ! grep -q '<!-- decl-' "$TMP/b.on"; then ok "(b) --token-budget: byte-identical to the off twin, no decl legend"; else no "(b) --token-budget changed the answer"; fi
 run ts "--for=$TTASK" --max-tokens=4000 >"$TMP/m.on" 2>/dev/null
@@ -318,27 +295,19 @@ leg="$( python3 - "$TMP/ts.on" "$TMP/ts.off" <<'PY'
 import sys
 on, off = open( sys.argv[1] ).read(), open( sys.argv[2] ).read()
 out = []
-for k in ( "<!-- decl-sink:", "<!-- decl-twin:" ):
+for k in ( "<!-- decl-twin:", ):
     a = on.find( k ) + 4; c = on[a:on.find( "-->", a )]
     out.append( "%s=%d/%d%s" % ( k[5:-1], on.count( k ), off.count( k ), "" if "--" not in c else " has--" ) )
 print( " ".join( out ) )
 PY
 )"
-case "$leg" in "decl-sink=1/0 decl-twin=1/0") ok "(l) each legend comment once when its rule fires, none on the off twin, no double hyphen inside";; *) no "(l) legend counts on/off: $leg";; esac
+case "$leg" in "decl-twin=1/0") ok "(l) the legend comment once when the rule fires, none on the off twin, no double hyphen inside";; *) no "(l) legend counts on/off: $leg";; esac
 
-# (o) each rule's own switch
-( cd "$TMP/ts" && RIPWIRE_NO_DECL_SINK=1 "$BIN" . --no-cache "--for=$TTASK" ) >"$TMP/o.twin"
-( cd "$TMP/ts" && RIPWIRE_NO_DECL_TWIN=1 "$BIN" . --no-cache "--for=$TTASK" ) >"$TMP/o.sink"
-python3 "$TMP/ref.py" "$TMP/ts.off" "$TMP/o.twin" "$TTASK" twin >"$TMP/ot.res" 2>&1
-python3 "$TMP/ref.py" "$TMP/ts.off" "$TMP/o.sink" "$TTASK" sink >"$TMP/os.res" 2>&1
-if grep -q '^PASS' "$TMP/ot.res" && grep -q '^PASS' "$TMP/os.res" && ! grep -q '<!-- decl-sink' "$TMP/o.twin" && ! grep -q '<!-- decl-twin' "$TMP/o.sink"; then
-    ok "(o) RIPWIRE_NO_DECL_SINK=1 leaves the twin rule alone ($( grep -o '[0-9]* pointers' "$TMP/ot.res" )), RIPWIRE_NO_DECL_TWIN=1 the sink alone ($( grep -o '[0-9]* sunk' "$TMP/os.res" ))"
-else no "(o) $( head -c 300 "$TMP/ot.res" ) / $( head -c 300 "$TMP/os.res" )"; fi
-
-# (sd) with SIBLING-DEMOTE on (the shipped default) the rules read its result: (a) on the demoted answer
-( cd "$TMP/ts" && env -u RIPWIRE_NO_SIBLING_DEMOTE "$BIN" . --no-cache "--for=$TTASK" ) >"$TMP/sd.on"
-( cd "$TMP/ts" && env -u RIPWIRE_NO_SIBLING_DEMOTE "${OFFENV[@]}" "$BIN" . --no-cache "--for=$TTASK" ) >"$TMP/sd.off"
-check_a sd "$TMP/sd.off" "$TMP/sd.on" "$TTASK"
+# (sd) with SIBLING-DEMOTE on (the shipped default) the rule reads its result: (a) on the demoted answer
+# (the cpp tree: on the ts tree SIBLING-DEMOTE already prints WidgetParser.parseWidgetConfig and its body past row 10 as pointers)
+( cd "$TMP/cpp" && env -u RIPWIRE_NO_SIBLING_DEMOTE "$BIN" . --no-cache "--for=$CTASK" ) >"$TMP/sd.on"
+( cd "$TMP/cpp" && env -u RIPWIRE_NO_SIBLING_DEMOTE "${OFFENV[@]}" "$BIN" . --no-cache "--for=$CTASK" ) >"$TMP/sd.off"
+check_a sd "$TMP/sd.off" "$TMP/sd.on" "$CTASK"
 
 mcp(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$TMP/ts" "$TTASK" \
   | ( cd "$TMP/ts" || exit 1; "$@" "$BIN" --mcp 2>/dev/null ) | python3 -c '
@@ -351,5 +320,5 @@ for line in sys.stdin:
 mcp env >"$TMP/x.on"
 mcp "${OFFENV[@]}" >"$TMP/x.off"
 check_a x "$TMP/x.off" "$TMP/x.on" "$TTASK"
-[ "$fail" = 0 ] && echo "fordeclsinkcheck: PASS" || echo "fordeclsinkcheck: FAIL"
+[ "$fail" = 0 ] && echo "fordecltwincheck: PASS" || echo "fordecltwincheck: FAIL"
 exit "$fail"

@@ -4,4 +4,4 @@ A ranked `<sigs>` `<d>` row that is a one-line owner-qualified declaration (`l=`
 
 A row stays a row when it carries `mem=`, `slot_by=` or `slot_fields=`, when it carries a `--note-add` note, or when the task names it (a qualified task word such as `LanguageService.getCompletionsAtPosition` names that full name; a bare word names the last segment; `Completions.getCompletionsAtPosition` does not name `LanguageService.getCompletionsAtPosition`). A short legend comment rides before the first pointer, only when the rule fires. A token budget leaves the answer as shaped and `--json` never reaches the rule; `est_tokens=` is re-priced over the rewritten bytes. CLI `--for` and MCP `for` share the one renderer; `RIPWIRE_NO_DECL_TWIN=1` turns it off.
 
-The rule is DECL-TWIN from the wrong-items census, measured offline by the precision lab (`tools/precision_lab.py`) before it was built. `test/fordeclsinkcheck.sh` pins it, its guards and its negatives.
+The rule is DECL-TWIN from the wrong-items census, measured offline by the precision lab (`tools/precision_lab.py`) before it was built. `test/fordecltwincheck.sh` pins it, its guards and its negatives.

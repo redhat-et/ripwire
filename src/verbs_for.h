@@ -17,7 +17,7 @@
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
 #include "foronesidereach.h"  // ONE-SIDE-REACH: rows that reach one of two named endpoints become tail pointers (read off the captured answer)
 #include "forsiblingdemote.h"  // SIBLING-DEMOTE: deep same-file sibling rows become tail pointers (read off the answer after ONE-SIDE-REACH)
-#include "fordeclsink.h"  // DECL-TWIN / DECL-SINK: one-line Owner.member declaration rows become pointers / move past row 10 (after SIBLING-DEMOTE)
+#include "fordecltwin.h"  // DECL-TWIN: a one-line Owner.member declaration row with a bodied twin becomes a pointer (after SIBLING-DEMOTE)
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -2982,7 +2982,7 @@ inline void appendPathGapSides( const MainDispatch& sd, const rw::GraphSubjectAr
 inline bool forFileSymsWanted( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
-    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || ( !rw::forFileSymsOn() && !rw::oneSideReachOn() && !rw::siblingDemoteOn() && !rw::declSinkOn() && !rw::declTwinOn() ) );
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || ( !rw::forFileSymsOn() && !rw::oneSideReachOn() && !rw::siblingDemoteOn() && !rw::declTwinOn() ) );
 }
 
 // What StdoutCapture::finish() hands back.
@@ -3116,7 +3116,7 @@ inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string&
 
 // The answer as sent after <syms> rendered, "" when unchanged: R-DEDUP's cut (`cut`, forfilesyms.h tailRowsWithoutPicks: <syms> has
 // priority over the head files' tail rows) first, then the ONE-SIDE-REACH demote pass on the cut answer, then SIBLING-DEMOTE on that,
-// then DECL-TWIN and DECL-SINK (fordeclsink.h), except under a budget. The root is re-priced once, on the final bytes, against `captured`, the answer it was priced on (the cut keeps its est_tokens= digits).
+// then DECL-TWIN (fordecltwin.h), except under a budget. The root is re-priced once, on the final bytes, against `captured`, the answer it was priced on (the cut keeps its est_tokens= digits).
 // `held` is the caller's one read of the budget (--token-budget or --max-tokens), passed in so shapingflagcheck (A)'s count stays put.
 inline std::string shapedForFileSymsAnswer( const MainDispatch& d, const std::string& captured, std::string cut, std::string& syms,
                                             const std::optional<rw::PricedRootInputs>& price, bool held )
@@ -3130,7 +3130,7 @@ inline std::string shapedForFileSymsAnswer( const MainDispatch& d, const std::st
     // SIBLING-DEMOTE is held by --token-budget alone: a bare --max-tokens is not read by --for (cli.h notice: "nothing was dropped"), so
     // the answer under it is the flagless one, demote included (forbodyfoldcheck F8m)
     rw::demoteSiblingRowsInto( d.ing, d.g, d.cfg.forTask, captured, out, held && d.cfg.tokenBudget > 0 );
-    rw::declRowsInto( d.cfg.forTask, captured, out, held && d.cfg.tokenBudget > 0 ); // DECL-TWIN then DECL-SINK, held the same way
+    rw::declTwinInto( d.cfg.forTask, captured, out, held && d.cfg.tokenBudget > 0 ); // DECL-TWIN, held the same way
     if( !out.empty() && price )
     {
         rw::repriceRootAfterCut( out, *price, captured.size() );   // signed: the pointers and legend may outweigh the rows they replace
