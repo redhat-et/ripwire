@@ -30,6 +30,10 @@
 #   (S)  source-first: two 3-hop chains equal on unproven hops and route_cands, the first found through tests/helper.py: the source
 #        chain prints, route_tie="source-first".
 #   (SL) the only chain runs through tests/: kept, route_tests="1".
+#   (W)  increment 2, the django-07 tie: two 3-hop chains each ending on a declined call (cands=2, InsertCompiler.fin / UpdateCompiler.fin),
+#        b_update defined first: the b_insert chain prints (its name shares "insert" with to='s owner InsertCompiler), route_equal="1"
+#        discloses the equally proven b_update chain.
+#   (W0) the same with no owner word in either name (b_one / b_two): the first found prints, route_equal="1".
 #   (L)  the legend clauses (compact by default; full has its own) ride exactly when route_tie= / route_declined= / route_tests= do; every answer parses (xmllint).
 #   (M)  MCP path_between carries the CLI's root attributes and rows on T, D and SL.
 #   (F)  --for "path from start_entry to Sink.fin" on D: the <graph_verb> block's <path> is the declined chain.
@@ -144,6 +148,14 @@ src_fixture(){ local d=$1 withSource=$2; mkdir -p "$TMP/$d/tests" "$TMP/$d/core"
 }
 src_fixture s 1
 src_fixture sl 0
+# (W) / (W0): start_entry -> a1 -> W.w2 -> InsertCompiler.fin (2 by name) and start_entry -> b1 -> {first, second} -> fin (declined)
+word_fixture(){ local d=$1 first=$2 second=$3; mkdir -p "$TMP/$d/app" "$TMP/$d/lib"
+    printf 'def start_entry(o):\n    a1(o)\n    b1(o)\n\ndef a1(o):\n    return o.w2(o)\n\ndef b1(o):\n    %s(o)\n    %s(o)\n\ndef %s(o):\n    return o.fin(o)\n\ndef %s(o):\n    return o.fin(o)\n' \
+        "$first" "$second" "$first" "$second" > "$TMP/$d/app/m.py"
+    printf 'class W:\n    def w2(self, o):\n        return o.fin(o)\n\nclass InsertCompiler:\n    def fin(self, o):\n        return 1\n\nclass UpdateCompiler:\n    def fin(self, o):\n        return 2\n' > "$TMP/$d/lib/k.py"
+}
+word_fixture w b_update b_insert
+word_fixture w0 b_one b_two
 
 run(){ local d=$1; shift; ( cd "$TMP/$d" || exit 1; env -u RIPWIRE_LEGEND HOME="$TMP/home" "$BIN" "$TMP/$d" --no-cache "$@" < /dev/null 2>/dev/null ); }
 root(){ grep -o '<path [^>]*>' | head -1; }
@@ -192,12 +204,18 @@ S="$( run s --path=start_entry,Sink.fin )"
 check S "$S" "start_entry b1 ph Sink.fin" source-first 1 "" ""
 SL="$( run sl --path=start_entry,Sink.fin )"
 check SL "$SL" "start_entry a1 th Sink.fin" "" "" "" 1
+W="$( run w --path=start_entry,InsertCompiler.fin )"
+check W "$W" "start_entry b1 b_insert InsertCompiler.fin" fewer-unproven 2 1 ""
+[ "$( attr route_equal <<<"$W" )" = 1 ] && ok "(W) route_equal=\"1\" discloses the equally proven b_update chain" || no "(W) route_equal=[$( attr route_equal <<<"$W" )]"
+W0="$( run w0 --path=start_entry,InsertCompiler.fin )"
+check W0 "$W0" "start_entry b1 b_one InsertCompiler.fin" fewer-unproven 2 1 ""
+[ "$( attr route_equal <<<"$W0" )" = 1 ] && ok "(W0) route_equal=\"1\"" || no "(W0) route_equal=[$( attr route_equal <<<"$W0" )]"
 
 # (L) legends ride exactly with their attributes; well-formed
 lfail=0
-for a in T C2 C2B D D3 D4 DX S SL; do
+for a in T C2 C2B D D3 D4 DX S SL W W0; do
     out="${!a}"; lg="$( legend <<<"$out" )"
-    for pair in "route_tie:route_tie=" "route_declined:route_declined=1" "route_tests:route_tests=N"; do
+    for pair in "route_tie:route_tie=" "route_declined:route_declined=1" "route_tests:route_tests=N" "route_equal:route_equal=N"; do
         at="${pair%%:*}"; cl="${pair#*:}"
         has="$( attr "$at" <<<"$out" )"
         if [ -n "$has" ] && ! grep -qF "$cl" <<<"$lg"; then no "(L) $a: $at= without its legend clause"; lfail=1; fi
