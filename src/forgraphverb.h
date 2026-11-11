@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -110,6 +111,56 @@ inline std::optional<std::string> sourceOnlyPickSpelling( const IngestResult& in
     return soleDefinitionSpelling( ing, kept.front() );
 }
 
+// Does the graph verb of `form` bind `spec` as written: the --path resolver (a glob included), the --callers one, the --connect one.
+inline bool graphFormResolves( const IngestResult& ing, GraphSubjectForm form, std::string_view spec )
+{
+    std::size_t unproven = 0;
+    bool        glob     = false;
+    switch( form )
+    {
+        case GraphSubjectForm::Path: return !resolvePathEndpoint( ing, spec, &unproven, &glob ).empty();
+        case GraphSubjectForm::Callers: return !resolveAllByNameQualified( ing, spec, &unproven ).empty();
+        case GraphSubjectForm::Common: return resolveFocus( ing, spec, &unproven ) != kNoNode;
+    }
+    return false;
+}
+
+// GV-PATH-BIND: the ONE M1 step every surface takes for a spelling its verb refused: the --for graph block (GraphSubjectSpellings) and
+// the direct --path / --connect / --callers (src/verbs_navigate.h). The rule's pick (sourceOnlyPickSpelling, unchanged), kept only
+// when the verb of `form` binds it; nullopt = refused as before.
+inline std::optional<std::string> narrowRefusedSpelling( const IngestResult& ing, std::string_view spec, GraphSubjectForm form )
+{
+    std::optional<std::string> pick = sourceOnlyPickSpelling( ing, spec );
+    if( pick && graphFormResolves( ing, form, *pick ) )
+    {
+        return pick;
+    }
+    return std::nullopt;
+}
+
+// ` narrowed="a b"`: the spellings as typed that M1 narrowed, space-separated; "" when none. The --for block's open tag and the direct
+// verbs' roots spell it alike.
+inline std::string narrowedAttrXml( std::span<const std::string> narrowed )
+{
+    if( narrowed.empty() )
+    {
+        return {};
+    }
+    std::string       names;
+    std::vector<char> esc;
+    for( const std::string& n : narrowed ) { names += ( names.empty() ? "" : " " ) + n; }
+    return " narrowed=\"" + std::string( escapeXml( names, esc ) ) + "\"";
+}
+
+// The direct verbs' legend clause for narrowed= (present only with the attribute; no period inside, so it reads as one sentence).
+inline constexpr std::string_view kNarrowedVerbLegend =
+    "narrowed=: the spellings as typed that several definitions fit (refused as written); the ones in a test or fixture path and the bodyless "
+    "ones were dropped, and the answer is the call on the ONE source definition left, named by its own spelling. ";
+inline std::string_view narrowedVerbLegend( bool on ) noexcept
+{
+    return on ? kNarrowedVerbLegend : std::string_view();
+}
+
 // How a block is opened (FOR-ROUTE fix1): `jsonDialect` = the body is the MCP callers twin's JSON in a CDATA section (S1);
 // `held` = a token budget is set, so the verb did NOT run here and the tag is self-closed with the verb= handle only (S2);
 // `nameTestHops` = path rows matched by name alone whose p= is a test or fixture path (S5), 0 = attribute absent.
@@ -173,26 +224,13 @@ public:
     const std::vector<Resolved>& tried() const noexcept { return m_memo; }
 
 private:
-    bool resolvesAsIs( const std::string& spec ) const
-    {
-        std::size_t unproven = 0;
-        bool        glob     = false;
-        switch( m_form )
-        {
-            case GraphSubjectForm::Path: return !resolvePathEndpoint( m_ing, spec, &unproven, &glob ).empty();
-            case GraphSubjectForm::Callers: return !resolveAllByNameQualified( m_ing, spec, &unproven ).empty();
-            case GraphSubjectForm::Common: return resolveFocus( m_ing, spec, &unproven ) != kNoNode;
-        }
-        return false;
-    }
     std::string bind( const std::string& spec ) const
     {
-        if( resolvesAsIs( spec ) )
+        if( graphFormResolves( m_ing, m_form, spec ) )
         {
             return spec;
         }
-        const std::optional<std::string> pick = sourceOnlyPickSpelling( m_ing, spec );
-        return pick && resolvesAsIs( *pick ) ? *pick : std::string();
+        return narrowRefusedSpelling( m_ing, spec, m_form ).value_or( std::string() );
     }
     const IngestResult&   m_ing;
     GraphSubjectForm      m_form;
@@ -321,13 +359,7 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     out += o.jsonDialect ? " dialect=\"json\"" : "";
     out += o.held ? " held=\"budget\"" : "";
     out += o.nameTestHops > 0 ? " name_test_hops=\"" + std::to_string( o.nameTestHops ) + "\"" : "";
-    if( !a.narrowed.empty() )
-    {
-        std::string       names;
-        std::vector<char> esc;
-        for( const std::string& n : a.narrowed ) { names += ( names.empty() ? "" : " " ) + n; }
-        out += " narrowed=\"" + std::string( escapeXml( names, esc ) ) + "\"";
-    }
+    out += narrowedAttrXml( a.narrowed );
     out += o.held ? "/>" : ">";
     return out;
 }

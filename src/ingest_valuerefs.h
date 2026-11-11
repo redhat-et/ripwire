@@ -1130,12 +1130,12 @@ private:
     // value goes, never stored itself.
     bool pyStoreKey( TSNode id ) const
     {
-        const TSNode sub = ts_node_parent( id );
+        const TSNode sub = parentOf( id );
         if( ts_node_is_null( sub ) || !kindIs( ts_node_type( sub ), "subscript" ) || !ts_node_eq( child( sub, m_fSubscript ), id ) )
         {
             return false;
         }
-        const TSNode as = ts_node_parent( sub );
+        const TSNode as = parentOf( sub );
         return !ts_node_is_null( as ) && kindIs( ts_node_type( as ), "assignment" ) && ts_node_eq( child( as, m_fLeft ), sub )
             && pySelfRooted( sub );
     }
@@ -1143,7 +1143,7 @@ private:
     // Python: is identifier `id` only a label (an attribute name or a keyword-argument name), never a read of a variable?
     bool pyLabel( TSNode id ) const
     {
-        const TSNode parent = ts_node_parent( id );
+        const TSNode parent = parentOf( id );
         return !ts_node_is_null( parent )
             && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), id ) )
                  || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), id ) ) );
@@ -4292,7 +4292,7 @@ private:
             return;
         }
         // `o[ 'on' + e ] = fn` stores a function under the name (an assignment target, `++`, `delete`): no lookup, so no call
-        const TSNode parent = ts_node_parent( sub );
+        const TSNode parent = parentOf( sub );
         const char*  pk     = ts_node_is_null( parent ) ? "" : ts_node_type( parent );
         const bool   store  = ( ( kindIs( pk, "assignment_expression" ) || kindIs( pk, "augmented_assignment_expression" ) )
                                 && ts_node_eq( child( parent, m_fLeft ), sub ) )

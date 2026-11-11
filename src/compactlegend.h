@@ -638,6 +638,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "via",               "<c via=\"impl\">: the receiver's interface/trait/abstract type has ONE implementor in the tree owning the callee (an outside or macro-made one may exist)", true, "c", MapHeaderRead::No, "impl" },
     { "via",               "<c via=\"link\">: that callee is a markdown link, not a call", true, "c", MapHeaderRead::No, "link" },
     { "anchor",            "<c anchor=missing>: that markdown link named a heading this file does not have, so the edge is the file", true, "c", MapHeaderRead::No, "missing" },
+    // GV-PATH-BIND (src/forgraphverb.h kNarrowedVerbLegend), present-only: the callers selector the M1 rule narrowed
+    { "narrowed",          "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "callers", MapHeaderRead::No, {}, "callers" },
     // CALLSITE-AT (2026-10-09): a callers row's call sites (editcheck.h rowCallSites); keyed to the callers schema, so the
     // map's own <s> rows never read it. The columnar form names the same list as its sites_at column.
     { "sites_at",          "<s sites_at=>: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },
@@ -933,6 +935,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "slot_fns", "s slot_fns=K: K functions that struct field holds (the width the crossing picks from); NOT capped, a wide table is still crossed; a hedge", true, {}, MapHeaderRead::No, {}, "path" },
     { "to_glob", "to_glob=1: to='s * matched every function or method definition fitting it (to_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
     { "from_glob", "from_glob=1: from='s * matched every function or method definition fitting it (from_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
+    // GV-PATH-BIND (src/forgraphverb.h kNarrowedVerbLegend), present-only: an endpoint / terminal / selector the M1 rule narrowed
+    { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "path", MapHeaderRead::No, {}, "path" },
     // PATH-ROUTE v2 (src/pathroute.h pathRouteLegend): present-only, on a single-chain reached answer of >= 2 by-name hops
     { "route_hedged", "route_hedged=name-stitched route_by_name=K route_cands=P: K hops of the shown chain are via=name (receiver unproven), P same-named candidate chains (route_cands counts in-repo same-named definitions along the route; builtin and external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P): a hedge, the true route may be another; =unlikely K>=4: probably not the real route, read next=; =not-proven route_len=N: the shortest chain found (N hops, K by name) is NOT printed, reachable=0 here is a refusal, not none (never no route); next= from='s callees; =proven-preferred: the shortest chain (route_len=, route_by_name= by name) is not shown, a proven-only chain is", false, "path", MapHeaderRead::No, {}, "path" },   // also defines route_by_name= route_cands= route_cands_capped= route_len=
     // PATH-FEWEST-UNPROVEN (src/pathroute.h pathFewestLegend): present-only, on a single-chain reached answer whose chain replaced the plain
@@ -1336,6 +1340,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "defs", "t defs=N: N definitions the terminal's spelling matched (every def of a bare name; only the named owner's/file's for A::m, A.m, ns.fn, file:name; spellings that pick one def share a row and print the widest); all were searched (above 1, qualify to narrow)", true, "t", MapHeaderRead::No, {}, "connect" },
     // 0.6.6 D1: present-only — absent unless a many-definition terminal's pick tied with another equally-joining definition
     { "ambiguous_terminal", "ambiguous_terminal=: terminal names whose pick tied with another equally-joining definition (qualify file:name)", true, "connect", MapHeaderRead::No, {}, "connect" },
+    { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "connect", MapHeaderRead::No, {}, "connect" },
     // grep: src/verbs_grep.h (the enc row's def count)
     { "defs", "enc defs=N: the enclosing name has N defs, the row unions them (only above 1)", true, "enc", MapHeaderRead::No, {}, "grep" },
     // owners: src/verbs_report.h (the of= form)

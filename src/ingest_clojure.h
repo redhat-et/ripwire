@@ -55,7 +55,7 @@ ClojureDefinitionShape clojureDefinitionShape( TSNode list, std::string_view src
 
 bool clojureDeclarationMethod( TSNode list, std::string_view src ) noexcept
 {
-    const TSNode parent = ts_node_parent( list );
+    const TSNode parent = parentOf( list );
     if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "list_lit" ) != 0 )
     {
         return false;

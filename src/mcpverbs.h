@@ -4243,7 +4243,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                                            // argument serialize() takes — see its comment.
                                                            // Shared by CLI --connect and the MCP connect verb.
                          std::size_t unprovenDefs = 0,     // H1: the terminals' decl→def residue, SUMMED by the caller
-                         const ConnectPicks& picks = ConnectPicks{} )   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
+                         const ConnectPicks& picks = ConnectPicks{},   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
+                         std::span<const std::string> narrowed = {} )  // GV-PATH-BIND: the terminals as typed that M1 narrowed (CLI only)
 {
     const std::string_view ambiguousTerminals = picks.ambiguous;
     // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
@@ -4290,6 +4291,9 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     const std::string  connectUnprovenLegend = unprovenDefsVerbComment( UnprovenDefsVerb::Connect, unprovenDefs > 0, "<!-- ripwire connect: " );
     // 0.6.6 D1: the tied-terminal names, charged like the residue attribute above; absent (0 bytes) when no pick tied
     const std::string  connectAmbiguousAttr = ambiguousTerminals.empty() ? std::string() : ( " ambiguous_terminal=\"" + ex( ambiguousTerminals ) + "\"" );
+    // GV-PATH-BIND (forgraphverb.h narrowRefusedSpelling): narrowed= and its clause, charged like the attribute above; absent (0 bytes) with none
+    const std::string  connectNarrowedAttr   = narrowedAttrXml( narrowed );
+    const std::string  connectNarrowedLegend = narrowed.empty() ? std::string() : "<!-- ripwire connect: " + std::string( narrowedVerbLegend( true ) ) + "-->";
     // FE-B: the reading of via="name", when some <e> of this answer carries it — charged like the clauses above
     const bool         connectHasVia = std::any_of( res.groups.begin(), res.groups.end(), [ & ]( const ConnectGroup& grp )
     {
@@ -4308,7 +4312,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                         + ( connectHasMiss ? "<!-- ripwire connect: " + anchorMissLegend( true ) + "-->" : std::string() );
     const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) )
                                          + connectUnindexedLegend.size() + connectUnprovenAttr.size() + connectUnprovenLegend.size()
-                                         + connectAmbiguousAttr.size() + connectViaLegend.size();
+                                         + connectAmbiguousAttr.size() + connectViaLegend.size() + connectNarrowedAttr.size() + connectNarrowedLegend.size();
 
     // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
@@ -4535,12 +4539,13 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
-                connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
-    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( out, "{}{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                connectNarrowedLegend, connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
                   connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero
                   connectAmbiguousAttr,          // 0.6.6 D1: absent when no many-definition pick tied
+                  connectNarrowedAttr,           // GV-PATH-BIND: absent when no terminal was narrowed
                   estTokens, hubFloor,
                   rw::cstr( connectCeiling ), connectOverAttr, hopRootXml,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),

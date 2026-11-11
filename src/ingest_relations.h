@@ -394,7 +394,7 @@ inline BaseScopeHit lookupInReopenedNamespace( TSNode ns, std::string_view name,
 {
     BaseScopeHit hit;
     const TSNode nsName = fieldChild( ns, NodeField::Name );
-    const TSNode outer  = ts_node_parent( ns );
+    const TSNode outer  = parentOf( ns );
     if( ts_node_is_null( nsName ) || ts_node_is_null( outer ) )
     {
         return hit;
@@ -430,7 +430,7 @@ inline BaseScopeHit lookupInReopenedNamespace( TSNode ns, std::string_view name,
 // ambiguous scope stops the walk with its flag set.
 inline BaseScopeHit findOutward( TSNode site, TSNode self, std::string_view name, bool scopeOwner, std::string_view src )   // allocates (the file's scope index)
 {
-    for( TSNode p = ts_node_parent( site ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( site ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         BaseScopeHit hit = lookupInScope( p, name, scopeOwner, self, src );
         if( ts_node_is_null( hit.name ) && !hit.cut && !hit.ambiguous && isNamespaceDeclKind( ts_node_type( p ) ) )
@@ -448,7 +448,7 @@ inline BaseScopeHit findOutward( TSNode site, TSNode self, std::string_view name
 // the tree root above `n` (the global scope a C++ `::Mid` names)
 inline TSNode rootOf( TSNode n ) noexcept
 {
-    for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( n ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         n = p;
     }
@@ -640,7 +640,7 @@ inline FnLiteralBinding fnLiteralBoundTo( TSNode roleNode, TSNode nameNode, Lang
     {
         return {};
     }
-    TSNode binding = ts_node_parent( nameNode );
+    TSNode binding = parentOf( nameNode );
     for( int hop = 0; !ts_node_is_null( binding ) && hop < 6; ++hop )
     {
         if( const TSNode value = fnLiteralBoundValue( binding ); !ts_node_is_null( value ) && extent::inSet( kFnLiteralBinding.literals, std::string_view( ts_node_type( value ) ) ) )
@@ -651,7 +651,7 @@ inline FnLiteralBinding fnLiteralBoundTo( TSNode roleNode, TSNode nameNode, Lang
         {
             break;
         }
-        binding = ts_node_parent( binding );
+        binding = parentOf( binding );
     }
     return {};
 }
@@ -693,7 +693,7 @@ inline DefBodyNodes defBodyNodeOf( TSNode roleNode, TSNode nameNode, SymKind kin
         return { body, {}, roleNode };
     }
     const bool oneOfSeveral = !ts_node_eq( binding, roleNode ) && ts_node_named_child_count( roleNode ) > 1
-                              && ts_node_eq( ts_node_parent( binding ), roleNode );
+                              && ts_node_eq( parentOf( binding ), roleNode );
     return { fieldChild( literal, NodeField::Body ), literal, oneOfSeveral ? binding : roleNode };
 }
 
@@ -1164,8 +1164,8 @@ inline std::pair<TSNode, TSNode> aliasSpecifierAndName( TSNode n, const char* t 
 // true ⇒ `n` sits in a function body or a lambda — or deeper than the side stream's own cap, where its enclosure is unknown
 inline bool insideFunctionBody( TSNode n ) noexcept
 {
-    TSNode parent = ts_node_parent( n );
-    for( int depth = 0; !ts_node_is_null( parent ); ++depth, parent = ts_node_parent( parent ) )
+    TSNode parent = parentOf( n );
+    for( int depth = 0; !ts_node_is_null( parent ); ++depth, parent = parentOf( parent ) )
     {
         const char* pt = ts_node_type( parent );
         if( depth >= 256 || kindIs( pt, "compound_statement" ) || kindIs( pt, "function_definition" ) || kindIs( pt, "lambda_expression" ) )
@@ -1255,7 +1255,7 @@ inline std::string cppScopePath( TSNode node, std::string_view src )
 {
     std::vector<std::string> innerFirst;
     int                      guard = 0;
-    for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ) && guard < 128; up = ts_node_parent( up ), ++guard )
+    for( TSNode up = parentOf( node ); !ts_node_is_null( up ) && guard < 128; up = parentOf( up ), ++guard )
     {
         const char* t = ts_node_type( up );
         if( kindIs( t, "function_definition" ) || kindIs( t, "compound_statement" ) || kindIs( t, "lambda_expression" ) )
@@ -1380,7 +1380,7 @@ inline std::vector<std::string> enclosingTemplateParameterNames( TSNode classNod
 {
     std::vector<std::string> names;
     int                      guard = 0;
-    for( TSNode up = ts_node_parent( classNode ); !ts_node_is_null( up ) && guard < 64; up = ts_node_parent( up ), ++guard )
+    for( TSNode up = parentOf( classNode ); !ts_node_is_null( up ) && guard < 64; up = parentOf( up ), ++guard )
     {
         if( !kindIs( ts_node_type( up ), "template_declaration" ) )
         {
@@ -2207,7 +2207,7 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
     TSNode cur = n;
     for( int guard = 0; guard < 4; ++guard )   // visibility wrapper + block wrapper + body_statement is the deepest real chain
     {
-        const TSNode p = ts_node_parent( cur );
+        const TSNode p = parentOf( cur );
         if( ts_node_is_null( p ) )
         {
             return false;
@@ -2230,7 +2230,7 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
             // Inline visibility: the sole argument of a receiverless visibility call, and the VISIBILITY
             // call's own parent chain must pass the same gate (next hop(s)) — this is what keeps
             // `def m; private attr_reader :x; end` out (`private` inside a method body fails the ascent).
-            const TSNode outer = ts_node_parent( p );
+            const TSNode outer = parentOf( p );
             if( !ts_node_is_null( outer ) && kindIs( ts_node_type( outer ), "call" )
                 && !rubyNamedDirective( outer, src, kRubyVisibilityNames ).empty()
                 && ts_node_named_child_count( p ) == 1 && ts_node_eq( ts_node_named_child( p, 0 ), cur ) )
@@ -2271,13 +2271,13 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
 // assembles its Read, Write and PrimaryKey modules exactly so.
 inline bool rubyInConcernIncludedBlock( TSNode call, std::string_view src ) noexcept
 {
-    TSNode up = ts_node_parent( call );
+    TSNode up = parentOf( call );
     if( !ts_node_is_null( up ) && ( kindIs( ts_node_type( up ), "body_statement" ) || kindIs( ts_node_type( up ), "block_body" ) ) )
     {
-        up = ts_node_parent( up );   // do … end wraps its statements in body_statement, { } in block_body
+        up = parentOf( up );   // do … end wraps its statements in body_statement, { } in block_body
     }
     const TSNode block = up;
-    const TSNode owner = ts_node_is_null( block ) ? block : ts_node_parent( block );
+    const TSNode owner = ts_node_is_null( block ) ? block : parentOf( block );
     return !ts_node_is_null( owner ) && ( kindIs( ts_node_type( block ), "do_block" ) || kindIs( ts_node_type( block ), "block" ) )
         && kindIs( ts_node_type( owner ), "call" ) && rubyNamedDirective( owner, src, std::array<std::string_view, 1>{ "included" } ) == "included"
         && rubyAttrAtClassBodyLevel( owner, src );
@@ -2357,7 +2357,7 @@ inline std::string rubyReceiverTarget( TSNode n, std::string_view src )
 inline std::vector<std::string> rubyArgumentTargets( TSNode argList, std::string_view src )
 {
     std::vector<std::string> out;
-    const TSNode parent = ts_node_parent( argList );
+    const TSNode parent = parentOf( argList );
     if( !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "call" ) && !rubyNamedDirective( parent, src, kRubyConstantDirectives ).empty() )
     {
         return out;
@@ -3108,7 +3108,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             // evaluated in the ENCLOSING scope (Ruby has not opened the class yet), and resolve.h's containment
             // is strict at the start, so that byte reads as outside the class — the nesting Ruby actually uses.
             const bool          superclassSite = ( lang == Lang::Ruby && kindIs( t, "superclass" ) );
-            const std::uint32_t siteByte       = superclassSite ? ts_node_start_byte( ts_node_parent( n ) ) : ts_node_start_byte( n );
+            const std::uint32_t siteByte       = superclassSite ? ts_node_start_byte( parentOf( n ) ) : ts_node_start_byte( n );
             incs.push_back( { fileId, /*isAngle*/ false, lazy, symbolic, siteByte, valueUse, std::move( tgt ) } );
         };
         // The constant-USE dedupe (parser version 83 for receivers; arguments and rescue classes joined at 93). Key =
