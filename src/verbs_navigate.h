@@ -3103,7 +3103,7 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                      rw::pathNearSinkXml( ing, pthNear, pthSingleRoot, pthRootPrefix ),
                      path.empty() ? rw::pathHandlerRuleXml( ing, pthBackHops->names(), pthHandler, pthSingleRoot, pthRootPrefix ) : std::string() );
         // FE-B via="name", #409 via="link"/anchor="missing", attrib-multidef prov="split", PATH-OWNERS n="Owner.name": one emitter, shared with MCP path_between
-        rw::emitPathAnswerRows( stdout, ing, g, pthPairs, pthRows, pthOwners, pthSingleRoot, pthRootPrefix, pthHops );   // TRACE-EP: pairs or today's rows, shared with MCP
+        rw::emitPathAnswerRows( stdout, ing, g, pthPairs, pthRows, pthOwners, pthSingleRoot, pthRootPrefix, pthHops, pthRoute.declinedCands );   // TRACE-EP: pairs or today's rows, shared with MCP
         rw::emitRaw( stdout, pthHopBodies.c_str() );    // PATH-HOP-BODY: after the hop rows they explain ("" when none)
         rw::emitRaw( stdout, pthRouteEl.xml.c_str() );  // BODY-ON-ROUTE: after the route rows they explain (reachable=0 only)
         rw::emitRaw( stdout, pthAlts.xml.c_str() );   // D2 part 5: empty when both picks are provably unique

@@ -699,14 +699,15 @@ inline bool pathPairsAnyHop( const PathPairs& pp, Pred&& pred )
 
 // THE hop rows of a reached --path answer: the listed pairs, else today's single path (defattrib.h emitPathHopRows).
 inline void emitPathAnswerRows( std::FILE* out, const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path,
-                                std::span<const std::string_view> owners, bool singleRoot, std::string_view rootPrefix, const HopFacts& hops )
+                                std::span<const std::string_view> owners, bool singleRoot, std::string_view rootPrefix, const HopFacts& hops,
+                                std::uint32_t declinedLastCands = 0 )
 {
     if( pp.active() )
     {
         emitPathPairs( out, ing, g, pp, singleRoot, rootPrefix, hops );
         return;
     }
-    emitPathHopRows( out, ing, g, path, owners, PathRowView{ singleRoot, rootPrefix, hops, HopShed::Full } );
+    emitPathHopRows( out, ing, g, path, owners, PathRowView{ singleRoot, rootPrefix, hops, HopShed::Full, declinedLastCands } );   // PATH-FEWEST-UNPROVEN
 }
 
 // HOP-CONTEXT-1: the edges emitPathAnswerRows prints, in the shape it prints them (pair 1 and today's single path in full,

@@ -30,7 +30,7 @@
 #   (S)  source-first: two 3-hop chains equal on unproven hops and route_cands, the first found through tests/helper.py: the source
 #        chain prints, route_tie="source-first".
 #   (SL) the only chain runs through tests/: kept, route_tests="1".
-#   (L)  the --legend=full clauses ride exactly when route_tie= / route_declined= / route_tests= do; every answer parses (xmllint).
+#   (L)  the legend clauses (compact by default; full has its own) ride exactly when route_tie= / route_declined= / route_tests= do; every answer parses (xmllint).
 #   (M)  MCP path_between carries the CLI's root attributes and rows on T, D and SL.
 #   (F)  --for "path from start_entry to Sink.fin" on D: the <graph_verb> block's <path> is the declined chain.
 #
@@ -153,7 +153,7 @@ t=sys.stdin.read(); m=re.search(r"<path [^>]*>(.*?)</path>",t,re.S); b=m.group(1
 print(" ".join(re.findall(r"<s [^>]*n=\"([^\"]*)\"",b)))'; }
 lastrow(){ python3 -c 'import re,sys
 t=sys.stdin.read(); m=re.search(r"<path [^>]*>(.*?)</path>",t,re.S); r=re.findall(r"<s [^>]*/>",m.group(1) if m else ""); print(r[-1] if r else "")'; }
-legend(){ python3 -c 'import re,sys; m=re.search(r"<!-- ripwire path:(.*?)-->",sys.stdin.read(),re.S); print(m.group(1) if m else "")'; }
+legend(){ python3 -c 'import re,sys; m=re.search(r"<!-- ripwire path[ :](.*?)-->",sys.stdin.read(),re.S); print(m.group(1) if m else "")'; }
 
 check(){ # arm out want_rows want_tie want_other want_declined want_tests [want_hedged]
     local arm=$1 out=$2 wr=$3 wt=$4 wo=$5 wd=$6 ws=$7 wh=${8-}
@@ -206,6 +206,14 @@ for a in T C2 C2B D D3 D4 DX S SL; do
     if command -v xmllint >/dev/null 2>&1 && ! xmllint --noout - <<<"$out" 2>/dev/null; then no "(L) $a: not well-formed"; lfail=1; fi
 done
 [ "$lfail" = 0 ] && ok "(L) every clause rides exactly with its attribute; every answer parses"
+DF="$( run d --path=start_entry,Sink.fin --legend=full )"; SLF="$( run sl --path=start_entry,Sink.fin --legend=full )"; CF="$( run c2 --path=start_entry,Sink.fin --legend=full )"
+if grep -qF 'route_tie=fewer-unproven|fewer-cands|source-first route_tie_other=K: the plain search' <<<"$( legend <<<"$DF" )" \
+   && grep -qF 'route_declined=1: the last row' <<<"$( legend <<<"$DF" )" && grep -qF 'route_tests=N: N intermediate rows' <<<"$( legend <<<"$SLF" )" \
+   && ! grep -qE 'route_tie=|route_declined=|route_tests=' <<<"$( legend <<<"$CF" )"; then
+    ok "(L) --legend=full carries the full clauses exactly when they fire"
+else
+    no "(L) --legend=full clauses: D/SL missing one, or C2 carries one"
+fi
 
 # (M) MCP path_between
 mcp(){ local d=$1 f=$2 t=$3; printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"g","version":"0"}}}' \

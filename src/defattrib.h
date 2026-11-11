@@ -1057,6 +1057,7 @@ struct PathRowView
     std::string_view rootPrefix;
     const HopFacts&  hops;
     HopShed          shed = HopShed::Full;
+    std::uint32_t    declinedLastCands = 0;   // > 0: the LAST hop is a declined call (PATH-FEWEST-UNPROVEN), its row says via="declined" cands=
 };
 inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Graph& g, std::span<const NodeId> path,
                              std::span<const std::string_view> owners, const PathRowView& view )
@@ -1073,8 +1074,10 @@ inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Grap
         const std::string_view rp    = singleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) : std::string_view( ing.files[ s.fileId ] );
         const std::string      name  = std::string( escapeXml( qualifiedMemberName( owners[i], s ), esc ) );   // QUALNAME-1: the language's separator
         const bool             hop   = i > 0;
-        const std::string      mark  = std::string( viaEdgeAttr( hop && edgeNameOnly( g, path[ i - 1 ], path[i] ), hop && edgeIsLink( g, path[ i - 1 ], path[i] ) ) )
-                                     + anchorMissAttr( hop && edgeAnchorMiss( g, path[ i - 1 ], path[i] ) );
+        const bool             declinedHop = hop && i + 1 == path.size() && view.declinedLastCands > 0;   // no graph edge: the declined call's own hedge
+        const std::string      mark  = declinedHop ? " via=\"declined\" cands=\"" + std::to_string( view.declinedLastCands ) + "\""
+                                                   : std::string( viaEdgeAttr( hop && edgeNameOnly( g, path[ i - 1 ], path[i] ), hop && edgeIsLink( g, path[ i - 1 ], path[i] ) ) )
+                                                         + anchorMissAttr( hop && edgeAnchorMiss( g, path[ i - 1 ], path[i] ) );
         const HopRecord* const rec = hop && hops.on ? hops.find( path[ i - 1 ], path[i] ) : nullptr;
         const std::string      ctx = rec != nullptr ? hopAttrsXml( ing, *rec, shed, /*withSig=*/true, singleRoot, rootPrefix ) : std::string();
         emitTo( out, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), name, escapeXml( rp, esc ), s.line,

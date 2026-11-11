@@ -4008,7 +4008,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     rw::emitTo( mem, "{}>{}{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
                   pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ),
                   pth.empty() ? pathHandlerRuleXml( ing, ptBackHops->names(), ptHandler, ptSingleRoot, ptRootPrefix ) : std::string() );
-    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix, ptHops );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
+    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix, ptHops, ptRoute.declinedCands );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
     rw::emitRaw( mem, ptHopBodies.c_str() );      // PATH-HOP-BODY, as on the CLI
     rw::emitRaw( mem, ptRouteEl.xml.c_str() );    // BODY-ON-ROUTE, as on the CLI
     rw::emitRaw( mem, ptAlts.xml.c_str() );   // D2 part 5, as on the CLI
