@@ -110,8 +110,8 @@ struct PathChainKey
     std::uint32_t tests    = 0;
     std::uint32_t offWord  = 0;
     friend auto operator<=>( const PathChainKey&, const PathChainKey& ) = default;   // member order = the key order
-    // as proven as `b`: the first two keys only (the graph's facts; tests and offWord are readings of paths and names)
-    bool asProven( const PathChainKey& b ) const noexcept { return std::pair( unproven, cands ) == std::pair( b.unproven, b.cands ); }
+    // the first two keys only: the graph's facts (tests and offWord are readings of paths and names); equal = as proven
+    std::pair<std::uint32_t, std::uint64_t> proof() const noexcept { return { unproven, cands }; }
 };
 inline std::uint64_t pathCandsTimes( std::uint64_t acc, std::uint64_t k ) noexcept
 {
@@ -147,15 +147,9 @@ inline std::vector<std::string> pathToOwnerWords( const IngestResult& ing, const
     return words;
 }
 // Does `n`'s name share no subtoken with `ownerWords`? (false when there are no owner words: the key then never differs)
-inline bool pathNameOffWord( const IngestResult& ing, NodeId n, const std::vector<std::string>& ownerWords, std::vector<std::string>& scratch )
+inline bool pathNameOffWord( const IngestResult& ing, NodeId n, const std::vector<std::string>& ownerWords )
 {
-    if( ownerWords.empty() )
-    {
-        return false;
-    }
-    scratch.clear();
-    subtokens( ing.symbols[n].name, scratch );
-    return std::ranges::none_of( scratch, [ & ]( const std::string& w ) { return std::ranges::find( ownerWords, w ) != ownerWords.end(); } );
+    return !ownerWords.empty() && !holdsSubtokenWord( ing.symbols[n].name, ownerWords );
 }
 // What the key of a chain reads besides the graph: whether test intermediates count, and the to= owner words.
 struct PathKeyReading
@@ -165,13 +159,12 @@ struct PathKeyReading
 };
 inline PathChainKey pathChainKey( const IngestResult& ing, const Graph& g, std::span<const NodeId> chain, const PathKeyReading& reading )
 {
-    PathChainKey             k;
-    std::vector<std::string> scratch;
+    PathChainKey k;
     for( std::size_t i = 1; i < chain.size(); ++i )
     {
         const bool mid = i + 1 < chain.size();
         k = pathHopKey( g, k, chain[i - 1], chain[i], [ & ] { return byNameCandidates( ing, g, chain[i - 1], chain[i] ); },
-                        PathHopMarks{ reading.testsOn && mid && pathDefInTests( ing, chain[i] ), mid && pathNameOffWord( ing, chain[i], reading.ownerWords, scratch ) } );
+                        PathHopMarks{ reading.testsOn && mid && pathDefInTests( ing, chain[i] ), mid && pathNameOffWord( ing, chain[i], reading.ownerWords ) } );
     }
     return k;
 }
@@ -322,16 +315,15 @@ private:
             }
         }
     }
-    bool inTests( NodeId v )
+    // a per-node fact read once: `memo[v]` is -1 until `read()` fills it
+    template<class Read>
+    static bool once( std::vector<std::int8_t>& memo, NodeId v, Read&& read )
     {
-        m_inTests[v] = m_inTests[v] < 0 ? std::int8_t( pathDefInTests( m_ing, v ) ? 1 : 0 ) : m_inTests[v];
-        return m_inTests[v] == 1;
+        memo[v] = memo[v] < 0 ? std::int8_t( read() ? 1 : 0 ) : memo[v];
+        return memo[v] == 1;
     }
-    bool offWord( NodeId v )
-    {
-        m_offWord[v] = m_offWord[v] < 0 ? std::int8_t( pathNameOffWord( m_ing, v, m_reading.ownerWords, m_wordScratch ) ? 1 : 0 ) : m_offWord[v];
-        return m_offWord[v] == 1;
-    }
+    bool inTests( NodeId v ) { return once( m_inTests, v, [ & ] { return pathDefInTests( m_ing, v ); } ); }
+    bool offWord( NodeId v ) { return once( m_offWord, v, [ & ] { return pathNameOffWord( m_ing, v, m_reading.ownerWords ); } ); }
     // byNameCandidates( u, v ) from ONE sorted list of u's by-name targets' names, built on u's first by-name edge (byNameCandidates
     // per edge rescans the out-edges: O(degree^2) on a by-name hub)
     std::uint64_t byNameCands( NodeId u, NodeId v )
@@ -366,7 +358,6 @@ private:
     std::vector<std::int8_t>      m_inTests;   // pathDefInTests, read once per node (-1 = not read yet)
     std::vector<std::int8_t>      m_offWord;   // pathNameOffWord, read once per node
     std::vector<NodeId>           m_queue;
-    std::vector<std::string>      m_wordScratch;
     std::vector<std::string_view> m_byNameNames;
     NodeId                        m_byNameOf = kNoNode;
 };
@@ -419,7 +410,7 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
     out.declinedCands = win->cands;
     out.tie           = tieOf( win->key, today );
     out.otherUnproven = today.unproven;
-    out.equalCount    = std::uint32_t( std::ranges::count_if( finals, [ & ]( const FinalCand& f ) { return &f != win && f.key.asProven( win->key ); } ) );
+    out.equalCount    = std::uint32_t( std::ranges::count_if( finals, [ & ]( const FinalCand& f ) { return &f != win && f.key.proof() == win->key.proof(); } ) );
     return out;
 }
 
