@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "Diagnostics.h"     // EXPECTS / DASSERT / PANIC — intern's preconditions and the pool's capacity
+#include "sortutil.h"        // rw::sortutil::svCompare — <=> without libstdc++'s wrapping size subtraction
 #include "platform.h"        // infra::platform::hardware_destructive_interference_size — one shard per line
 #include "unordered_dense.h"   // ankerl::unordered_dense::hash<std::string_view> — the pool's text hash
 
@@ -273,9 +274,11 @@ public:
     friend bool operator==( const InternedTextOf& a, std::string_view b ) noexcept { return std::string_view( a.str() ) == b; }
     friend std::strong_ordering operator<=>( const InternedTextOf& a, const InternedTextOf& b ) noexcept
     {
-        return a.id_ == b.id_ ? std::strong_ordering::equal : std::string_view( a.str() ) <=> std::string_view( b.str() );
+        return a.id_ == b.id_ ? std::strong_ordering::equal : sortutil::svCompare( a.str(), b.str() );
     }
-    friend std::strong_ordering operator<=>( const InternedTextOf& a, std::string_view b ) noexcept { return std::string_view( a.str() ) <=> b; }
+    // svCompare, not string_view's <=>: libstdc++'s computes `n1 - n2` on size_t, which the G1 integer sanitizer aborts on
+    // (sortutil.h; #608's Linux ASan leg died in ValueRefWalk::leave's binary_search on 1 - 8).
+    friend std::strong_ordering operator<=>( const InternedTextOf& a, std::string_view b ) noexcept { return sortutil::svCompare( a.str(), b ); }
 
 private:
     std::uint32_t id_ = TextPool::kEmptyId;

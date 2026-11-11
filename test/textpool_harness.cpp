@@ -43,14 +43,20 @@ void check( bool ok, const char* arm, const char* what )
 std::string textOf( std::size_t i ) { return "name_" + std::to_string( i * 7919 % 100003 ) + ( i % 3 == 0 ? std::string( 30, 'x' ) : "" ); }
 }
 
+// Static storage, not a local of exitRace: the detached thread keeps storing to it after exitRace and main return. A local was
+// a stack-use-after-return (Linux ASan's default fake stack reported it, #608 CI); under gcc, which does not check that, the
+// stray store landed in the exit path's frames and the run hung until the gate's timeout. std::atomic<bool> is trivially
+// destructible, so static destruction leaves it alone.
+constinit std::atomic<bool> gExitRaceStarted{ false };
+
 int exitRace()
 {
-    std::atomic<bool> started{ false };
-    std::thread( [ &started ] {
+    std::atomic<bool>& started = gExitRaceStarted;
+    std::thread( [] {
         for( std::uint64_t i = 0;; ++i )
         {
             rw::InternedText name( std::string_view( "exit_" + std::to_string( i ) ) );
-            started.store( true );
+            gExitRaceStarted.store( true, std::memory_order_relaxed );
             if( name.str().empty() )
             {
                 std::abort();
@@ -137,6 +143,15 @@ int main( int argc, char** argv )
     check( rw::InternedText( std::string_view( "alpha" ) ) == rw::InternedText( std::string_view( "alpha" ) )
                && !( rw::InternedText( std::string_view( "alpha" ) ) == rw::InternedText( std::string_view( "alphabet" ) ) ),
            "C", "== agrees with text equality" );
+    // C2. <=> against a name and against text, on a strict prefix (libstdc++'s string_view <=> subtracts the sizes there, and the
+    // G1 integer sanitizer aborts on the wrap: #608's Linux ASan leg) and on a byte >= 0x80 (memcmp order: unsigned).
+    {
+        const rw::InternedText shortName( std::string_view( "a" ) ), longName( std::string_view( "abcdefgh" ) ), high( std::string_view( "\xC3\xA9" ) );
+        check( ( shortName <=> longName ) < 0 && ( longName <=> shortName ) > 0 && ( shortName <=> std::string_view( "abcdefgh" ) ) < 0
+                   && ( longName <=> std::string_view( "a" ) ) > 0 && ( shortName <=> std::string_view( "a" ) ) == 0,
+               "C", "<=> on a strict prefix: shorter first, no size subtraction" );
+        check( ( shortName <=> high ) < 0 && ( high <=> std::string_view( "z" ) ) > 0, "C", "<=> is unsigned-byte order (memcmp's)" );
+    }
 
     // D. Edits.
     rw::InternedText e;

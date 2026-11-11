@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -43,6 +44,21 @@ constexpr bool svLess( std::string_view a, std::string_view b ) noexcept
         }
     }
     return a.size() < b.size();
+}
+// svLess's three-way twin, for an operator<=> over text: the same unsigned-byte order and no size subtraction (see above).
+constexpr std::strong_ordering svCompare( std::string_view a, std::string_view b ) noexcept
+{
+    const std::size_t n = a.size() < b.size() ? a.size() : b.size();
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        const unsigned char ca = static_cast<unsigned char>( a[ i ] );
+        const unsigned char cb = static_cast<unsigned char>( b[ i ] );
+        if( ca != cb )
+        {
+            return ca <=> cb;
+        }
+    }
+    return a.size() <=> b.size();
 }
 
 
