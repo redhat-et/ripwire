@@ -56,7 +56,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <tuple>
+#include <compare>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -108,24 +109,21 @@ struct PathChainKey
     std::uint64_t cands    = 1;
     std::uint32_t tests    = 0;
     std::uint32_t offWord  = 0;
-    friend bool operator<( const PathChainKey& a, const PathChainKey& b ) noexcept
-    {
-        return std::tie( a.unproven, a.cands, a.tests, a.offWord ) < std::tie( b.unproven, b.cands, b.tests, b.offWord );
-    }
-    bool asProven( const PathChainKey& b ) const noexcept { return unproven == b.unproven && cands == b.cands; }
+    friend auto operator<=>( const PathChainKey&, const PathChainKey& ) = default;   // member order = the key order
+    // as proven as `b`: the first two keys only (the graph's facts; tests and offWord are readings of paths and names)
+    bool asProven( const PathChainKey& b ) const noexcept { return std::pair( unproven, cands ) == std::pair( b.unproven, b.cands ); }
 };
 inline std::uint64_t pathCandsTimes( std::uint64_t acc, std::uint64_t k ) noexcept
 {
     return acc > kPathRouteCandsCeiling / k ? kPathRouteCandsCeiling : std::min( kPathRouteCandsCeiling, acc * k );
 }
-// The key of hop from -> to added to a prefix key: `byNameCands` is byNameCandidates( from, to ) (read only on a by-name edge),
-// `intermediateInTests` whether `to` is a test-path intermediate that counts.
-// `to` is an intermediate: `intermediateInTests` / `intermediateOffWord` say whether it counts toward tests / offWord.
+// Whether the hop's `to` is an intermediate that counts toward tests / offWord.
 struct PathHopMarks
 {
     bool intermediateInTests = false;
     bool intermediateOffWord = false;
 };
+// The key of hop from -> to added to a prefix key: `byNameCands()` is byNameCandidates( from, to ), read only on a by-name edge.
 template<class ByNameCands>
 inline PathChainKey pathHopKey( const Graph& g, PathChainKey k, NodeId from, NodeId to, ByNameCands&& byNameCands, PathHopMarks marks )
 {
@@ -135,7 +133,7 @@ inline PathChainKey pathHopKey( const Graph& g, PathChainKey k, NodeId from, Nod
     k.offWord += marks.intermediateOffWord ? 1u : 0u;
     return k;
 }
-// The subtokens of the to= definitions' owner names (lexical.h subtokens: >= 2 bytes, lowercased), sorted and distinct.
+// The subtokens of the to= definitions' owner names (lexical.h subtokens: >= 2 bytes, lowercased); a handful, read by linear find.
 inline std::vector<std::string> pathToOwnerWords( const IngestResult& ing, const std::vector<NodeId>& dstDefs )
 {
     std::vector<std::string> words;
@@ -146,8 +144,6 @@ inline std::vector<std::string> pathToOwnerWords( const IngestResult& ing, const
             subtokens( scopeLastSegment( ing.symbols[d].scope ), words );
         }
     }
-    std::ranges::sort( words );
-    words.erase( std::unique( words.begin(), words.end() ), words.end() );
     return words;
 }
 // Does `n`'s name share no subtoken with `ownerWords`? (false when there are no owner words: the key then never differs)
@@ -159,9 +155,15 @@ inline bool pathNameOffWord( const IngestResult& ing, NodeId n, const std::vecto
     }
     scratch.clear();
     subtokens( ing.symbols[n].name, scratch );
-    return std::ranges::none_of( scratch, [ & ]( const std::string& w ) { return std::ranges::binary_search( ownerWords, w ); } );
+    return std::ranges::none_of( scratch, [ & ]( const std::string& w ) { return std::ranges::find( ownerWords, w ) != ownerWords.end(); } );
 }
-inline PathChainKey pathChainKey( const IngestResult& ing, const Graph& g, std::span<const NodeId> chain, bool testsOn, const std::vector<std::string>& ownerWords )
+// What the key of a chain reads besides the graph: whether test intermediates count, and the to= owner words.
+struct PathKeyReading
+{
+    bool                     testsOn = false;
+    std::vector<std::string> ownerWords;
+};
+inline PathChainKey pathChainKey( const IngestResult& ing, const Graph& g, std::span<const NodeId> chain, const PathKeyReading& reading )
 {
     PathChainKey             k;
     std::vector<std::string> scratch;
@@ -169,7 +171,7 @@ inline PathChainKey pathChainKey( const IngestResult& ing, const Graph& g, std::
     {
         const bool mid = i + 1 < chain.size();
         k = pathHopKey( g, k, chain[i - 1], chain[i], [ & ] { return byNameCandidates( ing, g, chain[i - 1], chain[i] ); },
-                        PathHopMarks{ testsOn && mid && pathDefInTests( ing, chain[i] ), mid && pathNameOffWord( ing, chain[i], ownerWords, scratch ) } );
+                        PathHopMarks{ reading.testsOn && mid && pathDefInTests( ing, chain[i] ), mid && pathNameOffWord( ing, chain[i], reading.ownerWords, scratch ) } );
     }
     return k;
 }
@@ -192,195 +194,232 @@ struct FewestUnprovenChain
     std::uint32_t       equalCount    = 0;   // other final-step candidates as proven as the winner (same unproven, route_cands)
 };
 
-// `path` = the plain BFS chain (shortestPathAny, L hops). One layered BFS from srcDefs over every out-edge to depth L, the same edge
-// order as the plain search; each node keeps the least key over its predecessors one layer up (a strictly smaller key only, so equal
-// keys keep the first-found predecessor = the plain search's). The candidates at depth L: every to= definition reached by an edge,
-// and every declined call made at depth L-1 whose list holds a to= definition (declinedCrossingCands, <= kPathDeclinedLastCands).
-// Work: O(edges of the depth-L cone) plus one pass over the declined records; run only when today's chain has an unproven hop or a
-// test intermediate (an all-proven, all-source chain already has the least key).
+namespace pathfewest_detail
+{
+// One final step of a depth-L chain: an edge into a to= definition (`end`), or a declined call by `via` into `to`.
+struct FinalCand
+{
+    PathChainKey  key;
+    NodeId        end   = kNoNode;
+    NodeId        via   = kNoNode;
+    NodeId        to    = kNoNode;
+    std::uint32_t cands = 0;
+};
+
+// THE LAYERED SEARCH: one BFS from srcDefs over every out-edge to depth L, in the plain search's edge order; each node keeps the least
+// key over its predecessors one layer up, replaced only by a STRICTLY smaller key, so equal keys keep the first-found predecessor (the
+// plain search's). Work per loop (owner 11-04): the BFS visits each edge of the depth-L cone once; the per-node facts (test path, owner
+// word) are read once per node; the by-name candidate counts once per expanded node (one sorted name list, then equal_range per edge).
+class LayeredSearch
+{
+public:
+    LayeredSearch( const IngestResult& ing, const Graph& g, std::uint32_t depth, const PathKeyReading& reading )
+        : m_ing( ing ), m_g( g ), m_L( depth ), m_reading( reading ), m_n( g.wOutDeg.size() ),
+          m_dist( m_n, kUnseen ), m_prev( m_n, kNoNode ), m_best( m_n ), m_isDst( m_n, 0 ), m_inTests( m_n, -1 ), m_offWord( m_n, -1 )
+    {
+    }
+    void run( const std::vector<NodeId>& srcDefs, const std::vector<NodeId>& dstDefs )
+    {
+        for( const NodeId d : dstDefs )
+        {
+            if( d < m_n )
+            {
+                m_isDst[d] = 1;
+            }
+        }
+        for( const NodeId s : srcDefs )
+        {
+            if( s < m_n && m_dist[s] == kUnseen )
+            {
+                m_dist[s] = 0;
+                m_queue.push_back( s );
+            }
+        }
+        for( std::size_t head = 0; head < m_queue.size(); ++head )
+        {
+            if( m_dist[ m_queue[ head ] ] < m_L )
+            {
+                expand( m_queue[ head ] );   // depth L is the last layer: reached, never expanded
+            }
+        }
+    }
+    // The final-step candidates in a fixed order: edge-reached to= definitions in discovery order, then declined records in record
+    // order (one pass over the declined records; a list of more than kPathDeclinedLastCands candidates is no final step).
+    std::vector<FinalCand> finals( const std::vector<NodeId>& dstDefs ) const
+    {
+        std::vector<FinalCand> out;
+        for( const NodeId v : m_queue )
+        {
+            if( m_dist[v] == m_L && m_isDst[v] )
+            {
+                out.push_back( FinalCand{ m_best[v], v, kNoNode, kNoNode, 0 } );
+            }
+        }
+        const DeclinedCrossRule rule( m_ing, m_g );
+        for( std::uint32_t site = 0; site < m_g.declinedSiteList.size(); ++site )
+        {
+            const NodeId u = m_g.declinedSiteCaller[ site ];
+            if( u < m_n && m_dist[u] != kUnseen && m_dist[u] + 1 == m_L )
+            {
+                addDeclined( out, rule, site, u, dstDefs );
+            }
+        }
+        return out;
+    }
+    // The chain src .. f's last node (f.to after a declined call).
+    std::vector<NodeId> chainOf( const FinalCand& f ) const
+    {
+        std::vector<NodeId> chain;
+        if( f.via != kNoNode )
+        {
+            chain.push_back( f.to );
+        }
+        for( NodeId at = f.via != kNoNode ? f.via : f.end; at != kNoNode; at = m_prev[at] )
+        {
+            chain.push_back( at );
+        }
+        std::reverse( chain.begin(), chain.end() );
+        return chain;
+    }
+
+private:
+    static constexpr std::uint32_t kUnseen = UINT32_MAX;
+    void expand( NodeId u )
+    {
+        for( std::uint32_t k = m_g.outOff[u]; k < m_g.outOff[u + 1]; ++k )
+        {
+            const NodeId v = m_g.outTargets[k];
+            if( m_dist[v] == kUnseen )
+            {
+                m_dist[v] = m_dist[u] + 1;
+                m_queue.push_back( v );
+            }
+            const bool last = m_dist[v] == m_L;
+            if( m_dist[v] != m_dist[u] + 1 || ( last && !m_isDst[v] ) )
+            {
+                continue;   // not one layer down, or the last layer away from a to= definition
+            }
+            const PathChainKey kv = pathHopKey( m_g, m_best[u], u, v, [ & ] { return byNameCands( u, v ); },
+                                                PathHopMarks{ !last && m_reading.testsOn && inTests( v ), !last && offWord( v ) } );
+            if( m_prev[v] == kNoNode || kv < m_best[v] )
+            {
+                m_best[v] = kv;
+                m_prev[v] = u;
+            }
+        }
+    }
+    void addDeclined( std::vector<FinalCand>& out, const DeclinedCrossRule& rule, std::uint32_t site, NodeId u, const std::vector<NodeId>& dstDefs ) const
+    {
+        for( const NodeId d : dstDefs )
+        {
+            const std::uint32_t c = d < m_n ? declinedCrossingCands( m_g, rule, site, d ) : 0u;
+            if( c > 0 && c <= kPathDeclinedLastCands )
+            {
+                PathChainKey kd = m_best[u];
+                ++kd.unproven;
+                kd.cands = pathCandsTimes( kd.cands, c );
+                out.push_back( FinalCand{ kd, kNoNode, u, d, c } );
+            }
+        }
+    }
+    bool inTests( NodeId v )
+    {
+        m_inTests[v] = m_inTests[v] < 0 ? std::int8_t( pathDefInTests( m_ing, v ) ? 1 : 0 ) : m_inTests[v];
+        return m_inTests[v] == 1;
+    }
+    bool offWord( NodeId v )
+    {
+        m_offWord[v] = m_offWord[v] < 0 ? std::int8_t( pathNameOffWord( m_ing, v, m_reading.ownerWords, m_wordScratch ) ? 1 : 0 ) : m_offWord[v];
+        return m_offWord[v] == 1;
+    }
+    // byNameCandidates( u, v ) from ONE sorted list of u's by-name targets' names, built on u's first by-name edge (byNameCandidates
+    // per edge rescans the out-edges: O(degree^2) on a by-name hub)
+    std::uint64_t byNameCands( NodeId u, NodeId v )
+    {
+        if( m_byNameOf != u )
+        {
+            m_byNameOf = u;
+            m_byNameNames.clear();
+            for( std::uint32_t e = m_g.outOff[u]; e < m_g.outOff[u + 1]; ++e )
+            {
+                const NodeId t = m_g.outTargets[e];
+                if( t < m_ing.symbols.size() && e < m_g.outNameOnly.size() && edgeKindByte( m_g.outNameOnly[e] ) == kEdgeName )
+                {
+                    m_byNameNames.push_back( m_ing.symbols[t].name );
+                }
+            }
+            std::ranges::sort( m_byNameNames );
+        }
+        const auto [ lo, hi ] = std::ranges::equal_range( m_byNameNames, std::string_view( m_ing.symbols[v].name ) );
+        return std::max<std::uint64_t>( std::uint64_t( hi - lo ), 1 );   // byNameCandidates' own count, >= 1
+    }
+
+    const IngestResult&           m_ing;
+    const Graph&                  m_g;
+    std::uint32_t                 m_L;
+    const PathKeyReading&         m_reading;
+    std::size_t                   m_n;
+    std::vector<std::uint32_t>    m_dist;
+    std::vector<NodeId>           m_prev;
+    std::vector<PathChainKey>     m_best;
+    std::vector<char>             m_isDst;
+    std::vector<std::int8_t>      m_inTests;   // pathDefInTests, read once per node (-1 = not read yet)
+    std::vector<std::int8_t>      m_offWord;   // pathNameOffWord, read once per node
+    std::vector<NodeId>           m_queue;
+    std::vector<std::string>      m_wordScratch;
+    std::vector<std::string_view> m_byNameNames;
+    NodeId                        m_byNameOf = kNoNode;
+};
+
+// The first key on which the winner beats today's chain.
+inline PathTie tieOf( const PathChainKey& w, const PathChainKey& today ) noexcept
+{
+    return w.unproven < today.unproven ? PathTie::FewerUnproven
+         : w.cands < today.cands       ? PathTie::FewerCands
+         : w.tests < today.tests       ? PathTie::SourceFirst
+                                       : PathTie::OwnerWord;
+}
+}   // namespace pathfewest_detail
+
+// `path` = the plain BFS chain (shortestPathAny, L hops). The candidates at depth L: every to= definition an edge reaches, and every
+// declined call made at depth L-1 whose list holds a to= definition (declinedCrossingCands, <= kPathDeclinedLastCands); the least key
+// wins, today's chain on a tie. Run only when today's chain has an unproven hop or a test intermediate (an all-proven, all-source
+// chain already has the least key that matters).
 inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& path,
                                                const std::vector<NodeId>& srcDefs, const std::vector<NodeId>& dstDefs )
 {
+    using namespace pathfewest_detail;
     FewestUnprovenChain out;
     const std::size_t   N = g.wOutDeg.size();
     if( path.size() < 2 || N == 0 )
     {
         return out;
     }
-    const bool         testsOn = std::ranges::none_of( srcDefs, [ & ]( NodeId n ) { return n < N && pathDefInTests( ing, n ); } )
-                              && std::ranges::none_of( dstDefs, [ & ]( NodeId n ) { return n < N && pathDefInTests( ing, n ); } );
-    const std::vector<std::string> ownerWords = pathToOwnerWords( ing, dstDefs );
-    const PathChainKey             today      = pathChainKey( ing, g, path, testsOn, ownerWords );
+    const auto           anyInTests = [ & ]( const std::vector<NodeId>& defs ) { return std::ranges::any_of( defs, [ & ]( NodeId n ) { return n < N && pathDefInTests( ing, n ); } ); };
+    const PathKeyReading reading{ !anyInTests( srcDefs ) && !anyInTests( dstDefs ), pathToOwnerWords( ing, dstDefs ) };
+    const PathChainKey   today = pathChainKey( ing, g, path, reading );
     if( today.unproven == 0 && today.tests == 0 )
     {
         return out;
     }
-    const std::uint32_t      L = std::uint32_t( path.size() - 1 );
-    constexpr std::uint32_t  kUnseen = UINT32_MAX;
-    std::vector<std::uint32_t> dist( N, kUnseen );
-    std::vector<NodeId>        prev( N, kNoNode );
-    std::vector<PathChainKey>  best( N );
-    std::vector<char>          isDst( N, 0 );
-    std::vector<std::int8_t>   inTests( N, -1 );   // pathDefInTests, read once per node (-1 = not read yet)
-    std::vector<std::int8_t>   offWord( N, -1 );   // pathNameOffWord, read once per node
-    std::vector<std::string>   wordScratch;
-    for( const NodeId d : dstDefs )
-    {
-        if( d < N )
-        {
-            isDst[d] = 1;
-        }
-    }
-    const auto intermediateInTests = [ & ]( NodeId v ) -> bool
-    {
-        if( inTests[v] < 0 )
-        {
-            inTests[v] = pathDefInTests( ing, v ) ? 1 : 0;
-        }
-        return inTests[v] == 1;
-    };
-    const auto intermediateOffWord = [ & ]( NodeId v ) -> bool
-    {
-        if( offWord[v] < 0 )
-        {
-            offWord[v] = pathNameOffWord( ing, v, ownerWords, wordScratch ) ? 1 : 0;
-        }
-        return offWord[v] == 1;
-    };
-    // byNameCandidates( u, v ) for every by-name out-edge of the node being expanded, from ONE sorted list of its by-name targets' names
-    // (built on its first by-name edge): byNameCandidates per edge rescans the out-edges, O(degree^2) on a by-name hub.
-    std::vector<std::string_view> byNameNames;
-    NodeId                        byNameOf = kNoNode;
-    const auto byNameCands = [ & ]( NodeId u, NodeId v ) -> std::uint64_t
-    {
-        if( byNameOf != u )
-        {
-            byNameOf = u;
-            byNameNames.clear();
-            for( std::uint32_t e = g.outOff[u]; e < g.outOff[u + 1]; ++e )
-            {
-                const NodeId t = g.outTargets[e];
-                if( t < ing.symbols.size() && e < g.outNameOnly.size() && edgeKindByte( g.outNameOnly[e] ) == kEdgeName )
-                {
-                    byNameNames.push_back( ing.symbols[t].name );
-                }
-            }
-            std::ranges::sort( byNameNames );
-        }
-        const auto [ lo, hi ] = std::ranges::equal_range( byNameNames, std::string_view( ing.symbols[v].name ) );
-        return std::max<std::uint64_t>( std::uint64_t( hi - lo ), 1 );   // byNameCandidates' own count, >= 1
-    };
-    std::vector<NodeId> q;
-    for( const NodeId s : srcDefs )
-    {
-        if( s < N && dist[s] == kUnseen )
-        {
-            dist[s] = 0;
-            q.push_back( s );
-        }
-    }
-    for( std::size_t head = 0; head < q.size(); ++head )
-    {
-        const NodeId u = q[ head ];
-        if( dist[u] >= L )
-        {
-            continue;   // depth L is the last layer: reached, never expanded
-        }
-        for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
-        {
-            const NodeId v = g.outTargets[k];
-            if( dist[v] == kUnseen )
-            {
-                dist[v] = dist[u] + 1;
-                q.push_back( v );
-            }
-            else if( dist[v] != dist[u] + 1 )
-            {
-                continue;
-            }
-            if( dist[v] == L && !isDst[v] )
-            {
-                continue;   // the last layer matters only at a to= definition
-            }
-            const bool         mid = !( dist[v] == L && isDst[v] );
-            const PathChainKey kv  = pathHopKey( g, best[u], u, v, [ & ] { return byNameCands( u, v ); },
-                                                 PathHopMarks{ testsOn && mid && intermediateInTests( v ), mid && intermediateOffWord( v ) } );
-            if( prev[v] == kNoNode || kv < best[v] )
-            {
-                best[v] = kv;
-                prev[v] = u;
-            }
-        }
-    }
-    // the final-step candidates, in a fixed order: edge-reached to= definitions in discovery order, then declined records in record order;
-    // the least key wins (today's chain on a tie), and the others as proven as the winner are counted (route_equal=)
-    struct FinalCand
-    {
-        PathChainKey  key;
-        NodeId        end   = kNoNode;   // an edge-reached to= definition
-        NodeId        via   = kNoNode;   // the caller of a declined last call into `to`
-        NodeId        to    = kNoNode;
-        std::uint32_t cands = 0;
-    };
-    std::vector<FinalCand> finals;
-    for( const NodeId v : q )
-    {
-        if( dist[v] == L && isDst[v] )
-        {
-            finals.push_back( FinalCand{ best[v], v, kNoNode, kNoNode, 0 } );
-        }
-    }
-    const DeclinedCrossRule rule( ing, g );
-    for( std::uint32_t site = 0; site < g.declinedSiteList.size(); ++site )
-    {
-        const NodeId u = g.declinedSiteCaller[ site ];
-        if( u >= N || dist[u] == kUnseen || dist[u] + 1 != L )
-        {
-            continue;
-        }
-        for( const NodeId d : dstDefs )
-        {
-            const std::uint32_t c = d < N ? declinedCrossingCands( g, rule, site, d ) : 0u;
-            if( c == 0 || c > kPathDeclinedLastCands )
-            {
-                continue;
-            }
-            PathChainKey kd = best[u];
-            ++kd.unproven;
-            kd.cands = pathCandsTimes( kd.cands, c );
-            finals.push_back( FinalCand{ kd, kNoNode, u, d, c } );
-        }
-    }
-    const FinalCand* win = nullptr;
+    LayeredSearch search( ing, g, std::uint32_t( path.size() - 1 ), reading );
+    search.run( srcDefs, dstDefs );
+    const std::vector<FinalCand> finals = search.finals( dstDefs );
+    const FinalCand*             win    = nullptr;
     for( const FinalCand& f : finals )
     {
-        if( f.key < ( win != nullptr ? win->key : today ) )
-        {
-            win = &f;
-        }
+        win = f.key < ( win != nullptr ? win->key : today ) ? &f : win;
     }
     if( win == nullptr )
     {
         return out;   // today's chain has the least key (ties keep it)
     }
-    if( win->via != kNoNode )
-    {
-        out.chain.push_back( win->to );
-        out.declinedCands = win->cands;
-    }
-    for( NodeId at = win->via != kNoNode ? win->via : win->end; at != kNoNode; at = prev[at] )
-    {
-        out.chain.push_back( at );
-    }
-    std::reverse( out.chain.begin(), out.chain.end() );
+    out.chain = search.chainOf( *win );
     ENSURES( out.chain.size() == path.size(), "the replacing chain has the found length" );
-    const PathChainKey& w = win->key;
-    out.tie           = w.unproven < today.unproven ? PathTie::FewerUnproven
-                      : w.cands < today.cands       ? PathTie::FewerCands
-                      : w.tests < today.tests       ? PathTie::SourceFirst
-                                                    : PathTie::OwnerWord;
+    out.declinedCands = win->cands;
+    out.tie           = tieOf( win->key, today );
     out.otherUnproven = today.unproven;
-    out.equalCount    = std::uint32_t( std::ranges::count_if( finals, [ & ]( const FinalCand& f ) { return &f != win && f.key.asProven( w ); } ) );
+    out.equalCount    = std::uint32_t( std::ranges::count_if( finals, [ & ]( const FinalCand& f ) { return &f != win && f.key.asProven( win->key ); } ) );
     return out;
 }
 
