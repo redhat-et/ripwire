@@ -221,7 +221,7 @@ private:
             }
             else if( b.kind == LocalBindKind::VarDecl && !b.var.empty() )
             {
-                const bool             local = b.var.starts_with( kPythonLocalScopePrefix );   // a lambda parameter / comprehension target
+                const bool             local = b.var.str().starts_with( kPythonLocalScopePrefix );   // a lambda parameter / comprehension target
                 const std::string_view name  = local ? std::string_view( b.var ).substr( kPythonLocalScopePrefix.size() ) : std::string_view( b.var );
                 const NodeId           sc    = pythonBindScope( m_ing, b );   // the enclosing def / class; kNoNode: module scope
                 if( local && b.spanEnd > b.spanStart )
@@ -232,7 +232,7 @@ private:
                 {
                     addShadow( b, sc, name );
                 }
-                else if( !local && b.startByte > 0 && b.fileId < m_pyFile.size() && !b.var.starts_with( kPythonCondDefPrefix ) && isPyFile( b.fileId ) )
+                else if( !local && b.startByte > 0 && b.fileId < m_pyFile.size() && !b.var.str().starts_with( kPythonCondDefPrefix ) && isPyFile( b.fileId ) )
                 {
                     ++m_modWrites[ fk( b.fileId, name ) ];   // `global K` (byte 0) is not a write here
                 }
@@ -353,7 +353,7 @@ private:
             const std::uint32_t mf   = moduleFile( f, b->typeName, !js );
             // the name the imported module defines: JS `import { a as b }` → a; Python `from m import a as b` → a (never the alias)
             const std::string_view there = js ? ( b->importedName.empty() ? name : std::string_view( b->importedName ) )
-                                       : b->importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : name;
+                                       : b->importedName.str().starts_with( kPythonFromMemberMark ) ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : name;
             const bool          pyModule = !js && b->importedName == "module";   // `import m as K` binds a module, not a name of it
             NodeId              def  = mf == kNoFile || mf == f || pyModule ? kNoNode
                                      : depth < kRegReexportDepth ? resolveIdent( mf, there, depth + 1 ) : topLevel( mf, there );
@@ -386,11 +386,11 @@ private:
             {
                 return false;
             }
-            if( b->kind != LocalBindKind::Import || b->importedName == "module" || b->importedName.starts_with( kPythonFromMemberMark ) || sub == kNoFile )
+            if( b->kind != LocalBindKind::Import || b->importedName == "module" || b->importedName.str().starts_with( kPythonFromMemberMark ) || sub == kNoFile )
             {
                 return true;
             }
-            const std::string here = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+            const std::string here = b->typeName.str().ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
             return moduleFile( pkg, here, true ) != sub;
         } );
     }
@@ -437,15 +437,15 @@ private:
             std::uint32_t mf = kNoFile;
             if( b->importedName == "module" )
             {
-                const bool plain = b->typeName.size() > mod.size() && b->typeName.starts_with( mod ) && b->typeName[ mod.size() ] == '.';
+                const bool plain = b->typeName.size() > mod.size() && b->typeName.str().starts_with( mod ) && b->typeName[ mod.size() ] == '.';
                 mf               = moduleFile( f, plain ? mod : std::string_view( b->typeName ), true );
             }
             else
             {
-                const std::string_view member = b->importedName.starts_with( kPythonFromMemberMark )
+                const std::string_view member = b->importedName.str().starts_with( kPythonFromMemberMark )
                                                     ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : mod;
                 const std::uint32_t    pkg    = moduleFile( f, b->typeName, true );
-                const std::string      sub    = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+                const std::string      sub    = b->typeName.str().ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
                 mf                            = moduleFile( f, sub, true );
                 if( pkg != kNoFile && ( ( pkg != f && definesTop( pkg, member ) ) || bindsOtherThanSubmodule( pkg, member, b, mf ) ) )
                 {

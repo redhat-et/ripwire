@@ -400,7 +400,7 @@ inline void rubyNoteHelperMethods( TSNode call, std::uint32_t fileId, std::strin
     if( !owner.empty() )
     {
         rubyNoteSymbolArguments( fieldChild( call, NodeField::Arguments ),
-                                 RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubyHelperMethod, .typeName = owner }, src, binds );
+                                 RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubyHelperMethod, .typeName = rw::InternedText( owner ) }, src, binds );
     }
 }
 
@@ -560,7 +560,7 @@ inline void rubyNoteClassSideDef( TSNode defNode, std::uint32_t fileId, std::str
     if( side != RubyDefSide::Instance )
     {
         binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( defNode ), .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef,
-                                   .var = std::string( name ), .importedName = rubySideMark( side ) } );
+                                   .var = rw::InternedText( name ), .importedName = rw::InternedText( rubySideMark( side ) ) } );
     }
 }
 
@@ -574,17 +574,17 @@ inline void rubyNoteSingletonDecl( TSNode n, RubyDefSide side, std::uint32_t fil
     if( delegation.empty() )
     {
         rubyNoteSymbolArguments( fieldChild( n, NodeField::Arguments ),
-                                 RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .importedName = rubySideMark( side ) },
+                                 RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .importedName = rw::InternedText( rubySideMark( side ) ) },
                                  src, binds );
         return;
     }
     const std::string owner = rubyEnclosingScopeOf( n, src );
     if( delegation == "delegate_missing_to" )
     {
-        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .typeName = owner } );
+        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .typeName = rw::InternedText( owner ) } );
         return;
     }
-    rubyNoteSymbolArguments( fieldChild( n, NodeField::Arguments ), RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .typeName = owner },
+    rubyNoteSymbolArguments( fieldChild( n, NodeField::Arguments ), RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .typeName = rw::InternedText( owner ) },
                              src, binds );
 }
 
@@ -639,7 +639,7 @@ inline void rubyNoteClassMixins( TSNode n, bool extend, std::uint32_t fileId, st
     const bool singleton = rubyIsSingletonDef( n );   // the directive sits in `class << self`
     if( extend && !inIncluded && !singleton && rubyExtendsSelf( n ) )
     {
-        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyClassMixin, .var = "self" } );
+        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyClassMixin, .var = rw::InternedText( "self" ) } );
     }
     if( extend == singleton )
     {
@@ -649,7 +649,7 @@ inline void rubyNoteClassMixins( TSNode n, bool extend, std::uint32_t fileId, st
     for( const TSNode c : rubyMixinTargets( n, src ) )
     {
         binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( c ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyClassMixin,
-                                   .importedName = includer ? std::string( kRubyIncluderMark ) : std::string {} } );
+                                   .importedName = rw::InternedText( includer ? kRubyIncluderMark : std::string_view {} ) } );
     }
 }
 
@@ -705,8 +705,8 @@ inline void captureRubyMainMixins( TSNode root, std::uint32_t fileId, std::strin
         for( const TSNode c : rubyConstantArguments( n ) )
         {
             binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( c ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyMainMixin,
-                                       .spanStart = ts_node_start_point( c ).row + 1, .importedName = std::string( verb ),
-                                       .typeName = rubyConstantText( c, src ) } );
+                                       .spanStart = ts_node_start_point( c ).row + 1, .importedName = rw::InternedText( verb ),
+                                       .typeName = rw::InternedText( rubyConstantText( c, src ) ) } );
         }
         return true;
     } );

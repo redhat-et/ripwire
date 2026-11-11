@@ -761,11 +761,13 @@ struct ElixirContext
 void elixirExpandImplementations( const ElixirContext& context, std::vector<RawDef>& defs, std::size_t firstDef,
                                  std::vector<RawBind>& binds, std::size_t firstBind )
 {
-    const auto replacePrefix = []( std::string& text, const std::string& from, const std::string& to )
+    // `text` is a std::string (a def's scope / name) or a pool name (a bind's typeName, MEM-B1): build the new text, assign once
+    const auto replacePrefix = []( auto& text, const std::string& from, const std::string& to )
     {
-        if( text == from || ( text.starts_with( from ) && text.size() > from.size() && text[ from.size() ] == '.' ) )
+        const std::string_view was = text;
+        if( was == from || ( was.starts_with( from ) && was.size() > from.size() && was[ from.size() ] == '.' ) )
         {
-            text.replace( 0, from.size(), to );
+            text = to + std::string( was.substr( from.size() ) );
         }
     };
     for( TSNode call : context.calls )

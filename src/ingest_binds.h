@@ -4463,7 +4463,7 @@ inline void pushCallResult( BindCtx& cx, TSNode var, TSNode call, std::uint8_t i
     // startByte: the call Reference's own byte (the call's start) — graph.h joins on it and the callee name
     cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( call ), .lang = cx.lang, .kind = LocalBindKind::CallResult,
                                   .resultIndex = index, .unwrapDepth = depth, .spanStart = site.spanStart, .spanEnd = site.spanEnd,
-                                  .var = std::string( name ), .importedName = std::move( written ), .typeName = std::string( nodeTextOf( callee, cx.src ) ) } );
+                                  .var = rw::InternedText( name ), .importedName = rw::InternedText( written ), .typeName = rw::InternedText( nodeTextOf( callee, cx.src ) ) } );
 }
 
 // One ReturnType of the definition starting at `defStart`: position `index`, class `cls` ("" records nothing), the qualified
@@ -4474,7 +4474,7 @@ inline void pushReturnType( BindCtx& cx, std::uint32_t defStart, std::uint8_t in
     if( !cls.empty() )   // Symbol::sigStartByte joins startByte (the RubySingletonDef pattern)
     {
         cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = defStart, .lang = cx.lang, .kind = LocalBindKind::ReturnType,
-                                      .isFromAssignment = spelledSelf, .resultIndex = index, .unwrapDepth = depth, .importedName = std::string( whole ), .typeName = std::string( cls ) } );
+                                      .isFromAssignment = spelledSelf, .resultIndex = index, .unwrapDepth = depth, .importedName = rw::InternedText( whole ), .typeName = rw::InternedText( cls ) } );
     }
 }
 
@@ -4486,7 +4486,7 @@ inline void pushTypeImport( BindCtx& cx, std::uint32_t at, std::string_view var,
     if( !var.empty() && !path.empty() )
     {
         cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = at, .lang = cx.lang, .kind = LocalBindKind::TypeImport,
-                                      .var = std::string( var ), .importedName = std::string( path ), .typeName = std::string( item ) } );
+                                      .var = rw::InternedText( var ), .importedName = rw::InternedText( path ), .typeName = rw::InternedText( item ) } );
     }
 }
 
@@ -4550,7 +4550,7 @@ inline void pushNamespace( BindCtx& cx, TSNode n, TSNode name, TSNode body )
     if( !ts_node_is_null( body ) )
     {
         cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( n ), .lang = cx.lang, .kind = LocalBindKind::Namespace,
-                                      .spanStart = ts_node_start_byte( body ), .spanEnd = ts_node_end_byte( body ), .var = importPathText( name, cx.src ) } );
+                                      .spanStart = ts_node_start_byte( body ), .spanEnd = ts_node_end_byte( body ), .var = rw::InternedText( importPathText( name, cx.src ) ) } );
     }
 }
 
@@ -4639,7 +4639,7 @@ inline void captureTypeAlias( BindCtx& cx, TSNode n, const char* t )
         if( !name.empty() )
         {
             cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( n ), .lang = cx.lang, .kind = LocalBindKind::TypeAlias,
-                                          .spanStart = spanStart, .spanEnd = spanEnd, .var = std::string( name ), .importedName = importPathText( target, cx.src ) } );
+                                          .spanStart = spanStart, .spanEnd = spanEnd, .var = rw::InternedText( name ), .importedName = rw::InternedText( importPathText( target, cx.src ) ) } );
         }
     };
     if( kindIs( t, "type_definition" ) )
@@ -4967,8 +4967,8 @@ inline void captureScopeFact( BindCtx& cx, TSNode n, const char* t )
     }
     const std::string_view item = directive ? std::string_view{} : namesplit::afterLast( whole, "::" );
     cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( n ), .lang = cx.lang, .kind = LocalBindKind::TypeImport,
-                                  .spanStart = spanStart, .spanEnd = spanEnd, .var = directive ? std::string( "*" ) : std::string( item ),
-                                  .importedName = whole, .typeName = std::string( item ) } );
+                                  .spanStart = spanStart, .spanEnd = spanEnd, .var = rw::InternedText( directive ? std::string_view( "*" ) : std::string_view( item ) ),
+                                  .importedName = rw::InternedText( whole ), .typeName = rw::InternedText( item ) } );
 }
 
 // Rust `use` trees, flattened: `use a::b::C;`, `use a::{b::C, D as E, self, f::*};` — one TypeImport per name bound, the
@@ -5764,7 +5764,7 @@ inline bool captureTypedDeclShared( BindCtx& cx, TSNode n, const char* t )
         // packages this tree declares, whatever directory holds them, so an import of any other package is from outside
         const TSNode path = namedChildOfKind( n, { "scoped_identifier", "identifier" } );
         cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( n ), .lang = cx.lang, .kind = LocalBindKind::Namespace,
-                                      .var = importPathText( path, cx.src ) } );
+                                      .var = rw::InternedText( importPathText( path, cx.src ) ) } );
         return false;
     }
     if( kindIs( t, "method_declaration" ) || kindIs( t, "function_declaration" ) )
@@ -6026,7 +6026,7 @@ inline void capturePythonInPlaceFacts( BindCtx& cx, TSNode n, const char* t, std
         if( op != kPythonInPlaceMethods.end() && !var.empty() )
         {
             cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = at, .lang = cx.lang, .kind = LocalBindKind::AugAssign,
-                                          .var = std::string( var ), .importedName = std::string( op->binary ), .typeName = std::string( op->inPlace ) } );
+                                          .var = rw::InternedText( var ), .importedName = rw::InternedText( op->binary ), .typeName = rw::InternedText( op->inPlace ) } );
         }
         return;
     }
@@ -6048,7 +6048,7 @@ inline void capturePythonInPlaceFacts( BindCtx& cx, TSNode n, const char* t, std
     if( const std::string_view result = pythonOperatorResult( n, cx.src ); !result.empty() )
     {
         cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( body ), .lang = cx.lang, .kind = LocalBindKind::OperatorResult,
-                                      .var = std::string( name ), .typeName = std::string( result ) } );
+                                      .var = rw::InternedText( name ), .typeName = rw::InternedText( result ) } );
     }
 }
 

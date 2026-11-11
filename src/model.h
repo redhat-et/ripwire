@@ -1926,17 +1926,20 @@ struct Binding
                                           //   declarations) from its scope's start. See suppressShadowedReferences.
                                           //   ES/Elixir bindings also use spans as documented in LocalBindKind.
                                           //   {0,0} on a scope-less shadow capture (contains nothing).
-    std::string   var;                    // the declared variable identifier (`x`)
-    std::string   importedName;           // JsImport: the requested export name; never a global-name fallback.
+    rw::InternedText var;                 // the declared variable identifier (`x`). MEM-B1 BIND-INTERN: the three texts are 4 B ids
+                                          //   into the reference names' pool (refnames.h), so a Binding is nine u32 (see the pin below)
+    rw::InternedText importedName;        // JsImport: the requested export name; never a global-name fallback.
                                           //   Type/ParamType: the written type WHOLE when it is qualified, else "".
                                           //   JsExport: the LOCAL name the exported spelling binds (empty when
                                           //   the two are identical). Elixir: see LocalBindKind's field contracts.
-    std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
+    rw::InternedText typeName;            // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
                                           //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.
 };
-static_assert( sizeof( Binding ) == 6 * sizeof( std::uint32_t ) + 3 * sizeof( std::string ),
-               "Binding's scalars are five u32, a u8 kind, a bool and two u8 in 24 bytes — the four ride one u32 slot" );
+// MEM-B1 BIND-INTERN: 36 B on every ABI (96 B on libc++ with three std::string, 120 B on libstdc++). Six u32 of scalars (five u32,
+// a u8 kind, a bool and two u8 riding one u32 slot) and three 4 B pool ids: no member's size depends on the standard library, so
+// the pin is exact everywhere. A std::string member fails it; intern the text (rw::InternedText) instead.
+static_assert( sizeof( Binding ) == 9 * sizeof( std::uint32_t ), "Binding grew: see the MEM-B1 note above" );
 
 // R5 cross-language FFI binding alias. A language-binding DECLARATION found in a C/C++ file (or a
 // ctypes-handle assignment in a Python file) that makes a C/C++ definition reachable under a DIFFERENT
