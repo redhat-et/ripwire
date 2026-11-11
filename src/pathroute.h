@@ -317,11 +317,11 @@ private:
             }
         }
     }
-    // a per-node fact read once: `memo[v]` is -1 until `read()` fills it
-    template<class Read>
-    static bool once( std::vector<std::int8_t>& memo, NodeId v, Read&& read )
+    // a per-node fact computed once: `memo[v]` is -1 until `factOf()` fills it
+    template<class FactOf>
+    static bool once( std::vector<std::int8_t>& memo, NodeId v, FactOf&& factOf )
     {
-        memo[v] = memo[v] < 0 ? std::int8_t( read() ? 1 : 0 ) : memo[v];
+        memo[v] = memo[v] < 0 ? std::int8_t( factOf() ? 1 : 0 ) : memo[v];
         return memo[v] == 1;
     }
     // byNameCandidates( u, v ) from ONE sorted list of u's by-name targets' names, built on u's first by-name edge (byNameCandidates
