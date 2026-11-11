@@ -37,6 +37,9 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+# HEAD-RR-GATE (B34) changes which rows of the fixture's head file sit past <d> rank 10; the demote's rule and guards are pinned on the
+# round-robin this fixture was written against (the gate's own contract lives in forheadrrgatecheck).
+export RIPWIRE_NO_HEAD_RR_GATE=1
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forsiblingdemotecheck: BIN=$BIN"
