@@ -535,6 +535,14 @@ Discloses: `path_from_capped`
 | `kPathFromReachMaxNodes` | `4096` | — | runaway guard on A's forward walk; past it every caller of A stays where it ranked |
 | `kPathGapSideRows` | `10` | — | rows per side of a <path_gap>; the rest is count= and next= |
 
+### `src/forimportspec.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kImportSpecDepth` | `12` | — | statements one walk follows from the entry |
+
 ### `src/forliteral.h`
 
 Discloses: `capped`, `lit_capped`
