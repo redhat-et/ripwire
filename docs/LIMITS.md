@@ -1337,6 +1337,7 @@ Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importer
 | `kForLensDefaultTopN` | `40` | — | — |
 | `kForPayloadBudgetBytes` | `7500` | — | — |
 | `kForTailSigBytes` | `160` | — | — |
+| `kHeadRoundRobinLiftMaxLensRank` | `8` | — | — |
 | `kHeadRoundRobinRows` | `8` | — | — |
 | `kLegoClosureRowCap` | `200` | OUTPUT | — |
 | `kMaxExpandIncludes` | `24` | — | inc= cap |
