@@ -20,8 +20,11 @@
 #   (n5) a task-named row: a task naming WidgetParser.parseWidgetConfig keeps it; (n5o) a task naming another owner's member
 #        (Other.parseWidgetConfig) does not keep it; (n5r) a <shortkey> rung's <d n= l=/> (task Checker.readWidgetConfig) is no bodied twin
 #   (n6) a mem= row: every extractor names a type row bare (C++, C#, Java, Kotlin, Swift, Scala, TypeScript, Python, Ruby probed), and
-#        mem= rides only on class/struct/interface rows, so a mem= row is never owner-qualified: the arm checks that every mem= row of
-#        both trees stays put (structural; the guard is SIBLING-DEMOTE's K1, kept for one guard set)
+#        mem= rides only on class/struct/interface rows, so a mem= row is never owner-qualified and DECL-TWIN never reads one (K1 is
+#        kept for one guard set, unreachable here). The arm proves that premise on rows it sees: the ts tree carries mem= rows
+#        (WidgetConfigKeeper, and WidgetConfigHolder inside `namespace WidgetConfigNs`), every mem= row of both trees is bare and stays
+#        a row in place, and the C++ out-of-line nested type `struct WidgetConfigNest::WidgetConfigDeep` is a bare WidgetConfigDeep row
+#        (the shapes most likely to give a qualified type name). It FAILS when it sees no mem= row (CodeRabbit #607: it once passed on 0)
 #   (b)  --token-budget runs the rule too (DEMOTE-ALL-DIALECTS, fordemoteall.h): (a) on the budgeted answer and its off twin
 #   (b2) a bare --max-tokens (not read by --for) does not hold the rule: byte-identical to the flagless answer
 #   (j)  --json: the twinned row is a {"pointer":"decl-twin",...} object in its place, every other row as the off twin's
@@ -77,6 +80,16 @@ export class WidgetConfigUser {
     return v + parseWidgetConfig(text);
   }
 }
+export namespace WidgetConfigNs {
+  export class WidgetConfigHolder {
+    alphaSlot(x: number): number { return x; }
+    betaSlot(y: number): number { return y; }
+  }
+}
+export class WidgetConfigKeeper {
+  keepAlpha(x: number): number { return x; }
+  keepBeta(y: number): number { return y; }
+}
 ''' )
 helper = lambda i: f'''export function widgetConfigHelper{i:02d}(x: number): number {{
   const y = x + {i};
@@ -90,6 +103,8 @@ w( "cpp/src/cfg.h", '''struct WidgetConfigLimits { static const int widget_confi
 struct WidgetConfigOuter { struct WidgetConfigInner { int widget_a; int widget_b; }; };
 struct WidgetConfigHdr { int parse_widget_config(int x); int stop_widget_config(int x); };
 typedef int (WidgetConfigHdr::*WidgetConfigFn)(int);
+struct WidgetConfigNest { struct WidgetConfigDeep; };
+struct WidgetConfigNest::WidgetConfigDeep { int deep_alpha(int x); int deep_beta(int y); };
 ''' )
 w( "cpp/src/cfg.cc", '''#include "cfg.h"
 int WidgetConfigHdr::parse_widget_config(int x) {
@@ -261,7 +276,7 @@ stays n3 WidgetConfigHdr::stop_widget_config "$TMP/cpp.off" "$TMP/cpp.on" cpp "i
 grep -q 'n="WidgetConfigHdr::stop_widget_config"[^>]* slot_by=' "$TMP/cpp.off" || no "(n3) the fixture's stop_widget_config row lost slot_by="
 grep -q '<d l="[0-9]*" e="[0-9]*" n="stop_widget_config"' "$TMP/cpp.off" || no "(n3) the bodied stop_widget_config row is not in the answer — the arm cannot see K7"
 
-# (n6) mem= rows: never owner-qualified, and none moves
+# (n6) mem= rows: seen (the premise), never owner-qualified, none moves; qualified type spellings print bare
 nm="$( python3 - "$TMP/ts.off" "$TMP/ts.on" "$TMP/cpp.off" "$TMP/cpp.on" <<'PY'
 import re, sys
 bad, seen = [], 0
@@ -275,7 +290,18 @@ for off, on in ( ( sys.argv[1], sys.argv[2] ), ( sys.argv[3], sys.argv[4] ) ):
 print( "%d %s" % ( seen, ",".join( bad ) ) )
 PY
 )"
-case "$nm" in *" ") ok "(n6) mem= rows: ${nm% } seen, none owner-qualified, none moved (K1 kept for one guard set)";; *) no "(n6) mem= rows: $nm";; esac
+case "$nm" in   # the arm checks its own premise: no mem= row in either tree means it saw nothing (CodeRabbit #607)
+    "0 "*) no "(n6) no mem= row in either tree — the arm cannot see K1";;
+    *" ") ok "(n6) mem= rows: ${nm% } seen across the off/on answers, none owner-qualified, none moved";;
+    *) no "(n6) mem= rows: $nm";;
+esac
+for t in WidgetConfigHolder WidgetConfigKeeper; do
+    grep -q "<d [^>]*n=\"$t\"[^>]* mem=\"" "$TMP/ts.off" || no "(n6) the fixture's $t row carries no mem= — the arm cannot see K1 there"
+    stays n6 "$t" "$TMP/ts.off" "$TMP/ts.on" ts "it carries mem= (named bare: $t)"
+done
+if grep -q '<d [^>]*n="WidgetConfigDeep" sc="WidgetConfigNest"' "$TMP/cpp.off" && ! grep -q 'n="WidgetConfigNest::WidgetConfigDeep"' "$TMP/cpp.off"; then
+    ok "(n6) the out-of-line nested type struct WidgetConfigNest::WidgetConfigDeep prints as a bare WidgetConfigDeep row (sc= names the owner)"
+else no "(n6) WidgetConfigNest::WidgetConfigDeep: $( grep -o '<d [^>]*WidgetConfigDeep"[^>]*>' "$TMP/cpp.off" | head -2 )"; fi
 
 # (b) --token-budget runs the rule; (b2) a bare --max-tokens does not hold it; (j) --json carries the pointer object
 run ts "--for=$TTASK" --token-budget=4000 >"$TMP/b.on"; runoff ts "--for=$TTASK" --token-budget=4000 >"$TMP/b.off"
