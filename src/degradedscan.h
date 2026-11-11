@@ -29,6 +29,7 @@
 #include "darkflags.h"      // readWhole / wholeWordAt — the shared lexical helpers (no second copy)
 #include "crossref.h"       // definesNameAt / definitionShaped — whereis' lexical definition reading (lexicalDefHit)
 #include "lintrules.h"      // langOfPath — which clean files ride the C++ parse path (object-like #define not indexed)
+#include "langfacts.h"      // LangFacts::objectMacrosUnindexed
 
 #include <algorithm>
 #include <cstdint>
@@ -180,8 +181,7 @@ inline LexicalDefHit lexicalDefHit( const IngestResult& ing, std::string_view na
     for( std::size_t fileIndex = 0; fileIndex < ing.files.size(); ++fileIndex )
     {
         const bool degraded = fileParseDegraded( ing, fileIndex );
-        const Lang pathLang = langOfPath( ing.files[ fileIndex ] );
-        if( !degraded && pathLang != Lang::Cpp && pathLang != Lang::ObjC )
+        if( !degraded && !langFacts( langOfPath( ing.files[ fileIndex ] ) ).objectMacrosUnindexed )
         {
             continue;
         }

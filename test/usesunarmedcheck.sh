@@ -22,7 +22,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "usesunarmedcheck: BIN=$BIN"
@@ -175,8 +175,8 @@ for spec in "go Options" "rs CmdRenderer" "c cmd_table"; do
         ok "(A3) MCP uses $2 ($1) carries unindexed_roles= and its legend clause"
     else no "(A3) MCP uses $2 ($1) answers without the unindexed disclosure: $( printf '%s' "$mo" | grep -o '<uses [^>]*>' | head -1 )"; fi
 done
-[ "$seen" -eq 3 ] && ok "(A4) premise: all 3 unarmed definitions resolved (defs>=1), so A2/A3 read a real answer" \
-                  || no "(A4) premise: only $seen/3 unarmed definitions resolved — A2/A3 judged a refusal"
+if [ "$seen" -eq 3 ]; then ok "(A4) premise: all 3 unarmed definitions resolved (defs>=1), so A2/A3 read a real answer"
+else no "(A4) premise: only $seen/3 unarmed definitions resolved — A2/A3 judged a refusal"; fi
 # (A5) positive control: armed C++ class across .cpp files, Python class — real captures, NO disclosure
 for spec in "cpp Widget" "py Counter"; do
     set -- $spec
@@ -186,7 +186,7 @@ for spec in "cpp Widget" "py Counter"; do
         ok "(A5) control: --uses=$2 ($1) count=$cnt with no unindexed disclosure"
     else no "(A5) control: --uses=$2 ($1) count=${cnt:-?} / disclosure present: $r"; fi
     mo="$( mcp "$TMP/$1" uses ",\"symbol\":\"$2\"" )"
-    printf '%s' "$mo" | grep -q 'unindexed_roles' && no "(A5) control: MCP uses $2 ($1) discloses unindexed roles" || ok "(A5) control: MCP uses $2 ($1) carries no disclosure"
+    if printf '%s' "$mo" | grep -q 'unindexed_roles'; then no "(A5) control: MCP uses $2 ($1) discloses unindexed roles"; else ok "(A5) control: MCP uses $2 ($1) carries no disclosure"; fi
 done
 # (A6) fields with real captures (C, C++, Python) resolve with NO disclosure
 for spec in "cf point.x" "cpp Widget.size" "py Counter.total"; do
@@ -199,8 +199,7 @@ for spec in "cf point.x" "cpp Widget.size" "py Counter.total"; do
 done
 
 # ── (B) object-like macro in a C++-parsed header ──────────────────────────────────────────────────────────────
-grep -q '^#define MY_SOCK ' "$TMP/mac/tmux.h" && grep -qw MY_SOCK "$TMP/mac/main.c" \
-    && ok "(B1) premise: tmux.h #defines MY_SOCK and main.c uses it" || no "(B1) premise: fixture lost its #define"
+if grep -q '^#define MY_SOCK ' "$TMP/mac/tmux.h" && grep -qw MY_SOCK "$TMP/mac/main.c"; then ok "(B1) premise: tmux.h #defines MY_SOCK and main.c uses it"; else no "(B1) premise: fixture lost its #define"; fi
 out="$( rw "$TMP/mac" --defs=MY_SOCK )"
 if printf '%s' "$out" | grep -q "object-like macro, #define at .*tmux.h:3" && ! printf '%s' "$out" | grep -q 'did you mean'; then
     ok "(B2) CLI --defs=MY_SOCK names the #define line and drops the near-miss"
@@ -231,10 +230,10 @@ for spec in "ts routes Hono base.ts:7" "ts valueToken Row display.ts:2" "rs env_
     else no "(C3) MCP uses $2 ($1): $( printf '%s' "$mo" | head -c 300 )"; fi
 done
 q2="$( rw "$TMP/ts" --uses=Hono.routes )"
-printf '%s' "$q2" | grep -q "member selector 'Hono.routes': field symbols" && ok "(C4) the qualified form keeps its sentence" || no "(C4) qualified form changed: $q2"
+if printf '%s' "$q2" | grep -q "member selector 'Hono.routes': field symbols"; then ok "(C4) the qualified form keeps its sentence"; else no "(C4) qualified form changed: $q2"; fi
 # precision: a method-local `const r` and a TS stdlib name are not member declarations
 out="$( rw "$TMP/ts" --uses=r )"
-printf '%s' "$out" | grep -q 'declared as a member' && no "(C5) precision: a local variable read as a member declaration" || ok "(C5) precision: a method-local binding is not a member"
+if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C5) precision: a local variable read as a member declaration"; else ok "(C5) precision: a method-local binding is not a member"; fi
 
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"
@@ -247,10 +246,10 @@ if printf '%s' "$out" | grep -q "'winx' is defined at .*z.h:4 by a lexical read"
     ok "(D2) CLI --defs=winx names the lexical definition z.h:4, not a.c"
 else no "(D2) CLI --defs=winx: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
 mo="$( mcp "$TMP/deg" find_symbol ',"symbol":"winx"' )"
-printf '%s' "$mo" | grep -q 'defined at .*z.h:4 by a lexical read' && ok "(D3) MCP find_symbol winx names z.h:4" || no "(D3) MCP find_symbol winx: $( printf '%s' "$mo" | head -c 400 )"
+if printf '%s' "$mo" | grep -q 'defined at .*z.h:4 by a lexical read'; then ok "(D3) MCP find_symbol winx names z.h:4"; else no "(D3) MCP find_symbol winx: $( printf '%s' "$mo" | head -c 400 )"; fi
 out="$( rw "$TMP/deg" --defs=touch_nowhere_zz )"
-printf '%s' "$out" | grep -q 'lexical read\|object-like' && no "(D4) precision: a nowhere-name gets a def note" || ok "(D4) precision: a nowhere-name stays plain"
+if printf '%s' "$out" | grep -q 'lexical read\|object-like'; then no "(D4) precision: a nowhere-name gets a def note"; else ok "(D4) precision: a nowhere-name stays plain"; fi
 a="$( rw "$TMP/deg" --defs=winx )"; b="$( rw "$TMP/deg" --defs=winx )"
-[ "$a" = "$b" ] && ok "(D5) determinism: the note is byte-identical across runs" || no "(D5) the note differs run to run"
+if [ "$a" = "$b" ]; then ok "(D5) determinism: the note is byte-identical across runs"; else no "(D5) the note differs run to run"; fi
 
 exit $fail

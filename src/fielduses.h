@@ -194,10 +194,10 @@ inline bool memberDeclShaped( std::string_view line, std::size_t at, std::size_t
     }
     if( modifiersOnly )
     {
-        const bool goType = lang == Lang::Go && ( std::isalpha( (unsigned char)next ) || next == '*' || next == '[' || next == '_' );
+        const bool goType = langFacts( lang ).memberDecl == MemberDecl::NameThenType && ( std::isalpha( (unsigned char)next ) || next == '*' || next == '[' || next == '_' );
         return binds || goType;
     }
-    const bool typeFirstLang = lang == Lang::Java || lang == Lang::CSharp || lang == Lang::Dart;
+    const bool typeFirstLang = langFacts( lang ).memberDecl == MemberDecl::TypeFirst;
     return typeFirstLang && words >= 1 && prefix.find( '(' ) == std::string_view::npos && ( ( next == '=' && next2 != '=' ) || next == ';' || next == '{' );
 }
 

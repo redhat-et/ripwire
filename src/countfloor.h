@@ -29,6 +29,7 @@
 // consulted, so the two surfaces cannot disagree about a floor.
 
 #include "graph.h"           // Graph, declinedCallsNaming — the declined evidence and the in-edge CSR
+#include "langfacts.h"       // LangFacts::transitiveIncludes — usesRolesUnindexed's includer-language test
 #include "model.h"
 #include "nextverb.h"        // nextFlag — the follow-up's shell-safe spelling
 #include "valuerefindex.h"   // ValueRefIndex, valueRefCallerRows — the value evidence
@@ -136,7 +137,9 @@ inline bool usesRolesUnindexed( const IngestResult& ing, std::span<const NodeId>
         {
             if( !corpusHasC )
             {
-                corpusHasC = std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s ) { return s.lang == Lang::C; } );
+                // an INCLUDER language with no read capture (C): its files use the header and none of their reads is indexed
+                corpusHasC = std::any_of( ing.symbols.begin(), ing.symbols.end(),
+                                          []( const Symbol& s ) { return langFacts( s.lang ).transitiveIncludes && !valueUsesArmedFor( s.lang ); } );
             }
             if( *corpusHasC )
             {
