@@ -10540,7 +10540,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // whole qualified text with its template arguments); a declared local hides a same-named field, and a field hides a
     // namespace-scope variable, as C++'s own lookup orders them.
     std::string stdRecvKey;   // reused "<fromSymbol>#<recvVar>" buffer
-    Reference   stdFieldProbe;   // reused: fieldEntryAt reads only recvVar, the member name it looks up
     // the declaration texts the exception reads beyond Rule 2's tables: each C++ definition's QUALIFIED declarations, std ones
     // included ("<fromSymbol>#<var>" -> binding indices; Rule 2's tables keep "" for a std one), and every namespace-scope
     // declaration (var -> binding indices). Empty on a tree with no C++ definition.
@@ -10573,8 +10572,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }();
     const auto fieldTypeIn = [ & ]( const std::string& className, std::string_view member ) -> const FlatRecvType*
     {
-        stdFieldProbe.recvVar.assign( member );
-        return narrower.fieldEntryAt( stdFieldProbe, className, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } );
+        return narrower.fieldEntryOf( member, className, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } );
     };
     // every C/C++ type alias record (`typedef std::shared_ptr<ns::List> ListSP;` and `using ListSP2 = std::shared_ptr<ns::List>;`
     // alike, ingest_relations.h captureTypeAlias): alias name -> its recorded targets (the reference indices). A typedef is ALSO
@@ -11457,7 +11455,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             javaProvenType = javaProvenTypeReceiver( r, classNames, fieldNarrow, qkey );
             // (L) fix round 2 / 3 (D3, D6): `import ext.Util; … Util::open` (or `import ext.*;` alone) names the outside Util
-            if( javaProvenType.empty() || recvEv.types.jvmHides( r.fileId, r.startByte, r.recvVar.substr( 0, std::min( r.recvVar.find( '.' ), r.recvVar.size() ) ) ) )
+            if( javaProvenType.empty() || recvEv.types.jvmHides( r.fileId, r.startByte, r.recvVar.substr( 0, std::min( r.recvVar.str().find( '.' ), r.recvVar.size() ) ) ) )
             {
                 disposition = javaCandidateRefused( g, r, it != byName.end() );
                 continue;
@@ -11878,7 +11876,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // alone) is an outside class, never an in-tree namesake — the call falls to the ladder, which hedges it.
         if( !scipPinned && !canonical && !narrowed && writtenRoot == JsWrittenRoot::None
             && !( callResultFamilyOf( r.lang ) == CallResultFamily::Jvm
-                  && recvEv.types.jvmHides( r.fileId, r.startByte, std::string_view( r.recvVar ).substr( 0, std::min( r.recvVar.find( '.' ), r.recvVar.size() ) ) ) ) )
+                  && recvEv.types.jvmHides( r.fileId, r.startByte, std::string_view( r.recvVar ).substr( 0, std::min( r.recvVar.str().find( '.' ), r.recvVar.size() ) ) ) ) )
         {
             narrowed = narrowTo( narrower.rule2cClassNameRecv( r, ing.symbols[ r.fromSymbol ].scope, { classNames, fieldNarrow.localNameSet, memberFields }, chaUp ), r, cand );
         }

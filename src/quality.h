@@ -3904,7 +3904,7 @@ inline std::string qbodyCachePath( const std::string& repoHex, const std::string
 // bytes differ between two runs over the same facts. Every call site passes a fixed-width integer, and the constraint
 // keeps it that way: has_unique_object_representations is false for any type with padding or a floating-point member.
 template<class T>
-    requires std::has_unique_object_representations_v<T>
+    requires( std::has_unique_object_representations_v<T> && !rw::isPoolId<T> )   // a pool id is 4 unique bytes whose value is thread timing
 inline void qsnapPut( std::string& buf, const T& v )
 {
     buf.append( reinterpret_cast<const char*>( &v ), sizeof( T ) );
