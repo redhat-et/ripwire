@@ -276,7 +276,9 @@ inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std:
     }
     xml += "</sigs>";
     // the two rules one after the other, as demoteAndPointRowsInto runs them, so each row's pointer names the rule that moved it
-    std::string demoted = siblingDemoteOn() ? demote_detail::demoteSiblingRows( ing, g, task, xml, regime ) : std::string();
+    std::string demoted = !siblingDemoteOn()                ? std::string()
+                          : regime == DemoteRegime::Default ? demote_detail::demoteSiblingRows( ing, g, task, xml )
+                                                            : demote_detail::demoteSiblingRowsAs( ing, g, task, xml, regime );
     const std::vector<std::string> byDemote = pointerRanks( demoted );
     std::string twinned = declTwinOn() ? decl_detail::pointDeclTwins( task, demoted.empty() ? std::string_view( xml ) : std::string_view( demoted ) ) : std::string();
     const std::vector<std::string> all = pointerRanks( twinned.empty() ? demoted : twinned );

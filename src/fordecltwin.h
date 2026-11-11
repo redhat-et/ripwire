@@ -145,7 +145,11 @@ inline void demoteAndPointRowsInto( const IngestResult& ing, const Graph& g, std
     };
     if( siblingDemoteOn() )
     {
-        apply( [&]( std::string_view shaped ) { return demote_detail::demoteSiblingRows( ing, g, task, shaped, regime ); } );
+        apply( [&]( std::string_view shaped )
+               {
+                   return regime == DemoteRegime::Default ? demote_detail::demoteSiblingRows( ing, g, task, shaped )
+                                                          : demote_detail::demoteSiblingRowsAs( ing, g, task, shaped, regime );
+               } );
     }
     if( declTwinOn() )
     {

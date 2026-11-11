@@ -455,8 +455,8 @@ inline bool termHitsRow( std::string_view answer, const AnswerRow& r, const std:
                                 { return !t.empty() && ( darkflags::containsWord( name, t ) || darkflags::containsWord( scope, t ) || darkflags::containsWord( text, t ) ); } );
 }
 
-// The answer with the demoted rows rewritten as tail pointers; "" when none is.
-inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, DemoteRegime regime )
+// The answer with the demoted rows rewritten as tail pointers, read as `regime` says (Budgeted: K8 holds too); "" when none is.
+inline std::string demoteSiblingRowsAs( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, DemoteRegime regime )
 {
     const AnswerScan scan = scanAnswer( answer );
     std::vector<const AnswerRow*> dRows;
@@ -481,6 +481,11 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
     markWithoutCallPath( ing, g, task, scan, picked, demote );
     keepSameAsTargets( dRows, picked, demote );
     return pointerAnswer( answer, picked, demote );
+}
+// The default (no budget) answer with the demoted rows rewritten as tail pointers; "" when none is.
+inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer )
+{
+    return demoteSiblingRowsAs( ing, g, task, answer, DemoteRegime::Default );
 }
 } // namespace demote_detail
 } // namespace rw
