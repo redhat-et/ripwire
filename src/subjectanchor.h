@@ -842,7 +842,8 @@ inline RouteChoice routeAnchorFallThrough( std::string_view query, const RouteCh
 }
 
 // ANCHOR-HONESTY: the identifier-syntax words of a query that place a SOURCE-class definition (Injector.loadProvider, Model.save,
-// concurrent.futures.ThreadPoolExecutor), each with those definitions in NodeId order. One pass over the symbols for all words.
+// concurrent.futures.ThreadPoolExecutor), each with those definitions in NodeId order. Asked on name-exact routes only: one placement
+// pass for all the words, plus one selector resolution per identifier-syntax word (a short query holds one or two).
 struct SourceSyntaxAnchor
 {
     std::string_view    word;   // trimmed, as the query spells it
