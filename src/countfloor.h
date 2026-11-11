@@ -111,6 +111,56 @@ inline std::string countFloorNext( const IngestResult& ing, const Symbol& s )
     return nextFlag( literal ? "--grep=" : "--uses=", s.name );
 }
 
+// USES-UNARMED-DISCLOSE (B31). The uses verb's count= lists call, value, import and extends sites always, and read, write
+// and type-mention sites only where the index captures them (kValueUsesArmed above). A definition READ or NAMED more than
+// called (UseForm::NotCalls) in an unarmed language — a Go or Rust struct, a C global table — therefore answered a bare
+// count="0" beside hundreds of real uses (fzf Options, terraform FmtCommand, mdbook CmdRenderer, tmux cmd_table, htop
+// Process_class). A C-family HEADER definition is unarmed the same way when the corpus holds C files: the grammar reads
+// the header as C++, but the .c files that use it get no read capture (countFloorNext's `.h` rule, said on the count).
+// True exactly when one of `defs` is such a definition; the root then carries unindexed_roles= and its legend clause.
+inline bool usesRolesUnindexed( const IngestResult& ing, std::span<const NodeId> defs )
+{
+    std::optional<bool> corpusHasC;   // asked once, and only for a header definition of an armed language
+    for( const NodeId def : defs )
+    {
+        if( def >= ing.symbols.size() || useFormOf( ing.symbols[ def ] ) != UseForm::NotCalls )
+        {
+            continue;
+        }
+        const Symbol& ds = ing.symbols[ def ];
+        if( !valueUsesArmedFor( ds.lang ) )
+        {
+            return true;
+        }
+        if( ds.fileId < ing.files.size() && std::string_view( ing.files[ ds.fileId ] ).ends_with( ".h" ) )
+        {
+            if( !corpusHasC )
+            {
+                corpusHasC = std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s ) { return s.lang == Lang::C; } );
+            }
+            if( *corpusHasC )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline std::string unindexedRolesAttrXml( bool on )
+{
+    return on ? std::string( " unindexed_roles=\"read,write,type\"" ) : std::string();
+}
+
+// The clause defining unindexed_roles=, emitted exactly when the root carries it (G4). No flag dashes: it rides an XML comment.
+inline const char* unindexedRolesLegend( bool on ) noexcept
+{
+    return on ? "unindexed_roles=\"read,write,type\": the index captures no read, write or type-mention site for a definition of SYM "
+                "(its language has no such capture, or it is a C-family header used by C files), so count= lists only its call, value, "
+                "import and extends sites and a zero is NOT a count of its uses; the grep verb lists the text uses. "
+              : "";
+}
+
 // One row's verdict. `next` is a CLI flag spelling (MCP prints the same text), empty exactly when !isFloor.
 struct CallerFloor
 {
