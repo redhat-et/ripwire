@@ -104,6 +104,10 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-08 (lane SIBLING-DEMOTE, stacked on R-DEDUP-B; rule 4): docdemotegolden_for.xml 6431 -> 5999 B and
+# docdemotegolden_noroute.xml 9939 -> 9524 B, diffed by hand: only est_tokens and the deep same-file sibling <d> rows past answer row 10
+# (for: CHANGELOG r=11/12, Contributing r=14, both tier_probe rows r=16/18; noroute: PageCache.flush_cache/request_page/__init__ r=12/13/19,
+# paging_design r=15, CHANGELOG r=17/18) now print in place as <t p= sym= r=/> pointers, with the demote legend comment before the first.
 # RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): docdemotegolden_for.xml 6709 -> 6431 B and
 # docdemotegolden_noroute.xml 10216 -> 9939 B. The moves: the tail legend clause (sym= minus names a sigs row or the syms block
 # shows) and est_tokens; every tail row of a file whose positive-score names the sigs rows all show now prints p= only

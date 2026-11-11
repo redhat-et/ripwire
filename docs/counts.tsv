@@ -14,11 +14,11 @@ limits.output	46
 limits.parameters	9
 limits.silent	137
 tuning.constexpr_live	12
-tuning.declarations	296
+tuning.declarations	297
 tuning.duplicated	`kRowCap`
 tuning.gone	1
 tuning.gone_shown	`kSituTestRowsShown`
-tuning.names	295
+tuning.names	296
 tuning.tunable_live	111
-tuning.unswept	172
-tuning.unswept_shown	`kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, `kBridgeMaxHops`, +166 more
+tuning.unswept	173
+tuning.unswept_shown	`kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, `kBridgeMaxHops`, +167 more

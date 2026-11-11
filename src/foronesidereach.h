@@ -156,11 +156,7 @@ struct Row
     std::vector<NodeId> seeds; // every definition the row stands for (sorted)
 };
 
-inline bool tagIs( std::string_view rest, std::string_view name ) noexcept
-{
-    return rest.size() > name.size() + 1 && rest.substr( 1, name.size() ) == name
-        && ( rest[name.size() + 1] == ' ' || rest[name.size() + 1] == '>' || rest[name.size() + 1] == '/' );
-}
+using filesyms_detail::tagIs;
 // The <d> rows inside <sigs>, the <s> rows inside <callers> and the <y> rows inside <syms> of `text`, outside comments and CDATA.
 inline void scanRows( std::string_view text, bool inSyms, std::vector<Row>& out )
 {
@@ -480,25 +476,17 @@ inline bool demoteRow( const Sides& s, const Row& r )
 // `text` with each demoted row of it rewritten in place as <t p= sym= r=/> (the legend before the first when `legend`); "" when none is.
 inline std::string pointerText( std::string_view text, const std::vector<const Row*>& demoted, bool& legend )
 {
-    std::string out;
-    std::size_t from = 0;
+    std::vector<filesyms_detail::TailPointerSpan> spans;
+    spans.reserve( demoted.size() );
     for( const Row* r : demoted )
     {
         const std::string_view p = attrOf( r->attrs, "p" );
-        const std::string_view rank = attrOf( r->attrs, "r" );
         const std::size_t colon = r->tag == 'd' ? std::string_view::npos : p.rfind( ':' ); // <s>/<y> p= is file:line; a pointer names the file
-        out.append( text.substr( from, r->at - from ) );
-        out += legend ? kOneSideReachLegend : std::string_view();
-        legend = false;
-        out += "<t p=\"";
-        out += p.substr( 0, colon );
-        out += "\" sym=\"";
-        out += attrOf( r->attrs, "n" );
-        out += rank.empty() ? std::string() : "\" r=\"" + std::string( rank );
-        out += "\"/>";
-        from = r->end;
+        spans.push_back( { .at = r->at, .end = r->end, .p = p.substr( 0, colon ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ) } );
     }
-    return from == 0 ? std::string() : out.append( text.substr( from ) );
+    std::string out = filesyms_detail::tailPointerText( text, spans, legend ? kOneSideReachLegend : std::string_view() );
+    legend = legend && spans.empty();
+    return out;
 }
 } // namespace onesidereach_detail
 

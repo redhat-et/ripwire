@@ -621,6 +621,14 @@ Discloses: `capped`
 | `kForSelfHookMethodRows` | `4` | — | served methods per answer |
 | `kForSelfHookSiteRows` | `3` | — | base-class sites per served method |
 
+### `src/forsiblingdemote.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kOwnerNearRows` | `4` | — | (K3): the <d> rows right above that may name the owner |
+
 ### `src/forslots.h`
 
 Discloses: **none**
