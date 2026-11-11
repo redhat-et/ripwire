@@ -799,6 +799,7 @@ for _g in \
     pargatescheck \
     parsehealthcheck \
     partitioncheck \
+    pathfewestcheck \
     pathgapcheck \
     pathownercheck \
     pathpaircheck \
