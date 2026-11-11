@@ -748,8 +748,8 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
 inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact,
                               std::uint32_t lastHopRef )
 {
-    std::vector<HopWant> wanted = pathHopWants( pp, path, lastHopRef );   // the printed edges, the declined last hop pinned to its call
-    return hopFacts( ing, g, std::move( wanted ), redact );                // no reader lent: hopFacts makes one for the answer
+    EXPECTS( lastHopRef == kHopNoRef || !pp.active(), "only a single-chain answer ends on a declined hop (pathRouteChains)" );
+    return hopFacts( ing, g, pathHopWants( pp, path, lastHopRef ), redact );   // no reader lent: hopFacts makes one for the answer
 }
 
 // What the answer's hop rows carry, for the legend: today's path, or every printed chain when pairs are listed — the CLI and
