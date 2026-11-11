@@ -900,30 +900,37 @@ inline bool isCallFrameVerb( std::string_view w )
     return detail::graphSubjectWordIs( w, { "call", "calls", "invoke", "invokes" } );
 }
 
-// The query without the words `drop` selects (sentence order kept), and the dropped words that are not route stopwords.
-inline std::pair<std::string, std::vector<std::string>> queryWithout( std::string_view query, bool ( *drop )( std::string_view ) )
+// The query without the words `drop` selects (sentence order kept), the dropped words that are not route stopwords (the ones a reader
+// needs named), and whether any word went at all.
+struct QueryWithout
 {
     std::string              kept;
-    std::vector<std::string> dropped;
+    std::vector<std::string> named;
+    bool                     anyDropped = false;
+};
+inline QueryWithout queryWithout( std::string_view query, bool ( *drop )( std::string_view ) )
+{
+    QueryWithout out;
     for( const std::string_view w : splitRouteWords( query ) )
     {
         const std::string_view t = detail::graphSubjectTrimWord( w ).text;
         if( drop( t ) )
         {
+            out.anyDropped = true;
             if( !isRouteStopword( routeLower( t ) ) )
             {
-                dropped.emplace_back( t );
+                out.named.emplace_back( t );
             }
             continue;
         }
-        kept += kept.empty() ? "" : " ";
-        kept += w;
+        out.kept += out.kept.empty() ? "" : " ";
+        out.kept += w;
     }
-    return { std::move( kept ), std::move( dropped ) };
+    return out;
 }
 
 inline bool isFrameOrQuestionWord( std::string_view w ) { return isCallFrameVerb( w ) || subject_detail::isQuestionLead( w ); }
-inline bool isFrameVerbWord( std::string_view w ) { return isCallFrameVerb( w ); }
+inline bool isQuestionLeadWord( std::string_view w ) { return subject_detail::isQuestionLead( w ); }
 
 // ANCHOR-HONESTY R1b: a docs-file tie never beats a source definition. An anchor whose word is a source syntax anchor but whose
 // resolved definition is not source-class (the reST `.. method:: Model.save` section the whole-name index files first) is re-bound to
@@ -962,7 +969,8 @@ inline void preferSourceAnchorDefs( const IngestResult& ing, RouteChoice& rc, co
 // ANCHOR-HONESTY + WH-WORD-GUARD on a name-exact route whose query holds a source syntax anchor (the rules: tmp B27 RULE.md):
 //   R1a the call-frame verbs and question leads leave the ROUTE: the reduced query is routed again and, if still name-exact, replaces
 //       it, its reason naming the dropped words;
-//   R1b a non-source anchor definition of a source syntax anchor is re-bound to the source one.
+//   R1b a non-source anchor definition of a source syntax anchor is re-bound to the source one;
+//   R2  WH-WORD-GUARD: the question leads leave the RANK query too (a `where` or `what` namesake no longer scores).
 // Returns the source syntax anchors it judged by (empty: nothing changed).
 inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& ing, std::string_view task, SubjectRoute& out )
 {
@@ -978,19 +986,28 @@ inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& i
     }
     if( out.rankQuery.empty() )
     {
-        auto [ reduced, dropped ] = queryWithout( query, &isFrameOrQuestionWord );
-        if( reduced != query )
+        QueryWithout reduced = queryWithout( query, &isFrameOrQuestionWord );
+        if( reduced.anyDropped && !reduced.kept.empty() )
         {
-            RouteChoice bare = chooseForRanker( ing, reduced );
+            RouteChoice bare = chooseForRanker( ing, reduced.kept );
             if( bare.which == LexMode::NameExact )
             {
-                if( !dropped.empty() )
+                if( !reduced.named.empty() )
                 {
-                    bare.reason += subjectDroppedClause( ing, dropped );
+                    bare.reason += subjectDroppedClause( ing, reduced.named );
                 }
                 out.route     = std::move( bare );
-                out.rankQuery = queryWithout( query, &isFrameVerbWord ).first;   // the frame verbs rank no longer
+                out.rankQuery = std::move( reduced.kept );   // R2: the question leads rank no longer either
             }
+        }
+    }
+    // R2 WH-WORD-GUARD where R1a left the route alone (no frame word, a flip, or a reduced query that is no longer name-exact)
+    {
+        const std::string rq    = out.rankQuery.empty() ? std::string( task ) : out.rankQuery;
+        QueryWithout      asked = queryWithout( rq, &isQuestionLeadWord );
+        if( asked.anyDropped && !asked.kept.empty() )
+        {
+            out.rankQuery = std::move( asked.kept );
         }
     }
     preferSourceAnchorDefs( ing, out.route, src );
