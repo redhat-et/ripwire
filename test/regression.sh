@@ -552,6 +552,7 @@ for _g in \
     forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
+    forrowfeaturescheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsiblingdemotecheck \
@@ -801,6 +802,7 @@ for _g in \
     pargatescheck \
     parsehealthcheck \
     partitioncheck \
+    pathfewestcheck \
     pathgapcheck \
     pathownercheck \
     pathpaircheck \
