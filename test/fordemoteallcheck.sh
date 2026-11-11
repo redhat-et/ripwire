@@ -97,8 +97,8 @@ PY
 rk(){ python3 "$TMP/ranks.py" "$1" "${2:-xml}"; }
 prefix(){ python3 - "$1" <<'PY'
 import sys
-r = sorted( int( x[:-1] ) for x in sys.argv[1].split() )
-print( "yes" if r == list( range( 1, len( r ) + 1 ) ) else "no" )
+r = [ int( x[:-1] ) for x in sys.argv[1].split() ]   # in answer order, unsorted: ranks 2, 1 are not a rank prefix (CodeRabbit 4543056282)
+print( "yes" if r and r == list( range( 1, len( r ) + 1 ) ) else "no" )
 PY
 }
 OFF=( env RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1 )

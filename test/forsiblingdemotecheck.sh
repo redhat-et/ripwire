@@ -266,7 +266,7 @@ def ent( f ):
     s = open( f ).read(); s = s[s.find( "<sigs" ):s.find( "</sigs>" )]
     return [ ( m.group( 1 ), int( m.group( 2 ) ) ) for m in re.finditer( r'<(d|t) [^>]*?\br="(\d+)"', s ) ]
 on, off = ent( sys.argv[1] ), ent( sys.argv[2] )
-r = sorted( x[1] for x in on )
+r = [ x[1] for x in on ]   # in answer order, unsorted (CodeRabbit 4543056282)
 print( "ok" if any( t == "t" for t, _ in on ) and r == list( range( 1, len( r ) + 1 ) ) and len( on ) >= sum( 1 for t, _ in off if t == "d" ) else "on=%s off=%s" % ( on, off ) )
 PY
 )"
