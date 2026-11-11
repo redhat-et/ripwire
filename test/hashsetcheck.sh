@@ -23,8 +23,6 @@ no(){ fail=1; printf '  FAIL  %s\n' "$*"; return 0; }
 
 # the tables whose value IS read — name: what reads it
 REGISTRY='
-implEdges        graph.h: 1 = every site committing the edge was a one-implementor dispatch (lane L6)
-impl             resolve.h EdgeProvenanceSets: the same implEdges, read by value
 lazyPairs        graph.h / resolve.h: a lazy import pair, 0 once an eager import of the same pair is seen
 lazyPairsOut     resolve.h: the same table, passed out
 namesMemo        graph.h: memoized answer (does the file name the class)
