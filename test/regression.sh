@@ -529,6 +529,7 @@ for _g in \
     forcompresscheck \
     forctorhopcheck \
     fordeclrowcheck \
+    fordecltwincheck \
     fordisclosurecheck \
     fordispatchhopcheck \
     fordocbodycheck \
@@ -1028,6 +1029,7 @@ for _g in \
     testrowruncheck \
     testscopecheck \
     textdocscheck \
+    textpoolcheck \
     timsortcheck \
     tokenbudgetcheck \
     tomllangcheck \

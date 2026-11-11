@@ -100,8 +100,12 @@ for f in range(files):
 P
 git -C "$1" init -q . 2>/dev/null
 }
+# Sized so the M arm's limit (half the routed peak) sits above its 256 MB floor. 2000 files x 400 calls peaked at 458 MB
+# routed on main 74456897f, so half of it was under the floor and the floor was the limit; MEM-REF-SHRINK step 2 (#608) cut
+# the reference rows to 80 B and the same tree peaked at 278 MB, where a 256 MB limit sits above every between-phase
+# reading and M could not stop it. 880 calls per file peaks at 569 MB routed with that lane (macOS M2, 9 s).
 FX="$TMP/fx"
-genfx "$FX" 2000 400
+genfx "$FX" 2000 880
 
 # peak MB of one run: macOS phys_footprint, else max RSS
 peak(){ # outfile errfile env...
@@ -149,10 +153,13 @@ else
     no "M: --max-memory=${lim}M against a ${on} MB run did not stop (exit $rc): the guard does not see routed pages"
 fi
 
-# ---- D: the band between the at-line reading and the peak. A 400-file tree peaks near 180 MB in ~2 s (under the guard's
-#      5 s cadence, so no soft line); a limit at 70 % of the unlimited peak sits above every reading and below the peak. ----
+# ---- D: the band between the at-line reading and the peak. The tree must peak well over the 80 MB floor below in under
+#      the guard's 5 s cadence (so no soft line); a limit at 70 % of the unlimited peak sits above every reading and below
+#      the peak. 400 files peaked near 180 MB when this arm was written and 108 MB on main 74456897f; with #608's 80 B
+#      reference rows they peak at 71 MB on an M2 and 60 MB on CI's macOS runner, under the floor. 800 files peak at
+#      ~123 MB on the M2 in ~1 s. ----
 DX="$TMP/dx"
-genfx "$DX" 400 400
+genfx "$DX" 800 400
 dpeak(){ # outfile errfile [extra args]
     local o="$1" e="$2"; shift 2
     ( cd "$DX" && HOME="$TMP" /usr/bin/time -l "$BIN" "$DX" --no-cache "$@" >"$o" 2>"$e" ); local r=$?
