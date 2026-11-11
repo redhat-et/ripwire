@@ -289,6 +289,7 @@ struct SpecEntry
     std::uint32_t line     = 0;         // its exports key's line (else its name's)
     std::uint32_t entry    = kNoFile;
     std::size_t   cands    = 0;
+    std::size_t   unread   = 0;         // package.json files that could not be read: with no hit, no External verdict
     std::string   pkgDir;               // the package directory ("" = the root), for the definition-side fallback
 };
 
@@ -312,7 +313,13 @@ inline SpecEntry resolveWebSpec( const IngestResult& ing, const HashMap<std::str
         {
             continue;
         }
-        std::string text = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() );
+        std::optional<std::string> read = docparse::detail::readWholeFile( diskPath( ing, f ) );
+        if( !read )
+        {
+            ++out.unread;   // it may be the one manifest that declares the package: no External verdict below (CodeRabbit 4542271940)
+            continue;
+        }
+        std::string text = std::move( *read );
         if( !text.contains( "\"" + std::string( pkg ) + "\"" ) )
         {
             continue;
@@ -751,10 +758,7 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
             ++out.defs;
             continue;
         }
-        if( st.depth >= kImportSpecDepth )
-        {
-            continue;
-        }
+        const bool atDepthCap = st.depth >= kImportSpecDepth;   // the hops are still read: a state past the cap with one says capped=1
         if( python )
         {
             auto [ it, fresh ] = pyCache.try_emplace( st.file );
@@ -806,6 +810,12 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
                     nextMember = a->m;
                 }
             }
+        }
+        if( atDepthCap )
+        {
+            // a statement the walk did not follow: found="0" and defs= are then floors, not totals (CodeRabbit 4542271958)
+            out.capped = out.capped || !next.empty();
+            continue;
         }
         for( SpecHop& h : next )
         {

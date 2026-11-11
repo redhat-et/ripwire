@@ -30,6 +30,12 @@
 #   N2  ambiguous: `Gadget from @acme/dup` (two package.json files declare @acme/dup, two Gadget defs): cands="2", no def/rx row.
 #   N3  RIPWIRE_NO_IMPORT_SPEC=1 prints no spec row; a task with no spelled import is byte-identical with and without it.
 #   N4  every answer is well-formed XML (xmllint, when present).
+#   N5  an unreadable manifest is no verdict (CodeRabbit 4542271940): `gizmo imported from @acme/unread` where the one package.json
+#       that declares @acme/unread is chmod 000 prints no external="1" and no spec row (the definition-side chains answer, as before).
+#       Premise, counted: the same task resolves (p=packages/u/package.json) while the file is readable, and after the chmod the
+#       file really is unreadable (SKIP when it is not, e.g. as root).
+#   N6  the depth cap discloses (CodeRabbit 4542271958): a 14-statement `export *` chain past kImportSpecDepth (12) prints
+#       found="0" WITH capped="1". Premise, counted: a 6-statement chain of the same shape reaches its def (no capped=).
 #
 # Usage: bash test/importspellingcheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
 set -u
@@ -187,6 +193,44 @@ if grep -q '<spec ' "$TMP/n3.xml"; then no "N3 RIPWIRE_NO_IMPORT_SPEC=1 still pr
 ask "--for=where Base is defined" >"$TMP/n3a.xml"
 ( cd "$FIX" && RIPWIRE_NO_IMPORT_SPEC=1 HOME="$TMP" "$BIN" "$FIX" --no-cache "--for=where Base is defined" </dev/null >"$TMP/n3b.xml" 2>/dev/null )
 if [ -s "$TMP/n3a.xml" ] && cmp -s "$TMP/n3a.xml" "$TMP/n3b.xml"; then ok "N3 a task with no spelled import is byte-identical with the switch"; else no "N3 a task with no spelled import differs with RIPWIRE_NO_IMPORT_SPEC=1"; fi
+
+# ---- N5 / N6: their own fixtures (generated here), so the arms above read the tree they always read ----
+askin(){ local d="$1"; shift; ( cd "$d" || exit 1; HOME="$TMP" "$BIN" "$d" --no-cache "$@" </dev/null 2>/dev/null ); }
+U="$TMP/fxu"; mkdir -p "$U/packages/u" "$U/app"
+printf '{ "name": "acme-root", "private": true }\n' >"$U/package.json"
+printf '{\n  "name": "@acme/unread",\n  "exports": { ".": "./index.js" }\n}\n' >"$U/packages/u/package.json"
+printf 'export function gizmo() { return 1; }\n' >"$U/packages/u/index.ts"
+printf "import { gizmo } from '@acme/unread';\nexport function main() { return gizmo(); }\n" >"$U/app/main.ts"
+askin "$U" "--for=where gizmo imported from @acme/unread is defined" >"$TMP/n5a.xml"
+pre=$( count "$TMP/n5a.xml" '<spec m="@acme/unread" n="gizmo" p="packages/u/package.json"' )
+chmod 000 "$U/packages/u/package.json"
+if cat "$U/packages/u/package.json" >/dev/null 2>&1; then
+    echo "  SKIP  N5 chmod 000 leaves the manifest readable here (root?): the unreadable shape cannot be staged"
+else
+    askin "$U" "--for=where gizmo imported from @acme/unread is defined" >"$TMP/n5.xml"
+    ext=$( grep -c 'external="1"' "$TMP/n5.xml" ); spec=$( grep -c '<spec ' "$TMP/n5.xml" )
+    if [ "$pre" = 1 ] && [ -s "$TMP/n5.xml" ] && [ "$ext" = 0 ] && [ "$spec" = 0 ]; then ok "N5 an unreadable manifest: no external=1, no spec row (premise: resolved while readable)"
+    else no "N5 unreadable manifest: premise=$pre external=$ext spec=$spec (want 1 / 0 / 0)"; fi
+fi
+chmod 644 "$U/packages/u/package.json"
+chain(){ # chain DIR N: @acme/deep's entry re-exports through N statements to the def of deepThing
+    local d="$1" n="$2" i; mkdir -p "$d/packages/deep"
+    printf '{ "name": "acme-root", "private": true }\n' >"$d/package.json"
+    printf '{\n  "name": "@acme/deep",\n  "exports": { ".": "./index.js" }\n}\n' >"$d/packages/deep/package.json"
+    printf "export * from './h1';\n" >"$d/packages/deep/index.ts"
+    for i in $( seq 1 $(( n - 1 )) ); do printf "export * from './h%d';\n" $(( i + 1 )) >"$d/packages/deep/h$i.ts"; done
+    printf 'export function deepThing() { return 1; }\n' >"$d/packages/deep/h$n.ts"
+}
+chain "$TMP/fxd6" 6; chain "$TMP/fxd14" 14
+askin "$TMP/fxd6" "--for=where deepThing imported from @acme/deep is defined" >"$TMP/n6a.xml"
+askin "$TMP/fxd14" "--for=where deepThing imported from @acme/deep is defined" >"$TMP/n6.xml"
+short=$( count "$TMP/n6a.xml" '<def n="deepThing" p="packages/deep/h6.ts"' ); shortcap=$( count "$TMP/n6a.xml" 'capped="1"' )
+deep=$( block "$TMP/n6.xml" | grep -oE '<spec m="@acme/deep"[^>]*>' | head -1 )
+case "$deep" in
+    *'capped="1"'*'found="0"'*) [ "$short" = 1 ] && [ "$shortcap" = 0 ] && ok "N6 past the depth cap: $deep (premise: the 6-chain reaches its def)" \
+                                    || no "N6 premise: the 6-chain def=$short capped=$shortcap (want 1 / 0)" ;;
+    *) no "N6 past the depth cap: ${deep:-<no spec row>} (want found=\"0\" with capped=\"1\")" ;;
+esac
 
 if command -v xmllint >/dev/null 2>&1; then
     bad=0; n=0

@@ -1495,6 +1495,14 @@ inline ImportSpecBlock renderImportSpecBlock( const IngestResult& ing, const std
     out.xml.append( "<spec" );
     attr( "m", spec->spec );
     attr( "n", spec->name );
+    if( e.kind == SpecEntry::Kind::External && e.unread > 0 )
+    {
+        // an in-tree package.json could not be read and may be the one that declares the package: no verdict (CodeRabbit 4542271940)
+        DISCLOSE( Diagnostics::answerRefused, "an unreadable package.json may declare the spelled package: no external=1 verdict and no spec "
+                                              "block; the definition-side chains answer as before",
+                  "renderImportSpecBlock: an in-tree package.json is unreadable — no external verdict" );
+        return {};
+    }
     if( e.kind == SpecEntry::Kind::External && !spec->python && !jsModuleIsForeign( spec->spec, jsModuleVocabulary( ing ) ) )
     {
         return {};   // no package.json declares it, but a segment names this tree (a tsconfig path alias, an undeclared workspace dir): as before
