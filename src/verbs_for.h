@@ -3129,8 +3129,7 @@ inline std::string shapedForFileSymsAnswer( const MainDispatch& d, const std::st
     }
     // SIBLING-DEMOTE is held by --token-budget alone: a bare --max-tokens is not read by --for (cli.h notice: "nothing was dropped"), so
     // the answer under it is the flagless one, demote included (forbodyfoldcheck F8m)
-    rw::demoteSiblingRowsInto( d.ing, d.g, d.cfg.forTask, captured, out, held && d.cfg.tokenBudget > 0 );
-    rw::declTwinInto( d.cfg.forTask, captured, out, held && d.cfg.tokenBudget > 0 ); // DECL-TWIN, held the same way
+    rw::demoteAndPointRowsInto( d.ing, d.g, d.cfg.forTask, captured, out, held && d.cfg.tokenBudget > 0 ); // SIBLING-DEMOTE, then DECL-TWIN
     if( !out.empty() && price )
     {
         rw::repriceRootAfterCut( out, *price, captured.size() );   // signed: the pointers and legend may outweigh the rows they replace

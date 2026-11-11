@@ -15,7 +15,7 @@
 // rides before the first pointer, only when the rule fires. It runs where SIBLING-DEMOTE runs — the no-budget XML answer of CLI --for
 // and MCP `for`; a token budget leaves the answer as shaped; --json never reaches it. RIPWIRE_NO_DECL_TWIN=1 turns it off (byte
 // identity and the gate's twin).
-#include "forsiblingdemote.h" // editAnswerInto, demote_detail::scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
+#include "forsiblingdemote.h" // siblingDemoteOn, demote_detail::demoteSiblingRows / scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
 #include "serialize.h" // attrOf
 
 #include <algorithm>
@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rw
@@ -121,14 +122,31 @@ inline std::string pointDeclTwins( std::string_view task, std::string_view answe
 }
 } // namespace decl_detail
 
-// DECL-TWIN over the answer as the earlier post-passes left it: `edited` holds those passes' bytes ("" when they left `answer`
-// unchanged) and, when the rule fires, its result. Not priced (the caller re-prices the root once on the final bytes). `held` (a token
-// budget) leaves the answer as shaped. CLI shapedForFileSymsAnswer and MCP insertFileSyms both call this, after SIBLING-DEMOTE.
-inline void declTwinInto( std::string_view task, std::string_view answer, std::string& edited, bool held )
+// SIBLING-DEMOTE (forsiblingdemote.h) then DECL-TWIN over the answer as the earlier post-passes left it: `edited` holds those passes'
+// bytes ("" when they left `answer` unchanged) and takes each rule's result when it rewrites a row. Not priced: the caller re-prices the
+// root once on the final bytes (signed: the pointers and legends may outweigh the rows they replace). `held` (a token budget) leaves the
+// answer as shaped. CLI shapedForFileSymsAnswer and MCP insertFileSyms both call this.
+inline void demoteAndPointRowsInto( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, std::string& edited, bool held )
 {
-    if( !held && declTwinOn() )
+    if( held )
     {
-        editAnswerInto( answer, edited, [&]( std::string_view shaped ) { return decl_detail::pointDeclTwins( task, shaped ); } );
+        return;
+    }
+    const auto apply = [&]( const auto& pass )
+    {
+        std::string next = pass( edited.empty() ? answer : std::string_view( edited ) );
+        if( !next.empty() )
+        {
+            edited = std::move( next );
+        }
+    };
+    if( siblingDemoteOn() )
+    {
+        apply( [&]( std::string_view shaped ) { return demote_detail::demoteSiblingRows( ing, g, task, shaped ); } );
+    }
+    if( declTwinOn() )
+    {
+        apply( [&]( std::string_view shaped ) { return decl_detail::pointDeclTwins( task, shaped ); } );
     }
 }
 } // namespace rw

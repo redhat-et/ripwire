@@ -455,27 +455,4 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
     return pointerAnswer( answer, picked, demote );
 }
 } // namespace demote_detail
-
-// SIBLING-DEMOTE over the answer as the earlier post-passes left it: `edited` holds those passes' bytes ("" when they left `answer`
-// unchanged) and, when this pass demotes a row, its result. Not priced: the caller re-prices the root once on the final bytes (signed:
-// the pointers and legend may outweigh the rows they replace). `held` (a token budget) leaves the answer as shaped. CLI
-// shapedForFileSymsAnswer and MCP insertFileSyms both call this.
-// One answer post-pass over the answer as the earlier passes left it: `edited` ("" when they left `answer` unchanged) takes the pass's
-// result when it rewrote anything (the pass returns "" when it did not). SIBLING-DEMOTE and DECL-TWIN (fordecltwin.h) run through it.
-template <class Pass>
-inline void editAnswerInto( std::string_view answer, std::string& edited, Pass&& pass )
-{
-    std::string next = std::forward<Pass>( pass )( edited.empty() ? answer : std::string_view( edited ) );
-    if( !next.empty() )
-    {
-        edited = std::move( next );
-    }
-}
-inline void demoteSiblingRowsInto( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, std::string& edited, bool held )
-{
-    if( !held && siblingDemoteOn() )
-    {
-        editAnswerInto( answer, edited, [&]( std::string_view shaped ) { return demote_detail::demoteSiblingRows( ing, g, task, shaped ); } );
-    }
-}
 } // namespace rw
