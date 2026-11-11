@@ -2515,7 +2515,8 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 // ONE-SIDE-REACH (src/foronesidereach.h): then the CLI twin's demote pass over the answer and the block, re-priced on `price` (the root's
 // inputs, null: no re-price); held under budget_tokens. R-DEDUP's <syms> cut (forfilesyms.h tailRowsWithoutPicks) lands first, the
 // demote pass reads the cut answer; SIBLING-DEMOTE (src/forsiblingdemote.h) then reads that one, DECL-TWIN (src/fordecltwin.h) reads
-// its result, and the root is re-priced once on the final bytes.
+// its result, and the root is re-priced once on the final bytes. Under budget_tokens those two already ran on <sigs> before its rows
+// settled (DEMOTE-ALL-DIALECTS, assembleMcpFor), so they are held here.
 inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
 {
     if( out.ends_with( "</ctx>" ) )

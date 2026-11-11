@@ -12,9 +12,9 @@
 // row 10 — was built and measured beside it and dropped: on the post-SIBLING-DEMOTE answers it raised top-10 Wrong.)
 // A keep guard (SIBLING-DEMOTE's, forsiblingdemote.h) holds a row in place: K1 mem= / K7 slot_by= / slot_fields= (kKeepRowAttrs), K6 a
 // <note> rides in the row, K4 the task names the row (its full name, or its last segment for a bare task word). The legend comment
-// rides before the first pointer, only when the rule fires. It runs where SIBLING-DEMOTE runs — the no-budget XML answer of CLI --for
-// and MCP `for`; a token budget leaves the answer as shaped; --json never reaches it. RIPWIRE_NO_DECL_TWIN=1 turns it off (byte
-// identity and the gate's twin).
+// rides before the first pointer, only when the rule fires. It runs where SIBLING-DEMOTE runs — every dialect of CLI --for and MCP
+// `for` (DEMOTE-ALL-DIALECTS, fordemoteall.h: the no-budget XML answer here, a soft target's <sigs> before its rows settle, the --json
+// "sigs" array). RIPWIRE_NO_DECL_TWIN=1 turns it off (byte identity and the gate's twin).
 #include "forsiblingdemote.h" // siblingDemoteOn, demote_detail::demoteSiblingRows / scanAnswer / AnswerRow / kKeepRowAttrs / taskNameWords, filesyms_detail::tailPointerText / leafName
 #include "serialize.h" // attrOf
 
@@ -124,8 +124,9 @@ inline std::string pointDeclTwins( std::string_view task, std::string_view answe
 
 // SIBLING-DEMOTE (forsiblingdemote.h) then DECL-TWIN over the answer as the earlier post-passes left it: `edited` holds those passes'
 // bytes ("" when they left `answer` unchanged) and takes each rule's result when it rewrites a row. Not priced: the caller re-prices the
-// root once on the final bytes (signed: the pointers and legends may outweigh the rows they replace). `held` (a token budget) leaves the
-// answer as shaped. CLI shapedForFileSymsAnswer and MCP insertFileSyms both call this.
+// root once on the final bytes (signed: the pointers and legends may outweigh the rows they replace). `held` (a token budget, whose <sigs>
+// the rules already shaped before its rows settled: fordemoteall.h) leaves the answer as it is. CLI shapedForFileSymsAnswer and MCP
+// insertFileSyms both call this; fordemoteall.h's demoteAndPointBlock and demoteJsonRows run the same two passes.
 inline void demoteAndPointRowsInto( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, std::string& edited, bool held )
 {
     if( held )

@@ -23,8 +23,9 @@
 //   (K7) SLOT-FACT: the row carries slot_by= / slot_fields= (FN-VALUED-SLOT's cross-file call facts ride on the row, not the pointer).
 // K4's seeds are the first kCallPathSeeds resolved answer rows AND every answer row the task names (an identifier-syntax word of
 // the task spelled as the row's last segment): a proven caller or callee of the symbol a `who calls X` task names is its answer.
-// The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. A token budget (CLI --token-budget, MCP
-// budget_tokens; a bare --max-tokens is not read by --for) leaves the answer as shaped. The demoted bytes are priced markup, so the root's est_tokens= is
+// The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. Under a token budget (CLI --token-budget,
+// MCP budget_tokens; a bare --max-tokens is not read by --for) and in --json the rule runs too (DEMOTE-ALL-DIALECTS, fordemoteall.h:
+// on <sigs> before the rows settle, so the bytes it frees buy rows). The demoted bytes are priced markup, so the root's est_tokens= is
 // re-priced once over the post-passes (R-DEDUP's tail cut, ONE-SIDE-REACH, then this one: serialize.h repriceRootAfterCut) — the net change is
 // signed: on short rows the legend and pointers can ADD bytes, and est_tokens= then goes up.
 // RIPWIRE_NO_SIBLING_DEMOTE=1 turns it off (byte identity and the gate's twins).

@@ -22,9 +22,9 @@
 #   (n6) a mem= row: every extractor names a type row bare (C++, C#, Java, Kotlin, Swift, Scala, TypeScript, Python, Ruby probed), and
 #        mem= rides only on class/struct/interface rows, so a mem= row is never owner-qualified: the arm checks that every mem= row of
 #        both trees stays put (structural; the guard is SIBLING-DEMOTE's K1, kept for one guard set)
-#   (b)  --token-budget leaves the answer as shaped: no decl legend, byte-identical to the off twin under the same budget
+#   (b)  --token-budget runs the rule too (DEMOTE-ALL-DIALECTS, fordemoteall.h): (a) on the budgeted answer and its off twin
 #   (b2) a bare --max-tokens (not read by --for) does not hold the rule: byte-identical to the flagless answer
-#   (j)  --json never reaches the rule: byte-identical to the off twin
+#   (j)  --json: the twinned row is a {"pointer":"decl-twin",...} object in its place, every other row as the off twin's
 #   (e)  est_tokens= is re-priced on the final bytes (estchargecheck holds the rate); (w) well formed; (l) the legend once, no "--" inside
 #   (sd) with SIBLING-DEMOTE on, (a) on its result;  (x) MCP `for` (one renderer): (a) on the MCP answer and its off twin
 set -u
@@ -277,13 +277,23 @@ PY
 )"
 case "$nm" in *" ") ok "(n6) mem= rows: ${nm% } seen, none owner-qualified, none moved (K1 kept for one guard set)";; *) no "(n6) mem= rows: $nm";; esac
 
-# (b) --token-budget holds the rule; (b2) a bare --max-tokens does not; (j) --json never reaches it
+# (b) --token-budget runs the rule; (b2) a bare --max-tokens does not hold it; (j) --json carries the pointer object
 run ts "--for=$TTASK" --token-budget=4000 >"$TMP/b.on"; runoff ts "--for=$TTASK" --token-budget=4000 >"$TMP/b.off"
-if cmp -s "$TMP/b.on" "$TMP/b.off" && ! grep -q '<!-- decl-' "$TMP/b.on"; then ok "(b) --token-budget: byte-identical to the off twin, no decl legend"; else no "(b) --token-budget changed the answer"; fi
+python3 "$TMP/ref.py" "$TMP/b.off" "$TMP/b.on" "$TTASK" >"$TMP/b.res" 2>&1
+if grep -q '^PASS (a)' "$TMP/b.res" && ! grep -q '^PASS (a) 0 pointers' "$TMP/b.res"; then ok "(b) --token-budget (DEMOTE-ALL-DIALECTS): (a) on the budgeted answer and its off twin ($( grep -o '[0-9]* pointers' "$TMP/b.res" ); no row cut, so no refill)"
+else no "(b) --token-budget: $( head -c 500 "$TMP/b.res" )"; fi
 run ts "--for=$TTASK" --max-tokens=4000 >"$TMP/m.on" 2>/dev/null
 if cmp -s "$TMP/m.on" "$TMP/ts.on"; then ok "(b2) a bare --max-tokens leaves the answer byte-identical to the flagless one"; else no "(b2) --max-tokens=4000 changed the answer"; fi
 run ts "--for=$TTASK" --json >"$TMP/j.on"; runoff ts "--for=$TTASK" --json >"$TMP/j.off"
-if cmp -s "$TMP/j.on" "$TMP/j.off"; then ok "(j) --json: byte-identical to the off twin"; else no "(j) --json changed"; fi
+jres="$( python3 - "$TMP/j.on" "$TMP/j.off" <<'PY'
+import json, sys
+on, off = json.load( open( sys.argv[1] ) )["sigs"], json.load( open( sys.argv[2] ) )["sigs"]
+ptr = [ o for o in on if "pointer" in o ]
+rest = [ o for o in on if "pointer" not in o ] == [ o for o in off if o["r"] not in { p["r"] for p in ptr } ]
+print( "ok" if rest and [ ( p["pointer"], p["sym"] ) for p in ptr ] == [ ( "decl-twin", "WidgetParser.parseWidgetConfig" ) ] else "%s rest=%s" % ( ptr, rest ) )
+PY
+)"
+if [ "$jres" = ok ]; then ok "(j) --json (DEMOTE-ALL-DIALECTS): WidgetParser.parseWidgetConfig is a decl-twin pointer object, every other row as the off twin"; else no "(j) --json: $jres"; fi
 
 eon="$( grep -o '^<ctx [^>]*' "$TMP/ts.on" | grep -o ' est_tokens="[0-9]*"' | grep -o '[0-9]*' )"
 eoff="$( grep -o '^<ctx [^>]*' "$TMP/ts.off" | grep -o ' est_tokens="[0-9]*"' | grep -o '[0-9]*' )"

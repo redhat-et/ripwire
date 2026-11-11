@@ -34,10 +34,12 @@
 # Exits non-zero on any failure.
 
 set -u
-# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
-# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the rank order across budgets and dialects (a budget-held or --json answer is never demoted),
-# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
+# SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's readings
+# legitimately differ under them: <sigs shown= docs_dropped=> count the rows the ladder served BEFORE the rules print some as
+# <t p= sym= r=/> pointers (a pointer carries no <doc>), and (6)/(8) check those counts against the printed <d> rows. The rules are
+# pinned in forsiblingdemotecheck / fordecltwincheck / fordemoteallcheck.
 export RIPWIRE_NO_SIBLING_DEMOTE=1
+export RIPWIRE_NO_DECL_TWIN=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py set_prefix: the head round-robin set-prefix arms (lane hrr)

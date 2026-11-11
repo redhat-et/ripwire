@@ -530,6 +530,7 @@ for _g in \
     forctorhopcheck \
     fordeclrowcheck \
     fordecltwincheck \
+    fordemoteallcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
     fordocbodycheck \

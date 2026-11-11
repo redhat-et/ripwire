@@ -12,7 +12,10 @@
 // guards those feed (K1, K5, K7, K2) hold nothing there. RIPWIRE_NO_SIBLING_DEMOTE=1 / RIPWIRE_NO_DECL_TWIN=1 turn each rule off in
 // every dialect.
 #include "fordecltwin.h" // demoteAndPointRowsInto, siblingDemoteOn, declTwinOn, filesyms_detail::unescapeXmlAttr
-#include "serialize.h" // attrOf
+#include "memberowner.h" // MemberOwners / qualifiedMemberName: the row's n= as the XML dialect spells it
+#include "serialize.h" // attrOf, jsonStr
+
+#include <span>
 
 #include <algorithm>
 #include <cstddef>
@@ -233,12 +236,13 @@ inline std::string xmlAttr( std::string_view v )
     }
     return out;
 }
-// One row object as the <d> row the XML dialect prints for it: n= p= l= e= r= (the attributes the rules read), and a <note> child when
-// it carries notes (its own or its file's: the XML row carries both as <note> children).
-inline std::string xmlRowOf( std::string_view obj )
+// One row object as the <d> row the XML dialect prints for it: n= (`name`, owner-qualified as the XML row spells it; the JSON "n" is
+// the bare name beside "sc") p= l= e= r= (the attributes the rules read), and a <note> child when it carries notes (its own or its
+// file's: the XML row carries both as <note> children).
+inline std::string xmlRowOf( std::string_view obj, std::string_view name )
 {
-    std::string row = "<d";
-    for( const std::string_view key : { "n", "p", "l", "e", "r" } )
+    std::string row = "<d n=\"" + xmlAttr( name ) + "\"";
+    for( const std::string_view key : { "p", "l", "e", "r" } )
     {
         const std::string_view v = topValue( obj, key );
         if( !v.empty() )
@@ -266,8 +270,10 @@ inline std::vector<std::string> pointerRanks( std::string_view answer )
 } // namespace demote_json_detail
 
 // --json: the "sigs" array (`sigsJson`, from its `[` to its `]`) with each row the rules pick (read over the rows as the XML dialect
-// prints them) rewritten as {"pointer":RULE,"p":FILE,"sym":NAME,"r":RANK}; "" when no row moves (or a row has no r= to tell it by).
-inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view sigsJson )
+// prints them) rewritten as {"pointer":RULE,"p":FILE,"sym":NAME,"r":RANK} (sym= the owner-qualified name, as the XML pointer's);
+// "" when no row moves. `rowIds` are the rows' symbols in array order (packSignaturesJson's shown ids): an array they do not match
+// row for row, or a row with no "r" to tell it by, is left as shaped.
+inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view sigsJson, std::span<const NodeId> rowIds )
 {
     using namespace demote_json_detail;
     if( !demoteRulesOn() )
@@ -275,14 +281,22 @@ inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std:
         return {};
     }
     const std::vector<ObjectSpan> objects = arrayObjects( sigsJson );
-    std::string xml = "<sigs>";
-    for( const ObjectSpan& o : objects )
+    if( objects.size() != rowIds.size() )
     {
-        if( topValue( sigsJson.substr( o.at, o.end - o.at ), "r" ).empty() )
+        return {};
+    }
+    const MemberOwners owners( ing );
+    std::vector<std::string> names;
+    std::string xml = "<sigs>";
+    for( std::size_t k = 0; k < objects.size(); ++k )
+    {
+        const std::string_view obj = sigsJson.substr( objects[k].at, objects[k].end - objects[k].at );
+        if( topValue( obj, "r" ).empty() || std::size_t( rowIds[k] ) >= ing.symbols.size() )
         {
             return {};
         }
-        xml += xmlRowOf( sigsJson.substr( o.at, o.end - o.at ) );
+        names.push_back( qualifiedMemberName( owners, ing.symbols[rowIds[k]] ) );
+        xml += xmlRowOf( obj, names.back() );
     }
     xml += "</sigs>";
     // the two rules one after the other, as demoteAndPointRowsInto runs them, so each row's pointer names the rule that moved it
@@ -296,8 +310,9 @@ inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std:
     }
     std::string out;
     std::size_t from = 0;
-    for( const ObjectSpan& o : objects )
+    for( std::size_t k = 0; k < objects.size(); ++k )
     {
+        const ObjectSpan&      o   = objects[k];
         const std::string_view obj = sigsJson.substr( o.at, o.end - o.at );
         const std::string_view r = topValue( obj, "r" );
         const auto has = [&]( const std::vector<std::string>& ranks ) { return std::ranges::contains( ranks, std::string_view( r ) ); };
@@ -307,7 +322,7 @@ inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std:
         }
         out.append( sigsJson.substr( from, o.at - from ) );
         out.append( "{\"pointer\":\"" ).append( has( byDemote ) ? "demote" : "decl-twin" ).append( "\",\"p\":" ).append( topValue( obj, "p" ) );
-        out.append( ",\"sym\":" ).append( topValue( obj, "n" ) ).append( ",\"r\":" ).append( r ).append( "}" );
+        out.append( ",\"sym\":\"" ).append( jsonStr( names[k] ) ).append( "\",\"r\":" ).append( r ).append( "}" );
         from = o.end;
     }
     return out.append( sigsJson.substr( from ) );

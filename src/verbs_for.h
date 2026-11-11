@@ -1749,7 +1749,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
         // pointer object; under a soft target the bytes they free buy rows past the cut first (the rows stay a rank prefix)
         if( isSigsBuffered )
         {
-            const auto point = [ & ] { return rw::demoteJsonRows( in.ing, *in.graph, in.task, sigsJson ); };
+            const auto point = [ & ] { return rw::demoteJsonRows( in.ing, *in.graph, in.task, sigsJson, jsonShownIds ); };
             const auto renderAt = [ & ]( std::size_t rowDrop )
             {
                 return forLensJsonRowsAt( packSigs, in, ForJsonRefillState{ sigsJson, sigsCut, sigsCapped, sigsDroppedPositive, noteCounts, jsonShownIds },
@@ -3155,8 +3155,9 @@ inline std::string shapedForFileSymsAnswer( const MainDispatch& d, const std::st
     {
         out = std::move( cut );
     }
-    // SIBLING-DEMOTE is held by --token-budget alone: a bare --max-tokens is not read by --for (cli.h notice: "nothing was dropped"), so
-    // the answer under it is the flagless one, demote included (forbodyfoldcheck F8m)
+    // under --token-budget the rules already ran on <sigs> before its rows settled (DEMOTE-ALL-DIALECTS, runForLens), so they are held
+    // here; a bare --max-tokens is not read by --for (cli.h notice: "nothing was dropped"), so the answer under it is the flagless one,
+    // demote included (forbodyfoldcheck F8m)
     rw::demoteAndPointRowsInto( d.ing, d.g, d.cfg.forTask, captured, out, held && d.cfg.tokenBudget > 0 ); // SIBLING-DEMOTE, then DECL-TWIN
     if( !out.empty() && price )
     {
