@@ -1059,6 +1059,23 @@ struct PathRowView
     HopShed          shed = HopShed::Full;
     std::uint32_t    declinedLastCands = 0;   // > 0: the LAST hop is a declined call (PATH-FEWEST-UNPROVEN), its row says via="declined" cands=
 };
+// Row i's marks read off the edge INTO it (none on row 0): via=name/link, anchor=missing, prov=split, via=impl, in that order. A
+// declined last hop (`declinedCands` > 0, PATH-FEWEST-UNPROVEN) is no graph edge: via="declined" cands= alone, never the marks of a
+// same-caller edge into it, which is another call (CodeRabbit #612).
+inline std::string pathHopEdgeAttrs( const Graph& g, std::span<const NodeId> path, std::size_t i, std::uint32_t declinedCands )
+{
+    if( i == 0 )
+    {
+        return {};
+    }
+    if( declinedCands > 0 )
+    {
+        return " via=\"declined\" cands=\"" + std::to_string( declinedCands ) + "\"";
+    }
+    const NodeId from = path[ i - 1 ], to = path[i];
+    return std::string( viaEdgeAttr( edgeNameOnly( g, from, to ), edgeIsLink( g, from, to ) ) ) + anchorMissAttr( edgeAnchorMiss( g, from, to ) )
+         + splitArmAttrXml( pathHopSplitArm( g, path, i ) ) + viaImplAttr( edgeViaImpl( g, from, to ) );   // lane L6: via="impl"
+}
 inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Graph& g, std::span<const NodeId> path,
                              std::span<const std::string_view> owners, const PathRowView& view )
 {
@@ -1074,15 +1091,10 @@ inline void emitPathHopRows( std::FILE* out, const IngestResult& ing, const Grap
         const std::string_view rp    = singleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) : std::string_view( ing.files[ s.fileId ] );
         const std::string      name  = std::string( escapeXml( qualifiedMemberName( owners[i], s ), esc ) );   // QUALNAME-1: the language's separator
         const bool             hop   = i > 0;
-        const bool             declinedHop = hop && i + 1 == path.size() && view.declinedLastCands > 0;   // no graph edge: the declined call's own hedge
-        const std::string      mark  = declinedHop ? " via=\"declined\" cands=\"" + std::to_string( view.declinedLastCands ) + "\""
-                                                   : std::string( viaEdgeAttr( hop && edgeNameOnly( g, path[ i - 1 ], path[i] ), hop && edgeIsLink( g, path[ i - 1 ], path[i] ) ) )
-                                                         + anchorMissAttr( hop && edgeAnchorMiss( g, path[ i - 1 ], path[i] ) );
         const HopRecord* const rec = hop && hops.on ? hops.find( path[ i - 1 ], path[i] ) : nullptr;
         const std::string      ctx = rec != nullptr ? hopAttrsXml( ing, *rec, shed, /*withSig=*/true, singleRoot, rootPrefix ) : std::string();
-        emitTo( out, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), name, escapeXml( rp, esc ), s.line,
-                mark, splitArmAttrXml( !declinedHop && pathHopSplitArm( g, path, i ) ), viaImplAttr( hop && !declinedHop && edgeViaImpl( g, path[ i - 1 ], path[i] ) ),
-                ctx );   // lane L6: via="impl"; a declined hop's row reads no graph edge (CodeRabbit #612: a same-caller by-name edge is another call)
+        emitTo( out, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}/>", symTag( s.kind ), name, escapeXml( rp, esc ), s.line,
+                pathHopEdgeAttrs( g, path, i, i + 1 == path.size() ? view.declinedLastCands : 0 ), ctx );
     }
 }
 
