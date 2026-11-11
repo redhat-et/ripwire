@@ -611,6 +611,16 @@ Discloses: `capped`
 | `kReexportUseCap` | `2` | — | use-site rows per definition, from task-named files |
 | `kShortKeyRows` | `6` | — | rows per rung (a runaway guard; total= counts all) |
 
+### `src/forrowfeatures.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kRowFeaturesBeyondRows` | `20` | — | ranked candidates past the cut, listed so a near miss has a line |
+| `kRowFeaturesMaxHops` | `4` | — | graph distance is walked this far (undirected); further reads -1 |
+| `kRowFeaturesMaxPath` | `4096` | — | — |
+
 ### `src/forselfhook.h`
 
 Discloses: `capped`

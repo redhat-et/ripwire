@@ -17,6 +17,7 @@
 #include "graph.h" // Graph CSR + per-edge bytes, declined sites, definitionCountOfName
 #include "infra/Diagnostics.h"
 #include "infra/emit.h"
+#include "infra/ownedfile.h" // OwnedFile: the dump file closes on every path
 #include "infra/sortutil.h"
 #include "lexical.h" // LexTermEvidence, RouteAnchorDef, routeLower
 #include "model.h"
@@ -405,9 +406,9 @@ inline void count( std::string& out, long long v )
 // The section a printed row sits in, as the RIPWIRE_NO_<NAME> switch of the path that printed it (reports/ablation-top10.md).
 inline std::string sectionSource( std::string_view section )
 {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 22> kSections = { {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 21> kSections = { {
         { "sigs", "CORE" }, { "callers", "CALLER_HOP" }, { "dispatch", "DISPATCH_HOP" }, { "syms", "FILE_SYMS" }, { "hops", "OWNER_HOP" },
-        { "bodies", "BODY_SLOT" }, { "fold", "BODY_FOLD" }, { "lit", "LITERAL_ANCHOR" }, { "lit_capped", "LITERAL_ANCHOR" },
+        { "bodies", "BODY_SLOT" }, { "fold", "BODY_FOLD" }, { "lit", "LITERAL_ANCHOR" },
         { "selfhooks", "SELF_HOOK" }, { "listed", "LISTED_IN" }, { "ep", "EP_MANIFEST" }, { "reexports", "REEXPORT_HOPS" },
         { "shortkey", "SHORT_KEY" }, { "aliases", "ALIAS_HOP" }, { "dotted_strings", "DOTTED_STRINGS" }, { "unused_in_file", "UNUSED_TABLE" },
         { "reg", "REG_ROWS" }, { "named-file", "FILE_PAGE" }, { "doc_body", "FOR_DOC_BODY" }, { "graph_verb", "ROUTE_DECLINED" }, { "hdr", "HDR_ROWS" },
@@ -726,16 +727,17 @@ inline std::string headerText()
 // Append `text` to `path` (the two header lines first when the file is new or empty); false when any step failed.
 inline bool appendFile( const std::string& path, const std::string& text )
 {
-    std::FILE* f = std::fopen( path.c_str(), "ab" );
-    if( f == nullptr )
+    OwnedFile out = openOwnedFile( path.c_str(), "ab" );
+    if( !out )
     {
         return false;
     }
+    std::FILE* f = out.file;
     const bool fresh = std::fseek( f, 0, SEEK_END ) == 0 && std::ftell( f ) == 0;
     const std::string head = fresh ? headerText() : std::string();
     const bool wrote = std::fwrite( head.data(), 1, head.size(), f ) == head.size() && std::fwrite( text.data(), 1, text.size(), f ) == text.size();
     const bool flushed = std::fflush( f ) == 0 && std::ferror( f ) == 0;
-    return std::fclose( f ) == 0 && wrote && flushed;
+    return out.close() && wrote && flushed;
 }
 } // namespace rowfeat_detail
 

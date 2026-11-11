@@ -547,8 +547,8 @@ for _g in \
     fornotesjsoncheck \
     foronesidecheck \
     forrankordercheck \
-    forrowfeaturescheck \
     forregrowcheck \
+    forrowfeaturescheck \
     forrootlegendcheck \
     forroutecheck \
     forsectioncollapsecheck \
