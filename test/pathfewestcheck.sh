@@ -19,6 +19,7 @@
 # ARMS
 #   (T)  two 3-hop chains, the first found with 2 by-name hops, the other with 1: the 1-by-name chain prints, route_tie="fewer-unproven"
 #        route_tie_other="2", no route_hedged= (1 unproven hop is below the hedge).
+#   (T2) an inner tie: the better chain's pmid is reached from p1 and from p2 at equal keys: the first-found predecessor (p1) is kept.
 #   (C2) the cpython-02 shape: a 3-hop chain of 3 by-name hops (cands 2 each) with no equal-length alternative: unchanged (hedged
 #        name-stitched, no route_tie=); and (C2b) the better chain is the one found first: unchanged, no route_tie=.
 #   (D)  the django-07 shape: the found 4-hop chain has 3 by-name hops; the other 4-hop chain's last call is declined (cands=2, its
@@ -48,7 +49,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 echo "pathfewestcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -81,6 +82,8 @@ class Sink:
 EOF
 }
 tie_fixture t aa_first bb_second
+# (T2): start_entry -> aa_first -> W.wmid -> Sink.fin first; start_entry -> p1 | p2 -> pmid -> Sink.fin (1 by name), p1 found before p2
+mkdir -p "$TMP/t2"; sed -e 's/^    bb_second(o)$/    p1(o)\n    p2(o)/' -e 's/^def bb_second(o):$/def p1(o):\n    return pmid(o)\n\ndef p2(o):/' "$TMP/t/m.py" > "$TMP/t2/m.py"
 # (C2b): the 1-by-name chain is defined first, so the BFS already finds it
 mkdir -p "$TMP/c2b"; sed -e 's/^def aa_first/def zz_first/' -e 's/    aa_first(o)/    zz_first(o)/' -e 's/^def bb_second/def ab_second/' -e 's/    bb_second(o)/    ab_second(o)/' "$TMP/t/m.py" > "$TMP/c2b/m.py"
 python3 - "$TMP/c2b/m.py" <<'PYEOF'
@@ -190,6 +193,8 @@ check(){ # arm out want_rows want_tie want_other want_declined want_tests [want_
 
 T="$( run t --path=start_entry,Sink.fin )"
 check T "$T" "start_entry bb_second pmid Sink.fin" fewer-unproven 2 "" ""
+T2="$( run t2 --path=start_entry,Sink.fin )"
+check T2 "$T2" "start_entry p1 pmid Sink.fin" fewer-unproven 2 "" ""
 C2="$( run c2 --path=start_entry,Sink.fin )"
 check C2 "$C2" "start_entry A1.s1 A2.s2 Sink.fin" "" "" "" "" name-stitched
 C2B="$( run c2b --path=start_entry,Sink.fin )"
@@ -206,10 +211,10 @@ D3="$( run d3 --path=start_entry,Sink.fin )"
 check D3 "$D3" "start_entry b1 b2 b3 Sink.fin" fewer-unproven 3 1 ""
 DH="$( run dh --path=start_entry,Sink.fin )"
 check DH "$DH" "start_entry b1 BX.bx2 b3 Sink.fin" fewer-unproven 3 1 "" name-stitched
-[ "$( attr route_by_name <<<"$DH" )" = 1 ] && ok "(DH) route_by_name=\"1\" beside route_declined=\"1\"" || no "(DH) route_by_name=[$( attr route_by_name <<<"$DH" )]"
+if [ "$( attr route_by_name <<<"$DH" )" = 1 ]; then ok "(DH) route_by_name=\"1\" beside route_declined=\"1\""; else no "(DH) route_by_name=[$( attr route_by_name <<<"$DH" )]"; fi
 D4="$( run d4 --path=start_entry,Sink.fin )"
 check D4 "$D4" "start_entry a1 W.w2 W.w3 Sink.fin" "" "" "" "" name-stitched
-grep -qF 'via="declined"' <<<"$D4" && no "(D4) a via=\"declined\" row with 4 candidates" || ok "(D4) no declined row past 3 candidates"
+if grep -qF 'via="declined"' <<<"$D4"; then no "(D4) a via=\"declined\" row with 4 candidates"; else ok "(D4) no declined row past 3 candidates"; fi
 DX="$( run dx --path=start_entry,Sink.fin )"
 check DX "$DX" "start_entry a1 W.w2 W.w3 Sink.fin" "" "" "" "" name-stitched
 S="$( run s --path=start_entry,Sink.fin )"
@@ -218,14 +223,14 @@ SL="$( run sl --path=start_entry,Sink.fin )"
 check SL "$SL" "start_entry a1 th Sink.fin" "" "" "" 1
 W="$( run w --path=start_entry,InsertCompiler.fin )"
 check W "$W" "start_entry b1 b_insert InsertCompiler.fin" fewer-unproven 2 1 ""
-[ "$( attr route_equal <<<"$W" )" = 1 ] && ok "(W) route_equal=\"1\" discloses the equally proven b_update chain" || no "(W) route_equal=[$( attr route_equal <<<"$W" )]"
+if [ "$( attr route_equal <<<"$W" )" = 1 ]; then ok "(W) route_equal=\"1\" discloses the equally proven b_update chain"; else no "(W) route_equal=[$( attr route_equal <<<"$W" )]"; fi
 W0="$( run w0 --path=start_entry,InsertCompiler.fin )"
 check W0 "$W0" "start_entry b1 b_one InsertCompiler.fin" fewer-unproven 2 1 ""
-[ "$( attr route_equal <<<"$W0" )" = 1 ] && ok "(W0) route_equal=\"1\"" || no "(W0) route_equal=[$( attr route_equal <<<"$W0" )]"
+if [ "$( attr route_equal <<<"$W0" )" = 1 ]; then ok "(W0) route_equal=\"1\""; else no "(W0) route_equal=[$( attr route_equal <<<"$W0" )]"; fi
 
 # (L) legends ride exactly with their attributes; well-formed
 lfail=0
-for a in T C2 C2B D D3 DH D4 DX S SL W W0; do
+for a in T T2 C2 C2B D D3 DH D4 DX S SL W W0; do
     out="${!a}"; lg="$( legend <<<"$out" )"
     for pair in "route_tie:route_tie=" "route_declined:route_declined=1" "route_tests:route_tests=N" "route_equal:route_equal=N"; do
         at="${pair%%:*}"; cl="${pair#*:}"
@@ -261,7 +266,7 @@ for a in T D SL; do
         [ "$( attr "$at" <<<"$m" )" = "$( attr "$at" <<<"$cli" )" ] || same=0
     done
     [ "$( rows <<<"$m" )" = "$( rows <<<"$cli" )" ] && [ "$( lastrow <<<"$m" )" = "$( lastrow <<<"$cli" )" ] || same=0
-    [ "$same" = 1 ] && ok "(M) $a: path_between carries the CLI's root attributes and rows" || no "(M) $a: MCP $( root <<<"$m" ) vs CLI $( root <<<"$cli" )"
+    if [ "$same" = 1 ]; then ok "(M) $a: path_between carries the CLI's root attributes and rows"; else no "(M) $a: MCP $( root <<<"$m" ) vs CLI $( root <<<"$cli" )"; fi
 done
 
 # (F) --for graph_verb block on D
