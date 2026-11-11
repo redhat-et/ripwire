@@ -131,8 +131,12 @@ inline bool objectMacroAt( std::string_view line, std::size_t at, std::size_t na
 // `struct NAME;` / `class NAME;`: a forward declaration reads definition-shaped to whereis' label but defines nothing.
 inline bool forwardDeclarationAt( std::string_view line, std::size_t at, std::size_t nameLen ) noexcept
 {
-    const std::size_t next = line.find_first_not_of( " \t", at + nameLen );
-    return next != std::string_view::npos && line[ next ] == ';';
+    std::string_view rest = line.substr( std::min( at + nameLen, line.size() ) );
+    while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) )
+    {
+        rest.remove_prefix( 1 );
+    }
+    return rest.starts_with( ';' );
 }
 
 // The first line of `hay` whose first whole-word occurrence of `name` satisfies `accept( line, at )`; 0 when none.

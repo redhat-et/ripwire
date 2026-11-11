@@ -1260,7 +1260,7 @@ std::optional<int> runUses( const MainDispatch& d )
 
         rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size() - usHedged,
-                     rw::unindexedRolesAttrXml( usUnindexed ).c_str(),   // B31: beside the count it qualifies; absent when armed
+                     rw::unindexedRolesAttrXml( usUnindexed ),   // B31: beside the count it qualifies; absent when armed
                      rw::declinedLiteralCallsAttrXml( usDeclinedLiteralCalls ).c_str(),
                      rw::unprovenDefsAttrXml( usUnprovenDefs ).c_str(),   // H1: beside the count it qualifies; absent at zero
                      selectorAttrs.c_str(), usRootAttr.c_str(), upage,

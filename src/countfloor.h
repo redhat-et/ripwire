@@ -147,9 +147,9 @@ inline bool usesRolesUnindexed( const IngestResult& ing, std::span<const NodeId>
     return false;
 }
 
-inline std::string unindexedRolesAttrXml( bool on )
+inline const char* unindexedRolesAttrXml( bool on ) noexcept
 {
-    return on ? std::string( " unindexed_roles=\"read,write,type\"" ) : std::string();
+    return on ? " unindexed_roles=\"read,write,type\"" : "";
 }
 
 // The clause defining unindexed_roles=, emitted exactly when the root carries it (G4). No flag dashes: it rides an XML comment.
