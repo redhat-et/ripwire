@@ -529,6 +529,7 @@ for _g in \
     forcompresscheck \
     forctorhopcheck \
     fordeclrowcheck \
+    fordecltwincheck \
     fordisclosurecheck \
     fordispatchhopcheck \
     fordocbodycheck \
