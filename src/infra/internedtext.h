@@ -122,7 +122,11 @@ private:
         std::vector<Slot> slots;   // open addressing, linear probe, a power of two at most half full
         std::size_t       used = 0;
     };
-    static_assert( sizeof( Shard ) == kLine, "a Shard outgrew one line (a fatter std::mutex?): it now spans two, so re-measure the bounce" );
+    // alignas( kLine ) is the no-false-sharing guarantee: no two shards share a line on any platform. One shard fits ONE line
+    // only where the line is 128 B (ARM, where the bounce was measured); on x86 (64 B) libstdc++'s 40 B std::mutex + the
+    // vector + used = 72 B, and MSVC's mutex is fatter, so a shard takes two lines of its own there (#608 CI). A shard past
+    // two lines means a much fatter mutex: re-measure the bounce.
+    static_assert( sizeof( Shard ) % kLine == 0 && sizeof( Shard ) <= 2 * kLine, "a Shard outgrew two lines (a fatter std::mutex?): re-measure the bounce" );
 
     static void growShard( Shard& shard )
     {
