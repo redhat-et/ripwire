@@ -3960,7 +3960,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 // symbol has one. Unconditional (not --metrics-gated): it is an identity fact like id=, not a
                 // descriptive stat. Omitted whenever bind is nullptr or the per-symbol label is empty (the
                 // overwhelming common case) → zero token cost, byte-identical golden map on non-JNI corpora.
-                if( const std::string_view label = bind ? bind->at( id ) : std::string_view{}; !label.empty() )
+                if( const std::string_view label = bind ? bind->labelOf( id ) : std::string_view{}; !label.empty() )
                 {
                     w.write( " bind=\"" );  w.write( escapeXml( label, esc ) );  w.write( "\"" );
                 }
@@ -11500,7 +11500,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                 { rw::formatTo( num, sizeof( num ), ",\"overloads\":{}", rows.overloads[ rowIndex ] );  w.write( num ); }
                 w.write( splitLineJson( rows, rowIndex, s ) );   // the XML l= twin: a --metrics row split out of a same-name group
 
-                if( const std::string_view label = bind ? bind->at( id ) : std::string_view{}; !label.empty() )
+                if( const std::string_view label = bind ? bind->labelOf( id ) : std::string_view{}; !label.empty() )
                 { w.write( ",\"bind\":" );  writeJsonStr( w, label, esc ); }
 
                 if( const std::uint32_t ambK = counterAt( ambOut, id ); ambK > 0 )

@@ -61,7 +61,7 @@ struct SparseLabels
 
     bool empty() const noexcept { return rows.empty(); }
     void add( NodeId id, std::string label ) { rows.emplace_back( id, std::move( label ) ); }   // callers walk ids ascending
-    std::string_view at( NodeId id ) const noexcept
+    std::string_view labelOf( NodeId id ) const noexcept
     {
         const auto row = std::lower_bound( rows.begin(), rows.end(), id, []( const std::pair<NodeId, std::string>& r, NodeId key ) { return r.first < key; } );
         return row != rows.end() && row->first == id ? std::string_view( row->second ) : std::string_view{};

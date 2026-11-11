@@ -5,11 +5,11 @@
 // breakpoints; with them a memory card is one paired run, and the plateau ("graph-tables" minus "model") is a number a gate
 // can bound (test/memstatscheck.sh).
 //
-// Env-gated stderr only: unset, the readers below cost one cached getenv and print nothing, so stdout, stderr and rc of every
+// Env-gated stderr only: unset, the readers below cost one getenv each and print nothing, so stdout, stderr and rc of every
 // ordinary run are unchanged. The footprint is os::mem_footprint (macOS phys_footprint, Linux VmRSS); a platform that cannot
 // read it prints 0, which is a reading of "unknown", never of "nothing held".
-#include "emit.h"   // rw::emitTo
-#include "os.h"     // rw::os::mem_footprint / mem_footprint_peak
+#include "infra/emit.h"   // rw::emitTo
+#include "infra/os.h"     // rw::os::mem_footprint / mem_footprint_peak
 
 #include <cstdint>
 #include <cstdlib>  // std::getenv

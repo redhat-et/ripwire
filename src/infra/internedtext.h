@@ -95,7 +95,7 @@ public:
         }
     }
 
-    // how many distinct texts the pool holds (ids handed out so far; the empty text is none of them). RIPWIRE_STATS reads it.
+    // how many distinct texts the pool holds (ids handed out so far; the empty text is none of them); a host stats line reads it
     std::uint32_t idCount() const noexcept { return next_.load( std::memory_order_relaxed ) - 1; }
 
     const std::string& text( std::uint32_t id ) const noexcept

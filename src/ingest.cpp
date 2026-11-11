@@ -27,7 +27,7 @@
 #include "langfacts.h"        // langFacts(l): the per-language facts the ingest sections read instead of a Lang:: compare
 #include "didyoumean.h"        // octocode F3: boundedEditDistance/nearestNameByEditDistance — the ONE near-miss
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
-#include "infra/memstats.h" // M0 MEM-STATS: the RIPWIRE_STATS footprint reading at the model at rest
+#include "memstats.h" // M0 MEM-STATS: the RIPWIRE_STATS footprint reading at the model at rest
 
                                 // primitive, reused for a --match query's node-kind tokens (see nearestNodeKindHint)
 #include "pattern.h"           // R2: the pattern surface's compiler + matcher — AstWalk::Pattern rides the shared file walk
@@ -536,7 +536,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         suppressShadowedReferences( result );
     }
 
-    memstats::mark( "model" );   // M0 MEM-STATS: the model at rest, what buildGraph's side tables stack on (infra/memstats.h)
+    memstats::mark( "model" );   // M0 MEM-STATS: the model at rest, what buildGraph's side tables stack on (src/memstats.h)
     if( result.memoryStop.isSet() )
     {
         memguard::recordStop();   // #350: the caller must answer for this partial ingest (memguard.h, the backstop)

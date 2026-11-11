@@ -5,7 +5,7 @@
 
 #include "clones.h"     // cloneBodyKey — CLONES-PERSIST: the per-def clone key the cache carries
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
-#include "infra/memstats.h" // M0 MEM-STATS: RIPWIRE_STATS footprint readings at the pool join and after the cache write
+#include "memstats.h" // M0 MEM-STATS: RIPWIRE_STATS footprint readings at the pool join and after the cache write
 
 // ingest_parsepool.h — the parallel parse pool, moved VERBATIM out of ingest() in the 2026-08-30
 // decomposition: the per-thread raw-fact accumulators (one RawFacts each), the cold-path reserve
@@ -1067,7 +1067,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         // cache write and before returning to the model-build tail; keeping these empty-but-capacious vectors
         // alive needlessly raises the cold-run peak on large trees.
         std::vector<RawFacts>().swap( tFacts );
-        memstats::mark( "pool-join" );   // M0 MEM-STATS: the merged families, per-thread storage released (infra/memstats.h)
+        memstats::mark( "pool-join" );   // M0 MEM-STATS: the merged families, per-thread storage released (src/memstats.h)
 
         // P1-15: the SAME drift count, carried out of the function instead of only to stderr. The MCP
         // server discloses it per incremental pass (`_reingest`), which it could not do from an env-gated

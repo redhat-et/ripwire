@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# memstatscheck.sh — RIPWIRE_STATS's memory lines (src/infra/memstats.h, card M0 MEM-STATS) and the graph side tables
+# memstatscheck.sh — RIPWIRE_STATS's memory lines (src/memstats.h, card M0 MEM-STATS) and the graph side tables
 # they measure (card G1, reports mem-audit-fable-1111). The fixture is GENERATED here, never committed: it is large enough
 # to show an over-reserve, and a whole-repo run must not see it.
 #
