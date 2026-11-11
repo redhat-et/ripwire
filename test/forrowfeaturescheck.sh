@@ -16,7 +16,7 @@
 #   (a)  a second call appends its lines under the same two header lines (the header is written once)
 #   (v)  VALIDATE: a directory or an empty value writes nothing, says so on stderr, and stdout + rc are the unset run's
 #   (w)  a write that fails (the directory does not exist) is disclosed on stderr; stdout + rc are the unset run's
-#   (j)  a posture the dump does not read (--json; j2: the three RIPWIRE_NO_ switches that turn the capture off, a posture the old
+#   (j)  a posture the dump does not read (--json; j2: every RIPWIRE_NO_ switch that turns the capture off, a posture the old
 #        notice's list did not name) says so in one generic notice and writes nothing; stdout + rc are the unset run's
 #   (x)  an answer not captured whole (RIPWIRE_FAULT_CHARGE_BUFFER=1: no buffer) writes nothing and says so; stdout + rc are the
 #        fault-only run's. The switch exists only on a non-NDEBUG build: the arm detects it from the fault-only run's own notice and
@@ -203,7 +203,8 @@ run joff "" . --no-cache --json "--for=$TASK"
 run jon "RIPWIRE_ROW_FEATURES=$TMP/json.tsv" . --no-cache --json "--for=$TASK"
 n="$( seen jon "$NOTDUMPED" )"
 if same2 joff jon && [ "$n" -ge 1 ] && [ ! -e "$TMP/json.tsv" ]; then ok "(j) --json: stdout + rc unchanged, $n notice(s), nothing written"; else no "(j) the --json posture ($n notices)"; fi
-SW='RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_ONE_SIDE_REACH=1 RIPWIRE_NO_SIBLING_DEMOTE=1'
+# every switch forFileSymsWanted (src/verbs_for.h) ORs in; RIPWIRE_NO_DECL_TWIN is main's DECL-TWIN (a binary without it ignores it)
+SW='RIPWIRE_NO_FILE_SYMS=1 RIPWIRE_NO_ONE_SIDE_REACH=1 RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1'
 env $SW "$BIN" . --no-cache "--for=$TASK" >"$TMP/swoff.out" 2>"$TMP/swoff.err"; echo $? >"$TMP/swoff.rc"
 env $SW "RIPWIRE_ROW_FEATURES=$TMP/sw.tsv" "$BIN" . --no-cache "--for=$TASK" >"$TMP/swon.out" 2>"$TMP/swon.err"; echo $? >"$TMP/swon.rc"
 n="$( seen swon "$NOTDUMPED" )"
