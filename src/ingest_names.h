@@ -525,7 +525,7 @@ struct TemplateParameterLists
 inline TemplateParameterLists templateParameterListsAbove( TSNode node ) noexcept
 {
     TemplateParameterLists lists;
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         if( kindIs( t, "qualified_identifier" ) )
@@ -669,7 +669,7 @@ inline bool captureSpecializationHeader( bool isDef, Lang lang, std::string_view
 // "Traits<long>"). An out-of-range span reads "", as before.
 inline std::string cppQualifierText( TSNode nameNode, std::string_view src, bool isDefinition )
 {
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "qualified_identifier" ) || hasPhantomScopeSeparator( parent ) )
     {
         return {};
@@ -734,12 +734,12 @@ struct CppWrittenChainRoot
 };
 inline std::optional<CppWrittenChainRoot> cppWrittenChainRoot( TSNode nameNode, std::string_view src )
 {
-    TSNode outer = ts_node_parent( nameNode );
+    TSNode outer = parentOf( nameNode );
     if( ts_node_is_null( outer ) || !kindIs( ts_node_type( outer ), "qualified_identifier" ) || hasPhantomScopeSeparator( outer ) )
     {
         return std::nullopt;
     }
-    for( TSNode up = ts_node_parent( outer ); !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "qualified_identifier" ); up = ts_node_parent( up ) )
+    for( TSNode up = parentOf( outer ); !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "qualified_identifier" ); up = parentOf( up ) )
     {
         outer = up;
     }
@@ -779,7 +779,7 @@ inline std::optional<std::string_view> cppOutermostNamedNamespaceRoot( TSNode no
 {
     std::string_view outermostNsRoot;
     bool              sawNamespace = false;
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         if( !kindIs( ts_node_type( p ), "namespace_definition" ) )
         {
@@ -950,7 +950,7 @@ inline std::string rustPathSegment( std::string_view pathText ) noexcept
 // function from enclosingScopeOf rather than three more arms in its shared list.
 inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool includeModules )
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         const bool  isImpl  = kindIs( t, "impl_item" );
@@ -986,7 +986,7 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
 // test/rustqualcheck.sh §8.
 inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
 {
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) )
     {
         return {};
@@ -1010,7 +1010,7 @@ inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
 // rustRule3Proves) reads this one; stored in Reference::fieldName (model.h), which a Rust call reference does not otherwise use.
 inline std::string rustWrittenQualifier( TSNode nameNode, std::string_view src )
 {
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     const TSNode path   = ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) ? TSNode{} : fieldChild( parent, NodeField::Path );
     if( ts_node_is_null( path ) || !kindIs( ts_node_type( path ), "scoped_identifier" ) )
     {
@@ -1048,7 +1048,7 @@ inline std::string_view finalTypeSegment( TSNode typeNode, std::string_view src 
             typeNode = ts_node_named_child_count( typeNode ) > 0 ? ts_node_named_child( typeNode, ts_node_named_child_count( typeNode ) - 1 ) : TSNode{};
             if( !ts_node_is_null( typeNode ) && kindIs( t, "generic_type" ) )
             {
-                typeNode = ts_node_named_child( ts_node_parent( typeNode ), 0 );   // `Foo<T>`: the name, never the argument list
+                typeNode = ts_node_named_child( parentOf( typeNode ), 0 );   // `Foo<T>`: the name, never the argument list
             }
         }
         else if( kindIs( t, "member_expression" ) || kindIs( t, "scoped_type_identifier" ) || kindIs( t, "nested_identifier" ) )
@@ -1126,7 +1126,7 @@ inline std::string_view receiverTypeName( TSNode method, std::string_view src )
 // `self.m()`/`this->m()`/bare member call resolves to scope::m) and what a `Type::m` selector matches.
 inline std::string enclosingScopeOf( TSNode node, std::string_view src )
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const std::string_view kind( ts_node_type( p ) );   // one strlen per ancestor, then a compare per row
         for( const ScopeOwnerRow& row : kScopeOwners )
@@ -1163,7 +1163,7 @@ inline std::string enclosingScopeOf( TSNode node, std::string_view src )
 // so a member of one scopes to the class that owns it.
 inline std::string kotlinEnclosingScopeOf( TSNode nameNode, std::string_view src )
 {
-    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( nameNode ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         const bool scopeOwner =    kindIs( t, "class_declaration" )
@@ -1189,7 +1189,7 @@ inline std::string kotlinEnclosingScopeOf( TSNode nameNode, std::string_view src
 // owner's *_name kind. The definition's own node is walked through (its name node lies inside it). "" at file level.
 inline std::string protoEnclosingScopeOf( TSNode nameNode, std::string_view src )
 {
-    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( nameNode ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t        = ts_node_type( p );
         const char* nameKind = ( kindIs( t, "message" ) || kindIs( t, "group" ) ) ? "message_name"
@@ -1262,7 +1262,7 @@ inline std::string defScopeOf( Lang lang, TSNode nameNode, std::string_view src 
 // Returns "" at file level, so a top-level `def` keeps no scope and no id= (the file is not a scope).
 inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
 {
-    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( nameNode ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* t = ts_node_type( p );
         if( !kindIs( t, "class" ) && !kindIs( t, "module" ) )
@@ -1304,12 +1304,12 @@ inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
 // the same (assignment) node to this grammar, so it needs no separate arm. Both are gated.
 inline bool rubyCallIsAssignmentTarget( TSNode nameNode ) noexcept
 {
-    const TSNode call = ts_node_parent( nameNode );
+    const TSNode call = parentOf( nameNode );
     if( ts_node_is_null( call ) || !kindIs( ts_node_type( call ), "call" ) )
     {
         return false;
     }
-    const TSNode assign = ts_node_parent( call );
+    const TSNode assign = parentOf( call );
     if( ts_node_is_null( assign ) || !kindIs( ts_node_type( assign ), "assignment" ) )
     {
         return false;
@@ -1449,7 +1449,7 @@ inline void captureRubyDefs( TSNode root, std::uint32_t fileId, std::string_view
 // asks it — Swift's local binding below and C++'s block-scope direct-initialized local (cppBlockScopeDirectInit).
 inline bool nearestScopeOwnerIs( TSNode node, std::initializer_list<std::string_view> inside, std::initializer_list<std::string_view> outside ) noexcept
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const std::string_view kind( ts_node_type( p ) );
         if( std::find( inside.begin(), inside.end(), kind ) != inside.end() )
@@ -1649,7 +1649,7 @@ inline bool csharpNodeCarriesTestAttr( TSNode n, std::string_view src ) noexcept
 inline bool pythonInFileTestScope( TSNode defNode, std::string_view src ) noexcept
 {
     bool enclosedByClass = false;
-    for( TSNode n = defNode; !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    for( TSNode n = defNode; !ts_node_is_null( n ); n = parentOf( n ) )
     {
         if( !kindIs( ts_node_type( n ), "class_definition" ) )
         {
@@ -1676,7 +1676,7 @@ inline bool pythonInFileTestScope( TSNode defNode, std::string_view src ) noexce
 template<class NodePred>
 inline bool anySelfOrAncestor( TSNode node, NodePred pred ) noexcept
 {
-    for( TSNode n = node; !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    for( TSNode n = node; !ts_node_is_null( n ); n = parentOf( n ) )
     {
         if( pred( n ) )
         {
@@ -1700,7 +1700,7 @@ inline std::uint8_t parseRecoveredBits( TSNode defNode, SymKind kind, Lang lang,
     {
         return 0;
     }
-    const bool hasErrorAncestor = anySelfOrAncestor( ts_node_parent( defNode ), []( TSNode n ) noexcept { return ts_node_is_error( n ); } );
+    const bool hasErrorAncestor = anySelfOrAncestor( parentOf( defNode ), []( TSNode n ) noexcept { return ts_node_is_error( n ); } );
     if( !hasErrorAncestor )
     {
         return 0;
@@ -1820,7 +1820,7 @@ inline bool bindsOutsideItsFunction( TSNode roleNode, Lang lang ) noexcept
         }
         const bool localToken  = !e.localChildToken.empty() && ts_node_child_count( roleNode ) > 0
                                  && std::string_view( ts_node_type( ts_node_child( roleNode, 0 ) ) ) == e.localChildToken;
-        const TSNode parent      = ts_node_parent( roleNode );   // null above the root: no parent kind, never ts_node_type( null )
+        const TSNode parent      = parentOf( roleNode );   // null above the root: no parent kind, never ts_node_type( null )
         const bool   localParent = !e.localParentKind.empty() && !ts_node_is_null( parent ) && std::string_view( ts_node_type( parent ) ) == e.localParentKind;
         return !localToken && !localParent;
     }
@@ -2024,7 +2024,7 @@ inline bool constCaptureNeedsScreamingGate( Lang lang ) noexcept
 // up to the captured declaration is the robust discriminator.
 inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexcept
 {
-    for( TSNode walk = ts_node_parent( nameNode ); !ts_node_is_null( walk ) && !ts_node_eq( walk, declNode ); walk = ts_node_parent( walk ) )
+    for( TSNode walk = parentOf( nameNode ); !ts_node_is_null( walk ) && !ts_node_eq( walk, declNode ); walk = parentOf( walk ) )
     {
         if( kindIs( ts_node_type( walk ), "init_declarator" ) )
         {
@@ -2149,7 +2149,7 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
     {
         return false;   // no other grammar carries the capture — a query that grew one would need its own arm here
     }
-    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode parent = parentOf( nameNode );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -2164,7 +2164,7 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
         return false;   // `obj.x = …` / `cls.x = …` — not an instance attribute of the enclosing class
     }
     bool sawFunction = false;
-    for( TSNode up = ts_node_parent( roleNode ); !ts_node_is_null( up ); up = ts_node_parent( up ) )
+    for( TSNode up = parentOf( roleNode ); !ts_node_is_null( up ); up = parentOf( up ) )
     {
         const char* ut = ts_node_type( up );
         if( kindIs( ut, "function_definition" ) )
@@ -2198,13 +2198,13 @@ inline bool cppInternalLinkage( TSNode defNode, std::string_view src ) noexcept
     {
         return false;
     }
-    const TSNode parent      = ts_node_parent( defNode );
+    const TSNode parent      = parentOf( defNode );
     const bool   classMember = !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "field_declaration_list" );
     if( !classMember && !childTokenAmong( defNode, src, "storage_class_specifier", /*acceptAnonymousToken=*/false, { "static" } ).empty() )
     {
         return true;   // shape 2
     }
-    for( TSNode p = parent; !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parent; !ts_node_is_null( p ); p = parentOf( p ) )
     {
         if( kindIs( ts_node_type( p ), "namespace_definition" ) && ts_node_is_null( fieldChild( p, NodeField::Name ) ) )
         {
@@ -2357,12 +2357,12 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
 {
     // the declarator of a DECLARATION, through the `*` / `&` it may sit under. A definition's, a member's or a parameter's
     // function_declarator stops at the first parent — almost every capture this pattern makes.
-    TSNode decl    = ts_node_parent( fnDeclarator );
+    TSNode decl    = parentOf( fnDeclarator );
     bool   wrapped = false;
     for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && ( kindIs( ts_node_type( decl ), "pointer_declarator" ) || kindIs( ts_node_type( decl ), "reference_declarator" ) ); ++guard )
     {
         wrapped = true;
-        decl    = ts_node_parent( decl );
+        decl    = parentOf( decl );
     }
     if( ts_node_is_null( decl ) || !kindIs( ts_node_type( decl ), "declaration" ) )
     {
@@ -2464,7 +2464,7 @@ inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noex
         return true;
     }
     std::uint32_t mappingDepth = 0;
-    for( TSNode p = roleNode; !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = roleNode; !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const char* pt = ts_node_type( p );
         if( kindIs( pt, "block_mapping" ) || kindIs( pt, "flow_mapping" ) )
@@ -2532,7 +2532,7 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
         // macro-edges round: an EMPTY-body function-like `#define NOOP(x)` defines nothing callable — drop
         // it before it mints a symbol. The @name capture's parent IS the preproc node; object-like
         // preproc_def and Rust macro_definition fail the node-type test and are never gated.
-        const TSNode defineNode = ts_node_parent( nameNode );
+        const TSNode defineNode = parentOf( nameNode );
         return !ts_node_is_null( defineNode )
             && kindIs( ts_node_type( defineNode ), "preproc_function_def" )
             && !preprocFunctionDefHasBody( defineNode, src );
@@ -2549,7 +2549,7 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
 // with interior spacing would still pass, a decoy like `moduleLike.exports` cannot).
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode member = ts_node_parent( nameNode );
+    const TSNode member = parentOf( nameNode );
     if( ts_node_is_null( member ) )
     {
         return false;
@@ -2580,7 +2580,7 @@ inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
 // file's stem, the rule a Markdown file's own node is named by (ingest_parsepool.h: `fs::path( path ).stem()`).
 inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode member = ts_node_parent( nameNode );
+    const TSNode member = parentOf( nameNode );
     if( ts_node_is_null( member ) || !kindIs( ts_node_type( member ), "member_expression" ) || nodeTextOf( nameNode, src ) != "exports" )
     {
         return false;
@@ -2594,7 +2594,7 @@ inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) no
 // share the captured shape and fail exactly this test.
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode member = ts_node_parent( nameNode );
+    const TSNode member = parentOf( nameNode );
     if( ts_node_is_null( member ) )
     {
         return false;
@@ -2617,7 +2617,7 @@ inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noe
 // literal name, an assignment without a declaration (`Sub = Base.extend('Sub')`), and `exports.Sub = …` are not read.
 inline TSNode jsClassFactoryReceiver( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode decl = ts_node_parent( nameNode );
+    const TSNode decl = parentOf( nameNode );
     if( ts_node_is_null( decl ) || !kindIs( ts_node_type( decl ), "variable_declarator" ) )
     {
         return TSNode{};
@@ -2665,7 +2665,7 @@ inline constexpr int kExtendChainCap = 16;   // factory-of-a-factory links the r
 // `{ fields: [ … ] }`) is not one — such a factory is a class only by its receiver.
 inline bool jsFactoryHasClassBody( TSNode nameNode ) noexcept
 {
-    const TSNode call = fieldChild( ts_node_parent( nameNode ), NodeField::Value );
+    const TSNode call = fieldChild( parentOf( nameNode ), NodeField::Value );
     const TSNode args = ts_node_is_null( call ) ? call : fieldChild( call, NodeField::Arguments );
     const std::uint32_t n = ts_node_is_null( args ) ? 0u : ts_node_named_child_count( args );
     for( std::uint32_t i = 1; i < n; ++i )
@@ -2709,8 +2709,8 @@ inline bool jsClassFactoryMakesClass( TSNode nameNode, std::string_view src, int
     {
         return false;
     }
-    const TSNode declarator = ts_node_parent( nameNode );   // jsClassFactoryReceiver proved it a variable_declarator
-    const TSNode statement  = ts_node_parent( declarator );
+    const TSNode declarator = parentOf( nameNode );   // jsClassFactoryReceiver proved it a variable_declarator
+    const TSNode statement  = parentOf( declarator );
     const BaseScopeHit hit  = findOutward( recv, statement, nodeTextOf( recv, src ), /*scopeOwner=*/false, src );
     if( hit.cut || hit.ambiguous || ts_node_is_null( hit.decl ) )
     {
@@ -2722,7 +2722,7 @@ inline bool jsClassFactoryMakesClass( TSNode nameNode, std::string_view src, int
         return true;
     }
     // a declarator: baseDeclNames answered with its NAME node, whose parent is the variable_declarator
-    const TSNode boundDecl = ts_node_parent( hit.name );
+    const TSNode boundDecl = parentOf( hit.name );
     const TSNode value     = ts_node_is_null( boundDecl ) ? boundDecl : fieldChild( boundDecl, NodeField::Value );
     if( ts_node_is_null( value ) )
     {
@@ -2745,7 +2745,7 @@ inline std::string_view prototypeCtorName( TSNode nameNode, std::string_view src
     {
         return {};
     }
-    const TSNode member     = ts_node_parent( nameNode );
+    const TSNode member     = parentOf( nameNode );
     const TSNode protoMember = fieldChild( member, NodeField::Object );
     const TSNode ctor       = fieldChild( protoMember, NodeField::Object );
     if( ts_node_is_null( ctor ) )
@@ -2773,10 +2773,10 @@ inline std::string_view prototypeCtorName( TSNode nameNode, std::string_view src
 // are checked statically, never resolved — the gate pins that direction too.
 inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexcept
 {
-    const TSNode assign = ts_node_parent( nameNode );                                    // assignment
-    const TSNode stmt   = ts_node_is_null( assign ) ? assign : ts_node_parent( assign );  // expression_statement
-    const TSNode body   = ts_node_is_null( stmt )   ? stmt   : ts_node_parent( stmt );    // block
-    const TSNode cls    = ts_node_is_null( body )   ? body   : ts_node_parent( body );    // class_definition
+    const TSNode assign = parentOf( nameNode );                                    // assignment
+    const TSNode stmt   = ts_node_is_null( assign ) ? assign : parentOf( assign );  // expression_statement
+    const TSNode body   = ts_node_is_null( stmt )   ? stmt   : parentOf( stmt );    // block
+    const TSNode cls    = ts_node_is_null( body )   ? body   : parentOf( body );    // class_definition
     if( ts_node_is_null( cls ) || !kindIs( ts_node_type( cls ), "class_definition" ) )
     {
         return false;

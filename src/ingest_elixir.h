@@ -161,7 +161,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     // Module attributes (notably @spec/@type) are not runtime call sites.
     // The shared inert-region decision runs after this capture's other syntax filters,
     // so quoted definition heads and special forms never inflate declined=.
-    for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
+    for( TSNode parent = parentOf( role ); !ts_node_is_null( parent ); parent = parentOf( parent ) )
     {
         if( elixirLiveHole( parent, role, src ) ) { break; } // outer quoted declarations do not constrain the evaluated argument
         if( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src  ) == "@" )
@@ -224,7 +224,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
         return false;
     }
     bool inDefault = false;
-    for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
+    for( TSNode parent = parentOf( role ); !ts_node_is_null( parent ); parent = parentOf( parent ) )
     {
         if( elixirLiveHole( parent, role, src ) ) { break; } // outer quoted declarations do not constrain the evaluated argument
         if( std::strcmp( ts_node_type( parent ), "binary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src ) == "\\\\" )
@@ -265,7 +265,7 @@ bool elixirContains( TSNode outer, TSNode inner ) noexcept
 
 TSNode elixirLexicalScope( TSNode node ) noexcept
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         if( elixirNodeIs( p, "source" ) || elixirNodeIs( p, "do_block" ) || elixirNodeIs( p, "stab_clause" )
             || elixirNodeIs( p, "block" ) || elixirNodeIs( p, "pair" ) || elixirNodeIs( p, "else_block" )
@@ -311,7 +311,7 @@ bool elixirLiveHole( TSNode hole, TSNode site, std::string_view src ) noexcept
 {
     const auto target = elixirTarget( hole, src );
     if( ( target != "unquote" && target != "unquote_splicing" ) || !elixirContains( elixirFirstArgument( hole ), site ) ) { return false; }
-    for( TSNode parent = ts_node_parent( hole ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
+    for( TSNode parent = parentOf( hole ); !ts_node_is_null( parent ); parent = parentOf( parent ) )
     {
         if( elixirTarget( parent, src ) != "quote" || !elixirContains( elixirBody( parent, src ), hole ) )
         {
@@ -376,7 +376,7 @@ struct ElixirContext
             DISCLOSE( *shortfall, ExtractShortfall::DisclosureWhy::ElixirScopeTooDeep, "Elixir module nesting exceeds 128" );
             return {};
         }
-        for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+        for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
         {
             if( ( elixirModuleKeyword( elixirTarget( p, src ) ) || elixirTarget( p, src ) == "defimpl" )
                 && !elixirInert( p, src ) )
@@ -527,7 +527,7 @@ struct ElixirContext
     // visibility: function parameters, clause patterns, matches and comprehension generators.
     TSNode bindingScope( TSNode node ) const
     {
-        for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+        for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
         {
             if( elixirLiveHole( p, node, src ) ) { return {}; } // patterns outside the live hole are inert syntax
             if( elixirNodeIs( p, "unary_operator" ) && nodeFieldText( p, NodeField::Operator, src  ) == "^" ) { return {}; }
@@ -569,7 +569,7 @@ struct ElixirContext
                     }
                     if( op == "<-" )
                     {
-                        for( TSNode c = ts_node_parent( p ); !ts_node_is_null( c ); c = ts_node_parent( c ) )
+                        for( TSNode c = parentOf( p ); !ts_node_is_null( c ); c = parentOf( c ) )
                         {
                             if( elixirTarget( c, src ) == "for" || elixirTarget( c, src ) == "with" ) { return c; }
                         }
@@ -584,16 +584,16 @@ struct ElixirContext
     // `&name/N`: name is the operand of a named capture — a function, whatever variable shares its spelling
     bool namedCapture( TSNode name ) const
     {
-        const TSNode slash = ts_node_parent( name );
+        const TSNode slash = parentOf( name );
         return elixirNodeIs( slash, "binary_operator" ) && nodeFieldText( slash, NodeField::Operator, src  ) == "/"
-            && elixirNodeIs( ts_node_parent( slash ), "unary_operator" ) && nodeFieldText( ts_node_parent( slash ), NodeField::Operator, src  ) == "&";
+            && elixirNodeIs( parentOf( slash ), "unary_operator" ) && nodeFieldText( parentOf( slash ), NodeField::Operator, src  ) == "&";
     }
 
     bool bareCall( TSNode name ) const
     {
         const auto text = nodeTextOf( name, src );
         if( text.empty() || text == "true" || text == "false" || text == "nil" ) { return false; }
-        const TSNode parent = ts_node_parent( name );
+        const TSNode parent = parentOf( name );
         if( elixirNodeIs( parent, "dot" ) || ( elixirNodeIs( parent, "call" )
             && ts_node_eq( fieldChild( parent, NodeField::Target ), name ) ) ) { return false; }
         // A capture names a function even if a variable with the same spelling is bound — and even when the spelling
@@ -679,7 +679,7 @@ struct ElixirContext
                 continue;
             }
             const bool behaviour = ( keyword == "behaviour" || keyword == "behavior" )
-                                && elixirAttribute( ts_node_parent( call ), src ) == keyword;
+                                && elixirAttribute( parentOf( call ), src ) == keyword;
             if( keyword != "alias" && keyword != "import" && keyword != "require" && keyword != "use" && !behaviour ) { continue; }
             const auto targets = directiveModules( call );
             for( const std::string& target : targets )
@@ -742,7 +742,7 @@ struct ElixirContext
             const TSNode scope = bindingScope( identifier );
             if( ts_node_is_null( scope ) ) { continue; }
             auto visibleFrom = ts_node_start_byte( identifier );
-            for( TSNode p = ts_node_parent( identifier ); !ts_node_is_null( p ) && !ts_node_eq( p, scope ); p = ts_node_parent( p ) )
+            for( TSNode p = parentOf( identifier ); !ts_node_is_null( p ) && !ts_node_eq( p, scope ); p = parentOf( p ) )
             {
                 const auto op = nodeFieldText( p, NodeField::Operator, src  );
                 if( ( op == "=" || op == "<-" ) && elixirContains( fieldChild( p, NodeField::Left ), identifier ) )
@@ -803,9 +803,9 @@ std::pair<std::uint16_t, bool> elixirCallArity( TSNode role, TSNode name, std::s
     {
         expression = name;
     }
-    const TSNode parent = ts_node_parent( expression );
+    const TSNode parent = parentOf( expression );
     if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "/"
-        && nodeFieldText( ts_node_parent( parent ), NodeField::Operator, src  ) == "&" )
+        && nodeFieldText( parentOf( parent ), NodeField::Operator, src  ) == "&" )
     {
         const auto arity = nodeFieldText( parent, NodeField::Right, src  );
         std::uint16_t count = 0;

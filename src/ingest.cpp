@@ -13,6 +13,7 @@
 #include "quality.h"           // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
 #include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
 #include "infra/nodekind.h"    // rw::kindIs - the inline node-kind compare the per-AST-node dispatch chains run on (OPTREMARKS F3)
+#include "infra/tsparent.h"    // rw::parentOf - ts_node_parent answered from one cached root-descent path per file (parent-carry lane)
 #include "infra/fieldid.h"     // rw::fieldChild - the same defect one layer down: the field NAME resolved once per grammar, not per node
 #include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication
 #include "externalnames.h"     // FE-A: the JS/TS global tables the shadow walk keys on (ingest_jsimports.h jsNoteGlobalSpellings)
