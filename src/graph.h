@@ -2013,6 +2013,17 @@ struct BindKindCounts
     }
 };
 
+// G1c: free a side table's storage NOW, not at the end of its scope — buildGraph's resolve-only tables, before the CSR build
+// stacks on them (mem-audit-fable-1111: the final bump was 6 / 55 / 20 MiB on envoy / cockroach / vscode with every table
+// alive). Moves into a temporary that dies here; the static_assert keeps a type whose move would be a COPY (a peak, not a
+// release) out. The moved-from object is never read again, only destroyed.
+template<class T>
+inline void releaseStorage( T& table ) noexcept
+{
+    static_assert( std::is_nothrow_move_constructible_v<T>, "releaseStorage: a throwing move is a copy — it would raise the peak it means to lower" );
+    [[maybe_unused]] const T released( std::move( table ) );
+}
+
 struct FieldNarrowTables
 {
     HashMap<std::string, FlatRecvType> fieldTypeByClass;
@@ -9818,15 +9829,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // P2-D Rule 2b field-narrow tables (class#field → declared type, plus the local-shadow veto set) —
     // built by buildFieldNarrowTables above; consumed via Narrower::rule2bFieldRecvType in the resolve loop.
-    const FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing, classNames, bindCounts );
+    FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing, classNames, bindCounts );
 
     // Phase 5 external-name veto evidence (docs/EVALS.md "Phase 5") — built by buildExternalVetoTables above;
     // consumed by the veto step in the resolve loop, after every receiver rule has missed.
-    const ExternalVetoTables extVeto = buildExternalVetoTables( ing );
+    ExternalVetoTables extVeto = buildExternalVetoTables( ing );
 
     // ── L3 fn-pointer/callback binding tables (var→FUNCTION, Rule 2's exact discipline) — built by
     // buildFnPtrBindTables above; consumed via Narrower::fnPtrBindingTarget in the resolve loop below.
-    const FnPtrBindTables fnBinds  = buildFnPtrBindTables( ing );
+    FnPtrBindTables fnBinds  = buildFnPtrBindTables( ing );
     const bool fnBindActive        = !fnBinds.varFn.empty() || !fnBinds.varFnFile.empty();
 
     // SameInclude table: caller fileId → the sorted, deduped set of fileIds it TRANSITIVELY #includes,
@@ -9850,11 +9861,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, /*lazyPairsOut=*/nullptr, /*forCallNarrow=*/true,
                                                                              /*importsUnresolvedOut=*/nullptr, /*extrasOut=*/nullptr,
                                                                              kCallNarrowReadsCIncludeRoots ? &rule3Adj : nullptr );
-    const rw::FileSetStore fileIncludes  = transitiveIncludeSet( includeAdj );
-    const rw::FileSetStore rule3Closure  = rule3Adj.empty() ? rw::FileSetStore {} : transitiveIncludeSet( rule3Adj );
+    rw::FileSetStore fileIncludes  = transitiveIncludeSet( includeAdj );
+    rw::FileSetStore rule3Closure  = rule3Adj.empty() ? rw::FileSetStore {} : transitiveIncludeSet( rule3Adj );
     const rw::FileSetStore& rule3Includes = rule3Adj.empty() ? fileIncludes : rule3Closure;
-    const CppQualifierScopes cppQualScopes = buildCppQualifierScopes( ing );   // CPP-EXTQUAL-VETO (a), read at Rule 3 below
-    const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr, bindCounts );
+    CppQualifierScopes cppQualScopes = buildCppQualifierScopes( ing );   // CPP-EXTQUAL-VETO (a), read at Rule 3 below
+    JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr, bindCounts );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
     {
@@ -9940,13 +9951,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     ScopedRecvDecls scopedRecvDecls = buildScopedRecvDecls( ing );   // not const: (L) call-result typing fills an `auto` declaration's type
     const HashMap<std::string, std::vector<std::string>> usingReexports = buildUsingReexports( ing );
     const Narrower narrower( canonByName, varType, scopedRecvDecls, fileIncludes, symFileId, usingReexports, &rule3Includes );
-    const HashMap<std::string, char> memberFields = Narrower::memberFieldNames( ing );   // Rule 2c's member-field veto and Rule 2b's declared-member set, "<Owner>#<field>" (C/C++)
+    HashMap<std::string, char> memberFields = Narrower::memberFieldNames( ing );   // Rule 2c's member-field veto and Rule 2b's declared-member set, "<Owner>#<field>" (C/C++)
     // Issue #74: the same Narrower over Java's containment-derived `Class::method` map, so a proven
     // `Type::method` receiver resolves through the ONE type-side probe (methodOnTypeOrBases) instead of a
     // second copy of its base walk. A separate instance rather than extra keys in canonByName: merging
     // Java members into the shared map would put them in reach of the Kotlin↔Java bridge's Rule-1 lookups,
     // which is a resolution change #74 does not ask for. Empty map on a Java-free corpus ⇒ never hits.
-    const HashMap<std::string, rw::SmallVec<NodeId, 2>> javaTypeMembers = buildJavaTypeMembers( ing );
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> javaTypeMembers = buildJavaTypeMembers( ing );
     const Narrower javaNarrower( javaTypeMembers, varType, scopedRecvDecls, fileIncludes, symFileId, usingReexports );
     const ElixirResolver elixirResolver( ing );
     // ONE apply step for every receiver rule (1 / 2 / 2c / 2b): keep the rule's definition ids that are
@@ -9975,8 +9986,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
     // method of the caller language's builtin map/list/set/string type. Inert (active=false) on a corpus with no
     // symbol in a gated language.
-    const BuiltinMethodGate builtinGate = buildBuiltinMethodGate( ing, externalVeto, extVeto, includeAdj, jsImports );
-    const FalseEdgeRules    falseEdges  = buildFalseEdgeRules( ing, classNames, externalVeto, extVeto, includeAdj );   // FE-A (test/falseedgecheck.sh)
+    BuiltinMethodGate builtinGate = buildBuiltinMethodGate( ing, externalVeto, extVeto, includeAdj, jsImports );
+    FalseEdgeRules    falseEdges  = buildFalseEdgeRules( ing, classNames, externalVeto, extVeto, includeAdj );   // FE-A (test/falseedgecheck.sh)
     rw::SmallVec<NodeId, 2> feKept;                                                                        // its narrowed candidates, reused
     std::vector<NodeId>     gateRefused;   // reused: a gated call's targets refused for want of evidence (the list a decline records)
     const auto vetoExternal = [ & ]( const Reference& ref ) -> CallDisposition
@@ -10122,7 +10133,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     const RubyTopSelf              rubyTop   = buildRubyTopSelf( ing, rubyReach );   // a task file's or a template's self outside any class
     const std::vector<std::string> specializationsWithBases = sortedSpecializationNames( chaUp );   // resolve.h: what a C++ specialization inherits
     ChaConeMemo              chaCones( chaUp, chaDown );   // one cone per receiver type, computed on first use (see the type)
-    const ClassIdentity      classIds = buildClassIdentity( ing, chaUp );   // Rule 2's class identity: nesting, owners, real inheritance (resolve.h)
+    ClassIdentity      classIds = buildClassIdentity( ing, chaUp );   // Rule 2's class identity: nesting, owners, real inheritance (resolve.h)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
     rw::SmallVec<NodeId, 2>  reachScratch; // reused per-call buffer: the candidates a call can reach by name (reachableByName)
     // FE-B (receiverevidence.h): the receiver-evidence tables, the per-edge hedge sets and the reused per-call buffers.
@@ -10141,7 +10152,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     ReceiverEvidence         recvEv( ing, chaUp, classNames );
-    const HashMap<std::string, char> qualifierVerdicts = buildQualifierVerdicts( ing, extVeto, falseEdges );   // h1-annot
+    HashMap<std::string, char> qualifierVerdicts = buildQualifierVerdicts( ing, extVeto, falseEdges );   // h1-annot
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
         recvEv.localNames = &fieldNarrow.localNameSet;
@@ -13236,6 +13247,40 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         rw::emitTo( stderr, "[mem] edges acc={}/{}\n", acc.size(), acc.bucket_count() );
     }
+    // G1c: the resolve loop was the last reader of every table below — what is still read past here is byName (the priors),
+    // includeAdj (Graph::importAdj), acc and the per-edge key sets (the flatten), and the graph itself. Objects that hold
+    // references into these tables (the Narrowers, ExternalVeto, BaseEvidenceTables, ChaConeMemo) are not called again.
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/3z: release the resolve-only tables" );
+        releaseStorage( varType );
+        releaseStorage( fieldNarrow );
+        releaseStorage( extVeto );
+        releaseStorage( fnBinds );
+        releaseStorage( jsImports );
+        releaseStorage( recvEv );
+        releaseStorage( classIds );
+        releaseStorage( scopedRecvDecls );
+        releaseStorage( canonByName );
+        releaseStorage( canonFamilyByName );
+        releaseStorage( classNames );
+        releaseStorage( memberFields );
+        releaseStorage( javaTypeMembers );
+        releaseStorage( chaUp );
+        releaseStorage( chaDown );
+        releaseStorage( chaUpDeclared );
+        releaseStorage( chaCones );
+        releaseStorage( fileIncludes );
+        releaseStorage( rule3Closure );
+        releaseStorage( cppQualScopes );
+        releaseStorage( qualifierVerdicts );
+        releaseStorage( falseEdges );
+        releaseStorage( builtinGate );
+        releaseStorage( langCandMemo );
+        releaseStorage( declinedListsByHash );
+        releaseStorage( rule3Memo );
+        releaseStorage( rule3MemoMember );
+        releaseStorage( symFileId );
+    }
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
     // flatten + cap + sort by (from, to) — deterministic regardless of map order
@@ -13251,6 +13296,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         edges.push_back( { NodeId( k >> 32 ), NodeId( k & 0xffffffffu ), w } );
     }
+    releaseStorage( acc );   // G1c: flattened; the sort and the CSR arrays below stack on the edge list alone
     std::vector<E> edgeScratch;
     sortutil::radixSortByFromTo( edges, edgeScratch );
 
