@@ -15,6 +15,7 @@
 #include <atomic>       // gType3PassRuns / gType3PassPairs — the QD-ENVOY-TIME cost-bound counters
 #include <cctype>
 #include <cstdint>
+#include <span>         // cloneLcsLen — a clamped token run is a view, not a copy
 #include <limits>       // std::numeric_limits — the mask-width static_assert: an index shifted into a mask must fit it
 #include <cstdio>
 #include <string>
@@ -857,22 +858,32 @@ inline std::uint64_t cloneTokenHash( const std::string& t, std::uint64_t seed ) 
 // LCS length of two token-ID sequences via rolling two-row DP. O(|a|·|b|) time, O(min) space. Comparing interned
 // u32 ids (A4-P2) instead of std::string cells makes each DP cell a scalar compare. Sequences are clamped to
 // kType3MaxTokensForLcs by the caller so this stays a bounded constant per pair.
-inline std::size_t cloneLcsLen( const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b )
+//
+// T3-LCS (QD-ENVOY-TIME): the two rows are the CALLER's scratch, grown once per pass instead of allocated per pair,
+// and the per-row refill is gone. It was dead work: column 0 of every row is 0 and never written, and columns 1..nb
+// of the row about to be filled are all overwritten before any is read (cell j reads only the previous row and
+// cell j-1 of its own row). The rows swap as pointers; the result is the same value cell for cell.
+inline std::size_t cloneLcsLen( std::span<const std::uint32_t> a, std::span<const std::uint32_t> b, std::vector<std::uint32_t>& prevRow,
+                                std::vector<std::uint32_t>& curRow )
 {
     const std::size_t na = a.size(), nb = b.size();
     if( na == 0 || nb == 0 )
     {
         return 0;
     }
-    std::vector<std::uint32_t> prev( nb + 1, 0 ), cur( nb + 1, 0 );
-    for( std::size_t i = 1; i <= na; ++i )
+    prevRow.assign( nb + 1, 0 );
+    curRow.assign( nb + 1, 0 );
+    std::uint32_t*       prev = prevRow.data();
+    std::uint32_t*       cur  = curRow.data();
+    const std::uint32_t* bs   = b.data();
+    for( std::size_t i = 0; i < na; ++i )
     {
+        const std::uint32_t ai = a[i];
         for( std::size_t j = 1; j <= nb; ++j )
         {
-            cur[j] = ( a[i - 1] == b[j - 1] ) ? prev[j - 1] + 1 : std::max( prev[j], cur[j - 1] );
+            cur[j] = ( ai == bs[j - 1] ) ? prev[j - 1] + 1 : std::max( prev[j], cur[j - 1] );
         }
         std::swap( prev, cur );
-        std::fill( cur.begin(), cur.end(), 0u );
     }
     return prev[nb];
 }
@@ -1020,6 +1031,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     HashMap<std::uint64_t, std::uint8_t> pairSeen;
     std::vector<CloneGroup>              out;
     std::size_t                          comparedPairs = 0;
+    std::vector<std::uint32_t>           lcsPrevRow, lcsCurRow;   // cloneLcsLen's two DP rows, reused by every pair (T3-LCS)
     const auto pairKey = []( std::uint32_t x, std::uint32_t y ) noexcept
     { return ( std::uint64_t( x ) << 32 ) | std::uint64_t( y ); };
 
@@ -1110,13 +1122,11 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
                 // (c) the expensive compare: LCS over token sequences (clamped to the cost cap).
                 ++comparedPairs;
                 ++st.lcsRuns;
-                const std::vector<std::uint32_t>* pa = &ca.toks;
-                const std::vector<std::uint32_t>* pb = &cb.toks;
-                std::vector<std::uint32_t>        ta, tb;
-                if( pa->size() > kType3MaxTokensForLcs ) { ta.assign( pa->begin(), pa->begin() + kType3MaxTokensForLcs ); pa = &ta; }
-                if( pb->size() > kType3MaxTokensForLcs ) { tb.assign( pb->begin(), pb->begin() + kType3MaxTokensForLcs ); pb = &tb; }
-                const std::size_t lcs = cloneLcsLen( *pa, *pb );
-                const std::size_t den = pa->size() + pb->size();
+                // the clamp is a view of the first kType3MaxTokensForLcs tokens, not a copy of them (T3-LCS)
+                const std::span<const std::uint32_t> pa( ca.toks.data(), std::min( ca.toks.size(), kType3MaxTokensForLcs ) );
+                const std::span<const std::uint32_t> pb( cb.toks.data(), std::min( cb.toks.size(), kType3MaxTokensForLcs ) );
+                const std::size_t lcs = cloneLcsLen( pa, pb, lcsPrevRow, lcsCurRow );
+                const std::size_t den = pa.size() + pb.size();
                 if( den == 0 )
                 {
                     continue;
