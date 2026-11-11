@@ -6402,15 +6402,15 @@ struct RecvVarType
 // lost by the ordering. 0 = a uniquely resolved name-based edge, which no emitter writes.
 struct EdgeProvenanceSets
 {
-    const HashMap<std::uint64_t, char>& binding;
-    const HashMap<std::uint64_t, char>& import;
-    const HashMap<std::uint64_t, char>& split;
-    const HashMap<std::uint64_t, char>& finalSegment;
+    const U64Set&                       binding;
+    const U64Set&                       import;
+    const U64Set&                       split;
+    const U64Set&                       finalSegment;
     const HashMap<std::uint64_t, char>& impl;           // lane L6: 1 = every site committing the edge was a one-implementor dispatch
 };
 inline std::uint8_t edgeProvenance( bool scipPrecise, const EdgeProvenanceSets& sets, std::uint64_t edgeKey ) noexcept
 {
-    const auto holds = [ edgeKey ]( const HashMap<std::uint64_t, char>& set ) { return set.find( edgeKey ) != set.end(); };
+    const auto holds = [ edgeKey ]( const auto& set ) { return set.find( edgeKey ) != set.end(); };
     if( scipPrecise )
     {
         return 1u;

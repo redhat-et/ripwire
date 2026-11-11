@@ -3267,7 +3267,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                        const std::vector<std::uint32_t>* amp    = nullptr,   // Q2   change-amplification (callers + co-change partners)
                        const std::vector<std::uint32_t>* unresolvedOut = nullptr,  // honesty lever #2: per-symbol lang-filtered
                                                                                    // unresolved calls; summed into `unresolved=N`
-                       const std::vector<std::string>*   bind = nullptr,      // A4-R5 per-symbol cross-language binding
+                       const SparseLabels*               bind = nullptr,      // A4-R5 per-symbol cross-language binding
                                                                                // label (graph.h g.bindLabel) — JNI decoded
                                                                                // Java_pkg_Cls_method → "pkg.Cls.method".
                                                                                // Emitted as bind="…" ONLY when non-empty
@@ -3960,9 +3960,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 // symbol has one. Unconditional (not --metrics-gated): it is an identity fact like id=, not a
                 // descriptive stat. Omitted whenever bind is nullptr or the per-symbol label is empty (the
                 // overwhelming common case) → zero token cost, byte-identical golden map on non-JNI corpora.
-                if( bind && id < bind->size() && !(*bind)[id].empty() )
+                if( const std::string_view label = bind ? bind->at( id ) : std::string_view{}; !label.empty() )
                 {
-                    w.write( " bind=\"" );  w.write( escapeXml( (*bind)[id], esc ) );  w.write( "\"" );
+                    w.write( " bind=\"" );  w.write( escapeXml( label, esc ) );  w.write( "\"" );
                 }
 
                 char ambs[ 48 ];  ambs[ 0 ] = '\0';   // "fast guessed K of this symbol's call targets — read source"
@@ -11337,7 +11337,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                            const std::vector<std::uint32_t>* cbo, const std::vector<std::uint8_t>* tested,
                            const std::vector<std::uint32_t>* lcom4, const std::vector<std::uint32_t>* amp,
                            const std::vector<std::uint32_t>* unresolvedOut,
-                           const std::vector<std::string>* bind,
+                           const SparseLabels* bind,
                            bool autoOrder, std::size_t* outEstTokens,
                            const std::vector<std::uint8_t>* outProv = nullptr,
                            const MapAnnotations& ann = {},      // §B1.2: same value the XML serialize() takes;
@@ -11500,8 +11500,8 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                 { rw::formatTo( num, sizeof( num ), ",\"overloads\":{}", rows.overloads[ rowIndex ] );  w.write( num ); }
                 w.write( splitLineJson( rows, rowIndex, s ) );   // the XML l= twin: a --metrics row split out of a same-name group
 
-                if( bind && id < bind->size() && !(*bind)[id].empty() )
-                { w.write( ",\"bind\":" );  writeJsonStr( w, (*bind)[id], esc ); }
+                if( const std::string_view label = bind ? bind->at( id ) : std::string_view{}; !label.empty() )
+                { w.write( ",\"bind\":" );  writeJsonStr( w, label, esc ); }
 
                 if( const std::uint32_t ambK = counterAt( ambOut, id ); ambK > 0 )
                 { rw::formatTo( num, sizeof( num ), ",\"amb\":{}", ambK );  w.write( num ); }

@@ -234,7 +234,7 @@ struct Graph
     std::vector<RouteEdge>     routeEdges;    // B6.3 HTTP-route USE→DEF edges (sorted by fromSym, toSym, path) —
                                               // OUTSIDE the call graph, same as composeEdges; empty on any corpus
                                               // with zero detected routes (byte-identical default output).
-    std::vector<std::string>   bindLabel;      // A4-R5 per-symbol cross-language binding label — the JNI
+    SparseLabels               bindLabel;      // A4-R5 per-symbol cross-language binding label — the JNI
                                                // decoded Java name (`pkg.Cls.method`) for a `Java_*` def; ""
                                                // for every other symbol. Rendered as bind="..." by serialize
                                                // (see serialize.h's `bind` param). Empty vector ⇒ no JNI defs
@@ -6159,13 +6159,13 @@ inline void rubyFqnNames( const HashMap<std::string, std::vector<RubyAncestorEdg
 // directive sits at the class's own start byte (ingest_relations.h), which is the class symbol's.
 inline void rubyInstanceForwarders( const IngestResult& ing, HashMap<std::string, char>& out )
 {
-    HashMap<std::uint64_t, char> sites;   // (fileId << 32) | the class's start byte
+    U64Set sites;   // (fileId << 32) | the class's start byte
     for( const Include& inc : ing.includes )
     {
         const std::string_view written = std::string_view( inc.target ).substr( rubyConstIsAbsolute( inc.target ) ? 2 : 0 );
         if( inc.isSymbolic && !inc.isValueUse && std::ranges::find( kRubyInstanceForwardingBases, written ) != std::end( kRubyInstanceForwardingBases ) )
         {
-            sites.try_emplace( ( std::uint64_t( inc.fileId ) << 32 ) | inc.byte, 1 );
+            sites.insert( ( std::uint64_t( inc.fileId ) << 32 ) | inc.byte );
         }
     }
     if( sites.empty() )
@@ -9692,11 +9692,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            if( g.bindLabel.empty() )
-            {
-                g.bindLabel.assign( N, std::string() );
-            }
-            g.bindLabel[ s.id ] = std::move( readable );
+            g.bindLabel.add( s.id, std::move( readable ) );   // G1d: sparse, one row per JNI export
         }
     }
 
@@ -10028,9 +10024,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     };
     std::vector<NodeId>      bindingTier;   // A4-R5 reused FFI-alias fallback candidate buffer
     std::string              bindKey;       // A4-R5 reused "<fileId>#var" key buffer for the ctypes-handle gate
-    HashMap<std::uint64_t, char> bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
+    U64Set                       bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
                                                  // consumed below to stamp prov (outProv=2) + the amb honesty mark
-    HashMap<std::uint64_t, char> importEdges;    // (from<<32|to) keys of edges an ES named-import binding pinned,
+    U64Set                       importEdges;    // (from<<32|to) keys of edges an ES named-import binding pinned,
                                                  // consumed below to stamp prov (outProv=4). Same argument as
                                                  // bindingEdges: an ABSENT prov= is defined by the map legend as
                                                  // "uniquely-resolved-name-based", and these edges are neither —
@@ -10038,13 +10034,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                                  // unmarked would let a NEW resolution mechanism inherit the
                                                  // confidence label of the old one, silently. Not reserved, for the
                                                  // reason spelled out for splitEdges below.
-    HashMap<std::uint64_t, char> finalSegmentEdges;   // (from<<32|to) keys of edges a receiver's QUALIFIED written type chose by
+    U64Set                       finalSegmentEdges;   // (from<<32|to) keys of edges a receiver's QUALIFIED written type chose by
                                                       // its last name alone (Rule 2, or CHA-lite pruning by that type) —
                                                       // consumed below to stamp prov (outProv=5). The qualifier was never
                                                       // checked against the class's namespace, so such an edge can be a
                                                       // precise-looking WRONG one (test/narrowcheck.sh arm 24); an absent
                                                       // prov= would call it uniquely resolved. Not reserved, like splitEdges.
-    HashMap<std::uint64_t, char> splitEdges;     // C1: (from<<32|to) keys of edges that are an ARM of a k-way split the
+    U64Set                       splitEdges;     // C1: (from<<32|to) keys of edges that are an ARM of a k-way split the
                                                  // resolver could not choose between — the per-EDGE half of the per-SYMBOL
                                                  // ambOut counter, consumed below to stamp prov (outProv=3). ambOut says K
                                                  // of this symbol's CALLS were guesses; this says WHICH EDGES they were,
@@ -10058,7 +10054,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                                  // whose per-reference tier work dominates the growth cascade by orders of
                                                  // magnitude. A guessed reserve would be a made-up number in a hot struct.
     HashMap<std::uint64_t, char> linkEdges;      // (from<<32|to) a markdown link bound. The section that holds the link is the edge's from.
-    HashMap<std::uint64_t, char> anchorMissEdges; // (from<<32|to) a link whose slug named no heading, so the target is the file node.
+    U64Set                       anchorMissEdges; // (from<<32|to) a link whose slug named no heading, so the target is the file node.
     std::vector<NodeId>      rule3Out;   // reused Rule-3 output buffer (candidates from the single included file)
     Rule3FileMemo            rule3Memo;  // Rule 3's answer per (caller file, byName entry): one walk per name per file, not per call
     Rule3FileMemo            rule3MemoMember;   // the same for a member call, which reads the includer-directory closure (EXTQUAL-FIX1)
@@ -10337,8 +10333,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     };
-    HashMap<std::uint64_t, char> nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
-    HashMap<std::uint64_t, char> provenEdges;     // … and of an edge some call bound WITH evidence: a proven site wins the merged row
+    U64Set                       nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
+    U64Set                       provenEdges;     // … and of an edge some call bound WITH evidence: a proven site wins the merged row
     std::vector<NodeId>      provedScratch;   // reused: the name-ladder candidates the language's own lookup proves
     std::vector<NodeId>      memberRule3;     // reused: Rule 3's included-file candidates for a MEMBER call — a hedge tier, never a proof
     // FE-B: which of a call's name-ladder candidates the language's own lookup PROVES (receiverevidence.h, point 2). A
@@ -13168,19 +13164,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             e.nref    += 1;
             if( splitPick )
             {
-                splitEdges[ekey] = 1;   // C1: remember (from,to) for prov="split" — every arm of the split, never a subset
+                splitEdges.insert( ekey );   // C1: remember (from,to) for prov="split" — every arm of the split, never a subset
             }
             if( bindingPinned )
             {
-                bindingEdges[ekey] = 1; // A4-R5: remember (from,to) for prov="binding"
+                bindingEdges.insert( ekey ); // A4-R5: remember (from,to) for prov="binding"
             }
             if( importPinned )
             {
-                importEdges[ekey] = 1;  // remember (from,to) for prov="import"
+                importEdges.insert( ekey ); // remember (from,to) for prov="import"
             }
             if( finalSegmentType )
             {
-                finalSegmentEdges[ekey] = 1;   // remember (from,to) for prov="final-segment"
+                finalSegmentEdges.insert( ekey );   // remember (from,to) for prov="final-segment"
             }
             if( ifaceImpl )
             {
@@ -13195,13 +13191,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     it->second = char( 2 );   // … or later: a site that proved the edge another way wins its label
                 }
             }
-            ( nameOnly ? nameOnlyEdges : provenEdges )[ ekey ] = 1;   // FE-B: a proven site wins the merged row (Graph::outNameOnly)
+            ( nameOnly ? nameOnlyEdges : provenEdges ).insert( ekey );   // FE-B: a proven site wins the merged row (Graph::outNameOnly)
             if( anyMarkdownLink )
             {
                 noteMarkdownLinkSite( linkEdges, ekey, r );
                 if( siteIndex < mdSlugMiss.size() && mdSlugMiss[ siteIndex ] != 0 && siteIndex < mdLinkPin.size() && to == mdLinkPin[ siteIndex ] )
                 {
-                    anchorMissEdges[ ekey ] = 1;
+                    anchorMissEdges.insert( ekey );
                 }
             }
         }

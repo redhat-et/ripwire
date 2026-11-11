@@ -47,6 +47,26 @@ template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 
+// G1d (mem-audit-fable-1111): a set of u64 keys — what `HashMap<std::uint64_t, char>` spelled with a 16 B entry for an 8 B
+// key whose value nobody read. Same container family, same insertion-order iteration.
+using U64Set = ankerl::unordered_dense::set<std::uint64_t>;
+
+// G1d: a per-symbol label almost every symbol lacks (Graph::bindLabel, the JNI-decoded Java name of a `Java_*` def). Rows
+// are appended in ascending id order and binary-searched; an id with no row reads "". A dense vector<string> spent 24 B
+// on every symbol of a tree with one JNI export.
+struct SparseLabels
+{
+    std::vector<std::pair<NodeId, std::string>> rows;   // ascending id, one row per labelled symbol
+
+    bool empty() const noexcept { return rows.empty(); }
+    void add( NodeId id, std::string label ) { rows.emplace_back( id, std::move( label ) ); }   // callers walk ids ascending
+    std::string_view at( NodeId id ) const noexcept
+    {
+        const auto row = std::lower_bound( rows.begin(), rows.end(), id, []( const std::pair<NodeId, std::string>& r, NodeId key ) { return r.first < key; } );
+        return row != rows.end() && row->first == id ? std::string_view( row->second ) : std::string_view{};
+    }
+};
+
 // symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|modscope|type|alias|functype").
 // Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
 // `#define` definition (@definition.macro — C/C++ preproc_def/preproc_function_def, Rust macro_definition).
