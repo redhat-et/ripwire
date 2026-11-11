@@ -713,7 +713,7 @@ inline void emitPathAnswerRows( std::FILE* out, const IngestResult& ing, const G
 // HOP-CONTEXT-1: the edges emitPathAnswerRows prints, in the shape it prints them (pair 1 and today's single path in full,
 // later pairs site only; a bridge pair prints no hop rows) — the one input of the answer's single hopFacts() pass.
 // `lastHopRef` != kHopNoRef: today's single path ends on a declined call (PATH-FEWEST-UNPROVEN), that call's reference — its row's site=.
-inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const NodeId> path, std::uint32_t lastHopRef )
+inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const NodeId> path, std::uint32_t lastHopRef = kHopNoRef )
 {
     std::vector<HopWant> want;
     const auto add = [ & ]( std::span<const NodeId> rows, bool full )
@@ -748,7 +748,8 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
 inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact,
                               std::uint32_t lastHopRef )
 {
-    return hopFacts( ing, g, pathHopWants( pp, path, lastHopRef ), redact );   // no reader lent: hopFacts makes one for the answer
+    std::vector<HopWant> wanted = pathHopWants( pp, path, lastHopRef );   // the printed edges, the declined last hop pinned to its call
+    return hopFacts( ing, g, std::move( wanted ), redact );                // no reader lent: hopFacts makes one for the answer
 }
 
 // What the answer's hop rows carry, for the legend: today's path, or every printed chain when pairs are listed — the CLI and
