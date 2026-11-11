@@ -18,6 +18,12 @@
 #      bindings and fails here; a reserve by its own kind's count stays within 2.5 x of its distinct keys.
 #   F  the plateau (macOS: phys_footprint): graph-tables cur_mib minus model cur_mib stays under kPlateauMib on the
 #      fixture (red on the whole-family reserve: 23.8 MiB; 16.7 by kind). Linux prints the reading as INFO (glibc's RSS moves with its own thresholds; the bound is the M2's).
+#      A reading printed `unavailable` is never a plateau: macOS FAILS (its reader always answers), elsewhere F is SKIP.
+#   U  unknown is not zero (CodeRabbit 4543019678): with RIPWIRE_TEST_MEMSTATS_UNREAD=1 (src/memstats.h's seam: every reading
+#      unknown, the shape of a platform with no reader) each of the six phase lines prints cur_mib=unavailable
+#      peak_mib=unavailable and none prints a number, and F's own verdict on that run is "unavailable", not a plateau. It counts
+#      the phase lines it saw and FAILS on fewer than six (red before the fix: the lines printed 0.0-free numbers and the seam was
+#      ignored, so a reader's 0 would have printed as 0.0 MiB).
 #
 # Usage: bash test/memstatscheck.sh [BIN]
 set -u
@@ -121,23 +127,50 @@ done
 [ "$total" -eq 5 ] && [ "$bad" -eq 0 ] && ok "R: every per-kind table within 8 x its entries ($tables)"
 
 # ---- F ----
-model="$( grep '^\[mem\] phase=model ' "$TMP/n.err" | sed -E 's/.* cur_mib=([0-9.]+) .*/\1/' )"
-built="$( grep '^\[mem\] phase=graph-tables ' "$TMP/n.err" | sed -E 's/.* cur_mib=([0-9.]+) .*/\1/' )"
-if [ -z "$model" ] || [ -z "$built" ]; then
-    no "F: no model / graph-tables reading"
+# plateau ERRFILE -> "ok <plateau> <model>" | "unavailable" (either reading printed `unavailable`) | "missing" (no such lines)
+plateau(){
+    local model built
+    model="$( grep '^\[mem\] phase=model ' "$1" | sed -E 's/.* cur_mib=([^ ]+) .*/\1/' )"
+    built="$( grep '^\[mem\] phase=graph-tables ' "$1" | sed -E 's/.* cur_mib=([^ ]+) .*/\1/' )"
+    if [ -z "$model" ] || [ -z "$built" ]; then echo missing
+    elif [ "$model" = unavailable ] || [ "$built" = unavailable ]; then echo unavailable
+    else echo "ok $( awk -v a="$built" -v b="$model" 'BEGIN{ printf "%.1f", a - b }' ) $model"; fi
+}
+v="$( plateau "$TMP/n.err" )"
+case "$v" in
+    missing) no "F: no model / graph-tables reading" ;;
+    unavailable)
+        if [ "$( uname -s )" = Darwin ]; then no "F: the footprint reads unavailable on macOS (os::mem_footprint)"
+        else echo "  SKIP  F: the footprint reads unavailable on this platform: no plateau"; fi ;;
+    *)
+        set -- $v; plateau="$2"; model="$3"
+        case "$( uname -s )" in
+            Darwin)
+                if awk -v p="$plateau" -v k="$kPlateauMib" 'BEGIN{ exit !( p <= k ) }'; then
+                    ok "F: tables plateau $plateau MiB over the model ($model MiB) <= $kPlateauMib"
+                else
+                    no "F: tables plateau $plateau MiB over the model ($model MiB) > $kPlateauMib"
+                fi ;;
+            *) echo "  INFO  F: tables plateau $plateau MiB over the model ($model MiB); bound is macOS-only" ;;
+        esac ;;
+esac
+
+# ---- U ----
+( cd "$REPO" && RIPWIRE_STATS=1 RIPWIRE_TEST_MEMSTATS_UNREAD=1 "$BIN" "$REPO" --cache="$TMP/u.bin" --deps >/dev/null 2>"$TMP/u.err" ); rcu=$?
+nphase="$( grep -c '^\[mem\] phase=' "$TMP/u.err" )"
+nunread="$( grep -cE '^\[mem\] phase=[a-z-]+ cur_mib=unavailable peak_mib=unavailable$' "$TMP/u.err" )"
+nnum="$( grep -cE '^\[mem\] phase=.* (cur|peak)_mib=[0-9]' "$TMP/u.err" )"
+uv="$( plateau "$TMP/u.err" )"
+if [ "$rcu" -ne 0 ]; then
+    no "U: the seam run exited $rcu"
+elif [ "$nphase" -lt 6 ]; then
+    no "U: the seam run printed $nphase phase lines (want >= 6: the premise)"
+elif [ "$nunread" -ne "$nphase" ] || [ "$nnum" -ne 0 ]; then
+    no "U: $nunread of $nphase phase lines read unavailable, $nnum carry a number: $( grep '^\[mem\] phase=' "$TMP/u.err" | head -1 )"
+elif [ "$uv" != unavailable ]; then
+    no "U: F's verdict on the unknown readings is '$uv' (want unavailable, never a plateau)"
 else
-    plateau="$( awk -v a="$built" -v b="$model" 'BEGIN{ printf "%.1f", a - b }' )"
-    case "$( uname -s )" in
-        Darwin)
-            if awk -v m="$model" 'BEGIN{ exit !( m <= 0 ) }'; then
-                no "F: the footprint reads 0 on macOS (os::mem_footprint)"
-            elif awk -v p="$plateau" -v k="$kPlateauMib" 'BEGIN{ exit !( p <= k ) }'; then
-                ok "F: tables plateau $plateau MiB over the model ($model MiB) <= $kPlateauMib"
-            else
-                no "F: tables plateau $plateau MiB over the model ($model MiB) > $kPlateauMib"
-            fi ;;
-        *) echo "  INFO  F: tables plateau $plateau MiB over the model ($model MiB); bound is macOS-only" ;;
-    esac
+    ok "U: unknown readings print unavailable on all $nphase phase lines, and F reads no plateau from them"
 fi
 
 if [ "$fail" -eq 0 ]; then echo "PASS memstatscheck"; exit 0; fi

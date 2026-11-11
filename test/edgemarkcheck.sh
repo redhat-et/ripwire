@@ -10,11 +10,14 @@
 #
 # Arms:
 #   Q  RIPWIRE_STATS is stderr only: the full map is byte-identical with and without it.
-#   N  the premise: the `[mem] edge marks` line shows >= 1 edge of EACH of the eight marks and >= 1000 edges. It counts what it
-#      saw and fails on a zero, so a fixture that stops producing a mark cannot let O pass on an absent attribute.
+#   N  the premise: the `[mem] edge marks` line shows >= 1 edge of EACH of the nine marks (proven among them: the grid's plain
+#      calls) and >= 1000 edges. It counts what it saw and fails on a zero, so a fixture that stops producing a mark cannot let O
+#      pass on an absent attribute (CodeRabbit 4543019682: without proven here, an accumulator that stopped setting
+#      kEdgeMarkProven turned every grid edge into via="name" and still passed).
 #   O  the bits reach the output: the full map carries prov="split", "binding", "import", "final-segment", via="impl",
 #      via="name", via="link" and anchor="missing"; binding and anchor-miss rows equal the marked edges exactly (no other
-#      mark outranks binding in edgeProvenance, and anchor="missing" is a link edge's own bit).
+#      mark outranks binding in edgeProvenance, and anchor="missing" is a link edge's own bit); and an evidence-bound grid edge
+#      (grid_0_0 -> grid_0_1, a same-file call to a unique name) prints as a plain <c n="grid_0_1"/>, never via="name".
 #
 # Usage: bash test/edgemarkcheck.sh [BIN]
 set -u
@@ -70,11 +73,11 @@ if [ -z "$line" ]; then
     no "N: no [mem] edge marks line on stderr"
 else
     seen=0
-    for m in split binding import final-segment impl-only link anchor-miss name-only; do
+    for m in split binding import final-segment impl-only proven link anchor-miss name-only; do
         v="$( val "$m" )"
         if [ "${v:-0}" -ge 1 ]; then seen=$(( seen + 1 )); else no "N: no edge carries the $m mark (${v:-absent})"; fi
     done
-    [ "$seen" -eq 8 ] && ok "N: all eight marks seen: ${line#\[mem\] edge marks }"
+    [ "$seen" -eq 9 ] && ok "N: all nine marks seen: ${line#\[mem\] edge marks }"
     if [ "${edges:-0}" -lt 1000 ]; then no "N: the fixture holds ${edges:-0} edges (want >= 1000)"; fi
 fi
 
@@ -91,6 +94,12 @@ for pair in 'binding:prov="binding"' 'anchor-miss:anchor="missing"'; do
     want="$( val "$m" )"; got="$( cnt "$a" )"
     if [ -n "$want" ] && [ "$got" -eq "$want" ]; then ok "O: $a rows $got = $m edges"; else no "O: $a rows $got, $m edges ${want:-absent}"; fi
 done
+
+g00="$( grep -oE '<s t="fn" n="grid_0_0"[^>]*>(<c [^>]*/>)*' "$TMP/plain.map" | head -1 )"
+g01="$( printf '%s' "$g00" | grep -oE '<c n="grid_0_1"[^>]*/>' | head -1 )"
+if [ -z "$g01" ]; then no "O: the map has no grid_0_0 -> grid_0_1 callee row (the premise): ${g00:-<no grid_0_0 row>}"
+elif [ "$g01" = '<c n="grid_0_1"/>' ]; then ok "O: the evidence-bound grid edge grid_0_0 -> grid_0_1 prints $g01 (no via=)"
+else no "O: the evidence-bound grid edge prints $g01 (want <c n=\"grid_0_1\"/>)"; fi
 
 if [ "$fail" -eq 0 ]; then echo "PASS edgemarkcheck"; exit 0; fi
 echo "FAIL edgemarkcheck"; exit 1

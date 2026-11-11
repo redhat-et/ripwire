@@ -6,13 +6,16 @@
 // can bound (test/memstatscheck.sh).
 //
 // Env-gated stderr only: unset, the readers below cost one getenv each and print nothing, so stdout, stderr and rc of every
-// ordinary run are unchanged. The footprint is os::mem_footprint (macOS phys_footprint, Linux VmRSS); a platform that cannot
-// read it prints 0, which is a reading of "unknown", never of "nothing held".
+// ordinary run are unchanged. The footprint is os::mem_footprint (macOS phys_footprint, Linux VmRSS). Its readers return 0
+// when they cannot read (os.h: "0 = unknown"); a reading of 0 prints `unavailable`, never `0.0`, so a consumer (a person, or
+// test/memstatscheck.sh's plateau arm) cannot read an unknown as "nothing held" (CodeRabbit 4543019678).
 #include "infra/emit.h"   // rw::emitTo
 #include "infra/os.h"     // rw::os::mem_footprint / mem_footprint_peak
 
 #include <cstdint>
 #include <cstdlib>  // std::getenv
+#include <format>   // std::format: a reading's MiB text
+#include <string>
 #include <string_view>
 
 namespace rw::memstats
@@ -28,13 +31,27 @@ inline double mib( std::uint64_t bytes ) noexcept
     return double( bytes ) / ( 1024.0 * 1024.0 );
 }
 
-// one `[mem] phase=<phase> cur_mib=<now> peak_mib=<lifetime peak>` line when RIPWIRE_STATS is set
+// One footprint reading as the [mem] lines print it: MiB to one decimal, or `unavailable` for the readers' 0 (unknown). THE TEST
+// SEAM: RIPWIRE_TEST_MEMSTATS_UNREAD (any non-empty value) makes every reading unknown, the shape of a platform with no reader
+// (os.h's #else branch), which a macOS or Linux gate run cannot otherwise reach (test/memstatscheck.sh arm U).
+inline std::string reading( std::uint64_t bytes )
+{
+    const char* const unread = std::getenv( "RIPWIRE_TEST_MEMSTATS_UNREAD" );
+    if( bytes == 0 || ( unread != nullptr && *unread != '\0' ) )
+    {
+        return "unavailable";
+    }
+    return std::format( "{:.1f}", mib( bytes ) );
+}
+
+// one `[mem] phase=<phase> cur_mib=<now> peak_mib=<lifetime peak>` line when RIPWIRE_STATS is set (either reading may be
+// `unavailable`)
 inline void mark( std::string_view phase )
 {
     if( !enabled() )
     {
         return;
     }
-    rw::emitTo( stderr, "[mem] phase={} cur_mib={:.1f} peak_mib={:.1f}\n", phase, mib( os::mem_footprint() ), mib( os::mem_footprint_peak() ) );
+    rw::emitTo( stderr, "[mem] phase={} cur_mib={} peak_mib={}\n", phase, reading( os::mem_footprint() ), reading( os::mem_footprint_peak() ) );
 }
 }   // namespace rw::memstats
