@@ -3309,10 +3309,7 @@ inline std::optional<std::string> exemplarText( const std::string& root, const s
     // a '\n' in kindOrTask is a legal XML char escapeXml passes through, and a raw newline outside CDATA is a
     // G4 breach whichever dialect emitted it.
     const std::string reqNote = xmlCommentText( kindOrTask );
-    const std::string kindNote = pick.fromTask ? ( " (task -> kind=" + std::string( symTag( pick.targetKind ) )
-                                                   + ( pick.offTask ? ", low-confidence: off task, the pick shares no word with it"
-                      : pick.lowConfidence ? ", low-confidence: weak match, fell back to fn" : "" ) + ")" )
-                                               : std::string();
+    const std::string kindNote = exemplarKindNote( pick );
 
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
@@ -3336,7 +3333,7 @@ inline std::optional<std::string> exemplarText( const std::string& root, const s
                   symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
                   ex( exSingleRoot ? sarif::rootRelativeUri( ing.files[ wsym.fileId ], exRootPrefix ) : std::string_view( ing.files[ wsym.fileId ] ) ).c_str(), wsym.line,
                   fin( pick.winner ), wsym.ccx, exRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
-                  pick.lowConfidence ? ( pick.offTask ? " low_confidence=\"1\" off_task=\"1\"" : " low_confidence=\"1\"" ) : "",
+                  exemplarHedgeAttrs( pick ),
                   pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
     packBodies( mem, ing, { pick.winner }, 0 /* no byte budget in MCP (0 = unlimited) */, g.outOff, g.outTargets, g.outNameOnly, false, redact,
                 /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,

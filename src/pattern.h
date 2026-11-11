@@ -59,6 +59,7 @@
 #include "model.h"
 #include "infra/Diagnostics.h"
 #include "infra/namesplit.h"   // isIdentChar / isIdentStart — the ONE ASCII identifier-character pair
+#include "infra/tablelookup.h" // findByField — the one declarative-table row lookup
 #include "infra/tschildren.h"  // ChildCursor/forEachChild/collectChildren — the O(C) child walk (P1-0)
 
 #include <tree_sitter/api.h>
@@ -895,17 +896,12 @@ inline constexpr MemberCallShape kMemberCallShapes[] = {
     { "csharp",     "invocation_expression", "member_access_expression", "name" },
 };
 
-// The row for this compiled program, or null when its grammar has none or the pattern is not a call.
+// The row for this compiled program, or null when its grammar has none or the pattern is not a call. kMemberCallShapes
+// holds ONE row per grammarName, so a lookup by grammar is the whole search.
 inline const MemberCallShape* memberCallShapeFor( std::string_view grammarName, std::string_view rootKind ) noexcept
 {
-    for( const MemberCallShape& row : kMemberCallShapes )
-    {
-        if( row.grammarName == grammarName && row.callKind == rootKind )
-        {
-            return &row;
-        }
-    }
-    return nullptr;
+    const MemberCallShape* row = findByField( kMemberCallShapes, &MemberCallShape::grammarName, grammarName );   // one row per grammar
+    return ( row != nullptr && row->callKind == rootKind ) ? row : nullptr;
 }
 
 // V-2 (adversarial verification 2026-08-20). The ellipsis probe ABANDONS a candidate node when the run of

@@ -43,6 +43,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -189,25 +190,11 @@ struct ExemplarPick
     bool        lowConfidence  = false;  // INVARIANT 3: weak task→kind, fell back to Function
     bool        overCcxBar     = false;  // INVARIANT 1 relaxed: nothing under the ceiling, winner is over it
     bool        offTask        = false;  // INVARIANT 4: a trusted task match, but the role winner shares no word with it
-    // INVARIANT 4's vocabulary: the task's content subtokens plus those of the window's corroborating names. Filled on
-    // the task path only, read once by hedgeOffTaskPick, and at most kExemplarConfWindow names' worth of short words.
+    // INVARIANT 4's vocabulary: the task's subtokens plus those of the window's corroborating names (stopwords are
+    // skipped where it is read). Filled on a trusted task match only, read once by hedgeOffTaskPick, and at most
+    // kExemplarConfWindow names' worth of short words.
     std::vector<std::string> onTaskToks;
 };
-
-// A CONTENT subtoken: a lexical subtoken (>= 2 bytes, lexical.h subtokens) that is not a route stopword (`the`, `of`,
-// `how` ...). Appended to `out` only when it is not there already, so the vocabulary stays a short, duplicate-free list.
-inline void appendContentSubtokens( std::string_view text, std::vector<std::string>& out )
-{
-    std::vector<std::string> toks;
-    subtokens( text, toks );
-    for( std::string& t : toks )
-    {
-        if( !isRouteStopword( t ) && std::ranges::find( out, t ) == out.end() )
-        {
-            out.push_back( std::move( t ) );
-        }
-    }
-}
 
 // does the winner's NAME share at least one subtoken with the task? (INVARIANT 3 confidence gate.)
 inline bool shareNameSubtoken( std::string_view name, const std::vector<std::string>& taskToks )
@@ -229,6 +216,27 @@ inline bool shareNameSubtoken( std::string_view name, const std::vector<std::str
         }
     }
     return false;
+}
+
+// INVARIANT 4's vocabulary, gathered from the confidence window resolveExemplarKind already ranked: the task's own
+// subtokens and those of every window name that corroborated it (the matched cluster's words). Nothing on an
+// untrusted match, which is hedged already.
+inline void collectOnTaskToks( const IngestResult& ing, std::span<const std::pair<float, NodeId>> window,
+                               const std::vector<std::string>& taskToks, bool trustworthy, ExemplarPick& pick )
+{
+    if( !trustworthy )
+    {
+        return;
+    }
+    pick.onTaskToks = taskToks;
+    for( const std::pair<float, NodeId>& hit : window )
+    {
+        const std::string& name = ing.symbols[hit.second].name;
+        if( shareNameSubtoken( name, taskToks ) )
+        {
+            subtokens( name, pick.onTaskToks );
+        }
+    }
 }
 
 // resolveExemplarKind — step 1: a kind token selects the target kind directly; a task string donates its
@@ -286,18 +294,7 @@ inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::s
     }
     const float shareOfWindow = window ? float( corroborating ) / float( window ) : 0.f;
     const bool  trustworthy   = bestScore > 0.f && shareOfWindow > kExemplarConfMinShare;
-    if( trustworthy )
-    {
-        appendContentSubtokens( kindOrTask, pick.onTaskToks );
-        for( std::size_t j = 0; j < window; ++j )
-        {
-            const std::string& name = ing.symbols[ranked[j].second].name;
-            if( shareNameSubtoken( name, taskToks ) )
-            {
-                appendContentSubtokens( name, pick.onTaskToks );   // the corroborating names only: the matched cluster's words
-            }
-        }
-    }
+    collectOnTaskToks( ing, std::span<const std::pair<float, NodeId>>( ranked.data(), window ), taskToks, trustworthy, pick );
 
     pick.targetKind    = trustworthy ? ing.symbols[best].kind : SymKind::Function;
     pick.lowConfidence = !trustworthy;
@@ -360,10 +357,30 @@ inline void hedgeOffTaskPick( const IngestResult& ing, ExemplarPick& pick )
         return;   // a kind token, an already-hedged weak match, or no pick: nothing to judge
     }
     std::vector<std::string> winnerToks;
-    appendContentSubtokens( ing.symbols[pick.winner].name, winnerToks );
-    const bool onTask = std::ranges::any_of( winnerToks, [ & ]( const std::string& t ) { return std::ranges::find( pick.onTaskToks, t ) != pick.onTaskToks.end(); } );
+    subtokens( ing.symbols[pick.winner].name, winnerToks );
+    const bool onTask = std::ranges::any_of( winnerToks, [ & ]( const std::string& t )
+    {
+        return !isRouteStopword( t ) && std::ranges::find( pick.onTaskToks, t ) != pick.onTaskToks.end();   // a CONTENT word only
+    } );
     pick.offTask       = !onTask;
     pick.lowConfidence = !onTask;
+}
+
+// The two surfaces' shared reading of a pick's hedges: the legend's parenthetical, and the root's attributes.
+inline std::string exemplarKindNote( const ExemplarPick& pick )
+{
+    if( !pick.fromTask )
+    {
+        return {};
+    }
+    const char* why = pick.offTask ? ", low-confidence: off task, the pick shares no word with it"
+                    : pick.lowConfidence ? ", low-confidence: weak match, fell back to fn" : "";
+    return " (task -> kind=" + std::string( symTag( pick.targetKind ) ) + why + ")";
+}
+
+inline const char* exemplarHedgeAttrs( const ExemplarPick& pick ) noexcept
+{
+    return pick.offTask ? " low_confidence=\"1\" off_task=\"1\"" : pick.lowConfidence ? " low_confidence=\"1\"" : "";
 }
 
 // selectExemplar — resolve the target kind, then pick the best-in-class instance by ROLE under the three
