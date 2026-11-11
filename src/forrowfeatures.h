@@ -744,12 +744,12 @@ inline bool appendFile( const std::string& path, const std::string& text )
 }
 } // namespace rowfeat_detail
 
-// The answer was not captured whole (no buffer, a failed flush or read-back, stdout not restored): a dump of its bytes would place rows
-// that are not the answer, so nothing is written, and stderr says so. Disarms.
-inline void rowFeaturesSkipUncaptured()
+// `whole` false: the answer was not captured whole (no buffer, a failed flush or read-back, stdout not restored). A dump of its bytes
+// would place rows that are not the answer, so nothing is written, and stderr says so. Disarms. `whole` true: nothing to do.
+inline void rowFeaturesNoteCapture( bool whole )
 {
     RowFeatureRecorder& rec = rowFeatures();
-    if( !rec.armed )
+    if( whole || !rec.armed )
     {
         return;
     }

@@ -3155,6 +3155,12 @@ struct CapturedForAnswer
     std::optional<rw::PricedRootInputs> price;
 };
 
+// The capture holds the whole answer: a buffer, flushed and read back without error, and stdout restored.
+inline bool capturedWhole( const std::optional<StdoutCaptured>& cap )
+{
+    return cap && !cap->failed && cap->restored;
+}
+
 inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
 {
     StdoutCapture&                             capture = answer.capture;
@@ -3165,10 +3171,7 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     }
     const rw::Config&                      cfg = d.cfg;
     const std::optional<StdoutCaptured>    cap = capture.finish();
-    if( !cap || cap->failed || !cap->restored )
-    {
-        rw::rowFeaturesSkipUncaptured();   // ROW-FEATURE-DUMP reads only a whole answer
-    }
+    rw::rowFeaturesNoteCapture( capturedWhole( cap ) );   // ROW-FEATURE-DUMP reads only a whole answer
     if( cap && !cap->restored )
     {
         rw::emitTo( stderr, "ripwire: --for: could not restore stdout after the <syms> capture — the answer so far was written to the original stdout, the rest is lost\n" );
@@ -3182,7 +3185,7 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     {
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
-    const bool        whole = cap && !cap->failed;
+    const bool        whole = capturedWhole( cap );   // restored: the branch above returned otherwise
     const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;
     std::string       cut;   // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
     std::string       syms  = rw::renderForFileSyms(
