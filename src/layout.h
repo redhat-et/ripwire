@@ -1767,6 +1767,21 @@ inline std::vector<std::string> templateParamsAt( std::string_view src, const De
     return out;
 }
 
+// Model a nested definition. A class template is sized only when no member depends on its parameters
+// (InternedTextOf<Domain> is a 4 B id whatever Domain is): the parameter names are fenced off for the body walk, and its
+// `template` head is allowed. A non-template sees an empty fence, never its enclosing template's.
+inline LayoutDef modelNestedDef( ModelCtx& ctx, std::uint32_t fileId, const DefSite& site, std::string_view typeName, bool templateId )
+{
+    std::vector<std::string> params = templateId ? templateParamsAt( fileBytes( ctx, fileId ), site ) : std::vector<std::string>();
+    std::swap( ctx.templateParams, params );
+    const bool allowWas   = ctx.allowTemplateHead;
+    ctx.allowTemplateHead = templateId;
+    LayoutDef d           = modelDef( ctx, fileId, site, typeName );
+    ctx.allowTemplateHead = allowWas;
+    std::swap( ctx.templateParams, params );
+    return d;
+}
+
 inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, std::uint32_t preferFileId, std::string& note,
                                      bool templateId = false )
 {
@@ -1819,15 +1834,7 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
         }
         seenSite.emplace( key, true );
 
-        // A class template is sized only when no member depends on its parameters (InternedTextOf<Domain> is a 4 B id
-        // whatever Domain is): the parameter names are fenced off for the body walk, and its `template` head is allowed.
-        std::vector<std::string> params = templateId ? templateParamsAt( fileBytes( ctx, s.fileId ), site ) : std::vector<std::string>();
-        std::swap( ctx.templateParams, params );
-        const bool allowWas   = ctx.allowTemplateHead;
-        ctx.allowTemplateHead = templateId;
-        const LayoutDef d     = modelDef( ctx, s.fileId, site, typeName );
-        ctx.allowTemplateHead = allowWas;
-        std::swap( ctx.templateParams, params );
+        const LayoutDef d = modelNestedDef( ctx, s.fileId, site, typeName, templateId );
         if( !d.modeled ) { note = "nested-unmodelled"; out = TypeSize{}; break; }
         const TypeSize here{ d.size, d.align, true, d.tailPad, d.fields.empty() && d.baseSpec.empty() };
         if( first ) { out = here; first = false; }
@@ -2080,6 +2087,76 @@ inline bool resolveCrossFileAlias( const TypeScope& scope, std::string_view sing
     return false;
 }
 
+// The spelling that names the TYPE: cv-qualifiers, `typename` and a leading global `::` dropped.
+inline std::string_view typeCore( std::string_view spec )
+{
+    std::string_view core = withoutCv( spec );
+    while( core.starts_with( "::" ) )
+    {
+        core = core.substr( 2 );
+    }
+    return core;
+}
+
+// Size an in-repo aggregate by name, trying the qualified spelling and then its last segment (`rw::Foo`, then `Foo`).
+inline TypeSize sizeNestedByName( ModelCtx& ctx, std::string_view name, std::uint32_t fileId, std::string& note, bool templateId )
+{
+    TypeSize nested = sizeNestedAggregate( ctx, name, fileId, note, templateId );
+    if( !nested.known && name != lastSegment( name ) )
+    {
+        nested = sizeNestedAggregate( ctx, lastSegment( name ), fileId, note, templateId );
+    }
+    return nested;
+}
+
+// An in-repo class template (`InternedTextOf<RefNames>`): sized from its own definition when no member depends on its
+// parameters. A std:: template the table did not take, or one with no in-repo definition, is a template-type refusal.
+inline ResolvedType resolveTemplateIdType( const TypeScope& scope, std::string_view core, bool stdName )
+{
+    ResolvedType out;
+    TemplateId   id;
+    if( !stdName && splitTemplateId( core, id ) )
+    {
+        out.size = sizeNestedByName( scope.ctx, id.name, scope.fileId, out.note, true );
+        if( out.size.known )
+        {
+            return out;
+        }
+    }
+    if( out.note.empty() )
+    {
+        out.note = "template-type";
+    }
+    return out;
+}
+
+// One plain type name: a primitive, a template parameter (never sized), a std:: name outside the table, a same-file
+// alias, an in-repo aggregate, or an alias defined in another file — in that order. False leaves `out` unsized.
+inline bool resolveSingleName( const TypeScope& scope, std::string_view single, bool stdName, std::size_t depth, ResolvedType& out )
+{
+    if( primLookup( single, out.size ) )
+    {
+        return true;
+    }
+    const auto& params = scope.ctx.templateParams;
+    if( std::find( params.begin(), params.end(), single ) != params.end() )
+    {
+        out.note = "template-param";                                   // depends on the template's argument
+        return false;
+    }
+    if( stdName )
+    {
+        out.note = "std-unlisted";
+        return false;
+    }
+    if( resolveThroughAlias( scope, single, depth, out ) )
+    {
+        return true;
+    }
+    out.size = sizeNestedByName( scope.ctx, single, scope.fileId, out.note, false );   // a failed alias lane leaves no number
+    return out.size.known || ( out.note.empty() && resolveCrossFileAlias( scope, single, depth, out ) );
+}
+
 inline ResolvedType resolveFieldType( const TypeScope& scope, std::string_view spec, bool isPointer, bool isRef,
                                       std::size_t macroDepth )
 {
@@ -2088,12 +2165,8 @@ inline ResolvedType resolveFieldType( const TypeScope& scope, std::string_view s
 
     // A std:: name is the standard library's, never a same-named type in the repo (an in-repo `class string {}` stub once
     // sized every std::string at 1 B). The std lane sizes it or says why not; only a plain scalar falls through.
-    std::string_view core = withoutCv( spec );
-    while( core.starts_with( "::" ) )
-    {
-        core = core.substr( 2 );
-    }
-    const bool stdName = core.starts_with( "std::" );
+    const std::string_view core    = typeCore( spec );
+    const bool             stdName = core.starts_with( "std::" );
     if( stdName && resolveStdType( scope, core.substr( 5 ), macroDepth, out ) )
     {
         return out;
@@ -2101,61 +2174,16 @@ inline ResolvedType resolveFieldType( const TypeScope& scope, std::string_view s
 
     bool                          sawEnum = false;
     std::vector<std::string_view> words   = typeWords( spec, sawEnum );
-    if( words.empty() )
+    if( words.empty() || intFamilySize( words, out.size ) )
     {
         return out;
     }
-    if( intFamilySize( words, out.size ) )
-    {
-        return out;
-    }
-
-    // An in-repo class template (`InternedTextOf<RefNames>`): sized from its own definition when no member depends on
-    // its parameters. Anything else with a `<` stays a template-type refusal.
     if( spec.find( '<' ) != std::string_view::npos )
     {
-        TemplateId id;
-        if( !stdName && splitTemplateId( core, id ) )
-        {
-            TypeSize nested = sizeNestedAggregate( scope.ctx, id.name, scope.fileId, out.note, true );
-            if( !nested.known && id.name != lastSegment( id.name ) )
-            {
-                nested = sizeNestedAggregate( scope.ctx, lastSegment( id.name ), scope.fileId, out.note, true );
-            }
-            if( nested.known ) { out.size = nested; return out; }
-        }
-        if( out.note.empty() ) { out.note = "template-type"; }
-        return out;
+        return resolveTemplateIdType( scope, core, stdName );
     }
     if( words.size() != 1 )                                { out.note = "compound-type"; return out; }
-
-    const std::string_view single = words.front();
-    if( primLookup( single, out.size ) )
-    {
-        return out;
-    }
-    for( const std::string& param : scope.ctx.templateParams )
-    {
-        if( single == param ) { out.note = "template-param"; return out; }   // depends on the template's argument
-    }
-    if( stdName )
-    {
-        out.note = "std-unlisted";
-        return out;
-    }
-    if( resolveThroughAlias( scope, single, macroDepth, out ) )
-    {
-        return out;
-    }
-    out.size = TypeSize{};                                             // a failed alias lane leaves no number
-
-    TypeSize nested = sizeNestedAggregate( scope.ctx, single, scope.fileId, out.note );
-    if( !nested.known && single != lastSegment( single ) )
-    {
-        nested = sizeNestedAggregate( scope.ctx, lastSegment( single ), scope.fileId, out.note );
-    }
-    if( nested.known ) { out.size = nested; return out; }
-    if( out.note.empty() && resolveCrossFileAlias( scope, single, macroDepth, out ) )
+    if( resolveSingleName( scope, words.front(), stdName, macroDepth, out ) )
     {
         return out;
     }
@@ -2204,6 +2232,54 @@ inline void readDeclaredAlign( LayoutDef& def, std::string_view head )
     }
 }
 
+// The text of a base-class list: after the first top-level `:` past the name that is not part of a `::`; "" = none.
+inline std::string_view baseClauseOf( std::string_view head, std::string_view name )
+{
+    const std::size_t nameAt = head.find( name );
+    if( nameAt == std::string_view::npos )
+    {
+        return {};
+    }
+    for( std::size_t i = nameAt + name.size(); i < head.size(); ++i )
+    {
+        if( head[i] != ':' )
+        {
+            continue;
+        }
+        if( ( i + 1 < head.size() && head[ i + 1 ] == ':' ) || ( i > 0 && head[ i - 1 ] == ':' ) ) { ++i; continue; }
+        return head.substr( i + 1 );
+    }
+    return {};
+}
+
+// ONE non-virtual base is kept for placeBase (the Reference : RefColdFields shape); several bases, or a virtual one,
+// put subobjects where the source text cannot say, so they withdraw the numbers.
+inline void readBaseClause( LayoutDef& def, std::string_view head, std::string_view name )
+{
+    const std::string_view clause = baseClauseOf( head, name );
+    if( clause.empty() )
+    {
+        return;
+    }
+    const std::vector<std::string_view> bases = splitDeclarators( clause );
+    std::string_view                    one   = ( bases.size() == 1 ) ? trimView( bases.front() ) : std::string_view();
+    for( std::string_view access : { "public", "protected", "private" } )
+    {
+        if( one.starts_with( access ) && one.size() > access.size() && !identByte( (unsigned char)one[ access.size() ] ) )
+        {
+            one = trimView( one.substr( access.size() ) );
+        }
+    }
+    if( !one.empty() && !containsWord( one, "virtual" ) )
+    {
+        def.baseSpec = std::string( one );
+        return;
+    }
+    def.modeled = false;
+    addCaveat( def, "base-class", bases.size() > 1 ? "several base subobjects: their order and padding are not in this declaration"
+                                                   : "a virtual base's placement is not in this declaration" );
+}
+
 // Read the attributes the aggregate's HEAD text carries (everything from the def start to its `{`).
 inline void readHeadAttributes( LayoutDef& def, std::string_view head, std::string_view name, bool allowTemplate = false )
 {
@@ -2228,43 +2304,7 @@ inline void readHeadAttributes( LayoutDef& def, std::string_view head, std::stri
         def.packedAttr = true;
     }
 
-    // A base-class list: a top-level `:` after the name that is not part of a `::`. The base subobject's
-    // size and placement are not in this declaration, so the arithmetic has no starting offset.
-    const std::size_t nameAt = head.find( name );
-    if( nameAt == std::string_view::npos )
-    {
-        return;
-    }
-    for( std::size_t i = nameAt + name.size(); i < head.size(); ++i )
-    {
-        if( head[i] != ':' )
-        {
-            continue;
-        }
-        if( ( i + 1 < head.size() && head[ i + 1 ] == ':' ) || ( i > 0 && head[ i - 1 ] == ':' ) ) { ++i; continue; }
-        // ONE non-virtual base is placed at offset 0 by modelDefFromSource (the Reference : RefColdFields shape). Several
-        // bases, or a virtual one, put subobjects where the source text cannot say.
-        const std::vector<std::string_view> bases = splitDeclarators( head.substr( i + 1 ) );
-        std::string_view                    one   = ( bases.size() == 1 ) ? trimView( bases.front() ) : std::string_view();
-        for( std::string_view access : { "public", "protected", "private" } )
-        {
-            if( one.starts_with( access ) && one.size() > access.size() && !identByte( (unsigned char)one[ access.size() ] ) )
-            {
-                one = trimView( one.substr( access.size() ) );
-            }
-        }
-        if( one.empty() || containsWord( one, "virtual" ) )
-        {
-            def.modeled = false;
-            addCaveat( def, "base-class", bases.size() > 1 ? "several base subobjects: their order and padding are not in this declaration"
-                                                           : "a virtual base's placement is not in this declaration" );
-        }
-        else
-        {
-            def.baseSpec = std::string( one );
-        }
-        break;
-    }
+    readBaseClause( def, head, name );
 }
 
 // The mutable state of ONE aggregate-body walk, bundled so each phase below takes a single parameter
@@ -2325,14 +2365,14 @@ inline void placeBase( BodyWalk& w )
 // A bitfield whose type is ONE byte wide (bool, char, std::uint8_t, an enum over one): every ABI packs those the same way —
 // fill the current byte, open the next when the width does not fit. Wider types (Itanium straddles alignment units, MSVC
 // opens a unit per type change), zero widths and union members return false and the caller refuses the aggregate.
-inline bool placeByteBitfield( BodyWalk& w, const Declarator& d, std::string_view written, std::string_view baseSpec )
+inline bool placeByteBitfield( BodyWalk& w, const Declarator& d, std::string_view written )
 {
     if( std::string_view( w.def.aggregate ) == "union" )
     {
         return false;
     }
     const TypeScope    scope{ w.ctx, w.consts, w.fileId };
-    const ResolvedType r     = resolveFieldType( scope, baseSpec, false, false );
+    const ResolvedType r     = resolveFieldType( scope, d.baseSpec, false, false );
     std::uint32_t      width = 0;
     if( !r.size.known || r.size.size != 1 || !evalExtent( w.consts, d.bitWidth, width ) || width == 0 || width > 8 )
     {
@@ -2365,8 +2405,8 @@ inline bool placeByteBitfield( BodyWalk& w, const Declarator& d, std::string_vie
 }
 
 // Fold ONE parsed declarator into the def's field list, advancing the offset cursor when it still can.
-// `written` is the label (the type as the source spells it for THIS declarator); `baseSpec` is what is sized.
-inline void appendField( BodyWalk& w, const Declarator& d, std::string_view written, std::string_view baseSpec )
+// `written` is the label (the type as the source spells it for THIS declarator); d.baseSpec is what is sized.
+inline void appendField( BodyWalk& w, const Declarator& d, std::string_view written )
 {
     // Every string here reaches an XML ATTRIBUTE, which may not carry a raw newline under G4 — a member
     // declaration wrapped over two lines would otherwise emit one.
@@ -2375,7 +2415,7 @@ inline void appendField( BodyWalk& w, const Declarator& d, std::string_view writ
     f.type = flattenSpace( written, 160 );
 
     const TypeScope    scope{ w.ctx, w.consts, w.fileId };
-    const ResolvedType r = resolveFieldType( scope, baseSpec, d.isPointer, d.isRef );
+    const ResolvedType r = resolveFieldType( scope, d.baseSpec, d.isPointer, d.isRef );
     TypeSize           t = r.size;
     f.resolved = flattenSpace( r.resolved, 160 );
     f.why      = t.known ? std::string() : ( r.note.empty() ? std::string( "unknown-type" ) : r.note );
@@ -2635,6 +2675,37 @@ inline bool modelNonFieldStatement( BodyWalk& w, std::string_view s )
 }
 
 // Handle one top-level statement inside the aggregate body.
+// Fold ONE declarator of a member statement. `baseType` is the statement's shared base, set from declarator 0: a
+// follow-on declarator shares only that (`char *a, b;` makes b a `char`, `int *p, *q;` makes q an `int *`). False when
+// the statement was refused and the rest of it must not be read.
+inline bool modelDeclarator( BodyWalk& w, std::string_view part, bool first, std::string_view& baseType )
+{
+    Declarator d = parseDeclarator( part );
+    if( first && d.ok )
+    {
+        baseType = d.baseSpec;
+    }
+    d.baseSpec = baseType;
+    const std::string written = first ? std::string( d.typeSpec )
+                              : d.declPart.empty() ? std::string( baseType ) : std::string( baseType ) + " " + std::string( d.declPart );
+    if( d.isBitfield )
+    {
+        const bool placed = d.ok && !baseType.empty() && placeByteBitfield( w, d, written );
+        if( !placed )
+        {
+            w.refuse( "bitfield", "the bit allocation unit and packing order are implementation-defined" );
+        }
+        return placed;
+    }
+    if( !d.ok || baseType.empty() )
+    {
+        w.refuse( "unparsed-member", flattenSpace( part, 160 ) );
+        return false;
+    }
+    appendField( w, d, written );
+    return true;
+}
+
 inline void modelStatement( BodyWalk& w, std::string_view stmt )
 {
     const std::string_view s = peelAccessSpecifiers( w, trimView( stmt ) );
@@ -2647,29 +2718,10 @@ inline void modelStatement( BodyWalk& w, std::string_view stmt )
     std::string_view                    baseType;
     for( std::size_t i = 0; i < parts.size(); ++i )
     {
-        const Declarator d = parseDeclarator( parts[i] );
-        if( d.isBitfield )
+        if( !modelDeclarator( w, parts[i], i == 0, baseType ) )
         {
-            if( i == 0 && d.ok )
-            {
-                baseType = d.baseSpec;
-            }
-            if( !d.ok || baseType.empty() || !placeByteBitfield( w, d, ( i == 0 ) ? std::string( d.typeSpec ) : std::string( baseType ), baseType ) )
-            { w.refuse( "bitfield", "the bit allocation unit and packing order are implementation-defined" ); return; }
-            continue;
+            return;
         }
-        if( !d.ok || ( i == 0 && d.baseSpec.empty() ) )
-        { w.refuse( "unparsed-member", flattenSpace( parts[i], 160 ) ); return; }
-
-        if( i == 0 )
-        {
-            baseType = d.baseSpec;
-            appendField( w, d, d.typeSpec, baseType );
-            continue;
-        }
-        // A follow-on declarator shares only the BASE: `char *a, b;` makes b a `char`, `int *p, *q;` makes q an `int *`.
-        const std::string written = d.declPart.empty() ? std::string( baseType ) : std::string( baseType ) + " " + std::string( d.declPart );
-        appendField( w, d, written, baseType );
     }
 }
 
@@ -3346,6 +3398,37 @@ inline LayoutResult computeLayout( const IngestResult& ing, std::string_view spe
 
 using XmlEscaper = std::function<std::string( std::string_view )>;
 
+// One <f> row: name, type as written, expansion, extent, bitfield position, size (or why it has none), offset.
+inline void writeFieldRow( std::FILE* out, const FieldRow& f, const XmlEscaper& ex )
+{
+    rw::emitTo( out, "<f n=\"{}\" ty=\"{}\"", ex( f.name ).c_str(), ex( f.type ).c_str() );
+    if( !f.resolved.empty() )
+    {
+        rw::emitTo( out, " as=\"{}\"", ex( f.resolved ).c_str() );
+    }
+    if( f.elems != 1 )
+    {
+        rw::emitTo( out, " x=\"{}\"", f.elems );
+    }
+    if( f.bitWidth != 0 )
+    {
+        rw::emitTo( out, " bits=\"{}\" bit=\"{}\"", f.bitWidth, f.bitOffset );
+    }
+    if( f.sized )
+    {
+        rw::emitTo( out, " sz=\"{}\" al=\"{}\"", f.size, f.align );
+    }
+    else
+    {
+        rw::emitTo( out, " sized=\"0\" why=\"{}\"", ex( f.why.empty() ? std::string_view( "unknown-type" ) : std::string_view( f.why ) ).c_str() );
+    }
+    if( f.placed )
+    {
+        rw::emitTo( out, " off=\"{}\"", f.offset );
+    }
+    rw::emitRaw( out, "/>" );
+}
+
 // `rootPrefix` empty ⇒ p= keeps def.path unchanged (multi-root, or no single root to strip) — R-E
 // (2026-08-17 harvest): def.path is an already-materialized copy of ing.files[fileId], relativized here at
 // print time exactly like every other lens's pathRel.
@@ -3382,32 +3465,7 @@ inline void writeLayoutDef( std::FILE* out, const LayoutDef& def, const XmlEscap
         {
             rw::emitTo( out, "<pad bytes=\"{}\"/>", f.padBefore );
         }
-        rw::emitTo( out, "<f n=\"{}\" ty=\"{}\"", ex( f.name ).c_str(), ex( f.type ).c_str() );
-        if( !f.resolved.empty() )
-        {
-            rw::emitTo( out, " as=\"{}\"", ex( f.resolved ).c_str() );
-        }
-        if( f.elems != 1 )
-        {
-            rw::emitTo( out, " x=\"{}\"", f.elems );
-        }
-        if( f.bitWidth != 0 )
-        {
-            rw::emitTo( out, " bits=\"{}\" bit=\"{}\"", f.bitWidth, f.bitOffset );
-        }
-        if( f.sized )
-        {
-            rw::emitTo( out, " sz=\"{}\" al=\"{}\"", f.size, f.align );
-        }
-        else
-        {
-            rw::emitTo( out, " sized=\"0\" why=\"{}\"", ex( f.why.empty() ? std::string_view( "unknown-type" ) : std::string_view( f.why ) ).c_str() );
-        }
-        if( f.placed )
-        {
-            rw::emitTo( out, " off=\"{}\"", f.offset );
-        }
-        rw::emitRaw( out, "/>" );
+        writeFieldRow( out, f, ex );
     }
     if( def.modeled && def.tailPad )
     {
