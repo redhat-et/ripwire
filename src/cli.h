@@ -20,6 +20,7 @@
 #include "version.h"  // configure-generated kRipwireVersion + short build info (--version)
 #include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
 #include "infra/os.h"   // rw::os::normalize_path_arg — path-valued arguments take the program's path spelling at intake
+#include "infra/sizeparse.h"
 #include "rootguard.h"  // rw::noProjectRootReason — #350 layer 1: a run with no root, from a home/system directory
 
 namespace rw
@@ -688,71 +689,6 @@ inline void refuseEmptyValue( std::string_view flag, const char* needs, const ch
 {
     const std::string_view bare = flag.substr( 0, flag.size() - 1 );
     rw::emitTo( stderr, "ripwire: {}= is empty — it needs {}, e.g. {}\n", std::string_view( bare.data(), bare.size() ), needs, example );
-}
-
-// parse a NUL-terminated "...=<u64>" value tail with the same reject rules as parsePosInt: empty /
-// non-numeric / signed / zero / overflow (so `--pack-budget-bytes=-1` no longer wraps to 2^64-1 and
-// `=abc` no longer silently becomes 0). First char must be a digit — strtoull would accept "-1" by wrapping.
-inline bool parsePosU64( const char* s, std::size_t& out ) noexcept
-{
-    if( s[0] < '0' || s[0] > '9' )
-    {
-        return false;
-    }
-    char* end = nullptr;
-    errno     = 0;
-    const unsigned long long v = std::strtoull( s, &end, 10 );
-    if( end == s || *end != '\0' || v < 1 || errno == ERANGE )
-    {
-        return false;
-    }
-    out = std::size_t( v );
-    return true;
-}
-
-// parse a "...=<u64>[K|M|G]" BYTE-SIZE value: an optional single-char suffix (case-insensitive, powers of
-// 1024, a trailing "B" tolerated so "10MB" works) scales the number; a bare number is bytes. Same reject
-// rules as parsePosU64 (empty / signed / zero / bad-suffix / overflow). Used by --max-file-size.
-inline bool parseByteSize( const char* s, std::size_t& out ) noexcept
-{
-    if( s[0] < '0' || s[0] > '9' )
-    {
-        return false;
-    }
-    char* end = nullptr;
-    errno     = 0;
-    const unsigned long long v = std::strtoull( s, &end, 10 );
-    if( end == s || v < 1 || errno == ERANGE )
-    {
-        return false;
-    }
-
-    std::size_t mult = 1;
-    if( *end != '\0' )                                        // an optional K/M/G scale suffix
-    {
-        switch( *end )
-        {
-            case 'k': case 'K': mult = 1024ull;                    break;
-            case 'm': case 'M': mult = 1024ull * 1024;             break;
-            case 'g': case 'G': mult = 1024ull * 1024 * 1024;      break;
-            default:            return false;
-        }
-        ++end;
-        if( *end == 'b' || *end == 'B' )
-        {
-            ++end; // tolerate the "B" of KB/MB/GB
-        }
-        if( *end != '\0' )
-        {
-            return false;
-        }
-    }
-    if( v > static_cast<unsigned long long>( SIZE_MAX / mult ) )
-    {
-        return false; // overflow guard
-    }
-    out = std::size_t( v ) * mult;
-    return true;
 }
 
 // #350: the memory guard's limit — parseByteSize's grammar, and never below the 64 MiB floor (memguard::kFloorBytes,

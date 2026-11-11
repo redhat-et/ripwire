@@ -1887,7 +1887,7 @@ void init_process( int& argc, char**& argv )
 
     // the path-valued environment the program reads, in its own spelling. A variable whose spelling is already right is
     // not rewritten, so a child process inherits exactly what this one was given unless the spelling had to change.
-    static constexpr const wchar_t* kPathVariables[] = { L"HOME", L"TMPDIR", L"XDG_CACHE_HOME", L"CODEX_HOME", L"CLAUDE_CONFIG_DIR" };
+    static constexpr const wchar_t* kPathVariables[] = { L"HOME", L"RIPWIRE_CACHE_DIR", L"TMPDIR", L"XDG_CACHE_HOME", L"CODEX_HOME", L"CLAUDE_CONFIG_DIR" };
     for( const wchar_t* const name : kPathVariables )
     {
         std::string value = environmentUtf8( name );

@@ -2,6 +2,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include "langfacts.h"
+#include "infra/sizeparse.h"
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -1914,7 +1915,7 @@ inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, 
 // `quality_baseline` verbs call the SAME code (no duplication of the git-archive / stale-vs-HEAD logic). main.cpp
 // re-exports them with `using` aliases so its existing call sites are byte-unchanged.
 
-// S4: shared per-user cache-directory ladder: $TMPDIR/ripwire → $XDG_CACHE_HOME/ripwire →
+// S4: shared per-user cache-directory ladder: $RIPWIRE_CACHE_DIR/ripwire → $TMPDIR/ripwire → $XDG_CACHE_HOME/ripwire →
 // /tmp/ripwire-<uid>, always mode 0700. Keeping our artifacts one level below TMPDIR is a performance
 // boundary as well as a security one: cache hygiene must never enumerate an unbounded shared TMPDIR full of
 // unrelated agent-session files. Returns the dir with NO trailing slash. Deterministic per (user, env).
@@ -1941,36 +1942,53 @@ inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, 
 // "temp" in that environment, it is per-user, --doctor's cache-dir row discloses it, and a Windows-only
 // %LOCALAPPDATA%\ripwire rung would break this ladder's one-shape-everywhere rule for an environment Windows itself
 // never produces (it sets TEMP and TMP per user). README's Windows section says where the cache goes.
-inline std::string cacheDirLadder()
+struct CacheDirSource
 {
-    std::string d;
-    // #303: an explicit override wins, exactly for the constrained-TMPDIR case the issue measured. An unusable
-    // override fails closed like every other rung (the mkdir/lstat/chmod verification below).
+    const char* label = "fallback";
+    const char* location = "the platform temp directory";
+};
+
+inline std::string cacheDirLadder( CacheDirSource* source = nullptr )
+{
+    std::string parent;
+    CacheDirSource selected;
     if( const char* overrideDir = std::getenv( "RIPWIRE_CACHE_DIR" ); overrideDir && *overrideDir )
     {
-        d = overrideDir;
-        while( d.size() > 1 && d.back() == '/' )
+        selected = { "override", "RIPWIRE_CACHE_DIR" };
+        if( source )
         {
-            d.pop_back();
+            *source = selected;
         }
+        if( !VALIDATE( os::path_is_absolute( overrideDir ), "RIPWIRE_CACHE_DIR must be absolute" ) )
+        {
+            rw::emitTo( stderr, "ripwire: RIPWIRE_CACHE_DIR must be an absolute path — got '{}'\\n", overrideDir );
+            return os::rebased_path( "/dev/null/ripwire-cache-unavailable" );
+        }
+        parent = overrideDir;
     }
     else if( const char* tmpDir = std::getenv( "TMPDIR" ); tmpDir && *tmpDir )
     {
-        d = tmpDir;
-        while( d.size() > 1 && d.back() == '/' )
-        {
-          d.pop_back();
-        }
-        d += "/ripwire";
+        selected = { "tmpdir", "TMPDIR" };
+        parent = tmpDir;
     }
     else if( const char* xdgCache = std::getenv( "XDG_CACHE_HOME" ); xdgCache && *xdgCache )
     {
-        d = std::string( xdgCache ) + "/ripwire";
+        selected = { "xdg", "XDG_CACHE_HOME" };
+        parent = xdgCache;
     }
-    else
+    if( source )
     {
-        d = "/tmp/ripwire-" + std::to_string( static_cast<unsigned long long>( os::getuid() ) );
+        *source = selected;
     }
+
+    const bool fallback = parent.empty();
+    while( !parent.empty() && parent.back() == '/' )
+    {
+        parent.pop_back();
+    }
+    const std::string d = fallback
+        ? "/tmp/ripwire-" + std::to_string( static_cast<unsigned long long>( os::getuid() ) )
+        : parent + "/ripwire";
 
     const int mkdirRc = os::mkdir( d.c_str(), 0700 );
     os::stat_t st {};
@@ -1991,16 +2009,6 @@ inline std::string cacheDirLadder()
     // unopenable there; the raw "/dev/null/..." spelling is only fail-closed by accident (drive-relative,
     // usually absent) the way the bug this file exists for relied on.
     return os::rebased_path( "/dev/null/ripwire-cache-unavailable" );
-}
-
-// #303: which ladder rung picked the cache dir, for --doctor's cache-dir row (src= attribute). Reads the same
-// environment in the same order cacheDirLadder() does, so the two can never disagree.
-inline std::string cacheDirSource()
-{
-    if( const char* v = std::getenv( "RIPWIRE_CACHE_DIR" ); v && *v ) return "override";
-    if( const char* v = std::getenv( "TMPDIR" ); v && *v ) return "tmpdir";
-    if( const char* v = std::getenv( "XDG_CACHE_HOME" ); v && *v ) return "xdg";
-    return "fallback";
 }
 
 // popen a shell command and return its trimmed stdout ("" on any failure — never crashes). THE one copy of
@@ -3551,38 +3559,39 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
 // both call fs::remove, and a double-remove is a benign no-op (the second just gets ENOENT via the error_code
 // overload). This sweep matches "ripwire-" (not a narrower family prefix), so it also backstops qsnap/qheadsnap
 // blobs that outlive their own keep-2 cap between runs — one dir-wide safety net under the per-family caps.
-// #303: each hygiene bound is env-settable (RIPWIRE_CACHE_MAX_BYTES, RIPWIRE_CACHE_MAX_AGE_DAYS,
-// RIPWIRE_CACHE_MAX_BLOBS) — the issue's 500 MB-scratch-volume host needs a smaller cap without a rebuild.
-// Unset or unparsable falls back to the shipped default; a zero or negative override is ignored the same way.
-inline double cacheMaxBlobAgeDays()
+inline constexpr double kMaxCacheBlobAgeDays = 30.0;
+inline constexpr std::uintmax_t kMaxCacheDirBytes = 2ull * 1024 * 1024 * 1024;
+inline constexpr std::size_t kMaxCacheBlobCount = 4096;   // bound every future hygiene scan
+
+inline std::size_t cacheLimit( const char* name, std::size_t fallback, bool ( *parse )( const char*, std::size_t& ) noexcept,
+                               std::size_t max = SIZE_MAX )
 {
-    if( const char* v = std::getenv( "RIPWIRE_CACHE_MAX_AGE_DAYS" ); v && *v )
+    if( const char* value = std::getenv( name ); value && *value )
     {
-        char* end = nullptr;
-        const double parsed = std::strtod( v, &end );
-        if( end != v && parsed > 0.0 ) return parsed;
+        std::size_t limit = 0;
+        const bool parsed = parse( value, limit );
+        if( VALIDATE( parsed && limit <= max, "invalid cache limit" ) )
+        {
+            return limit;
+        }
+        rw::emitTo( stderr, "ripwire: rejected {}='{}' — using default {}\n", name, value, fallback );
     }
-    return 30.0;
+    return fallback;
 }
+
+inline std::size_t cacheMaxBlobAgeDays()
+{
+    return cacheLimit( "RIPWIRE_CACHE_MAX_AGE_DAYS", static_cast<std::size_t>( kMaxCacheBlobAgeDays ), rw::parsePosU64, 36500 );
+}
+
 inline std::uintmax_t cacheMaxDirBytes()
 {
-    if( const char* v = std::getenv( "RIPWIRE_CACHE_MAX_BYTES" ); v && *v )
-    {
-        char* end = nullptr;
-        const unsigned long long parsed = std::strtoull( v, &end, 10 );
-        if( end != v && parsed > 0 ) return parsed;
-    }
-    return 2ull * 1024 * 1024 * 1024;   // 2 GB
+    return cacheLimit( "RIPWIRE_CACHE_MAX_BYTES", kMaxCacheDirBytes, rw::parseByteSize );
 }
+
 inline std::size_t cacheMaxBlobCount()
 {
-    if( const char* v = std::getenv( "RIPWIRE_CACHE_MAX_BLOBS" ); v && *v )
-    {
-        char* end = nullptr;
-        const unsigned long long parsed = std::strtoull( v, &end, 10 );
-        if( end != v && parsed > 0 ) return static_cast<std::size_t>( parsed );
-    }
-    return 4096;   // bound every future hygiene scan
+    return cacheLimit( "RIPWIRE_CACHE_MAX_BLOBS", kMaxCacheBlobCount, rw::parsePosU64 );
 }
 
 // 2026-09-06 stranger audit: the advisory edit locks (mcpedit.h editLockPath — <cacheDir>/locks/<xx>/ripwire-edit-

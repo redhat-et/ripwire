@@ -650,7 +650,7 @@ fi
 # `return` must hand back `os::rebased_path( … )`, never a bare spelling.
 # RED on the pre-fix source (two bare returns, no rebase in the body at all), GREEN on the fixed one.
 QH="$ROOT/src/quality.h"
-ladderbody="$( awk '/^inline std::string cacheDirLadder\(\)/{f=1} f{print} f&&/^}/{exit}' "$QH" )"
+ladderbody="$( awk '/^inline std::string cacheDirLadder\(/{f=1} f{print} f&&/^}/{exit}' "$QH" )"
 if [ -z "$ladderbody" ]; then
     no "(m) could not extract cacheDirLadder()'s body from src/quality.h — the arm is not observing what it claims"
 else
@@ -667,48 +667,40 @@ else
     fi
 fi
 
+# (n) The override owns its cache and the configured cap applies on a real write.
+echo "  ARM   override dir + env caps (#303)"
+scratch="$TMP/override-check"
+override="$scratch/cachebase"
+ignored="$scratch/tmp"
+mkdir -p "$override/ripwire" "$ignored"
+touch "$override/ripwire/ripwire-0000000000000001-lean.bin"
+env -u XDG_CACHE_HOME RIPWIRE_CACHE_DIR="$override" TMPDIR="$ignored" RIPWIRE_CACHE_MAX_BLOBS=1 \
+    "$BIN" "$REPO" >"$scratch/run.out" 2>"$scratch/run.err"
+if [ "$?" -eq 0 ] && [ -n "$( find "$override/ripwire" -maxdepth 2 -name 'ripwire-*-lean*.bin' -print -quit )" ] \
+    && [ ! -e "$override/ripwire/ripwire-0000000000000001-lean.bin" ]; then
+    ok "(n) wrote a blob under the override and evicted the seeded blob"
+else
+    no "(n) expected a new blob and eviction under the override"
+fi
+
+env -u XDG_CACHE_HOME RIPWIRE_CACHE_DIR="$override" TMPDIR="$ignored" \
+    RIPWIRE_CACHE_MAX_BYTES=1MB RIPWIRE_CACHE_MAX_AGE_DAYS=1 RIPWIRE_CACHE_MAX_BLOBS=7 \
+    "$BIN" "$REPO" --doctor >"$scratch/doctor.out" 2>"$scratch/doctor.err"
+if grep 'n="cache-dir"' "$scratch/doctor.out" | grep -F "dir=\"$override/ripwire\"" \
+    | grep -q 'dir_source="override" cap_bytes="1048576" cap_age_days="1" cap_blobs="7"'; then
+    ok "(n) --doctor reports the override and all effective caps"
+else
+    no "(n) --doctor did not report the override and effective caps"
+fi
+
+touch "$scratch/not-a-directory"
+env -u XDG_CACHE_HOME RIPWIRE_CACHE_DIR="$scratch/not-a-directory" TMPDIR="$ignored" \
+    "$BIN" "$REPO" --doctor >"$scratch/invalid.out" 2>"$scratch/invalid.err"
+if grep 'n="cache-dir" ok="0"' "$scratch/invalid.out" | grep -q 'dir_source="override"' \
+    && [ -z "$( find "$ignored" -maxdepth 2 -name 'ripwire*' -print -quit )" ]; then
+    ok "(n) an unusable override fails closed without creating a cache under TMPDIR"
+else
+    no "(n) the override did not fail closed or TMPDIR was used"
+fi
 
 [ "$fail" -eq 0 ] && echo "evictioncheck: ALL PASS" || { echo "evictioncheck: SOME CHECKS FAILED"; exit 1; }
-
-# =============================================================================
-# ARM (#303): RIPWIRE_CACHE_DIR — the explicit override is the ladder's FIRST
-# rung, and the sweep's hygiene caps are env-settable. Red on main, where the
-# variable is ignored: blobs land under TMPDIR, not the override.
-# =============================================================================
-echo "  ARM   override dir + env caps (#303)"
-if [ -z "$BIN" ]; then
-    no "(n) no binary to run — pass the ripwire path as \$1"
-else
-    scratch="$( mktemp -d )"
-    override="$scratch/ripwire-cache"
-    mkdir -p "$override"
-    tmpdir_scratch="$( mktemp -d )"
-    if RIPWIRE_CACHE_DIR="$override" TMPDIR="$tmpdir_scratch" "$BIN" doctor >"$scratch/doctor.out" 2>&1 \
-       && grep -q "source=\"override\"" "$scratch/doctor.out" \
-       && grep -q "dir=\"$override\"" "$scratch/doctor.out"; then
-        ok "(n) RIPWIRE_CACHE_DIR wins the ladder: --doctor reports dir= the override and source=override"
-    else
-        no "(n) RIPWIRE_CACHE_DIR was ignored — --doctor did not report the override as the cache dir (see $scratch/doctor.out)"
-    fi
-    if grep -q "cap_bytes=" "$scratch/doctor.out" && grep -q "cap_age_days=" "$scratch/doctor.out" && grep -q "cap_blobs=" "$scratch/doctor.out"; then
-        ok "(n) --doctor discloses the effective hygiene caps (cap_bytes/cap_age_days/cap_blobs)"
-    else
-        no "(n) --doctor does not disclose the hygiene caps"
-    fi
-    if RIPWIRE_CACHE_DIR="$override" RIPWIRE_CACHE_MAX_BYTES=1048576 RIPWIRE_CACHE_MAX_AGE_DAYS=1 RIPWIRE_CACHE_MAX_BLOBS=7 \
-       "$BIN" doctor >"$scratch/caps.out" 2>&1 \
-       && grep -q "cap_bytes=\"1048576\"" "$scratch/caps.out" \
-       && grep -q "cap_age_days=\"1\"" "$scratch/caps.out" \
-       && grep -q "cap_blobs=\"7\"" "$scratch/caps.out"; then
-        ok "(n) the env-settable caps are honoured (1 MiB / 1 day / 7 blobs)"
-    else
-        no "(n) the env-settable caps were ignored (see $scratch/caps.out)"
-    fi
-    # Nothing may land under the ignored TMPDIR rung.
-    if [ -z "$( find "$tmpdir_scratch" -maxdepth 2 -name 'ripwire*' -print -quit )" ]; then
-        ok "(n) with the override set, nothing was created under TMPDIR"
-    else
-        no "(n) with RIPWIRE_CACHE_DIR set, blobs were still created under TMPDIR"
-    fi
-    rm -rf "$scratch" "$tmpdir_scratch"
-fi

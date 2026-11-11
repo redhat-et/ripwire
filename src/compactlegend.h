@@ -1317,7 +1317,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "agent", "agent=: the agent named by the agent flag; its live-integration c rows follow the built-in checks", false, "doctor", MapHeaderRead::No, {}, "doctor" },
     { "copied", "copied=1: the PATH binary is a byte-identical copy of this one, an ok copied install", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "loaded", "loaded=/expected=: grammars whose tags query compiled / grammars compiled in; a shortfall fails the row", true, "c", MapHeaderRead::No, {}, "doctor" },   // also defines expected=
-    { "dir", "dir=: the per-user cache directory scanned (TMPDIR/XDG_CACHE_HOME ladder); unwritable fails the row", true, "c", MapHeaderRead::No, {}, "doctor" },
+    { "dir", "dir=: the per-user cache directory scanned (RIPWIRE_CACHE_DIR, TMPDIR, XDG_CACHE_HOME, then platform temp); unwritable fails the row", true, "c", MapHeaderRead::No, {}, "doctor" },
+    { "dir_source", "dir_source=: the cache directory source (override, tmpdir, xdg or fallback)", true, "c", MapHeaderRead::No, {}, "doctor" },
+    { "cap_bytes", "cap_bytes=N: the cache eviction budget in bytes", true, "c", MapHeaderRead::No, {}, "doctor" },
+    { "cap_age_days", "cap_age_days=N: the cache eviction age limit in whole days", true, "c", MapHeaderRead::No, {}, "doctor" },
+    { "cap_blobs", "cap_blobs=N: the cache eviction budget in blobs", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "blobs", "blobs=N: ripwire cache blobs in dir=; the scan stops at 4096 (blobs_floor=1 then)", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "blobs_floor", "blobs_floor=1: the 4096-blob scan cap fired; blobs= and bytes= are FLOORS, not totals", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "bytes", "bytes=N: total size in bytes of the blobs counted (short when truncated=1)", true, "c", MapHeaderRead::No, {}, "doctor" },

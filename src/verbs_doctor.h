@@ -733,15 +733,14 @@ inline DoctorCacheStats doctorCacheStats( const std::string& dir )
     return out;
 }
 
-inline std::string doctorCacheDirHint( bool writable, const std::string& dir, std::vector<char>& esc )
+inline std::string doctorCacheDirHint( bool writable, const std::string& dir, const char* location, std::vector<char>& esc )
 {
     if( writable )
     {
         return "";
     }
     return " hint=\"" + std::string( rw::escapeXml( std::string_view(
-                  "cannot write to " + dir + " (from TMPDIR/XDG_CACHE_HOME/tmp fallback) — fix its "
-                  "permissions, or point TMPDIR/XDG_CACHE_HOME at a directory you can write to" ), esc ) ) + "\"";
+                  "cannot write to " + dir + " (from " + location + ") — use a writable cache directory" ), esc ) ) + "\"";
 }
 
 inline std::string doctorGitHint( bool gitAvailable )
@@ -972,7 +971,8 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     // doctorCacheStats/doctorEditLockCount's scans all read the one path the cache actually uses, identically
     // to every other cacheDirLadder() consumer in the tree.
     {
-        const std::string dir   = cacheDirLadder();
+        CacheDirSource source;
+        const std::string dir   = cacheDirLadder( &source );
         const std::string probe = dir + "/.ripwire-doctor-probe-" + std::to_string( rw::os::getpid() );
         bool writable = false;
         // create+remove a real file — the only thing "writable" can honestly mean on either platform; a mode-bit
@@ -1007,17 +1007,12 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         // Declaring the list HERE makes it a fact of the output that test/lib/doctorvolatile.sh reads; no gate
         // keeps a copy. Removing the fields instead is worse: cache size is this check's whole content.
         // #303: the ladder rung that picked the dir, and the effective hygiene caps (env-settable since #303).
-        attrs += " source=\"" + std::string( escapeXml( cacheDirSource().c_str(), esc ) ) + "\"";
-        {
-            char capBuf[64];
-            std::snprintf( capBuf, sizeof( capBuf ), "%llu", static_cast<unsigned long long>( cacheMaxDirBytes() ) );
-            attrs += " cap_bytes=\"" + std::string( capBuf ) + "\"";
-            std::snprintf( capBuf, sizeof( capBuf ), "%.0f", cacheMaxBlobAgeDays() );
-            attrs += " cap_age_days=\"" + std::string( capBuf ) + "\"";
-            attrs += " cap_blobs=\"" + std::to_string( cacheMaxBlobCount() ) + "\"";
-        }
+        attrs += " dir_source=\"" + std::string( source.label ) + "\"";
+        attrs += " cap_bytes=\"" + std::to_string( cacheMaxDirBytes() ) + "\"";
+        attrs += " cap_age_days=\"" + std::to_string( cacheMaxBlobAgeDays() ) + "\"";
+        attrs += " cap_blobs=\"" + std::to_string( cacheMaxBlobCount() ) + "\"";
         attrs += " volatile=\"blobs,blobs_floor,bytes,many,truncated,locks\"";
-        attrs += doctorCacheDirHint( writable, dir, esc );
+        attrs += doctorCacheDirHint( writable, dir, source.location, esc );
         row( "cache-dir", writable, attrs );
     }
 

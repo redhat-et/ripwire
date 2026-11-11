@@ -751,7 +751,7 @@ private:
 // serve every blob. The cause is named WHERE the reader looks (stderr + exit 1, or an MCP error), never as a zero.
 // ONE renderer for both blob readers (the prconverge.h one-renderer rule): `batch` names which reader's blobs were not
 // read — the cross-branch sweep's (--stray-content, --plan, --abi, --eval-stray) or --whereis's — and every other word is
-// shared, so the CLI and MCP hosts of both verbs name the same cause, the cache directory and TMPDIR.
+// shared, so the CLI and MCP hosts of both verbs name the same cause, the cache directory and its configuration source.
 enum class UnreadBlobBatch : std::uint8_t
 {
     Branches,   // the cross-branch sweep's batch: every ref's side of every path it compares
@@ -760,9 +760,11 @@ enum class UnreadBlobBatch : std::uint8_t
 inline std::string blobsUnreadCause( UnreadBlobBatch batch )
 {
     const std::string_view unread = batch == UnreadBlobBatch::Trees ? "the trees' blobs" : "the branches' blobs";
-    return std::format( "could not read {} (the one `git cat-file --batch` did not start or stopped early; its sha list is written under {} - is TMPDIR "
+    quality::CacheDirSource source;
+    const std::string dir = quality::cacheDirLadder( &source );
+    return std::format( "could not read {} (the one `git cat-file --batch` did not start or stopped early; its sha list is written under {} - is {} "
                         "a writable directory?)",
-                        unread, quality::cacheDirLadder() );
+                        unread, dir, source.location );
 }
 
 // ── git plumbing (read-only) ─────────────────────────────────────────────────────────────────────────────

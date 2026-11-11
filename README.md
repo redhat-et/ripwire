@@ -2683,6 +2683,11 @@ the time. Judge the cost of the tool by the second call, not the first. If the f
 looks wrong, run `ripwire . --doctor`: it checks the binary, the grammars, the cache and the git
 identity of the index, and says which one is at fault.
 
+Set `RIPWIRE_CACHE_DIR` to an existing absolute directory to store the cache in its `ripwire/`
+subdirectory. The default eviction limits are 2 GiB, 30 days and 4,096 blobs. Override them with
+`RIPWIRE_CACHE_MAX_BYTES` (bytes or a K/M/G suffix), `RIPWIRE_CACHE_MAX_AGE_DAYS` (whole days) and
+`RIPWIRE_CACHE_MAX_BLOBS` (count). `--doctor` reports the active directory and limits.
+
 #### 4.2 Use the common commands
 
 | Task | Command |
