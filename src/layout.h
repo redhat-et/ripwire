@@ -2113,18 +2113,36 @@ inline bool atDirectiveStart( std::string_view body, std::size_t at )
     return true;
 }
 
+// One past a directive's last byte: the first newline NOT escaped by a trailing backslash (`#define W ( A \` goes on).
+inline std::size_t directiveEnd( std::string_view body, std::size_t at )
+{
+    for( std::size_t i = at; i < body.size(); ++i )
+    {
+        if( body[i] != '\n' )
+        {
+            continue;
+        }
+        std::size_t back = i;
+        if( back > at && body[back - 1] == '\r' )
+        {
+            --back;
+        }
+        if( back == at || body[back - 1] != '\\' )
+        {
+            return i;
+        }
+    }
+    return body.size();
+}
+
 // One preprocessor directive line inside the body. An `#if`-family conditional can add or remove fields
 // depending on build flags, so it withdraws the numbers; every other directive is merely skipped.
 inline std::size_t walkDirective( BodyWalk& w, std::size_t at )
 {
     static constexpr std::string_view kConditional[] = { "if", "ifdef", "ifndef", "else", "elif", "endif" };
 
-    std::size_t end = at;
-    while( end < w.body.size() && w.body[end] != '\n' )
-    {
-        ++end;
-    }
-    const std::string_view d = trimView( w.body.substr( at + 1, end - at - 1 ) );
+    const std::size_t      end = directiveEnd( w.body, at );
+    const std::string_view d   = trimView( w.body.substr( at + 1, end - at - 1 ) );
     for( std::string_view c : kConditional )
     {
         if( d.rfind( c, 0 ) == 0 && ( d.size() == c.size() || !identByte( (unsigned char)d[ c.size() ] ) ) )
@@ -2134,8 +2152,11 @@ inline std::size_t walkDirective( BodyWalk& w, std::size_t at )
         }
     }
 
+    // A directive BETWEEN two members belongs to neither: the next statement starts after it. The test is the text
+    // BEFORE the `#` — testing through `next` included the directive itself, so it never passed, and every #define
+    // between two fields was glued onto the next field's type (tmux window_pane.sync_dirty, 2026-11-11 audit).
     const std::size_t next = std::min( end + 1, w.body.size() );
-    if( trimView( w.body.substr( w.stmtStart, ( next > w.stmtStart ) ? next - w.stmtStart : 0 ) ).empty() )
+    if( trimView( w.body.substr( w.stmtStart, ( at > w.stmtStart ) ? at - w.stmtStart : 0 ) ).empty() )
     {
         w.stmtStart = next;
     }
