@@ -720,6 +720,7 @@ struct ElixirContext
                 }
                 else if( elixirNodeIs( filter, "list" ) )
                 {
+                    std::string pairs;   // built here, interned once (MEM-B1: a pool name's += would intern every prefix)
                     for( std::uint32_t i = 0; i < ts_node_named_child_count( filter ); ++i )
                     {
                         const TSNode entries = ts_node_named_child( filter, i );
@@ -730,9 +731,10 @@ struct ElixirContext
                             auto key = nodeTextOf( fieldChild( pair, NodeField::Key ), src );
                             while( !key.empty() && ( key.back() == ':' || std::isspace( static_cast<unsigned char>( key.back() ) ) ) ) { key.remove_suffix( 1 ); }
                             const auto count = nodeTextOf( fieldChild( pair, NodeField::Value ), src );
-                            bind.importedName += "\n" + std::string( key ) + "/" + std::string( count ) + "\n";
+                            pairs += "\n" + std::string( key ) + "/" + std::string( count ) + "\n";
                         }
                     }
+                    bind.importedName = pairs;
                 }
                 binds.push_back( std::move( bind ) );
             }
