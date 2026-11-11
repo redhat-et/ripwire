@@ -1468,6 +1468,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "git", "git=/dirty=: the root is a git repo / its tree differs from HEAD (the stamp's +dirty)", true, "facts", MapHeaderRead::No, {}, "help-task" },   // also defines dirty=
     { "trace", "trace=1: the task text has a stack/sanitizer trace shape; it routes to from-trace", true, "facts", MapHeaderRead::No, {}, "help-task" },
     { "resolved_symbols", "resolved_symbols=N: indexed names the task NAMES; a bare short/common word needs backticks or F()", true, "facts", MapHeaderRead::No, {}, "help-task" },
+    { "reason", "task-route reason=system-event: an abstain on a harness report, not a task (any other abstain carries next=)", false, "task-route", MapHeaderRead::No, {}, "help-task" },
     // doctor purpose line (compactlegend.h:179) spells c name= but the emitter writes n= (verbs_doctor.h row lambda, doctorAgentRows); the n row above defines it; consider fixing the purpose to c n= ok=.
     // doctor truncated= means two different things on two c rows (cache-dir: scan cut, bytes/blobs short; tracked-binaries: scan skipped, stale=0 unmeasured); one KEY-qualified row carries both.
     // doctor p0=/src0= are numbered: tracked-binaries emits p0..p7/src0..src7 (kShown=8); only p0/src0 get a reading, so p1..p7/src1..src7 stay undefined if a gate reads every name (needs 14 more rows or a prefix rule).
