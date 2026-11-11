@@ -426,12 +426,12 @@ inline bool isVerbatimMessageTask( std::span<const std::string_view> words )
     return words.size() >= kForVerbatimMinWords && std::none_of( words.begin(), words.end(), []( std::string_view w ) { return isMessageCue( w ); } );
 }
 
-// the task without its leading and trailing blanks
-inline std::string_view trimTask( std::string_view task ) noexcept
+// both ends trimmed of every whitespace byte, newlines included (a default may start on the line after the name)
+inline std::string_view trimAllWs( std::string_view v ) noexcept
 {
-    const std::size_t a = task.find_first_not_of( " \t" );
-    const std::size_t b = task.find_last_not_of( " \t" );
-    return a == std::string_view::npos ? std::string_view() : task.substr( a, b - a + 1 );
+    constexpr std::string_view kBlanks = " \t\r\n\f\v";
+    const std::size_t          first   = v.find_first_not_of( kBlanks );
+    return first == std::string_view::npos ? std::string_view() : v.substr( first, v.find_last_not_of( kBlanks ) - first + 1 );
 }
 
 // a key's last segment that says the dotted word is a file or a host: an extension of kLintExtRows (every indexed language), of
@@ -835,7 +835,7 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     }
     if( !m && lit_detail::isVerbatimMessageTask( words ) )
     {
-        ForLiteral v{ std::string( lit_detail::trimTask( task ) ), "message" };   // MSG-VERBATIM: last, the whole text, one scan
+        ForLiteral v{ std::string( lit_detail::trimAllWs( task ) ), "message" };   // MSG-VERBATIM: last, the whole text, one scan
         v.verbatim = true;
         out.push_back( std::move( v ) );
     }
@@ -3089,13 +3089,6 @@ inline std::vector<std::pair<std::size_t, std::size_t>> callArgsAt( std::string_
     return {};
 }
 
-// both ends trimmed of every whitespace byte, newlines included (a default may start on the line after the name)
-inline std::string_view trimAllWs( std::string_view v ) noexcept
-{
-    constexpr std::string_view kBlanks = " \t\r\n\f\v";
-    const std::size_t          first   = v.find_first_not_of( kBlanks );
-    return first == std::string_view::npos ? std::string_view() : v.substr( first, v.find_last_not_of( kBlanks ) - first + 1 );
-}
 
 // boost's `po::value<int>()->default_value(10)`: the text inside the call's parens, a paren inside a string default (`default_value(")")`) not counted
 inline std::optional<std::string_view> boostDefaultOf( std::string_view arg ) noexcept

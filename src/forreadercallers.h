@@ -117,8 +117,6 @@ struct Walk
     const Graph&        g;
     std::vector<NodeId> printed;   // readers and rows: never a row again
 
-    bool seen( NodeId id ) const { return std::find( printed.begin(), printed.end(), id ) != printed.end(); }
-
     // the kept callers of `target` (an in-edge from a callable source-path symbol), deduped, in (path, line, id) order
     void keptCallersInto( NodeId target, NodeId named, std::vector<std::pair<NodeId, bool>>& out ) const
     {
@@ -132,7 +130,7 @@ struct Walk
         for( std::uint32_t e = ro[target]; e < ro[target + 1]; ++e )
         {
             const NodeId c = ci[e];
-            if( std::size_t( c ) >= ing.symbols.size() || c == target || c == named || seen( c ) )
+            if( std::size_t( c ) >= ing.symbols.size() || c == target || c == named || std::ranges::contains( printed, c ) )
             {
                 continue;
             }
