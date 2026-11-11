@@ -219,6 +219,7 @@ int main( int argc, char** argv )
                  (unsigned long long)st.candidateCount, (unsigned long long)st.rawPairVisits, (unsigned long long)st.distinctPairs,
                  (unsigned long long)st.sketchRejects, (unsigned long long)st.jaccardMerges, (unsigned long long)st.lcsRuns,
                  (unsigned long long)st.emittedPairs );
+    std::printf( "CAP %d\n", st.pairCapHit ? 1 : 0 );   // T3-PAIRSEEN: the walk-parity arms diff this line too
     check( st.distinctPairs >= 1770, "S4) chaff pairs really reached the pre-gate (distinctPairs >= C(60,2))" );
     check( st.emittedPairs == t3.size(), "S4) stats emitted count matches the returned vector" );
 #ifdef CTX_TYPE3_SKETCH_OFF

@@ -68,5 +68,38 @@ n="$( grep -c '^PAIR' "$WORK/pairs_on.txt" )"
 if [ "$n" -lt 3 ]; then echo "  FAIL  fixture emitted only $n pairs (expected >= 3)"; echo "clonebandcheck: FAIL"; exit 2; fi
 echo "  PASS  fixture emitted $n Type-3 pairs (near-clones + borderline present)"
 
+# ── T3-PAIRSEEN walk parity (QD-ENVOY-TIME): the candidate-major walk against the bucket walk it replaced ───────────
+# findClonesType3 de-duplicates pairs per candidate (sorted partner lists) instead of through a global pair hash, and
+# re-runs the bucket walk when the pair cap is reached, so the capped "first N" stay the bucket walk's. Two parities,
+# each on PAIR + EMITTED + STATS + CAP lines (every counter, not just the pairs):
+#   W1  uncapped: the shipped build vs -DCTX_TYPE3_BUCKET_WALK (the bucket walk alone);
+#   W2  capped at 2: the same pair of builds with -DCTX_TYPE3_MAX_PAIRS=2. Its premise: the cap really fired (CAP 1) with
+#       two pairs kept. On this fixture the two kept pairs happen not to depend on the visit order, so W2 pins the rest of
+#       what the re-run restores: the bucket walk's counters (a build that keeps the candidate walk's own first N instead
+#       reports raw=47844 against the bucket walk's 2133, measured 2026-11-11) and the disclosure.
+# The capped harnesses fail their own S2 check by design (two pairs kept of three), so their exit code is not read.
+build_one walk -DCTX_TYPE3_BUCKET_WALK
+build_one cap -DCTX_TYPE3_MAX_PAIRS=2
+build_one capwalk -DCTX_TYPE3_MAX_PAIRS=2 -DCTX_TYPE3_BUCKET_WALK
+walk_lines() { grep '^PAIR\|^EMITTED\|^STATS\|^CAP' "$1"; }
+mkdir -p "$WORK/fix_walk" "$WORK/fix_cap" "$WORK/fix_capwalk"
+"$WORK/harness_walk"    "$WORK/fix_walk"    > "$WORK/out_walk.txt"
+"$WORK/harness_cap"     "$WORK/fix_cap"     > "$WORK/out_cap.txt"
+"$WORK/harness_capwalk" "$WORK/fix_capwalk" > "$WORK/out_capwalk.txt"
+walk_lines "$WORK/out_on.txt" > "$WORK/w_on.txt"; walk_lines "$WORK/out_walk.txt" > "$WORK/w_walk.txt"
+if ! diff -u "$WORK/w_walk.txt" "$WORK/w_on.txt" > "$WORK/w1.diff"; then
+    echo "  FAIL  W1 walk parity (uncapped): the candidate walk differs from the bucket walk"; sed 's/^/    /' "$WORK/w1.diff"; echo "clonebandcheck: FAIL"; exit 2
+fi
+grep -q '^CAP 0$' "$WORK/w_on.txt" || { echo "  FAIL  W1 premise: the uncapped run reports the cap fired"; echo "clonebandcheck: FAIL"; exit 2; }
+echo "  PASS  W1 walk parity (uncapped): pairs and every Type3Stats counter identical to the bucket walk"
+walk_lines "$WORK/out_cap.txt" > "$WORK/w_cap.txt"; walk_lines "$WORK/out_capwalk.txt" > "$WORK/w_capwalk.txt"
+if ! grep -q '^CAP 1$' "$WORK/w_cap.txt" || ! grep -q '^EMITTED 2$' "$WORK/w_cap.txt"; then
+    echo "  FAIL  W2 premise: the cap-2 build did not fire the cap with two pairs kept"; sed 's/^/    /' "$WORK/w_cap.txt"; echo "clonebandcheck: FAIL"; exit 2
+fi
+if ! diff -u "$WORK/w_capwalk.txt" "$WORK/w_cap.txt" > "$WORK/w2.diff"; then
+    echo "  FAIL  W2 walk parity (cap 2): the capped pass kept other pairs than the bucket walk"; sed 's/^/    /' "$WORK/w2.diff"; echo "clonebandcheck: FAIL"; exit 2
+fi
+echo "  PASS  W2 walk parity (cap 2, cap fired): the bucket walk's first-N pairs, counters and disclosure"
+
 echo "clonebandcheck: OK"
 exit 0
