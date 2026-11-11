@@ -1168,6 +1168,8 @@ int fcntl( int fd, int cmd, int )
 }
 
 int dup( int fd )           { return ::_dup( fd ); }
+int dup_cloexec( int fd )   { return ::_dup( fd ); }
+ssize_t write_nosigpipe( int fd, const void* buf, std::size_t count ) { return write( fd, buf, count ); }
 int dup2( int fd, int fd2 ) { return ::_dup2( fd, fd2 ); }
 
 int ftruncate( int fd, off_t length )
@@ -1224,6 +1226,7 @@ int flock( int fd, int operation )
 
 // pipe: the CRT's anonymous pipe, both ends non-inheritable (spawn_sh hands the write end to its child explicitly).
 int pipe( int fds[ 2 ] ) { return ::_pipe( fds, 65536, _O_BINARY | _O_NOINHERIT ); }
+int pipe_cloexec( int fds[ 2 ] ) { return pipe( fds ); }   // _O_NOINHERIT is already close-on-exec's meaning
 
 // poll: pipes only — the one caller waits on a spawn_sh pipe. POLLIN when bytes are waiting, POLLHUP once every writer
 // has closed (the read that follows returns 0, POSIX's EOF), POLLNVAL for a descriptor with no handle. There is no
@@ -2264,6 +2267,9 @@ pid_t spawn_sh( const std::string& command, const int pipeFds[ 2 ] )
 // kill: a negative pid is the process group — TerminateJobObject ends the whole tree; a positive pid ends that
 // process. Only children spawn_sh started are known (ESRCH otherwise). Signal 0 asks whether the child still runs. The
 // signal is recorded so waitpid reports the death as that signal.
+// fork_session: Windows has no fork. The one caller (--help-task --deadline-ms) answers synchronously on -1.
+pid_t fork_session() { return fail( ENOSYS ); }
+
 int kill( pid_t pid, int sig )
 {
     const std::lock_guard<std::mutex> lock( childMutex() );
@@ -2510,6 +2516,11 @@ int pthread_main_np()
     static const DWORD firstCaller = ::GetCurrentThreadId();
     return ::GetCurrentThreadId() == firstCaller ? 1 : 0;
 }
+
+// liveThreadCount: 0, "this platform cannot say". Its one caller guards fork(), and fork_session is ENOSYS here, so
+// there is no fork for the count to protect. A real count (CreateToolhelp32Snapshot) would not answer the question
+// either: the loader starts thread-pool workers before main, so a single-threaded program reads more than 1.
+std::size_t liveThreadCount() { return 0; }
 
 int pthread_getname_np( pthread_t, char* name, std::size_t nameCount )
 {

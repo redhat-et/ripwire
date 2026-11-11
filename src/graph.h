@@ -15268,10 +15268,16 @@ inline NamespaceFit namespaceFitOf( std::span<const std::string_view> prefix, co
 
 // `found` is what the earlier tiers matched, returned untouched unless it is empty (resolveAllByDottedScope's contract).
 // `fitted` (lane js-def-naming fix 1): how many definitions the spelling could mean (matches plus candidates left unplaced) when it
-// refuses, 0 on every other path, so a refusal can say "N fit, none chosen" rather than "none".
+// refuses, 0 on every other path, so a refusal can say "N fit, none chosen" rather than "none". `fittedIdsOut` (GV-ASSEMBLY M1,
+// forgraphverb.h sourceOnlyPickSpelling): on that refusal, the MATCHES themselves, in candidate order (the unplaced ones have no
+// match, so fewer ids than `fitted` means some fitting definition is not listed); left empty on every other path.
 inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing, std::string_view spec, std::vector<NodeId> found,
-                                                        std::size_t* fittedOut = nullptr )
+                                                        std::size_t* fittedOut = nullptr, std::vector<NodeId>* fittedIdsOut = nullptr )
 {
+    if( fittedIdsOut != nullptr )
+    {
+        fittedIdsOut->clear();
+    }
     std::size_t scratch = 0;
     std::size_t& fitted = fittedOut != nullptr ? *fittedOut : scratch;
     fitted              = 0;
@@ -15507,6 +15513,13 @@ inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing,
     if( unknownChain || unplaced != 0 || ( objectMember && headNamed ) || matches.empty() || !oneEntity )
     {
         fitted = matches.size() + unplaced;
+        if( fittedIdsOut != nullptr && fitted != 0 )
+        {
+            for( const Match& m : matches )
+            {
+                fittedIdsOut->push_back( m.id );
+            }
+        }
         return {};
     }
     std::vector<NodeId> out;

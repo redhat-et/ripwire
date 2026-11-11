@@ -71,6 +71,15 @@
 #   (i6) a holder with no X-macro list: its fields (the field side table) are the rows, by="field", two fields are n="2"
 #   (i7) a larger X-macro list whose name column is unknown (type and name columns tie) does not hide a smaller list with a known one
 #   (i8) `key` → `Keys` holders (vowel + y plural); a brace inside a comment does not move the property-line depth; two rows are n="2"
+#
+# ARMS (EXEMPLAR-RESIDUAL-2)
+#   (r1) a directory-local touch row: the typical member's directory aggregator (filters/__init__.py) names all four members in that
+#        directory but four of the family's ten: <touch .. share="4/4" scope="dir">, after the family-wide rows, and the legend then
+#        defines scope="dir"; (r1n) a directory whose aggregator names one of its four members prints no such row and no such clause
+#   (r2) Go contract lines: the typical registry entry's package (plugins/alpha) asserts three interfaces for Alpha (`&T{}`,
+#        `(*T)(nil)`, a `var (` group's `T{}`): <asserts type="Alpha" p=.. n="3"> after the touch list; a helper type's single assertion
+#        and a _test.go file's are not printed; the legend defines <asserts>; (r2n) a Go registry whose packages assert nothing: no row
+#   (r2u) an unreadable Go file of that package: n= is a floor, floor="1" unread="1" (r2u0: the asserting file itself: <asserts n="0" ../>)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -678,6 +687,101 @@ if block "$TMP/i8.xml" | grep -q ' into="ServerKeys" into_p="src/keys/server.ts:
     ok "(i8) key -> Keys holders; braces in comments are not depth; two property lines are n=\"2\""
 else no "(i8) Keys holders: $( block "$TMP/i8.xml" | head -c 400 )"; fi
 
+# r1 / r1n: RESIDUAL-2 dir-local touch rows. Ten Command subclasses in three directories (none holds half, so the scope is app):
+# four in app/filters (3 lines each, the median size: the typical member is one of them), three in app/strings (1 line), three in
+# app/math (6 lines). filters/__init__.py imports the four filters (4 of 10: not half the family); app/registry.py lists all ten.
+mkdir -p "$F/dirloc/app/filters" "$F/dirloc/app/strings" "$F/dirloc/app/math"
+printf 'class Command:\n    def run(self):\n        raise NotImplementedError\n' > "$F/dirloc/app/base.py"
+for c in where select reject uniq; do
+    printf 'from app.base import Command\n\n\nclass %sCommand(Command):\n    def run(self):\n        return "%s"\n' "$( cap "$c" )" "$c" > "$F/dirloc/app/filters/$c.py"
+done
+for c in upcase downcase trim; do printf 'from app.base import Command\nclass %sCommand(Command): pass\n' "$( cap "$c" )" > "$F/dirloc/app/strings/$c.py"; done
+for c in floor ceil round; do
+    printf 'from app.base import Command\n\n\nclass %sCommand(Command):\n    def run(self):\n        a = 1\n        b = 2\n        c = 3\n        return "%s"\n' "$( cap "$c" )" "$c" > "$F/dirloc/app/math/$c.py"
+done
+printf 'from .where import WhereCommand\nfrom .select import SelectCommand\nfrom .reject import RejectCommand\nfrom .uniq import UniqCommand\n' > "$F/dirloc/app/filters/__init__.py"
+printf 'ALL = [\n    "WhereCommand", "SelectCommand", "RejectCommand", "UniqCommand",\n    "UpcaseCommand", "DowncaseCommand", "TrimCommand",\n    "FloorCommand", "CeilCommand", "RoundCommand",\n]\n' > "$F/dirloc/app/registry.py"
+cp -R "$F/dirloc" "$F/dirneg"
+printf 'from .where import WhereCommand\n' > "$F/dirneg/app/filters/__init__.py"
+run dirloc "--for=add a new command" >"$TMP/r1.xml"
+b="$( block "$TMP/r1.xml" )"
+if printf '%s' "$b" | grep -q '<m n="\(Where\|Select\|Reject\|Uniq\)Command" p="app/filters/'; then ok "(r1) the typical member is a filter (the median size)"
+else no "(r1) typical: $( printf '%s' "$b" | head -c 400 )"; fi
+if printf '%s' "$b" | grep -q '<touch p="app/registry.py:[0-9]*"[^>]* share="10/10"[^>]*>[^<]*</touch><touch p="app/filters/__init__.py:[0-9]*" share="4/4" scope="dir">'; then
+    ok "(r1) filters/__init__.py: share=\"4/4\" scope=\"dir\", after the family-wide registry.py row"
+else no "(r1) dir-local row: $( touchrows "$TMP/r1.xml" | head -c 500 )"; fi
+if grep -q 'scope="dir"[^<]*<touch>: a file in the typical member' "$TMP/r1.xml"; then ok "(r1) the legend defines scope=\"dir\" when a row carries it"; else no "(r1) legend: scope=\"dir\" clause missing"; fi
+run dirneg "--for=add a new command" >"$TMP/r1n.xml"
+if [ -n "$( block "$TMP/r1n.xml" )" ] && ! grep -q 'scope="dir"' "$TMP/r1n.xml" && has_touch r1n "$TMP/r1n.xml" app/registry.py 10/10 | grep -q PASS; then
+    ok "(r1n) an aggregator naming one of its four members: no dir-local row, no scope=\"dir\" clause"
+else no "(r1n) $( touchrows "$TMP/r1n.xml" | head -c 400 )"; fi
+
+# r2 / r2n: RESIDUAL-2 Go contract lines. A registry of four plugin packages (gofx/plugins/registry.go); the typical entry (the first,
+# alpha) is named for its package plugins/alpha, whose alpha.go asserts three interfaces for Alpha (`&T{}`, `(*T)(nil)`, a `var (`
+# group's `T{}`) and one for a helper type; alpha_test.go asserts one more (a test file: not read).
+mkdir -p "$F/gofx/plugins"
+for p in alpha beta gamma delta; do
+    P="$( cap "$p" )"; mkdir -p "$F/gofx/plugins/$p"
+    printf 'package %s\n\nconst Name = "%s"\n\ntype %s struct{}\n\nfunc New() (*%s, error) { return &%s{}, nil }\n' "$p" "$P" "$P" "$P" "$P" > "$F/gofx/plugins/$p/$p.go"
+done
+cat >> "$F/gofx/plugins/alpha/alpha.go" <<'GO'
+
+type helper struct{}
+
+var _ fw.FilterPlugin = &Alpha{}
+var _ fw.ScorePlugin = (*Alpha)(nil) // checked by the compiler
+var (
+	_ fw.PreFilterPlugin = Alpha{}
+)
+var _ fw.Lister = &helper{}
+var answer = 42
+GO
+printf 'package alpha\n\nvar _ fw.TestOnlyPlugin = &Alpha{}\n' > "$F/gofx/plugins/alpha/alpha_test.go"
+printf 'package alpha\n' > "$F/gofx/plugins/alpha/extra.go" # asserts nothing: the r2u arm makes it unreadable
+cat > "$F/gofx/plugins/registry.go" <<'GO'
+package plugins
+
+type Registry map[string]func() (interface{}, error)
+
+func NewInTreeRegistry() Registry {
+	return Registry{
+		alpha.Name: alpha.New,
+		beta.Name:  beta.New,
+		gamma.Name: gamma.New,
+		delta.Name: delta.New,
+	}
+}
+GO
+run gofx "--for=add a new in-tree plugin" >"$TMP/r2.xml"
+b="$( block "$TMP/r2.xml" )"
+if printf '%s' "$b" | grep -q '\(</touch_list>\|<touch_list total="0"/>\)<asserts type="Alpha" p="plugins/alpha/alpha.go:11" n="3">fw.FilterPlugin fw.ScorePlugin fw.PreFilterPlugin</asserts></exemplar_family>' \
+   && ! printf '%s' "$b" | grep -q 'TestOnlyPlugin\|fw.Lister'; then ok "(r2) the typical entry's package asserts three interfaces for Alpha: <asserts type=\"Alpha\" n=\"3\">, after the touch list"
+else no "(r2) contract row: $( printf '%s' "$b" | head -c 600 )"; fi
+if grep -q '<asserts> (Go)' "$TMP/r2.xml"; then ok "(r2) the legend defines <asserts> when the row prints"; else no "(r2) legend: <asserts> clause missing"; fi
+if [ -n "$( block "$TMP/e_go.xml" )" ] && ! grep -q '<asserts' "$TMP/e_go.xml" && ! grep -q '<asserts> (Go)' "$TMP/e_go.xml"; then ok "(r2n) a Go registry whose packages assert nothing: no <asserts> row, no clause"
+else no "(r2n) e_go: $( block "$TMP/e_go.xml" | head -c 400 )"; fi
+# r2u / r2u0: a home Go file the contract scan cannot read makes n= a floor, never a silent total or a silent "none" (CodeRabbit
+# #600). r2u: extra.go unreadable, alpha.go still asserts three: n="3" floor="1" unread="1". r2u0: alpha.go itself unreadable, no
+# type asserts anything in what could be read: <asserts n="0" floor="1" unread="1"/>. The clean r2 run above carries neither.
+runc gofx "--for=add a new in-tree plugin" >"$TMP/r2uprime.xml"
+if unreadable "$F/gofx/plugins/alpha/extra.go"; then
+    runc gofx "--for=add a new in-tree plugin" >"$TMP/r2u.xml"; chmod 644 "$F/gofx/plugins/alpha/extra.go"
+    if block "$TMP/r2u.xml" | grep -q '<asserts type="Alpha" p="plugins/alpha/alpha.go:11" n="3" floor="1" unread="1">fw.FilterPlugin fw.ScorePlugin fw.PreFilterPlugin</asserts></exemplar_family>' \
+       && grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2u.xml"; then ok "(r2u) an unreadable package file: <asserts n=\"3\" floor=\"1\" unread=\"1\">, the legend says n= is a floor"
+    else no "(r2u) unreadable package file: $( block "$TMP/r2u.xml" | grep -o '<asserts.*' | head -c 400 )"; fi
+else
+    echo "  SKIP  (r2u) cannot make a file unreadable here (root?): the unread-contract arm did not run"
+fi
+if unreadable "$F/gofx/plugins/alpha/alpha.go"; then
+    runc gofx "--for=add a new in-tree plugin" >"$TMP/r2u0.xml"; chmod 644 "$F/gofx/plugins/alpha/alpha.go"
+    if block "$TMP/r2u0.xml" | grep -q '<asserts n="0" floor="1" unread="1"/></exemplar_family>' && ! grep -q '<asserts> (Go)' "$TMP/r2u0.xml" \
+       && grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2u0.xml"; then ok "(r2u0) the asserting file itself unreadable: <asserts n=\"0\" floor=\"1\" unread=\"1\"/>, not a silent none"
+    else no "(r2u0) unreadable asserting file: $( block "$TMP/r2u0.xml" | grep -o '</touch_list>.*\|<touch_list total="0"/>.*' | head -c 400 )"; fi
+else
+    echo "  SKIP  (r2u0) cannot make a file unreadable here (root?): the unread-contract arm did not run"
+fi
+if ! grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2.xml"; then ok "(r2u) positive twin: the clean r2 run carries no contract-unread clause"; else no "(r2u) twin: clean run carries the contract-unread clause"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
@@ -696,7 +800,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n r2 r2u r2u0; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
@@ -707,7 +811,7 @@ legend = s[ i: s.index( "-->", i ) ]
 if "--" in legend[ 4: ]: sys.exit( "double hyphen in the legend" )
 m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))</ctx>$', s, re.S )
 if not m: sys.exit( "the block does not close right before </ctx>" )
-for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows) ([^>]*?)/?>', m.group( 1 ) ):
+for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows|asserts) ([^>]*?)/?>', m.group( 1 ) ):
     for a in re.findall( r'(\w+)="', attrs ):
         if not re.search( r'(?<![\w])' + a + r'=', legend ): sys.exit( "attribute %s= on <%s> is not in the legend" % ( a, tag ) )
 PY

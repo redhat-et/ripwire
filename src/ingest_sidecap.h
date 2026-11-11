@@ -22,6 +22,14 @@ namespace rw
 namespace
 {
 
+// RIPWIRE_NO_PARENT_CACHE (any value) turns infra/tsparent.h's ancestor cache off: same answers, the pre-cache cost (the A/B
+// handle test/parentcachecheck.sh diffs against). Read once per process.
+inline bool parentCacheOn()
+{
+    static const bool on = std::getenv( "RIPWIRE_NO_PARENT_CACHE" ) == nullptr;
+    return on;
+}
+
 // One parser, reused across files (single-threaded). Language set per file.
 struct ParserGuard
 {
@@ -1634,7 +1642,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
                        std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses,
                        const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall )
 {
-    AncestorCacheScope ancestors( root );   // parent-carry: the side walk's visitors climb through one cached root-descent path (infra/tsparent.h)
+    AncestorCacheScope ancestors( root, parentCacheOn() );   // parent-carry: the side walk's visitors climb through one cached root-descent path (infra/tsparent.h)
     const std::size_t firstRefOfFile  = refs.size();
     const std::size_t firstIncOfFile  = incs.size();
     const std::size_t firstBindOfFile = binds.size();
@@ -1857,7 +1865,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
         return;
     }
 
-    AncestorCacheScope  ancestors( root );   // parent-carry: every parentOf climb in this file's capture reads one cached root-descent path
+    AncestorCacheScope  ancestors( root, parentCacheOn() );   // parent-carry: every parentOf climb in this file's capture reads one cached root-descent path
     BaseScopeIndexGuard baseScopes;   // lane lego-transitive fix 1 (mutable: lookups fill it): this file's base-lookup scope tables (ingest_relations.h)
     TSQuery* query = compiledQueryFor( le );   // shared immutable query, compiled once per grammar (pre-warmed) — do NOT delete
     if( query == nullptr )

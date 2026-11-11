@@ -109,9 +109,12 @@ def json_charged_stanzas( t ):
     return sum( len( k.encode() ) + 4 + _jlen( v ) for k, v in d.items() if k not in JSON_UNCHARGED_KEYS )
 
 
-def upper_bound( answer, ref, T, k, total, u_floored ):
+def upper_bound( answer, ref, T, k, total, u_floored, ref_old=None ):
     """The upper-bound twin. Returns (ok, detail). Applies only to a cut (k < total) served past the rank floor (k > 4).
     `u_floored` is the reader's U including FIX1's tail floor (XML; ignored for JSON). A missing <sigs> is not ok.
+    `ref_old`: the same reference answer on the pre-TAIL-SYM-WIDE tail (RIPWIRE_TAIL_SYM_WIDE_ROWS=0), whose widened rows are the
+    p_only= suffix again, so the reserve's cap (the old walk's part) is read off it; without it, off `ref` (where a widened row
+    with sym= reads as an old-walk row: a smaller room, so a reader that cannot pass it may fail where the binary is right).
     Resolution (forbudget-soft fix-1 review, F1): the XML twin carries about 1.8-2.8 rows of slack (measured on the fornotes
     corpus), because at a cut the tail fills less than its share and that unused share is real headroom the answer does not
     show, so this reader cannot recover it. A 1-row over-serve is therefore NOT caught in XML; JSON, which states its tail,
@@ -121,7 +124,7 @@ def upper_bound( answer, ref, T, k, total, u_floored ):
     rows = rows_printed( answer )
     if rows is None:
         return False, "upper: no rows to measure (premise)"
-    st, rt, ro = tail_size( answer ), tail_size( ref ), old_walk_tail_size( ref )   # ro: the reserve's cap (FOR-TAIL-WIDE F1)
+    st, rt, ro = tail_size( answer ), tail_size( ref ), old_walk_tail_size( ref if ref_old is None else ref_old )   # ro: the reserve's cap (FOR-TAIL-WIDE F1)
     if answer.lstrip().startswith( "{" ):
         room = T - min( json_charged_stanzas( answer ), min( st, ro ) )
     else:
