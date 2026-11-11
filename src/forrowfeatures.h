@@ -232,27 +232,6 @@ struct Context
     std::vector<std::pair<std::string, std::size_t>> defCounts; // definitionCountOfName by bare name, memoized
 };
 
-// Every neighbour of `u` either way round (out-edges, then in-edges).
-template<class F>
-inline void forEachNeighbour( const Graph& g, NodeId u, F&& visit )
-{
-    const std::size_t outEnd = std::size_t( u ) + 1 < g.outOff.size() ? g.outOff[u + 1] : 0;
-    for( std::size_t k = std::size_t( u ) + 1 < g.outOff.size() ? g.outOff[u] : 0; k < outEnd; ++k )
-    {
-        visit( g.outTargets[k] );
-    }
-    const std::uint32_t* ro = g.inEdges.rowOffsets();
-    const std::uint32_t* ci = g.inEdges.colIndices();
-    if( ro == nullptr || ci == nullptr || std::size_t( u ) >= g.inEdges.rows() )
-    {
-        return;
-    }
-    for( std::uint32_t k = ro[u]; k < ro[u + 1]; ++k )
-    {
-        visit( NodeId( ci[k] ) );
-    }
-}
-
 // Undirected breadth-first distances from `seeds`, at most kRowFeaturesMaxHops (kRowFeaturesMaxHops + 1 = not reached).
 inline std::vector<std::uint8_t> hopDistances( const Graph& g, std::size_t n, const std::vector<NodeId>& seeds )
 {
@@ -274,14 +253,16 @@ inline std::vector<std::uint8_t> hopDistances( const Graph& g, std::size_t n, co
         {
             continue;
         }
-        forEachNeighbour( g, u, [&]( NodeId v )
+        const auto reach = [&]( NodeId v )
         {
             if( v < n && dist[v] > dist[u] + 1 )
             {
                 dist[v] = std::uint8_t( dist[u] + 1 );
                 queue.push_back( v );
             }
-        } );
+        };
+        demote_detail::forNeighbours( g, u, /*forward=*/true, /*provenOnly=*/false, reach );
+        demote_detail::forNeighbours( g, u, /*forward=*/false, /*provenOnly=*/false, reach );
     }
     return dist;
 }

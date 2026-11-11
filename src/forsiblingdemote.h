@@ -283,15 +283,15 @@ inline bool provenEdge( const Graph& g, std::size_t edge ) noexcept
 {
     return edge != SIZE_MAX && ( g.outNameOnly.empty() || ( edge < g.outNameOnly.size() && edgeKindByte( g.outNameOnly[edge] ) == 0 ) );
 }
-// Proven out-neighbours (forward) or in-neighbours (!forward) of `u`, itself left out.
+// Out-neighbours (forward) or in-neighbours (!forward) of `u`, itself left out; provenOnly: over proven edges only.
 template<class F>
-inline void forProvenNeighbours( const Graph& g, NodeId u, bool forward, F&& visit )
+inline void forNeighbours( const Graph& g, NodeId u, bool forward, bool provenOnly, F&& visit )
 {
     if( forward )
     {
         for( std::uint32_t k = std::size_t( u ) + 1 < g.outOff.size() ? g.outOff[u] : 0; std::size_t( u ) + 1 < g.outOff.size() && k < g.outOff[u + 1]; ++k )
         {
-            if( g.outTargets[k] != u && provenEdge( g, k ) )
+            if( g.outTargets[k] != u && ( !provenOnly || provenEdge( g, k ) ) )
             {
                 visit( g.outTargets[k] );
             }
@@ -306,11 +306,17 @@ inline void forProvenNeighbours( const Graph& g, NodeId u, bool forward, F&& vis
     }
     for( std::uint32_t k = ro[u]; k < ro[u + 1]; ++k )
     {
-        if( ci[k] != u && provenEdge( g, edgeIndex( g, ci[k], u ) ) )
+        if( ci[k] != u && ( !provenOnly || provenEdge( g, edgeIndex( g, ci[k], u ) ) ) )
         {
             visit( NodeId( ci[k] ) );
         }
     }
+}
+// Proven out-neighbours (forward) or in-neighbours (!forward) of `u`, itself left out.
+template<class F>
+inline void forProvenNeighbours( const Graph& g, NodeId u, bool forward, F&& visit )
+{
+    forNeighbours( g, u, forward, /*provenOnly=*/true, visit );
 }
 // The seeds' one-hop proven neighbourhoods, each way round: a row is within two proven hops of a seed when the seed, or a node one hop
 // from it in the same direction, is its own neighbour.
