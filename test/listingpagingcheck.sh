@@ -696,13 +696,19 @@ if os.path.exists(bp) and os.path.getsize(bp) > 0:
     raw = open(bp, encoding="utf-8", errors="replace").read()
     raw = re.sub( r'<!--.*?-->', '', raw, flags=re.S )   # the legend's prose <d r=N> is not a row
     bundle = []
-    for m in re.finditer( r'<d\s[^>]*>', raw ):
+    # B26 DEMOTE-ALL: the budgeted bundle is demoted (a SIBLING-DEMOTE / DECL-TWIN row prints in place as <t p= sym= r=/>, its
+    # rank held) while a --limit/--offset page is the candidate listing, never demoted; a pointer carries no l=, so it matches
+    # its walk row on (file, name) — the XML n= is the pointer's sym=
+    for m in re.finditer( r'<d\s[^>]*>|<t\s[^>]*\br="\d+"[^>]*>', raw ):
         t = m.group( 0 )
-        n = re.search( r'\sn="([^"]*)"', t )
+        n = re.search( r'\s(?:n|sym)="([^"]*)"', t )
         pp = re.search( r'\sp="([^"]*)"', t )
         ll = re.search( r'\sl="([^"]*)"', t )
-        bundle.append( ( pp.group(1) if pp else "?" ) + "\x1f" + ( ll.group(1) if ll else "?" ) + "\x1f" + ( n.group(1) if n else "?" ) )
-    if rows[:len(bundle)] != bundle:
+        bundle.append( ( pp.group(1) if pp else "?" ) + "\x1f" + ( ll.group(1) if ll else "*" ) + "\x1f" + ( n.group(1) if n else "?" ) )
+    def same( w, b ):
+        wp, wl, wn = w.split( "\x1f" ); bp_, bl, bn = b.split( "\x1f" )
+        return wp == bp_ and wn == bn and ( bl == "*" or wl == bl )
+    if len( rows ) < len( bundle ) or not all( same( w, b ) for w, b in zip( rows, bundle ) ):
         problems.append("the un-paged bundle's served rows are NOT a prefix of the walk — the page and the bundle answer different orders")
     else:
         print(f"  PASS  (G3) the un-paged bundle's {len(bundle)} rows are a prefix of the walk (same order)")

@@ -227,7 +227,7 @@ inline std::string xmlRowOf( std::string_view obj, std::string_view name )
         }
     }
     const bool noted = !topValue( obj, "notes" ).empty() || !topValue( obj, "file_notes" ).empty();
-    return row + ( noted ? "><note/></d>" : "></d>" );
+    return row + ( noted ? "><note k=\"json\"/></d>" : "></d>" ); // (K6) scanAnswer reads a note as "<note " (an attribute run)
 }
 // The ranks (r= text) of the <t> pointers inside the answer's <sigs>.
 inline std::vector<std::string> pointerRanks( std::string_view answer )
