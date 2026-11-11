@@ -152,7 +152,11 @@ if [ "$j2" = ok ]; then ok "(j2) --json: each pointer is the twin's row (p, r, t
 # (b) the soft target sweep
 prev=0; plus=""; bok=1
 for N in 1000 1300 1600 2000; do
-    run --token-budget=$N >"$TMP/b$N.xml"; runoff --token-budget=$N >"$TMP/b$N.off"
+    run --token-budget=$N >"$TMP/b$N.xml"; rcon=$?; runoff --token-budget=$N >"$TMP/b$N.off"; rcoff=$?
+    # a failed run (either side) is no comparison: its empty answer reads as 0 rows and would pass (b>=) / (b+) (CodeRabbit 4543056289)
+    if [ "$rcon" -ne 0 ] || [ "$rcoff" -ne 0 ] || [ ! -s "$TMP/b$N.xml" ] || [ ! -s "$TMP/b$N.off" ]; then
+        no "(b) N=$N: the run exited $rcon, its undemoted twin $rcoff (both must answer)"; bok=0; prev=0; continue
+    fi
     on="$( rk "$TMP/b$N.xml" )"; of="$( rk "$TMP/b$N.off" )"
     ent="$( echo "$on" | awk '{ print $2 }' )"; offrows="$( echo "$of" | awk '{ print $1 }' )"
     list="$( echo "$on" | awk '{ for( i = 3; i <= NF; ++i ) if( $i !~ /:/ ) printf "%s ", $i }' )"
@@ -167,7 +171,8 @@ done
 if [ -n "$plus" ]; then ok "(b+) the freed bytes buy rows:$plus"; else no "(b+) no budget served more ranked entries than its undemoted twin"; fi
 
 # (jb) --json under a soft target
-run --json --token-budget=1300 >"$TMP/jb.json"; runoff --json --token-budget=1300 >"$TMP/jb.off"
+run --json --token-budget=1300 >"$TMP/jb.json"; rcjb=$?; runoff --json --token-budget=1300 >"$TMP/jb.off"; rcjbo=$?
+[ "$rcjb" -eq 0 ] && [ "$rcjbo" -eq 0 ] && [ -s "$TMP/jb.json" ] && [ -s "$TMP/jb.off" ] || no "(jb) the --json run exited $rcjb, its twin $rcjbo (both must answer)"
 jb="$( rk "$TMP/jb.json" json )"; jbo="$( rk "$TMP/jb.off" json | awk '{ print $1 }' )"
 jbl="$( echo "$jb" | awk '{ for( i = 3; i <= NF; ++i ) if( $i !~ /:/ ) printf "%s ", $i }' )"
 if echo "$jb" | grep -q ':demote' && [ "$( echo "$jb" | awk '{ print $2 }' )" -ge "$jbo" ] && [ "$( prefix "$jbl" )" = yes ]; then
@@ -176,6 +181,8 @@ else no "(jb) --json --token-budget=1300: [$jb] twin rows $jbo"; fi
 
 # (xb) MCP budget_tokens
 mcp "$TMP/xb.xml" 1300 env; mcp "$TMP/xb.off" 1300 "${OFF[@]}"
+# an MCP call that answered nothing (the server failed, or returned no tool text) is no comparison: 0 rows would pass K >= the twin's
+for f in xb.xml xb.off; do grep -q '<sigs' "$TMP/$f" || no "(xb) MCP $f holds no <sigs> block (the call failed)"; done
 xb="$( rk "$TMP/xb.xml" )"; xbo="$( rk "$TMP/xb.off" | awk '{ print $1 }' )"
 xbl="$( echo "$xb" | awk '{ for( i = 3; i <= NF; ++i ) if( $i !~ /:/ ) printf "%s ", $i }' )"
 agree="$( python3 - "$xbl" "$( echo "$( rk "$TMP/b1300.xml" )" | awk '{ for( i = 3; i <= NF; ++i ) if( $i !~ /:/ ) printf "%s ", $i }' )" <<'PY'
