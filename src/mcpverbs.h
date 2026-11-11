@@ -3957,10 +3957,10 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     const std::vector<NodeId>& ptBind   = ptChains.bind;
     const NodeId               srcUsed  = ptChains.from;
     const NodeId               dstUsed  = ptChains.to;
-    const HopFacts             ptHops   = pathHopFacts( ing, g, ptPairs, ptRows, redact );   // HOP-CONTEXT-1, as on the CLI
+    const HopFacts             ptHops   = pathHopFacts( ing, g, ptPairs, ptRows, redact, ptRoute.declinedRef );   // HOP-CONTEXT-1, as on the CLI
     const PathBridge          ptBridge     = pth.empty() ? pathBridge( ing, g, srcDefs, dstDefs, valueRefIndexOf( ix ), *ptBackHops ) : PathBridge{};      // ix2-slice, as on the CLI
     const std::string         ptSinkCallers = pth.empty() && ptGaps.any() && !dstGlob ? pathSinkCallersSelector( ing, *ptBackHops, dstDefs, to, ptSingleRoot, ptRootPrefix ) : std::string();   // HOP1 #6, as on the CLI
-    const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, ptRows );   // TRACE-EP: the CLI's legend marks, by the same call
+    const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, ptRows, ptRoute.declinedCands > 0 );   // TRACE-EP: the CLI's legend marks, by the same call
     const std::string         ptKindLegend = std::string( viaNameLegend( ptMarks.via ) ) + viaLinkLegend( ptMarks.link ) + anchorMissLegend( ptMarks.miss );
     const PathEndpointBinding ptBound      = pathEndpointBinding( g, endpointDefinitionCount( ing, srcDefs ), endpointDefinitionCount( ing, dstDefs ), ptBind );   // attrib-multidef, as on the CLI
     const bool                ptHasSplit = ptMarks.split;
@@ -4009,7 +4009,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     rw::emitTo( mem, "{}>{}{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
                   pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ),
                   pth.empty() ? pathHandlerRuleXml( ing, ptBackHops->names(), ptHandler, ptSingleRoot, ptRootPrefix ) : std::string() );
-    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix, ptHops );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
+    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix, ptHops, ptRoute.declinedCands );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
     rw::emitRaw( mem, ptHopBodies.c_str() );      // PATH-HOP-BODY, as on the CLI
     rw::emitRaw( mem, ptRouteEl.xml.c_str() );    // BODY-ON-ROUTE, as on the CLI
     rw::emitRaw( mem, ptAlts.xml.c_str() );   // D2 part 5, as on the CLI

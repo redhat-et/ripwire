@@ -178,13 +178,6 @@ inline bool isConstructorName( std::string_view member, std::string_view cls ) n
 {
     return member == cls || std::ranges::binary_search( kFoldCtorNames, member, rw::sortutil::svLess );
 }
-// does `text` (a member's name, or its body) carry one of `words` as a subtoken
-inline bool holdsWord( std::string_view text, const std::vector<std::string>& words )
-{
-    std::vector<std::string> toks;
-    subtokens( text, toks );
-    return std::ranges::any_of( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
-}
 // One body through packBodies (the --expand body shape, no callee rows: the empty CSR has no out-edge for any id), unwrapped from
 // its <bodies> envelope: the legend comments packBodies writes ahead of the envelope (an extent-suspect body's reading) stay in
 // front of the <b>. nullopt when the buffer failed or the span rendered nothing.
@@ -272,7 +265,7 @@ inline std::vector<NodeId> slicePicks( const IngestResult& ing, const std::vecto
     std::ranges::copy_if( members, std::back_inserter( chosen ), [ & ]( NodeId m )
     {
         const Symbol& ms = ing.symbols[m];
-        return !isConstructorName( ms.name, cls ) && ( holdsWord( ms.name, words ) || holdsWord( bodyOf( ms ), words ) );
+        return !isConstructorName( ms.name, cls ) && ( holdsSubtokenWord( ms.name, words ) || holdsSubtokenWord( bodyOf( ms ), words ) );
     } );
     return chosen;
 }

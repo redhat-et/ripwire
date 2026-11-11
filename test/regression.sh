@@ -552,6 +552,7 @@ for _g in \
     forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
+    forrowfeaturescheck \
     forsectioncollapsecheck \
     forselfhookcheck \
     forsiblingdemotecheck \
@@ -799,6 +800,7 @@ for _g in \
     pargatescheck \
     parsehealthcheck \
     partitioncheck \
+    pathfewestcheck \
     pathgapcheck \
     pathownercheck \
     pathpaircheck \
@@ -1029,6 +1031,7 @@ for _g in \
     testrowruncheck \
     testscopecheck \
     textdocscheck \
+    textpoolcheck \
     timsortcheck \
     tokenbudgetcheck \
     tomllangcheck \
