@@ -29,7 +29,8 @@ namespace rw::sortutil
 // the tables that use it prove their own sortedness in a static_assert, and std::memcmp cannot be used
 // in a constant expression. test/portablebuildcheck.sh arm #6 keeps the default comparator from
 // coming back.
-constexpr bool svLess( std::string_view a, std::string_view b ) noexcept
+// The three-way form, for an operator<=> over text (infra/internedtext.h): the same order, and no size subtraction.
+constexpr std::strong_ordering svCompare( std::string_view a, std::string_view b ) noexcept
 {
     const std::size_t n = a.size() < b.size() ? a.size() : b.size();
     for( std::size_t i = 0; i < n; ++i )
@@ -40,26 +41,12 @@ constexpr bool svLess( std::string_view a, std::string_view b ) noexcept
         const unsigned char cb = static_cast<unsigned char>( b[ i ] );
         if( ca != cb )
         {
-            return ca < cb;
-        }
-    }
-    return a.size() < b.size();
-}
-// svLess's three-way twin, for an operator<=> over text: the same unsigned-byte order and no size subtraction (see above).
-constexpr std::strong_ordering svCompare( std::string_view a, std::string_view b ) noexcept
-{
-    const std::size_t n = a.size() < b.size() ? a.size() : b.size();
-    for( std::size_t i = 0; i < n; ++i )
-    {
-        const unsigned char ca = static_cast<unsigned char>( a[ i ] );
-        const unsigned char cb = static_cast<unsigned char>( b[ i ] );
-        if( ca != cb )
-        {
             return ca <=> cb;
         }
     }
     return a.size() <=> b.size();
 }
+constexpr bool svLess( std::string_view a, std::string_view b ) noexcept { return svCompare( a, b ) < 0; }
 
 
 inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
