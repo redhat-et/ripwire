@@ -734,6 +734,7 @@ for _g in \
     mdembedcheck \
     mdsectioncheck \
     memguardcheck \
+    memstatscheck \
     mentioncapcheck \
     mentioncheck \
     mentionsverbcheck \
