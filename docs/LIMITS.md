@@ -29,16 +29,16 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-10 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-11 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 411 | 140 | 274 | **137** |
+| 412 | 141 | 274 | **138** |
 
 Plus 9 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 411 + 9 is the 420 constants this generator parses out of `src/`.
+are not counted as caps, and 412 + 9 is the 421 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 411 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 269 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 412 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 270 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -620,6 +620,14 @@ Discloses: `capped`
 | `kForSelfHookCandidateRows` | `4` | — | base definitions named when the order picks none provably |
 | `kForSelfHookMethodRows` | `4` | — | served methods per answer |
 | `kForSelfHookSiteRows` | `3` | — | base-class sites per served method |
+
+### `src/forsiblingdemote.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kOwnerNearRows` | `4` | — | (K3): the <d> rows right above that may name the owner |
 
 ### `src/forslots.h`
 

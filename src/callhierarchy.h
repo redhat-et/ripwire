@@ -102,6 +102,9 @@ struct CallHierarchyRows
     // lane declined-sites (declinedsites.h): the records behind declinedCalls, in served order (callers file-first, callees
     // file and line) — the <dc> rows, never in `rows` or any count above; uncut, declinedSites.size() == declinedCalls.
     std::vector<std::uint32_t> declinedSites;
+    // GV-PATH-BIND (CLI --callers, src/verbs_navigate.h callHierarchyRowsNarrowed): the selector as typed when it bound nothing and the
+    // M1 rule narrowed it to one source definition, whose spelling these rows answer; empty otherwise (the root's narrowed=)
+    std::vector<std::string>   narrowed;
 };
 
 // ── CLOSURE BLOCKS (lane ix2-slice, IX-2 P2): what the functions written INSIDE of='s body call ───────────────────────────

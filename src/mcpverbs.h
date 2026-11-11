@@ -50,6 +50,7 @@
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
 #include "foronesidereach.h" // ONE-SIDE-REACH: the CLI twin's answer edit, one renderer
+#include "forsiblingdemote.h" // SIBLING-DEMOTE: the CLI twin's answer edit, one renderer
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2482,23 +2483,25 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 // held under budget_tokens.
 // ONE-SIDE-REACH (src/foronesidereach.h): then the CLI twin's demote pass over the answer and the block, re-priced on `price` (the root's
 // inputs, null: no re-price); held under budget_tokens. R-DEDUP's <syms> cut (forfilesyms.h tailRowsWithoutPicks) lands first, the
-// demote pass reads the cut answer, and the root is re-priced once on the result.
+// demote pass reads the cut answer; SIBLING-DEMOTE (src/forsiblingdemote.h) then reads that one, and the root is re-priced once on the
+// result.
 inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
 {
     if( out.ends_with( "</ctx>" ) )
     {
-        std::string cut; // R-DEDUP: <syms> has priority over the head files' tail rows (forfilesyms.h tailRowsWithoutPicks)
+        std::string cut; // R-DEDUP: <syms> has priority over the head files' tail rows (forfilesyms.h tailRowsWithoutPicks); SIBLING-DEMOTE (forsiblingdemote.h)
         args.answer = std::string_view( out ).substr( 0, out.size() - 6 );
         args.answerOut = &cut;
         std::string syms = renderForFileSyms( ing, g, args );
         const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
         OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
         std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
+        demoteSiblingRowsInto( ing, g, args.task, args.answer, answer, args.held );
         if( !answer.empty() )
         {
             if( price != nullptr )
             {
-                // once, on the final bytes: the <syms> cut and the demote rewrite are both priced markup (signed: the pointers and
+                // once, on the final bytes: the <syms> cut and the demote rewrites are all priced markup (signed: the pointers and
                 // legend may outweigh the rows they replace)
                 repriceRootAfterCut( answer, *price, args.answer.size() );
             }
@@ -4240,7 +4243,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                                            // argument serialize() takes — see its comment.
                                                            // Shared by CLI --connect and the MCP connect verb.
                          std::size_t unprovenDefs = 0,     // H1: the terminals' decl→def residue, SUMMED by the caller
-                         const ConnectPicks& picks = ConnectPicks{} )   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
+                         const ConnectPicks& picks = ConnectPicks{},   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
+                         std::span<const std::string> narrowed = {} )  // GV-PATH-BIND: the terminals as typed that M1 narrowed (CLI only)
 {
     const std::string_view ambiguousTerminals = picks.ambiguous;
     // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
@@ -4287,6 +4291,9 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     const std::string  connectUnprovenLegend = unprovenDefsVerbComment( UnprovenDefsVerb::Connect, unprovenDefs > 0, "<!-- ripwire connect: " );
     // 0.6.6 D1: the tied-terminal names, charged like the residue attribute above; absent (0 bytes) when no pick tied
     const std::string  connectAmbiguousAttr = ambiguousTerminals.empty() ? std::string() : ( " ambiguous_terminal=\"" + ex( ambiguousTerminals ) + "\"" );
+    // GV-PATH-BIND (forgraphverb.h narrowRefusedSpelling): narrowed= and its clause, charged like the attribute above; absent (0 bytes) with none
+    const std::string  connectNarrowedAttr   = narrowedAttrXml( narrowed );
+    const std::string  connectNarrowedLegend = narrowed.empty() ? std::string() : "<!-- ripwire connect: " + std::string( narrowedVerbLegend( true ) ) + "-->";
     // FE-B: the reading of via="name", when some <e> of this answer carries it — charged like the clauses above
     const bool         connectHasVia = std::any_of( res.groups.begin(), res.groups.end(), [ & ]( const ConnectGroup& grp )
     {
@@ -4305,7 +4312,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                         + ( connectHasMiss ? "<!-- ripwire connect: " + anchorMissLegend( true ) + "-->" : std::string() );
     const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) )
                                          + connectUnindexedLegend.size() + connectUnprovenAttr.size() + connectUnprovenLegend.size()
-                                         + connectAmbiguousAttr.size() + connectViaLegend.size();
+                                         + connectAmbiguousAttr.size() + connectViaLegend.size() + connectNarrowedAttr.size() + connectNarrowedLegend.size();
 
     // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
@@ -4532,12 +4539,13 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
-                connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
-    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( out, "{}{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                connectNarrowedLegend, connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
                   connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero
                   connectAmbiguousAttr,          // 0.6.6 D1: absent when no many-definition pick tied
+                  connectNarrowedAttr,           // GV-PATH-BIND: absent when no terminal was narrowed
                   estTokens, hubFloor,
                   rw::cstr( connectCeiling ), connectOverAttr, hopRootXml,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),

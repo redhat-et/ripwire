@@ -72,7 +72,9 @@ run(){ local fx="$1"; shift; ( cd "$fx" || exit 1; "$BIN" "$fx" --no-cache "$@" 
 # an answer: rc 0 and a closed root, else the arm is red (z1)
 ans(){ local out="$1" fx="$2"; shift 2; run "$fx" "$@" >"$out"; local rc=$?; [ "$rc" = 0 ] && [ -s "$out" ] && grep -q '</ctx>$' "$out"; }
 block(){ python3 -c 'import sys; s=open(sys.argv[1],encoding="utf8").read(); i=s.find("<!-- ripwire for doc_body"); j=s.find("</doc_body>",i); print(s[i:j+11].replace("\n"," ") if i>=0 and j>=0 else "")' "$1"; }
-tailrows(){ python3 -c 'import re,sys; print(" ".join(re.findall(r"<t p=\"([^\"]+)\"", open(sys.argv[1]).read())[:10]))' "$1"; }
+# the FILE tail rows (<t p="FILE"/>, <t p="FILE" sym="NAME"/>); a SIBLING-DEMOTE pointer in <sigs> (<t p= sym= r=/>, forsiblingdemote.h)
+# carries its rank r= — a demoted ranked row, not a tail row
+tailrows(){ python3 -c 'import re,sys; print(" ".join(re.findall(r"<t p=\"([^\"]+)\"(?: sym=\"[^\"]*\")?/>", open(sys.argv[1]).read())[:10]))' "$1"; }
 
 # (f1) fires
 if ans "$TMP/f1.xml" "$DFX" "--for=$TASK" && python3 - "$TMP/f1.xml" <<'PY'

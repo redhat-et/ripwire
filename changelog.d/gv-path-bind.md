@@ -1,0 +1,5 @@
+### Changed — `--path`, `--connect` and `--callers` bind a refused spelling's one source definition
+
+A direct `--path` endpoint, `--connect` terminal or `--callers` selector that the resolver refused because several definitions fit it (`ApplicationRef.tick`: the source method plus a bodyless `.d.ts` declaration and a copy under `test/`) now answers on the ONE definition left once the definitions in a test or fixture path and the bodyless ones are dropped. This is the rule the `--for` graph block has used since GV-ASSEMBLY (#602), and the rule itself is unchanged. The verb runs with that definition's own spelling (`file:name`, else `@file:line`), so the answer is the explicit-spelling call's answer, and `narrowed="<as typed>"` on the root plus one legend clause say what was narrowed. The `--callers` JSON dialect carries `"narrowed"`. When two or more definitions are left, or none, the refusal is byte-for-byte what it was. `test/gvassemblycheck.sh` (d1)-(d4).
+
+The three compact readings move the session legend dictionary to `dictv=d09e6b2a6acbcef8 entries=1056` (docs/COMMANDS.md and the showcase capture are re-recorded).

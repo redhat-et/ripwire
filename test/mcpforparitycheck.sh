@@ -34,6 +34,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
+# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the CLI and MCP candidate pools and ladder heads (the pre-demote head both dialects start from; MCP's <h> rows differ from the CLI's, so its K2 keeps differ by design),
+# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
+export RIPWIRE_NO_SIBLING_DEMOTE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

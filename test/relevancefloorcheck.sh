@@ -55,6 +55,10 @@
 #   RIPWIRE_BIN=asan/ripwire bash test/relevancefloorcheck.sh
 
 set -u
+# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
+# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the relevance floor's row quota (rows, not the pointers a later pass prints),
+# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
+export RIPWIRE_NO_SIBLING_DEMOTE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

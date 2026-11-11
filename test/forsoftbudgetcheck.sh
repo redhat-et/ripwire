@@ -53,6 +53,10 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"   # gitenvhermeticcheck (D): no ambient GIT_* reaches the RP10 fixture repos
+# SIBLING-DEMOTE (2026-11-08) is a post-cut pass that prints deep same-file <d> rows as <t> pointers; this gate pins
+# the cut itself (rows, bytes, next= continuations), so it reads the undemoted answer. A budget-held answer is never
+# demoted; that interplay and the pointer's r= rank are pinned in forsiblingdemotecheck (b) and estchargecheck (A7).
+export RIPWIRE_NO_SIBLING_DEMOTE=1
 unset RIPWIRE_NO_HEAD_RR          # lane hrr: the reorder is ON here unless a twin below sets it (cli_so / mcp_so)
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py: the soft-target readers, shared helpers (CHECKLIST 32)
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
