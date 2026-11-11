@@ -102,6 +102,7 @@ set -u
 # <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the budget ladder's rows against the default's (a budget-held answer is never demoted),
 # so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
 export RIPWIRE_NO_SIBLING_DEMOTE=1
+export RIPWIRE_NO_DECL_TWIN=1   # DECL-TWIN (fordecltwin.h) runs after it; pinned in fordecltwincheck
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_BODY_SLOT RIPWIRE_NO_OWNER_HOP RIPWIRE_NO_HEAD_RR
