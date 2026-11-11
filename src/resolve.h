@@ -8336,12 +8336,17 @@ struct Narrower
     // stopped with a base unvisited answer nullptr too: neither proves which member the name reaches.
     const FlatRecvType* fieldEntryAt( const Reference& r, const std::string& callerScope, const FieldRecvTables& fields ) const
     {
+        return fieldEntryOf( r.recvVar, callerScope, fields );
+    }
+    // The same lookup for a member NAME the caller has as text (graph.h's std-field probe): no reference row, nothing interned.
+    const FlatRecvType* fieldEntryOf( std::string_view member, const std::string& callerScope, const FieldRecvTables& fields ) const
+    {
         std::string_view className( callerScope );
         if( const std::size_t cut = className.rfind( "::" ); cut != std::string_view::npos )
         {
             className.remove_prefix( cut + 2 );
         }
-        if( const auto [ own, ownDeclared ] = declaredFieldAt( className, r.recvVar, fields ); ownDeclared )
+        if( const auto [ own, ownDeclared ] = declaredFieldAt( className, member, fields ); ownDeclared )
         {
             return own;   // the class's own member hides every base's — nullptr when its type was not captured
         }
@@ -8354,7 +8359,7 @@ struct Narrower
             {
                 return nullptr;   // the cap left a base unvisited: this level may be incomplete, and deeper ones are unread
             }
-            if( const auto [ hit, declaring ] = declaringBasesAt( lvlEnd, r.recvVar, fields ); declaring != 0 )
+            if( const auto [ hit, declaring ] = declaringBasesAt( lvlEnd, member, fields ); declaring != 0 )
             {
                 return declaring == 1 ? hit : nullptr;   // two bases declaring it at one level → an ambiguous lookup
             }

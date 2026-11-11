@@ -2352,16 +2352,17 @@ private:
         r.lang          = m_lang;
         r.role          = RefRole::Value;
         r.name          = std::string( name );
-        r.qualifier     = std::string{ s.scope, fileShadow ? '1' : '0' };
+        std::string qualifier{ s.scope, fileShadow ? '1' : '0' };
+        if( s.litAt != 0 )
+        {
+            qualifier += "@" + std::to_string( s.litAt );   // REGISTRAR: the object literal (qualifier[2..], read only by regindex.h)
+        }
+        r.qualifier     = qualifier;   // interned once; a registrar's is position-keyed (refnames.h GROWTH)
         r.recvVar       = std::move( s.container );
         r.setComposeRel( std::move( s.key ) );
         r.setFieldName( std::move( s.into ) );
         r.argCount      = s.argIndex;
         r.argCountKnown = s.isArg;
-        if( s.litAt != 0 )
-        {
-            r.qualifier += "@" + std::to_string( s.litAt );   // REGISTRAR: the object literal (qualifier[2..], read only by regindex.h)
-        }
         valueSlot( j, r );   // IX-1: a struct-field slot's type and field (inert without a slot row)
         r.memberRoot = std::string( owner );   // IX1-V2: a method value's receiver type (methodValueAt), "" otherwise
         r.setMemberVia( std::move( via ) );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise

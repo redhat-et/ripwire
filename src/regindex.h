@@ -672,7 +672,7 @@ private:
                 {
                     continue;
                 }
-                const NodeId def = shadowed( r.fileId, r.recvVar.substr( 0, r.recvVar.find( '.' ) ), r.startByte, r.fromSymbol )
+                const NodeId def = shadowed( r.fileId, r.recvVar.substr( 0, r.recvVar.str().find( '.' ) ), r.startByte, r.fromSymbol )
                                        ? kNoNode : resolveDotted( r.fileId, r.fieldName().empty() ? r.recvVar : r.recvVar + "." + r.fieldName() );
                 for( const std::size_t k : it->second )
                 {
