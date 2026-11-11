@@ -5320,26 +5320,41 @@ inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& i
 // take the remaining rows in score order. Rank 1 never moves (the first row is its own file's best) unless it may not open a
 // file (a doc row while the docs reorder runs: that reorder moves it below the code rows anyway).
 inline constexpr std::size_t kHeadRoundRobinRows = 8;
+// HEAD-RR-GATE (card B34, from the ROW-FEATURE-DUMP data, reports/row-feature-dump-1111.md): a row may open its file in the head
+// only when its OWN lens rank — its 1-based place in the packer's (score desc, id asc) order, the entry's globalRank — is at
+// most this. A file whose best row ranks past it gets no head slot; that slot goes to the next row in score order. Measured on
+// the dump: the lifts from past rank 8 were 11 top-10 Wrong items against 0 credited ones.
+inline constexpr std::uint32_t kHeadRoundRobinLiftMaxLensRank = 8;
+// The A/B handle: RIPWIRE_NO_HEAD_RR_GATE set ⇒ every row may open a file (the round-robin before the gate, byte-identical).
+// Read once per process (the MCP server asks per call; the environment does not change under a run).
+inline std::uint32_t headRoundRobinLiftMaxLensRank()
+{
+    static const std::uint32_t maxLensRank = std::getenv( "RIPWIRE_NO_HEAD_RR_GATE" ) != nullptr ? UINT32_MAX : kHeadRoundRobinLiftMaxLensRank;
+    return maxLensRank;
+}
 
 // The new order of a score-ordered sequence of n rows (indices into it): `fileOf(i)` / `nameOf(i)` read row i. One selection
 // for both dialects' rendered rows (reorderHeadRoundRobin in packSignatures and packSignaturesJson). The --for body-tail fold
 // and the compact hops do NOT follow it: they walk the surface in score order (verbs_for.h, measured there).
 // `mayOpen(i)`: may row i open a file in the head? (false for a doc row when the docs reorder runs after: it would move that row
-// back below the code rows, so lifting it would only spend a head slot and add a second reading.)
-template< class FileOf, class NameOf, class MayOpen >
-inline std::vector<std::size_t> headRoundRobinOrder( std::size_t n, FileOf&& fileOf, NameOf&& nameOf, MayOpen&& mayOpen )
+// back below the code rows, so lifting it would only spend a head slot and add a second reading.) `lensRankOf(i)`: row i's own
+// lens rank; a row past `maxLiftLensRank` opens no file (HEAD-RR-GATE, kHeadRoundRobinLiftMaxLensRank).
+template< class FileOf, class NameOf, class MayOpen, class LensRankOf >
+inline std::vector<std::size_t> headRoundRobinOrder( std::size_t n, FileOf&& fileOf, NameOf&& nameOf, MayOpen&& mayOpen, LensRankOf&& lensRankOf,
+                                                     std::uint32_t maxLiftLensRank )
 {
     std::vector<std::size_t>      order;
     std::vector<char>             taken( n, 0 );
     std::vector<std::uint32_t>    headFiles;   // at most kHeadRoundRobinRows entries: a linear scan is the cheap lookup
     std::vector<std::string_view> headNames;
     order.reserve( n );
-    const bool rank1Opens = n > 0 && mayOpen( std::size_t{ 0 } );   // read once, outside the contract (contracts call no functors)
+    const auto opens      = [ & ]( std::size_t i ) { return mayOpen( i ) && lensRankOf( i ) <= maxLiftLensRank; };
+    const bool rank1Opens = n > 0 && opens( std::size_t{ 0 } );   // read once, outside the contract (contracts call no functors)
     for( std::size_t i = 0; i < n && order.size() < kHeadRoundRobinRows; ++i )
     {
         const std::uint32_t    f  = fileOf( i );
         const std::string_view nm = nameOf( i );
-        if( !mayOpen( i ) || std::ranges::find( headFiles, f ) != headFiles.end() || std::ranges::find( headNames, nm ) != headNames.end() )
+        if( !opens( i ) || std::ranges::find( headFiles, f ) != headFiles.end() || std::ranges::find( headNames, nm ) != headNames.end() )
         {
             continue;
         }
@@ -5376,7 +5391,8 @@ inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&&
     }
     const std::vector<std::size_t> pos = headRoundRobinOrder( live.size(), [ & ]( std::size_t k ) { return fileOf( entries[ live[k] ] ); },
                                                               [ & ]( std::size_t k ) { return nameOf( entries[ live[k] ] ); },
-                                                              [ & ]( std::size_t k ) { return mayOpen( entries[ live[k] ] ); } );
+                                                              [ & ]( std::size_t k ) { return mayOpen( entries[ live[k] ] ); },
+                                                              [ & ]( std::size_t k ) { return entries[ live[k] ].globalRank; }, headRoundRobinLiftMaxLensRank() );
     std::size_t              moved = 0;
     std::vector<std::size_t> newOrder;
     newOrder.reserve( pos.size() );

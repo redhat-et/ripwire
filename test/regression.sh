@@ -537,6 +537,7 @@ for _g in \
     forfilesymscheck \
     forhdrshapecheck \
     forheadrrcheck \
+    forheadrrgatecheck \
     forinitslotscheck \
     forlenscheck \
     forliteralcheck \

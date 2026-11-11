@@ -18,8 +18,8 @@
 #            directory, else the root) holds an implementation of its family; a types-only package keeps 1.0.
 #
 # Arms (colour on b112e8ac in brackets):
-#   H1 [P] one file holding most matching rows (mono): ON order == the round-robin of the OFF order (the model below), the same
-#          rows, more distinct files in the head-8 (a file the OFF head-8 left out enters it), r=1 unchanged, files_first= == the rows whose rank changed, reading present
+#   H1 [P] one file holding most matching rows (mono): ON order == the round-robin of the OFF order (the model below, gated at
+#          lens rank 8 since HEAD-RR-GATE B34), the same rows, r=1 unchanged, files_first= == the rows whose rank changed, reading present
 #   H2 [P] a C typedef/struct pair (pair): the same, and the fixture exercises the name rule (the model without it differs)
 #   H3 [G] the fold serves the score top three: the first three rows of the RIPWIRE_NO_HEAD_RR=1 answer (mono, pair)
 #   H3b [P fix1] the loop aggregator dispatchQueuedJobs (mono) is never followed (review F6; red on 5351fbbb)
@@ -84,12 +84,14 @@ def rows(t):
 def sigs(t):
     m = re.search(r'<sigs\b([^>]*)>', t); return attrs(m.group(1)) if m else {}
 def legend(t): return " ".join(re.findall(r'<!--(.*?)-->', t, re.S))
-def model(rs, names=True, k=8):
-    """the round-robin, independently: each file's best row first (score order), a taken name opens no file"""
+def model(rs, names=True, k=8, gate=8):
+    """the round-robin, independently: each file's best row first (score order), a taken name opens no file; HEAD-RR-GATE
+    (B34): a row whose lens rank (its place in the score-ordered OFF rows, i + 1: no row is budget-dropped here) is past
+    `gate` opens no file (pinned on its own in forheadrrgatecheck)"""
     head, files, nms, taken = [], set(), set(), set()
     for i, (p, n) in enumerate(rs):
         if len(head) == k: break
-        if p in files or (names and n in nms): continue
+        if i + 1 > gate or p in files or (names and n in nms): continue
         head.append(i); taken.add(i); files.add(p); nms.add(n)
     return [rs[i] for i in head] + [rs[i] for i in range(len(rs)) if i not in taken]
 def fail(msg): print(msg); sys.exit(1)
@@ -176,7 +178,10 @@ chk(){ local label="$1"; shift; local msg; if msg="$( python3 "$TMP/chk.py" "$@"
 # ── H1/H2/H3: the head, the name rule, the fold ───────────────────────────────────────────────────────────────────────────
 run "$TMP/mono.on" "$FIX/mono" 0 --for="$Q_MONO"; run "$TMP/mono.off" "$FIX/mono" 1 --for="$Q_MONO"
 if ran "$TMP/mono.on" H1 && ran "$TMP/mono.off" "H1 (twin)"; then
-    chk "H1 one file holds most rows: the head names each file first" rr "$TMP/mono.on" "$TMP/mono.off" morefiles
+    # HEAD-RR-GATE (B34): the "more distinct files in the head-8" clause (morefiles) is retired with the gate — a row may open a
+    # file only from lens rank <= 8, i.e. from inside the score head-8, so the head-8's file SET no longer grows; mono's config.ts
+    # row (lens rank 11) now keeps r=11; pool.ts (lens rank 7) is the lift the gate keeps (forheadrrgatecheck M1). The order is still the round-robin model's.
+    chk "H1 one file holds most rows: the head names each file first" rr "$TMP/mono.on" "$TMP/mono.off"
     chk "H3 mono: the fold serves the score top three" fold "$TMP/mono.on" "$TMP/mono.off"
     # fix1 (review F6): dispatchQueuedJobs is a loop aggregator (let n; for … { dispatchJobToWorker(…); n++ } return n), not a thin
     # delegator — its one call is not its last statement, so it is never followed (RED on 5351fbbb, where H3 went red in CI)
