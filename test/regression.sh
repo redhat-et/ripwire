@@ -794,6 +794,7 @@ for _g in \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \
+    parentcachecheck \
     pargatescheck \
     parsehealthcheck \
     partitioncheck \
