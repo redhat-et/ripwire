@@ -46,7 +46,7 @@ inline std::string demoteAndPointBlock( const IngestResult& ing, const Graph& g,
     context.reserve( before.size() + block.size() + after.size() );
     context.append( before ).append( block ).append( after );
     std::string edited;
-    demoteAndPointRowsInto( ing, g, task, context, edited, /*held=*/false );
+    demoteAndPointRowsInto( ing, g, task, context, edited, /*held=*/false, DemoteRegime::Budgeted ); // a soft target's <sigs>: K8 holds
     if( edited.empty() )
     {
         return {};
@@ -213,12 +213,12 @@ inline std::string xmlAttr( std::string_view v )
     return out;
 }
 // One row object as the <d> row the XML dialect prints for it: n= (`name`, owner-qualified as the XML row spells it; the JSON "n" is
-// the bare name beside "sc") p= l= e= r= (the attributes the rules read), and a <note> child when it carries notes (its own or its
-// file's: the XML row carries both as <note> children).
+// the bare name beside "sc") p= l= e= r= sc= (the attributes the rules read), the signature as its text (K8), and a <note> child when
+// it carries notes (its own or its file's: the XML row carries both as <note> children).
 inline std::string xmlRowOf( std::string_view obj, std::string_view name )
 {
     std::string row = "<d n=\"" + xmlAttr( name ) + "\"";
-    for( const std::string_view key : { "p", "l", "e", "r" } )
+    for( const std::string_view key : { "p", "l", "e", "r", "sc" } )
     {
         const std::string_view v = topValue( obj, key );
         if( !v.empty() )
@@ -227,7 +227,9 @@ inline std::string xmlRowOf( std::string_view obj, std::string_view name )
         }
     }
     const bool noted = !topValue( obj, "notes" ).empty() || !topValue( obj, "file_notes" ).empty();
-    return row + ( noted ? "><note k=\"json\"/></d>" : "></d>" ); // (K6) scanAnswer reads a note as "<note " (an attribute run)
+    const std::string_view sig = topValue( obj, "sig" ); // (K8) the printed signature, the row text a task term may hit
+    row.append( ">" ).append( sig.empty() || sig.front() != '"' ? std::string() : xmlAttr( unquote( sig ) ) );
+    return row + ( noted ? "<note k=\"json\"/></d>" : "</d>" ); // (K6) scanAnswer reads a note as "<note " (an attribute run)
 }
 // The ranks (r= text) of the <t> pointers inside the answer's <sigs>.
 inline std::vector<std::string> pointerRanks( std::string_view answer )
@@ -246,7 +248,8 @@ inline std::vector<std::string> pointerRanks( std::string_view answer )
 // prints them) rewritten as {"pointer":RULE,"p":FILE,"sym":NAME,"r":RANK} (sym= the owner-qualified name, as the XML pointer's);
 // "" when no row moves. `rowIds` are the rows' symbols in array order (packSignaturesJson's shown ids): an array they do not match
 // row for row, or a row with no "r" to tell it by, is left as shaped.
-inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view sigsJson, std::span<const NodeId> rowIds )
+inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view sigsJson, std::span<const NodeId> rowIds,
+                                   DemoteRegime regime )
 {
     using namespace demote_json_detail;
     if( !demoteRulesOn() )
@@ -273,7 +276,7 @@ inline std::string demoteJsonRows( const IngestResult& ing, const Graph& g, std:
     }
     xml += "</sigs>";
     // the two rules one after the other, as demoteAndPointRowsInto runs them, so each row's pointer names the rule that moved it
-    std::string demoted = siblingDemoteOn() ? demote_detail::demoteSiblingRows( ing, g, task, xml ) : std::string();
+    std::string demoted = siblingDemoteOn() ? demote_detail::demoteSiblingRows( ing, g, task, xml, regime ) : std::string();
     const std::vector<std::string> byDemote = pointerRanks( demoted );
     std::string twinned = declTwinOn() ? decl_detail::pointDeclTwins( task, demoted.empty() ? std::string_view( xml ) : std::string_view( demoted ) ) : std::string();
     const std::vector<std::string> all = pointerRanks( twinned.empty() ? demoted : twinned );

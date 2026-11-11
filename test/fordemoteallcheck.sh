@@ -20,6 +20,11 @@
 #   (jb) --json --token-budget=1300: pointer objects present, rows + pointers >= the twin's rows, r = 1..K
 #   (xb) MCP budget_tokens=1300: pointers present, r = 1..K, K >= its twin's rows, and a rank both MCP and the CLI (--token-budget=1300)
 #        show is a pointer in both or a row in both
+#   (k8) TERM-HIT (K8, B26-FIX): under a budget, a row a question term hits (K4's taskNames; an identifier token of the row's name, sc=
+#        or printed signature) stays whole. TASK_K8 names zorbQuux, the parameter of variants 05..16: under --token-budget=2000 and MCP
+#        budget_tokens=2000 every hit variant past <d> rank 10 is a <d> row (>= 1 such, counted); (k8n) premise: the variants no term
+#        hits (01..04) past rank 10 are still pointers in those answers (counted; FAILS on zero); (k8d) no budget: K8 does not run, a
+#        hit variant past rank 10 is a pointer in the default answer (counted; FAILS on zero)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -35,6 +40,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
 unset RIPWIRE_NO_SIBLING_DEMOTE RIPWIRE_NO_DECL_TWIN   # an inherited value (even 0) turns a rule off
 TASK='how is the widget config parsed and checked'
+TASK_K8='how is the widget config parsed and checked, and where is zorbQuux read'
 
 python3 - "$TMP/t/src" <<'PY' || { echo "fixture generator failed"; exit 2; }
 import os, sys
@@ -54,9 +60,10 @@ int WidgetConfigHdr::check_widget_config(int x) {
 }
 '''
 for i in range( 1, 17 ):
+    # (k8): variants 05..16 name zorbQuux in their signatures (a parameter: no row is named that), the term K8's task asks about
     s += f'''// Widget config variant {i}: a helper that reads one widget config field.
-int widget_config_variant_{i:02d}(int x) {{
-  int y = x * {i};
+int widget_config_variant_{i:02d}(int {"zorbQuux" if i >= 5 else "x"}) {{
+  int y = {"zorbQuux" if i >= 5 else "x"} * {i};
   return y;
 }}
 '''
@@ -94,7 +101,7 @@ run(){ ( cd "$TMP/t" && "$BIN" . --no-cache "--for=$TASK" "$@" ); }
 runoff(){ ( cd "$TMP/t" && "${OFF[@]}" "$BIN" . --no-cache "--for=$TASK" "$@" ); }
 mcp(){ # mcp OUT [BUDGET] [env...]
     local out="$1" b=""; shift; [ -n "${1:-}" ] && b=",\"budget_tokens\":$1"; shift || true
-    printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"%s}}}\n' "$TMP/t" "$TASK" "$b" \
+    printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"%s}}}\n' "$TMP/t" "${MCPTASK:-$TASK}" "$b" \
       | ( cd "$TMP/t" && "$@" "$BIN" --mcp 2>/dev/null ) | python3 -c '
 import json, sys
 for line in sys.stdin:
@@ -175,6 +182,31 @@ PY
 if echo "$xb" | grep -q ':demote' && [ "$( echo "$xb" | awk '{ print $2 }' )" -ge "$xbo" ] && [ "$( prefix "$xbl" )" = yes ] && [ "$agree" = ok ]; then
     ok "(xb) MCP budget_tokens=1300: pointers, $( echo "$xb" | awk '{ print $2 }' ) entries >= the twin's $xbo rows, a rank prefix, the CLI's reading on every shared rank"
 else no "(xb) MCP budget_tokens=1300: [$xb] twin rows $xbo, disagreeing ranks: $agree"; fi
+
+# (k8) TERM-HIT: a budgeted row a question term hits stays whole; (k8n) its premise; (k8d) the no-budget answer is untouched
+k8(){ # k8 FILE -> "<hit rows past r10> <hit pointers> <unhit pointers>" over widget_config_variant_NN (hit: NN >= 05)
+    python3 - "$1" <<'PY'
+import re, sys
+s = open( sys.argv[1] ).read(); s = s[s.find( "<sigs" ):s.find( "</sigs>" )]
+hr = hp = up = 0
+for m in re.finditer( r'<(d|t) [^>]*?(?:n|sym)="widget_config_variant_(\d+)"[^>]*?\br="(\d+)"', s ):
+    hit = int( m.group( 2 ) ) >= 5
+    if m.group( 1 ) == "t": hp += hit; up += not hit
+    elif hit and int( m.group( 3 ) ) > 10: hr += 1
+print( hr, hp, up )
+PY
+}
+( cd "$TMP/t" && "$BIN" . --no-cache "--for=$TASK_K8" --token-budget=2000 ) >"$TMP/k8.xml"
+( cd "$TMP/t" && "$BIN" . --no-cache "--for=$TASK_K8" ) >"$TMP/k8d.xml"
+MCPTASK="$TASK_K8" mcp "$TMP/k8m.xml" 2000 env
+read -r k8r k8h k8u <<<"$( k8 "$TMP/k8.xml" )"; read -r k8mr k8mh k8mu <<<"$( k8 "$TMP/k8m.xml" )"; read -r _ k8dh _ <<<"$( k8 "$TMP/k8d.xml" )"
+if [ "$k8r" -ge 1 ] && [ "$k8h" = 0 ] && [ "$k8mr" -ge 1 ] && [ "$k8mh" = 0 ]; then
+    ok "(k8) --token-budget=2000 / MCP budget_tokens=2000: every variant zorbQuux hits stays a row ($k8r / $k8mr of them past rank 10), none is a pointer"
+else no "(k8) a term-hit variant was pointed under a budget: CLI rows past r10 $k8r, pointers $k8h; MCP rows past r10 $k8mr, pointers $k8mh"; fi
+if [ "$k8u" -ge 1 ] && [ "$k8mu" -ge 1 ]; then ok "(k8n) premise: the same budgeted answers still point $k8u (CLI) / $k8mu (MCP) variants no term hits"
+else no "(k8n) premise: no pointer among the variants no term hits (CLI $k8u, MCP $k8mu) — the arm proves nothing"; fi
+if [ "$k8dh" -ge 1 ]; then ok "(k8d) no budget: K8 does not run — $k8dh hit variant(s) past rank 10 are pointers in the default answer"
+else no "(k8d) no hit variant is a pointer in the default answer ($k8dh): K8 ran without a budget, or the premise is gone"; fi
 
 [ "$fail" = 0 ] && echo "fordemoteallcheck: PASS" || echo "fordemoteallcheck: FAIL"
 exit "$fail"

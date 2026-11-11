@@ -124,10 +124,12 @@ inline std::string pointDeclTwins( std::string_view task, std::string_view answe
 
 // SIBLING-DEMOTE (forsiblingdemote.h) then DECL-TWIN over the answer as the earlier post-passes left it: `edited` holds those passes'
 // bytes ("" when they left `answer` unchanged) and takes each rule's result when it rewrites a row. Not priced: the caller re-prices the
-// root once on the final bytes (signed: the pointers and legends may outweigh the rows they replace). `held` (a token budget, whose <sigs>
+// root once on the final bytes (signed: the pointers and legends may outweigh the rows they replace). `regime` says whether a budget
+// shaped the answer (SIBLING-DEMOTE's K8 holds there). `held` (a token budget, whose <sigs>
 // the rules already shaped before its rows settled: fordemoteall.h) leaves the answer as it is. CLI shapedForFileSymsAnswer and MCP
 // insertFileSyms both call this; fordemoteall.h's demoteAndPointBlock and demoteJsonRows run the same two passes.
-inline void demoteAndPointRowsInto( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, std::string& edited, bool held )
+inline void demoteAndPointRowsInto( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, std::string& edited, bool held,
+                                    DemoteRegime regime )
 {
     if( held )
     {
@@ -143,7 +145,7 @@ inline void demoteAndPointRowsInto( const IngestResult& ing, const Graph& g, std
     };
     if( siblingDemoteOn() )
     {
-        apply( [&]( std::string_view shaped ) { return demote_detail::demoteSiblingRows( ing, g, task, shaped ); } );
+        apply( [&]( std::string_view shaped ) { return demote_detail::demoteSiblingRows( ing, g, task, shaped, regime ); } );
     }
     if( declTwinOn() )
     {

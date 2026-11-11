@@ -20,7 +20,9 @@
 //        rows that are proven callers of the head);
 //   (K5) a kept <d> row's same_as= names it (its doc+signature text is the one that row points to);
 //   (K6) NOTED: the row carries a <note> (a gotcha someone saved with --note-add on that symbol: a pointer would drop it);
-//   (K7) SLOT-FACT: the row carries slot_by= / slot_fields= (FN-VALUED-SLOT's cross-file call facts ride on the row, not the pointer).
+//   (K7) SLOT-FACT: the row carries slot_by= / slot_fields= (FN-VALUED-SLOT's cross-file call facts ride on the row, not the pointer);
+//   (K8) TERM-HIT, under a token budget only (DemoteRegime::Budgeted): a word K4's seeds read (taskNames) is a whole identifier of
+//        the row's n=, its sc= or its printed signature (B26-FIX: a budgeted answer pointed rows whose text carried a gold item's terms).
 // K4's seeds are the first kCallPathSeeds resolved answer rows AND every answer row the task names (an identifier-syntax word of
 // the task spelled as the row's last segment): a proven caller or callee of the symbol a `who calls X` task names is its answer.
 // The pointer keeps the row's p=, n= (as sym=) and r= bytes; a short legend comment rides before the first one. Under a token budget (CLI --token-budget,
@@ -29,6 +31,7 @@
 // re-priced once over the post-passes (R-DEDUP's tail cut, ONE-SIDE-REACH, then this one: serialize.h repriceRootAfterCut) — the net change is
 // signed: on short rows the legend and pointers can ADD bytes, and est_tokens= then goes up.
 // RIPWIRE_NO_SIBLING_DEMOTE=1 turns it off (byte identity and the gate's twins).
+#include "darkflags.h" // darkflags::containsWord, the whole-identifier test (K8)
 #include "forfilesyms.h" // filesyms_detail::FileLookup / leafName / unescapeXmlAttr
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / inEdges, edgeIndex, edgeKindByte
 #include "lexical.h" // splitRouteWords, isRouteStopword, routeLower, detail::graphSubjectTrimWord
@@ -57,6 +60,13 @@ inline constexpr std::size_t kCallPathSeeds = 3; // (K4): the first resolved ans
 
 inline constexpr std::string_view kSiblingDemoteLegend =
     "<!-- demote: a <t> in sigs is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name, r= rank), not the answer -->";
+
+// Which answer the rule reads: the default (no budget) answer, or a budgeted one, where K8 also keeps a row a task term hits.
+enum class DemoteRegime : bool
+{
+    Default,
+    Budgeted,
+};
 
 inline bool siblingDemoteOn()
 {
@@ -433,8 +443,20 @@ inline std::string pointerAnswer( std::string_view answer, const std::vector<con
     return filesyms_detail::tailPointerText( answer, spans, kSiblingDemoteLegend );
 }
 
+// K8: a task word (K4's taskNames) is a whole identifier of the row's n=, sc= or printed text (its signature, between the open tag
+// and </d>).
+inline bool termHitsRow( std::string_view answer, const AnswerRow& r, const std::vector<std::string_view>& terms )
+{
+    const std::string name = filesyms_detail::unescapeXmlAttr( attrOf( r.attrs, "n" ) );
+    const std::string_view scope = attrOf( r.attrs, "sc" );
+    const std::size_t open = answer.find( '>', r.at );
+    const std::string_view text = open < r.end ? answer.substr( open + 1, r.end - open - 1 ) : std::string_view();
+    return std::ranges::any_of( terms, [&]( std::string_view t )
+                                { return !t.empty() && ( darkflags::containsWord( name, t ) || darkflags::containsWord( scope, t ) || darkflags::containsWord( text, t ) ); } );
+}
+
 // The answer with the demoted rows rewritten as tail pointers; "" when none is.
-inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer )
+inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, std::string_view task, std::string_view answer, DemoteRegime regime )
 {
     const AnswerScan scan = scanAnswer( answer );
     std::vector<const AnswerRow*> dRows;
@@ -445,7 +467,12 @@ inline std::string demoteSiblingRows( const IngestResult& ing, const Graph& g, s
             dRows.push_back( &r );
         }
     }
-    const std::vector<const AnswerRow*> picked = pickByBytes( scan, dRows );
+    std::vector<const AnswerRow*> picked = pickByBytes( scan, dRows );
+    if( regime == DemoteRegime::Budgeted )
+    {
+        const std::vector<std::string_view> terms = taskNames( task );
+        std::erase_if( picked, [&]( const AnswerRow* r ) { return termHitsRow( answer, *r, terms ); } );
+    }
     if( picked.empty() )
     {
         return {};
