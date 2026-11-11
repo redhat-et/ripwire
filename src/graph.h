@@ -278,9 +278,9 @@ struct ImplementorRow
 inline std::vector<ImplementorRow> implementorClosure( const std::vector<std::vector<NodeId>>& implementors, NodeId base )
 {
     std::vector<ImplementorRow> rows;
-    HashMap<NodeId, char>       seen;
+    HashSet<NodeId>             seen;
     seen.reserve( 32 );
-    seen.emplace( base, char( 1 ) );
+    seen.insert( base );
     const auto expand = [ & ]( NodeId parent, std::uint32_t depth )
     {
         if( parent >= implementors.size() )
@@ -289,7 +289,7 @@ inline std::vector<ImplementorRow> implementorClosure( const std::vector<std::ve
         }
         for( NodeId child : implementors[ parent ] )
         {
-            if( seen.emplace( child, char( 1 ) ).second )
+            if( seen.insert( child ).second )
             {
                 rows.push_back( ImplementorRow{ child, parent, depth } );
             }
@@ -340,9 +340,8 @@ public:
                 expand( out_.rows[ i ].id, out_.rows[ i ].depth + 1 );
             }
         }
-        for( const auto& [ id, unused ] : other_ )
+        for( const NodeId id : other_ )
         {
-            ( void )unused;
             out_.otherBase += seen_.find( id ) == seen_.end() ? 1u : 0u;
         }
         for( std::size_t i = 0; i < out_.rows.size() && out_.rows[ i ].depth == 1; ++i )   // breadth-first: the direct rows lead
@@ -387,7 +386,7 @@ private:
             const BaseBound b = boundOf( parent, k );
             if( depth >= 2 && b == BaseBound::Other )
             {
-                other_.try_emplace( ( *kids )[ k ], char( 1 ) );
+                other_.insert( ( *kids )[ k ] );
             }
             else
             {
@@ -401,7 +400,7 @@ private:
     LegoClosure                                   out_;
     std::vector<char>                             walk_;    // parallel to rows: 1 = the edge that added the row is proven, so it is walked
     HashMap<NodeId, std::uint32_t>                seen_;    // node → its row index (base → UINT32_MAX)
-    HashMap<NodeId, char>                         other_;   // types reached only through an Other edge
+    HashSet<NodeId>                               other_;   // types reached only through an Other edge
 };
 
 inline LegoClosure legoImplementorClosure( const std::vector<std::vector<NodeId>>& implementors, const std::vector<std::vector<std::uint8_t>>& bound, NodeId base )
@@ -4871,7 +4870,7 @@ struct RubyTopSelf
     const IngestResult&   ing;
     const RubySelfReach&  reach;
     std::vector<Kind>     byFile;        // per file: what self is outside any class
-    HashMap<NodeId, char> viewMethods;   // the defs a view answers besides main's: helper modules', helper_methods'
+    HashSet<NodeId> viewMethods;   // the defs a view answers besides main's: helper modules', helper_methods'
 
     // the self a Ruby call outside any class runs against in r's file, as a key no class shares; nullptr when not known
     const std::string* selfOf( const Reference& r ) const
@@ -4951,7 +4950,7 @@ inline RubyTopSelf buildRubyTopSelf( const IngestResult& ing, const RubySelfReac
         const bool method = s.lang == Lang::Ruby && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && !s.scope.empty();
         if( method && ( rubyIsHelperFile( ing.files[ s.fileId ] ) || ( !declared.empty() && declared.find( s.scope + "#" + s.name ) != declared.end() ) ) )
         {
-            top.viewMethods.try_emplace( s.id, 1 );
+            top.viewMethods.insert( s.id );
         }
     }
     return top;
@@ -6154,13 +6153,13 @@ inline void rubyFqnNames( const HashMap<std::string, std::vector<RubyAncestorEdg
 // directive sits at the class's own start byte (ingest_relations.h), which is the class symbol's.
 inline void rubyInstanceForwarders( const IngestResult& ing, HashMap<std::string, char>& out )
 {
-    U64Set sites;   // (fileId << 32) | the class's start byte
+    HashSet<std::uint64_t> sites;   // (fileId << 32) | the class's start byte
     for( const Include& inc : ing.includes )
     {
         const std::string_view written = std::string_view( inc.target ).substr( rubyConstIsAbsolute( inc.target ) ? 2 : 0 );
         if( inc.isSymbolic && !inc.isValueUse && std::ranges::find( kRubyInstanceForwardingBases, written ) != std::end( kRubyInstanceForwardingBases ) )
         {
-            sites.insert( ( std::uint64_t( inc.fileId ) << 32 ) | inc.byte );
+            sites.insert( hashutil::packPair( inc.fileId, inc.byte ) );
         }
     }
     if( sites.empty() )
@@ -6169,7 +6168,7 @@ inline void rubyInstanceForwarders( const IngestResult& ing, HashMap<std::string
     }
     for( const Symbol& s : ing.symbols )
     {
-        if( s.lang == Lang::Ruby && s.kind == SymKind::Class && sites.find( ( std::uint64_t( s.fileId ) << 32 ) | s.sigStartByte ) != sites.end() )
+        if( s.lang == Lang::Ruby && s.kind == SymKind::Class && sites.find( hashutil::packPair( s.fileId, s.sigStartByte ) ) != sites.end() )
         {
             out.try_emplace( s.name, 1 );
         }
@@ -9311,20 +9310,20 @@ inline bool isMarkdownLinkRef( const Reference& r ) noexcept
 
 // Link-ness is where the reference came from: lang Markdown and not a doc mention. isMarkdownLinkRef also requires a
 // path, which an in-file anchor and a wikilink do not have. A markdown doc mention is neither.
-inline void noteMarkdownLinkSite( HashMap<std::uint64_t, char>& linkEdges, std::uint64_t ekey, const Reference& r )
+inline void noteMarkdownLinkSite( HashSet<std::uint64_t>& linkEdges, std::uint64_t ekey, const Reference& r )
 {
     if( langFacts( r.lang ).linkSections && !r.isDocLink )
     {
-        linkEdges[ ekey ] = 1;
+        linkEdges.insert( ekey );
     }
 }
 
 template <class Edge>
-inline bool graphHasMarkdownLink( const std::vector<Edge>& edges, const HashMap<std::uint64_t, char>& linkEdges )
+inline bool graphHasMarkdownLink( const std::vector<Edge>& edges, const HashSet<std::uint64_t>& linkEdges )
 {
     for( const Edge& e : edges )
     {
-        const std::uint64_t key = ( std::uint64_t( e.from ) << 32 ) | e.to;
+        const std::uint64_t key = hashutil::packPair( e.from, e.to );
         if( linkEdges.find( key ) != linkEdges.end() )
         {
             return true;
@@ -9333,7 +9332,7 @@ inline bool graphHasMarkdownLink( const std::vector<Edge>& edges, const HashMap<
     return false;
 }
 
-inline std::uint8_t markdownLinkBit( const HashMap<std::uint64_t, char>& linkEdges, std::uint64_t key ) noexcept
+inline std::uint8_t markdownLinkBit( const HashSet<std::uint64_t>& linkEdges, std::uint64_t key ) noexcept
 {
     return linkEdges.find( key ) != linkEdges.end() ? 1u : 0u;
 }
@@ -10018,9 +10017,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     };
     std::vector<NodeId>      bindingTier;   // A4-R5 reused FFI-alias fallback candidate buffer
     std::string              bindKey;       // A4-R5 reused "<fileId>#var" key buffer for the ctypes-handle gate
-    U64Set                       bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
+    HashSet<std::uint64_t>        bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
                                                  // consumed below to stamp prov (outProv=2) + the amb honesty mark
-    U64Set                       importEdges;    // (from<<32|to) keys of edges an ES named-import binding pinned,
+    HashSet<std::uint64_t>        importEdges;    // (from<<32|to) keys of edges an ES named-import binding pinned,
                                                  // consumed below to stamp prov (outProv=4). Same argument as
                                                  // bindingEdges: an ABSENT prov= is defined by the map legend as
                                                  // "uniquely-resolved-name-based", and these edges are neither —
@@ -10028,13 +10027,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                                  // unmarked would let a NEW resolution mechanism inherit the
                                                  // confidence label of the old one, silently. Not reserved, for the
                                                  // reason spelled out for splitEdges below.
-    U64Set                       finalSegmentEdges;   // (from<<32|to) keys of edges a receiver's QUALIFIED written type chose by
+    HashSet<std::uint64_t>        finalSegmentEdges;   // (from<<32|to) keys of edges a receiver's QUALIFIED written type chose by
                                                       // its last name alone (Rule 2, or CHA-lite pruning by that type) —
                                                       // consumed below to stamp prov (outProv=5). The qualifier was never
                                                       // checked against the class's namespace, so such an edge can be a
                                                       // precise-looking WRONG one (test/narrowcheck.sh arm 24); an absent
                                                       // prov= would call it uniquely resolved. Not reserved, like splitEdges.
-    U64Set                       splitEdges;     // C1: (from<<32|to) keys of edges that are an ARM of a k-way split the
+    HashSet<std::uint64_t>        splitEdges;     // C1: (from<<32|to) keys of edges that are an ARM of a k-way split the
                                                  // resolver could not choose between — the per-EDGE half of the per-SYMBOL
                                                  // ambOut counter, consumed below to stamp prov (outProv=3). ambOut says K
                                                  // of this symbol's CALLS were guesses; this says WHICH EDGES they were,
@@ -10047,8 +10046,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                                  // so its bucket layout cannot reach output, and it is filled inside a loop
                                                  // whose per-reference tier work dominates the growth cascade by orders of
                                                  // magnitude. A guessed reserve would be a made-up number in a hot struct.
-    HashMap<std::uint64_t, char> linkEdges;      // (from<<32|to) a markdown link bound. The section that holds the link is the edge's from.
-    U64Set                       anchorMissEdges; // (from<<32|to) a link whose slug named no heading, so the target is the file node.
+    HashSet<std::uint64_t>       linkEdges;      // (from<<32|to) a markdown link bound. The section that holds the link is the edge's from.
+    HashSet<std::uint64_t>        anchorMissEdges; // (from<<32|to) a link whose slug named no heading, so the target is the file node.
     std::vector<NodeId>      rule3Out;   // reused Rule-3 output buffer (candidates from the single included file)
     Rule3FileMemo            rule3Memo;  // Rule 3's answer per (caller file, byName entry): one walk per name per file, not per call
     Rule3FileMemo            rule3MemoMember;   // the same for a member call, which reads the includer-directory closure (EXTQUAL-FIX1)
@@ -10327,8 +10326,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     };
-    U64Set                       nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
-    U64Set                       provenEdges;     // … and of an edge some call bound WITH evidence: a proven site wins the merged row
+    HashSet<std::uint64_t>        nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
+    HashSet<std::uint64_t>        provenEdges;     // … and of an edge some call bound WITH evidence: a proven site wins the merged row
     std::vector<NodeId>      provedScratch;   // reused: the name-ladder candidates the language's own lookup proves
     std::vector<NodeId>      memberRule3;     // reused: Rule 3's included-file candidates for a MEMBER call — a hedge tier, never a proof
     // FE-B: which of a call's name-ladder candidates the language's own lookup PROVES (receiverevidence.h, point 2). A
@@ -13150,7 +13149,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue;
             }
-            const std::uint64_t ekey = ( std::uint64_t( r.fromSymbol ) << 32 ) | to;
+            const std::uint64_t ekey = hashutil::packPair( r.fromSymbol, to );
             EdgeAcc& e = acc[ ekey ];
             e.confSum += classic( to ) ? base : 0.f;
             e.nref    += 1;
@@ -13318,7 +13317,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         return markdownLinkBit( linkEdges, k ) != 0 && anchorMissEdges.contains( k );
     };
-    if( std::any_of( edges.begin(), edges.end(), [ & ]( const E& e ) { return anchorMissed( ( std::uint64_t( e.from ) << 32 ) | e.to ); } ) )
+    if( std::any_of( edges.begin(), edges.end(), [ & ]( const E& e ) { return anchorMissed( hashutil::packPair( e.from, e.to ) ); } ) )
     {
         g.outAnchorMiss.assign( edges.size(), 0u );
     }
@@ -13327,7 +13326,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     const auto hedged = [ & ]( std::uint64_t k ) { return nameOnlyEdges.contains( k ) && !provenEdges.contains( k ); };
     const auto marked = [ & ]( const E& e )
     {
-        const std::uint64_t k = ( std::uint64_t( e.from ) << 32 ) | e.to;
+        const std::uint64_t k = hashutil::packPair( e.from, e.to );
         return hedged( k ) || markdownLinkBit( linkEdges, k ) != 0;
     };
     if( std::any_of( edges.begin(), edges.end(), marked ) )
@@ -13348,12 +13347,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // the symbol's amb= counts it either way, so nothing is lost by the ordering.
             if( !g.outProv.empty() )
             {
-                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), provSets, ( std::uint64_t( e.from ) << 32 ) | e.to );
+                g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), provSets, hashutil::packPair( e.from, e.to ) );
             }
             if( !g.outNameOnly.empty() )
             {
                 ASSUME( pos < g.outNameOnly.size(), "outNameOnly is allocated one slot per flattened edge" );
-                const std::uint64_t key = ( std::uint64_t( e.from ) << 32 ) | e.to;
+                const std::uint64_t key = hashutil::packPair( e.from, e.to );
                 std::uint8_t        kind = 0;
                 if( markdownLinkBit( linkEdges, key ) != 0 )
                 {
@@ -13367,7 +13366,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             if( !g.outAnchorMiss.empty() )
             {
-                g.outAnchorMiss[ pos ] = anchorMissed( ( std::uint64_t( e.from ) << 32 ) | e.to ) ? 1u : 0u;
+                g.outAnchorMiss[ pos ] = anchorMissed( hashutil::packPair( e.from, e.to ) ) ? 1u : 0u;
             }
         }
     }

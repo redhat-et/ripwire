@@ -600,6 +600,7 @@ for _g in \
     gvassemblycheck \
     handlerrulecheck \
     hasacheck \
+    hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
     headsnapcachecheck \

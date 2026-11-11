@@ -9739,10 +9739,10 @@ inline std::vector<std::vector<NodeId>> legoImplementorsOnSurface( const IngestR
                                                                    const std::vector<NodeId>& surfaceIds )
 {
     std::vector<char>            onSurface( ing.symbols.size(), 0 );
-    HashMap<std::uint32_t, char> surfaceFiles;
+    HashSet<std::uint32_t>       surfaceFiles;
     for( NodeId s : surfaceIds )
     {
-        if( s < onSurface.size() ) { onSurface[s] = 1;  surfaceFiles.emplace( ing.symbols[s].fileId, char( 1 ) ); }
+        if( s < onSurface.size() ) { onSurface[s] = 1;  surfaceFiles.insert( ing.symbols[s].fileId ); }
     }
 
     const auto isOnSurface = [ & ]( NodeId n ) { return n < onSurface.size() && ( onSurface[n] || surfaceFiles.find( ing.symbols[n].fileId ) != surfaceFiles.end() ); };

@@ -952,10 +952,10 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
 // declarator is not a value use), so the pass is a no-op there; every other ref keeps its position and order.
 inline void dropFieldDefinitionSites( IngestResult& result, const std::vector<RawDef>& fieldDefs )
 {
-    HashMap<std::uint64_t, char> defSite;
+    HashSet<std::uint64_t>       defSite;
     for( const RawDef& d : fieldDefs )
     {
-        defSite.try_emplace( ( std::uint64_t( d.fileId ) << 32 ) | d.nameByte, 1 );
+        defSite.insert( ( std::uint64_t( d.fileId ) << 32 ) | d.nameByte );
     }
     if( defSite.empty() )
     {

@@ -5686,7 +5686,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             if( !commits.empty() )
             {
                 // co-change degree per file = # of OTHER files that share ≥1 commit with it (file-level).
-                std::vector<HashMap<std::uint32_t, char>> partners( ing.files.size() );
+                std::vector<HashSet<std::uint32_t>> partners( ing.files.size() );
                 for( const std::vector<std::uint32_t>& c : commits )
                 {
                     for( std::size_t i = 0; i < c.size(); ++i )
@@ -5694,7 +5694,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                         for( std::size_t j = i + 1; j < c.size(); ++j )
                         {
                             const std::uint32_t a = c[i], b = c[j];
-                            if( a < ing.files.size() && b < ing.files.size() ) { partners[a][b] = 1; partners[b][a] = 1; }
+                            if( a < ing.files.size() && b < ing.files.size() ) { partners[a].insert( b ); partners[b].insert( a ); }
                         }
                     }
                 }

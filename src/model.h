@@ -31,6 +31,7 @@
 
 #if defined( CTX_USE_STD_MAP )
     #include <unordered_map>
+    #include <unordered_set>
 #else
     #include "unordered_dense.h"   // ankerl flat hash map — far faster than std::unordered_map
 #endif
@@ -39,18 +40,19 @@ namespace rw
 {
 
 // project-wide fast map alias — use HashMap<>, never std::unordered_map (flat, cache-friendly).
+// HashSet<> is its membership twin (HASHSET-ALIAS, owner 11-11): a table that only asks "is K in it" is a set, never a
+// HashMap<K, char|bool> whose value nobody reads — 8 B per u64 entry instead of 16, 4 per u32 instead of 8, the same
+// container family and the same insertion-order iteration (test/hashsetcheck.sh holds the line).
 #if defined( CTX_USE_STD_MAP )
 template<class K, class V> using HashMap = std::unordered_map<K, V>;
+template<class K> using HashSet = std::unordered_set<K>;
 #else
 template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
+template<class K> using HashSet = ankerl::unordered_dense::set<K>;
 #endif
 
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
-
-// G1d (mem-audit-fable-1111): a set of u64 keys — what `HashMap<std::uint64_t, char>` spelled with a 16 B entry for an 8 B
-// key whose value nobody read. Same container family, same insertion-order iteration.
-using U64Set = ankerl::unordered_dense::set<std::uint64_t>;
 
 // G1d: a per-symbol label almost every symbol lacks (Graph::bindLabel, the JNI-decoded Java name of a `Java_*` def). Rows
 // are appended in ascending id order and binary-searched; an id with no row reads "". A dense vector<string> spent 24 B
