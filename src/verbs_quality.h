@@ -2064,6 +2064,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         const std::vector<quality::StaleAck> staleAcks = acks.empty() ? std::vector<quality::StaleAck>{}
                                                          : refPair ? refPairStaleAcks( acks, refs )
                                                          : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath ) );
+        if( std::getenv( "RIPWIRE_STATS" ) )   // QD-ENVOY-TIME cost bound: Type-3 passes this call ran (test/qdtype3oncecheck.sh)
+        {
+            rw::emitTo( stderr, "ripwire: quality-passes type3_runs={} type3_pairs={}\n", gType3PassRuns.load( std::memory_order_relaxed ),
+                        gType3PassPairs.load( std::memory_order_relaxed ) );
+        }
 
         // P1.4 — the <sa> family now carries THREE whys, and the third is counted SEPARATELY: stale= means
         // "this ack no longer applies", and a foreign ack applies fine — it is the SESSION that was wrong,

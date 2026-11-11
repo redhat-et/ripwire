@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>       // gType3PassRuns / gType3PassPairs — the QD-ENVOY-TIME cost-bound counters
 #include <cctype>
 #include <cstdint>
 #include <limits>       // std::numeric_limits — the mask-width static_assert: an index shifted into a mask must fit it
@@ -880,6 +881,12 @@ inline std::size_t cloneLcsLen( const std::vector<std::uint32_t>& a, const std::
 // identical. Each returned group has exactly two members {loId,hiId} with type==3 and the measured similarity.
 // Deterministic; bounded (see the header block). Does NOT alter findClones() — callers opt into this pass.
 // statsOut (optional): per-pass pair-visit counters for the clonebandcheck gate; never affects the result.
+// QD-ENVOY-TIME cost bound: Type-3 passes this process ran, and the pairs they emitted in all. --quality-delta prints both on
+// its RIPWIRE_STATS line, and test/qdtype3oncecheck.sh holds the run count to one per call (the pairs are its premise).
+// Relaxed: a count read once at the end, never a synchronization point.
+inline std::atomic<std::uint32_t> gType3PassRuns{ 0 };
+inline std::atomic<std::uint64_t> gType3PassPairs{ 0 };
+
 inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int minTokens, Type3Stats* statsOut = nullptr )
 {
     Type3Stats st;
@@ -1132,6 +1139,8 @@ done:
     std::sort( out.begin(), out.end(), []( const CloneGroup& p, const CloneGroup& q )
                { return p.members[0] != q.members[0] ? p.members[0] < q.members[0] : p.members[1] < q.members[1]; } );
     st.emittedPairs = out.size();
+    gType3PassRuns.fetch_add( 1, std::memory_order_relaxed );
+    gType3PassPairs.fetch_add( out.size(), std::memory_order_relaxed );
     if( statsOut )
     {
         *statsOut = st;
