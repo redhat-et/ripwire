@@ -7,6 +7,13 @@
 #        chain holds tickImpl, and the block equals the bare --path call with that spelling
 #   (e2) `callers of ApplicationRef.tick`: the same narrowing on the callers form (verb=--callers=src/app/application_ref.ts:tick)
 #   (e3) NEGATIVE: two bodied source definitions left (a second src/ copy) → refused as before: no graph block, no narrowed=
+#   GV-PATH-BIND: the same frozen rule on the DIRECT verbs (src/forgraphverb.h narrowRefusedSpelling, src/verbs_navigate.h):
+#   (d1) `--path=ApplicationRef.tick,refreshView` binds the one source definition: rc 0, from="src/app/application_ref.ts:tick",
+#        narrowed="ApplicationRef.tick" on <path>, its reading in the legend (compact and full), and the answer == the explicit
+#        `--path=src/app/application_ref.ts:tick,refreshView` answer apart from that disclosure
+#   (d2) `--connect=ApplicationRef.tick,refreshView`: the same on <connect> (est_tokens= masked: it charges the disclosure)
+#   (d3) the callers form `--callers=ApplicationRef.tick`: the same on <callers>, bootApp listed
+#   (d4) NEGATIVE: two bodied source definitions left → --path, --connect and --callers still refuse (rc 1, no narrowed=)
 #   M3 MET-BRIDGE: an unreached path whose search reached a caller of to= prints the proven prefix and the one crossing.
 #   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): <met_bridge reachable="0"
 #        in="onContinueReading" via="declined"> holding the path verb's reachable="1" answer onFileEvent -> onContinueReading (its
@@ -155,6 +162,67 @@ if [ "$( rc e3 )" = 0 ] && [ "$( count e3 '<graph_verb ' )" = 0 ] && [ "$( count
     ok "(e3) two source definitions left: no bind, no graph block (the bare --path still refuses)"
 else no "(e3) rc=$( rc e3 ) graph_verb=$( count e3 '<graph_verb ' ) narrowed=$( count e3 'narrowed=' )"; fi
 
+# ── GV-PATH-BIND: the direct verbs ──
+# $1 the narrowed answer, $2 the explicit-spelling answer: "eq=1" when they are byte-equal once the narrowed= attribute, its one
+# legend reading and est_tokens= are taken out; then how many narrowed= attributes / readings the narrowed answer carried
+direq(){ python3 - "$TMP/$1.xml" "$TMP/$2.xml" <<'PY'
+import re, sys
+a = open( sys.argv[1], encoding="utf8", errors="replace" ).read()
+b = open( sys.argv[2], encoding="utf8", errors="replace" ).read()
+attrs = len( re.findall( r' narrowed="[^"]*"', a ) )
+reads = len( re.findall( r'narrowed=: [^.]*\. ?', a ) )
+mask = lambda s: re.sub( r' est_tokens="\d+"', '', s )
+cut = mask( re.sub( r'narrowed=: [^.]*\. ?', '', re.sub( r' narrowed="[^"]*"', '', a ) ) )
+print( "eq=%d attrs=%d reads=%d" % ( int( cut == mask( b ) and b != '' ), attrs, reads ) )
+PY
+}
+# the root element <$2 …>'s attribute $3 (comments skipped), or '-'
+rootattr(){ python3 - "$TMP/$1.xml" "$2" "$3" <<'PY'
+import re, sys
+s = re.sub( r'<!--.*?-->', '', open( sys.argv[1], encoding="utf8", errors="replace" ).read(), flags=re.S )
+m = re.search( r'<' + sys.argv[2] + r' ([^>]*)>', s )
+a = re.search( r'\b' + sys.argv[3] + r'="([^"]*)"', m.group( 1 ) ) if m else None
+print( a.group( 1 ) if a else '-' )
+PY
+}
+
+# (d1) direct --path, narrowed
+RIPWIRE_NO_HOP_BODY=1 run "$F1" d1 --path=ApplicationRef.tick,refreshView
+RIPWIRE_NO_HOP_BODY=1 run "$F1" d1f --path=ApplicationRef.tick,refreshView --legend=full
+d1eq="$( direq d1 e1v )"; d1nar="$( rootattr d1 path narrowed )"; d1from="$( rootattr d1 path from )"
+if [ "$( rc d1 )" = 0 ] && [ "$( rc d1f )" = 0 ] && [ "$d1eq" = "eq=1 attrs=1 reads=1" ] && [ "$d1nar" = "ApplicationRef.tick" ] \
+   && [ "$d1from" = "src/app/application_ref.ts:tick" ] && grep -q 'reachable="1"' "$TMP/d1.xml" && grep -q 'narrowed=: ' "$TMP/d1f.xml" \
+   && grep -q ' narrowed="ApplicationRef.tick"' "$TMP/d1f.xml"; then
+    ok "(d1) direct --path endpoint refused over 3 definitions binds the one source definition: from=$d1from narrowed=$d1nar, == the explicit call ($d1eq)"
+else no "(d1) rc=$( rc d1 )/$( rc d1f ) narrowed='$d1nar' from='$d1from' $d1eq"; fi
+
+# (d2) direct --connect, narrowed
+run "$F1" d2 --connect=ApplicationRef.tick,refreshView
+run "$F1" d2v --connect=src/app/application_ref.ts:tick,refreshView
+d2eq="$( direq d2 d2v )"; d2nar="$( rootattr d2 connect narrowed )"
+if [ "$( rc d2 )" = 0 ] && [ "$( rc d2v )" = 0 ] && [ "$d2eq" = "eq=1 attrs=1 reads=1" ] && [ "$d2nar" = "ApplicationRef.tick" ] && grep -q 'tickImpl' "$TMP/d2.xml"; then
+    ok "(d2) direct --connect terminal narrowed: narrowed=$d2nar, == the explicit call ($d2eq)"
+else no "(d2) rc=$( rc d2 )/$( rc d2v ) narrowed='$d2nar' $d2eq"; fi
+
+# (d3) direct --callers, narrowed
+run "$F1" d3 --callers=ApplicationRef.tick
+run "$F1" d3v --callers=src/app/application_ref.ts:tick
+d3eq="$( direq d3 d3v )"; d3nar="$( rootattr d3 callers narrowed )"; d3of="$( rootattr d3 callers of )"
+if [ "$( rc d3 )" = 0 ] && [ "$( rc d3v )" = 0 ] && [ "$d3eq" = "eq=1 attrs=1 reads=1" ] && [ "$d3nar" = "ApplicationRef.tick" ] \
+   && [ "$d3of" = "src/app/application_ref.ts:tick" ] && grep -q 'n="bootApp"' "$TMP/d3.xml"; then
+    ok "(d3) direct --callers narrowed: of=$d3of narrowed=$d3nar, bootApp listed, == the explicit call ($d3eq)"
+else no "(d3) rc=$( rc d3 )/$( rc d3v ) narrowed='$d3nar' of='$d3of' $d3eq"; fi
+
+# (d4) negative: two bodied source definitions left → every direct verb refuses as before
+run "$F1N" d4p --path=ApplicationRef.tick,refreshView
+run "$F1N" d4c --connect=ApplicationRef.tick,refreshView
+run "$F1N" d4k --callers=ApplicationRef.tick
+d4n=$(( $( count d4p 'narrowed' ) + $( count d4c 'narrowed' ) + $( count d4k 'narrowed' ) ))
+if [ "$( rc d4p )" = 1 ] && [ "$( rc d4c )" = 1 ] && [ "$( rc d4k )" = 1 ] && [ "$d4n" = 0 ] && grep -q 'found="0" refused="4"' "$TMP/d4p.xml" \
+   && grep -q 'found="0" refused="4"' "$TMP/d4k.xml" && [ ! -s "$TMP/d4c.xml" ]; then
+    ok "(d4) two source definitions left: --path/--connect/--callers still refuse (rc 1, refused=4, no narrowed=)"
+else no "(d4) rc=$( rc d4p )/$( rc d4c )/$( rc d4k ) narrowed=$d4n"; fi
+
 # (b1) met bridge across a declined virtual call
 RIPWIRE_NO_HOP_BODY=1 run "$F3" b1 --for="path from ConnectionImpl::onFileEvent to ConnectionManagerImpl::onData"
 RIPWIRE_NO_HOP_BODY=1 run "$F3" b1v --path=ConnectionImpl::onFileEvent,src/filter_manager.cc:onContinueReading
@@ -187,7 +255,7 @@ else no "(b1) rc=$( rc b1 )/$( rc b1v ) facts='$facts'"; fi
 
 # (b2) negative, envoy-03: from= names two `main` definitions; the reached one calls an out-of-tree same-named run
 run "$F3N" b2 --for="path from main to InstanceBase::run"
-if [ "$( rc b2 )" = 0 ] && [ "$( count b2 '<graph_verb ' )" = 1 ] && grep -q 'met="1"' "$TMP/b2.xml" && [ "$( count b2 '<met_bridge' )" = 0 ]; then
+if [ "$( rc b2 )" = 0 ] && [ "$( count b2 '<graph_verb ' )" = 1 ] && grep -Eq '<near_sink [^>]*>(<ns [^>]*/>)*<ns [^>]*met="1"' "$TMP/b2.xml" && [ "$( count b2 '<met_bridge' )" = 0 ]; then
     ok "(b2) from= binds two definitions: the near_sink met=1 row stays, no met_bridge"
 else no "(b2) rc=$( rc b2 ) graph_verb=$( count b2 '<graph_verb ' ) met_bridge=$( count b2 '<met_bridge' )"; fi
 
