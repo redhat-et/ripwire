@@ -1542,7 +1542,9 @@ inline ImportSpecBlock renderImportSpecBlock( const IngestResult& ing, const std
         out.xml.append( " found=\"0\"/>" );
         return out;
     }
-    out.dropName = true;
+    // the definition-side chains of the name stay when the walk ended in the entry itself at a value binding (`ValidationError =
+    // pydantic_core.ValidationError` in a package __init__): that is an alias, and the chains are where its definition is
+    out.dropName = !( w.hops.empty() && ( w.def->kind == SymKind::Var || w.def->kind == SymKind::Alias ) );
     out.defs     = 1;
     out.xml.append( "/><def" );
     attr( "n", w.def->name );
@@ -1569,6 +1571,22 @@ inline ImportSpecBlock renderImportSpecBlock( const IngestResult& ing, const std
     return out;
 }
 
+// IMPORT-SPELLING: the definition-side candidates once the spelled import has spoken: its name dropped when the walk served it (or
+// the spec is ambiguous or external), the rest under the spec's package directory when it resolved one (else main's last-segment rule).
+inline std::vector<const Symbol*> specScopedDefs( const IngestResult& ing, const ImportSpecBlock& spec, std::vector<reexport_detail::ReexportTaskName>& names,
+                                                  const std::vector<std::string_view>& tokens )
+{
+    using namespace reexport_detail;
+    if( spec.dropName )
+    {
+        std::erase_if( names, [ & ]( const ReexportTaskName& n ) { return n.name == spec.name; } );
+    }
+    std::vector<const Symbol*> defs = names.empty() ? std::vector<const Symbol*>{} : reexportDefs( ing, names, spec.narrow ? std::string_view() : reexportFromPackage( tokens ) );
+    const std::string          under = spec.pkgDir.empty() ? std::string() : spec.pkgDir + "/";
+    std::erase_if( defs, [ & ]( const Symbol* d ) { return spec.narrow && !rootRelPath( ing, d->fileId ).starts_with( under ); } );
+    return defs;
+}
+
 // CR pre-pass 42b: a token budget is a request the block must obey, so under one the rows are NOT printed (they sit outside
 // est_tokens). A one-line marker names how many definitions carry a chain; the legend sentence holds no double dash.
 inline std::string reexportHeldMarker( std::size_t defs )
@@ -1576,6 +1594,16 @@ inline std::string reexportHeldMarker( std::size_t defs )
     return "<!-- reexports held=\"budget\": a token budget is set, so the re-export rows are not printed (they sit outside est_tokens); "
            "defs= definitions carry a chain: ask again without the token budget for the rows -->"
            "<reexports held=\"budget\" defs=\"" + std::to_string( defs ) + "\"/>";
+}
+
+// IMPORT-SPELLING: the block when only the spelled import prints ("" when it printed nothing; the held marker under a token budget).
+inline std::string specOnlyBlock( const ImportSpecBlock& spec, bool held )
+{
+    if( spec.xml.empty() )
+    {
+        return {};
+    }
+    return held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
 }
 
 // The <reexports> block for `task` ("" when no task word names a definition that something re-exports; `held`: a token budget is
@@ -1587,20 +1615,11 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
     // IMPORT-SPELLING: the chain FROM the spelled import, ahead of the definition-side chains; it may also drop the spelled name
     // from them (served, ambiguous or external) and narrow them to the package's own directory
-    ImportSpecBlock spec = renderImportSpecBlock( ing, tokens );
-    if( spec.dropName )
-    {
-        std::erase_if( names, [ & ]( const ReexportTaskName& n ) { return n.name == spec.name; } );
-    }
-    std::vector<const Symbol*> defs = names.empty() ? std::vector<const Symbol*>{} : reexportDefs( ing, names, spec.narrow ? std::string_view() : reexportFromPackage( tokens ) );
-    if( spec.narrow )
-    {
-        const std::string under = spec.pkgDir.empty() ? std::string() : spec.pkgDir + "/";
-        std::erase_if( defs, [ & ]( const Symbol* d ) { return !rootRelPath( ing, d->fileId ).starts_with( under ); } );
-    }
+    const ImportSpecBlock            spec = renderImportSpecBlock( ing, tokens );
+    const std::vector<const Symbol*> defs = specScopedDefs( ing, spec, names, tokens );
     if( defs.empty() )
     {
-        return spec.xml.empty() ? std::string() : held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
+        return specOnlyBlock( spec, held );
     }
     // CR nitpick (review 5712563408, forreexport.h:1025): no cue word and no task-named file means no chain can print (a chain prints
     // when cued, or when it carries a use row, and a use row is only noted from a task-named file): return before the file map and
@@ -1615,7 +1634,7 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     std::vector<char> taskFiles = reexportTaskFiles( ing, tokens );
     if( !cued && !qualified && std::ranges::none_of( taskFiles, []( char c ) { return c != 0; } ) )
     {
-        return spec.xml.empty() ? std::string() : held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
+        return specOnlyBlock( spec, held );
     }
     const auto dialectOf = []( DepDialect want ) { return [ want ]( const Symbol* d ) { return dependencyDialect( d->lang ) == want; }; };
     const bool rust      = std::ranges::any_of( defs, dialectOf( DepDialect::Rust ) );
@@ -1633,7 +1652,7 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     }
     if( xml.out.empty() )
     {
-        return spec.xml.empty() ? std::string() : held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
+        return specOnlyBlock( spec, held );
     }
     if( held )
     {

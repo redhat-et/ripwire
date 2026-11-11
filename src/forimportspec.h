@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -68,12 +69,12 @@ namespace importspec_detail
 {
 
 // The words a task writes between NAME and `from` (`inject imported from`, `the Component decorator from`).
+// One blank-delimited list, matched as ` word `.
 inline bool specCueWord( std::string_view w )
 {
-    static constexpr std::array<std::string_view, 22> kCue{ "imported", "exported", "re-exported", "reexported", "type", "types",
-                                                            "decorator", "function", "class", "interface", "const", "constant",
-                                                            "enum", "is", "was", "being", "as", "{", "}", "the", "a", "an" };
-    return std::ranges::find( kCue, w ) != kCue.end();
+    static constexpr std::string_view kCue = " imported exported re-exported reexported type types decorator function class interface const "
+                                             "constant enum is was being as { } the a an ";
+    return !w.empty() && !w.contains( ' ' ) && kCue.contains( std::string( " " ).append( w ).append( " " ) );
 }
 
 inline bool identWord( std::string_view w )
@@ -86,17 +87,11 @@ inline bool identWord( std::string_view w )
 inline std::vector<std::string_view> dottedSegments( std::string_view m )
 {
     std::vector<std::string_view> segs;
-    for( std::size_t at = 0; at <= m.size(); )
+    for( const auto part : std::views::split( m, '.' ) )
     {
-        const std::size_t end = std::min( m.find( '.', at ), m.size() );
-        if( !identWord( m.substr( at, end - at ) ) )
-        {
-            return {};
-        }
-        segs.push_back( m.substr( at, end - at ) );
-        at = end + 1;
+        segs.emplace_back( part.begin(), part.end() );
     }
-    return segs;
+    return std::ranges::all_of( segs, identWord ) ? segs : std::vector<std::string_view>{};
 }
 
 }   // namespace importspec_detail
@@ -170,11 +165,6 @@ using tsimport::JsonNode;   // resolve.h: the package.json reader the import res
 using tsimport::exportsEntry;
 using tsimport::parseJsonObject;
 using tsimport::splitPackageSpecifier;
-
-inline std::uint32_t lineAt( const std::string& text, std::size_t byte )
-{
-    return std::uint32_t( std::count( text.begin(), text.begin() + std::ptrdiff_t( std::min( byte, text.size() ) ), '\n' ) ) + 1;
-}
 
 // tsc's order for a relative, extensionless specifier: the FILE (`.ts`, `.tsx`, `.d.ts`) before the directory index. kNoFile when
 // none answers or the specifier is not relative and extensionless (a runtime extension keeps the resolver's own answer).
@@ -270,7 +260,7 @@ inline std::string exportsTargetOf( const JsonNode& e, int depth = 0 )
 inline std::uint32_t lineOfKey( const std::string& text, std::string_view key )
 {
     const std::size_t at = text.find( "\"" + std::string( key ) + "\"" );
-    return at == std::string::npos ? 0 : lineAt( text, at );
+    return at == std::string::npos ? 0 : std::uint32_t( std::ranges::count( std::string_view( text ).substr( 0, at ), '\n' ) ) + 1;
 }
 
 }   // namespace importspec_detail
