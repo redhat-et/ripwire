@@ -19,7 +19,9 @@
 //   * a constructor (forctorhop.h ctor_detail::isCtorName on its owner class) hops to its class: the class node's callers (the `new`
 //     sites) and its own; its row says ctor="1";
 //   * fan-in gate: a node with more than kReaderCallerFanIn kept callers lists none, one <lcn of= n= next="--callers=…"/> says how many;
-//   * at most kReaderCallerRows <lc> rows per element; past it one <lcn more=/> counts the rest.
+//     a constructor's n= counts its class's construction sites too, which its own --callers does not list: class_next="--callers=Class"
+//   * at most kReaderCallerRows <lc> rows per element; past it one <lcn more=/> counts the rest; readers past kReaderCallerReaders that
+//     have a kept caller are counted by readers_more= on that same closing <lcn/>.
 // Nothing enters the ranked rows; the rows sit inside <lit>, so its bytes= counts them. RIPWIRE_NO_READER_CALLERS (any value) turns it off.
 
 #include "forctorhop.h"        // ctor_detail::isCtorName — the language's constructor spelling
@@ -46,7 +48,7 @@ namespace rw
 inline constexpr std::size_t kReaderCallerReaders = 3;    // reader owners walked, in row order (the lit's own body cap)
 inline constexpr std::size_t kReaderCallerFanIn   = 6;    // a node with more kept callers lists none (a hub: <lcn n=>)
 inline constexpr std::size_t kReaderCallerRows    = 12;   // <lc> rows per <lit>
-static_assert( kReaderCallerFanIn == 6 && kReaderCallerRows == 12, "kReaderCallersLegend states both caps: move the sentence with the constants" );
+static_assert( kReaderCallerReaders == 3 && kReaderCallerFanIn == 6 && kReaderCallerRows == 12, "kReaderCallersLegend states the three caps: move the sentence with the constants" );
 
 inline bool readerCallersOn()
 {
@@ -56,7 +58,8 @@ inline bool readerCallersOn()
 inline constexpr std::string_view kReaderCallersLegend =
     "<!-- ripwire for lit callers: lc d=1 a call-graph caller of= a reader above (an ls row's in=), d=2 its caller when that reader has one caller or "
     "of= is a constructor (ctor=1: its hop is the class's construction sites); n= t= p=file:line the caller, source paths only; via=name bound by "
-    "name alone, the name has one definition. lcn n= a node with more than 6 callers (none listed, next=), more= rows past the 12-row cap. -->";
+    "name alone, the name has one definition. lcn n= a node with more than 6 callers (none listed, next=; a constructor's n= counts its class's "
+    "construction sites, class_next= lists them), more= rows past the 12-row cap, readers_more= readers past the first 3 with callers, not walked. -->";
 static_assert( kReaderCallersLegend.find( "--", 4 ) == kReaderCallersLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
 struct ReaderCallers
@@ -241,6 +244,11 @@ inline ReaderCallers renderReaderCallers( const IngestResult& ing, const Graph* 
         const NodeId  cls   = s.scope.empty() && s.kind == SymKind::Method ? ownerClassOf( ing, of ) : kNoNode;
         const std::string_view owner = cls != kNoNode ? std::string_view( ing.symbols[cls].name ) : scopeLastSegment( s.scope );
         out.xml += nextAttrXml( nextFlag( "--callers=", owner.empty() ? s.name : std::string( owner ) + "." + s.name ) );   // the selector spelling Owner.name
+        const NodeId ctorCls = ctorClassOf( ing, of );
+        if( ctorCls != kNoNode )
+        {
+            out.xml += nextAttrXml( nextFlag( "--callers=", ing.symbols[ctorCls].name ), "class_next" );   // n= counted the class's in-edges too
+        }
         out.xml += "/>";
     };
     for( std::size_t r = 0; r < readers.size() && r < kReaderCallerReaders; ++r )
@@ -278,9 +286,17 @@ inline ReaderCallers renderReaderCallers( const IngestResult& ing, const Graph* 
             }
         }
     }
-    if( more > 0 )
+    std::size_t readersMore = 0;   // readers past kReaderCallerReaders with a caller not printed above: not walked, counted (CR 4540061421)
+    for( std::size_t r = kReaderCallerReaders; r < readers.size(); ++r )
     {
-        out.xml += "<lcn more=\"" + std::to_string( more ) + "\"/>";
+        readersMore += std::size_t( readers[r] ) < ing.symbols.size() && !walk.callersOf( readers[r] ).empty() ? 1 : 0;
+    }
+    if( more > 0 || readersMore > 0 )
+    {
+        out.xml += "<lcn";
+        out.xml += more > 0 ? " more=\"" + std::to_string( more ) + "\"" : std::string();
+        out.xml += readersMore > 0 ? " readers_more=\"" + std::to_string( readersMore ) + "\"" : std::string();
+        out.xml += "/>";
     }
     return out;
 }

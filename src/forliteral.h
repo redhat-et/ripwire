@@ -292,7 +292,7 @@ struct ForLiteral
     bool             frag = false;   // shape=message: `text` is a fragment of the task's words, the whole text has no site
     std::size_t      tryNo = 1;      // the task's Nth literal (earlier ones were scanned and have no source site): try="N" when > 1
     bool             bare = false;   // WHOLE-TOKEN: shape=flag from a bare kebab token beside an option/flag/setting word (1..kForBareFlagMaxSites sites)
-    bool             verbatim = false;   // MSG-VERBATIM: shape=message from a cue-less task's whole text (1..kForVerbatimMaxSites sites, no fragments)
+    bool             verbatim = false;   // MSG-VERBATIM: shape=message from a cue-less task's whole text (1..kForVerbatimMaxSites confirmed string sites, no fragments)
 };
 inline constexpr std::size_t kForBareFlagMaxSites = 8;   // WHOLE-TOKEN: a bare kebab token with more source sites is prose, not one option
 inline constexpr std::size_t kForVerbatimMaxSites = 3;   // MSG-VERBATIM: a cue-less whole text with more source sites is no single message
@@ -4359,7 +4359,9 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         lit_detail::dropCodeRows( rows );   // a code row is never printed (all code: no block)
     }
     out.sites = rows.size();
-    if( ( lit.bare && rows.size() > kForBareFlagMaxSites ) || ( lit.verbatim && rows.size() > kForVerbatimMaxSites ) )
+    // MSG-VERBATIM counts confirmed string sites only (CR 4540061404): a k='?' row (span tier unparsed) may be code or a comment
+    const std::size_t verbatimStrings = lit.verbatim ? std::size_t( std::ranges::count( rows, 's', &lit_detail::Site::k ) ) : 0;
+    if( ( lit.bare && rows.size() > kForBareFlagMaxSites ) || ( lit.verbatim && ( verbatimStrings == 0 || verbatimStrings > kForVerbatimMaxSites ) ) )
     {
         return ForLiteralRender{};   // WHOLE-TOKEN / MSG-VERBATIM: too many sites to be the one option or message the task names
     }
