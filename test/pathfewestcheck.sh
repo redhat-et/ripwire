@@ -25,8 +25,10 @@
 #        list holds Sink.fin): the declined chain prints, its last row via="declined" cands="2", root route_declined="1"
 #        route_tie="fewer-unproven" route_tie_other="3".
 #   (D3) the same with cands=3 (the bound): the declined chain prints.
+#   (DH) the django-07 verdict: the declined chain also carries one by-name hop (b1 -> BX.bx2): 2 unproven hops, so it stays HEDGED
+#        (route_hedged="name-stitched" route_by_name="1" route_declined="1"): the declined hop counts in the verdict.
 #   (D4) NEGATIVE: 4 candidates: unchanged (the by-name chain, no route_tie=, no via="declined").
-#   (DX) NEGATIVE: the declined call at the right depth names another function (its list does not hold to=): unchanged.
+#   (DX) NEGATIVE: a declined call (cands=2) at the right depth whose list does not hold to= (it names fin_x): unchanged.
 #   (S)  source-first: two 3-hop chains equal on unproven hops and route_cands, the first found through tests/helper.py: the source
 #        chain prints, route_tie="source-first".
 #   (SL) the only chain runs through tests/: kept, route_tests="1".
@@ -138,7 +140,14 @@ EOF
 decl_fixture d 2 fin
 decl_fixture d3 3 fin
 decl_fixture d4 4 fin
-decl_fixture dx 2 fin_x
+decl_fixture dh 2 fin
+python3 - "$TMP/dh/app/m.py" <<'PYEOF'
+import sys
+p = sys.argv[1]; t = open(p).read()
+t = t.replace("def b1(o):\n    return b2(o)\n", "def b1(o):\n    return o.bx2(o)\n\nclass BX:\n    def bx2(self, o):\n        return b3(o)\n")
+open(p, "w").write(t)
+PYEOF
+decl_fixture dx 3 fin_x   # two fin_x definitions: b3's call is DECLINED, its list [Other2.fin_x, Other3.fin_x] does not hold Sink.fin
 # (S) / (SL): start_entry -> a1 -> tests/helper.py:th -> Sink.fin and start_entry -> b1 -> core/zz.py:ph -> Sink.fin (each 1 by name)
 src_fixture(){ local d=$1 withSource=$2; mkdir -p "$TMP/$d/tests" "$TMP/$d/core"
     printf 'from tests.helper import th\nfrom core.zz import ph\n\ndef start_entry(o):\n    a1(o)\n    b1(o)\n\ndef a1(o):\n    return th(o)\n\ndef b1(o):\n    return %s\n' \
@@ -195,6 +204,9 @@ else
 fi
 D3="$( run d3 --path=start_entry,Sink.fin )"
 check D3 "$D3" "start_entry b1 b2 b3 Sink.fin" fewer-unproven 3 1 ""
+DH="$( run dh --path=start_entry,Sink.fin )"
+check DH "$DH" "start_entry b1 BX.bx2 b3 Sink.fin" fewer-unproven 3 1 "" name-stitched
+[ "$( attr route_by_name <<<"$DH" )" = 1 ] && ok "(DH) route_by_name=\"1\" beside route_declined=\"1\"" || no "(DH) route_by_name=[$( attr route_by_name <<<"$DH" )]"
 D4="$( run d4 --path=start_entry,Sink.fin )"
 check D4 "$D4" "start_entry a1 W.w2 W.w3 Sink.fin" "" "" "" "" name-stitched
 grep -qF 'via="declined"' <<<"$D4" && no "(D4) a via=\"declined\" row with 4 candidates" || ok "(D4) no declined row past 3 candidates"
@@ -213,7 +225,7 @@ check W0 "$W0" "start_entry b1 b_one InsertCompiler.fin" fewer-unproven 2 1 ""
 
 # (L) legends ride exactly with their attributes; well-formed
 lfail=0
-for a in T C2 C2B D D3 D4 DX S SL W W0; do
+for a in T C2 C2B D D3 DH D4 DX S SL W W0; do
     out="${!a}"; lg="$( legend <<<"$out" )"
     for pair in "route_tie:route_tie=" "route_declined:route_declined=1" "route_tests:route_tests=N" "route_equal:route_equal=N"; do
         at="${pair%%:*}"; cl="${pair#*:}"

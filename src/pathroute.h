@@ -51,6 +51,7 @@
 #include "model.h"
 #include "nextverb.h"    // nextAttrXml
 #include "pathpairs.h"   // PathPairs, pathPairSelector
+#include "infra/sortutil.h"   // svLess — the by-name candidate count's sorted name list
 
 #include <algorithm>
 #include <cstddef>
@@ -339,9 +340,9 @@ private:
                     m_byNameNames.push_back( m_ing.symbols[t].name );
                 }
             }
-            std::ranges::sort( m_byNameNames );
+            std::ranges::sort( m_byNameNames, sortutil::svLess );   // the explicit byte comparator (portablebuildcheck #6)
         }
-        const auto [ lo, hi ] = std::ranges::equal_range( m_byNameNames, std::string_view( m_ing.symbols[v].name ) );
+        const auto [ lo, hi ] = std::ranges::equal_range( m_byNameNames, std::string_view( m_ing.symbols[v].name ), sortutil::svLess );
         return std::max<std::uint64_t>( std::uint64_t( hi - lo ), 1 );   // byNameCandidates' own count, >= 1
     }
 
