@@ -1986,6 +1986,7 @@ struct BindKindCounts
 {
     std::array<std::uint32_t, kLocalBindKindCount> all {};     // every record of the kind
     std::array<std::uint32_t, kLocalBindKindCount> inDef {};   // ... of them inside a definition (fromSymbol != kNoNode)
+    std::size_t localNames = 0;   // Rule 2b's local-name set: the in-definition records but FE-B's receiver evidence (buildFieldNarrowTables' filter)
 
     static BindKindCounts of( const IngestResult& ing ) noexcept
     {
@@ -1994,23 +1995,15 @@ struct BindKindCounts
         {
             const std::size_t kind = std::size_t( b.kind );
             ASSUME( kind < kLocalBindKindCount, "a Binding's kind is a LocalBindKind enumerator (the cache reader validates it)" );
+            const bool inDef = b.fromSymbol != kNoNode;
             ++counts.all[ kind ];
-            counts.inDef[ kind ] += b.fromSymbol != kNoNode ? 1u : 0u;
+            counts.inDef[ kind ] += inDef ? 1u : 0u;
+            counts.localNames += inDef && !isReceiverEvidenceKind( b.kind ) ? 1u : 0u;
         }
         return counts;
     }
     std::uint32_t allOf( LocalBindKind kind ) const noexcept { return all[ std::size_t( kind ) ]; }
     std::uint32_t inDefOf( LocalBindKind kind ) const noexcept { return inDef[ std::size_t( kind ) ]; }
-    // Rule 2b's local-name set: every in-definition record but FE-B's receiver evidence (buildFieldNarrowTables' own filter)
-    std::size_t localNameRecords() const noexcept
-    {
-        std::size_t total = 0;
-        for( std::size_t kind = 0; kind < kLocalBindKindCount; ++kind )
-        {
-            total += isReceiverEvidenceKind( LocalBindKind( kind ) ) ? 0u : inDef[ kind ];
-        }
-        return total;
-    }
 };
 
 // G1c: free a side table's storage NOW, not at the end of its scope — buildGraph's resolve-only tables, before the CSR build
@@ -2139,7 +2132,7 @@ inline void recordMemberTypeFact( HashMap<std::string, FlatRecvType>& table, con
     recordFlatRecvTypeFact( table, key, inStd ? std::string_view{} : std::string_view( cr.calleeName ), !cr.qualifier.empty(), cr.viaArrow );
 }
 
-inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const HashMap<std::string, char>& classNames, const BindKindCounts& bindCounts )
+inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const HashMap<std::string, char>& classNames )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2d: Rule-2b field-narrow tables" );
     FieldNarrowTables t;
@@ -2157,7 +2150,8 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
         key.append( cr.fieldName() );
         recordMemberTypeFact( t.fieldTypeByClass, key, cr, aliasPeel );
     }
-    t.localNameSet.reserve( bindCounts.localNameRecords() );
+    const BindKindCounts bindCounts = BindKindCounts::of( ing );   // G1a: one pass over the bindings, so each table reserves its own kind
+    t.localNameSet.reserve( bindCounts.localNames );
     t.localShadowSpans.reserve( bindCounts.inDefOf( LocalBindKind::VarDecl ) );
     for( const Binding& b : ing.bindings )
     {
@@ -3665,7 +3659,7 @@ struct JsExportTables
     HashMap<std::string, std::vector<VarSpan>> shadows;
 };
 
-inline JsExportTables buildJsExportTables( const IngestResult& ing, const BindKindCounts& bindCounts )
+inline JsExportTables buildJsExportTablesSized( const IngestResult& ing, const BindKindCounts& bindCounts )
 {
     JsExportTables ex;
     ex.shadows.reserve( bindCounts.allOf( LocalBindKind::JsShadow ) );
@@ -3721,7 +3715,7 @@ inline JsExportTables buildJsExportTables( const IngestResult& ing, const BindKi
 }
 inline JsExportTables buildJsExportTables( const IngestResult& ing )   // --affected's class-new rows (testmap.h ClassNewJsBinds)
 {
-    return buildJsExportTables( ing, BindKindCounts::of( ing ) );
+    return buildJsExportTablesSized( ing, BindKindCounts::of( ing ) );
 }
 
 // The definition `moduleFile` exports under `name` — kNoNode when the export is ambiguous, matches no definition,
@@ -3753,7 +3747,7 @@ inline JsImportTarget pinJsImport( const IngestResult& ing, const JsExportTables
     return target;
 }
 
-inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncludeCtx* workspace, const BindKindCounts& bindCounts )
+inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncludeCtx* workspace )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2g: JS/TS import tables" );
     JsImportTables tables;
@@ -3763,12 +3757,13 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
         tables.rebinds[ jsImportKey( b.fileId, b.var ) ].push_back( { b.spanStart, b.spanEnd } );
         if( b.isFromAssignment ) { tables.pinnedRebinds[ jsImportKey( b.fileId, b.var ) ].push_back( { b.spanStart, b.spanEnd } ); }
     }
+    const BindKindCounts bindCounts = BindKindCounts::of( ing );   // the pass that used to ask only "any JsImport?" (G1a)
     if( bindCounts.allOf( LocalBindKind::JsImport ) == 0 )
     {
         return tables;
     }
     tables.targets.reserve( bindCounts.allOf( LocalBindKind::JsImport ) );
-    JsExportTables ex = buildJsExportTables( ing, bindCounts );
+    JsExportTables ex = buildJsExportTablesSized( ing, bindCounts );
     for( const Binding& b : ing.bindings )
     {
         if( b.kind != LocalBindKind::JsImport || b.fileId >= ing.files.size() ) { continue; }
@@ -9802,9 +9797,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // declaration's type is simply unrecorded (test/narrowcheck.sh arm 48). An ASSIGNMENT's such type is no fact at all
     // and is skipped (resolve.h assignmentNamesNoClass, arms 44-46).
     // Deterministic: ing.bindings is in (file, byte, var) order; first binding wins, a later conflict tombstones.
-    const BindKindCounts bindCounts = BindKindCounts::of( ing );   // G1a: what each per-kind table below reserves for
     HashMap<std::string, FlatRecvType> varType;
-    varType.reserve( bindCounts.inDefOf( LocalBindKind::Type ) );
+    varType.reserve( BindKindCounts::of( ing ).inDefOf( LocalBindKind::Type ) );   // G1a: the Type records in a definition, not every binding
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/1h: varType binding table" );
         std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
@@ -9825,7 +9819,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // P2-D Rule 2b field-narrow tables (class#field → declared type, plus the local-shadow veto set) —
     // built by buildFieldNarrowTables above; consumed via Narrower::rule2bFieldRecvType in the resolve loop.
-    FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing, classNames, bindCounts );
+    FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing, classNames );
 
     // Phase 5 external-name veto evidence (docs/EVALS.md "Phase 5") — built by buildExternalVetoTables above;
     // consumed by the veto step in the resolve loop, after every receiver rule has missed.
@@ -9861,7 +9855,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     rw::FileSetStore rule3Closure  = rule3Adj.empty() ? rw::FileSetStore {} : transitiveIncludeSet( rule3Adj );
     const rw::FileSetStore& rule3Includes = rule3Adj.empty() ? fileIncludes : rule3Closure;
     CppQualifierScopes cppQualScopes = buildCppQualifierScopes( ing );   // CPP-EXTQUAL-VETO (a), read at Rule 3 below
-    JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr, bindCounts );
+    JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
     {
@@ -16029,7 +16023,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
         buildShadowKey( key, b.fromSymbol, b.var );
         recordFlatRecvType( localType, key, b );
     }
-    const FieldNarrowTables narrow = buildFieldNarrowTables( ing, classNames, bindCounts );   // "Class#field" → declared type (S5-E)
+    const FieldNarrowTables narrow = buildFieldNarrowTables( ing, classNames );   // "Class#field" → declared type (S5-E)
 
     const LocalShadowSpans localSpans = localShadowSpans( ing );   // a bare name a LOCAL declaration covers is that local, never the field
 

@@ -17,10 +17,10 @@
 
 namespace rw::memstats
 {
+// read at each of the handful of call sites (no cache: a run asks it fewer than a dozen times)
 inline bool enabled() noexcept
 {
-    static const bool on = std::getenv( "RIPWIRE_STATS" ) != nullptr;
-    return on;
+    return std::getenv( "RIPWIRE_STATS" ) != nullptr;
 }
 
 inline double mib( std::uint64_t bytes ) noexcept
