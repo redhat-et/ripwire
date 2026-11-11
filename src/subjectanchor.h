@@ -841,13 +841,171 @@ inline RouteChoice routeAnchorFallThrough( std::string_view query, const RouteCh
     return rc;
 }
 
+// ANCHOR-HONESTY: the identifier-syntax words of a query that place a SOURCE-class definition (Injector.loadProvider, Model.save,
+// concurrent.futures.ThreadPoolExecutor), each with those definitions in NodeId order. One pass over the symbols for all words.
+struct SourceSyntaxAnchor
+{
+    std::string_view    word;   // trimmed, as the query spells it
+    std::vector<NodeId> defs;   // its source-class placed definitions, never empty
+};
+inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query )
+{
+    using namespace subject_detail;
+    std::vector<std::string_view> words;
+    std::vector<Spelling>         spelled;
+    for( const std::string_view w : splitRouteWords( query ) )
+    {
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        if( !hasNameSyntax( t ) )
+        {
+            continue;
+        }
+        if( const Spelling sp = parseSpelling( t ); sp.valid )
+        {
+            words.push_back( t );
+            spelled.push_back( sp );
+        }
+    }
+    std::vector<SourceSyntaxAnchor> out;
+    if( spelled.empty() )
+    {
+        return out;
+    }
+    // the subject reading's placement (leaf + scope or file stem), and the selector verbs' own resolver for the spellings it misses (a
+    // TypeScript method carries no scope: `Injector.loadProvider` resolves through its dotted-scope tier)
+    std::vector<std::vector<NodeId>> placed = placeCandidates( ing, spelled );
+    for( std::size_t k = 0; k < placed.size(); ++k )
+    {
+        for( const NodeId id : resolveAllByNameQualified( ing, words[k] ) )
+        {
+            if( std::ranges::find( placed[k], id ) == placed[k].end() )
+            {
+                placed[k].push_back( id );
+            }
+        }
+        std::ranges::sort( placed[k] );
+        std::erase_if( placed[k], [ & ]( NodeId id ) { return !sourceClassDef( ing, id ); } );
+        if( !placed[k].empty() )
+        {
+            out.push_back( SourceSyntaxAnchor{ words[k], std::move( placed[k] ) } );
+        }
+    }
+    return out;
+}
+
+// ANCHOR-HONESTY: the plain words a short "what does X call" question frames X with. Beside a source syntax anchor they are the
+// question, not a second subject: a test-only `call` must not veto X, and a source `invoke` elsewhere must not anchor the answer.
+inline bool isCallFrameVerb( std::string_view w )
+{
+    return detail::graphSubjectWordIs( w, { "call", "calls", "invoke", "invokes" } );
+}
+
+// The query without the words `drop` selects (sentence order kept), and the dropped words that are not route stopwords.
+inline std::pair<std::string, std::vector<std::string>> queryWithout( std::string_view query, bool ( *drop )( std::string_view ) )
+{
+    std::string              kept;
+    std::vector<std::string> dropped;
+    for( const std::string_view w : splitRouteWords( query ) )
+    {
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        if( drop( t ) )
+        {
+            if( !isRouteStopword( routeLower( t ) ) )
+            {
+                dropped.emplace_back( t );
+            }
+            continue;
+        }
+        kept += kept.empty() ? "" : " ";
+        kept += w;
+    }
+    return { std::move( kept ), std::move( dropped ) };
+}
+
+inline bool isFrameOrQuestionWord( std::string_view w ) { return isCallFrameVerb( w ) || subject_detail::isQuestionLead( w ); }
+inline bool isFrameVerbWord( std::string_view w ) { return isCallFrameVerb( w ); }
+
+// ANCHOR-HONESTY R1b: a docs-file tie never beats a source definition. An anchor whose word is a source syntax anchor but whose
+// resolved definition is not source-class (the reST `.. method:: Model.save` section the whole-name index files first) is re-bound to
+// the word's first source-class definition, and the anchors: clause names that file.
+inline void preferSourceAnchorDefs( const IngestResult& ing, RouteChoice& rc, const std::vector<SourceSyntaxAnchor>& src )
+{
+    for( RouteAnchorDef& a : rc.anchorDefs )
+    {
+        const auto at = std::ranges::find_if( src, [ & ]( const SourceSyntaxAnchor& s ) { return routeLower( s.word ) == a.lowerName; } );
+        if( at == src.end() )
+        {
+            continue;
+        }
+        bool sourceBound = false;
+        for( NodeId id = 0; id < NodeId( ing.symbols.size() ) && !sourceBound; ++id )
+        {
+            const Symbol& s = ing.symbols[id];
+            sourceBound = s.fileId == a.fileId && routeLower( s.name ) == a.lowerName && subject_detail::sourceClassDef( ing, id );
+        }
+        if( sourceBound )
+        {
+            continue;
+        }
+        const Symbol& def = ing.symbols[at->defs.front()];
+        const std::string oldEvidence = routeAnchorPath( rootRelPath( ing, a.fileId ) ) + ( a.extraDefs != 0 ? "+" + std::to_string( a.extraDefs ) : "" );
+        a = RouteAnchorDef{ routeLower( def.name ), def.fileId, std::uint32_t( at->defs.size() - 1 ) };
+        const std::string newEvidence = routeAnchorPath( rootRelPath( ing, a.fileId ) ) + ( a.extraDefs != 0 ? "+" + std::to_string( a.extraDefs ) : "" );
+        const std::string from = std::string( at->word ) + "(" + oldEvidence + ")";
+        if( const std::size_t pos = rc.reason.find( from ); pos != std::string::npos )
+        {
+            rc.reason.replace( pos, from.size(), std::string( at->word ) + "(" + newEvidence + ")" );
+        }
+    }
+}
+
+// ANCHOR-HONESTY + WH-WORD-GUARD on a name-exact route whose query holds a source syntax anchor (the rules: tmp B27 RULE.md):
+//   R1a the call-frame verbs and question leads leave the ROUTE: the reduced query is routed again and, if still name-exact, replaces
+//       it, its reason naming the dropped words;
+//   R1b a non-source anchor definition of a source syntax anchor is re-bound to the source one.
+// Returns the source syntax anchors it judged by (empty: nothing changed).
+inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& ing, std::string_view task, SubjectRoute& out )
+{
+    if( out.route.which != LexMode::NameExact )
+    {
+        return {};
+    }
+    const std::string_view          query = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
+    std::vector<SourceSyntaxAnchor> src   = sourceSyntaxAnchors( ing, query );
+    if( src.empty() )
+    {
+        return src;
+    }
+    if( out.rankQuery.empty() )
+    {
+        auto [ reduced, dropped ] = queryWithout( query, &isFrameOrQuestionWord );
+        if( reduced != query )
+        {
+            RouteChoice bare = chooseForRanker( ing, reduced );
+            if( bare.which == LexMode::NameExact )
+            {
+                if( !dropped.empty() )
+                {
+                    bare.reason += subjectDroppedClause( ing, dropped );
+                }
+                out.route     = std::move( bare );
+                out.rankQuery = queryWithout( query, &isFrameVerbWord ).first;   // the frame verbs rank no longer
+            }
+        }
+    }
+    preferSourceAnchorDefs( ing, out.route, src );
+    return src;
+}
+
 // THE entry point both the CLI lens and the MCP verbs call in place of chooseForRanker. No reading and a source-backed anchor: exactly
 // chooseForRanker. confidence= reads low on anchorNoSource, and route= says why, so the answer explains itself in every legend dialect.
 inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
 {
     SubjectRoute out = chooseSubjectRouteUnchecked( ing, g, task, servesBodiesAndCallers );
+    // R1c: a source syntax anchor vouches for the route by itself, whatever plain word resolved beside it
+    const bool sourceSyntax = !applyAnchorHonesty( ing, task, out ).empty();
     const std::string_view rankQuery = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
-    out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, rankQuery );
+    out.anchorNoSource = !sourceSyntax && !routeAnchorHasSourceDef( ing, out.route, rankQuery );
     if( out.anchorNoSource && routeAnchorUncommitted( out.route ) )
     {
         out.route = routeAnchorFallThrough( rankQuery, out.route );   // the words rank; no anchorDefs restrict the bodies
