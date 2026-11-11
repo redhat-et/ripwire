@@ -1736,6 +1736,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     std::size_t sigsDroppedPositive = 0;   // A2: set only by the memstream-buffered render below (nullptr on the ENOMEM degrade path)
     std::vector<rw::NodeId> jsonShownIds;   // lane 2: the sigs rows actually emitted (the XML twin's shownSigIds)
     std::string sigsJson;
+    std::optional<std::size_t> jsonAtCutUndemoted;   // DEMOTE-ALL-DIALECTS: the rows at the cut before the pointers (the tail's charge)
     {
         rw::MemoryStream sigsStream;
         bool             isSigsBuffered = false;
@@ -1761,6 +1762,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
         // pointer object; under a soft target the bytes they free buy rows past the cut first (the rows stay a rank prefix)
         if( isSigsBuffered )
         {
+            const auto atCutOf = [ & ] { return sigsJson.size() - std::min( sigsJson.size(), sigsCut.pastTargetBytes ); };
             const auto point = [ & ] { return rw::demoteJsonRows( in.ing, *in.graph, in.task, sigsJson, jsonShownIds,
                                                                 in.tokenBudget > 0 ? rw::DemoteRegime::Budgeted : rw::DemoteRegime::Default ); };
             const auto renderAt = [ & ]( std::size_t rowDrop )
@@ -1772,6 +1774,10 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
                 ? rw::refillRowsForDemote( sigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsJson; }, [ & ] { return sigsCut.rowDropCut; },
                                            [ & ] { return jsonShownIds.size(); }, renderAt, point )
                 : point();
+            // the tail below is funded from the rows AT THE CUT; pastTargetBytes measures the rows as rendered, so the charge is taken
+            // before the pointers shorten them: bytes freed past the target are not at-target bytes (CodeRabbit 4543056277), and the
+            // refill above already spent the freed bytes on rows
+            jsonAtCutUndemoted = atCutOf();
             if( !pointed.empty() )
             {
                 sigsJson = std::move( pointed );
@@ -1879,7 +1885,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     // DEEP-TAIL (FOLD C: page 0 of the file page), the explicit-regime fill (forLensJsonTailStanza above): reserve first — funded
     // from what the rows AT THE CUT left of the bundle budget (the same share the refill above priced the rows against)
     // lane 2: the rank rows exclude the files of the rows emitted (after a refill: the rows it kept — the XML twin's rule)
-    const std::size_t  jsonCutRows = sigsJson.size() - std::min( sigsJson.size(), sigsCut.pastTargetBytes );
+    const std::size_t  jsonCutRows = jsonAtCutUndemoted.value_or( sigsJson.size() - std::min( sigsJson.size(), sigsCut.pastTargetBytes ) );
     const rw::FileTail jsonTail    = rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task );
     std::size_t        jsonTailShown = 0;
     tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, forLensJsonTailShare( in.tokenBudget, bundleBudget, fixedBytes, jsonCutRows ), &jsonTailShown );

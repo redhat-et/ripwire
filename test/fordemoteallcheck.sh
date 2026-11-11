@@ -25,6 +25,11 @@
 #        budget_tokens=2000 every hit variant past <d> rank 10 is a <d> row (>= 1 such, counted); (k8n) premise: the variants no term
 #        hits (01..04) past rank 10 are still pointers in those answers (counted; FAILS on zero); (k8d) no budget: K8 does not run, a
 #        hit variant past rank 10 is a pointer in the default answer (counted; FAILS on zero)
+#   (jt) the --json tail's charge (CodeRabbit 4543056277): a soft target funds the tail from the rows AT THE CUT as rendered, so the
+#        bytes the pointers free (already spent on rows by the refill) are not funded again: on a wider tree (t2: 24 more long-signature
+#        variants, 55 more one-row files) the demoted answer's tail shows no more files than its undemoted twin's at N = 1600, 2000,
+#        2500 (red before: 29 / 50 / 62 against 24 / 29 / 36). Premise, counted: each answer carries >= 1 pointer and its twin's tail
+#        >= 1 file; FAILS on zero.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -207,6 +212,44 @@ if [ "$k8u" -ge 1 ] && [ "$k8mu" -ge 1 ]; then ok "(k8n) premise: the same budge
 else no "(k8n) premise: no pointer among the variants no term hits (CLI $k8u, MCP $k8mu) — the arm proves nothing"; fi
 if [ "$k8dh" -ge 1 ]; then ok "(k8d) no budget: K8 does not run — $k8dh hit variant(s) past rank 10 are pointers in the default answer"
 else no "(k8d) no hit variant is a pointer in the default answer ($k8dh): K8 ran without a budget, or the premise is gone"; fi
+
+# (jt) the --json tail is funded from the rows at the cut as rendered, not from the bytes the pointers free
+cp -R "$TMP/t" "$TMP/t2"
+python3 - "$TMP/t2/src" <<'PY' || { echo "fixture generator failed"; exit 2; }
+import os, sys
+d = sys.argv[1]
+for i in range( 6, 61 ):
+    open( os.path.join( d, f"o{i}.cc" ), "w" ).write( f"// Widget config other {i}.\nint widget_config_other_{i}(int x) {{ return x + {i}; }}\n" )
+s = ""
+for i in range( 17, 41 ):
+    s += f"""// Widget config variant {i}: a helper that reads one widget config field and checks the widget config parsed value.
+int widget_config_variant_{i:02d}(int widget_config_parsed_value_argument_{i}, int widget_config_checked_value_argument_{i}) {{
+  return widget_config_parsed_value_argument_{i} * {i} + widget_config_checked_value_argument_{i};
+}}
+"""
+open( os.path.join( d, "cfg.cc" ), "a" ).write( s )
+PY
+jt=0
+for N in 1600 2000 2500; do
+    ( cd "$TMP/t2" && "$BIN" . --no-cache "--for=$TASK" --json --token-budget=$N ) >"$TMP/jt$N.json"; rca=$?
+    ( cd "$TMP/t2" && "${OFF[@]}" "$BIN" . --no-cache "--for=$TASK" --json --token-budget=$N ) >"$TMP/jt$N.off"; rcb=$?
+    r="$( python3 - "$TMP/jt$N.json" "$TMP/jt$N.off" <<'PY'
+import json, sys
+try:
+    on, off = json.load( open( sys.argv[1] ) ), json.load( open( sys.argv[2] ) )
+    ptr = sum( 1 for x in on["sigs"] if "pointer" in x ); a, b = on["tail"]["shown"], off["tail"]["shown"]
+    print( "%d %d %d" % ( ptr, a, b ) )
+except Exception as e:
+    print( "ERR %s" % e )
+PY
+)"
+    set -- $r
+    if [ "$rca" -ne 0 ] || [ "$rcb" -ne 0 ] || [ "$1" = ERR ]; then no "(jt) N=$N: the runs exited $rca / $rcb ($r)"
+    elif [ "$1" -lt 1 ] || [ "$3" -lt 1 ]; then no "(jt) N=$N premise: $1 pointers, the twin's tail $3 files (want >= 1 each)"
+    elif [ "$2" -gt "$3" ]; then no "(jt) N=$N: the demoted answer's tail shows $2 files > its undemoted twin's $3 (the freed bytes funded twice)"
+    else jt=$(( jt + 1 )); fi
+done
+[ "$jt" = 3 ] && ok "(jt) --json tail at N = 1600 2000 2500: never more files than the undemoted twin's (pointers and twin tails counted)"
 
 [ "$fail" = 0 ] && echo "fordemoteallcheck: PASS" || echo "fordemoteallcheck: FAIL"
 exit "$fail"
