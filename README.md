@@ -2463,6 +2463,7 @@ to it:
 - What does the linter flag? (`--lint`)
 - Which cross-module call seams does no test reach? (`--seams`)
 - What is built but switched off in this repo? (`--flags`)
+- Which environment variables do the shell scripts read, which ones must be set, and with what defaults? (`--flags --json`: each Bash read carries `form=` required/default/settest/plain, `colon=`, `default=`)
 - How do the modules depend on each other? (`--deps`)
 - Does the code follow our layering rules? (`--arch`)
 - Which clusters of code belong together? (`--communities`)
@@ -2786,7 +2787,7 @@ This is the part to wire into a script.
 
 `--json` emits JSON instead of XML, with keys mirroring the XML attribute names one to one. It is an
 allow-list: the default map, `--for`, `--pack-task`, `--callers`, `--callees`, `--impact`,
-`--quality-delta`, `--test-gate`, `--metrics`, and `--plan-lanes`, which is JSON-native. Every other
+`--quality-delta`, `--test-gate`, `--metrics`, `--flags`, and `--plan-lanes`, which is JSON-native. Every other
 verb refuses on stderr with exit 1 rather than silently falling back to XML, so a verb added tomorrow
 refuses by default.
 

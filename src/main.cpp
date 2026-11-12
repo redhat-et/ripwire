@@ -3242,6 +3242,7 @@ void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
 inline constexpr std::string_view kJsonVerbs[] =
 {
     "--for", "--pack-task", "--callers", "--callees", "--impact", "--quality-delta", "--test-gate", "--metrics", "--defs",
+    "--flags",        // the gate rows, Bash env reads (form/colon/default) included — a CI contract check's input
     "--plan-lanes",   // JSON-NATIVE: emits JSON with or without the flag, and says so (the redundancy note in main)
 };
 
@@ -4465,7 +4466,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                 // The sentence is the allow-list (kJsonVerbs) spelled out; keep the two in step.
                 rw::emitTo( stderr, "ripwire: --json is not yet supported for {} — supported: the default map, "
                               "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
-                              "--metrics, --defs, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
+                              "--metrics, --defs, --flags, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
             }
             return 1;
         }
