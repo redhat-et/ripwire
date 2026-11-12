@@ -261,10 +261,34 @@ rrun(){
 # Literals from the W1-MEASURE census. These are the
 # flagship "did I break a caller?" sites: selectBaseline's second caller is a hard compile error under an
 # arity change and was never named; writeTally had a def and two call sites and reported ZERO callers.
-rrun US --uses=selectBaseline \
-&& { { [ "$( cnt "$US" )" = 2 ] && printf '%s' "$US" | grep -q 'mcpverbs.h'; } \
-    && ok "repo: --uses=selectBaseline count=2 and names the mcpverbs.h qualified caller (was 1)" \
-    || no "repo: --uses=selectBaseline expected 2 incl. mcpverbs.h, got '$( cnt "$US" )': $US"; }
+# DERIVED, NOT PINNED (2026-11-12, B43 PINNED-SELF-COUNTS). The repo-root --uses counts below were literals re-pinned on
+# every lane that added a call site (readWholeFile 4 -> 60 over 40 re-pins, the history below). Each is now compared with
+# test/lib/sitecount.py's lexical count of the same name over src/ (calls outside comments and literals, the definition
+# excluded): a new call site moves both sides and stays green, a resolver regression moves only ripwire's side and reds.
+# (§6-self) proves the derivation is live on a fixture first -- a derivation that counts nothing would make every arm vacuous.
+derive(){ python3 "$ROOT/test/lib/sitecount.py" "$1" "$2" 2>/dev/null | cut -d' ' -f1; }
+SCX="$( mktemp -d )"; mkdir -p "$SCX/src"
+printf '%s\n' 'inline int fooRead( const char* p ) { return p != nullptr; }' 'int a() { return fooRead( "x" ); } // fooRead( "c" )' \
+    'int b() { return detail::fooRead( "fooRead(" ) + fooRead<int>( nullptr ); }' >"$SCX/src/a.h"
+sc0="$( derive "$SCX" fooRead )"
+printf '%s\n' 'int c() { return fooRead( "y" ); }' >"$SCX/src/b.cpp"
+sc1="$( derive "$SCX" fooRead )"
+rm -f "$SCX/src/b.cpp"; printf '%s\n' 'inline int fooRead( const char* p ) { return 0; }' >"$SCX/src/a.h"
+sc2="$( derive "$SCX" fooRead )"; rm -rf "$SCX"
+if [ "$sc0" = 3 ] && [ "$sc1" = 4 ] && [ "$sc2" = 0 ]; then
+    ok "(§6-self) sitecount derives 3 calls on the fixture (comment, literal and definition excluded), 4 after +1 site, 0 after the drop"
+else
+    no "(§6-self) sitecount on the fixture: expected 3 / 4 / 0 calls, got '$sc0' / '$sc1' / '$sc2' -- the derived pins below are not live"
+fi
+# pin_derived LABEL VAR NAME [EXTRA-GREP] -- ripwire's count must equal the derivation, and the derivation must be >= 1.
+pin_derived(){
+    local got want; got="$( cnt "${!2}" )"; want="$( derive "$ROOT" "$3" )"
+    if ! [ "${want:-0}" -ge 1 ] 2>/dev/null; then no "repo: $1 -- sitecount derived '${want}' call sites of $3 (expected >= 1; the derivation went blind)"
+    elif [ "$got" != "$want" ]; then no "repo: $1 expected the derived $want, got '$got' -- ripwire's resolver and test/lib/sitecount.py disagree on $3's call sites"
+    elif [ -n "${4:-}" ] && ! printf '%s' "${!2}" | grep -q "${4:-}"; then no "repo: $1 count=$got but does not name ${4:-}"
+    else ok "repo: $1 count=$got = sitecount's derivation${4:+, names ${4:-}}"; fi
+}
+rrun US --uses=selectBaseline && pin_derived "--uses=selectBaseline (incl. the mcpverbs.h qualified caller; was 1)" US selectBaseline 'mcpverbs.h'
 # 4 -> 5 when src/readability.h adopted docparse::detail::readWholeFile as the canonical whole-file read
 # (the feat/readability-lens round); 5 -> 6 when src/renamemine.h adopted the same one (feat/naming-calibration);
 # 6 -> 7 when src/commentcoherence.h adopted the same one (feat/comment-coherence);
@@ -384,18 +408,13 @@ rrun US --uses=selectBaseline \
 # 58 -> 60 2026-11-08 (lane/docs-units, DOCS-UNITS, measured after merging main at fc0e35967: the two new <u> rows): a document's bytes are read
 # through the canonical helper in src/ingest_docpass.h docTextOfDoc (an HTML page's bytes, read once in the doc post-pass) and src/recall.h
 # recallDocText (a document with no extracted text, read for its section offsets). No new fopen/fread. #571 stacks on this pin.
-rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 60 ] \
-    && ok "repo: --uses=readWholeFile count=60 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 60, got '$( cnt "$RW" )'"; }
+# 60 -> DERIVED 2026-11-12 (B43): the count is test/lib/sitecount.py's, see (§6-self) above; no further re-pins.
+rrun RW --uses=readWholeFile && pin_derived "--uses=readWholeFile (docparse::detail:: -- a seam the audit's rw::-anchored grep missed)" RW readWholeFile
 rrun WC --callers=writeTally \
-&& { [ "$( cnt "$WC" )" = 1 ] \
-    && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
-    || no "repo: --callers=writeTally expected 1, got '$( cnt "$WC" )'"; }
-rrun WU --uses=writeTally \
-&& { [ "$( cnt "$WU" )" = 2 ] \
-    && ok "repo: --uses=writeTally count=2 (the two explicit-template-argument call sites)" \
-    || no "repo: --uses=writeTally expected 2, got '$( cnt "$WU" )'"; }
+&& { [ "$( cnt "$WC" )" -ge 1 ] 2>/dev/null \
+    && ok "repo: --callers=writeTally count=$( cnt "$WC" ) >= 1 (was 0 — the template call sites' callers are named)" \
+    || no "repo: --callers=writeTally expected >= 1 (the defect was 0), got '$( cnt "$WC" )'"; }
+rrun WU --uses=writeTally && pin_derived "--uses=writeTally (the explicit-template-argument call sites)" WU writeTally
 rrun HM --callers=headSnapshotIngestMutex \
 && { [ "$( cnt "$HM" )" = 0 ] \
     && ok "repo: --callers=headSnapshotIngestMutex stays 0 — its 4 sites are most-vexing-parse declarations" \

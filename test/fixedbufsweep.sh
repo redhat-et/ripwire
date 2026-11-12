@@ -74,9 +74,9 @@
 #   (S5) LIVE — the six converted emitters, exercised at a ~600-byte corpus path, must be xmllint-clean.
 #        A static gate proves the shape; this proves the fix. (test/det-gate.sh and test/xmlwellformed.sh
 #        carry the same width fixture for the determinism and G4 halves — see §B15.)
-#   (S6) THE COUNTS ARE ASSERTED — mentions / calls / string-interpolating sites / rows / width-form sites
-#        are pinned next to the table and re-derived every run, so no figure in this file is printed without
-#        being checked. The header's own count had already rotted by one before this arm existed.
+#   (S6) THE ENUMERATION IS LIVE — mentions / calls / string-interpolating sites / rows are re-derived every run,
+#        printed, and held to a floor and to calls <= mentions, sites <= calls, rows <= sites; width-form sites are
+#        0. Until 2026-11-12 the counts were pinned exactly, which re-pinned arithmetic (S1)/(S2) already check.
 #
 # Usage:  test/fixedbufsweep.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fixedbufsweep.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
@@ -627,6 +627,12 @@ if not bad:
 #            2026-10-18 (lane/hrr): +1 call/+1 mention/+1 site, rows unchanged (363/248/248/109 -> 364/249/249/109): sigsOpenTag's
 #            nb[96] ' files_first="{}"' (35 B worst case, one size_t, nothing escaped) — re-read and sized before this pin.
 EXPECTED = { "mentions": 366, "calls": 251, "sites": 251, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=); arch-honest: +2 (packDeps hb, hdr)
+#            2026-11-12 (B43 PINNED-SELF-COUNTS): EXPECTED above is now HISTORY, not a pin -- it drifted on #619 (and on every
+#            lane that added one site) while (S1)/(S2) already held the member set both ways: every derived site is a TABLE
+#            row with its multiplicity, and no row is stale. An exact count on top of that only re-pins arithmetic. What (S1)/(S2)
+#            cannot see is the enumerator going BLIND (a regex that matches nothing passes both vacuously), so (S6) is a FLOOR
+#            below every count this file has ever recorded, plus the order invariants and widthforms == 0 (a claim, not a count).
+FLOOR = { "mentions": 150, "calls": 100, "sites": 100, "rows": 40 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
@@ -646,16 +652,19 @@ EXPECTED = { "mentions": 366, "calls": 251, "sites": 251, "rows": 109, "widthfor
 #            snprintf CALL and no new fixed buffer entered src/ in this round beyond the one Phase 5 site already rowed.
 # 2026-09-03 (round 4 merge): +1 call/+1 mention — quality.h ack-ledger lockfile name "ripwire-sidecar-%016llx.lock" into a sized buffer, bounded hex (re-read, not just counted)
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
-drift    = { k: ( EXPECTED[k], derived[k] ) for k in EXPECTED if EXPECTED[k] != derived[k] }
-if drift:
-    no_( "(S6) the pinned enumeration has drifted: %s — re-derive the TABLE against the new population, then "
-         "set EXPECTED in test/fixedbufsweep.sh to { %s }. Do not update the number without re-reading the "
-         "sites it counts: that is how this gate's own header rotted."
-         % ( ", ".join( "%s pinned %d, source has %d" % ( k, a, b ) for k, ( a, b ) in sorted( drift.items() ) ),
-             ", ".join( '"%s": %d' % ( k, derived[k] ) for k in sorted( derived ) ) ) )
+short    = { k: ( FLOOR[k], derived[k] ) for k in FLOOR if derived[k] < FLOOR[k] }
+order    = [ "%s %d > %s %d" % ( a, derived[a], b, derived[b] )
+             for a, b in ( ( "calls", "mentions" ), ( "sites", "calls" ), ( "rows", "sites" ) ) if derived[a] > derived[b] ]
+if short or order or widths:
+    no_( "(S6) the enumeration looks blind or inconsistent: %s%s%s -- the sweep's regexes no longer see src/'s format "
+         "calls; fix the matcher before trusting (S1)/(S2)"
+         % ( ", ".join( "%s %d below the floor %d" % ( k, b, a ) for k, ( a, b ) in sorted( short.items() ) ),
+             ( "; " if short and order else "" ) + "; ".join( order ),
+             ( "; " if ( short or order ) else "" ) + ( "%d width/precision-form site(s), expected 0" % len( widths ) if widths else "" ) ) )
 else:
-    ok_( "(S6) the enumeration is ASSERTED and holds: %d mentions, %d calls, %d fixed-buffer sites "
-         "(%d via a width/precision form), %d table rows" % ( mentions, calls, sites, len( widths ), len( found ) ) )
+    ok_( "(S6) the enumeration is live: %d mentions >= %d, %d calls >= %d, %d fixed-buffer sites >= %d (0 via a width/precision "
+         "form), %d table rows >= %d; (S1)/(S2) hold the member set" % ( mentions, FLOOR["mentions"], calls, FLOOR["calls"],
+         sites, FLOOR["sites"], len( found ), FLOOR["rows"] ) )
 
 # (S1b) nothing is allowed to be classified 'breaching'
 breaching = [ k for k, v in TABLE.items() if v[1] == "breaching" ]
