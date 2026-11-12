@@ -174,11 +174,9 @@ inline constexpr const char* kExemplarSelectionRule =
     "chosen by ROLE, NEVER by text similarity to your task: candidates are first filtered to cognitive "
     "complexity at or under the ccx ceiling (4x the complexity bar), then ordered non-fixture path before "
     "test-fixture path, tested before untested, higher fan-in, lower complexity, fewer lines, lowest id. "
-    "low_confidence=1 marks a weak task-to-kind match that fell back to fn, or (with off_task=1) a task that did "
-    "match the corpus while the role pick shares no word with it or with the names it matched, so it is a shape "
-    "to copy, not the code your task is about; over_ccx_bar=1 marks a corpus "
-    "where nothing was under the ceiling, so the pick is the least bad rather than a clean one; candidates= "
-    "counts the ELIGIBLE instances of the kind (post-ceiling), not every instance";
+    "low_confidence=1 marks a weak task-to-kind match that fell back to fn, or with off_task=1 a pick sharing "
+    "no word with the task; over_ccx_bar=1 marks a corpus where nothing was under the ceiling, so the pick is "
+    "least bad; candidates= counts the ELIGIBLE (post-ceiling) instances";
 
 // The selection result. `winner == kNoNode` ⇒ no candidate of the kind (caller reports not-found).
 struct ExemplarPick
