@@ -1071,49 +1071,44 @@ inline void rustMacroPathOf( std::string_view pathText, std::string& qualifier, 
 // name a macro of the expansion site: not read, a floor). String literals and comments are skipped; `$crate::x != y` is no call.
 namespace rust_transcriber_scan
 {
-inline bool identChar( char c ) noexcept { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; }
-inline bool blankChar( char c ) noexcept { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+// blanks: space, tab, CR, LF (rw::isJsonWs is exactly that set); identifier bytes: namesplit::isIdentChar (ASCII)
 inline std::uint32_t skipBlanks( std::string_view src, std::uint32_t k, std::uint32_t end ) noexcept
 {
-    while( k < end && blankChar( src[ k ] ) )
+    while( k < end && rw::isJsonWs( src[ k ] ) )
     {
         ++k;
     }
     return k;
 }
-// A string literal or a comment at `i`: moves `i` past it (a line comment stops at its newline, which the caller counts),
-// adding the newlines it holds to `line`. False, `i` unmoved, when `i` starts neither.
-inline bool skipLiteralOrComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+// A string literal at `i` (`"` to its unescaped close): moves `i` past it, adding the newlines it holds to `line`.
+inline void skipStringLiteral( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
 {
-    const char c    = src[ i ];
+    for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
+    {
+        line += src[ i ] == '\n' ? 1u : 0u;
+    }
+    ++i;
+}
+// A comment at `i` (`//` or `/*`): moves `i` past it (a line comment stops at its newline, which the caller counts), adding the
+// newlines a block comment holds to `line`. False, `i` unmoved, when `i` starts none.
+inline bool skipComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
     const char next = i + 1 < end ? src[ i + 1 ] : '\0';
-    if( c == '"' )   // to its unescaped close
+    if( src[ i ] != '/' || ( next != '/' && next != '*' ) )
     {
-        for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
-        {
-            line += src[ i ] == '\n' ? 1u : 0u;
-        }
-        ++i;
+        return false;
+    }
+    if( next == '/' )
+    {
+        i = static_cast<std::uint32_t>( std::min<std::size_t>( src.find( '\n', i ), end ) );
         return true;
     }
-    if( c == '/' && next == '/' )
+    for( i += 2; i + 1 < end && !( src[ i ] == '*' && src[ i + 1 ] == '/' ); ++i )
     {
-        while( i < end && src[ i ] != '\n' )
-        {
-            ++i;
-        }
-        return true;
+        line += src[ i ] == '\n' ? 1u : 0u;
     }
-    if( c == '/' && next == '*' )
-    {
-        for( i += 2; i + 1 < end && !( src[ i ] == '*' && src[ i + 1 ] == '/' ); ++i )
-        {
-            line += src[ i ] == '\n' ? 1u : 0u;
-        }
-        i += 2;
-        return true;
-    }
-    return false;
+    i += 2;
+    return true;
 }
 // `$crate` at `at` followed by ( `::` ident )+ `!` (not `!=`): the last segment's [nameAt, nameEnd). Only peeks.
 inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
@@ -1128,7 +1123,7 @@ inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint3
             break;
         }
         const std::uint32_t segAt = skipBlanks( src, k + 2, end );
-        for( k = segAt; k < end && identChar( src[ k ] ); ++k )
+        for( k = segAt; k < end && namesplit::isIdentChar( src[ k ] ); ++k )
         {
         }
         if( k == segAt )
@@ -1146,7 +1141,7 @@ inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint3
 inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::uint32_t nameAt, std::uint32_t nameEnd, std::uint32_t fileId, std::uint32_t line )
 {
     std::string_view path = src.substr( at, nameAt - at );   // `$crate::a::` — its trailing `::` dropped
-    while( !path.empty() && ( blankChar( path.back() ) || path.back() == ':' ) )
+    while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
     {
         path.remove_suffix( 1 );
     }
@@ -1183,11 +1178,16 @@ inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fil
             ++i;
             continue;
         }
-        if( skipLiteralOrComment( src, i, end, line ) )
+        if( src[ i ] == '"' )
+        {
+            skipStringLiteral( src, i, end, line );
+            continue;
+        }
+        if( skipComment( src, i, end, line ) )
         {
             continue;
         }
-        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && identChar( src[ i + 6 ] ) );
+        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && namesplit::isIdentChar( src[ i + 6 ] ) );
         if( !atCrate )
         {
             ++i;
