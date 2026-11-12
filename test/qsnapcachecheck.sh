@@ -77,9 +77,9 @@ if [ -n "$QF" ]; then ok "run 1 creates a qsnap Snapshot cache file"; else no "n
 I1="$( [ -n "$QF" ] && inode_of "$QF" )"
 
 run --no-cache >"$TMP/a2" 2>/dev/null; rc2=$?
-diff -q "$TMP/a1" "$TMP/a2" >/dev/null \
-    && ok "run 2 byte-identical to run 1 (cached == uncached output)" \
-    || { no "cached output diverges from run 1"; diff "$TMP/a1" "$TMP/a2" | head -6; }
+[ "$rc1" = 0 ] && [ "$rc2" = 0 ] && diff -q "$TMP/a1" "$TMP/a2" >/dev/null \
+    && ok "run 2 byte-identical to run 1 (cached == uncached output), both exit 0" \
+    || { no "cached output diverges from run 1, or a run failed (exit $rc1 / $rc2)"; diff "$TMP/a1" "$TMP/a2" | head -6; }
 
 I2="$( [ -n "$QF" ] && inode_of "$QF" )"
 [ -n "$I1" ] && [ "$I1" = "$I2" ] && ok "run 2 REUSED the qsnap blob (inode stable — heavy path skipped)" \
@@ -130,8 +130,8 @@ EOF
 run --no-cache >"$TMP/c_warm" 2>/dev/null; rcw=$?     # HEAD Snapshot served from the qsnap cache
 rm -f $( qsnapfiles )
 run --no-cache >"$TMP/c_cold" 2>/dev/null; rccold=$?  # HEAD Snapshot recomputed from scratch
-diff -q "$TMP/c_warm" "$TMP/c_cold" >/dev/null \
-    && ok "introduced regression reported byte-identically cached vs uncached" \
+[ "$rcw" = "$rccold" ] && diff -q "$TMP/c_warm" "$TMP/c_cold" >/dev/null \
+    && ok "introduced regression reported byte-identically cached vs uncached (same exit $rcw)" \
     || { no "regression report differs cached vs uncached (exit warm=$rcw cold=$rccold)"; diff "$TMP/c_warm" "$TMP/c_cold" | head -8; }
 grep -q 'kind="complexity"' "$TMP/c_warm" \
     && ok "the introduced complexity regression is actually reported (non-vacuous)" \
@@ -152,12 +152,12 @@ after="$( nqsnap )"
 # ── (e) degrade on corrupt qsnap blob → alert on stderr + correct output ───────────────────────────────────
 # ground truth from a pristine private cache dir, then corrupt every qsnap blob in our dir and re-run.
 mkdir -p "$TMP/coldxdg"
-env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg" "$BIN" "$REPO" --quality-delta --no-cache >"$TMP/e_truth" 2>/dev/null
+env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg" "$BIN" "$REPO" --quality-delta --no-cache >"$TMP/e_truth" 2>/dev/null; rcet=$?
 for f in $( qsnapfiles ); do printf 'QSNP\xff\xff\xff\xffGARBAGE-not-a-valid-snapshot-blob\x00\x01\x02' > "$f"; done
 run --no-cache >"$TMP/e1" 2>"$TMP/e_err"; rce=$?
-diff -q "$TMP/e1" "$TMP/e_truth" >/dev/null \
+[ "$rce" = "$rcet" ] && diff -q "$TMP/e1" "$TMP/e_truth" >/dev/null \
     && ok "corrupt qsnap blob degrades to recompute — output byte-identical (degrade-don't-crash)" \
-    || { no "corrupt qsnap blob changed the output (exit=$rce)"; diff "$TMP/e_truth" "$TMP/e1" | head -6; }
+    || { no "corrupt qsnap blob changed the output or the exit (exit=$rce, cold truth $rcet)"; diff "$TMP/e_truth" "$TMP/e1" | head -6; }
 grep -qi 'Snapshot cache corrupt' "$TMP/e_err" \
     && ok "corrupt qsnap blob emits a DEGRADED alert to stderr" \
     || { no "no corrupt-blob alert on stderr"; head -3 "$TMP/e_err"; }

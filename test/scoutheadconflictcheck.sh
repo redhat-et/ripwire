@@ -150,7 +150,7 @@ WTREF="$( tr '<' '\n' <"$TMP/uc.xml" | sed -n 's/^arm ref="\([^"]*\)".*/\1/p' | 
 if [ "$rcC" = 0 ] && armAttrs "$TMP/uc.xml" armB | grep -q 'head_conflicts="0">' \
    && [ -n "$WTREF" ] && armAttrs "$TMP/uc.xml" "$WTREF" | grep -q 'ok="1" changed="1"'; then
     ok "UNAVAIL control: pass-through shim — armB head_conflicts=0 (row carries no head_conflicts_ok=), working tree changed=1 (gamma)"
-    armAttrs "$TMP/um.xml" armB | grep -q 'head_conflicts="0" head_conflicts_ok="0"' \
+    [ "$rcM" = 0 ] && armAttrs "$TMP/um.xml" armB | grep -q 'head_conflicts="0" head_conflicts_ok="0"' \
         && ok "UNAVAIL: an unavailable HEAD tree leaves armB's head conflicts UNKNOWN (head_conflicts_ok=\"0\"), not a false beta row" \
         || no "UNAVAIL: head-conflict lane diffed an unavailable HEAD as empty (exit $rcM): $( armAttrs "$TMP/um.xml" armB )"
     armAttrs "$TMP/um.xml" "$WTREF" | grep -q 'ok="0" reason="tree_unavailable" changed="0"' \

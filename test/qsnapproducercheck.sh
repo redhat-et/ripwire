@@ -270,7 +270,7 @@ else
 
     cp "$TMP/f1.bin" "$QF"
     run >"$TMP/f1_out" 2>"$TMP/f1_err"; rc1=$?
-    { ! grep -q 'kind="dead-code"' "$TMP/f_cold" && grep -q 'kind="dead-code"' "$TMP/f1_out"; } \
+    { [ "$rc1" = 2 ] && ! grep -q 'kind="dead-code"' "$TMP/f_cold" && grep -q 'kind="dead-code"' "$TMP/f1_out"; } \
         && ok "(F1) control: the forged dead set, producer kept, IS served — a dead-code row the cold run lacks (exit $rcf -> $rc1)" \
         || no "(F1) control did not fire (cold exit $rcf, forged exit $rc1) — the forgery cannot show a stale set is harmful"
 
