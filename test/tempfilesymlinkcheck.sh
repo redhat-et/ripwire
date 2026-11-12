@@ -219,8 +219,9 @@ savecache_temp_verdict(){
     nRel="$(    printf '%s\n' "$body" | grep -cE '\.releaseFd\(\)' )"
     nFd="$(     printf '%s\n' "$body" | grep -cE 'fdopen\( *rawFd' )"
     nCommit="$( printf '%s\n' "$body" | grep -cE '\.commit\( *path *\)' )"
-    # any other way to open a file by name: fopen/freopen, an fstream, a raw open(2) (fdopen does not match: a letter precedes "open(")
-    nOther="$(  printf '%s\n' "$body" | grep -cE '(^|[^A-Za-z_])(std::|::|os::)?(f|fre)?open\(|std::(o|i)?fstream|O_TRUNC' )"
+    # any other way to open a file by name: fopen/freopen, an fstream, a raw open(2)/openat(2)/creat(2) (fdopen does not match:
+    # a letter precedes "open(")
+    nOther="$(  printf '%s\n' "$body" | grep -cE '(^|[^A-Za-z_])(std::|::|os::)?((f|fre)?open|openat|creat)\(|std::(o|i)?fstream|O_TRUNC' )"
     local counts="createExclTempFile=$nExcl releaseFd=$nRel fdopen(rawFd)=$nFd commit(path)=$nCommit other-opens=$nOther"
     if [ "$nExcl" -ge 1 ] && [ "$nRel" -ge 1 ] && [ "$nFd" -ge 1 ] && [ "$nCommit" -ge 1 ] && [ "$nOther" = 0 ]; then
         echo "OK $counts"
