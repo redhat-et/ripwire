@@ -102,9 +102,9 @@ if [ -n "$w2" ] && [ "$w2" -ge 75 ]; then
 else no "(s1) PREMISE: the fixture function is not ccx >= 75 (row: '${r2:-none}'); stderr: $( head -c 300 "$TMP/s2.xml.err" )"; fi
 judge s2 "$TMP/s2.xml" 'monster' major
 judge s3 "$TMP/s3.xml" 'monster' minor
-grep -q 'monster="1" marks a complexity row\|r monster=1:' "$TMP/s2.xml" && ok "(s2) the legend defines monster=" || no "(s2) no monster= reading in the legend"
+if grep -q 'monster="1" marks a complexity row\|r monster=1:' "$TMP/s2.xml"; then ok "(s2) the legend defines monster="; else no "(s2) no monster= reading in the legend"; fi
 qd "$S" HEAD~2..HEAD~1 "$TMP/s2b.xml"
-cmp -s "$TMP/s2.xml" "$TMP/s2b.xml" && ok "(d) the seeded tangle run twice is byte-identical" || no "(d) the seeded tangle run is not deterministic"
+if cmp -s "$TMP/s2.xml" "$TMP/s2b.xml"; then ok "(d) the seeded tangle run twice is byte-identical"; else no "(d) the seeded tangle run is not deterministic"; fi
 
 # ── real-merge replays: one process at a time, memory guarded ─────────────────────────────────────────────────────────
 ARMS=(
