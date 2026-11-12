@@ -11,4 +11,4 @@ Four answers made a claim the index could not back:
 
 Found by the Fable ideas verify pass (USES-UNARMED-DISCLOSE), the Fable answer audit (USES-FIELD-EXTERNAL) and the Opus audit verify (TMUX-STRUCT-WINDOW).
 
-The new `unindexed_roles=` compact legend term moves the session legend dictionary to `dictv=827f47d36b4bbcbf entries=1061` (docs/COMMANDS.md and the showcase capture are re-recorded).
+The new `unindexed_roles=` compact legend term moves the session legend dictionary to `dictv=ee9f9bf8aeb08671 entries=1065` (docs/COMMANDS.md and the showcase capture are re-recorded).
