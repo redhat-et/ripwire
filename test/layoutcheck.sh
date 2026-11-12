@@ -609,6 +609,25 @@ else
     no "unreadable (control): the readable mirror did not report mismatch/exit 2 with no unreadable= (rc=$urc, unreadable= hits=$( grep -c 'unreadable=' "$UR/warm.out" )) — the arm is void: $( grep -o '<layout [^>]*>' "$UR/warm.out" )"
 fi
 
+# base SPELLING is not byte drift (CodeRabbit 4553235766; red on c9c01fcff: kind="drift", exit 2): the host spells its base
+# `simd::BaseSlot`, the shader `BaseSlot`, both 4 B at offset 0 — same bytes, so kind="spelling" and exit 0. Control: a base of
+# a DIFFERENT size in the same pair stays drift, exit 2.
+SB="$TMP/spellbase"; mkdir -p "$SB/same" "$SB/diff"
+printf 'namespace simd { struct BaseSlot { int a; }; }\nstruct SpellBaseCase : simd::BaseSlot { int x; };\n' >"$SB/same/host.h"
+printf 'struct BaseSlot { int a; };\nstruct SpellBaseCase : BaseSlot { int x; };\n'                               >"$SB/same/shader.h"
+printf 'namespace simd { struct BaseSlot { long a; }; }\nstruct SpellBaseCase : simd::BaseSlot { int x; };\n' >"$SB/diff/host.h"
+cp "$SB/same/shader.h" "$SB/diff/shader.h"
+L="$( "$BIN" "$SB/same" --layout=SpellBaseCase --no-cache 2>/dev/null )"; RC=$?
+sbBases=$( printf '%s' "$L" | grep -o ' base_sz="4"' | wc -l | tr -d ' ' )
+if [ "$sbBases" -eq 2 ] && printf '%s' "$L" | grep -q '<mismatch '; then
+    if [ "$( attr 'mismatch ' kind )" = "spelling" ] && [ "$( attr 'layout ' mirror )" = "spelling" ] && [ "$RC" -eq 0 ]; then
+        ok "base spelling: simd::BaseSlot vs BaseSlot (both base_sz=4) reads mirror=\"spelling\" kind=\"spelling\", exit 0"
+    else no "base spelling: mirror=$( attr 'layout ' mirror ) kind=$( attr 'mismatch ' kind ) rc=$RC — a base spelled differently with the same bytes is not drift"; fi
+else no "base spelling (premise): want two sized 4 B bases and a <mismatch> element, got base_sz=4 x$sbBases — the arm is vacuous"; fi
+L="$( "$BIN" "$SB/diff" --layout=SpellBaseCase --no-cache 2>/dev/null )"; RC=$?
+if [ "$( attr 'mismatch ' kind )" = "drift" ] && [ "$RC" -eq 2 ]; then ok "base spelling (control): a base of a different size stays kind=\"drift\", exit 2"
+else no "base spelling (control): kind=$( attr 'mismatch ' kind ) rc=$RC — a base size change must stay drift"; fi
+
 # exit-code control for the owner decision: a single readable definition still exits 0, a matching mirror 0, drift 2
 for ec in PadCase:0:"a single readable definition" TwinUniforms:0:"a matching mirror" MirrorUniforms:2:"mirror drift"; do
     ecName="${ec%%:*}"; ecRest="${ec#*:}"; ecWant="${ecRest%%:*}"; ecWhat="${ecRest#*:}"

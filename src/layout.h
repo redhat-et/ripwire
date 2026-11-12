@@ -2979,10 +2979,19 @@ inline void computeShapes( LayoutDef& def )
     const auto foldAll = [ & ]( std::uint64_t part ) { fold( byteHash, part ); fold( spellHash, part ); fold( slotHash, part ); };
 
     for( std::uint64_t part : { std::uint64_t( def.size ), std::uint64_t( def.align ), std::uint64_t( def.modeled ? 1 : 0 ),
-                                std::uint64_t( def.baseSize ), fnv1a64( def.baseSpec ) } )
+                                std::uint64_t( def.baseSize ), std::uint64_t( def.baseSized ? 1 : 0 ) } )
     {
         foldAll( part );
     }
+    // The base's SPELLING is a spelling, like a field type's: `simd::Base` on the host and `Base` in the shader take the same
+    // bytes and must read kind="spelling", not drift (CodeRabbit 4553235766). An UNSIZED base keeps it in the byte key too.
+    const std::uint64_t baseSpelling = fnv1a64( def.baseSpec );
+    if( !def.baseSized )
+    {
+        fold( byteHash, baseSpelling );
+    }
+    fold( spellHash, baseSpelling );
+    fold( slotHash, baseSpelling );
     for( const FieldRow& f : def.fields )
     {
         fold( byteHash, fnv1a64( f.name ) );
