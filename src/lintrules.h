@@ -1194,7 +1194,7 @@ struct ErrorMaskRule
 // the left-hand result of a CALL — in the if's own initializer (`if _, err := f(); err != nil {}`) or in the
 // statement immediately before it (`err := f()` / `err = f()`). The binding is what makes it the error branch
 // of that call rather than a nil test on some long-lived variable. RUST: `if let Err(..) = <expr> {}` with no
-// else, and a match arm `Err(..) => {}` or `Err(..) => ()` — the Err variant makes it a Result by
+// else, and an unguarded match arm `Err(..) => {}` or `Err(..) => ()` — the Err variant makes it a Result by
 // construction. Any binding inside Err(..) counts (`_`, `_e`, `e`): rustc warns on an unused `e`, so `_` is
 // the real spelling, and an unused binding swallows the same. Both languages' rows always gate, exactly as
 // Python's `except: pass` does. Every non-block capture (`err`, `Err`) is dropped by the emptyOnly filter,
@@ -1225,8 +1225,8 @@ inline constexpr std::array<ErrorMaskRule, 11> kErrorMaskRules = { {
       "empty-err-go-prev", true },   // Go: err := f() <NL> if err != nil {}
     { "(if_expression condition: (let_condition pattern: (tuple_struct_pattern type: (identifier) @t) value: (_)) consequence: (block) @m !alternative (#eq? @t \"Err\"))",
       "empty-err-rust-iflet", true },   // Rust: if let Err(_) = f() {}
-    { "(match_arm pattern: (match_pattern (tuple_struct_pattern type: (identifier) @t)) value: [(block) (unit_expression)] @m (#eq? @t \"Err\"))",
-      "empty-err-rust-arm", true },     // Rust: Err(_) => {} / Err(_) => ()
+    { "(match_arm pattern: (match_pattern (tuple_struct_pattern type: (identifier) @t) !condition) value: [(block) (unit_expression)] @m (#eq? @t \"Err\"))",
+      "empty-err-rust-arm", true },     // Rust: Err(_) => {} / Err(_) => ()   (a guarded arm handles the error)
 } } ;
 
 #undef RW_GO_ERR_FROM_CALL

@@ -831,6 +831,9 @@ pub fn at_log() { touch(); }
 pub fn iflet_variant_log() { touch(); }
 pub fn ref_named() { touch(); }
 pub fn ref_log() { touch(); }
+pub fn guard_unit() { touch(); }
+pub fn guard_block() { touch(); }
+pub fn chain_empty() { touch(); }
 '
 RSE='use std::fmt::Write;
 
@@ -896,6 +899,19 @@ pub fn ref_log() {
     touch();
     match std::fs::metadata(".") { Ok(_) => touch(), Err(ref mut _e) => log::warn!("failed") }
 }
+pub fn guard_unit() -> Result<(), MyError> {
+    touch();
+    match load() { Ok(_) => (), Err(e) if recover(&e) => (), Err(e) => return Err(e) }
+}
+pub fn guard_block() {
+    touch();
+    match load() { Ok(_) => touch(), Err(e) if recover(&e) => {}, Err(e) => panic!("{e}") }
+}
+pub fn chain_empty() {
+    touch();
+    if let Err(e) = load() && recover(&e) {
+    }
+}
 '
 qd_pair empty_rs a.rs "$RSB" "$RSE"
 qd_has  "empty (rust)" error-masking iflet_empty gating
@@ -910,12 +926,16 @@ qd_none "empty (rust)" error-masking write_char "let _ = fallible(); is out of s
 qd_none "empty (rust)" error-masking names_e    "the arm logs the error by name, inside the format string"
 qd_has  "log-only (rust)" error-masking ref_log minor   # Err(ref mut _e): the wrappers still bind the whole error side
 # CR #632 4556210583: an Err pattern that names ONE variant (or a few) is not a broad handler
-for s in variant_log or_log at_log iflet_variant_log ref_named; do premise "rust variants" empty_rs "$s" '(tuple_struct_pattern) @m'; done
+for s in variant_log or_log at_log iflet_variant_log ref_named guard_unit guard_block chain_empty; do premise "rust variants" empty_rs "$s" '(tuple_struct_pattern) @m'; done
 qd_none "log-only (rust)" error-masking variant_log       "Err(MyError::NotFound) handles one variant"
 qd_none "log-only (rust)" error-masking or_log            "Err(A | B) handles two variants"
 qd_none "log-only (rust)" error-masking at_log            "Err(e @ MyError::Busy) handles one variant"
 qd_none "log-only (rust)" error-masking iflet_variant_log "if let Err(MyError::NotFound) handles one variant"
 qd_none "log-only (rust)" error-masking ref_named         "Err(ref e) logs the error by name"
+# CR #632 4556210784: a match guard is where the error is handled
+qd_none "empty (rust)" error-masking guard_unit  "Err(e) if recover(&e) => () — the guard handles it"
+qd_none "empty (rust)" error-masking guard_block "Err(e) if recover(&e) => {} — the guard handles it"
+qd_none "empty (rust)" error-masking chain_empty "if let Err(e) = f() && recover(&e) {} — the chain's condition handles it"
 
 CXB='#include <cstdio>
 #include <iostream>
