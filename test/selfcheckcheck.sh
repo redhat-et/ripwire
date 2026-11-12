@@ -160,6 +160,7 @@ ALLOW = {
     "has_value":              "read-only std::optional state test (verbs_grep.h: grepReadsIngest named its stop; lane grep-carrier)",
     "active":                 "read-only member predicate (pathpairs.h PathPairs::active: pairs.size() >= 2); no state — pathHopFacts' precondition that only a single-chain answer ends on a declined hop (lane path-fewest-unproven)",
     "inCheckout":             "read-only member predicate (crossref.h WhereHit::inCheckout: fromWorktree || ref == \"HEAD\"); no state — labelJobRows' precondition that a parse job holds no checkout row",
+    "offset":                 "read-only member sum (ingest_cache.h ByteW::offset: streamed + b.size()); no state — finishCacheBlob's blob-length postcondition over the windowed writer (lane ref-step3)",
 }
 # (T) ASSUMED-THEN-TESTED allowlist: "site -> reason", one line each. A site lands here only when the equality
 # really is a true invariant (the re-test below is dead defensive code that should eventually be deleted, not
