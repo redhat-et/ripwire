@@ -31,6 +31,7 @@
 
 #if defined( CTX_USE_STD_MAP )
     #include <unordered_map>
+    #include <unordered_set>
 #else
     #include "unordered_dense.h"   // ankerl flat hash map — far faster than std::unordered_map
 #endif
@@ -39,14 +40,35 @@ namespace rw
 {
 
 // project-wide fast map alias — use HashMap<>, never std::unordered_map (flat, cache-friendly).
+// HashSet<> is its membership twin (HASHSET-ALIAS, owner 11-11): a table that only asks "is K in it" is a set, never a
+// HashMap<K, char|bool> whose value nobody reads — 8 B per u64 entry instead of 16, 4 per u32 instead of 8, the same
+// container family and the same insertion-order iteration (test/hashsetcheck.sh holds the line).
 #if defined( CTX_USE_STD_MAP )
 template<class K, class V> using HashMap = std::unordered_map<K, V>;
+template<class K> using HashSet = std::unordered_set<K>;
 #else
 template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
+template<class K> using HashSet = ankerl::unordered_dense::set<K>;
 #endif
 
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
+
+// G1d: a per-symbol label almost every symbol lacks (Graph::bindLabel, the JNI-decoded Java name of a `Java_*` def). Rows
+// are appended in ascending id order and binary-searched; an id with no row reads "". A dense vector<string> spent 24 B
+// on every symbol of a tree with one JNI export.
+struct SparseLabels
+{
+    std::vector<std::pair<NodeId, std::string>> rows;   // ascending id, one row per labelled symbol
+
+    bool empty() const noexcept { return rows.empty(); }
+    void add( NodeId id, std::string label ) { rows.emplace_back( id, std::move( label ) ); }   // callers walk ids ascending
+    std::string_view labelOf( NodeId id ) const noexcept
+    {
+        const auto row = std::lower_bound( rows.begin(), rows.end(), id, []( const std::pair<NodeId, std::string>& r, NodeId key ) { return r.first < key; } );
+        return row != rows.end() && row->first == id ? std::string_view( row->second ) : std::string_view{};
+    }
+};
 
 // symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|modscope|type|alias|functype").
 // Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
@@ -1201,6 +1223,7 @@ public:
     RefColdFields& operator=( RefColdFields&& ) noexcept = default;
     ~RefColdFields()                                     = default;
 
+    bool hasColdBlock() const noexcept { return cold_ != nullptr; }   // RIPWIRE_STATS counts the rows that carry a block
     const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName : kNoRefColdText; }
     const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel : kNoRefColdText; }
     const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath : kNoRefColdText; }

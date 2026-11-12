@@ -816,7 +816,7 @@ inline void warnCoincidingClaims( PlanLanesResult& result )
                 continue;
             }
 
-            ankerl::unordered_dense::set<std::uint64_t> keysA, keysB;
+            HashSet<std::uint64_t> keysA, keysB;
             for( const Claim& c : ca )
             {
                 keysA.insert( c.key );

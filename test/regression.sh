@@ -456,6 +456,7 @@ for _g in \
     droppedpositivecheck \
     duprowcheck \
     dynmapsimdcheck \
+    edgemarkcheck \
     editcheckanswercheck \
     editcheckcheck \
     editcheckdeclcheck \
@@ -601,6 +602,7 @@ for _g in \
     gvassemblycheck \
     handlerrulecheck \
     hasacheck \
+    hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
     headsnapcachecheck \
@@ -735,6 +737,7 @@ for _g in \
     mdembedcheck \
     mdsectioncheck \
     memguardcheck \
+    memstatscheck \
     mentioncapcheck \
     mentioncheck \
     mentionsverbcheck \

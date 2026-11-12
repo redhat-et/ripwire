@@ -238,7 +238,7 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
             // empty or missing slot falls through to the read below and yields the same bytes, so the two
             // paths cannot disagree; the size guard keeps a vector built for another corpus in bounds.
             std::vector<std::string> fileBytes( ing.files.size() );
-            HashMap<std::uint32_t, bool> fileRead;
+            HashSet<std::uint32_t>       fileRead;
             const auto getBytes = [ & ]( std::uint32_t fid ) -> const std::string&
             {
                 if( preRead != nullptr && fid < preRead->size() && !( *preRead )[fid].empty() )
@@ -256,7 +256,7 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
                         if( sz > 0 ) { fileBytes[fid].resize( std::size_t( sz ) ); std::fread( fileBytes[fid].data(), 1, std::size_t( sz ), fp ); }
                         std::fclose( fp );
                     }
-                    fileRead[fid] = true;
+                    fileRead.insert( fid );
                 }
                 return fileBytes[fid];
             };
