@@ -1115,12 +1115,15 @@ inline constexpr const char* kQdMaskReportOnlyLegend =
 inline constexpr const char* kQdCloneLegend =
     "CLONE ROWS name the whole group rather than one symbol: members= is the member list and tokens= its "
     "shared normalized-token count (the same per-group pair the clones verb reports). idiom= names a "
-    "RECOGNIZED BODY SHAPE every member spells, out of a closed set of three (threshold-ladder, "
-    "switch-name-table, builder-chain). idiom= alone changes nothing; a group that ALSO shares no "
+    "RECOGNIZED BODY SHAPE every member spells, out of a closed set of four (threshold-ladder, "
+    "switch-name-table, builder-chain, one-statement). idiom= alone changes nothing; a group that ALSO shares no "
     "non-keyword identifier between any two members, sits in pairwise-distinct enclosing contexts, and "
     "stays under 80 normalized tokens is an idiom COLLISION rather than a copy, and is reported minor "
     "instead of gating. Break any one of those and it gates as before, idiom= and all: two bucketing "
-    "ladders over the SAME enum are a copy. The shape is read off the body's token stream and not a parse "
+    "ladders over the SAME enum are a copy. one-statement is a body of one return statement (leading "
+    "EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside); its shared-identifier test leaves out each member's "
+    "own parameter names, every std:: chain and standard container/string words (size, find, npos, first, "
+    "second and the like), and a pair identical once its parameters are renamed always gates. The shape is read off the body's token stream and not a parse "
     "tree, so a macro-assembled body classifies as whatever its raw tokens spell — the name is printed so "
     "the call can be overruled by reading. ";
 
