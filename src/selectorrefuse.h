@@ -104,6 +104,33 @@ inline std::string degradedParseClause( const IngestResult& ing, std::string_vie
            "the skipped verb itemizes)";
 }
 
+// B31 (USES-UNARMED-DISCLOSE, TMUX-STRUCT-WINDOW): where the BYTES define a name the index does not hold — the CLI
+// wording of degradedscan.h's lexicalDefHit. An object-like `#define` on the C++ parse path is never indexed (by design),
+// and a definition inside a degraded parse was not extracted; either way "not found" is a floor, and the note names the
+// line instead of a near-miss spelling. "" when the scan found no such line.
+inline std::string lexicalDefClause( const IngestResult& ing, std::string_view name, const LexicalDefHit& hit )
+{
+    if( hit.capped )
+    {
+        return " (note: the lexical definition scan stopped at its budget, " + std::to_string( kLexicalDefScanFiles ) + " files or "
+             + std::to_string( kLexicalDefScanBytes >> 20 ) + " MiB, before reading every file, so this miss is not proof the bytes define nothing; --grep="
+             + std::string( name ) + " lists its text uses)";
+    }
+    if( !hit.found )
+    {
+        return {};
+    }
+    const std::string site = ing.files[ hit.fileIndex ] + ":" + std::to_string( hit.line );
+    if( hit.objectMacro )
+    {
+        return " (note: '" + std::string( name ) + "' is an object-like macro, #define at " + site
+             + ", and object-like macros on the C++ parse path are not indexed, so this miss is not proof it is undefined; --grep="
+             + std::string( name ) + " lists its text uses)";
+    }
+    return " (note: '" + std::string( name ) + "' is defined at " + site + " by a lexical read, in a file whose parse is DEGRADED (err_ratio="
+         + hit.errRatio + ") — the definition was not extracted; the skipped verb itemizes)";
+}
+
 // THE DIAGNOSIS — the parenthetical alone, "" when there is nothing honest to add. Separated from the
 // sentence below (W3FIX) because the five arms this round routed here spell their verdict AFTER the echoed
 // selector ("ripwire: --expand=SEL matched no symbol"), so they need the clause without the sentence. A
@@ -235,7 +262,12 @@ inline std::string selectorFaultClause( const IngestResult& ing, std::string_vie
             return clause + " — e.g. " + std::string( retryForm ) + definingFiles[0] + ":" + std::string( bareName ) + ")";
         }
     }
-    return withDidYouMean( ing, bareName, {} ) + degradedParseClause( ing, bareName );
+    const LexicalDefHit defHit = lexicalDefHit( ing, bareName );
+    if( defHit.found )
+    {
+        return lexicalDefClause( ing, bareName, defHit );   // the bytes define it: a near-miss spelling, or a mere mention elsewhere, would only mislead
+    }
+    return withDidYouMean( ing, bareName, {} ) + degradedParseClause( ing, bareName ) + lexicalDefClause( ing, bareName, defHit );
 }
 
 // The complete stderr line (no trailing newline) for a selector that resolved to nothing.

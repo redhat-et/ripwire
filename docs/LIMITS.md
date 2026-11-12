@@ -283,6 +283,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDegradedScanFiles` | `32` | — | — |
+| `kLexicalDefScanFiles` | `4096` | — | — |
 
 ### `src/didyoumean.h`
 

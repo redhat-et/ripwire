@@ -1055,6 +1055,7 @@ for _g in \
     usescheck \
     usesliteralcheck \
     usesselectorcheck \
+    usesunarmedcheck \
     usingdeclcheck \
     utf8scrubcheck \
     vendoredassetcheck \
