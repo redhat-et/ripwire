@@ -877,7 +877,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "defaults_untied", "defaults_untied=N: N same-name C/C++ declarations with possible defaults could not be tied (not applied); a flag may be one", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
     // exemplar: src/verbs_for.h + src/exemplar.h selectExemplar/pickWinnerOfKind
     { "candidates", "candidates=N: instances of kind= under the ccx ceiling the pick was ranked from", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
-    { "low_confidence", "low_confidence=1: weak task-to-kind match, fell back to fn; pass a kind (fn|method|class...) instead", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
+    { "low_confidence", "low_confidence=1: weak task-to-kind match, fell back to fn unless off_task=1; pass a kind (fn|method|class...)", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
     { "off_task", "off_task=1: not a fallback; the task matched the corpus, but the role pick shares no word with it or the names it matched: a shape to copy, not the code the task is about", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
     // exercises: src/verbs_change.h runExercises + exercisesHarnessAttr
     { "seed_files", "seed_files=N: test files the pattern matched", false, "exercises", MapHeaderRead::No, {}, "exercises" },

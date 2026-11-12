@@ -188,6 +188,29 @@ if printf '%s' "$ONH" | grep -q 'p="src/middleware/' && ! printf '%s' "$ONH" | g
 else
     no "positive arm: 'a middleware' should pick from src/middleware/ with no low_confidence: $ONH"
 fi
+# 5b) the compact legend of an off-task answer must not call the pick a fallback (CR #624 review 5869575117):
+# off_task="1" rides WITH low_confidence="1", and the low_confidence reading said "fell back to fn" unconditionally,
+# while the off_task reading says "not a fallback". The low_confidence reading must hold its fallback claim to
+# answers without off_task=1. Premise: the answer carries both attributes. Control: a plain fallback (arm 2's weak
+# query) still reads "fell back to fn".
+OFFDOC="$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' --legend=compact 2>/dev/null )"
+lcReading(){ printf '%s' "$1" | grep -oE 'low_confidence=1: [^;]*' | head -1; }
+if printf '%s' "$OFFDOC" | grep -q 'off_task="1"' && printf '%s' "$OFFDOC" | grep -q 'low_confidence="1"'; then
+    ok "5b premise: the off-task answer carries low_confidence=\"1\" off_task=\"1\""
+    LCR="$( lcReading "$OFFDOC" )"
+    case "$LCR" in
+        *"fell back to fn"*"unless off_task=1"*) ok "5b: the low_confidence reading conditions its fallback claim on off_task: $LCR" ;;
+        *"fell back to fn"*) no "5b: an off-task answer's low_confidence reading claims a fallback it did not make: $LCR" ;;
+        "") no "5b: the off-task answer carries no low_confidence reading" ;;
+        *) ok "5b: the low_confidence reading makes no fallback claim: $LCR" ;;
+    esac
+else
+    no "5b premise: the off-task answer lost low_confidence=\"1\" off_task=\"1\" — the legend arm would be vacuous"
+fi
+WEAKDOC="$( "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" --legend=compact 2>/dev/null )"
+printf '%s' "$WEAKDOC" | grep -q 'off_task="1"' && no "5b control: the plain fallback must not carry off_task" \
+    || { case "$( lcReading "$WEAKDOC" )" in *"fell back to fn"*) ok "5b control: a plain fallback still reads 'fell back to fn'" ;;
+         *) no "5b control: the plain fallback's low_confidence reading lost its fallback claim: $( lcReading "$WEAKDOC" )" ;; esac; }
 # a kind token is never hedged by the task test: there is no task to be off
 KH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar=fn 2>/dev/null )" )"
 printf '%s' "$KH" | grep -q 'low_confidence' && no "a kind token (fn) must never carry low_confidence: $KH" \
