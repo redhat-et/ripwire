@@ -11280,20 +11280,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // a name the tree never defines is not counted as a refused in-tree candidate).
         // A Rust `macro_rules!` without #[macro_export] (internalLinkage) is textual: it binds a site in its own file, a child module of it
         // or, through `#[macro_use] mod`, its parent's (rustMacroScopeOf), or one a `use` names (a `pub(crate) use m;` re-export).
-        // RUST-MACRO-PATH: a path invocation (`crate::m!`, a transcriber's `$crate::m!`, `axum_core::m!`, or a `use … as` alias ingest renamed,
-        // ingest_model.h retargetRustMacroAliases) binds only the macros its written path proves: an outside crate's `serde_json::json!`
-        // never reaches an in-tree `json`, whatever its export or scope.
+        // RUST-MACRO-PATH (pathMacro): `crate::m!`, `$crate::m!`, `axum_core::m!` or a `use … as` alias (ingest_model.h retargetRustMacroAliases) binds
+        // only a macro its written path proves (rustRule3Proves), whatever its export or scope: `serde_json::json!` never reaches an in-tree `json`.
         const bool pathMacro = r.role == RefRole::Macro && langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse && !std::string_view( r.qualifier ).empty();
         const auto macroDef = [ & ]( NodeId c )
         {
-            if( pathMacro )
-            {
-                return symKind[ c ] == SymKind::Macro && langCompatible( symLang[ c ], r.lang ) && recvEv.types.rustRule3Proves( r, c, {} );
-            }
             return symKind[ c ] == SymKind::Macro && langCompatible( symLang[ c ], r.lang )
-                && ( ing.symbols[ c ].internalLinkage == 0 || macroRefLang( symLang[ c ] ) || symFileId[ c ] == r.fileId
+                && ( pathMacro ? recvEv.types.rustRule3Proves( r, c, {} ) : ( ing.symbols[ c ].internalLinkage == 0 || macroRefLang( symLang[ c ] ) || symFileId[ c ] == r.fileId
                      || rustMacroScopeOf( ing, symFileId[ c ], macroScopes ).holds( ing.files[ r.fileId ] )
-                     || ( langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) ) );
+                     || ( langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) ) ) );
         };
         // A procedural macro is a function that carries #[proc_macro] (a nested `fn assert` a glob `use` reaches is no macro: zed +110 before
         // this test), read once per candidate (procMacroMemo).
