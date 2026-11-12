@@ -555,24 +555,25 @@ private:
     }
 
     // TS ProviderRecord: `{ provide: K, useClass: C }` — the value pair and the ONE `provide` pair of the same object literal. A pair
-    // counts only when the extractor marked it (qualifier "<scope><shadow>@<start byte of its object literal>"): the literal is an
+    // counts only when the extractor marked it (Reference::litAt, 1 + the start byte of its object literal): the literal is an
     // ELEMENT of an array (a call argument, a `const` initialiser or a `providers` / `viewProviders` property) and the value is written bare. Key and value
     // pair only through the SAME literal, so a ternary / `||` / return / reassignment / second call can never join two objects.
     void collectProviderSites( std::vector<RegSite>& out ) const
     {
-        struct Pair { std::uint32_t ref; std::string_view lit; std::string_view field; };
-        HashMap<std::string, std::vector<Pair>> keysByLit;   // "<file>@<literal start>" → its `provide` pairs
-        std::vector<Pair>                       values;
+        struct Pair { std::uint32_t ref; std::string_view field; };
+        HashMap<std::uint64_t, std::vector<Pair>> keysByLit;   // ( file, literal start ) → its `provide` pairs
+        std::vector<Pair>                         values;
         const auto litKey = [ & ]( const Pair& p )
         {
-            return std::to_string( m_ing.references[ p.ref ].fileId ) + "@" + std::string( p.lit );
+            const Reference& r = m_ing.references[ p.ref ];
+            return ( std::uint64_t( r.fileId ) << 32 ) | r.litAt;
         };
         for( std::uint32_t i = 0; i < m_ing.references.size(); ++i )
         {
             const Reference& r   = m_ing.references[i];
             const RegLang*   row = r.role == RefRole::Value ? regLang( r.lang ) : nullptr;
             if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel().size() < 2
-                || r.composeRel()[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
+                || r.composeRel()[0] != '.' || r.litAt == 0 )
             {
                 continue;
             }
@@ -581,7 +582,7 @@ private:
             {
                 continue;   // the written slot was capped (vrClean): its object is not provable
             }
-            const Pair p{ i, std::string_view( r.qualifier ).substr( 3 ), field };
+            const Pair p{ i, field };
             if( field == row->keyField )
             {
                 keysByLit[ litKey( p ) ].push_back( p );
@@ -591,7 +592,7 @@ private:
                 values.push_back( p );
             }
         }
-        HashMap<std::string, std::uint32_t> valuesIn;   // the value pairs of one literal: two or more are not one record
+        HashMap<std::uint64_t, std::uint32_t> valuesIn;   // the value pairs of one literal: two or more are not one record
         for( const Pair& v : values )
         {
             ++valuesIn[ litKey( v ) ];

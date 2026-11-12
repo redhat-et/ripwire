@@ -85,18 +85,19 @@ struct RawRef : RefColdFields   // fieldName, composeRel, memberPath, memberCtor
     rw::InternedText name;             // MEM-REF-SHRINK step 2: name / qualifier / recvVar are 4 B pool ids (infra/internedtext.h)
     rw::InternedText qualifier;        // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
     rw::InternedText recvVar;          // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
-    std::string   memberRoot;          // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
+    rw::InternedText memberRoot;       // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
     bool          memberFactory = false;   // FE-B on #373: memberCtor names a FactoryBot factory, not a class
     bool          forwarded = false;       // lane fcall-forward fix 1: a JS/TS `f.call/f.apply` site standing for `f( … )` (model.h Reference::forwarded)
     bool          trailingLambda = false;  // #155: a Kotlin call whose lambda is written after its argument list (model.h Reference::trailingLambda)
     std::uint32_t baseBind = 0;          // lane lego-transitive fix 1, an inherit ref only: 1 + the name byte of the same-file
                                          //   declaration the base binds to (ingest_relations.h localBaseBinding); 0 none, ~0u unknown
+    std::uint32_t litAt = 0;             // MEM-R1a: a registrar Value ref's 1 + object-literal start byte (model.h Reference::litAt)
 };
 
-// MEM-REF-SHRINK (model.h, beside Reference's own budget): one inline string, three 4 B pool ids, the cold block's pointer and
-// 36 B of ids and flags: 80 B on libc++ (step 1 136, before it 248). Every worker's vector<RawRef> and the merged one hold these
-// rows at the parse-pool peak.
-static_assert( sizeof( RawRef ) <= sizeof( std::string ) + 56, "RawRef grew: see the MEM-REF-SHRINK note in model.h" );
+// MEM-REF-SHRINK (model.h, beside Reference's own budget): Reference minus fromSymbol, in the same 64 B on every ABI (MEM-R1a:
+// memberRoot a pool id; step 2 80 B on libc++, step 1 136, before it 248). Every worker's vector<RawRef> and the merged one hold
+// these rows at the parse-pool peak.
+static_assert( sizeof( RawRef ) == 64, "RawRef is one 64 B row: see the MEM-REF-SHRINK note in model.h" );
 
 // P2-D Rule 2 raw local-variable type binding (pre-attribution). startByte sits inside the enclosing
 // function body so the enclosing-def attribution (the same byte-span scan as RawRef) assigns the binding's
@@ -2413,7 +2414,9 @@ struct CachedRecordHead
 // tiny native-endian binary (de)serializer (the cache is host-local, never shipped)
 struct ByteW
 {
-    std::string b;
+    std::string   b;
+    std::uint64_t streamed = 0;   // C1 SAVE-STREAM: bytes saveCache already wrote out of `b` to its file (0 for an in-memory writer)
+    std::uint64_t offset() const noexcept { return streamed + b.size(); }   // the absolute blob offset the next byte lands at
     void u8 ( std::uint8_t  v ) { b.push_back( char( v ) ); }
     void u32( std::uint32_t v ) { b.append( reinterpret_cast<const char*>( &v ), 4 ); }
     void u64( std::uint64_t v ) { b.append( reinterpret_cast<const char*>( &v ), 8 ); }
@@ -2591,7 +2594,50 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         }
     }
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
+// MEM-R1a: a registrar Value ref's object-literal offset is the row field litAt, but the record still spells it as the qualifier's
+// "@<litAt>" tail (the format every blob since the registrar lane holds), so the blob is byte-identical and no kParserVer moves.
+// Only a Value ref's qualifier is ever split (its text is "<scope><shadow>", two characters, from emitValueRef): a call's written
+// qualifier keeps any '@' it has.
+inline void writeRefQualifier( ByteW& w, const RawRef& r )
+{
+    if( r.litAt == 0 )
+    {
+        w.str( r.qualifier );
+        return;
+    }
+    DASSERT( r.role == RefRole::Value && r.qualifier.size() == 2 );
+    w.str( std::string( r.qualifier ) + "@" + std::to_string( r.litAt ) );
+}
+// The reader's half. The blob is external input: a tail that is not a nonzero u32 in decimal is corruption (the record takes
+// readFileRecord's one refusal path), never a text to keep.
+inline void readRefQualifier( ByteR& r, std::string_view qualifier, RawRef& x )
+{
+    if( x.role != RefRole::Value || qualifier.size() <= 2 || qualifier[ 2 ] != '@' )
+    {
+        x.qualifier = qualifier;
+        return;
+    }
+    const std::string_view digits = qualifier.substr( 3 );
+    std::uint64_t          litAt  = 0;
+    // length and every digit are checked BEFORE any arithmetic (CodeRabbit 4545944847): a 20-nines tail or a `1/` would
+    // otherwise wrap the accumulator, which -fsanitize=integer aborts on before VALIDATE can refuse the record
+    bool valid = !digits.empty() && digits.size() <= 10
+              && std::all_of( digits.begin(), digits.end(), []( char c ) { return c >= '0' && c <= '9'; } );
+    for( std::size_t k = 0; valid && k < digits.size(); ++k )
+    {
+        litAt = litAt * 10 + std::uint64_t( digits[ k ] - '0' );   // <= 10 digits: at most 9 999 999 999, far under 2^64
+    }
+    if( !VALIDATE( valid && litAt != 0 && litAt <= 0xFFFFFFFFu ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache ref record carries a registrar qualifier whose literal offset is not a number — cache treated as corrupt" );
+        r.ok = false;
+        return;
+    }
+    x.qualifier = qualifier.substr( 0, 2 );
+    x.litAt     = std::uint32_t( litAt );
+}
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); writeRefQualifier( w, r ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2745,7 +2791,7 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); x.qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.str() ); x.setComposeRel( r.str() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.str(); x.setMemberPath( r.str() ); x.setMemberCtor( r.str() ); x.setMemberVia( r.str() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); const std::string_view qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.view() ); x.setComposeRel( r.view() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); readRefQualifier( r, qualifier, x ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.view(); x.setMemberPath( r.view() ); x.setMemberCtor( r.view() ); x.setMemberVia( r.view() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u8( b.resultIndex ); w.u8( b.unwrapDepth ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
 inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.view(); b.typeName = r.view(); b.importedName = r.view(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
@@ -3435,7 +3481,7 @@ inline std::vector<CacheWriteRow> buildCacheWritePlan( const std::vector<std::ui
 // configuration crawls it; the rest of the blob is unaffected.
 inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::string& scratch, CacheEntry& entryOut )
 {
-    const std::size_t recOffset = w.b.size();
+    const std::uint64_t recOffset = w.offset();
     scratch.resize( src.recLength );
     if( !preadExact( fd, scratch.data(), scratch.size(), src.recOffset )
         || recordSum32( std::string_view( scratch.data(), scratch.size() ) ) != src.recSum )
@@ -3445,28 +3491,36 @@ inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::str
         return false;
     }
     w.raw( scratch.data(), scratch.size() );
-    entryOut = CacheEntry{ src.pathHash, std::uint64_t( recOffset ), src.contentHash,
+    entryOut = CacheEntry{ src.pathHash, recOffset, src.contentHash,
                            std::uint32_t( scratch.size() ), src.recSum };
     return true;
 }
 
-// Close a v15 blob: patch the header's entry count (carry-over drops only settle it here), append the
-// offset table, then the 24-byte trailer whose digest covers HEADER || TABLE. Each record carries its own
-// digest in its table entry and is checked only when that record is actually read, so this is the whole of
-// "the checksum covers the table plus the records actually read". The exact-fit invariant the trailer
-// encodes — fileSize == tableOffset + entryCount*32 + 24 — is what makes a truncation that removes whole
-// records detectable at all, so it is asserted here at the one place that can still be wrong about it.
-inline void finishCacheBlob( ByteW& w, const std::vector<CacheEntry>& table )
+// Close a v15 blob: append the offset table, then the 24-byte trailer whose digest covers HEADER || TABLE. Each record carries
+// its own digest in its table entry and is checked only when that record is actually read, so this is the whole of "the
+// checksum covers the table plus the records actually read". The exact-fit invariant the trailer encodes — fileSize ==
+// tableOffset + entryCount*32 + 24 — is what makes a truncation that removes whole records detectable at all, so it is asserted
+// here at the one place that can still be wrong about it. C1 SAVE-STREAM: the header's bytes left `w` with the first window, so
+// they ride in `index` beside the table, entryCount patched in here (carry-over drops only settle it now); saveCache patches the
+// FILE's copy once the stream is out.
+struct CacheBlobIndex
 {
+    std::string             header;   // the blob's first kCacheHeaderBytes, as written (entryCount 0 until finishCacheBlob)
+    std::vector<CacheEntry> table;    // one entry per record, in record order
+};
+inline void finishCacheBlob( ByteW& w, CacheBlobIndex& index )
+{
+    const std::vector<CacheEntry>& table = index.table;
+    ASSUME( index.header.size() == kCacheHeaderBytes );
     const std::uint32_t entryCount  = std::uint32_t( table.size() );
-    const std::uint64_t tableOffset = std::uint64_t( w.b.size() );
-    std::memcpy( w.b.data() + 21, &entryCount, 4 );
+    std::memcpy( index.header.data() + 21, &entryCount, 4 );
+    const std::uint64_t tableOffset = w.offset();
 
     // The digest's input is header || table, which are not adjacent in the blob, so it is assembled once
     // here and the table half is then appended to the blob out of the same buffer.
     std::string hdrTable;
     hdrTable.resize( kCacheHeaderBytes + std::size_t( entryCount ) * kCacheEntryBytes );
-    std::memcpy( hdrTable.data(), w.b.data(), kCacheHeaderBytes );
+    std::memcpy( hdrTable.data(), index.header.data(), kCacheHeaderBytes );
     if( entryCount != 0 )
     {
         std::memcpy( hdrTable.data() + kCacheHeaderBytes, table.data(), std::size_t( entryCount ) * kCacheEntryBytes );
@@ -3477,7 +3531,7 @@ inline void finishCacheBlob( ByteW& w, const std::vector<CacheEntry>& table )
     w.u32( entryCount );
     w.u32( 0 );   // reserved
     w.u64( blobChecksum( std::string_view( hdrTable.data(), hdrTable.size() ) ) );
-    ASSUME( w.b.size() == tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes );
+    ASSUME( w.offset() == tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes );
 }
 
 // write the cache atomically (path.tmp → rename); groups the merged raw facts back by file.
@@ -3532,10 +3586,73 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     std::vector<CacheEntry>          carry;
     const std::vector<CacheWriteRow> plan  = buildCacheWritePlan( keys.order, keys.pathHashes, prev.entries, carry );
 
-    std::vector<CacheEntry> table;
+    // unique per-process temp so two concurrent runs (this repo runs ~20 parallel sessions) don't
+    // interleave writes into ONE shared "path.tmp" and rename a torn file. rename(2) is atomic; the
+    // per-pid temp makes each writer's bytes whole → last-writer-wins, never a corrupt cache.
+    //
+    // A3-F9: fwrite/fclose were never checked, so an ENOSPC (or any short write) produced a truncated
+    // temp file that still got rename()'d over the previous GOOD cache — silently destroying it (the
+    // checksum trailer self-heals on next load via a full reparse, so this was perf-only, but a good
+    // cache should never be clobbered without a peep). Mirrors mcpedit::atomicWrite's discipline
+    // (src/mcp.h): check the write byte-count AND fclose's return, and on any failure unlink the temp
+    // and leave the prior on-disk cache (if any) untouched.
+    // Round 5 (rw::pathguard): the temp is created EXCLUSIVELY and WITHOUT following a link, under an
+    // unpredictable name beside the cache blob, refusing an existing entry at that name. The name keeps its
+    // `.tmp` tail (a *.tmp residue glob still
+    // matches) and 0666 preserves the fopen("wb") default mode. The RAII holder owns the temp NAME and removes
+    // it on every early return below; fdopen adopts the descriptor so fwrite/fclose keep their bookkeeping.
+    rw::pathguard::ExclTempFile temp  = rw::pathguard::createExclTempFile( path + ".", ".tmp", 0666 );
+    const int                   rawFd = temp.ok() ? temp.releaseFd() : -1;
+    std::FILE*                  fp    = rawFd >= 0 ? os::fdopen( rawFd, "wb" ) : nullptr;
+    // A throw between here and the checked close below (table.reserve, a window's growth) must not leak the stream and its
+    // descriptor (CodeRabbit 4545944852): this owner closes it on unwind; the normal path takes the stream back first.
+    struct StreamOwner
+    {
+        std::FILE*& stream;
+        ~StreamOwner()
+        {
+            if( stream != nullptr )
+            {
+                std::fclose( stream );
+            }
+        }
+    } closeOnUnwind{ fp };
+    if( !fp )
+    {
+        const int openErr = errno;
+        if( rawFd >= 0 )
+        {
+            os::close( rawFd );   // fdopen did not adopt the descriptor; the holder still removes the temp name
+        }
+        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
+                  "ingest: saveCache could not open temp file for write — cache left unchanged" );
+        rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
+                      path.c_str(), std::strerror( openErr )  );   // 2026-09-06: Release kept no signal for this
+        return;
+    }
+    // C1 SAVE-STREAM (reports/mem-audit-fable-1111 §C1): the blob is no longer built whole in memory. `w` is a WINDOW: once it
+    // holds kSaveWindowBytes at a record boundary it is written to the temp and cleared, `w.streamed` carrying the absolute offset
+    // every recOffset and the trailer's tableOffset are read from. The one header field that settles only at the end, entryCount,
+    // is patched in the file with one seek-and-write before the rename; the bytes are the ones the whole-blob write produced.
+    // Before this the doubling std::string set the cold peak on envoy and vscode (+1.4-1.5 x the blob over the pool join, M2 11-11).
+    // The stream owns the descriptor since releaseFd(), so it closes on every path: a write failure only marks `wErr`, and the
+    // close is evaluated on its own, never short-circuited into one expression.
+    constexpr std::size_t kSaveWindowBytes = std::size_t( 4 ) << 20;
+    bool                  wErr             = false;
+    ByteW                 w;
+    const auto            drain = [ & ]
+    {
+        if( !wErr && !w.b.empty() && std::fwrite( w.b.data(), 1, w.b.size(), fp ) != w.b.size() )
+        {
+            wErr = true;
+        }
+        w.streamed += w.b.size();
+        w.b.clear();
+    };
+    CacheBlobIndex           index;
+    std::vector<CacheEntry>& table = index.table;
     table.reserve( plan.size() );
 
-    ByteW w;
     // A1 (team-index): kArtifactArch byte sits in the header right after parserVer so loadCache's guard
     // rejects a foreign-arch (endian/pointer-width) blob before trusting any raw-int record bytes.
     w.u32( kCacheMagic );
@@ -3545,6 +3662,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     w.u64( (std::uint64_t)blobWriteNs );
     w.u32( 0 );   // entryCount — patched in place below, once the carry-over verification has settled it
     ASSUME( w.b.size() == kCacheHeaderBytes );
+    index.header = w.b;   // finishCacheBlob's digest input: the first window takes these bytes to the file
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
         std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
@@ -3554,6 +3672,14 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         std::string                carryBuf;                                   // one carry-over record, verified before it is appended
         for( const CacheWriteRow& row : plan )
         {
+            if( w.b.size() >= kSaveWindowBytes )   // a record boundary: no record straddles a window, so its bytes are whole in `w`
+            {
+                drain();
+            }
+            if( wErr )
+            {
+                break;   // the temp is torn already: nothing below can publish it
+            }
             if( row.fileIndex == kNoCacheIndex )
             {
                 CacheEntry copied;
@@ -3564,7 +3690,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 continue;
             }
 
-            const std::size_t   recOffset = w.b.size();
+            const std::size_t   recStart  = w.b.size();   // the record's first byte in the window
+            const std::uint64_t recOffset = w.offset();   //   …and in the blob
             const std::uint32_t f         = row.fileIndex;
             w.str( keys.rels[f] );
             w.u64( f < fileHash.size() ? fileHash[f] : 0 );
@@ -3709,55 +3836,28 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u8( constOpens[i].namespaceOnly ? 1 : 0 );
                 w.str( constOpens[i].written );
             }
-            table.push_back( CacheEntry{ row.pathHash, std::uint64_t( recOffset ),
+            table.push_back( CacheEntry{ row.pathHash, recOffset,
                                          f < fileHash.size() ? fileHash[f] : 0,
-                                         std::uint32_t( w.b.size() - recOffset ),
-                                         recordSum32( std::string_view( w.b.data() + recOffset, w.b.size() - recOffset ) ) } );
+                                         std::uint32_t( w.b.size() - recStart ),
+                                         recordSum32( std::string_view( w.b.data() + recStart, w.b.size() - recStart ) ) } );
         }
     }   // symmetric bare scope: serialize-records profiling span
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: offset table + trailer" );
-        finishCacheBlob( w, table );
+        const std::uint32_t entryCount = std::uint32_t( table.size() );
+        finishCacheBlob( w, index );
+        drain();
+        // entryCount into the file's header: one seek-and-write after the stream, before the close and the rename
+        if( !wErr && ( std::fseek( fp, 21, SEEK_SET ) != 0 || std::fwrite( &entryCount, 1, 4, fp ) != 4 ) )
+        {
+            wErr = true;
+        }
     }
     PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: write + rename" );
 
-    // unique per-process temp so two concurrent runs (this repo runs ~20 parallel sessions) don't
-    // interleave writes into ONE shared "path.tmp" and rename a torn file. rename(2) is atomic; the
-    // per-pid temp makes each writer's bytes whole → last-writer-wins, never a corrupt cache.
-    //
-    // A3-F9: fwrite/fclose were never checked, so an ENOSPC (or any short write) produced a truncated
-    // temp file that still got rename()'d over the previous GOOD cache — silently destroying it (the
-    // checksum trailer self-heals on next load via a full reparse, so this was perf-only, but a good
-    // cache should never be clobbered without a peep). Mirrors mcpedit::atomicWrite's discipline
-    // (src/mcp.h): check the write byte-count AND fclose's return, and on any failure unlink the temp
-    // and leave the prior on-disk cache (if any) untouched.
-    // Round 5 (rw::pathguard): the temp is created EXCLUSIVELY and WITHOUT following a link, under an
-    // unpredictable name beside the cache blob, refusing an existing entry at that name. The name keeps its
-    // `.tmp` tail (a *.tmp residue glob still
-    // matches) and 0666 preserves the fopen("wb") default mode. The RAII holder owns the temp NAME and removes
-    // it on every early return below; fdopen adopts the descriptor so fwrite/fclose keep their bookkeeping.
-    rw::pathguard::ExclTempFile temp  = rw::pathguard::createExclTempFile( path + ".", ".tmp", 0666 );
-    const int                   rawFd = temp.ok() ? temp.releaseFd() : -1;
-    std::FILE*                  fp    = rawFd >= 0 ? os::fdopen( rawFd, "wb" ) : nullptr;
-    if( !fp )
-    {
-        const int openErr = errno;
-        if( rawFd >= 0 )
-        {
-            os::close( rawFd );   // fdopen did not adopt the descriptor; the holder still removes the temp name
-        }
-        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
-                  "ingest: saveCache could not open temp file for write — cache left unchanged" );
-        rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
-                      path.c_str(), std::strerror( openErr )  );   // 2026-09-06: Release kept no signal for this
-        return;
-    }
-    // The stream owns the descriptor since releaseFd(), so it closes on every path: the write and the close
-    // are evaluated separately, never short-circuited into one expression.
-    const std::size_t wrote  = std::fwrite( w.b.data(), 1, w.b.size(), fp );
-    const bool        closed = std::fclose( fp ) == 0;
-    const bool        wErr   = wrote != w.b.size() || !closed;
+    const bool closed = std::fclose( std::exchange( fp, nullptr ) ) == 0;   // taken back from closeOnUnwind: closed once, checked
+    wErr              = wErr || !closed;
     if( wErr )
     {
         // never rename a short/torn write over a good cache — the holder removes the temp on return

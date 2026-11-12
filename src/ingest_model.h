@@ -929,6 +929,7 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.forwarded   = r.forwarded;                  // lane fcall-forward fix 1: an `f.call/f.apply` site standing for `f( … )`
         ref.trailingLambda = r.trailingLambda;          // #155: a Kotlin call whose lambda trails its argument list (scope-function arm)
         ref.baseBind    = r.baseBind;                   // lane lego-transitive fix 1: an inherit ref's same-file base binding
+        ref.litAt       = r.litAt;                      // MEM-R1a: a registrar Value ref's object literal (regindex.h)
         ref.takeColdFrom( r );   // fieldName, composeRel (S5-E), memberPath, memberCtor, memberVia (FE-B): one block, moved whole
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test
         // #60: the module-scope owner owns EXACTLY the references it was minted for — the call/macro
