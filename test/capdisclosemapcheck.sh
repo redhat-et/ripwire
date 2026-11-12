@@ -100,6 +100,22 @@ if grep -q '^INFO kFxLane awaits #9' "$TMP/fx.out" && grep -q '^INFO kFxPend pen
     ok "(P1f) awaits: and pending: rows are INFO only; a legend row with no static_assert FAILS"
 else no "(P1f) awaits/pending/legend classes misbehaved: $( grep -E '^(FAIL|INFO)' "$TMP/fx.out" | tr '\n' ' ' )"; fi
 
+# (P1g) CodeRabbit #626 4548924360 / 4548924364: a declaration split across lines is still in scope, and a commented-out
+#       static_assert ties nothing to a legend.
+G="$TMP/fg"; mkdir -p "$G/src"
+cat >"$G/src/forfg.h" <<'EOF'
+inline constexpr std::size_t kFgMaxRows =
+    8;
+inline constexpr std::size_t kFgLegendCap = 5;
+// static_assert( kFgLegendCap == 5, "the legend states it" );
+EOF
+printf 'kFgLegendCap\tlegend\n' >"$TMP/fg.map"
+python3 -I "$LIB" "$G" "$TMP/fg.map" >"$TMP/fg.out" 2>&1
+if grep -q '^FAIL kFgMaxRows (src/forfg.h:1) is an answer-path cap with no row' "$TMP/fg.out" \
+    && grep -q '^FAIL kFgLegendCap: classified legend, but no static_assert' "$TMP/fg.out"; then
+    ok "(P1g) a cap declared across two lines is in scope (FAILS unmapped at its line), and a commented-out static_assert is no legend tie"
+else no "(P1g) multi-line declaration / commented static_assert misread: $( grep -E '^(FAIL|PASS|SUMMARY)' "$TMP/fg.out" | tr '\n' ' ' )"; fi
+
 if [ "$fail" = 0 ]; then
     echo "ALL PASS"
 else

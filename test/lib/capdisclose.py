@@ -28,7 +28,15 @@ pending=P awaits=A failed=F`.
 """
 import os, re, sys
 
-STRIP = re.compile( r'//[^\n]*|/\*.*?\*/|R"(\w*)\(.*?\)\1"|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', re.S )
+STRIP = re.compile( r'//[^\n]*|/\*.*?\*/|R"([^ ()\\\t\v\f\n]{0,16})\(.*?\)\1"|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', re.S )
+
+def blank( m ):
+    """A removed comment or literal keeps its newlines and is at least one space, so it never joins two tokens."""
+    return "\n" * m.group( 0 ).count( "\n" ) or " "
+
+def uncommented( text ):
+    """text with comments blanked and every string literal kept (a static_assert's message is read)."""
+    return STRIP.sub( lambda m: m.group( 0 ) if m.group( 0 )[:1] in "\"'R" else blank( m ), text )
 INT_T = r'(?:std::)?(?:size_t|uint\d+_t|int\d*_t|int|unsigned|u8|u16|u32|u64|i32|i64|long)'
 CONST = re.compile( r'\bconstexpr\s+' + INT_T + r'\s+(k[A-Z]\w*)\s*(?:=|\{)\s*([0-9][0-9\'uUlLzZ]*|std::size_t\s*\{\s*\d+\s*\}|std::size_t\s*\(\s*\d+\s*\))\s*\}?\s*;' )
 NAMED = re.compile( r'Max|Limit|Cap|Ceiling|Depth|Pairs' )
@@ -52,7 +60,7 @@ def all_sources( root ):
 def stripped( root, rel, cache={} ):
     key = ( root, rel )
     if key not in cache:
-        cache[key] = STRIP.sub( lambda m: "\n" * m.group( 0 ).count( "\n" ), open( os.path.join( root, rel ), errors="replace" ).read() )
+        cache[key] = STRIP.sub( blank, open( os.path.join( root, rel ), errors="replace" ).read() )
     return cache[key]
 
 def function_scopes( text ):
@@ -82,12 +90,14 @@ def cap_site( name, line ):
 def scope( root ):
     defs = {}
     for f in answer_path( root ):
-        for i, line in enumerate( stripped( root, f ).split( "\n" ), 1 ):
-            for m in CONST.finditer( line ):
-                defs.setdefault( m.group( 1 ), ( f, i ) )
+        # the whole file, not line by line: `constexpr std::size_t kMaxRows =\n    8;` is one declaration (CodeRabbit #626 4548924360)
+        text = stripped( root, f )
+        for m in CONST.finditer( text ):
+            defs.setdefault( m.group( 1 ), ( f, text.count( "\n", 0, m.start( 1 ) ) + 1 ) )
     asserted = set()
     for f in all_sources( root ):
-        for m in re.finditer( r'static_assert\s*\(([^;]*)\)\s*;', open( os.path.join( root, f ), errors="replace" ).read() ):
+        # comments blanked, strings kept: a commented-out static_assert ties nothing (CodeRabbit #626 4548924364)
+        for m in re.finditer( r'static_assert\s*\(([^;]*)\)\s*;', uncommented( open( os.path.join( root, f ), errors="replace" ).read() ) ):
             if re.search( r'legend|Legend|states', m.group( 1 ) ):
                 asserted.update( re.findall( r'\b(k[A-Z]\w*)\s*==', m.group( 1 ) ) )
     return { k: v for k, v in defs.items() if "Min" not in k and ( NAMED.search( k ) or k in asserted or sites( root, k ) ) }, asserted
