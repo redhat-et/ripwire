@@ -194,7 +194,10 @@ def lex( src, line0=1, bodies=None ):
 class Simple:
     __slots__ = ( "words", "line", "assigns", "redirs" )
     def __init__( self, words, line, assigns, redirs=() ):
-        self.words, self.line, self.assigns, self.redirs = words, line, assigns, list( redirs )
+        self.words = words      # [ Word ]: the command words, after leading NAME=value assignments
+        self.line = line        # 1-based source line of the first word
+        self.assigns = assigns  # [ Word ]: the leading NAME=value words
+        self.redirs = list( redirs )
 class Compound:
     __slots__ = ( "kind", "conds", "bodies", "line", "name" )
     def __init__( self, kind, line, conds=(), bodies=(), name=None ):
