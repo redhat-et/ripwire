@@ -112,11 +112,13 @@ struct RawBind
     std::uint8_t  unwrapDepth = 0;                   // kind==CallResult/ReturnType: unwrap operators / layers (model.h LocalBindKind)
     std::uint32_t spanStart = 0;   // lexical visibility or declaration span; see model.h Binding/LocalBindKind
     std::uint32_t spanEnd   = 0;
-    std::string   var;             // the declared variable identifier (`x`)
-    std::string   importedName;    // ES export identity or Elixir callable/import fact; see LocalBindKind.
-    std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
-                                   // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
+    rw::InternedText var;          // the declared variable identifier (`x`). MEM-B1: pool ids, as model.h Binding's
+    rw::InternedText importedName; // ES export identity or Elixir callable/import fact; see LocalBindKind.
+    rw::InternedText typeName;     // kind==Type: the written type's final segment (`Foo`);
+                                   // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel: a fixed text)
 };
+// MEM-B1: four u32 positions, five u8 facts in one padded u32 pair, three pool ids: 36 B on every ABI (no std::string member).
+static_assert( sizeof( RawBind ) == 9 * sizeof( std::uint32_t ), "RawBind grew: see the MEM-B1 note at model.h Binding" );
 
 // B6.3 raw client-side HTTP-route USE (pre-attribution). startByte sits at the call-expression's own
 // start so the enclosing-def byte-span scan (same DefSweep as RawRef/RawBind) assigns fromSymbol. The
@@ -2745,7 +2747,7 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
 }
 inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); x.qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.str() ); x.setComposeRel( r.str() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.str(); x.setMemberPath( r.str() ); x.setMemberCtor( r.str() ); x.setMemberVia( r.str() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u8( b.resultIndex ); w.u8( b.unwrapDepth ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
-inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
+inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.view(); b.typeName = r.view(); b.importedName = r.view(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
 inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = r.enumU8<BindKind>( kBindKindCount ); a.lowConf = r.flagU8(); a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
 // B6.3: RouteDef needs no startByte (its handler is resolved by NAME in buildGraph); RawRouteUse mirrors

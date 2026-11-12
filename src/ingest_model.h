@@ -1004,7 +1004,7 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
     result.bindings.resize( rawBinds.size() );
     DefSweep bindSweep{ spanIndex.spans, spanIndex.fileSpanStart };
     std::size_t outBindIndex = 0;
-    for( RawBind& rb : rawBinds )   // rawBinds consumed here → move its 2 strings into the Binding
+    for( RawBind& rb : rawBinds )   // rawBinds consumed here; the three texts are pool ids (MEM-B1), copied as 4 B each
     {
         Binding& b = result.bindings[ outBindIndex++ ];
         b.fileId     = rb.fileId;
@@ -1015,9 +1015,9 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
         b.startByte  = rb.startByte;   // the declaration a VarDecl and its typed record share (Rule 2 lexical lookup)
         b.spanStart  = rb.spanStart;   // shadow fix round: the declaring block's span rides through
         b.spanEnd    = rb.spanEnd;
-        b.var        = std::move( rb.var );
-        b.typeName   = std::move( rb.typeName );
-        b.importedName = std::move( rb.importedName );
+        b.var        = rb.var;
+        b.typeName   = rb.typeName;
+        b.importedName = rb.importedName;
         // findOwnedDef, not find: a file-scope binding must keep fromSymbol == kNoNode (see DefSweep).
         b.fromSymbol = bindSweep.findOwnedDef( rb.fileId, rb.startByte );
     }

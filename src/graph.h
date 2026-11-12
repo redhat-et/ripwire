@@ -2446,7 +2446,7 @@ inline std::uint32_t pythonModuleFormFile( const Binding& b, std::uint32_t resol
     EXPECTS( !b.typeName.empty(), "typeName.front() below needs a spec: both callers (recordImportBindFile, recordScopedImportBindFile) take bindings buildPythonImportVetoes already filtered for an empty typeName" );
     // ind4b fix 5 (E3): `import pkg.x` binds the ROOT `pkg` (pkg/__init__.py), not pkg.x, but `import pkg.x as pkg` binds pkg.x and the
     // record cannot tell them apart (same var, same typeName): a dotted spec whose first segment is the bound name names no ONE file.
-    if( b.typeName.starts_with( b.var ) && b.typeName.size() > b.var.size() && b.typeName[ b.var.size() ] == '.' )
+    if( b.typeName.str().starts_with( b.var ) && b.typeName.size() > b.var.size() && b.typeName[ b.var.size() ] == '.' )
     {
         return kNoFile;
     }
@@ -2614,7 +2614,7 @@ inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, 
     }
     for( const Binding& b : ing.bindings )
     {
-        if( b.kind != LocalBindKind::Import || !b.importedName.starts_with( kPythonFromMemberMark ) )
+        if( b.kind != LocalBindKind::Import || !b.importedName.str().starts_with( kPythonFromMemberMark ) )
         {
             continue;
         }
@@ -2656,7 +2656,7 @@ inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( c
             && wanted.contains( b.var ) && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) )
         {
             key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
-            const bool member = b.importedName.starts_with( kPythonFromMemberMark );
+            const bool member = b.importedName.str().starts_with( kPythonFromMemberMark );
             binds[ key ].push_back( PythonNameBind{ pythonBindScope( ing, b ), b.kind == LocalBindKind::Import, b.importedName == "module",
                                                     member ? b.importedName.substr( kPythonFromMemberMark.size() ) : std::string{} } );
         }
@@ -2757,7 +2757,7 @@ inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std:
     {
         return;
     }
-    const std::string_view member = b.importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() )
+    const std::string_view member = b.importedName.str().starts_with( kPythonFromMemberMark ) ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() )
                                                                                        : std::string_view( b.var );
     std::string dir;
     bool        ok = true;
@@ -3053,7 +3053,7 @@ inline char pythonImportVerdict( const Binding& b, std::uint32_t resolved, const
     {
         return 'i';
     }
-    const std::size_t dot = b.typeName.find( '.' );
+    const std::size_t dot = b.typeName.str().find( '.' );
     const std::string head( dot == std::string::npos ? std::string_view( b.typeName ) : std::string_view( b.typeName ).substr( 0, dot ) );
     return moduleNames.find( head ) != moduleNames.end() ? 'u' : 'x';
 }
@@ -8499,7 +8499,7 @@ inline HashMap<std::string, char> pythonRootPackageImports( const IngestResult& 
         if( b.kind == LocalBindKind::Import && b.fileId < ing.files.size()
             && langFacts( langOfPath( ing.files[ b.fileId ] ) ).baseImportEvidence == BaseImportEvidence::PythonImport
             && !b.var.empty() && !b.typeName.empty() && b.typeName.front() != '.'
-            && names.contains( std::string( std::string_view( b.typeName ).substr( 0, b.typeName.find( '.' ) ) ) ) )
+            && names.contains( std::string( std::string_view( b.typeName ).substr( 0, b.typeName.str().find( '.' ) ) ) ) )
         {
             out.try_emplace( jsImportKey( b.fileId, b.var ), char( 1 ) );
         }
@@ -8873,7 +8873,7 @@ inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
         {
             continue;
         }
-        const bool renamed = b.importedName.starts_with( kPythonFromMemberMark ) && pythonBindScope( ing, b ) == kNoNode;
+        const bool renamed = b.importedName.str().starts_with( kPythonFromMemberMark ) && pythonBindScope( ing, b ) == kNoNode;
         const std::string member = renamed ? b.importedName.substr( kPythonFromMemberMark.size() ) : std::string{};
         const auto [ it, fresh ] = out.renamed.try_emplace( fileNameKey( key, b.fileId, b.var ), member );
         if( !fresh && it->second != member )
@@ -9233,7 +9233,7 @@ inline bool baseBoundOutsideTree( const BaseEvidenceTables& t, const Reference& 
                 {
                     return;
                 }
-                const std::size_t dot = b.importedName.rfind( '.' );
+                const std::size_t dot = b.importedName.str().rfind( '.' );
                 const bool        out = dot != std::string::npos && jvmPackageOutsideTree( *t.recvEv, std::string_view( b.importedName ).substr( 0, dot ) );
                 ( out ? outside : inside ) = true;
             } );

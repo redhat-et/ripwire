@@ -1372,7 +1372,7 @@ struct CallResultTypes
             bool aliased = false;   // `use nu_protocol::Value as NuValue; NuValue::nothing()`: a `use` binds a ONE-segment qualifier only
             forEachRustUseAt( r.fileId, r.startByte, sep == std::string::npos ? last : std::string_view{}, [ & ]( const Binding& b )
             {
-                const std::size_t at = b.importedName.rfind( "::" );
+                const std::size_t at = b.importedName.str().rfind( "::" );
                 aliased = aliased || ( !owner.empty() && std::string_view( b.importedName ).substr( at == std::string::npos ? 0 : at + 2 ) == owner );
             } );
             return aliased || holdsTarget( written, r.startByte );
@@ -1386,7 +1386,7 @@ struct CallResultTypes
             {
                 return false;
             }
-            const std::size_t at = b.importedName.rfind( "::" );
+            const std::size_t at = b.importedName.str().rfind( "::" );
             if( at == std::string::npos )
             {
                 return false;
@@ -1472,7 +1472,7 @@ struct CallResultTypes
         }
         const std::string head( path.substr( 0, path.find( "::" ) ) );
         std::string       root = head;
-        forEachRustUseAt( f, at, head, [ & ]( const Binding& b ) { root = b.importedName.substr( 0, b.importedName.find( "::" ) ); } );
+        forEachRustUseAt( f, at, head, [ & ]( const Binding& b ) { root = b.importedName.substr( 0, b.importedName.str().find( "::" ) ); } );
         return rust.packageNames.contains( root );
     }
     // the files holding module (crate, module)'s own level: a file module's files, or (`inlineMod` set) the one file of an
@@ -2495,7 +2495,7 @@ struct ReceiverEvidence
             namespaceNamesBuilt = true;
             for( const Binding* ns : types.namespaces )
             {
-                namespaceNames.try_emplace( std::string( ns->var.substr( 0, ns->var.find( '.' ) ) ), char( 1 ) );   // `a.b` declares `a`
+                namespaceNames.try_emplace( std::string( ns->var.substr( 0, ns->var.str().find( '.' ) ) ), char( 1 ) );   // `a.b` declares `a`
             }
         }
         return namespaceNames.contains( key );

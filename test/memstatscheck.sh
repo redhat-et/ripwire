@@ -10,6 +10,9 @@
 #      graph-resolved, graph-end), and the tables line shows every one of its five per-kind tables NON-EMPTY on this
 #      fixture (C++ typed and untyped locals, ES imports and a lexical shadow of one). It counts what it saw and fails on
 #      fewer than five: a table the fixture never fills would let R pass on an empty table's four buckets.
+#   B  the binding row (MEM-B1 BIND-INTERN): the bindings family line reports row_b=36, nine u32 on every ABI (three pool ids for
+#      var / importedName / typeName). A std::string member back in Binding reads 96 (libc++) or 120 (libstdc++) and fails; the
+#      premise (N's >= 50000 bindings, the line seen once) is counted first.
 #   R  reserve by kind (G1a), machine-free: each table's bucket count is at most 8 x max( size, 16 ). A table reserved for
 #      every binding while it holds one kind (the pre-G1a `reserve( ing.bindings.size() )`) has 2^k buckets for ~100 K
 #      bindings and fails here; a reserve by its own kind's count stays within 2.5 x of its distinct keys.
@@ -103,6 +106,17 @@ fi
 bindings="$( grep '^\[mem\] family bindings ' "$TMP/n.err" | sed -E 's/.* size=([0-9]+) .*/\1/' )"
 if [ "${bindings:-0}" -lt 50000 ]; then
     no "N: the fixture holds ${bindings:-0} bindings (want >= 50000, or R cannot tell a whole-family reserve)"
+fi
+
+# ---- B ----
+lines="$( grep -c '^\[mem\] family bindings ' "$TMP/n.err" )"
+rowb="$( grep '^\[mem\] family bindings ' "$TMP/n.err" | sed -E 's/.* row_b=([0-9]+) .*/\1/' )"
+if [ "$lines" -ne 1 ] || [ "${bindings:-0}" -lt 50000 ]; then
+    no "B: premise: the bindings family line printed $lines times (want 1), ${bindings:-0} bindings (want >= 50000)"
+elif [ "$rowb" != 36 ]; then
+    no "B: a Binding row is ${rowb:-?} B (want 36: var / importedName / typeName as 4 B pool ids, model.h MEM-B1)"
+else
+    ok "B: a Binding row is 36 B over $bindings bindings"
 fi
 
 # ---- R ----
