@@ -4291,8 +4291,9 @@ inline constexpr char kConnectHeader[] =
 // emitted only on the answer that carries them. (G4: no double hyphen.)
 inline constexpr std::string_view kConnectTestJointLegend =
     "source_joint=\"none\": every terminal is source code and no source function joins the <unconnected> ones within radius= (the"
-    " search does not walk through test or fixture code); test_joint=/test_joint_p= name a test that does call them together:"
-    " test-only evidence of how they are used, not a source caller ";
+    " search does not walk through test or fixture code); test_joint=/test_joint_p= name a test-class function the unrestricted"
+    " search joins them through (an undirected join, so not necessarily a caller of both): test-only evidence of how they are"
+    " used, not a source caller ";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
