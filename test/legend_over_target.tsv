@@ -27,3 +27,4 @@ ripwire.from-trace/v1	frame-name	118	 resolved_by="	frame n= t=: the bound symbo
 ripwire.grep/v1	enc-name	73	<enc n="	enc n=: an enclosing symbol of this page's hits	LEGEND-G-BLIND: the enclosing-symbol rows' n= rode undefined; present-only beside an <enc> row
 ripwire.pack-top-n/v1	map-rows	69	 k="	s t= n= k=: kind, name, rank	LEGEND-G-BLIND: the ranked-map rows' own keys rode undefined on the bundle's map; same clause as map-diff
 mcp:exemplar	body-kind	41	<b t="	b t= l=: the body's kind and first line	LEGEND-G-BLIND: the served body row's t=/l= rode undefined; present-only beside a <b> row (MCP twin)
+ripwire.pr-context/v1	changed-sym-name	80	<s t="	s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name	LEGEND-G-BLIND: a changed file's s rows and their caller rows printed t= n= undefined; present-only beside an <s> row (absent when the diff touches no symbol)
