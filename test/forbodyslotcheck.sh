@@ -98,9 +98,11 @@
 # Exits non-zero on any failure.
 
 set -u
-# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
-# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the budget ladder's rows against the default's (a budget-held answer is never demoted),
-# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
+# SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's twins
+# legitimately differ under them: its premises read the owner's one-line in-class declaration as the r1 ROW (Builder::Build in
+# build.h, PoolDispatcher::Dispatch, …), which DECL-TWIN prints as a pointer to its bodied twin, and its E arms compare the budget
+# ladder's rows with the head round-robin's default, where SIBLING-DEMOTE's rank > 10 rule reads each answer's own served order.
+# The rules and their budget refill are pinned in forsiblingdemotecheck / fordecltwincheck / fordemoteallcheck.
 export RIPWIRE_NO_SIBLING_DEMOTE=1
 export RIPWIRE_NO_DECL_TWIN=1   # DECL-TWIN (fordecltwin.h) runs after it; pinned in fordecltwincheck
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"

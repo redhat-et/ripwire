@@ -55,10 +55,11 @@
 #   RIPWIRE_BIN=asan/ripwire bash test/relevancefloorcheck.sh
 
 set -u
-# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
-# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the relevance floor's row quota (rows, not the pointers a later pass prints),
-# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
-export RIPWIRE_NO_SIBLING_DEMOTE=1
+# SIBLING-DEMOTE / DECL-TWIN (forsiblingdemote.h, fordecltwin.h; every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) print some
+# ranked rows as <t p= sym= r=/> pointers in their place. The floor's row quota counts RANKED ENTRIES — a <d> row or such a pointer
+# (XML), a row object or a pointer object (--json) — so the gate reads the answer as shipped; the rules are pinned in their own gates.
+unset RIPWIRE_NO_SIBLING_DEMOTE RIPWIRE_NO_DECL_TWIN
+ranked(){ grep -oE '<d |<t [^>]* r="[0-9]+"' | wc -l | tr -d ' '; }
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -123,7 +124,7 @@ echo "=== (1) the floor fires: the bundle holds the anchor's file and nothing el
 # the FULL header's "relevance floor: kept" wording, so these runs ask for --legend=full, the pre-change default.
 A_OUT="$( rw --for=FLOORANCHOR_uniquefn --legend=full )"
 a_files="$( bundleFiles "$A_OUT" )"
-a_rows="$( printf '%s' "$A_OUT" | grep -o '<d ' | wc -l | tr -d ' ' )"
+a_rows="$( printf '%s' "$A_OUT" | ranked )"
 if [ "$( printf '%s\n' "$a_files" | grep -c . )" = "1" ] && printf '%s' "$a_files" | grep -q '^src/anchor\.c$'; then
     ok "(1) the bundle holds exactly src/anchor.c"
 else
@@ -224,7 +225,7 @@ fi
 echo "=== (5) nothing matched ⇒ nothing claimed ==="
 # ═══════════════════════════════════════════════════════════════════════════
 Z_OUT="$( rw --for=ZZQQNOSUCHTOKENXYZ --legend=full )"
-z_rows="$( printf '%s' "$Z_OUT" | grep -o '<d ' | wc -l | tr -d ' ' )"
+z_rows="$( printf '%s' "$Z_OUT" | ranked )"
 z_bytes="$( printf '%s' "$Z_OUT" | wc -c | tr -d ' ' )"
 if [ "$z_rows" = "0" ] && printf '%s' "$Z_OUT" | grep -q '<sigs></sigs>'; then
     ok "(5) a query nothing scores on emits an empty <sigs> ($z_bytes B), not 40 arbitrary rows"
@@ -239,7 +240,7 @@ printf '%s' "$Z_OUT" | grep -q 'relevance floor: kept 0 of 40' \
 echo "=== (6) INERT on a query with real material — the guard never shrinks a full bundle ==="
 # ═══════════════════════════════════════════════════════════════════════════
 F_OUT="$( rw --for="unrelated alpha" )"
-f_rows="$( printf '%s' "$F_OUT" | grep -o '<d ' | wc -l | tr -d ' ' )"
+f_rows="$( printf '%s' "$F_OUT" | ranked )"
 if [ "$f_rows" = "40" ] && ! printf '%s' "$F_OUT" | grep -q 'relevance floor'; then
     ok "(6) 60 positively-scoring symbols ⇒ the full 40-row quota, and NO floor note (inert, byte-neutral)"
 else
@@ -250,7 +251,7 @@ fi
 echo "=== (7) the JSON dialect floors identically ==="
 # ═══════════════════════════════════════════════════════════════════════════
 J_OUT="$( rw --for=FLOORANCHOR_uniquefn --json )"
-j_rows="$( printf '%s' "$J_OUT" | grep -o '"sig":' | wc -l | tr -d ' ' )"
+j_rows="$( printf '%s' "$J_OUT" | grep -oE '"sig":|"pointer":' | wc -l | tr -d ' ' )"
 if [ "$j_rows" = "1" ] && ! printf '%s' "$J_OUT" | grep -q 'ci-hidden'; then
     ok "(7) --json emits the anchor row alone"
 else
