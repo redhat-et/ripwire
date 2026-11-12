@@ -3499,19 +3499,26 @@ inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::str
 // checksum covers the table plus the records actually read". The exact-fit invariant the trailer encodes — fileSize ==
 // tableOffset + entryCount*32 + 24 — is what makes a truncation that removes whole records detectable at all, so it is asserted
 // here at the one place that can still be wrong about it. C1 SAVE-STREAM: the header's bytes left `w` with the first window, so
-// the caller hands them in with entryCount already patched (carry-over drops only settle it here) and patches the FILE's copy
-// once the stream is out (saveCache).
-inline void finishCacheBlob( ByteW& w, std::string_view header, const std::vector<CacheEntry>& table )
+// they ride in `index` beside the table, entryCount patched in here (carry-over drops only settle it now); saveCache patches the
+// FILE's copy once the stream is out.
+struct CacheBlobIndex
 {
-    ASSUME( header.size() == kCacheHeaderBytes );
+    std::string             header;   // the blob's first kCacheHeaderBytes, as written (entryCount 0 until finishCacheBlob)
+    std::vector<CacheEntry> table;    // one entry per record, in record order
+};
+inline void finishCacheBlob( ByteW& w, CacheBlobIndex& index )
+{
+    const std::vector<CacheEntry>& table = index.table;
+    ASSUME( index.header.size() == kCacheHeaderBytes );
     const std::uint32_t entryCount  = std::uint32_t( table.size() );
+    std::memcpy( index.header.data() + 21, &entryCount, 4 );
     const std::uint64_t tableOffset = w.offset();
 
     // The digest's input is header || table, which are not adjacent in the blob, so it is assembled once
     // here and the table half is then appended to the blob out of the same buffer.
     std::string hdrTable;
     hdrTable.resize( kCacheHeaderBytes + std::size_t( entryCount ) * kCacheEntryBytes );
-    std::memcpy( hdrTable.data(), header.data(), kCacheHeaderBytes );
+    std::memcpy( hdrTable.data(), index.header.data(), kCacheHeaderBytes );
     if( entryCount != 0 )
     {
         std::memcpy( hdrTable.data() + kCacheHeaderBytes, table.data(), std::size_t( entryCount ) * kCacheEntryBytes );
@@ -3627,7 +3634,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         w.streamed += w.b.size();
         w.b.clear();
     };
-    std::vector<CacheEntry> table;
+    CacheBlobIndex           index;
+    std::vector<CacheEntry>& table = index.table;
     table.reserve( plan.size() );
 
     // A1 (team-index): kArtifactArch byte sits in the header right after parserVer so loadCache's guard
@@ -3639,7 +3647,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     w.u64( (std::uint64_t)blobWriteNs );
     w.u32( 0 );   // entryCount — patched in place below, once the carry-over verification has settled it
     ASSUME( w.b.size() == kCacheHeaderBytes );
-    std::string header = w.b;   // finishCacheBlob's digest input: the first window takes these bytes to the file
+    index.header = w.b;   // finishCacheBlob's digest input: the first window takes these bytes to the file
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
         std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
@@ -3823,8 +3831,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: offset table + trailer" );
         const std::uint32_t entryCount = std::uint32_t( table.size() );
-        std::memcpy( header.data() + 21, &entryCount, 4 );
-        finishCacheBlob( w, header, table );
+        finishCacheBlob( w, index );
         drain();
         // entryCount into the file's header: one seek-and-write after the stream, before the close and the rename
         if( !wErr && ( std::fseek( fp, 21, SEEK_SET ) != 0 || std::fwrite( &entryCount, 1, 4, fp ) != 4 ) )

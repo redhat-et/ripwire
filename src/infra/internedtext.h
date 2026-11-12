@@ -93,7 +93,7 @@ public:
                 {
                     PANIC( "text pool full: more than kCapacity distinct texts" );   // ~4.29 G texts (100+ GB): no row can hold a past-the-end id
                 }
-                makeSlot( id, text );
+                std::construct_at( makeSlot( id ), text );   // NIT-7: constructed here, under this shard's lock
                 slot = { tag, id };
                 ++shard.used;
                 return id;
@@ -173,12 +173,12 @@ private:
         const unsigned      seg   = unsigned( std::bit_width( index / kFirst + 1 ) ) - 1;
         return { seg, std::size_t( index - std::uint64_t( kFirst ) * ( ( std::uint64_t( 1 ) << seg ) - 1 ) ) };
     }
-    // Construct a NEW id's text in its slot, making its segment on the first id that lands there (a release CAS: another shard's
-    // first intern may race for the same segment, and the loser frees its copy). NIT-7 (MEM-R1c): the segment is RAW storage and
-    // each slot is constructed here, under the shard lock that hands out its id, so a segment's untouched tail stays untouched
-    // (`new std::string[ n ]` constructed, and so wrote, all of segment k's kFirst << k slots at its first id: 6 MiB at segment
-    // 6). Nothing reads a slot before its id is published, and the destructor destroys exactly the ids below next_.
-    void makeSlot( std::uint32_t id, std::string_view text )
+    // The RAW slot a NEW id's text is constructed in, making its segment on the first id that lands there (a release CAS: another
+    // shard's first intern may race for the same segment, and the loser frees its copy). NIT-7 (MEM-R1c): the segment is raw
+    // storage and intern constructs each slot, under the shard lock that hands out its id, so a segment's untouched tail stays
+    // untouched (`new std::string[ n ]` constructed, and so wrote, all of segment k's kFirst << k slots at its first id: 6 MiB at
+    // segment 6). Nothing reads a slot before its id is published, and the destructor destroys exactly the ids below next_.
+    std::string* makeSlot( std::uint32_t id )
     {
         const auto [ seg, offset ] = locate( id );
         std::string* base = segments_[ seg ].load( std::memory_order_acquire );
@@ -194,7 +194,7 @@ private:
                 ::operator delete( fresh );
             }
         }
-        std::construct_at( base + offset, text );
+        return base + offset;
     }
 
     std::atomic<std::string*>  segments_[ kSegments ] = {};
