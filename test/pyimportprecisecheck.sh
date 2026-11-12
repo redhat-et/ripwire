@@ -488,6 +488,17 @@ else no "#533 confine: pkg/helper.py <- [$CH], util/x.py <- [$CU] (both must be 
 if [ "$CR" = "app/pkg/user2.py " ] && [ "$CR2" = "" ]; then
     ok '#533 confine twin: the resolved package'"'"'s own member is found (app/pkg/real.py), its other-root namesake is not'
 else no "#533 confine twin: app/pkg/real.py <- [$CR], pkg/real.py <- [$CR2]"; fi
+# #533 review (round 2): a name that is BOTH bound in pkg/__init__.py and a sibling pkg/<name>.py still draws the member edge, and
+# the package edge stays. `from pkg3 import both` loads pkg3 (whose __init__ defines both()) and, in the usual case, that binding is
+# the package re-exporting its own submodule, so the dependency on pkg3/both.py is real; the edge is drawn by design, not by accident.
+mkdir -p "$PC/pkg3"
+printf 'def both():\n    return 1\n' >"$PC/pkg3/__init__.py"
+printf 'def pyc_both():\n    return 1\n' >"$PC/pkg3/both.py"
+printf 'from pkg3 import both\n' >"$PC/bothuser.py"
+CB="$( imp "$PC" pkg3/both.py )"; CBI="$( imp "$PC" pkg3/__init__.py )"
+if [ "$CB" = "bothuser.py " ] && [ "$CBI" = "bothuser.py " ]; then
+    ok '#533 init-and-sibling: a name both bound in pkg3/__init__.py and a file pkg3/both.py draws the member edge and keeps the package edge'
+else no "#533 init-and-sibling: pkg3/both.py <- [$CB], pkg3/__init__.py <- [$CBI] (both must be bothuser.py)"; fi
 CT="$( imp "$PC" pkg2/tcmod.py )"; CY="$( imp "$PC" pkg2/trymod.py )"
 if [ "$CT" = "tc.py " ] && [ "$CY" = "tryimp.py " ]; then
     ok '#478 gap 1 shapes: a member import under `if TYPE_CHECKING:` and inside try/except ImportError keeps its edge'
