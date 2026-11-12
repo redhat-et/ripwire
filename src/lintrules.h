@@ -1199,6 +1199,16 @@ struct ErrorMaskRule
 // the real spelling, and an unused binding swallows the same. Both languages' rows always gate, exactly as
 // Python's `except: pass` does. Every non-block capture (`err`, `Err`) is dropped by the emptyOnly filter,
 // as the promise rules' @p is.
+// Go: <err> bound from a CALL, position-matched. A single call on the right (`_, err := f()`, `err = f()`) feeds
+// every name on the left; a two-value right-hand side feeds each name from the expression in ITS position
+// (`err, n := f(), 3` binds err to the call; `err, _ := savedErr, len(items)` binds it to a variable — CR #632).
+// Three or more values are not matched: a miss, never a false row. Spelled once for both Go rows below.
+#define RW_GO_ERR_FROM_CALL_IN( stmt )                                                                               \
+    "(" stmt " left: (expression_list (identifier) @e) right: (expression_list . (call_expression) .)) "             \
+    "(" stmt " left: (expression_list . (identifier) @e . (_) .) right: (expression_list . (call_expression) . (_) .)) " \
+    "(" stmt " left: (expression_list . (_) . (identifier) @e .) right: (expression_list . (_) . (call_expression) .)) "
+#define RW_GO_ERR_FROM_CALL "[" RW_GO_ERR_FROM_CALL_IN( "short_var_declaration" ) RW_GO_ERR_FROM_CALL_IN( "assignment_statement" ) "]"
+
 inline constexpr std::array<ErrorMaskRule, 11> kErrorMaskRules = { {
     { "(catch_clause body: (compound_statement) @m)",                                    "empty-catch-cfamily", true  },  // C/C++/ObjC
     { "(catch_clause body: (block) @m)",                                                 "empty-catch-java",    true  },  // Java
@@ -1207,10 +1217,10 @@ inline constexpr std::array<ErrorMaskRule, 11> kErrorMaskRules = { {
     { "(except_clause (block (expression_statement (ellipsis))) @m)",                    "swallow-except-dots", false },  // Python: except ...: ...
     { "(call_expression function: (member_expression property: (property_identifier) @p (#eq? @p \"catch\")) arguments: (arguments (arrow_function body: (statement_block) @m)))", "swallow-catch-arrow", true  },  // .catch(()=>{})
     { "(call_expression function: (member_expression property: (property_identifier) @p (#eq? @p \"then\"))  arguments: (arguments (_) (arrow_function body: (statement_block) @m)))", "swallow-then-arrow",  true  },  // .then(_, ()=>{})
-    { "(if_statement initializer: [(short_var_declaration left: (expression_list (identifier) @e) right: (expression_list (call_expression))) (assignment_statement left: (expression_list (identifier) @e) right: (expression_list (call_expression)))]"
+    { "(if_statement initializer: " RW_GO_ERR_FROM_CALL
       " condition: (binary_expression left: (identifier) @l operator: \"!=\" right: (nil)) consequence: (block) @m !alternative (#eq? @e @l) (#match? @l \"^(.*[eE]rr|err[A-Z].*)$\"))",
       "empty-err-go-init", true },   // Go: if _, err := f(); err != nil {}
-    { "([(short_var_declaration left: (expression_list (identifier) @e) right: (expression_list (call_expression))) (assignment_statement left: (expression_list (identifier) @e) right: (expression_list (call_expression)))]"
+    { "(" RW_GO_ERR_FROM_CALL
       " . (if_statement !initializer condition: (binary_expression left: (identifier) @l operator: \"!=\" right: (nil)) consequence: (block) @m !alternative) (#eq? @e @l) (#match? @l \"^(.*[eE]rr|err[A-Z].*)$\"))",
       "empty-err-go-prev", true },   // Go: err := f() <NL> if err != nil {}
     { "(if_expression condition: (let_condition pattern: (tuple_struct_pattern type: (identifier) @t) value: (_)) consequence: (block) @m !alternative (#eq? @t \"Err\"))",
@@ -1218,6 +1228,9 @@ inline constexpr std::array<ErrorMaskRule, 11> kErrorMaskRules = { {
     { "(match_arm pattern: (match_pattern (tuple_struct_pattern type: (identifier) @t)) value: [(block) (unit_expression)] @m (#eq? @t \"Err\"))",
       "empty-err-rust-arm", true },     // Rust: Err(_) => {} / Err(_) => ()
 } } ;
+
+#undef RW_GO_ERR_FROM_CALL
+#undef RW_GO_ERR_FROM_CALL_IN
 
 // Does the captured block SWALLOW — is there nothing in it that could handle the error? astQuery returns the
 // @m span text with \n/\r/\t already flattened to spaces and truncated to 120 chars; an empty `{}` (even

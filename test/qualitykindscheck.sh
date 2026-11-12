@@ -699,6 +699,12 @@ func logged() { touch() }
 func paramErr(err error) { touch() }
 func discard() { touch() }
 func elseBranch() { touch() }
+func callFirst() { touch() }
+func callSecond() { touch() }
+func multiInit(savedErr error, items []int) { touch() }
+func multiPrev(savedErr error, items []int) { touch() }
+func wrongPosInit(savedErr error) { touch() }
+func wrongPosPrev(savedErr error) { touch() }
 
 func risky() error { return nil }
 func touch() { log.Print(os.Args) }
@@ -751,6 +757,39 @@ func elseBranch() {
 		touch()
 	}
 }
+func callFirst() {
+	touch()
+	if err, n := risky(), 3; err != nil {
+	}
+}
+func callSecond() {
+	touch()
+	n, err := 3, risky()
+	if err != nil {
+	}
+}
+func multiInit(savedErr error, items []int) {
+	touch()
+	if err, _ := savedErr, len(items); err != nil {
+	}
+}
+func multiPrev(savedErr error, items []int) {
+	touch()
+	err, _ := savedErr, len(items)
+	if err != nil {
+	}
+}
+func wrongPosInit(savedErr error) {
+	touch()
+	if err, n := savedErr, risky(); err != nil {
+	}
+}
+func wrongPosPrev(savedErr error) {
+	touch()
+	n, err := risky(), savedErr
+	if err != nil {
+	}
+}
 
 func risky() error { return nil }
 func touch() { log.Print(os.Args) }
@@ -758,6 +797,8 @@ func touch() { log.Print(os.Args) }
 qd_pair empty_go a.go "$GOB" "$GOE"
 qd_has  "empty (go)" error-masking initEmpty gating
 qd_has  "empty (go)" error-masking prevEmpty gating
+qd_has  "empty (go)" error-masking callFirst gating    # err, n := f(), 3 — err IS the call's result
+qd_has  "empty (go)" error-masking callSecond gating   # n, err := 3, f()
 for s in retErr logged paramErr elseBranch; do premise "empty (go)" empty_go "$s" '(binary_expression right: (nil)) @m'; done
 premise "empty (go)" empty_go discard '(assignment_statement left: (expression_list (identifier) @m))'
 qd_none "empty (go)" error-masking retErr     "the branch returns the error"
@@ -765,6 +806,12 @@ qd_none "empty (go)" error-masking logged     "the branch logs the error by name
 qd_none "empty (go)" error-masking paramErr   "err is a parameter, not a call result here"
 qd_none "empty (go)" error-masking discard    "_ = recover() is out of scope"
 qd_none "empty (go)" error-masking elseBranch "an if/else is not an error branch alone"
+# CR #632 4556210611: a multi-value right-hand side binds err to the expression IN ITS POSITION, not to a call elsewhere
+for s in multiInit multiPrev wrongPosInit wrongPosPrev; do premise "empty (go)" empty_go "$s" '(expression_list (identifier) (_)) @m'; done
+qd_none "empty (go)" error-masking multiInit    "err, _ := savedErr, len(items) binds err to a variable, not a call"
+qd_none "empty (go)" error-masking multiPrev    "the same multi-value binding in the statement before the if"
+qd_none "empty (go)" error-masking wrongPosInit "err, n := savedErr, f() — the call feeds n, not err"
+qd_none "empty (go)" error-masking wrongPosPrev "n, err := f(), savedErr — the call feeds n, not err"
 if [ "$QD_RC" = 2 ]; then ok "empty (go): the gating rows fire exit 2"; else no "empty (go): should exit 2 (got $QD_RC)"; fi
 
 RSB='use std::fmt::Write;
