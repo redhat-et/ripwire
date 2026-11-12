@@ -767,6 +767,69 @@ qd_none "empty (go)" error-masking discard    "_ = recover() is out of scope"
 qd_none "empty (go)" error-masking elseBranch "an if/else is not an error branch alone"
 [ "$QD_RC" = 2 ] && ok "empty (go): the gating rows fire exit 2" || no "empty (go): should exit 2 (got $QD_RC)"
 
+RSB='use std::fmt::Write;
+
+fn touch() {}
+pub fn iflet_empty() { touch(); }
+pub fn arm_empty() { touch(); }
+pub fn arm_unit() { touch(); }
+pub fn log_only() { touch(); }
+pub fn log_arm() { touch(); }
+pub fn ret_err() -> Result<(), std::io::Error> { touch(); Ok(()) }
+pub fn write_char(buf: &mut String) { touch(); }
+pub fn names_e() { touch(); }
+'
+RSE='use std::fmt::Write;
+
+fn touch() {}
+pub fn iflet_empty() {
+    touch();
+    if let Err(_) = std::fs::metadata(".") {
+    }
+}
+pub fn arm_empty() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => {}, Err(_frame) => {} }
+}
+pub fn arm_unit() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(_) => () }
+}
+pub fn log_only() {
+    touch();
+    if let Err(_) = std::fs::metadata(".") {
+        eprintln!("ignored");
+    }
+}
+pub fn log_arm() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(_e) => log::warn!("failed") }
+}
+pub fn ret_err() -> Result<(), std::io::Error> {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => Ok(()), Err(e) => return Err(e.into()) }
+}
+pub fn write_char(buf: &mut String) {
+    touch();
+    let _ = buf.write_char(char::from(10));
+}
+pub fn names_e() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(e) => eprintln!("failed: {e}") }
+}
+'
+qd_pair empty_rs a.rs "$RSB" "$RSE"
+qd_has  "empty (rust)" error-masking iflet_empty gating
+qd_has  "empty (rust)" error-masking arm_empty gating
+qd_has  "empty (rust)" error-masking arm_unit gating
+qd_has  "log-only (rust)" error-masking log_only minor
+qd_has  "log-only (rust)" error-masking log_arm minor
+for s in ret_err names_e; do premise "empty (rust)" empty_rs "$s" '(tuple_struct_pattern) @m'; done
+premise "empty (rust)" empty_rs write_char '(let_declaration) @m'
+qd_none "empty (rust)" error-masking ret_err    "the arm returns the error"
+qd_none "empty (rust)" error-masking write_char "let _ = fallible(); is out of scope"
+qd_none "empty (rust)" error-masking names_e    "the arm logs the error by name, inside the format string"
+
 
 # ── 6) PLACEHOLDER — the eleventh kind: a stub or TODO the change ADDED ───────────────────────────────────
 #   Never gates: every row is origin="new-symbol" by construction, including one that lands in a symbol that

@@ -1183,8 +1183,8 @@ struct ErrorMaskRule
 };
 
 // The table. C-family (C/C++/ObjC), Java, TS/JS empty catches; Python bare/pass/ellipsis except handlers;
-// swallowed promise rejections (`.catch(()=>{})` / `.then(...,()=>{})` empty handler); Go's empty error
-// branches (QD-K6E-GO, below). Go's ignored-error `_ =` discard and Rust's `let _ =
+// swallowed promise rejections (`.catch(()=>{})` / `.then(...,()=>{})` empty handler); Go's and Rust's empty
+// error branches (QD-K6E-GO / QD-K6E-RUST, below). Go's ignored-error `_ =` discard and Rust's `let _ =
 // fallible();` are deliberately OMITTED: a spot check of 10 such sites across axum, promgo and vuln found 0
 // defects (`_ = recover()` in a deferred guard, `let _ = buf.write_char(..)` into an in-memory buffer, a
 // compile-only test helper), and telling an error-typed discard from a benign one needs type info ripwire
@@ -1193,10 +1193,13 @@ struct ErrorMaskRule
 // GO: `if <err> != nil {}` with no else, where <err> is error-named (isGoErrName's spelling as a regex) AND is
 // the left-hand result of a CALL — in the if's own initializer (`if _, err := f(); err != nil {}`) or in the
 // statement immediately before it (`err := f()` / `err = f()`). The binding is what makes it the error branch
-// of that call rather than a nil test on some long-lived variable. Its rows always gate, exactly as Python's
-// `except: pass` does. Every non-block capture (`err`) is dropped by the emptyOnly filter,
+// of that call rather than a nil test on some long-lived variable. RUST: `if let Err(..) = <expr> {}` with no
+// else, and a match arm `Err(..) => {}` or `Err(..) => ()` — the Err variant makes it a Result by
+// construction. Any binding inside Err(..) counts (`_`, `_e`, `e`): rustc warns on an unused `e`, so `_` is
+// the real spelling, and an unused binding swallows the same. Both languages' rows always gate, exactly as
+// Python's `except: pass` does. Every non-block capture (`err`, `Err`) is dropped by the emptyOnly filter,
 // as the promise rules' @p is.
-inline constexpr std::array<ErrorMaskRule, 9> kErrorMaskRules = { {
+inline constexpr std::array<ErrorMaskRule, 11> kErrorMaskRules = { {
     { "(catch_clause body: (compound_statement) @m)",                                    "empty-catch-cfamily", true  },  // C/C++/ObjC
     { "(catch_clause body: (block) @m)",                                                 "empty-catch-java",    true  },  // Java
     { "(catch_clause body: (statement_block) @m)",                                       "empty-catch-tsjs",    true  },  // TS/JS
@@ -1210,6 +1213,10 @@ inline constexpr std::array<ErrorMaskRule, 9> kErrorMaskRules = { {
     { "([(short_var_declaration left: (expression_list (identifier) @e) right: (expression_list (call_expression))) (assignment_statement left: (expression_list (identifier) @e) right: (expression_list (call_expression)))]"
       " . (if_statement !initializer condition: (binary_expression left: (identifier) @l operator: \"!=\" right: (nil)) consequence: (block) @m !alternative) (#eq? @e @l) (#match? @l \"^(.*[eE]rr|err[A-Z].*)$\"))",
       "empty-err-go-prev", true },   // Go: err := f() <NL> if err != nil {}
+    { "(if_expression condition: (let_condition pattern: (tuple_struct_pattern type: (identifier) @t) value: (_)) consequence: (block) @m !alternative (#eq? @t \"Err\"))",
+      "empty-err-rust-iflet", true },   // Rust: if let Err(_) = f() {}
+    { "(match_arm pattern: (match_pattern (tuple_struct_pattern type: (identifier) @t)) value: [(block) (unit_expression)] @m (#eq? @t \"Err\"))",
+      "empty-err-rust-arm", true },     // Rust: Err(_) => {} / Err(_) => ()
 } } ;
 
 // Does the captured block SWALLOW — is there nothing in it that could handle the error? astQuery returns the
@@ -1327,6 +1334,8 @@ inline bool errorMaskCommentConsumesBlock( std::string_view raw ) noexcept
 // A brace pair with nothing at all between them. Split out from errorMaskBlockIsEmpty so the caller can
 // tell WHICH half answered: this one needs no confirm (there is no comment to mis-read), the comment half
 // does.
+// Rust's unit `()` is the same empty body as an arm value (`Err(_) => ()`); no other row captures a node that can
+// spell it.
 inline bool errorMaskBlockIsBareBraces( std::string_view collapsed ) noexcept
 {
     std::string stripped;
@@ -1337,7 +1346,7 @@ inline bool errorMaskBlockIsBareBraces( std::string_view collapsed ) noexcept
             stripped.push_back( c );
         }
     }
-    return stripped == "{}";
+    return stripped == "{}" || stripped == "()";
 }
 
 // THE PREFILTER, over astQuery's flattened span text. Cheap and deliberately over-accepting on its comment

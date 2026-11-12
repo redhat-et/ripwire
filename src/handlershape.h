@@ -332,7 +332,8 @@ inline void readCppHandler( TSNode n, std::string_view src, Handler& h )
 }
 
 // One row per grammar: which node is a handler there, and who reads it. A grammar absent from the table has
-// no handler shape (Go's `if err != nil` is its own reader below; Rust, Swift and the rest are not judged).
+// no handler shape (Go's `if err != nil` and Rust's `Err(..)` arm are their own readers below; Swift and the rest are
+// not judged).
 struct HandlerReader
 {
     Lang        lang;
@@ -679,6 +680,103 @@ inline std::string_view goLogOnlyShape( TSNode n, std::string_view src, std::vec
     return mentionsError( body, src, nodeTextOf( left, src ) ) ? std::string_view() : kShapeLogOnly;
 }
 
+// Rust, QD-K6E-RUST's log-only half: an `Err(..)` arm, or an `if let Err(..) = … {}` with no else, whose body is only
+// print/log macros (eprintln!, println!, log::warn!, tracing::error!, a bare warn!/error!/…) and never names the Err
+// binding. Err is a Result's whole error side, so the handler is broad by construction. A guarded arm (`Err(_) if …`) is
+// conditional and not judged.
+inline constexpr std::string_view kRustPrintMacros[] = { "eprintln", "eprint", "println", "print" };
+inline constexpr std::string_view kRustLogLevels[]   = { "error", "warn", "info", "debug", "trace" };
+
+inline bool isRustLogMacro( TSNode stmt, std::string_view src )
+{
+    const TSNode e = statementExpression( stmt );
+    if( !typeIs( e, "macro_invocation" ) )
+    {
+        return false;
+    }
+    std::string_view m = nodeTextOf( field( e, "macro" ), src );
+    if( std::find( std::begin( kRustPrintMacros ), std::end( kRustPrintMacros ), m ) != std::end( kRustPrintMacros ) )
+    {
+        return true;
+    }
+    for( std::string_view crate : { std::string_view( "log::" ), std::string_view( "tracing::" ) } )
+    {
+        m = m.starts_with( crate ) ? m.substr( crate.size() ) : m;
+    }
+    return std::find( std::begin( kRustLogLevels ), std::end( kRustLogLevels ), m ) != std::end( kRustLogLevels );
+}
+
+// The Err binding of a tuple-struct pattern `Err( x )`, through `ref`/`mut` wrappers; empty for `_`, `..` or a nested
+// pattern. False when the pattern is not `Err( … )` at all.
+inline bool rustErrBinding( TSNode pat, std::string_view src, std::string_view& name )
+{
+    name = {};
+    if( !typeIs( pat, "tuple_struct_pattern" ) || nodeTextOf( field( pat, "type" ), src ) != "Err" )
+    {
+        return false;
+    }
+    const TSNode inner = namedChild( pat, 1 );   // child 0 is the type
+    if( typeIs( inner, "identifier" ) )
+    {
+        name = nodeTextOf( inner, src );
+    }
+    return true;
+}
+
+// A Rust format string names its argument INSIDE the literal (`"{e}"`, `"{e:?}"`), where mentionsName cannot see it.
+inline bool rustFormatNames( TSNode body, std::string_view src, std::string_view name )
+{
+    const std::string_view text = nodeTextOf( body, src );
+    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
+    {
+        const char after = at + name.size() < text.size() ? text[at + name.size()] : '\0';
+        if( at > 0 && text[at - 1] == '{' && ( after == '}' || after == ':' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline std::string_view rustLogOnlyShape( TSNode n, std::string_view src, std::vector<TSNode>& stmts )
+{
+    const bool       isArm = typeIs( n, "match_arm" );
+    std::string_view name;
+    TSNode           body;
+    if( isArm )
+    {
+        const TSNode mp = field( n, "pattern" );
+        if( !ts_node_is_null( field( mp, "condition" ) ) || !rustErrBinding( namedChild( mp, 0 ), src, name ) )
+        {
+            return {};
+        }
+        body = field( n, "value" );
+    }
+    else
+    {
+        const TSNode cond = field( n, "condition" );
+        if( !typeIs( cond, "let_condition" ) || !ts_node_is_null( field( n, "alternative" ) ) || !rustErrBinding( field( cond, "pattern" ), src, name ) )
+        {
+            return {};
+        }
+        body = field( n, "consequence" );
+    }
+    if( typeIs( body, "block" ) )
+    {
+        statementsOf( body, stmts );
+    }
+    else
+    {
+        stmts.assign( 1, body );   // `Err(_) => eprintln!( "x" ),`
+    }
+    if( stmts.empty() || !std::all_of( stmts.begin(), stmts.end(), [ & ]( TSNode s ) { return isRustLogMacro( s, src ); } ) )
+    {
+        return {};
+    }
+    const bool named = !name.empty() && name != "_" && ( mentionsError( body, src, name ) || rustFormatNames( body, src, name ) );
+    return named ? std::string_view() : kShapeLogOnly;
+}
+
 // ── placeholders ──────────────────────────────────────────────────────────────────────────────────────
 
 // Case-insensitive search for one of the stub phrases in a string literal's text. "TODO" is matched
@@ -910,6 +1008,10 @@ inline std::string_view shapeOfNode( TSNode n, std::string_view src, Lang lang, 
     if( lang == Lang::Go && kindIs( type, "if_statement" ) )
     {
         return goLogOnlyShape( n, src, stmts );
+    }
+    if( lang == Lang::Rust && ( kindIs( type, "match_arm" ) || kindIs( type, "if_expression" ) ) )
+    {
+        return rustLogOnlyShape( n, src, stmts );
     }
     if( isCommentNode( n ) )
     {
