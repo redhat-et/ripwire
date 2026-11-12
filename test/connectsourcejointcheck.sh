@@ -20,6 +20,11 @@
 #   E  a source joint that connects MORE than the test (the old tie-break's loser) now wins over the test               (RED on main)
 #   F  test terminal: when a terminal IS test code, a test joint stays allowed (and no source_joint=)
 #   G  legend: source_joint= / test_joint= / test_joint_p= are defined in both dialects when present; absent otherwise
+#   I  the evidence names a test that joins terminals the source search left APART: with planIt/applyIt joined through
+#      source and a shorter test path beside it, and cIt/dIt joined only by a second test, test_joint= is the cIt/dIt
+#      test, not the lower-id planIt/applyIt one (CodeRabbit #625)
+#   J  the test_joint= reading in both dialects does not claim a direction: the test is a node the undirected search
+#      joins them THROUGH (A -> helper <- B is not "a test that calls them together"; CodeRabbit #625)
 #   H  determinism (3 runs) + xmllint
 #   M  mutations: each assertion sees its own regression
 #
@@ -53,6 +58,13 @@ printf 'void planIt(); void applyIt();\nvoid testBoth() { planIt(); applyIt(); }
     printf 'void x1() {}\nvoid x2() {}\nvoid x3() {}\nvoid x4() {}\nvoid x5() {}\nvoid planIt(); void applyIt();\n'
     printf 'void driver() { planIt(); applyIt(); x1(); x2(); x3(); x4(); x5(); }\n'
 } > "$TIE/src/driver.cpp"
+
+# planIt/applyIt are joined through source (driver -> planIt, driver -> mid -> applyIt) and by a SHORTER test path (abTest);
+# cIt/dIt only by a second test (cdTest), declared after abTest so it has the higher id
+XC="$TMP/crosscomp";    mksrc "$XC"
+printf 'void cIt() {}\nvoid dIt() {}\n' >> "$XC/src/core.cpp"
+printf 'void planIt(); void applyIt();\nvoid mid() { applyIt(); }\nvoid driver() { planIt(); mid(); }\n' > "$XC/src/driver.cpp"
+printf 'void planIt(); void applyIt(); void cIt(); void dIt();\nvoid abTest() { planIt(); applyIt(); }\nvoid cdTest() { cIt(); dIt(); }\n' > "$XC/test/core_test.cpp"
 
 TT="$TMP/testterm";     mksrc "$TT"
 printf 'void helperT() {}\nvoid applyIt();\nvoid testDriver() { helperT(); applyIt(); }\n' > "$TT/test/helper_test.cpp"
@@ -141,6 +153,22 @@ else
 fi
 if printf '%s' "$F_DOC" | grep -q 'source_joint='; then no "(F) source_joint= printed for a test terminal"; else ok "(F) no source_joint= for a test terminal"; fi
 
+# ── I) the evidence joins what the source search left apart ─────────────────────────────────────────────
+I_DOC="$( "$BIN" "$XC" --no-cache --connect=planIt,applyIt,cIt,dIt 2>/dev/null )"
+iPrem=0
+printf '%s' "$I_DOC" | grep -q '<g terminals="2"><t n="planIt"' && iPrem=$(( iPrem + 1 ))
+[ "$( printf '%s' "$I_DOC" | grep -o '<unconnected radius=' | wc -l | tr -d ' ' )" = 2 ] && iPrem=$(( iPrem + 1 ))
+if [ "$iPrem" -eq 2 ]; then
+    ok "(I) premise: planIt/applyIt joined through source, cIt and dIt <unconnected> ($iPrem/2)"
+else
+    no "(I) premise: expected one source group of planIt/applyIt and two <unconnected> rows ($iPrem/2): $( brief "$I_DOC" )"
+fi
+if printf '%s' "$I_DOC" | grep -q '<connect [^>]*test_joint="cdTest" test_joint_p="test/core_test.cpp:3"'; then
+    ok "(I) test_joint= names cdTest, the test that joins the <unconnected> cIt/dIt"
+else
+    no "(I) test_joint= is not cdTest (evidence unrelated to the <unconnected> terminals?): $( brief "$I_DOC" )"
+fi
+
 # ── G) legend ────────────────────────────────────────────────────────────────────────────────────────────
 for lbl in full default; do
     [ "$lbl" = full ] && doc="$A_FULL" || doc="$A_DEF"
@@ -148,6 +176,17 @@ for lbl in full default; do
     for a in 'source_joint=' 'test_joint=' 'test_joint_p='; do
         if printf '%s' "$leg" | grep -qF "$a"; then ok "(G) $lbl legend defines $a"; else no "(G) $lbl legend lacks $a"; fi
     done
+done
+# J) the reading names an undirected join, never a caller of both
+for lbl in full default; do
+    [ "$lbl" = full ] && doc="$A_FULL" || doc="$A_DEF"
+    clause="$( printf '%s' "$doc" | sed 's/<connect .*//' | grep -oE 'test_joint=/test_joint_p=[^;]*' | head -1 )"
+    case "$clause" in
+        '') no "(J) $lbl legend: no test_joint=/test_joint_p= reading to judge";;
+        *'call them together'*|*'calls them together'*) no "(J) $lbl legend claims the test calls both: $clause";;
+        *through*) ok "(J) $lbl legend reads the test as a node the search joins them through";;
+        *) no "(J) $lbl legend: the test_joint reading does not say the join runs through the test: $clause";;
+    esac
 done
 if printf '%s' "$D_DOC" | sed 's/<connect .*//' | grep -qF 'source_joint='; then no "(G) the source_joint= clause rides an answer that does not carry it"; else ok "(G) the clause is present-only (absent with a source joint)"; fi
 
