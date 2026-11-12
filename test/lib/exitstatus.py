@@ -444,7 +444,7 @@ class Walker:
         self.src, self.extra = src, list( extra )
         self.vars = binvars( src )
         self.targets = []                          # fnmatch patterns of compiled harnesses
-        self.errexit = False; self.pipefail = False
+        self.errexit = False; self.pipefail = False; self.subst_depth = 0
         self.calls = []                            # ( line, cmd, consumer, via )
         self.funcs = {}                            # name -> Compound
         self.wrappers = {}                         # name -> ( line, cmd ) of the call whose status IS the function's
@@ -554,6 +554,13 @@ class Walker:
         m = re.search( r'echo\s+"?\$\??"?\s*>+\s*"?[^"\s]*?\.([A-Za-z0-9_]+)"?', head )
         if m:
             return ( "checked", "rc file .%s compared" % m.group( 1 ) ) if "file:" + m.group( 1 ) in self.compared else ( "unchecked", "rc file .%s written, never compared" % m.group( 1 ) )
+        # a status only PRINTED in a message is not tested (CodeRabbit #626 4548924371): `echo "exit $?"`, `printf 'rc=%s\n' $?`
+        # to the terminal. Everything else that reads $? next -- a test, `echo $?` alone as the output (rc=$( cmd; echo $? )),
+        # $? written to a file, $? handed to a checker function, $? printed into a $( ) the gate captures (OUT="$( cmd; echo
+        # "rc=$?" )") -- counts as the next statement testing it.
+        if re.match( r'\s*(?:echo|printf)\b', head ) and ">" not in head and not self.subst_depth \
+                and not re.match( r'\s*(?:echo|printf\s+(?:\'%s\'|"%s"|%s))\s+"?\$\{?\?\}?"?\s*$', head ):
+            return ( "unchecked", "$? printed, not tested" )
         return ( "checked", "$? tested by the next statement" )
     def walk_andor( self, ao, consumer ):
         n = len( ao )
@@ -614,8 +621,12 @@ class Walker:
                 if assign_only and w in c.assigns: sc = consumer
                 elif local_assign: sc = ( "unchecked", "%s x=$(...) (status masked)" % unq( words[0] ) )
                 else: sc = ( "unchecked", "$(...) argument (status discarded)" )
+                self.subst_depth += 1
                 self.walk_list( parse( inner, ln ), sc )
+                self.subst_depth -= 1
         if cw is None: return
+        # errexit resolves HERE, against set -e as it stands at this call (CodeRabbit #626 4548924380), not at the end
+        if consumer[0] == "errexit": consumer = self.resolve( consumer )
         kind = self.under_test( cw )
         if kind:
             self.calls.append( ( c.line, cw, consumer, kind ) )
