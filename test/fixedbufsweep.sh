@@ -219,7 +219,7 @@ TABLE = {
 # set it belongs in and why: a string argument makes it a TABLE row, with real prose.
 NUMERIC_ONLY = {
     ( "src/serialize.h", "p" ): 2,
-    ( "src/degradedscan.h", "hit.errRatio" ): 2,   # degradedHits (line 90) + lexicalDefHit (B31): each its own char[16], "{:.3f}" of a ratio <= 1.000
+    ( "src/degradedscan.h", "hit.errRatio" ): 1,
     ( "src/dmm.h", "value" ): 1,
     ( "src/editcheck.h", "callersOpen" ): 1,
     ( "src/editcheck.h", "cc" ): 1,
@@ -626,10 +626,7 @@ if not bad:
 #            train 26c (cli-perf merged onto the train's 363/248/248/109): re-derived on the merged tree.
 #            2026-10-18 (lane/hrr): +1 call/+1 mention/+1 site, rows unchanged (363/248/248/109 -> 364/249/249/109): sigsOpenTag's
 #            nb[96] ' files_first="{}"' (35 B worst case, one size_t, nothing escaped) — re-read and sized before this pin.
-#            2026-11-12 (lane/uses-unarmed, B31): +1 call/+1 mention/+1 site, rows unchanged (366/251/251/109 -> 367/252/252/109):
-#            lexicalDefHit's hit.errRatio[16] (LexicalDefHit, degradedscan.h), "{:.3f}" of errBytes/fileBytes, numeric only — the
-#            same shape and bound as degradedHits' own errRatio[16] at line 90; re-read and sized before this pin.
-EXPECTED = { "mentions": 367, "calls": 252, "sites": 252, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=); arch-honest: +2 (packDeps hb, hdr); uses-unarmed: +1 (lexicalDefHit errRatio)
+EXPECTED = { "mentions": 366, "calls": 251, "sites": 251, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=); arch-honest: +2 (packDeps hb, hdr)
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

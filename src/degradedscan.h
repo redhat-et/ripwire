@@ -56,6 +56,14 @@ struct DegradedTextHit
     char        errRatio[ 16 ] = {};   // "%.3f"; <= 1.000 by construction (errBytes <= fileBytes)
 };
 
+// THE one formatting of a degraded file's error ratio, for both hits below (each carries its own char[16]): two surfaces
+// and two scans can never print different digits for the same file.
+template<class Hit>
+inline void setErrRatio( Hit& hit, const FileHealth& h )
+{
+    rw::formatTo( hit.errRatio, sizeof( hit.errRatio ), "{:.3f}", double( h.errBytes ) / double( h.fileBytes ) );
+}
+
 inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_view name )
 {
     if( name.empty() || name.size() > 256 )
@@ -87,7 +95,7 @@ inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_vie
                 DegradedTextHit hit;
                 hit.found     = true;
                 hit.fileIndex = fileIndex;
-                rw::formatTo( hit.errRatio, sizeof( hit.errRatio ), "{:.3f}", double( h.errBytes ) / double( h.fileBytes ) );
+                setErrRatio( hit, h );
                 return hit;
             }
         }
@@ -230,7 +238,7 @@ inline LexicalDefHit lexicalDefHit( const IngestResult& ing, std::string_view na
             if( degraded )
             {
                 const FileHealth& h = ing.fileHealth[ fileIndex ];
-                rw::formatTo( hit.errRatio, sizeof( hit.errRatio ), "{:.3f}", double( h.errBytes ) / double( h.fileBytes ) );
+                setErrRatio( hit, h );
             }
             return hit;
         }
