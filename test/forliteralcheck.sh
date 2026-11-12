@@ -39,6 +39,7 @@
 #   L9 [G] bytes= is the element's own size (open tag to </lit>)
 #   X1 [G] determinism  X2 [G] xmllint well-formed  X3 [G] no "--" inside the lit legend comment
 #   N2 [train 42b T-5] `x = x + 1  # note:` is no def header: the bare string after it is a row, not a docstring (twin: the same without the comment)
+#   M6 (READER-CALLERS MSG-VERBATIM): a cue-less task of 4+ words whose whole text is a string site verbatim is a message; M5 keeps a near miss one letter short
 #   K1-K10, M1-M5 (lane LITERAL-ANCHOR; RED on base 4e8bfde7 where [P], fixture built at runtime): a dotted key (3+ segments, or 2 with a setting/option/key/command/flag word) or
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
 #   T28-T37 (fix round 2; RED on 5bbee3cb where [P]): tbl= is an allowlist of proven openers per language; a closer ends the opener walk; read= and <lit_capped> say the rank cap; table rows first
@@ -325,11 +326,14 @@ M3="$( krun '--for=the `Invalid user settings file` error' | lit )"; M3b="$( kru
 if has "$M3" 'shape="message"' && has "$M3b" 'shape="message"'; then ok "M3 [P] a backticked or single-quoted span with a cue outside it"; else no "M3: ${M3:0:300} / ${M3b:0:300}"; fi
 M4="$( krun '--for=terminal foo must be the last filter in a chain error' | lit )"
 if has "$M4" 's="must be the last filter in a chain" shape="message"' && has "$M4" 'frag="1"' && has "$M4" 'in="chain"'; then ok "M4 [P] no whole hit: the longest end-anchored fragment, frag=1 says so"; else no "M4: ${M4:0:500}"; fi
-for near in 'Invalid user settings file' 'bad state error' 'Stale cache entry found error' 'Only a test message here error' 'why does retry fail error' '`no outer cue message here`' 'the `no outer cue message here` text' 'Zzq yyx wwv uut error' 'alpha if beta error' 'foo(x) bar baz error' 'Invalid user settings file errorHandler' 'Invalid user settings file terror'; do
+for near in 'Invalid user settings fil' 'bad state error' 'Stale cache entry found error' 'Only a test message here error' 'why does retry fail error' '`no outer cue message here`' 'the `no outer cue message here` text' 'Zzq yyx wwv uut error' 'alpha if beta error' 'foo(x) bar baz error' 'Invalid user settings file errorHandler' 'Invalid user settings file terror'; do
     N="$( krun "--for=$near" )"
     if ! has "$N" '<lit ' && [ "$N" = "$( koff "--for=$near" )" ]; then ok "M5 [G] near miss, no <lit and byte-identical: $near"
     else no "M5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
 done
+# MSG-VERBATIM (forreadercallerscheck owns the trigger): a cue-less task that IS a source string verbatim is a message; one letter short is not (M5)
+M6="$( krun '--for=Invalid user settings file' | lit )"
+if has "$M6" 's="Invalid user settings file" shape="message"' && ! has "$M6" 'frag='; then ok "M6 [P] a cue-less 4-word task that is a string site verbatim: shape=message"; else no "M6: ${M6:0:300}"; fi
 # ── Q (lane LITERAL-ANCHOR fix round 1; [P] arms are RED on a4ac4941): the review's C1-C5 and the mid-sentence cue; fixture built at runtime ──
 QF="$TMP/qfix"; mkdir -p "$QF/app" "$QF/pkg"
 python3 -I -c 'import sys

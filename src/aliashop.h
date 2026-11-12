@@ -262,7 +262,7 @@ struct BindCache
 {
     HashMap<std::string, char>                       isNamespace;
     HashMap<std::uint64_t, std::vector<std::string>> chains;   // hashutil::packPair( file, byte ) -> the namespaces and classes around it
-    HashMap<std::uint64_t, char>                     unknown;  // the keys whose file could not be read or did not balance
+    HashSet<std::uint64_t>                           unknown;  // the keys whose file could not be read or did not balance
 };
 
 // The lexical chains at the declaration starts of `ids`, read ONE pass per file (hoisting: a --uses answer's thousands of sites
@@ -300,7 +300,7 @@ inline void primeChains( const IngestResult& ing, std::vector<std::pair<std::uin
             const std::uint64_t key = hashutil::packPair( want[ k ].first, want[ k ].second );
             if( !got[ k - from ] )
             {
-                cache.unknown.try_emplace( key, '\1' );
+                cache.unknown.insert( key );
             }
             cache.chains.try_emplace( key, got[ k - from ].value_or( std::vector<std::string>{} ) );
         }

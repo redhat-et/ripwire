@@ -651,7 +651,7 @@ private:
         }
         std::vector<NodeId>   out;
         std::vector<NodeId>   stack = ownersOf( bs );
-        HashMap<NodeId, char> seen;
+        HashSet<NodeId>       seen;
         while( !stack.empty() )
         {
             const NodeId b = stack.back();
@@ -660,7 +660,7 @@ private:
             const std::vector<std::uint8_t>& bound = g_.implementorBound[b];
             for( std::size_t k = 0; k < kids.size(); ++k )
             {
-                if( bound[k] == std::uint8_t( BaseBound::Proven ) && seen.try_emplace( kids[k], char( 1 ) ).second )
+                if( bound[k] == std::uint8_t( BaseBound::Proven ) && seen.insert( kids[k] ).second )
                 {
                     out.push_back( kids[k] );
                     stack.push_back( kids[k] );

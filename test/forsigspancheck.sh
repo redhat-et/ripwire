@@ -90,9 +90,11 @@
 # Exits non-zero on any failure.
 
 set -u
-# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
-# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the <sigs> span and its shown= / docs_after_code= disclosure (counted before the demote pass),
-# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
+# SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's twins
+# legitimately differ under them: (R) compares the docs-after-code reorder with plain score order, and SIBLING-DEMOTE's rank > 10
+# rule reads the SERVED order, so the two orders demote different rows; (N) drops e=, and DECL-TWIN reads a one-line declaration off
+# l= = e=. The gate pins the <sigs> span and its shown= / docs_after_code= disclosure (counted before the rules); the rules are pinned
+# in forsiblingdemotecheck / fordecltwincheck / fordemoteallcheck.
 export RIPWIRE_NO_SIBLING_DEMOTE=1
 export RIPWIRE_NO_DECL_TWIN=1   # DECL-TWIN (fordecltwin.h) runs after it; pinned in fordecltwincheck
 export PYTHONDONTWRITEBYTECODE=1

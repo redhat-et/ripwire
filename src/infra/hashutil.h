@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "platform.h" // infra::platform::multiplyLow64 — the sanitizer-clean wrapping multiply
+#include "unordered_dense.h" // ankerl::unordered_dense::detail::wyhash::hash — hashMix's body
 
 namespace rw::hashutil
 {
@@ -55,6 +56,16 @@ inline constexpr std::uint64_t fnv1aAbsorb( std::uint64_t hash, char c ) noexcep
 inline constexpr std::uint64_t packPair( std::uint32_t high, std::uint32_t low ) noexcept
 {
     return ( std::uint64_t( high ) << 32 ) | std::uint64_t( low );
+}
+
+// Mix a u64 key (a packPair, an id) into a well-spread hash, for a hash container keyed by a composite integer. This IS the
+// flat containers' own u64 hash (wyhash's 128-bit multiply-fold, the one ankerl applies to an integer key), so a custom
+// hasher built on it spreads exactly as HashMap/HashSet do on a bare u64. Picked by microbench over the splitmix64
+// finalizer (M2, 2026-11-11, -O2, median of 3): a dependent chain 1.7 vs 4.8 ns, throughput 0.39 vs 0.78 ns, and a
+// 4 M-key set insert + lookup 23.8 vs 39.0 ns/op. One 64x64->128 multiply, no wrapping 64-bit multiply for the sanitizer.
+inline std::uint64_t hashMix( std::uint64_t key ) noexcept
+{
+    return ankerl::unordered_dense::detail::wyhash::hash( key );
 }
 
 } // namespace rw::hashutil
