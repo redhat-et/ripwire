@@ -16167,6 +16167,23 @@ inline std::string memberOwnerRefusal( const IngestResult& ing, std::span<const 
 // A member selector whose OWNER resolves to a type in a language that extracts no fields refuses BY LANGUAGE
 // NAME — an empty answer there would read as "no uses", which is the zero-means-none-exists lie. "" when the
 // spec is not a member selector or the owner is not an indexed unserved type.
+// An owner whose members the index never extracts: a class-like definition in a language with no field capture.
+inline bool fieldsUnservedOwner( const Symbol& s ) noexcept
+{
+    const bool classLike  = s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
+    const bool fieldsLang = s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::Python;   // queries/{c,cpp,python}/tags.scm carry @definition.field
+    return classLike && !fieldsLang;
+}
+
+// THE sentence for a member of an unserved owner — the qualified selector's refusal, and (B31 USES-FIELD-EXTERNAL) the bare
+// name's when its only definition is a lexical member declaration (fielduses.h unservedMemberDeclRefusal).
+inline std::string memberUnservedSentence( const IngestResult& ing, std::string_view spec, const Symbol& owner )
+{
+    return "member selector '" + std::string( spec ) + "': field symbols are extracted for C, C++ and Python only — '"
+         + owner.name + "' is a lang=" + langTag( owner.lang ) + " type (" + ing.files[ owner.fileId ]
+         + "), so its members are not indexed and their use-sites cannot be resolved";
+}
+
 inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::string_view spec )
 {
     if( !looksLikeMemberSelector( spec ) )
@@ -16177,13 +16194,9 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
     const std::string_view owner = spec.substr( 0, dot );
     for( const Symbol& s : ing.symbols )
     {
-        const bool classLike   = s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
-        const bool fieldsLang  = s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::Python;   // queries/{c,cpp,python}/tags.scm carry @definition.field
-        if( classLike && s.name == owner && !fieldsLang )
+        if( s.name == owner && fieldsUnservedOwner( s ) )
         {
-            return "member selector '" + std::string( spec ) + "': field symbols are extracted for C, C++ and Python only — '"
-                 + std::string( owner ) + "' is a lang=" + langTag( s.lang ) + " type (" + ing.files[ s.fileId ]
-                 + "), so its members are not indexed and their use-sites cannot be resolved";
+            return memberUnservedSentence( ing, spec, s );
         }
     }
     return {};

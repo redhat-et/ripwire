@@ -305,6 +305,7 @@ for _g in \
     aliasdefcheck \
     anchorbodycheck \
     anchorcheck \
+    anchorhonestycheck \
     archcheck \
     archhonestcheck \
     archmetricscheck \
@@ -1061,6 +1062,7 @@ for _g in \
     usescheck \
     usesliteralcheck \
     usesselectorcheck \
+    usesunarmedcheck \
     usingdeclcheck \
     utf8scrubcheck \
     vendoredassetcheck \
