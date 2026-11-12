@@ -7,6 +7,8 @@
 #           `use axum_core::__define_rejection as define_rejection;`). M0 is the bare twin that bound before.
 #   N arms  negatives: an outside crate's macro path (`serde_json::json!`, `use serde_json::json as sj; sj!`, `other_crate::__define_thing!`)
 #           never binds the in-tree namesake. Each counts its premise (the site is read, under the target's name) and FAILs on zero.
+#   L arms  the transcriber scan skips raw strings (`r#"…"#`), nested block comments and a `'"'` char literal (CodeRabbit #627): a
+#           `$crate::ghost!` inside one is no call, and the real call after it is still read (premise, FAILs on zero).
 #   X arms  #610 (fixture by @soarkit, test/rustmacropathfix/rx-*): a `pub use` that resolves outside the tree carries no class, and two
 #           re-exports of the SAME class agree, so `make()`'s `crate::facade::Config` types `c.get()` (proven); two re-exports of DIFFERENT
 #           in-tree classes stay ambiguous (both rows by name, none proven; premise: two Config::get rows).
@@ -100,6 +102,15 @@ premise N3 "$M" __define_thing thing_core/src/ext.rs:15
 row     N3.extcrate    "$M" callees ext_other    $MD __define_thing none
 premise N4 "$M" json app/src/lib.rs:12
 row     N4.crossext    "$M" callees app_ext      $MD json           none
+# ---- L: the transcriber scan's literals and comments (CodeRabbit #627). L1-L3 first check the scan reached past the literal (the real
+#      `$crate::other_thing!` after it is a caller row), then that nothing inside it is a call: `ghost` has no caller at all.
+row     L1.premise     "$M" callers other_thing  $MD raw_quiet      present
+row     L2.premise     "$M" callers other_thing  $MD nest_quiet     present
+row     L3.charquote   "$M" callers other_thing  $MD char_quiet     present
+ghost=$( ask "$M" callers ghost )
+ghostrows=$( printf '%s' "$ghost" | grep -oE '<s [^>]*p="thing_core/src/macros.rs[^>]*>' | grep -c . )
+if printf '%s' "$ghost" | grep -q 'schema=' && [ "$ghostrows" = 0 ]; then echo "PASS L1L2.ghost (no caller reads a call inside a raw string or nested comment)"
+else echo "FAIL L1L2.ghost --callers=ghost lists $ghostrows macros.rs row(s): a call inside a literal or comment was read"; fail=1; fi
 
 # ---- X: #610 re-export bindings (fixture by @soarkit)
 row X1.extplusintree "$T/rx-ext"  callees src/app.rs:use_it src/model.rs Config::get proven

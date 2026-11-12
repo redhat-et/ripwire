@@ -28,3 +28,37 @@ macro_rules! json {
         0
     };
 }
+
+// CodeRabbit #627: what the transcriber scan must read as one literal or comment. `ghost` is only ever spelled inside them, so no
+// macro below calls it; each also makes one real `$crate::other_thing!` call AFTER the literal, which the scan must still reach.
+#[macro_export]
+macro_rules! ghost {
+    () => {};
+}
+
+// a raw string: the embedded `"` does not close it
+#[macro_export]
+macro_rules! raw_quiet {
+    ($name:ident) => {
+        const _: &str = r#"a " $crate::ghost!() b"#;
+        $crate::other_thing!($name);
+    };
+}
+
+// a nested block comment: the inner `*/` does not close the outer one
+#[macro_export]
+macro_rules! nest_quiet {
+    ($name:ident) => {
+        /* outer /* inner */ $crate::ghost!(); */
+        $crate::other_thing!($name);
+    };
+}
+
+// a char literal `'"'` opens no string, so the real call after it is read
+#[macro_export]
+macro_rules! char_quiet {
+    ($name:ident) => {
+        const _: char = '"';
+        $crate::other_thing!($name);
+    };
+}

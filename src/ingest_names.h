@@ -1068,7 +1068,8 @@ inline void rustMacroPathOf( std::string_view pathText, std::string& qualifier, 
 // the macro definition's span owns them and the graph connects THROUGH the macro (`wrap_thing` → `other_thing`, axum's
 // `__define_rejection` → `__log_rejection`). A token tree is not parsed, so this is a lexical scan over the definition, kept to the
 // `$crate`-rooted path: the one spelling that names the defining crate's macro by construction (a bare `name!` in a transcriber may
-// name a macro of the expansion site: not read, a floor). String literals and comments are skipped; `$crate::x != y` is no call.
+// name a macro of the expansion site: not read, a floor). String, raw-string and char literals and (nested) comments are skipped;
+// `$crate::x != y` is no call.
 namespace rust_transcriber_scan
 {
 // blanks: space, tab, CR, LF (rw::isJsonWs is exactly that set); identifier bytes: namesplit::isIdentChar (ASCII)
@@ -1090,7 +1091,8 @@ inline void skipStringLiteral( std::string_view src, std::uint32_t& i, std::uint
     ++i;
 }
 // A comment at `i` (`//` or `/*`): moves `i` past it (a line comment stops at its newline, which the caller counts), adding the
-// newlines a block comment holds to `line`. False, `i` unmoved, when `i` starts none.
+// newlines a block comment holds to `line`. Rust block comments nest (`/* a /* b */ still a comment */`), so the outer `*/` closes
+// it (CodeRabbit #627). False, `i` unmoved, when `i` starts none.
 inline bool skipComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
 {
     const char next = i + 1 < end ? src[ i + 1 ] : '\0';
@@ -1103,12 +1105,77 @@ inline bool skipComment( std::string_view src, std::uint32_t& i, std::uint32_t e
         i = static_cast<std::uint32_t>( std::min<std::size_t>( src.find( '\n', i ), end ) );
         return true;
     }
-    for( i += 2; i + 1 < end && !( src[ i ] == '*' && src[ i + 1 ] == '/' ); ++i )
+    std::uint32_t depth = 1;
+    for( i += 2; i < end && depth > 0; )
     {
+        const std::string_view two = src.substr( i, 2 );
         line += src[ i ] == '\n' ? 1u : 0u;
+        depth += two == "/*" ? 1u : 0u;
+        depth -= two == "*/" ? 1u : 0u;
+        i += two == "/*" || two == "*/" ? 2u : 1u;
     }
-    i += 2;
     return true;
+}
+// A raw string at `i` (`r"…"`, `r#"…"#`, `br##"…"##`: no escapes, closed only by `"` and as many `#` as opened it): moves `i` past
+// it, adding the newlines it holds to `line` (CodeRabbit #627: an embedded `"` does not close it). False, `i` unmoved, when the `r`
+// is part of an identifier or no raw string starts there.
+inline bool skipRawString( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    const bool tokenStart = i == 0 || !namesplit::isIdentChar( src[ i - 1 ] ) || ( src[ i - 1 ] == 'b' && ( i == 1 || !namesplit::isIdentChar( src[ i - 2 ] ) ) );
+    if( src[ i ] != 'r' || !tokenStart )
+    {
+        return false;
+    }
+    std::uint32_t q = i + 1;
+    while( q < end && src[ q ] == '#' )
+    {
+        ++q;
+    }
+    if( q >= end || src[ q ] != '"' )
+    {
+        return false;
+    }
+    const std::string closer = "\"" + std::string( q - i - 1, '#' );
+    const std::size_t close  = src.substr( 0, end ).find( closer, q + 1 );
+    const std::uint32_t stop = close == std::string_view::npos ? end : static_cast<std::uint32_t>( close + closer.size() );
+    line += static_cast<std::uint32_t>( std::count( src.begin() + i, src.begin() + stop, '\n' ) );
+    i = stop;
+    return true;
+}
+// A char literal at `i` (`'"'`, `'\''`, `'\u{22}'`): moves `i` past it, so its quote opens no string. False for a lifetime or label
+// (`'a`), which has no closing `'` right after one character or an escape.
+inline bool skipCharLiteral( std::string_view src, std::uint32_t& i, std::uint32_t end ) noexcept
+{
+    if( src[ i ] != '\'' || i + 2 >= end )
+    {
+        return false;
+    }
+    if( src[ i + 1 ] != '\\' )
+    {
+        if( src[ i + 2 ] != '\'' )
+        {
+            return false;   // a lifetime or a label
+        }
+        i += 3;
+        return true;
+    }
+    const std::size_t close = src.substr( 0, end ).find( '\'', i + 3 );
+    if( close == std::string_view::npos || close > i + 12 )
+    {
+        return false;
+    }
+    i = static_cast<std::uint32_t>( close + 1 );
+    return true;
+}
+// Any literal or comment at `i` that the scan must not read calls in: moves `i` past it. False, `i` unmoved, when none starts.
+inline bool skipLiteralOrComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    if( src[ i ] == '"' )
+    {
+        skipStringLiteral( src, i, end, line );
+        return true;
+    }
+    return skipRawString( src, i, end, line ) || skipCharLiteral( src, i, end ) || skipComment( src, i, end, line );
 }
 // `$crate` at `at` followed by ( `::` ident )+ `!` (not `!=`): the last segment's [nameAt, nameEnd). Only peeks.
 inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
@@ -1178,12 +1245,7 @@ inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fil
             ++i;
             continue;
         }
-        if( src[ i ] == '"' )
-        {
-            skipStringLiteral( src, i, end, line );
-            continue;
-        }
-        if( skipComment( src, i, end, line ) )
+        if( skipLiteralOrComment( src, i, end, line ) )
         {
             continue;
         }
