@@ -467,6 +467,57 @@ printf '%s' "$MA" | grep -q 'unmatched_member' \
 QN2="$( "$BIN" "$QF" --pattern='ping($X)' --no-cache 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1 )"
 printf '%s' "$QN2" | grep -q 'unmatched_member' \
     && no "a fixture with no member call carries unmatched_member: $QN2" || ok "no member near miss, no unmatched_member= (the qualified fixture)"
+# -- 7c) the member near miss stays exact (CR #624 review 5869575117) ------------------------------------------------
+# Three ways the 7b count or its next= misled: (1) a C/C++ pointer call `p->f(x)` is counted, but next= spelled
+# `$O.f($X)`, which never matches it; (2) a pattern already holding $O, $RECV and $RW_RECEIVER got $RW_RECEIVER as
+# the receiver too, so next= bound it twice and missed the counted call; (3) a member call longer than the ellipsis
+# bound was abandoned and the abandon rolled back, so unmatched_member= read as a total while it was a floor.
+MX="$TMP/memberexact"; mkdir -p "$MX/mixed" "$MX/arrow" "$MX/recv" "$MX/long" "$MX/short"
+printf 'struct W { void f(int); };\nvoid g(W* p, W o) { p->f(1); p->f(2); o.f(3); }\n' >"$MX/mixed/a.cpp"
+printf 'struct W { void f(int); };\nvoid g(W* p) { p->f(1); p->f(2); }\n' >"$MX/arrow/a.cpp"
+printf 'def h(o):\n    o.f(1, 2, 3)\n' >"$MX/recv/b.py"
+printf 'def h(o):\n    o.foo(%s)\n' "$( seq -s, 0 399 )" >"$MX/long/c.py"
+printf 'def h(o):\n    o.foo(%s)\n' "$( seq -s, 0 9 )" >"$MX/short/c.py"
+# PREMISE: the fixtures carry the shapes the arms are about, counted by text; zero FAILS (no vacuous pass).
+arrowSites="$( grep -o -- '->f(' "$MX/mixed/a.cpp" "$MX/arrow/a.cpp" | wc -l | tr -d ' ' )"
+longSites="$( grep -c 'o\.foo(' "$MX/long/c.py" "$MX/short/c.py" | awk -F: '{ n += $2 } END { print n + 0 }' )"
+[ "${arrowSites:-0}" -ge 4 ] && [ "${longSites:-0}" -eq 2 ] && grep -q 'o\.f(1, 2, 3)' "$MX/recv/b.py" \
+    && ok "member-exact premise: $arrowSites arrow call sites, $longSites long/short member calls, one 3-argument member call" \
+    || no "member-exact premise: the fixtures lost their shapes (arrow=${arrowSites:-0} long=${longSites:-0}) — the arms below would be vacuous"
+xroot(){ "$BIN" "$1" --no-cache --pattern="$2" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }
+# (1) arrow: mixed spellings disclose the arrow count and keep the dot next=; an all-arrow corpus gets the arrow next=
+XM="$( xroot "$MX/mixed" 'f($X)' )"
+printf '%s' "$XM" | grep -q ' unmatched_member="3"' && printf '%s' "$XM" | grep -q ' unmatched_member_arrow="2"' \
+    && printf '%s' "$XM" | grep -qF "next=\"--pattern=&apos;\$O.f(\$X)&apos;\"" \
+    && ok "mixed . and ->: unmatched_member=\"3\" unmatched_member_arrow=\"2\", next= keeps the dot spelling" \
+    || no "mixed . and -> should read unmatched_member=\"3\" unmatched_member_arrow=\"2\" with the dot next=: $XM"
+XA="$( xroot "$MX/arrow" 'f($X)' )"
+printf '%s' "$XA" | grep -qF "next=\"--pattern=&apos;\$O-&gt;f(\$X)&apos;\"" \
+    && ok "all-arrow corpus: next= spells \$O->f(\$X)" || no "an all-arrow corpus should get next='\$O->f(\$X)': $XA"
+XAN="$( xroot "$MX/arrow" '$O->f($X)' )"
+printf '%s' "$XAN" | grep -q ' hits="2"' \
+    && ok "pasting the arrow next= hits exactly the 2 counted calls" || no "\$O->f(\$X) should hit the 2 arrow calls: $XAN"
+# control: a dot-only corpus carries no arrow attribute (7b's fixture)
+printf '%s' "$( mroot 'post_message($X)' )" | grep -q 'unmatched_member_arrow' \
+    && no "a dot-only corpus carries unmatched_member_arrow" || ok "control: no arrow call, no unmatched_member_arrow="
+# (2) receivers exhausted: next= takes a receiver the pattern does not spell, and pasting it hits the counted call
+XR="$( xroot "$MX/recv" 'f($O, $RECV, $RW_RECEIVER)' )"
+XRN="$( printf '%s' "$XR" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
+printf '%s' "$XR" | grep -q ' unmatched_member="1"' && [ -n "$XRN" ] \
+    && [ "$( xroot "$MX/recv" "$XRN" | grep -c ' hits="1"' )" = 1 ] \
+    && ok "receivers \$O \$RECV \$RW_RECEIVER taken: next='$XRN' is free and hits the 1 counted call" \
+    || no "with \$O \$RECV \$RW_RECEIVER in the pattern, next= should take a free receiver that hits the counted call: next='$XRN' root=$XR"
+# (3) the ellipsis bound: the long member call is a floor, disclosed; the short one is counted with no floor flag
+XL="$( xroot "$MX/long" 'foo(...)' )"
+printf '%s' "$XL" | grep -q ' unmatched_member_capped="1"' \
+    && ok "a member call past the ellipsis bound labels unmatched_member= a floor (unmatched_member_capped=\"1\")" \
+    || no "UNDISCLOSED: a member call the ellipsis bound skipped left no floor label: $XL"
+printf '%s' "$XL" | grep -q ' ellipsis_capped="0"' \
+    && ok "the member probe's abandon stays out of ellipsis_capped= (the exact answer's fact)" || no "ellipsis_capped= should stay 0 for a member-only abandon: $XL"
+XS="$( xroot "$MX/short" 'foo(...)' )"
+printf '%s' "$XS" | grep -q ' unmatched_member="1"' && ! printf '%s' "$XS" | grep -q 'unmatched_member_capped' \
+    && ok "control: a member call under the bound is counted (unmatched_member=\"1\") with no floor flag" \
+    || no "a member call under the bound should read unmatched_member=\"1\" with no unmatched_member_capped: $XS"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

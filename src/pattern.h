@@ -925,6 +925,8 @@ struct MatchStats
     // hits; disclosed as unmatched_member= with the `$O.f($X)` spelling as next=. Null shape: the grammar has no row.
     const MemberCallShape* memberShape          = nullptr;
     std::uint64_t          memberUnmatchedCount = 0;
+    std::uint64_t          memberCappedCount    = 0;       // third-ask probes the ellipsis bound abandoned: the count is a floor
+    std::uint64_t          memberArrowCount     = 0;       // counted calls whose member callee is spelled `->` (C, C++)
     bool                   relaxMember          = false;   // set for the third ask only
 };
 
@@ -1124,8 +1126,26 @@ inline bool countQualifiedNearMiss( const PatternProgram& prog, TSNode n, std::s
     return counted;
 }
 
-// The third ask (PATTERN-MEMBER-ZERO), same contract as the second: counted, never a hit, ellipsis abandons rolled back.
-// Asked only when the node's callee IS the grammar's member kind, so an ordinary refused call costs one type compare.
+// Is this member callee spelled with the arrow operator (`ptr->f`)? The operator is an anonymous child, and a pattern
+// spelled `$O.f` never matches it, so the emitter needs the count to offer a next= that does.
+inline bool memberCalleeIsArrow( TSNode callee )
+{
+    const std::uint32_t n = ts_node_child_count( callee );
+    for( std::uint32_t i = 0; i < n; ++i )
+    {
+        const TSNode c = ts_node_child( callee, i );
+        if( !ts_node_is_named( c ) && std::string_view( ts_node_type( c ) ) == "->" )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The third ask (PATTERN-MEMBER-ZERO), same contract as the second: counted, never a hit. Its ellipsis abandons are
+// rolled back out of ellipsis_capped= (the exact answer's fact) and kept in memberCappedCount, so a member call the
+// bound skipped labels unmatched_member= a floor instead of vanishing (CR #624). Asked only when the node's callee IS
+// the grammar's member kind, so an ordinary refused call costs one type compare.
 inline void countMemberNearMiss( const PatternProgram& prog, TSNode n, std::string_view src, MatchStats& stats )
 {
     if( stats.memberShape == nullptr || ts_node_named_child_count( n ) == 0
@@ -1138,7 +1158,10 @@ inline void countMemberNearMiss( const PatternProgram& prog, TSNode n, std::stri
     stats.relaxMember    = true;
     stats.relaxedLeafHit = false;
     const bool relaxedMatch = matchAt( prog, 0, n, src, relaxedEnv, stats, 0 );
-    stats.memberUnmatchedCount += ( relaxedMatch && stats.relaxedLeafHit ) ? 1u : 0u;
+    const bool counted      = relaxedMatch && stats.relaxedLeafHit;
+    stats.memberUnmatchedCount += counted ? 1u : 0u;
+    stats.memberArrowCount += ( counted && memberCalleeIsArrow( ts_node_named_child( n, 0 ) ) ) ? 1u : 0u;
+    stats.memberCappedCount += stats.ellipsisCappedCount - ellipsisBefore;
     stats.relaxMember         = false;
     stats.ellipsisCappedCount = ellipsisBefore;
 }

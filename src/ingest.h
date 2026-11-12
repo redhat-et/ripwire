@@ -606,6 +606,17 @@ private:
     AstRegexUndecidedReport state;
 };
 
+// The member-call near-miss counts of one pattern run (PATTERN-MEMBER-ZERO), summed across the parallel file walk
+// like ellipsisCappedOut: counted = calls the bare callee names as a member (unmatched_member=), capped = member
+// probes the ellipsis bound abandoned, so `counted` is a floor (unmatched_member_capped=), arrow = counted calls
+// spelled with `->` (unmatched_member_arrow=), which a `$O.f` next= cannot match.
+struct MemberNearMissTally
+{
+    std::atomic<std::uint64_t> counted{ 0 };
+    std::atomic<std::uint64_t> capped{ 0 };
+    std::atomic<std::uint64_t> arrow{ 0 };
+};
+
 struct AstQueryGroup
 {
     const std::vector<AstQuerySpec>* specs         = nullptr;   // borrowed — the caller owns the spec table
@@ -628,8 +639,8 @@ struct AstQueryGroup
     // (pattern.h MatchStats::qualifiedUnmatchedCount) — never hits; the emitter discloses unmatched_qualified=.
     std::atomic<std::uint64_t>*       qualifiedUnmatchedOut = nullptr;
     // AstWalk::Pattern only, optional: member calls (`obj.f(x)`) only the bare callee of a call pattern names
-    // (pattern.h MatchStats::memberUnmatchedCount, kMemberCallShapes) — never hits; disclosed as unmatched_member=.
-    std::atomic<std::uint64_t>*       memberUnmatchedOut = nullptr;
+    // (pattern.h MatchStats member counts, kMemberCallShapes) — never hits; disclosed as unmatched_member=.
+    MemberNearMissTally*              memberOut = nullptr;
 
     // §L3: a query that DID compile (for at least one grammar) still tells the caller nothing about WHICH
     // grammars accepted it, or how much of the corpus could even ask it the question. `(interface_declaration)
