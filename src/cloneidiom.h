@@ -44,8 +44,9 @@
 // Type-1 copy after alpha-renaming) never demotes, whatever its vocabulary — a one-line copy that renamed
 // only its parameters is still a copy. That clause is what keeps two `return s.scope.empty() ? …` copies
 // gating even if they had no member name in common.
-// Every exclusion fails SAFE: a signature the parameter reader cannot parse yields no parameter names, so
-// more identifiers stay in and fewer groups demote.
+// A signature the parameter reader cannot parse yields no parameter names: more identifiers stay in, which
+// is the safe side of condition (2), but the alpha-rename refusal then cannot see a parameter-only rename,
+// so the reader finds the list after a generic signature's type parameters as well (idiomParamListOpen).
 //
 // ON (4), AND WHY IT IS A CEILING RATHER THAN A DROP. The design note that prompted this asked for a
 // "higher token floor (e.g. 2x the normal one) before it can group at all". Implemented literally that
@@ -623,23 +624,83 @@ inline CloneIdiom classifyOneStatement( const std::vector<IdiomTok>& t )
     return ( depth == 0 && taken >= 1 ) ? CloneIdiom::OneStatement : CloneIdiom::None;   // a `;`-less language
 }
 
-// The parameter NAMES of one signature's parameter list, read off its tokens: the `(` that follows the
-// symbol's own name, split at depth-1 commas (template angles counted, so `std::map<K, V> m` is one
-// parameter), the default after a depth-1 `=` ignored. A signature that never spells `name (` yields none —
-// the safe direction, since every name returned here LEAVES the identifier set.
+// One type-parameter group opened at sig[open] — `<T extends Base, U>` (TypeScript, Rust, Java, C#, Swift,
+// Kotlin) or `[T any]` (Go) — skipped: the index just past its close, or sig.size() when it never closes
+// before a body or statement starts.
+inline std::size_t idiomSkipTypeParams( const std::vector<IdiomTok>& sig, std::size_t open ) noexcept
+{
+    const bool  angled = sig[open].text == "<";
+    std::size_t depth  = 0;
+    for( std::size_t k = open; k < sig.size(); ++k )
+    {
+        const std::string_view w = sig[k].text;
+        if( w == "{" || w == ";" )
+        {
+            break;
+        }
+        if( angled )
+        {
+            if( w == "<" )
+            {
+                ++depth;
+            }
+            else if( !w.empty() && w.find_first_not_of( '>' ) == std::string_view::npos && depth > 0 )
+            {
+                depth -= std::min( depth, w.size() );   // `>>` closes two
+            }
+        }
+        else
+        {
+            const int step = idiomBracketStep( w );
+            depth = step > 0 ? depth + 1 : ( step < 0 && depth > 0 ? depth - 1 : depth );
+        }
+        if( depth == 0 )
+        {
+            return k + 1;
+        }
+    }
+    return sig.size();
+}
+
+// The `(` that opens the symbol's own parameter list: `name (`, or `name` then one type-parameter group then
+// `(` (`first<T>( value: T )`, `First[T any]( value T )`). sig.size() when the signature spells neither.
+inline std::size_t idiomParamListOpen( const std::vector<IdiomTok>& sig, std::string_view name ) noexcept
+{
+    for( std::size_t i = 0; !name.empty() && i + 1 < sig.size(); ++i )
+    {
+        if( sig[i].text != name )
+        {
+            continue;
+        }
+        std::size_t j = i + 1;
+        if( sig[j].text == "<" || sig[j].text == "[" )
+        {
+            j = idiomSkipTypeParams( sig, j );
+        }
+        if( j < sig.size() && sig[j].text == "(" )
+        {
+            return j;
+        }
+    }
+    return sig.size();
+}
+
+// The parameter NAMES of one signature's parameter list, read off its tokens: the `(` that opens the
+// symbol's own parameter list (idiomParamListOpen: after its name, and after a generic signature's type
+// parameters), split at depth-1 commas (template angles counted, so `std::map<K, V> m` is one parameter),
+// the default after a depth-1 `=` ignored. A signature that spells no parameter list yields none. That is
+// safe for condition (2), since every name returned here LEAVES the identifier set, but NOT for the
+// alpha-rename refusal, which then sees two parameter-renamed copies as different bodies: so the list is
+// found through type parameters too (CodeRabbit #629, `function first<T>( value: T )`).
 inline std::vector<std::string_view> idiomParamNames( const std::vector<IdiomTok>& sig, std::string_view name, bool nameFirst )
 {
     std::vector<std::string_view> out;
-    std::size_t i = 0;
-    while( i + 1 < sig.size() && !( sig[i].text == name && sig[i + 1].text == "(" ) )
-    {
-        ++i;
-    }
-    if( name.empty() || i + 1 >= sig.size() )
+    std::size_t i = idiomParamListOpen( sig, name );
+    if( i >= sig.size() )
     {
         return out;
     }
-    i += 2;
+    i += 1;
     std::size_t      depth = 1, angle = 0;
     bool             inDefault = false;
     std::string_view firstId, lastId;

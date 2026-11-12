@@ -114,6 +114,7 @@ expect_row onestmt_expects     siteBefore  entryBefore one-statement yes   # (O)
 expect_row onestmt_ifreturn    siteBefore  entryBefore NONE          no    # (O) if-then-return is two statements
 expect_row onestmt_alpha       widthBetween gapOf      one-statement no    # (O) identical after renaming parameters
 expect_row onestmt_alpha_generic widthBetween gapOf  one-statement no    # (O) the same, through a generic signature (`gapOf<T>(…)`: the parameter list follows the type parameters)
+expect_row onestmt_alpha_gogeneric WidthBetween GapOf one-statement no   # (O) the same through Go type parameters (`GapOf[T int | int64](…)`)
 expect_row onestmt_memberparam rowFits     cellFits    one-statement no    # (O) a shared MEMBER spelled like a parameter
 
 # ── (G) true-positive preservation: the row stream itself is untouched ────────────────────────────────
@@ -121,7 +122,7 @@ expect_row onestmt_memberparam rowFits     cellFits    one-statement no    # (O)
 # the shape each yielded before any of this existed. A classifier that suppressed a row would pass every
 # attribute arm above and fail here.
 for d in ladder_demote ladder_sharedids ladder_samefile switchtable paramstruct nonidiom \
-         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha onestmt_alpha_generic onestmt_memberparam; do
+         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha onestmt_alpha_generic onestmt_alpha_gogeneric onestmt_memberparam; do
     n="$( rows "$d" | wc -l | tr -d ' ' )"
     m="$( rows "$d" | grep -c 'n="2"' )"
     if [ "$n" = 1 ] && [ "$m" = 1 ]; then
