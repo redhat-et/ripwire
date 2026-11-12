@@ -67,6 +67,7 @@ EOF
 while read -r c _; do
     ( cd "$REPO" && "$BIN" . --quality-delta="$c..$c^" --quality-kinds=duplication,new-clone-of-reused-helper ) \
         >"$TMP/$c.xml" 2>"$TMP/$c.err"
+    echo "$?" >"$TMP/$c.rc"
 done <<EOF
 $COMMITS
 EOF
@@ -119,10 +120,14 @@ n3b="$( rows 3b7931830 | wc -l | tr -d ' ' )"; g3b="$( rows 3b7931830 | grep -c 
 if [ "$n3b" -gt 0 ] && [ "$n3b" = "$g3b" ]; then ok "3b7931830: all $n3b afterLast-family rows still gate"; else no "3b7931830: $g3b of $n3b rows gate"; fi
 if rows 3b7931830 | grep -q 'idiom="one-statement"'; then no "3b7931830: a two-statement member was classified one-statement"; else ok "3b7931830: no two-statement member classified one-statement"; fi
 
-# ── (C) commit-level gating counts ────────────────────────────────────────────────────────────────────
+# ── (C) commit-level gating counts, and the exit status that must agree with them ─────────────────────
+# quality-delta exits 2 when a row gates and 0 when none does; any other status is a failed run whose
+# (possibly empty) document every arm above would otherwise read as an answer.
 while read -r c want; do
     got="$( rows "$c" | grep -c 'gating="1"' )"
     if [ "$got" = "$want" ]; then ok "$c: $got gating clone rows (expected $want)"; else no "$c: $got gating clone rows, expected $want"; fi
+    rc="$( cat "$TMP/$c.rc" )"; wantrc=0; [ "$want" -gt 0 ] && wantrc=2
+    if [ "$rc" = "$wantrc" ]; then ok "$c: exit $rc (expected $wantrc)"; else no "$c: exit $rc, expected $wantrc ($( head -c 200 "$TMP/$c.err" ))"; fi
 done <<EOF
 $COMMITS
 EOF
