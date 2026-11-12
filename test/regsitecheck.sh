@@ -309,9 +309,13 @@ if out=$( chk row "$TMP/p3.xml" CACHE_STORE n=2 consumers=CacheService.construct
 for w in p2 p3; do
     cp "$TMP/$w.xml" "$TMP/$w.cold.xml"
     case "$w" in p2) q="$Q_TS" ;; p3) q="$Q_NEST" ;; esac
-    run "$w" "$TS" -- --for="$q"
+    run "$w" "$TS" RIPWIRE_CACHE_STATS=1 -- --for="$q"
+    # the warm run must have READ the records (CodeRabbit 4545944864): a rejected cache reparses and matches the cold answer too
+    st="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]* cached_records=[0-9]*' "$TMP/$w.err" | head -1 )"
+    hit=0; case "$st" in *"reparsed=0 "*) [ "$( printf '%s' "$st" | sed -n 's/.*cached_records=\([0-9]*\)/\1/p' )" -ge 1 ] && hit=1 ;; esac
     if ! grep -q '<reg ' "$TMP/$w.cold.xml"; then no "W $w premise: the cold answer carries no reg row"
-    elif cmp -s "$TMP/$w.cold.xml" "$TMP/$w.xml"; then ok "W $w warm answer byte-identical to the cold one ($( grep -o '<reg ' "$TMP/$w.xml" | wc -l | tr -d ' ' ) reg row(s))"
+    elif [ "$hit" -ne 1 ]; then no "W $w premise: the warm run did not deserialize the cache (${st:-no cache-stats line}) — the comparison would not test the literal offset"
+    elif cmp -s "$TMP/$w.cold.xml" "$TMP/$w.xml"; then ok "W $w warm answer (cache read: $st) byte-identical to the cold one ($( grep -o '<reg ' "$TMP/$w.xml" | wc -l | tr -d ' ' ) reg row(s))"
     else no "W $w warm answer differs from the cold one (the registrar literal offset lost on the cache path?)"; fi
 done
 

@@ -2619,11 +2619,13 @@ inline void readRefQualifier( ByteR& r, std::string_view qualifier, RawRef& x )
     }
     const std::string_view digits = qualifier.substr( 3 );
     std::uint64_t          litAt  = 0;
-    bool                   valid  = !digits.empty() && digits.size() <= 10;
-    for( const char c : digits )
+    // length and every digit are checked BEFORE any arithmetic (CodeRabbit 4545944847): a 20-nines tail or a `1/` would
+    // otherwise wrap the accumulator, which -fsanitize=integer aborts on before VALIDATE can refuse the record
+    bool valid = !digits.empty() && digits.size() <= 10
+              && std::all_of( digits.begin(), digits.end(), []( char c ) { return c >= '0' && c <= '9'; } );
+    for( std::size_t k = 0; valid && k < digits.size(); ++k )
     {
-        valid = valid && c >= '0' && c <= '9';
-        litAt = litAt * 10 + std::uint64_t( c - '0' );
+        litAt = litAt * 10 + std::uint64_t( digits[ k ] - '0' );   // <= 10 digits: at most 9 999 999 999, far under 2^64
     }
     if( !VALIDATE( valid && litAt != 0 && litAt <= 0xFFFFFFFFu ) )
     {
@@ -3602,6 +3604,19 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     rw::pathguard::ExclTempFile temp  = rw::pathguard::createExclTempFile( path + ".", ".tmp", 0666 );
     const int                   rawFd = temp.ok() ? temp.releaseFd() : -1;
     std::FILE*                  fp    = rawFd >= 0 ? os::fdopen( rawFd, "wb" ) : nullptr;
+    // A throw between here and the checked close below (table.reserve, a window's growth) must not leak the stream and its
+    // descriptor (CodeRabbit 4545944852): this owner closes it on unwind; the normal path takes the stream back first.
+    struct StreamOwner
+    {
+        std::FILE*& stream;
+        ~StreamOwner()
+        {
+            if( stream != nullptr )
+            {
+                std::fclose( stream );
+            }
+        }
+    } closeOnUnwind{ fp };
     if( !fp )
     {
         const int openErr = errno;
@@ -3841,7 +3856,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
     PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: write + rename" );
 
-    const bool closed = std::fclose( fp ) == 0;
+    const bool closed = std::fclose( std::exchange( fp, nullptr ) ) == 0;   // taken back from closeOnUnwind: closed once, checked
     wErr              = wErr || !closed;
     if( wErr )
     {
