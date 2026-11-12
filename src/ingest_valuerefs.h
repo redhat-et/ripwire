@@ -3508,8 +3508,9 @@ private:
             {
                 return;   // a nested `.a.b =` / array `[i] =` designator: not one field of this literal's type
             }
-            r.setMemberPath( std::string( fld ) );
-            const auto [ lt, ltKw ] = designatedType( j - 2, r.memberPathMut() );
+            std::string path( fld );
+            const auto [ lt, ltKw ] = designatedType( j - 2, path );
+            r.setMemberPath( path );
             r.setMemberCtor( slotCtor( lt, ltKw ) );
             return;
         }

@@ -1085,8 +1085,9 @@ void rustImplVisitNode( RustImplCtx& cx, TSNode node, const char* t )
         const std::string_view path    = written.substr( 0, std::min( written.find( '<' ), written.size() ) );
         if( path.find( "::" ) != std::string_view::npos )
         {
-            r.memberPathMut().assign( path );
-            std::erase_if( r.memberPathMut(), []( char ch ) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; } );
+            std::string spelled( path );
+            std::erase_if( spelled, []( char ch ) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; } );
+            r.setMemberPath( spelled );
         }
         cx.refs->push_back( std::move( r ) );
     }

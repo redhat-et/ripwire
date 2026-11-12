@@ -16,6 +16,8 @@
 #   P  the reference row (MEM-R1a): the references family line reports row_b=64, one row per 64 B line on every ABI (four pool ids,
 #      no std::string; model.h's static_assert pins it at compile time, this arm on the binary that ran). The premise (the line seen
 #      once, >= 50000 references) is counted first.
+#   C  the cold block (MEM-R1b): the textpool line reports the reference cold block at 20 B, five pool ids on every ABI (it was five
+#      std::string, 120 B on libc++ in a 128 B malloc bucket). The premise (the line seen once, >= 1 block on this fixture) first.
 #   R  reserve by kind (G1a), machine-free: each table's bucket count is at most 8 x max( size, 16 ). A table reserved for
 #      every binding while it holds one kind (the pre-G1a `reserve( ing.bindings.size() )`) has 2^k buckets for ~100 K
 #      bindings and fails here; a reserve by its own kind's count stays within 2.5 x of its distinct keys.
@@ -134,6 +136,18 @@ elif [ "$prow" != 64 ]; then
     no "P: a Reference row is ${prow:-?} B (want 64: memberRoot a pool id, litAt a u32; model.h MEM-REF-SHRINK)"
 else
     ok "P: a Reference row is 64 B over $prefs references"
+fi
+
+# ---- C ----
+clines="$( grep -c '^\[mem\] textpool ' "$TMP/n.err" )"
+cblocks="$( grep '^\[mem\] textpool ' "$TMP/n.err" | sed -E 's/.* cold blocks=([0-9]+) .*/\1/' )"
+cbytes="$( grep '^\[mem\] textpool ' "$TMP/n.err" | sed -E 's/.* \(([0-9]+) B each\)$/\1/' )"
+if [ "$clines" -ne 1 ] || [ "${cblocks:-0}" -lt 1 ]; then
+    no "C: premise: the textpool line printed $clines times (want 1), ${cblocks:-0} cold blocks (want >= 1)"
+elif [ "$cbytes" != 20 ]; then
+    no "C: a reference cold block is ${cbytes:-?} B (want 20: five pool ids, model.h RefColdText)"
+else
+    ok "C: a reference cold block is 20 B ($cblocks blocks)"
 fi
 
 # ---- R ----

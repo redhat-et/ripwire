@@ -379,8 +379,9 @@ void extractMarkdown( std::uint32_t fileId, std::string_view src, std::string_vi
             // The link as written (path + optional #slug; the slug is lowered, the path is not). It is a fact of THIS file alone, so it is
             // safe in the cache; the (file, slug) heading it names is resolved in buildGraph, where every file's
             // headings exist (graph.h bindMarkdownLinks). buildGraph reads this path. A member call still reads it beside memberCall.
-            r.memberPathMut().assign( writtenTarget );
-            lowercaseMarkdownSlug( r.memberPathMut() );
+            std::string link( writtenTarget );
+            lowercaseMarkdownSlug( link );
+            r.setMemberPath( link );
             refs.push_back( std::move( r ) );
         }
     };

@@ -770,8 +770,8 @@ inline bool rubyNamingChild( TSNode n, const char* t, TSNode c ) noexcept
 inline void rubyTypeReceiver( RawRef& ref, std::string_view type, std::string_view via, bool factory )
 {
     ref.recvVar.clear();
-    ref.memberCtorMut().assign( type );
-    ref.memberViaMut().assign( via );
+    ref.setMemberCtor( type );
+    ref.setMemberVia( via );
     ref.memberFactory = factory;
 }
 

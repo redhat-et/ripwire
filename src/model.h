@@ -1200,14 +1200,19 @@ inline PyKwArgs pyKwArgsOf( std::string_view composeRel ) noexcept
 //   NOT here: Go and TS receivers fill it on half the references. Reads go through the accessors (an empty string when the
 //   block is absent); writes through setX (any text: string, view or literal; an empty one allocates nothing) or XMut. Value semantics: a copy copies the block.
 //   The cache record is unchanged: writeRef / readRef read and write the same five strings in the same order.
+// MEM-R1b: the five are 4 B pool ids (infra/internedtext.h), so a block is 20 B in a 32 B malloc bucket instead of 120 B in a 128 B
+//   one, on every ABI. Every text here is a name, a written path or type, a slot as written or a short mark (`k3o`, `.provide`,
+//   kCppElementMark + a container), never a byte position, so a server's pool still grows only with distinct texts. An accessor
+//   still returns `const std::string&`: the pool's text, which never moves.
 struct RefColdText
 {
-    std::string fieldName;
-    std::string composeRel;
-    std::string memberPath;
-    std::string memberCtor;
-    std::string memberVia;
+    rw::InternedText fieldName;
+    rw::InternedText composeRel;
+    rw::InternedText memberPath;
+    rw::InternedText memberCtor;
+    rw::InternedText memberVia;
 };
+static_assert( sizeof( RefColdText ) == 20, "five pool ids: see the MEM-R1b note above" );
 inline const std::string kNoRefColdText{};   // what every accessor returns without a block (constant-initialised: no guard)
 class RefColdFields
 {
@@ -1224,30 +1229,26 @@ public:
     ~RefColdFields()                                     = default;
 
     bool hasColdBlock() const noexcept { return cold_ != nullptr; }   // RIPWIRE_STATS counts the rows that carry a block
-    const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName : kNoRefColdText; }
-    const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel : kNoRefColdText; }
-    const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath : kNoRefColdText; }
-    const std::string& memberCtor() const noexcept { return cold_ ? cold_->memberCtor : kNoRefColdText; }
-    const std::string& memberVia() const noexcept { return cold_ ? cold_->memberVia : kNoRefColdText; }
+    const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName.str() : kNoRefColdText; }
+    const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel.str() : kNoRefColdText; }
+    const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath.str() : kNoRefColdText; }
+    const std::string& memberCtor() const noexcept { return cold_ ? cold_->memberCtor.str() : kNoRefColdText; }
+    const std::string& memberVia() const noexcept { return cold_ ? cold_->memberVia.str() : kNoRefColdText; }
 
-    template <class Text> void setFieldName( Text&& value ) { setText( &RefColdText::fieldName, std::forward<Text>( value ) ); }
-    template <class Text> void setComposeRel( Text&& value ) { setText( &RefColdText::composeRel, std::forward<Text>( value ) ); }
-    template <class Text> void setMemberPath( Text&& value ) { setText( &RefColdText::memberPath, std::forward<Text>( value ) ); }
-    template <class Text> void setMemberCtor( Text&& value ) { setText( &RefColdText::memberCtor, std::forward<Text>( value ) ); }
-    template <class Text> void setMemberVia( Text&& value ) { setText( &RefColdText::memberVia, std::forward<Text>( value ) ); }
-
-    std::string& memberPathMut() { return block().memberPath; }
-    std::string& memberCtorMut() { return block().memberCtor; }
-    std::string& memberViaMut() { return block().memberVia; }
+    void setFieldName( std::string_view value ) { setText( &RefColdText::fieldName, value ); }
+    void setComposeRel( std::string_view value ) { setText( &RefColdText::composeRel, value ); }
+    void setMemberPath( std::string_view value ) { setText( &RefColdText::memberPath, value ); }
+    void setMemberCtor( std::string_view value ) { setText( &RefColdText::memberCtor, value ); }
+    void setMemberVia( std::string_view value ) { setText( &RefColdText::memberVia, value ); }
 
     // emitReferences: a RawRef's block moves into its Reference whole (one pointer, no string moves).
     void takeColdFrom( RefColdFields& other ) noexcept { cold_ = std::move( other.cold_ ); }
 
 private:
     RefColdText& block() { return rw::sharedOnce( cold_, [] { return std::make_unique<RefColdText>(); } ); }
-    template <class Text> void setText( std::string RefColdText::* slot, Text&& value )
+    void setText( rw::InternedText RefColdText::* slot, std::string_view value )
     {
-        if( cold_ || !std::string_view( value ).empty() ) { block().*slot = std::forward<Text>( value ); }
+        if( cold_ || !value.empty() ) { block().*slot = value; }
     }
     std::unique_ptr<RefColdText> cold_;
 };
