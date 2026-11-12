@@ -70,6 +70,7 @@
 #include <cstdio>
 #include <functional>
 #include <limits>       // std::numeric_limits — IntEval::apply refuses the one quotient int64 cannot hold
+#include <memory>       // std::unique_ptr / shared_ptr / weak_ptr — the std:: table's sizeof rows
 #include <string>
 #include <string_view>
 #include <utility>
@@ -924,16 +925,17 @@ inline bool primLookup( std::string_view spelling, TypeSize& out )
 // never resolved to a same-named in-repo type: it stays unsized with why="std-unlisted". MSVC's STL changes its
 // container sizes with _ITERATOR_DEBUG_LEVEL, so a Windows build carries no table rather than a number that depends on a
 // build setting the source cannot show.
+// Every number below is sizeof/alignof of the REAL type in this binary's library (CodeRabbit 4544554325): a build setting that
+// moves a size (_GLIBCXX_USE_CXX11_ABI=0's 8 B std::string, _GLIBCXX_DEBUG's vector, a libc++ ABI option) moves it here too.
 #if defined( _LIBCPP_VERSION ) && defined( __LP64__ )
-inline constexpr std::string_view kStdAbi        = "libc++";
-inline constexpr std::uint32_t    kStdStringSize = 24;
+inline constexpr std::string_view kStdAbi = "libc++";
 #elif defined( __GLIBCXX__ ) && defined( __LP64__ )
-inline constexpr std::string_view kStdAbi        = "libstdc++";
-inline constexpr std::uint32_t    kStdStringSize = 32;
+inline constexpr std::string_view kStdAbi = "libstdc++";
 #else
-inline constexpr std::string_view kStdAbi        = {};
-inline constexpr std::uint32_t    kStdStringSize = 0;
+inline constexpr std::string_view kStdAbi = {};
 #endif
+inline constexpr std::uint32_t kStdStringSize  = std::uint32_t( sizeof( std::string ) );
+inline constexpr std::uint32_t kStdStringAlign = std::uint32_t( alignof( std::string ) );
 
 // The arg-independent rows: `args` is how many template arguments the DEFAULT form takes (a second one — a custom
 // allocator or deleter — can change the size, so it is refused rather than assumed stateless).
@@ -945,9 +947,16 @@ struct StdFixedType
     std::uint32_t    align;
 };
 
+template<class T>
+inline constexpr StdFixedType stdFixedRow( std::string_view name, std::uint32_t args )
+{
+    return StdFixedType{ name, args, std::uint32_t( sizeof( T ) ), std::uint32_t( alignof( T ) ) };
+}
+// The default-allocator / default-deleter forms: their size does not depend on the element type.
 inline constexpr StdFixedType kStdFixedTable[] = {
-    { "string_view", 0, 16, 8 }, { "vector", 1, 24, 8 }, { "unique_ptr", 1, 8, 8 },
-    { "shared_ptr",  1, 16, 8 }, { "weak_ptr", 1, 16, 8 },
+    stdFixedRow<std::string_view>( "string_view", 0 ), stdFixedRow<std::vector<int>>( "vector", 1 ),
+    stdFixedRow<std::unique_ptr<int>>( "unique_ptr", 1 ), stdFixedRow<std::shared_ptr<int>>( "shared_ptr", 1 ),
+    stdFixedRow<std::weak_ptr<int>>( "weak_ptr", 1 ),
 };
 
 // ── the result model ─────────────────────────────────────────────────────────────────────────────────
@@ -1465,9 +1474,13 @@ inline Declarator parseDeclarator( std::string_view text )
     }
 
     const std::string_view whole = s;
-    d.isBitfield = cutAtTopLevel( s, ":" );        // a bitfield WIDTH — `s` keeps the declarator, the width is kept aside
+    std::string_view       beforeInit = s;
+    cutAtTopLevel( beforeInit, "={" );             // a `:` is a bitfield width only BEFORE the first top-level `=`/`{`: in
+    std::string_view declPart = beforeInit;        // `std::uint8_t c = f ? 2 : 1;` it is a ternary's (CodeRabbit 4544554334)
+    d.isBitfield = cutAtTopLevel( declPart, ":" ); // a bitfield WIDTH — `s` keeps the declarator, the width is kept aside
     if( d.isBitfield )
     {
+        s = declPart;
         const std::size_t colon = whole.find( ':', s.size() );
         std::string_view  width = ( colon == std::string_view::npos ) ? std::string_view() : whole.substr( colon + 1 );
         cutAtTopLevel( width, "={" );              // C++20 `std::uint8_t a : 1 = 0;`
@@ -1655,6 +1668,33 @@ struct ModelCtx
           consts( i.files.size() ), bytesLoaded( i.files.size(), 0 ) {}
 };
 
+// Does `expr` (an array extent, a bitfield width, a std::array bound) name a parameter of the class template being sized? Its
+// value is the template ARGUMENT's, which the model never reads, so a same-named file constant must not stand in for it
+// (CodeRabbit 4544554342: `template <std::size_t N> struct Buf { char data[N]; };` beside `constexpr std::size_t N = 16;`).
+inline bool namesTemplateParam( const ModelCtx& ctx, std::string_view expr )
+{
+    const auto& params = ctx.templateParams;
+    for( std::size_t i = 0; i < expr.size() && !params.empty(); )
+    {
+        if( !identByte( (unsigned char)expr[i] ) )
+        {
+            ++i;
+            continue;
+        }
+        std::size_t e = i;
+        while( e < expr.size() && identByte( (unsigned char)expr[e] ) )
+        {
+            ++e;
+        }
+        if( std::find( params.begin(), params.end(), expr.substr( i, e - i ) ) != params.end() )
+        {
+            return true;
+        }
+        i = e;
+    }
+    return false;
+}
+
 // ONE lazy load per file, feeding all three views: the raw bytes, the comment-blanked text, and the
 // constant/alias table harvested from it. The three accessors below are pure lookups so none of them
 // carries a second copy of the load-once dance.
@@ -1836,7 +1876,9 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
 
         const LayoutDef d = modelNestedDef( ctx, s.fileId, site, typeName, templateId );
         if( !d.modeled ) { note = "nested-unmodelled"; out = TypeSize{}; break; }
-        const TypeSize here{ d.size, d.align, true, d.tailPad, d.fields.empty() && d.baseSpec.empty() };
+        // empty: no member, and no base or one the model placed at 0 B (`struct M : E {};`, CodeRabbit 4544554347)
+        const bool     emptyAgg = d.fields.empty() && ( d.baseSpec.empty() || ( d.baseSized && d.baseSize == 0 ) );
+        const TypeSize here{ d.size, d.align, true, d.tailPad, emptyAgg };
         if( first ) { out = here; first = false; }
         else if( here.size != out.size || here.align != out.align ) { note = "nested-mirrors-disagree"; out = TypeSize{}; break; }
     }
@@ -1957,7 +1999,7 @@ inline bool resolveStdType( const TypeScope& scope, std::string_view rest, std::
     };
     if( !id.hasArgs && id.name == "string" )
     {
-        return sized( kStdStringSize, 8 );
+        return sized( kStdStringSize, kStdStringAlign );
     }
     for( const StdFixedType& row : kStdFixedTable )
     {
@@ -1988,6 +2030,11 @@ inline bool resolveStdType( const TypeScope& scope, std::string_view rest, std::
         const ResolvedType t = resolveTypeArg( scope, id.args[0], depth );
         if( !t.size.known ) { failFromArg( out, t ); return true; }
         std::uint32_t n = 0;
+        if( namesTemplateParam( scope.ctx, id.args[1] ) )
+        {
+            out.note = "template-param";   // the bound is the template argument's
+            return true;
+        }
         if( !evalExtent( scope.consts, id.args[1], n ) || n == 0 || n > kMaxArrayElems / std::max( t.size.size, 1u ) )
         {
             out.note = "unknown-extent";
@@ -2450,6 +2497,13 @@ inline void appendField( BodyWalk& w, const Declarator& d, std::string_view writ
     for( std::string_view e : d.extents )
     {
         std::uint32_t n = 0;
+        if( namesTemplateParam( w.ctx, e ) )
+        {
+            addCaveat( w.def, "template-param", f.name + "[" + flattenSpace( e, 80 ) + "]: the extent is the template argument's" );
+            t.known = false;
+            f.why   = "template-param";
+            break;
+        }
         if( !evalExtent( w.consts, e, n ) || f.elems > kMaxArrayElems / n )
         {
             addCaveat( w.def, "unknown-extent", f.name + "[" + flattenSpace( e, 80 ) + "]" );
@@ -2690,6 +2744,11 @@ inline bool modelDeclarator( BodyWalk& w, std::string_view part, bool first, std
                               : d.declPart.empty() ? std::string( baseType ) : std::string( baseType ) + " " + std::string( d.declPart );
     if( d.isBitfield )
     {
+        if( namesTemplateParam( w.ctx, d.bitWidth ) )
+        {
+            w.refuse( "template-param", std::string( d.name ) + " : " + flattenSpace( d.bitWidth, 80 ) + ": the width is the template argument's" );
+            return false;
+        }
         const bool placed = d.ok && !baseType.empty() && placeByteBitfield( w, d, written );
         if( !placed )
         {
@@ -2700,6 +2759,15 @@ inline bool modelDeclarator( BodyWalk& w, std::string_view part, bool first, std
     if( !d.ok || baseType.empty() )
     {
         w.refuse( "unparsed-member", flattenSpace( part, 160 ) );
+        return false;
+    }
+    // The empty-base optimisation is barred when the first member has the base's own type: two subobjects of one type may
+    // not share an address, so `struct D : E { E e; int x; }` puts e at 1, not 0 (CodeRabbit 4544554347). Refused, not placed.
+    if( w.def.fields.empty() && w.def.baseSized && w.def.baseSize == 0 && !d.isPointer && !d.isRef
+        && lastSegment( withoutCv( d.baseSpec ) ) == lastSegment( withoutCv( w.def.baseSpec ) ) )
+    {
+        w.refuse( "base-class", flattenSpace( w.def.baseSpec, 120 ) + ": the first member " + std::string( d.name )
+                                  + " has the empty base's own type, so the base cannot share its address" );
         return false;
     }
     appendField( w, d, written );
@@ -2785,8 +2853,9 @@ inline std::size_t walkDirective( BodyWalk& w, std::size_t at )
     // A directive BETWEEN two members belongs to neither: the next statement starts after it. The test is the text
     // BEFORE the `#` — testing through `next` included the directive itself, so it never passed, and every #define
     // between two fields was glued onto the next field's type (tmux window_pane.sync_dirty, 2026-11-11 audit).
-    const std::size_t next = std::min( end + 1, w.body.size() );
-    if( trimView( w.body.substr( w.stmtStart, ( at > w.stmtStart ) ? at - w.stmtStart : 0 ) ).empty() )
+    const std::size_t next   = std::min( end + 1, w.body.size() );
+    const std::string before = withoutComments( w.body.substr( w.stmtStart, ( at > w.stmtStart ) ? at - w.stmtStart : 0 ) );
+    if( trimView( before ).empty() )   // a `// flags` line above the directive is not a member either (CodeRabbit 4544554368)
     {
         w.stmtStart = next;
     }

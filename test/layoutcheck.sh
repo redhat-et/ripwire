@@ -536,6 +536,39 @@ case "$( uname -s )" in
         ;;
 esac
 
+# ── 18) B44 (CodeRabbit on #618): six shapes, each checked against the COMPILER where the model answers, refused where it may not.
+#        Red before: TernaryInitCase sized 2 (c read as a 1-bit field), EmptyChainCase sized 8 (a at 4), EboClashCase placed e at
+#        0, the three Tpl*Case sized from the file's N / W (modeled="1"), CommentDefineCase.sync_dirty glued to the #define.
+run TernaryInitCase
+{ [ "$( field c bits )" = "" ] && [ "$( field c sz )" = "1" ]; } \
+    && ok "TernaryInitCase.c: a ternary default initializer is a 1 B member, not a bitfield" \
+    || no "TernaryInitCase.c: bits='$( field c bits )' sz='$( field c sz )' (want no bits=, 1 B)"
+run EmptyChainCase
+[ "$( field a off )" = "0" ] \
+    && ok "EmptyChainCase.a @ 0: a base whose only content is an empty base is empty" \
+    || no "EmptyChainCase.a off='$( field a off )' (want 0)"
+case "$( uname -s )" in
+    MINGW*|MSYS*|CYGWIN*) printf '  SKIP  crfixes probe: a Windows build carries no std table\n' ;;
+    *)
+        : >"$TMP/probe_body.cpp"; : >"$TMP/probe_want.txt"
+        LAYOUT_RUN_FLAGS="--no-cache"; LAYOUT_RUN_ENV=""
+        PROBE_INCLUDE='#include "crfixes.h"'
+        layout_probe_rows "layoutfix::" "$CORPUS" TernaryInitCase EmptyChainCase
+        probe_compare "crfixes probe (ternary initializer, empty-base chain)" -I"$CORPUS"
+        ;;
+esac
+expect_refused EboClashCase base-class
+for c in TplExtentCase TplArrayCase TplWidthCase; do
+    run "$c"
+    [ "$( attr 'def ' modeled )" = "0" ] \
+        && ok "$c: modeled=\"0\" — the template argument decides the member, never the same-named file constant" \
+        || no "$c: modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) (want 0: sized from the file's N / W)"
+done
+run CommentDefineCase
+{ [ "$( fty sync_dirty )" = "unsigned int" ] && [ "$( attr 'def ' size )" = "8" ]; } \
+    && ok "CommentDefineCase.sync_dirty: ty=\"unsigned int\" with a comment line above the #define, size=8" \
+    || no "CommentDefineCase.sync_dirty: ty='$( fty sync_dirty )' size='$( attr 'def ' size )' (want unsigned int / 8)"
+
 # ── UNREADABLE DEFINITION: a mirror whose second half could not be read is DISCLOSED, in every build flavour ──────
 # A definition indexed from a warm cache whose file is unreadable when the verb runs used to be dropped with a
 # one-argument DISCLOSE — a debug trace, nothing at all in a Release binary — so a drifting mirror read
