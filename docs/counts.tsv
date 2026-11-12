@@ -5,20 +5,20 @@
 taken	2026-11-12
 gates.scripts	800
 limits.boundary	46
-limits.caps	419
-limits.constants	428
+limits.caps	420
+limits.constants	429
 limits.disclosing	276
 limits.files	144
 limits.indexing	50
 limits.output	46
 limits.parameters	9
-limits.silent	143
+limits.silent	144
 tuning.constexpr_live	12
-tuning.declarations	304
+tuning.declarations	305
 tuning.duplicated	`kRowCap`
 tuning.gone	1
 tuning.gone_shown	`kSituTestRowsShown`
-tuning.names	303
+tuning.names	304
 tuning.tunable_live	111
-tuning.unswept	180
-tuning.unswept_shown	`kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, `kBridgeMaxHops`, +174 more
+tuning.unswept	181
+tuning.unswept_shown	`kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, `kBridgeMaxHops`, +175 more

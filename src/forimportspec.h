@@ -48,8 +48,8 @@
 namespace rw
 {
 
-inline constexpr std::size_t kImportSpecDepth  = 12;    // statements one walk follows from the entry
-inline constexpr std::size_t kImportSpecStates = 256;   // (file, name) states one walk visits; past it the walk says capped="1"
+inline constexpr std::size_t kImportSpecDepth     = 12;    // statements one walk follows from the entry
+inline constexpr std::size_t kImportSpecMaxStates = 256;   // (file, name) states one walk visits; past it the walk says capped="1"
 
 inline bool forImportSpecOn()
 {
@@ -819,7 +819,7 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
         }
         for( SpecHop& h : next )
         {
-            if( states.size() >= kImportSpecStates )
+            if( states.size() >= kImportSpecMaxStates )
             {
                 out.capped = true;
                 break;
