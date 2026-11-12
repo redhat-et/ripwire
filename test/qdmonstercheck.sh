@@ -37,9 +37,16 @@ G=( git -c user.name=t -c user.email=t@t -c commit.gpgsign=false )
 row(){ grep -oE "<r kind=\"complexity\" sym=\"$2\"[^>]*>" "$1" | head -1; }
 attr(){ printf '%s' "$1" | sed -nE "s/.* $2=\"([^\"]*)\".*/\1/p"; }
 
-# judge LABEL FILE SYM WANT(major|minor|absent) — one arm: the row's severity and monster= mark, with the premise count
+# judge LABEL FILE SYM WANT(major|minor|absent) RC — one arm: the call's exit status first (RC = the allowed codes, "0", "2" or
+# "0|2"), then the row's severity and monster= mark, with the premise count. A call that crashed or refused the range prints
+# nothing, which would read as "no complexity row" — so no row is inspected until the status is one the arm expects.
 judge(){
-    local label="$1" f="$2" sym="$3" want="$4" r was now sev mon seen
+    local label="$1" f="$2" sym="$3" want="$4" rcwant="$5" rc r was now sev mon seen
+    rc="$( cat "$f.rc" 2>/dev/null )"
+    case "|$rcwant|" in
+        *"|$rc|"*) ;;
+        *) no "($label) exit status ${rc:-none}, want $rcwant (stderr: $( head -c 300 "$f.err" ))"; return ;;
+    esac
     r="$( row "$f" "$sym" )"
     was="$( attr "$r" was )"; now="$( attr "$r" now )"; sev="$( attr "$r" sev )"; mon="$( attr "$r" monster )"
     seen=0; [ -n "$was" ] && [ "$was" -ge 75 ] && seen=1
@@ -90,21 +97,21 @@ body "" > "$S/m.py";               "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" c
 body "$flat" > "$S/m.py";          "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" commit -qm flat
 body "$flat$nested" > "$S/m.py";   "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" commit -qm nested
 body "$flat$nested$small" > "$S/m.py"; "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" commit -qm small
-qd(){ ( cd "$1" && "$BIN" . --quality-delta="$2" --quality-kinds=complexity,nesting ) > "$3" 2> "$3.err"; }
+qd(){ ( cd "$1" && "$BIN" . --quality-delta="$2" --quality-kinds=complexity,nesting ) > "$3" 2> "$3.err"; echo $? > "$3.rc"; }
 qd "$S" HEAD~3..HEAD~2 "$TMP/s1.xml"
 qd "$S" HEAD~2..HEAD~1 "$TMP/s2.xml"
 qd "$S" HEAD~1..HEAD   "$TMP/s3.xml"
 # (s1) the base row must exist for the premise: read it off the flat commit's own baseline (was= of s2 is the flat commit's ccx)
 r2="$( row "$TMP/s2.xml" 'monster' )"; w2="$( attr "$r2" was )"
 if [ -n "$w2" ] && [ "$w2" -ge 75 ]; then
-    judge s1 "$TMP/s1.xml" 'monster' absent
+    judge s1 "$TMP/s1.xml" 'monster' absent 0
     ok "(s1) PREMISE: the flat commit's monster is ccx $w2 (>= 75), so (s1)'s silence is about the flat lines, not a small function"
 else no "(s1) PREMISE: the fixture function is not ccx >= 75 (row: '${r2:-none}'); stderr: $( head -c 300 "$TMP/s2.xml.err" )"; fi
-judge s2 "$TMP/s2.xml" 'monster' major
-judge s3 "$TMP/s3.xml" 'monster' minor
+judge s2 "$TMP/s2.xml" 'monster' major 2
+judge s3 "$TMP/s3.xml" 'monster' minor 0
 if grep -q 'monster="1" marks a complexity row\|r monster=1:' "$TMP/s2.xml"; then ok "(s2) the legend defines monster="; else no "(s2) no monster= reading in the legend"; fi
 qd "$S" HEAD~2..HEAD~1 "$TMP/s2b.xml"
-if cmp -s "$TMP/s2.xml" "$TMP/s2b.xml"; then ok "(d) the seeded tangle run twice is byte-identical"; else no "(d) the seeded tangle run is not deterministic"; fi
+if cmp -s "$TMP/s2.xml" "$TMP/s2b.xml" && cmp -s "$TMP/s2.xml.rc" "$TMP/s2b.xml.rc"; then ok "(d) the seeded tangle run twice is byte-identical (stdout + exit status $( cat "$TMP/s2b.xml.rc" ))"; else no "(d) the seeded tangle run is not deterministic"; fi
 
 # ── real-merge replays: one process at a time, memory guarded ─────────────────────────────────────────────────────────
 ARMS=(
@@ -123,7 +130,9 @@ for a in "${ARMS[@]}"; do
     fi
     if ! memok; then echo "  SKIP  ($label) memory_pressure free below 40 %: not starting a whole-repo replay"; continue; fi
     qd "$REPO" "$sha^1..$sha" "$TMP/$label.xml"
-    judge "$label" "$TMP/$label.xml" "$sym" "$want"
+    # a major (gating) row must exit 2; a minor arm may still exit 2 when another row of the merge gates
+    if [ "$want" = major ]; then rcw=2; else rcw="0|2"; fi
+    judge "$label" "$TMP/$label.xml" "$sym" "$want" "$rcw"
 done
 
 [ "$fail" = 0 ] && echo "qdmonstercheck: PASS" || echo "qdmonstercheck: FAIL"
