@@ -1,0 +1,135 @@
+# test/capdisclose.map -- CAP-DISCLOSE-LINT (B43): how each answer-path cap constant discloses that it fired.
+# Read by test/lib/capdisclose.py (its docstring is the contract); gated by test/capdisclosemapcheck.sh.
+# Columns (TAB-separated): kName  CLASS  [awaits:#N]
+#   sink:a,b        every function with a cap site of kName mentions a or b -- removing that disclosure reds the gate
+#   legend          a static_assert ties kName to the legend sentence that states the cap
+#   none:<reason>   not an answer cut
+#   pending:<id> r  a cut whose function names no disclosure identifier: baselined, printed as INFO, to audit
+#   awaits:#N       the constant is on an unmerged lane (absent = INFO, present = checked)
+# How the rows were made (2026-11-12): `capdisclose.py . /dev/null --draft` proposed every row from the identifiers present
+# at EVERY cap site's function (capped / more / cut / shown / floor / truncated / DISCLOSE ...). A sink row therefore holds
+# the disclosure that is there today in place; it does not prove that identifier reports THIS cap -- a reviewer who reads a
+# function and finds otherwise reclassifies the row to pending. #614's depth cap and #613's reader cap are the two rows read
+# by hand (CodeRabbit 4542271958 and 4540061421): both lanes' red revisions FAIL their row and the fixed revisions PASS.
+# A new cap constant on the answer path needs a row here in the same commit.
+kImportSpecDepth	sink:atDepthCap	awaits:#614
+kReaderCallerReaders	sink:readersMore	awaits:#613
+kAliasHopChains	sink:cut,shown
+kAliasHopMemberNames	sink:cut,shown
+kAliasHopSigBytes	sink:cut,truncateUtf8WithEllipsis
+kCallPathSeeds	pending:B43 no disclosure identifier in the cap site's function (src/forsiblingdemote.h:430); audit: cut or work bound
+kCloneKeyTokenBits	pending:B43 no disclosure identifier in the cap site's function (src/clones.h:397); audit: cut or work bound
+kDeadExportedRowsShown	sink:shown,walkSkipped
+kEvidenceCap	pending:B43 no disclosure identifier in the cap site's function (src/verbs_navigate.h:2243 (no cap site)); audit: cut or work bound
+kForBodyFoldBudgetBytes	sink:cut,firstCutNext
+kForBodyFoldRows	pending:B43 no disclosure identifier in the cap site's function (src/forfold.h:77); audit: cut or work bound
+kForBodySlotMaxBytes	legend
+kForCallerHopDepth2Rows	sink:firstShown,secondShown
+kForCallerHopRows	sink:firstShown,secondShown
+kForDeclRowsCap	sink:shown
+kForDeclSubjectTries	pending:B43 no disclosure identifier in the cap site's function (src/fordeclrow.h:431); audit: cut or work bound
+kForDetailFloorShareDivisor	pending:B43 no disclosure identifier in the cap site's function (src/verbs_for.h:2080); audit: cut or work bound
+kForDispatchCtorRows	sink:shown,isFloor
+kForDispatchHopRows	sink:shown,isFloor
+kForDocBodyBytes	pending:B43 no disclosure identifier in the cap site's function (src/fordocbody.h:892); audit: cut or work bound
+kForDocBodyFiles	sink:shown,shownSigIds
+kForDocBodyTriggerDocs	sink:shown,shownSigIds
+kForDocBodyTriggerRows	sink:shown,shownSigIds
+kForDottedLoaderNamedMax	sink:loadersFloor
+kForDottedStringRows	sink:shown,shownRows
+kForDottedTemplateFillsListed	sink:firstShown,firstShownOf
+kForFilePageCallerFiles	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:461, src/forfilepage.h:467); audit: cut or work bound
+kForFilePageDefRows	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:554, src/forfilepage.h:595); audit: cut or work bound
+kForFilePageDirFiles	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:641, src/forfilepage.h:739); audit: cut or work bound
+kForFilePageListFiles	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:131, src/forfilepage.h:167); audit: cut or work bound
+kForFilePageMaxAnchors	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:631, src/forfilepage.h:734); audit: cut or work bound
+kForFilePageMaxBytes	sink:bytesCut,shown
+kForFilePageNextDepth	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:56 (no cap site)); audit: cut or work bound
+kForFilePageTopBytes	sink:shownLines,shownBytes
+kForFilePageTopLines	sink:shownLines,shownBytes
+kForFileSymsBindPerHead	pending:B43 no disclosure identifier in the cap site's function (src/forfilesyms.h:1201); audit: cut or work bound
+kForFileSymsFiles	sink:shownAt,ShownFiles
+kForFileSymsHeadRows	pending:B43 no disclosure identifier in the cap site's function (src/forfilesyms.h:544); audit: cut or work bound
+kForFileSymsRowsPerRule	sink:cut
+kForFlagDefaultMaxBytes	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:177 (no cap site)); audit: cut or work bound
+kForFlagOwnerMaxLines	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:3832); audit: cut or work bound
+kForFlagWriteHits	sink:floor
+kForFlagWriteRows	sink:writesFloor,floor
+kForLiteralArmLines	legend
+kForLiteralBodies	sink:cut,shownRowCount
+kForLiteralBodyCapBytes	sink:cut,shownRowCount
+kForLiteralCandidates	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:4728, src/forliteral.h:4848); audit: cut or work bound
+kForLiteralContextLines	sink:cut,shownRowCount
+kForLiteralExcerptAfter	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:3288); audit: cut or work bound
+kForLiteralExcerptBefore	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:3277, src/forliteral.h:3519); audit: cut or work bound
+kForLiteralFileMaxSegments	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:477); audit: cut or work bound
+kForLiteralKeyLead	sink:truncateUtf8WithEllipsis
+kForLiteralMessageContent	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:657); audit: cut or work bound
+kForLiteralMessageTries	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:663); audit: cut or work bound
+kForLiteralMessageWords	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:531, src/forliteral.h:574); audit: cut or work bound
+kForLiteralTierFiles	sink:floor
+kForLiteralWholeBodyLines	sink:cut,shownRowCount
+kForLiteralWholeContent	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:655); audit: cut or work bound
+kForOwnerHopRows	sink:capCut,firstCapCut
+kForPageSpliceReserve	sink:forCut,shownIds
+kForPageSymNameCount	pending:B43 no disclosure identifier in the cap site's function (src/forpage.h:591, src/forpage.h:722); audit: cut or work bound
+kForPageUnionSymbolCap	pending:B43 no disclosure identifier in the cap site's function (src/forpage.h:579); audit: cut or work bound
+kForRankedHopHeadRows	legend
+kForRankedHopMaxCallers	legend
+kForRankedMessageWords	pending:B43 no disclosure identifier in the cap site's function (src/forcallerhop.h:294, src/forcallerhop.h:385); audit: cut or work bound
+kForRegCallBytes	legend
+kForRegCallLines	legend
+kForRegIdentBytes	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:2512, src/forliteral.h:2520); audit: cut or work bound
+kForRegLineHits	sink:cut,shownRowCount
+kForSelfHookCandidateRows	pending:B43 no disclosure identifier in the cap site's function (src/forselfhook.h:1199); audit: cut or work bound
+kForSelfHookMethodRows	sink:shown,partial
+kForSelfHookSiteRows	sink:skipped
+kForTableAnchors	sink:cutLegend
+kForTableByteCap	sink:cutLegend
+kForTableElementBytes	sink:cutLegend
+kForTableMaxAnchor	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:858); audit: cut or work bound
+kForTableOpenerLines	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:2106); audit: cut or work bound
+kForTableReaderFiles	sink:floor
+kForTableReaderRows	sink:shown,floor
+kForTableSiblingLines	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:1732, src/forliteral.h:2147); audit: cut or work bound
+kForThinCoveragePct	pending:B43 no disclosure identifier in the cap site's function (src/forpage.h:142); audit: cut or work bound
+kForUnusedDirFiles	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:3222); audit: cut or work bound
+kForUnusedExtraFiles	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:2313); audit: cut or work bound
+kForUnusedMaxBytes	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:3254); audit: cut or work bound
+kForUnusedRowsPerFile	sink:shownRows,graphCountFloorAttrXml
+kForUnusedSitesShown	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:665); audit: cut or work bound
+kFpGram	sink:DISCLOSE
+kGraphSubjectAttempts	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:181, src/forgraphverb.h:189); audit: cut or work bound
+kGraphSubjectSlotCands	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:187, src/forgraphverb.h:188); audit: cut or work bound
+kGrepHitRefsMax	pending:B43 no disclosure identifier in the cap site's function (src/verbs_grep.h:946); audit: cut or work bound
+kJsonEnvelopeDigitsMax	pending:B43 no disclosure identifier in the cap site's function (src/verbs_for.h:1661 (no cap site)); audit: cut or work bound
+kKeep	pending:B43 no disclosure identifier in the cap site's function (src/forselfhook.h:541); audit: cut or work bound
+kLineStartReach	pending:B43 no disclosure identifier in the cap site's function (src/fordocbody.h:402); audit: cut or work bound
+kLintDefaultPayloadBytes	sink:saturatedRules,lintDefaultShown
+kLitHubFanIn	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:1061); audit: cut or work bound
+kMatchMaxHits	sink:saturatedRules,lintDefaultShown
+kMaxLinesUp	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:528, src/forunused.h:785); audit: cut or work bound
+kOneSideMaxEndpointDefs	pending:B43 no disclosure identifier in the cap site's function (src/foronesidereach.h:100); audit: cut or work bound
+kOneSideRootPathMaxHops	pending:B43 no disclosure identifier in the cap site's function (src/foronesidereach.h:421, src/foronesidereach.h:426); audit: cut or work bound
+kOwnerNearRows	pending:B43 no disclosure identifier in the cap site's function (src/forsiblingdemote.h:225); audit: cut or work bound
+kPathDeclinedLastCands	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:315); audit: cut or work bound
+kPathFromReachMaxNodes	sink:floorScore
+kPathRouteCandsCeiling	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:121, src/pathroute.h:567); audit: cut or work bound
+kPathRouteHedgeNameHops	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:494); audit: cut or work bound
+kPathRouteRefuseCandsThreshold	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:507); audit: cut or work bound
+kPathRouteRefuseNameHops	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:507, src/pathroute.h:566); audit: cut or work bound
+kReexportDefCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:1438); audit: cut or work bound
+kReexportNameCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:1011); audit: cut or work bound
+kReexportRowCap	legend
+kReexportSpellingCap	sink:capped
+kReexportUseCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:788, src/forreexport.h:801); audit: cut or work bound
+kRowFeaturesMaxHops	pending:B43 no disclosure identifier in the cap site's function (src/forrowfeatures.h:254, src/forrowfeatures.h:482); audit: cut or work bound
+kRowFeaturesMaxPath	sink:DISCLOSE
+kRunTraceRelevantLinesCap	sink:isCapped
+kShortKeyBodyBytes	legend
+kShortKeyRows	legend
+kShown	sink:truncated,selfExecutablePath
+kSketchHashes	pending:B43 no disclosure identifier in the cap site's function (src/clones.h:768, src/clones.h:770); audit: cut or work bound
+kSupport	pending:B43 no disclosure identifier in the cap site's function (src/gitmine.h:3477, src/verbs_report.h:1776); audit: cut or work bound
+kType3MaxBucket	sink:DISCLOSE
+kType3MaxTokensForLcs	sink:DISCLOSE
