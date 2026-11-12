@@ -549,6 +549,7 @@ for _g in \
     fornotesjsoncheck \
     foronesidecheck \
     forrankordercheck \
+    forreadercallerscheck \
     forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
