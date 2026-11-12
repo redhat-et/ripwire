@@ -1037,7 +1037,7 @@ def gaps( doc ):
     keys   = set()
     for m in re.finditer( r'<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*/?>', body ):
         for a in re.findall( r'\s([\w:.-]+)="', m.group( 2 ) ):
-            if a not in { "p", "n", "t", "id", "l", "k", "c" }: keys.add( m.group( 1 ) + "@" + a )
+            keys.add( m.group( 1 ) + "@" + a )   # no CORE exemption (LEGEND-G-BLIND): p=/n=/t= are judged too
     return sorted( k for k in keys if not defined( k.split( "@", 1 )[ 1 ], legend ) )
 dflt, full = rd( "h_def" ), rd( "h_full" )
 try:
@@ -1104,7 +1104,7 @@ def gaps( doc, legend = None ):
     keys   = set()
     for m in re.finditer( r'<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*/?>', body ):
         for a in re.findall( r'\s([\w:.-]+)="', m.group( 2 ) ):
-            if a not in { "p", "n", "t", "id", "l", "k", "c" }: keys.add( m.group( 1 ) + "@" + a )
+            keys.add( m.group( 1 ) + "@" + a )   # no CORE exemption (LEGEND-G-BLIND): p=/n=/t= are judged too
     return sorted( k for k in keys if not defined( k.split( "@", 1 )[ 1 ], legend ) )
 docs = { k: rd( "s_" + k ) for k in ( "pdef", "pcmp", "idef", "icmp" ) }
 slot = re.compile( r'<s [^>]*via="slot"[^>]*slot_fns="\d+"' )

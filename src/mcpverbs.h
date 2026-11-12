@@ -2462,7 +2462,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // for the attribute that describes the head — the same exemption mcpConfidenceExemptBytes already makes.
     // r2-LO: a completeness attribute this bundle carries and its own legend never spells (at=, ccx=, next=) gets its compact
     // reading — BEFORE pricing, so est_tokens= prices the bytes served, and after the sigs budget, so the rows are unchanged.
-    closeRosterGaps( out );
+    closeRosterGaps( out, "for" );
     mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
     return McpForAssembly{ std::move( out ), mcpSigsCut, std::move( mcpDocPick ) };
 }
@@ -4208,7 +4208,7 @@ inline constexpr char kConnectHeader[] =
     " max_tokens= is the token ceiling this bundle was SHAPED against (the max_tokens flag; absent = none"
     " was asked for); est_tokens= is what it cost, truncated=\"paths\" says the shaping had to cut, and"
     " over_ceiling=\"1\" says est_tokens exceeds max_tokens anyway (the trim ran out of things to drop before it"
-    " reached the ceiling; the bundle is then complete, not further trimmed) -->";
+    " reached the ceiling; the bundle is then complete, not further trimmed). t n= / s n=: a terminal's / a join's symbol name -->";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
