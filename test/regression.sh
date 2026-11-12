@@ -849,6 +849,7 @@ for _g in \
     qddialscheck \
     qdrefpaircheck \
     qdtestdeadcheck \
+    qdtype3oncecheck \
     qextractionkeycheck \
     qoriginoraclecheck \
     qrevtokencheck \
