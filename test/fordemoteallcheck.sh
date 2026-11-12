@@ -20,6 +20,13 @@
 #   (jb) --json --token-budget=1300: pointer objects present, rows + pointers >= the twin's rows, r = 1..K
 #   (xb) MCP budget_tokens=1300: pointers present, r = 1..K, K >= its twin's rows, and a rank both MCP and the CLI (--token-budget=1300)
 #        show is a pointer in both or a row in both
+#   (xf) a failed MCP refill render keeps the render before it whole (CodeRabbit 4543325946): RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL=1 fails
+#        every re-render (round C's refill, the demote refill) at budget_tokens=1300, so the answer ships its first render; its readings
+#        must be that render's: (xf1) dropped_positive= is the <sigs> tag's total= - shown= (every fixture row scores > 0; premise,
+#        checked: the same identity holds in the no-seam answer), (xf2) the variants <sigs> does not show are listed in order by the tail
+#        (it excludes the rows the block shows, no more): variants 01..K in <sigs> + tail, no gap. Premise, counted: the seam answer
+#        shows fewer rows than the no-seam answer (a refill was tried and failed) and its tail lists >= 1 variant; FAILS on zero.
+#        Red before: dropped_positive 4 against 26 - 19 = 7, and the tail skipped variants 10..12 the failed render had shown.
 #   (k8) TERM-HIT (K8, B26-FIX): under a budget, a row a question term hits (K4's taskNames; an identifier token of the row's name, sc=
 #        or printed signature) stays whole. TASK_K8 names zorbQuux, the parameter of variants 05..16: under --token-budget=2000 and MCP
 #        budget_tokens=2000 every hit variant past <d> rank 10 is a <d> row (>= 1 such, counted); (k8n) premise: the variants no term
@@ -194,6 +201,36 @@ PY
 if echo "$xb" | grep -q ':demote' && [ "$( echo "$xb" | awk '{ print $2 }' )" -ge "$xbo" ] && [ "$( prefix "$xbl" )" = yes ] && [ "$agree" = ok ]; then
     ok "(xb) MCP budget_tokens=1300: pointers, $( echo "$xb" | awk '{ print $2 }' ) entries >= the twin's $xbo rows, a rank prefix, the CLI's reading on every shared rank"
 else no "(xb) MCP budget_tokens=1300: [$xb] twin rows $xbo, disagreeing ranks: $agree"; fi
+
+# (xf) a failed MCP refill render: the shipped block's readings are its own (CodeRabbit 4543325946)
+mcp "$TMP/xf.xml" 1300 env RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL=1
+readings(){ python3 - "$1" <<'PY'
+import re, sys
+s = open( sys.argv[1] ).read()
+tag = re.search( r'<sigs ([^>]*)>', s )
+if not tag: print( "none" ); sys.exit()
+a = dict( re.findall( r'(\w+)="([^"]*)"', tag.group( 1 ) ) )
+dp = re.search( r'dropped_positive="(\d+)"', s )
+sig = s[s.find( "<sigs" ):s.find( "</sigs>" )]
+tail = s[s.find( "<tail" ):]; tail = tail[:tail.find( "</tail>" )] if "</tail>" in tail else ""
+var = lambda t: [ int( m ) for m in re.findall( r'widget_config_variant_(\d+)', t ) ]
+shown, tailed = var( sig ), var( tail )
+allv = sorted( set( shown ) | set( tailed ) )
+gap = "nogap" if allv and allv == list( range( 1, len( allv ) + 1 ) ) else "gap:" + ",".join( map( str, allv ) )
+print( a.get( "shown", "?" ), a.get( "total", "?" ), dp.group( 1 ) if dp else "-", len( tailed ), gap )
+PY
+}
+xf="$( readings "$TMP/xf.xml" )"; xn="$( readings "$TMP/xb.xml" )"
+read -r xfs xft xfd xftl xfg <<<"$xf"; read -r xns xnt xnd _ _ <<<"$xn"
+if [ "$xf" = none ] || [ "$xn" = none ]; then no "(xf) an MCP answer holds no <sigs> tag (seam [$xf], no seam [$xn])"
+elif [ "$xnd" != "$(( xnt - xns ))" ]; then no "(xf) premise: the no-seam answer's dropped_positive=$xnd is not total - shown = $(( xnt - xns )) (the identity this arm reads does not hold here)"
+elif [ "$xfs" -ge "$xns" ] || [ "$xftl" -eq 0 ]; then no "(xf) premise: the seam answer shows $xfs rows (no-seam $xns) and its tail lists $xftl variants — no refill failed here"
+else
+    [ "$xfd" = "$(( xft - xfs ))" ] && ok "(xf1) a failed refill render: dropped_positive=$xfd = total $xft - shown $xfs (the shipped render's)" \
+        || no "(xf1) a failed refill render: dropped_positive=$xfd, but the shipped <sigs> is total $xft - shown $xfs = $(( xft - xfs )) (a failed render's reading)"
+    [ "$xfg" = nogap ] && ok "(xf2) a failed refill render: the tail lists the $xftl variants <sigs> does not show, in order (no gap)" \
+        || no "(xf2) a failed refill render: variants in <sigs> + tail [$xfg] — the tail excluded rows a failed render showed"
+fi
 
 # (k8) TERM-HIT: a budgeted row a question term hits stays whole; (k8n) its premise; (k8d) the no-budget answer is untouched
 k8(){ # k8 FILE -> "<hit rows past r10> <hit pointers> <unhit pointers>" over widget_config_variant_NN (hit: NN >= 05)
