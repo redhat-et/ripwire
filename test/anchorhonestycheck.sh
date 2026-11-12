@@ -9,7 +9,9 @@
 #   Negatives, each counting its premise and FAILing on zero:
 #   N1 a genuinely test-only anchor still says "anchor has no source definition";
 #   N2 an interrogative stays a ranking word when no source syntax anchor resolves (a `what` method still ranks);
-#   N3 a subject that IS a `where` method keeps it in the head.
+#   N3 a subject that IS a `where` method keeps it in the head;
+#   N4 an outer qualifier that places nothing (`Missing.futures.ThreadPoolExecutor`) does not borrow the inner spelling's source anchor.
+#   N5 a C++ namespace the definition's file opens (`rw::detail::ConnPool`) still places it; its Missing:: twin does not.
 #   Fixtures generated at test time; CLI and MCP; determinism; well-formed XML.
 # Usage: bash test/anchorhonestycheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/anchorhonestycheck.sh
 set -u
@@ -281,6 +283,40 @@ if [ "$nN" -ge 1 ]; then ok "N1 counted $nN test-only wordings with the note"; e
 A="$( ask "$T" 'what does UnknownThing.notDefinedAnywhere call' )"; R="$( route "$A" )"
 nW="$( countn "$A" what )"
 if [ "$nW" -ge 1 ]; then ok "N2 no source anchor: what() still ranks ($nW rows)"; else no "N2 no source anchor: counted 0 what() rows (route $R)"; fi
+
+# ═══ N4 an outer qualifier that places nothing does not borrow the inner spelling's source anchor (CodeRabbit 4545021751) ═══
+#   `Missing.futures.ThreadPoolExecutor` reduces to (ThreadPoolExecutor, futures), which places Lib/concurrent/futures/thread.py; no
+#   path segment or scope says Missing, so it is no source syntax anchor: the frame word stays, the no-source note fires, and an
+#   interrogative stays a ranking word (H4's true spelling drops all three).
+nM="$( { find "$P" -path '*Missing*'; grep -rl 'Missing' "$P" 2>/dev/null; } | wc -l | tr -d ' ' )"
+nC="$( grep -c '^class ThreadPoolExecutor' "$P/Lib/concurrent/futures/thread.py" 2>/dev/null )"
+if [ "$nM" -eq 0 ] && [ "${nC:-0}" -ge 1 ]; then ok "N4 premise: ThreadPoolExecutor is defined under Lib/concurrent/futures and nothing in the fixture says Missing"
+else no "N4 premise: Missing in $nM path(s)/file(s), class ThreadPoolExecutor x${nC:-0}"; fi
+nN=0
+R="$( route "$( ask "$P" 'what does Missing.futures.ThreadPoolExecutor call' )" )"
+case "$R" in *"$NOSRC"*) nN=$(( nN + 1 )); ok "N4 call: the no-source note fires";; *) no "N4 call: route $R (the reduced spelling backed it)";; esac
+case "$R" in *'dropped: call'*) no "N4 call: the frame word was dropped (route $R)";; *) ok "N4 call: the frame word stays";; esac
+for q in 'where Missing.futures.ThreadPoolExecutor is defined' 'where Missing::futures::ThreadPoolExecutor is defined'; do
+    nW="$( countn "$( ask "$P" "$q" )" where )"
+    if [ "$nW" -ge 1 ]; then nN=$(( nN + 1 )); ok "N4 [$q]: where() still ranks ($nW rows)"; else no "N4 [$q]: counted 0 where() rows (the reduced spelling dropped it)"; fi
+done
+if [ "$nN" -eq 3 ]; then ok "N4 counted $nN outer-qualified wordings read as no source anchor"; else no "N4 counted $nN of 3 outer-qualified wordings read as no source anchor"; fi
+
+# ═══ N5 an outer qualifier the definition's file opens still places it (a C++ namespace is no path segment or scope) ═══
+C="$TMP/cpp"; mkdir -p "$C/src/pool"
+printf 'namespace rw\n{\nnamespace detail\n{\nclass ConnPool\n{\npublic:\n    void drainAll();\n    int  sizeNow() const;\n};\nvoid ConnPool::drainAll() { sizeNow(); }\nint ConnPool::sizeNow() const { return 0; }\n}\n}\n' >"$C/src/pool/pool.cpp"
+printf 'int main() { rw::detail::ConnPool p; p.drainAll(); }\n' >"$C/src/main.cpp"
+( cd "$C" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+nP=0
+for q in 'where rw::detail::ConnPool is defined' 'what does rw::detail::ConnPool::drainAll call'; do
+    R="$( route "$( ask "$C" "$q" )" )"
+    case "$R" in name-exact*) case "$R" in *"$NOSRC"*) no "N5 [$q]: route $R";; *) nP=$(( nP + 1 )); ok "N5 [$q]: the namespace places it (no note)";; esac;; *) no "N5 [$q]: route $R";; esac
+done
+R="$( route "$( ask "$C" 'what does rw::detail::ConnPool::drainAll call' )" )"
+case "$R" in *'dropped: call'*) ok "N5 call: the frame word leaves beside a namespace-qualified source anchor";; *) no "N5 call: route $R";; esac
+R="$( route "$( ask "$C" 'what does Missing::detail::ConnPool::drainAll call' )" )"
+case "$R" in *'dropped: call'*) no "N5 Missing:: twin: the frame word was dropped (route $R)";; *) nP=$(( nP + 1 )); ok "N5 Missing:: twin: the frame word stays";; esac
+if [ "$nP" -eq 3 ]; then ok "N5 counted $nP namespace wordings read as expected"; else no "N5 counted $nP of 3 namespace wordings read as expected"; fi
 
 # ═══ N3 a subject that IS a where method keeps it ═══
 A="$( ask "$P" 'what does Icon.where call' )"
