@@ -2,8 +2,8 @@
 # docs/LIMITS.md, docs/TUNING.md, the deck). Generated, do not edit: `python3 docs/counts_snapshot.py refresh`
 # re-takes it from the tree; `check` compares it with the tree. A feature PR leaves it alone, which is what keeps
 # two open PRs that each add a gate or a cap from conflicting on a total.
-taken	2026-11-11
-gates.scripts	791
+taken	2026-11-12
+gates.scripts	793
 limits.boundary	46
 limits.caps	415
 limits.constants	424
