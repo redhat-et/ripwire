@@ -269,16 +269,18 @@ rrun(){
 derive(){ python3 "$ROOT/test/lib/sitecount.py" "$1" "$2" 2>/dev/null | cut -d' ' -f1; }
 SCX="$( mktemp -d )"; mkdir -p "$SCX/src"
 printf '%s\n' 'inline int fooRead( const char* p ) { return p != nullptr; }' 'int a() { return fooRead( "x" ); } // fooRead( "c" )' \
-    'int b() { return detail::fooRead( "fooRead(" ) + fooRead<int>( nullptr ); }' >"$SCX/src/a.h"
+    'int b() { return detail::fooRead( "fooRead(" ) + fooRead<int>( nullptr ); }' \
+    'inline int fooRead( int ) noexcept( true ) { return 0; }' 'const char* rs = R"-( " fooRead( 1 ) " )-";' \
+    'int c0() { return/**/fooRead( 2 ); }' >"$SCX/src/a.h"
 sc0="$( derive "$SCX" fooRead )"
 printf '%s\n' 'int c() { return fooRead( "y" ); }' >"$SCX/src/b.cpp"
 sc1="$( derive "$SCX" fooRead )"
 rm -f "$SCX/src/b.cpp"; printf '%s\n' 'inline int fooRead( const char* p ) { return 0; }' >"$SCX/src/a.h"
 sc2="$( derive "$SCX" fooRead )"; rm -rf "$SCX"
-if [ "$sc0" = 3 ] && [ "$sc1" = 4 ] && [ "$sc2" = 0 ]; then
-    ok "(§6-self) sitecount derives 3 calls on the fixture (comment, literal and definition excluded), 4 after +1 site, 0 after the drop"
+if [ "$sc0" = 4 ] && [ "$sc1" = 5 ] && [ "$sc2" = 0 ]; then
+    ok "(§6-self) sitecount derives 4 calls on the fixture (comments, literals incl. a R\"-( )-\" raw string, and definitions incl. noexcept( true ) excluded; return/**/f( ) counted), 5 after +1 site, 0 after the drop"
 else
-    no "(§6-self) sitecount on the fixture: expected 3 / 4 / 0 calls, got '$sc0' / '$sc1' / '$sc2' -- the derived pins below are not live"
+    no "(§6-self) sitecount on the fixture: expected 4 / 5 / 0 calls, got '$sc0' / '$sc1' / '$sc2' -- the derived pins below are not live"
 fi
 # pin_derived LABEL VAR NAME [EXTRA-GREP] -- ripwire's count must equal the derivation, and the derivation must be >= 1.
 pin_derived(){
