@@ -1046,7 +1046,7 @@ inline void retargetRustMacroAliases( IngestResult& result )
     }
     for( Reference& r : result.references )
     {
-        if( r.lang != Lang::Rust || r.role != RefRole::Macro || !std::string_view( r.qualifier ).empty() )
+        if( !langFacts( r.lang ).bangMacros || r.role != RefRole::Macro || !std::string_view( r.qualifier ).empty() )
         {
             continue;
         }
