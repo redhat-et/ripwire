@@ -128,13 +128,16 @@ else:
 
 # ── (B) uses: a refusal claims only what was checked ──
 _, cerr, crc = cli( [ "--uses=valueToken" ] )
-( ok if crc != 0 and "no indexed definition" in cerr else no )( "(B) CLI --uses=valueToken refuses on no indexed definition (fixture sanity; rc=%d)" % crc )
+# the refusal names the checked fact either way: "matched no indexed definition", or (B31 member-decl, a same-line
+# `interface Row { valueToken: string; }`) "is declared as a member of 'Row' ... and has no other indexed definition"
+checked = lambda s: re.search( r"no (?:other )?indexed definition", s or "" ) is not None
+( ok if crc != 0 and checked( cerr ) else no )( "(B) CLI --uses=valueToken refuses on no indexed definition (fixture sanity; rc=%d)" % crc )
 ut, uerr = mcp( "uses", { "path": FIX, "symbol": "valueToken" } )
 if ut is not None:
     ok( "(B) MCP uses answers valueToken (field indexed): nothing to over-claim" )
 else:
     ( ok if "no use-site" not in uerr else no )( "(B) MCP uses refusal does not claim \"no use-site\" (row.valueToken is one): %s" % uerr[ :240 ] )
-    ( ok if "no indexed definition" in uerr else no )( "(B) MCP uses refusal still names the checked fact (no indexed definition)" )
+    ( ok if checked( uerr ) else no )( "(B) MCP uses refusal still names the checked fact (no indexed definition): %s" % uerr[ :240 ] )
 # the batch verb speaks the same refusal
 bt, berr = mcp( "batch", { "path": FIX, "queries": [ { "verb": "uses", "symbol": "valueToken" } ] } )
 btxt = ( bt or "" ) + ( berr or "" )

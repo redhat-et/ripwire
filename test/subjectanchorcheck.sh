@@ -287,18 +287,23 @@ NOHEAD='anchor is not the ranked head'
 FH="$TMP/fh"; mkdir -p "$FH/pkg/futures" "$FH/ui" "$FH/cc"
 printf 'class ThreadPoolExecutor:\n    def submit(self, fn):\n        return fn()\n' > "$FH/pkg/futures/thread.py"
 printf 'class Icon:\n    def where(self, x):\n        return x\n' > "$FH/ui/dnd.py"
-printf 'def where(x):\n    return x\n' > "$FH/ui/other.py"
+printf 'def where(x):\n    return x\n\ndef on(x):\n    return x\n' > "$FH/ui/other.py"
 printf 'def icon_helper(x):\n    return x\n' > "$FH/ui/IconTools.py"
 # (a) the anchor heads the rows: high, no clause
 A="$( ask "$FH" 'where ThreadPoolExecutor is defined' )"
 has "$( route "$A" )" 'name-exact(ThreadPoolExecutor)' "FH(a) the route is name-exact on the anchor"
 if [ "$( conf "$A" )" = high ]; then ok "FH(a) anchor heads: high"; else no "FH(a) anchor heads: $( conf "$A" )"; fi; hasnt "$A" "$NOHEAD" "FH(a) anchor heads: no clause"
-# (b) the anchor is present but another symbol heads (a plain word's namesake, ld-cpython-01's shape): not high, and route= says which row heads
-A="$( ask "$FH" 'where pkg.futures.ThreadPoolExecutor is defined' )"; R="$( route "$A" )"
+# (b) the anchor is present but another symbol heads (a plain word's namesake): not high, and route= says which row heads. A question lead
+# (`where`, ld-cpython-01's shape) no longer ranks beside a source syntax anchor (WH-WORD-GUARD, test/anchorhonestycheck.sh): its twin heads.
+# The namesake here is a route stopword that still ranks (`on`): a word that anchors would make its own file an anchor file
+A="$( ask "$FH" 'where pkg.futures.ThreadPoolExecutor is defined on' )"; R="$( route "$A" )"
 has "$R" 'name-exact(pkg.futures.ThreadPoolExecutor)' "FH(b) the route is name-exact on the dotted anchor"
 if [ "$( conf "$A" )" = low ]; then ok "FH(b) another head: low"; else no "FH(b) another head: $( conf "$A" )"; fi
-has "$R" "$NOHEAD (r=1 is where in ui/other.py)" "FH(b) route= names the row that heads"
-M="$( mcpfor "$FH" 'where pkg.futures.ThreadPoolExecutor is defined' )"
+has "$R" "$NOHEAD (r=1 is on in ui/other.py)" "FH(b) route= names the row that heads"
+A="$( ask "$FH" 'where pkg.futures.ThreadPoolExecutor is defined' )"
+if [ "$( conf "$A" )" = high ]; then ok "FH(b) WH-WORD-GUARD twin: where ranks no longer, the anchor heads, high"; else no "FH(b) WH-WORD-GUARD twin: $( conf "$A" )"; fi
+hasnt "$A" "$NOHEAD" "FH(b) WH-WORD-GUARD twin: no clause"
+M="$( mcpfor "$FH" 'where pkg.futures.ThreadPoolExecutor is defined on' )"
 if [ "$( conf "$M" )" = low ]; then ok "FH(b) MCP twin: low"; else no "FH(b) MCP twin: $( conf "$M" )"; fi; has "$( route "$M" )" "$NOHEAD" "FH(b) MCP twin: the clause"
 # (b) sibling: C++, a qualified anchor beside a plain word that is a function elsewhere
 printf 'namespace app { struct WidgetBox { int size() const { return 1; } }; }\n' > "$FH/cc/widget.h"
@@ -319,18 +324,20 @@ r1(){ printf '%s' "$1" | python3 -c 'import re,sys; t=re.sub(r"<!--.*?-->","",sy
 FD="$TMP/fhd"; mkdir -p "$FD/pkg/futures" "$FD/docs" "$FD/ui"
 printf 'class ThreadPoolExecutor:\n    def submit(self, fn):\n        return fn()\n' > "$FD/pkg/futures/thread.py"
 printf 'class Gadget:\n    def run(self):\n        return 1\n' > "$FD/ui/gadget.py"
-printf '# where\n\n## where\n\nwhere is where\n' > "$FD/docs/where.md"
-A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is defined' )"; R="$( route "$A" )"
+# the Markdown namesake is a route stopword that still ranks (`with`); a question lead (`where`) ranks no longer beside a source syntax
+# anchor (WH-WORD-GUARD), so it cannot score the Markdown rows first here
+printf '# with\n\n## with\n\nwith is with\n' > "$FD/docs/where.md"
+A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is defined with' )"; R="$( route "$A" )"
 has "$R" 'name-exact(pkg.futures.ThreadPoolExecutor)' "FH(d) the route is name-exact on the dotted anchor"
 has "$A" 'docs_after_code=' "FH(d) premise: the Markdown rows scored first and the reorder moved them below the code"
 if [ "$( r1 "$A" )" = 'ThreadPoolExecutor|pkg/futures/thread.py' ]; then ok "FH(d) the anchor is the row printed as r=1"; else no "FH(d) r=1 is $( r1 "$A" )"; fi
 hasnt "$R" "$NOHEAD" "FH(d) the printed head is the anchor: no clause naming a row that is not r=1"
-M="$( mcpfor "$FD" 'where pkg.futures.ThreadPoolExecutor is defined' )"
+M="$( mcpfor "$FD" 'where pkg.futures.ThreadPoolExecutor is defined with' )"
 if [ "$( r1 "$M" )" = 'ThreadPoolExecutor|pkg/futures/thread.py' ]; then ok "FH(d) MCP twin: the anchor is r=1"; else no "FH(d) MCP twin: r=1 is $( r1 "$M" )"; fi; hasnt "$( route "$M" )" "$NOHEAD" "FH(d) MCP twin: no clause"
 # twin: a question about docs keeps score order, the Markdown row IS r=1, and the clause names it
-A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is documented' )"; R="$( route "$A" )"
-has "$R" "$NOHEAD (r=1 is where in docs/where.md)" "FH(d) twin: a docs question keeps the Markdown head, and the clause names that row"
-if [ "$( r1 "$A" )" = 'where|docs/where.md' ]; then ok "FH(d) twin: the named row is the printed r=1"; else no "FH(d) twin: r=1 is $( r1 "$A" )"; fi
+A="$( ask "$FD" 'where pkg.futures.ThreadPoolExecutor is documented with' )"; R="$( route "$A" )"
+has "$R" "$NOHEAD (r=1 is with in docs/where.md)" "FH(d) twin: a docs question keeps the Markdown head, and the clause names that row"
+if [ "$( r1 "$A" )" = 'with|docs/where.md' ]; then ok "FH(d) twin: the named row is the printed r=1"; else no "FH(d) twin: r=1 is $( r1 "$A" )"; fi
 # (e) CR 4498011593: a dotted word that spells a symbol (`FooBar.py` = the method py of FooBar) is not a file subject because a file of that
 # spelling exists; its tests/FooBar.py is no anchor file, so the plain word's function heading the rows reads low
 FS="$TMP/fhs"; mkdir -p "$FS/src" "$FS/tests"
@@ -367,7 +374,12 @@ A="$( ask "$VN" 'BundledThing fresh parameter' )"; R="$( route "$A" )"
 has "$R" 'declined' "V .github first in path order: the declined route stands, the map is not given up"
 hasnt "$R" 'dropped:' "V .github first: no flip"
 has "$( blk "$A" )" 'bundledUser' "V .github first: the source def's callers ride on top, or the map stands"
-A="$( ask "$VN" 'BundledThing parameter' )"; has "$( route "$A" )" 'anchor has no source definition' "V two words, already name-exact at base: no map to lose, and the CI anchor says so"
+# two words, already name-exact at base: the identifier has a source definition beside its CI copy, so the anchor is the source one
+# (ANCHOR-HONESTY R1b: a non-source tie never beats a source definition) and no false "no source definition" note fires
+A="$( ask "$VN" 'BundledThing parameter' )"
+hasnt "$( route "$A" )" 'anchor has no source definition' "V two words, already name-exact at base: the source definition backs the anchor, no false note"
+has "$( route "$A" )" 'BundledThing(src/thing.ts)' "V two words: the anchor names the source file, not the CI copy"
+case "$A" in *'<b t="fn" l="1" p="src/thing.ts" n="BundledThing">'*) ok "V two words: the source body prints";; *) no "V two words: no source body";; esac
 A="$( ask "$VN" 'VendorOnlyThing' )"; if [ "$( conf "$A" )" = low ]; then ok "V vendored anchor: confidence low"; else no "V vendored anchor: $( conf "$A" )"; fi
 A="$( ask "$VN" 'VendorOnlyThing zznope sturdy' )"; hasnt "$A" 'by="subject"' "V vendored only: lifts nothing"
 
