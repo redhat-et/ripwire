@@ -1800,6 +1800,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // merge-scout (mergescout.h writeSymRows): the <sym p= id=/> rows an arm's changed symbols print; seen only when an arm
     // changed code (the working-tree arm on a dirty tree), so the floor could not pin it stably.
     { "p", "sym p= id=: a changed symbol's file and identity (id= is the file itself on a file-level row)", true, "sym", MapHeaderRead::No, {}, "merge-scout" },
+    // pr-context (prcontext.h): a changed file's <s> rows and their <caller> rows print t= n=; seen only when the diff
+    // touches a symbol, so a HEAD~1 roster row whose last commit is test-only cannot pin it either way.
+    { "n", "s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name", true, "s", MapHeaderRead::No, {}, "pr-context" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
