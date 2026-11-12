@@ -257,7 +257,8 @@ inline bool singleQuoteStrings( Lang lang ) noexcept
 
 // Brace depth inside an owner's span, walked forward once: `{`/`}` outside `//` and `/* */` comments, "…" and `…` strings,
 // '…' strings (singleQuoteStrings) and char literals (CodeRabbit 4553235701: `label = '{'` opened a phantom depth). A direct
-// member sits at depth 1; an object-literal property, a method's local or a nested type's member sits deeper.
+// member sits at depth 1; an object-literal property, a method's local or a nested type's member sits deeper. A skip may
+// carry `pos` past the byte asked for: that byte sits inside the comment or string (memberDeclLine reads that as no member).
 struct OwnerBraceWalk
 {
     std::size_t pos          = 0;
@@ -341,6 +342,10 @@ inline std::uint32_t memberDeclLine( const IngestResult& ing, const Symbol& owne
             continue;
         }
         walk.advanceTo( bytes, at );
+        if( walk.pos > at )
+        {
+            continue;   // the walk skipped over it: inside a `/* … */` spanning lines or a string (CodeRabbit 4553235721)
+        }
         if( walk.opened && walk.depth != 1 )
         {
             continue;   // inside a nested literal, body or type: not a member of THIS owner

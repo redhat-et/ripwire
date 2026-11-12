@@ -355,6 +355,16 @@ else no "(C10) CLI --uses=valueToken (quoted braces): $( printf '%s' "$out" | he
 out="$( rw "$TMP/rsl" --uses=rows )"
 if printf '%s' "$out" | grep -q "'rows' is declared as a member of 'View' at .*lib.rs:1"; then ok "(C12) control: a Rust lifetime is not a quote, --uses=rows still refuses with the member sentence"
 else no "(C12) control: --uses=rows (Rust lifetime): $( printf '%s' "$out" | head -c 300 )"; fi
+# (C11) a member commented out inside a `/* … */` spanning lines declares nothing (4553235721)
+mkdir -p "$TMP/tsc"
+printf 'export class Box {\n  /*\n  valueToken: number;\n  */\n  size = 1;\n}\nexport function v(b: any): number {\n  return b.valueToken\n}\n' > "$TMP/tsc/box.ts"
+c11=$( grep -c '^  valueToken: number;' "$TMP/tsc/box.ts" )
+if [ "$c11" -eq 1 ]; then ok "(C11) premise: the commented-out member line is in the fixture"; else no "(C11) premise: lost the commented-out member ($c11) — the arm is vacuous"; fi
+out="$( rw "$TMP/tsc" --uses=valueToken )"
+if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C11) precision: a commented-out member is named a declaration: $( printf '%s' "$out" | head -c 300 )"
+else ok "(C11) precision: a member inside a multi-line /* */ declares nothing"; fi
+mo="$( mcp "$TMP/tsc" uses ',"symbol":"valueToken"' )"
+if printf '%s' "$mo" | grep -q 'declared as a member'; then no "(C11) precision: MCP uses valueToken names the commented-out member"; else ok "(C11) precision: MCP uses valueToken does not name the commented-out member"; fi
 
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"
