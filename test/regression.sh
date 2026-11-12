@@ -305,6 +305,7 @@ for _g in \
     aliasdefcheck \
     anchorbodycheck \
     anchorcheck \
+    anchorhonestycheck \
     archcheck \
     archhonestcheck \
     archmetricscheck \
