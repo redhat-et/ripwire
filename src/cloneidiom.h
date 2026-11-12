@@ -36,7 +36,8 @@
 //       the C family, the first in the name-first languages, kIdiomNameFirstLangMask);
 //   (b) every name in a `std::`-qualified chain (`std::ranges::any_of`, `std::string_view::npos`);
 //   (c) the fixed stop list kIdiomOneStatementStopWords — standard container and string vocabulary.
-// Everything else stays in: member names after `.`/`->` (`scope`, `name`, `m_inClass`), named constants
+// Everything else stays in: member names after `.`/`->` (`scope`, `name`, `m_inClass`), even one spelled like a
+// parameter, named constants
 // (`kMinBytesPerToken`), in-repo callees, lambda parameters, and the arguments of a contract assert.
 // Conditions (3) and (4) are unchanged and there is no new floor. One extra refusal holds for this idiom:
 // a pair whose two bodies are token-identical once each member's parameters are renamed by position (a
@@ -570,6 +571,7 @@ inline CloneIdiom classifyOneStatement( const std::vector<IdiomTok>& t )
     }
     while( idiomEatContract( t, i, end ) )
     {
+        // each call advanced `i` past one leading contract assert
     }
     if( i >= end || t[i].text != "return" )
     {
@@ -716,8 +718,11 @@ inline OneStatementFacts oneStatementFacts( const std::vector<IdiomTok>& body, c
     std::string renamed;
     for( std::size_t k = 0; k < body.size(); ++k )
     {
-        const std::string_view w     = body[k].text;
-        const auto             param = std::find( params.begin(), params.end(), w );
+        const std::string_view w = body[k].text;
+        // A name after `.`/`->`/`::` is a MEMBER, never the parameter it happens to be spelled like (`vf.prefix`
+        // beside a parameter `prefix`): it stays in the set and is not renamed.
+        const bool afterAccess = k > 0 && ( body[k - 1].text == "." || body[k - 1].text == "->" || body[k - 1].text == "::" );
+        const auto param       = afterAccess ? params.end() : std::find( params.begin(), params.end(), w );
         if( body[k].kind == CodeTokenKind::Identifier && param != params.end() )
         {
             renamed += '\x01';
