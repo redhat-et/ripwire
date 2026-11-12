@@ -13,6 +13,10 @@
 #   R  reserve by kind (G1a), machine-free: each table's bucket count is at most 8 x max( size, 16 ). A table reserved for
 #      every binding while it holds one kind (the pre-G1a `reserve( ing.bindings.size() )`) has 2^k buckets for ~100 K
 #      bindings and fails here; a reserve by its own kind's count stays within 2.5 x of its distinct keys.
+#   E  the edge table's reserve (CodeRabbit 4544551960): on a generated corpus of 4800 empty C functions (symbols, no
+#      references) the resolve loop adds no edge, so the edge accumulator holds at most 8 x max( references, 16 ) buckets
+#      at graph-tables. Red before: reserve( symbols ) gave 8192 buckets for 0 references. Premise: the symbols family
+#      reads >= 4000 and references reads 0, counted first.
 #   F  the plateau (macOS: phys_footprint): graph-tables cur_mib minus model cur_mib stays under kPlateauMib on the
 #      fixture (red on the whole-family reserve: 23.8 MiB; 16.7 by kind). Linux prints the reading as INFO (glibc's RSS moves with its own thresholds; the bound is the M2's).
 #      A reading printed `unavailable` is never a plateau: macOS FAILS (its reader always answers), elsewhere F is SKIP.
@@ -111,6 +115,25 @@ for pair in $( printf '%s\n' "$tables" | tr ' ' '\n' | grep -E '^(varType|localN
     fi
 done
 [ "$total" -eq 5 ] && [ "$bad" -eq 0 ] && ok "R: every per-kind table within 8 x its entries ($tables)"
+
+# ---- E ----
+EREPO="$TMP/erepo"; mkdir -p "$EREPO"
+python3 - "$EREPO" <<'PY'
+import sys, os
+for f in range( 8 ):
+    open( os.path.join( sys.argv[1], f"t{f}.c" ), "w" ).write( "".join( f"void f{f}_{i}(void) {{}}\n" for i in range( 600 ) ) )
+PY
+( cd "$EREPO" && RIPWIRE_STATS=1 "$BIN" "$EREPO" --no-cache --deps >/dev/null 2>"$TMP/e.err" ) || no "E: the --deps run exited non-zero"
+esyms="$( grep '^\[mem\] family symbols ' "$TMP/e.err" | sed -E 's/.* size=([0-9]+) .*/\1/' )"
+erefs="$( grep '^\[mem\] family references ' "$TMP/e.err" | sed -E 's/.* size=([0-9]+) .*/\1/' )"
+eacc="$( grep '^\[mem\] tables ' "$TMP/e.err" | tr ' ' '\n' | sed -n 's/^acc=[0-9]*\///p' | head -1 )"
+if [ "${esyms:-0}" -lt 4000 ] || [ "${erefs:-x}" != "0" ] || [ -z "$eacc" ]; then
+    no "E: premise: symbols=${esyms:-?} references=${erefs:-?} acc buckets=${eacc:-?} (want >= 4000, 0, a reading)"
+else
+    ok "E: premise: $esyms symbols, 0 references"
+    if [ "$eacc" -le 128 ]; then ok "E: the edge accumulator reserves $eacc buckets for 0 references (<= 8 x 16)"
+    else no "E: the edge accumulator reserves $eacc buckets for $esyms symbols and 0 references (> 8 x 16: reserved by symbols)"; fi
+fi
 
 # ---- F ----
 # plateau ERRFILE -> "ok <plateau> <model>" | "unavailable" (either reading printed `unavailable`) | "missing" (no such lines)
