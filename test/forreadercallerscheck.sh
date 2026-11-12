@@ -14,6 +14,8 @@
 #   R4 [P] fan-in gate: a reader with 7 callers lists none: <lcn of="hub_reader" n="7" next="--callers=hub_reader"/>
 #   R5 [F] reader limit (CR 4540061421): 5 readers, each with a caller; the first 3 are walked and <lcn readers_more="2"/> says the
 #          other 2 were not (premise: --callers=rd_3 lists use_rd_3, so a dropped reader had a caller)
+#   R5b [F] (CR 4550333670): a caller cut by the 12-row cap is not printed, so a 4th reader whose only caller it is counts in
+#          readers_more=1 (premise: --callers=rd_d lists shared_x, rd_d is an ls row, 12 lc rows)
 #   R6 [F] constructor hub (CR 4540061415): a constructor whose class is built in 7 places is a hub; its lcn carries next= (the
 #          constructor's own callers) and class_next="--callers=Hubby" (the construction sites; premise: that command lists all 7,
 #          the next= one lists none of them)
@@ -113,6 +115,19 @@ def rd_{i}():
 def use_rd_{i}():
     return rd_{i}()
 ''' for i in range( 5 ) ) )
+# R5b (CR 4550333670): rd_a and rd_b take 6 callers each (the 12-row cap), rd_c's one caller shared_x is past the cap, and
+# shared_x is the 4th reader rd_d's only caller
+w( "py/widgets/capped.py", "import os\n" + "".join( f'''
+def rd_{r}():
+    return os.getenv('WIDGET_CAPPED')
+''' for r in "abcd" ) + "".join( f'''
+def c{r}_{i}():
+    return rd_{r}()
+''' for r in "ab" for i in range( 6 ) ) + '''
+def shared_x():
+    rd_c()
+    return rd_d()
+''' )
 # R6: a constructor reader whose class is constructed in 7 places
 w( "py/widgets/hubctor.py", '''import os
 
@@ -223,6 +238,12 @@ else no "R5 premise: rd_3 is no ls row or --callers=rd_3 lists no use_rd_3"; fi
 n=$( count "$TMP/r1" ' readers_more="' ); m=$( count "$TMP/r1" '<lc ' )
 if [ "$m" -gt 0 ]; then if [ "$n" = 0 ]; then ok "R5 one reader: no readers_more= (premise: $m lc rows printed)"; else no "R5 readers_more= on a one-reader lit"; fi
 else no "R5 premise: the one-reader lit printed no lc rows"; fi
+# R5b: a caller omitted by the row cap is no printed caller, so the reader it alone calls counts in readers_more=
+run py --for=WIDGET_CAPPED >"$TMP/r5b"; run py --callers=rd_d >"$TMP/r5bc"
+if has "$TMP/r5bc" 'n="shared_x"' && has "$TMP/r5b" 'in="rd_d"' && [ "$( count "$TMP/r5b" '<lc ' )" = 12 ]; then
+    if has "$TMP/r5b" '<lcn more="1" readers_more="1"/>' && ! has "$TMP/r5b" 'n="shared_x"'; then ok "R5b a row-capped caller still counts for readers_more=1 (premise: rd_d is an ls row, its one caller shared_x, 12 lc rows)"
+    else no "R5b readers_more= missed rd_d, whose only caller was cut by the row cap: $( grep -o '<lcn [^>]*>' "$TMP/r5b" | tr '\n' ' ' )"; fi
+else no "R5b premise: rd_d no ls row, --callers=rd_d lists no shared_x, or not 12 lc rows ($( count "$TMP/r5b" '<lc ' ))"; fi
 # R6
 run py --for=WIDGET_CTOR_VALUE >"$TMP/r6"; run py --callers=Hubby >"$TMP/r6k"; run py --callers=Hubby.__init__ >"$TMP/r6i"
 nk=$( count "$TMP/r6k" 'n="make_hubby_' ); ni=$( count "$TMP/r6i" 'n="make_hubby_' )

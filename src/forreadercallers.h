@@ -210,9 +210,10 @@ inline ReaderCallers renderReaderCallers( const IngestResult& ing, const Graph* 
     {
         return out;
     }
-    Walk        walk{ ing, *g, std::vector<NodeId>( readers.begin(), readers.end() ) };
-    std::size_t more = 0;
-    const auto  row  = [ & ]( int d, NodeId of, NodeId c, bool byName )
+    Walk                walk{ ing, *g, std::vector<NodeId>( readers.begin(), readers.end() ) };
+    std::vector<NodeId> shown( readers.begin(), readers.end() );   // readers and EMITTED rows: a row past the cap is not shown
+    std::size_t         more = 0;
+    const auto          row  = [ & ]( int d, NodeId of, NodeId c, bool byName )
     {
         walk.printed.push_back( c );
         if( out.rows >= kReaderCallerRows )
@@ -220,6 +221,7 @@ inline ReaderCallers renderReaderCallers( const IngestResult& ing, const Graph* 
             ++more;
             return;
         }
+        shown.push_back( c );
         const Symbol& s = ing.symbols[c];
         out.xml += "<lc d=\"" + std::to_string( d ) + "\" of=\"";
         out.xml += escapeXml( chainOf( ing, of ), esc );
@@ -286,7 +288,10 @@ inline ReaderCallers renderReaderCallers( const IngestResult& ing, const Graph* 
             }
         }
     }
-    std::size_t readersMore = 0;   // readers past kReaderCallerReaders with a caller not printed above: not walked, counted (CR 4540061421)
+    // readers past kReaderCallerReaders with a caller not printed above: not walked, counted (CR 4540061421). A caller the row cap
+    // cut counts: it was never printed (CR 4550333670)
+    walk.printed = std::move( shown );
+    std::size_t readersMore = 0;
     for( std::size_t r = kReaderCallerReaders; r < readers.size(); ++r )
     {
         readersMore += std::size_t( readers[r] ) < ing.symbols.size() && !walk.callersOf( readers[r] ).empty() ? 1 : 0;
