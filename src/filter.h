@@ -173,20 +173,17 @@ inline PathTier pathTierOf( std::string_view p ) noexcept
 
 // The TEST CLASS: a definition in the test partition (isTestSymbol: a test path or an in-file test scope) or in a
 // fixture/bench/testdata directory (pathTierOf). --path's test twin, --defs class="test", the --for M1 narrowing and
-// --connect's source joint (graph.h connectSourceJoint) all ask this one rule. pathInTestsOrFixtures is its FILE half, for a
-// caller that classifies every symbol of a file at once (one path read per file, not per symbol).
+// --connect's source joint all ask this one rule. pathInTestsOrFixtures is its FILE half (isTestPath or the TestOrBench tier; a
+// prose file under test/ is the Doc tier and still a test path), for graph.h connectSourceJoint, which classifies each file once
+// and ORs in the symbol's own testScope: the same answer as pathDefInTests, one path read per file instead of per symbol.
 inline bool pathInTestsOrFixtures( std::string_view p ) noexcept
 {
-    return isTestPath( p ) || pathTierOf( p ) == PathTier::TestOrBench;
+    const PathTier tier = pathTierOf( p );
+    return tier == PathTier::TestOrBench || ( tier == PathTier::Doc && isTestPath( p ) );
 }
 inline bool pathDefInTests( const IngestResult& ing, NodeId n ) noexcept
 {
-    if( n >= ing.symbols.size() )
-    {
-        return false;
-    }
-    const Symbol& s = ing.symbols[ n ];
-    return s.testScope != 0 || ( s.fileId < ing.files.size() && pathInTestsOrFixtures( rootRelPath( ing, s.fileId ) ) );
+    return isTestSymbol( ing, n ) || pathTierOf( rootRelPath( ing, ing.symbols[n].fileId ) ) == PathTier::TestOrBench;
 }
 
 // ── LB-G (r10 GitNexus round) — the ORDERING key, in ONE place for every verb that sorts rows by it ──────

@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "connectsourcejointcheck: BIN=$BIN"
@@ -62,14 +62,20 @@ premise=0
 for t in planIt applyIt; do
     "$BIN" "$TONLY" --no-cache --callers="$t" 2>/dev/null | grep -q 'testBoth' && premise=$(( premise + 1 ))
 done
-[ "$premise" -eq 2 ] && ok "(P) premise: testBoth calls both terminals (seen by --callers on each: $premise/2)" \
-                     || no "(P) premise: testBoth is not a caller of both terminals ($premise/2) — the negative arms below would be vacuous"
+if [ "$premise" -eq 2 ]; then
+    ok "(P) premise: testBoth calls both terminals (seen by --callers on each: $premise/2)"
+else
+    no "(P) premise: testBoth is not a caller of both terminals ($premise/2) — the negative arms below would be vacuous"
+fi
 premTie=0
 for t in planIt applyIt; do
     "$BIN" "$TIE" --no-cache --callers="$t" 2>/dev/null | grep -q 'testBoth' && premTie=$(( premTie + 1 ))
 done
-[ "$premTie" -eq 2 ] && ok "(P) premise: tie fixture's testBoth calls both terminals ($premTie/2)" \
-                     || no "(P) premise: tie fixture's testBoth calls $premTie/2 terminals"
+if [ "$premTie" -eq 2 ]; then
+    ok "(P) premise: tie fixture's testBoth calls both terminals ($premTie/2)"
+else
+    no "(P) premise: tie fixture's testBoth calls $premTie/2 terminals"
+fi
 
 # ── A) CLI --connect, test-only joint ──────────────────────────────────────────────────────────────────
 checkTestOnly(){   # $1 label, $2 document
@@ -78,12 +84,9 @@ checkTestOnly(){   # $1 label, $2 document
     else
         ok "($1) no <s> row names the test function testBoth"
     fi
-    printf '%s' "$2" | grep -q '<connect [^>]*source_joint="none"' \
-        && ok "($1) the root says source_joint=\"none\"" || no "($1) no source_joint=\"none\" on the root: $( brief "$2" )"
-    printf '%s' "$2" | grep -q '<connect [^>]*test_joint="testBoth" test_joint_p="test/core_test.cpp:2"' \
-        && ok "($1) the test is named as test-only evidence (test_joint= test_joint_p=)" || no "($1) test_joint=/test_joint_p= missing: $( brief "$2" )"
-    printf '%s' "$2" | grep -q '<unconnected radius=' \
-        && ok "($1) the terminals are reported <unconnected> (no source joint within radius)" || no "($1) no <unconnected> row: $( brief "$2" )"
+    if printf '%s' "$2" | grep -q '<connect [^>]*source_joint="none"'; then ok "($1) the root says source_joint=\"none\""; else no "($1) no source_joint=\"none\" on the root: $( brief "$2" )"; fi
+    if printf '%s' "$2" | grep -q '<connect [^>]*test_joint="testBoth" test_joint_p="test/core_test.cpp:2"'; then ok "($1) the test is named as test-only evidence (test_joint= test_joint_p=)"; else no "($1) test_joint=/test_joint_p= missing: $( brief "$2" )"; fi
+    if printf '%s' "$2" | grep -q '<unconnected radius='; then ok "($1) the terminals are reported <unconnected> (no source joint within radius)"; else no "($1) no <unconnected> row: $( brief "$2" )"; fi
 }
 A_FULL="$( "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt --legend=full 2>/dev/null )"
 A_DEF="$( "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt 2>/dev/null )"
@@ -117,51 +120,57 @@ fi
 
 # ── D) positive control: a real source joint is still the joint ─────────────────────────────────────────
 D_DOC="$( "$BIN" "$SJ" --no-cache --connect=planIt,applyIt 2>/dev/null )"
-[ "$( steinerOf "$D_DOC" )" = "driver" ] && ok "(D) a source joint (driver) still prints as <s>" || no "(D) expected <s n=\"driver\">: $( brief "$D_DOC" )"
-printf '%s' "$D_DOC" | grep -q 'source_joint=' && no "(D) source_joint= printed beside a real source joint" || ok "(D) no source_joint= when a source joint exists"
+if [ "$( steinerOf "$D_DOC" )" = "driver" ]; then ok "(D) a source joint (driver) still prints as <s>"; else no "(D) expected <s n=\"driver\">: $( brief "$D_DOC" )"; fi
+if printf '%s' "$D_DOC" | grep -q 'source_joint='; then no "(D) source_joint= printed beside a real source joint"; else ok "(D) no source_joint= when a source joint exists"; fi
 
 # ── E) a source joint the old tie-break lost to a test ───────────────────────────────────────────────────
 E_DOC="$( "$BIN" "$TIE" --no-cache --connect=planIt,applyIt 2>/dev/null )"
-[ "$( steinerOf "$E_DOC" )" = "driver" ] && ok "(E) the source joint driver (connects 7) wins over the test testBoth (connects 2)" \
-                                         || no "(E) expected the source joint driver, got '$( steinerOf "$E_DOC" )': $( brief "$E_DOC" )"
-printf '%s' "$E_DOC" | grep -q 'source_joint=' && no "(E) source_joint= printed though a source joint exists" || ok "(E) no source_joint= (a source joint was found)"
+if [ "$( steinerOf "$E_DOC" )" = "driver" ]; then
+    ok "(E) the source joint driver (connects 7) wins over the test testBoth (connects 2)"
+else
+    no "(E) expected the source joint driver, got '$( steinerOf "$E_DOC" )': $( brief "$E_DOC" )"
+fi
+if printf '%s' "$E_DOC" | grep -q 'source_joint='; then no "(E) source_joint= printed though a source joint exists"; else ok "(E) no source_joint= (a source joint was found)"; fi
 
 # ── F) a test terminal keeps its test joint ──────────────────────────────────────────────────────────────
 F_DOC="$( "$BIN" "$TT" --no-cache --connect=helperT,applyIt 2>/dev/null )"
-[ "$( steinerOf "$F_DOC" )" = "testDriver" ] && ok "(F) with a test terminal, the test joint testDriver is still printed" \
-                                              || no "(F) expected <s n=\"testDriver\"> for a test terminal: $( brief "$F_DOC" )"
-printf '%s' "$F_DOC" | grep -q 'source_joint=' && no "(F) source_joint= printed for a test terminal" || ok "(F) no source_joint= for a test terminal"
+if [ "$( steinerOf "$F_DOC" )" = "testDriver" ]; then
+    ok "(F) with a test terminal, the test joint testDriver is still printed"
+else
+    no "(F) expected <s n=\"testDriver\"> for a test terminal: $( brief "$F_DOC" )"
+fi
+if printf '%s' "$F_DOC" | grep -q 'source_joint='; then no "(F) source_joint= printed for a test terminal"; else ok "(F) no source_joint= for a test terminal"; fi
 
 # ── G) legend ────────────────────────────────────────────────────────────────────────────────────────────
 for lbl in full default; do
     [ "$lbl" = full ] && doc="$A_FULL" || doc="$A_DEF"
     leg="$( printf '%s' "$doc" | sed 's/<connect .*//' )"
     for a in 'source_joint=' 'test_joint=' 'test_joint_p='; do
-        printf '%s' "$leg" | grep -qF "$a" && ok "(G) $lbl legend defines $a" || no "(G) $lbl legend lacks $a"
+        if printf '%s' "$leg" | grep -qF "$a"; then ok "(G) $lbl legend defines $a"; else no "(G) $lbl legend lacks $a"; fi
     done
 done
-printf '%s' "$D_DOC" | sed 's/<connect .*//' | grep -qF 'source_joint=' \
-    && no "(G) the source_joint= clause rides an answer that does not carry it" || ok "(G) the clause is present-only (absent with a source joint)"
+if printf '%s' "$D_DOC" | sed 's/<connect .*//' | grep -qF 'source_joint='; then no "(G) the source_joint= clause rides an answer that does not carry it"; else ok "(G) the clause is present-only (absent with a source joint)"; fi
 
 # ── H) determinism + well-formedness ─────────────────────────────────────────────────────────────────────
 "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d1" 2>&1
 "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d2" 2>&1
 "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d3" 2>&1
-cmp -s "$TMP/d1" "$TMP/d2" && cmp -s "$TMP/d2" "$TMP/d3" && ok "(H) 3 runs byte-identical" || no "(H) non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2" && cmp -s "$TMP/d2" "$TMP/d3"; then ok "(H) 3 runs byte-identical"; else no "(H) non-deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
+    xmlBad=0
     for d in "$A_FULL" "$A_DEF" "$D_DOC" "$E_DOC" "$F_DOC"; do
-        printf '%s' "$d" | xmllint --noout - 2>/dev/null || { no "(H) malformed xml: $( brief "$d" )"; }
+        if ! printf '%s' "$d" | xmllint --noout - 2>/dev/null; then xmlBad=$(( xmlBad + 1 )); no "(H) malformed xml: $( brief "$d" )"; fi
     done
-    ok "(H) xmllint pass over the five answers"
+    if [ "$xmlBad" -eq 0 ]; then ok "(H) xmllint pass over the five answers"; fi
 fi
 
 # ── M) mutations ─────────────────────────────────────────────────────────────────────────────────────────
 MUT="$( printf '%s' "$A_FULL" | sed 's/<unconnected/<s n="testBoth" t="fn"\/><unconnected/' )"
-printf '%s' "$MUT" | grep -q '<s n="testBoth"' && ok "(M) mutation (test joint printed) trips (A)" || no "(M) mutation not seen by (A)"
+if printf '%s' "$MUT" | grep -q '<s n="testBoth"'; then ok "(M) mutation (test joint printed) trips (A)"; else no "(M) mutation not seen by (A)"; fi
 MUT="$( printf '%s' "$A_FULL" | sed 's/ source_joint="none"//g' )"
-printf '%s' "$MUT" | grep -q '<connect [^>]*source_joint="none"' && no "(M) mutation (disclosure dropped) passes (A)" || ok "(M) mutation (disclosure dropped) trips (A)"
+if printf '%s' "$MUT" | grep -q '<connect [^>]*source_joint="none"'; then no "(M) mutation (disclosure dropped) passes (A)"; else ok "(M) mutation (disclosure dropped) trips (A)"; fi
 MUT="$( printf '%s' "$E_DOC" | sed 's/<s n="driver"/<s n="testBoth"/' )"
-[ "$( steinerOf "$MUT" )" = "driver" ] && no "(M) mutation (test wins tie) passes (E)" || ok "(M) mutation (test wins tie) trips (E)"
+if [ "$( steinerOf "$MUT" )" = "driver" ]; then no "(M) mutation (test wins tie) passes (E)"; else ok "(M) mutation (test wins tie) trips (E)"; fi
 
-[ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
+if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fi
 exit "$fail"
