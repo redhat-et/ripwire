@@ -338,11 +338,16 @@ DET = os.path.join( TMP, "detached" )
 os.makedirs( os.path.join( DET, "src" ), exist_ok = True )
 open( os.path.join( DET, "src", "a.c" ), "w" ).write( "int alpha( int n ) { return n + 1; }\n" )
 gitc = [ "git", "-c", "user.email=g@example.invalid", "-c", "user.name=g" ]
-subprocess.run( [ "git", "init", "-q", DET ], capture_output = True )
-subprocess.run( gitc + [ "-C", DET, "add", "-A" ], capture_output = True )
-subprocess.run( gitc + [ "-C", DET, "commit", "-qm", "one" ], capture_output = True )
+# A caller's exported GIT_DIR / GIT_WORK_TREE (a git hook exports both) beats `git -C`, so a fixture built under it would commit
+# into the CALLER's repository (CodeRabbit 4546573988). Every fixture git call runs under fixtureGitEnv; arm (HIST0) pins it.
+GIT_REPO_VARS = ( "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR" )
+def fixtureGitEnv( env ): return { k: v for k, v in env.items() if k not in GIT_REPO_VARS }
+FIXENV = fixtureGitEnv( os.environ )
+subprocess.run( [ "git", "init", "-q", DET ], capture_output = True, env = FIXENV )
+subprocess.run( gitc + [ "-C", DET, "add", "-A" ], capture_output = True, env = FIXENV )
+subprocess.run( gitc + [ "-C", DET, "commit", "-qm", "one" ], capture_output = True, env = FIXENV )
 open( os.path.join( DET, "src", "a.c" ), "a" ).write( "int beta( int n ) { return alpha( n ) * 2; }\n" )
-subprocess.run( gitc + [ "-C", DET, "commit", "-qam", "two" ], capture_output = True )
+subprocess.run( gitc + [ "-C", DET, "commit", "-qam", "two" ], capture_output = True, env = FIXENV )
 subprocess.run( [ "git", "-C", DET, "checkout", "-q", "--detach", "HEAD" ], capture_output = True )
 CYC = os.path.join( TMP, "cycle", "src" )
 os.makedirs( CYC, exist_ok = True )
@@ -424,20 +429,39 @@ ROSTER += [
 #   (4) THE CORE EXEMPTION (below CORE).
 # Hermetic git fixtures for the two modifiers whose answer depends on repository state (--stray-content --plan reads unmerged
 # local branches, --cochange-groups reads history): a CI checkout has neither, so the rows build their own state here.
+def buildHist( root, env ):
+    """the history fixture at root: 4 commits on the default branch, one more on `side`; git runs under fixtureGitEnv( env )."""
+    e = fixtureGitEnv( env )
+    os.makedirs( os.path.join( root, "src" ), exist_ok = True )
+    gith = lambda *a: subprocess.run( gitc + [ "-c", "commit.gpgsign=false", "-C", root ] + list( a ), capture_output = True, env = e )
+    subprocess.run( [ "git", "init", "-q", root ], capture_output = True, env = e )
+    for i in range( 4 ):
+        for f in ( "route.ts", "handler.ts" ):
+            open( os.path.join( root, "src", f ), "a" ).write( f"export function {f[:-3]}{i}( x: number ) {{ return x + {i}; }}\n" )
+        open( os.path.join( root, "src", "util.ts" ), "a" ).write( f"export const u{i} = {i};\n" )
+        gith( "add", "-A" );  gith( "commit", "-qm", f"c{i}" )
+    gith( "checkout", "-q", "-b", "side" )
+    open( os.path.join( root, "src", "side.ts" ), "w" ).write( "export function sideOnly( y: number ) { return y * 2; }\n" )
+    open( os.path.join( root, "src", "route.ts" ), "a" ).write( "export function routeSide() { return 0; }\n" )
+    gith( "add", "-A" );  gith( "commit", "-qm", "side work" )
+    gith( "checkout", "-q", "-" )
+def gitCount( root, *a ):
+    r = subprocess.run( [ "git", "-C", root ] + list( a ), capture_output = True, text = True, env = FIXENV )
+    return len( r.stdout.split() ) if r.returncode == 0 else 0
 HIST = os.path.join( TMP, "hist" )
-os.makedirs( os.path.join( HIST, "src" ), exist_ok = True )
-gith = lambda *a: subprocess.run( gitc + [ "-c", "commit.gpgsign=false", "-C", HIST ] + list( a ), capture_output = True )
-subprocess.run( [ "git", "init", "-q", HIST ], capture_output = True )
-for i in range( 4 ):
-    for f in ( "route.ts", "handler.ts" ):
-        open( os.path.join( HIST, "src", f ), "a" ).write( f"export function {f[:-3]}{i}( x: number ) {{ return x + {i}; }}\n" )
-    open( os.path.join( HIST, "src", "util.ts" ), "a" ).write( f"export const u{i} = {i};\n" )
-    gith( "add", "-A" );  gith( "commit", "-qm", f"c{i}" )
-gith( "checkout", "-q", "-b", "side" )
-open( os.path.join( HIST, "src", "side.ts" ), "w" ).write( "export function sideOnly( y: number ) { return y * 2; }\n" )
-open( os.path.join( HIST, "src", "route.ts" ), "a" ).write( "export function routeSide() { return 0; }\n" )
-gith( "add", "-A" );  gith( "commit", "-qm", "side work" )
-gith( "checkout", "-q", "-" )
+buildHist( HIST, os.environ )
+# (HIST0) the fixture is real and stays put. Premise: HIST has its 4+1 commits and the `side` branch (counted; zero FAILs).
+# Leak arm: a decoy repository stands in for a caller's exported GIT_DIR / GIT_WORK_TREE while a second fixture is built; the
+# decoy must keep exactly its one commit and one branch (its own count is the premise: a decoy with no commit proves nothing).
+DECOY = os.path.join( TMP, "decoy" );  os.makedirs( DECOY, exist_ok = True )
+subprocess.run( [ "git", "init", "-q", DECOY ], capture_output = True, env = FIXENV )
+open( os.path.join( DECOY, "d.txt" ), "w" ).write( "decoy\n" )
+subprocess.run( gitc + [ "-c", "commit.gpgsign=false", "-C", DECOY, "add", "-A" ], capture_output = True, env = FIXENV )
+subprocess.run( gitc + [ "-c", "commit.gpgsign=false", "-C", DECOY, "commit", "-qm", "decoy" ], capture_output = True, env = FIXENV )
+decoyBefore = ( gitCount( DECOY, "rev-list", "--all" ), gitCount( DECOY, "branch", "--format=%(refname)" ) )
+buildHist( os.path.join( TMP, "hist-under-gitdir" ), { **os.environ, "GIT_DIR": os.path.join( DECOY, ".git" ), "GIT_WORK_TREE": DECOY } )
+decoyAfter  = ( gitCount( DECOY, "rev-list", "--all" ), gitCount( DECOY, "branch", "--format=%(refname)" ) )
+histCounts  = ( gitCount( HIST, "rev-list", "--all" ), gitCount( HIST, "branch", "--list", "side" ) )
 # The second corpora: two small committed fixtures other gates already use (ownerhopcheck, forsoftbudgetcheck) — a hono-shaped
 # TypeScript middleware tree with a test file, and a textual-shaped Python package. The verbs agents call most, on each.
 TSC = os.path.join( ROOT, "test", "ownerhopfix", "ts" )
@@ -450,6 +474,12 @@ ROSTER += [
     ( "cochange-groups-default",  [ HIST,  "--cochange", "--cochange-groups" ] ),
     ( "slice-flow-default",       [ SMALL, "--slice=connectSubgraph:res", "--slice-flow=both" ] ),
     ( "defs-default",             [ SMALL, "--defs=escapeXml" ] ),
+    # --order=stable withholds k= (serialize.h) but keeps t= n= p= and <c n=>: the map-family readings must not ride on k= alone
+    # (CodeRabbit 4546573980). Arm (GST) counts the <s> rows these print WITHOUT k= — zero means the rows prove nothing.
+    ( "metrics-stable-default",          [ SMALL, "--metrics", "--order=stable" ] ),
+    ( "query-stable-default",            [ SMALL, "--query=rank symbols", "--order=stable" ] ),
+    ( "pack-signatures-stable-default",  [ SMALL, "--pack-signatures", "--order=stable" ] ),
+    ( "pack-top-n-stable-default",       [ SMALL, "--pack-top-n=2", "--order=stable" ] ),
 ]
 for tag, corpus, task, sym, callee in ( ( "ts", TSC, "how does the gateway check the session cookie", "checkSessionToken", "gateway" ),
                                         ( "py", PYC, "how does the message pump deliver a message", "resolve", "deliver" ) ):
@@ -676,26 +706,42 @@ tarm( g == [ "z@bogus" ], f"(T7) a block quoted inside CDATA defines nothing: a 
 g = gapsOf( tdoc( b'<![CDATA[x <!-- syms: bogus= --><syms>y]]>' + GOOD + SYM ), True )[ 3 ]
 tarm( g == [], f"(T7b) twin: a real block after the CDATA quote still reads its own comment (gaps {g})" )
 # (T6) live: a DEFAULT --for answer from the roster that carries a trailing block; the first open-tag attribute only its comment
-# defines is cut from that comment, and the same reader must report it
-live = [ ( n, d ) for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if e is None and d and n.endswith( "-default" ) and trailingBlocks( d ) ]
-if not live:
-    tarm( False, "(T6) no default roster answer carries a trailing block: the live mutation has nothing to cut" )
-else:
-    n, d = live[ 0 ]
-    lo, hi, c = trailingBlocks( d )[ 0 ]
+# defines is cut from that comment, and the same reader must report it. cutOwnComment does the cut: a TRAILING block's comment
+# stands before lo, a LEADING block's (<bodies>, INNER) right after its open tag, inside [ lo, hi ) — CodeRabbit 4546574011: an
+# rfind before lo found no leading comment and cut the wrong bytes. -> ( tag, attr, before, after ), or ( tag, None, ... ).
+def cutOwnComment( d, lo, hi, c ):
     head  = legendOf( d, anyRoot = True )
     open_ = re.match( rb'<([\w-]+)((?:\s+[\w:.-]+="[^"]*")*)', d[ lo:hi ] )
     tag   = open_.group( 1 ).decode()
     only  = [ a for a in ( x.decode() for x in re.findall( rb'\s([\w:.-]+)="', open_.group( 2 ) ) ) if not defined( a, head ) ]
     if not only:
+        return tag, None, None, None
+    a, cb = only[ 0 ], c.encode()
+    inner = d.find( cb, lo, hi )
+    cs    = inner if inner >= 0 else d.rfind( cb, 0, lo )
+    mut   = d[ :cs ] + re.sub( rb'(?<![\w:.-])' + re.escape( a.encode() ) + rb'\s*=', a.encode() + b' ', cb ) + d[ cs + len( cb ): ]
+    return tag, a, gapsOf( d, True )[ 3 ], gapsOf( mut, True )[ 3 ]
+live = [ ( n, d ) for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if e is None and d and n.endswith( "-default" ) and trailingBlocks( d ) ]
+if not live:
+    tarm( False, "(T6) no default roster answer carries a trailing block: the live mutation has nothing to cut" )
+else:
+    n, d = live[ 0 ]
+    tag, a, before, after = cutOwnComment( d, *trailingBlocks( d )[ 0 ] )
+    if a is None:
         tarm( False, f"(T6) {n}: every attribute of <{tag}> is defined by the head legend: nothing to cut" )
     else:
-        a, cb = only[ 0 ], c.encode()
-        cs    = d.rfind( cb, 0, lo )
-        mut   = d[ :cs ] + re.sub( rb'(?<![\w:.-])' + re.escape( a.encode() ) + rb'\s*=', a.encode() + b' ', cb ) + d[ cs + len( cb ): ]
-        before, after = gapsOf( d, True )[ 3 ], gapsOf( mut, True )[ 3 ]
         tarm( f"{tag}@{a}" not in before and f"{tag}@{a}" in after,
               f"(T6) {n}: live <{tag}> defines {a}= in its own comment, and cutting it reds {tag}@{a} (before {before}, after {after})" )
+# (T6b) the same cut when the FIRST block is a LEADING one: the <bodies> comment that defines shown= follows its open tag. Premise:
+# the fixture's first block must be that leading block (counted; zero is a FAIL, not a pass).
+LD   = tdoc( b'<bodies shown="1"><!-- shown=N: bodies printed; via="name": matched by name alone --><b n="x"><c n="y" via="name"/></b></bodies>' )
+lead = [ b for b in trailingBlocks( LD ) if LD.startswith( b'<bodies', b[ 0 ] ) ]
+if not lead or trailingBlocks( LD )[ 0 ] != lead[ 0 ]:
+    tarm( False, f"(T6b) premise: the fixture's first block is not a leading <bodies> block ({len( lead )} leading blocks seen)" )
+else:
+    tag, a, before, after = cutOwnComment( LD, *lead[ 0 ] )
+    tarm( a == "shown" and "bodies@shown" not in before and "bodies@shown" in after,
+          f"(T6b) a leading <bodies> block's own comment is the one cut: {len( lead )} leading block(s), cut {tag}@{a} (before {before}, after {after})" )
 # (T8) a LEADING block: the comment right after <bodies>'s open tag defines that block's rows, and nothing outside it
 LB = b'<bodies shown="1"><!-- via="name": matched by name alone --><b t="fn"><c n="x" via="name"/></b></bodies>'
 g = gapsOf( tdoc( LB.replace( b't="fn"', b'' ) ), True )[ 3 ]
@@ -704,6 +750,20 @@ g = gapsOf( tdoc( LB.replace( b'<!--', b'<e/><!--' ).replace( b't="fn"', b'' ) )
 tarm( "c@via" in g, f"(T8b) mutant: an element between the open tag and the comment -> c@via is a gap (gaps {g})" )
 g = gapsOf( tdoc( LB.replace( b't="fn"', b'' ) + b'<z via="1"/>' ), True )[ 3 ]
 tarm( "z@via" in g, f"(T8c) the block's comment defines nothing after the block (gaps {g})" )
+# (HIST0) see buildHist: the premise counts, then the decoy that a leaking fixture would have written into
+tarm( histCounts[ 0 ] >= 5 and histCounts[ 1 ] == 1, f"(HIST0) premise: the history fixture holds {histCounts[ 0 ]} commits (want 5) and {histCounts[ 1 ]} side branch (want 1)" )
+tarm( decoyBefore[ 0 ] >= 1 and decoyAfter == decoyBefore,
+      f"(HIST0) a caller's exported GIT_DIR/GIT_WORK_TREE never receives the fixture: decoy commits/branches {decoyBefore} -> {decoyAfter}" )
+# (GST) the stable-order rows print <s> rows without k= (the premise of their judgement), counted
+noK = sum( len( [ m for m in re.findall( rb'<s\s[^>]*>', re.sub( rb'<!--.*?-->', b'', d, flags = re.S ) ) if b' k="' not in m ] )
+           for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if n.endswith( "-stable-default" ) and e is None and d )
+tarm( noK > 0, f"(GST) premise: the --order=stable rows print {noK} <s> rows without k= for (G) to judge" )
+# (GST2) element-qualified: (G)'s name-level predicate passed these rows on main only by coincidence (t= "defined" by the value
+# reading t=modscope=..., n= by <entry p= n=>), so each stable row's legend must name the <s> row keys themselves: an
+# `s t= n=` clause (or the map's own `<s t= n=`). Rows checked are counted; zero is a FAIL.
+stRows = [ ( n, d ) for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if n.endswith( "-stable-default" ) and e is None and d ]
+stMiss = [ n for n, d in stRows if not re.search( r'(?<![\w:.=-])<?s t= n=', legendOf( d, anyRoot = True ) ) ]
+tarm( stRows and not stMiss, f"(GST2) {len( stRows )} --order=stable row(s) checked; each legend names the <s> row keys (s t= n=): missing on {stMiss}" )
 writeLines( "trail", tl )
 PY
 
