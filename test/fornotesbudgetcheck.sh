@@ -307,6 +307,12 @@ def read( path ):
             r = g( 'r' )
             rows.append( ( int( r ) if r.isdigit() else 10**9, g( 'p' ) + ":" + g( 'l' ) + ":" + g( 'n' ), len( x.group( 0 ).encode() ) + elided,
                            1 if '<note ' in x.group( 0 ) else 0 ) )
+        # B26 DEMOTE-ALL: a budgeted answer is demoted too; a SIBLING-DEMOTE / DECL-TWIN pointer <t p= sym= r=/> holds its rank, so it
+        # is a served row here as the JSON twin's pointer object is (priced at its printed bytes; a noted row is never pointed: K6)
+        for x in re.finditer( r'<t ([^>]*\br="\d+"[^>]*)/>', inner ):
+            a = x.group( 1 )
+            g = lambda k: ( re.search( r'\b' + k + r'="([^"]*)"', a ) or [ None, "?" ] )[ 1 ]
+            rows.append( ( int( g( 'r' ) ), g( 'p' ) + ":*:" + g( 'sym' ), len( x.group( 0 ).encode() ), 0 ) )
         t = re.search( r'\btotal="(\d+)"', m.group( 1 ) ); total = int( t.group( 1 ) ) if t else len( rows )
         nxt = re.search( r'\bnext="[^"]+"', m.group( 1 ) ) is not None
         rt = root.group( 0 )

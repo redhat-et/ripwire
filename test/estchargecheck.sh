@@ -218,10 +218,12 @@ def rb( p ):
     m = re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S )
     if not m: return None
     inner = m.group( 1 ); rows = []; elided = 0
-    for d in re.finditer( r'<d ([^>]*)>.*?</d>|<d ([^>]*)/>', inner, re.S ):
-        a = d.group( 1 ) or d.group( 2 )
+    # B26 DEMOTE-ALL: a budgeted answer is demoted too, so a <t p= sym= r=/> pointer holds its rank as a ranked entry priced at its
+    # printed bytes (no cx=/ccx=/in= to elide), as soft_rows.py above counts it; a <d> row is charged as the ladder charges it
+    for d in re.finditer( r'<d ([^>]*)>.*?</d>|<d ([^>]*)/>|<t ([^>]*\br="\d+"[^>]*)/>', inner, re.S ):
+        a = d.group( 1 ) or d.group( 2 ) or d.group( 3 )
         r = re.search( r'\br="(\d+)"', a )
-        printed = len( d.group( 0 ).encode() ); c = charge( a, printed ); elided += c - printed
+        printed = len( d.group( 0 ).encode() ); c = printed if d.group( 3 ) else charge( a, printed ); elided += c - printed
         rows.append( ( int( r.group( 1 ) ) if r else 10**9, c ) )
     rows.sort()
     return len( inner.encode() ), len( inner.encode() ) + elided, rows
@@ -967,6 +969,10 @@ python3 -c 'import re,sys; m=re.search(r" task=\"([^\"]*)\"", sys.argv[1]); sys.
 }
 
 est_11_sweep(){
+# B26 DEMOTE-ALL: a budgeted answer is demoted too (SIBLING-DEMOTE / DECL-TWIN run before the rows settle and the bytes they
+# free buy rows). ST's maximality prices REF's next entry as the ladder prices it, an UNDEMOTED row, while a demoted REF prints
+# that rank as a ~46 B pointer, so this section reads the rules-OFF twin; fordemoteallcheck (b)/(b+) pins the demoted fill
+local -x RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1
 # A7 SWEEP — the harness is kept, its property REPLACED (forbudget-soft (rule 4)). Was (PR #135 CI, 2026-09-11): delivered
 # bytes <= N x 2.36 x 1.15 at exit 0 at EVERY budget, or the ladder's disclosed last rung / the <sigs> unpaid twin — the guard
 # against a byte spliced in after the ladder priced the document. A soft target makes no byte promise, so the sweep now pins
@@ -1112,6 +1118,10 @@ done   # HRR twin / on (lane hrr)
 }
 
 est_11_a7r(){
+# B26 DEMOTE-ALL: a budgeted answer is demoted too (SIBLING-DEMOTE / DECL-TWIN run before the rows settle and the bytes they
+# free buy rows). ST's maximality prices REF's next entry as the ladder prices it, an UNDEMOTED row, while a demoted REF prints
+# that rank as a ~46 B pointer, so this section reads the rules-OFF twin; fordemoteallcheck (b)/(b+) pins the demoted fill
+local -x RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1
 # ── #11 A7R (lego-charge fix round 4): THE TRAILING-SECTION RESERVE — and its forbudget-soft (rule 4) REPLACEMENT. Under the
 # old hard ceiling --with-graph's block and the first --detail body were charged only AFTER <sigs> had claimed the whole
 # sig-side ceiling, so lego-charge reserved the graph bytes and a measured first-body floor OUT of the sig claim

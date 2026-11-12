@@ -26,7 +26,8 @@
 #        and (a) holds on it; twin: widget_config_variant_08 (no note) is still a pointer. K7 (slot facts) is driven by fnslotcheck
 #        (F1b/K2/K3/X2b/F4) and K4's task-named seeds by pymodcallsitescheck (X7/X7b/X7c), whose rows sit past rank 10.
 #   (e)  est_tokens= is re-priced down (estchargecheck holds its value to the bytes); (w) well formed; (l) one legend comment, no "--" in it
-#   (b)  --token-budget leaves the answer as shaped: no pointer in <sigs>, no legend comment
+#   (b)  --token-budget runs the rule too (DEMOTE-ALL-DIALECTS, fordemoteall.h): pointers and the legend in <sigs>, the ranked entries
+#        a rank prefix, never fewer than the RIPWIRE_NO_SIBLING_DEMOTE=1 twin's rows (fordemoteallcheck pins the refill and --json)
 #   (b2) a bare --max-tokens (not read by --for: its notice says nothing was dropped) does not hold the demote: byte-identical to (a)'s
 #   (g)  GROWTH (sit 11-08: 4 aborts): a second tree of ten one-row files and z.py's four short undocumented rows. The legend comment
 #        and three pointers outweigh the rows they replace, so the answer GROWS: the run exits 0 and answers, (a) holds on it (default
@@ -258,7 +259,19 @@ arm r ptr widget_config_variant_06 "a same-file decoy at <d> rank 11"
 
 run "--for=$TASK" --token-budget=4000 >"$TMP/b.xml"
 python3 "$TMP/names.py" "$TMP/b.xml" >"$TMP/b.names"
-if grep -q '^ptr $' "$TMP/b.names" && ! grep -q '<!-- demote:' "$TMP/b.xml"; then ok "(b) --token-budget: no pointer in <sigs>"; else no "(b) $( head -c 300 "$TMP/b.names" )"; fi
+RIPWIRE_NO_SIBLING_DEMOTE=1 run "--for=$TASK" --token-budget=4000 >"$TMP/b.off"
+bres="$( python3 - "$TMP/b.xml" "$TMP/b.off" <<'PY'
+import re, sys
+def ent( f ):
+    s = open( f ).read(); s = s[s.find( "<sigs" ):s.find( "</sigs>" )]
+    return [ ( m.group( 1 ), int( m.group( 2 ) ) ) for m in re.finditer( r'<(d|t) [^>]*?\br="(\d+)"', s ) ]
+on, off = ent( sys.argv[1] ), ent( sys.argv[2] )
+r = [ x[1] for x in on ]   # in answer order, unsorted (CodeRabbit 4543056282)
+print( "ok" if any( t == "t" for t, _ in on ) and r == list( range( 1, len( r ) + 1 ) ) and len( on ) >= sum( 1 for t, _ in off if t == "d" ) else "on=%s off=%s" % ( on, off ) )
+PY
+)"
+if [ "$bres" = ok ] && grep -q '<!-- demote:' "$TMP/b.xml"; then ok "(b) --token-budget (DEMOTE-ALL-DIALECTS): the rule runs before the rows settle: pointers and the legend, rows + pointers a rank prefix, never fewer than the off twin's rows (fordemoteallcheck pins the refill)"
+else no "(b) $( printf '%s' "$bres" | head -c 300 )"; fi
 run "--for=$TASK" --max-tokens=4000 >"$TMP/m.xml" 2>/dev/null
 if cmp -s "$TMP/m.xml" "$TMP/on.xml"; then ok "(b2) a bare --max-tokens (not read by --for) leaves the demoted answer byte-identical to the flagless one"; else no "(b2) --max-tokens=4000 changed the answer (it is not read by --for: forbodyfoldcheck F8m)"; fi
 

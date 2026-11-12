@@ -432,6 +432,7 @@ for _g in \
     defoverdeclcheck \
     defslookupcheck \
     degradedhintcheck \
+    demoterefillcheck \
     dependencypincheck \
     deplangscheck \
     depsprecisecheck \
@@ -531,6 +532,7 @@ for _g in \
     forctorhopcheck \
     fordeclrowcheck \
     fordecltwincheck \
+    fordemoteallcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
     fordocbodycheck \
