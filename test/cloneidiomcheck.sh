@@ -245,6 +245,22 @@ case "$OROW" in
     '')             no "quality-delta: no row for the one-statement pair at all — the arm above is vacuous";;
     *)              ok "quality-delta: the demoted one-statement pair does not gate";;
 esac
+# the one-statement legend sentence rides only a document that carries a one-statement row (G4); it is part of
+# the FULL legend, so both halves ask for it (the compact one would make the negative half vacuous)
+qdfull(){ "$BIN" "$TMP/$1" --quality-delta --no-cache --legend=full 2>/dev/null; }
+case "$( qdfull qd_onestmt )" in
+    *'one-statement is a body of one return statement'*) ok "quality-delta: the one-statement row's document defines the idiom's narrowed test";;
+    *) no "quality-delta: a document with a one-statement row never defines the narrowed test";;
+esac
+LFULL="$( qdfull qd_demote )"
+case "$LFULL" in
+    *'CLONE ROWS name the whole group'*) ;;
+    *) no "quality-delta: the ladder document's full legend has no clone paragraph — the next arm would be vacuous";;
+esac
+case "$LFULL" in
+    *'one-statement is a body of one return statement'*) no "quality-delta: a ladder-only document pays for the one-statement sentence";;
+    *) ok "quality-delta: a ladder-only document does not carry the one-statement sentence";;
+esac
 mkrepo qd_onestmt_const "onestmt_sharedconst/site.h" "onestmt_sharedconst/ledger.h" || { echo "git fixture setup failed"; exit 2; }
 CROW="$( qd qd_onestmt_const | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"
 case "$CROW" in

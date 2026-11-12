@@ -521,8 +521,26 @@ inline constexpr std::uint32_t kIdiomNameFirstLangMask = langBit( Lang::Python )
                                                        | langBit( Lang::Go ) | langBit( Lang::Rust ) | langBit( Lang::Swift ) | langBit( Lang::Kotlin )
                                                        | langBit( Lang::GDScript ) | langBit( Lang::Ruby ) | langBit( Lang::Lua ) | langBit( Lang::Elixir );
 
-inline bool idiomIsOpenBracket( std::string_view w ) noexcept { return w == "(" || w == "[" || w == "{"; }
-inline bool idiomIsCloseBracket( std::string_view w ) noexcept { return w == ")" || w == "]" || w == "}"; }
+// The depth step of one token: +1 for an opening bracket of any kind, -1 for a closing one, 0 otherwise. One
+// switch rather than two `==` disjunctions, which the duplication kind names as the next copy of the house's
+// "is one of N constants" predicate.
+inline int idiomBracketStep( std::string_view w ) noexcept
+{
+    if( w.size() != 1 )
+    {
+        return 0;
+    }
+    switch( w[0] )
+    {
+        case '(':
+        case '[':
+        case '{': return 1;
+        case ')':
+        case ']':
+        case '}': return -1;
+        default:  return 0;
+    }
+}
 
 // `MACRO ( <balanced> ) ;?` for a kIdiomContractMacros name. Advances past it on a match.
 inline bool idiomEatContract( const std::vector<IdiomTok>& t, std::size_t& i, std::size_t end )
@@ -535,11 +553,12 @@ inline bool idiomEatContract( const std::vector<IdiomTok>& t, std::size_t& i, st
     std::size_t j = i + 1, depth = 0;
     for( ; j < end; ++j )
     {
-        if( idiomIsOpenBracket( t[j].text ) )
+        const int step = idiomBracketStep( t[j].text );
+        if( step > 0 )
         {
             ++depth;
         }
-        else if( idiomIsCloseBracket( t[j].text ) && --depth == 0 )
+        else if( step < 0 && --depth == 0 )
         {
             break;
         }
@@ -581,12 +600,13 @@ inline CloneIdiom classifyOneStatement( const std::vector<IdiomTok>& t )
     std::size_t depth = 0, taken = 0;
     for( ; i < end; ++i )
     {
-        const std::string_view w = t[i].text;
-        if( idiomIsOpenBracket( w ) )
+        const std::string_view w    = t[i].text;
+        const int              step = idiomBracketStep( w );
+        if( step > 0 )
         {
             ++depth;
         }
-        else if( idiomIsCloseBracket( w ) )
+        else if( step < 0 )
         {
             if( depth == 0 )
             {
@@ -636,13 +656,14 @@ inline std::vector<std::string_view> idiomParamNames( const std::vector<IdiomTok
     };
     for( ; i < sig.size(); ++i )
     {
-        const std::string_view w = sig[i].text;
-        if( idiomIsOpenBracket( w ) )
+        const std::string_view w    = sig[i].text;
+        const int              step = idiomBracketStep( w );
+        if( step > 0 )
         {
             ++depth;
             continue;
         }
-        if( idiomIsCloseBracket( w ) )
+        if( step < 0 )
         {
             if( --depth == 0 )
             {

@@ -1120,12 +1120,18 @@ inline constexpr const char* kQdCloneLegend =
     "non-keyword identifier between any two members, sits in pairwise-distinct enclosing contexts, and "
     "stays under 80 normalized tokens is an idiom COLLISION rather than a copy, and is reported minor "
     "instead of gating. Break any one of those and it gates as before, idiom= and all: two bucketing "
-    "ladders over the SAME enum are a copy. one-statement is a body of one return statement (leading "
-    "EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside); its shared-identifier test leaves out each member's "
-    "own parameter names, every std:: chain and standard container/string words (size, find, npos, first, "
-    "second and the like), and a pair identical once its parameters are renamed always gates. The shape is read off the body's token stream and not a parse "
+    "ladders over the SAME enum are a copy. The shape is read off the body's token stream and not a parse "
     "tree, so a macro-assembled body classifies as whatever its raw tokens spell — the name is printed so "
     "the call can be overruled by reading. ";
+
+// The one-statement half of the clone paragraph, printed only when a row carries idiom="one-statement": its
+// narrowed shared-identifier test is the one rule a reader of THAT row needs, and a ladder-only document
+// should not pay for it (the same G4 rule as every conditional section here).
+inline constexpr const char* kQdOneStatementLegend =
+    "one-statement is a body of one return statement (leading EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside); "
+    "its shared-identifier test leaves out each member's own parameter names, every std:: chain and standard "
+    "container/string words (size, find, npos, first, second and the like), and a pair identical once its "
+    "parameters are renamed always gates. ";
 
 // P1 — the SCOPE half of the quality-delta legend, printed ONLY when the report actually contains a
 // scope partition or a foreign-ack row. That is a G4 (token density) decision, not a hedge: the
@@ -1250,6 +1256,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         }
         return false;
     };
+    const auto anyOneStatementRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.facet == rw::cloneIdiomName( rw::CloneIdiom::OneStatement ); } );
+    };
     const auto anyMinorMaskRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && r.isMinor; } );
@@ -1343,6 +1353,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyCloneRow( p.rows ) || anyCloneRow( p.disclosedRows ) )
         {
             std::fputs( kQdCloneLegend, out );
+            if( anyOneStatementRow( p.rows ) || anyOneStatementRow( p.disclosedRows ) )
+            {
+                std::fputs( kQdOneStatementLegend, out );
+            }
         }
         if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
         {

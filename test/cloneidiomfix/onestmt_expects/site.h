@@ -5,6 +5,6 @@ struct Site { int path; int line; int col; };
 inline bool siteBefore( const Site& a, const Site& b )
 {
     EXPECTS( a.path >= 0 );
-    return a.path != b.path ? a.path < b.path : ( a.line != b.line ? a.line < b.line : a.col < b.col );
+    return ( a.path - b.path ) * 4 + ( a.line - b.line ) * 2 + ( a.col > b.col ? 1 : 0 ) - ( a.col < b.col ? 1 : 0 ) > 0;
 }
 }
