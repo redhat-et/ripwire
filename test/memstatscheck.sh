@@ -19,6 +19,12 @@
 #   F  the plateau (macOS: phys_footprint): graph-tables cur_mib minus model cur_mib stays under kPlateauMib on the
 #      fixture (red on the whole-family reserve: 23.8 MiB; 16.7 by kind). Linux prints the reading as INFO (glibc's RSS moves with its own thresholds; the bound is the M2's).
 #      A reading printed `unavailable` is never a plateau: macOS FAILS (its reader always answers), elsewhere F is SKIP.
+#   S  the save peak (macOS: phys_footprint; card C1 SAVE-STREAM): on a second, larger generated fixture (240 C++ files, a ~50 MiB
+#      lean blob) the cache write lifts the lifetime peak by at most a quarter of the blob over the parse's own (save-cache peak_mib
+#      minus pool-join peak_mib). Building the whole blob in one doubling std::string lifts it by 33 MiB on a 50 MiB blob (red,
+#      M2 11-11); the windowed writer by 0. The parse's peak sits ~68 MiB above the pool join's cur_mib here, so that pair can not
+#      bound the save on a fixture a gate can afford. The premise (the blob is at least 40 MiB, both lines seen once) is counted first.
+#      Linux prints INFO.
 #   U  unknown is not zero (CodeRabbit 4543019678): with RIPWIRE_TEST_MEMSTATS_UNREAD=1 (src/memstats.h's seam: every reading
 #      unknown, the shape of a platform with no reader) each of the six phase lines prints cur_mib=unavailable
 #      peak_mib=unavailable and none prints a number, and F's own verdict on that run is "unavailable", not a plateau. It counts
@@ -154,6 +160,42 @@ case "$v" in
             *) echo "  INFO  F: tables plateau $plateau MiB over the model ($model MiB); bound is macOS-only" ;;
         esac ;;
 esac
+
+# ---- S ----
+REPO2="$TMP/repo2"; mkdir -p "$REPO2/cpp"
+python3 - "$REPO2" <<'PY2'
+import sys, os
+root = sys.argv[1]
+for f in range( 240 ):
+    out = [ f"struct Widget{f} {{ void run(); int size; }};" ]
+    for fn in range( 50 ):
+        body = [ f"    Widget{f} w{v}; w{v}.run(); int n{v} = {v};" for v in range( 25 ) ]
+        out.append( f"void fn_{f}_{fn}()\n{{\n" + "\n".join( body ) + "\n}" )
+    open( os.path.join( root, "cpp", f"f{f}.cpp" ), "w" ).write( "\n".join( out ) + "\n" )
+PY2
+( cd "$REPO2" && RIPWIRE_STATS=1 "$BIN" "$REPO2" --cache="$TMP/s.bin" --deps >/dev/null 2>"$TMP/s2.err" ); rcs2=$?
+blob=$( wc -c <"$TMP/s.bin" 2>/dev/null | tr -d ' ' ); blob=${blob:-0}
+njoin="$( grep -c '^\[mem\] phase=pool-join ' "$TMP/s2.err" )"; nsave="$( grep -c '^\[mem\] phase=save-cache ' "$TMP/s2.err" )"
+joinpk="$( grep '^\[mem\] phase=pool-join ' "$TMP/s2.err" | sed -E 's/.* peak_mib=([^ ]+)$/\1/' )"
+savepk="$( grep '^\[mem\] phase=save-cache ' "$TMP/s2.err" | sed -E 's/.* peak_mib=([^ ]+)$/\1/' )"
+rm -f "$TMP/s.bin"
+if [ "$rcs2" -ne 0 ] || [ "$njoin" -ne 1 ] || [ "$nsave" -ne 1 ] || [ "$blob" -lt $(( 40 * 1048576 )) ]; then
+    no "S: premise: rc=$rcs2, pool-join x$njoin, save-cache x$nsave (want 1 each), blob $blob B (want >= 40 MiB)"
+elif [ "$joinpk" = unavailable ] || [ "$savepk" = unavailable ]; then
+    if [ "$( uname -s )" = Darwin ]; then no "S: the footprint reads unavailable on macOS"; else echo "  SKIP  S: the footprint reads unavailable on this platform"; fi
+else
+    rise="$( awk -v a="$savepk" -v b="$joinpk" 'BEGIN{ printf "%.1f", a - b }' )"
+    cap="$( awk -v n="$blob" 'BEGIN{ printf "%.1f", n / 1048576 / 4 }' )"
+    case "$( uname -s )" in
+        Darwin)
+            if awk -v r="$rise" -v c="$cap" 'BEGIN{ exit !( r <= c ) }'; then
+                ok "S: the cache write lifts the peak $rise MiB over the parse's $joinpk (<= $cap: a quarter of the $(( blob / 1048576 )) MiB blob)"
+            else
+                no "S: the cache write lifts the peak $rise MiB over the parse's $joinpk (> $cap: a quarter of the $(( blob / 1048576 )) MiB blob; the blob is built in memory?)"
+            fi ;;
+        *) echo "  INFO  S: the cache write lifts the peak $rise MiB over the parse's $joinpk; blob $(( blob / 1048576 )) MiB; bound is macOS-only" ;;
+    esac
+fi
 
 # ---- U ----
 ( cd "$REPO" && RIPWIRE_STATS=1 RIPWIRE_TEST_MEMSTATS_UNREAD=1 "$BIN" "$REPO" --cache="$TMP/u.bin" --deps >/dev/null 2>"$TMP/u.err" ); rcu=$?
