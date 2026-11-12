@@ -33,6 +33,12 @@
 #   (L) the two root counters are present and count over ALL groups
 #   (M) the emitted legend DEFINES both new attributes (the legend-coverage ratchet's own predicate)
 #   (N) the fixture corpus is TRACKED by git — a gate whose corpus only exists locally is not a gate
+#   (O) THE FOURTH IDIOM, one-statement (decision C3, QD-DUP-SHORT): a one-return pair sharing only its
+#       parameter names demotes; the same pair plus ONE shared named constant gates; the same pair in one
+#       namespace gates; an EXPECTS-led member still classifies; an if-then-return member is refused (the
+#       group carries no idiom); a pair identical once its parameters are renamed gates although it shares
+#       no other identifier at all. The quality-delta half: the demoted pair is minor, the shared-constant
+#       pair gates. The real-history replays live in test/dupshortcheck.sh.
 #
 # Usage:  bash test/cloneidiomcheck.sh            |   RIPWIRE_BIN=asan/ripwire bash test/cloneidiomcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
@@ -101,12 +107,19 @@ expect_row ladder_samefile  widthClassOf        depthClassOf        threshold-la
 expect_row switchtable      hueName             phaseName           switch-name-table yes   # (D)
 expect_row paramstruct      defaultCameraParams defaultMixerParams  builder-chain     yes   # (E)
 expect_row nonidiom         accumulateWeights   rollupSamples       NONE              no    # (F)
+expect_row onestmt_demote      siteBefore  entryBefore one-statement yes   # (O) only parameter names in common
+expect_row onestmt_sharedconst siteBefore  entryBefore one-statement no    # (O) + one shared constant kOrderSlack
+expect_row onestmt_samefile    siteBefore  entryBefore one-statement no    # (O) one file, one namespace
+expect_row onestmt_expects     siteBefore  entryBefore one-statement yes   # (O) EXPECTS does not count as a statement
+expect_row onestmt_ifreturn    siteBefore  entryBefore NONE          no    # (O) if-then-return is two statements
+expect_row onestmt_alpha       widthBetween gapOf      one-statement no    # (O) identical after renaming parameters
 
 # ── (G) true-positive preservation: the row stream itself is untouched ────────────────────────────────
 # Demotion is an ANNOTATION. Every fixture must still yield exactly ONE group of exactly TWO members —
 # the shape each yielded before any of this existed. A classifier that suppressed a row would pass every
 # attribute arm above and fail here.
-for d in ladder_demote ladder_sharedids ladder_samefile switchtable paramstruct nonidiom; do
+for d in ladder_demote ladder_sharedids ladder_samefile switchtable paramstruct nonidiom \
+         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha; do
     n="$( rows "$d" | wc -l | tr -d ' ' )"
     m="$( rows "$d" | grep -c 'n="2"' )"
     if [ "$n" = 1 ] && [ "$m" = 1 ]; then
@@ -217,6 +230,25 @@ esac
 case "$SROW" in
     *'gating="1"'*) ok "quality-delta: the shared-identifier ladder still gates";;
     *)              no "quality-delta: the shared-identifier ladder stopped gating";;
+esac
+
+# (O) the quality-delta half of the fourth idiom: the parameter-only pair is minor, the shared-constant pair gates
+mkrepo qd_onestmt "onestmt_demote/site.h" "onestmt_demote/ledger.h" || { echo "git fixture setup failed"; exit 2; }
+OROW="$( qd qd_onestmt | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"
+case "$OROW" in
+    *'idiom="one-statement"'*'sev="minor"'*|*'sev="minor"'*'idiom="one-statement"'*) ok "quality-delta: the parameter-only one-statement pair is minor, idiom named";;
+    *) no "quality-delta: the parameter-only one-statement pair is not a minor one-statement row (row: ${OROW:-<none>})";;
+esac
+case "$OROW" in
+    *'gating="1"'*) no "quality-delta: the demoted one-statement pair still gates";;
+    '')             no "quality-delta: no row for the one-statement pair at all — the arm above is vacuous";;
+    *)              ok "quality-delta: the demoted one-statement pair does not gate";;
+esac
+mkrepo qd_onestmt_const "onestmt_sharedconst/site.h" "onestmt_sharedconst/ledger.h" || { echo "git fixture setup failed"; exit 2; }
+CROW="$( qd qd_onestmt_const | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"
+case "$CROW" in
+    *'idiom="one-statement"'*'gating="1"'*|*'gating="1"'*'idiom="one-statement"'*) ok "quality-delta: the shared-constant one-statement pair still gates";;
+    *) no "quality-delta: the shared-constant one-statement pair stopped gating (row: ${CROW:-<none>})";;
 esac
 
 # ── (J) determinism ───────────────────────────────────────────────────────────────────────────────────
