@@ -18813,16 +18813,25 @@ inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g
     {
         return connectSubgraph( g, terminals, radius );
     }
-    std::vector<char> fileInTests( ing.files.size() );   // the file half once per file, the symbol half (testScope) per node
-    for( std::size_t f = 0; f < ing.files.size(); ++f )
-    {
-        fileInTests[ f ] = pathInTestsOrFixtures( rootRelPath( ing, std::uint32_t( f ) ) ) ? 1 : 0;
-    }
-    std::vector<char> inTests( N, 0 );
+    // pathDefInTests per node, its path half read once per file: a symbol with no testScope of its own answers exactly that file's
+    // half, so the first such symbol of each file is asked and the answer reused (kFileUnread until then)
+    constexpr std::uint8_t    kFileUnread = 2;
+    std::vector<std::uint8_t> fileInTests( ing.files.size(), kFileUnread );
+    std::vector<char>         inTests( N, 0 );
     for( std::size_t n = 0; n < N && n < ing.symbols.size(); ++n )
     {
         const Symbol& s = ing.symbols[ n ];
-        inTests[ n ] = ( s.testScope != 0 || ( s.fileId < fileInTests.size() && fileInTests[ s.fileId ] != 0 ) ) ? 1 : 0;
+        if( s.testScope != 0 || s.fileId >= fileInTests.size() )
+        {
+            inTests[ n ] = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
+            continue;
+        }
+        std::uint8_t& fileHalf = fileInTests[ s.fileId ];
+        if( fileHalf == kFileUnread )
+        {
+            fileHalf = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
+        }
+        inTests[ n ] = char( fileHalf );
     }
     ConnectResult res = connectSubgraph( g, terminals, radius, inTests );
     if( res.groups.size() <= 1 )

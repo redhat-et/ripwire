@@ -173,14 +173,7 @@ inline PathTier pathTierOf( std::string_view p ) noexcept
 
 // The TEST CLASS: a definition in the test partition (isTestSymbol: a test path or an in-file test scope) or in a
 // fixture/bench/testdata directory (pathTierOf). --path's test twin, --defs class="test", the --for M1 narrowing and
-// --connect's source joint all ask this one rule. pathInTestsOrFixtures is its FILE half (isTestPath or the TestOrBench tier; a
-// prose file under test/ is the Doc tier and still a test path), for graph.h connectSourceJoint, which classifies each file once
-// and ORs in the symbol's own testScope: the same answer as pathDefInTests, one path read per file instead of per symbol.
-inline bool pathInTestsOrFixtures( std::string_view p ) noexcept
-{
-    const PathTier tier = pathTierOf( p );
-    return tier == PathTier::TestOrBench || ( tier == PathTier::Doc && isTestPath( p ) );
-}
+// --connect's source joint (graph.h connectSourceJoint) all ask this one rule.
 inline bool pathDefInTests( const IngestResult& ing, NodeId n ) noexcept
 {
     return isTestSymbol( ing, n ) || pathTierOf( rootRelPath( ing, ing.symbols[n].fileId ) ) == PathTier::TestOrBench;
