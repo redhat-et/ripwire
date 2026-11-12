@@ -171,8 +171,8 @@ mkfam(){   # $1 dir, $2 the function every caller calls
 }
 mkfam "$TMP/off" useState
 mkfam "$TMP/on" composeMiddleware
-OFFH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' 2>/dev/null )" )"
-ONH="$( exemhdr "$( "$BIN" "$TMP/on" --no-cache --exemplar='a middleware' 2>/dev/null )" )"
+OFFH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' 2>/dev/null )" )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+ONH="$( exemhdr "$( "$BIN" "$TMP/on" --no-cache --exemplar='a middleware' 2>/dev/null )" )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
 # premise: both fixtures really carry the middleware family (6 + the composer) the window corroborates on
 famN="$( ls "$TMP/on/src/middleware" "$TMP/off/src/middleware" 2>/dev/null | grep -c '\.ts$' )"
 [ "$famN" -eq 14 ] && ok "premise: both fixtures carry the 7-file middleware family ($famN files)" \
@@ -193,7 +193,7 @@ fi
 # while the off_task reading says "not a fallback". The low_confidence reading must hold its fallback claim to
 # answers without off_task=1. Premise: the answer carries both attributes. Control: a plain fallback (arm 2's weak
 # query) still reads "fell back to fn".
-OFFDOC="$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' --legend=compact 2>/dev/null )"
+OFFDOC="$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' --legend=compact 2>/dev/null )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
 lcReading(){ printf '%s' "$1" | grep -oE 'low_confidence=1: [^;]*' | head -1; }
 if printf '%s' "$OFFDOC" | grep -q 'off_task="1"' && printf '%s' "$OFFDOC" | grep -q 'low_confidence="1"'; then
     ok "5b premise: the off-task answer carries low_confidence=\"1\" off_task=\"1\""
@@ -207,12 +207,12 @@ if printf '%s' "$OFFDOC" | grep -q 'off_task="1"' && printf '%s' "$OFFDOC" | gre
 else
     no "5b premise: the off-task answer lost low_confidence=\"1\" off_task=\"1\" — the legend arm would be vacuous"
 fi
-WEAKDOC="$( "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" --legend=compact 2>/dev/null )"
+WEAKDOC="$( "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" --legend=compact 2>/dev/null )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
 printf '%s' "$WEAKDOC" | grep -q 'off_task="1"' && no "5b control: the plain fallback must not carry off_task" \
     || { case "$( lcReading "$WEAKDOC" )" in *"fell back to fn"*) ok "5b control: a plain fallback still reads 'fell back to fn'" ;;
          *) no "5b control: the plain fallback's low_confidence reading lost its fallback claim: $( lcReading "$WEAKDOC" )" ;; esac; }
 # a kind token is never hedged by the task test: there is no task to be off
-KH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar=fn 2>/dev/null )" )"
+KH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar=fn 2>/dev/null )" )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
 printf '%s' "$KH" | grep -q 'low_confidence' && no "a kind token (fn) must never carry low_confidence: $KH" \
     || { [ -n "$KH" ] && ok "a kind token (fn) carries no hedge: $KH" \
          || no "premise: --exemplar=fn printed no <exemplar> header (the call failed or printed nothing)"; }

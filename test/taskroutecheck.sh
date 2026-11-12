@@ -855,7 +855,7 @@ pub fn commands() -> u32 { 1 }
 pub fn pipeline() -> u32 { commands() + 1 }
 SRC
 git -C "$OF" add -A; git -C "$OF" -c user.email=g@example.invalid -c user.name=g commit -qm fixture
-ofRoute(){ "$BIN" "$OF" --no-cache --help-task="$1" 2>/dev/null | grep -oE '<task-route [^>]*>|<facts [^>]*>|<run>[^<]*' | tr '\n' ' '; }
+ofRoute(){ "$BIN" "$OF" --no-cache --help-task="$1" 2>/dev/null | grep -oE '<task-route [^>]*>|<facts [^>]*>|<run>[^<]*' | tr '\n' ' '; }   # status: the arms below read the output; a failed run prints nothing, which they fail on
 HB="$( ofRoute 'how does nushell evaluate a list of commands' )"
 case "$HB" in *'resolved_symbols="1"'*'--expand=&apos;commands&apos;'*) ok "HT-b premise: 'of commands' resolves the weak name and routes --expand='commands'";;
     *) no "HT-b premise: the of-only task should resolve commands and route --expand: $HB";; esac

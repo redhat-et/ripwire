@@ -440,7 +440,7 @@ GO
 memberSites="$( grep -cE '\.(post_message|emit|push|Push)\(' "$MF"/w.py "$MF"/w.ts "$MF"/w.rs "$MF"/w.go | awk -F: '{ n += $2 } END { print n + 0 }' )"
 [ "${memberSites:-0}" -gt 0 ] && ok "member premise: the fixture carries $memberSites member-call sites (py 2, ts 2, rs 1, go 1)" \
     || no "member premise: the fixture carries no member-call site — the unmatched_member arms below would be vacuous"
-mroot(){ "$BIN" "$MF" --no-cache --pattern="$1" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }
+mroot(){ "$BIN" "$MF" --no-cache --pattern="$1" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }   # status: the arms below read the output; a failed run prints nothing, which they fail on
 MP="$( mroot 'post_message($X)' )"
 printf '%s' "$MP" | grep -q ' hits="1"' && printf '%s' "$MP" | grep -q ' unmatched_member="2"' \
     && ok "post_message(\$X): hits=\"1\" (the bare call) and unmatched_member=\"2\" (self.post_message, self.app.post_message)" \
@@ -450,7 +450,8 @@ printf '%s' "$MP" | grep -qF " next=\"--pattern=&apos;\$O.post_message(\$X)&apos
 MPN="$( mroot '$O.post_message($X)' )"
 printf '%s' "$MPN" | grep -q ' hits="2"' \
     && ok "pasting next= matches exactly the counted calls: \$O.post_message(\$X) hits=\"2\"" || no "\$O.post_message(\$X) should hit the 2 member calls: $MPN"
-"$BIN" "$MF" --no-cache --pattern='post_message($X)' 2>/dev/null | grep -qE '<!-- unmatched_qualified=N: [^>]*unmatched_member=N: ' \
+UQDOC="$( "$BIN" "$MF" --no-cache --pattern='post_message($X)' 2>/dev/null )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+printf '%s' "$UQDOC" | grep -qE '<!-- unmatched_qualified=N: [^>]*unmatched_member=N: ' \
     && ok "the same document defines unmatched_member= (kPatternQualifiedLegend)" || no "unmatched_member= rides with no reading"
 for pc in 'emit($X)|1|2' 'push($X)|1|1' 'Push($X)|1|1'; do
     pq="${pc%%|*}"; rest="${pc#*|}"; ph="${rest%%|*}"; pm="${rest#*|}"
@@ -465,7 +466,7 @@ printf '%s' "$MA" | grep -q 'unmatched_member' \
     && no "an ARGUMENT member (log(self.post_message)) was counted as a member near miss of log(post_message): $MA" \
     || { [ -n "$MA" ] && ok "only the callee is relaxed: log(self.post_message) is no near miss of log(post_message)" \
          || no "premise: log(post_message) printed no <pattern> header (the call failed or printed nothing)"; }
-QN2="$( "$BIN" "$QF" --pattern='ping($X)' --no-cache 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1 )"
+QN2="$( "$BIN" "$QF" --pattern='ping($X)' --no-cache 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1 )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
 printf '%s' "$QN2" | grep -q 'unmatched_member' \
     && no "a fixture with no member call carries unmatched_member: $QN2" \
     || { [ -n "$QN2" ] && ok "no member near miss, no unmatched_member= (the qualified fixture)" \
@@ -487,7 +488,7 @@ longSites="$( grep -c 'o\.foo(' "$MX/long/c.py" "$MX/short/c.py" | awk -F: '{ n 
 [ "${arrowSites:-0}" -ge 4 ] && [ "${longSites:-0}" -eq 2 ] && grep -q 'o\.f(1, 2, 3)' "$MX/recv/b.py" \
     && ok "member-exact premise: $arrowSites arrow call sites, $longSites long/short member calls, one 3-argument member call" \
     || no "member-exact premise: the fixtures lost their shapes (arrow=${arrowSites:-0} long=${longSites:-0}) — the arms below would be vacuous"
-xroot(){ "$BIN" "$1" --no-cache --pattern="$2" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }
+xroot(){ "$BIN" "$1" --no-cache --pattern="$2" 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1; }   # status: the arms below read the output; a failed run prints nothing, which they fail on
 # (1) arrow: mixed spellings disclose the arrow count and keep the dot next=; an all-arrow corpus gets the arrow next=
 XM="$( xroot "$MX/mixed" 'f($X)' )"
 printf '%s' "$XM" | grep -q ' unmatched_member="3"' && printf '%s' "$XM" | grep -q ' unmatched_member_arrow="2"' \
