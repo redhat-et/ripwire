@@ -1036,7 +1036,7 @@ inline void retargetRustMacroAliases( IngestResult& result )
     for( std::uint32_t i = 0; i < result.bindings.size(); ++i )
     {
         const Binding& b = result.bindings[ i ];
-        if( b.kind == LocalBindKind::TypeImport && b.var != b.typeName && !b.typeName.empty() && b.var != "*" && b.importedName.find( "::" ) != std::string::npos )
+        if( b.kind == LocalBindKind::TypeImport && b.var != b.typeName && !b.typeName.empty() && b.var != "*" && std::string_view( b.importedName ).find( "::" ) != std::string_view::npos )
         {
             renames.push_back( i );   // bindings are sorted by file: so is this list (a Rust file's, as the reference read below is)
         }
