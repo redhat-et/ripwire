@@ -12,8 +12,8 @@
 # function and finds otherwise reclassifies the row to pending. #614's depth cap and #613's reader cap are the two rows read
 # by hand (CodeRabbit 4542271958 and 4540061421): both lanes' red revisions FAIL their row and the fixed revisions PASS.
 # A new cap constant on the answer path needs a row here in the same commit.
-kImportSpecDepth	sink:atDepthCap	awaits:#614
-kReaderCallerReaders	sink:readersMore	awaits:#613
+kImportSpecDepth	sink:atDepthCap
+kReaderCallerReaders	sink:readersMore
 kAliasHopChains	sink:cut,shown
 kAliasHopMemberNames	sink:cut,shown
 kAliasHopSigBytes	sink:cut,truncateUtf8WithEllipsis
@@ -21,6 +21,7 @@ kCallPathSeeds	pending:B43 no disclosure identifier in the cap site's function (
 kCloneKeyTokenBits	pending:B43 no disclosure identifier in the cap site's function (src/clones.h:397); audit: cut or work bound
 kDeadExportedRowsShown	sink:shown,walkSkipped
 kEvidenceCap	pending:B43 no disclosure identifier in the cap site's function (src/verbs_navigate.h:2243 (no cap site)); audit: cut or work bound
+kForBareFlagMaxSites	none:a shape test, not a cut: a bare kebab token with more source sites is prose, so no <lit shape="flag"> is claimed (WHOLE-TOKEN; read by hand at train 1111c)
 kForBodyFoldBudgetBytes	sink:cut,firstCutNext
 kForBodyFoldRows	pending:B43 no disclosure identifier in the cap site's function (src/forfold.h:77); audit: cut or work bound
 kForBodySlotMaxBytes	legend
@@ -98,10 +99,12 @@ kForUnusedExtraFiles	pending:B43 no disclosure identifier in the cap site's func
 kForUnusedMaxBytes	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:3254); audit: cut or work bound
 kForUnusedRowsPerFile	sink:shownRows,graphCountFloorAttrXml
 kForUnusedSitesShown	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:665); audit: cut or work bound
+kForVerbatimMaxSites	none:a shape test, not a cut: a cue-less whole text with more confirmed string sites is no single message, so no <lit shape="message"> is claimed (MSG-VERBATIM; read by hand at train 1111c)
 kFpGram	none:the k-gram width of a fingerprint (a parameter, not a cut; read by hand after #615 moved it)
 kGraphSubjectAttempts	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:181, src/forgraphverb.h:189); audit: cut or work bound
 kGraphSubjectSlotCands	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:187, src/forgraphverb.h:188); audit: cut or work bound
 kGrepHitRefsMax	pending:B43 no disclosure identifier in the cap site's function (src/verbs_grep.h:946); audit: cut or work bound
+kImportSpecMaxStates	sink:cutDepth
 kJsonEnvelopeDigitsMax	pending:B43 no disclosure identifier in the cap site's function (src/verbs_for.h:1661 (no cap site)); audit: cut or work bound
 kKeep	pending:B43 no disclosure identifier in the cap site's function (src/forselfhook.h:541); audit: cut or work bound
 kLineStartReach	pending:B43 no disclosure identifier in the cap site's function (src/fordocbody.h:402); audit: cut or work bound
@@ -118,6 +121,8 @@ kPathRouteCandsCeiling	pending:B43 no disclosure identifier in the cap site's fu
 kPathRouteHedgeNameHops	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:494); audit: cut or work bound
 kPathRouteRefuseCandsThreshold	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:507); audit: cut or work bound
 kPathRouteRefuseNameHops	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:507, src/pathroute.h:566); audit: cut or work bound
+kReaderCallerFanIn	sink:hub
+kReaderCallerRows	sink:more
 kReexportDefCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:1438); audit: cut or work bound
 kReexportNameCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:1011); audit: cut or work bound
 kReexportRowCap	legend
