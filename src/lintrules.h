@@ -1183,10 +1183,20 @@ struct ErrorMaskRule
 };
 
 // The table. C-family (C/C++/ObjC), Java, TS/JS empty catches; Python bare/pass/ellipsis except handlers;
-// swallowed promise rejections (`.catch(()=>{})` / `.then(...,()=>{})` empty handler). Go's ignored-error
-// `_ =` discard is deliberately OMITTED: distinguishing an error-typed discard from a benign `_ =` needs type
-// info ripwire does not have, so a deterministic, low-false-positive rule is not available (documented skip).
-inline constexpr std::array<ErrorMaskRule, 7> kErrorMaskRules = { {
+// swallowed promise rejections (`.catch(()=>{})` / `.then(...,()=>{})` empty handler); Go's empty error
+// branches (QD-K6E-GO, below). Go's ignored-error `_ =` discard and Rust's `let _ =
+// fallible();` are deliberately OMITTED: a spot check of 10 such sites across axum, promgo and vuln found 0
+// defects (`_ = recover()` in a deferred guard, `let _ = buf.write_char(..)` into an in-memory buffer, a
+// compile-only test helper), and telling an error-typed discard from a benign one needs type info ripwire
+// does not have (documented skip).
+//
+// GO: `if <err> != nil {}` with no else, where <err> is error-named (isGoErrName's spelling as a regex) AND is
+// the left-hand result of a CALL — in the if's own initializer (`if _, err := f(); err != nil {}`) or in the
+// statement immediately before it (`err := f()` / `err = f()`). The binding is what makes it the error branch
+// of that call rather than a nil test on some long-lived variable. Its rows always gate, exactly as Python's
+// `except: pass` does. Every non-block capture (`err`) is dropped by the emptyOnly filter,
+// as the promise rules' @p is.
+inline constexpr std::array<ErrorMaskRule, 9> kErrorMaskRules = { {
     { "(catch_clause body: (compound_statement) @m)",                                    "empty-catch-cfamily", true  },  // C/C++/ObjC
     { "(catch_clause body: (block) @m)",                                                 "empty-catch-java",    true  },  // Java
     { "(catch_clause body: (statement_block) @m)",                                       "empty-catch-tsjs",    true  },  // TS/JS
@@ -1194,6 +1204,12 @@ inline constexpr std::array<ErrorMaskRule, 7> kErrorMaskRules = { {
     { "(except_clause (block (expression_statement (ellipsis))) @m)",                    "swallow-except-dots", false },  // Python: except ...: ...
     { "(call_expression function: (member_expression property: (property_identifier) @p (#eq? @p \"catch\")) arguments: (arguments (arrow_function body: (statement_block) @m)))", "swallow-catch-arrow", true  },  // .catch(()=>{})
     { "(call_expression function: (member_expression property: (property_identifier) @p (#eq? @p \"then\"))  arguments: (arguments (_) (arrow_function body: (statement_block) @m)))", "swallow-then-arrow",  true  },  // .then(_, ()=>{})
+    { "(if_statement initializer: [(short_var_declaration left: (expression_list (identifier) @e) right: (expression_list (call_expression))) (assignment_statement left: (expression_list (identifier) @e) right: (expression_list (call_expression)))]"
+      " condition: (binary_expression left: (identifier) @l operator: \"!=\" right: (nil)) consequence: (block) @m !alternative (#eq? @e @l) (#match? @l \"^(.*[eE]rr|err[A-Z].*)$\"))",
+      "empty-err-go-init", true },   // Go: if _, err := f(); err != nil {}
+    { "([(short_var_declaration left: (expression_list (identifier) @e) right: (expression_list (call_expression))) (assignment_statement left: (expression_list (identifier) @e) right: (expression_list (call_expression)))]"
+      " . (if_statement !initializer condition: (binary_expression left: (identifier) @l operator: \"!=\" right: (nil)) consequence: (block) @m !alternative) (#eq? @e @l) (#match? @l \"^(.*[eE]rr|err[A-Z].*)$\"))",
+      "empty-err-go-prev", true },   // Go: err := f() <NL> if err != nil {}
 } } ;
 
 // Does the captured block SWALLOW — is there nothing in it that could handle the error? astQuery returns the

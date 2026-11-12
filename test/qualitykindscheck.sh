@@ -674,6 +674,100 @@ void routed() { try { risky(); } catch( const Oops& ) { throw; } catch( ... ) { 
 qd_has  "masking (c++)" error-masking rethrow minor
 qd_none "masking (c++)" error-masking routed "a re-throw ahead of a catch-all sibling routes, it is not redundant"
 
+# ── 5b) EMPTY ERROR BRANCHES in Go and Rust (QD-K6E-GO / QD-K6E-RUST) + Rust log-only + C++ stream logging (K6L-CXX)
+#   Go: `if err != nil {}` (comment-only counts), err bound from a CALL in the if's initializer or the statement right
+#   before it; Rust: `if let Err(..) = f() {}` and `Err(..) => {}` / `=> ()`. Both GATE, as Python's `except: pass` does.
+#   Rust log-only: an Err arm / if-let Err whose body only prints or logs and never names the binding — sev=minor.
+#   C++ log-only: a catch whose body is only `std::cerr << …`, `LOG( x ) << …`, `fprintf( stderr, … )`, `fputs( …, stderr )`
+#   — sev=minor. Every negative arm first COUNTS the sites it judges (ripwire's own --match over the edited fixture) and
+#   FAILS on zero, so a fixture that stopped parsing as the shape cannot pass vacuously.
+premise(){   # LABEL DIR SYM QUERY → FAIL unless the query hits at least once inside SYM
+    local n; n="$( cd "$WORK/$2" && "$BIN" . --match="$4" --no-cache 2>/dev/null | tr '>' '\n' | grep -c "<m p=[^ ]* in=\"$3\"" )"
+    if [ "${n:-0}" -gt 0 ]; then ok "$1: premise — $n site(s) judged in $3"; else no "$1: premise — 0 sites in $3 (the negative arm is vacuous)"; fi
+}
+GOB='package p
+
+import (
+	"log"
+	"os"
+)
+
+func initEmpty() { touch() }
+func prevEmpty() { touch() }
+func retErr() error { touch(); return nil }
+func logged() { touch() }
+func paramErr(err error) { touch() }
+func discard() { touch() }
+func elseBranch() { touch() }
+
+func risky() error { return nil }
+func touch() { log.Print(os.Args) }
+'
+GOE='package p
+
+import (
+	"log"
+	"os"
+)
+
+func initEmpty() {
+	touch()
+	if _, err := os.Stat("."); err != nil {
+	}
+}
+func prevEmpty() {
+	touch()
+	err := risky()
+	if err != nil {
+		// ignored
+	}
+}
+func retErr() error {
+	touch()
+	if err := risky(); err != nil {
+		return err
+	}
+	return nil
+}
+func logged() {
+	touch()
+	if err := risky(); err != nil {
+		log.Printf("%v", err)
+	}
+}
+func paramErr(err error) {
+	touch()
+	if err != nil {
+	}
+}
+func discard() {
+	touch()
+	defer func() { _ = recover() }()
+}
+func elseBranch() {
+	touch()
+	if err := risky(); err != nil {
+	} else {
+		touch()
+	}
+}
+
+func risky() error { return nil }
+func touch() { log.Print(os.Args) }
+'
+qd_pair empty_go a.go "$GOB" "$GOE"
+qd_has  "empty (go)" error-masking initEmpty gating
+qd_has  "empty (go)" error-masking prevEmpty gating
+for s in retErr logged paramErr elseBranch; do premise "empty (go)" empty_go "$s" '(binary_expression right: (nil)) @m'; done
+premise "empty (go)" empty_go discard '(assignment_statement left: (expression_list (identifier) @m))'
+qd_none "empty (go)" error-masking retErr     "the branch returns the error"
+qd_none "empty (go)" error-masking logged     "the branch logs the error by name"
+qd_none "empty (go)" error-masking paramErr   "err is a parameter, not a call result here"
+qd_none "empty (go)" error-masking discard    "_ = recover() is out of scope"
+qd_none "empty (go)" error-masking elseBranch "an if/else is not an error branch alone"
+[ "$QD_RC" = 2 ] && ok "empty (go): the gating rows fire exit 2" || no "empty (go): should exit 2 (got $QD_RC)"
+
+
 # ── 6) PLACEHOLDER — the eleventh kind: a stub or TODO the change ADDED ───────────────────────────────────
 #   Never gates: every row is origin="new-symbol" by construction, including one that lands in a symbol that
 #   existed at the baseline (other() below). The near-misses are the ones the kind must not count: a TODO
