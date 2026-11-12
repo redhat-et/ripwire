@@ -201,8 +201,15 @@ inline bool memberDeclShaped( std::string_view line, std::size_t at, std::size_t
         const bool goType = langFacts( lang ).memberDecl == MemberDecl::NameThenType && ( std::isalpha( (unsigned char)next ) || next == '*' || next == '[' || next == '_' );
         return binds || goType;
     }
-    const bool typeFirstLang = langFacts( lang ).memberDecl == MemberDecl::TypeFirst;
-    return typeFirstLang && words >= 1 && prefix.find( '(' ) == std::string_view::npos && ( ( next == '=' && next2 != '=' ) || next == ';' || next == '{' );
+    // TYPE-FIRST: the name sits in the declarator slot right after a type — never inside an initializer (`int seed = valueToken;`
+    // reads valueToken, CodeRabbit 4553235686) or after a member access (`this.x =`). The prefix holds no `=`/`(` and ends on a
+    // type's last byte (a word, `>`, `]`, `?`, `*`) or a declarator list's `,`.
+    const bool             typeFirstLang  = langFacts( lang ).memberDecl == MemberDecl::TypeFirst;
+    const std::size_t      lastByte       = prefix.find_last_not_of( " \t" );
+    const char             typeEnd        = lastByte == std::string_view::npos ? '\0' : prefix[ lastByte ];
+    const bool             declaratorSlot = std::isalnum( (unsigned char)typeEnd ) || std::string_view( "_$>]?*," ).find( typeEnd ) != std::string_view::npos;
+    return typeFirstLang && words >= 1 && prefix.find_first_of( "=(" ) == std::string_view::npos && declaratorSlot
+        && ( ( next == '=' && next2 != '=' ) || next == ';' || next == '{' );
 }
 
 // Every subtoken of `name` occurs in definition `id`'s body (the B0.2 per-definition token row): the cheap test that

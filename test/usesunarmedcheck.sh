@@ -331,6 +331,16 @@ if printf '%s' "$out" | grep -q "declared as a member of 'Holder'"; then no "(C8
 else ok "(C8) precision: an object-literal property nested in a member initializer is not a member of the class"; fi
 mo="$( mcp "$TMP/ts2" uses ',"symbol":"depth"' )"
 if printf '%s' "$mo" | grep -q "declared as a member of 'Holder'"; then no "(C8) precision: MCP uses depth names Holder"; else ok "(C8) precision: MCP uses depth does not name Holder"; fi
+# #630 CodeRabbit round, one section per finding (each red on c9c01fcff):
+# (C9) a Java initializer READS valueToken (`int seed = valueToken;`): not a member declaration (4553235686)
+mkdir -p "$TMP/jv"
+printf 'public class Box {\n    int seed = valueToken;\n    int read() { return seed + valueToken; }\n}\n' > "$TMP/jv/Box.java"
+c9=$( grep -cw valueToken "$TMP/jv/Box.java" ); jcls="$( "$BIN" "$TMP/jv" --no-cache --defs=Box 2>/dev/null | grep -c 'Box.java' )"
+if [ "$c9" -ge 2 ] && [ "$jcls" -ge 1 ]; then ok "(C9) premise: Box is indexed and valueToken is read on $c9 lines"
+else no "(C9) premise: Box indexed=$jcls valueToken lines=$c9 — the arm is vacuous"; fi
+out="$( rw "$TMP/jv" --uses=valueToken )"
+if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C9) precision: a Java initializer's read is named a member declaration: $( printf '%s' "$out" | head -c 300 )"
+else ok "(C9) precision: a Java initializer's read of valueToken is not a member declaration"; fi
 
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"
