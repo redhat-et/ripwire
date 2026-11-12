@@ -1023,6 +1023,62 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
     }
 }
 
+// RUST-MACRO-PATH: a macro invoked by the alias a `use … as` binds (`use crate::__define_rejection as define_rejection;` then
+// `define_rejection! { … }`) names the macro the path ends in: the reference is renamed to that item and carries the path as its
+// written qualifier, so graph.h binds it exactly as it binds `crate::__define_rejection!` (the path must prove the macro: an
+// outside crate's `use serde_json::json as sj;` stays external), and --uses lists it under the macro's own name. In scope: a
+// file-level `use`, or one in the invoking function. Two renames of one alias in scope that disagree (cfg alternatives) rename
+// nothing. After emitBindings, from per-file facts only: a warm run renames what a cold run does, and no cache record changes.
+inline void retargetRustMacroAliases( IngestResult& result )
+{
+    std::vector<std::uint32_t> renames;   // indices of Rust `use … as` bindings whose alias differs from the item it names
+    for( std::uint32_t i = 0; i < result.bindings.size(); ++i )
+    {
+        const Binding& b = result.bindings[ i ];
+        if( b.kind == LocalBindKind::TypeImport && b.var != b.typeName && !b.typeName.empty() && b.var != "*" && b.importedName.find( "::" ) != std::string::npos )
+        {
+            renames.push_back( i );   // bindings are sorted by file: so is this list (a Rust file's, as the reference read below is)
+        }
+    }
+    if( renames.empty() )
+    {
+        return;
+    }
+    for( Reference& r : result.references )
+    {
+        if( r.lang != Lang::Rust || r.role != RefRole::Macro || !std::string_view( r.qualifier ).empty() )
+        {
+            continue;
+        }
+        const auto first = std::ranges::lower_bound( renames, r.fileId, {}, [ & ]( std::uint32_t i ) { return result.bindings[ i ].fileId; } );
+        const Binding* pick = nullptr;
+        bool           clash = false;
+        for( auto at = first; at != renames.end() && result.bindings[ *at ].fileId == r.fileId; ++at )
+        {
+            const Binding& b = result.bindings[ *at ];
+            if( b.var != std::string_view( r.calleeName ) || ( b.fromSymbol != kNoNode && b.fromSymbol != r.fromSymbol ) )
+            {
+                continue;
+            }
+            clash = clash || ( pick != nullptr && pick->importedName != b.importedName );
+            pick  = pick == nullptr ? &b : pick;
+        }
+        if( pick == nullptr || clash )
+        {
+            continue;
+        }
+        const std::string_view path   = pick->importedName;
+        const std::string_view module = path.substr( 0, path.rfind( "::" ) );
+        const std::size_t      sep    = module.rfind( "::" );
+        r.calleeName = pick->typeName;
+        r.qualifier  = sep == std::string_view::npos ? module : module.substr( sep + 2 );
+        if( sep != std::string_view::npos )
+        {
+            r.setFieldName( std::string( module ) );   // the whole written qualifier, as a path macro's (model.h rustWrittenQualifierOf)
+        }
+    }
+}
+
 // A4-R5: FFI binding aliases in a deterministic total order (fileId, kind, aliasName, targetScope,
 // targetName) so buildGraph's alias tables are built identically warm-vs-cold, run-to-run.
 inline void emitBindingAliases( IngestResult& result, std::vector<BindingAlias>& rawFfis )

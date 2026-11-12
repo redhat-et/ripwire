@@ -372,7 +372,10 @@ constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 305;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 307;          // bump on any grammar/.scm/extraction change
+                                                      // 307 = 2026-11-11 (lane rust-macro-path, PLACEHOLDER: the train renumbers; above main's 305/306): a Rust path
+                                                      //   macro invocation (`crate::m!`, `serde_json::json!`) is captured with its written path, and a transcriber's
+                                                      //   `$crate::m!` is a Macro reference of its `macro_rules!`. Rich file tag 308. kCacheVersion unchanged.
                                                       // 305 = 2026-11-10 (#446 round 1, @SeddonShen; above main's 303 and the PR head's 304): C++ base clauses read as @reference.base tags captures
                                                       //   (queries/cpp/tags.scm, LangFacts::basesAsCaptures). Rich file tag 306. kCacheVersion unchanged.
                                                       // 303 = 2026-11-06 (lane proto-index, PLACEHOLDER: the train renumbers; above main's 301 and open #538's 302;

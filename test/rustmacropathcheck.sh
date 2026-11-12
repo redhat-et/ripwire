@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # rustmacropathcheck.sh — RUST-MACRO-PATH and RUST-REEXPORT-DUP (#610): Rust edges a written path or a `use` proves.
+#   M arms  a macro invocation binds by its path's last segment and through a `use … as` alias (fixture test/rustmacropathfix/macro, a
+#           two-crate workspace): `define_thing!(Alpha)` through `use crate::__define_thing as define_thing;`, `crate::__define_thing!(Beta)`,
+#           `$crate::other_thing!` inside a `macro_rules!` transcriber, a file-scope `define_thing! { Epsilon }` (a use site, no caller
+#           node), and the same three shapes from a second workspace crate (`thing_core::__define_thing!`, axum's
+#           `use axum_core::__define_rejection as define_rejection;`). M0 is the bare twin that bound before.
+#   N arms  negatives: an outside crate's macro path (`serde_json::json!`, `use serde_json::json as sj; sj!`, `other_crate::__define_thing!`)
+#           never binds the in-tree namesake. Each counts its premise (the site is read, under the target's name) and FAILs on zero.
 #   X arms  #610 (fixture by @soarkit, test/rustmacropathfix/rx-*): a `pub use` that resolves outside the tree carries no class, and two
 #           re-exports of the SAME class agree, so `make()`'s `crate::facade::Config` types `c.get()` (proven); two re-exports of DIFFERENT
 #           in-tree classes stay ambiguous (both rows by name, none proven; premise: two Config::get rows).
@@ -17,6 +24,7 @@ trap 'rm -rf "$T"' EXIT
 fail=0
 # the fixtures are copied out, so a run never writes beside the committed files
 cp -R "$FX/." "$T/"
+M=$T/macro
 # ask ROOT VERB SYM: the answer, or FAILED-RUN when the run exits nonzero or prints no schema
 ask() {
     local root=$1 verb=$2 sym=$3 out rc
@@ -71,6 +79,27 @@ premise() {
     n=$( site "$2" "$3" "$4" )
     if [ "$n" -ge 1 ]; then echo "PASS $1.premise (sites=$n)"; else echo "FAIL $1.premise --uses=$3 lists no site at $4: the negative arm saw nothing"; fail=1; fi
 }
+
+MD=thing_core/src/macros.rs
+# ---- M: in-crate paths and aliases (thing_core/src/user.rs)
+row     M0.bare        "$M" callees gamma        $MD __define_thing present
+row     M1.alias       "$M" callees alpha        $MD __define_thing present
+row     M2.cratepath   "$M" callees beta         $MD __define_thing present
+row     M3.dollarcrate "$M" callers other_thing  $MD wrap_thing     present
+usesite M4.filescope   "$M" __define_thing thing_core/src/user.rs:19
+# ---- M: another workspace crate's path and alias (app/src/lib.rs)
+row     M5.crossalias  "$M" callees app_alias    $MD __define_thing present
+row     M6.crosspath   "$M" callees app_path     $MD __define_thing present
+usesite M7.crossfile   "$M" __define_thing app/src/lib.rs:16
+# ---- N: outside-crate macro paths (thing_core/src/ext.rs, app/src/lib.rs) never bind the in-tree namesake
+premise N1 "$M" json thing_core/src/ext.rs:5
+row     N1.extpath     "$M" callees ext_path     $MD json           none
+premise N2 "$M" json thing_core/src/ext.rs:10
+row     N2.extalias    "$M" callees ext_alias    $MD json           none
+premise N3 "$M" __define_thing thing_core/src/ext.rs:15
+row     N3.extcrate    "$M" callees ext_other    $MD __define_thing none
+premise N4 "$M" json app/src/lib.rs:12
+row     N4.crossext    "$M" callees app_ext      $MD json           none
 
 # ---- X: #610 re-export bindings (fixture by @soarkit)
 row X1.extplusintree "$T/rx-ext"  callees src/app.rs:use_it src/model.rs Config::get proven

@@ -1027,6 +1027,155 @@ inline std::string rustWrittenQualifier( TSNode nameNode, std::string_view src )
     return out.find_first_of( "<>" ) != std::string::npos || out.starts_with( "::" ) ? std::string{} : out;
 }
 
+// RUST-MACRO-PATH: a path macro invocation's qualifier from its written path (`crate`, `axum_core`, `$crate::a`), `$crate` (the crate
+// of the macro whose transcriber spells it) read as `crate`: the last segment into `qualifier`, and the whole path, blanks dropped, into
+// `written` when it has more than one segment — the pair rustQualifierOf / rustWrittenQualifier give a path call. A generic or
+// `<T as Trait>` segment, a leading `::` or a non-identifier segment leaves both empty (the site reads as a bare name).
+inline void rustMacroPathOf( std::string_view pathText, std::string& qualifier, std::string& written )
+{
+    qualifier.clear();
+    written.clear();
+    std::string out;
+    for( const char c : pathText )
+    {
+        if( c != ' ' && c != '\t' && c != '\n' && c != '\r' )
+        {
+            out.push_back( c );
+        }
+    }
+    if( out.starts_with( "$crate" ) && ( out.size() == 6 || out[ 6 ] == ':' ) )
+    {
+        out.erase( 0, 1 );
+    }
+    if( out.empty() || out.starts_with( "::" ) || out.find_first_of( "<>$" ) != std::string::npos )
+    {
+        return;
+    }
+    const std::size_t      sep  = out.rfind( "::" );
+    const std::string_view last = sep == std::string::npos ? std::string_view( out ) : std::string_view( out ).substr( sep + 2 );
+    if( !isRustIdentifier( last ) )
+    {
+        return;
+    }
+    qualifier.assign( last );
+    if( sep != std::string::npos )
+    {
+        written = std::move( out );
+    }
+}
+
+// RUST-MACRO-PATH: the `$crate::…::name!` invocations a `macro_rules!` transcriber spells, as Macro references at their own byte, so
+// the macro definition's span owns them and the graph connects THROUGH the macro (`wrap_thing` → `other_thing`, axum's
+// `__define_rejection` → `__log_rejection`). A token tree is not parsed, so this is a lexical scan over the definition, kept to the
+// `$crate`-rooted path: the one spelling that names the defining crate's macro by construction (a bare `name!` in a transcriber may
+// name a macro of the expansion site: not read, a floor). String literals and comments are skipped; `$crate::x != y` is no call.
+inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+{
+    const std::uint32_t begin = ts_node_start_byte( macroDef );
+    const std::uint32_t end   = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
+    const auto          ident = []( char c ) noexcept { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    const auto          blank = []( char c ) noexcept { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    std::uint32_t       line  = ts_node_start_point( macroDef ).row + 1;
+    std::uint32_t       i     = begin;
+    while( i < end )
+    {
+        const char c = src[ i ];
+        if( c == '\n' )
+        {
+            ++line;
+            ++i;
+        }
+        else if( c == '"' )   // a string literal: to its unescaped close
+        {
+            for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
+            {
+                line += src[ i ] == '\n' ? 1u : 0u;
+            }
+            ++i;
+        }
+        else if( c == '/' && i + 1 < end && src[ i + 1 ] == '/' )   // a line comment: its newline is counted above
+        {
+            while( i < end && src[ i ] != '\n' )
+            {
+                ++i;
+            }
+        }
+        else if( c == '/' && i + 1 < end && src[ i + 1 ] == '*' )
+        {
+            for( i += 2; i + 1 < end && !( src[ i ] == '*' && src[ i + 1 ] == '/' ); ++i )
+            {
+                line += src[ i ] == '\n' ? 1u : 0u;
+            }
+            i += 2;
+        }
+        else if( c != '$' || src.substr( i, 6 ) != "$crate" || ( i + 6 < end && ident( src[ i + 6 ] ) ) )
+        {
+            ++i;
+        }
+        else
+        {
+            // `$crate` ( `::` ident )+ `!` — j only peeks, the scan resumes past `$crate` so a newline inside the path is still counted
+            std::uint32_t j = i + 6, nameAt = 0, nameEnd = 0;
+            for( ;; )
+            {
+                std::uint32_t k = j;
+                while( k < end && blank( src[ k ] ) )
+                {
+                    ++k;
+                }
+                if( k + 1 >= end || src[ k ] != ':' || src[ k + 1 ] != ':' )
+                {
+                    break;
+                }
+                for( k += 2; k < end && blank( src[ k ] ); ++k )
+                {
+                }
+                const std::uint32_t segAt = k;
+                while( k < end && ident( src[ k ] ) )
+                {
+                    ++k;
+                }
+                if( k == segAt )
+                {
+                    break;
+                }
+                nameAt  = segAt;
+                nameEnd = k;
+                j       = k;
+            }
+            while( j < end && blank( src[ j ] ) )
+            {
+                ++j;
+            }
+            if( nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' ) )
+            {
+                std::string_view path = src.substr( i, nameAt - i );   // `$crate::a::` — its trailing `::` dropped below
+                while( !path.empty() && ( blank( path.back() ) || path.back() == ':' ) )
+                {
+                    path.remove_suffix( 1 );
+                }
+                RawRef r;
+                r.fileId    = fileId;
+                r.startByte = i;
+                r.line      = line;
+                r.lang      = Lang::Rust;
+                r.role      = RefRole::Macro;
+                r.name      = std::string( src.substr( nameAt, nameEnd - nameAt ) );
+                std::string qualifier;
+                std::string written;
+                rustMacroPathOf( path, qualifier, written );
+                r.qualifier = std::move( qualifier );
+                if( !written.empty() )
+                {
+                    r.setFieldName( std::move( written ) );
+                }
+                refs.push_back( std::move( r ) );
+            }
+            i += 6;
+        }
+    }
+}
+
 // The name a written type ends in: `Deb`, `*Deb` → "Deb"; `Stack[T]`, `*Stack[T]`, `Foo<T>` → the name, never the
 // argument list; Go `pkg.T` → "T"; a TS `a.b.C` member chain → "C". "" for any other form (a slice, map, func type).
 // Shared by the receiver evidence in ingest_binds.h and the Go receiver row of kScopeOwners below.
