@@ -1302,6 +1302,8 @@ struct Reference : RefColdFields
                                           //   A fourth reading, on a Rust CALL reference (role Call, recv None): the whole qualifier a path call
                                           //   is written with when it has more than one segment (`crate::far` for `crate::far::helper()`), ""
                                           //   otherwise (ingest_names.h rustWrittenQualifier; read through rustWrittenQualifierOf below).
+                                          //   RUST-MACRO-PATH: a Rust MACRO reference carries the same reading (ingest_names.h rustMacroPathOf,
+                                          //   `$crate` read as `crate`; a `use … as` alias's path, ingest_model.h retargetRustMacroAliases).
     // composeRel() (RefColdFields): "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
@@ -1372,7 +1374,7 @@ static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= 
 // references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
 inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
 {
-    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName().empty();
+    const bool whole = ( r.role == RefRole::Call || r.role == RefRole::Macro ) && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName().empty();
     return whole ? std::string_view( r.fieldName() ) : std::string_view( r.qualifier );
 }
 
