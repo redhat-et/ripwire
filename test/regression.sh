@@ -950,6 +950,7 @@ for _g in \
     runtracecheck \
     rustanccheck \
     rustimportprecisecheck \
+    rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \
     safedeletecheck \
