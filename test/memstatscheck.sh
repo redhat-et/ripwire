@@ -13,6 +13,9 @@
 #   B  the binding row (MEM-B1 BIND-INTERN): the bindings family line reports row_b=36, nine u32 on every ABI (three pool ids for
 #      var / importedName / typeName). A std::string member back in Binding reads 96 (libc++) or 120 (libstdc++) and fails; the
 #      premise (N's >= 50000 bindings, the line seen once) is counted first.
+#   P  the reference row (MEM-R1a): the references family line reports row_b=64, one row per 64 B line on every ABI (four pool ids,
+#      no std::string; model.h's static_assert pins it at compile time, this arm on the binary that ran). The premise (the line seen
+#      once, >= 50000 references) is counted first.
 #   R  reserve by kind (G1a), machine-free: each table's bucket count is at most 8 x max( size, 16 ). A table reserved for
 #      every binding while it holds one kind (the pre-G1a `reserve( ing.bindings.size() )`) has 2^k buckets for ~100 K
 #      bindings and fails here; a reserve by its own kind's count stays within 2.5 x of its distinct keys.
@@ -119,6 +122,18 @@ elif [ "$rowb" != 36 ]; then
     no "B: a Binding row is ${rowb:-?} B (want 36: var / importedName / typeName as 4 B pool ids, model.h MEM-B1)"
 else
     ok "B: a Binding row is 36 B over $bindings bindings"
+fi
+
+# ---- P ----
+plines="$( grep -c '^\[mem\] family references ' "$TMP/n.err" )"
+prefs="$( grep '^\[mem\] family references ' "$TMP/n.err" | sed -E 's/.* size=([0-9]+) .*/\1/' )"
+prow="$( grep '^\[mem\] family references ' "$TMP/n.err" | sed -E 's/.* row_b=([0-9]+) .*/\1/' )"
+if [ "$plines" -ne 1 ] || [ "${prefs:-0}" -lt 50000 ]; then
+    no "P: premise: the references family line printed $plines times (want 1), ${prefs:-0} references (want >= 50000)"
+elif [ "$prow" != 64 ]; then
+    no "P: a Reference row is ${prow:-?} B (want 64: memberRoot a pool id, litAt a u32; model.h MEM-REF-SHRINK)"
+else
+    ok "P: a Reference row is 64 B over $prefs references"
 fi
 
 # ---- R ----

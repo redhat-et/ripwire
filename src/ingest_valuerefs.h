@@ -2352,12 +2352,9 @@ private:
         r.lang          = m_lang;
         r.role          = RefRole::Value;
         r.name          = std::string( name );
-        std::string qualifier{ s.scope, fileShadow ? '1' : '0' };
-        if( s.litAt != 0 )
-        {
-            qualifier += "@" + std::to_string( s.litAt );   // REGISTRAR: the object literal (qualifier[2..], read only by regindex.h)
-        }
-        r.qualifier     = qualifier;   // interned once; a registrar's is position-keyed (refnames.h GROWTH)
+        const char qualifier[ 2 ] = { s.scope, fileShadow ? '1' : '0' };
+        r.qualifier     = std::string_view( qualifier, 2 );   // one of a few dozen two-character texts: never position-keyed
+        r.litAt         = s.litAt;   // REGISTRAR: the object literal, a row field (MEM-R1a; read only by regindex.h)
         r.recvVar       = std::move( s.container );
         r.setComposeRel( std::move( s.key ) );
         r.setFieldName( std::move( s.into ) );

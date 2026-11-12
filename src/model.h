@@ -1308,7 +1308,7 @@ struct Reference : RefColdFields
     //   is the field of a member access, and memberRoot is the receiver chain's ROOT identifier as written (`crypto` for
     //   `crypto.subtle.verify()`, `this`, a package alias), "" when the root is not an identifier (a call, a literal,
     //   `new X()`). Read only by graph.h's FalseEdgeRules. false/"" for every other language and every non-call ref.
-    std::string   memberRoot;   // memberCall sits beside qualifierRootsStd above: the bools share one padding slot
+    rw::InternedText memberRoot;   // MEM-R1a: a 4 B pool id like the three above (a name, an alias, a scope path: never a position)
     // FE-B (test/receiverevidencecheck.sh): the rest of a member call's receiver chain, for the receiver-evidence rule
     //   (graph.h ReceiverEvidence). memberPath is the member names BETWEEN memberRoot and the callee, '.'-joined —
     //   "bucket" for `this.bucket.listSchemas()`, "req.raw.headers" for `ctx.req.raw.headers.get()`, "" for `root.m()`.
@@ -1347,12 +1347,18 @@ struct Reference : RefColdFields
     //   memberCall is false there, so no member-call reader sees it. graph.h's implementors builder reads both (baseEvidence).
     //   Sits in memberFactory's alignment padding: sizeof(Reference) is unchanged.
     std::uint32_t baseBind = 0;
+    // MEM-R1a, a REGISTRAR Value ref only (model.h kRegLangs form ProviderRecord, ingest_valuerefs.h emitValueRef): 1 + the start byte
+    //   of the object literal the pair is read from, 0 = none. regindex.h collectProviderSites pairs a literal's key and value through
+    //   ( fileId, litAt ). It was the qualifier's "@<offset>" tail, a position-keyed pooled text (refnames.h GROWTH); the cache record
+    //   still spells it that way (writeRef / readRef), so the blob is unchanged.
+    std::uint32_t litAt = 0;
 };
-// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. One inline string (memberRoot), three 4 B pool
-// ids (calleeName, qualifier, recvVar: step 2, infra/internedtext.h), the cold block's pointer and 36 B of ids and flags: 80 B on
-// libc++ (step 1 144, before it 264), 88 B on libstdc++. A new std::string member, or a flag placed where it adds a padding slot,
-// fails here; move cold text into RefColdText, or a name into rw::InternedText, instead.
-static_assert( sizeof( Reference ) <= sizeof( std::string ) + 56, "Reference grew: see the MEM-REF-SHRINK note above" );
+// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. Four 4 B pool ids (calleeName, qualifier, recvVar,
+// memberRoot: step 2 and MEM-R1a, infra/internedtext.h), the cold block's pointer, 44 B of ids, counts and flags and litAt: exactly
+// 64 B, one row per 64 B line, on every ABI (no std::string member is left, so libc++, libstdc++ and MSVC agree; step 2 80 B on
+// libc++, step 1 144, before it 264). A new member, or a flag placed where it adds a padding slot, fails here; move cold text into
+// RefColdText, or a name into rw::InternedText, instead.
+static_assert( sizeof( Reference ) == 64, "Reference is one 64 B row: see the MEM-REF-SHRINK note above" );
 // The sentinels Reference::baseBind holds besides a real binding (1 + a name byte): ONE definition for the writer (ingest_relations.h
 // localBaseBinding) and every reader (graph.h provenBasesOf, valuerefindex.h inheritEdges / ClassFamilies::bindBase).
 inline constexpr std::uint32_t kBaseBindNone          = 0;            // no enclosing scope declares the name

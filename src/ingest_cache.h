@@ -85,18 +85,19 @@ struct RawRef : RefColdFields   // fieldName, composeRel, memberPath, memberCtor
     rw::InternedText name;             // MEM-REF-SHRINK step 2: name / qualifier / recvVar are 4 B pool ids (infra/internedtext.h)
     rw::InternedText qualifier;        // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
     rw::InternedText recvVar;          // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
-    std::string   memberRoot;          // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
+    rw::InternedText memberRoot;       // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
     bool          memberFactory = false;   // FE-B on #373: memberCtor names a FactoryBot factory, not a class
     bool          forwarded = false;       // lane fcall-forward fix 1: a JS/TS `f.call/f.apply` site standing for `f( … )` (model.h Reference::forwarded)
     bool          trailingLambda = false;  // #155: a Kotlin call whose lambda is written after its argument list (model.h Reference::trailingLambda)
     std::uint32_t baseBind = 0;          // lane lego-transitive fix 1, an inherit ref only: 1 + the name byte of the same-file
                                          //   declaration the base binds to (ingest_relations.h localBaseBinding); 0 none, ~0u unknown
+    std::uint32_t litAt = 0;             // MEM-R1a: a registrar Value ref's 1 + object-literal start byte (model.h Reference::litAt)
 };
 
-// MEM-REF-SHRINK (model.h, beside Reference's own budget): one inline string, three 4 B pool ids, the cold block's pointer and
-// 36 B of ids and flags: 80 B on libc++ (step 1 136, before it 248). Every worker's vector<RawRef> and the merged one hold these
-// rows at the parse-pool peak.
-static_assert( sizeof( RawRef ) <= sizeof( std::string ) + 56, "RawRef grew: see the MEM-REF-SHRINK note in model.h" );
+// MEM-REF-SHRINK (model.h, beside Reference's own budget): Reference minus fromSymbol, in the same 64 B on every ABI (MEM-R1a:
+// memberRoot a pool id; step 2 80 B on libc++, step 1 136, before it 248). Every worker's vector<RawRef> and the merged one hold
+// these rows at the parse-pool peak.
+static_assert( sizeof( RawRef ) == 64, "RawRef is one 64 B row: see the MEM-REF-SHRINK note in model.h" );
 
 // P2-D Rule 2 raw local-variable type binding (pre-attribution). startByte sits inside the enclosing
 // function body so the enclosing-def attribution (the same byte-span scan as RawRef) assigns the binding's
@@ -2593,7 +2594,48 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         }
     }
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
+// MEM-R1a: a registrar Value ref's object-literal offset is the row field litAt, but the record still spells it as the qualifier's
+// "@<litAt>" tail (the format every blob since the registrar lane holds), so the blob is byte-identical and no kParserVer moves.
+// Only a Value ref's qualifier is ever split (its text is "<scope><shadow>", two characters, from emitValueRef): a call's written
+// qualifier keeps any '@' it has.
+inline void writeRefQualifier( ByteW& w, const RawRef& r )
+{
+    if( r.litAt == 0 )
+    {
+        w.str( r.qualifier );
+        return;
+    }
+    DASSERT( r.role == RefRole::Value && r.qualifier.size() == 2 );
+    w.str( std::string( r.qualifier ) + "@" + std::to_string( r.litAt ) );
+}
+// The reader's half. The blob is external input: a tail that is not a nonzero u32 in decimal is corruption (the record takes
+// readFileRecord's one refusal path), never a text to keep.
+inline void readRefQualifier( ByteR& r, std::string_view qualifier, RawRef& x )
+{
+    if( x.role != RefRole::Value || qualifier.size() <= 2 || qualifier[ 2 ] != '@' )
+    {
+        x.qualifier = qualifier;
+        return;
+    }
+    const std::string_view digits = qualifier.substr( 3 );
+    std::uint64_t          litAt  = 0;
+    bool                   valid  = !digits.empty() && digits.size() <= 10;
+    for( const char c : digits )
+    {
+        valid = valid && c >= '0' && c <= '9';
+        litAt = litAt * 10 + std::uint64_t( c - '0' );
+    }
+    if( !VALIDATE( valid && litAt != 0 && litAt <= 0xFFFFFFFFu ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache ref record carries a registrar qualifier whose literal offset is not a number — cache treated as corrupt" );
+        r.ok = false;
+        return;
+    }
+    x.qualifier = qualifier.substr( 0, 2 );
+    x.litAt     = std::uint32_t( litAt );
+}
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); writeRefQualifier( w, r ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2747,7 +2789,7 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); x.qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.str() ); x.setComposeRel( r.str() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.str(); x.setMemberPath( r.str() ); x.setMemberCtor( r.str() ); x.setMemberVia( r.str() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); const std::string_view qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.str() ); x.setComposeRel( r.str() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); readRefQualifier( r, qualifier, x ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.view(); x.setMemberPath( r.str() ); x.setMemberCtor( r.str() ); x.setMemberVia( r.str() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u8( b.resultIndex ); w.u8( b.unwrapDepth ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
 inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.view(); b.typeName = r.view(); b.importedName = r.view(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }

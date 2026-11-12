@@ -45,6 +45,10 @@
 #          providers / viewProviders) counts; F2r4/TA/TB/T1 pin the rows lost by design (a bare call argument, a const object)
 #   T3 [P] TS: a function-local `function K(){}` in a file that imports K gives no row (the sites are not filed under the local symbol)
 #   GF1 [P] a registrar fact's scope char "g" is no name evidence for a class g in another file (graph.h file evidence; cr-prepass 43b F-G1); GF2-GF4 [G] twins
+#   W  [G] MEM-R1a: a registrar pair's object-literal offset is the row field Reference::litAt, and the cache record spells it as the
+#          qualifier's "@<offset>" tail (ingest_cache.h writeRefQualifier / readRefQualifier). P2 and P3 re-run WARM on their own
+#          caches: byte-identical to the cold answers, each still carrying its row (the premise), so a reader that drops or mis-splits
+#          the offset on the warm path loses the row here.
 #   X1 [G] determinism   X2 [G] xmllint well-formed (when xmllint is present)
 #
 # Usage:  bash test/regsitecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/regsitecheck.sh
@@ -300,6 +304,16 @@ else no "G6 vacuous: EventManager not a shown row"; fi
 
 run p3 "$TS" -- --for="$Q_NEST"
 if out=$( chk row "$TMP/p3.xml" CACHE_STORE n=2 consumers=CacheService.constructor RedisStore makeStore ); then ok "P3 NestJS-shaped providers"; else no "P3 $out"; fi
+
+# W: the warm twins of P2 and P3 (same cache file, now populated)
+for w in p2 p3; do
+    cp "$TMP/$w.xml" "$TMP/$w.cold.xml"
+    case "$w" in p2) q="$Q_TS" ;; p3) q="$Q_NEST" ;; esac
+    run "$w" "$TS" -- --for="$q"
+    if ! grep -q '<reg ' "$TMP/$w.cold.xml"; then no "W $w premise: the cold answer carries no reg row"
+    elif cmp -s "$TMP/$w.cold.xml" "$TMP/$w.xml"; then ok "W $w warm answer byte-identical to the cold one ($( grep -o '<reg ' "$TMP/$w.xml" | wc -l | tr -d ' ' ) reg row(s))"
+    else no "W $w warm answer differs from the cold one (the registrar literal offset lost on the cache path?)"; fi
+done
 
 run g1 "$PY" -- --for="which handlers does pool connect"
 if out=$( chk nokey "$TMP/g1.xml" pool ); then ok "G1 same-named connect of a non-storing class: no row"; else no "G1 $out"; fi
