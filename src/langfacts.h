@@ -104,8 +104,9 @@ enum class TestRunnerEntry : std::uint8_t { None, GoTestName, RustTestAttr };
 
 /// How a member variable is declared, read lexically where the index extracts no field (LangFacts::memberDecl; fielduses.h
 /// memberDeclShaped): the name first, then `:` / `=` / `;` (TS, Rust, Swift, Kotlin …); Go's name then its type; or the
-/// C-family type first (`Type name;`), Java, C# and Dart.
-enum class MemberDecl : std::uint8_t { NameFirst, NameThenType, TypeFirst };
+/// C-family type first (`Type name;`), Java, C# and Dart. None: the language declares no member lexically (Ruby: instance
+/// variables are `@ivar`s and the attr_* family is indexed as Var defs), so a class-body `has_many :posts` is a call, not a field.
+enum class MemberDecl : std::uint8_t { NameFirst, NameThenType, TypeFirst, None };
 
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
@@ -452,7 +453,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .memberDecl = MemberDecl::TypeFirst },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
       .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .armOpeners = ArmOpeners::RubyWhen },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .armOpeners = ArmOpeners::RubyWhen, .memberDecl = MemberDecl::None },
     { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,

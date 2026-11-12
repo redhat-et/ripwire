@@ -175,7 +175,11 @@ inline bool memberDeclShaped( std::string_view line, std::size_t at, std::size_t
 
     bool              modifiersOnly = true;
     std::size_t       words         = 0;
-    const std::string_view prefix   = line.substr( 0, at );
+    std::string_view  prefix        = line.substr( 0, at );
+    if( const std::size_t opener = prefix.find_last_of( "{};" ); opener != std::string_view::npos )
+    {
+        prefix.remove_prefix( opener + 1 );   // `class Options { limit = 1; }`: the declaration starts after the owner's opener
+    }
     for( std::size_t i = prefix.find_first_not_of( " \t" ); i != std::string_view::npos; i = prefix.find_first_not_of( " \t", i ) )
     {
         std::size_t end = prefix.find_first_of( " \t", i );
@@ -236,16 +240,71 @@ inline bool insideFunctionOfFile( const IngestResult& ing, std::uint32_t fileId,
     return false;
 }
 
+// Brace depth inside an owner's span, walked forward once: `{`/`}` outside `//` and `/* */` comments and "…" strings. A
+// direct member sits at depth 1; an object-literal property, a method's local or a nested type's member sits deeper.
+struct OwnerBraceWalk
+{
+    std::size_t pos    = 0;
+    std::size_t depth  = 0;
+    bool        opened = false;   // the owner's body brace was seen (GDScript's indented classes never open one)
+
+    void advanceTo( std::string_view bytes, std::size_t to )
+    {
+        while( pos < to )
+        {
+            const char c    = bytes[ pos ];
+            const char next = pos + 1 < bytes.size() ? bytes[ pos + 1 ] : '\0';
+            if( c == '/' && next == '/' )
+            {
+                pos = std::min( bytes.find( '\n', pos ), bytes.size() );   // may pass `to`: the next walk resumes outside the comment
+            }
+            else if( c == '/' && next == '*' )
+            {
+                const std::size_t close = bytes.find( "*/", pos + 2 );
+                pos                     = close == std::string_view::npos ? bytes.size() : close + 2;
+            }
+            else if( c == '"' )
+            {
+                std::size_t k = pos + 1;
+                while( k < bytes.size() && bytes[ k ] != '"' && bytes[ k ] != '\n' )
+                {
+                    k += bytes[ k ] == '\\' ? 2 : 1;
+                }
+                pos = std::min( k + 1, bytes.size() );
+            }
+            else
+            {
+                if( c == '{' )
+                {
+                    ++depth;
+                    opened = true;
+                }
+                else if( c == '}' && depth > 0 )
+                {
+                    --depth;
+                }
+                ++pos;
+            }
+        }
+    }
+};
+
 // The first line of `owner`'s body that declares member `name`; 0 when none.
 inline std::uint32_t memberDeclLine( const IngestResult& ing, const Symbol& owner, std::string_view bytes, std::string_view name, NodeId fileFirst )
 {
     const std::size_t begin = std::min<std::size_t>( owner.sigStartByte, bytes.size() );   // a Go struct's signature spans its fields
     const std::size_t end   = std::min<std::size_t>( owner.endByte, bytes.size() );
+    OwnerBraceWalk    walk{ .pos = begin };
     for( std::size_t at = bytes.find( name, begin ); at != std::string_view::npos && at + name.size() <= end; at = bytes.find( name, at + 1 ) )
     {
         if( !darkflags::wholeWordAt( bytes, at, name.size() ) )
         {
             continue;
+        }
+        walk.advanceTo( bytes, at );
+        if( walk.opened && walk.depth != 1 )
+        {
+            continue;   // inside a nested literal, body or type: not a member of THIS owner
         }
         const std::size_t nl        = bytes.rfind( '\n', at );
         const std::size_t lineStart = nl == std::string_view::npos ? 0 : nl + 1;
@@ -278,7 +337,7 @@ inline std::string unservedMemberDeclRefusal( const IngestResult& ing, std::stri
         {
             fileFirst = id;
         }
-        if( !fieldsUnservedOwner( s ) || s.endByte <= s.sigStartByte || !lexRowMayHold( ing, id, name ) )
+        if( !fieldsUnservedOwner( s ) || langFacts( s.lang ).memberDecl == MemberDecl::None || s.endByte <= s.sigStartByte || !lexRowMayHold( ing, id, name ) )
         {
             continue;
         }

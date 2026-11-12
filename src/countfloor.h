@@ -137,9 +137,13 @@ inline bool usesRolesUnindexed( const IngestResult& ing, std::span<const NodeId>
         {
             if( !corpusHasC )
             {
-                // an INCLUDER language with no read capture (C): its files use the header and none of their reads is indexed
-                corpusHasC = std::any_of( ing.symbols.begin(), ing.symbols.end(),
-                                          []( const Symbol& s ) { return langFacts( s.lang ).transitiveIncludes && !valueUsesArmedFor( s.lang ); } );
+                // an INCLUDER language with no read capture (C): its files use the header and none of their reads is indexed. Read
+                // from the file list, not the symbols: a .c file holding only `extern struct cell g;` mints no symbol at all.
+                corpusHasC = std::any_of( ing.files.begin(), ing.files.end(), []( const std::string& path )
+                {
+                    const Lang lang = langOfPath( path );
+                    return langFacts( lang ).transitiveIncludes && !valueUsesArmedFor( lang );
+                } );
             }
             if( *corpusHasC )
             {
@@ -158,9 +162,10 @@ inline const char* unindexedRolesAttrXml( bool on ) noexcept
 // The clause defining unindexed_roles=, emitted exactly when the root carries it (G4). No flag dashes: it rides an XML comment.
 inline const char* unindexedRolesLegend( bool on ) noexcept
 {
-    return on ? "unindexed_roles=\"read,write,type\": the index captures no read, write or type-mention site for a definition of SYM "
-                "(its language has no such capture, or it is a C-family header used by C files), so count= lists only its call, value, "
-                "import and extends sites and a zero is NOT a count of its uses; the grep verb lists the text uses. "
+    return on ? "unindexed_roles=\"read,write,type\": the index captures no read, write or type-mention site for some or all users of SYM "
+                "(its language has no such capture, or it is a C-family header whose C users go uncaptured), so count= is a floor: every call, "
+                "value, import and extends site, but only the captured read, write and type sites; a zero is NOT a count of its uses; the grep "
+                "verb lists the text uses. "
               : "";
 }
 

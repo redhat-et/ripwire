@@ -1316,7 +1316,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // uses: src/verbs_navigate.h
     { "count", "count=N: unhedged use-site rows (a floor)", false, "uses", MapHeaderRead::No, {}, "uses" },
     // B31 USES-UNARMED-DISCLOSE (src/countfloor.h usesRolesUnindexed), present-only
-    { "unindexed_roles", "unindexed_roles=read,write,type: no such site is indexed for this definition (its language, or a C-family header used by C files), so count= holds only call, value, import and extends sites; a zero is not a count of its uses (grep lists the text uses)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "unindexed_roles", "unindexed_roles=read,write,type: such sites go uncaptured for some or all users of this definition (its language, or the C users of a C-family header), so count= is a floor: every call, value, import and extends site, only the captured read, write and type ones; a zero is not a count of its uses (grep lists the text uses)", false, "uses", MapHeaderRead::No, {}, "uses" },
     // XF-ALIAS-HOP (src/aliashop.h AliasReach): the sites written through an alias of of=, present-only
     { "via", "<u via=\"alias\" alias=A>: the site is written as the alias A, whose written target reaches of= (the head or a template argument, up to 4 alias hops); never a call edge; listed after the direct rows, counted in count= when that A is the one in scope at the site (its file, or a namespace or class enclosing it)", true, "u", MapHeaderRead::No, "alias", "uses" },
     { "hedge", "<u hedge=\"name\">: the alias site is matched by name only (no reaching alias encloses it, or a namesake does); listed last, in no count=", true, "u", MapHeaderRead::No, {}, "uses" },

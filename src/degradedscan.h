@@ -109,7 +109,8 @@ inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_vie
 //     definition shape that path never indexes. A clean file's other lexical "definitions" stay unclaimed: its parse is
 //     the better evidence.
 // The first such line in path order wins. Bounded like the scan above (cold path: the command is already failing),
-// with a wider file cap because the def is the point; a budget hit returns what was found so far, never a guess.
+// with a wider file cap because the def is the point; a budget hit returns capped (nothing found in what was read), and
+// both refusal renderers say the scan stopped, so a miss past the budget never reads as a finished scan.
 inline constexpr std::size_t kLexicalDefScanFiles = 4096;
 inline constexpr std::size_t kLexicalDefScanBytes = 16u << 20;
 
@@ -120,8 +121,19 @@ struct LexicalDefHit
     std::uint32_t line        = 0;       // 1-based
     bool          objectMacro = false;   // `#define NAME` with no parameter list
     bool          degraded    = false;   // the file's parse is degraded; errRatio is then set
+    bool          capped      = false;   // the scan stopped at its budget before reading every file (found is then false)
     char          errRatio[ 16 ] = {};
 };
+
+// Does byte `at` of `hay` sit inside a `/* … */` opened on an earlier line? The last opener before it is newer than the last
+// closer. A `/*` inside a string or a `//` comment reads as an opener too: the scan then claims nothing, the safe direction.
+inline bool insideBlockCommentAt( std::string_view hay, std::size_t at ) noexcept
+{
+    const std::string_view before = hay.substr( 0, std::min( at, hay.size() ) );
+    const std::size_t      opened = before.rfind( "/*" );
+    const std::size_t      closed = before.rfind( "*/" );
+    return opened != std::string_view::npos && ( closed == std::string_view::npos || closed < opened );
+}
 
 // `#define NAME` with NO parameter list: the byte after the name is not '('.
 inline bool objectMacroAt( std::string_view line, std::size_t at, std::size_t nameLen ) noexcept
@@ -140,9 +152,9 @@ inline bool forwardDeclarationAt( std::string_view line, std::size_t at, std::si
     return rest.starts_with( ';' );
 }
 
-// The first line of `hay` whose first whole-word occurrence of `name` satisfies `accept( line, at )`; 0 when none.
-template<class Accept>
-inline std::uint32_t firstLineWhere( std::string_view hay, std::string_view name, Accept&& accept )
+// The first line of `hay` whose first whole-word occurrence of `name` satisfies `lineMatches( line, at )`; 0 when none.
+template<class LineMatches>
+inline std::uint32_t firstLineWhere( std::string_view hay, std::string_view name, LineMatches&& lineMatches )
 {
     std::uint32_t lineNo  = 1;
     std::size_t   counted = 0;
@@ -159,7 +171,7 @@ inline std::uint32_t firstLineWhere( std::string_view hay, std::string_view name
         {
             if( darkflags::wholeWordAt( line, inLine, name.size() ) )
             {
-                if( accept( line, inLine ) )
+                if( lineMatches( line, inLine ) )
                 {
                     return lineNo;
                 }
@@ -181,7 +193,8 @@ inline LexicalDefHit lexicalDefHit( const IngestResult& ing, std::string_view na
     for( std::size_t fileIndex = 0; fileIndex < ing.files.size(); ++fileIndex )
     {
         const bool degraded = fileParseDegraded( ing, fileIndex );
-        if( !degraded && !langFacts( langOfPath( ing.files[ fileIndex ] ) ).objectMacrosUnindexed )
+        const bool cppPath  = langFacts( langOfPath( ing.files[ fileIndex ] ) ).objectMacrosUnindexed;   // C indexes its macros
+        if( !degraded && !cppPath )
         {
             continue;
         }
@@ -192,12 +205,18 @@ inline LexicalDefHit lexicalDefHit( const IngestResult& ing, std::string_view na
         }
         if( ++scannedFiles > kLexicalDefScanFiles || ( scannedBytes += bytes->size() ) > kLexicalDefScanBytes )
         {
-            return {};   // budget — absent claims nothing
+            LexicalDefHit capped;   // budget: what was read held no definition; the refusal says the scan stopped
+            capped.capped = true;
+            return capped;
         }
         bool                macro = false;
         const std::uint32_t line  = firstLineWhere( *bytes, name, [ & ]( std::string_view text, std::size_t at )
         {
-            macro = objectMacroAt( text, at, name.size() );
+            if( insideBlockCommentAt( *bytes, std::size_t( text.data() - bytes->data() ) ) )
+            {
+                return false;   // a commented-out `#define` (or definition) defines nothing
+            }
+            macro = cppPath && objectMacroAt( text, at, name.size() );
             return macro || ( degraded && crossref::definitionShaped( text, name, at ) && !forwardDeclarationAt( text, at, name.size() ) );
         } );
         if( line != 0 )

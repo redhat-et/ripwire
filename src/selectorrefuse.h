@@ -108,9 +108,14 @@ inline std::string degradedParseClause( const IngestResult& ing, std::string_vie
 // wording of degradedscan.h's lexicalDefHit. An object-like `#define` on the C++ parse path is never indexed (by design),
 // and a definition inside a degraded parse was not extracted; either way "not found" is a floor, and the note names the
 // line instead of a near-miss spelling. "" when the scan found no such line.
-inline std::string lexicalDefClause( const IngestResult& ing, std::string_view name )
+inline std::string lexicalDefClause( const IngestResult& ing, std::string_view name, const LexicalDefHit& hit )
 {
-    const LexicalDefHit hit = lexicalDefHit( ing, name );
+    if( hit.capped )
+    {
+        return " (note: the lexical definition scan stopped at its budget, " + std::to_string( kLexicalDefScanFiles ) + " files or "
+             + std::to_string( kLexicalDefScanBytes >> 20 ) + " MiB, before reading every file, so this miss is not proof the bytes define nothing; --grep="
+             + std::string( name ) + " lists its text uses)";
+    }
     if( !hit.found )
     {
         return {};
@@ -257,11 +262,12 @@ inline std::string selectorFaultClause( const IngestResult& ing, std::string_vie
             return clause + " — e.g. " + std::string( retryForm ) + definingFiles[0] + ":" + std::string( bareName ) + ")";
         }
     }
-    if( std::string defClause = lexicalDefClause( ing, bareName ); !defClause.empty() )
+    const LexicalDefHit defHit = lexicalDefHit( ing, bareName );
+    if( defHit.found )
     {
-        return defClause;   // the bytes define it: a near-miss spelling, or a mere mention elsewhere, would only mislead
+        return lexicalDefClause( ing, bareName, defHit );   // the bytes define it: a near-miss spelling, or a mere mention elsewhere, would only mislead
     }
-    return withDidYouMean( ing, bareName, {} ) + degradedParseClause( ing, bareName );
+    return withDidYouMean( ing, bareName, {} ) + degradedParseClause( ing, bareName ) + lexicalDefClause( ing, bareName, defHit );
 }
 
 // The complete stderr line (no trailing newline) for a selector that resolved to nothing.

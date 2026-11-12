@@ -924,9 +924,14 @@ inline std::string degradedParseNote( const IngestResult& ing, std::string_view 
 
 // B31: the MCP wording of degradedscan.h's lexicalDefHit (selectorrefuse.h::lexicalDefClause words the same facts for
 // the CLI) — the line whose bytes define a name the index does not hold. "" when the scan found none.
-inline std::string lexicalDefNote( const IngestResult& ing, std::string_view spelling )
+inline std::string lexicalDefNote( const IngestResult& ing, std::string_view spelling, const LexicalDefHit& hit )
 {
-    const LexicalDefHit hit = lexicalDefHit( ing, spelling );
+    if( hit.capped )
+    {
+        return " — note: the lexical definition scan stopped at its budget, " + std::to_string( kLexicalDefScanFiles ) + " files or "
+             + std::to_string( kLexicalDefScanBytes >> 20 ) + " MiB, before reading every file, so this miss is not proof the bytes define nothing; grep pattern=\""
+             + cappedEcho( spelling ) + "\" lists its text uses";
+    }
     if( !hit.found )
     {
         return {};
@@ -962,14 +967,15 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
     { // a line-seed: the at-diagnosis is the actionable half; a symbol-name near-miss for '@f.cpp:12' is noise
         return msg + atSeedClause( ing, spelling );
     }
-    const std::string defNote = lexicalDefNote( ing, spelling );
-    const std::string near    = defNote.empty() ? didYouMean( ing, spelling ) : std::string();   // the bytes define it: no near-miss
+    const LexicalDefHit defHit = lexicalDefHit( ing, spelling );
+    const std::string   defNote = lexicalDefNote( ing, spelling, defHit );
+    const std::string   near    = defHit.found ? std::string() : didYouMean( ing, spelling );   // the bytes define it: no near-miss
     if( !near.empty() && near != spelling )
     {
         msg += " (did you mean '" + near + "'?)";
     }
     if( !retryHint.empty() ) { msg += " — "; msg += retryHint; }
-    msg += defNote.empty() ? degradedParseNote( ing, spelling ) : defNote;
+    msg += defHit.found ? defNote : degradedParseNote( ing, spelling ) + defNote;   // a capped scan adds its note after the degraded one
     return msg;
 }
 

@@ -14,7 +14,8 @@
 # resolve with NO disclosure (so "always disclose" fails). Negative arms count their premise and FAIL on zero.
 #
 # RED-FIRST: recorded 2026-11-11 against main ea25a7888 — (A2..A4) (A6) (B2) (B3) (C2..C5) (D2) (D3) FAIL there; the
-# premise, control and precision arms pass on both.
+# premise, control and precision arms pass on both. B44 (CodeRabbit + CI round, 2026-11-12) added arms red on lane 1fd60ea1b:
+# (A7) (A8) (B5) (B6) (B7) (C6) (C7) (C8); (A5)'s MCP control now requires a served answer.
 #
 # Usage: test/usesunarmedcheck.sh [BIN]
 set -u
@@ -36,7 +37,7 @@ mcp(){   # $1=corpus $2=verb $3=extra argument JSON fields (comma-led)
 root_of(){ printf '%s' "$1" | grep -o '<uses [^>]*>' | head -1; }
 
 # ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────────────
-mkdir -p "$TMP/go" "$TMP/rs/src" "$TMP/c" "$TMP/cpp" "$TMP/py" "$TMP/ts" "$TMP/mac" "$TMP/deg"
+mkdir -p "$TMP/go" "$TMP/rs/src" "$TMP/c" "$TMP/cpp" "$TMP/py" "$TMP/ts" "$TMP/mac" "$TMP/deg" "$TMP/rb"
 cat > "$TMP/go/opts.go" <<'EOF'
 package fz
 
@@ -186,7 +187,9 @@ for spec in "cpp Widget" "py Counter"; do
         ok "(A5) control: --uses=$2 ($1) count=$cnt with no unindexed disclosure"
     else no "(A5) control: --uses=$2 ($1) count=${cnt:-?} / disclosure present: $r"; fi
     mo="$( mcp "$TMP/$1" uses ",\"symbol\":\"$2\"" )"
-    if printf '%s' "$mo" | grep -q 'unindexed_roles'; then no "(A5) control: MCP uses $2 ($1) discloses unindexed roles"; else ok "(A5) control: MCP uses $2 ($1) carries no disclosure"; fi
+    if ! printf '%s' "$mo" | grep -q '<uses [^>]*count=\\"[1-9]'; then no "(A5) control: MCP uses $2 ($1) served no <uses> answer with count>=1: $( printf '%s' "$mo" | head -c 300 )"
+    elif printf '%s' "$mo" | grep -q 'unindexed_roles'; then no "(A5) control: MCP uses $2 ($1) discloses unindexed roles"
+    else ok "(A5) control: MCP uses $2 ($1) answers count>=1 and carries no disclosure"; fi
 done
 # (A6) fields with real captures (C, C++, Python) resolve with NO disclosure
 for spec in "cf point.x" "cpp Widget.size" "py Counter.total"; do
@@ -197,6 +200,20 @@ for spec in "cf point.x" "cpp Widget.size" "py Counter.total"; do
         ok "(A6) control: field --uses=$2 ($1) count=$cnt, no disclosure"
     else no "(A6) control: field --uses=$2 ($1): $r"; fi
 done
+# (A7) a header type whose only C user is a declaration-only .c file (no symbol of its own): the C includer is read from the
+# file list, so the disclosure still fires; (A8) the clause calls count= a floor for SOME or all users (C++ users keep reads)
+mkdir -p "$TMP/hc"
+printf 'struct cell\n{\n    int x;\n};\n' > "$TMP/hc/a.h"
+printf '#include "a.h"\nextern struct cell g_cell;\nextern struct cell g_other;\n' > "$TMP/hc/b.c"
+nd=0; "$BIN" "$TMP/hc" --no-cache --defs=g_cell >/dev/null 2>&1 || nd=1
+uc=$( grep -cw cell "$TMP/hc/b.c" )
+if [ "$nd" -eq 1 ] && [ "$uc" -ge 2 ]; then ok "(A7) premise: b.c mentions cell on $uc lines and defines no indexed symbol"
+else no "(A7) premise: b.c indexes a symbol ($nd) or lost its uses ($uc) — A7 is vacuous"; fi
+out="$( rw "$TMP/hc" --uses=cell )"
+if printf '%s' "$( root_of "$out" )" | grep -q 'defs="1".*unindexed_roles="read,write,type"'; then ok "(A7) --uses=cell discloses unindexed_roles= for a header used only by a symbol-less .c file"
+else no "(A7) --uses=cell (symbol-less C includer) answers without the disclosure: $( root_of "$out" )"; fi
+if printf '%s' "$out" | grep -o '<!--.*-->' | grep -q 'unindexed_roles=[^ ]*: .*some or all users.*count= is a floor'; then ok "(A8) the clause scopes the missing roles to some or all users and calls count= a floor"
+else no "(A8) the unindexed_roles clause still claims count= holds only the other roles for every user"; fi
 
 # ── (B) object-like macro in a C++-parsed header ──────────────────────────────────────────────────────────────
 if grep -q '^#define MY_SOCK ' "$TMP/mac/tmux.h" && grep -qw MY_SOCK "$TMP/mac/main.c"; then ok "(B1) premise: tmux.h #defines MY_SOCK and main.c uses it"; else no "(B1) premise: fixture lost its #define"; fi
@@ -212,6 +229,58 @@ out="$( rw "$TMP/mac" --defs=tmuxprox )"
 if printf '%s' "$out" | grep -q "did you mean 'tmuxproc'" && ! printf '%s' "$out" | grep -q 'object-like'; then
     ok "(B4) precision: a plain typo keeps its near-miss and no macro note"
 else no "(B4) precision: the typo refusal changed: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
+if printf '%s' "$out" | grep -q 'stopped at its budget'; then no "(B4) precision: a 2-file corpus says the lexical scan stopped at its budget"; else ok "(B4) precision: a small corpus carries no budget note"; fi
+# (B5) a `#define` inside a multi-line /* */ comment defines nothing
+mkdir -p "$TMP/mcom"
+printf '#ifndef OLD_H\n#define OLD_H\n/* retired:\n#define OLD_SOCK "/tmp/old"\n*/\nint oldproc( int x );\n#endif\n' > "$TMP/mcom/old.h"
+printf '#include "old.h"\nint oldproc( int x ) { return x; }\n' > "$TMP/mcom/main.c"
+if grep -q '^#define OLD_SOCK ' "$TMP/mcom/old.h"; then ok "(B5) premise: old.h holds a #define OLD_SOCK line, inside a block comment"; else no "(B5) premise: fixture lost the commented #define"; fi
+out="$( rw "$TMP/mcom" --defs=OLD_SOCK )"
+if printf '%s' "$out" | grep -q 'not found' && ! printf '%s' "$out" | grep -q 'object-like macro'; then ok "(B5) CLI --defs=OLD_SOCK: a commented-out #define is not named as the definition"
+else no "(B5) CLI --defs=OLD_SOCK: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
+mo="$( mcp "$TMP/mcom" find_symbol ',"symbol":"OLD_SOCK"' )"
+if printf '%s' "$mo" | grep -q 'object-like macro'; then no "(B5) MCP find_symbol OLD_SOCK names a commented-out #define"; else ok "(B5) MCP find_symbol OLD_SOCK: no macro note for a commented-out #define"; fi
+# (B6) a degraded .c file's object-like #define is not a "C++ parse path" macro: C indexes macros
+mkdir -p "$TMP/degc"
+printf 'int a[] = { 1, 2, \n#define C_SOCK 7\n 3 ) ) ;\n' > "$TMP/degc/a.c"
+printf 'int fine( void ) { return 1; }\n' > "$TMP/degc/b.c"
+nd=0; "$BIN" "$TMP/degc" --no-cache --defs=C_SOCK >/dev/null 2>&1 || nd=1
+if [ "$nd" -eq 1 ]; then ok "(B6) premise: C_SOCK is not indexed (the degraded parse lost it)"; else no "(B6) premise: --defs=C_SOCK resolved — the B6 arms are vacuous"; fi
+out="$( rw "$TMP/degc" --defs=C_SOCK )"
+if printf '%s' "$out" | grep -q 'C++ parse path'; then no "(B6) CLI --defs=C_SOCK gives a degraded .c macro the C++-path reason: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"
+else ok "(B6) CLI --defs=C_SOCK: a degraded .c file's #define gets no C++-path reason"; fi
+mo="$( mcp "$TMP/degc" find_symbol ',"symbol":"C_SOCK"' )"
+if printf '%s' "$mo" | grep -q 'C++ parse path'; then no "(B6) MCP find_symbol C_SOCK gives a degraded .c macro the C++-path reason"; else ok "(B6) MCP find_symbol C_SOCK: no C++-path reason"; fi
+# (B7) past the scan budget (4096 C++-path files) a miss says the scan stopped, CLI and MCP; generated here, never committed
+mkdir -p "$TMP/big"
+i=0; while [ "$i" -le 4096 ]; do printf 'int f%04d( void );\n' "$i" > "$TMP/big/h$( printf '%04d' "$i" ).h"; i=$(( i + 1 )); done
+nb=$( ls "$TMP/big" | grep -c '\.h$' )
+if [ "$nb" -gt 4096 ]; then ok "(B7) premise: $nb C++-path headers, past the 4096-file scan budget"; else no "(B7) premise: only $nb headers — B7 cannot trip the budget"; fi
+out="$( rw "$TMP/big" --defs=never_defined_zz )"
+if printf '%s' "$out" | grep -q 'not found' && printf '%s' "$out" | grep -q 'lexical definition scan stopped at its budget, 4096 files'; then ok "(B7) CLI: a miss past the budget says the lexical scan stopped"
+else no "(B7) CLI: a miss past the budget is silent about it: $( printf '%s' "$out" | grep 'ripwire:' | head -1 | head -c 300 )"; fi
+mo="$( mcp "$TMP/big" find_symbol ',"symbol":"never_defined_zz"' )"
+if printf '%s' "$mo" | grep -q 'lexical definition scan stopped at its budget'; then ok "(B7) MCP find_symbol: a miss past the budget says the scan stopped"
+else no "(B7) MCP find_symbol past the budget: $( printf '%s' "$mo" | head -c 300 )"; fi
+
+# Ruby declares no member lexically (instance variables are @ivars; the attr_* family is indexed, rubyattrscheck): a
+# class-body DSL call `has_many :posts` is a call with a symbol argument, never `name: Type`.
+mkdir -p "$TMP/rb"
+cat > "$TMP/rb/post.rb" <<'EOF'
+class Post
+  has_many :comments
+  attr_accessor :title
+
+  def summary
+    title
+  end
+end
+EOF
+cat > "$TMP/rb/user.rb" <<'EOF'
+class User
+  has_many :posts
+end
+EOF
 
 # ── (C) USES-FIELD-EXTERNAL ───────────────────────────────────────────────────────────────────────────────────
 t=$( grep -cw 'routes' "$TMP/ts/base.ts" ); v=$( grep -cw 'valueToken' "$TMP/ts/display.ts" ); e=$( grep -cw 'env_vars' "$TMP/rs/src/lib.rs" ); q=$( grep -cw 'Query' "$TMP/go/opts.go" )
@@ -234,6 +303,34 @@ if printf '%s' "$q2" | grep -q "member selector 'Hono.routes': field symbols"; t
 # precision: a method-local `const r` and a TS stdlib name are not member declarations
 out="$( rw "$TMP/ts" --uses=r )"
 if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C5) precision: a local variable read as a member declaration"; else ok "(C5) precision: a method-local binding is not a member"; fi
+# precision: a Ruby class-body DSL call (`has_many :posts`) is not `name: Type` (ruby: MemberDecl::None)
+h=$( grep -cE '^  (has_many|attr_accessor) :' "$TMP/rb/post.rb" "$TMP/rb/user.rb" | awk -F: '{s+=$2} END{print s+0}' )
+hc="$( "$BIN" "$TMP/rb" --no-cache --uses=has_many 2>/dev/null | grep -oE 'count="[0-9]+"' | head -1 )"
+if [ "$h" -ge 3 ] && [ "$hc" = 'count="2"' ]; then ok "(C6) premise: 3 class-body DSL calls, and --uses=has_many answers its 2 call sites ($hc)"
+else no "(C6) premise: DSL lines=$h, --uses=has_many ${hc:-refused} — the C6 arms are vacuous or the answer was refused"; fi
+for fam in has_many attr_accessor; do
+    out="$( rw "$TMP/rb" --uses="$fam" )"
+    if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C6) precision: Ruby --uses=$fam read a DSL call as a member declaration: $( printf '%s' "$out" | head -c 300 )"
+    else ok "(C6) precision: Ruby --uses=$fam answers; a DSL call with a symbol argument is not a member declaration"; fi
+    mo="$( mcp "$TMP/rb" uses ",\"symbol\":\"$fam\"" )"
+    if printf '%s' "$mo" | grep -q 'declared as a member'; then no "(C6) precision: MCP uses $fam (rb) refused as a member declaration"
+    else ok "(C6) precision: MCP uses $fam (rb) is not refused as a member declaration"; fi
+done
+# (C7) a member declared on its owner's own opener line; (C8) an object-literal property nested in a member's initializer
+# belongs to the literal, not to the class
+mkdir -p "$TMP/ts1" "$TMP/ts2"
+printf 'export class Opts { limit = 1; }\nexport function lim(o: Opts): number {\n  return o.limit\n}\n' > "$TMP/ts1/opts.ts"
+printf 'export class Holder {\n  config = {\n    depth: 1\n  };\n}\nexport function d(h: Holder): number {\n  return h.config.depth\n}\n' > "$TMP/ts2/holder.ts"
+l7=$( grep -cw limit "$TMP/ts1/opts.ts" ); l8=$( grep -cw depth "$TMP/ts2/holder.ts" )
+if [ "$l7" -ge 2 ] && [ "$l8" -ge 2 ]; then ok "(C7/C8) premise: limit and depth are declared and used ($l7/$l8 lines)"; else no "(C7/C8) premise: fixtures lost their uses ($l7/$l8)"; fi
+out="$( rw "$TMP/ts1" --uses=limit )"
+if printf '%s' "$out" | grep -q "'limit' is declared as a member of 'Opts' at .*opts.ts:1"; then ok "(C7) CLI --uses=limit: a member on the owner's opener line refuses with the member sentence"
+else no "(C7) CLI --uses=limit (same-line opener): $( printf '%s' "$out" | head -c 300 )"; fi
+out="$( rw "$TMP/ts2" --uses=depth )"
+if printf '%s' "$out" | grep -q "declared as a member of 'Holder'"; then no "(C8) precision: an object-literal property is named a member of Holder: $( printf '%s' "$out" | head -c 300 )"
+else ok "(C8) precision: an object-literal property nested in a member initializer is not a member of the class"; fi
+mo="$( mcp "$TMP/ts2" uses ',"symbol":"depth"' )"
+if printf '%s' "$mo" | grep -q "declared as a member of 'Holder'"; then no "(C8) precision: MCP uses depth names Holder"; else ok "(C8) precision: MCP uses depth does not name Holder"; fi
 
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"
