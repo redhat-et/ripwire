@@ -341,6 +341,20 @@ else no "(C9) premise: Box indexed=$jcls valueToken lines=$c9 — the arm is vac
 out="$( rw "$TMP/jv" --uses=valueToken )"
 if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C9) precision: a Java initializer's read is named a member declaration: $( printf '%s' "$out" | head -c 300 )"
 else ok "(C9) precision: a Java initializer's read of valueToken is not a member declaration"; fi
+# (C10) `'{'` and `` `{` `` in a TS class body are strings, not braces: the real member at depth 1 still refuses (4553235701);
+# (C12) control for the walk's char-literal rule: a Rust lifetime `'a` is not a quote, the member still refuses
+mkdir -p "$TMP/tsq" "$TMP/rsl/src"
+printf "export class Box {\n  label = '{';\n  tpl = \`{\`;\n  valueToken: number = 0;\n}\nexport function v(b: Box): number {\n  return b.valueToken\n}\n" > "$TMP/tsq/box.ts"
+printf "pub struct View<'a> { pub rows: &'a str, }\npub fn n(v: &View) -> usize {\n    v.rows.len()\n}\n" > "$TMP/rsl/src/lib.rs"
+c10=$( grep -c "'{'" "$TMP/tsq/box.ts" ); c12=$( grep -c "<'a>" "$TMP/rsl/src/lib.rs" )
+if [ "$c10" -eq 1 ] && [ "$c12" -eq 1 ]; then ok "(C10/C12) premise: a quoted brace and a lifetime are in their fixtures"
+else no "(C10/C12) premise: quoted brace=$c10 lifetime=$c12 — the arms are vacuous"; fi
+out="$( rw "$TMP/tsq" --uses=valueToken )"
+if printf '%s' "$out" | grep -q "'valueToken' is declared as a member of 'Box' at .*box.ts:4"; then ok "(C10) CLI --uses=valueToken: quoted braces open no depth, the member at box.ts:4 refuses"
+else no "(C10) CLI --uses=valueToken (quoted braces): $( printf '%s' "$out" | head -c 300 )"; fi
+out="$( rw "$TMP/rsl" --uses=rows )"
+if printf '%s' "$out" | grep -q "'rows' is declared as a member of 'View' at .*lib.rs:1"; then ok "(C12) control: a Rust lifetime is not a quote, --uses=rows still refuses with the member sentence"
+else no "(C12) control: --uses=rows (Rust lifetime): $( printf '%s' "$out" | head -c 300 )"; fi
 
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"

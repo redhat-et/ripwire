@@ -247,13 +247,34 @@ inline bool insideFunctionOfFile( const IngestResult& ing, std::uint32_t fileId,
     return false;
 }
 
-// Brace depth inside an owner's span, walked forward once: `{`/`}` outside `//` and `/* */` comments and "…" strings. A
-// direct member sits at depth 1; an object-literal property, a method's local or a nested type's member sits deeper.
+// Do `'…'` quotes delimit STRINGS in this language (any length)? Elsewhere a `'` opens only a char literal (`'{'`, `'\n'`) or
+// is a Rust lifetime / an apostrophe, and the walk skips just the char-literal shape.
+inline bool singleQuoteStrings( Lang lang ) noexcept
+{
+    return lang == Lang::TypeScript || lang == Lang::JavaScript || lang == Lang::Dart || lang == Lang::Php || lang == Lang::Lua
+        || lang == Lang::GDScript;
+}
+
+// Brace depth inside an owner's span, walked forward once: `{`/`}` outside `//` and `/* */` comments, "…" and `…` strings,
+// '…' strings (singleQuoteStrings) and char literals (CodeRabbit 4553235701: `label = '{'` opened a phantom depth). A direct
+// member sits at depth 1; an object-literal property, a method's local or a nested type's member sits deeper.
 struct OwnerBraceWalk
 {
-    std::size_t pos    = 0;
-    std::size_t depth  = 0;
-    bool        opened = false;   // the owner's body brace was seen (GDScript's indented classes never open one)
+    std::size_t pos          = 0;
+    std::size_t depth        = 0;
+    bool        opened       = false;   // the owner's body brace was seen (GDScript's indented classes never open one)
+    bool        quoteStrings = false;   // singleQuoteStrings( the owner's language )
+
+    // The byte after the literal that opens at `pos` with `quote`, or npos when none closes it (`'a` lifetime, apostrophe).
+    static std::size_t literalEnd( std::string_view bytes, std::size_t open, char quote, bool multiLine ) noexcept
+    {
+        std::size_t k = open + 1;
+        while( k < bytes.size() && bytes[ k ] != quote && ( multiLine || bytes[ k ] != '\n' ) )
+        {
+            k += bytes[ k ] == '\\' ? 2 : 1;
+        }
+        return k < bytes.size() && bytes[ k ] == quote ? k + 1 : std::string_view::npos;
+    }
 
     void advanceTo( std::string_view bytes, std::size_t to )
     {
@@ -279,6 +300,17 @@ struct OwnerBraceWalk
                 }
                 pos = std::min( k + 1, bytes.size() );
             }
+            else if( c == '`' )
+            {
+                const std::size_t end = literalEnd( bytes, pos, '`', true );   // a template literal / Go raw string spans lines
+                pos                   = end == std::string_view::npos ? bytes.size() : end;
+            }
+            else if( c == '\'' )
+            {
+                const std::size_t end     = literalEnd( bytes, pos, '\'', false );
+                const bool        charLit = end != std::string_view::npos && ( end == pos + 3 || ( end <= pos + 8 && next == '\\' ) );
+                pos                       = end != std::string_view::npos && ( quoteStrings || charLit ) ? end : pos + 1;
+            }
             else
             {
                 if( c == '{' )
@@ -301,7 +333,7 @@ inline std::uint32_t memberDeclLine( const IngestResult& ing, const Symbol& owne
 {
     const std::size_t begin = std::min<std::size_t>( owner.sigStartByte, bytes.size() );   // a Go struct's signature spans its fields
     const std::size_t end   = std::min<std::size_t>( owner.endByte, bytes.size() );
-    OwnerBraceWalk    walk{ .pos = begin };
+    OwnerBraceWalk    walk{ .pos = begin, .quoteStrings = singleQuoteStrings( owner.lang ) };
     for( std::size_t at = bytes.find( name, begin ); at != std::string_view::npos && at + name.size() <= end; at = bytes.find( name, at + 1 ) )
     {
         if( !darkflags::wholeWordAt( bytes, at, name.size() ) )
