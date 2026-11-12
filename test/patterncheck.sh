@@ -463,10 +463,13 @@ done
 MA="$( mroot 'log(post_message)' )"
 printf '%s' "$MA" | grep -q 'unmatched_member' \
     && no "an ARGUMENT member (log(self.post_message)) was counted as a member near miss of log(post_message): $MA" \
-    || ok "only the callee is relaxed: log(self.post_message) is no near miss of log(post_message)"
+    || { [ -n "$MA" ] && ok "only the callee is relaxed: log(self.post_message) is no near miss of log(post_message)" \
+         || no "premise: log(post_message) printed no <pattern> header (the call failed or printed nothing)"; }
 QN2="$( "$BIN" "$QF" --pattern='ping($X)' --no-cache 2>/dev/null | grep -oE '<pattern [^>]*>' | head -1 )"
 printf '%s' "$QN2" | grep -q 'unmatched_member' \
-    && no "a fixture with no member call carries unmatched_member: $QN2" || ok "no member near miss, no unmatched_member= (the qualified fixture)"
+    && no "a fixture with no member call carries unmatched_member: $QN2" \
+    || { [ -n "$QN2" ] && ok "no member near miss, no unmatched_member= (the qualified fixture)" \
+         || no "premise: ping(\$X) printed no <pattern> header (the call failed or printed nothing)"; }
 # -- 7c) the member near miss stays exact (CR #624 review 5869575117) ------------------------------------------------
 # Three ways the 7b count or its next= misled: (1) a C/C++ pointer call `p->f(x)` is counted, but next= spelled
 # `$O.f($X)`, which never matches it; (2) a pattern already holding $O, $RECV and $RW_RECEIVER got $RW_RECEIVER as
@@ -498,8 +501,11 @@ XAN="$( xroot "$MX/arrow" '$O->f($X)' )"
 printf '%s' "$XAN" | grep -q ' hits="2"' \
     && ok "pasting the arrow next= hits exactly the 2 counted calls" || no "\$O->f(\$X) should hit the 2 arrow calls: $XAN"
 # control: a dot-only corpus carries no arrow attribute (7b's fixture)
-printf '%s' "$( mroot 'post_message($X)' )" | grep -q 'unmatched_member_arrow' \
-    && no "a dot-only corpus carries unmatched_member_arrow" || ok "control: no arrow call, no unmatched_member_arrow="
+MDOT="$( mroot 'post_message($X)' )"
+printf '%s' "$MDOT" | grep -q 'unmatched_member_arrow' \
+    && no "a dot-only corpus carries unmatched_member_arrow" \
+    || { printf '%s' "$MDOT" | grep -q ' unmatched_member="' && ok "control: no arrow call, no unmatched_member_arrow= (unmatched_member= present)" \
+         || no "premise: the dot-only corpus printed no unmatched_member= (the call failed or the near miss vanished): $MDOT"; }
 # (2) receivers exhausted: next= takes a receiver the pattern does not spell, and pasting it hits the counted call
 XR="$( xroot "$MX/recv" 'f($O, $RECV, $RW_RECEIVER)' )"
 XRN="$( printf '%s' "$XR" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
