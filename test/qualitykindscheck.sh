@@ -825,6 +825,12 @@ pub fn log_arm() { touch(); }
 pub fn ret_err() -> Result<(), std::io::Error> { touch(); Ok(()) }
 pub fn write_char(buf: &mut String) { touch(); }
 pub fn names_e() { touch(); }
+pub fn variant_log() { touch(); }
+pub fn or_log() { touch(); }
+pub fn at_log() { touch(); }
+pub fn iflet_variant_log() { touch(); }
+pub fn ref_named() { touch(); }
+pub fn ref_log() { touch(); }
 '
 RSE='use std::fmt::Write;
 
@@ -864,6 +870,32 @@ pub fn names_e() {
     touch();
     match std::fs::metadata(".") { Ok(_) => touch(), Err(e) => eprintln!("failed: {e}") }
 }
+pub fn variant_log() {
+    touch();
+    match load() { Ok(_) => touch(), Err(MyError::NotFound) => eprintln!("missing"), Err(e) => panic!("{e}") }
+}
+pub fn or_log() {
+    touch();
+    match load() { Ok(_) => touch(), Err(MyError::A | MyError::B) => eprintln!("skipped"), Err(e) => panic!("{e}") }
+}
+pub fn at_log() {
+    touch();
+    match load() { Ok(_) => touch(), Err(e @ MyError::Busy) => eprintln!("busy"), Err(e) => panic!("{e}") }
+}
+pub fn iflet_variant_log() {
+    touch();
+    if let Err(MyError::NotFound) = load() {
+        eprintln!("missing");
+    }
+}
+pub fn ref_named() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(ref e) => eprintln!("failed: {e}") }
+}
+pub fn ref_log() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(ref mut _e) => log::warn!("failed") }
+}
 '
 qd_pair empty_rs a.rs "$RSB" "$RSE"
 qd_has  "empty (rust)" error-masking iflet_empty gating
@@ -876,6 +908,14 @@ premise "empty (rust)" empty_rs write_char '(let_declaration) @m'
 qd_none "empty (rust)" error-masking ret_err    "the arm returns the error"
 qd_none "empty (rust)" error-masking write_char "let _ = fallible(); is out of scope"
 qd_none "empty (rust)" error-masking names_e    "the arm logs the error by name, inside the format string"
+qd_has  "log-only (rust)" error-masking ref_log minor   # Err(ref mut _e): the wrappers still bind the whole error side
+# CR #632 4556210583: an Err pattern that names ONE variant (or a few) is not a broad handler
+for s in variant_log or_log at_log iflet_variant_log ref_named; do premise "rust variants" empty_rs "$s" '(tuple_struct_pattern) @m'; done
+qd_none "log-only (rust)" error-masking variant_log       "Err(MyError::NotFound) handles one variant"
+qd_none "log-only (rust)" error-masking or_log            "Err(A | B) handles two variants"
+qd_none "log-only (rust)" error-masking at_log            "Err(e @ MyError::Busy) handles one variant"
+qd_none "log-only (rust)" error-masking iflet_variant_log "if let Err(MyError::NotFound) handles one variant"
+qd_none "log-only (rust)" error-masking ref_named         "Err(ref e) logs the error by name"
 
 CXB='#include <cstdio>
 #include <iostream>

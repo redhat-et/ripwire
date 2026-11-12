@@ -761,8 +761,10 @@ inline bool isRustLogMacro( TSNode stmt, std::string_view src )
     return std::find( std::begin( kRustLogLevels ), std::end( kRustLogLevels ), m ) != std::end( kRustLogLevels );
 }
 
-// The Err binding of a tuple-struct pattern `Err( x )`, through `ref`/`mut` wrappers; empty for `_`, `..` or a nested
-// pattern. False when the pattern is not `Err( … )` at all.
+// The Err binding of a tuple-struct pattern `Err( x )`, through `ref`/`mut` wrappers; empty for `_` or `..`. False
+// when the pattern is not `Err( … )` at all, or when its inner pattern is REFUTABLE — `Err( MyError::NotFound )`,
+// `Err( A | B )`, `Err( e @ MyError::Busy )`, an upper-case unit variant `Err( NotFound )`: that handles one variant,
+// not the whole error side, so it is not a broad handler (CR #632).
 inline bool rustErrBinding( TSNode pat, std::string_view src, std::string_view& name )
 {
     name = {};
@@ -770,12 +772,21 @@ inline bool rustErrBinding( TSNode pat, std::string_view src, std::string_view& 
     {
         return false;
     }
-    const TSNode inner = namedChild( pat, 1 );   // child 0 is the type
-    if( typeIs( inner, "identifier" ) )
+    TSNode inner = namedChild( pat, 1 );   // child 0 is the type
+    while( typeIs( inner, "ref_pattern" ) || typeIs( inner, "mut_pattern" ) )
     {
-        name = nodeTextOf( inner, src );
+        inner = namedChild( inner, ts_node_named_child_count( inner ) - 1 );   // `ref`/`mut` wrap the binding last
     }
-    return true;
+    if( ts_node_is_null( inner ) || typeIs( inner, "remaining_field_pattern" ) )
+    {
+        return true;   // `Err( _ )` (`_` is an anonymous token) or `Err( .. )`
+    }
+    if( !typeIs( inner, "identifier" ) )
+    {
+        return false;
+    }
+    name = nodeTextOf( inner, src );
+    return name.empty() || name[0] < 'A' || name[0] > 'Z';   // an upper-case `Err( NotFound )` names a variant
 }
 
 // A Rust format string names its argument INSIDE the literal (`"{e}"`, `"{e:?}"`), where mentionsName cannot see it.
