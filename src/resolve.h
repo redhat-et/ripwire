@@ -713,7 +713,9 @@ inline std::vector<PythonMemberSite> pythonFromImportMembers( const IngestResult
 // the distinct member files one Python from-import Include reaches, in binding order; never the includer itself. `pkgFile` is the
 // file the statement's own Include resolved to (kNoFile = none), and it confines the lookup the way Python's import does (#533):
 //   * <D>/__init__.py → the member is pkg's own: only <D>/<member>.py or <D>/<member>/__init__.py (unique-or-degrade), never
-//     another root's pkg/<member>.py, which Python never loads for this statement;
+//     another root's pkg/<member>.py, which Python never loads for this statement. The edge is drawn even when the __init__
+//     also binds <member> itself: that binding is usually the package re-exporting its own submodule (pinned by the
+//     init-and-sibling arm of test/pyimportprecisecheck.sh);
 //   * a plain module (util.py) → no member edge: the module wins at import time, and a util/x.py beside it is not util.x;
 //   * nothing (a namespace package, an ambiguous root) → the full tiered probe of `<module>.<member>`, as `import pkg.mod` would.
 inline void pythonMemberFiles( const IngestResult& ing, const std::vector<PythonMemberSite>& sites, const Include& inc, std::uint32_t pkgFile,
@@ -5024,9 +5026,9 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
                 recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
             }
         }
-        if( memberSites.empty() )
+        if( memberSites.empty() || includeLangOf( rootRelPath( ing, inc.fileId ) ) != IncludeLang::Python )
         {
-            continue;
+            continue;   // no from-import members in this build, or not a Python includer: nothing to look up
         }
         // #478 gap 1: the submodules a from-import's members name, confined to the package `to` resolved to (kNoFile — a
         // namespace package has no __init__.py — keeps the full probe; a self-resolve, `from . import x` in an __init__.py, confines too). Left out of the call narrow (memberSites is empty there): see its note above.
