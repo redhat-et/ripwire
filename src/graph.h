@@ -18868,7 +18868,8 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
 // common caller, unhedged; and §2.4a's tie-break (fewer connects wins) hands an equal-distance join to a test, which usually
 // connects few. So when no terminal is test-class (filter.h pathDefInTests), the search never walks through a test-class
 // node. When that leaves apart terminals the unrestricted search joins, the result names the first test-class intermediary
-// (id order) of that search as testJoint: test-only evidence, disclosed by the emitter, never printed as a joint. A test
+// (id order) of an unrestricted group that joins terminals the source search left apart as testJoint: test-only evidence,
+// disclosed by the emitter, never printed as a joint. A test
 // terminal keeps today's search unchanged (a test's own helpers are its honest joints).
 inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& terminals, std::uint32_t radius )
 {
@@ -18907,8 +18908,21 @@ inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g
     {
         return res;   // the tests join nothing the source search left apart
     }
+    // Only a group of the unrestricted search that joins terminals the source search left APART is evidence for them: a test
+    // beside a source-joined pair (a shorter test path) says nothing about the <unconnected> ones (CodeRabbit #625).
+    const auto sourceComponentOf = [ & ]( NodeId t )
+    {
+        const auto it = std::lower_bound( res.terminals.begin(), res.terminals.end(), t );
+        return ( it != res.terminals.end() && *it == t ) ? res.componentOf[ std::size_t( it - res.terminals.begin() ) ] : UINT32_MAX;
+    };
     for( const ConnectGroup& grp : any.groups )
     {
+        const bool joinsApart = std::any_of( grp.terminals.begin(), grp.terminals.end(),
+                                             [ & ]( NodeId t ) { return sourceComponentOf( t ) != sourceComponentOf( grp.terminals.front() ); } );
+        if( !joinsApart )
+        {
+            continue;
+        }
         const auto hit = std::find_if( grp.steiner.begin(), grp.steiner.end(), [ & ]( NodeId v ) { return v < N && inTests[ v ] != 0; } );
         if( hit != grp.steiner.end() && ( res.testJoint == kNoNode || *hit < res.testJoint ) )
         {
