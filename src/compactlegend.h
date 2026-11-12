@@ -1766,17 +1766,17 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // map legend defines them"; the map's own purpose line does, and the answers below printed them under a legend that did not.
     // Most-used verbs first (--for's MCP twin, the map family, grep, callees, from-trace). Present-only and key-qualified, so an
     // answer without the element pays nothing and no other verb reads them.
-    { "k", "<f p=> a file; <s t= n= k=>: kind, name, rank; <c n=>: a resolved callee", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines p= t= n= c n=
-    { "k", "<f p=> a file; <s t= n= k=>: kind, name, rank; <c n=>: a resolved callee", true, "s", MapHeaderRead::No, {}, "map-diff" },   // also defines p= t= n= c n=
-    { "k", "<f p=> a file; <s t= n= k=>: kind, name, rank; <c n=>: a resolved callee", true, "s", MapHeaderRead::No, {}, "around" },   // also defines p= t= n= c n=
-    { "k", "<f p=> a file; <s t= n= k=>: kind, name, rank; <c n=>: a resolved callee", true, "s", MapHeaderRead::No, {}, "query" },   // also defines p= t= n= c n=
-    { "k", "<f p=> a file; <s t= n= k=>: kind, name, rank; <c n=>: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-signatures" },   // also defines p= t= n= c n=
-    { "k", "<f p=> a file; <s t= n= k=>: kind, name, rank; <c n=>: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-top-n" },   // also defines p= t= n= c n=
+    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines p= t= n= c n=
+    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "map-diff" },   // also defines p= t= n= c n=
+    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "around" },   // also defines p= t= n= c n=
+    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "query" },   // also defines p= t= n= c n=
+    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-signatures" },   // also defines p= t= n= c n=
+    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-top-n" },   // also defines p= t= n= c n=
     { "t", "s t=: the unit's kind (fn|cls|...)", true, "s", MapHeaderRead::No, {}, "context-ratio" },
     { "t", "inc t=: one include/import target as written; one with no edge did not resolve to an indexed file", true, "inc", MapHeaderRead::No, {}, "deps" },
     { "n", "enc n=: an enclosing symbol of this page's hits, first-appearance order", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "n", "hit n=N: N byte-identical sites in this file folded into this row, one sibling per extra site (absent: 1)", true, "hit", MapHeaderRead::No, {}, "grep" },
-    { "pattern_dispatch", "pattern_dispatch=N: lookups that build a member NAME from a template; <pd l= pattern= cands=K shown=>: its line, the template, the K members it can name (first 8 as t rows)", false, "callees", MapHeaderRead::No, {}, "callees" },
+    { "pattern_dispatch", "pattern_dispatch=N: lookups that build a member NAME from a template; pd l= pattern= cands=K shown=: its line, the template, the K members it can name (first 8 as t rows)", false, "callees", MapHeaderRead::No, {}, "callees" },
     { "t", "b t= l=: the body's kind and first line", true, "b", MapHeaderRead::No, {}, "exemplar" },
     { "n", "t n= / s n=: a terminal's / a join's symbol name", true, "t", MapHeaderRead::No, {}, "connect" },
     { "t", "t=: sym='s kind (fn|cls|...)", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
@@ -1794,7 +1794,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "t", "b t= n= p= l=: a served body's kind, name, file, first line", true, "b", MapHeaderRead::No, {}, "for" },
     { "owner", "field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer", true, "field", MapHeaderRead::No, {}, "for" },
     { "pure", "d pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "for" },
-    { "h", "enc h=: the edit handle, sym#<identity>@<file content hash>; stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
+    { "h", "enc h=: the edit handle, sym#<16hex>@<16hex> (identity, file content hash); stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; their rule rows say applicable=0 (count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
     { "unavailable", "unavailable=/unavailable_why=: families that could not be measured here, and why; s unavail=: those for that row (absent from fired= is then no evidence)", false, "ensemble", MapHeaderRead::No, {}, "ensemble" },
     // merge-scout (mergescout.h writeSymRows): the <sym p= id=/> rows an arm's changed symbols print; seen only when an arm
