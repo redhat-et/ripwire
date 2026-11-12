@@ -1069,110 +1069,137 @@ inline void rustMacroPathOf( std::string_view pathText, std::string& qualifier, 
 // `__define_rejection` → `__log_rejection`). A token tree is not parsed, so this is a lexical scan over the definition, kept to the
 // `$crate`-rooted path: the one spelling that names the defining crate's macro by construction (a bare `name!` in a transcriber may
 // name a macro of the expansion site: not read, a floor). String literals and comments are skipped; `$crate::x != y` is no call.
+namespace rust_transcriber_scan
+{
+inline bool identChar( char c ) noexcept { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; }
+inline bool blankChar( char c ) noexcept { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+inline std::uint32_t skipBlanks( std::string_view src, std::uint32_t k, std::uint32_t end ) noexcept
+{
+    while( k < end && blankChar( src[ k ] ) )
+    {
+        ++k;
+    }
+    return k;
+}
+// A string literal or a comment at `i`: moves `i` past it (a line comment stops at its newline, which the caller counts),
+// adding the newlines it holds to `line`. False, `i` unmoved, when `i` starts neither.
+inline bool skipLiteralOrComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    const char c    = src[ i ];
+    const char next = i + 1 < end ? src[ i + 1 ] : '\0';
+    if( c == '"' )   // to its unescaped close
+    {
+        for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
+        {
+            line += src[ i ] == '\n' ? 1u : 0u;
+        }
+        ++i;
+        return true;
+    }
+    if( c == '/' && next == '/' )
+    {
+        while( i < end && src[ i ] != '\n' )
+        {
+            ++i;
+        }
+        return true;
+    }
+    if( c == '/' && next == '*' )
+    {
+        for( i += 2; i + 1 < end && !( src[ i ] == '*' && src[ i + 1 ] == '/' ); ++i )
+        {
+            line += src[ i ] == '\n' ? 1u : 0u;
+        }
+        i += 2;
+        return true;
+    }
+    return false;
+}
+// `$crate` at `at` followed by ( `::` ident )+ `!` (not `!=`): the last segment's [nameAt, nameEnd). Only peeks.
+inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
+{
+    nameAt = nameEnd = 0;
+    std::uint32_t j  = at + 6;
+    for( ;; )
+    {
+        std::uint32_t k = skipBlanks( src, j, end );
+        if( k + 1 >= end || src[ k ] != ':' || src[ k + 1 ] != ':' )
+        {
+            break;
+        }
+        const std::uint32_t segAt = skipBlanks( src, k + 2, end );
+        for( k = segAt; k < end && identChar( src[ k ] ); ++k )
+        {
+        }
+        if( k == segAt )
+        {
+            break;
+        }
+        nameAt  = segAt;
+        nameEnd = k;
+        j       = k;
+    }
+    j = skipBlanks( src, j, end );
+    return nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' );
+}
+// The Macro reference for `$crate::a::name!` at `at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
+inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::uint32_t nameAt, std::uint32_t nameEnd, std::uint32_t fileId, std::uint32_t line )
+{
+    std::string_view path = src.substr( at, nameAt - at );   // `$crate::a::` — its trailing `::` dropped
+    while( !path.empty() && ( blankChar( path.back() ) || path.back() == ':' ) )
+    {
+        path.remove_suffix( 1 );
+    }
+    RawRef r;
+    r.fileId    = fileId;
+    r.startByte = at;
+    r.line      = line;
+    r.lang      = Lang::Rust;
+    r.role      = RefRole::Macro;
+    r.name      = std::string( src.substr( nameAt, nameEnd - nameAt ) );
+    std::string qualifier;
+    std::string written;
+    rustMacroPathOf( path, qualifier, written );
+    r.qualifier = std::move( qualifier );
+    if( !written.empty() )
+    {
+        r.setFieldName( std::move( written ) );
+    }
+    return r;
+}
+}   // namespace rust_transcriber_scan
+
 inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
 {
-    const std::uint32_t begin = ts_node_start_byte( macroDef );
-    const std::uint32_t end   = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
-    const auto          ident = []( char c ) noexcept { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
-    const auto          blank = []( char c ) noexcept { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-    std::uint32_t       line  = ts_node_start_point( macroDef ).row + 1;
-    std::uint32_t       i     = begin;
+    using namespace rust_transcriber_scan;
+    const std::uint32_t end  = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
+    std::uint32_t       line = ts_node_start_point( macroDef ).row + 1;
+    std::uint32_t       i    = ts_node_start_byte( macroDef );
     while( i < end )
     {
-        const char c = src[ i ];
-        if( c == '\n' )
+        if( src[ i ] == '\n' )
         {
             ++line;
             ++i;
+            continue;
         }
-        else if( c == '"' )   // a string literal: to its unescaped close
+        if( skipLiteralOrComment( src, i, end, line ) )
         {
-            for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
-            {
-                line += src[ i ] == '\n' ? 1u : 0u;
-            }
-            ++i;
+            continue;
         }
-        else if( c == '/' && i + 1 < end && src[ i + 1 ] == '/' )   // a line comment: its newline is counted above
-        {
-            while( i < end && src[ i ] != '\n' )
-            {
-                ++i;
-            }
-        }
-        else if( c == '/' && i + 1 < end && src[ i + 1 ] == '*' )
-        {
-            for( i += 2; i + 1 < end && !( src[ i ] == '*' && src[ i + 1 ] == '/' ); ++i )
-            {
-                line += src[ i ] == '\n' ? 1u : 0u;
-            }
-            i += 2;
-        }
-        else if( c != '$' || src.substr( i, 6 ) != "$crate" || ( i + 6 < end && ident( src[ i + 6 ] ) ) )
+        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && identChar( src[ i + 6 ] ) );
+        if( !atCrate )
         {
             ++i;
+            continue;
         }
-        else
+        std::uint32_t nameAt  = 0;
+        std::uint32_t nameEnd = 0;
+        if( cratePathMacroAt( src, i, end, nameAt, nameEnd ) )
         {
-            // `$crate` ( `::` ident )+ `!` — j only peeks, the scan resumes past `$crate` so a newline inside the path is still counted
-            std::uint32_t j = i + 6, nameAt = 0, nameEnd = 0;
-            for( ;; )
-            {
-                std::uint32_t k = j;
-                while( k < end && blank( src[ k ] ) )
-                {
-                    ++k;
-                }
-                if( k + 1 >= end || src[ k ] != ':' || src[ k + 1 ] != ':' )
-                {
-                    break;
-                }
-                for( k += 2; k < end && blank( src[ k ] ); ++k )
-                {
-                }
-                const std::uint32_t segAt = k;
-                while( k < end && ident( src[ k ] ) )
-                {
-                    ++k;
-                }
-                if( k == segAt )
-                {
-                    break;
-                }
-                nameAt  = segAt;
-                nameEnd = k;
-                j       = k;
-            }
-            while( j < end && blank( src[ j ] ) )
-            {
-                ++j;
-            }
-            if( nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' ) )
-            {
-                std::string_view path = src.substr( i, nameAt - i );   // `$crate::a::` — its trailing `::` dropped below
-                while( !path.empty() && ( blank( path.back() ) || path.back() == ':' ) )
-                {
-                    path.remove_suffix( 1 );
-                }
-                RawRef r;
-                r.fileId    = fileId;
-                r.startByte = i;
-                r.line      = line;
-                r.lang      = Lang::Rust;
-                r.role      = RefRole::Macro;
-                r.name      = std::string( src.substr( nameAt, nameEnd - nameAt ) );
-                std::string qualifier;
-                std::string written;
-                rustMacroPathOf( path, qualifier, written );
-                r.qualifier = std::move( qualifier );
-                if( !written.empty() )
-                {
-                    r.setFieldName( std::move( written ) );
-                }
-                refs.push_back( std::move( r ) );
-            }
-            i += 6;
+            refs.push_back( cratePathMacroRef( src, i, nameAt, nameEnd, fileId, line ) );
         }
+        i += 6;   // resume past `$crate` so a newline inside the path is still counted
     }
 }
 

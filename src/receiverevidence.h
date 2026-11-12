@@ -1277,6 +1277,13 @@ struct CallResultTypes
         bool   bound   = false;     // some binding spells the name (it may resolve outside the tree)
         bool   clash   = false;     // two bindings resolve to DIFFERENT in-tree classes: ambiguous, no class
         bool   globbed = false;     // rust-receivers: a glob at the module's level may bring the name in unseen (not followed)
+        // one binding that spells the name, resolving to `c` (kNoNode: outside the tree, which carries no class)
+        void take( NodeId c )
+        {
+            bound = true;
+            clash = clash || ( c != kNoNode && one != kNoNode && one != c );
+            one   = one == kNoNode ? c : one;
+        }
     };
     // rustItemAt's re-export step for one file `mf` of the module: each `use … cls` at the module's own level (`atLevel`) names
     // the class its path reaches, and a glob there sets `globbed`. #610 (@soarkit): a binding that resolves to no in-tree class
@@ -1295,18 +1302,13 @@ struct CallResultTypes
             {
                 continue;
             }
-            pick.globbed = pick.globbed || b->var == "*";
-            if( b->var == cls )
+            if( b->var == "*" )
             {
-                const auto [ modPath, item ] = splitLast( b->importedName, "::" );
-                const NodeId c = modPath.empty() ? kNoNode : rustClassAt( mf, b->startByte, modPath, item, depth + 1 );
-                pick.bound = true;
-                if( c != kNoNode )
-                {
-                    pick.clash = pick.clash || ( pick.one != kNoNode && pick.one != c );
-                    pick.one   = pick.one == kNoNode ? c : pick.one;
-                }
+                pick.globbed = true;
+                continue;
             }
+            const auto [ modPath, item ] = splitLast( b->importedName, "::" );
+            pick.take( modPath.empty() ? kNoNode : rustClassAt( mf, b->startByte, modPath, item, depth + 1 ) );
         }
     }
     // (L) a qualified Rust call whose qualifier is a module path reaching `target`'s own module (`model::load()`,
