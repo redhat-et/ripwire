@@ -57,6 +57,10 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 # the cut itself (rows, bytes, next= continuations), so it reads the undemoted answer. A budget-held answer is never
 # demoted; that interplay and the pointer's r= rank are pinned in forsiblingdemotecheck (b) and estchargecheck (A7).
 export RIPWIRE_NO_SIBLING_DEMOTE=1
+# DEMOTE-ALL-DIALECTS (fordemoteall.h): both rules now run under a soft target too and print rows as pointers (the freed bytes buy
+# rows), so the cut this gate counts in <d> rows reads the undemoted answer — its twin legitimately differs (fordemoteallcheck pins
+# the budgeted answer with the rules on: rank prefix, monotone, never fewer entries than this twin's rows).
+export RIPWIRE_NO_DECL_TWIN=1
 unset RIPWIRE_NO_HEAD_RR          # lane hrr: the reorder is ON here unless a twin below sets it (cli_so / mcp_so)
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py: the soft-target readers, shared helpers (CHECKLIST 32)
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"

@@ -62,8 +62,9 @@ if dialect == 'xml':
     def sigs_block(doc):
         a = doc.find('<sigs'); b = doc.find('</sigs>')
         return doc[a:b+7] if a >= 0 and b >= 0 else ''
-    ref_ranks = sorted(int(m) for m in re.findall(r'<d [^>]*r="(\d+)"', sigs_block(ref)))
-    cap_ranks = sorted(int(m) for m in re.findall(r'<d [^>]*r="(\d+)"', sigs_block(cap)))
+    # B26 DEMOTE-ALL: a SIBLING-DEMOTE / DECL-TWIN pointer <t p= sym= r=/> holds its rank (served, not dropped), in every dialect
+    ref_ranks = sorted(int(m) for m in re.findall(r'<(?:d|t) [^>]*\br="(\d+)"', sigs_block(ref)))
+    cap_ranks = sorted(int(m) for m in re.findall(r'<(?:d|t) [^>]*\br="(\d+)"', sigs_block(cap)))
     m = re.search(r'dropped_positive="(\d+)"', cap)
     reported = int(m.group(1)) if m else 0
     ref_has_attr = 'dropped_positive="' in ref

@@ -26,7 +26,8 @@
 #        and (a) holds on it; twin: widget_config_variant_08 (no note) is still a pointer. K7 (slot facts) is driven by fnslotcheck
 #        (F1b/K2/K3/X2b/F4) and K4's task-named seeds by pymodcallsitescheck (X7/X7b/X7c), whose rows sit past rank 10.
 #   (e)  est_tokens= is re-priced down (estchargecheck holds its value to the bytes); (w) well formed; (l) one legend comment, no "--" in it
-#   (b)  --token-budget leaves the answer as shaped: no pointer in <sigs>, no legend comment
+#   (b)  --token-budget runs the rule too (DEMOTE-ALL-DIALECTS, fordemoteall.h): pointers and the legend in <sigs>, the ranked entries
+#        a rank prefix, never fewer than the RIPWIRE_NO_SIBLING_DEMOTE=1 twin's rows (fordemoteallcheck pins the refill and --json)
 #   (b2) a bare --max-tokens (not read by --for: its notice says nothing was dropped) does not hold the demote: byte-identical to (a)'s
 #   (g)  GROWTH (sit 11-08: 4 aborts): a second tree of ten one-row files and z.py's four short undocumented rows. The legend comment
 #        and three pointers outweigh the rows they replace, so the answer GROWS: the run exits 0 and answers, (a) holds on it (default
@@ -192,7 +193,9 @@ print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^"]*)"(?: r="\d+")?/
 print( "rows " + ",".join( re.findall( r'<d [^>]*?\bn="([^"]*)"', s ) ) )
 PY
 
-run(){ ( cd "$TMP/py" && "$BIN" . --no-cache "$@" ); }
+run(){   # CodeRabbit 4550333691: a non-zero exit fails the gate (the off twin of (b) is a baseline: an empty one passed trivially)
+    local rc; ( cd "$TMP/py" && "$BIN" . --no-cache "$@" ) || { rc=$?; no "exit $rc from: ripwire . --no-cache $*" >&2; return "$rc"; }
+}
 run "--for=$TASK" >"$TMP/on.xml"; rc1=$?
 RIPWIRE_NO_SIBLING_DEMOTE=1 run "--for=$TASK" >"$TMP/off.xml"; rc2=$?
 [ "$rc1" = 0 ] && [ "$rc2" = 0 ] || no "runs exited $rc1 / $rc2"
@@ -222,9 +225,9 @@ grep -q 'same_as="widget_shelf_row"' "$TMP/on.xml" || no "(k5) the fixture no lo
 # (k6) NOTED: a row carrying a --note-add note stays a row (a pointer would drop the note)
 cp -R "$TMP/py" "$TMP/py6"
 ( cd "$TMP/py6" && git init -q -b main . && git add -A && git -c user.email=gate@example.invalid -c user.name=gate commit -qm fx ) || no "(k6) could not make the fixture copy a git repo"
-"$BIN" "$TMP/py6" --note-add="widget_config_variant_07: keep the variant table in step with the parser" >/dev/null 2>&1
-( cd "$TMP/py6" && "$BIN" . --no-cache "--for=$TASK" ) >"$TMP/k6.on"
-( cd "$TMP/py6" && RIPWIRE_NO_SIBLING_DEMOTE=1 "$BIN" . --no-cache "--for=$TASK" ) >"$TMP/k6.off"
+"$BIN" "$TMP/py6" --note-add="widget_config_variant_07: keep the variant table in step with the parser" >/dev/null 2>&1 || no "(k6) --note-add exited $?"
+( cd "$TMP/py6" && "$BIN" . --no-cache "--for=$TASK" ) >"$TMP/k6.on" || no "(k6) the on answer exited $?"
+( cd "$TMP/py6" && RIPWIRE_NO_SIBLING_DEMOTE=1 "$BIN" . --no-cache "--for=$TASK" ) >"$TMP/k6.off" || no "(k6) the off twin exited $?"
 python3 "$TMP/check.py" "$TMP/k6.off" "$TMP/k6.on" "$KEEP4" >"$TMP/k6.res" 2>&1
 python3 "$TMP/names.py" "$TMP/k6.on" >"$TMP/k6.names"
 ptr="$( sed -n 's/^ptr //p' "$TMP/k6.names" ),"; rws="$( sed -n 's/^rows //p' "$TMP/k6.names" ),"
@@ -258,7 +261,20 @@ arm r ptr widget_config_variant_06 "a same-file decoy at <d> rank 11"
 
 run "--for=$TASK" --token-budget=4000 >"$TMP/b.xml"
 python3 "$TMP/names.py" "$TMP/b.xml" >"$TMP/b.names"
-if grep -q '^ptr $' "$TMP/b.names" && ! grep -q '<!-- demote:' "$TMP/b.xml"; then ok "(b) --token-budget: no pointer in <sigs>"; else no "(b) $( head -c 300 "$TMP/b.names" )"; fi
+RIPWIRE_NO_SIBLING_DEMOTE=1 run "--for=$TASK" --token-budget=4000 >"$TMP/b.off"
+bres="$( python3 - "$TMP/b.xml" "$TMP/b.off" <<'PY'
+import re, sys
+def ent( f ):
+    s = open( f ).read(); s = s[s.find( "<sigs" ):s.find( "</sigs>" )]
+    return [ ( m.group( 1 ), int( m.group( 2 ) ) ) for m in re.finditer( r'<(d|t) [^>]*?\br="(\d+)"', s ) ]
+on, off = ent( sys.argv[1] ), ent( sys.argv[2] )
+r = [ x[1] for x in on ]   # in answer order, unsorted (CodeRabbit 4543056282)
+offRows = sum( 1 for t, _ in off if t == "d" )   # premise of the baseline: an off twin with no rows is no baseline (CR 4550333691)
+print( "ok" if offRows > 0 and any( t == "t" for t, _ in on ) and r == list( range( 1, len( r ) + 1 ) ) and len( on ) >= offRows else "on=%s off=%s (off rows %d, want > 0)" % ( on, off, offRows ) )
+PY
+)"
+if [ "$bres" = ok ] && grep -q '<!-- demote:' "$TMP/b.xml"; then ok "(b) --token-budget (DEMOTE-ALL-DIALECTS): the rule runs before the rows settle: pointers and the legend, rows + pointers a rank prefix, never fewer than the off twin's rows (fordemoteallcheck pins the refill)"
+else no "(b) $( printf '%s' "$bres" | head -c 300 )"; fi
 run "--for=$TASK" --max-tokens=4000 >"$TMP/m.xml" 2>/dev/null
 if cmp -s "$TMP/m.xml" "$TMP/on.xml"; then ok "(b2) a bare --max-tokens (not read by --for) leaves the demoted answer byte-identical to the flagless one"; else no "(b2) --max-tokens=4000 changed the answer (it is not read by --for: forbodyfoldcheck F8m)"; fi
 
@@ -274,7 +290,7 @@ grun(){ ( cd "$TMP/g" && "$BIN" . --no-cache --for="zap mode" "$@" 2>"$TMP/g.err
 for shape in default sigonly; do
     flag=(); [ "$shape" = sigonly ] && flag=( --signatures-only )
     grun ${flag[@]+"${flag[@]}"} >"$TMP/g.$shape.on"; grc=$?
-    RIPWIRE_NO_SIBLING_DEMOTE=1 grun ${flag[@]+"${flag[@]}"} >"$TMP/g.$shape.off"
+    RIPWIRE_NO_SIBLING_DEMOTE=1 grun ${flag[@]+"${flag[@]}"} >"$TMP/g.$shape.off" || no "(g) $shape: the off twin exited $?"
     gon="$( wc -c <"$TMP/g.$shape.on" | tr -d ' ' )"; goff="$( wc -c <"$TMP/g.$shape.off" | tr -d ' ' )"
     python3 "$TMP/check.py" "$TMP/g.$shape.off" "$TMP/g.$shape.on" "" >"$TMP/g.res" 2>&1
     if [ "$grc" = 0 ] && [ "$gon" -gt "$goff" ] && grep -q '^PASS (a)' "$TMP/g.res" && ! grep -q '^PASS (a) 0 rows' "$TMP/g.res"; then

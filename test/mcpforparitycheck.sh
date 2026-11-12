@@ -34,11 +34,10 @@
 # Exits non-zero on any failure.
 
 set -u
-# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
-# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the CLI and MCP candidate pools and ladder heads (the pre-demote head both dialects start from; MCP's <h> rows differ from the CLI's, so its K2 keeps differ by design),
-# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
-export RIPWIRE_NO_SIBLING_DEMOTE=1
-export RIPWIRE_NO_DECL_TWIN=1   # DECL-TWIN (fordecltwin.h) runs after it; pinned in fordecltwincheck
+# SIBLING-DEMOTE / DECL-TWIN run in every dialect (DEMOTE-ALL-DIALECTS, fordemoteall.h): the pools are read off the ranked entries
+# (rows and the pointers printed in their place, rows.py below), so the gate reads the answers as shipped. fordemoteallcheck pins
+# MCP's <sigs> byte-equal to the CLI's where the two answers carry the same guard inputs.
+unset RIPWIRE_NO_SIBLING_DEMOTE RIPWIRE_NO_DECL_TWIN
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -64,7 +63,9 @@ fi
 ok "shared cap read from source: kForLensDefaultTopN=$CAP"
 
 # ── the two dialects, and the two facts read off each ────────────────────────────────────────────────────
-# The served set is (file, line, name) per <d> row inside <sigs> — NOT id=, which the emitter omits whenever
+# The served set is (file, rank, name) per ranked entry inside <sigs> — a <d> row, or a <t p= sym= r=/> demote pointer printed in its
+# place (DEMOTE-ALL-DIALECTS: which rows print as pointers follows each dialect's own guards — the CLI's <h> hop rows keep their callees
+# as rows, MCP's answer has none — so the pool is read off the entries, not their spelling) — NOT id=, which the emitter omits whenever
 # it would equal the bare name, so an id-keyed comparison silently undercounts the scope-less rows (measured
 # while writing this gate: 24 of 29 CLI rows on one task). RE-PINNED: P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh) — the file is the row's own p=.
 cat > "$TMP/rows.py" <<'PY'
@@ -73,12 +74,12 @@ s = sys.stdin.read()
 m = re.search( r'<sigs[^>]*>(.*?)</sigs>', s, re.S )
 body = m.group( 1 ) if m else ''
 out = []
-for d in re.finditer( r'<d ([^>]*)>', body ):
-    a = d.group( 1 )
+for d in re.finditer( r'<d ([^>]*)>|<t ([^>]* r="[0-9]+"[^>]*)>', body ):   # a row, or a demote pointer in its place (DEMOTE-ALL-DIALECTS)
+    a = d.group( 1 ) or d.group( 2 )
     p = re.search( r'\bp="([^"]*)"', a )
-    n = re.search( r'\bn="([^"]*)"', a )
-    l = re.search( r'\bl="([^"]*)"', a )
-    out.append( ( p.group( 1 ) if p else "?" ) + ":" + ( l.group( 1 ) if l else "?" ) + ":" + ( n.group( 1 ) if n else "?" ) )
+    n = re.search( r'\b(?:n|sym)="([^"]*)"', a )
+    r = re.search( r'\br="([^"]*)"', a )
+    out.append( ( p.group( 1 ) if p else "?" ) + ":" + ( r.group( 1 ) if r else "?" ) + ":" + ( n.group( 1 ) if n else "?" ) )
 print( "\n".join( sorted( out ) ) )
 PY
 cat > "$TMP/mcptext.py" <<'PY'

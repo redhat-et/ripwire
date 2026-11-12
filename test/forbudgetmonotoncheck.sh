@@ -47,10 +47,9 @@
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 
 set -u
-# SIBLING-DEMOTE (forsiblingdemote.h) is a no-budget XML post-pass that prints deep same-file <d> rows (past <d> rank 10) as
-# <t> pointers; a budget-held, --json or --candidates answer is left as shaped. This gate pins the sig/body section split across ceilings (a budget-held answer is never demoted, so the default's sigs would be the only demoted side),
-# so it reads the undemoted answer; the demote's rule, guards and budget interplay are pinned in forsiblingdemotecheck.
-export RIPWIRE_NO_SIBLING_DEMOTE=1
+# SIBLING-DEMOTE / DECL-TWIN run on the default AND under an explicit --token-budget (DEMOTE-ALL-DIALECTS, fordemoteall.h), so the
+# frozen-share identity (#1, #5) holds with the rules on: both sides print the same pointers. The rules are pinned in their gates.
+unset RIPWIRE_NO_SIBLING_DEMOTE RIPWIRE_NO_DECL_TWIN
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
@@ -108,10 +107,13 @@ STAGES="One Two Three Four Five Six"
 sigsblock(){ python3 -c 'import sys; s=open(sys.argv[1],"rb").read(); a=s.find(b"<sigs"); b=s.find(b"</sigs>"); sys.stdout.buffer.write(s[a:b+7] if a>=0 and b>=0 else b"")' "$1"; }
 bodyset(){ grep -o 'n="frobwidgetPipelineScheduleStage[A-Za-z]*">' "$1" | sed 's/.*Stage//; s/">//' | sort; }
 bodiesattr(){ grep -o 'bundle="auto" bodies="[0-9]*"' "$1" | head -1; }
-# the <sigs> block's rows, one p:l:n per line (score or shown order as served) — the set-prefix h arms' row key
+# the <sigs> block's ranked entries, one p:n per line (score or shown order as served) — the set-prefix h arms' row key. An entry is a
+# <d> row or a demote pointer <t p= sym= r=/> in its place (DEMOTE-ALL-DIALECTS): which rows of the same set print as pointers follows
+# the served ORDER (SIBLING-DEMOTE's rank > 10 rule reads the head round-robin's order on the default, score order under a budget),
+# so the set arms compare the entries, not their spelling; the score-order byte arms (#1, #5) compare the spelling too.
 rowkeys(){ python3 -c 'import re,sys; s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); a=s.find("<sigs"); b=s.find("</sigs>"); blk=s[a:b] if a>=0 and b>=0 else ""
 at=lambda t,k: (re.search(r"\s"+k+r"=\"([^\"]*)\"",t) or [None,""])[1]
-print("".join(at(t,"p")+":"+at(t,"l")+":"+at(t,"n")+"\n" for t in re.findall(r"<d [^>]*>",blk)),end="")' "$1"; }
+print("".join(at(t,"p")+":"+(at(t,"n") or at(t,"sym"))+"\n" for t in re.findall(r"<d [^>]*>|<t [^>]* r=\"[0-9]+\"[^>]*>",blk)),end="")' "$1"; }
 export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py set_prefix: the head round-robin h arms (lane hrr)
 setprefix(){ python3 "$RIPWIRE_TESTLIB/softbudget.py" setprefix "$1" "$2" "$3"; }
 
