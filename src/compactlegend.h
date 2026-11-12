@@ -1177,6 +1177,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "off", "off=N: computed byte offset; absent after an earlier field of unknown size", true, "f", MapHeaderRead::No, {}, "layout" },
     { "d", "d=: caveat detail: the first site this kind fired on, or a plain description", true, "caveat", MapHeaderRead::No, {}, "layout" },
     { "count", "count=N: member sites this one caveat row stands for (absent = 1)", true, "caveat", MapHeaderRead::No, {}, "layout" },
+    // LAYOUT-SIZED (2026-11-11): the four present-only facts a sized std::/base/bitfield answer carries.
+    { "why", "why=: why sized=0: unknown-type (no definition found), std-unlisted (std:: type outside the std_abi= table), template-type, template-param, compound-type, nested-unmodelled, nest-depth, recursive-type, nested-mirrors-disagree, macro-type-ambiguous, unknown-extent, attribute-aligned", true, "f", MapHeaderRead::No, {}, "layout" },
+    { "bits", "bits=N bit=B: a bitfield N bits wide from bit B of its 1-byte unit at off=", true, "f", MapHeaderRead::No, {}, "layout" },   // also defines bit=
+    { "base", "base=: the one base class, its subobject at offset 0; base_sz=N: the bytes it takes (0 = empty base)", true, "def", MapHeaderRead::No, {}, "layout" },   // also defines base_sz=
+    { "std_abi", "std_abi=: the C++ standard library (libc++|libstdc++) whose std:: member sizes were used: the one this binary was built against", false, "layout", MapHeaderRead::No, {}, "layout" },
     // merge-scout: src/mergescout.h writeScoutArm / root emit
     { "head", "head=: the HEAD commit, bare 9-hex sha (at= adds +dirty)", false, "merge-scout", MapHeaderRead::No, {}, "merge-scout" },
     // TRAIN 9 (L1 x t9-mergescout): the lane put both ok= postures and reason= in the FULL prose legend, which was
@@ -1316,6 +1321,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "tests", "tests=/untested=: tests to run (t total) / impacted symbols no test reaches (u total)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     // uses: src/verbs_navigate.h
     { "count", "count=N: unhedged use-site rows (a floor)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    // B31 USES-UNARMED-DISCLOSE (src/countfloor.h usesRolesUnindexed), present-only
+    { "unindexed_roles", "unindexed_roles=read,write,type: such sites go uncaptured for some or all users of this definition (its language, or the C users of a C-family header), so count= is a floor: every call, value, import and extends site, only the captured read, write and type ones; a zero is not a count of its uses (grep lists the text uses)", false, "uses", MapHeaderRead::No, {}, "uses" },
     // XF-ALIAS-HOP (src/aliashop.h AliasReach): the sites written through an alias of of=, present-only
     { "via", "<u via=\"alias\" alias=A>: the site is written as the alias A, whose written target reaches of= (the head or a template argument, up to 4 alias hops); never a call edge; listed after the direct rows, counted in count= when that A is the one in scope at the site (its file, or a namespace or class enclosing it)", true, "u", MapHeaderRead::No, "alias", "uses" },
     { "hedge", "<u hedge=\"name\">: the alias site is matched by name only (no reaching alias encloses it, or a namesake does); listed last, in no count=", true, "u", MapHeaderRead::No, {}, "uses" },

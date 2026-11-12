@@ -27,6 +27,13 @@
 
 #include "model.h"
 #include "darkflags.h"      // readWhole / wholeWordAt — the shared lexical helpers (no second copy)
+#include "crossref.h"       // definesNameAt / definitionShaped — whereis' lexical definition reading (lexicalDefHit)
+#include "lintrules.h"      // langOfPath — which clean files ride the C++ parse path (object-like #define not indexed)
+#include "langfacts.h"      // LangFacts::objectMacrosUnindexed
+
+#include <algorithm>
+#include <cstdint>
+#include <optional>
 
 #include <cstddef>
 #include <cstdio>
@@ -48,6 +55,14 @@ struct DegradedTextHit
     std::size_t fileIndex = 0;         // into ing.files, valid only when found
     char        errRatio[ 16 ] = {};   // "%.3f"; <= 1.000 by construction (errBytes <= fileBytes)
 };
+
+// THE one formatting of a degraded file's error ratio, for both hits below (each carries its own char[16]): two surfaces
+// and two scans can never print different digits for the same file.
+template<class Hit>
+inline void setErrRatio( Hit& hit, const FileHealth& h )
+{
+    rw::formatTo( hit.errRatio, sizeof( hit.errRatio ), "{:.3f}", double( h.errBytes ) / double( h.fileBytes ) );
+}
 
 inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_view name )
 {
@@ -80,9 +95,152 @@ inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_vie
                 DegradedTextHit hit;
                 hit.found     = true;
                 hit.fileIndex = fileIndex;
-                rw::formatTo( hit.errRatio, sizeof( hit.errRatio ), "{:.3f}", double( h.errBytes ) / double( h.fileBytes ) );
+                setErrRatio( hit, h );
                 return hit;
             }
+        }
+    }
+    return {};
+}
+
+// ── LEXICAL-DEF (B31: USES-UNARMED-DISCLOSE + TMUX-STRUCT-WINDOW) ─────────────────────────────────────────────────
+//
+// The textual hit above names the FIRST degraded file that mentions the name, in path order, and stops at 32 files.
+// That was the wrong file twice on tmux: `--defs=window` named alerts.c (a mention) while `struct window {` sits at
+// tmux.h:1441 (the 108th degraded file, past the cap), and `--defs=TMUX_SOCK` said only "did you mean 'tmuxproc'"
+// for a name tmux.h:95 `#define`s — object-like macros are deliberately not captured on the C++ path
+// (queries/cpp/tags.scm), so "not found" there is a floor the refusal never named. This scan answers the sharper
+// question: where do the BYTES define the name the index does not hold? Two readings, one walk:
+//   * a parse-DEGRADED file: a line definitionShaped() reads as a definition (whereis' own lexical label, so the two
+//     verbs name the same site);
+//   * a clean C++-path file (.h/.hpp/.cpp/.mm …, langOfPath Cpp/ObjC): only an object-like `#define NAME`, the one
+//     definition shape that path never indexes. A clean file's other lexical "definitions" stay unclaimed: its parse is
+//     the better evidence.
+// The first such line in path order wins. Bounded like the scan above (cold path: the command is already failing),
+// with a wider file cap because the def is the point; a budget hit returns capped (nothing found in what was read), and
+// both refusal renderers say the scan stopped, so a miss past the budget never reads as a finished scan.
+inline constexpr std::size_t kLexicalDefScanFiles = 4096;
+inline constexpr std::size_t kLexicalDefScanBytes = 16u << 20;
+
+struct LexicalDefHit
+{
+    bool          found       = false;
+    std::size_t   fileIndex   = 0;       // into ing.files, valid only when found
+    std::uint32_t line        = 0;       // 1-based
+    bool          objectMacro = false;   // `#define NAME` with no parameter list
+    bool          degraded    = false;   // the file's parse is degraded; errRatio is then set
+    bool          capped      = false;   // the scan stopped at its budget before reading every file (found is then false)
+    char          errRatio[ 16 ] = {};
+};
+
+// Does byte `at` of `hay` sit inside a `/* … */` opened on an earlier line? The last opener before it is newer than the last
+// closer. A `/*` inside a string or a `//` comment reads as an opener too: the scan then claims nothing, the safe direction.
+inline bool insideBlockCommentAt( std::string_view hay, std::size_t at ) noexcept
+{
+    const std::string_view before = hay.substr( 0, std::min( at, hay.size() ) );
+    const std::size_t      opened = before.rfind( "/*" );
+    const std::size_t      closed = before.rfind( "*/" );
+    return opened != std::string_view::npos && ( closed == std::string_view::npos || closed < opened );
+}
+
+// `#define NAME` with NO parameter list: the byte after the name is not '('.
+inline bool objectMacroAt( std::string_view line, std::size_t at, std::size_t nameLen ) noexcept
+{
+    return crossref::definesNameAt( line, at ) && ( at + nameLen >= line.size() || line[ at + nameLen ] != '(' );
+}
+
+// `struct NAME;` / `class NAME;`: a forward declaration reads definition-shaped to whereis' label but defines nothing.
+inline bool forwardDeclarationAt( std::string_view line, std::size_t at, std::size_t nameLen ) noexcept
+{
+    std::string_view rest = line.substr( std::min( at + nameLen, line.size() ) );
+    while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) )
+    {
+        rest.remove_prefix( 1 );
+    }
+    return rest.starts_with( ';' );
+}
+
+// The first line of `hay` whose first whole-word occurrence of `name` satisfies `lineMatches( line, at )`; 0 when none.
+template<class LineMatches>
+inline std::uint32_t firstLineWhere( std::string_view hay, std::string_view name, LineMatches&& lineMatches )
+{
+    std::uint32_t lineNo  = 1;
+    std::size_t   counted = 0;
+    for( std::size_t at = hay.find( name ); at != std::string_view::npos; )
+    {
+        lineNo += std::uint32_t( std::count( hay.begin() + std::ptrdiff_t( counted ), hay.begin() + std::ptrdiff_t( at ), '\n' ) );
+        counted                     = at;
+        const std::size_t nl        = hay.rfind( '\n', at );
+        const std::size_t lineStart = nl == std::string_view::npos ? 0 : nl + 1;
+        std::size_t       lineEnd   = hay.find( '\n', at );
+        lineEnd                     = lineEnd == std::string_view::npos ? hay.size() : lineEnd;
+        const std::string_view line = hay.substr( lineStart, lineEnd - lineStart );
+        for( std::size_t inLine = line.find( name ); inLine != std::string_view::npos; inLine = line.find( name, inLine + 1 ) )
+        {
+            if( darkflags::wholeWordAt( line, inLine, name.size() ) )
+            {
+                if( lineMatches( line, inLine ) )
+                {
+                    return lineNo;
+                }
+                break;   // one reading per line, whereis' rule: the line's first whole-word occurrence is its evidence
+            }
+        }
+        at = lineEnd >= hay.size() ? std::string_view::npos : hay.find( name, lineEnd + 1 );
+    }
+    return 0;
+}
+
+inline LexicalDefHit lexicalDefHit( const IngestResult& ing, std::string_view name )
+{
+    if( name.empty() || name.size() > 256 )
+    {
+        return {};
+    }
+    std::size_t scannedFiles = 0, scannedBytes = 0;
+    for( std::size_t fileIndex = 0; fileIndex < ing.files.size(); ++fileIndex )
+    {
+        const bool degraded = fileParseDegraded( ing, fileIndex );
+        const bool cppPath  = langFacts( langOfPath( ing.files[ fileIndex ] ) ).objectMacrosUnindexed;   // C indexes its macros
+        if( !degraded && !cppPath )
+        {
+            continue;
+        }
+        const std::optional<std::string> bytes = darkflags::readWhole( diskPath( ing, std::uint32_t( fileIndex ) ) );
+        if( !bytes )
+        {
+            continue;
+        }
+        if( ++scannedFiles > kLexicalDefScanFiles || ( scannedBytes += bytes->size() ) > kLexicalDefScanBytes )
+        {
+            LexicalDefHit capped;   // budget: what was read held no definition; the refusal says the scan stopped
+            capped.capped = true;
+            return capped;
+        }
+        bool                macro = false;
+        const std::uint32_t line  = firstLineWhere( *bytes, name, [ & ]( std::string_view text, std::size_t at )
+        {
+            if( insideBlockCommentAt( *bytes, std::size_t( text.data() - bytes->data() ) ) )
+            {
+                return false;   // a commented-out `#define` (or definition) defines nothing
+            }
+            macro = cppPath && objectMacroAt( text, at, name.size() );
+            return macro || ( degraded && crossref::definitionShaped( text, name, at ) && !forwardDeclarationAt( text, at, name.size() ) );
+        } );
+        if( line != 0 )
+        {
+            LexicalDefHit hit;
+            hit.found       = true;
+            hit.fileIndex   = fileIndex;
+            hit.line        = line;
+            hit.objectMacro = macro;
+            hit.degraded    = degraded;
+            if( degraded )
+            {
+                const FileHealth& h = ing.fileHealth[ fileIndex ];
+                setErrRatio( hit, h );
+            }
+            return hit;
         }
     }
     return {};

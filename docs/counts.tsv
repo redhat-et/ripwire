@@ -5,14 +5,14 @@
 taken	2026-11-12
 gates.scripts	802
 limits.boundary	46
-limits.caps	420
-limits.constants	429
+limits.caps	421
+limits.constants	430
 limits.disclosing	276
 limits.files	144
 limits.indexing	50
 limits.output	46
 limits.parameters	9
-limits.silent	144
+limits.silent	145
 tuning.constexpr_live	12
 tuning.declarations	305
 tuning.duplicated	`kRowCap`
