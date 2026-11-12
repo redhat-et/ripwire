@@ -170,6 +170,21 @@ for a in idiom demoted idiom_groups demoted_groups; do
     esac
 done
 
+# (M) the DEFAULT (compact) legend's demoted=1 reading on a demoted one-statement pair: that pair may share its
+# parameter names (the identifier test leaves them out), so a reading that says only "no shared identifier"
+# states something false about the very row it explains (CodeRabbit #629). Premise: the row is demoted.
+CL="$( "$BIN" "$CORPUS/onestmt_demote" --clones --no-cache 2>/dev/null )"
+case "$CL" in
+    *'idiom="one-statement" demoted="1"'*)
+        DR="$( printf '%s' "$CL" | sed 's/<clones .*//' | grep -oE 'group demoted=1: [^;]*' | head -1 )"
+        case "$DR" in
+            '') no "compact legend: a demoted one-statement row, but no 'group demoted=1:' reading";;
+            *parameter*) ok "compact legend: demoted=1 qualifies the one-statement identifier test ($DR)";;
+            *) no "compact legend: demoted=1 reads '$DR' without the one-statement parameter exclusion";;
+        esac;;
+    *) no "compact legend premise: onestmt_demote printed no demoted one-statement row";;
+esac
+
 # ── (H)/(I) the quality-delta half ────────────────────────────────────────────────────────────────────
 # A group is only judged preexisting-worse when at least one member EXISTED at the baseline, so each repo
 # commits one member and leaves the twin in the working tree. Without that the row is origin="new-symbol",
