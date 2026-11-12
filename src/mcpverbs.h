@@ -4760,12 +4760,13 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     // The strict-equality test itself used to be MCP-only; the CLI carried a reachable-ancestor carve-out that
     // made it honor sidecars this arm dropped, which is the divergence R3 revoked.
     rw::quality::BaselineSelection baseSel = rw::quality::selectBaseline( root, sidecar, /*removeStaleFile=*/false );
+    rw::quality::TreePasses        passes;   // QD-IDENTITY-ONCE: the CLI's sharing, over this `ing` (verbs_quality.h DeltaBasis::passes)
     if( !baseSel.isSidecarHonored() )
     {
         // #228 part 1 — the IDENTITY BASIS, through the SAME seam the CLI takes (quality::computeHeadBasis).
         // This verb and the CLI must answer one tree one way in the same second; a per-caller copy of the
         // basis is precisely how they drifted apart before (the R3 divergence this arm's comment records).
-        rw::quality::HeadBasis basis = rw::quality::computeHeadBasis( root, ing, g, root );
+        rw::quality::HeadBasis basis = rw::quality::computeHeadBasis( root, ing, g, root, rw::kDefaultMaxFileBytes, {}, &passes );
         if( !basis.ok )
         {
             oc.ok     = false;
@@ -4785,7 +4786,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
 
     rw::quality::HistoryUnread historyUnread;
     oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root, {}, rw::kDefaultMaxFileBytes, &oc.registerMacroExcluded, &oc.apiNewSurface,
-                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread );
+                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread, &passes );
     historyUnread.renames = heal.renames.refusedPartial && baseSel.marker == std::string_view( "sidecar" );   // the CLI's own rule
     oc.historyJson = rw::quality::historyUnreadDisclosure( historyUnread ).second;
 
@@ -4801,7 +4802,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     // pins the two surfaces to the same JSON key set).
     if( !acks.empty() )
     {
-        oc.staleAcks = rw::quality::computeStaleAcks( acks, rw::quality::computeSnapshot( ing, g, root ) );
+        oc.staleAcks = rw::quality::computeStaleAcks( acks, rw::quality::computeSnapshot( ing, g, root, nullptr, {}, &passes ) );
         rw::quality::stampStaleAckIdentity( oc.staleAcks, ing, root );   // M21(a): the CLI twin's sym=/p=
     }
 
