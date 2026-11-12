@@ -2462,7 +2462,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // for the attribute that describes the head — the same exemption mcpConfidenceExemptBytes already makes.
     // r2-LO: a completeness attribute this bundle carries and its own legend never spells (at=, ccx=, next=) gets its compact
     // reading — BEFORE pricing, so est_tokens= prices the bytes served, and after the sigs budget, so the rows are unchanged.
-    closeRosterGaps( out, "for" );
+    closeRosterGaps( out );
     mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
     return McpForAssembly{ std::move( out ), mcpSigsCut, std::move( mcpDocPick ) };
 }

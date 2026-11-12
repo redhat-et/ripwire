@@ -1797,6 +1797,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "h", "enc h=: the edit handle, sym#<identity>@<file content hash>; stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; their rule rows say applicable=0 (count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
     { "unavailable", "unavailable=/unavailable_why=: families that could not be measured here, and why; s unavail=: those for that row (absent from fired= is then no evidence)", false, "ensemble", MapHeaderRead::No, {}, "ensemble" },
+    // merge-scout (mergescout.h writeSymRows): the <sym p= id=/> rows an arm's changed symbols print; seen only when an arm
+    // changed code (the working-tree arm on a dirty tree), so the floor could not pin it stably.
+    { "p", "sym p= id=: a changed symbol's file and identity (id= is the file itself on a file-level row)", true, "sym", MapHeaderRead::No, {}, "merge-scout" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
@@ -2286,11 +2289,12 @@ inline bool commentsSpellAttr( std::string_view doc, std::string_view attr )
 // root. The class it closes, generally: a completeness attribute riding an answer undefined — found on MCP `for` as
 // at= (stamped on the root, defined nowhere), ccx= (cx= alone was read) and next= (on the r=1 row). On a compact answer
 // it is a no-op by construction: compactLegendText reads every present term. Returns whether anything was added.
-// LEGEND-G-BLIND (2026-11-11), two corrections. `key` is the answer's schema key: a key-qualified reading belongs to that verb
-// alone, and with no key the MCP `for` bundle was handed from-trace's "task=: the trace source this bundle maps". And "spelled"
-// means spelled in the LEGEND the reader meets first (the comments before the first row), not anywhere in the answer: a
-// clause inside a later block (the body slot's via="name" note) does not define a <c via=> row the head legend serves.
-inline bool closeRosterGaps( std::string& doc, std::string_view key )
+// LEGEND-G-BLIND (2026-11-11), two corrections. The readings are the `for` key's (kRosterClosureKey): a key-qualified reading
+// belongs to that verb alone, and with no key the MCP `for` bundle was handed from-trace's "task=: the trace source this bundle
+// maps". And "spelled" means spelled in the LEGEND the reader meets first (the comments before the first row), not anywhere in
+// the answer: a clause inside a later block (the body slot's via="name" note) does not define a <c via=> row the head legend serves.
+inline constexpr std::string_view kRosterClosureKey = "for";   // the one native-legend answer this closes (mcpverbs.h)
+inline bool closeRosterGaps( std::string& doc )
 {
     const CompactRootInfo root = findCompactRoot( doc );
     if( root.tag.empty() )
@@ -2311,7 +2315,7 @@ inline bool closeRosterGaps( std::string& doc, std::string_view key )
     }
     const std::string_view legend = view.substr( 0, at );
     std::string add;
-    for( const std::uint16_t i : compactPresentTerms( compactDocHead( view, root ), view, key ) )
+    for( const std::uint16_t i : compactPresentTerms( compactDocHead( view, root ), view, kRosterClosureKey ) )
     {
         // compactPresentTerms returns a JOINT index over both reading tables, so it is resolved by compactReading and
         // never by subscripting the first table — which is only 92 long and would be read past for every key-qualified
