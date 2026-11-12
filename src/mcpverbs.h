@@ -51,6 +51,7 @@
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
 #include "foronesidereach.h" // ONE-SIDE-REACH: the CLI twin's answer edit, one renderer
 #include "forsiblingdemote.h" // SIBLING-DEMOTE: the CLI twin's answer edit, one renderer
+#include "fordemoteall.h" // DEMOTE-ALL-DIALECTS: the demote rules under budget_tokens, before the rows settle
 #include "fordecltwin.h" // demoteAndPointRowsInto: SIBLING-DEMOTE then DECL-TWIN, the CLI twin's answer edits, one renderer
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
@@ -2142,12 +2143,67 @@ struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by ref
 // served from the rows at the target cut, and the rows past the cut fill what the sections served before the tail (<hdr> rows,
 // <lego>, <compose>, <routes>: `sectionsBytes`) leave of T — never below the cut. The tail rides on top on this twin, as it always
 // did. Re-rendered only when that narrows the rows; the first render's redaction count is replaced, never added to.
-template< class Render >
-inline void mcpForSoftRefill( const McpForAssemblyInputs& in, const Render& renderSigs, std::string& sigsStr, rw::SigsCutReport& cut,
-                              const rw::SigsCutContinuation* next, std::size_t sectionsBytes,
-                              const std::optional<RedactCounts>& before, const std::optional<RedactCounts>& after )
+// The rows rendered again at row budget `rowDrop` (round C's refill and DEMOTE-ALL-DIALECTS'): the latest render's redaction count
+// (`redactBefore`..`redactAfter`) comes back out first, and the pair then spans this render. A failed render (no bytes) keeps the
+// render before it whole — the block, its cut report, the rows it showed, its dropped/capped readings and the redaction tally — as
+// the CLI and --json twins' renders do (CodeRabbit 4543325946). false: it failed.
+struct McpRowsState   // what one <sigs> render writes: the block and the readings renderSigs leaves beside it (assembleMcpFor's locals)
 {
-    if( in.budgetTokens == 0 || cut.pastTarget == 0 )
+    std::string&                 sigs;
+    rw::SigsCutReport&           cut;
+    std::size_t&                 droppedPositive;
+    bool&                        capped;
+    std::vector<rw::NodeId>&     shown;
+    std::optional<RedactCounts>& redactBefore;
+    std::optional<RedactCounts>& redactAfter;
+};
+template< class Render >
+inline bool mcpForRowsAt( const McpForAssemblyInputs& in, const Render& renderSigs, const McpRowsState& st, const rw::SigsCutContinuation* next,
+                          std::size_t rowDrop )
+{
+    const rw::SigsCutReport                 firstCut     = st.cut;
+    const std::size_t                       firstDropped = st.droppedPositive;
+    const bool                              firstCapped  = st.capped;
+    const std::vector<rw::NodeId>           firstShown   = st.shown;
+    const std::optional<RedactCounts>       firstBefore  = st.redactBefore;
+    const std::optional<RedactCounts>       firstAfter   = st.redactAfter;
+    const std::optional<RedactCounts>       redactNow    = in.redact != nullptr ? std::optional<RedactCounts>( *in.redact ) : std::nullopt;
+    redactTakeBack( in.redact, st.redactBefore, st.redactAfter );
+    st.redactBefore             = in.redact != nullptr ? std::optional<RedactCounts>( *in.redact ) : std::nullopt;
+    st.cut                      = rw::SigsCutReport {};
+    st.cut.continuationRequest  = next;
+    st.cut.rowDropBudgetBytes   = rowDrop;
+    std::string refill          = captureXml( renderSigs );   // assembleMcpFor's own render seam (its renderToString)
+    // RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL=1 (gates only: fordemoteallcheck (xf)): every render made here fails the way a lost memstream
+    // write fails it, after the renderer ran, so its readings are the failed render's
+    const char* const failSeam  = std::getenv( "RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL" );
+    if( failSeam != nullptr && std::string_view( failSeam ) == "1" )
+    {
+        refill.clear();
+    }
+    if( !refill.empty() )
+    {
+        st.sigs        = std::move( refill );
+        st.redactAfter = in.redact != nullptr ? std::optional<RedactCounts>( *in.redact ) : std::nullopt;
+        return true;
+    }
+    st.cut             = firstCut;
+    st.droppedPositive = firstDropped;
+    st.capped          = firstCapped;
+    st.shown           = firstShown;
+    st.redactBefore    = firstBefore;
+    st.redactAfter     = firstAfter;
+    if( redactNow )
+    {
+        *in.redact = *redactNow;
+    }
+    return false;
+}
+template< class Render >
+inline void mcpForSoftRefill( const McpForAssemblyInputs& in, const Render& renderSigs, const McpRowsState& st, const rw::SigsCutContinuation* next,
+                              std::size_t sectionsBytes )
+{
+    if( in.budgetTokens == 0 || st.cut.pastTarget == 0 )
     {
         return;
     }
@@ -2156,11 +2212,7 @@ inline void mcpForSoftRefill( const McpForAssemblyInputs& in, const Render& rend
     {
         return;
     }
-    redactTakeBack( in.redact, before, after );
-    cut                     = rw::SigsCutReport {};
-    cut.continuationRequest = next;
-    cut.rowDropBudgetBytes  = rowDrop;
-    sigsStr                 = captureXml( renderSigs );   // assembleMcpFor's own render seam (its renderToString)
+    (void)mcpForRowsAt( in, renderSigs, st, next, rowDrop );   // a failed render keeps the first one whole
 }
 
 // round C (RESERVE SECTIONS FIRST, the CLI twin's rule): the --sections= posture the stub plan reads — under budget_tokens the two
@@ -2225,7 +2277,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail's rank rows exclude these files
     // round C: the render is named so a soft target can narrow its rows past the cut once the sections are served (below); the
     // redaction tally around it is snapshotted so a second render replaces this one's count instead of adding to it
-    const std::optional<RedactCounts> redactBeforeSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+    std::optional<RedactCounts> redactBeforeSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
     const auto renderSigs = [ & ]( std::FILE* m2 )
     {
         packSignatures( m2, ing, lensRank, forTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
@@ -2245,7 +2297,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                                                               //   spelling; SIZE-3a: repeated text folded to same_as= (mcpattrparitycheck)
     };
     std::string sigsStr = renderToString( renderSigs );
-    const std::optional<RedactCounts> redactAfterSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+    std::optional<RedactCounts> redactAfterSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
     // §P3 × §P4 (parity with the CLI --for): narrow the lego block to the files the budget-trimmed sigs
     // actually kept and re-render (a byte-subset of what the budget already charged for) — reads sigsStr
     // directly now rather than re-slicing it back out of the flushed memstream buffer.
@@ -2331,9 +2383,24 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                                                      /*viaLegendInHead=*/false, /*compress=*/false, &in.g.outProv, /*splitLegendInHead=*/false, &in.g.outAnchorMiss },
                                      in.slotOwner, share );
     }
-    mcpForSoftRefill( in, renderSigs, sigsStr, mcpSigsCut, &mcpSigsNext,
-                      mcpHdrXml.size() + legoStr.size() + composeStr.size() + routeStr.size() + mcpSlot.xml.size(),
-                      redactBeforeSigs, redactAfterSigs );
+    const McpRowsState mcpRows { sigsStr, mcpSigsCut, mcpDroppedPositive, mcpSigsCapped, mcpShownIds, redactBeforeSigs, redactAfterSigs };
+    mcpForSoftRefill( in, renderSigs, mcpRows, &mcpSigsNext,
+                      mcpHdrXml.size() + legoStr.size() + composeStr.size() + routeStr.size() + mcpSlot.xml.size() );
+    // DEMOTE-ALL-DIALECTS (fordemoteall.h, the CLI twin's rule): under budget_tokens SIBLING-DEMOTE and DECL-TWIN run on <sigs>, read
+    // with the <hdr> rows before it and the body slot after it, before the rows are settled: the bytes they free buy rows past the
+    // cut. The no-budget answer is shaped after <syms> (insertFileSyms).
+    if( budgetTokens > 0 && demoteRulesOn() )
+    {
+        const std::string after = mcpSlot.xml;
+        const auto        point = [ & ] { return demoteAndPointBlock( ing, in.g, task, mcpHdrXml, sigsStr, after ); };
+        const auto        renderAt = [ & ]( std::size_t rowDrop ) { return mcpForRowsAt( in, renderSigs, mcpRows, &mcpSigsNext, rowDrop ); };
+        std::string pointed = refillRowsForDemote( mcpSigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsStr; },
+                                                   [ & ] { return mcpSigsCut.rowDropCut; }, [ & ] { return mcpShownIds.size(); }, renderAt, point );
+        if( !pointed.empty() )
+        {
+            sigsStr = std::move( pointed );
+        }
+    }
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
     // spelling (no bracket note), same economy and same reasoning as the CLI twin — byte-consistent between
@@ -2485,7 +2552,8 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 // ONE-SIDE-REACH (src/foronesidereach.h): then the CLI twin's demote pass over the answer and the block, re-priced on `price` (the root's
 // inputs, null: no re-price); held under budget_tokens. R-DEDUP's <syms> cut (forfilesyms.h tailRowsWithoutPicks) lands first, the
 // demote pass reads the cut answer; SIBLING-DEMOTE (src/forsiblingdemote.h) then reads that one, DECL-TWIN (src/fordecltwin.h) reads
-// its result, and the root is re-priced once on the final bytes.
+// its result, and the root is re-priced once on the final bytes. Under budget_tokens those two already ran on <sigs> before its rows
+// settled (DEMOTE-ALL-DIALECTS, assembleMcpFor), so they are held here.
 inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
 {
     if( out.ends_with( "</ctx>" ) )
@@ -2497,7 +2565,7 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
         const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
         OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
         std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
-        demoteAndPointRowsInto( ing, g, args.task, args.answer, answer, args.held ); // SIBLING-DEMOTE, then DECL-TWIN
+        demoteAndPointRowsInto( ing, g, args.task, args.answer, answer, args.held, DemoteRegime::Default ); // SIBLING-DEMOTE, then DECL-TWIN
         if( !answer.empty() )
         {
             if( price != nullptr )

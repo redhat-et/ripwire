@@ -35,10 +35,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 416 | 142 | 274 | **142** |
+| 420 | 144 | 276 | **144** |
 
 Plus 9 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 416 + 9 is the 425 constants this generator parses out of `src/`.
+are not counted as caps, and 420 + 9 is the 429 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 416 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 274 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 420 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 278 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -536,12 +536,22 @@ Discloses: `path_from_capped`
 | `kPathFromReachMaxNodes` | `4096` | — | runaway guard on A's forward walk; past it every caller of A stays where it ranked |
 | `kPathGapSideRows` | `10` | — | rows per side of a <path_gap>; the rest is count= and next= |
 
+### `src/forimportspec.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kImportSpecDepth` | `12` | — | statements one walk follows from the entry |
+| `kImportSpecMaxStates` | `256` | — | (file, name) states one walk visits; past it the walk says capped="1" |
+
 ### `src/forliteral.h`
 
 Discloses: `capped`, `lit_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kForBareFlagMaxSites` | `8` | — | WHOLE-TOKEN: a bare kebab token with more source sites is prose, not one option |
 | `kForFlagDefaultMaxBytes` | `80` | — | def= text |
 | `kForFlagOwnerMaxLines` | `8` | — | a constant write outside any function names the owner type within this many lines above it |
 | `kForFlagWriteHits` | `4096` | — | the field's sites read for a constant write (past it: floor=1) |
@@ -562,6 +572,7 @@ Discloses: `capped`, `lit_capped`
 | `kForTableReaderFiles` | `16` | — | REG-READER: caller files read for them, by path (past it: readers= is a floor) |
 | `kForTableReaderRows` | `2` | — | REG-READER: <lr> reads of a subscript row's table listed (readers= counts all) |
 | `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
+| `kForVerbatimMaxSites` | `3` | — | MSG-VERBATIM: a cue-less whole text with more source sites is no single message |
 
 ### `src/formembers.h`
 
@@ -598,6 +609,14 @@ Discloses: `capped`
 | `kForPageRowsDefault` | `40` | OUTPUT | `--for --limit=N` with no N is never accepted (the flag refuses 0); |
 | `kForPageUnionSymbolCap` | `8` | INDEXING | symbols per file whose term masks join that file's union |
 | `kForThinMinFiles` | `3` | — | a ranked head over fewer files than this ⇒ thin |
+
+### `src/forreadercallers.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kReaderCallerRows` | `12` | — | <lc> rows per <lit> |
 
 ### `src/forreexport.h`
 

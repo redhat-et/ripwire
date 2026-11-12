@@ -160,7 +160,7 @@ check( ptrs and all( ( s, rk ) in pl for p, s, rk in ptrs ), "(p) each of the %d
 dem = [ pl[( s, rk )] for p, s, rk in ptrs if ( s, rk ) in pl ]
 check( dem and all( r["demote"] == "demoted" for r in dem ), "(p) the %d SIBLING-DEMOTE pointers read demote=demoted" % len( dem ) )
 # (k) verdicts
-VERD = { "not_sigs", "top_rank", "K6_noted", "K1_mem", "K7_slot", "no_same_file", "K2_hop_callee", "K3_owner_near", "K4_call_path", "K5_same_as", "demoted" }
+VERD = { "not_sigs", "top_rank", "K6_noted", "K1_mem", "K7_slot", "no_same_file", "K2_hop_callee", "K3_owner_near", "K4_call_path", "K5_same_as", "K8_term_hit", "demoted" }
 drows = [ r for r in rows if r["printed"] == "row" and r["ans_tag"] == "d" and r["section"] == "sigs" ]
 check( drows and all( r["demote"] in VERD for r in drows ), "(k) all %d <sigs> <d> lines carry a verdict from the closed set" % len( drows ) )
 top = [ r for r in drows if 0 < int( r["d_pos"] ) <= 10 ]

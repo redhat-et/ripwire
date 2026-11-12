@@ -433,6 +433,7 @@ for _g in \
     defoverdeclcheck \
     defslookupcheck \
     degradedhintcheck \
+    demoterefillcheck \
     dependencypincheck \
     deplangscheck \
     depsprecisecheck \
@@ -457,6 +458,7 @@ for _g in \
     droppedpositivecheck \
     duprowcheck \
     dynmapsimdcheck \
+    edgemarkcheck \
     editcheckanswercheck \
     editcheckcheck \
     editcheckdeclcheck \
@@ -531,6 +533,7 @@ for _g in \
     forctorhopcheck \
     fordeclrowcheck \
     fordecltwincheck \
+    fordemoteallcheck \
     fordisclosurecheck \
     fordispatchhopcheck \
     fordocbodycheck \
@@ -549,6 +552,7 @@ for _g in \
     fornotesjsoncheck \
     foronesidecheck \
     forrankordercheck \
+    forreadercallerscheck \
     forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
@@ -602,6 +606,7 @@ for _g in \
     gvassemblycheck \
     handlerrulecheck \
     hasacheck \
+    hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
     headsnapcachecheck \
@@ -629,6 +634,7 @@ for _g in \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \
+    importspellingcheck \
     includeanglecheck \
     includeprecisecheck \
     indexoutcheck \
@@ -736,6 +742,7 @@ for _g in \
     mdembedcheck \
     mdsectioncheck \
     memguardcheck \
+    memstatscheck \
     mentioncapcheck \
     mentioncheck \
     mentionsverbcheck \

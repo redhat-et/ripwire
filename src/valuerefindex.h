@@ -96,13 +96,13 @@ public:
             }
         }
         HashMap<std::string, std::uint32_t> first;    // a directory as the files spell it → its first file
-        HashMap<std::uint32_t, char>        goDir;    // CR 4396503857: first files of the directories already in m_dirs (the first file may be no .go file)
+        HashSet<std::uint32_t>              goDir;    // CR 4396503857: first files of the directories already in m_dirs (the first file may be no .go file)
         m_dirOfFile.resize( ing.files.size() );
         for( std::uint32_t f = 0; f < ing.files.size(); ++f )
         {
             const auto it = first.try_emplace( std::string( includerDir( ing.files[f] ) ), f ).first;
             m_dirOfFile[f] = it->second;
-            if( ing.files[f].ends_with( ".go" ) && goDir.try_emplace( it->second, char( 1 ) ).second )
+            if( ing.files[f].ends_with( ".go" ) && goDir.insert( it->second ).second )
             {
                 m_dirs.emplace_back( std::string( includerDir( rootRelPath( ing, f ) ) ), it->second );
             }
@@ -1483,10 +1483,10 @@ private:
     // fix1 (RSS): what a narrow index keeps (narrowFor).
     struct KeepSets
     {
-        HashMap<std::uint32_t, char> values;       // kept Value reference indices
+        HashSet<std::uint32_t>       values;       // kept Value reference indices
         HashMap<std::string, char>   names;        // the names resolveName looks up: kept values' callees and their bare callees
         HashMap<std::string, char>   containers;   // "fileId#container" of the kept values
-        HashMap<NodeId, char>        paramOwners;  // a kept parameter default's function
+        HashSet<NodeId>              paramOwners;  // a kept parameter default's function
         bool keepsThrough( const IngestResult& ing, const Reference& t ) const
         {
             if( scopeOf( t ) == 'p' )
@@ -1528,7 +1528,7 @@ private:
             {
                 continue;
             }
-            k.values.try_emplace( i, char( 1 ) );
+            k.values.insert( i );
             k.names.try_emplace( r.calleeName, char( 1 ) );
             if( sc == 'a' )
             {
@@ -1536,7 +1536,7 @@ private:
             }
             else if( sc == 'p' )
             {
-                k.paramOwners.try_emplace( r.fromSymbol, char( 1 ) );
+                k.paramOwners.insert( r.fromSymbol );
             }
             if( !r.recvVar.empty() )
             {

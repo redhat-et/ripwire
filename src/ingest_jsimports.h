@@ -199,7 +199,7 @@ inline std::uint32_t jsModuleBindingCount( TSNode root, std::string_view name, s
 // leaves the call to the unchanged ladder. Each recorded declarator's start byte lands in `aliasDecls`, so the shadow
 // walk below does not read the alias as a declaration hiding itself.
 template <class Emit>
-inline void captureJsModuleAliases( TSNode stmt, std::string_view src, HashMap<std::uint32_t, char>& aliasDecls, Emit&& emit )
+inline void captureJsModuleAliases( TSNode stmt, std::string_view src, HashSet<std::uint32_t>& aliasDecls, Emit&& emit )
 {
     ChildCursor cursor( stmt );
     std::vector<TSNode> declarators;
@@ -253,7 +253,7 @@ inline void captureJsModuleAliases( TSNode stmt, std::string_view src, HashMap<s
                 }
             }
         }
-        if( any ) { aliasDecls.try_emplace( ts_node_start_byte( declarator ), 1 ); }
+        if( any ) { aliasDecls.insert( ts_node_start_byte( declarator ) ); }
     }
 }
 
@@ -580,7 +580,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
     collectChildren( root, cursor.cur, children );
     HashMap<std::string, char> imported;
     imported.reserve( children.size() );
-    HashMap<std::uint32_t, char> aliasDecls;   // FE-A: start bytes of the declarators that ARE a ModuleAlias — never their own shadow
+    HashSet<std::uint32_t>       aliasDecls;   // FE-A: start bytes of the declarators that ARE a ModuleAlias — never their own shadow
     const auto record = [ & ]( TSNode node, LocalBindKind kind, std::string name, TSNode scope )
     {
         RawBind bind;

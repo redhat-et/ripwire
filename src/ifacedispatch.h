@@ -521,8 +521,8 @@ private:
             return hit->second;
         }
         std::vector<Row>        rows;
-        HashMap<NodeId, char>   seen;
-        seen.emplace( type, char( 1 ) );
+        HashSet<NodeId>         seen;
+        seen.insert( type );
         const auto expand = [ & ]( NodeId parent, bool provenSoFar )
         {
             if( parent >= implementors_.size() )
@@ -537,7 +537,7 @@ private:
                     continue;
                 }
                 const NodeId child = implementors_[ parent ][ k ];
-                if( seen.emplace( child, char( 1 ) ).second )
+                if( seen.insert( child ).second )
                 {
                     rows.push_back( Row{ child, provenSoFar && b == BaseBound::Proven } );
                 }

@@ -106,8 +106,15 @@ check_arm clean C1
 
 # ── D: determinism, clean tree ──────────────────────────────────────────────────────────────────────────────
 run_qd clean2
-if cmp -s "$TMP/clean.out" "$TMP/clean2.out" && cmp -s "$TMP/clean.err" "$TMP/clean2.err" && cmp -s "$TMP/clean.rc" "$TMP/clean2.rc"; then
-    ok "D: two clean-tree calls byte-identical (stdout + stderr + rc)"
+# RIPWIRE_STATS=1 also prints the MEM-STATS `[mem] phase=… cur_mib=… peak_mib=…` lines (#617). Those are a live heap reading: they
+# differ between two identical calls by design, and the phase list depends on whether a cache save ran. So D compares stderr
+# WITHOUT them. Premise: both calls must print at least one non-[mem] stats line, or the stderr compare would be vacuous.
+nomem(){ grep -v '^\[mem\] ' "$TMP/$1.err" > "$TMP/$1.err.nomem" || true; }
+nomem clean; nomem clean2
+if [ ! -s "$TMP/clean.err.nomem" ] || [ ! -s "$TMP/clean2.err.nomem" ]; then
+    no "D: premise — a clean-tree call printed no stats line outside [mem] (the stderr compare would be vacuous)"
+elif cmp -s "$TMP/clean.out" "$TMP/clean2.out" && cmp -s "$TMP/clean.err.nomem" "$TMP/clean2.err.nomem" && cmp -s "$TMP/clean.rc" "$TMP/clean2.rc"; then
+    ok "D: two clean-tree calls byte-identical (stdout + stderr outside [mem] + rc)"
 else
     no "D: two clean-tree calls differ"
 fi

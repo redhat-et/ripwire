@@ -117,6 +117,7 @@
 #include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis / lineBreaksOf
 #include "taskroute.h"       // taskroute::identifierRunOf
 #include "siblift.h"         // siblift_detail::dirOf — a path's directory
+#include "forreadercallers.h"   // renderReaderCallers — READER-CALLERS: the callers of the shown rows' reader functions
 #include "subjectanchor.h"   // subject_detail::sourceClassDef / isToolOrVendoredPath — the answer's source-class anchors
 
 #include <algorithm>
@@ -290,7 +291,11 @@ struct ForLiteral
     std::string_view shape;   // "quoted" | "const" | "dotted" | "message" | "flag"
     bool             frag = false;   // shape=message: `text` is a fragment of the task's words, the whole text has no site
     std::size_t      tryNo = 1;      // the task's Nth literal (earlier ones were scanned and have no source site): try="N" when > 1
+    bool             bare = false;   // WHOLE-TOKEN: shape=flag from a bare kebab token beside an option/flag/setting word (1..kForBareFlagMaxSites sites)
+    bool             verbatim = false;   // MSG-VERBATIM: shape=message from a cue-less task's whole text (1..kForVerbatimMaxSites confirmed string sites, no fragments)
 };
+inline constexpr std::size_t kForBareFlagMaxSites = 8;   // WHOLE-TOKEN: a bare kebab token with more source sites is prose, not one option
+inline constexpr std::size_t kForVerbatimMaxSites = 3;   // MSG-VERBATIM: a cue-less whole text with more source sites is no single message
 
 namespace lit_detail
 {
@@ -411,6 +416,22 @@ inline bool isSettingCue( std::string_view w )
 inline bool isMessageCue( std::string_view w )
 {
     return wordIsOneOf( w, kForLiteralMessageCues );
+}
+
+// MSG-VERBATIM (ORCH reports/s0-batch-1111.md §4): a task of kForVerbatimMinWords words or more with no message cue word may still BE a message
+// (`Nest can't resolve dependencies of the`): its whole text is tried once, and only a verbatim string site says so
+inline constexpr std::size_t kForVerbatimMinWords = 4;
+inline bool isVerbatimMessageTask( std::span<const std::string_view> words )
+{
+    return words.size() >= kForVerbatimMinWords && std::none_of( words.begin(), words.end(), []( std::string_view w ) { return isMessageCue( w ); } );
+}
+
+// both ends trimmed of every whitespace byte, newlines included (a default may start on the line after the name)
+inline std::string_view trimAllWs( std::string_view v ) noexcept
+{
+    constexpr std::string_view kBlanks = " \t\r\n\f\v";
+    const std::size_t          first   = v.find_first_not_of( kBlanks );
+    return first == std::string_view::npos ? std::string_view() : v.substr( first, v.find_last_not_of( kBlanks ) - first + 1 );
 }
 
 // a key's last segment that says the dotted word is a file or a host: an extension of kLintExtRows (every indexed language), of
@@ -727,6 +748,39 @@ inline std::vector<std::string> flagNamesOf( std::string_view task )
     return out;
 }
 
+// WHOLE-TOKEN (ORCH reports/ideas-verify-fable-1111.md): a BARE kebab token (`escape-time option`, no `--`) right before or after an
+// option/flag/setting word, the same bytes flagNamesOf keeps (lower-case letters, digits, an inner hyphen), backticks and quotes stripped.
+// Each once, never one flagNamesOf already read dashed. Its <lit shape="flag"> prints only with 1..kForBareFlagMaxSites source sites.
+inline std::vector<std::string> bareFlagNamesOf( std::string_view task )
+{
+    std::vector<std::string>            out;
+    const std::vector<std::string>      dashed = flagNamesOf( task );
+    const std::vector<std::string_view> words  = lit_detail::taskWords( task );
+    static constexpr std::array<std::string_view, 6> kCues{ "option", "options", "flag", "flags", "setting", "settings" };
+    const auto cueAt = [ & ]( std::size_t j ) { return j < words.size() && lit_detail::wordIsOneOf( lit_detail::stripWordPunct( words[j] ), kCues ); };
+    for( std::size_t i = 0; i < words.size(); ++i )
+    {
+        std::string_view w = words[i];
+        while( !w.empty() && std::string_view( "`'\"([{<" ).find( w.front() ) != std::string_view::npos )
+        {
+            w.remove_prefix( 1 );
+        }
+        while( !w.empty() && std::string_view( "`'\")]}>,;:.!?" ).find( w.back() ) != std::string_view::npos )
+        {
+            w.remove_suffix( 1 );
+        }
+        const bool bytesOk = w.size() >= kForFlagMinName && std::islower( static_cast<unsigned char>( w.front() ) ) != 0 && w.back() != '-'
+                             && w.find( '-' ) != std::string_view::npos && w.find( "--" ) == std::string_view::npos
+                             && std::all_of( w.begin(), w.end(), []( char c ) { return std::islower( static_cast<unsigned char>( c ) ) != 0 || std::isdigit( static_cast<unsigned char>( c ) ) != 0 || c == '-'; } );
+        if( bytesOk && ( cueAt( i + 1 ) || ( i > 0 && cueAt( i - 1 ) ) ) && std::find( dashed.begin(), dashed.end(), w ) == dashed.end()
+            && std::find( out.begin(), out.end(), w ) == out.end() )
+        {
+            out.emplace_back( w );
+        }
+    }
+    return out;
+}
+
 // The task quotes a message literal: a "double-quoted" span (the quoted shape's own reading, lit_detail::quotedSpan) or a
 // 'single-quoted' one (lit_detail::delimitedSpan: `wasn't` is no quote) of the same message-fragment shape (quotedSpan read on that
 // span). SIZE-2 (forpage.h tailFoldKept): such a task keeps its tail's config and doc rows listed — a quoted message's text lives in a
@@ -772,6 +826,18 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     for( std::string& f : flagNamesOf( task ) )
     {
         out.push_back( ForLiteral{ std::move( f ), "flag" } );   // FLAG-SHAPE-LIT: after every shape that was here before it, the message too, so none of them moves
+    }
+    for( std::string& f : bareFlagNamesOf( task ) )
+    {
+        ForLiteral b{ std::move( f ), "flag" };   // WHOLE-TOKEN: after every dashed flag
+        b.bare = true;
+        out.push_back( std::move( b ) );
+    }
+    if( !m && lit_detail::isVerbatimMessageTask( words ) )
+    {
+        ForLiteral v{ std::string( lit_detail::trimAllWs( task ) ), "message" };   // MSG-VERBATIM: last, the whole text, one scan
+        v.verbatim = true;
+        out.push_back( std::move( v ) );
     }
     for( std::size_t i = 0; i < out.size(); ++i )
     {
@@ -3023,13 +3089,6 @@ inline std::vector<std::pair<std::size_t, std::size_t>> callArgsAt( std::string_
     return {};
 }
 
-// both ends trimmed of every whitespace byte, newlines included (a default may start on the line after the name)
-inline std::string_view trimAllWs( std::string_view v ) noexcept
-{
-    constexpr std::string_view kBlanks = " \t\r\n\f\v";
-    const std::size_t          first   = v.find_first_not_of( kBlanks );
-    return first == std::string_view::npos ? std::string_view() : v.substr( first, v.find_last_not_of( kBlanks ) - first + 1 );
-}
 
 // boost's `po::value<int>()->default_value(10)`: the text inside the call's parens, a paren inside a string default (`default_value(")")`) not counted
 inline std::optional<std::string_view> boostDefaultOf( std::string_view arg ) noexcept
@@ -4300,6 +4359,12 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         lit_detail::dropCodeRows( rows );   // a code row is never printed (all code: no block)
     }
     out.sites = rows.size();
+    // MSG-VERBATIM counts confirmed string sites only (CR 4540061404): a k='?' row (span tier unparsed) may be code or a comment
+    const std::size_t verbatimStrings = lit.verbatim ? std::size_t( std::ranges::count( rows, 's', &lit_detail::Site::k ) ) : 0;
+    if( ( lit.bare && rows.size() > kForBareFlagMaxSites ) || ( lit.verbatim && ( verbatimStrings == 0 || verbatimStrings > kForVerbatimMaxSites ) ) )
+    {
+        return ForLiteralRender{};   // WHOLE-TOKEN / MSG-VERBATIM: too many sites to be the one option or message the task names
+    }
     if( rows.empty() )
     {
         return out;   // no source site: nothing to anchor on (test/doc/comment counts alone answer nothing; measured as noise, ld2-django-09)
@@ -4566,6 +4631,11 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             readers.xml.clear();   // the lr rows do not fit what the cap left: readers= still counts every read, so none listed says they were cut
         }
     }
+    ReaderCallers callers;   // READER-CALLERS: who calls the functions the shown rows sit in (never on a table: its lr rows read it)
+    if( !policy.tableRows )
+    {
+        callers = renderReaderCallers( ing, anchors.g, std::span<const NodeId>( owners ), relPath, esc );
+    }
     const bool subscriptShown = policy.tableRows && std::any_of( rows.begin(), rows.begin() + std::ptrdiff_t( shownRowCount ), []( const lit_detail::Site& r ) { return r.subscript; } );
     if( byteCut && shownRowCount == 0 )
     {
@@ -4596,6 +4666,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         x += kForLiteralSubscriptLegend;   // present only with a subscript reg= row (REG-READER)
         out.subLegend = true;
+    }
+    if( callers.rows > 0 || !callers.xml.empty() )
+    {
+        x += kReaderCallersLegend;   // present only with lc/lcn rows (READER-CALLERS)
     }
     if( cutMovedRow && !limits.cutLegendAbove )
     {
@@ -4628,7 +4702,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         x += " floor=\"1\"";
     }
     x += nextAttrXml( nextFlag( "--grep=", lit.text ) );
-    const std::string inner = rowsXml + flag.writesXml + readers.xml + bodiesXml + "</lit>";
+    const std::string inner = rowsXml + flag.writesXml + readers.xml + bodiesXml + callers.xml + "</lit>";
     // bytes= is the element's own size from its open tag on (the legend comment excluded): a fixed point over its own digits
     const std::size_t openAt = x.find( "<lit " );
     const std::size_t fixed  = ( x.size() - openAt ) + std::string_view( " bytes=\"\">" ).size() + inner.size();
@@ -4654,6 +4728,10 @@ inline bool namesIndexedFile( const IngestResult& ing, std::string_view name )
 inline ForLiteralRender renderMessageTries( const IngestResult& ing, const ForLiteral& lit, std::string_view rootArg, std::string_view served,
                                             RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
 {
+    if( lit.verbatim )
+    {
+        return renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, {}, anchors );   // MSG-VERBATIM: the whole text, no fragments
+    }
     for( const std::string& t : forMessageTries( lit.text ) )
     {
         ForLiteral tried = lit;
