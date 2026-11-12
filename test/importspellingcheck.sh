@@ -23,6 +23,8 @@
 #   S4  card (c) on the definition-side walk: `where injectAll is defined` reaches src/core.ts, public_api.ts and index.ts.
 #   S5  Python: `where acme.pkg.Thing is defined` -> `lazy from .impl import Thing` in acme/pkg/__init__.py; `Thing2 imported from
 #       acme.pkg` -> the parenthesised `Other as Thing2` (as="Thing2", def Other).
+#   S5c a `#` comment inside a parenthesised Python list (CodeRabbit 4550333639): `Thing3`, the name after a commented line,
+#       and `Thing4`, the name after a comment holding `)`, each reach their def. Premise, counted: the list has 2 comment lines.
 #   N1  external: `inject from lodash/fp` (no in-tree package.json declares lodash and no segment names an in-tree directory or
 #       file: graph.h jsModuleIsForeign): external="1" and no rx/def rows. Premise: the fixture defines inject (counted) and the spec
 #       row printed. (A spelling that no package.json declares but whose segment names the tree, `@fix/m` for a directory m/, keeps
@@ -135,6 +137,22 @@ w py/acme/pkg/__init__.py "from .base import (Base,
 lazy from .impl import Thing"
 w py/acme/pkg/impl.py "class Thing:
     pass"
+# S5c (CodeRabbit 4550333639): a `#` comment inside the parenthesised list, one plain and one holding a `)`
+w py/acme/cmt/__init__.py "from .parts import (
+    Plain,  # the plain one
+    Hidden as Thing3,  # see f()
+    Last as Thing4,
+)"
+w py/acme/cmt/parts.py "class Plain:
+    pass
+
+
+class Hidden:
+    pass
+
+
+class Last:
+    pass"
 w py/acme/pkg/base.py "class Base:
     pass
 
@@ -173,6 +191,15 @@ ask "--for=where acme.pkg.Thing is defined" >"$TMP/s5.xml"
 has "$TMP/s5.xml" "S5 Python lazy from hop" '<spec m="acme.pkg" n="Thing" p="py/acme/pkg/__init__.py" entry="py/acme/pkg/__init__.py"/><def n="Thing" p="py/acme/pkg/impl.py" l="1" total="1"/><rx p="py/acme/pkg/__init__.py" l="3" from=".impl"/>'
 ask "--for=Thing2 imported from acme.pkg" >"$TMP/s5b.xml"
 has "$TMP/s5b.xml" "S5 Python parenthesised rename" '<def n="Other" p="py/acme/pkg/base.py" l="5" total="1"/><rx p="py/acme/pkg/__init__.py" l="1" from=".base" as="Thing2"/>'
+cmts=$( grep -c '^ .*#' "$FIX/py/acme/cmt/__init__.py" )
+ask "--for=Thing3 imported from acme.cmt" >"$TMP/s5c.xml"
+ask "--for=Thing4 imported from acme.cmt" >"$TMP/s5d.xml"
+if [ "$cmts" = 2 ]; then
+    has "$TMP/s5c.xml" "S5c a comment in the list does not swallow the next name" '<def n="Hidden" p="py/acme/cmt/parts.py" l="5" total="1"/><rx p="py/acme/cmt/__init__.py" l="1" from=".parts" as="Thing3"/>'
+    has "$TMP/s5d.xml" "S5c a \`)\` in a comment does not end the list" '<def n="Last" p="py/acme/cmt/parts.py" l="9" total="1"/><rx p="py/acme/cmt/__init__.py" l="1" from=".parts" as="Thing4"/>'
+    hasnt "$TMP/s5c.xml" "S5c no found=0 for the commented list" 'found="0"'
+    hasnt "$TMP/s5d.xml" "S5c no found=0 past the commented \`)\`" 'found="0"'
+else no "S5c premise: the fixture list carries $cmts comment lines (want 2)"; fi
 
 ask "--for=inject from lodash/fp" >"$TMP/n1.xml"
 defs=$( grep -rl 'export function inject(' "$FIX/packages" | wc -l | tr -d ' ' )

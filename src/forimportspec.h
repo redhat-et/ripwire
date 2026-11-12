@@ -495,19 +495,18 @@ inline std::vector<PyFrom> pythonFroms( const std::string& text )
         }
         PyFrom pf{ .byte = lineStart + ind, .module = std::string( line.substr( 5, imp - 5 ) ) };
         std::erase( pf.module, ' ' );
-        std::string list( line.substr( imp + 8 ) );
+        // Each physical line loses its `#` comment BEFORE it joins the list: a comment kept in the join swallows the next line's
+        // name, and a `)` inside one (`# see f()`) would end the list early.
+        const auto uncommented = []( std::string_view s ) { return s.substr( 0, std::min( s.find( '#' ), s.size() ) ); };
+        std::string list( uncommented( line.substr( imp + 8 ) ) );
         if( list.contains( '(' ) )
         {
             while( !list.contains( ')' ) && at < text.size() )   // a parenthesized list runs to its `)`
             {
                 const std::size_t e2 = std::min( text.find( '\n', at ), text.size() );
-                list.append( " " ).append( text, at, e2 - at );
+                list.append( " " ).append( uncommented( std::string_view( text ).substr( at, e2 - at ) ) );
                 at = e2 + 1;
             }
-        }
-        if( const std::size_t hash = list.find( '#' ); hash != std::string::npos && !list.contains( '(' ) )
-        {
-            list.resize( hash );
         }
         for( char& ch : list )
         {
@@ -518,10 +517,6 @@ inline std::vector<PyFrom> pythonFroms( const std::string& text )
             const std::size_t comma = std::min( list.find( ',', p ), list.size() );
             std::string_view  item  = std::string_view( list ).substr( p, comma - p );
             p                       = comma + 1;
-            if( const std::size_t hash = item.find( '#' ); hash != std::string_view::npos )
-            {
-                item = item.substr( 0, hash );
-            }
             const std::size_t b = item.find_first_not_of( ' ' );
             if( b == std::string_view::npos )
             {
