@@ -1110,6 +1110,12 @@ inline constexpr const char* kQdMaskReportOnlyLegend =
     "gate in that language yet: log-only (a broad handler whose body only logs and never names the error) "
     "or rethrow-only (the sole handler re-throws the error unchanged). ";
 
+// QD-MONSTER-GROWTH — emitted only when a monster="1" row is in the document.
+inline constexpr const char* kQdMonsterLegend =
+    "monster=\"1\" marks a complexity row on a function over 5x the ccx bar (was= 75 or more) that grew by now= minus was= "
+    "(10 or more) in this change: major whatever the percentage, since tangle in a giant function is a small share of it "
+    "forever. Put the new branch in a helper. ";
+
 // Emitted only when a clone-family row (duplication / new-clone-of-reused-helper) is in the document,
 // which is what puts members=, tokens= and idiom= on a first screen. A clean tree has none.
 inline constexpr const char* kQdCloneLegend =
@@ -1259,6 +1265,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; } );
     };
+    const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
+    };
 
     std::fputs( kQdLegendCore, out );
 
@@ -1352,6 +1362,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyDefectShapeRow( p.rows ) || anyDefectShapeRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdDefectShapeLegend );
+        }
+        if( anyMonsterRow( p.rows ) || anyMonsterRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdMonsterLegend );
         }
     }
 
@@ -1981,9 +1995,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 // tolerant token parsing, splitAckLocator, the takeAckNamedToken family) at all — that half of
                 // the contract is what qackconcurrencycheck.sh's grammar arm (2) and byte-identity arm (7) pin
                 // instead, over the actual file. What THIS catches: rescoreNumericMajor's kMaterialityBars
-                // lookup (by kind name) silently drifting from the bar/minorDelta/growthTiered literals
-                // perSymbolKind was called with (computeDelta, above) — two spellings of the same three
-                // constants that a future edit could change in only one place. A drift there means the live
+                // lookup (by kind name) silently drifting from the kMaterialityBars row perSymbolKind is handed
+                // by index (computeDelta, above; the static_assert beside the table pins the order) — two ways
+                // to reach the same constants that a future edit could break in only one place. A drift there means the live
                 // formula (numericRegressionIsMajor, via perSymbolKind) and the re-score formula
                 // (rescoreNumericMajor) have silently diverged — see quality.h's MaterialityBar table, the one
                 // place both are meant to agree. ENSURES, not ASSUME: this is this function's OWN postcondition
