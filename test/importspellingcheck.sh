@@ -38,6 +38,9 @@
 #       file really is unreadable (SKIP when it is not, e.g. as root).
 #   N6  the depth cap discloses (CodeRabbit 4542271958): a 14-statement `export *` chain past kImportSpecDepth (12) prints
 #       found="0" WITH capped="1". Premise, counted: a 6-statement chain of the same shape reaches its def (no capped=).
+#   N7  a cut the walk can no longer use is no hedge (CodeRabbit 4550333655): a def found at depth 12 beside a sibling that still
+#       hands the name on, and a def found at depth 1 beside 300 depth-2 statements past kImportSpecMaxStates, print no capped=.
+#       Premise, counted: the depth-12 sibling hop and the 300 statements exist.
 #
 # Usage: bash test/importspellingcheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
 set -u
@@ -258,6 +261,41 @@ case "$deep" in
                                     || no "N6 premise: the 6-chain def=$short capped=$shortcap (want 1 / 0)" ;;
     *) no "N6 past the depth cap: ${deep:-<no spec row>} (want found=\"0\" with capped=\"1\")" ;;
 esac
+
+# N7 (CodeRabbit 4550333655): a cut the walk can no longer use does not hedge a found answer with capped=1.
+#   (a) depth: a12.ts defines deepThing 12 statements from the entry (kImportSpecDepth) while b12.ts, at the same depth, still
+#       hands it on; (b) states: a.ts defines it one statement in while ten siblings each re-export 30 files (300 depth-2 states
+#       past kImportSpecMaxStates, 256). Premise, counted: the b-branch hop at depth 12 and the 300 depth-2 statements exist.
+fork(){ # fork DIR: the entry hands deepThing to a 12-chain ending in its def and to a 12-chain that keeps going
+    local d="$1" i b; mkdir -p "$d/packages/deep"
+    printf '{ "name": "acme-root", "private": true }\n' >"$d/package.json"
+    printf '{\n  "name": "@acme/deep",\n  "exports": { ".": "./index.js" }\n}\n' >"$d/packages/deep/package.json"
+    printf "export * from './a1';\nexport * from './b1';\n" >"$d/packages/deep/index.ts"
+    for b in a b; do for i in $( seq 1 11 ); do printf "export * from './%s%d';\n" "$b" $(( i + 1 )) >"$d/packages/deep/$b$i.ts"; done; done
+    printf 'export function deepThing() { return 1; }\n' >"$d/packages/deep/a12.ts"
+    printf "export * from './b13';\n" >"$d/packages/deep/b12.ts"
+    printf 'export const other = 1;\n' >"$d/packages/deep/b13.ts"
+}
+fan(){ # fan DIR: the entry hands deepThing to a.ts (its def) and to s1..s10, each re-exporting 30 files
+    local d="$1" i j; mkdir -p "$d/packages/deep"
+    printf '{ "name": "acme-root", "private": true }\n' >"$d/package.json"
+    printf '{\n  "name": "@acme/deep",\n  "exports": { ".": "./index.js" }\n}\n' >"$d/packages/deep/package.json"
+    { printf "export * from './a';\n"; for i in $( seq 1 10 ); do printf "export * from './s%d';\n" "$i"; done; } >"$d/packages/deep/index.ts"
+    printf 'export function deepThing() { return 1; }\n' >"$d/packages/deep/a.ts"
+    for i in $( seq 1 10 ); do
+        for j in $( seq 1 30 ); do printf "export * from './t%d_%d';\n" "$i" "$j"; printf 'export const v%d_%d = 1;\n' "$i" "$j" >"$d/packages/deep/t${i}_$j.ts"; done >"$d/packages/deep/s$i.ts"
+    done
+}
+fork "$TMP/fxf"; fan "$TMP/fxn"
+askin "$TMP/fxf" "--for=where deepThing imported from @acme/deep is defined" >"$TMP/n7a.xml"
+askin "$TMP/fxn" "--for=where deepThing imported from @acme/deep is defined" >"$TMP/n7b.xml"
+bhop=$( grep -c "export \* from './b13'" "$TMP/fxf/packages/deep/b12.ts" ); fanrx=$( cat "$TMP/fxn/packages/deep"/s*.ts | grep -c '^export \* from' )
+for arm in "a:$TMP/n7a.xml:a12.ts:depth" "b:$TMP/n7b.xml:a.ts:states"; do
+    IFS=: read -r tag xml def what <<<"$arm"
+    row=$( block "$xml" | grep -oE '<spec m="@acme/deep"[^>]*>' | head -1 ); got=$( count "$xml" "<def n=\"deepThing\" p=\"packages/deep/$def\"" )
+    if [ "$bhop" = 1 ] && [ "$fanrx" = 300 ] && [ "$got" = 1 ] && [ -n "$row" ] && [ "${row#*capped=}" = "$row" ]; then ok "N7$tag a found def is not capped by the $what cut: $row (premise: b12 hop $bhop, depth-2 statements $fanrx)"
+    else no "N7$tag $what cut after the def: ${row:-<no spec row>} def=$got (premise: b12 hop $bhop want 1, depth-2 statements $fanrx want 300; want no capped=)"; fi
+done
 
 if command -v xmllint >/dev/null 2>&1; then
     bad=0; n=0

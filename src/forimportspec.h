@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -708,6 +709,7 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
     HashMap<std::uint32_t, std::vector<PyFrom>> pyCache;
     int         found      = -1;
     std::size_t foundDepth = 0;
+    std::size_t cutDepth   = std::numeric_limits<std::size_t>::max();   // the shallowest state a cap left out
     for( std::size_t at = 0; at < states.size(); ++at )
     {
         const State st = states[ at ];
@@ -752,6 +754,10 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
             }
             ++out.defs;
             continue;
+        }
+        if( found >= 0 )
+        {
+            continue;   // the walk ends at foundDepth: this state's statements can change neither def nor defs
         }
         const bool atDepthCap = st.depth >= kImportSpecDepth;   // the hops are still read: a state past the cap with one says capped=1
         if( python )
@@ -809,14 +815,14 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
         if( atDepthCap )
         {
             // a statement the walk did not follow: found="0" and defs= are then floors, not totals (CodeRabbit 4542271958)
-            out.capped = out.capped || !next.empty();
+            cutDepth = next.empty() ? cutDepth : std::min( cutDepth, st.depth + 1 );
             continue;
         }
         for( SpecHop& h : next )
         {
             if( states.size() >= kImportSpecMaxStates )
             {
-                out.capped = true;
+                cutDepth = std::min( cutDepth, st.depth + 1 );
                 break;
             }
             std::string key = std::to_string( h.file ) + "#" + h.taken;
@@ -831,6 +837,8 @@ inline SpecWalk walkImportSpec( const IngestResult& ing, const HashMap<std::stri
             states.push_back( State{ to, std::move( taken ), int( at ), std::move( h ), st.depth + 1, member } );
         }
     }
+    // capped=1 only for a cut the walk could still have used: before any def, or at a depth no deeper than the def's (defs= floor)
+    out.capped = cutDepth != std::numeric_limits<std::size_t>::max() && ( found < 0 || cutDepth <= foundDepth );
     for( int i = found; i > 0; i = states[ std::size_t( i ) ].parent )
     {
         out.hops.insert( out.hops.begin(), states[ std::size_t( i ) ].hop );
