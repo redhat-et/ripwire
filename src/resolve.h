@@ -750,12 +750,14 @@ inline void pythonMemberFiles( const IngestResult& ing, const std::vector<Python
         std::uint32_t to = kNoFile;
         if( pkgFile != kNoFile )
         {
+            // pkgDir is the PACKAGE's path, so the probe takes the package's identity: in a multi-root workspace its root is the
+            // one the member lives in, and the importer's root would reject that hit and fall back to its own disk dir (#533).
             module.assign( member );
             module.append( ".py" );
-            const std::uint32_t asModule = joinNormalizeLookup( pkgDir, module, fileIndex, ws, inc.fileId );
+            const std::uint32_t asModule = joinNormalizeLookup( pkgDir, module, fileIndex, ws, pkgFile );
             module.assign( member );
             module.append( "/__init__.py" );
-            const std::uint32_t asPackage = joinNormalizeLookup( pkgDir, module, fileIndex, ws, inc.fileId );
+            const std::uint32_t asPackage = joinNormalizeLookup( pkgDir, module, fileIndex, ws, pkgFile );
             to = ( asModule == kNoFile ) ? asPackage : ( asPackage == kNoFile || asPackage == asModule ) ? asModule : kNoFile;   // unique-or-degrade
         }
         else
