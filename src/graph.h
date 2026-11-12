@@ -9971,8 +9971,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
     struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; std::uint8_t marks = 0; };   // marks: resolve.h EdgeMark (EDGE-FLAGS)
     HashMap<std::uint64_t, EdgeAcc> acc;
-    acc.reserve( N );   // past the 4-bucket / 0.8-load rehash cascade. G1a: one edge per SYMBOL, not per reference — the table ends at 1.5-8 edges
-                        // a symbol, and reserve( references ) zero-filled 16-32 MiB of buckets on envoy and vscode that no edge reached
+    acc.reserve( std::min<std::size_t>( N, ing.references.size() ) );   // past the 4-bucket / 0.8-load rehash cascade. G1a: one edge per SYMBOL,
+                        // not per reference — the table ends at 1.5-8 edges a symbol, and reserve( references ) zero-filled 16-32 MiB of buckets on
+                        // envoy and vscode that no edge reached. Capped by the references too (CodeRabbit 4544551960): many symbols and few
+                        // references (generated headers, data tables) resolve few edges, and a reserve is only a hint the table grows past
     std::vector<NodeId>      cand, tier;
     std::vector<NodeId>      modAttrNamesakes;   // PY-MOD-CALL-SITES: an unproven module attribute's candidates, reused
     HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>> declinedListsByHash;   // tier-3 declines: list hash → list numbers (internDeclinedList)
