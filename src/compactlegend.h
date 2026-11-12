@@ -1722,7 +1722,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // clones: src/verbs_report.h emitClonesReport (groupExemptKind, cloneIdiomAttrs)
     { "exempt", "group exempt=fixture|shell-runner: every member is on such a path; quality-delta duplication ignores it", true, "group", MapHeaderRead::No, {}, "clones" },
     { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens; one-statement leaves out parameter names, std:: chains and container words, and never demotes a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens, where one-statement leaves out parameter names, std:: chains and container words and never demotes a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
     // quality-delta: src/verbs_quality.h (range attrs, duplication r row); staleAcksXml in src/quality.h
     { "key", "sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires)", true, "sa", MapHeaderRead::No, {}, "quality-delta" },   // also defines why=
     { "members", "r members=/tokens=: a duplication row's clone group (member ids) / their shared normalized-token count", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines tokens=
