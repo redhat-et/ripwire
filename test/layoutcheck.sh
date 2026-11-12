@@ -391,6 +391,184 @@ has 'f n="cb"' \
     && ok "StdFunctionFieldCase: the std::function field is still COUNTED (not silently dropped)" \
     || no "StdFunctionFieldCase: field 'cb' vanished with no trace: $( printf '%s' "$L" | tr '<' '\n' | grep '^f ' )"
 
+# ── 15) LAYOUT-PTR-STAR (2026-11-11 audit): ty= is the type AS WRITTEN for THIS declarator. `char *name` printed
+#        `char **` (the `*` stayed in the type text and appendField added another), and `char *a, b;` labelled the
+#        plain `b` as `char *`. Sizes were right; the label was not.
+# fty NAME -> the ty= on the <f n="NAME"> row, unescaped enough for a compare
+fty(){ field "$1" ty; }
+run PtrStarCase
+PTR_SEEN="$( printf '%s' "$L" | tr '<' '\n' | grep '^f n=' | grep -c 'ty="[^"]*\*' )"
+[ "$PTR_SEEN" -ge 1 ] \
+    && ok "PtrStarCase premise: $PTR_SEEN pointer field rows seen" \
+    || no "PtrStarCase premise: no pointer field rows seen — the arms below would pass blind: $( printf '%s' "$L" | head -c 400 )"
+for pair in 'name|char *' 'a|char *' 'b|char' 'c|char*' 'argv|char **' 'p|int *' 'q|int *'; do
+    fn="${pair%%|*}"; want="${pair#*|}"
+    [ "$( fty "$fn" )" = "$want" ] \
+        && ok "PtrStarCase.$fn: ty=\"$want\" (as written)" \
+        || no "PtrStarCase.$fn: ty=\"$( fty "$fn" )\" (want \"$want\")"
+done
+expect_size  PtrStarCase 56 8
+expect_field PtrStarCase b 16 1
+expect_field PtrStarCase q 48 8
+
+# ── 16) a #define line inside a struct body is not part of the next field (tmux window_pane.sync_dirty) ──────────────
+run DefineLeakCase
+[ "$( fty sync_dirty )" = "unsigned int" ] \
+    && ok "DefineLeakCase.sync_dirty: ty=\"unsigned int\" (the #define lines above it, one continued, are not glued on)" \
+    || no "DefineLeakCase.sync_dirty: ty=\"$( fty sync_dirty )\" (want \"unsigned int\")"
+expect_size  DefineLeakCase 8 4
+expect_field DefineLeakCase sync_dirty 4 4
+
+# ── 17) LAYOUT-SIZED (2026-11-11 memory audit): std:: members, an alias of an in-repo template, a base class and 1-byte
+#        bitfields are SIZED, and every number is checked against the COMPILER, not a pinned value. std::string is 24 B in
+#        libc++ and 32 B in libstdc++; the verb's table is the library this binary was built against (std_abi= names it),
+#        so the probe below is compiled by the same toolchain family and the two must agree on every CI leg.
+CACHE_FILE="$( dirname "$BIN" )/CMakeCache.txt"
+LXX="${CXX:-$( [ -f "$CACHE_FILE" ] && sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' "$CACHE_FILE" | head -1 )}"
+LXX="${LXX:-c++}"
+LSTD=""
+if [ -f "$ROOT/scripts/cxxstd.sh" ]; then . "$ROOT/scripts/cxxstd.sh"; LSTD="$( ripwire_cxx_std_flag "$LXX" 2>/dev/null )"; fi
+
+# layout_probe_src NS STRUCT... : the verb's answer for each struct becomes probe lines — sizeof/alignof, and offsetof for
+# every placed NON-bitfield row (offsetof cannot name a bitfield; its byte is checked through its neighbours and sizeof).
+# Writes the probe body to stdout and the verb's own numbers to $TMP/probe_want.txt in the same line format.
+layout_probe_rows(){
+    local ns="$1" corpus="$2"; shift 2
+    local s
+    for s in "$@"; do
+        env $LAYOUT_RUN_ENV "$BIN" "$corpus" --layout="$s" $LAYOUT_RUN_FLAGS 2>/dev/null >"$TMP/lp_$s.xml"
+        python3 - "$TMP/lp_$s.xml" "$ns" "$s" >>"$TMP/probe_body.cpp" 2>>"$TMP/probe_want.txt" <<'PYPROBE'
+import re, sys
+doc = open(sys.argv[1]).read(); ns, s = sys.argv[2], sys.argv[3]
+d = re.search(r'<def [^>]*>', doc)
+size = re.search(r' size="(\d+)"', d.group(0)) if d else None
+align = re.search(r' align="(\d+)"', d.group(0)) if d else None
+print(f'    std::printf( "{s} sizeof %zu alignof %zu\\n", sizeof( {ns}{s} ), alignof( {ns}{s} ) );')
+sys.stderr.write(f"{s} sizeof {size.group(1) if size else 'none'} alignof {align.group(1) if align else 'none'}\n")
+for row in re.findall(r'<f [^>]*/>', doc):
+    n = re.search(r' n="([^"]*)"', row).group(1)
+    off = re.search(r' off="(\d+)"', row)
+    if ' bits=' in row:
+        continue
+    print(f'    std::printf( "{s}.{n} off %zu\\n", offsetof( {ns}{s}, {n} ) );')
+    sys.stderr.write(f"{s}.{n} off {off.group(1) if off else 'none'}\n")
+PYPROBE
+    done
+}
+
+# probe_compare WHAT INCLUDE_ARGS... : compile the probe, run it, diff against the verb's numbers.
+probe_compare(){
+    local what="$1"; shift
+    { printf '#include <cstddef>\n#include <cstdio>\n%s\nint main()\n{\n' "$PROBE_INCLUDE"; cat "$TMP/probe_body.cpp"; printf '    return 0;\n}\n'; } >"$TMP/probe.cpp"
+    if ! "$LXX" $LSTD -w -Wno-invalid-offsetof "$@" "$TMP/probe.cpp" -o "$TMP/probe" 2>"$TMP/probe.err"; then
+        no "$what: the compiler probe did not compile ($LXX): $( head -c 400 "$TMP/probe.err" )"
+        return
+    fi
+    "$TMP/probe" >"$TMP/probe_got.txt"
+    if diff "$TMP/probe_want.txt" "$TMP/probe_got.txt" >"$TMP/probe.diff"; then
+        ok "$what: every sizeof/alignof/offsetof --layout printed equals the compiler's ($( grep -c '' "$TMP/probe_got.txt" ) numbers, $LXX, std_abi=$STD_ABI)"
+    else
+        no "$what: --layout disagrees with the compiler (< verb, > compiler): $( tr '\n' ' ' <"$TMP/probe.diff" | head -c 900 )"
+    fi
+}
+
+run StdMembersCase
+STD_ABI="$( attr 'layout ' std_abi )"
+STD_SEEN="$( printf '%s' "$L" | tr '<' '\n' | grep '^f n=' | grep -c 'ty="std::' )"
+[ "$STD_SEEN" -ge 10 ] \
+    && ok "std premise: $STD_SEEN std:: member rows seen in StdMembersCase" \
+    || no "std premise: only $STD_SEEN std:: member rows seen in StdMembersCase — the probe arm would pass blind"
+case "$( uname -s )" in
+    MINGW*|MSYS*|CYGWIN*) printf '  SKIP  std table: a Windows build carries none (MSVC sizes follow _ITERATOR_DEBUG_LEVEL)\n' ;;
+    *)
+        if [ -n "$STD_ABI" ] && [ "$( attr 'def ' modeled )" = "1" ]; then
+            ok "StdMembersCase: modeled=\"1\" with std_abi=\"$STD_ABI\" on the root"
+        else
+            no "StdMembersCase: modeled=$( attr 'def ' modeled ) std_abi='$STD_ABI' (want modeled 1 and a named library): $( printf '%s' "$L" | tr '<' '\n' | grep -E '^(f n=|caveat)' | grep -E 'sized="0"|caveat' | tr '\n' ' ' | head -c 500 )"
+        fi
+        : >"$TMP/probe_body.cpp"; : >"$TMP/probe_want.txt"
+        LAYOUT_RUN_FLAGS="--no-cache"; LAYOUT_RUN_ENV=""
+        PROBE_INCLUDE='#include "stdmembers.h"'
+        layout_probe_rows "layoutfix::" "$CORPUS" StdMembersCase DerivedRowCase ByteBitsCase
+        probe_compare "fixture probe (std members, alias of a template, base class, byte bitfields)" -I"$CORPUS"
+        ;;
+esac
+run DerivedRowCase
+{ [ "$( attr 'def ' base )" = "ColdBase" ] && [ "$( attr 'def ' base_sz )" = "8" ] && [ "$( field id off )" = "8" ]; } \
+    && ok "DerivedRowCase: base=\"ColdBase\" base_sz=\"8\", the first member placed after it at 8" \
+    || no "DerivedRowCase: base='$( attr 'def ' base )' base_sz='$( attr 'def ' base_sz )' id.off='$( field id off )' (want ColdBase / 8 / 8)"
+[ "$( field name sz )" = "4" ] \
+    && ok "DerivedRowCase.name: TextId (alias in textalias.h of the template in textid.h) sized 4 B through both files" \
+    || no "DerivedRowCase.name: sz='$( field name sz )' why='$( field name why )' (want 4: the cross-file alias of an in-repo template)"
+run ByteBitsCase
+{ [ "$( field a bits )" = "1" ] && [ "$( field c bit )" = "4" ] && [ "$( field d off )" = "3" ] && [ "$( field e bit )" = "4" ] && [ "$( field x off )" = "4" ]; } \
+    && ok "ByteBitsCase: 1-byte bitfields packed a|b|c into byte 2, d|e into byte 3, x at 4" \
+    || no "ByteBitsCase: a.bits=$( field a bits ) c.bit=$( field c bit ) d.off=$( field d off ) e.bit=$( field e bit ) x.off=$( field x off ) (want 1/4/3/4/4)"
+
+# What stays unsized says WHY, by member — never a silent number.
+run UnlistedStdCase
+{ [ "$( field cb why )" = "std-unlisted" ] && [ "$( field bits why )" = "std-unlisted" ] && [ "$( attr 'def ' modeled )" = "0" ] && [ "$( field first off )" = "0" ]; } \
+    && ok "UnlistedStdCase: std::function and std::vector<bool> are sized=\"0\" why=\"std-unlisted\", modeled=\"0\"" \
+    || no "UnlistedStdCase: cb.why='$( field cb why )' bits.why='$( field bits why )' modeled=$( attr 'def ' modeled ) (want std-unlisted x2, modeled 0)"
+expect_refused TailPadDerivedCase base-class
+# A std:: name never resolves to a same-named in-repo type: the `class string {}` stub in textid.h is 1 B.
+run StdMembersCase
+[ "$( field s sz )" != "1" ] \
+    && ok "StdMembersCase.s: std::string is not sized as the in-repo 'class string {}' stub (sz=$( field s sz ))" \
+    || no "StdMembersCase.s: std::string sized 1 B — it resolved to the textid.h stub"
+
+# The three structs the memory lanes shrink, on ripwire's own source, against the compiler.
+case "$( uname -s )" in
+    MINGW*|MSYS*|CYGWIN*) printf '  SKIP  ripwire structs: a Windows build carries no std table\n' ;;
+    *)
+        : >"$TMP/probe_body.cpp"; : >"$TMP/probe_want.txt"
+        mkdir -p "$TMP/selfcache"
+        # one cold index into a private cache, then two warm reads of it
+        LAYOUT_RUN_FLAGS=""; LAYOUT_RUN_ENV="XDG_CACHE_HOME=$TMP/selfcache TMPDIR=$TMP/selfcache"
+        PROBE_INCLUDE='#include "model.h"'
+        layout_probe_rows "rw::" "$ROOT" Reference Binding Symbol
+        SELF_ROWS="$( grep -c ' off ' "$TMP/probe_want.txt" )"
+        SELF_NONE="$( grep -c 'none' "$TMP/probe_want.txt" )"
+        { [ "$SELF_ROWS" -ge 40 ] && [ "$SELF_NONE" = "0" ]; } \
+            && ok "ripwire structs premise: $SELF_ROWS field offsets and 3 sizes printed, none missing" \
+            || no "ripwire structs: $SELF_ROWS offsets, $SELF_NONE missing numbers: $( grep none "$TMP/probe_want.txt" | tr '\n' ' ' | head -c 400 )"
+        probe_compare "ripwire's Reference / Binding / Symbol" -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src"
+        ;;
+esac
+
+# ── 18) B44 (CodeRabbit on #618): six shapes, each checked against the COMPILER where the model answers, refused where it may not.
+#        Red before: TernaryInitCase sized 2 (c read as a 1-bit field), EmptyChainCase sized 8 (a at 4), EboClashCase placed e at
+#        0, the three Tpl*Case sized from the file's N / W (modeled="1"), CommentDefineCase.sync_dirty glued to the #define.
+run TernaryInitCase
+{ [ "$( field c bits )" = "" ] && [ "$( field c sz )" = "1" ]; } \
+    && ok "TernaryInitCase.c: a ternary default initializer is a 1 B member, not a bitfield" \
+    || no "TernaryInitCase.c: bits='$( field c bits )' sz='$( field c sz )' (want no bits=, 1 B)"
+run EmptyChainCase
+[ "$( field a off )" = "0" ] \
+    && ok "EmptyChainCase.a @ 0: a base whose only content is an empty base is empty" \
+    || no "EmptyChainCase.a off='$( field a off )' (want 0)"
+case "$( uname -s )" in
+    MINGW*|MSYS*|CYGWIN*) printf '  SKIP  crfixes probe: a Windows build carries no std table\n' ;;
+    *)
+        : >"$TMP/probe_body.cpp"; : >"$TMP/probe_want.txt"
+        LAYOUT_RUN_FLAGS="--no-cache"; LAYOUT_RUN_ENV=""
+        PROBE_INCLUDE='#include "crfixes.h"'
+        layout_probe_rows "layoutfix::" "$CORPUS" TernaryInitCase EmptyChainCase
+        probe_compare "crfixes probe (ternary initializer, empty-base chain)" -I"$CORPUS"
+        ;;
+esac
+expect_refused EboClashCase base-class
+for c in TplExtentCase TplArrayCase TplWidthCase; do
+    run "$c"
+    [ "$( attr 'def ' modeled )" = "0" ] \
+        && ok "$c: modeled=\"0\" — the template argument decides the member, never the same-named file constant" \
+        || no "$c: modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) (want 0: sized from the file's N / W)"
+done
+run CommentDefineCase
+{ [ "$( fty sync_dirty )" = "unsigned int" ] && [ "$( attr 'def ' size )" = "8" ]; } \
+    && ok "CommentDefineCase.sync_dirty: ty=\"unsigned int\" with a comment line above the #define, size=8" \
+    || no "CommentDefineCase.sync_dirty: ty='$( fty sync_dirty )' size='$( attr 'def ' size )' (want unsigned int / 8)"
+
 # ── UNREADABLE DEFINITION: a mirror whose second half could not be read is DISCLOSED, in every build flavour ──────
 # A definition indexed from a warm cache whose file is unreadable when the verb runs used to be dropped with a
 # one-argument DISCLOSE — a debug trace, nothing at all in a Release binary — so a drifting mirror read
