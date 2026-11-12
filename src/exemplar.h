@@ -43,6 +43,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -173,9 +174,9 @@ inline constexpr const char* kExemplarSelectionRule =
     "chosen by ROLE, NEVER by text similarity to your task: candidates are first filtered to cognitive "
     "complexity at or under the ccx ceiling (4x the complexity bar), then ordered non-fixture path before "
     "test-fixture path, tested before untested, higher fan-in, lower complexity, fewer lines, lowest id. "
-    "low_confidence=1 marks a weak task-to-kind match that fell back to fn; over_ccx_bar=1 marks a corpus "
-    "where nothing was under the ceiling, so the pick is the least bad rather than a clean one; candidates= "
-    "counts the ELIGIBLE instances of the kind (post-ceiling), not every instance";
+    "low_confidence=1 marks a weak task-to-kind match that fell back to fn, or with off_task=1 a pick sharing "
+    "no word with the task; over_ccx_bar=1 marks a corpus where nothing was under the ceiling, so the pick is "
+    "least bad; candidates= counts the ELIGIBLE (post-ceiling) instances";
 
 // The selection result. `winner == kNoNode` ⇒ no candidate of the kind (caller reports not-found).
 struct ExemplarPick
@@ -186,6 +187,11 @@ struct ExemplarPick
     bool        fromTask       = false;  // the arg was a task string, not a kind token
     bool        lowConfidence  = false;  // INVARIANT 3: weak task→kind, fell back to Function
     bool        overCcxBar     = false;  // INVARIANT 1 relaxed: nothing under the ceiling, winner is over it
+    bool        offTask        = false;  // INVARIANT 4: a trusted task match, but the role winner shares no word with it
+    // INVARIANT 4's vocabulary: the task's subtokens plus those of the window's corroborating names (stopwords are
+    // skipped where it is read). Filled on a trusted task match only, read once by hedgeOffTaskPick, and at most
+    // kExemplarConfWindow names' worth of short words.
+    std::vector<std::string> onTaskToks;
 };
 
 // does the winner's NAME share at least one subtoken with the task? (INVARIANT 3 confidence gate.)
@@ -208,6 +214,27 @@ inline bool shareNameSubtoken( std::string_view name, const std::vector<std::str
         }
     }
     return false;
+}
+
+// INVARIANT 4's vocabulary, gathered from the confidence window resolveExemplarKind already ranked: the task's own
+// subtokens and those of every window name that corroborated it (the matched cluster's words). Nothing on an
+// untrusted match, which is hedged already.
+inline void collectOnTaskToks( const IngestResult& ing, std::span<const std::pair<float, NodeId>> window,
+                               const std::vector<std::string>& taskToks, bool trustworthy, ExemplarPick& pick )
+{
+    if( !trustworthy )
+    {
+        return;
+    }
+    pick.onTaskToks = taskToks;
+    for( const std::pair<float, NodeId>& hit : window )
+    {
+        const std::string& name = ing.symbols[hit.second].name;
+        if( shareNameSubtoken( name, taskToks ) )
+        {
+            subtokens( name, pick.onTaskToks );
+        }
+    }
 }
 
 // resolveExemplarKind — step 1: a kind token selects the target kind directly; a task string donates its
@@ -265,6 +292,7 @@ inline bool resolveExemplarKind( const IngestResult& ing, const Graph& g, std::s
     }
     const float shareOfWindow = window ? float( corroborating ) / float( window ) : 0.f;
     const bool  trustworthy   = bestScore > 0.f && shareOfWindow > kExemplarConfMinShare;
+    collectOnTaskToks( ing, std::span<const std::pair<float, NodeId>>( ranked.data(), window ), taskToks, trustworthy, pick );
 
     pick.targetKind    = trustworthy ? ing.symbols[best].kind : SymKind::Function;
     pick.lowConfidence = !trustworthy;
@@ -312,6 +340,47 @@ inline void pickWinnerOfKind( const IngestResult& ing, const std::vector<std::ui
     }
 }
 
+// INVARIANT 4 (the off-task hedge, audit EXEMPLAR-VERB-TASK-BLIND 2026-11-11). The winner is chosen by ROLE over EVERY
+// candidate of the donated kind, so a task that matches the corpus well still gets a pick unrelated to the match: hono
+// `a middleware` returned `useState` (src/jsx/hooks) with no hedge, while `basicAuth middleware` returned the same pick
+// flagged low_confidence. A confident pick the task never touched is the confident-wrong case, and the write-moment
+// skills tell agents to run this verb before writing code. So when the kind WAS trusted but the winner's name shares
+// no content subtoken with the task or with the window's corroborating names, the pick is hedged: lowConfidence plus
+// offTask, which says WHY. The pick itself is unchanged — restricting the ranking to the matched cluster is the
+// larger follow-up this hedge does not attempt.
+inline void hedgeOffTaskPick( const IngestResult& ing, ExemplarPick& pick )
+{
+    if( !pick.fromTask || pick.lowConfidence || pick.winner == kNoNode )
+    {
+        return;   // a kind token, an already-hedged weak match, or no pick: nothing to judge
+    }
+    std::vector<std::string> winnerToks;
+    subtokens( ing.symbols[pick.winner].name, winnerToks );
+    const bool onTask = std::ranges::any_of( winnerToks, [ & ]( const std::string& t )
+    {
+        return !isRouteStopword( t ) && std::ranges::find( pick.onTaskToks, t ) != pick.onTaskToks.end();   // a CONTENT word only
+    } );
+    pick.offTask       = !onTask;
+    pick.lowConfidence = !onTask;
+}
+
+// The two surfaces' shared reading of a pick's hedges: the legend's parenthetical, and the root's attributes.
+inline std::string exemplarKindNote( const ExemplarPick& pick )
+{
+    if( !pick.fromTask )
+    {
+        return {};
+    }
+    const char* why = pick.offTask ? ", low-confidence: off task, the pick shares no word with it"
+                    : pick.lowConfidence ? ", low-confidence: weak match, fell back to fn" : "";
+    return " (task -> kind=" + std::string( symTag( pick.targetKind ) ) + why + ")";
+}
+
+inline const char* exemplarHedgeAttrs( const ExemplarPick& pick ) noexcept
+{
+    return pick.offTask ? " low_confidence=\"1\" off_task=\"1\"" : pick.lowConfidence ? " low_confidence=\"1\"" : "";
+}
+
 // selectExemplar — resolve the target kind, then pick the best-in-class instance by ROLE under the three
 // A3-F5 invariants. `fanIn` = in-edge CSR row lengths (reused-count), `tested` = the computeQMetrics flag;
 // both indexed by NodeId (short/absent vectors degrade to 0 — no crash). The ccx ceiling is tried FIRST;
@@ -334,6 +403,7 @@ inline ExemplarPick selectExemplar( const IngestResult& ing, const Graph& g,
         pickWinnerOfKind( ing, fanIn, tested, /*eligibleOnly=*/false, pick );   // pass B: nothing was under it
         pick.overCcxBar = pick.winner != kNoNode;
     }
+    hedgeOffTaskPick( ing, pick );
     return pick;
 }
 

@@ -29,13 +29,14 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "exemplarconfcheck: BIN=$BIN  CORPUS=$ROOT"
 
 exemhdr(){ printf '%s' "$1" | grep -o '<exemplar[^>]*>' | head -1; }
+kindHedged(){ printf '%s' "$1" | grep -q 'low_confidence="1"' && ! printf '%s' "$1" | grep -q 'off_task="1"'; }
 
 # ── 1) a task with NO topical match anywhere in this repo MUST emit low_confidence="1" ────────────────────
 # The originally-reported false-negative: fnv1a64 (a hash fn) is not a "format bytes for humans" exemplar,
 # and the pre-fix signal never said so.
 WEAK="$( "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" 2>/dev/null )"
 WHDR="$( exemhdr "$WEAK" )"
-printf '%s' "$WHDR" | grep -q 'low_confidence="1"' \
+kindHedged "$WHDR" \
     && ok "weak query (byte-size formatting) fires low_confidence=1: $WHDR" \
     || no "weak query (byte-size formatting) did NOT fire low_confidence: $WHDR"
 
@@ -80,16 +81,18 @@ printf '%s' "$WHDR" | grep -q 'low_confidence="1"' \
 # src/ — so it cannot repeat the self-referential trap the 2026-08-12 note above describes.
 STRONG1="$( "$BIN" "$ROOT" --no-cache --exemplar="compute the churn of a file" 2>/dev/null )"
 SHDR1="$( exemhdr "$STRONG1" )"
-printf '%s' "$SHDR1" | grep -q 'low_confidence' \
-    && no "strong query (file churn) wrongly fired low_confidence: $SHDR1" \
-    || ok "strong query (file churn) does not fire low_confidence: $SHDR1"
+# INVARIANT 4 (2026-11-11): a trusted match may still hedge OFF-TASK (the role pick, e.g. kindIs, shares no word with
+# the churn task). That is low_confidence="1" WITH off_task="1"; the kind-donation signal this arm pins is the bare one.
+kindHedged "$SHDR1" \
+    && no "strong query (file churn) wrongly fired the kind low_confidence: $SHDR1" \
+    || ok "strong query (file churn) does not fire the kind low_confidence: $SHDR1"
 
 # a second independent strong query (a dense literal "compute" cluster in this repo).
 STRONG2="$( "$BIN" "$ROOT" --no-cache --exemplar="compute pagerank" 2>/dev/null )"
 SHDR2="$( exemhdr "$STRONG2" )"
-printf '%s' "$SHDR2" | grep -q 'low_confidence' \
-    && no "strong query (compute pagerank) wrongly fired low_confidence: $SHDR2" \
-    || ok "strong query (compute pagerank) does not fire low_confidence: $SHDR2"
+kindHedged "$SHDR2" \
+    && no "strong query (compute pagerank) wrongly fired the kind low_confidence: $SHDR2" \
+    || ok "strong query (compute pagerank) does not fire the kind low_confidence: $SHDR2"
 
 # ── 3) selection itself is untouched — the ROLE-based winner is a function of (corpus, donated KIND), never ──
 # of the query TEXT, proving this fix changed only the confidence signal.
@@ -148,6 +151,70 @@ if diff -q "$TMP/w1" "$TMP/w2" >/dev/null; then ok "determinism (weak-query --ex
 command -v xmllint >/dev/null 2>&1 \
     && { printf '%s' "$WEAK" | xmllint --noout - 2>/dev/null && ok "xml well-formed (weak-query --exemplar)" || no "xml malformed (weak-query --exemplar)"; } \
     || ok "xml well-formed (xmllint absent — skipped)"
+
+# ── 5) INVARIANT 4, the off-task hedge (audit EXEMPLAR-VERB-TASK-BLIND 2026-11-11) ─────────────────────────────
+# hono `--exemplar='a middleware'` matched a real middleware cluster (the kind donation was trusted) and still returned
+# `useState` from src/jsx/hooks, a role pick that shares no word with the task, with NO low_confidence. Two fixtures
+# that differ only in WHO the role composite favours: in OFF the most-called function is an unrelated helper, so the
+# pick must hedge (low_confidence="1" off_task="1"); in ON the middleware family's own composer is the most-called
+# one, so the pick must be one of them and must NOT hedge (the positive arm: a build that hedges everything fails it).
+mkfam(){   # $1 dir, $2 the function every caller calls
+    mkdir -p "$1/src/middleware" "$1/src/hooks"
+    for m in cors logger etag compress timing secure; do
+        printf 'export function %sMiddleware(c: number): number {\n  return composeMiddleware(c) + 1\n}\n' "$m" >"$1/src/middleware/$m.ts"
+    done
+    printf 'export function composeMiddleware(c: number): number {\n  return c * 2\n}\n' >"$1/src/middleware/compose.ts"
+    printf 'export function useState(v: number): number {\n  return v + 3\n}\n' >"$1/src/hooks/state.ts"
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        printf 'export function screen%s(v: number): number {\n  return %s(v)\n}\n' "$i" "$2" >>"$1/src/hooks/screens.ts"
+    done
+}
+mkfam "$TMP/off" useState
+mkfam "$TMP/on" composeMiddleware
+OFFH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' 2>/dev/null )" )"
+ONH="$( exemhdr "$( "$BIN" "$TMP/on" --no-cache --exemplar='a middleware' 2>/dev/null )" )"
+# premise: both fixtures really carry the middleware family (6 + the composer) the window corroborates on
+famN="$( ls "$TMP/on/src/middleware" "$TMP/off/src/middleware" 2>/dev/null | grep -c '\.ts$' )"
+[ "$famN" -eq 14 ] && ok "premise: both fixtures carry the 7-file middleware family ($famN files)" \
+    || no "premise: expected 14 middleware files across the two fixtures, found $famN"
+nameOf5="$( nameOf "$OFFH" )"
+if [ "$nameOf5" = "useState" ] && printf '%s' "$OFFH" | grep -q 'low_confidence="1"' && printf '%s' "$OFFH" | grep -q 'off_task="1"'; then
+    ok "off-task pick hedges: 'a middleware' -> useState carries low_confidence=1 off_task=1: $OFFH"
+else
+    no "off-task pick must be useState with low_confidence=\"1\" off_task=\"1\": $OFFH"
+fi
+if printf '%s' "$ONH" | grep -q 'p="src/middleware/' && ! printf '%s' "$ONH" | grep -q 'low_confidence'; then
+    ok "positive arm: a real middleware/ family member is picked and NOT hedged: $ONH"
+else
+    no "positive arm: 'a middleware' should pick from src/middleware/ with no low_confidence: $ONH"
+fi
+# 5b) the compact legend of an off-task answer must not call the pick a fallback (CR #624 review 5869575117):
+# off_task="1" rides WITH low_confidence="1", and the low_confidence reading said "fell back to fn" unconditionally,
+# while the off_task reading says "not a fallback". The low_confidence reading must hold its fallback claim to
+# answers without off_task=1. Premise: the answer carries both attributes. Control: a plain fallback (arm 2's weak
+# query) still reads "fell back to fn".
+OFFDOC="$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' --legend=compact 2>/dev/null )"
+lcReading(){ printf '%s' "$1" | grep -oE 'low_confidence=1: [^;]*' | head -1; }
+if printf '%s' "$OFFDOC" | grep -q 'off_task="1"' && printf '%s' "$OFFDOC" | grep -q 'low_confidence="1"'; then
+    ok "5b premise: the off-task answer carries low_confidence=\"1\" off_task=\"1\""
+    LCR="$( lcReading "$OFFDOC" )"
+    case "$LCR" in
+        *"fell back to fn"*"unless off_task=1"*) ok "5b: the low_confidence reading conditions its fallback claim on off_task: $LCR" ;;
+        *"fell back to fn"*) no "5b: an off-task answer's low_confidence reading claims a fallback it did not make: $LCR" ;;
+        "") no "5b: the off-task answer carries no low_confidence reading" ;;
+        *) ok "5b: the low_confidence reading makes no fallback claim: $LCR" ;;
+    esac
+else
+    no "5b premise: the off-task answer lost low_confidence=\"1\" off_task=\"1\" — the legend arm would be vacuous"
+fi
+WEAKDOC="$( "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" --legend=compact 2>/dev/null )"
+printf '%s' "$WEAKDOC" | grep -q 'off_task="1"' && no "5b control: the plain fallback must not carry off_task" \
+    || { case "$( lcReading "$WEAKDOC" )" in *"fell back to fn"*) ok "5b control: a plain fallback still reads 'fell back to fn'" ;;
+         *) no "5b control: the plain fallback's low_confidence reading lost its fallback claim: $( lcReading "$WEAKDOC" )" ;; esac; }
+# a kind token is never hedged by the task test: there is no task to be off
+KH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar=fn 2>/dev/null )" )"
+printf '%s' "$KH" | grep -q 'low_confidence' && no "a kind token (fn) must never carry low_confidence: $KH" \
+    || ok "a kind token (fn) carries no hedge: $KH"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

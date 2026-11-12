@@ -836,6 +836,35 @@ for A in 'status=' 'confidence=' 'score=' 'margin=' 'git=' 'dirty=' 'trace=' 're
 done
 case "$LG" in *--*) no "the legend contains '--' — ill-formed inside an XML comment (G4)";; *) ok "the legend spells no '--' (XML-comment safe)";; esac
 
+# ── HELP-TASK-ROUTE (audit-verify 2026-11-11): an abstain names a next step; `of` alone never reads high ──────
+# (a) hono `how does hono route a request to a handler` abstained with nothing to do next. Every abstain now carries
+# next= (the ranked --for search over the same text, which answers any task) or reason=system-event.
+HA="$( route 'how does hono route a request to a handler' )"
+case "$HA" in
+    *'status="abstain"'*' next="--for=&apos;how does hono route a request to a handler&apos;"'*) ok "HT-a: the hono abstain names --for over the same task as next=";;
+    *) no "HT-a: the hono abstain should carry next=\"--for='…'\": $HA";;
+esac
+case "$SYS1" in *'status="abstain"'*'reason="system-event"'*) ok "HT-a: a harness event abstains with reason=system-event, not a --for over the event text";;
+    *) no "HT-a: the task-notification abstain should carry reason=\"system-event\": $SYS1";; esac
+case "$SYS1" in *' next="'*) no "HT-a: a harness event must not be handed to --for: $SYS1";; *) ok "HT-a: no next= on a harness event";; esac
+# (b) nushell `how does nushell evaluate a pipeline of commands` resolved `commands` through `of` alone and routed
+# --expand='commands' at confidence="high". Its own fixture: a lowercase plural noun that is also a function.
+OF="$TMP/of repo"; mkdir -p "$OF"; git -C "$OF" init -q
+cat >"$OF/eval.rs" <<'SRC'
+pub fn commands() -> u32 { 1 }
+pub fn pipeline() -> u32 { commands() + 1 }
+SRC
+git -C "$OF" add -A; git -C "$OF" -c user.email=g@example.invalid -c user.name=g commit -qm fixture
+ofRoute(){ "$BIN" "$OF" --no-cache --help-task="$1" 2>/dev/null | grep -oE '<task-route [^>]*>|<facts [^>]*>|<run>[^<]*' | tr '\n' ' '; }
+HB="$( ofRoute 'how does nushell evaluate a list of commands' )"
+case "$HB" in *'resolved_symbols="1"'*'--expand=&apos;commands&apos;'*) ok "HT-b premise: 'of commands' resolves the weak name and routes --expand='commands'";;
+    *) no "HT-b premise: the of-only task should resolve commands and route --expand: $HB";; esac
+case "$HB" in *'status="recommend" confidence="low"'*) ok "HT-b: a route standing on a name met only after 'of' reads confidence=low (status stays recommend)";;
+    *) no "HT-b: the of-only route should read status=recommend confidence=low: $HB";; esac
+HC="$( ofRoute 'I want to understand the function commands' )"
+case "$HC" in *'status="recommend" confidence="high"'*'--expand=&apos;commands&apos;'*) ok "HT-b control: the same name after a real cue (function) still routes at confidence=high";;
+    *) no "HT-b control: 'the function commands' should route --expand='commands' at confidence=high: $HC";; esac
+
 # ── R-LEG: every command this router GENERATES is one the binary accepts (PR #215 review item 5) ───────────
 # A1-2 put --legend=compact on the route commands by editing 26 strings. That is 26 chances to be wrong and no
 # rule for the 27th, and the same hand-application shipped `--zoom --legend=compact --mermaid` into a skill —
@@ -846,10 +875,36 @@ case "$LG" in *--*) no "the legend contains '--' — ill-formed inside an XML co
 RLEG_EMPTY="$TMP/rleg_empty"; mkdir -p "$RLEG_EMPTY"
 cut -f5 "$ROOT/test/taskroutefix/prompts.tsv" 2>/dev/null | sed '1d' > "$TMP/rleg_tasks.txt"   # column 5 is the prompt
 : > "$TMP/rleg_cmds.txt"
+# HELP-TASK-ROUTE (a), audit-verify 2026-11-11: the same corpus pass counts the statuses. Every abstain must name its
+# next step (next= or reason=), and its next= joins the commands executed below. That alone passes a router that
+# abstains on everything, so the recommend count is pinned too: it may not drop below RLEG_RECOMMEND_FLOOR, the count
+# the pre-change binary (main ea25a7888) produced on this corpus — a cap on confidence may never cost a route.
+RLEG_RECOMMEND_FLOOR=118
+rleg_rec=0; rleg_abs=0; rleg_abs_bare=0
 while IFS= read -r _t; do
     [ -n "$_t" ] || continue
-    route "$_t" 2>/dev/null | grep -oE '<run>[^<]*' | sed 's/^<run>//' >> "$TMP/rleg_cmds.txt"
+    route "$_t" 2>/dev/null > "$TMP/rleg_one.xml"
+    grep -oE '<run>[^<]*' "$TMP/rleg_one.xml" | sed 's/^<run>//' >> "$TMP/rleg_cmds.txt"
+    _root="$( grep -oE '<task-route [^>]*>' "$TMP/rleg_one.xml" | head -1 )"
+    case "$_root" in
+        *'status="recommend"'*) rleg_rec=$(( rleg_rec + 1 )) ;;
+        *'status="abstain"'*)
+            rleg_abs=$(( rleg_abs + 1 ))
+            case "$_root" in
+                *' next="'*) printf '%s\n' "$_root" | sed -n 's/.* next="\([^"]*\)".*/\1/p' >> "$TMP/rleg_cmds.txt" ;;
+                *' reason="'*) : ;;
+                *) rleg_abs_bare=$(( rleg_abs_bare + 1 ))
+                   [ "$rleg_abs_bare" -le 3 ] && printf '        BARE ABSTAIN: %s\n' "$( printf '%s' "$_t" | head -c 100 )" ;;
+            esac ;;
+    esac
 done < "$TMP/rleg_tasks.txt"
+[ "$rleg_abs" -gt 0 ] || no "HT-a premise: the corpus produced no abstain at all — the next-step arm below proved nothing"
+[ "$rleg_abs_bare" -eq 0 ] \
+    && ok "HT-a: all $rleg_abs corpus abstains name a next step (next= or reason=)" \
+    || no "HT-a: $rleg_abs_bare of $rleg_abs corpus abstains end with no next= and no reason= (listed above)"
+[ "$rleg_rec" -ge "$RLEG_RECOMMEND_FLOOR" ] \
+    && ok "HT-a recommend-count control: $rleg_rec corpus recommends >= the pinned floor $RLEG_RECOMMEND_FLOOR (no route lost)" \
+    || no "HT-a recommend-count control: $rleg_rec corpus recommends < the pinned floor $RLEG_RECOMMEND_FLOOR — a route was lost"
 # the <run> line is XML-escaped; unescape the two entities the router can emit, then drop the leading `ripwire`
 sed -e "s/&apos;/'/g" -e 's/&quot;/"/g' -e 's/&amp;/\&/g' "$TMP/rleg_cmds.txt" | sort -u > "$TMP/rleg_u.txt"
 # THE STATUS, CAPTURED RATHER THAN SWALLOWED (CodeRabbit, PR #215). This ran each command under

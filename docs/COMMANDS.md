@@ -499,7 +499,7 @@ $ ./build/ripwire . --lego=Vehicle
 
 **Answers:** before you write: the repo's best existing example of this kind of code, to imitate before you write: the repo's best-in-class instance to IMITATE.
 
-Just pass a plain task — --exemplar="format byte sizes" — and the KIND is inferred from the top match; or name a KIND directly (fn|method|class|struct|iface|var). Picks by ROLE — lowest cognitive cx under a hard ccx ceiling, then tested + highest fan-in; test-fixture paths de-prioritized — NOT text similarity (similar-snippet retrieval measurably hurts). A weak task match falls back to fn (low_confidence=1); an all-over-ceiling kind flags over_ccx_bar=1
+Just pass a plain task — --exemplar="format byte sizes" — and the KIND is inferred from the top match; or name a KIND directly (fn|method|class|struct|iface|var). Picks by ROLE — lowest cognitive cx under a hard ccx ceiling, then tested + highest fan-in; test-fixture paths de-prioritized — NOT text similarity (similar-snippet retrieval measurably hurts). A weak task match falls back to fn (low_confidence=1); a good task match whose pick shares no word with it adds off_task=1 beside low_confidence=1; an all-over-ceiling kind flags over_ccx_bar=1
 
 **Try it**
 
@@ -4635,7 +4635,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=b51c8234fe655ef8 entries=1060
+ripwire legend dictionary ripwire.dict/v1 dictv=5be2bb3dabaae9de entries=1062
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
