@@ -13,3 +13,24 @@ ripwire.connect/v1	hop-site	76	 site="	e site=: a call of t= in f=	HOP-CONTEXT-1
 ripwire.connect/v1	hop-call	48	 call="	e call=: its text	HOP-CONTEXT-1: a <e> row carries the call's text (arguments at the site); present-only beside call=
 ripwire.connect/v1	hop-sig	50	 sig="	e sig=: t='s signature	HOP-CONTEXT-1: a <e> row carries the callee's signature once per callee (the agent's R2 read); present-only beside <e sig=>
 ripwire.for/v1	tail-sym-skip	17	<tail	its top symbols not in sigs/syms	R-DEDUP: a tail row skips the names a sigs row or the syms block shows; the compact legend says so (verbs_for.h kForCompactLegendTail, 17 B); present-only beside <tail
+ripwire.map-diff/v1	map-rows	60	<s t="	s t= n=: kind, name	LEGEND-G-BLIND: the ranked-map rows' own keys (f p=, s t= n= k=, c n=) rode this answer undefined; the map's purpose line defines them, its siblings' did not (Fable answer audit flag L); rides on n= so --order=stable (no k=) is defined too
+ripwire.map-diff/v1	map-rank	12	 k="	s k=: rank	LEGEND-G-BLIND: the ranked rows' k=; its own present-only clause, absent under --order=stable
+ripwire.pack-signatures/v1	map-rows	60	<s t="	s t= n=: kind, name	LEGEND-G-BLIND: the ranked map this bundle carries printed its row keys undefined; same clause as map-diff; rides on n= so --order=stable (no k=) is defined too
+ripwire.pack-signatures/v1	map-rank	12	 k="	s k=: rank	LEGEND-G-BLIND: the ranked rows' k=; its own present-only clause, absent under --order=stable
+ripwire.metrics/v1	map-rows	60	<s t="	s t= n=: kind, name	LEGEND-G-BLIND: hono --metrics printed <s k=> under a legend with no k= (the audit's repro); same clause as map-diff; rides on n= so --order=stable (no k=) is defined too
+ripwire.metrics/v1	map-rank	12	 k="	s k=: rank	LEGEND-G-BLIND: the ranked rows' k=; its own present-only clause, absent under --order=stable
+ripwire.deps/v1	inc-target	99	<inc t="	inc t=: one include/import target as written	LEGEND-G-BLIND: tmux --deps printed <inc t="sys/types.h"/> with no t= reading (the audit verify's repro); present-only beside an <inc> row
+ripwire.context-ratio/v1	unit-kind	36	 t="	s t=: the unit's kind	LEGEND-G-BLIND: the s rows' t= rode undefined; present-only beside an <s> row
+ripwire.skipped/v1	lang-name	83	<lang n="	lang n=: a language this build extracted symbols from	LEGEND-G-BLIND: the <lang> census rows' n= rode undefined (the purpose line named the element only); present-only beside a <lang> row
+ripwire.connect/v1	terminal-name	50	<t n="	t n= / s n=: a terminal's / a join's symbol name	LEGEND-G-BLIND: the terminal and join rows' n= rode undefined (the CORE exemption hid it); present-only beside a <t> row
+ripwire.query/v1	map-rows	60	<s t="	s t= n=: kind, name	LEGEND-G-BLIND: the lexical-rank map printed its row keys undefined; same clause as map-diff; rides on n= so --order=stable (no k=) is defined too
+ripwire.query/v1	map-rank	12	 k="	s k=: rank	LEGEND-G-BLIND: the ranked rows' k=; its own present-only clause, absent under --order=stable
+ripwire.exemplar/v1	body-kind	41	<b t="	b t= l=: the body's kind and first line	LEGEND-G-BLIND: the served body row's t=/l= rode undefined; present-only beside a <b> row
+ripwire.around/v1	map-rows	60	<s t="	s t= n=: kind, name	LEGEND-G-BLIND: the around map printed its row keys undefined; same clause as map-diff; rides on n= so --order=stable (no k=) is defined too
+ripwire.around/v1	map-rank	12	 k="	s k=: rank	LEGEND-G-BLIND: the ranked rows' k=; its own present-only clause, absent under --order=stable
+ripwire.from-trace/v1	frame-name	118	 resolved_by="	frame n= t=: the bound symbol's name and kind	LEGEND-G-BLIND: the frame rows' n= t= and the ranked rows' d/b/c n= rode undefined; present-only beside a <frame> row
+ripwire.grep/v1	enc-name	73	<enc n="	enc n=: an enclosing symbol of this page's hits	LEGEND-G-BLIND: the enclosing-symbol rows' n= rode undefined; present-only beside an <enc> row
+ripwire.pack-top-n/v1	map-rows	60	<s t="	s t= n=: kind, name	LEGEND-G-BLIND: the ranked-map rows' own keys rode undefined on the bundle's map; same clause as map-diff; rides on n= so --order=stable (no k=) is defined too
+ripwire.pack-top-n/v1	map-rank	12	 k="	s k=: rank	LEGEND-G-BLIND: the ranked rows' k=; its own present-only clause, absent under --order=stable
+mcp:exemplar	body-kind	41	<b t="	b t= l=: the body's kind and first line	LEGEND-G-BLIND: the served body row's t=/l= rode undefined; present-only beside a <b> row (MCP twin)
+ripwire.pr-context/v1	changed-sym-name	80	<s t="	s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name	LEGEND-G-BLIND: a changed file's s rows and their caller rows printed t= n= undefined; present-only beside an <s> row (absent when the diff touches no symbol)

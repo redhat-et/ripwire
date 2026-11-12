@@ -1,0 +1,58 @@
+# legendcoverage_g_baseline.txt — arm (G)'s floor (LEGEND-G-BLIND, 2026-11-11). One 'row | element@attr' per line: an attribute a
+# DEFAULT answer emits with no definition (name=) in its own legend. Every line was found when arm (G) gained the six modifier
+# rows, the TypeScript and Python corpora, the MCP rows and the narrowed CORE exemption; the old default rows had none. The floor
+# may only SHRINK: a gap not listed here fails (G), and a listed line that no longer reproduces is printed for deletion.
+# Credit: the Fable answer audit (flag L) found the blind spots; the Opus audit verify (LEGEND-G-BLIND) confirmed them.
+# BURN-DOWN 2026-11-11 (same lane): 175 -> 50. The 125 lines gone are defined now (src/compactlegend.h kCompactAttributeReadings,
+# the LEGEND-G-BLIND block; the MCP for closure). The 50 left are the rarely used modifiers: --stray-content --plan,
+# --pack-task --partition, --cochange-groups, --slice-flow, --layout, --gateability, --field-affinity.
+cochange-groups-default | cochange@cover
+cochange-groups-default | cochange@groups
+cochange-groups-default | cochange@pairs_covered
+cochange-groups-default | f@conf_core
+cochange-groups-default | group@core
+cochange-groups-default | group@partners
+field-affinity-default | fn@l
+field-affinity-default | s@l
+field-affinity-root-default | fn@l
+field-affinity-root-default | s@l
+gateability-default | fix@live
+gateability-default | gateability@projected_drift
+layout-default | caveat@k
+layout-default | def@l
+layout-default | f@n
+partition-default | b@l
+partition-default | b@n
+partition-default | b@t
+partition-default | c@l
+partition-default | c@n
+partition-default | d@l
+partition-default | d@n
+partition-default | s@n
+partition-default | s@t
+slice-flow-default | s@f
+slice-flow-default | slice@flow
+slice-flow-default | slice@flow_redundant
+slice-flow-default | slice@var
+stray-plan-default | arm@base
+stray-plan-default | arm@changed
+stray-plan-default | arm@head_conflicts
+stray-plan-default | arm@ok
+stray-plan-default | arm@ref
+stray-plan-default | landing-plan@bounded
+stray-plan-default | landing-plan@head
+stray-plan-default | landing-plan@merged
+stray-plan-default | landing-plan@refs
+stray-plan-default | landing-plan@scout-ok
+stray-plan-default | landing-plan@scouted
+stray-plan-default | landing-plan@superseded
+stray-plan-default | landing-plan@undetermined
+stray-plan-default | landing-plan@unmerged
+stray-plan-default | landing@order
+stray-plan-default | ref@files
+stray-plan-default | ref@name
+stray-plan-default | ref@scouted
+stray-plan-default | ref@stray
+stray-plan-default | ref@v
+stray-plan-default | sym@id
+stray-plan-default | sym@p
