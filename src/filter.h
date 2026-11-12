@@ -171,6 +171,24 @@ inline PathTier pathTierOf( std::string_view p ) noexcept
     return PathTier::Source;
 }
 
+// The TEST CLASS: a definition in the test partition (isTestSymbol: a test path or an in-file test scope) or in a
+// fixture/bench/testdata directory (pathTierOf). --path's test twin, --defs class="test", the --for M1 narrowing and
+// --connect's source joint (graph.h connectSourceJoint) all ask this one rule. pathInTestsOrFixtures is its FILE half, for a
+// caller that classifies every symbol of a file at once (one path read per file, not per symbol).
+inline bool pathInTestsOrFixtures( std::string_view p ) noexcept
+{
+    return isTestPath( p ) || pathTierOf( p ) == PathTier::TestOrBench;
+}
+inline bool pathDefInTests( const IngestResult& ing, NodeId n ) noexcept
+{
+    if( n >= ing.symbols.size() )
+    {
+        return false;
+    }
+    const Symbol& s = ing.symbols[ n ];
+    return s.testScope != 0 || ( s.fileId < ing.files.size() && pathInTestsOrFixtures( rootRelPath( ing, s.fileId ) ) );
+}
+
 // ── LB-G (r10 GitNexus round) — the ORDERING key, in ONE place for every verb that sorts rows by it ──────
 // --grep has ordered SOURCE > TEST/BENCH > DOC since the span-tier round; --callers/--callees/--uses joined
 // it in the r10 fix round. Three verbs sorting by "tier then path" is three chances to spell the key

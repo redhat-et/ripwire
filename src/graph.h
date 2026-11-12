@@ -18208,10 +18208,15 @@ struct ConnectResult
     std::vector<ConnectGroup>  groups;        // ordered by lowest terminal id (first-seen over the ascending terminal list)
     std::uint32_t              radius    = connectcfg::kDefaultRadius;   // the CLAMPED radius actually searched
     bool                       truncated = false;   // a size cap dropped ≥1 MST path (emitter stamps truncated="paths")
+    // CONNECT-SOURCE-JOINT (connectSourceJoint below): the test-class intermediary that joins terminals this source-only search
+    // left apart (emitter: source_joint="none" test_joint= test_joint_p=); kNoNode when nothing was left apart that a test joins
+    NodeId                     testJoint = kNoNode;
 };
 
+// `notThrough` (empty = none): nodes the search never walks THROUGH — reached, but never expanded, so never an intermediary
+// of any leg. A terminal is always expanded (it is the source of its own search).
 inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>& terminalSpecs,
-                                      std::uint32_t radius = connectcfg::kDefaultRadius )
+                                      std::uint32_t radius = connectcfg::kDefaultRadius, std::span<const char> notThrough = {} )
 {
     const std::size_t N = g.wOutDeg.size();
     ConnectResult res;
@@ -18308,6 +18313,10 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
                 if( du >= res.radius )
                 {
                     continue; // radius bound: never expand past R undirected hops
+                }
+                if( u != src && u < notThrough.size() && notThrough[ u ] != 0 )
+                {
+                    continue; // CONNECT-SOURCE-JOINT: reached, never walked through (never a joint)
                 }
 
                 // out-edges first (ascending by construction — buildGraph stores targets ascending per source)
@@ -18788,6 +18797,52 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
         }
     }
     return out;
+}
+
+// CONNECT-SOURCE-JOINT (a): a test function is never the joint of terminals that are all source. terraform's
+// `--connect=Context.Plan,Context.Apply` joined the two through TestContext2Apply_nullableVariables and printed it as the
+// common caller, unhedged; and §2.4a's tie-break (fewer connects wins) hands an equal-distance join to a test, which usually
+// connects few. So when no terminal is test-class (filter.h pathDefInTests), the search never walks through a test-class
+// node. When that leaves apart terminals the unrestricted search joins, the result names the first test-class intermediary
+// (id order) of that search as testJoint: test-only evidence, disclosed by the emitter, never printed as a joint. A test
+// terminal keeps today's search unchanged (a test's own helpers are its honest joints).
+inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& terminals, std::uint32_t radius )
+{
+    const std::size_t N = g.wOutDeg.size();
+    if( terminals.size() < 2 || std::any_of( terminals.begin(), terminals.end(), [ & ]( NodeId t ) { return pathDefInTests( ing, t ); } ) )
+    {
+        return connectSubgraph( g, terminals, radius );
+    }
+    std::vector<char> fileInTests( ing.files.size() );   // the file half once per file, the symbol half (testScope) per node
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        fileInTests[ f ] = pathInTestsOrFixtures( rootRelPath( ing, std::uint32_t( f ) ) ) ? 1 : 0;
+    }
+    std::vector<char> inTests( N, 0 );
+    for( std::size_t n = 0; n < N && n < ing.symbols.size(); ++n )
+    {
+        const Symbol& s = ing.symbols[ n ];
+        inTests[ n ] = ( s.testScope != 0 || ( s.fileId < fileInTests.size() && fileInTests[ s.fileId ] != 0 ) ) ? 1 : 0;
+    }
+    ConnectResult res = connectSubgraph( g, terminals, radius, inTests );
+    if( res.groups.size() <= 1 )
+    {
+        return res;   // every terminal joined through source (or nothing to join): no test was needed
+    }
+    const ConnectResult any = connectSubgraph( g, terminals, radius );
+    if( any.groups.size() >= res.groups.size() )
+    {
+        return res;   // the tests join nothing the source search left apart
+    }
+    for( const ConnectGroup& grp : any.groups )
+    {
+        const auto hit = std::find_if( grp.steiner.begin(), grp.steiner.end(), [ & ]( NodeId v ) { return v < N && inTests[ v ] != 0; } );
+        if( hit != grp.steiner.end() && ( res.testJoint == kNoNode || *hit < res.testJoint ) )
+        {
+            res.testJoint = *hit;
+        }
+    }
+    return res;
 }
 
 // ---- community detection (--communities): one level of Louvain local-moving on the UNDIRECTED projection

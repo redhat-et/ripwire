@@ -30,7 +30,7 @@
 // answer (gaps, bridge, near_sink) is unchanged — this file is never consulted there.
 
 #include "defattrib.h"   // defGroupsOf, pathHopSplitArm, pathHopOwners, emitPathHopRows — the one --path row emitter
-#include "filter.h"      // isTestSymbol, pathTierOf — the test twin's classifier
+#include "filter.h"      // pathDefInTests — the test twin's classifier
 #include "forowner.h"     // ownerQuestionWords, ownerFoldName — the question words (owner-hop's)
 #include "graph.h"       // edgeIndex, edgeNameOnly/edgeIsLink/edgeAnchorMiss/edgeViaImpl, reachRankBefore
 #include "memberowner.h"  // MemberOwners — an endpoint's owner, as its row prints it
@@ -496,12 +496,7 @@ struct PathEndpointSide
     std::string_view        typed;
     bool                    bound = false;
 };
-// a definition in the test partition (filter.h isTestSymbol) or a fixture/bench/testdata directory (pathTierOf) — the two
-// classifiers the listing verbs already order by; nothing is re-derived here
-inline bool pathDefInTests( const IngestResult& ing, NodeId n ) noexcept
-{
-    return isTestSymbol( ing, n ) || pathTierOf( rootRelPath( ing, ing.symbols[n].fileId ) ) == PathTier::TestOrBench;
-}
+// pathDefInTests (the test class: a test symbol or a fixture/bench/testdata path) lives in filter.h beside its two classifiers
 // one side: `fired` = the bound def is in tests and a non-test DEFINITION (never a declaration) of the selector exists; `twin` =
 // the one of those that reaches the other endpoint's definitions (shortestPathAny: proven or hedged hops; a bridge-only def is
 // not a chain, so it is not named), kNoNode when none does

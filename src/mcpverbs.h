@@ -4210,6 +4210,13 @@ inline constexpr char kConnectHeader[] =
     " over_ceiling=\"1\" says est_tokens exceeds max_tokens anyway (the trim ran out of things to drop before it"
     " reached the ceiling; the bundle is then complete, not further trimmed) -->";
 
+// CONNECT-SOURCE-JOINT (graph.h connectSourceJoint): the reading of the root's source_joint= / test_joint= / test_joint_p=,
+// emitted only on the answer that carries them. (G4: no double hyphen.)
+inline constexpr std::string_view kConnectTestJointLegend =
+    "source_joint=\"none\": every terminal is source code and no source function joins the <unconnected> ones within radius= (the"
+    " search does not walk through test or fixture code); test_joint=/test_joint_p= name a test that does call them together:"
+    " test-only evidence of how they are used, not a source caller ";
+
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
 // BOUNDED rather than measured — a wide start-tag with every counter at five digits and truncated="paths"
@@ -4295,6 +4302,15 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // GV-PATH-BIND (forgraphverb.h narrowRefusedSpelling): narrowed= and its clause, charged like the attribute above; absent (0 bytes) with none
     const std::string  connectNarrowedAttr   = narrowedAttrXml( narrowed );
     const std::string  connectNarrowedLegend = narrowed.empty() ? std::string() : "<!-- ripwire connect: " + std::string( narrowedVerbLegend( true ) ) + "-->";
+    // CONNECT-SOURCE-JOINT (graph.h connectSourceJoint): every terminal is source, a test-class node alone joins some of them, and
+    // the search did not walk through it: the root says so and names the test, charged like narrowed= above; absent (0 bytes) otherwise
+    std::string        connectTestJointAttr, connectTestJointLegend;
+    if( res.testJoint < ing.symbols.size() )
+    {
+        const Symbol& tj       = ing.symbols[ res.testJoint ];
+        connectTestJointAttr   = " source_joint=\"none\" test_joint=\"" + ex( tj.name ) + "\" test_joint_p=\"" + ex( pathRel( tj.fileId ) ) + ":" + std::to_string( tj.line ) + "\"";
+        connectTestJointLegend = "<!-- ripwire connect: " + std::string( kConnectTestJointLegend ) + "-->";
+    }
     // FE-B: the reading of via="name", when some <e> of this answer carries it — charged like the clauses above
     const bool         connectHasVia = std::any_of( res.groups.begin(), res.groups.end(), [ & ]( const ConnectGroup& grp )
     {
@@ -4313,7 +4329,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                         + ( connectHasMiss ? "<!-- ripwire connect: " + anchorMissLegend( true ) + "-->" : std::string() );
     const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) )
                                          + connectUnindexedLegend.size() + connectUnprovenAttr.size() + connectUnprovenLegend.size()
-                                         + connectAmbiguousAttr.size() + connectViaLegend.size() + connectNarrowedAttr.size() + connectNarrowedLegend.size();
+                                         + connectAmbiguousAttr.size() + connectViaLegend.size() + connectNarrowedAttr.size() + connectNarrowedLegend.size()
+                                         + connectTestJointAttr.size() + connectTestJointLegend.size();
 
     // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
@@ -4540,13 +4557,14 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
-                connectNarrowedLegend, connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
-    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( out, "{}{}{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                connectNarrowedLegend, connectTestJointLegend, connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{}{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
                   connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero
                   connectAmbiguousAttr,          // 0.6.6 D1: absent when no many-definition pick tied
                   connectNarrowedAttr,           // GV-PATH-BIND: absent when no terminal was narrowed
+                  connectTestJointAttr,          // CONNECT-SOURCE-JOINT: absent unless only a test joins source terminals
                   estTokens, hubFloor,
                   rw::cstr( connectCeiling ), connectOverAttr, hopRootXml,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
@@ -4580,7 +4598,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     }
 
     const ConnectPicks  picks = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
-    const ConnectResult res = connectSubgraph( g, terminals, radius );
+    const ConnectResult res = connectSourceJoint( ing, g, terminals, radius );   // CONNECT-SOURCE-JOINT: never a test joint for source terminals
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
     if( !mem ) { err = "internal error"; return {}; }

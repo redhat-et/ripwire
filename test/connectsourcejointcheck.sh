@@ -158,7 +158,7 @@ fi
 # ── M) mutations ─────────────────────────────────────────────────────────────────────────────────────────
 MUT="$( printf '%s' "$A_FULL" | sed 's/<unconnected/<s n="testBoth" t="fn"\/><unconnected/' )"
 printf '%s' "$MUT" | grep -q '<s n="testBoth"' && ok "(M) mutation (test joint printed) trips (A)" || no "(M) mutation not seen by (A)"
-MUT="$( printf '%s' "$A_FULL" | sed 's/ source_joint="none"//' )"
+MUT="$( printf '%s' "$A_FULL" | sed 's/ source_joint="none"//g' )"
 printf '%s' "$MUT" | grep -q '<connect [^>]*source_joint="none"' && no "(M) mutation (disclosure dropped) passes (A)" || ok "(M) mutation (disclosure dropped) trips (A)"
 MUT="$( printf '%s' "$E_DOC" | sed 's/<s n="driver"/<s n="testBoth"/' )"
 [ "$( steinerOf "$MUT" )" = "driver" ] && no "(M) mutation (test wins tie) passes (E)" || ok "(M) mutation (test wins tie) trips (E)"
