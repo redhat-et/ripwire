@@ -396,6 +396,7 @@ for _g in \
     connectcheck \
     connectcorecheck \
     connectjoincheck \
+    connectsourcejointcheck \
     constcheck \
     contextratiocheck \
     coplintcheck \

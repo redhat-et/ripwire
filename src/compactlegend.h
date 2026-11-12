@@ -1348,6 +1348,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // 0.6.6 D1: present-only — absent unless a many-definition terminal's pick tied with another equally-joining definition
     { "ambiguous_terminal", "ambiguous_terminal=: terminal names whose pick tied with another equally-joining definition (qualify file:name)", true, "connect", MapHeaderRead::No, {}, "connect" },
     { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "connect", MapHeaderRead::No, {}, "connect" },
+    // CONNECT-SOURCE-JOINT (src/mcpverbs.h kConnectTestJointLegend), present-only: only a test joins source terminals
+    { "source_joint", "source_joint=none: all terminals are source and no source function joins the unconnected ones (test/fixture code is not walked); test_joint=/test_joint_p=: a test that calls them together, test-only evidence, not a source caller", false, "connect", MapHeaderRead::No, {}, "connect" },   // also defines test_joint=, test_joint_p=
     // grep: src/verbs_grep.h (the enc row's def count)
     { "defs", "enc defs=N: the enclosing name has N defs, the row unions them (only above 1)", true, "enc", MapHeaderRead::No, {}, "grep" },
     // owners: src/verbs_report.h (the of= form)
