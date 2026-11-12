@@ -214,7 +214,8 @@ printf '%s' "$WEAKDOC" | grep -q 'off_task="1"' && no "5b control: the plain fal
 # a kind token is never hedged by the task test: there is no task to be off
 KH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar=fn 2>/dev/null )" )"
 printf '%s' "$KH" | grep -q 'low_confidence' && no "a kind token (fn) must never carry low_confidence: $KH" \
-    || ok "a kind token (fn) carries no hedge: $KH"
+    || { [ -n "$KH" ] && ok "a kind token (fn) carries no hedge: $KH" \
+         || no "premise: --exemplar=fn printed no <exemplar> header (the call failed or printed nothing)"; }
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
