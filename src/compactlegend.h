@@ -1766,12 +1766,18 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // map legend defines them"; the map's own purpose line does, and the answers below printed them under a legend that did not.
     // Most-used verbs first (--for's MCP twin, the map family, grep, callees, from-trace). Present-only and key-qualified, so an
     // answer without the element pays nothing and no other verb reads them.
-    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines p= t= n= c n=
-    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "map-diff" },   // also defines p= t= n= c n=
-    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "around" },   // also defines p= t= n= c n=
-    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "query" },   // also defines p= t= n= c n=
-    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-signatures" },   // also defines p= t= n= c n=
-    { "k", "f p=: a file; s t= n= k=: kind, name, rank; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-top-n" },   // also defines p= t= n= c n=
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "map-diff" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "map-diff" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "around" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "around" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "query" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "query" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-signatures" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "pack-signatures" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-top-n" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "pack-top-n" },
     { "t", "s t=: the unit's kind (fn|cls|...)", true, "s", MapHeaderRead::No, {}, "context-ratio" },
     { "t", "inc t=: one include/import target as written; one with no edge did not resolve to an indexed file", true, "inc", MapHeaderRead::No, {}, "deps" },
     { "n", "enc n=: an enclosing symbol of this page's hits, first-appearance order", true, "enc", MapHeaderRead::No, {}, "grep" },
