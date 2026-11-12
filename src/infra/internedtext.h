@@ -26,7 +26,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <memory>   // std::construct_at / std::destroy_at: a segment's slots are constructed one id at a time (NIT-7)
 #include <mutex>
+#include <new>      // ::operator new / delete: a segment is raw storage
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,11 +49,19 @@ public:
     constexpr TextPool() noexcept = default;
     TextPool( const TextPool& )            = delete;
     TextPool& operator=( const TextPool& ) = delete;
+    // Every id below next_ has its slot constructed (makeSlot runs under the shard lock that hands the id out), and a pool with a
+    // scope is destroyed after its last interning thread joined: destroy those slots, then free each raw segment.
     ~TextPool()
     {
+        const std::uint32_t end = next_.load( std::memory_order_relaxed );
+        for( std::uint32_t id = 1; id < end && id <= kCapacity; ++id )
+        {
+            const auto [ seg, offset ] = locate( id );
+            std::destroy_at( segments_[ seg ].load( std::memory_order_relaxed ) + offset );
+        }
         for( std::size_t seg = 0; seg < kSegments; ++seg )
         {
-            delete[] segments_[ seg ].load( std::memory_order_relaxed );
+            ::operator delete( segments_[ seg ].load( std::memory_order_relaxed ) );
         }
     }
 
@@ -83,7 +93,7 @@ public:
                 {
                     PANIC( "text pool full: more than kCapacity distinct texts" );   // ~4.29 G texts (100+ GB): no row can hold a past-the-end id
                 }
-                makeSlot( id ) = std::string( text );
+                makeSlot( id, text );
                 slot = { tag, id };
                 ++shard.used;
                 return id;
@@ -163,25 +173,28 @@ private:
         const unsigned      seg   = unsigned( std::bit_width( index / kFirst + 1 ) ) - 1;
         return { seg, std::size_t( index - std::uint64_t( kFirst ) * ( ( std::uint64_t( 1 ) << seg ) - 1 ) ) };
     }
-    // The slot a NEW id's text goes in, making its segment on the first id that lands there (a release CAS: another shard's
-    // first intern may race for the same segment, and the loser frees its copy).
-    std::string& makeSlot( std::uint32_t id )
+    // Construct a NEW id's text in its slot, making its segment on the first id that lands there (a release CAS: another shard's
+    // first intern may race for the same segment, and the loser frees its copy). NIT-7 (MEM-R1c): the segment is RAW storage and
+    // each slot is constructed here, under the shard lock that hands out its id, so a segment's untouched tail stays untouched
+    // (`new std::string[ n ]` constructed, and so wrote, all of segment k's kFirst << k slots at its first id: 6 MiB at segment
+    // 6). Nothing reads a slot before its id is published, and the destructor destroys exactly the ids below next_.
+    void makeSlot( std::uint32_t id, std::string_view text )
     {
         const auto [ seg, offset ] = locate( id );
         std::string* base = segments_[ seg ].load( std::memory_order_acquire );
         if( base == nullptr )
         {
-            std::string* fresh = new std::string[ std::size_t( kFirst ) << seg ];
+            std::string* fresh = static_cast<std::string*>( ::operator new( sizeof( std::string ) * ( std::size_t( kFirst ) << seg ) ) );
             if( segments_[ seg ].compare_exchange_strong( base, fresh, std::memory_order_acq_rel, std::memory_order_acquire ) )
             {
                 base = fresh;
             }
             else
             {
-                delete[] fresh;
+                ::operator delete( fresh );
             }
         }
-        return base[ offset ];
+        std::construct_at( base + offset, text );
     }
 
     std::atomic<std::string*>  segments_[ kSegments ] = {};
