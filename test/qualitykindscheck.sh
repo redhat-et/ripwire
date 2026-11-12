@@ -674,6 +674,309 @@ void routed() { try { risky(); } catch( const Oops& ) { throw; } catch( ... ) { 
 qd_has  "masking (c++)" error-masking rethrow minor
 qd_none "masking (c++)" error-masking routed "a re-throw ahead of a catch-all sibling routes, it is not redundant"
 
+# ── 5b) EMPTY ERROR BRANCHES in Go and Rust (QD-K6E-GO / QD-K6E-RUST) + Rust log-only + C++ stream logging (K6L-CXX)
+#   Go: `if err != nil {}` (comment-only counts), err bound from a CALL in the if's initializer or the statement right
+#   before it; Rust: `if let Err(..) = f() {}` and `Err(..) => {}` / `=> ()`. Both GATE, as Python's `except: pass` does.
+#   Rust log-only: an Err arm / if-let Err whose body only prints or logs and never names the binding — sev=minor.
+#   C++ log-only: a catch whose body is only `std::cerr << …`, `LOG( x ) << …`, `fprintf( stderr, … )`, `fputs( …, stderr )`
+#   — sev=minor. Every negative arm first COUNTS the sites it judges (ripwire's own --match over the edited fixture) and
+#   FAILS on zero, so a fixture that stopped parsing as the shape cannot pass vacuously.
+premise(){   # LABEL DIR SYM QUERY → FAIL unless the query hits at least once inside SYM
+    local n; n="$( cd "$WORK/$2" && "$BIN" . --match="$4" --no-cache 2>/dev/null | tr '>' '\n' | grep -c "<m p=[^ ]* in=\"$3\"" )"
+    if [ "${n:-0}" -gt 0 ]; then ok "$1: premise — $n site(s) judged in $3"; else no "$1: premise — 0 sites in $3 (the negative arm is vacuous)"; fi
+}
+GOB='package p
+
+import (
+	"log"
+	"os"
+)
+
+func initEmpty() { touch() }
+func prevEmpty() { touch() }
+func retErr() error { touch(); return nil }
+func logged() { touch() }
+func paramErr(err error) { touch() }
+func discard() { touch() }
+func elseBranch() { touch() }
+func callFirst() { touch() }
+func callSecond() { touch() }
+func multiInit(savedErr error, items []int) { touch() }
+func multiPrev(savedErr error, items []int) { touch() }
+func wrongPosInit(savedErr error) { touch() }
+func wrongPosPrev(savedErr error) { touch() }
+
+func risky() error { return nil }
+func touch() { log.Print(os.Args) }
+'
+GOE='package p
+
+import (
+	"log"
+	"os"
+)
+
+func initEmpty() {
+	touch()
+	if _, err := os.Stat("."); err != nil {
+	}
+}
+func prevEmpty() {
+	touch()
+	err := risky()
+	if err != nil {
+		// ignored
+	}
+}
+func retErr() error {
+	touch()
+	if err := risky(); err != nil {
+		return err
+	}
+	return nil
+}
+func logged() {
+	touch()
+	if err := risky(); err != nil {
+		log.Printf("%v", err)
+	}
+}
+func paramErr(err error) {
+	touch()
+	if err != nil {
+	}
+}
+func discard() {
+	touch()
+	defer func() { _ = recover() }()
+}
+func elseBranch() {
+	touch()
+	if err := risky(); err != nil {
+	} else {
+		touch()
+	}
+}
+func callFirst() {
+	touch()
+	if err, n := risky(), 3; err != nil {
+	}
+}
+func callSecond() {
+	touch()
+	n, err := 3, risky()
+	if err != nil {
+	}
+}
+func multiInit(savedErr error, items []int) {
+	touch()
+	if err, _ := savedErr, len(items); err != nil {
+	}
+}
+func multiPrev(savedErr error, items []int) {
+	touch()
+	err, _ := savedErr, len(items)
+	if err != nil {
+	}
+}
+func wrongPosInit(savedErr error) {
+	touch()
+	if err, n := savedErr, risky(); err != nil {
+	}
+}
+func wrongPosPrev(savedErr error) {
+	touch()
+	n, err := risky(), savedErr
+	if err != nil {
+	}
+}
+
+func risky() error { return nil }
+func touch() { log.Print(os.Args) }
+'
+qd_pair empty_go a.go "$GOB" "$GOE"
+qd_has  "empty (go)" error-masking initEmpty gating
+qd_has  "empty (go)" error-masking prevEmpty gating
+qd_has  "empty (go)" error-masking callFirst gating    # err, n := f(), 3 — err IS the call's result
+qd_has  "empty (go)" error-masking callSecond gating   # n, err := 3, f()
+for s in retErr logged paramErr elseBranch; do premise "empty (go)" empty_go "$s" '(binary_expression right: (nil)) @m'; done
+premise "empty (go)" empty_go discard '(assignment_statement left: (expression_list (identifier) @m))'
+qd_none "empty (go)" error-masking retErr     "the branch returns the error"
+qd_none "empty (go)" error-masking logged     "the branch logs the error by name"
+qd_none "empty (go)" error-masking paramErr   "err is a parameter, not a call result here"
+qd_none "empty (go)" error-masking discard    "_ = recover() is out of scope"
+qd_none "empty (go)" error-masking elseBranch "an if/else is not an error branch alone"
+# CR #632 4556210611: a multi-value right-hand side binds err to the expression IN ITS POSITION, not to a call elsewhere
+for s in multiInit multiPrev wrongPosInit wrongPosPrev; do premise "empty (go)" empty_go "$s" '(expression_list (identifier) (_)) @m'; done
+qd_none "empty (go)" error-masking multiInit    "err, _ := savedErr, len(items) binds err to a variable, not a call"
+qd_none "empty (go)" error-masking multiPrev    "the same multi-value binding in the statement before the if"
+qd_none "empty (go)" error-masking wrongPosInit "err, n := savedErr, f() — the call feeds n, not err"
+qd_none "empty (go)" error-masking wrongPosPrev "n, err := f(), savedErr — the call feeds n, not err"
+if [ "$QD_RC" = 2 ]; then ok "empty (go): the gating rows fire exit 2"; else no "empty (go): should exit 2 (got $QD_RC)"; fi
+
+RSB='use std::fmt::Write;
+
+fn touch() {}
+pub fn iflet_empty() { touch(); }
+pub fn arm_empty() { touch(); }
+pub fn arm_unit() { touch(); }
+pub fn log_only() { touch(); }
+pub fn log_arm() { touch(); }
+pub fn ret_err() -> Result<(), std::io::Error> { touch(); Ok(()) }
+pub fn write_char(buf: &mut String) { touch(); }
+pub fn names_e() { touch(); }
+pub fn variant_log() { touch(); }
+pub fn or_log() { touch(); }
+pub fn at_log() { touch(); }
+pub fn iflet_variant_log() { touch(); }
+pub fn ref_named() { touch(); }
+pub fn ref_log() { touch(); }
+pub fn guard_unit() { touch(); }
+pub fn guard_block() { touch(); }
+pub fn chain_empty() { touch(); }
+'
+RSE='use std::fmt::Write;
+
+fn touch() {}
+pub fn iflet_empty() {
+    touch();
+    if let Err(_) = std::fs::metadata(".") {
+    }
+}
+pub fn arm_empty() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => {}, Err(_frame) => {} }
+}
+pub fn arm_unit() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(_) => () }
+}
+pub fn log_only() {
+    touch();
+    if let Err(_) = std::fs::metadata(".") {
+        eprintln!("ignored");
+    }
+}
+pub fn log_arm() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(_e) => log::warn!("failed") }
+}
+pub fn ret_err() -> Result<(), std::io::Error> {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => Ok(()), Err(e) => return Err(e.into()) }
+}
+pub fn write_char(buf: &mut String) {
+    touch();
+    let _ = buf.write_char(char::from(10));
+}
+pub fn names_e() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(e) => eprintln!("failed: {e}") }
+}
+pub fn variant_log() {
+    touch();
+    match load() { Ok(_) => touch(), Err(MyError::NotFound) => eprintln!("missing"), Err(e) => panic!("{e}") }
+}
+pub fn or_log() {
+    touch();
+    match load() { Ok(_) => touch(), Err(MyError::A | MyError::B) => eprintln!("skipped"), Err(e) => panic!("{e}") }
+}
+pub fn at_log() {
+    touch();
+    match load() { Ok(_) => touch(), Err(e @ MyError::Busy) => eprintln!("busy"), Err(e) => panic!("{e}") }
+}
+pub fn iflet_variant_log() {
+    touch();
+    if let Err(MyError::NotFound) = load() {
+        eprintln!("missing");
+    }
+}
+pub fn ref_named() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(ref e) => eprintln!("failed: {e}") }
+}
+pub fn ref_log() {
+    touch();
+    match std::fs::metadata(".") { Ok(_) => touch(), Err(ref mut _e) => log::warn!("failed") }
+}
+pub fn guard_unit() -> Result<(), MyError> {
+    touch();
+    match load() { Ok(_) => (), Err(e) if recover(&e) => (), Err(e) => return Err(e) }
+}
+pub fn guard_block() {
+    touch();
+    match load() { Ok(_) => touch(), Err(e) if recover(&e) => {}, Err(e) => panic!("{e}") }
+}
+pub fn chain_empty() {
+    touch();
+    if let Err(e) = load() && recover(&e) {
+    }
+}
+'
+qd_pair empty_rs a.rs "$RSB" "$RSE"
+qd_has  "empty (rust)" error-masking iflet_empty gating
+qd_has  "empty (rust)" error-masking arm_empty gating
+qd_has  "empty (rust)" error-masking arm_unit gating
+qd_has  "log-only (rust)" error-masking log_only minor
+qd_has  "log-only (rust)" error-masking log_arm minor
+for s in ret_err names_e; do premise "empty (rust)" empty_rs "$s" '(tuple_struct_pattern) @m'; done
+premise "empty (rust)" empty_rs write_char '(let_declaration) @m'
+qd_none "empty (rust)" error-masking ret_err    "the arm returns the error"
+qd_none "empty (rust)" error-masking write_char "let _ = fallible(); is out of scope"
+qd_none "empty (rust)" error-masking names_e    "the arm logs the error by name, inside the format string"
+qd_has  "log-only (rust)" error-masking ref_log minor   # Err(ref mut _e): the wrappers still bind the whole error side
+# CR #632 4556210583: an Err pattern that names ONE variant (or a few) is not a broad handler
+for s in variant_log or_log at_log iflet_variant_log ref_named guard_unit guard_block chain_empty; do premise "rust variants" empty_rs "$s" '(tuple_struct_pattern) @m'; done
+qd_none "log-only (rust)" error-masking variant_log       "Err(MyError::NotFound) handles one variant"
+qd_none "log-only (rust)" error-masking or_log            "Err(A | B) handles two variants"
+qd_none "log-only (rust)" error-masking at_log            "Err(e @ MyError::Busy) handles one variant"
+qd_none "log-only (rust)" error-masking iflet_variant_log "if let Err(MyError::NotFound) handles one variant"
+qd_none "log-only (rust)" error-masking ref_named         "Err(ref e) logs the error by name"
+# CR #632 4556210784: a match guard is where the error is handled
+qd_none "empty (rust)" error-masking guard_unit  "Err(e) if recover(&e) => () — the guard handles it"
+qd_none "empty (rust)" error-masking guard_block "Err(e) if recover(&e) => {} — the guard handles it"
+qd_none "empty (rust)" error-masking chain_empty "if let Err(e) = f() && recover(&e) {} — the chain's condition handles it"
+
+CXB='#include <cstdio>
+#include <iostream>
+#include <sstream>
+void risky();
+void stream_log() { risky(); }
+void macro_log() { risky(); }
+void fprintf_log() { risky(); }
+void fputs_log() { risky(); }
+void log_rethrow() { risky(); }
+void log_return_value() { risky(); }
+void oss_thrown() { risky(); }
+void oss_only() { risky(); }
+'
+CXE='#include <cstdio>
+#include <iostream>
+#include <sstream>
+void risky();
+void stream_log() { try { risky(); } catch( ... ) { std::cerr << "ignored" << std::endl; } }
+void macro_log() { try { risky(); } catch( ... ) { LOG( ERROR ) << "ignored"; } }
+void fprintf_log() { try { risky(); } catch( ... ) { fprintf( stderr, "ignored\n" ); } }
+void fputs_log() { try { risky(); } catch( ... ) { fputs( "ignored\n", stderr ); } }
+void log_rethrow() { try { risky(); } catch( ... ) { std::cerr << "failed" << std::endl; throw; } }
+int log_return_value() { try { risky(); } catch( ... ) { std::cerr << "failed\n"; return -1; } return 0; }
+void oss_thrown() { try { risky(); } catch( ... ) { std::ostringstream os; os << "failed"; throw std::runtime_error( os.str() ); } }
+void oss_only() { try { risky(); } catch( ... ) { trace_buffer << "failed"; } }
+'
+qd_pair log_cpp a.cpp "$CXB" "$CXE"
+for s in stream_log macro_log fprintf_log fputs_log; do qd_has "log-only (c++)" error-masking "$s" minor; done
+for s in log_rethrow log_return_value oss_thrown oss_only; do premise "log-only (c++)" log_cpp "$s" '(catch_clause) @m'; done
+qd_none "log-only (c++)" error-masking log_rethrow      "it logs and re-throws"
+qd_none "log-only (c++)" error-masking log_return_value "it logs and returns an error value"
+qd_none "log-only (c++)" error-masking oss_thrown       "the << builds an exception message that is thrown"
+qd_none "log-only (c++)" error-masking oss_only         "a << into a non-console stream is not logging"
+# the fixture's near-identical one-liners are duplication rows (those gate); no error-masking row may
+if printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<r kind="error-masking"' | grep -q 'gating='; then
+    no "log-only (c++): an error-masking row gates"
+else
+    ok "log-only (c++): no error-masking row gates"
+fi
+
 # ── 6) PLACEHOLDER — the eleventh kind: a stub or TODO the change ADDED ───────────────────────────────────
 #   Never gates: every row is origin="new-symbol" by construction, including one that lands in a symbol that
 #   existed at the baseline (other() below). The near-misses are the ones the kind must not count: a TODO
