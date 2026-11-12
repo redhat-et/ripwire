@@ -75,7 +75,7 @@
 #        A static gate proves the shape; this proves the fix. (test/det-gate.sh and test/xmlwellformed.sh
 #        carry the same width fixture for the determinism and G4 halves — see §B15.)
 #   (S6) THE ENUMERATION IS LIVE — mentions / calls / string-interpolating sites / rows are re-derived every run,
-#        printed, and held to a floor and to calls <= mentions, sites <= calls, rows <= sites; width-form sites are
+#        printed, and held to a floor and to sites <= calls, rows <= sites; width-form sites are
 #        0. Until 2026-11-12 the counts were pinned exactly, which re-pinned arithmetic (S1)/(S2) already check.
 #
 # Usage:  test/fixedbufsweep.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fixedbufsweep.sh
@@ -653,8 +653,14 @@ FLOOR = { "mentions": 150, "calls": 100, "sites": 100, "rows": 40 }
 # 2026-09-03 (round 4 merge): +1 call/+1 mention — quality.h ack-ledger lockfile name "ripwire-sidecar-%016llx.lock" into a sized buffer, bounded hex (re-read, not just counted)
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
 short    = { k: ( FLOOR[k], derived[k] ) for k in FLOOR if derived[k] < FLOOR[k] }
-order    = [ "%s %d > %s %d" % ( a, derived[a], b, derived[b] )
-             for a, b in ( ( "calls", "mentions" ), ( "sites", "calls" ), ( "rows", "sites" ) ) if derived[a] > derived[b] ]
+# sites <= calls and rows <= sites hold by construction. calls <= mentions does NOT: a mention is a matching LINE and
+# two calls can share one (CodeRabbit #626 4548924327), so that pair is not an invariant and is not checked.
+ORDER    = ( ( "sites", "calls" ), ( "rows", "sites" ) )
+def order_violations( d ):
+    return [ "%s %d > %s %d" % ( a, d[a], b, d[b] ) for a, b in ORDER if d[a] > d[b] ]
+if order_violations( { "mentions": 200, "calls": 251, "sites": 251, "rows": 109 } ) or not order_violations( { "mentions": 9, "calls": 5, "sites": 6, "rows": 1 } ):
+    no_( "(S6) control: two calls on one mention line must pass the order check and sites > calls must fail it" )
+order    = order_violations( derived )
 if short or order or widths:
     no_( "(S6) the enumeration looks blind or inconsistent: %s%s%s -- the sweep's regexes no longer see src/'s format "
          "calls; fix the matcher before trusting (S1)/(S2)"
