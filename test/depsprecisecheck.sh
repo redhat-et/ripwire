@@ -251,8 +251,8 @@ partial_root 2 "$( root_of "$TMP/tp.deps" )" && ok "#220 (E3) pnpm-workspace.yam
 printf 'layer app = packages/app\nlayer lib = packages/lib\ndeny app -> lib\n' >"$TMP/rules220.txt"
 "$BIN" "$TA" --arch="$TMP/rules220.txt" --no-cache >"$TMP/ta.arch" 2>"$TMP/ta.arch.err"; RCA=$?
 "$BIN" "$TR" --arch="$TMP/rules220.txt" --no-cache >"$TMP/tr.arch" 2>/dev/null
-partial_root 3 "$( root_of "$TMP/ta.arch" )" && ok "#220 (F) --arch alias tree: <arch … imports_unresolved=\"3\" graph_partial=\"1\">, no counts_floor (rc=$RCA)" \
-    || no "#220 (F) --arch root lacks the partial pair or still claims counts_floor — got: $( root_of "$TMP/ta.arch" )"
+[ "$RCA" = 0 ] && partial_root 3 "$( root_of "$TMP/ta.arch" )" && ok "#220 (F) --arch alias tree: <arch … imports_unresolved=\"3\" graph_partial=\"1\">, no counts_floor (rc=$RCA)" \
+    || no "#220 (F) --arch alias tree: exit $RCA (want 0), or the root lacks the partial pair or still claims counts_floor — got: $( root_of "$TMP/ta.arch" )"
 grep -q 'imports_unresolved=\|graph_partial=' "$TMP/tr.arch" && no "#220 (F) --arch relative control carries imports_unresolved=/graph_partial=" \
     || ok "#220 (F) --arch relative control: no count"
 grep -q 'did not resolve' "$TMP/ta.arch.err" && ok "#220 (F) --arch says it on stderr too, where a CI log reads it" \

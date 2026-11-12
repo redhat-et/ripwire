@@ -298,8 +298,8 @@ if "$CXX" "$CXXSTD" -O1 -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" 
     "$PR/probe" "$PR/work" > "$PR/out.txt" 2>&1
     PROBE_RC=$?
     PROBE_ROWS="$( grep -c '^PROBE-' "$PR/out.txt" )"
-    [ "$PROBE_ROWS" -eq 9 ] \
-        && ok "(f) presence: the probe reported all 9 rows" \
+    [ "$PROBE_ROWS" -eq 9 ] && [ "$PROBE_RC" -eq 0 ] \
+        && ok "(f) presence: the probe reported all 9 rows and exited 0" \
         || no "(f) the probe reported $PROBE_ROWS of 9 rows (rc=$PROBE_RC): $( head -c 300 "$PR/out.txt" )"
     while IFS= read -r prow; do
         case "$prow" in

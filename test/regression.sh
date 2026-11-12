@@ -349,6 +349,7 @@ for _g in \
     candheadcheck \
     candidatescheck \
     canoncheck \
+    capdisclosemapcheck \
     capdisclosurecheck \
     capsweepcheck \
     ccheck \
