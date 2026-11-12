@@ -1044,6 +1044,28 @@ inline const HandlerReader* handlerReaderFor( Lang lang, const char* type ) noex
     return ( row != nullptr && std::strcmp( row->nodeType, type ) == 0 ) ? row : nullptr;
 }
 
+// The languages whose error branch is not a catch clause: Go's `if err != nil` and Rust's Err arm / `if let Err`. One row
+// per (language, node type), read like kHandlerReaders.
+struct ErrBranchReader
+{
+    Lang        lang;
+    const char* nodeType;
+    std::string_view ( *shape )( TSNode, std::string_view, std::vector<TSNode>& );
+};
+
+inline constexpr ErrBranchReader kErrBranchReaders[] = {
+    { Lang::Go,   "if_statement",  goLogOnlyShape   },
+    { Lang::Rust, "match_arm",     rustLogOnlyShape },
+    { Lang::Rust, "if_expression", rustLogOnlyShape },
+};
+
+inline const ErrBranchReader* errBranchReaderFor( Lang lang, const char* type ) noexcept
+{
+    const auto it = std::find_if( std::begin( kErrBranchReaders ), std::end( kErrBranchReaders ),
+                                  [ & ]( const ErrBranchReader& r ) { return r.lang == lang && std::strcmp( r.nodeType, type ) == 0; } );
+    return it == std::end( kErrBranchReaders ) ? nullptr : it;
+}
+
 // A stub, and not an abstract-method contract (declaresAbstractContract) — the one test for every spelling.
 inline bool isPlaceholderStub( TSNode n, const char* type, std::string_view src, Lang lang )
 {
@@ -1060,13 +1082,9 @@ inline std::string_view shapeOfNode( TSNode n, std::string_view src, Lang lang, 
         reader->read( n, src, h );
         return handlerShape( h, src, stmts );
     }
-    if( lang == Lang::Go && kindIs( type, "if_statement" ) )
+    if( const ErrBranchReader* reader = errBranchReaderFor( lang, type ) )
     {
-        return goLogOnlyShape( n, src, stmts );
-    }
-    if( lang == Lang::Rust && ( kindIs( type, "match_arm" ) || kindIs( type, "if_expression" ) ) )
-    {
-        return rustLogOnlyShape( n, src, stmts );
+        return reader->shape( n, src, stmts );
     }
     if( isCommentNode( n ) )
     {

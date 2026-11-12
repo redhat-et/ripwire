@@ -765,7 +765,7 @@ qd_none "empty (go)" error-masking logged     "the branch logs the error by name
 qd_none "empty (go)" error-masking paramErr   "err is a parameter, not a call result here"
 qd_none "empty (go)" error-masking discard    "_ = recover() is out of scope"
 qd_none "empty (go)" error-masking elseBranch "an if/else is not an error branch alone"
-[ "$QD_RC" = 2 ] && ok "empty (go): the gating rows fire exit 2" || no "empty (go): should exit 2 (got $QD_RC)"
+if [ "$QD_RC" = 2 ]; then ok "empty (go): the gating rows fire exit 2"; else no "empty (go): should exit 2 (got $QD_RC)"; fi
 
 RSB='use std::fmt::Write;
 
@@ -864,8 +864,11 @@ qd_none "log-only (c++)" error-masking log_return_value "it logs and returns an 
 qd_none "log-only (c++)" error-masking oss_thrown       "the << builds an exception message that is thrown"
 qd_none "log-only (c++)" error-masking oss_only         "a << into a non-console stream is not logging"
 # the fixture's near-identical one-liners are duplication rows (those gate); no error-masking row may
-printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<r kind="error-masking"' | grep -q 'gating=' \
-    && no "log-only (c++): an error-masking row gates" || ok "log-only (c++): no error-masking row gates"
+if printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<r kind="error-masking"' | grep -q 'gating='; then
+    no "log-only (c++): an error-masking row gates"
+else
+    ok "log-only (c++): no error-masking row gates"
+fi
 
 # ── 6) PLACEHOLDER — the eleventh kind: a stub or TODO the change ADDED ───────────────────────────────────
 #   Never gates: every row is origin="new-symbol" by construction, including one that lands in a symbol that
