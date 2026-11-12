@@ -98,7 +98,7 @@ kForUnusedExtraFiles	pending:B43 no disclosure identifier in the cap site's func
 kForUnusedMaxBytes	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:3254); audit: cut or work bound
 kForUnusedRowsPerFile	sink:shownRows,graphCountFloorAttrXml
 kForUnusedSitesShown	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:665); audit: cut or work bound
-kFpGram	sink:DISCLOSE
+kFpGram	none:the k-gram width of a fingerprint (a parameter, not a cut; read by hand after #615 moved it)
 kGraphSubjectAttempts	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:181, src/forgraphverb.h:189); audit: cut or work bound
 kGraphSubjectSlotCands	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:187, src/forgraphverb.h:188); audit: cut or work bound
 kGrepHitRefsMax	pending:B43 no disclosure identifier in the cap site's function (src/verbs_grep.h:946); audit: cut or work bound
@@ -131,5 +131,5 @@ kShortKeyRows	legend
 kShown	sink:truncated,selfExecutablePath
 kSketchHashes	pending:B43 no disclosure identifier in the cap site's function (src/clones.h:768, src/clones.h:770); audit: cut or work bound
 kSupport	pending:B43 no disclosure identifier in the cap site's function (src/gitmine.h:3477, src/verbs_report.h:1776); audit: cut or work bound
-kType3MaxBucket	sink:DISCLOSE
-kType3MaxTokensForLcs	sink:DISCLOSE
+kType3MaxBucket	pending:B43 the stop-gram cut skips a bucket with no attribute; the drafted sink:DISCLOSE was the pair cap's, one function over (read by hand after #615)
+kType3MaxTokensForLcs	pending:B43 the LCS reads a body's first 4096 tokens with no attribute; the drafted sink:DISCLOSE was the pair cap's (read by hand after #615)
