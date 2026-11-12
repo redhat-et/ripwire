@@ -1721,7 +1721,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "d", MapHeaderRead::No, {}, "pack-task" },
     // clones: src/verbs_report.h emitClonesReport (groupExemptKind, cloneIdiomAttrs)
     { "exempt", "group exempt=fixture|shell-runner: every member is on such a path; quality-delta duplication ignores it", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement", true, "group", MapHeaderRead::No, {}, "clones" },
     { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
     // quality-delta: src/verbs_quality.h (range attrs, duplication r row); staleAcksXml in src/quality.h
     { "key", "sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires)", true, "sa", MapHeaderRead::No, {}, "quality-delta" },   // also defines why=

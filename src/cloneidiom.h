@@ -10,11 +10,12 @@
 // spell "bucket a scalar", not because anybody copied anybody. Every one of the five needed a reasoned
 // ack, twice.
 //
-// WHAT THIS ADDS. A CLOSED set of three recognized idioms — and closed means closed; a fourth is a
-// decision, not a patch:
+// WHAT THIS ADDS. A CLOSED set of four recognized idioms — and closed means closed; each one past the
+// first three is a decision, not a patch:
 //     threshold-ladder    a chain of `if( x < C ) return K` and nothing else
 //     switch-name-table   a `switch` whose every arm is a label plus a literal return
 //     builder-chain       a param-struct initializer chain: declare, assign every field, return
+//     one-statement       the body is ONE `return <expr>;` (leading contract asserts aside) — DECISION C3
 // A clone group whose members ALL classify to the SAME idiom is annotated with that idiom's name. It is
 // additionally DEMOTED — reported, but no longer gating — only when the whole conjunction holds:
 //     (1) every member classifies to the same recognized idiom, AND
@@ -23,6 +24,28 @@
 //     (4) the group is below kIdiomCloneTokenFloor normalized tokens.
 // Break any one and the group keeps gating. Two ladders over the same enum ARE a copy; two ladders in one
 // namespace ARE a copy; a 200-token ladder is a table that wants to be data whatever it is spelled over.
+//
+// THE FOURTH IDIOM, one-statement (decision C3 of the great-engineer design log, 2026-11-12: "one-statement
+// clone pairs with no shared vocabulary are minor"). Two one-line predicates such as
+//     return a.path != b.path ? a.path < b.path : a.line < b.line;
+//     return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
+// normalize to near-identical token streams because C++ has one way to spell "compare two keys", and the
+// literal identifier test of condition (2) never refused them: their only common words are the parameter
+// names `a` and `b`. So for THIS idiom only, condition (2) reads a NARROWER identifier set, which leaves out
+//   (a) the member's own parameter names (read off its signature: the last identifier of each parameter in
+//       the C family, the first in the name-first languages, kIdiomNameFirstLangMask);
+//   (b) every name in a `std::`-qualified chain (`std::ranges::any_of`, `std::string_view::npos`);
+//   (c) the fixed stop list kIdiomOneStatementStopWords — standard container and string vocabulary.
+// Everything else stays in: member names after `.`/`->` (`scope`, `name`, `m_inClass`), even one spelled like a
+// parameter, named constants
+// (`kMinBytesPerToken`), in-repo callees, lambda parameters, and the arguments of a contract assert.
+// Conditions (3) and (4) are unchanged and there is no new floor. One extra refusal holds for this idiom:
+// a pair whose two bodies are token-identical once each member's parameters are renamed by position (a
+// Type-1 copy after alpha-renaming) never demotes, whatever its vocabulary — a one-line copy that renamed
+// only its parameters is still a copy. That clause is what keeps two `return s.scope.empty() ? …` copies
+// gating even if they had no member name in common.
+// Every exclusion fails SAFE: a signature the parameter reader cannot parse yields no parameter names, so
+// more identifiers stay in and fewer groups demote.
 //
 // ON (4), AND WHY IT IS A CEILING RATHER THAN A DROP. The design note that prompted this asked for a
 // "higher token floor (e.g. 2x the normal one) before it can group at all". Implemented literally that
@@ -40,6 +63,8 @@
 //   * `builder-chain` covers the param-STRUCT spelling (`p.field = v;` repeated). The fluent
 //     `Builder().withX().withY().build()` spelling is deliberately NOT modelled — it is one statement with
 //     call parens in it, which every classifier here refuses on purpose.
+//   * `one-statement` needs a literal `return`: a Rust/Kotlin expression body (`{ a == b }`, `= a == b`) is
+//     not modelled, and a Python body is read as the same token stream (a leading `:` refuses).
 //   * Condition (2) is literal token equality, so ONE coincidental word in common (two unrelated enums that
 //     both spell a `Mid` member) is enough to refuse the demotion. That direction is chosen: refusing to
 //     demote costs a reasoned ack, demoting a real copy costs a missed duplicate.
@@ -64,10 +89,10 @@ namespace rw
 
 // The closed set. Row order IS the enum's declaration order and the static_assert is what makes reordering
 // the enum a compile error rather than a silent re-labelling of every emitted row.
-enum class CloneIdiom : std::uint8_t { None = 0, ThresholdLadder = 1, SwitchNameTable = 2, BuilderChain = 3 };
+enum class CloneIdiom : std::uint8_t { None = 0, ThresholdLadder = 1, SwitchNameTable = 2, BuilderChain = 3, OneStatement = 4 };
 
-inline constexpr std::string_view kCloneIdiomNames[] = { "", "threshold-ladder", "switch-name-table", "builder-chain" };
-static_assert( std::size( kCloneIdiomNames ) == std::size_t( CloneIdiom::BuilderChain ) + 1,
+inline constexpr std::string_view kCloneIdiomNames[] = { "", "threshold-ladder", "switch-name-table", "builder-chain", "one-statement" };
+static_assert( std::size( kCloneIdiomNames ) == std::size_t( CloneIdiom::OneStatement ) + 1,
                "kCloneIdiomNames must carry exactly one row per CloneIdiom, in declaration order" );
 
 inline std::string_view cloneIdiomName( CloneIdiom k ) noexcept { return kCloneIdiomNames[ std::size_t( k ) ]; }
@@ -477,9 +502,275 @@ inline CloneIdiom classifyBuilderChain( const std::vector<IdiomTok>& t )
     return ( assigns >= kIdiomMinBuilderFields && declares <= 1 && returns <= 1 ) ? CloneIdiom::BuilderChain : CloneIdiom::None;
 }
 
-// The one entry point: the first grammar that accepts wins, and the three are mutually exclusive by
-// construction (a ladder has no `switch`, a table's first token IS `switch`, a builder has no control flow),
-// so the order is not load-bearing.
+// ── idiom 4, one-statement (decision C3; see the header) ──────────────────────────────────────────────
+
+// The contract asserts that do not count as a statement: a one-liner that states its precondition first is
+// still a one-liner. The set is closed and these four are the house spellings (CLAUDE.md, the ASSUME rule).
+inline constexpr std::string_view kIdiomContractMacros[] = { "EXPECTS", "ASSUME", "DASSERT", "VALIDATE" };
+
+// Condition (2)'s stop list for one-statement members: standard container and string vocabulary, the words
+// two unrelated one-liners share because they both touch a string or a vector. Fixed and documented here,
+// never tuned per finding: a word added here stops refusing demotions everywhere at once.
+inline constexpr std::string_view kIdiomOneStatementStopWords[] = {
+    "size", "empty", "begin", "end", "find", "rfind", "substr", "npos", "front", "back", "data",
+    "first", "second", "starts_with", "ends_with", "contains" };
+
+// Languages whose parameter spells its NAME first (`a: T`, `a T`, untyped `a`). Every other language reads
+// the C-family way: the name is the last identifier before a default (`const Symbol& s`, `int n = 3`).
+inline constexpr std::uint32_t kIdiomNameFirstLangMask = langBit( Lang::Python ) | langBit( Lang::TypeScript ) | langBit( Lang::JavaScript )
+                                                       | langBit( Lang::Go ) | langBit( Lang::Rust ) | langBit( Lang::Swift ) | langBit( Lang::Kotlin )
+                                                       | langBit( Lang::GDScript ) | langBit( Lang::Ruby ) | langBit( Lang::Lua ) | langBit( Lang::Elixir );
+
+// The depth step of one token: +1 for an opening bracket of any kind, -1 for a closing one, 0 otherwise. One
+// switch rather than two `==` disjunctions, which the duplication kind names as the next copy of the house's
+// "is one of N constants" predicate.
+inline int idiomBracketStep( std::string_view w ) noexcept
+{
+    if( w.size() != 1 )
+    {
+        return 0;
+    }
+    switch( w[0] )
+    {
+        case '(':
+        case '[':
+        case '{': return 1;
+        case ')':
+        case ']':
+        case '}': return -1;
+        default:  return 0;
+    }
+}
+
+// `MACRO ( <balanced> ) ;?` for a kIdiomContractMacros name. Advances past it on a match.
+inline bool idiomEatContract( const std::vector<IdiomTok>& t, std::size_t& i, std::size_t end )
+{
+    if( i + 1 >= end || t[i + 1].text != "("
+        || std::find( std::begin( kIdiomContractMacros ), std::end( kIdiomContractMacros ), t[i].text ) == std::end( kIdiomContractMacros ) )
+    {
+        return false;
+    }
+    std::size_t j = i + 1, depth = 0;
+    for( ; j < end; ++j )
+    {
+        const int step = idiomBracketStep( t[j].text );
+        if( step > 0 )
+        {
+            ++depth;
+        }
+        else if( step < 0 && --depth == 0 )
+        {
+            break;
+        }
+    }
+    if( j >= end )
+    {
+        return false;   // unbalanced: not a contract statement this grammar can bound
+    }
+    ++j;
+    if( j < end && t[j].text == ";" )
+    {
+        ++j;
+    }
+    i = j;
+    return true;
+}
+
+// The body is `{ [contract]* return <expr> ;? }` and nothing else. <expr> may hold anything bracketed —
+// a lambda's own braces and semicolons sit at depth > 0 and are part of the one statement — but a `;` at
+// depth 0 that is not the last token is a second statement, and a body that does not start with `return`
+// (a declaration, an `if`, a loop) is refused outright.
+inline CloneIdiom classifyOneStatement( const std::vector<IdiomTok>& t )
+{
+    std::size_t i = 0, end = t.size();
+    if( end >= 2 && t[0].text == "{" && t[end - 1].text == "}" )
+    {
+        ++i;
+        --end;
+    }
+    while( idiomEatContract( t, i, end ) )
+    {
+        // each call advanced `i` past one leading contract assert
+    }
+    if( i >= end || t[i].text != "return" )
+    {
+        return CloneIdiom::None;
+    }
+    ++i;
+    std::size_t depth = 0, taken = 0;
+    for( ; i < end; ++i )
+    {
+        const std::string_view w    = t[i].text;
+        const int              step = idiomBracketStep( w );
+        if( step > 0 )
+        {
+            ++depth;
+        }
+        else if( step < 0 )
+        {
+            if( depth == 0 )
+            {
+                return CloneIdiom::None;   // closes something the body never opened
+            }
+            --depth;
+        }
+        else if( depth == 0 && w == ";" )
+        {
+            return ( i + 1 == end && taken >= 1 ) ? CloneIdiom::OneStatement : CloneIdiom::None;
+        }
+        ++taken;
+    }
+    return ( depth == 0 && taken >= 1 ) ? CloneIdiom::OneStatement : CloneIdiom::None;   // a `;`-less language
+}
+
+// The parameter NAMES of one signature's parameter list, read off its tokens: the `(` that follows the
+// symbol's own name, split at depth-1 commas (template angles counted, so `std::map<K, V> m` is one
+// parameter), the default after a depth-1 `=` ignored. A signature that never spells `name (` yields none —
+// the safe direction, since every name returned here LEAVES the identifier set.
+inline std::vector<std::string_view> idiomParamNames( const std::vector<IdiomTok>& sig, std::string_view name, bool nameFirst )
+{
+    std::vector<std::string_view> out;
+    std::size_t i = 0;
+    while( i + 1 < sig.size() && !( sig[i].text == name && sig[i + 1].text == "(" ) )
+    {
+        ++i;
+    }
+    if( name.empty() || i + 1 >= sig.size() )
+    {
+        return out;
+    }
+    i += 2;
+    std::size_t      depth = 1, angle = 0;
+    bool             inDefault = false;
+    std::string_view firstId, lastId;
+    const auto flush = [ & ]
+    {
+        const std::string_view pick = nameFirst ? firstId : lastId;
+        if( !pick.empty() )
+        {
+            out.push_back( pick );
+        }
+        firstId = lastId = {};
+        inDefault = false;
+        angle = 0;
+    };
+    for( ; i < sig.size(); ++i )
+    {
+        const std::string_view w    = sig[i].text;
+        const int              step = idiomBracketStep( w );
+        if( step > 0 )
+        {
+            ++depth;
+            continue;
+        }
+        if( step < 0 )
+        {
+            if( --depth == 0 )
+            {
+                flush();
+                break;
+            }
+            continue;
+        }
+        if( depth != 1 || inDefault )
+        {
+            if( depth == 1 && w == "," && angle == 0 )
+            {
+                flush();
+            }
+            continue;
+        }
+        if( w == "<" )
+        {
+            ++angle;
+        }
+        else if( ( w == ">" || w == ">>" ) && angle > 0 )
+        {
+            angle -= std::min<std::size_t>( angle, w.size() );
+        }
+        else if( w == "," && angle == 0 )
+        {
+            flush();
+        }
+        else if( w == "=" && angle == 0 )
+        {
+            inDefault = true;
+        }
+        else if( sig[i].kind == CodeTokenKind::Identifier )
+        {
+            if( firstId.empty() )
+            {
+                firstId = w;
+            }
+            lastId = w;
+        }
+    }
+    return out;
+}
+
+// What condition (2) and the alpha-rename refusal read for ONE one-statement member: the narrowed identifier
+// set (see the header for its three exclusions) and a hash of the body with every parameter replaced by its
+// position, so two bodies that differ only in parameter spelling hash equal.
+struct OneStatementFacts
+{
+    std::vector<std::uint64_t> ids;     // sorted + unique FNV-1a of the narrowed identifier set
+    std::uint64_t              alpha = 0;
+};
+
+inline OneStatementFacts oneStatementFacts( const std::vector<IdiomTok>& body, const std::vector<std::string_view>& params )
+{
+    OneStatementFacts f;
+    std::vector<bool> inStdChain( body.size(), false );
+    for( std::size_t k = 0; k + 1 < body.size(); ++k )
+    {
+        if( body[k].text != "std" || body[k + 1].text != "::" )
+        {
+            continue;
+        }
+        for( std::size_t j = k; j < body.size() && body[j].kind == CodeTokenKind::Identifier; j += 2 )
+        {
+            inStdChain[j] = true;
+            if( j + 1 >= body.size() || body[j + 1].text != "::" )
+            {
+                break;
+            }
+        }
+    }
+    std::string renamed;
+    for( std::size_t k = 0; k < body.size(); ++k )
+    {
+        const std::string_view w = body[k].text;
+        // A name after `.`/`->`/`::` is a MEMBER, never the parameter it happens to be spelled like (`vf.prefix`
+        // beside a parameter `prefix`): it stays in the set and is not renamed.
+        const bool afterAccess = k > 0 && ( body[k - 1].text == "." || body[k - 1].text == "->" || body[k - 1].text == "::" );
+        const auto param       = afterAccess ? params.end() : std::find( params.begin(), params.end(), w );
+        if( body[k].kind == CodeTokenKind::Identifier && param != params.end() )
+        {
+            renamed += '\x01';
+            renamed += std::to_string( param - params.begin() );
+        }
+        else
+        {
+            renamed += w;
+        }
+        renamed += '\x02';
+        if( body[k].kind != CodeTokenKind::Identifier || param != params.end() || inStdChain[k]
+            || std::find( std::begin( kIdiomOneStatementStopWords ), std::end( kIdiomOneStatementStopWords ), w ) != std::end( kIdiomOneStatementStopWords ) )
+        {
+            continue;
+        }
+        f.ids.push_back( fnv1a64( w ) );
+    }
+    std::sort( f.ids.begin(), f.ids.end() );
+    f.ids.erase( std::unique( f.ids.begin(), f.ids.end() ), f.ids.end() );
+    f.alpha = fnv1a64( renamed );
+    return f;
+}
+
+// The one entry point: the first grammar that accepts wins, and the four are mutually exclusive by
+// construction (a ladder has no `switch` and at least two `if`s, a table's first token IS `switch`, a
+// builder has no control flow and at least three statements, a one-statement body starts with `return`
+// and holds no second statement), so the order is not load-bearing.
 inline CloneIdiom classifyCloneIdiom( const std::vector<IdiomTok>& t )
 {
     const CloneIdiom ladder = classifyThresholdLadder( t );
@@ -492,7 +783,12 @@ inline CloneIdiom classifyCloneIdiom( const std::vector<IdiomTok>& t )
     {
         return table;
     }
-    return classifyBuilderChain( t );
+    const CloneIdiom builder = classifyBuilderChain( t );
+    if( builder != CloneIdiom::None )
+    {
+        return builder;
+    }
+    return classifyOneStatement( t );
 }
 
 // ── group verdicts ────────────────────────────────────────────────────────────────────────────────────
@@ -512,7 +808,8 @@ namespace cloneidiomdetail
 struct MemberShape
 {
     CloneIdiom                 idiom  = CloneIdiom::None;
-    std::vector<std::uint64_t> ids;      // sorted + unique FNV-1a of every non-keyword identifier in the body
+    std::vector<std::uint64_t> ids;      // sorted + unique FNV-1a of every non-keyword identifier in the body (one-statement: the narrowed set)
+    std::uint64_t              alpha  = 0;   // one-statement only: the parameter-renamed body hash (OneStatementFacts::alpha)
     std::uint32_t              fileId = 0;
     std::string                scope;
 };
@@ -599,6 +896,19 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
         {
             continue;
         }
+        if( shapes[k].idiom == CloneIdiom::OneStatement )
+        {
+            std::vector<IdiomTok> sig;
+            if( s.sigStartByte < s.sigEndByte )
+            {
+                scanCodeTokens( bytes, s.sigStartByte, s.sigEndByte, usesHashLineComments( s.lang ), true,
+                                [ & ]( std::string_view w, CodeTokenKind kind ) { sig.push_back( { w, kind } ); } );
+            }
+            OneStatementFacts f = oneStatementFacts( toks, idiomParamNames( sig, s.name, langInMask( kIdiomNameFirstLangMask, s.lang ) ) );
+            shapes[k].ids   = std::move( f.ids );
+            shapes[k].alpha = f.alpha;
+            continue;
+        }
         ids.clear();
         for( const IdiomTok& t : toks )
         {
@@ -662,6 +972,10 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
                 if( ms[a]->fileId == ms[b]->fileId && ms[a]->scope == ms[b]->scope )
                 {
                     demote = false;
+                }
+                else if( idiom == CloneIdiom::OneStatement && ms[a]->alpha == ms[b]->alpha )
+                {
+                    demote = false;   // a Type-1 copy after renaming parameters — a copy whatever its vocabulary
                 }
                 else if( !cloneidiomdetail::idiomSetsDisjoint( ms[a]->ids, ms[b]->ids ) )
                 {
