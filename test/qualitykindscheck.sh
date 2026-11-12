@@ -830,6 +830,42 @@ qd_none "empty (rust)" error-masking ret_err    "the arm returns the error"
 qd_none "empty (rust)" error-masking write_char "let _ = fallible(); is out of scope"
 qd_none "empty (rust)" error-masking names_e    "the arm logs the error by name, inside the format string"
 
+CXB='#include <cstdio>
+#include <iostream>
+#include <sstream>
+void risky();
+void stream_log() { risky(); }
+void macro_log() { risky(); }
+void fprintf_log() { risky(); }
+void fputs_log() { risky(); }
+void log_rethrow() { risky(); }
+void log_return_value() { risky(); }
+void oss_thrown() { risky(); }
+void oss_only() { risky(); }
+'
+CXE='#include <cstdio>
+#include <iostream>
+#include <sstream>
+void risky();
+void stream_log() { try { risky(); } catch( ... ) { std::cerr << "ignored" << std::endl; } }
+void macro_log() { try { risky(); } catch( ... ) { LOG( ERROR ) << "ignored"; } }
+void fprintf_log() { try { risky(); } catch( ... ) { fprintf( stderr, "ignored\n" ); } }
+void fputs_log() { try { risky(); } catch( ... ) { fputs( "ignored\n", stderr ); } }
+void log_rethrow() { try { risky(); } catch( ... ) { std::cerr << "failed" << std::endl; throw; } }
+int log_return_value() { try { risky(); } catch( ... ) { std::cerr << "failed\n"; return -1; } return 0; }
+void oss_thrown() { try { risky(); } catch( ... ) { std::ostringstream os; os << "failed"; throw std::runtime_error( os.str() ); } }
+void oss_only() { try { risky(); } catch( ... ) { trace_buffer << "failed"; } }
+'
+qd_pair log_cpp a.cpp "$CXB" "$CXE"
+for s in stream_log macro_log fprintf_log fputs_log; do qd_has "log-only (c++)" error-masking "$s" minor; done
+for s in log_rethrow log_return_value oss_thrown oss_only; do premise "log-only (c++)" log_cpp "$s" '(catch_clause) @m'; done
+qd_none "log-only (c++)" error-masking log_rethrow      "it logs and re-throws"
+qd_none "log-only (c++)" error-masking log_return_value "it logs and returns an error value"
+qd_none "log-only (c++)" error-masking oss_thrown       "the << builds an exception message that is thrown"
+qd_none "log-only (c++)" error-masking oss_only         "a << into a non-console stream is not logging"
+# the fixture's near-identical one-liners are duplication rows (those gate); no error-masking row may
+printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<r kind="error-masking"' | grep -q 'gating=' \
+    && no "log-only (c++): an error-masking row gates" || ok "log-only (c++): no error-masking row gates"
 
 # ── 6) PLACEHOLDER — the eleventh kind: a stub or TODO the change ADDED ───────────────────────────────────
 #   Never gates: every row is origin="new-symbol" by construction, including one that lands in a symbol that

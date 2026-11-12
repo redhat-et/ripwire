@@ -1837,6 +1837,8 @@ inline constexpr char kHelpHead[] =
         "                               by construction. LIMIT: origin is canonId (path::scope::name) identity, so a RENAMED/MOVED symbol reads as new and a regression carried in with the move will not gate.\n"
         "                               error-masking = a NEW empty/pass/comment-only handler, or log-only (a broad handler whose body only logs and never names the error) or rethrow-only (the sole\n"
         "                               handler re-throws it unchanged); those two gate only where their precision was measured (Python) and are sev=\"minor\" in every other language.\n"
+        "                               Empty counts Go's `if err != nil {}` on a call's err and Rust's `if let Err(..) = f() {}` / `Err(..) => {}` or `=> ()`, and gates like Python's `except: pass`;\n"
+        "                               log-only counts a Rust Err arm of print/log macros and a C++ catch of `std::cerr <<`, `LOG( x ) <<` or `fprintf( stderr, … )` (sev=\"minor\").\n"
         "                               placeholder = a stub the change ADDED (todo!()/unimplemented!(), Kotlin TODO(), NotImplementedException, a bare raise NotImplementedError as a free function's body,\n"
         "                               a throw/raise/panic/assert saying \"not implemented\") or a comment line opening with TODO/FIXME that names no issue (#12, ABC-12, a URL); new-symbol by\n"
         "                               construction, so it never gates. Counted per enclosing symbol, like error-masking: a file-level TODO outside every definition is not counted.\n"

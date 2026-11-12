@@ -555,6 +555,57 @@ inline constexpr std::string_view kLogVerbs[] = {
 
 inline constexpr std::string_view kBarePrintCalls[] = { "print", "println", "printf", "puts", "warn", "eprint", "eprintln", "p" };
 
+// C's print-to-a-stream calls, logging only when the stream is stderr: `fprintf( stderr, … )`, `fputs( "…", stderr )`.
+// A file handle is output, not a log, so `fprintf( fp, … )` answers no.
+inline constexpr std::string_view kStreamPrintCalls[] = { "fprintf", "fputs", "vfprintf", "fputc", "putc" };
+
+inline bool isStderrPrintCall( TSNode call, std::string_view verb, std::string_view src )
+{
+    verb = verb.starts_with( "std::" ) ? verb.substr( 5 ) : verb;
+    if( std::find( std::begin( kStreamPrintCalls ), std::end( kStreamPrintCalls ), verb ) == std::end( kStreamPrintCalls ) )
+    {
+        return false;
+    }
+    const TSNode args = field( call, "arguments" );
+    for( std::uint32_t i = 0; i < namedCount( args ); ++i )
+    {
+        if( nodeTextOf( namedChild( args, i ), src ) == "stderr" )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// C++ stream logging, K6L-CXX: a `<<` chain whose LEFTMOST operand is a console stream (`std::cerr << "x" << std::endl`)
+// or a logging macro call (`LOG( ERROR ) << "x"`, `VLOG( 1 ) << …`: a callee isLogReceiver reads as a logger). Any
+// other leftmost operand — an `std::ostringstream`, a file stream, a shift — answers no.
+inline constexpr std::string_view kConsoleStreams[] = { "std::cerr", "std::clog", "std::cout", "cerr", "clog", "cout" };
+
+inline bool isStreamLogStatement( TSNode stmt, std::string_view src )
+{
+    TSNode e = statementExpression( stmt );
+    if( !typeIs( e, "binary_expression" ) )
+    {
+        return false;
+    }
+    while( typeIs( e, "binary_expression" ) )
+    {
+        if( nodeTextOf( field( e, "operator" ), src ) != "<<" )
+        {
+            return false;
+        }
+        e = field( e, "left" );
+    }
+    if( typeIs( e, "call_expression" ) )
+    {
+        const TSNode fn = field( e, "function" );
+        return typeIs( fn, "identifier" ) && isLogReceiver( nodeTextOf( fn, src ) );
+    }
+    const std::string_view head = nodeTextOf( e, src );
+    return std::find( std::begin( kConsoleStreams ), std::end( kConsoleStreams ), head ) != std::end( kConsoleStreams );
+}
+
 // Is this statement ONE logging/print call? An unrecognised callee answers no — the shape then does not
 // fire, which is a miss and never a finding.
 inline bool isLogCall( TSNode stmt, std::string_view src )
@@ -562,10 +613,14 @@ inline bool isLogCall( TSNode stmt, std::string_view src )
     const TSNode call = statementExpression( stmt );
     if( !isCallNode( call ) )
     {
-        return false;
+        return isStreamLogStatement( stmt, src );
     }
     std::string_view       recv;
     const std::string_view verb = calleeText( call, src, recv );
+    if( isStderrPrintCall( call, verb, src ) )
+    {
+        return true;
+    }
     if( recv.empty() )
     {
         for( std::string_view bare : kBarePrintCalls )
