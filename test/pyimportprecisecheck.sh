@@ -462,8 +462,20 @@ fi
 
 # #533 review: the importer each member edge resolves TO, not only the counts — `--impact=FILE` lists a file's importers, so a
 # swap of wide.py's pkg/mod.py edge with multi.py's pkg/ma.py edge (same afferent=, same cones) fails here.
-# imp ROOT... FILE: one root, or several for a multi-root workspace (FILE is then root-labeled, rb/pkg/mod.py).
-imp(){ local tgt="${!#}"; "$BIN" "${@:1:$#-1}" --impact="$tgt" --no-cache --legend=compact 2>/dev/null | grep -oE '<f via="[^"]*" p="[^"]*"' | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '; }
+# imp ROOT... FILE: one root, or several for a multi-root workspace (FILE is then root-labeled, rb/pkg/mod.py). A run that fails
+# (rc != 0, or no <impact> answer) must never read as "no importers": an empty list is what the negative arms want. So it prints
+# IMPERR(...) in place of the list, which no arm accepts, and logs the call to $TMP/imp.err, which fails the gate at the end
+# (imp runs in a $( ) subshell, so it cannot set fail itself). #533 review (CodeRabbit, round 2).
+imp(){
+    local tgt="${!#}" out rc
+    echo "$tgt" >>"$TMP/imp.calls"
+    out="$( "$BIN" "${@:1:$#-1}" --impact="$tgt" --no-cache --legend=compact 2>/dev/null )"; rc=$?
+    if [ "$rc" -ne 0 ] || ! grep -q '<impact ' <<<"$out"; then
+        printf 'imp %s: rc=%s, impact answer %s\n' "$tgt" "$rc" "$( grep -q '<impact ' <<<"$out" && echo present || echo absent )" >>"$TMP/imp.err"
+        printf 'IMPERR(rc=%s) ' "$rc"; return 0
+    fi
+    grep -oE '<f via="[^"]*" p="[^"]*"' <<<"$out" | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '
+}
 IW="$( imp "$PB" pkg/mod.py )"; IM="$( imp "$PB" pkg/ma.py )"
 if [ "$IW" = "wide.py " ] && [ "$IM" = "multi.py " ]; then
     ok '#478 gap 1 targets: pkg/mod.py is imported by wide.py alone, pkg/ma.py by multi.py alone'
@@ -586,5 +598,11 @@ if [ "$rc" -eq 0 ] && grep -q '<callers [^>]*count="0"' "$TMP/pa.other"; then
 else
     no "#478 gap 2 rule 3 negative: decoy gained a caller or the run failed (rc=$rc): $( cat "$TMP/pa.other" )"
 fi
+
+# every imp call above ran and answered (see imp): one that did not is a FAIL even where its arm compared equal.
+NIMP="$( wc -l <"$TMP/imp.calls" 2>/dev/null | tr -d ' ' )"
+if [ "${NIMP:-0}" -eq 0 ]; then no "imp premise: no --impact call was counted (the importer arms saw nothing)"
+elif [ -s "$TMP/imp.err" ]; then while IFS= read -r l; do no "imp: --impact did not answer: $l"; done <"$TMP/imp.err"
+else ok "imp: all $NIMP --impact calls exited 0 with an <impact> answer"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
