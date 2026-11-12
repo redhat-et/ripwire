@@ -200,7 +200,10 @@ w( "ts/src/spread.ts", "".join( f'''export function spreadMsg{i}(): string {{ re
 ''' for i in range( 4 ) ) )
 PY
 
-run(){ local repo="$1"; shift; ( cd "$TMP/$repo" && "$BIN" . --no-cache "$@" ) 2>/dev/null; }
+run(){   # CodeRabbit 4550333682: a non-zero exit fails the gate; the output still reaches the arm's own assertions
+    local repo="$1" rc; shift
+    ( cd "$TMP/$repo" && "$BIN" . --no-cache "$@" ) 2>/dev/null || { rc=$?; no "exit $rc from: ($repo) ripwire . --no-cache $*" >&2; return "$rc"; }
+}
 has(){ grep -qF -- "$2" "$1"; }
 count(){ grep -oF -- "$2" "$1" | wc -l | tr -d ' '; }
 
