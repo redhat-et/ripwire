@@ -2147,17 +2147,6 @@ struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by ref
 // (`redactBefore`..`redactAfter`) comes back out first, and the pair then spans this render. A failed render (no bytes) keeps the
 // render before it whole — the block, its cut report, the rows it showed, its dropped/capped readings and the redaction tally — as
 // the CLI and --json twins' renders do (CodeRabbit 4543325946). false: it failed.
-// RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL=1 (gates only; read once): every render mcpForRowsAt makes AGAIN (round C's refill, the demote
-// refill) fails the way a lost memstream write fails it, after the renderer ran, so its readings are the failed render's
-inline bool mcpRowsRenderFailInjected()
-{
-    static const bool isOn = []
-    {
-        const char* const v = std::getenv( "RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL" );
-        return v != nullptr && std::string_view( v ) == "1";
-    }();
-    return isOn;
-}
 struct McpRowsState   // what one <sigs> render writes: the block and the readings renderSigs leaves beside it (assembleMcpFor's locals)
 {
     std::string&                 sigs;
@@ -2185,7 +2174,10 @@ inline bool mcpForRowsAt( const McpForAssemblyInputs& in, const Render& renderSi
     st.cut.continuationRequest  = next;
     st.cut.rowDropBudgetBytes   = rowDrop;
     std::string refill          = captureXml( renderSigs );   // assembleMcpFor's own render seam (its renderToString)
-    if( mcpRowsRenderFailInjected() )
+    // RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL=1 (gates only: fordemoteallcheck (xf)): every render made here fails the way a lost memstream
+    // write fails it, after the renderer ran, so its readings are the failed render's
+    const char* const failSeam  = std::getenv( "RIPWIRE_TEST_MCP_ROWS_RENDER_FAIL" );
+    if( failSeam != nullptr && std::string_view( failSeam ) == "1" )
     {
         refill.clear();
     }
