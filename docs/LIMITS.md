@@ -151,6 +151,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kBackHopWidth` | `16` | — | — |
+| `kConnectDeclinedJointCap` | `3` | — | — |
 | `kImpactRingRowCap` | `16` | — | — |
 | `kImpactRingSlotDepth` | `3` | — | a field-only chain's depth; pathgaps.h pins it to kBridgeSlotCrossings |
 
