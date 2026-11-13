@@ -2420,6 +2420,7 @@ struct ByteW
     std::FILE*    sink       = nullptr;
     std::uint64_t flushed    = 0;
     bool          sinkFailed = false;
+    std::string   header;    // the blob's first kCacheHeaderBytes, kept by saveCache: finishCacheBlob's digest reads them after a flush
     static constexpr std::size_t kSaveWindowBytes = std::size_t( 4 ) << 20;
     std::uint64_t pos() const { return flushed + b.size(); }
     void flushWindow( std::size_t atLeast = kSaveWindowBytes )
@@ -3477,12 +3478,13 @@ inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::str
 // "the checksum covers the table plus the records actually read". The exact-fit invariant the trailer
 // encodes — fileSize == tableOffset + entryCount*32 + 24 — is what makes a truncation that removes whole
 // records detectable at all, so it is asserted here at the one place that can still be wrong about it.
-// SAVE-STREAM: `header` is the blob's first kCacheHeaderBytes as written (a streamed window has already flushed them); the
-// entry-count patch lands in the digest's copy here, and in the bytes still in the window when they are; a streamed blob's
-// file copy is patched by saveCache after the last flush.
-inline void finishCacheBlob( ByteW& w, std::string_view header, const std::vector<CacheEntry>& table )
+// SAVE-STREAM: once the window has flushed the header, its bytes come from w.header; the entry-count patch lands in the
+// digest's copy here, and in the window when the header is still in it (a streamed blob's file copy is patched by
+// finishCacheStream after the last flush).
+inline void finishCacheBlob( ByteW& w, const std::vector<CacheEntry>& table )
 {
-    ASSUME( header.size() == kCacheHeaderBytes );
+    ASSUME( w.flushed == 0 || w.header.size() == kCacheHeaderBytes );
+    const std::string_view header = w.flushed == 0 ? std::string_view( w.b.data(), kCacheHeaderBytes ) : std::string_view( w.header );
     const std::uint32_t entryCount  = std::uint32_t( table.size() );
     const std::uint64_t tableOffset = w.pos();
     if( w.flushed == 0 )
@@ -3507,6 +3509,18 @@ inline void finishCacheBlob( ByteW& w, std::string_view header, const std::vecto
     w.u32( 0 );   // reserved
     w.u64( blobChecksum( std::string_view( hdrTable.data(), hdrTable.size() ) ) );
     ASSUME( w.pos() == tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes );
+}
+
+// SAVE-STREAM: write the window's tail, then the header's entry count when the header had already left the window
+// (finishCacheBlob settled it after the carry-over records), then close: true when every write and the close succeeded,
+// the same check the one whole-blob fwrite had. The stream is closed on every path.
+inline bool finishCacheStream( ByteW& w, std::FILE* fp, std::uint32_t entryCount )
+{
+    const bool streamed = w.flushed != 0;
+    w.flushWindow( 1 );
+    const bool patched = !streamed || ( std::fseek( fp, 21, SEEK_SET ) == 0 && std::fwrite( &entryCount, 1, 4, fp ) == 4 );
+    const bool closed  = std::fclose( fp ) == 0;
+    return !w.sinkFailed && patched && closed;
 }
 
 // write the cache atomically (path.tmp → rename); groups the merged raw facts back by file.
@@ -3607,7 +3621,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     w.u64( (std::uint64_t)blobWriteNs );
     w.u32( 0 );   // entryCount — patched in place below, once the carry-over verification has settled it
     ASSUME( w.b.size() == kCacheHeaderBytes );
-    const std::string header = w.b;   // finishCacheBlob's digest reads it after the window has flushed it
+    w.header = w.b;   // finishCacheBlob's digest reads it after the window has flushed it
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
         std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
@@ -3784,21 +3798,13 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: offset table + trailer" );
-        finishCacheBlob( w, header, table );
+        finishCacheBlob( w, table );
     }
     PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: write + rename" );
 
     // The stream owns the descriptor since releaseFd(), so it closes on every path: the write and the close
     // are evaluated separately, never short-circuited into one expression.
-    // SAVE-STREAM: the window's tail, then the header's entry count (finishCacheBlob settled it after the header had left
-    // the window), each write checked like the one whole-blob write before it
-    const bool        streamed = w.flushed != 0;
-    w.flushWindow( 1 );
-    std::uint32_t     entryCount = std::uint32_t( table.size() );
-    const bool        patched    = !streamed
-                                || ( std::fseek( fp, 21, SEEK_SET ) == 0 && std::fwrite( &entryCount, 1, 4, fp ) == 4 );
-    const bool        closed     = std::fclose( fp ) == 0;
-    const bool        wErr       = w.sinkFailed || !patched || !closed;
+    const bool wErr = !finishCacheStream( w, fp, std::uint32_t( table.size() ) );
     if( wErr )
     {
         // never rename a short/torn write over a good cache — the holder removes the temp on return
