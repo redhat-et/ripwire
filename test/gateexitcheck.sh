@@ -773,6 +773,14 @@ PLANT = {
     # (CodeRabbit #626 4548924371) a status that is only printed is not tested
     "h1_printed":   ( '"$CXX" t.cpp -o "$WORK/h"\n"$WORK/h" a > o; echo "exit $?"\n"$WORK/h" b > o; [ $? = 0 ] || no b\necho done\n',
                       [ ( 2, "unchecked" ), ( 3, "checked" ) ] ),
+    # (CodeRabbit #633 4557724184) a status printed to stderr is still only printed, and a `$?` later in the next and-or
+    # list is the status of the test before it, not of the call
+    "h1_printed_fd": ( '"$CXX" t.cpp -o "$WORK/h"\n"$WORK/h" a > o; echo "exit $?" >&2\n"$WORK/h" b > o; printf \'rc=%s\\n\' $? >/dev/null\necho done\n',
+                      [ ( 2, "unchecked" ), ( 3, "unchecked" ) ] ),
+    # (the redirect after a compound is no pipeline of its own: the `||` after it tests the call, line 4)
+    "h1_later_rc":  ( '"$CXX" t.cpp -o "$WORK/h"\n"$WORK/h" a > o; [ -s o ] || no "empty (rc=$?)"\n"$WORK/h" b > o; [ $? = 0 ] && [ -s o ] || no b\n'
+                      '( cd d && "$WORK/h" c ) 2>/dev/null || { rc=$?; no "c rc=$rc"; }\necho done\n',
+                      [ ( 2, "unchecked" ), ( 3, "checked" ), ( 4, "checked" ) ] ),
     # The binary variable is spelled @BIN@ in this file's planted shapes and substituted below, so this gate's own
     # text never contains a literal "$" "BIN": it scans other gates as DATA and invokes no binary, and binoverridecheck
     # (2b)'s static tell (RIPWIRE_BIN + "$" "BIN" in one file) holds that claim to the letter (CI red on #626).

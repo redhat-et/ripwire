@@ -437,6 +437,16 @@ def _text( node ):
 def _list_text( lst ):
     return " ; ".join( " ".join( _text( c ) for _op, ( _n, cmds ) in ao for c in cmds ) for ao in lst )
 
+# The text of an and-or list's first pipeline: the one whose `$?` is the previous statement's status. A redirect after a compound
+# (`( cd d && "$BIN" . ) 2>/dev/null || { rc=$?; … }`) parses as a pipeline of its own; it is skipped, as the shell applies it to
+# the compound before the `||` runs.
+_BARE_REDIRECT = re.compile( r'^\s*(?:\d*\s*>+\s*&?\s*\S+\s*|\d*\s*<\s*\S+\s*)+$' )
+def _first_pipeline_text( ao ):
+    for m in range( len( ao ) ):
+        t = _list_text( [ ao[m:m + 1] ] )
+        if not _BARE_REDIRECT.match( t ): return t
+    return ""
+
 _COMPARED = {}
 
 class Walker:
@@ -541,9 +551,9 @@ class Walker:
             if last and toplevel:
                 self.walk_andor( ao, ( "checked", "exit status (the script's last statement)" ) ); continue
             nxt = _list_text( [ lst[k + 1] ] ) if not last else ""
-            cap = self.capture( nxt )
+            cap = self.capture( nxt, _first_pipeline_text( lst[k + 1] ) if not last else "" )
             self.walk_andor( ao, cap if cap else ( "errexit", None ) )
-    def capture( self, nxt ):
+    def capture( self, nxt, first ):
         head = nxt.split( " ; " )[0]
         if "PIPESTATUS" in head: return ( "checked", "PIPESTATUS read" )
         if "$?" not in head and "${?}" not in head: return None
@@ -558,8 +568,13 @@ class Walker:
         # to the terminal. Everything else that reads $? next -- a test, `echo $?` alone as the output (rc=$( cmd; echo $? )),
         # $? written to a file, $? handed to a checker function, $? printed into a $( ) the gate captures (OUT="$( cmd; echo
         # "rc=$?" )") -- counts as the next statement testing it.
-        if re.match( r'\s*(?:echo|printf)\b', head ) and ">" not in head and not self.subst_depth \
-                and not re.match( r'\s*(?:echo|printf\s+(?:\'%s\'|"%s"|%s))\s+"?\$\{?\?\}?"?\s*$', head ):
+        # CodeRabbit #633 4557724184: only the FIRST pipeline of the next and-or list sees the call's status (in `[ -s o ] || no
+        # "rc=$?"` the `$?` is the test's), and a redirect to &1, &2 or /dev/null prints, it writes no file.
+        # `first` is the next and-or list's first pipeline; the rendered text spells `>&2` as `>& 2`.
+        if "$?" not in first and "${?}" not in first: return None
+        to_file = re.search( r'(?<![&>])>+(?!\s*&\s*[12]\b)(?!\s*/dev/null\b)\s*\S', first )
+        if re.match( r'\s*(?:echo|printf)\b', first ) and not to_file and not self.subst_depth \
+                and not re.match( r'\s*(?:echo|printf\s+(?:\'%s\'|"%s"|%s))\s+"?\$\{?\?\}?"?\s*$', first ):
             return ( "unchecked", "$? printed, not tested" )
         return ( "checked", "$? tested by the next statement" )
     def walk_andor( self, ao, consumer ):
