@@ -282,12 +282,12 @@ mkdir -p "$TMP/raw"
 printf '#ifndef RAW_H\n#define RAW_H\nstatic const char* kDoc = R"doc(\n#define GHOST_SOCK "/tmp/ghost"\n)doc";\n#define REAL_SOCK "/tmp/real"\nint rawproc( int x );\n#endif\n' > "$TMP/raw/raw.h"
 printf '#include "raw.h"\nint rawproc( int x ) { return x; }\n' > "$TMP/raw/main.c"
 if grep -q '^#define GHOST_SOCK ' "$TMP/raw/raw.h" && grep -q 'R"doc(' "$TMP/raw/raw.h"; then ok "(B9) premise: raw.h holds a #define GHOST_SOCK line inside a raw string"; else no "(B9) premise: fixture lost the raw-string #define"; fi
-out="$( rw "$TMP/raw" --defs=GHOST_SOCK )"
+out="$( rw "$TMP/raw" --defs=GHOST_SOCK )"   # status: --defs exits 1 on a refusal by design; the answer text is the verdict and an empty one FAILs
 if printf '%s' "$out" | grep -q 'not found' && ! printf '%s' "$out" | grep -q 'object-like macro'; then ok "(B9) CLI --defs=GHOST_SOCK: a #define inside a raw string is not named as the definition"
 else no "(B9) CLI --defs=GHOST_SOCK: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
-mo="$( mcp "$TMP/raw" find_symbol ',"symbol":"GHOST_SOCK"' )"
-if printf '%s' "$mo" | grep -q 'object-like macro'; then no "(B9) MCP find_symbol GHOST_SOCK names a raw-string #define"; else ok "(B9) MCP find_symbol GHOST_SOCK: no macro note for a raw-string #define"; fi
-out="$( rw "$TMP/raw" --defs=REAL_SOCK )"
+mo="$( mcp "$TMP/raw" find_symbol ',"symbol":"GHOST_SOCK"' )"   # status: the MCP reply text is the verdict; an empty reply FAILs the arm below
+if [ -z "$mo" ] || printf '%s' "$mo" | grep -q 'object-like macro'; then no "(B9) MCP find_symbol GHOST_SOCK names a raw-string #define (or replied nothing)"; else ok "(B9) MCP find_symbol GHOST_SOCK: no macro note for a raw-string #define"; fi
+out="$( rw "$TMP/raw" --defs=REAL_SOCK )"   # status: --defs exits 1 on a refusal by design; the answer text is the verdict and an empty one FAILs
 if printf '%s' "$out" | grep -q 'object-like macro, #define at .*raw.h:6'; then ok "(B9) control: REAL_SOCK after the raw string closes is named at raw.h:6"
 else no "(B9) control: REAL_SOCK after the raw string: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
 # Ruby declares no member lexically (instance variables are @ivars; the attr_* family is indexed, rubyattrscheck): a
@@ -404,13 +404,13 @@ printf 'export class Small {\n    run(): number { return zz_capped_name(); }\n}\
 cb=$( cat "$TMP"/declcap/*.ts | wc -c | tr -d ' ' ); mx=$( wc -c "$TMP"/declcap/*.ts | awk '$2 != "total" && $1 > m { m = $1 } END { print m + 0 }' )
 if [ "$cb" -gt 16777216 ] && [ "$mx" -lt 4194304 ]; then ok "(C13) premise: $cb bytes of TS classes calling zz_capped_name (past the 16 MiB budget, each file under 4 MiB)"
 else no "(C13) premise: $cb bytes, largest file $mx — the budget cannot trip"; fi
-out="$( rw "$TMP/declcap" --uses=zz_capped_name )"
+out="$( rw "$TMP/declcap" --uses=zz_capped_name )"   # status: --uses exit status is not the contract here; the <uses> attributes are the verdict and an empty answer FAILs
 if printf '%s' "$out" | grep -q '<uses [^>]*external="1"[^>]* decl_scan="capped"' && printf '%s' "$out" | grep -q 'decl_scan="\{0,1\}capped"\{0,1\}: the scan'; then ok "(C13) CLI --uses: past the budget the external answer carries decl_scan=\"capped\" and its legend"
 else no "(C13) CLI --uses past the budget: $( printf '%s' "$out" | grep -o '<uses [^>]*>' | head -1 )"; fi
-mo="$( mcp "$TMP/declcap" uses ',"symbol":"zz_capped_name"' )"
+mo="$( mcp "$TMP/declcap" uses ',"symbol":"zz_capped_name"' )"   # status: the MCP reply text is the verdict; an empty reply FAILs
 if printf '%s' "$mo" | grep -q 'external=\\"1\\"[^>]* decl_scan=\\"capped\\"'; then ok "(C13) MCP uses: past the budget the external answer carries decl_scan=\"capped\""
 else no "(C13) MCP uses past the budget: $( printf '%s' "$mo" | grep -o '<uses [^>]*>' | head -1 | head -c 300 )"; fi
-out="$( rw "$TMP/declsmall" --uses=zz_capped_name )"
+out="$( rw "$TMP/declsmall" --uses=zz_capped_name )"   # status: --uses exit status is not the contract here; the <uses> attributes are the verdict and an empty answer FAILs
 if printf '%s' "$out" | grep -q '<uses [^>]*external="1"' && ! printf '%s' "$out" | grep -q 'decl_scan'; then ok "(C13) precision: a small corpus's external answer carries no decl_scan="
 else no "(C13) precision: small corpus: $( printf '%s' "$out" | grep -o '<uses [^>]*>' | head -1 )"; fi
 

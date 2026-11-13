@@ -980,6 +980,22 @@ inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std:
     }
     return true;
 }
+// Drop the definitions the outer qualifiers do not place; `*unreadDefs` (optional) counts the ones dropped because their file
+// could not be read, so the caller discloses them instead of reading the qualifier as absent (ANCHOR-READ-DISCLOSE).
+inline void dropOuterUnplaced( const IngestResult& ing, std::vector<NodeId>& defs, std::string_view outer, std::size_t* unreadDefs )
+{
+    std::erase_if( defs, [ & ]( NodeId id )
+    {
+        bool       unread = false;
+        const bool drop   = !outerQualifiersPlace( ing, ing.symbols[id], outer, &unread );
+        if( drop && unread && unreadDefs != nullptr )
+        {
+            ++*unreadDefs;
+        }
+        return drop;
+    } );
+}
+
 // `*unreadDefs` (optional) counts the placed definitions dropped because their file could not be read (outerQualifiersPlace).
 inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query, std::size_t* unreadDefs = nullptr )
 {
@@ -1012,16 +1028,7 @@ inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& 
         // the placement read only the leaf and the last qualifier: `Missing::Model::save` placed the indexed `Model::save`, so the
         // qualifiers before that one must place the definition too (CodeRabbit 4545021751)
         const std::string_view outer = outerQualifiers( words[k], spelled[k] );
-        std::erase_if( placed[k], [ & ]( NodeId id )
-        {
-            bool       unread = false;
-            const bool drop   = !outerQualifiersPlace( ing, ing.symbols[id], outer, &unread );
-            if( drop && unread && unreadDefs != nullptr )
-            {
-                ++*unreadDefs;
-            }
-            return drop;
-        } );
+        dropOuterUnplaced( ing, placed[k], outer, unreadDefs );
         for( const NodeId id : resolveAllByNameQualified( ing, words[k] ) )
         {
             if( std::ranges::find( placed[k], id ) == placed[k].end() )

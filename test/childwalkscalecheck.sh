@@ -410,7 +410,7 @@ if [ "$( count_rows "$TMP/a_pat.xml" '<m p="big.c:2" in="f">' )" = 1 ]; then
 else
     no "(A7) findMatches/matchChildren: the pattern lost its match on the flooded body"
 fi
-"$BIN" "$TMP/patarrow/n1000" --no-cache --pattern='f($X)' >"$TMP/a_pa.xml" 2>/dev/null
+"$BIN" "$TMP/patarrow/n1000" --no-cache --pattern='f($X)' >"$TMP/a_pa.xml" 2>/dev/null   # status: --pattern exits 0 or 1 by hit count; the unmatched_member_arrow attribute is the verdict and a missing one FAILs
 if grep -q ' unmatched_member="1" unmatched_member_arrow="1"' "$TMP/a_pa.xml"; then
     ok "(A7b) memberCalleeOperator: the flooded \`p ->f( 1 )\` still counts as an arrow member near-miss (B39 reaches the walk)"
 else

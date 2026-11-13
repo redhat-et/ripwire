@@ -367,7 +367,7 @@ printf 'int main() { rw::detail::Huge h; h.drainAll(); }\n' >"$H/src/main.cpp"
 ( cd "$H" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
 hb=$( wc -c <"$H/src/huge.cpp" | tr -d ' ' )
 if [ "$hb" -gt 4194304 ] && [ "$hb" -lt 8388608 ]; then ok "N9 premise: huge.cpp is $hb bytes, past the 4 MiB read"; else no "N9 premise: huge.cpp is $hb bytes"; fi
-R="$( route "$( cd "$H" && HOME="$TMP/home" TMPDIR="$TMP/home/" "$BIN" "$H" --no-cache --max-file-size=8M '--for=what does Outer::detail::Huge::drainAll call' 2>/dev/null </dev/null )" )"
+R="$( route "$( cd "$H" && HOME="$TMP/home" TMPDIR="$TMP/home/" "$BIN" "$H" --no-cache --max-file-size=8M '--for=what does Outer::detail::Huge::drainAll call' 2>/dev/null </dev/null )" )"   # status: --for exits 0 on a routed answer; the route reason is the verdict and an empty route FAILs the arm below
 case "$R" in *'not placed: the file is unreadable or over 4 MiB'*) ok "N9 the route says the definition's file was too big to check";; *) no "N9 the unread definition file is silent (route $R)";; esac
 R="$( route "$( ask "$C" 'what does Missing::detail::ConnPool::drainAll call' )" )"
 case "$R" in *'unreadable or over 4 MiB'*) no "N9 precision: a readable file carries the unread note (route $R)";; *) ok "N9 precision: a readable definition file carries no unread note";; esac

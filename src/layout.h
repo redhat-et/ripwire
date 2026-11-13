@@ -1911,11 +1911,7 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
         // empty: no member, and no base or one the model placed at 0 B (`struct M : E {};`, CodeRabbit 4544554347)
         const bool     emptyAgg = d.fields.empty() && ( d.baseSpec.empty() || ( d.baseSized && d.baseSize == 0 ) );
         const TypeSize here{ d.size, d.align, true, d.tailPad, emptyAgg };
-        if( first )
-        {
-            recordZeroOffsetTypes( ctx, typeName, d );
-        }
-        if( first ) { out = here; first = false; }
+        if( first ) { recordZeroOffsetTypes( ctx, typeName, d ); out = here; first = false; }
         else if( here.size != out.size || here.align != out.align ) { note = "nested-mirrors-disagree"; out = TypeSize{}; break; }
     }
     --ctx.depth;
@@ -2775,6 +2771,26 @@ inline bool modelNonFieldStatement( BodyWalk& w, std::string_view s )
     return true;
 }
 
+// The empty-base rule one level down: a first member whose own offset 0 holds the empty base's type (`struct A : E { int x; };
+// struct D : E { A a; };` puts a at 4, not 0) — LAYOUT-EBO-NESTED, CodeRabbit #630. Read after appendField sized the member, which
+// recorded its offset-0 chain. Refuses on `w` and returns true when the rule applies.
+inline bool refuseNestedEmptyBase( BodyWalk& w, const Declarator& d )
+{
+    if( w.def.fields.size() != 1 || !w.def.baseSized || w.def.baseSize != 0 || d.isPointer || d.isRef )
+    {
+        return false;
+    }
+    const std::string_view base = lastSegment( withoutCv( w.def.baseSpec ) );
+    const auto             it   = w.ctx.zeroOffsetTypes.find( std::string( lastSegment( withoutCv( d.baseSpec ) ) ) );
+    if( it == w.ctx.zeroOffsetTypes.end() || std::ranges::find( it->second, base ) == it->second.end() )
+    {
+        return false;
+    }
+    w.refuse( "base-class", flattenSpace( w.def.baseSpec, 120 ) + ": the first member " + std::string( d.name ) + " holds a "
+                              + std::string( base ) + " at its own offset 0, so the empty base cannot share its address" );
+    return true;
+}
+
 // Handle one top-level statement inside the aggregate body.
 // Fold ONE declarator of a member statement. `baseType` is the statement's shared base, set from declarator 0: a
 // follow-on declarator shares only that (`char *a, b;` makes b a `char`, `int *p, *q;` makes q an `int *`). False when
@@ -2818,22 +2834,7 @@ inline bool modelDeclarator( BodyWalk& w, std::string_view part, bool first, std
         return false;
     }
     appendField( w, d, written );
-    // ...and the same rule one level down: a first member whose own offset 0 holds the empty base's type (`struct A : E { int x; };
-    // struct D : E { A a; };` puts a at 4, not 0) — LAYOUT-EBO-NESTED, CodeRabbit #630. Read after appendField sized the member, which
-    // recorded its offset-0 chain.
-    if( w.def.fields.size() == 1 && w.def.baseSized && w.def.baseSize == 0 && !d.isPointer && !d.isRef )
-    {
-        const auto it = w.ctx.zeroOffsetTypes.find( std::string( lastSegment( withoutCv( d.baseSpec ) ) ) );
-        if( it != w.ctx.zeroOffsetTypes.end()
-            && std::ranges::find( it->second, lastSegment( withoutCv( w.def.baseSpec ) ) ) != it->second.end() )
-        {
-            w.refuse( "base-class", flattenSpace( w.def.baseSpec, 120 ) + ": the first member " + std::string( d.name ) + " holds a "
-                                      + std::string( lastSegment( withoutCv( w.def.baseSpec ) ) )
-                                      + " at its own offset 0, so the empty base cannot share its address" );
-            return false;
-        }
-    }
-    return true;
+    return !refuseNestedEmptyBase( w, d );
 }
 
 inline void modelStatement( BodyWalk& w, std::string_view stmt )
