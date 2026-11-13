@@ -25,6 +25,9 @@
 #      test, not the lower-id planIt/applyIt one (CodeRabbit #625)
 #   J  the test_joint= reading in both dialects does not claim a direction: the test is a node the undirected search
 #      joins them THROUGH (A -> helper <- B is not "a test that calls them together"; CodeRabbit #625)
+#   K  the evidence is per LEG: one unrestricted group holds planIt/applyIt (source-joined, with a shorter abTest beside
+#      them) and cIt (joined to applyIt only through bcTest); test_joint= is bcTest, the test on the leg that crosses
+#      source components, not the lower-id abTest on a source-joined leg (CodeRabbit #636)
 #   H  determinism (3 runs) + xmllint
 #   M  mutations: each assertion sees its own regression
 #
@@ -65,6 +68,13 @@ XC="$TMP/crosscomp";    mksrc "$XC"
 printf 'void cIt() {}\nvoid dIt() {}\n' >> "$XC/src/core.cpp"
 printf 'void planIt(); void applyIt();\nvoid mid() { applyIt(); }\nvoid driver() { planIt(); mid(); }\n' > "$XC/src/driver.cpp"
 printf 'void planIt(); void applyIt(); void cIt(); void dIt();\nvoid abTest() { planIt(); applyIt(); }\nvoid cdTest() { cIt(); dIt(); }\n' > "$XC/test/core_test.cpp"
+
+# one unrestricted group: planIt/applyIt joined through source and by a shorter abTest; cIt reaches applyIt only through bcTest,
+# declared after abTest so it has the higher id
+XL="$TMP/crossleg";     mksrc "$XL"
+printf 'void cIt() {}\n' >> "$XL/src/core.cpp"
+printf 'void planIt(); void applyIt();\nvoid mid() { applyIt(); }\nvoid driver() { planIt(); mid(); }\n' > "$XL/src/driver.cpp"
+printf 'void planIt(); void applyIt(); void cIt();\nvoid abTest() { planIt(); applyIt(); }\nvoid bcTest() { applyIt(); cIt(); }\n' > "$XL/test/core_test.cpp"
 
 TT="$TMP/testterm";     mksrc "$TT"
 printf 'void helperT() {}\nvoid applyIt();\nvoid testDriver() { helperT(); applyIt(); }\n' > "$TT/test/helper_test.cpp"
@@ -167,6 +177,19 @@ if printf '%s' "$I_DOC" | grep -q '<connect [^>]*test_joint="cdTest" test_joint_
     ok "(I) test_joint= names cdTest, the test that joins the <unconnected> cIt/dIt"
 else
     no "(I) test_joint= is not cdTest (evidence unrelated to the <unconnected> terminals?): $( brief "$I_DOC" )"
+fi
+
+# ── K) the evidence is the test on a leg that crosses source components ─────────────────────────────────
+K_DOC="$( "$BIN" "$XL" --no-cache --connect=planIt,applyIt,cIt 2>/dev/null )"
+if printf '%s' "$K_DOC" | grep -q '<g terminals="2"><t n="planIt"' && printf '%s' "$K_DOC" | grep -q '<unconnected radius='; then
+    ok "(K) premise: planIt/applyIt joined through source, cIt <unconnected>"
+else
+    no "(K) premise: expected a source group of planIt/applyIt and cIt <unconnected>: $( brief "$K_DOC" )"
+fi
+if printf '%s' "$K_DOC" | grep -q '<connect [^>]*test_joint="bcTest" test_joint_p="test/core_test.cpp:3"'; then
+    ok "(K) test_joint= names bcTest, the test on the leg to the <unconnected> cIt"
+else
+    no "(K) test_joint= is not bcTest (a test from a source-joined leg?): $( brief "$K_DOC" )"
 fi
 
 # ── G) legend ────────────────────────────────────────────────────────────────────────────────────────────
