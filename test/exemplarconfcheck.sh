@@ -29,6 +29,18 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "exemplarconfcheck: BIN=$BIN  CORPUS=$ROOT"
 
 exemhdr(){ printf '%s' "$1" | grep -o '<exemplar[^>]*>' | head -1; }
+# runex FILE ARG...: the binary's answer to ARG... into FILE. A nonzero exit is a FAIL and empties FILE, so no arm reads what a failed
+# run printed before it exited (CodeRabbit #633: XML then exit 1 passed the off-task, legend and kind-token arms).
+runex(){
+    local f=$1 rc
+    shift
+    "$BIN" "$@" >"$f" 2>/dev/null
+    rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    no "the binary exited $rc on: $*"
+    : >"$f"
+    return 1
+}
 kindHedged(){ printf '%s' "$1" | grep -q 'low_confidence="1"' && ! printf '%s' "$1" | grep -q 'off_task="1"'; }
 
 # ── 1) a task with NO topical match anywhere in this repo MUST emit low_confidence="1" ────────────────────
@@ -171,8 +183,10 @@ mkfam(){   # $1 dir, $2 the function every caller calls
 }
 mkfam "$TMP/off" useState
 mkfam "$TMP/on" composeMiddleware
-OFFH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' 2>/dev/null )" )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
-ONH="$( exemhdr "$( "$BIN" "$TMP/on" --no-cache --exemplar='a middleware' 2>/dev/null )" )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+runex "$TMP/off.out" "$TMP/off" --no-cache --exemplar='a middleware'   # status: runex FAILs a nonzero exit; the arms below read the output
+runex "$TMP/on.out" "$TMP/on" --no-cache --exemplar='a middleware'     # status: runex FAILs a nonzero exit; the arms below read the output
+OFFH="$( exemhdr "$( cat "$TMP/off.out" )" )"
+ONH="$( exemhdr "$( cat "$TMP/on.out" )" )"
 # premise: both fixtures really carry the middleware family (6 + the composer) the window corroborates on
 famN="$( ls "$TMP/on/src/middleware" "$TMP/off/src/middleware" 2>/dev/null | grep -c '\.ts$' )"
 [ "$famN" -eq 14 ] && ok "premise: both fixtures carry the 7-file middleware family ($famN files)" \
@@ -193,7 +207,8 @@ fi
 # while the off_task reading says "not a fallback". The low_confidence reading must hold its fallback claim to
 # answers without off_task=1. Premise: the answer carries both attributes. Control: a plain fallback (arm 2's weak
 # query) still reads "fell back to fn".
-OFFDOC="$( "$BIN" "$TMP/off" --no-cache --exemplar='a middleware' --legend=compact 2>/dev/null )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+runex "$TMP/offdoc.out" "$TMP/off" --no-cache --exemplar='a middleware' --legend=compact   # status: runex FAILs a nonzero exit
+OFFDOC="$( cat "$TMP/offdoc.out" )"
 lcReading(){ printf '%s' "$1" | grep -oE 'low_confidence=1: [^;]*' | head -1; }
 if printf '%s' "$OFFDOC" | grep -q 'off_task="1"' && printf '%s' "$OFFDOC" | grep -q 'low_confidence="1"'; then
     ok "5b premise: the off-task answer carries low_confidence=\"1\" off_task=\"1\""
@@ -207,12 +222,14 @@ if printf '%s' "$OFFDOC" | grep -q 'off_task="1"' && printf '%s' "$OFFDOC" | gre
 else
     no "5b premise: the off-task answer lost low_confidence=\"1\" off_task=\"1\" — the legend arm would be vacuous"
 fi
-WEAKDOC="$( "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" --legend=compact 2>/dev/null )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+runex "$TMP/weakdoc.out" "$ROOT" --no-cache --exemplar="format byte sizes for humans" --legend=compact   # status: runex FAILs a nonzero exit
+WEAKDOC="$( cat "$TMP/weakdoc.out" )"
 printf '%s' "$WEAKDOC" | grep -q 'off_task="1"' && no "5b control: the plain fallback must not carry off_task" \
     || { case "$( lcReading "$WEAKDOC" )" in *"fell back to fn"*) ok "5b control: a plain fallback still reads 'fell back to fn'" ;;
          *) no "5b control: the plain fallback's low_confidence reading lost its fallback claim: $( lcReading "$WEAKDOC" )" ;; esac; }
 # a kind token is never hedged by the task test: there is no task to be off
-KH="$( exemhdr "$( "$BIN" "$TMP/off" --no-cache --exemplar=fn 2>/dev/null )" )"   # status: the arms below read the output; a failed run prints nothing, which they fail on
+runex "$TMP/kind.out" "$TMP/off" --no-cache --exemplar=fn   # status: runex FAILs a nonzero exit
+KH="$( exemhdr "$( cat "$TMP/kind.out" )" )"
 printf '%s' "$KH" | grep -q 'low_confidence' && no "a kind token (fn) must never carry low_confidence: $KH" \
     || { [ -n "$KH" ] && ok "a kind token (fn) carries no hedge: $KH" \
          || no "premise: --exemplar=fn printed no <exemplar> header (the call failed or printed nothing)"; }
