@@ -17,7 +17,8 @@
 #             (the macro-ARGUMENT call parses as a normal call and must SURVIVE) and reads MAXN.
 #   sitefix/ — MACRO-P0 (section 9): macro invocations the grammar reads as typeless declarators (brace-initialised
 #             `REGISTER_FACTORY( F, B ){ "name" };`, nested braces, class-member DECLARE_LUA_FUNCTION / MOCK_METHOD, an
-#             error-recovered in-function ASSIGN_OR_CO_RETURN, a C run of `;`-less EXPORT_FUNC) are uses, never defs; block-forming macros, real ALL-CAPS
+#             error-recovered in-function ASSIGN_OR_CO_RETURN, a C run of `;`-less EXPORT_FUNC, a recovered body read past the
+#             invocation's own `)`) are uses, never defs; block-forming macros, real ALL-CAPS
 #             functions and constructors stay defs.
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/macroedgecheck.sh   (or asan/ripwire)
@@ -234,6 +235,42 @@ EXPORT_FUNC(PyAlpha)
 EXPORT_FUNC(PyBeta)
 EXPORT_FUNC(PyGamma)
 EOF
+cat >"$SF/recovered.h" <<'EOF'
+#include "registry.h"
+#define CONSTRUCT_ON_FIRST_USE( type, ... ) static const type* objectPtr = new type{ __VA_ARGS__ }; return *objectPtr
+using ProviderPtr = int*;
+struct Context {};
+struct FileConfig {};
+class ProviderFactories
+{
+public:
+    virtual ProviderPtr createFileProvider( Context& context, const FileConfig& config ) const = 0;
+};
+class MockProviderFactories : public ProviderFactories
+{
+public:
+  MOCK_METHOD(ProviderPtr, createEnvironmentProvider, (), (const));
+  MOCK_METHOD(
+      ProviderPtr, mockCreateFileProvider,
+      (Server::Configuration::Context&,
+       (const envoy::common::v3::FileConfig& config)),
+      (const));
+
+  ProviderPtr createFileProvider(
+      Server::Configuration::Context& context,
+      const envoy::common::v3::FileConfig& config)
+      const override {
+    return mockCreateFileProvider(context, config);
+  }
+};
+int makeIndex( int );
+int handshakerIndex() {
+  CONSTRUCT_ON_FIRST_USE(int, []() -> int {
+    int index = makeIndex(0);
+    return index;
+  }());
+}
+EOF
 cat >"$SF/keep.cc" <<'EOF'
 #include "registry.h"
 #define TEST_F( fixture, name ) void fixture##_##name()
@@ -251,6 +288,13 @@ HSV::HSV() {}
 TEST_F( SumTest, Adds ) { (void)COMPUTE_SUM( 1, 2 ); }
 TEST( SumTest, Empty ) {}
 DEFINE_HANDLER( reload ) { return COMPUTE_SUM( 3, 4 ); }
+#define WASM_EXPORT( ret, name, args ) extern "C" ret name args
+void logDebug( const char* );
+using uint32_t = unsigned;
+WASM_EXPORT(uint32_t, proxy_on_vm_start, (uint32_t, uint32_t configuration_size)) {
+  logDebug("onStart");
+  return 1;
+}
 EOF
 sverb(){ "$BIN" "$SF" "$1" --no-cache --legend=compact 2>/dev/null; }
 # fnrows NAME: the function rows (t="fn" or t="method") --defs=NAME lists (-1 when the run printed no defs schema)
@@ -268,9 +312,11 @@ if [ "$SITES" -ge 13 ] && printf '%s' "$RD" | grep -q '<d [^>]*t="macro"'; then
 else
     no "MACRO-P0 premise: sites=$SITES (want >=13) or no t=\"macro\" REGISTER_FACTORY row — the arms below would see nothing"
 fi
-# 9b) THE TRAP: no phantom def survives, in any of the six shapes (EXPORT_FUNC: a C run of `;`-less invocations, cpython's
-#     PC/python3dll.c, where tree-sitter-c reads the previous invocation as a macro_type_specifier inside an ERROR node)
-for m in REGISTER_FACTORY DECLARE_LUA_FUNCTION MOCK_METHOD ASSIGN_OR_CO_RETURN EXPORT_FUNC; do
+# 9b) THE TRAP: no phantom def survives, in any of the shapes (EXPORT_FUNC: a C run of `;`-less invocations, cpython's
+#     PC/python3dll.c, where tree-sitter-c reads the previous invocation as a macro_type_specifier inside an ERROR node;
+#     recovered.h: envoy's multi-line MOCK_METHOD whose recovered "body" is the next method's, and CONSTRUCT_ON_FIRST_USE whose
+#     argument lambda's body is read as the def's behind a MISSING ")")
+for m in REGISTER_FACTORY DECLARE_LUA_FUNCTION MOCK_METHOD ASSIGN_OR_CO_RETURN EXPORT_FUNC CONSTRUCT_ON_FIRST_USE; do
     n="$( fnrows "$m" )"
     [ "$n" = 0 ] && ok "MACRO-P0 trap: --defs=$m lists 0 function defs (every invocation is a use)" \
         || no "MACRO-P0 trap: --defs=$m lists $n function def(s) — one phantom keeps the name shared and unbinds every invocation"
@@ -298,7 +344,7 @@ printf '%s\n' "$DC" | grep -q 'n="consume"' \
     && ok "MACRO-P0: decodeLoop() keeps its consume() callee" \
     || no "MACRO-P0: decodeLoop() lost its consume() callee"
 # 9e) keeps: each must stay a function definition
-for kv in TEST_F:1 TEST:1 COMPUTE_SUM:1 RGB:2 HSV:1 DEFINE_HANDLER:1; do
+for kv in TEST_F:1 TEST:1 COMPUTE_SUM:1 RGB:2 HSV:1 DEFINE_HANDLER:1 WASM_EXPORT:1; do
     k="${kv%%:*}"; want="${kv##*:}"
     n="$( fnrows "$k" )"
     [ "$n" = "$want" ] && ok "MACRO-P0 keep: --defs=$k lists $n function def(s)" \

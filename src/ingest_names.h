@@ -2631,8 +2631,10 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
 //   * its owner (a function_definition, declaration or field_declaration, through `*` / `&` / init declarators) carries
 //     no type; or the owner is an ERROR node and no type node stands right before the declarator;
 //   * it is not a constructor (the enclosing class's own name: `struct RGB { RGB() {} };`);
-//   * a definition's braces hold no `;` before their own closing brace: a body with a statement is a block-forming macro
-//     (`TEST_F( S, N ) { … ; }`, cpython `TARGET( op ) { … ; }`) and keeps its def, named after the macro.
+//   * a definition's braces hold no `;` before their own closing brace, or they do not follow the invocation's own closed
+//     `( … )` (bodyFollowsClosedParameters: error recovery read a later body): a body with a statement right after the
+//     parentheses is a block-forming macro (`TEST_F( S, N ) { … ; }`, cpython `TARGET( op ) { … ; }`) and keeps its def,
+//     named after the macro.
 // NOT this card: a trailing annotation macro (`T f() ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { body }`) parses as a typeless
 // def named after the annotation that OWNS f's real body; its body holds `;`, so it keeps its def here (the P1 card).
 inline constexpr std::array<std::string_view, 10> kBlockFormingTestMacros = {
@@ -2694,6 +2696,43 @@ inline bool errorDeclaratorUntyped( TSNode fnDeclarator ) noexcept
     return std::ranges::find( kTypeKinds, kind ) == std::end( kTypeKinds );
 }
 
+// Does a definition's body follow its declarator's own CLOSED parameter list, with only blanks and comments between? A
+// block-forming macro does (`TEST_F( S, N ) { … }`, `WASM_EXPORT( T, f, ( a ) ) { … }`). Error recovery that read an
+// invocation's arguments past its `)` does not: `CONSTRUCT_ON_FIRST_USE( int, []() -> int { … }() );` closes the list with a
+// MISSING ")" and reads the argument lambda's body as the def's, and envoy's multi-line MOCK_METHOD( …, ( a, ( b ) ), (const) );
+// recovers with the NEXT method's body, error nodes between.
+inline bool bodyFollowsClosedParameters( TSNode fnDeclarator, TSNode body, std::string_view src ) noexcept
+{
+    const TSNode        parameters = fieldChild( fnDeclarator, NodeField::Parameters );
+    const std::uint32_t childCount = ts_node_is_null( parameters ) ? 0u : ts_node_child_count( parameters );
+    if( childCount == 0 )
+    {
+        return false;
+    }
+    const TSNode close = ts_node_child( parameters, childCount - 1 );
+    if( ts_node_is_missing( close ) || !kindIs( ts_node_type( close ), ")" ) || ts_node_start_byte( body ) < ts_node_end_byte( parameters ) )
+    {
+        return false;
+    }
+    const std::string_view gap = src.substr( ts_node_end_byte( parameters ), ts_node_start_byte( body ) - ts_node_end_byte( parameters ) );
+    for( std::size_t i = 0; i < gap.size(); )
+    {
+        const std::string_view rest = gap.substr( i );
+        if( rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\n' || rest[0] == '\r' )
+        {
+            ++i;
+            continue;
+        }
+        if( !rest.starts_with( "//" ) && !rest.starts_with( "/*" ) )
+        {
+            return false;
+        }
+        const std::size_t close = rest.starts_with( "//" ) ? rest.find( '\n' ) : rest.find( "*/", 2 );
+        i                       = close == std::string_view::npos ? gap.size() : i + close + ( rest[1] == '*' ? 2u : 1u );
+    }
+    return true;
+}
+
 // Is the definition/declaration `owner` a constructor of the class whose member list holds it?
 inline bool ownerIsConstructorOf( TSNode owner, std::string_view name, std::string_view src ) noexcept
 {
@@ -2742,7 +2781,7 @@ inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view na
         return false;
     }
     const TSNode body = isDefinition ? fieldChild( owner, NodeField::Body ) : TSNode {};
-    return ts_node_is_null( body ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) );
+    return ts_node_is_null( body ) || !bodyFollowsClosedParameters( fnDeclarator, body, src ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) );
 }
 
 // The capture-side question: a C-family @definition.function/@definition.method on a function_declarator that
