@@ -237,6 +237,26 @@ namespace infra::platform
 #endif
 }
 
+// The low 64 bits of lhs + rhs + carry (carry is 0 or 1), and the carry out of bit 63 written back to `carry`: one word
+// of a multi-word add (clones.h CloneLcsBits, the bit-parallel LCS). Same posture as multiplyLow64 above: the sum is
+// formed in 128 bits, so nothing wraps for the `integer` sanitizer group, and the explicit casts take the two halves
+// (the compiler emits add / adc). MSVC's arm is the plain wrapping add with the carry read from the compares.
+[[nodiscard]] ALWAYS_INLINE constexpr std::uint64_t addWithCarry64( std::uint64_t lhs, std::uint64_t rhs, std::uint64_t& carry ) noexcept
+{
+#if defined(__clang__) || defined(__GNUC__)
+    using Wide = unsigned __int128;
+    constexpr Wide kMask64 = Wide( ~std::uint64_t( 0 ) );
+    const Wide     sum     = Wide( lhs ) + Wide( rhs ) + Wide( carry );
+    carry                  = static_cast<std::uint64_t>( sum >> 64 );
+    return static_cast<std::uint64_t>( sum & kMask64 );
+#else
+    const std::uint64_t partial = lhs + rhs;
+    const std::uint64_t sum     = partial + carry;
+    carry                       = std::uint64_t( partial < lhs ) | std::uint64_t( sum < partial );
+    return sum;
+#endif
+}
+
 // ==========================================================================
 // Checked integer arithmetic
 // ==========================================================================

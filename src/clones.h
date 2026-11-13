@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>       // gType3PassRuns / gType3PassPairs — the QD-ENVOY-TIME cost-bound counters
+#include <bit>          // std::popcount — CloneLcsBits counts the zero bits of its DP vector
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>      // std::getenv — RIPWIRE_LCS_VERIFY
@@ -696,6 +697,7 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
 //      the emitted set was verified pair-identical against the exact baseline on this repo src/, SFML, and llama.cpp
 //      (test/clonebandcheck.sh asserts the parity on a borderline-including fixture on every run).
 //   5. Only pairs passing (a)+(a′)+(b) get the O(n·m) LCS over the two token sequences (n,m ≤ per-body token count;
+//      QD-LCS runs it bit-parallel, n·⌈m/64⌉ word steps, and stops once the pair cannot reach the threshold;
 //      capped at kType3MaxTokensForLcs so one pathological pair can't dominate). similarity = 2·LCS/(|a|+|b|).
 //   6. Report pairs with kType3MinSimilarity ≤ similarity < 1.0 as CloneGroup{ {a,b}, tokens, type=3, similarity }.
 //
@@ -920,6 +922,113 @@ inline std::size_t type3LcsNeed( std::size_t den ) noexcept
     return ceilTwoFifths == 0 ? 0 : ceilTwoFifths - 1;
 }
 
+// QD-LCS bit-parallel: the LCS length of `a` against many `b`s, 64 DP cells per machine word (Allison-Dix 1986, in the
+// form of Hyyrö 2004, "Bit-parallel LCS-length computation revisited"). load(a) builds one match mask per distinct token
+// of a: bit k is set where a[k] is that token. lcs(b) then keeps one bit vector V over a's positions, all ones at the
+// start, and for each token of b updates
+//     U = V & M[token];   V = (V + U) | (V & ~M[token])
+// where the add carries across words. After the last token the LCS is the number of zero bits in V's low |a| bits. A
+// token of b that a does not hold leaves V unchanged, so its row costs one table load. The answer equals cloneLcsLen's
+// cell for cell; test/lcsidentitycheck.sh checks both against an independent DP on a fuzz set and on real pairs.
+//
+// Built for the Type-3 pair walk, where one candidate meets every partner in turn: the walk loads a candidate once and
+// runs every partner against its masks. The slot table is indexed by token id (the pass interns ids densely), grows to
+// the largest id seen and is cleared through the list of ids a load touched, so a load costs O(|a|) and no hashing.
+//
+// `need` has cloneLcsLen's contract: an answer ≥ need is exact, and once the LCS cannot reach `need` the scan stops and
+// returns a bound below it. The bound after j tokens of b is zeros(V) + (|b| - j), and it falls by at most one per token,
+// so it is counted (a popcount pass) only at the first token where it could have fallen below `need`, not every row.
+class CloneLcsBits
+{
+public:
+    void load( std::span<const std::uint32_t> a )
+    {
+        for( const std::uint32_t t : used_ )
+        {
+            slot_[t] = 0;
+        }
+        used_.clear();
+        masks_.clear();
+        size_  = a.size();
+        words_ = ( size_ + 63 ) / 64;
+        for( std::size_t k = 0; k < size_; ++k )
+        {
+            const std::uint32_t t = a[k];
+            if( t >= slot_.size() )
+            {
+                slot_.resize( std::size_t( t ) + 1, 0 );
+            }
+            if( slot_[t] == 0 )
+            {
+                used_.push_back( t );
+                slot_[t] = std::uint32_t( used_.size() );
+                masks_.resize( masks_.size() + words_, 0 );
+            }
+            masks_[ ( slot_[t] - 1 ) * words_ + k / 64 ] |= std::uint64_t( 1 ) << ( k % 64 );
+        }
+    }
+
+    std::size_t lcs( std::span<const std::uint32_t> b, std::size_t need = 0 )
+    {
+        const std::size_t nb       = b.size();
+        const std::size_t shortest = std::min( size_, nb );
+        if( shortest == 0 || shortest < need )
+        {
+            return shortest;
+        }
+        v_.assign( words_, ~std::uint64_t( 0 ) );
+        std::uint64_t* const v    = v_.data();
+        std::size_t          next = nb - need + 1;   // the first token count after which the bound can be below need
+        for( std::size_t j = 0; j < nb; ++j )
+        {
+            const std::uint32_t t = b[j];
+            if( t < slot_.size() && slot_[t] != 0 )
+            {
+                const std::uint64_t* const m     = masks_.data() + std::size_t( slot_[t] - 1 ) * words_;
+                std::uint64_t              carry = 0;
+                for( std::size_t w = 0; w < words_; ++w )
+                {
+                    const std::uint64_t vw = v[w];
+                    const std::uint64_t u  = vw & m[w];
+                    v[w]                   = infra::platform::addWithCarry64( vw, u, carry ) | ( vw & ~m[w] );
+                }
+            }
+            if( j + 1 == next )
+            {
+                const std::size_t reach = zeros() + ( nb - j - 1 );   // the most the LCS can still reach
+                if( reach < need )
+                {
+                    return reach;
+                }
+                next = j + 2 + ( reach - need );
+            }
+        }
+        return zeros();
+    }
+
+private:
+    // the zero bits of V in a's |a| positions: the LCS of a and the tokens of b seen so far
+    std::size_t zeros() const noexcept
+    {
+        std::size_t ones = 0;
+        for( std::size_t w = 0; w + 1 < words_; ++w )
+        {
+            ones += std::size_t( std::popcount( v_[w] ) );
+        }
+        const std::size_t topBits = size_ - ( words_ - 1 ) * 64;   // 1..64 live bits in the last word
+        const std::uint64_t topMask = topBits == 64 ? ~std::uint64_t( 0 ) : ( std::uint64_t( 1 ) << topBits ) - 1;
+        ones += std::size_t( std::popcount( v_[words_ - 1] & topMask ) );
+        return size_ - ones;
+    }
+
+    std::vector<std::uint32_t> slot_;    // token id -> 1 + its mask row in masks_; 0 = not in a
+    std::vector<std::uint32_t> used_;    // the ids the last load gave a slot (cleared by the next load)
+    std::vector<std::uint64_t> masks_;   // one row of words_ words per distinct token of a
+    std::vector<std::uint64_t> v_;       // the DP's bit vector, words_ words
+    std::size_t                size_  = 0;
+    std::size_t                words_ = 0;
+};
+
 // One Type-3 candidate: one representative per DISTINCT normalized stream (findClonesType3 below collects them).
 struct Type3Cand
 {
@@ -1073,7 +1182,12 @@ private:
         const std::size_t den = pa.size() + pb.size();
         // below type3LcsNeed the ratio cannot reach kType3MinSimilarity, so the DP may stop early with a smaller value
         const std::size_t need = type3LcsNeed( den );
-        const std::size_t lcs  = cloneLcsLen( pa, pb, lcsPrevRow_, lcsCurRow_, need );
+        if( lcsBitsFor_ != ia )   // the candidate walk meets every partner of ia in a row: one load serves them all
+        {
+            lcsBits_.load( pa );
+            lcsBitsFor_ = ia;
+        }
+        const std::size_t lcs = lcsBits_.lcs( pb, need );
         if( verifyLcs_ )
         {
             verifyLcs( pa, pb, need, lcs );
@@ -1090,12 +1204,14 @@ private:
 
     // The identity check behind RIPWIRE_LCS_VERIFY: the fast answer `lcs` for `need` against the plain DP's exact length. A
     // length at or above `need` must be exact; one below it must come from a pair whose exact length is below it too.
+    // The bit-parallel LCS run to the end (no need) must equal the plain DP on every pair, exited or not.
     void verifyLcs( std::span<const std::uint32_t> pa, std::span<const std::uint32_t> pb, std::size_t need, std::size_t lcs )
     {
         const std::size_t exact = cloneLcsLen( pa, pb, verifyPrevRow_, verifyCurRow_ );
+        const bool        bad   = ( lcs >= need ? lcs != exact : exact >= need ) || lcsBits_.lcs( pb ) != exact;
         ++st_.lcsVerified;
         st_.lcsVerifyExits += lcs < need ? 1 : 0;
-        st_.lcsVerifyMismatches += ( lcs >= need ? lcs != exact : exact >= need ) ? 1 : 0;
+        st_.lcsVerifyMismatches += bad ? 1 : 0;
     }
 
     // The candidate walk (see the class comment); false = it reached the cap and the bucket walk must answer.
@@ -1175,7 +1291,8 @@ private:
     Type3Stats&                       st_;
     std::vector<CloneGroup>           out_;
     std::size_t                       comparedPairs_ = 0;
-    std::vector<std::uint32_t>        lcsPrevRow_, lcsCurRow_;   // cloneLcsLen's two DP rows, reused by every pair (T3-LCS)
+    CloneLcsBits                      lcsBits_;   // the bit-parallel LCS, loaded with candidate lcsBitsFor_ (QD-LCS)
+    std::uint32_t                     lcsBitsFor_ = ~std::uint32_t( 0 );   // the candidate lcsBits_ holds; none at the start
     std::vector<std::uint32_t>        verifyPrevRow_, verifyCurRow_;   // the RIPWIRE_LCS_VERIFY plain DP's rows
     std::vector<std::uint64_t>        lcsKeys_;   // the candidate walk's LCS record: (ia << 32 | ib), ascending
     std::vector<float>                lcsSims_;   // ... and each pair's similarity
