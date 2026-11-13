@@ -12,7 +12,8 @@
 #   N3 a subject that IS a `where` method keeps it in the head;
 #   N4 an outer qualifier that places nothing (`Missing.futures.ThreadPoolExecutor`) does not borrow the inner spelling's source anchor.
 #   N5 a C++ namespace the definition's file opens (`rw::detail::ConnPool`) still places it; its Missing:: twin does not.
-#   N8 a comment word or unrelated identifier in the definition's file is no scope (CARD-SWEEP-1113).
+#   N8 a comment word or unrelated identifier in the definition's file is no scope; N9 an unread (>4 MiB) definition file is
+#   disclosed on the route (CARD-SWEEP-1113).
 #   Fixtures generated at test time; CLI and MCP; determinism; well-formed XML.
 # Usage: bash test/anchorhonestycheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/anchorhonestycheck.sh
 set -u
@@ -353,6 +354,23 @@ done
 R="$( route "$( ask "$Q" 'what does rw::detail::ConnPool::drainAll call' )" )"
 case "$R" in *'dropped: call'*) nQ=$(( nQ + 1 )); ok "N8 control: rw:: (namespace rw) still places on the same file";; *) no "N8 control: rw::detail::ConnPool::drainAll route $R";; esac
 if [ "$nQ" -eq 3 ]; then ok "N8 counted $nQ qualifier wordings read as expected"; else no "N8 counted $nQ of 3 qualifier wordings read as expected"; fi
+
+# ═══ N9 a definition file too big to read says so (ANCHOR-READ-DISCLOSE, CodeRabbit #630) ═══
+#   Huge::drainAll lives in a 4.3 MiB file, indexed under --max-file-size=8M but past readWhole's 4 MiB. `Outer::` is in no scope or
+#   path, so only the file could place it, and the file cannot be read: the definition is not placed, and the route reason now says
+#   the qualifier went unchecked instead of reading `Outer` as absent (silent on main cd04d477e).
+#   Generated here, never committed.
+H="$TMP/huge"; mkdir -p "$H/src"
+{ printf 'namespace rw\n{\nnamespace detail\n{\nclass Huge\n{\npublic:\n    void drainAll();\n    int  sizeNow() const;\n};\nvoid Huge::drainAll() { sizeNow(); }\nint Huge::sizeNow() const { return 0; }\n}\n}\n'
+  awk 'BEGIN { for( i = 0; i < 60000; ++i ) printf "// padding padding padding padding padding padding padding padding %05d\n", i }'; } >"$H/src/huge.cpp"
+printf 'int main() { rw::detail::Huge h; h.drainAll(); }\n' >"$H/src/main.cpp"
+( cd "$H" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+hb=$( wc -c <"$H/src/huge.cpp" | tr -d ' ' )
+if [ "$hb" -gt 4194304 ] && [ "$hb" -lt 8388608 ]; then ok "N9 premise: huge.cpp is $hb bytes, past the 4 MiB read"; else no "N9 premise: huge.cpp is $hb bytes"; fi
+R="$( route "$( cd "$H" && HOME="$TMP/home" TMPDIR="$TMP/home/" "$BIN" "$H" --no-cache --max-file-size=8M '--for=what does Outer::detail::Huge::drainAll call' 2>/dev/null </dev/null )" )"
+case "$R" in *'not placed: the file is unreadable or over 4 MiB'*) ok "N9 the route says the definition's file was too big to check";; *) no "N9 the unread definition file is silent (route $R)";; esac
+R="$( route "$( ask "$C" 'what does Missing::detail::ConnPool::drainAll call' )" )"
+case "$R" in *'unreadable or over 4 MiB'*) no "N9 precision: a readable file carries the unread note (route $R)";; *) ok "N9 precision: a readable definition file carries no unread note";; esac
 
 # ═══ N3 a subject that IS a where method keeps it ═══
 A="$( ask "$P" 'what does Icon.where call' )"

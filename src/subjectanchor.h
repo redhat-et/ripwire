@@ -934,7 +934,9 @@ inline bool opensScopeNamed( std::string_view bytes, std::string_view seg )
 // file's path, a Rust path keyword, or a scope its file opens (a C++ `namespace rw {`, a Rust `mod net {`; opensScopeNamed): `Missing.Model.save`
 // names nothing of pkg/models/base.py's Model.save, `concurrent.futures.ThreadPoolExecutor` names Lib/concurrent/. Read only on
 // a word with outer qualifiers, and the file only when the cheap tests fail.
-inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer )
+// ANCHOR-READ-DISCLOSE (CodeRabbit #630): a definition file the read cannot open (unreadable, or over darkflags::readWhole's
+// 4 MiB) is not placed, and `*unread` says so, so the route reason discloses it instead of reading the qualifier as absent.
+inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer, bool* unread = nullptr )
 {
     const std::string_view path = rootRelPath( ing, s.fileId );
     const auto namesSegment = []( std::string_view text, std::string_view seps, std::string_view seg )
@@ -967,6 +969,10 @@ inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std:
             bytes = darkflags::readWhole( diskPath( ing, s.fileId ) );
             read  = true;
         }
+        if( !bytes && unread != nullptr )
+        {
+            *unread = true;
+        }
         if( !bytes || !opensScopeNamed( *bytes, seg ) )
         {
             return false;
@@ -974,7 +980,8 @@ inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std:
     }
     return true;
 }
-inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query )
+// `*unreadDefs` (optional) counts the placed definitions dropped because their file could not be read (outerQualifiersPlace).
+inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query, std::size_t* unreadDefs = nullptr )
 {
     using namespace subject_detail;
     std::vector<std::string_view> words;
@@ -1005,7 +1012,16 @@ inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& 
         // the placement read only the leaf and the last qualifier: `Missing::Model::save` placed the indexed `Model::save`, so the
         // qualifiers before that one must place the definition too (CodeRabbit 4545021751)
         const std::string_view outer = outerQualifiers( words[k], spelled[k] );
-        std::erase_if( placed[k], [ & ]( NodeId id ) { return !outerQualifiersPlace( ing, ing.symbols[id], outer ); } );
+        std::erase_if( placed[k], [ & ]( NodeId id )
+        {
+            bool       unread = false;
+            const bool drop   = !outerQualifiersPlace( ing, ing.symbols[id], outer, &unread );
+            if( drop && unread && unreadDefs != nullptr )
+            {
+                ++*unreadDefs;
+            }
+            return drop;
+        } );
         for( const NodeId id : resolveAllByNameQualified( ing, words[k] ) )
         {
             if( std::ranges::find( placed[k], id ) == placed[k].end() )
@@ -1107,8 +1123,14 @@ inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& i
     {
         return {};
     }
-    const std::string_view          query = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
-    std::vector<SourceSyntaxAnchor> src   = sourceSyntaxAnchors( ing, query );
+    const std::string_view          query      = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
+    std::size_t                     unreadDefs = 0;
+    std::vector<SourceSyntaxAnchor> src        = sourceSyntaxAnchors( ing, query, &unreadDefs );
+    if( unreadDefs != 0 )
+    {
+        out.route.reason += "; " + std::to_string( unreadDefs ) + " definition(s) not placed: the file is unreadable or over 4 MiB, so its "
+                            "outer qualifier was not checked";
+    }
     if( src.empty() )
     {
         return src;
