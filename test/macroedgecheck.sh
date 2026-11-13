@@ -366,9 +366,11 @@ done
 #        thread.h:70: 41 such sites). The generic shape is an ALL-CAPS macro call between a declarator's `)` (or its
 #        const/noexcept/override) and the body or `;`; a constructor's host is an ERROR node, and a typed definition or field
 #        reads the real declarator inside an ERROR before the macro (`tryLock() DISABLE( ABSL_UNLOCK_FUNCTION() ) { … }`,
-#        `int g_ ABSL_GUARDED_BY( mu_ );`). The trap arm counts every phantom (FAIL on >0); its premise counts the
+#        `int g_ ABSL_GUARDED_BY( mu_ );`). An out-of-line `void A::f() ABSL_…( mu ) {` reads `A::f()` as a variable with an
+#        empty initialiser, so no prototype is captured: the annotation's definition is renamed to f (emptyOut). The trap arm counts every phantom (FAIL on >0); its premise counts the
 #        annotation sites it saw (FAIL on zero). Keeps: a real ALL-CAPS function after a `;`-closed prototype,
-#        an annotated declaration stays a declaration, a leading annotation leaves its function alone. ──
+#        an annotated declaration stays a declaration, a leading annotation leaves its function alone, and cpython's
+#        `Py_LOCAL_INLINE( void * )` line (an ERROR before `CHECK_CALL( … ) { … }`) is no constructor prototype. ──
 AF="$TMP/annfix"
 mkdir -p "$AF"
 cat >"$AF/lock.h" <<'EOF'
@@ -402,6 +404,7 @@ public:
     int declOnly() const ABSL_LOCKS_EXCLUDED( mu_ );
     ABSL_MUST_USE_RESULT bool leading() { return helperOne( 7 ) > 0; }
     void outOfClass( int x );
+    void emptyOut();
     int guarded_ ABSL_GUARDED_BY( mu_ );
     int mu_ = 0;
     int v_  = 0;
@@ -410,6 +413,11 @@ EOF
 cat >"$AF/lock.cc" <<'EOF'
 #include "lock.h"
 void CondVar::outOfClass( int x ) ABSL_LOCKS_EXCLUDED( mu_ ) { helperThree( x ); }
+void CondVar::emptyOut() ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu_ ) {
+    helperOne( 9 );
+}
+struct Pool { ~Pool(); int q_ = 0; };
+Pool::~Pool() ABSL_LOCKS_EXCLUDED( q_ ) { helperTwo( 8 ); }
 int gmu = 0;
 int freeFn( int x ) ABSL_EXCLUSIVE_LOCKS_REQUIRED( gmu ) { return helperTwo( x ); }
 int CAPS_REAL( int a ) { return helperOne( a ); }
@@ -418,6 +426,7 @@ int callers()
     CondVar c( 1 );
     c.notifyOne();
     c.outOfClass( 2 );
+    c.emptyOut();
     int m = 0;
     return c.waitFor( m, 1 ) + freeFn( 2 ) + CAPS_REAL( 3 ) + c.getConst();
 }
@@ -425,6 +434,25 @@ EOF
 cat >"$AF/caps.c" <<'EOF'
 int proto_one( void );
 int CAPS_AFTER( int b ) { int c = b + proto_one(); return c; }
+EOF
+cat >"$AF/pegen.h" <<'EOF'
+#define Py_LOCAL_INLINE( type ) static inline type
+typedef struct Parser { int error_indicator; } Parser;
+int check_failed( void );
+Py_LOCAL_INLINE(int)
+tokens_adjacent(Parser *p, int a)
+{
+    return p->error_indicator == a;
+}
+
+Py_LOCAL_INLINE(void *)
+CHECK_CALL(Parser *p, void *result)
+{
+    if (result == 0) {
+        p->error_indicator = check_failed();
+    }
+    return result;
+}
 EOF
 averb(){
     local out rc
@@ -455,13 +483,13 @@ for m in ABSL_LOCKS_EXCLUDED ABSL_EXCLUSIVE_LOCKS_REQUIRED ABSL_UNLOCK_FUNCTION 
         || no "MACRO-P1 trap: --defs=$m lists $n function def(s) — an annotation owns a real function's body"
 done
 # 10c) each annotated function is ONE definition with a body (no decl_only="1" row left behind)
-for f in notifyOne waitFor getConst virt multiLine waitForT tryLock outOfClass freeFn CondVar; do   # CondVar: the constructor (its prototype half is an ERROR node)
+for f in notifyOne waitFor getConst virt multiLine waitForT tryLock outOfClass emptyOut freeFn CondVar; do   # CondVar: the constructor (its prototype half is an ERROR node)
     n="$( afnrows "$f" )"; d="$( afnrows "$f" decl )"
     [ "$n" = 1 ] && [ "$d" = 0 ] && ok "MACRO-P1: --defs=$f lists one function def, with its body" \
         || no "MACRO-P1: --defs=$f lists $n function def(s), $d of them decl_only — want 1 with its body"
 done
 # 10d) the body's calls and the annotation are the real function's: callees, and the caller side binds to it
-for fc in notifyOne:helperOne waitFor:helperTwo outOfClass:helperThree freeFn:helperTwo; do
+for fc in notifyOne:helperOne waitFor:helperTwo outOfClass:helperThree emptyOut:helperOne freeFn:helperTwo; do
     f="${fc%%:*}"; c="${fc##*:}"
     averb "--callees=$f" | tr '>' '\n' | grep -q "n=\"$c\"" && ok "MACRO-P1: --callees=$f lists $c (the body is $f's)" \
         || no "MACRO-P1: --callees=$f does not list $c"
@@ -474,12 +502,12 @@ nau="$( printf '%s' "$AU" | grep -oE '<u role="macro"' | grep -c . )"
 [ "$nau" -ge 5 ] && ! printf '%s' "$AU" | grep -q '<u role="call"' \
     && ok "MACRO-P1: --uses=ABSL_EXCLUSIVE_LOCKS_REQUIRED lists $nau role=\"macro\" sites and no role=\"call\"" \
     || no "MACRO-P1: --uses=ABSL_EXCLUSIVE_LOCKS_REQUIRED lists $nau role=\"macro\" sites (want >=5, none role=\"call\")"
-for f in notifyOne waitFor freeFn; do
+for f in notifyOne waitFor freeFn emptyOut; do
     averb "--callers=$f" | tr '>' '\n' | grep -q 'n="callers"' && ok "MACRO-P1: --callers=$f lists callers()" \
         || no "MACRO-P1: --callers=$f does not list callers()"
 done
 # 10e) keeps: a real ALL-CAPS function after a `;`-closed prototype, a leading annotation, an annotated declaration
-for kv in CAPS_REAL:1 CAPS_AFTER:1 leading:1; do
+for kv in CAPS_REAL:1 CAPS_AFTER:1 CHECK_CALL:1 leading:1; do   # CHECK_CALL: cpython Parser/pegen.h, after an ERROR that is no constructor
     k="${kv%%:*}"; want="${kv##*:}"
     n="$( afnrows "$k" )"; d="$( afnrows "$k" decl )"
     [ "$n" = "$want" ] && [ "$d" = 0 ] && ok "MACRO-P1 keep: --defs=$k lists $n function def(s) with a body" \

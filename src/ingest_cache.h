@@ -379,7 +379,9 @@ constexpr std::uint32_t kParserVer    = 309;          // bump on any grammar/.sc
                                                       // 309 = 2026-11-13 (lane macro-p0, PLACEHOLDER: the train renumbers; above main's 307/308): a C-family macro
                                                       //   invocation read as a typeless declarator (`REGISTER_FACTORY( F, B ){ "n" };`, a class-member `MOCK_METHOD( … );`)
                                                       //   mints no function def; the site is a use of the macro (ingest_names.h cFamilyMacroInvocationDecl). Rich file
-                                                      //   tag 310. kCacheVersion unchanged.
+                                                      //   tag 310. kCacheVersion unchanged. MACRO-P1 (stacked on macro-p0, same placeholder): a trailing annotation
+                                                      //   macro (`T f() ABSL_LOCKS_EXCLUDED( mu ) { body }`) is a use, and f's prototype adopts the body
+                                                      //   (ingest_names.h annotationHostDeclarator / annotatedDefinitionAfter).
                                                       // 307 = 2026-11-11 (lane rust-macro-path, PLACEHOLDER: the train renumbers; above main's 305/306): a Rust path
                                                       //   macro invocation (`crate::m!`, `serde_json::json!`) is captured with its written path, and a transcriber's
                                                       //   `$crate::m!` is a Macro reference of its `macro_rules!`. Rich file tag 308. kCacheVersion unchanged.
