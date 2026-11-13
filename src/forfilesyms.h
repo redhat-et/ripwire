@@ -166,7 +166,8 @@ static_assert( legendDefinesAll( kForFileSymsBindLegend, kForFileSymsBindAttrs )
                "each bind clause must spell by=, into= and bind_total=" );
 static_assert( legendDefinesAll( kForFileSymsInitLegend, kForFileSymsInitAttrs ) && legendDefinesAll( kForFileSymsInitLegendCompact, kForFileSymsInitAttrs ),
                "each init clause must spell by=, of= and at=" );
-static_assert( kForFileSymsInitHeadRows == 5, "the full init clause says \"the first 5 <d> rows\": move the words with the constant" );
+static_assert( kForFileSymsInitHeadRows == 5 && kForFileSymsInitLegend.find( "the first 5 <d> rows" ) != std::string_view::npos,
+               "the full init legend clause says \"the first 5 <d> rows\": move the words with the constant" );
 static_assert( kForFileSymsInitLegend.find( "--" ) == std::string_view::npos && kForFileSymsInitLegendCompact.find( "--" ) == std::string_view::npos
                    && kForFileSymsInitLegend.find( ';', 1 ) == std::string_view::npos && kForFileSymsInitLegendCompact.find( ';', 1 ) == std::string_view::npos,
                "one clause each, and no '--' (the legend is an XML comment)" );
