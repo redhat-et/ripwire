@@ -1565,6 +1565,49 @@ function storyCards(s, { kick, head, stories, footText }){
   ]);
 }
 
+/* ── S12f2 · a consumer: fullsend-ai's pre-flight check (in review: #641) ── */
+{
+  // PENDING MERGE: #641 (jflowers, "feat(flags): report Bash environment-variable reads, with --json"), OPEN on 2026-11-13.
+  // This slide is its own commit so it can be kept or dropped when #641 lands; it is worded to be true while #641 is in review.
+  // Every claim is from #641's description; the consumer is named the way that PR names it.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// a consumer, in review: PR #641 by @jflowers — not merged yet", AMBER);
+  title(s, "From a regex to --flags --json: fullsend-ai's pre-flight check", { size: 28 });
+  card(s, MX, 1.72, 5.9, 2.7, CARD2);
+  s.addText([
+    { text: "The check\n", options: { color: CYAN, bold: true, fontSize: 14 } },
+    { text: "fullsend-ai's bash-env-contract pre-flight check lists the environment variables its agent scripts need, and how each is read: required (${X:?}), defaulted (${X:-d}), tested, or plain. It extracted them with its own regular expressions.\n\n", options: { color: MUTED, fontSize: 11.5 } },
+    { text: "#641 ", options: { color: TEXT, bold: true, fontSize: 11.5 } },
+    { text: "gives --flags a Bash lane: every $X or ${X…} read in a shell file, unless the same file assigned X earlier, with its form and default, and --json output, so the check can call ripwire instead.", options: { color: MUTED, fontSize: 11.5 } },
+  ], { x: MX+0.22, y: 1.86, w: 5.46, h: 2.46, fontFace: SANS, valign: "top", margin: 0 });
+  card(s, 6.72, 1.72, 5.99, 2.7);
+  s.addText([
+    { text: "The result on the real trees\n", options: { color: GREEN, bold: true, fontSize: 14 } },
+    { text: "The ported check's findings were byte-identical to the regex version on the real fullsend-ai agent and fullsend trees, with and without the baseline — ", options: { color: MUTED, fontSize: 11.5 } },
+    { text: "except where the regex was wrong.", options: { color: TEXT, bold: true, fontSize: 11.5 } },
+  ], { x: 6.94, y: 1.86, w: 5.55, h: 2.46, fontFace: SANS, valign: "top", margin: 0 });
+  const bugs = [
+    ["echo \"  PR_URL=${PR_URL}\"", "the regex counted this as an assignment, which hid two :? requirements; ripwire does not"],
+    ["jq '… $X …'", "a $X inside a single-quoted jq program was reported as a shell requirement. In Bash, single quotes expand nothing, and ripwire's lexer follows Bash quoting"],
+  ];
+  let y = 4.62;
+  for (const [code, what] of bugs){
+    card(s, MX, y, 12.09, 0.8);
+    s.addText(code, { x: MX+0.2, y: y+0.06, w: 3.6, h: 0.68, fontFace: MONO, fontSize: 11.5, bold: true, color: AMBER, valign: "middle", margin: 0 });
+    s.addText(what, { x: MX+3.95, y: y+0.06, w: 7.95, h: 0.68, fontFace: SANS, fontSize: 11, color: MUTED, valign: "middle", margin: 0 });
+    y += 0.88;
+  }
+  foot(s, "source: PR #641's description (open, 2026-11-13); the port is on an unpushed branch of the consumer");
+  notes(s, [
+    "SOURCES (a consumer). PENDING MERGE: #641, \"feat(flags): report Bash environment-variable reads, with --json\", by @jflowers, OPEN as of 2026-11-13. This slide lives in its own commit; when #641 merges, change the kicker to \"merged: #641 (<merge commit>)\" and re-check the figures on the merged tree; if #641 is closed, drop the commit.",
+    "- \"The aim is to let fullsend-ai's bash-env-contract pre-flight check use ripwire --flags --json in place of its own regex extraction.\"",
+    "- \"Every $X or ${X…} in a .sh, .bash or .zsh file is reported as an env read, unless the same file assigned X earlier. --flags also joins the --json allow-list.\" Forms: required (${X:?}, ${X?}), default (${X:-d}), unset-default, settest, assign, plain.",
+    "- \"bash-env-contract was ported on a branch that has not been pushed. On the real fullsend-ai agents and fullsend trees, its findings are byte-identical to the regex version, with and without the baseline.\"",
+    "- \"Comparing the extracted facts found regex bugs that ripwire avoids: echo \\\"  PR_URL=${PR_URL}\\\" was counted as an assignment. That hid two :? requirements. A $X inside a single-quoted jq program was reported as a shell requirement.\"",
+    "- Lexer: \"'…' spans lines and expands nothing\"; \"\\\"…\\\" expands $X\". Limit: \"Matching is lexical within one file … A name set by eval, printf -v \\\"$1\\\", or a function defined after the read still looks external. --help states this limit.\" (--help text as of #641's branch.)",
+  ]);
+}
+
 /* ── S12ab · the edit loop ──────────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
@@ -1693,7 +1736,7 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["194 long flags · 38 slides",        "bash test/deckclaimcheck.sh"],
+    ["194 long flags · 39 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["807 gate scripts (counts snapshot 2026-11-13)", "bash test/manifestcheck.sh"], // gatecount
