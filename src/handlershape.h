@@ -566,12 +566,21 @@ inline bool isStderrPrintCall( TSNode call, std::string_view verb, std::string_v
     {
         return false;
     }
-    const TSNode args = field( call, "arguments" );
+    // the STREAM argument only: fprintf/vfprintf take it first, fputs/fputc/putc second (`fprintf( fp, "%p", stderr )` writes to
+    // fp); a comment is a named child too, so it is skipped, never counted as a position (CodeRabbit #636)
+    const std::uint32_t streamPos = ( verb == "fprintf" || verb == "vfprintf" ) ? 0u : 1u;
+    const TSNode        args      = field( call, "arguments" );
+    std::uint32_t       pos       = 0;
     for( std::uint32_t i = 0; i < namedCount( args ); ++i )
     {
-        if( nodeTextOf( namedChild( args, i ), src ) == "stderr" )
+        const TSNode a = namedChild( args, i );
+        if( typeIs( a, "comment" ) )
         {
-            return true;
+            continue;
+        }
+        if( pos++ == streamPos )
+        {
+            return nodeTextOf( a, src ) == "stderr";
         }
     }
     return false;
