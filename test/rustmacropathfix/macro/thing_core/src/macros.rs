@@ -62,3 +62,9 @@ macro_rules! char_quiet {
         $crate::other_thing!($name);
     };
 }
+
+// CodeRabbit #633: the macro shadow.rs's `exported_mac!()` names, though a function import there is renamed `exported_mac`
+#[macro_export]
+macro_rules! exported_mac {
+    () => {};
+}

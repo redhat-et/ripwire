@@ -9,6 +9,9 @@
 #           never binds the in-tree namesake. Each counts its premise (the site is read, under the target's name) and FAILs on zero.
 #   L arms  the transcriber scan skips raw strings (`r#"…"#`), nested block comments and a `'"'` char literal (CodeRabbit #627): a
 #           `$crate::ghost!` inside one is no call, and the real call after it is still read (premise, FAILs on zero).
+#   S arms  a renamed FUNCTION import (`use crate::things::helper_fn as local_mac;`) beside a macro of the alias's name, a same-file
+#           `macro_rules! local_mac` or a #[macro_export] one (CodeRabbit #633): Rust keeps the namespaces apart, so the site binds the
+#           macro, never the function the `use` renames.
 #   X arms  #610 (fixture by @soarkit, test/rustmacropathfix/rx-*): a `pub use` that resolves outside the tree carries no class, and two
 #           re-exports of the SAME class agree, so `make()`'s `crate::facade::Config` types `c.get()` (proven); two re-exports of DIFFERENT
 #           in-tree classes stay ambiguous (both rows by name, none proven; premise: two Config::get rows).
@@ -111,6 +114,12 @@ ghost=$( ask "$M" callers ghost )
 ghostrows=$( printf '%s' "$ghost" | grep -oE '<s [^>]*p="thing_core/src/macros.rs[^>]*>' | grep -c . )
 if printf '%s' "$ghost" | grep -q 'schema=' && [ "$ghostrows" = 0 ]; then echo "PASS L1L2.ghost (no caller reads a call inside a raw string or nested comment)"
 else echo "FAIL L1L2.ghost --callers=ghost lists $ghostrows macros.rs row(s): a call inside a literal or comment was read"; fail=1; fi
+
+# ---- S: a renamed function import beside a macro of the alias's name (CodeRabbit #633; thing_core/src/shadow.rs)
+row     S1.localmac    "$M" callees calls_local    thing_core/src/shadow.rs local_mac    present
+row     S1.nofn        "$M" callees calls_local    thing_core/src/things.rs helper_fn    none
+row     S2.exportmac   "$M" callees calls_exported $MD                      exported_mac present
+row     S2.nofn        "$M" callees calls_exported thing_core/src/things.rs shared_fn    none
 
 # ---- X: #610 re-export bindings (fixture by @soarkit)
 row X1.extplusintree "$T/rx-ext"  callees src/app.rs:use_it src/model.rs Config::get proven

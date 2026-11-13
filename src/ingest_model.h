@@ -1030,6 +1030,54 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
 // outside crate's `use serde_json::json as sj;` stays external), and --uses lists it under the macro's own name. In scope: a
 // file-level `use`, or one in the invoking function. Two renames of one alias in scope that disagree (cfg alternatives) rename
 // nothing. After emitBindings, from per-file facts only: a warm run renames what a cold run does, and no cache record changes.
+// CodeRabbit #633: Rust keeps macros apart from functions and types, so `use crate::things::helper as m;` imports no macro unless
+// `helper` is one, and `m!()` then names whatever macro `m` is. A rename survives only when nothing in the tree says otherwise: no Rust
+// macro of the alias's name in the alias's own file (a local `macro_rules! m` is what `m!()` names), and the imported name is an in-tree
+// Rust macro or names no in-tree Rust item at all (an outside crate's item: graph.h's path proof decides, and it binds only a macro).
+// A renamed in-tree function or type with no macro of its name keeps the reference as written. One pass over the symbols, against the
+// sorted names the renames ask about.
+inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<std::uint32_t>& renames )
+{
+    std::vector<std::string_view> asked;
+    asked.reserve( renames.size() * 2 );
+    for( const std::uint32_t i : renames )
+    {
+        asked.push_back( result.bindings[ i ].typeName );
+        asked.push_back( result.bindings[ i ].var );
+    }
+    std::ranges::sort( asked );
+    asked.erase( std::ranges::unique( asked ).begin(), asked.end() );
+    std::vector<std::uint8_t> macroNamed( asked.size(), 0 ), itemNamed( asked.size(), 0 );
+    std::vector<std::pair<std::uint32_t, std::string_view>> fileMacros;   // (fileId, name) of every asked-about Rust macro
+    for( const Symbol& s : result.symbols )
+    {
+        if( !langFacts( s.lang ).bangMacros )
+        {
+            continue;
+        }
+        const auto at = std::ranges::lower_bound( asked, std::string_view( s.name ) );
+        if( at == asked.end() || *at != s.name )
+        {
+            continue;
+        }
+        const std::size_t slot = std::size_t( at - asked.begin() );
+        ( s.kind == SymKind::Macro ? macroNamed : itemNamed )[ slot ] = 1;
+        if( s.kind == SymKind::Macro )
+        {
+            fileMacros.emplace_back( s.fileId, *at );
+        }
+    }
+    std::ranges::sort( fileMacros );
+    const auto slotOf = [ & ]( std::string_view name ) { return std::size_t( std::ranges::lower_bound( asked, name ) - asked.begin() ); };
+    std::erase_if( renames, [ & ]( std::uint32_t i )
+    {
+        const Binding&         b      = result.bindings[ i ];
+        const std::size_t      source = slotOf( b.typeName );
+        const bool             local  = std::ranges::binary_search( fileMacros, std::pair<std::uint32_t, std::string_view>( b.fileId, b.var ) );
+        return local || ( macroNamed[ source ] == 0 && itemNamed[ source ] != 0 );
+    } );
+}
+
 inline void retargetRustMacroAliases( IngestResult& result )
 {
     std::vector<std::uint32_t> renames;   // indices of Rust `use … as` bindings whose alias differs from the item it names
@@ -1041,6 +1089,11 @@ inline void retargetRustMacroAliases( IngestResult& result )
             renames.push_back( i );   // bindings are sorted by file: so is this list (a Rust file's, as the reference read below is)
         }
     }
+    if( renames.empty() )
+    {
+        return;
+    }
+    keepMacroNamespaceRenames( result, renames );
     if( renames.empty() )
     {
         return;
