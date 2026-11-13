@@ -1784,19 +1784,6 @@ struct MovedBodies
             }
         }
         std::sort( held.begin(), held.end() );
-        std::vector<const CloneSketch*> vacated;
-        for( const auto& [ key, cid ] : base.moveCidBySym )
-        {
-            if( !std::binary_search( held.begin(), held.end(), key ) )
-            {
-                removed.push_back( cid );
-                if( const auto sk = base.moveSketchBySym.find( key ); sk != base.moveSketchBySym.end() )
-                {
-                    vacated.push_back( &sk->second );
-                }
-            }
-        }
-        std::sort( removed.begin(), removed.end() );
         for( std::uint64_t c : now.cid )
         {
             if( c != 0 )
@@ -1805,6 +1792,22 @@ struct MovedBodies
             }
         }
         std::sort( current.begin(), current.end() );
+        // A vacated body some current body carries UNCHANGED is claimed by that exact match: its sketch is no near-move source, so a
+        // lightly edited copy beside the unchanged move is never a second "moved" body of the same source (#646 CR).
+        std::vector<const CloneSketch*> vacated;
+        for( const auto& [ key, cid ] : base.moveCidBySym )
+        {
+            if( !std::binary_search( held.begin(), held.end(), key ) )
+            {
+                removed.push_back( cid );
+                const auto sk = base.moveSketchBySym.find( key );
+                if( sk != base.moveSketchBySym.end() && !std::binary_search( current.begin(), current.end(), cid ) )
+                {
+                    vacated.push_back( &sk->second );
+                }
+            }
+        }
+        std::sort( removed.begin(), removed.end() );
         matchNearMoves( base, keyOf, now, vacated );
     }
 

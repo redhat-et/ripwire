@@ -14,6 +14,9 @@
 #   N3. EXTENT-CTOR: a class whose constructor shares its canonical id (C++: Foo::Foo) is measured over the
 #       constructor's own body — the class extent (well over 240 lines) never reaches a verbosity row;
 #   T.  TEST DRIVERS are report-only: the same 250-line new function under test/ prints and does not gate;
+#   #646 CodeRabbit round (each RED on train head 6621e14e7):
+#   M1. a body moved UNCHANGED plus a lightly edited copy of it: the move is origin="moved", the copy is new-symbol and gates (the
+#       exact move claims its source; the copy never near-matches it);
 #   J.  --json carries the same gating count and the per-row origin/ceiling;
 #   L.  every surface stating "new-symbol rows never gate" names the ceiling exception.
 #
@@ -178,6 +181,20 @@ if ! crashed N5; then
     elif [ "$RC" = 2 ] && printf '%s' "$ROW" | grep -q 'origin="new-symbol"' && printf '%s' "$ROW" | grep -q 'gating="1"'; then
         ok "N5: a new function with a similar name but another body stays new-symbol and gates ($CANDS candidate pair seen)"
     else no "N5: a genuinely new function must not read as moved (rc=$RC row: $ROW)"; fi
+fi
+
+# ═══ M1) AN UNCHANGED MOVE CLAIMS ITS SOURCE: AN EDITED COPY OF IT IS NEW ═══════════════════════════════════════════════
+R="$WORK/m1"; base "$R"; variedfn src_body 245 A > "$R/src/a.cpp"; printf 'int usea(){ return src_body(1); }\n' >> "$R/src/a.cpp"; commitall "$R" src
+rm "$R/src/a.cpp"
+{ variedfn moved_body 245 A; variedfn edited_copy 245 A 4; printf 'int usea(){ return moved_body(1) + edited_copy(2); }\n'; } > "$R/src/b.cpp"
+run "$R"
+if ! crashed M1; then
+    MR="$( rowof "$OUT" verbosity moved_body )"; CR="$( rowof "$OUT" verbosity edited_copy )"
+    if [ -z "$MR" ] || [ -z "$CR" ]; then no "M1: premise — rows for both new bodies (moved: ${MR:-<none>}; copy: ${CR:-<none>})"
+    elif [ "$RC" = 2 ] && printf '%s' "$MR" | grep -q 'origin="moved"' && printf '%s' "$CR" | grep -q 'origin="new-symbol"' \
+         && printf '%s' "$CR" | grep -q 'gating="1"'; then
+        ok "M1: the unchanged move is origin=\"moved\"; its edited copy stays new-symbol and gates"
+    else no "M1: the edited copy must not reuse the claimed source (rc=$RC moved: $MR copy: $CR)"; fi
 fi
 
 # ═══ N3) CONSTRUCTOR EXTENT: measured over its own body, not the class ═════════════════════════════════
