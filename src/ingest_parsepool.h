@@ -227,7 +227,8 @@ inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, In
                               + willGrow( out.constOpens, hit.constOpens.size() )
                               + willGrow( out.constructs, hit.constructs.size() );
 
-    scan.health[ fileId ] = hit.health;   // §L1
+    scan.health[ fileId ]          = hit.health;   // §L1
+    scan.constructsKnown[ fileId ] = hit.constructsAbsent ? 0 : 1;   // QD-CONSTRUCTS-AT-INGEST: the record says whether it has them
     appendRelabelled( hit.defs, fileId, out.defs );
     appendRelabelled( hit.refs, fileId, out.refs );
     appendRelabelled( hit.incs, fileId, out.incs );
@@ -269,7 +270,7 @@ inline WarmHitTotals markCacheHits( const CacheRecords& cache, const IngestFileS
             continue;
         }
         candidates[ fileId ] = head;
-        if( head->hash != scan.hash[ fileId ] )
+        if( head->hash != scan.hash[ fileId ] || !recordServesThisIngest( *head, scan ) )
         {
             continue;
         }
@@ -342,7 +343,7 @@ struct ParsePoolShared
 inline bool blobHoldsFactlessRecord( const CachedRecordHead* rec, const CachedRecordHead& expect ) noexcept
 {
     return rec != nullptr && rec->hash == expect.hash && rec->sizeBytes == expect.sizeBytes && rec->mtimeNs == expect.mtimeNs
-        && rec->ctimeNs == expect.ctimeNs && rec->health == expect.health && rec->counts.none();
+        && rec->ctimeNs == expect.ctimeNs && rec->health == expect.health && rec->counts.none() && !rec->constructsAbsent;
 }
 
 // A cache miss is about to change the blob: mark it dirty and count the file as drift (RIPWIRE_CACHE_STATS reparsed=).
@@ -600,7 +601,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 if( hit == nullptr )
                 {
                     const CachedRecordHead* candidate = sh.cacheCandidateFacts[ fileId ];
-                    if( candidate != nullptr && candidate->hash == h )
+                    if( candidate != nullptr && candidate->hash == h && recordServesThisIngest( *candidate, scan ) )
                     {
                         hit = candidate;
                     }
@@ -719,7 +720,15 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 }
                 // QD-CONSTRUCTS-AT-INGEST: from THIS tree, before the member-macro re-parse below can swap it — the tree
                 // findQualityConstructs' own parse would build (ingest_astquery.h collectConstructHits says why).
-                collectConstructHits( *le, static_cast<std::uint32_t>( fileId ), bytes, ts_tree_root_node( tree.get() ), constructCursor, out.constructs );
+                // Only an ingest that wants them runs the pass (ingest.h WantConstructHits); otherwise the record says absent.
+                if( scan.wantConstructHits )
+                {
+                    collectConstructHits( *le, static_cast<std::uint32_t>( fileId ), bytes, ts_tree_root_node( tree.get() ), constructCursor, out.constructs );
+                }
+                else
+                {
+                    scan.constructsKnown[ fileId ] = 0;
+                }
 
                 // §L1 — before `bytes` can be moved below. May swap `tree` for the member-macro re-parse (macroreparse.h).
                 scan.health[ fileId ] = measureHealthAdoptingMemberMacroReparse( pg.p, le->lang, bytes, tree, macroWork );
@@ -1098,7 +1107,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( !parseCut && !cacheFile.empty() && dirty.load() )
         {
             forgetNestRefusalsForCache( scan );   // a refused file is written UNKNOWN, so a warm run re-refuses it (ingest_prewarm.h)
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, raw.constructs, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, raw.constructs, scan.constructsKnown, captureValueUses );
             memstats::mark( "save-cache" );   // M0: peak_mib holds the cache blob's own peak (card C1)
         }
     }

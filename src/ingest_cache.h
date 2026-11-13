@@ -2393,7 +2393,7 @@ inline std::pair<std::size_t, std::size_t> cacheEntryRange( const std::vector<Ca
 // not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
 // so it is what makes a same-(mtime,size) edit visible for free. -1 ⇒ unknown (the file was unstatable at
 // hash time) → the gate always re-hashes, which is the safe direction.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; std::vector<ConstructHit> constructs; };
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; std::vector<ConstructHit> constructs; bool constructsAbsent = false; };
 
 // v49 (WARM-DIRECT): the eight per-file fact-family counts. The record carries them in its HEAD as well as before each
 // family, so a reader holding only the head (the warm planner, CacheRecords below) knows every record's exact sizes:
@@ -2415,6 +2415,7 @@ struct CachedRecordHead
     long long      ctimeNs   = -1;
     FileHealth     health;
     FileFactCounts counts;
+    bool           constructsAbsent = false;   // v51: the record was written by a pool that ran no construct pass (kConstructsAbsent)
 };
 
 // tiny native-endian binary (de)serializer (the cache is host-local, never shipped)
@@ -2818,6 +2819,9 @@ inline constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (li
 inline constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
 inline constexpr std::size_t kMinConstOpenRecordBytes = 13;  // parser version 82: 2×u32 (startByte,endByte) + 1×u8 (namespaceOnly) + 1×str(len u32, empty)
 inline constexpr std::size_t kConstructRecordBytes    = 9;   // v51: 2×u32 (startByte,line) + 1×u8 (tag) — fixed size
+// v51: the HEAD's construct count when the record's pool ran no construct pass (ingest.h WantConstructHits): the hits are
+// unknown, not zero. The body then holds a zero count; a --quality-delta ingest treats the record as a miss.
+inline constexpr std::uint32_t kConstructsAbsent      = 0xFFFFFFFFu;
 
 // Read a record's HEAD: its root-relative key (a view into the reader's bytes), hash, stat triple, health and the v49
 // family counts. readFileRecord starts with it; the warm planner (loadCache) reads only this much of each record.
@@ -2843,7 +2847,12 @@ inline bool readRecordHead( ByteR& r, std::string_view& relOut, CachedRecordHead
     c.routeDefs  = r.u32();
     c.routeUses  = r.u32();
     c.constOpens = r.u32();
-    c.constructs = r.u32();                  // v51
+    c.constructs = r.u32();                  // v51; kConstructsAbsent = never computed for this record
+    head.constructsAbsent = c.constructs == kConstructsAbsent;
+    if( head.constructsAbsent )
+    {
+        c.constructs = 0;
+    }
     return r.ok;
 }
 
@@ -2911,6 +2920,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.mtimeNs   = head.mtimeNs;
     ffOut.ctimeNs   = head.ctimeNs;
     ffOut.health    = head.health;
+    ffOut.constructsAbsent = head.constructsAbsent;
     if( captureValueUses )
     {
         // H3 (v10): the file's subtoken dictionary — def rows below index into it. Must be strictly
@@ -3186,6 +3196,7 @@ struct CacheRecords
         out.routeUses.clear();
         out.constOpens.clear();
         out.constructs.clear();
+        out.constructsAbsent = false;
         ByteR       r{ recBuf.data(), recBuf.data() + recBuf.size() };
         std::string rel;
         bool        decoded = false;
@@ -3573,6 +3584,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
                        const std::vector<ConstOpen>& constOpens,                                             // parser version 82
                        const std::vector<ConstructHit>& constructs,                                          // v51
+                       const std::vector<std::uint8_t>& constructsKnown,   // v51: 0 = written kConstructsAbsent, per fileId
                        bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
@@ -3737,11 +3749,12 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             // v49: the head copy of the eight family counts (readRecordHead), in the body's family order
             for( const std::size_t familyCount : { std::size_t( ix.defIndex[f].size() ), ix.refIndex[f].size(), std::size_t( ix.incIndex[f].size() ),
                                                    ix.bindIndex[f].size(), std::size_t( ix.ffiIndex[f].size() ), std::size_t( ix.routeDefIndex[f].size() ),
-                                                   std::size_t( ix.routeUseIndex[f].size() ), std::size_t( ix.constOpenIndex[f].size() ),
-                                                   std::size_t( ix.constructIndex[f].size() ) } )
+                                                   std::size_t( ix.routeUseIndex[f].size() ), std::size_t( ix.constOpenIndex[f].size() ) } )
             {
                 w.u32( std::uint32_t( familyCount ) );
             }
+            const bool constructsKnownHere = f >= constructsKnown.size() || constructsKnown[f] != 0;
+            w.u32( constructsKnownHere ? std::uint32_t( ix.constructIndex[f].size() ) : kConstructsAbsent );   // v51
             if( captureValueUses )
             {
                 // H3 (v10): the sorted union of this file's def rows — subtokens repeat heavily across a

@@ -33,6 +33,12 @@ struct IngestFileScan
     std::vector<std::uint32_t>    nestRefusedBytes;   // the Kotlin nesting guard: the refused file's size, 0 = not refused (one writer per slot)
     std::vector<std::uint8_t>     extractPartial;     // 1 = the file's facts are PARTIAL (an ExtractShortfall, or a throw mid-file) (one writer per slot)
     std::vector<std::uint32_t>    extractPartialBytes;   // its size as observed at hash time, 0 = not captured (the row's bytes=)
+    // QD-CONSTRUCTS-AT-INGEST (lazy): does this ingest find construct hits (ingest.h tlIngestWantsConstructHits, read once
+    // by runParsePool), and per fileId, are its hits KNOWN — found by this parse, or carried by a record that had them.
+    // 0 only for a code file parsed without the pass or carried from a record that lacked it; saveCache writes the
+    // record "constructs absent" then. One writer per slot.
+    bool                          wantConstructHits = false;
+    std::vector<std::uint8_t>     constructsKnown;
 
     // `knownBytes` is the file's size where the caller holds its bytes; otherwise the stat taken at hash time, which is
     // read HERE, before the save path may forget it for the cache. 0 = neither was captured.
@@ -70,6 +76,13 @@ inline void notePartialExtract( IngestFileScan& scan, std::size_t fileId, const 
 }
 
 // size the per-file arrays and classify each file's language — the fileId space is the crawl's sorted list.
+// QD-CONSTRUCTS-AT-INGEST (lazy): a record written without the construct pass cannot serve an ingest that wants the
+// hits, so that file is a miss here and in the parse pool: it is parsed again (once: the rewritten record carries them).
+inline bool recordServesThisIngest( const CachedRecordHead& head, const IngestFileScan& scan ) noexcept
+{
+    return !( scan.wantConstructHits && head.constructsAbsent );
+}
+
 inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
 {
     const std::size_t nfilesEarly = files.size();
@@ -83,6 +96,7 @@ inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
     scan.nestRefusedBytes.assign( nfilesEarly, 0u );
     scan.extractPartial.assign( nfilesEarly, 0u );
     scan.extractPartialBytes.assign( nfilesEarly, 0u );
+    scan.constructsKnown.assign( nfilesEarly, 1u );   // known-empty until a parse without the pass says otherwise
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: classify file languages" );
         for( std::size_t fileId = 0; fileId < nfilesEarly; ++fileId )
@@ -369,7 +383,9 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Cac
                         // A4-P7 stat-gate first, else read+hash.
                         if( !cache.empty() )
                         {
-                            if( const CachedRecordHead* head = cache.headOf( fi ) )
+                            // a record that cannot serve this ingest is a miss like an absent path: its grammar is compiled
+                            const CachedRecordHead* head = cache.headOf( fi );
+                            if( head != nullptr && recordServesThisIngest( *head, scan ) )
                             {
                                 const CachedRecordHead& ff = *head;
 

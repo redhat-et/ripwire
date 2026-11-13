@@ -13,6 +13,7 @@
 #   (B)  the --quality-delta answer (stdout, stderr without the verify line, rc) is byte-identical across (C), (W), (N)
 #        and A..B, and names the planted constructs (positive twin: a silent binary fails here);
 #   (P)  a memory-cut parse (RIPWIRE_TEST_MEMGUARD=parse:1) claims no hits and --quality-delta refuses it (exit 5);
+#   (L)  lazy: --deps runs no construct pass; the next --quality-delta re-parses those records once, then they serve;
 #   (R)  optional: QDC_REPOS="dir1 dir2 …" repeats (C)+(W) on real trees (the lane's envoy / cockroach / vscode run).
 #
 # Usage:  bash test/qdconstructscheck.sh          (BIN=build/ripwire)
@@ -159,6 +160,34 @@ if [ "$( cat "$WORK/P.rc" )" = 5 ] && grep -q 'memory guard stopped the parse' "
 else
     no "(P) memory-cut run: rc $( cat "$WORK/P.rc" ), verify line '$( verifyline "$WORK/P.err" )'"; sed 's/^/    /' "$WORK/P.err" | head -10
 fi
+
+# (L) lazy: a run that is not --quality-delta runs no construct pass (ingest.h WantConstructHits). On a fresh cache a
+#     --deps writes every code record "constructs absent", so the next --quality-delta re-parses exactly those files
+#     (reparsed= counts them: zero would mean --deps paid for the pass after all) and answers byte-identically; the
+#     rewritten records then serve both a warm --deps and the next --quality-delta with reparsed=0.
+reparsed(){ sed -n 's/.*ripwire: cache-stats reparsed=\([0-9]*\).*/\1/p' "$WORK/$1.err" | head -n 1; }
+mkdir -p "$WORK/home-l" "$WORK/tmp-l"
+runl(){
+    local tag="$1"; shift
+    ( cd "$FX" && env HOME="$WORK/home-l" TMPDIR="$WORK/tmp-l" RIPWIRE_QD_CONSTRUCTS_VERIFY=1 RIPWIRE_CACHE_STATS=1 "$BIN" . "$@" \
+        > "$WORK/$tag.out" 2> "$WORK/$tag.err" ); echo $? > "$WORK/$tag.rc"
+}
+runl L1 --deps
+runl L2 --quality-delta
+runl L3 --deps
+runl L4 --quality-delta
+if [ "$( cat "$WORK/L1.rc" )" = 0 ] && [ -z "$( verifyline "$WORK/L1.err" )" ]; then ok "(L) a cold --deps exits 0 and reads no construct hits"; else no "(L) cold --deps: rc $( cat "$WORK/L1.rc" ), verify line '$( verifyline "$WORK/L1.err" )'"; fi
+r2="$( reparsed L2 )"
+if [ "${r2:-0}" -ge 6 ]; then ok "(L) the --quality-delta after it re-parsed the $r2 records --deps wrote without hits"; else no "(L) the --quality-delta after --deps re-parsed ${r2:-?} files, expected >= 6 (one per code file)"; fi
+v2="$( verifyline "$WORK/L2.err" )"
+if [ "$( field "$v2" equal )" = 1 ] && [ "$( field "$v2" carried_mask ) $( field "$v2" carried_placeholder )" = "$( cat "$WORK/C.counts" )" ]; then ok "(L) its hits are carried and equal the cold ones: $v2"; else no "(L) after --deps: ${v2:-no verify line}, cold counts $( cat "$WORK/C.counts" )"; fi
+if cmp -s "$WORK/C.out" "$WORK/L2.out" && cmp -s "$WORK/C.out" "$WORK/L4.out" && [ "$( cat "$WORK/L2.rc" )" = "$( cat "$WORK/C.rc" )" ]; then ok "(L) both answers are byte-identical to the cold one (rc $( cat "$WORK/L2.rc" ))"; else no "(L) the --quality-delta answers after --deps differ from the cold one"; fi
+# the records the --quality-delta rewrote hold every family, not only the hits: a warm map off them equals an uncached one
+# (a forced miss whose grammar queries were never compiled would extract no defs or refs and still exit 0)
+runl L5
+runl L6 --no-cache
+if [ "$( cat "$WORK/L5.rc" )" = 0 ] && [ -s "$WORK/L5.out" ] && cmp -s "$WORK/L5.out" "$WORK/L6.out"; then ok "(L) a warm map off the rewritten records equals the --no-cache map"; else no "(L) warm map rc $( cat "$WORK/L5.rc" ) differs from the --no-cache map"; fi
+if [ "$( reparsed L3 )" = 0 ] && [ "$( reparsed L4 )" = 0 ] && [ "$( field "$( verifyline "$WORK/L4.err" )" equal )" = 1 ]; then ok "(L) the rewritten records serve a warm --deps and the next --quality-delta (reparsed=0 both)"; else no "(L) after the rewrite: --deps reparsed=$( reparsed L3 ), --quality-delta reparsed=$( reparsed L4 )"; fi
 
 # (R) real trees, optional
 for repo in ${QDC_REPOS:-}; do
