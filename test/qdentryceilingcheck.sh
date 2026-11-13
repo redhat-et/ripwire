@@ -23,7 +23,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qdentryceilingcheck (git required for the HEAD-baseline fixtures)"; exit 0; }
@@ -59,8 +59,8 @@ longfn l240 235 '' > "$CAL/l.cpp"
 MET="$( cd "$CAL" && "$BIN" . --metrics --no-cache 2>/dev/null )"
 CCX="$( printf '%s' "$MET" | tr '>' '\n' | grep 'n="c61"' | grep -o ' ccx="[0-9]*"' | cut -d'"' -f2 )"
 LOC="$( printf '%s' "$MET" | tr '>' '\n' | grep 'n="l240"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"
-[ "$CCX" = 61 ] && ok "C: ifs 61 measures ccx=61" || no "C: ifs 61 measures ccx=${CCX:-<none>} (fixture calibration off)"
-[ "$LOC" = 240 ] && ok "C: longfn of 235 statements spans loc=240" || no "C: longfn 235 spans loc=${LOC:-<none>}"
+if [ "$CCX" = 61 ]; then ok "C: ifs 61 measures ccx=61"; else no "C: ifs 61 measures ccx=${CCX:-<none>} (fixture calibration off)"; fi
+if [ "$LOC" = 240 ]; then ok "C: longfn of 235 statements spans loc=240"; else no "C: longfn 235 spans loc=${LOC:-<none>}"; fi
 
 # ═══ P1) A NEW 250-LINE SRC FUNCTION GATES ═════════════════════════════════════════════════════════════
 R="$WORK/p1"; base "$R"; longfn big 245 '' > "$R/src/big.cpp"
@@ -112,8 +112,9 @@ if ! crashed N2; then
     elif [ "$RC" = 0 ] && ! rows "$OUT" | grep -q 'gating="1"' && rowof "$OUT" verbosity 'lib::moved_big' | grep -q 'origin="moved"'; then
         ok "N2: the 250-line body moved to another file and name prints origin=\"moved\" ($MV row(s)) and does not gate"
     else no "N2: a moved body must not gate (rc=$RC rows: $( rows "$OUT" | tr '\n' ' ' ))"; fi
-    MH="$( hattr "$OUT" 'new-symbol' )"; [ "$MH" = "$( newrows "$OUT" )" ] && ok "N2: new-symbol= counts the moved rows too ($MH)" \
-        || no "N2: header new-symbol=$MH but $( newrows "$OUT" ) rows carry origin=new-symbol|moved"
+    MH="$( hattr "$OUT" 'new-symbol' )"
+    if [ "$MH" = "$( newrows "$OUT" )" ]; then ok "N2: new-symbol= counts the moved rows too ($MH)"
+    else no "N2: header new-symbol=$MH but $( newrows "$OUT" ) rows carry origin=new-symbol|moved"; fi
 fi
 R="$WORK/n2c"; base "$R"; longfn big 245 '' > "$R/src/old.cpp"; printf 'int useb(){ return big(1); }\n' >> "$R/src/old.cpp"; commitall "$R" big
 { printf 'namespace lib\n{\n'; longfn copy_big 245 '    '; printf '}\nint usec(){ return lib::copy_big(1); }\n'; } > "$R/src/new.cpp"
@@ -163,7 +164,7 @@ if [ "$JRC" = 2 ] && [ "$JG" = "$( hattr "$P1OUT" gating )" ] && printf '%s' "$J
     ok "J: --json gating=$JG and \"ceiling\":240 match the XML (exit 2)"
 else no "J: json parity (rc=$JRC gating=$JG xml gating=$( hattr "$P1OUT" gating ))"; fi
 JM="$( cd "$WORK/n2" && "$BIN" . --quality-delta --json --no-cache 2>/dev/null )"
-printf '%s' "$JM" | grep -q '"origin":"moved"' && ok "J: --json carries \"origin\":\"moved\"" || no "J: --json lacks origin moved"
+if printf '%s' "$JM" | grep -q '"origin":"moved"'; then ok "J: --json carries \"origin\":\"moved\""; else no "J: --json lacks origin moved"; fi
 
 # ═══ L) LEGEND — the exception is stated wherever the rule is ═════════════════════════════════════════
 PHRASE='new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling'
