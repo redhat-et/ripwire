@@ -1081,12 +1081,14 @@ inline std::uint32_t skipBlanks( std::string_view src, std::uint32_t k, std::uin
     }
     return k;
 }
-// A string literal at `i` (`"` to its unescaped close): moves `i` past it, adding the newlines it holds to `line`.
+// A string literal at `i` (`"` to its unescaped close): moves `i` past it, adding the newlines it holds to `line`, the one an escape
+// skips included (a string continuation, `"a \<newline> b"`: CodeRabbit #633).
 inline void skipStringLiteral( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
 {
     for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
     {
-        line += src[ i ] == '\n' ? 1u : 0u;
+        const bool escaped = src[ i ] == '\\' && i + 1 < end;
+        line += src[ escaped ? i + 1 : i ] == '\n' ? 1u : 0u;
     }
     ++i;
 }

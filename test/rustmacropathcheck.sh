@@ -8,7 +8,8 @@
 #   N arms  negatives: an outside crate's macro path (`serde_json::json!`, `use serde_json::json as sj; sj!`, `other_crate::__define_thing!`)
 #           never binds the in-tree namesake. Each counts its premise (the site is read, under the target's name) and FAILs on zero.
 #   L arms  the transcriber scan skips raw strings (`r#"…"#`), nested block comments and a `'"'` char literal (CodeRabbit #627): a
-#           `$crate::ghost!` inside one is no call, and the real call after it is still read (premise, FAILs on zero).
+#           `$crate::ghost!` inside one is no call, and the real call after it is still read (premise, FAILs on zero). L4: a string
+#           continuation (`"a \<newline> b"`) counts its newline, so the call after it reports its own line (CodeRabbit #633).
 #   S arms  a renamed FUNCTION import (`use crate::things::helper_fn as local_mac;`) beside a macro of the alias's name, a same-file
 #           `macro_rules! local_mac` or a #[macro_export] one (CodeRabbit #633): Rust keeps the namespaces apart, so the site binds the
 #           macro, never the function the `use` renames.
@@ -114,6 +115,8 @@ ghost=$( ask "$M" callers ghost )
 ghostrows=$( printf '%s' "$ghost" | grep -oE '<s [^>]*p="thing_core/src/macros.rs[^>]*>' | grep -c . )
 if printf '%s' "$ghost" | grep -q 'schema=' && [ "$ghostrows" = 0 ]; then echo "PASS L1L2.ghost (no caller reads a call inside a raw string or nested comment)"
 else echo "FAIL L1L2.ghost --callers=ghost lists $ghostrows macros.rs row(s): a call inside a literal or comment was read"; fail=1; fi
+
+usesite L4.contline    "$M" other_thing thing_core/src/macros.rs:78
 
 # ---- S: a renamed function import beside a macro of the alias's name (CodeRabbit #633; thing_core/src/shadow.rs)
 row     S1.localmac    "$M" callees calls_local    thing_core/src/shadow.rs local_mac    present

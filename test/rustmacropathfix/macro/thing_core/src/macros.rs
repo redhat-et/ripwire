@@ -68,3 +68,13 @@ macro_rules! char_quiet {
 macro_rules! exported_mac {
     () => {};
 }
+
+// CodeRabbit #633: a string continuation (`\` then a newline) inside a transcriber; the call after it reports its own line
+#[macro_export]
+macro_rules! cont_quiet {
+    ($name:ident) => {
+        const _: &str = "a \
+            b";
+        $crate::other_thing!($name);
+    };
+}
