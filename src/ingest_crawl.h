@@ -2199,37 +2199,38 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
 // Deliberately an out-parameter, unlike docparse::detail::readWholeFile: the parse pool and the AST-query pass
 // each hand in one worker-local buffer and reuse it for every file they read, so its capacity carries over.
 //
-// The stream is OWNED (rw::OwnedFile), so every return closes it. It used to be a raw FILE* closed inside
-// `( got == want ) && ( std::fclose( fp ) == 0 )`, which short-circuited past the close on every short read: a
-// file truncated between the size probe and the read leaked one descriptor per read, per re-ingest of a long-lived
-// server, until nothing more could be opened and every later file dropped out of the answer with exit 0.
+// READFILE-DIRECT: one open, one fstat, one read (pathguard::readRegularFileNoFollow's posture). Through stdio it was
+// fopen, fseek( END ), ftell, fseek( SET ), fread, fclose — four more calls per file, and on a cold envoy parse pool
+// fseek alone was 3 % of the samples. The descriptor is OWNED (pathguard::OwnedFd), so every return closes it: a raw
+// close skipped on a short read leaked one descriptor per read, per re-ingest of a long-lived server, until nothing
+// more could be opened and every later file dropped out of the answer with exit 0. Same answer as before: exactly the
+// size the file had when opened is read, and a short read (truncated under us) or a read error is false, `out` empty.
 bool readFile( const std::string& path, std::string& out )
 {
-    PROFILE_SCOPE_DESCRIBE( "ingest/readFile: fopen+read whole file" );
+    PROFILE_SCOPE_DESCRIBE( "ingest/readFile: open+fstat+read whole file" );
 
-    OwnedFile fp = openOwnedFile( path.c_str(), "rb" );
-    if( !fp )
+    const pathguard::OwnedFd fd( os::open( path.c_str(), O_RDONLY | O_CLOEXEC ) );
+    os::stat_t               st{};
+    if( !fd.valid() || os::fstat( fd.get(), &st ) != 0 || st.st_size < 0 )
     {
         return false;
     }
 
-    if( std::fseek( fp.file, 0, SEEK_END ) != 0 )
+    out.resize( static_cast<std::size_t>( st.st_size ) );
+    std::size_t got = 0;
+    while( got < out.size() )
     {
-        return false;
-    }
-    const long len = std::ftell( fp.file );
-    if( len < 0 || std::fseek( fp.file, 0, SEEK_SET ) != 0 )
-    {
-        return false;
-    }
-
-    out.resize( static_cast<std::size_t>( len ) );
-    const std::size_t want = out.size();
-    const std::size_t got  = want == 0 ? 0 : std::fread( out.data(), 1, want, fp.file );
-    const bool        closedOk = fp.close();
-    if( got != want || !closedOk )
-    {
-        out.clear();
+        const os::ssize_t n = os::read( fd.get(), out.data() + got, out.size() - got );
+        if( n > 0 )
+        {
+            got += static_cast<std::size_t>( n );
+            continue;
+        }
+        if( n < 0 && errno == EINTR )
+        {
+            continue;
+        }
+        out.clear();   // end of file before the size it was opened with, or a read error
         return false;
     }
     return true;
