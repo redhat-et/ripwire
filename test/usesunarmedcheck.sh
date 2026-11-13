@@ -15,7 +15,8 @@
 #
 # RED-FIRST: recorded 2026-11-11 against main ea25a7888 — (A2..A4) (A6) (B2) (B3) (C2..C5) (D2) (D3) FAIL there; the
 # premise, control and precision arms pass on both. B44 (CodeRabbit + CI round, 2026-11-12) added arms red on lane 1fd60ea1b:
-# (A7) (A8) (B5) (B6) (B7) (C6) (C7) (C8); (A5)'s MCP control now requires a served answer.
+# (A7) (A8) (B5) (B6) (B7) (C6) (C7) (C8); (A5)'s MCP control now requires a served answer. CARD-SWEEP-1113: (B8) red
+# (alarm) on main cd04d477e.
 #
 # Usage: test/usesunarmedcheck.sh [BIN]
 set -u
@@ -263,6 +264,18 @@ mo="$( mcp "$TMP/big" find_symbol ',"symbol":"never_defined_zz"' )"
 if printf '%s' "$mo" | grep -q 'lexical definition scan stopped at its budget'; then ok "(B7) MCP find_symbol: a miss past the budget says the scan stopped"
 else no "(B7) MCP find_symbol past the budget: $( printf '%s' "$mo" | head -c 300 )"; fi
 
+# (B8) LEXDEF-ONEPASS (CodeRabbit #630 4553235640): a 3.6 MiB `//`-only header naming an unindexed name on 45000 lines.
+# The block-comment test rfound the whole prefix per candidate line (quadratic: over 120 s on main cd04d477e); one
+# forward pass answers in about 2 s. Generated here, never committed (a whole-repo run must not see it).
+mkdir -p "$TMP/lexq"
+awk 'BEGIN { for( i = 0; i < 45000; ++i ) printf "// note: zz_ghost_name appears here in a line comment, padding padding padd %05d\n", i }' > "$TMP/lexq/big.h"
+printf 'int use_it( void ) { return 1; }\n' > "$TMP/lexq/user.c"
+nq=$( grep -c zz_ghost_name "$TMP/lexq/big.h" ); bq=$( wc -c < "$TMP/lexq/big.h" | tr -d ' ' )
+if [ "$nq" -eq 45000 ] && [ "$bq" -gt 3000000 ] && [ "$bq" -lt 4194304 ]; then ok "(B8) premise: big.h is $bq bytes (under the 4 MiB read cap) with $nq mentions"
+else no "(B8) premise: big.h is $bq bytes with $nq mentions — the arm cannot show the quadratic"; fi
+qrc=0; out="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$TMP/lexq" --no-cache --legend=compact --defs=zz_ghost_name 2>&1 )" || qrc=$?
+if [ "$qrc" -eq 1 ] && printf '%s' "$out" | grep -q 'not found' && ! printf '%s' "$out" | grep -q 'object-like'; then ok "(B8) --defs=zz_ghost_name over 45000 commented mentions refuses within 30 s (rc=1)"
+else no "(B8) --defs=zz_ghost_name over 45000 commented mentions: rc=$qrc (142 = the 30 s alarm), $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
 # Ruby declares no member lexically (instance variables are @ivars; the attr_* family is indexed, rubyattrscheck): a
 # class-body DSL call `has_many :posts` is a call with a symbol argument, never `name: Type`.
 mkdir -p "$TMP/rb"
