@@ -543,6 +543,13 @@ struct McpIndex
     mutable std::shared_ptr<const ValueRefIndex> valueRefs;
     mutable std::uint64_t                        valueRefBuilds = 0;   // monotone: McpRequestTiming's vri= reads it
 
+    // MCP-CALL-MEMO: the per-index facts the `for`, `pack`, `from_trace`, `lego` and `exemplar` verbs read on every call — the
+    // purity fixpoint (computeImpure) and QMetrics (computeQMetrics) — are pure functions of (`ing`, `g`), so they are built on
+    // first use and reused until the index is replaced, under the same rule as valueRefs: every writer of `ing` resets them
+    // (releaseMcpIndexMemory). Before, each call recomputed them (computeImpure 21 ms envoy, 84 ms vscode per `for` call).
+    mutable std::shared_ptr<const std::vector<char>> impure;
+    mutable std::shared_ptr<const QMetrics>          qmetrics;
+
     // ── P1-15 incremental-pass disclosure (the `_reingest` envelope field; mcpReingestField below).
     //
     // incrementalPasses counts ONLY rebuilds that refreshed an index this process ALREADY held for this
@@ -828,6 +835,8 @@ inline void releaseMcpIndexMemory()
     McpIndex& ix = mcpIndexSlot();
     ix.valid = false;
     ix.valueRefs.reset();   // it points into `ing` (see McpIndex::valueRefs) — and it is resident bulk too
+    ix.impure.reset();      // MCP-CALL-MEMO: derived from the `ing` and `g` released below
+    ix.qmetrics.reset();
     ix.ing   = IngestResult{};
     ix.g     = Graph{};
     std::vector<float>().swap( ix.rank );
@@ -1174,6 +1183,16 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
     } ).detach();
 }
 
+// MCP-CALL-MEMO: the purity fixpoint and QMetrics of `ix`, built on first use and reused until `ix.ing` is replaced.
+inline const std::vector<char>& impureOf( const McpIndex& ix )
+{
+    return sharedOnce( ix.impure, [ & ] { return std::make_shared<const std::vector<char>>( computeImpure( ix.ing, ix.g ) ); } );
+}
+inline const QMetrics& qMetricsOf( const McpIndex& ix )
+{
+    return sharedOnce( ix.qmetrics, [ & ] { return std::make_shared<const QMetrics>( computeQMetrics( ix.ing, ix.g ) ); } );
+}
+
 // The value-reference index of `ix`, built on first use and reused until `ix.ing` is replaced (every writer of `ing`
 // resets it — see McpIndex::valueRefs).
 inline const ValueRefIndex& valueRefIndexOf( const McpIndex& ix )
@@ -1245,8 +1264,10 @@ inline const McpIndex& getIndex( const std::string& root )
     const McpRebuildBaseline a3Before = mcpRebuildBaseline( ix, isIncrementalPass );
 
     // `ing` is about to be replaced: the value-reference index points into it (McpIndex::valueRefs), so it goes first —
-    // whether or not the file content moved.
+    // whether or not the file content moved. The MCP-CALL-MEMO facts are functions of `ing` and `g` too.
     ix.valueRefs.reset();
+    ix.impure.reset();
+    ix.qmetrics.reset();
 
     // Multi-root workspace key (A11): per-root ingest (each with ITS OWN mcpCachePath blob — an edit in
     // one root never reparses another) merged into one IngestResult; else the single-root path unchanged.
