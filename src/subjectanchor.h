@@ -475,7 +475,12 @@ inline std::vector<CodeName> sentenceCodeNames( const IngestResult& ing, std::st
     return out;
 }
 
-// does the sentence ask what depends on `spelling` (a dependents cue in that sense anywhere; no plain-word bound: the code is marked)?
+// does the sentence ask what depends on `spelling`? A dependents cue in that sense anywhere (no plain-word bound: the code is marked)
+// whose object is the name: the name, or a pronoun for it, within kCueObjectWords words after the cue ("which functions call it
+// directly", "who invokes `f`", "callers does `f` have"). A cue about something else ("how does rake invoke the task ... `multitask`
+// prerequisites") asks nothing about the name.
+inline constexpr std::size_t      kCueObjectWords = 3;
+inline constexpr std::string_view kCuePronouns[]  = { "it", "them", "its" };
 inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::string_view spelling )
 {
     std::vector<std::string_view> text;
@@ -491,9 +496,20 @@ inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::s
             callee = callee || ( k > 0 && wordIn( text[k - 1], kCalleeAux ) ) || ( k + 1 < text.size() && wordIn( text[k + 1], kAgentCues ) );
         }
     }
+    const auto objectAfter = [ & ]( std::size_t k )
+    {
+        for( std::size_t j = k + 1; j < text.size() && j <= k + kCueObjectWords; ++j )
+        {
+            if( text[j].find( spelling ) != std::string_view::npos || wordIn( text[j], kCuePronouns ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
     for( std::size_t k = 0; k < text.size(); ++k )
     {
-        if( cueInDependentsSense( text, k, callee ) )
+        if( cueInDependentsSense( text, k, callee ) && objectAfter( k ) )
         {
             return true;
         }

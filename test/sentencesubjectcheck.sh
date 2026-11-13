@@ -4,8 +4,10 @@
 #   C   a sentence that `backticks` ONE function and asks what calls or depends on it gets <callers by="subject">, however long it is
 #       and whatever other identifier it mentions in passing; a call's argument list and a Go receiver are read as the name; the rest
 #       of the answer is byte-identical (the block is additive)
-#   CN  NEGATIVE: no cue, two backticked functions, the callee sense, a negated cue: no callers block (each arm counts what it saw)
-#   G   `[call] chain from A to B`, `A reach(es) B` and `calls both A and B` run the path / connect verb the key form runs
+#   CN  NEGATIVE: no cue, two backticked functions, the callee sense, a negated cue, a cue whose object is not the name ("how does the
+#       app invoke the task and run the `f` step"): no callers block (each arm counts what it saw)
+#   G   `[call] chain from A to B`, `A reach(es) B` and `calls both A and B` run the path / connect verb the key form runs, only
+#       when no key form (`common callers of`, `path from`, `callers of`) is in the sentence: that block is never replaced
 #   GN  NEGATIVE: the words without code ("a chain from start to finish", "which tests reach the cache"): no graph block; the key
 #       form is unchanged
 #   R   RE-ASK: a code-spelling sentence that asks for callers or a path and got no block ends with ONE <reask next="..."/>, the bare
@@ -101,12 +103,13 @@ seen=0
 for q in 'How does `prepare_setup_platform` choose the name it returns, and where is that documented in the repository?' \
          'If `prepare_setup_platform` changes its signature, which functions call `end_there` today?' \
          'What does `prepare_setup_platform` call internally, and which values does it update along the way?' \
-         'I changed nothing in `prepare_setup_platform`; where is the 404 fallback decided for the platform setup?'; do
+         'I changed nothing in `prepare_setup_platform`; where is the 404 fallback decided for the platform setup?' \
+         'When I run the setup, how does the app invoke the task and run the `prepare_setup_platform` step in parallel?'; do
     A="$( ask "$R" "$q" )"
     case "$A" in *'<ctx '*) seen=$(( seen + 1 ));; *) no "CN no answer printed ($q)";; esac
     hasnt "$A" '<callers by="subject"' "CN ($q): no callers block"
 done
-[ "$seen" = 4 ] && ok "CN saw 4 answers" || no "CN saw $seen of 4 answers"
+[ "$seen" = 5 ] && ok "CN saw 5 answers" || no "CN saw $seen of 5 answers"
 
 # ── G: sentence graph forms run the verb the key runs ──
 gv(){ local A; A="$( ask "$R" "$1" )"; local V; V="$( verb "$A" )"; [ "$V" = "$2" ] && ok "G $3: verb=$V" || no "G $3: verb=$V (want $2)"; }
@@ -114,6 +117,7 @@ gv 'Trace the exact call chain from `start_here` (app/flow.py) to `end_there`. N
 gv 'How does `start_here()` reach `end_there` when the flow runs?' '--path=start_here,end_there' "A reach B"
 gv 'Which non-test function calls both `end_there` and `other_end`? Give the function and its file.' '--connect=end_there,other_end' "calls both A and B"
 gv 'path from start_here to end_there' '--path=start_here,end_there' "the key form, unchanged (control)"
+gv 'Which function calls both `end_there` and `other_end`, and which other callers of end_there do not?' '--callers=end_there' "a key form in the same sentence keeps its block (nothing replaced)"
 seen=0
 for q in 'Is there a chain from start to finish documented in the flow notes?' 'Which tests reach the cache when the flow runs?' 'Does the setup call both handlers and the logger?'; do
     A="$( ask "$R" "$q" )"
