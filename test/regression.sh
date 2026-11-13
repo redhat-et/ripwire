@@ -438,6 +438,7 @@ for _g in \
     demoterefillcheck \
     dependencypincheck \
     deplangscheck \
+    depsnographcheck \
     depsprecisecheck \
     det-gate \
     detailcheck \
@@ -746,7 +747,6 @@ for _g in \
     mdsectioncheck \
     memguardcheck \
     memstatscheck \
-    depsnographcheck \
     mentioncapcheck \
     mentioncheck \
     mentionsverbcheck \
