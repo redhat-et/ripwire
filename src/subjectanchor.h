@@ -1050,7 +1050,7 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
 // <callers by="subject">, no <graph_verb>): the bare form of the same question, the one call that does answer it. The shape is read
 // from the sentence's own words, as the blocks read it: ONE code name and a dependents cue is `--callers=X`; two or more code names and
 // a graph cue (path, chain, reach, calls both, common caller) is `--path=A,B` (`--connect=A,B` for both / common), the first two names
-// in sentence order. A sentence is a question mark, a `backticked` name or a question lead; a stored key ("X gains a parameter") is not
+// in sentence order unless a `from`/`to` marker states the direction. A sentence is a question mark, a `backticked` name or a question lead; a stored key ("X gains a parameter") is not
 // one. Anything else is "" (nothing to suggest).
 inline std::string sentenceReaskInvocation( const IngestResult& ing, std::string_view task )
 {
@@ -1078,9 +1078,33 @@ inline std::string sentenceReaskInvocation( const IngestResult& ing, std::string
         common   = common || both || commonCaller;
         graphCue = graphCue || both || commonCaller || is( k, { "path", "chain", "reach", "reaches" } );
     }
+    if( graphCue && names.size() >= 2 && common )
+    {
+        return "--connect=" + names[0].spelling + "," + names[1].spelling;
+    }
     if( graphCue && names.size() >= 2 )
     {
-        return std::string( common ? "--connect=" : "--path=" ) + names[0].spelling + "," + names[1].spelling;
+        // the direction as the sentence states it: `from X` is the source and `to X` the destination, so "the path to B from A" is
+        // --path=A,B; no marker keeps sentence order, as `A reaches B` reads; two sources or two destinations suggest nothing
+        const SentenceWordText read = sentenceWordText( words );
+        const auto role = [ & ]( std::string_view spelling )
+        {
+            for( std::size_t k = 0; k < read.text.size(); ++k )
+            {
+                if( read.text[k].find( spelling ) != std::string_view::npos )
+                {
+                    return k > 0 && is( k - 1, { "from" } ) ? -1 : k > 0 && is( k - 1, { "to", "into" } ) ? 1 : 0;
+                }
+            }
+            return 0;
+        };
+        const int from0 = role( names[0].spelling ), from1 = role( names[1].spelling );
+        if( from0 == from1 && from0 != 0 )
+        {
+            return {};
+        }
+        const bool swap = from0 == 1 || from1 == -1;
+        return "--path=" + names[ swap ? 1 : 0 ].spelling + "," + names[ swap ? 0 : 1 ].spelling;
     }
     if( names.size() == 1 && asksDependentsOf( words, names.front().spelling ) )
     {

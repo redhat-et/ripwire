@@ -17,6 +17,7 @@
 #       (`Missing.setup.prepare_setup_platform`) is no name: no callers block, no re-ask; its twin `setup.prepare_setup_platform` (the
 #       file stem) still gets the block
 #   CG  a Go receiver spelling with no pronoun after the cue ("Which functions call `(*kv.Replica).NewEvalContext`?") gets the block
+#   RD  the re-ask keeps the stated direction: "the path to `end_there` from `start_here`" is --path=start_here,end_there
 # Usage: bash test/sentencesubjectcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -153,6 +154,9 @@ A="$( ask "$R" 'What is the path, if any, between `start_here` and `other_end`?'
 hasnt "$A" '<graph_verb' "R path: the sentence got no block (premise)"
 N="$( reask "$A" )"; if [ "$N" = '--path=start_here,other_end' ]; then ok "R path: next=$N"; else no "R path: next=$N"; fi
 [ "${N#--}" != "$N" ] && runs "$R" "$N" start_here "path"
+A="$( ask "$R" 'What is the path to `end_there` from `start_here`?' )" || no "RD: ripwire exited $?"
+hasnt "$A" '<graph_verb' "RD: the sentence got no block (premise)"
+N="$( reask "$A" )"; if [ "$N" = '--path=start_here,end_there' ]; then ok "RD: next=$N (the stated direction)"; else no "RD: next=$N (want --path=start_here,end_there)"; fi
 seen=0
 for q in 'If `prepare_setup_platform` (app/setup.py) gained a new required parameter, which functions call it directly?' \
          'Trace the exact call chain from `start_here` (app/flow.py) to `end_there`.' \
