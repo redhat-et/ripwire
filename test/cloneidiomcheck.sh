@@ -37,7 +37,7 @@
 #       parameter names demotes; the same pair plus ONE shared named constant gates; the same pair in one
 #       namespace gates; an EXPECTS-led member still classifies; an if-then-return member is refused (the
 #       group carries no idiom); a pair identical once its parameters are renamed gates although it shares
-#       no other identifier at all, also when its signature is generic (`name<T>(…)`, `name[T any](…)`); a pair sharing a MEMBER spelled like a parameter gates. The quality-delta half: the demoted pair is minor, the shared-constant
+#       no other identifier at all, also when its signature is generic (`name<T>(…)`, `name[T any](…)`) or one default holds a template comma or a less-than; a pair sharing a MEMBER spelled like a parameter gates. The quality-delta half: the demoted pair is minor, the shared-constant
 #       pair gates. The real-history replays live in test/dupshortcheck.sh.
 #
 # Usage:  bash test/cloneidiomcheck.sh            |   RIPWIRE_BIN=asan/ripwire bash test/cloneidiomcheck.sh
@@ -114,6 +114,8 @@ expect_row onestmt_expects     siteBefore  entryBefore one-statement yes   # (O)
 expect_row onestmt_ifreturn    siteBefore  entryBefore NONE          no    # (O) if-then-return is two statements
 expect_row onestmt_alpha       widthBetween gapOf      one-statement no    # (O) identical after renaming parameters
 expect_row onestmt_alpha_generic widthBetween gapOf  one-statement no    # (O) the same, through a generic signature (`gapOf<T>(…)`: the parameter list follows the type parameters)
+expect_row onestmt_alpha_tdefault widthBetween gapOf one-statement no    # (O) the same, with a template comma in one default (`hi = pick<Lo, Hi>()`: no parameter `long`, `pad` stays third; CodeRabbit #636)
+expect_row onestmt_alpha_ltdefault widthBetween gapOf one-statement no   # (O) the same, with a less-than in one default (`hi = kLo < kHi`: the `<` opens no template, `pad` is still a parameter)
 expect_row onestmt_alpha_gogeneric WidthBetween GapOf one-statement no   # (O) the same through Go type parameters (`GapOf[T int | int64](…)`)
 expect_row onestmt_memberparam rowFits     cellFits    one-statement no    # (O) a shared MEMBER spelled like a parameter
 
@@ -122,7 +124,7 @@ expect_row onestmt_memberparam rowFits     cellFits    one-statement no    # (O)
 # the shape each yielded before any of this existed. A classifier that suppressed a row would pass every
 # attribute arm above and fail here.
 for d in ladder_demote ladder_sharedids ladder_samefile switchtable paramstruct nonidiom \
-         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha onestmt_alpha_generic onestmt_alpha_gogeneric onestmt_memberparam; do
+         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha onestmt_alpha_generic onestmt_alpha_gogeneric onestmt_alpha_tdefault onestmt_alpha_ltdefault onestmt_memberparam; do
     n="$( rows "$d" | wc -l | tr -d ' ' )"
     m="$( rows "$d" | grep -c 'n="2"' )"
     if [ "$n" = 1 ] && [ "$m" = 1 ]; then
