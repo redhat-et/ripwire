@@ -8858,6 +8858,28 @@ inline std::size_t healDefectSites( Snapshot& base, const IdentityAliases& al )
     return healed;
 }
 
+// MOVES: a move record is RE-KEYED by a rename alias, never copied. A copy left the old key behind as a VACATED body (MovedBodies)
+// while the same body still sits at the new key, so its sketch could pass a new look-alike off as moved (#646 CR). Dropping the old
+// key only removes a move source, so it can only make a row gate, never exempt one. Add-never-overwrite, as healMap. The count re-keyed.
+template<class Map>
+inline std::size_t rekeyMoveRecords( Map& m, const IdentityAliases& al )
+{
+    std::size_t n = 0;
+    for( const auto& [ from, to ] : al.toCurrent )
+    {
+        const auto src = m.find( from );
+        if( src == m.end() || m.find( to ) != m.end() )
+        {
+            continue;
+        }
+        auto v = std::move( src->second );
+        m.erase( src );
+        m[ to ] = std::move( v );
+        ++n;
+    }
+    return n;
+}
+
 // Heal a BASELINE snapshot forward: an entry recorded under a pre-rename identity is re-filed under the
 // identity the current tree uses, so computeDelta's `was` lookups, its origin oracle and its churn join all
 // find it without a single edit to any of them.
@@ -8893,25 +8915,8 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healMap( base.maskReportBySym );
     healMap( base.placeholderBySym );
     healMap( base.bodyHashBySym );
-    // MOVES: a move record is RE-KEYED, never copied. A copy left the old key behind as a VACATED body (MovedBodies) while the
-    // same body still sits at the new key, so its sketch could pass a new look-alike off as moved (#646 CR). Dropping the old key
-    // only removes a move source, so it can only make a row gate, never exempt one.
-    const auto rekeyMap = [ & ]( auto& m, bool counted )
-    {
-        for( const auto& [ from, to ] : al.toCurrent )
-        {
-            const auto src = m.find( from );
-            if( src != m.end() && m.find( to ) == m.end() )
-            {
-                auto v = std::move( src->second );
-                m.erase( src );
-                m[ to ] = std::move( v );
-                moved += counted ? 1 : 0;
-            }
-        }
-    };
-    rekeyMap( base.moveCidBySym, true );
-    rekeyMap( base.moveSketchBySym, false );   // its sketch follows it; not a separate healed key in the count
+    moved += rekeyMoveRecords( base.moveCidBySym, al );
+    (void) rekeyMoveRecords( base.moveSketchBySym, al );   // its sketch follows it; not a separate healed key in the count
 
     // the two SORTED SETS — same add-never-overwrite rule, then restore the sorted invariant every
     // std::binary_search consumer depends on.
@@ -9983,6 +9988,44 @@ inline std::pair<std::string, std::string> historyUnreadDisclosure( const Histor
     return { xml + "\"", json + "]" };
 }
 
+// One per-symbol kind's CURRENT side: each key's MAX metric over its overloads (they share a key) and the node that supplies it,
+// the lowest NodeId on a tie. That node's move status and kind are the row's (#646 CR: not the key's first overload).
+struct MetricMaxAt
+{
+    std::uint32_t now = 0;
+    NodeId        at  = kNoNode;
+};
+template<class MetricOf>
+inline ScratchMap<MetricMaxAt> metricMaxByKey( const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode, MetricOf metricOf )
+{
+    ScratchMap<MetricMaxAt> out( ing.symbols.size() );
+    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( i >= g.canonId.size() || g.canonId[i].empty() )
+        {
+            continue;
+        }
+        MetricMaxAt&        slot = out[ keyByNode[i] ];
+        const std::uint32_t m    = metricOf( i );
+        if( slot.at == kNoNode || m > slot.now )
+        {
+            slot = { m, i };
+        }
+    }
+    return out;
+}
+
+// QD-ENTRY-CEILING: the ceiling a just-pushed row gates at, or 0. Only a NEW, material row of a function or method (`measured`,
+// the kind of the symbol that supplies the value: a class extent never gates) at or over the kind's ceiling, and not a moved
+// body or a test driver.
+inline std::uint32_t newSymbolCeilingGate( const Regression& r, SymKind measured, std::uint32_t ceilingAt )
+{
+    const bool callable = measured == SymKind::Function || measured == SymKind::Method;
+    const bool gates    = r.isNewSymbol && !r.isMoved && !r.isMinor && callable && ceilingAt != 0 && r.now >= ceilingAt && !r.path.empty()
+                       && !isTestPath( r.path );
+    return gates ? ceilingAt : 0;
+}
+
 // `root` = the ingest root exactly as invoked; every baseline COMPARISON key is the root-relative
 // baselineCanonId (S2) so a committed baseline matches regardless of how the root was spelled on either run.
 // The human-readable `Regression.sym` keeps the FULL g.canonId (display only — never hashed/compared), so the
@@ -10205,26 +10248,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     const auto perSymbolKind =
         [ & ]( const MaterialityBar& mb, std::uint32_t ceilingAt, const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap, auto metricOf )
     {
-        const std::uint32_t bar = mb.bar;
-        struct MaxAt
-        {
-            std::uint32_t now = 0;
-            NodeId        at  = kNoNode;   // the overload that supplies `now` (the lowest NodeId on a tie): its move status is the row's
-        };
-        ScratchMap<MaxAt> nowBySym( ing.symbols.size() );
-        for( NodeId i = 0; i < ing.symbols.size(); ++i )
-        {
-            if( i >= g.canonId.size() || g.canonId[i].empty() )
-            {
-                continue;
-            }
-            MaxAt&              slot = nowBySym[ keyByNode[i] ];
-            const std::uint32_t m    = metricOf( i );
-            if( slot.at == kNoNode || m > slot.now )
-            {
-                slot = { m, i };
-            }
-        }
+        const std::uint32_t           bar      = mb.bar;
+        ScratchMap<MetricMaxAt>       nowBySym = metricMaxByKey( ing, g, keyByNode, metricOf );
         ScratchMap<std::uint8_t> reported( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
@@ -10264,14 +10289,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                   isMonsterGrowth( was, now, bar, mb.monsterGrowth ) ? std::string( kMonsterFacet ) : std::string(),
                                   isNew, isMovedB } );          // origin: the finding IS this symbol
                 stampLoc( i );
-                // QD-ENTRY-CEILING: a NEW function at the ceiling gates — unless its body moved, or it is a test driver. Only a
-                // function or method: the kind of the symbol that supplies the measured value, so a class's extent never gates.
-                const SymKind measured = ing.symbols[ nowIt->second.at ].kind;
-                if( isNew && !isMovedB && material && ( measured == SymKind::Function || measured == SymKind::Method ) && ceilingAt != 0
-                    && now >= ceilingAt && !regs.back().path.empty() && !isTestPath( regs.back().path ) )
-                {
-                    regs.back().ceiling = ceilingAt;
-                }
+                regs.back().ceiling = newSymbolCeilingGate( regs.back(), ing.symbols[ nowIt->second.at ].kind, ceilingAt );   // QD-ENTRY-CEILING
             }
             else if( mb.growthTiered && was > 0 && growthPct >= kSubBarGrowthPct && now >= subBarGrowthFloor( bar ) )
             {
