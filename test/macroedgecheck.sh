@@ -17,7 +17,7 @@
 #             (the macro-ARGUMENT call parses as a normal call and must SURVIVE) and reads MAXN.
 #   sitefix/ — MACRO-P0 (section 9): macro invocations the grammar reads as typeless declarators (brace-initialised
 #             `REGISTER_FACTORY( F, B ){ "name" };`, nested braces, class-member DECLARE_LUA_FUNCTION / MOCK_METHOD, an
-#             error-recovered in-function ASSIGN_OR_CO_RETURN) are uses, never defs; block-forming macros, real ALL-CAPS
+#             error-recovered in-function ASSIGN_OR_CO_RETURN, a C run of `;`-less EXPORT_FUNC) are uses, never defs; block-forming macros, real ALL-CAPS
 #             functions and constructors stay defs.
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/macroedgecheck.sh   (or asan/ripwire)
@@ -228,6 +228,12 @@ int decodeLoop()
     }
 }
 EOF
+cat >"$SF/exports.c" <<'EOF'
+#define EXPORT_FUNC( name ) static const char* name##_export = #name;
+EXPORT_FUNC(PyAlpha)
+EXPORT_FUNC(PyBeta)
+EXPORT_FUNC(PyGamma)
+EOF
 cat >"$SF/keep.cc" <<'EOF'
 #include "registry.h"
 #define TEST_F( fixture, name ) void fixture##_##name()
@@ -262,8 +268,9 @@ if [ "$SITES" -ge 13 ] && printf '%s' "$RD" | grep -q '<d [^>]*t="macro"'; then
 else
     no "MACRO-P0 premise: sites=$SITES (want >=13) or no t=\"macro\" REGISTER_FACTORY row — the arms below would see nothing"
 fi
-# 9b) THE TRAP: no phantom def survives, in any of the five shapes
-for m in REGISTER_FACTORY DECLARE_LUA_FUNCTION MOCK_METHOD ASSIGN_OR_CO_RETURN; do
+# 9b) THE TRAP: no phantom def survives, in any of the six shapes (EXPORT_FUNC: a C run of `;`-less invocations, cpython's
+#     PC/python3dll.c, where tree-sitter-c reads the previous invocation as a macro_type_specifier inside an ERROR node)
+for m in REGISTER_FACTORY DECLARE_LUA_FUNCTION MOCK_METHOD ASSIGN_OR_CO_RETURN EXPORT_FUNC; do
     n="$( fnrows "$m" )"
     [ "$n" = 0 ] && ok "MACRO-P0 trap: --defs=$m lists 0 function defs (every invocation is a use)" \
         || no "MACRO-P0 trap: --defs=$m lists $n function def(s) — one phantom keeps the name shared and unbinds every invocation"

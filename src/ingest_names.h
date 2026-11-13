@@ -2678,11 +2678,13 @@ inline bool braceBlockHoldsStatement( std::string_view block ) noexcept
 }
 
 // Is this ERROR-recovered declarator typeless — no type node right before it (cFamilyMacroInvocationDecl's ERROR arm)?
+// A macro_type_specifier (`NAME( x )`) does not count as a type here: in a C run of `;`-less invocations
+// (`EXPORT_FUNC( a )` `EXPORT_FUNC( b )`, cpython PC/python3dll.c) tree-sitter-c reads the previous invocation as one.
 inline bool errorDeclaratorUntyped( TSNode fnDeclarator ) noexcept
 {
     static constexpr std::string_view kTypeKinds[] = { "primitive_type", "type_identifier", "qualified_identifier", "template_type", "sized_type_specifier",
                                                        "struct_specifier", "class_specifier", "union_specifier", "enum_specifier", "type_qualifier",
-                                                       "storage_class_specifier", "placeholder_type_specifier", "macro_type_specifier" };
+                                                       "storage_class_specifier", "placeholder_type_specifier" };
     const TSNode prev = ts_node_prev_named_sibling( fnDeclarator );
     if( ts_node_is_null( prev ) )
     {
