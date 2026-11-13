@@ -27,7 +27,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ fail=1; printf '  FAIL  %s\n' "$*"; return 0; }
 
-if ! "$BIN" --version 2>/dev/null | grep -q '^ripwire '; then
+if ! "$BIN" --version 2>/dev/null | grep -q '^ripwire '; then   # status: a binary that cannot run prints no version line, so the grep fails it
     echo "  FAIL  $BIN does not run"; echo "FAIL depsnographcheck"; exit 1
 fi
 
