@@ -1214,7 +1214,7 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// how it stays true", AMBER);
   title(s, "Proven, not promised");
   const cards = [
-    ["807 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is a dated snapshot of the runner's own loop (counts snapshot 2026-11-13)"], // gatecount
+    ["810 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is a dated snapshot of the runner's own loop (counts snapshot 2026-11-13)"], // gatecount
     ["byte-identical, always", "two runs over the same tree produce the same bytes; warm equals cold. Enforced in CI, twice — Release AND a plain flavour, because NDEBUG once blinded a whole class of checks"],
     ["differential refactoring", "a refactor must prove it changed nothing observable: two binaries, hundreds of argv vectors, stdout + stderr + exit codes byte-identical"],
     ["held-out labels, authored blind", "eval labels were written by reading source before the ranker ever ran on them — so the eval is allowed to say the ranker is wrong. It has."],
@@ -1238,7 +1238,7 @@ function storyCards(s, { kick, head, stories, footText }){
   title(s, "Claims you can trust, because we publish what failed", { size: 32 });
 
   card(s, MX, 1.72, 3.86, 1.72);
-  stat(s, "807", "gate scripts named by test/regression.sh — and the COUNT is the counts snapshot 2026-11-13 of that loop, checked exact at every refresh and release", // gatecount
+  stat(s, "810", "gate scripts named by test/regression.sh — and the COUNT is the counts snapshot 2026-11-13 of that loop, checked exact at every refresh and release", // gatecount
     MX+0.15, 1.86, 3.56, CYAN, { bsize: 42, bh: 0.66, lsize: 9.5 });
   card(s, 4.68, 1.72, 3.86, 1.72, CARD2);
   stat(s, "8", "registered NEGATIVES — changes built, gated green, measured against a band written before the code, and reverted rather than tuned",
@@ -1540,7 +1540,7 @@ function storyCards(s, { kick, head, stories, footText }){
     ["194 long flags · 36 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
-    ["807 gate scripts (counts snapshot 2026-11-13)", "bash test/manifestcheck.sh"], // gatecount
+    ["810 gate scripts (counts snapshot 2026-11-13)", "bash test/manifestcheck.sh"], // gatecount
     ["49 repos · 76 papers · 237 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
