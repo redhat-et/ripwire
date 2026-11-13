@@ -1023,7 +1023,7 @@ inline constexpr const char* kQdIdentityLegend =
     "as new-symbol. FLOORS, stated because silence here would read as a guarantee: the two clone kinds key "
     "on a member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; ORIGIN follows the "
     "rename record, not content: a move git recorded no rename for reads as new-symbol, or as moved (never "
-    "gating) when its unchanged body is over a bar. ";
+    "gating) when its body, unchanged or nearly so, is over a bar. ";
 
 // How the two mechanisms decide, in full — printed only when an ack was actually SUPPRESSED by one of
 // them (acked= is non-zero), which is the only state in which a reader has a suppression to audit. The
@@ -1340,7 +1340,7 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         // other answer keeps its legend bytes.
         if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.isNewSymbol && r.isMoved; } ) )
         {
-            rw::emitRaw( out, "origin=\"moved\": the same body left another name or file in this diff; it never gates. " );
+            rw::emitRaw( out, "origin=\"moved\": the same or a nearly identical body (a clone-sketch match) left another name or file in this diff; it never gates. " );
         }
         if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.ceiling != 0; } ) )
         {

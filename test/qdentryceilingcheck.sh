@@ -9,6 +9,8 @@
 #   N1. a new ccx-59 function and a new 239-line function stay printed, origin="new-symbol", and do not gate;
 #   N2. MOVED-BODY: the same 250-line body moved to another file under another name (re-indented) prints
 #       origin="moved" and does not gate; a COPY (the original kept) is not a move and still gates;
+#   N4. a body RENAMED with a small edit (4 of 245 statements), the old name kept as a wrapper, prints origin="moved";
+#   N5. a genuinely new function with a similar name, beside a removed ceiling-sized body, stays new-symbol and gates;
 #   N3. EXTENT-CTOR: a class whose constructor shares its canonical id (C++: Foo::Foo) is measured over the
 #       constructor's own body — the class extent (well over 240 lines) never reaches a verbosity row;
 #   T.  TEST DRIVERS are report-only: the same 250-line new function under test/ prints and does not gate;
@@ -38,6 +40,23 @@ ifs(){ n=$1; s=''; i=1; while [ "$i" -le "$n" ]; do s="$s if(a>$i){ s++; }"; i=$
 lines(){ n=$1; i=1; while [ "$i" -le "$n" ]; do printf '%s s += a * %d;\n' "$2" "$i"; i=$(( i + 1 )); done; }
 # longfn NAME N INDENT: a function of N straight-line statements; codeLoc = N + 5 (signature, braces, the local, the return).
 longfn(){ printf '%sint %s( int a )\n%s{\n%s int s = 0;\n' "$3" "$1" "$3" "$3"; lines "$2" "$3"; printf '%s return s;\n%s}\n' "$3" "$3"; }
+# variedfn NAME N SET [EDIT]: a function of N statements drawn from one of two DISJOINT shape sets (A or B) in a fixed,
+# varied order, so its 5-gram fingerprint set is rich like real code (longfn repeats one shape). EDIT=k rewrites k statements
+# in the middle (statements 100..100+k-1) to a shape neither set uses: the "small edit" of a rename-and-tweak.
+variedfn(){
+    printf 'int %s( int a )\n{\n    int s = 0, t = 1;\n' "$1"
+    awk -v n="$2" -v set="$3" -v ed="${4:-0}" 'BEGIN{
+        A[0]="s += a * K;"; A[1]="if( s > K ) { s -= a; }"; A[2]="t = s ^ ( a << 2 );"; A[3]="s = helper( s, K );";
+        A[4]="t = t + s / K;"; A[5]="s = s % ( K + 1 ) + t;"; A[6]="t = ( s > a ) ? s : a;"; A[7]="s = s - t * K;";
+        B[0]="buf.push_back( a + K );"; B[1]="do { a--; } while( a > K );"; B[2]="obj->field = K;"; B[3]="arr[ a % K ] |= 1;";
+        B[4]="ret = obj->method( K, a, ret );"; B[5]="try_one( &ret, K );"; B[6]="cnt = !cnt;"; B[7]="x = y ? K : -K;";
+        for( i = 1; i <= n; i++ ) {
+            k = ( i * 5 + int( i / 3 ) ) % 8; st = ( set == "B" ) ? B[k] : A[k];
+            if( ed > 0 && i >= 100 && i < 100 + ed ) { st = "log_line( \"edited\", K, a );"; }
+            gsub( /K/, i, st ); print "    " st;
+        } }'
+    printf '    return s + t;\n}\n'
+}
 newrepo(){ mkdir -p "$1/src"; ( cd "$1" && git init -q && git config user.email t@t && git config user.name t ); }
 commitall(){ ( cd "$1" && git add -A >/dev/null 2>&1 && git commit -qm "$2" >/dev/null 2>&1 ); }
 dq(){  ( cd "$1" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null ); }
@@ -125,6 +144,40 @@ if ! crashed N2c; then
     elif [ "$RC" = 2 ] && printf '%s' "$ROW" | grep -q 'origin="new-symbol"' && printf '%s' "$ROW" | grep -q 'gating="1"'; then
         ok "N2c: a COPY (original still present) is not a move — it still gates"
     else no "N2c: a copied body must still gate (rc=$RC row: $ROW)"; fi
+fi
+
+# ═══ N4) A RENAMED BODY WITH A SMALL EDIT IS A MOVE (the #572 extractHtml -> extractHtmlFlat shape) ═══════════════════
+# The old name stays as a thin wrapper, so its key never leaves the tree; its BODY does (the key no longer carries a body over a
+# bar). The new name holds that body with 4 of 245 statements rewritten, so the exact identity differs and only the clone
+# sketch can say it is the same body.
+R="$WORK/n4"; base "$R"; variedfn flatten 245 A > "$R/src/html.cpp"; printf 'int usef(){ return flatten(1); }\n' >> "$R/src/html.cpp"; commitall "$R" flatten
+OLDLOC="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="flatten"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"
+{ variedfn flatten_flat 245 A 4; printf 'int flatten( int a ){ return flatten_flat( a ); }\nint usef(){ return flatten(1); }\n'; } > "$R/src/html.cpp"
+run "$R"
+if ! crashed N4; then
+    ROW="$( rowof "$OUT" verbosity flatten_flat )"
+    if [ "${OLDLOC:-0}" -lt 240 ]; then no "N4: premise — the baseline body is ${OLDLOC:-<none>} lines, not a ceiling-sized source"
+    elif [ -z "$ROW" ]; then no "N4: premise — no verbosity row for the renamed body (rows: $( rows "$OUT" | tr '\n' ' ' ))"
+    elif [ "$RC" = 0 ] && printf '%s' "$ROW" | grep -q 'origin="moved"' && ! rows "$OUT" | grep -q 'gating="1"'; then
+        ok "N4: a body renamed with a 4-statement edit (old name kept as a wrapper) prints origin=\"moved\" and does not gate"
+    else no "N4: a renamed-and-edited body must read as moved (rc=$RC row: $ROW)"; fi
+fi
+
+# ═══ N5) A GENUINELY NEW FUNCTION WITH A SIMILAR NAME IS STILL NEW ════════════════════════════════════════════════════
+# The same diff removes a ceiling-sized body (a move source the matcher must consider) and adds a ceiling-sized function whose
+# name is close (parse_rows -> parse_rows_v2) but whose body is another shape set. It must stay new-symbol and gate.
+R="$WORK/n5"; base "$R"; variedfn parse_rows 245 A > "$R/src/p.cpp"; printf 'int usep(){ return parse_rows(1); }\n' >> "$R/src/p.cpp"; commitall "$R" rows
+OLDLOC="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="parse_rows"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"
+{ variedfn parse_rows_v2 245 B; printf 'int usep(){ return parse_rows_v2(1); }\n'; } > "$R/src/p.cpp"
+run "$R"
+if ! crashed N5; then
+    ROW="$( rowof "$OUT" verbosity parse_rows_v2 )"
+    GONE="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep -c 'n="parse_rows"' | tr -d ' ' )"
+    CANDS=0; [ "${OLDLOC:-0}" -ge 240 ] && [ "$GONE" = 0 ] && [ -n "$ROW" ] && CANDS=1
+    if [ "$CANDS" -lt 1 ]; then no "N5: premise — 0 candidate pairs (removed source loc=${OLDLOC:-<none>}, still present=$GONE, new row: ${ROW:-<none>})"
+    elif [ "$RC" = 2 ] && printf '%s' "$ROW" | grep -q 'origin="new-symbol"' && printf '%s' "$ROW" | grep -q 'gating="1"'; then
+        ok "N5: a new function with a similar name but another body stays new-symbol and gates ($CANDS candidate pair seen)"
+    else no "N5: a genuinely new function must not read as moved (rc=$RC row: $ROW)"; fi
 fi
 
 # ═══ N3) CONSTRUCTOR EXTENT: measured over its own body, not the class ═════════════════════════════════

@@ -121,6 +121,11 @@ inline constexpr std::uint32_t subBarGrowthFloor( std::uint32_t bar ) noexcept {
 // kind's bar gates: ccx 60 or 240 code lines at 4. The step plan is 4, then 3, then 2, each step only while sampled precision holds
 // 0.8 and a typical lane diff prints at most one such row (GE design § 1.5). Report-only, never gating: a MOVED body (origin="moved")
 // and a TEST DRIVER (isTestPath — owner C4: every function under test/ is report-only). A knob, in the knob census.
+// MOVES (2026-11-13): the clone-sketch Jaccard at which a NEW body and a vacated baseline body (each the other's unique best) are one
+// moved body. Picked from the 30-PR replay (last 30 merges to 0b8f0bf8d): the three real moves scored 0.851 (extractHtmlFlat, #572),
+// 0.922 and 0.976; the best non-move scored 0.310; the gate's 4-of-245-statement rename scores 0.804. 0.70 sits in that gap, ~5
+// standard errors of the 128-component estimate from either side.
+constexpr float           kMoveSketchMinJaccard = 0.70f;
 constexpr std::uint32_t   kNewSymbolCeilingMul = 4;
 inline constexpr std::uint32_t newSymbolCeiling( std::uint32_t bar ) noexcept { return bar * kNewSymbolCeilingMul; }
 
@@ -294,6 +299,7 @@ struct Snapshot
     gtl::btree_map<std::uint64_t, std::uint32_t> placeholderBySym; // the placeholder kind — hash(canonId) → COUNT of stub / TODO constructs in the symbol (SUM over overloads, like maskBySym)
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — pathQualifiedKey(path,scope,name) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them). Path-qualified since v6: a bare canonId key folded every scope-less same-named symbol ACROSS FILES into one join identity (the W1-S2 cross-file churn misattribution)
     gtl::btree_map<std::uint64_t, std::uint64_t> moveCidBySym;  // QD-ENTRY-CEILING MOVED-BODY — qualityKey → moveCidOf (the scrubbed hash of the callable's BODY), recorded only for a function or method over the ccx or the line bar: the baseline half of "this new function is a body the same diff removed elsewhere" (origin="moved"). A sidecar or blob without it recognizes no move
+    gtl::btree_map<std::uint64_t, CloneSketch>   moveSketchBySym; // QD-ENTRY-CEILING MOVES — qualityKey → the clone matcher's minhash sketch (cloneSketchOfStream, 128 B) of the same body moveCidBySym identifies, so a body moved WITH a small edit is still recognized (MovedBodies). A sidecar or blob without it recognizes exact moves only
     std::vector<std::uint64_t>             cloneGroups; // sorted hash(sorted member canonIds)
     std::vector<std::uint64_t>             dead;        // sorted hash(canonId) of dead-candidate symbols
     std::vector<std::uint64_t>             publicApi;   // Q1 contract drift — sorted hash(canonId) of PUBLIC/exported symbols (see isPublicApi)
@@ -1660,29 +1666,47 @@ inline std::uint64_t scrubbedBodyHash( std::string_view body, std::string_view n
 // symbol's own name scrubbed, nothing semantic) over the BODY after its signature, so the same body under another name, in another
 // file, re-indented into a namespace or class, or with a reworded signature is one identity, and a body with one changed statement
 // is another. `def` is the [sigStartByte, endByte) view forEachSymbolBody hands out. 0 = no identity (not a callable).
+// The BODY of a [sigStartByte, endByte) definition view: everything after its signature (the whole view when no signature span is known).
+inline std::string_view bodyAfterSignature( const Symbol& s, std::string_view def ) noexcept
+{
+    const std::size_t bodyAt = ( s.sigEndByte > s.sigStartByte && s.sigEndByte - s.sigStartByte < def.size() ) ? s.sigEndByte - s.sigStartByte : 0;
+    return def.substr( bodyAt );
+}
 inline std::uint64_t moveCidOf( const Symbol& s, std::string_view def )
 {
     if( s.kind != SymKind::Function && s.kind != SymKind::Method )
     {
         return 0;
     }
-    const std::size_t bodyAt = ( s.sigEndByte > s.sigStartByte && s.sigEndByte - s.sigStartByte < def.size() ) ? s.sigEndByte - s.sigStartByte : 0;
-    const std::uint64_t cid = scrubbedBodyHash( def.substr( bodyAt ), s.name );
+    const std::uint64_t cid = scrubbedBodyHash( bodyAfterSignature( s, def ), s.name );
     return cid != 0 ? cid : 1;
 }
+// MOVES (2026-11-13) — the same body as the clone matcher sees it: its normalized token stream's minhash sketch (clones.h).
+inline CloneSketch moveSketchOf( const Symbol& s, std::string_view def )
+{
+    const std::string body( bodyAfterSignature( s, def ) );
+    return cloneSketchOfStream( normalizeTokens( body, 0, std::uint32_t( body.size() ), usesHashLineComments( s.lang ) ) );
+}
 
-// `moveCidOut` (MOVED-BODY): when given, also each callable's moveCidOf — only for a body over the ccx or the line bar, the only
+// The move identities of one tree: moveCidOf per node (0 = none) and, for the same nodes, the sketch (sparse, ascending node order).
+struct MoveIdentities
+{
+    std::vector<std::uint64_t>                       cid;
+    std::vector<std::pair<NodeId, CloneSketch>>      sketch;
+};
+
+// `moveOut` (MOVED-BODY): when given, also each callable's moveCidOf and its sketch — only for a body over the ccx or the line bar, the only
 // bodies a new-function row (and so a move) can be about; 0 elsewhere. Same pass, so the corpus is read once.
-inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, std::vector<std::uint64_t>* moveCidOut = nullptr )
+inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveIdentities* moveOut = nullptr )
 {
     std::vector<std::uint32_t> out( ing.symbols.size(), 0 );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         out[i] = ing.symbols[i].loc;
     }
-    if( moveCidOut != nullptr )
+    if( moveOut != nullptr )
     {
-        moveCidOut->assign( ing.symbols.size(), 0 );
+        moveOut->cid.assign( ing.symbols.size(), 0 );
     }
     forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body )
     {
@@ -1696,13 +1720,154 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, std::v
                       // same reason ("doc sections churn by design").
         }
         out[i] = codeLinesInBody( body, s.lang );
-        if( moveCidOut != nullptr && ( s.ccx > kCcxBar || out[i] > kLocBar ) )
+        if( moveOut != nullptr && ( s.ccx > kCcxBar || out[i] > kLocBar ) && ( moveOut->cid[i] = moveCidOf( s, body ) ) != 0 )
         {
-            ( *moveCidOut )[i] = moveCidOf( s, body );
+            moveOut->sketch.emplace_back( i, moveSketchOf( s, body ) );
         }
     } );
     return out;
 }
+
+// MOVED-BODY (QD-ENTRY-CEILING card 2) — WHICH NEW CALLABLE IS A BODY THIS DIFF MOVED. A body moved to another file or name gets a
+// new canonical id, so the origin axis read it as new code: the 11-04 replay's one moved row at the 4x ceiling (dispatchMainBody)
+// would gate as a "new 1,000-line function" on the commit that only relocated it. A current callable is a move when its move
+// identity (moveCidOf) equals the identity of a VACATED baseline body (MOVES below), and no other current
+// callable carries that identity (a body that is both kept and copied, or copied twice, is a copy: refuse, floors not guesses).
+// A rewrite is not a move: one changed statement changes the identity. Only bodies over the ccx or the line bar are recorded.
+// MOVES (2026-11-13, owner "fix moves in-lane first"): the exact identity missed the 30-PR replay's one false ceiling row,
+// extractHtmlFlat (#572) — the old extractHtml body under a new name with a 4-line edit, the old name kept as a 3-line wrapper. Two
+// changes: (1) a baseline body is VACATED when its key no longer carries a body over a bar (gone, or shrunk under the bars: the
+// wrapper case), not only when the key is gone; (2) a NEW callable (its key absent from the baseline) whose exact identity matches
+// nothing is still a move when it and one vacated body are each other's best clone-sketch match (cloneSketchJaccard, the Type-3
+// matcher's own minhash) at kMoveSketchMinJaccard or more, with no tie on either side. A copy is still not a move (the original keeps
+// its body, so nothing is vacated), and two candidates for one vacated body refuse (the mutual-best test).
+struct MovedBodies
+{
+    std::vector<std::uint64_t> removed;     // sorted move identities of VACATED baseline bodies
+    std::vector<std::uint64_t> current;     // sorted move identities of every current body over a bar (a multiset: the uniqueness test)
+    std::vector<NodeId>        nearMoved;   // sorted: new callables matched to a vacated body by sketch (mutual best, at the threshold)
+    const std::vector<std::uint64_t>& cidOf;
+
+    MovedBodies( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const MoveIdentities& now )
+        : cidOf( now.cid )
+    {
+        std::vector<std::uint64_t> held;   // keys that still carry a body over a bar
+        for( NodeId i = 0; i < keyOf.size() && i < now.cid.size(); ++i )
+        {
+            if( keyOf[i] != 0 && now.cid[i] != 0 )
+            {
+                held.push_back( keyOf[i] );
+            }
+        }
+        std::sort( held.begin(), held.end() );
+        std::vector<const CloneSketch*> vacated;
+        for( const auto& [ key, cid ] : base.moveCidBySym )
+        {
+            if( !std::binary_search( held.begin(), held.end(), key ) )
+            {
+                removed.push_back( cid );
+                if( const auto sk = base.moveSketchBySym.find( key ); sk != base.moveSketchBySym.end() )
+                {
+                    vacated.push_back( &sk->second );
+                }
+            }
+        }
+        std::sort( removed.begin(), removed.end() );
+        for( std::uint64_t c : now.cid )
+        {
+            if( c != 0 )
+            {
+                current.push_back( c );
+            }
+        }
+        std::sort( current.begin(), current.end() );
+        matchNearMoves( base, keyOf, now, vacated );
+    }
+
+    bool isMoved( NodeId i ) const
+    {
+        if( i >= cidOf.size() || cidOf[i] == 0 )
+        {
+            return false;
+        }
+        if( std::binary_search( removed.begin(), removed.end(), cidOf[i] ) )
+        {
+            const auto [ lo, hi ] = std::equal_range( current.begin(), current.end(), cidOf[i] );
+            return hi - lo == 1;
+        }
+        return std::binary_search( nearMoved.begin(), nearMoved.end(), i );
+    }
+
+private:
+    // The best index by score, or -1 when the best is shared (a tie refuses: floors, not guesses).
+    static std::ptrdiff_t uniqueBest( std::span<const float> scores )
+    {
+        std::ptrdiff_t best = -1;
+        bool           tie  = false;
+        for( std::size_t k = 0; k < scores.size(); ++k )
+        {
+            if( best < 0 || scores[k] > scores[ std::size_t( best ) ] )
+            {
+                best = std::ptrdiff_t( k );
+                tie  = false;
+            }
+            else if( scores[k] == scores[ std::size_t( best ) ] )
+            {
+                tie = true;
+            }
+        }
+        return tie ? -1 : best;
+    }
+
+    // The new callables a sketch match may claim: their key is absent from the baseline and their exact identity moved nothing.
+    std::vector<std::size_t> nearMoveCandidates( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const MoveIdentities& now ) const
+    {
+        std::vector<std::size_t> cands;   // indexes into now.sketch
+        for( std::size_t c = 0; c < now.sketch.size(); ++c )
+        {
+            const NodeId i = now.sketch[c].first;
+            if( i < keyOf.size() && keyOf[i] != 0 && base.locBySym.find( keyOf[i] ) == base.locBySym.end()
+                && !std::binary_search( removed.begin(), removed.end(), now.cid[i] ) )
+            {
+                cands.push_back( c );
+            }
+        }
+        return cands;
+    }
+
+    void matchNearMoves( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const MoveIdentities& now, const std::vector<const CloneSketch*>& vacated )
+    {
+        const std::vector<std::size_t> cands = nearMoveCandidates( base, keyOf, now );
+        const std::size_t              nv    = vacated.size();
+        std::vector<float>             sim( cands.size() * nv );   // row = candidate, column = vacated body
+        for( std::size_t a = 0; a < cands.size(); ++a )
+        {
+            for( std::size_t v = 0; v < nv; ++v )
+            {
+                sim[ a * nv + v ] = cloneSketchJaccard( now.sketch[ cands[a] ].second, *vacated[v] );
+            }
+        }
+        std::vector<float> col( cands.size() );
+        for( std::size_t a = 0; a < cands.size() && nv != 0; ++a )
+        {
+            const std::span<const float> row( sim.data() + a * nv, nv );
+            const std::ptrdiff_t         v = uniqueBest( row );
+            if( v < 0 || row[ std::size_t( v ) ] < kMoveSketchMinJaccard )
+            {
+                continue;
+            }
+            for( std::size_t b = 0; b < cands.size(); ++b )
+            {
+                col[b] = sim[ b * nv + std::size_t( v ) ];
+            }
+            if( uniqueBest( col ) == std::ptrdiff_t( a ) )
+            {
+                nearMoved.push_back( now.sketch[ cands[a] ].first );
+            }
+        }
+        std::sort( nearMoved.begin(), nearMoved.end() );
+    }
+};
 
 // EXTENT-CTOR (QD-ENTRY-CEILING card 1, 2026-11-12) — A CLASS IS NOT ITS CONSTRUCTOR'S BODY. A C++ class symbol is scoped by its
 // own name, so `class TextPool` and its constructor `TextPool::TextPool` share one canonical id, and every per-symbol kind keeps
@@ -1711,60 +1876,6 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, std::v
 // the id, the non-callable symbols under it measure 0 code lines, so the row measures the callable's own body. A class with no
 // constructor keeps its id and its extent, as before; --metrics reads Symbol::loc and does not move. `keyOf[i]` is the
 // symbol's qualityKey, 0 for a symbol with no canonical id. Applied on both sides of the delta (computeSnapshot and computeDelta).
-// MOVED-BODY (QD-ENTRY-CEILING card 2) — WHICH NEW CALLABLE IS A BODY THIS DIFF MOVED. A body moved to another file or name gets a
-// new canonical id, so the origin axis read it as new code: the 11-04 replay's one moved row at the 4x ceiling (dispatchMainBody)
-// would gate as a "new 1,000-line function" on the commit that only relocated it. A current callable is a move when its move
-// identity (moveCidOf) equals the identity of a baseline body whose key is GONE from the current tree, and no other current
-// callable carries that identity (a body that is both kept and copied, or copied twice, is a copy: refuse, floors not guesses).
-// A rewrite is not a move: one changed statement changes the identity. Only bodies over the ccx or the line bar are recorded.
-struct MovedBodies
-{
-    std::vector<std::uint64_t> removed;   // sorted move identities of baseline bodies whose key the current tree no longer has
-    std::vector<std::uint64_t> current;   // sorted move identities of every current body over a bar (a multiset: the uniqueness test)
-    const std::vector<std::uint64_t>& cidOf;
-
-    MovedBodies( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const std::vector<std::uint64_t>& nowCid )
-        : cidOf( nowCid )
-    {
-        std::vector<std::uint64_t> keys;
-        keys.reserve( keyOf.size() );
-        for( std::uint64_t k : keyOf )
-        {
-            if( k != 0 )
-            {
-                keys.push_back( k );
-            }
-        }
-        std::sort( keys.begin(), keys.end() );
-        for( const auto& [ key, cid ] : base.moveCidBySym )
-        {
-            if( !std::binary_search( keys.begin(), keys.end(), key ) )
-            {
-                removed.push_back( cid );
-            }
-        }
-        std::sort( removed.begin(), removed.end() );
-        for( std::uint64_t c : nowCid )
-        {
-            if( c != 0 )
-            {
-                current.push_back( c );
-            }
-        }
-        std::sort( current.begin(), current.end() );
-    }
-
-    bool isMoved( NodeId i ) const
-    {
-        if( i >= cidOf.size() || cidOf[i] == 0 || !std::binary_search( removed.begin(), removed.end(), cidOf[i] ) )
-        {
-            return false;
-        }
-        const auto [ lo, hi ] = std::equal_range( current.begin(), current.end(), cidOf[i] );
-        return hi - lo == 1;
-    }
-};
-
 inline void measureCallableNotItsContainer( const IngestResult& ing, const std::vector<std::uint64_t>& keyOf, std::vector<std::uint32_t>& codeLoc )
 {
     const auto isCallable = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
@@ -3869,6 +3980,8 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   codeLocByNode              (quality.h) — the locBySym VALUES (code lines per body)
 //   measureCallableNotItsContainer (quality.h) — EXTENT-CTOR: a container sharing a callable's id lends it no extent
 //   moveCidOf                  (quality.h) — MOVED-BODY: the move identity moveCidBySym stores
+//   moveSketchOf               (quality.h) — MOVES: the clone sketch moveSketchBySym stores (clones.h cloneSketchOfStream builds it)
+//   recordMoveSketches         (quality.h) — MOVES: which overload's sketch a key keeps
 //   pythonFrameworkInvokedSymbol (quality.h) — the framework-hook exemption isDeadCandidate calls into (#228)
 //   pythonRecordParent         (quality.h) — fills the closure host and owner that pythonReceiverScope reads (#228)
 //   pythonReceiverScope        (quality.h) — which method a self./cls. call in a closure belongs to (#228)
@@ -4027,7 +4140,9 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // blob holds the class extent there, and would read every such constructor as shrunk. Bumped 26 -> 27.
 // v28 (2026-11-12, lane entry-ceiling, MOVED-BODY) — a BLOB SHAPE change: the Snapshot gained moveCidBySym (one hash map after
 // bodyHashBySym). A v27 blob is short by one map. Bumped 27 -> 28.
-constexpr std::uint32_t kQSnapCacheScheme = 28;
+// v29 (2026-11-13, lane entry-ceiling, MOVES) — a BLOB SHAPE change: the Snapshot gained moveSketchBySym (key + 128-byte clone sketch
+// records after moveCidBySym), and a VACATED body now includes a key that shrank under the bars. Bumped 28 -> 29.
+constexpr std::uint32_t kQSnapCacheScheme = 29;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -4156,6 +4271,12 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
     putValMap( s.placeholderBySym );
     putHashMap( s.bodyHashBySym );
     putHashMap( s.moveCidBySym );   // v28 (MOVED-BODY)
+    qsnapPut( buf, std::uint32_t( s.moveSketchBySym.size() ) );   // v29 (MOVES): key, then the 128 sketch bytes
+    for( const auto& [ k, sk ] : s.moveSketchBySym )
+    {
+        qsnapPut( buf, k );
+        qsnapPut( buf, sk );
+    }
     putVec( s.cloneGroups );
     putVec( s.dead );
     putVec( s.publicApi );
@@ -4268,6 +4389,25 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         }
         return true;
     };
+    const auto getSketchMap = [ & ]( gtl::btree_map<std::uint64_t, CloneSketch>& m ) -> bool   // v29 (MOVES)
+    {
+        std::uint32_t n = 0;
+        if( !qsnapGet( p, end, n ) || !qsnapCountFits( p, end, n, sizeof( std::uint64_t ) + sizeof( CloneSketch ) ) )
+        {
+            return false;
+        }
+        for( std::uint32_t i = 0; i < n; ++i )
+        {
+            std::uint64_t k;
+            CloneSketch   sk;
+            if( !qsnapGet( p, end, k ) || !qsnapGet( p, end, sk ) )
+            {
+                return false;
+            }
+            m[k] = sk;
+        }
+        return true;
+    };
     const auto getVec = [ & ]( std::vector<std::uint64_t>& v ) -> bool
     {
         std::uint32_t n = 0;
@@ -4308,7 +4448,7 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         return true;
     };
 
-    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
+    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getSketchMap( s.moveSketchBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
         || !getDefectSites( s.defectSites ) )
     {
         return false;
@@ -4678,6 +4818,21 @@ inline RefSpec resolveRefSpec( const std::string& root, std::string_view spec )
         r.reason = noParentReason( root, r.targetSha );
     }
     return r;
+}
+
+// MOVES (2026-11-13): the baseline half of a near-identical move — beside each key's recorded move identity, the sketch of the body
+// that identity came from (the overload whose cid is the recorded MAX, so the pair stays order-independent). Keys moveCidBySym does
+// not hold (outside the baseline's files, no canonical id) get no sketch either.
+inline void recordMoveSketches( Snapshot& snap, const MoveIdentities& ids, const std::vector<std::uint64_t>& keyOf )
+{
+    for( const auto& [ i, sketch ] : ids.sketch )
+    {
+        const auto it = i < keyOf.size() ? snap.moveCidBySym.find( keyOf[i] ) : snap.moveCidBySym.end();
+        if( it != snap.moveCidBySym.end() && it->second == ids.cid[i] )
+        {
+            snap.moveSketchBySym[ it->first ] = sketch;
+        }
+    }
 }
 
 // T0.1 — build a quality Snapshot from the HEAD version of the tree, so `--quality-delta` (and the MCP
@@ -5965,8 +6120,9 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
                                  const std::vector<char>* fileInBaseline, const KindScope& scope, TreePasses* passes )
 {
     Snapshot snap;
-    std::vector<std::uint64_t> moveCid;                                                  // MOVED-BODY: the move identity of every body over a bar
-    std::vector<std::uint32_t> codeLoc = codeLocByNode( ing, &moveCid );                 // Q-DIAL-3: the verbosity kind's metric is CODE lines
+    MoveIdentities moveIds;                                                              // MOVED-BODY: the move identity of every body over a bar
+    std::vector<std::uint32_t> codeLoc = codeLocByNode( ing, &moveIds );                 // Q-DIAL-3: the verbosity kind's metric is CODE lines
+    const std::vector<std::uint64_t>& moveCid = moveIds.cid;
     std::vector<std::uint64_t> keyOf( ing.symbols.size(), 0 );                           // path-qualified ALWAYS — see qualityKey
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
@@ -6012,6 +6168,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
             snap.publicApi.push_back( key );
         }
     }
+    recordMoveSketches( snap, moveIds, keyOf );   // MOVES: the sketch beside each recorded move identity
     if( kindSelected( scope.kinds, "dead-code" ) )
     {
         addDeadSet( snap, ing, g, root, fileInBaseline );   // sorted below with the rest; its order of insertion never reaches a reader
@@ -6333,6 +6490,21 @@ inline void writeHexPairLines( std::ostream& f, std::string_view tag, const HexM
     }
 }
 
+// MOVES: "moves <key> <sketch>", the key in hex and the 128 sketch bytes as 256 hex digits, one per record.
+inline void writeMoveSketchLines( std::ostream& f, const gtl::btree_map<std::uint64_t, CloneSketch>& m )
+{
+    static constexpr char kHex[] = "0123456789abcdef";
+    for( const auto& [ k, sk ] : m )
+    {
+        f << "moves " << std::hex << k << std::dec << ' ';
+        for( const std::uint8_t b : sk )
+        {
+            f << kHex[ b >> 4 ] << kHex[ b & 15 ];
+        }
+        f << '\n';
+    }
+}
+
 // The defect-shape records of a baseline sidecar: "defect <anchor> <site>", both hex, one per record.
 inline void writeDefectSiteLines( std::ostream& f, const std::vector<DefectSiteKey>& sites )
 {
@@ -6430,6 +6602,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     }
     writeHexPairLines( f, "bodyq", s.bodyHashBySym ); // §D#4 short-horizon-churn raw-body hash, pathQualifiedKey-keyed
     writeHexPairLines( f, "movec", s.moveCidBySym );  // MOVED-BODY: the move identity of a body over a bar
+    writeMoveSketchLines( f, s.moveSketchBySym );      // MOVES: the clone sketch of that body
     for( std::uint64_t h : s.cloneGroups )
     {
         f << "clone " << std::hex << h << std::dec << '\n';
@@ -6535,6 +6708,29 @@ inline rw::pathguard::NoFollowRead readBaselineSidecar( const std::string& path,
     return sidecar;
 }
 
+// MOVES: one "moves <key> <256 hex digits>" record (writeMoveSketchLines). A malformed line degrades and is skipped, like every record.
+inline void readMoveSketchLine( std::istream& is, gtl::btree_map<std::uint64_t, CloneSketch>& m, BaselineReadStats& stats )
+{
+    std::uint64_t key = 0;
+    std::string   hex;
+    is >> std::hex >> key >> std::dec >> hex;
+    const auto nib = []( char c ) -> int { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; };
+    CloneSketch sk{};
+    bool        ok = !is.fail() && hex.size() == 2 * sk.size();
+    for( std::size_t j = 0; ok && j < sk.size(); ++j )
+    {
+        const int hi = nib( hex[ 2 * j ] ), lo = nib( hex[ 2 * j + 1 ] );
+        ok = hi >= 0 && lo >= 0;
+        sk[j] = std::uint8_t( ( hi << 4 ) | ( lo & 15 ) );
+    }
+    if( !ok )
+    {
+        DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine );
+        return;
+    }
+    m[ key ] = sk;
+}
+
 inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )
 {
     stats = BaselineReadStats{};
@@ -6629,6 +6825,10 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         else if( kind == "movec" )   // MOVED-BODY; a sidecar written before it has none, and then no move is recognized
         {
             readHashMap( out.moveCidBySym );
+        }
+        else if( kind == "moves" )   // MOVES; a sidecar written before it has none, and then only exact moves are recognized
+        {
+            readMoveSketchLine( is, out.moveSketchBySym, stats );
         }
         else if( kind == "clone" )
         {
@@ -9920,10 +10120,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         regs.back().memberPaths = cloneMemberPaths( cg, ing, root );   // P1 SCOPE — see cloneMemberPaths
     };
 
-    std::vector<std::uint64_t> nowMoveCid;
-    std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing, &nowMoveCid );   // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
+    MoveIdentities nowMove;
+    std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing, &nowMove );      // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
     measureCallableNotItsContainer( ing, keyByNode, nowCodeLoc );                 // EXTENT-CTOR — and the same container rule
-    const MovedBodies moved( base, keyByNode, nowMoveCid );                       // MOVED-BODY — read by perSymbolKind below
+    const MovedBodies moved( base, keyByNode, nowMove );                          // MOVED-BODY — read by perSymbolKind below
 
     // One per-symbol metric kind: aggregate the CURRENT side to the same per-canonId MAX the snapshot stores
     // (overloads share an id), compare per-id MAX vs the baseline's per-id MAX, report each id once at its

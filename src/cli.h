@@ -1839,7 +1839,7 @@ inline constexpr char kHelpHead[] =
         "                               not a moved body, not test code, ceiling= on the row); exit 0 means\n"
         "                               \"nothing that already existed got worse\", not \"clean\". Clone kinds classify by member set (new-symbol only if EVERY member is new); short-horizon-churn is preexisting\n"
         "                               by construction. LIMIT: origin is canonId (path::scope::name) identity, so a RENAMED/MOVED symbol reads as new and a regression carried in with the move will not gate;\n"
-        "                               a function over the ccx or line bar whose body moved whole (same scrubbed body, the old one removed) reads origin=\"moved\" and never gates.\n"
+        "                               a function over the ccx or line bar whose body moved, whole or with a small edit (a clone-sketch match to a body that left its key), reads origin=\"moved\" and never gates.\n"
         "                               error-masking = a NEW empty/pass/comment-only handler, or log-only (a broad handler whose body only logs and never names the error) or rethrow-only (the sole\n"
         "                               handler re-throws it unchanged); those two gate only where their precision was measured (Python) and are sev=\"minor\" in every other language.\n"
         "                               placeholder = a stub the change ADDED (todo!()/unimplemented!(), Kotlin TODO(), NotImplementedException, a bare raise NotImplementedError as a free function's body,\n"

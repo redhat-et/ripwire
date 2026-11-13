@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-13, lane entry-ceiling MOVES (after the main merge e57136074): RE-PINNED with UPDATE_GOLDEN=1, kQSnapCacheScheme 28 -> 29. A
+#   BLOB SHAPE change: the Snapshot gained moveSketchBySym (recordMoveSketches fills it beside moveCidBySym; serialize/deserialize carry
+#   it), and codeLocByNode now returns the sketch with the identity. The manifest gains moveSketchOf and recordMoveSketches.
 # 2026-11-12, lane entry-ceiling MOVED-BODY (same lane, next commit): RE-PINNED with UPDATE_GOLDEN=1, kQSnapCacheScheme 27 -> 28. A BLOB
 #   SHAPE change: the Snapshot gained moveCidBySym (computeSnapshot fills it, serialize/deserializeSnapshot carry it); the manifest
 #   gains moveCidOf, the identity it stores.
