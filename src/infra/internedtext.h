@@ -6,7 +6,9 @@
 // DETERMINISM. Ids are assigned in first-intern order, which depends on thread timing, so an id must never reach output, an order
 // or a hash. That is enforced by the type, not by convention: InternedTextOf exposes no id; ordering is the TEXT's (operator<=>),
 // and equality of two values is id equality only because interning is canonical (one text, one id), which gives exactly the text
-// answer. No std::hash is provided, so a hash container keyed by one must name its text.
+// answer. No std::hash is provided, so a hash container keyed by one must name its text. The one named escape hatch (owner 11-11,
+// K1 option (a)) is infra/idkeyedmap.h's IdKeyedMap: a friend that hashes the id, and has no iteration API, so the id-dependent
+// slot order can never be observed (test/textpoolcheck.sh arm N holds that).
 //
 // THREADING. intern() takes one of kShards mutexes (picked by the text's hash), so two threads interning the same text serialise
 // and get the same id. text() takes no lock: slots live in segments that never move or shrink (segment k holds kFirst << k
@@ -29,6 +31,7 @@
 #include <memory>   // std::construct_at / std::destroy_at: a segment's slots are constructed one id at a time (NIT-7)
 #include <mutex>
 #include <new>      // ::operator new / delete: a segment is raw storage
+#include <optional>  // InternedTextOf::ifInterned
 #include <string>
 #include <string_view>
 #include <vector>
@@ -105,6 +108,35 @@ public:
         }
     }
 
+    // The id `text` already has, kAbsentId when no one interned it — never inserts (a lookup key that was never interned names
+    // nothing a table built from interned texts can hold). Takes the shard lock, as intern does: a reader racing an intern of the
+    // same text sees it or not, and either answer is one the pool gave at some instant.
+    static constexpr std::uint32_t kAbsentId = 0xFFFFFFFFu;   // past kCapacity: never an id
+    std::uint32_t lookup( std::string_view text, std::uint64_t hash ) const
+    {
+        DASSERT( !text.empty() && hash == hashOf( text ) );
+        const Shard&        shard = shards_[ hash >> ( 64 - kShardBits ) ];
+        const std::uint32_t tag   = std::uint32_t( hash );
+        std::lock_guard     lock( shard.mutex );
+        if( shard.slots.empty() )
+        {
+            return kAbsentId;
+        }
+        const std::size_t mask = shard.slots.size() - 1;
+        for( std::size_t probe = tag & mask;; probe = ( probe + 1 ) & mask )
+        {
+            const Slot& slot = shard.slots[ probe ];
+            if( slot.id == kEmptyId )
+            {
+                return kAbsentId;   // a shard is at most half full: a probe always reaches a free slot
+            }
+            if( slot.tag == tag && this->text( slot.id ) == text )
+            {
+                return slot.id;
+            }
+        }
+    }
+
     // how many distinct texts the pool holds (ids handed out so far; the empty text is none of them); a host stats line reads it
     std::uint32_t idCount() const noexcept { return next_.load( std::memory_order_relaxed ) - 1; }
 
@@ -132,8 +164,8 @@ private:
     };
     struct alignas( kLine ) Shard   // one shard per destructive-interference line: no false sharing between shards' locks
     {
-        std::mutex        mutex;
-        std::vector<Slot> slots;   // open addressing, linear probe, a power of two at most half full
+        mutable std::mutex mutex;   // lookup (const) locks it too
+        std::vector<Slot>  slots;   // open addressing, linear probe, a power of two at most half full
         std::size_t       used = 0;
     };
     // alignas( kLine ) is the no-false-sharing guarantee: no two shards share a line on any platform. One shard fits ONE line
@@ -243,6 +275,39 @@ template <class Domain> std::uint32_t internCached( std::string_view text )
     return slot.id;
 }
 
+// The id `text` has in Domain's pool, TextPool::kAbsentId when it was never interned: lookup behind a per-thread front cache of
+// the ids this thread found last (only hits are cached: a text interned later is found by the next miss). Never inserts.
+template <class Domain> std::uint32_t lookupCached( std::string_view text )
+{
+    if( text.empty() )
+    {
+        return TextPool::kEmptyId;
+    }
+    struct FrontSlot
+    {
+        std::uint32_t tag = 0;
+        std::uint32_t id  = TextPool::kEmptyId;
+    };
+    constexpr std::size_t kFrontSlots = 512;   // 4 KB per thread
+    thread_local FrontSlot front[ kFrontSlots ];
+    const TextPool&     pool = Domain::pool();
+    const std::uint64_t hash = TextPool::hashOf( text );
+    FrontSlot&          slot = front[ hash & ( kFrontSlots - 1 ) ];
+    const std::uint32_t tag  = std::uint32_t( hash >> 32 );
+    if( slot.id != TextPool::kEmptyId && slot.tag == tag && std::string_view( pool.text( slot.id ) ) == text )
+    {
+        return slot.id;
+    }
+    const std::uint32_t id = pool.lookup( text, hash );
+    if( id != TextPool::kAbsentId )
+    {
+        slot = { tag, id };
+    }
+    return id;
+}
+
+template <class Domain, class V> class IdKeyedMap;   // infra/idkeyedmap.h: the one reader of an id (lookup-only, no iteration)
+
 // A text in Domain's pool: 4 B, read like a const std::string, assigned from any text. No mutation in place: an edit builds the new
 // text and assigns it. `+=` and push_back do that per call (copy, re-intern), so build a long text in a std::string and assign once.
 // See the DETERMINISM note above for why no id is exposed.
@@ -251,6 +316,19 @@ template <class Domain> class InternedTextOf
 public:
     InternedTextOf() noexcept = default;
     explicit InternedTextOf( std::string_view text ) : id_( internCached<Domain>( text ) ) {}   // explicit: no text converts to a name behind a comparison
+    // The value `text` names when someone already interned it, nullopt otherwise; never inserts (a lookup by a name some table
+    // may hold: an absent text cannot be one of its keys).
+    static std::optional<InternedTextOf> ifInterned( std::string_view text )
+    {
+        const std::uint32_t id = lookupCached<Domain>( text );
+        if( id == TextPool::kAbsentId )
+        {
+            return std::nullopt;
+        }
+        InternedTextOf found;
+        found.id_ = id;
+        return found;
+    }
     InternedTextOf& operator=( std::string_view text )
     {
         id_ = internCached<Domain>( text );
@@ -297,6 +375,7 @@ public:
     friend std::strong_ordering operator<=>( const InternedTextOf& a, std::string_view b ) noexcept { return sortutil::svCompare( a.str(), b ); }
 
 private:
+    template <class D, class V> friend class IdKeyedMap;   // the ONE reader of id_: a lookup-only table that never iterates
     std::uint32_t id_ = TextPool::kEmptyId;
 };
 
