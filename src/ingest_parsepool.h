@@ -200,6 +200,17 @@ struct PendingParsedFile
 // makes "the warm path does not reallocate" an executable fact instead of a profile reading — the same
 // posture `reparsed=`/`cached_records=` already take for their claims. One capacity() compare per family
 // per file; nothing in the per-element loops changes.
+// One family of a cache hit: re-stamp today's fileId on every row and move it into the worker's accumulator.
+template <typename Row>
+inline void appendRelabelled( std::vector<Row>& rows, std::uint32_t fileId, std::vector<Row>& dst )
+{
+    for( Row& row : rows )
+    {
+        row.fileId = fileId;
+        dst.push_back( std::move( row ) );
+    }
+}
+
 inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, IngestFileScan& scan, RawFacts& out )
 {
     const auto willGrow = []( const auto& dst, std::size_t need ) noexcept
@@ -217,51 +228,15 @@ inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, In
                               + willGrow( out.constructs, hit.constructs.size() );
 
     scan.health[ fileId ] = hit.health;   // §L1
-    for( RawDef& d : hit.defs )
-    {
-        d.fileId = fileId;
-        out.defs.push_back( std::move( d ) );
-    }
-    for( RawRef& rr : hit.refs )
-    {
-        rr.fileId = fileId;
-        out.refs.push_back( std::move( rr ) );
-    }
-    for( Include& in : hit.incs )
-    {
-        in.fileId = fileId;
-        out.incs.push_back( std::move( in ) );
-    }
-    for( RawBind& b : hit.binds )
-    {
-        b.fileId = fileId;
-        out.binds.push_back( std::move( b ) );
-    }
-    for( BindingAlias& a : hit.ffis )
-    {
-        a.fileId = fileId;
-        out.ffis.push_back( std::move( a ) );
-    }
-    for( RouteDef& rd : hit.routeDefs )        // B6.3
-    {
-        rd.fileId = fileId;
-        out.routeDefs.push_back( std::move( rd ) );
-    }
-    for( RawRouteUse& ru : hit.routeUses )     // B6.3
-    {
-        ru.fileId = fileId;
-        out.routeUses.push_back( std::move( ru ) );
-    }
-    for( ConstOpen& co : hit.constOpens )      // parser version 82
-    {
-        co.fileId = fileId;
-        out.constOpens.push_back( std::move( co ) );
-    }
-    for( ConstructHit& ch : hit.constructs )   // QD-CONSTRUCTS-AT-INGEST
-    {
-        ch.fileId = fileId;
-        out.constructs.push_back( ch );
-    }
+    appendRelabelled( hit.defs, fileId, out.defs );
+    appendRelabelled( hit.refs, fileId, out.refs );
+    appendRelabelled( hit.incs, fileId, out.incs );
+    appendRelabelled( hit.binds, fileId, out.binds );
+    appendRelabelled( hit.ffis, fileId, out.ffis );
+    appendRelabelled( hit.routeDefs, fileId, out.routeDefs );     // B6.3
+    appendRelabelled( hit.routeUses, fileId, out.routeUses );     // B6.3
+    appendRelabelled( hit.constOpens, fileId, out.constOpens );   // parser version 82
+    appendRelabelled( hit.constructs, fileId, out.constructs );   // QD-CONSTRUCTS-AT-INGEST
     return growths;
 }
 

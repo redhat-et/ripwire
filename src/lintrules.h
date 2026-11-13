@@ -1382,17 +1382,6 @@ inline bool errorMaskBlockIsEmpty( std::string_view collapsed ) noexcept
 // are the caller's ONE-ENTRY memo: astQuery already sorts (file, startByte, tag), so one slot holds a
 // whole file's candidates. An UNREADABLE or MOVED file answers false — a finding that cannot be
 // substantiated is not reported. Never throws.
-// The confirm over bytes the caller already holds for the match's file (the parse worker's own read, at ingest). The
-// disk form below reads the file and asks exactly this, so the two cannot answer differently for the same bytes.
-inline bool errorMaskConfirmInBytes( std::string_view fileBytes, const AstMatch& m ) noexcept
-{
-    if( std::size_t( m.startByte ) + m.text.size() > fileBytes.size() )
-    {
-        return false;
-    }
-    return errorMaskCommentConsumesBlock( fileBytes.substr( m.startByte, m.text.size() ) );
-}
-
 inline bool errorMaskConfirmOnDisk( const IngestResult& ing, const AstMatch& m,
                                     std::uint32_t& memoFileId, std::string& memoBytes )
 {
@@ -1406,7 +1395,22 @@ inline bool errorMaskConfirmOnDisk( const IngestResult& ing, const AstMatch& m,
         }
         memoBytes = std::move( bytes ).value_or( std::string() );
     }
-    return errorMaskConfirmInBytes( memoBytes, m );
+    if( std::size_t( m.startByte ) + m.text.size() > memoBytes.size() )
+    {
+        return false;
+    }
+    return errorMaskCommentConsumesBlock( std::string_view( memoBytes ).substr( m.startByte, m.text.size() ) );
+}
+
+// The confirm over bytes the caller already holds for the match's file (the parse worker's own read, at ingest). The
+// disk form above asks the same question of the bytes it reads, over the same slice.
+inline bool errorMaskConfirmInBytes( std::string_view fileBytes, const AstMatch& m ) noexcept
+{
+    if( std::size_t( m.startByte ) + m.text.size() > fileBytes.size() )
+    {
+        return false;
+    }
+    return errorMaskCommentConsumesBlock( fileBytes.substr( m.startByte, m.text.size() ) );
 }
 
 // One error-masking hit: the suppressing block's file + start byte (so a caller can attribute it to the
@@ -1546,11 +1550,11 @@ static_assert( constructTagOf( kShapeTodo ) == kConstructTagCount - 1 && constru
 // BOTH budgets are unbounded: see findQualityConstructs' header for why.
 inline std::vector<AstQuerySpec> errorMaskQuerySpecs()
 {
-    std::vector<AstQuerySpec> specs;
-    specs.reserve( kErrorMaskRules.size() );
-    for( std::size_t r = 0; r < kErrorMaskRules.size(); ++r )
+    std::vector<AstQuerySpec> specs( kErrorMaskRules.size() );   // spec r is tagged with its row index r (errorMaskRuleIndex reads it back)
+    for( std::size_t r = 0; r < specs.size(); ++r )
     {
-        specs.push_back( { std::string( kErrorMaskRules[r].query ), std::to_string( r ) } );
+        specs[r].query = kErrorMaskRules[r].query;
+        specs[r].tag   = std::to_string( r );
     }
     return specs;
 }
