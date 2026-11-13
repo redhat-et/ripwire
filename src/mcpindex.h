@@ -830,6 +830,7 @@ inline void invalidateMcpIndex()
 
 // #350: over the memory guard's hard limit, drop the resident index's bulk (the ingest, the graph, the ranks and the
 // per-file arrays) and mark it stale, so the footprint can fall back under the line; the next getIndex() rebuilds.
+// getIndex() also calls it first on every rebuild (S1), so a rebuild never holds the old index beside the new one.
 inline void releaseMcpIndexMemory()
 {
     McpIndex& ix = mcpIndexSlot();
@@ -1263,11 +1264,13 @@ inline const McpIndex& getIndex( const std::string& root )
     // touches the warm reuse that returned above.
     const McpRebuildBaseline a3Before = mcpRebuildBaseline( ix, isIncrementalPass );
 
-    // `ing` is about to be replaced: the value-reference index points into it (McpIndex::valueRefs), so it goes first —
-    // whether or not the file content moved. The MCP-CALL-MEMO facts are functions of `ing` and `g` too.
-    ix.valueRefs.reset();
-    ix.impure.reset();
-    ix.qmetrics.reset();
+    // S1 (mem-audit-fable-1111): the old index goes BEFORE the new ingest, not when the new one is assigned over it. Everything
+    // the rebuild still needs from it was taken just above (a3Before) or lives outside the bulk (root, cacheFile, dirMtime, the
+    // watcher, the counters); the ingest reads the cache blob on disk, never the old model. Holding both meant a rebuild peaked
+    // at the old model + graph on top of a fresh build (envoy: about 565 MiB extra). The value-reference index and the
+    // MCP-CALL-MEMO facts point into or derive from `ing`, and releaseMcpIndexMemory drops them first. A failed ingest or graph
+    // build now leaves an invalid slot, the state the FileGraphStopped path below already leaves; the next request rebuilds.
+    releaseMcpIndexMemory();
 
     // Multi-root workspace key (A11): per-root ingest (each with ITS OWN mcpCachePath blob — an edit in
     // one root never reparses another) merged into one IngestResult; else the single-root path unchanged.
