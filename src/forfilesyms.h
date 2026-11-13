@@ -1465,12 +1465,17 @@ inline BindPicks pickBinds( const IngestResult& ing, const ShownFiles& sf, const
     return out;
 }
 // The legend, with the by="bind" clause spliced before its close when a bind row prints.
+// A present-only clause spliced before the legend's closing ` -->` (the legend stays one comment).
+inline void spliceLegendClause( std::string& legend, std::string_view clause )
+{
+    legend.insert( legend.size() - kLegendClose.size(), clause );
+}
 inline std::string symsLegend( bool compactLegend, const BindPicks& binds )
 {
     std::string out( compactLegend ? kForFileSymsLegendCompact : kForFileSymsLegend );
     if( !binds.rows.empty() )
     {
-        out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsBindLegendCompact : kForFileSymsBindLegend );
+        spliceLegendClause( out, compactLegend ? kForFileSymsBindLegendCompact : kForFileSymsBindLegend );
     }
     return out;
 }
@@ -1478,10 +1483,7 @@ inline std::string symsLegend( bool compactLegend, const BindPicks& binds )
 inline std::string symsLegendOf( bool compactLegend, const Picks& picks )
 {
     std::string out = symsLegend( compactLegend, picks.binds );
-    if( !picks.inits.empty() )
-    {
-        out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
-    }
+    spliceLegendClause( out, picks.inits.empty() ? std::string_view() : compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
     return out;
 }
 // A <y> row's opening `<y p="file:line" n="Owner.name"` for symbol `s` (the attribute tail is the rule's own).
