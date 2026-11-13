@@ -58,9 +58,12 @@ root_of(){ grep -o "<$1 [^>]*>" | head -1; }         # first START-TAG of elemen
 
 # ── 1) head_ref: ONE spelling across the --stray-content family ────────────────────────────────────────
 # Both halves are run against this repo itself (the verb needs real refs); a shallow/ref-less checkout
-# degrades to zero rows but STILL emits the root element, which is all this assertion reads.
-"$BIN" . --stray-content --no-cache >"$TMP/stray.xml" 2>/dev/null
-"$BIN" . --stray-content --abi --no-cache >"$TMP/abi.xml" 2>/dev/null
+# degrades to zero rows but STILL emits the root element, which is all this assertion reads. Past the 512-branch refusal (a
+# long-lived dev clone or its linked worktree) there is no root element at all, so both ask test/lib/sweeproot.sh's root.
+. "$ROOT/test/lib/sweeproot.sh"
+SWEEP="$( sweepRoot "$ROOT" "$TMP/sweep" )"
+"$BIN" "$SWEEP" --stray-content --no-cache >"$TMP/stray.xml" 2>/dev/null   # status: the root element is the verdict; a refusal leaves none and the arms below FAIL
+"$BIN" "$SWEEP" --stray-content --abi --no-cache >"$TMP/abi.xml" 2>/dev/null   # status: the root element is the verdict; a refusal leaves none and the arms below FAIL
 
 SC="$( root_of stray-content <"$TMP/stray.xml" )"
 AB="$( root_of abi          <"$TMP/abi.xml"   )"

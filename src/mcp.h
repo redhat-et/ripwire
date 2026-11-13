@@ -2436,14 +2436,18 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     resp = !listingRefusal.empty() ? errResultMsg( -32602, listingRefusal ) : pagedResult( [ & ]( McpPageArgs pg )
                     {
                         bool              seedFault = false;
-                        bool              blobFault = false;
-                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing, &blobFault,
+                        SweepFault        sweepFault = SweepFault::None;
+                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing, &sweepFault,
                                                             whereisFullText );
                         if( seedFault )
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
                         }
-                        if( blobFault )
+                        if( sweepFault == SweepFault::TooManyRefs )
+                        {
+                            return errResultMsg( -32602, tooManyRefsRefusal() );
+                        }
+                        if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "whereis (MCP): the blob stream did not serve every blob — a -32603 error names it, no hit count" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
@@ -2456,9 +2460,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // `kind` doubles as the optional ref-name substring filter (no dedicated arg needed).
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
-                        bool              blobFault = false;
-                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &blobFault );
-                        if( blobFault )
+                        SweepFault        sweepFault = SweepFault::None;
+                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &sweepFault );
+                        if( sweepFault == SweepFault::TooManyRefs )
+                        {
+                            return errResultMsg( -32602, tooManyRefsRefusal() );
+                        }
+                        if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );

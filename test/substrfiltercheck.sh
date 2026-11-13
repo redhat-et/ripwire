@@ -31,6 +31,11 @@
 #
 # RED-FIRST (base binary ec5e3c3): A/B fail on --flags and --stray-content, D fails on both whereis arms.
 #
+# ARM E (MAIN-LOCAL-REDS, 2026-11-13) covers the other refusal the sweep verbs share: more than 512 local branches (crossref
+# kMaxRefs). The CLI --stray-content already said "more than 512 refs match — narrow it with --stray-content=SUBSTR"; --whereis
+# said "is not a git repository (or has no HEAD commit)", and the MCP whereis and stray_content twins said the same. RED-FIRST
+# (main cd04d477e): E1 (both roots), E3, E4 and E6 fail; E0, E2 and E5 hold on both binaries.
+#
 # Usage:  bash test/substrfiltercheck.sh [BIN]   |   RIPWIRE_BIN=build_base/ripwire bash test/…
 # Exits non-zero on any failure.
 
@@ -53,7 +58,7 @@ MISS="zzzznosuchfilterxyz"
 # branches was green only where a lane/* head happened to exist. refuses_empty/lives take the corpus from
 # $CORPUS, which defaults to this repo and is pointed at the fixture for that one flag.
 . "$ROOT/test/lib/strayfixture.sh"
-SFIX="$( mktemp -d )"; trap 'rm -rf "$SFIX"' EXIT
+SFIX="$( mktemp -d )"; EFIX="$( mktemp -d )"; trap 'rm -rf "$SFIX" "$EFIX"' EXIT
 mkStrayFixture "$SFIX"
 strayFixtureHasRef "$SFIX" \
     && ok "fixture: throwaway repo carries a lane/* ref for --stray-content=lane to select" \
@@ -159,6 +164,78 @@ else
     no "D --whereis=@one.cpp:2 did not resolve the seed: $( printf '%s' "$OUT" | grep -o '<whereis [^>]*>' )"
 fi
 rm -rf "$WFIX"
+
+# ── E: a repository with more than 512 local branches IS a git repository ────────────────────────────────────────────────
+# A long-lived clone with hundreds of lane branches has the cap (the operator's checkout this was found in: 518 heads), and a
+# linked worktree shares its branches. An agent told "not a git repository" stops using every git verb; the honest refusal
+# names the cap and the filter that narrows under it. The fixture: 513 branches with DISTINCT tips (a branch at HEAD's sha is
+# not swept, so it would not count toward the cap), asked from the main checkout and from a linked worktree (.git a file).
+EGIT(){ git -c user.name=Dev -c user.email=dev@x.com -c commit.gpgsign=false "$@"; }
+EGIT -C "$EFIX" init -q main
+printf 'int capProbe( int x ) { return x + 1; }\n' >"$EFIX/main/cap.cpp"
+EGIT -C "$EFIX/main" add -A
+GIT_AUTHOR_DATE="2026-06-01T12:00:00" GIT_COMMITTER_DATE="2026-06-01T12:00:00" EGIT -C "$EFIX/main" commit -qm init
+ETREE="$( git -C "$EFIX/main" rev-parse 'HEAD^{tree}' )"; EHEAD="$( git -C "$EFIX/main" rev-parse HEAD )"
+for i in $( seq -w 1 513 ); do
+    tip="$( GIT_AUTHOR_NAME=Dev GIT_AUTHOR_EMAIL=dev@x.com GIT_COMMITTER_NAME=Dev GIT_COMMITTER_EMAIL=dev@x.com \
+            GIT_AUTHOR_DATE="2026-06-01T13:00:00" GIT_COMMITTER_DATE="2026-06-01T13:00:00" git -C "$EFIX/main" commit-tree "$ETREE" -p "$EHEAD" -m "b$i" )"
+    printf 'create refs/heads/b%s %s\n' "$i" "$tip"
+done | git -C "$EFIX/main" update-ref --stdin
+EGIT -C "$EFIX/main" worktree add -q "$EFIX/linked" b001 2>/dev/null
+# E0 the premise, counted: more than 512 branches whose tip is not HEAD's, and the linked root's .git is a FILE.
+ESWEPT="$( git -C "$EFIX/main" for-each-ref refs/heads --format='%(objectname)' | grep -vcF "$EHEAD" )"
+if [ "$ESWEPT" -gt 512 ] && [ -f "$EFIX/linked/.git" ]; then
+    ok "E0 fixture: $ESWEPT branches off HEAD's sha (cap 512), and a linked worktree whose .git is a file"
+else
+    no "E0 fixture: $ESWEPT branches off HEAD's sha, linked .git a file: $( [ -f "$EFIX/linked/.git" ] && echo yes || echo no ) — E1-E5 would prove nothing"
+fi
+# E1 the CLI --whereis refusal names the cap, from both roots.
+for eroot in main linked; do
+    OUT="$( "$BIN" "$EFIX/$eroot" --whereis=capProbe --no-cache 2>&1 1>/dev/null )"; RC=$?
+    if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs" && ! printf '%s' "$OUT" | grep -qF "not a git repository" \
+       && ! printf '%s' "$OUT" | grep -qF -- "--stray-content="; then
+        ok "E1 --whereis over 513 branches ($eroot root) refuses naming the ref cap, and no CLI filter it does not have"
+    else
+        no "E1 --whereis over 513 branches ($eroot root) → exit $RC: $OUT"
+    fi
+done
+# One fresh MCP session per call (initialize, then tools/call); prints the tools/call reply line.
+emcp(){ printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" \
+        | "$BIN" --mcp 2>/dev/null | grep -F '"id":2'; }   # status: the tools/call reply line is the verdict (error vs document), asserted by each caller
+# E2 twin: the MCP whereis kind= filter the refusals name narrows under the cap and answers (the CLI --whereis has no ref
+# filter — --stray-content=SUBSTR is another verb that takes precedence, crossrefcheck's guard arm — so no CLI refusal names one).
+OUT="$( emcp whereis "{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\",\"kind\":\"b007\"}" )"
+if printf '%s' "$OUT" | grep -qF '<whereis ' && printf '%s' "$OUT" | grep -qF 'filter=\"b007\"'; then
+    ok "E2 MCP whereis kind=b007 (linked root) answers under the cap"
+else
+    no "E2 MCP whereis kind=b007 (linked root): $( printf '%s' "$OUT" | head -c 300 )"
+fi
+# E3/E4 the MCP twins answer an error naming the cap, never "not a git repository".
+for etool in whereis stray_content; do
+    eargs="{\"path\":\"$EFIX/linked\"}"; [ "$etool" = whereis ] && eargs="{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\"}"
+    OUT="$( emcp "$etool" "$eargs" )"
+    if printf '%s' "$OUT" | grep -qF '"error"' && printf '%s' "$OUT" | grep -qF "more than 512 refs match" && ! printf '%s' "$OUT" | grep -qF "not a git repository"; then
+        ok "E3/E4 MCP $etool over 513 branches answers an error naming the ref cap"
+    else
+        no "E3/E4 MCP $etool over 513 branches: $( printf '%s' "$OUT" | head -c 300 )"
+    fi
+done
+# E5 control: the CLI --stray-content twin already said so (holds on both binaries).
+OUT="$( "$BIN" "$EFIX/linked" --stray-content --no-cache 2>&1 1>/dev/null )"; RC=$?
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs match"; then
+    ok "E5 --stray-content over 513 branches refuses naming the ref cap (control)"
+else
+    no "E5 --stray-content over 513 branches → exit $RC: $OUT"
+fi
+# E6 --eval-stray scores that sweep: its refusal said "cannot read '<labels>', or <root> is not a git repository" — both false.
+printf 'b001\tunmerged\n' >"$EFIX/labels.tsv"
+OUT="$( "$BIN" "$EFIX/linked" --eval-stray="$EFIX/labels.tsv" --no-cache 2>&1 1>/dev/null )"; RC=$?
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs" && ! printf '%s' "$OUT" | grep -qF "not a git repository"; then
+    ok "E6 --eval-stray over 513 branches refuses naming the ref cap"
+else
+    no "E6 --eval-stray over 513 branches → exit $RC: $OUT"
+fi
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
