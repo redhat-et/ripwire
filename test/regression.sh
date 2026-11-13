@@ -374,8 +374,6 @@ for _g in \
     cloneidiomcheck \
     clonelexcheck \
     clonepersistcheck \
-    qdconstructscheck \
-    qbasecachecheck \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \
@@ -853,10 +851,12 @@ for _g in \
     pyshapecheck \
     qackconcurrencycheck \
     qackorigincheck \
+    qbasecachecheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
     qdclonepaircheck \
+    qdconstructscheck \
     qddegradecheck \
     qddialscheck \
     qdmonstercheck \

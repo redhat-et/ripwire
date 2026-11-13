@@ -12,7 +12,7 @@
 #        stats lines, rc);
 #   (N)  --no-cache neither reads nor writes the blob (two ingests, no new blob) and answers byte-identically;
 #   (X)  a changed --exclude MISSES (two ingests, a second blob); so does a changed --quality-kinds selection. The build's
-#        producer identity is folded into the same key string as both (quality.h qbaseExclHex);
+#        producer identity is folded into the same key string as both (verbs_quality.h scoreBaseCommit: the qsnap key plus the kinds);
 #   (C)  a corrupt blob is REFUSED: the corrupt line on stderr, two ingests, the same answer, and the rewritten blob hits
 #        on the next call;
 #   (T)  a truncated blob is refused the same way.

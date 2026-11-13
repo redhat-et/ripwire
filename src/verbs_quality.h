@@ -197,8 +197,10 @@ int refPairStopRefusal( const PhaseStop& stop, const RefPairDelta& refs, std::st
 bool takeCachedBase( const std::string& path, const std::string& sha, RefPairDelta& refs )
 {
     using namespace rw;
-    quality::BaseCommitScore cached;
-    const int                hit = quality::probeBaseCommitScore( path, sha, cached );
+    // 1 = a valid hit, 0 = a clean miss (absent, empty, not a regular file), -1 = present but refused
+    quality::BaseCommitScore         cached;
+    const std::optional<std::string> blob = quality::readQSnapBlob( path );
+    const int                        hit  = !blob ? 0 : quality::deserializeBaseCommitScore( *blob, sha, cached ) ? 1 : -1;
     if( hit == -1 )
     {
         rw::emitRaw( stderr, "ripwire: quality: base Snapshot cache corrupt — recomputing\n" );
@@ -222,7 +224,8 @@ std::optional<int> scoreBaseCommit( const std::string& root, const std::string& 
     // neither reads nor writes it, so the flag that asks for a fresh answer gets one.
     const bool        useCache = !cfg.noCache;
     const std::string repoHex  = useCache ? quality::cacheRootKeyHex( root ) : std::string();
-    const std::string exclHex  = useCache ? quality::qbaseExclHex( cfg.excludes, cfg.maxFileBytes, refs.selected ) : std::string();
+    // the qsnap key (excludes, maxFileBytes, scheme, producer identity) plus the selected kinds: a base Snapshot holds only those
+    const std::string exclHex  = useCache ? quality::qsnapExclHex( cfg.excludes, cfg.maxFileBytes ) + "k" + std::to_string( refs.selected ) : std::string();
     const std::string path     = useCache ? quality::qbaseCachePath( repoHex, exclHex, sha ) : std::string();
     if( useCache && takeCachedBase( path, sha, refs ) )
     {
@@ -247,7 +250,7 @@ std::optional<int> scoreBaseCommit( const std::string& root, const std::string& 
     if( useCache && !refs.stop.stopped )   // a stopped side is never persisted: the next call must not read a partial floor as whole
     {
         (void)quality::atomicWriteFile( path, quality::serializeBaseCommitScore( { refs.baseSnapshot, refs.baseMacros }, sha ) );
-        quality::evictOldQBaseCaches( quality::cacheDirLadder(), repoHex, exclHex, path, 2 );
+        quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + repoHex + "-" + exclHex + "-", path, 2 );
     }
     return std::nullopt;
 }

@@ -4721,8 +4721,9 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
 // scoreBaseCommit): the base Snapshot for the selected kinds and the base tree's C-family macro names. Both are pure
 // functions of (repo, base sha, excludes, maxFileBytes, the selected kinds, the extraction and producer identity), so they
 // are stored in one blob of the "qbase" family keyed by exactly that, with the qsnap family's two never-stale guards:
-//  1) the FILENAME key folds the qsnap scheme, the producer identity and the kind mask into the excludes hash, the sha
-//     into the suffix — another sha, exclude set, kind selection or build names another file;
+//  1) the FILENAME key is the qsnap one (qsnapExclHex: excludes, maxFileBytes, the qsnap scheme, the producer identity)
+//     plus the kind mask, the sha the suffix (verbs_quality.h scoreBaseCommit) — another sha, exclude set, kind selection
+//     or build names another file;
 //  2) the blob self-validates: its own magic and an fnv1a64 trailer over the whole body, and inside it a whole qsnap
 //     blob (magic, scheme, ingest format mirrors, producer hash, sha hash, its own trailer). A blob that fails either
 //     is refused, recomputed and rewritten (the caller alerts, the HEAD qsnap's corrupt-cache way).
@@ -4735,21 +4736,9 @@ struct BaseCommitScore
     std::vector<std::string> macros;   // cFamilyMacroNames of the base tree, in its order
 };
 
-inline std::string qbaseExclHex( const std::vector<std::string>& excludes, std::size_t maxFileBytes, KindMask kinds )
-{
-    return exclConfigHex( excludes, "qbase" + std::to_string( kQSnapCacheScheme ) + '\x1f' + std::string( producerIdentity() ) + '\x1f' + std::to_string( kinds ),
-                          maxFileBytes );
-}
-
 inline std::string qbaseCachePath( const std::string& repoHex, const std::string& exclHex, const std::string& baseSha )
 {
     return shaKeyedCachePath( "qbase", repoHex, exclHex, baseSha );
-}
-
-inline void evictOldQBaseCaches( const std::string& dir, const std::string& repoHex, const std::string& exclHex,
-                                 const std::string& keepPath, std::size_t keep = 2 )
-{
-    evictOldCacheFamily( dir, "ripwire-qbase-" + repoHex + "-" + exclHex + "-", keepPath, keep );
 }
 
 // magic, the qsnap blob (length-prefixed), the macro names (count, then length-prefixed each), an fnv1a64 trailer
@@ -4812,17 +4801,6 @@ inline bool deserializeBaseCommitScore( const std::string& blob, const std::stri
         p += len;
     }
     return p == end;
-}
-
-// 1 = a valid hit (`out` filled), 0 = a clean miss (absent, empty, not a regular file), -1 = present but refused
-inline int probeBaseCommitScore( const std::string& path, const std::string& baseSha, BaseCommitScore& out )
-{
-    const std::optional<std::string> blob = readQSnapBlob( path );
-    if( !blob )
-    {
-        return 0;
-    }
-    return deserializeBaseCommitScore( *blob, baseSha, out ) ? 1 : -1;
 }
 
 // ─── R-I: one materialized commit tree, ingested AND graphed, with an EXPLICIT lifetime ─────────────────
