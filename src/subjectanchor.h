@@ -385,6 +385,20 @@ inline bool asksDependents( const std::vector<std::string_view>& words, const st
     return cue && !name.empty() && std::size_t( std::ranges::count_if( dropped, plain ) ) <= kSubjectMaxPlainWords;
 }
 
+// A Go receiver spelling read as the name it qualifies: `(*pkg.T).M` and `(T).M` are pkg.T.M and T.M; "" when `w` is not one.
+// Anything after the method name stays (a sentence word's closing backtick or `?`).
+inline std::string goReceiverRead( std::string_view w )
+{
+    const std::size_t rp = w.find( ')' );
+    if( !w.starts_with( '(' ) || rp == std::string_view::npos || rp + 1 >= w.size() || w[rp + 1] != '.' )
+    {
+        return {};
+    }
+    std::string_view recv = w.substr( 1, rp - 1 );
+    recv.remove_prefix( recv.starts_with( '*' ) ? 1 : 0 );
+    return std::string( recv ) + std::string( w.substr( rp + 1 ) );
+}
+
 // SENTENCE-SUBJECT. A sentence that marks its code (`backticks`) says which words are names, so the guards above that tell a name from
 // prose (one identifier-syntax word, at most kSubjectMaxPlainWords plain words) have nothing left to guess: "If
 // `kvserver.NewReplicaEvalContext` (pkg/...) gained a new required parameter, exactly which non-test functions call it directly ...;
@@ -403,21 +417,10 @@ inline std::vector<std::string> backtickSpellings( std::string_view task )
         }
         std::string_view span = task.substr( open + 1, close - open - 1 );
         open                  = task.find( '`', close + 1 );
-        std::string name;
-        if( span.starts_with( '(' ) )   // a Go receiver: `(*pkg.T).M`, `(T).M`
+        std::string name = span.starts_with( '(' ) ? goReceiverRead( span ) : std::string( span );   // a Go receiver: `(*pkg.T).M`, `(T).M`
+        if( name.empty() )
         {
-            const std::size_t rp = span.find( ')' );
-            if( rp == std::string_view::npos || rp + 1 >= span.size() || span[rp + 1] != '.' )
-            {
-                continue;
-            }
-            std::string_view recv = span.substr( 1, rp - 1 );
-            recv.remove_prefix( recv.starts_with( '*' ) ? 1 : 0 );
-            name = std::string( recv ) + std::string( span.substr( rp + 1 ) );
-        }
-        else
-        {
-            name = std::string( span );
+            continue;
         }
         if( const std::size_t lp = name.find( '(' ); lp != std::string::npos )   // a call: `f(title)`, `f()`, `f(...)`
         {
@@ -544,6 +547,26 @@ inline std::vector<CodeName> sentenceCodeNames( const IngestResult& ing, std::st
     return out;
 }
 
+// The sentence's words as the name tests compare them: trimmed, and a Go receiver word read as backtickSpellings reads it
+// (`(*kv.Replica).NewEvalContext` is kv.Replica.NewEvalContext). `text` views `goRead`'s strings or the words themselves.
+struct SentenceWordText
+{
+    std::vector<std::string_view> text;
+    std::vector<std::string>      goRead;
+};
+inline SentenceWordText sentenceWordText( const std::vector<std::string_view>& words )
+{
+    SentenceWordText r;
+    r.goRead.reserve( words.size() );   // no reallocation: `text` views these strings (a move of `r` keeps the buffer)
+    for( std::string_view w : words )
+    {
+        w.remove_prefix( w.starts_with( '`' ) ? 1 : 0 );
+        r.goRead.push_back( goReceiverRead( w ) );
+        r.text.push_back( r.goRead.back().empty() ? detail::graphSubjectTrimWord( w ).text : std::string_view( r.goRead.back() ) );
+    }
+    return r;
+}
+
 // does the sentence ask what depends on `spelling`? A dependents cue in that sense anywhere (no plain-word bound: the code is marked)
 // whose object is the name: the name, or a pronoun for it, within kCueObjectWords words after the cue ("which functions call it
 // directly", "who invokes `f`", "callers does `f` have"). A cue about something else ("how does rake invoke the task ... `multitask`
@@ -552,11 +575,8 @@ inline constexpr std::size_t      kCueObjectWords = 3;
 inline constexpr std::string_view kCuePronouns[]  = { "it", "them", "its" };
 inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::string_view spelling )
 {
-    std::vector<std::string_view> text;
-    for( const std::string_view w : words )
-    {
-        text.push_back( detail::graphSubjectTrimWord( w ).text );
-    }
+    const SentenceWordText        read = sentenceWordText( words );
+    const std::vector<std::string_view>& text = read.text;
     bool callee = false;
     for( std::size_t k = 0; k < text.size(); ++k )
     {

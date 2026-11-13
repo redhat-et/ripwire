@@ -16,6 +16,7 @@
 #   CQ  in a long sentence (the sentence reading, not the short-subject one), a spelling whose OUTER qualifier places nothing
 #       (`Missing.setup.prepare_setup_platform`) is no name: no callers block, no re-ask; its twin `setup.prepare_setup_platform` (the
 #       file stem) still gets the block
+#   CG  a Go receiver spelling with no pronoun after the cue ("Which functions call `(*kv.Replica).NewEvalContext`?") gets the block
 # Usage: bash test/sentencesubjectcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -102,6 +103,7 @@ csub(){ # $1 root $2 task $3 caller row $4 label
 csub "$R" 'If `prepare_setup_platform` (app/setup.py) gained a new required parameter, exactly which non-test functions call it directly and would have to change? Give each function with its file; functions that merely receive the resulting EvalContext as a parameter do not count.' first_caller "long sentence, a second identifier in passing"
 csub "$R" 'Which functions call `prepare_setup_platform(hass, name)` and must change when it gains a third argument, in production code and in tests? Group them by file.' first_caller "a call's argument list"
 csub "$G" 'If `(*kv.Replica).NewEvalContext` gained a new required parameter, which functions call it directly and would have to change?' evaluateBatch "go receiver spelling"
+csub "$G" 'Which functions call `(*kv.Replica).NewEvalContext`?' evaluateBatch "CG go receiver spelling, no pronoun after the cue"
 csub "$R" 'If `setup.prepare_setup_platform` gained a new required parameter, exactly which non-test functions call it directly and would have to change?' first_caller "CQ twin: the file-stem qualifier places it"
 A="$( ask "$R" 'If `Missing.setup.prepare_setup_platform` gained a new required parameter, exactly which non-test functions call it directly and would have to change?' )" || no "CQ: ripwire exited $?"
 case "$A" in *'<ctx '*) ok "CQ: an answer printed";; *) no "CQ: no answer printed";; esac
