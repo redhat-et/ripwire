@@ -628,6 +628,25 @@ L="$( "$BIN" "$SB/diff" --layout=SpellBaseCase --no-cache 2>/dev/null )"; RC=$?
 if [ "$( attr 'mismatch ' kind )" = "drift" ] && [ "$RC" -eq 2 ]; then ok "base spelling (control): a base of a different size stays kind=\"drift\", exit 2"
 else no "base spelling (control): kind=$( attr 'mismatch ' kind ) rc=$RC — a base size change must stay drift"; fi
 
+# LAYOUT-DEPENDENT-NAMES (CodeRabbit #630 4553235733): an in-repo class template is sized from its own definition only when no
+# member depends on its parameters. `std::vector<T>` (T may be bool: 40 B on libstdc++) and a span bound N shadowed by a file
+# constant did not count as dependent, so `DepVec<bool>` sized 32 and `DepSpan<4>` 16 (main cd04d477e); both now refuse. (A
+# member typed `typename Alloc::size_type` already refuses: nested-unmodelled.) Controls: `DepPtr<int>`
+# (T* is a pointer) is still sized, and a non-template span over the file constant still is.
+DN="$TMP/depnames"; mkdir -p "$DN"
+printf '#include <vector>\n#include <span>\n#include <cstddef>\nconstexpr std::size_t N = 16;\nstruct Al { using size_type = unsigned char; };\ntemplate <class Alloc> struct DepAlloc { typename Alloc::size_type n; int x; };\ntemplate <class T> struct DepVec { std::vector<T> v; int x; };\ntemplate <std::size_t N> struct DepSpan { std::span<int, N> s; int x; };\ntemplate <class T> struct DepPtr { T* p; int x; };\nstruct UseVec { DepVec<bool> v; };\nstruct UseSpan { DepSpan<4> s; };\nstruct UsePtr { DepPtr<int> p; };\nstruct FixedSpan { std::span<int, N> s; int x; };\n' >"$DN/d.h"
+nDep=0
+for c in UseVec UseSpan; do
+    L="$( "$BIN" "$DN" --layout="$c" --no-cache 2>/dev/null )"
+    if [ "$( attr 'def ' modeled )" = "0" ]; then nDep=$(( nDep + 1 )); ok "dependent names: $c is not sized (its template member depends on the argument)"
+    else no "dependent names: $c modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) — a dependent member was sized"; fi
+done
+L="$( "$BIN" "$DN" --layout=UsePtr --no-cache 2>/dev/null )"
+if [ "$( attr 'def ' modeled )" = "1" ] && [ "$( attr 'def ' size )" = "16" ]; then ok "dependent names (control): DepPtr<int> (T* is a pointer) is sized, size=16"; else no "dependent names (control): UsePtr modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size )"; fi
+L="$( "$BIN" "$DN" --layout=FixedSpan --no-cache 2>/dev/null )"
+if [ "$( field s sz )" = "8" ]; then ok "dependent names (control): a non-template span<int, N> over the file constant is sized 8"; else no "dependent names (control): FixedSpan.s sz=$( field s sz ) why=$( field s why )"; fi
+[ "$nDep" -eq 2 ] && ok "dependent names: counted $nDep refusals" || no "dependent names: counted $nDep of 2 refusals"
+
 # exit-code control for the owner decision: a single readable definition still exits 0, a matching mirror 0, drift 2
 for ec in PadCase:0:"a single readable definition" TwinUniforms:0:"a matching mirror" MirrorUniforms:2:"mirror drift"; do
     ecName="${ec%%:*}"; ecRest="${ec#*:}"; ecWant="${ecRest%%:*}"; ecWhat="${ecRest#*:}"

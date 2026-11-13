@@ -2007,6 +2007,12 @@ inline bool resolveStdType( const TypeScope& scope, std::string_view rest, std::
         {
             continue;
         }
+        // LAYOUT-DEPENDENT-NAMES (CodeRabbit #630): vector<T> of a template parameter may be vector<bool> (40 B on libstdc++)
+        if( id.name == "vector" && !id.args.empty() && namesTemplateParam( scope.ctx, id.args.front() ) )
+        {
+            out.note = "template-param";
+            return true;
+        }
         const bool boolVector = id.name == "vector" && !id.args.empty() && withoutCv( id.args.front() ) == "bool";
         if( row.args != id.args.size() || boolVector )
         {
@@ -2047,6 +2053,11 @@ inline bool resolveStdType( const TypeScope& scope, std::string_view rest, std::
         if( id.args.size() == 1 || id.args[1] == "dynamic_extent" || id.args[1] == "std::dynamic_extent" )
         {
             return sized( 16, 8 );       // pointer + size
+        }
+        if( namesTemplateParam( scope.ctx, id.args[1] ) )
+        {
+            out.note = "template-param";   // the bound is the template argument's, not a same-named file constant (CodeRabbit #630)
+            return true;
         }
         std::uint32_t n = 0;
         if( !evalExtent( scope.consts, id.args[1], n ) )
