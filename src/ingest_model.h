@@ -1048,7 +1048,8 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
     std::ranges::sort( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
     asked.erase( std::ranges::unique( asked ).begin(), asked.end() );
     std::vector<std::uint8_t> macroNamed( asked.size(), 0 ), itemNamed( asked.size(), 0 );
-    std::vector<std::pair<std::uint32_t, std::string_view>> fileMacros;   // (fileId, name) of every asked-about Rust macro
+    using FileMacro = std::pair<std::uint32_t, std::string_view>;   // (fileId, name) of an asked-about Rust macro
+    std::vector<FileMacro> fileMacros;
     for( const Symbol& s : result.symbols )
     {
         if( !langFacts( s.lang ).bangMacros )
@@ -1067,7 +1068,7 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
             fileMacros.emplace_back( s.fileId, *at );
         }
     }
-    const auto fileThenSvLess = []( const std::pair<std::uint32_t, std::string_view>& a, const std::pair<std::uint32_t, std::string_view>& b ) noexcept
+    const auto fileThenSvLess = []( const FileMacro& a, const FileMacro& b ) noexcept
     {
         return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
     };
@@ -1077,7 +1078,7 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
     {
         const Binding&         b      = result.bindings[ i ];
         const std::size_t      source = slotOf( b.typeName );
-        const bool             local  = std::ranges::binary_search( fileMacros, std::pair<std::uint32_t, std::string_view>( b.fileId, b.var ), fileThenSvLess );
+        const bool             local  = std::ranges::binary_search( fileMacros, FileMacro( b.fileId, b.var ), fileThenSvLess );
         return local || ( macroNamed[ source ] == 0 && itemNamed[ source ] != 0 );
     } );
 }
