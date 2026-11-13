@@ -1,0 +1,5 @@
+### Fixed — two benchmark harnesses refuse a malformed bank instead of writing or reading a wrong one (#492)
+
+`bench/agentloop/grade_answers.py` refused a graded TSV whose header had the wrong number of columns, but read a row with more cells than the 13-column header and kept only the first 13, dropping the rest without a word. A row wider than the schema now refuses the whole file by line and row id, whatever the row's status; a row short of trailing cells is still padded, as before. `run_agentloop.py` reads the bank through the same loader.
+
+`bench/roundc-h2h/derive_questions.py` picks six commits per shape at indices `0, stride, …, 5*stride` with `stride = L // 6`. Below six eligible commits the stride is 0, so one commit became six identical questions, and at zero the pick raised `IndexError`. It now refuses to write the bank when a shape has fewer than six eligible commits. The registered RocksDB derivation is unchanged: its smallest list is S4 at `L=270`. Gates: an arm in `test/agentloopgradercheck.sh` and the new `test/roundcderivecheck.sh`, both red on the old code.
