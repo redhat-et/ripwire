@@ -133,7 +133,8 @@ runs(){ # $1 root $2 invocation $3 row it must print $4 label
     if { [ "$rc" = 0 ] || [ "$rc" = 4 ]; }; then ok "R $4: next= runs (rc=$rc)"; else no "R $4: next= rc=$rc"; fi
     has "$out" "$3" "R $4: the bare call answers it"
 }
-A="$( ask "$R" 'I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?' )" || no "R callers: ripwire exited $?"
+q='I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?'
+A="$( ask "$R" "$q" )" || no "R callers: ripwire exited $?"
 hasnt "$A" '<callers by="subject"' "R callers: the sentence got no block (premise)"
 N="$( reask "$A" )"; if [ "$N" = '--callers=prepare_setup_platform' ]; then ok "R callers: next=$N"; else no "R callers: next=$N"; fi
 [ "${N#--}" != "$N" ] && runs "$R" "$N" first_caller "callers"
