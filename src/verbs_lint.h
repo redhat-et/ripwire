@@ -1323,7 +1323,8 @@ inline constexpr std::string_view kPatternQualifiedLegend =
     "A floor when the hit budget stops the walk (hits_capped=1): nodes past the stop are not counted -->";
 
 // unmatched_member='s next=: the same pattern with a receiver metavariable in front of its leading callee name, or ""
-// when the pattern does not start with `name(` (then the count still rides, with no follow-up to offer). The receiver
+// when the pattern does not start with `name(` or the continuation would pass the pattern byte limit (then the count
+// still rides, with no follow-up to offer). The receiver
 // is the first of `$O`, `$RECV`, `$RW_RECEIVER`, `$RW_RECEIVER2`, ... the pattern does not already spell, so it never
 // binds to one of the pattern's own metavariables (CR #624). `op` is the member operator every counted call shares
 // (`->` or `?.`), else `.`.
@@ -1354,10 +1355,21 @@ inline std::string memberPatternNext( std::string_view pattern, std::string_view
     {
         receiver = k < std::size( kReceivers ) ? std::string( kReceivers[k] ) : std::string( kReceivers[2] ) + std::to_string( k - 1 );
     }
+    // PATTERN-NEXT-LIMITS (CodeRabbit #633): a pattern already at the metavariable limit takes the anonymous `$_`
+    // receiver (it binds nothing, so it needs no slot), and a continuation past the byte limit is not offered: next=
+    // must compile when pasted.
+    if( rw::pattern::normalizePattern( pattern, "$" ).metaNames.size() >= rw::pattern::kMaxMetavars )
+    {
+        receiver = "$_";
+    }
     std::string next( pattern.substr( 0, start ) );
     next += receiver;
     next += op;
     next += pattern.substr( start );
+    if( next.size() > rw::pattern::kMaxPatternBytes )
+    {
+        return {};
+    }
     return rw::nextFlag( "--pattern=", next );
 }
 
