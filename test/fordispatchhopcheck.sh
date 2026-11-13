@@ -60,6 +60,11 @@
 #   H2 [G] a candidate whose type a production call constructs (fixture rs: pick_renderers ctor="Cmd::new") carries no held= row
 #   H3 [P] both legends define held= and of= beside the element
 #
+# #646 CodeRabbit round (each [P] arm RED on train head 6621e14e7):
+#   H4 [P] a short type name two types carry (fixture heldqual: a::Reader the candidate, b::Reader a plain struct; the index keeps
+#          no namespace): no declaration of `Reader` is a row (b::Reader's `other_`/`plain_` are not a::Reader's evidence), capped="0";
+#          H4pre: the fixture spells all three
+#
 # Usage:  bash test/fordispatchhopcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fordispatchhopcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
@@ -81,7 +86,8 @@ cd "$ROOT"
 F="test/fordispatchhopfix"
 [ -f "$F/cpp/loader.cc" ] && [ -f "$F/cpp1/tests/loader_test.cc" ] && [ -f "$F/rs/src/pick.rs" ] && [ -f "$F/cppwrap/cached.cc" ] && [ -f "$F/ladder/main.py" ] \
     && [ -f "$F/factory/pg_store.cc" ] && [ -f "$F/double/loader_test.cc" ] && [ -f "$F/recv/loader.cc" ] && [ -f "$F/initm/loader.cc" ] \
-    && [ -f "$F/ts/src/loader.ts" ] && [ -f "$F/alltest/tests/fakes.cc" ] && [ -f "$F/recvbound/rc.cc" ] && [ -f "$F/dumpfs/src/test.cc" ] && [ -f "$F/osentry/src/disk.cc" ] && [ -f "$F/cutmcp/src/zmain.cc" ] && [ -f "$F/heldas/src/app.cc" ] || { echo "fixture $F missing"; exit 2; }
+    && [ -f "$F/ts/src/loader.ts" ] && [ -f "$F/alltest/tests/fakes.cc" ] && [ -f "$F/recvbound/rc.cc" ] && [ -f "$F/dumpfs/src/test.cc" ] && [ -f "$F/osentry/src/disk.cc" ] && [ -f "$F/cutmcp/src/zmain.cc" ] && [ -f "$F/heldas/src/app.cc" ] \
+    && [ -f "$F/heldqual/src/app.cc" ] || { echo "fixture $F missing"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -179,6 +185,14 @@ for a in held of; do
     grep -qE "; dispatch ([^;]*[ (])?$a=" "$TMP/h1" || { h3=1; no "(H3) compact clause does not define $a="; }
 done
 [ "$h3" = 0 ] && ok "(H3) both legends define held= and of= beside the element"
+run "$F/heldqual" "--for=Parser::Load file_reader_->ReadFile" >"$TMP/h4"; h4rc=$?
+HQ="$( hop "$TMP/h4" )"
+nq="$( printf '%s' "$HQ" | grep -o '<s held=' | wc -l | tr -d ' ' )"
+grep -q 'b::Reader other_;' "$F/heldqual/src/app.cc" && grep -q 'Reader plain_;' "$F/heldqual/src/app.cc" && grep -q 'a::Reader mine_;' "$F/heldqual/src/app.cc"
+verdict $? "(H4pre) the heldqual fixture declares b::Reader twice and a::Reader once by value" "(H4pre) the heldqual fixture lost a declaration"
+if [ "$h4rc" = 0 ] && [ "$nq" = 0 ] && has "$HQ" 'n="Reader::ReadFile"' && has "$HQ" 'capped="0"'; then
+    ok "(H4) a short name two types carry: the element stands with no held row (b::Reader's fields are never a::Reader's evidence)"
+else no "(H4) rc=$h4rc, expected the element with 0 held rows and capped=0: [$HQ]"; fi
 
 # ── N1 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 n1(){ local dir="$1" task="$2" why="$3"

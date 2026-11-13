@@ -556,6 +556,27 @@ inline std::vector<HeldAsRow> dispatchHeldAs( const IngestResult& ing, std::span
         const std::string_view scope = ing.symbols[c].scope;
         typeOf.push_back( scope.substr( scope.find_last_of( ".:" ) == std::string_view::npos ? 0 : scope.find_last_of( ".:" ) + 1 ) );
     }
+    // A short type name two class-like definitions carry (a::Reader beside b::Reader; a symbol's scope keeps no namespace) is
+    // ambiguous: a declaration of it cannot say which type it holds, so such a candidate takes no held row (floors, not guesses).
+    std::vector<const Symbol*> ownerDef( bare.size(), nullptr );
+    std::vector<char>          ambiguous( bare.size(), 0 );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( !ReceiverEvidence::classLike( s.kind ) )
+        {
+            continue;
+        }
+        for( std::size_t k = 0; k < bare.size(); ++k )
+        {
+            if( s.name != typeOf[k] || s.lang != ing.symbols[ bare[k] ].lang )
+            {
+                continue;
+            }
+            const Symbol*& first = ownerDef[k];
+            ambiguous[k] |= first != nullptr && ( first->fileId != s.fileId || first->line != s.line );
+            first = first == nullptr ? &s : first;
+        }
+    }
     for( std::uint32_t i = 0; i < ing.references.size(); ++i )
     {
         const Reference& r = ing.references[i];
@@ -572,6 +593,10 @@ inline std::vector<HeldAsRow> dispatchHeldAs( const IngestResult& ing, std::span
             if( r.calleeName != typeOf[k] || r.lang != cs.lang )
             {
                 continue;
+            }
+            if( ambiguous[k] != 0 )
+            {
+                break;   // two types carry this short name: the declaration names neither for sure
             }
             const Symbol& from = ing.symbols[ r.fromSymbol ];
             if( asMember && ReceiverEvidence::classLike( from.kind ) )
