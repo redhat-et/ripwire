@@ -719,6 +719,7 @@ for _g in \
     mcpgrepdegradedcheck \
     mcphandlecheck \
     mcpincrementalcheck \
+    mcponeparsecheck \
     mcpmanifestcheck \
     mcprangeedgecheck \
     mcpreadloopcheck \

@@ -188,7 +188,7 @@ using rw::quality::deadCodeEligibleKind;
 // DIFFERENT versions (parserVerFor), so a single shared file forced a full re-parse + full rewrite on
 // every class switch (measured: plain-map-after --for 0.81 s vs 0.16 s warm). Suffixing the filename
 // with the class gives each class its OWN warm cache, so alternating verb classes never thrashes.
-// (MCP has its own separate file, mcpCachePath in mcp.h — unaffected.)
+// (The MCP server shares the rich file: mcpindex.h mcpCachePath, ONE-PARSE.)
 //
 // Y4: resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
 // choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
