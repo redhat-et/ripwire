@@ -631,8 +631,9 @@ inline void appendHeldAsRow( std::string& x, const IngestResult& ing, const Memb
 {
     const Reference& r    = ing.references[ h.ref ];
     const Symbol&    from = ing.symbols[ h.from ];
-    std::string      line( trimWs( dispatch_detail::sourceLine( text, r.fileId, h.line ) ).substr( 0, kForDispatchHeldText ) );
-    redactInPlace( line, redact );
+    std::string      line( trimWs( dispatch_detail::sourceLine( text, r.fileId, h.line ) ) );
+    redactInPlace( line, redact );   // BEFORE the cut: a secret crossing byte kForDispatchHeldText must reach the redactor whole
+    line.resize( std::min( line.size(), kForDispatchHeldText ) );
     const std::string_view rp = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] ) : sarif::rootRelativeUri( ing.files[ r.fileId ], rootArg );
     x += h.member ? "<s held=\"member\" of=\"" : "<s held=\"local\" of=\"";
     x += escapeXml( r.calleeName, esc );
