@@ -20,6 +20,9 @@
 #             error-recovered in-function ASSIGN_OR_CO_RETURN, a C run of `;`-less EXPORT_FUNC, a recovered body read past the
 #             invocation's own `)`) are uses, never defs; block-forming macros, real ALL-CAPS
 #             functions and constructors stay defs.
+#   annfix/ — MACRO-P1 (section 10): trailing annotation macros (`void f() ABSL_LOCKS_EXCLUDED( mu_ ) { … }`, const/noexcept/
+#             override mixes, a constructor, a destructor, a template, a nested annotation, a field) are uses; the real
+#             function keeps its name and body; a real ALL-CAPS function stays a def.
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/macroedgecheck.sh   (or asan/ripwire)
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
@@ -356,6 +359,135 @@ for kv in TEST_F:1 TEST:1 COMPUTE_SUM:1 RGB:2 HSV:1 DEFINE_HANDLER:1 WASM_EXPORT
     [ "$n" = "$want" ] && ok "MACRO-P0 keep: --defs=$k lists $n function def(s)" \
         || no "MACRO-P0 keep: --defs=$k lists $n function def(s), want $want"
 done
+
+# ── 10) MACRO-P1: a trailing ANNOTATION macro is a use, and the real function keeps its name and body (ingest_names.h
+#        cFamilyAnnotationHost). `T f( a ) ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { body }` parses as a prototype `f` closed by a
+#        MISSING ";" and a typeless definition named after the annotation that owns f's body and calls (envoy CondVar::waitFor,
+#        thread.h:70: 41 such sites). The generic shape is an ALL-CAPS macro call between a declarator's `)` (or its
+#        const/noexcept/override) and the body or `;`; a constructor's host is an ERROR node, and a typed definition or field
+#        reads the real declarator inside an ERROR before the macro (`tryLock() DISABLE( ABSL_UNLOCK_FUNCTION() ) { … }`,
+#        `int g_ ABSL_GUARDED_BY( mu_ );`). The trap arm counts every phantom (FAIL on >0); its premise counts the
+#        annotation sites it saw (FAIL on zero). Keeps: a real ALL-CAPS function after a `;`-closed prototype,
+#        an annotated declaration stays a declaration, a leading annotation leaves its function alone. ──
+AF="$TMP/annfix"
+mkdir -p "$AF"
+cat >"$AF/lock.h" <<'EOF'
+#pragma once
+#define ABSL_LOCKS_EXCLUDED( ... ) __attribute__( ( locks_excluded( __VA_ARGS__ ) ) )
+#define ABSL_EXCLUSIVE_LOCKS_REQUIRED( ... ) __attribute__( ( exclusive_locks_required( __VA_ARGS__ ) ) )
+#define ABSL_UNLOCK_FUNCTION( ... ) __attribute__( ( unlock_function( __VA_ARGS__ ) ) )
+#define ABSL_GUARDED_BY( x ) __attribute__( ( guarded_by( x ) ) )
+#define ABSL_MUST_USE_RESULT [[nodiscard]]
+#define DISABLE_ANNOT( x ) x
+int helperOne( int );
+int helperTwo( int );
+int helperThree( int );
+class CondVar
+{
+public:
+    CondVar( int v ) ABSL_LOCKS_EXCLUDED( mu_ ) : v_( v ) { helperThree( v ); }
+    ~CondVar() ABSL_UNLOCK_FUNCTION() { helperTwo( 0 ); }
+    void notifyOne() ABSL_LOCKS_EXCLUDED( mu_ ) { helperOne( 1 ); }
+    bool waitFor( int& m, int d ) noexcept ABSL_EXCLUSIVE_LOCKS_REQUIRED( m ) {
+        return helperTwo( d ) > 0;
+    }
+    int getConst() const ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu_ ) { return helperOne( 2 ); }
+    void virt() override ABSL_LOCKS_EXCLUDED( mu_ ) { helperTwo( 3 ); }
+    void multiLine( int a )
+        ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu_ ) {
+        helperOne( a );
+    }
+    template <class D> bool waitForT( int& m, const D& d ) noexcept ABSL_EXCLUSIVE_LOCKS_REQUIRED( m ) { return helperThree( d ) > 0; }
+    bool tryLock() DISABLE_ANNOT( ABSL_UNLOCK_FUNCTION() ) { return helperTwo( 5 ) > 0; }
+    int declOnly() const ABSL_LOCKS_EXCLUDED( mu_ );
+    ABSL_MUST_USE_RESULT bool leading() { return helperOne( 7 ) > 0; }
+    void outOfClass( int x );
+    int guarded_ ABSL_GUARDED_BY( mu_ );
+    int mu_ = 0;
+    int v_  = 0;
+};
+EOF
+cat >"$AF/lock.cc" <<'EOF'
+#include "lock.h"
+void CondVar::outOfClass( int x ) ABSL_LOCKS_EXCLUDED( mu_ ) { helperThree( x ); }
+int gmu = 0;
+int freeFn( int x ) ABSL_EXCLUSIVE_LOCKS_REQUIRED( gmu ) { return helperTwo( x ); }
+int CAPS_REAL( int a ) { return helperOne( a ); }
+int callers()
+{
+    CondVar c( 1 );
+    c.notifyOne();
+    c.outOfClass( 2 );
+    int m = 0;
+    return c.waitFor( m, 1 ) + freeFn( 2 ) + CAPS_REAL( 3 ) + c.getConst();
+}
+EOF
+cat >"$AF/caps.c" <<'EOF'
+int proto_one( void );
+int CAPS_AFTER( int b ) { int c = b + proto_one(); return c; }
+EOF
+averb(){
+    local out rc
+    out="$( "$BIN" "$AF" "$1" --no-cache --legend=compact 2>/dev/null )"; rc=$?
+    if [ "$rc" != 0 ]; then printf 'FAILED-RUN'; return; fi
+    printf '%s' "$out"
+}
+# 10a) premise: the annotation sites are there, and the #define is indexed
+ASITES="$( grep -cE '\)( *(const|noexcept|override))* *(ABSL_[A-Z_]+|DISABLE_ANNOT)\(' "$AF/lock.h" "$AF/lock.cc" | awk -F: '{ s += $2 } END { print s + 0 }' )"
+AD="$( averb --defs=ABSL_LOCKS_EXCLUDED )"   # status: FAILED-RUN on a nonzero exit fails 10a's t="macro" match
+if [ "$ASITES" -ge 9 ] && printf '%s' "$AD" | grep -q '<d [^>]*t="macro"'; then
+    ok "MACRO-P1 premise: $ASITES trailing annotation sites in the fixture, and the ABSL_LOCKS_EXCLUDED #define is indexed"
+else
+    no "MACRO-P1 premise: sites=$ASITES (want >=9) or no t=\"macro\" ABSL_LOCKS_EXCLUDED row — the arms below would see nothing"
+fi
+# afnrows NAME [decl]: the function rows --defs=NAME lists in annfix (with decl: only the decl_only="1" ones); -1 without a defs schema
+afnrows(){
+    local out
+    out="$( averb "--defs=$1" )"   # status: averb prints FAILED-RUN on a nonzero exit; no defs schema, so -1
+    printf '%s' "$out" | grep -q 'schema="ripwire.defs/v1"' || { printf -- '-1'; return; }
+    if [ "${2:-}" = decl ]; then printf '%s' "$out" | grep -oE '<d [^>]*t="(fn|method)"[^>]*' | grep -c 'decl_only="1"'; return; fi
+    printf '%s' "$out" | grep -oE '<d [^>]*t="(fn|method)"' | grep -c .
+}
+# 10b) THE TRAP: no annotation is a function definition
+for m in ABSL_LOCKS_EXCLUDED ABSL_EXCLUSIVE_LOCKS_REQUIRED ABSL_UNLOCK_FUNCTION ABSL_GUARDED_BY DISABLE_ANNOT; do
+    n="$( afnrows "$m" )"
+    [ "$n" = 0 ] && ok "MACRO-P1 trap: --defs=$m lists 0 function defs (every annotation is a use)" \
+        || no "MACRO-P1 trap: --defs=$m lists $n function def(s) — an annotation owns a real function's body"
+done
+# 10c) each annotated function is ONE definition with a body (no decl_only="1" row left behind)
+for f in notifyOne waitFor getConst virt multiLine waitForT tryLock outOfClass freeFn CondVar; do   # CondVar: the constructor (its prototype half is an ERROR node)
+    n="$( afnrows "$f" )"; d="$( afnrows "$f" decl )"
+    [ "$n" = 1 ] && [ "$d" = 0 ] && ok "MACRO-P1: --defs=$f lists one function def, with its body" \
+        || no "MACRO-P1: --defs=$f lists $n function def(s), $d of them decl_only — want 1 with its body"
+done
+# 10d) the body's calls and the annotation are the real function's: callees, and the caller side binds to it
+for fc in notifyOne:helperOne waitFor:helperTwo outOfClass:helperThree freeFn:helperTwo; do
+    f="${fc%%:*}"; c="${fc##*:}"
+    averb "--callees=$f" | tr '>' '\n' | grep -q "n=\"$c\"" && ok "MACRO-P1: --callees=$f lists $c (the body is $f's)" \
+        || no "MACRO-P1: --callees=$f does not list $c"
+done
+averb --callees=notifyOne | tr '>' '\n' | grep 'n="ABSL_LOCKS_EXCLUDED"' | grep -q 'role="macro"' \
+    && ok "MACRO-P1: notifyOne() has a role=\"macro\" ABSL_LOCKS_EXCLUDED row" \
+    || no "MACRO-P1: notifyOne() has no role=\"macro\" ABSL_LOCKS_EXCLUDED row"
+AU="$( averb --uses=ABSL_EXCLUSIVE_LOCKS_REQUIRED )"   # status: FAILED-RUN on a nonzero exit fails both matches
+nau="$( printf '%s' "$AU" | grep -oE '<u role="macro"' | grep -c . )"
+[ "$nau" -ge 5 ] && ! printf '%s' "$AU" | grep -q '<u role="call"' \
+    && ok "MACRO-P1: --uses=ABSL_EXCLUSIVE_LOCKS_REQUIRED lists $nau role=\"macro\" sites and no role=\"call\"" \
+    || no "MACRO-P1: --uses=ABSL_EXCLUSIVE_LOCKS_REQUIRED lists $nau role=\"macro\" sites (want >=5, none role=\"call\")"
+for f in notifyOne waitFor freeFn; do
+    averb "--callers=$f" | tr '>' '\n' | grep -q 'n="callers"' && ok "MACRO-P1: --callers=$f lists callers()" \
+        || no "MACRO-P1: --callers=$f does not list callers()"
+done
+# 10e) keeps: a real ALL-CAPS function after a `;`-closed prototype, a leading annotation, an annotated declaration
+for kv in CAPS_REAL:1 CAPS_AFTER:1 leading:1; do
+    k="${kv%%:*}"; want="${kv##*:}"
+    n="$( afnrows "$k" )"; d="$( afnrows "$k" decl )"
+    [ "$n" = "$want" ] && [ "$d" = 0 ] && ok "MACRO-P1 keep: --defs=$k lists $n function def(s) with a body" \
+        || no "MACRO-P1 keep: --defs=$k lists $n function def(s), $d decl_only — want $want with a body"
+done
+n="$( afnrows declOnly decl )"
+[ "$n" = 1 ] && ok "MACRO-P1 keep: declOnly (an annotated declaration closed by its own \`;\`) stays one decl_only def" \
+    || no "MACRO-P1 keep: declOnly lists $n decl_only def(s), want 1"
 
 # ── 7) determinism — macro symbols/edges must be byte-stable run-to-run. ──
 "$BIN" "$FIX" --no-cache >"$TMP/m1" 2>/dev/null
