@@ -282,8 +282,8 @@ if "$CXX" "$CXXSTD" -O1 -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" 
     "$PB/probe" "$PB/work" > "$PB/out.txt" 2>&1
     PBRC=$?
     PBROWS="$( grep -c '^PROBE-' "$PB/out.txt" )"
-    [ "$PBROWS" -eq 9 ] \
-        && ok "presence: the probe reported all 9 rows" \
+    [ "$PBROWS" -eq 9 ] && [ "$PBRC" -eq 0 ] \
+        && ok "presence: the probe reported all 9 rows and exited 0" \
         || no "the probe reported $PBROWS of 9 rows (rc=$PBRC): $( head -c 300 "$PB/out.txt" )"
     while IFS= read -r prow; do
         case "$prow" in

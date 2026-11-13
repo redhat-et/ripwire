@@ -197,9 +197,9 @@ with open( os.path.join( d, "quiet.py" ), "w" ) as f:
 PY
 ( cd "$CLEAN" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init >/dev/null 2>&1 )
 ( cd "$CLEAN" && "$BIN" . --quality-delta --quality-ack="nothing to accept" >/dev/null 2>"$WORK/zero.err" ); rcZ=$?
-[ ! -e "$CLEAN/.ripwire_quality_acks" ] \
+[ "$rcZ" = 0 ] && [ ! -e "$CLEAN/.ripwire_quality_acks" ] \
     && ok "(5) an ack of zero findings creates no ledger (exit $rcZ)" \
-    || no "(5) an ack of zero findings CREATED $CLEAN/.ripwire_quality_acks ($( wc -c <"$CLEAN/.ripwire_quality_acks" | tr -d ' ' ) B) — a write with nothing to say"
+    || no "(5) exit $rcZ (want 0), or an ack of zero findings CREATED $CLEAN/.ripwire_quality_acks ($( wc -c <"$CLEAN/.ripwire_quality_acks" | tr -d ' ' ) B) — a write with nothing to say"
 grep -q 'nothing to acknowledge' "$WORK/zero.err" \
     && ok "(5) the zero-findings ack says so on stderr" \
     || no "(5) the zero-findings ack is not disclosed: [$( head -c 160 "$WORK/zero.err" | tr '\n' ' ' )]"
@@ -254,7 +254,7 @@ if [ -f "$COMMITTED" ]; then
     rm -f "$CLEAN/.ripwire_quality_acks"
     cp "$COMMITTED" "$CLEAN/.ripwire_quality_acks"
     ( cd "$CLEAN" && "$BIN" . --quality-delta --quality-ack="H10 round-trip probe" >/dev/null 2>"$WORK/rt.err" ); rcRT=$?
-    if cmp -s "$COMMITTED" "$CLEAN/.ripwire_quality_acks"; then
+    if [ "$rcRT" = 0 ] && cmp -s "$COMMITTED" "$CLEAN/.ripwire_quality_acks"; then
         ok "(7) the binary's read+rewrite of the committed ledger is byte-identical (exit $rcRT)"
     else
         no "(7) the binary REWROTE the committed ledger on a run that accepted nothing (exit $rcRT)"

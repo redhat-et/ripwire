@@ -2504,6 +2504,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             else if( kind == SymKind::Macro )
             {
                 captureMacroBodyCalls( roleNode, fileId, le.lang, src, refs );   // macro-edges: the graph connects THROUGH the macro
+                if( langFacts( le.lang ).bangMacros )   // Rust: `$crate` exists only where `name!` macros do
+                {
+                    captureRustTranscriberMacroCalls( roleNode, fileId, src, refs );   // RUST-MACRO-PATH: `$crate::m!` in a transcriber
+                }
             }
             }
             else if( isRef && full )
@@ -2619,6 +2623,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     // Reference::qualifierRootsStd and graph.h::keepStdQualifiedCandidates.
                     r.qualifierRootsStd = cppQualifiedChainRootsStd( nameNode, src );
                     cppResplitRefName( r, nameTxt );            // H4 RE-SPLIT at 3+ segments, operator tails, `template` disambiguator
+                }
+                else if( langFacts( le.lang ).bangMacros && r.role == RefRole::Macro )
+                {
+                    // RUST-MACRO-PATH: `crate::m!`, `axum_core::m!`, `serde_json::json!`: the written path, which graph.h requires to prove the macro
+                    const TSNode parent = parentOf( nameNode );
+                    if( !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "scoped_identifier" ) )
+                    {
+                        std::string qualifier;
+                        rustMacroPathOf( nodeTextOf( fieldChild( parent, NodeField::Path ), src ), qualifier, rustWritten );
+                        r.qualifier = std::move( qualifier );
+                    }
                 }
                 else if( le.lang == Lang::Rust )
                 {

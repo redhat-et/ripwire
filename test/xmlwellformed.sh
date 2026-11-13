@@ -69,6 +69,10 @@ check_xml() {
         no "$label — ripwire produced no output (rc=$rc_ripwire)"
         return
     fi
+    if [ "$rc_ripwire" -ge 128 ]; then   # a signal after a complete document still reads as well-formed (gateexitcheck H2)
+        no "$label — ripwire died on signal $(( rc_ripwire - 128 )) after printing"
+        return
+    fi
     if printf '%s' "$out" | xmllint --noout - 2>/dev/null; then
         ok "$label"
     else

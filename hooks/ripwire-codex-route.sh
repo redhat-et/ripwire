@@ -354,7 +354,9 @@ if meter_home; then
     [ -n "$session" ] || session="prompt:$promptHash"
     sessionHash="$( hash_text "$session" )"
     intent="$( printf '%s' "$route" | sed -n 's/.*<choice intent="\([^"]*\)".*/\1/p' | head -1 )"
-    recommended="$( printf '%s' "$route" | grep -oE -- '--[a-z0-9-]+' | head -1 )"
+    # The first flag AFTER the root's open tag: an abstain's root carries next="--for=…" (HELP-TASK-ROUTE (a)), which is a
+    # follow-up, not a recommendation, so an abstain row keeps recommended="" as before.
+    recommended="$( printf '%s' "${route#*<task-route*>}" | grep -oE -- '--[a-z0-9-]+' | head -1 )"
     now="$( date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true )"
     jq -cn --arg at "$now" --arg status "$status" --arg intent "$intent" --arg hash "$promptHash" \
         --arg sessionHash "$sessionHash" --arg recommended "$recommended" --argjson bytes "$promptBytes" \
