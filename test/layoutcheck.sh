@@ -645,7 +645,7 @@ L="$( "$BIN" "$DN" --layout=UsePtr --no-cache 2>/dev/null )"
 if [ "$( attr 'def ' modeled )" = "1" ] && [ "$( attr 'def ' size )" = "16" ]; then ok "dependent names (control): DepPtr<int> (T* is a pointer) is sized, size=16"; else no "dependent names (control): UsePtr modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size )"; fi
 L="$( "$BIN" "$DN" --layout=FixedSpan --no-cache 2>/dev/null )"
 if [ "$( field s sz )" = "8" ]; then ok "dependent names (control): a non-template span<int, N> over the file constant is sized 8"; else no "dependent names (control): FixedSpan.s sz=$( field s sz ) why=$( field s why )"; fi
-[ "$nDep" -eq 2 ] && ok "dependent names: counted $nDep refusals" || no "dependent names: counted $nDep of 2 refusals"
+if [ "$nDep" -eq 2 ]; then ok "dependent names: counted $nDep refusals"; else no "dependent names: counted $nDep of 2 refusals"; fi
 
 # LAYOUT-EBO-NESTED (CodeRabbit #630 4553235747): `struct A : E { int x; }; struct D : E { A a; int y; };` — a sits at 4, not 0,
 # because A holds an E at its own offset 0; the model refuses it (was size=8 with a at 0). Controls: a first member that holds

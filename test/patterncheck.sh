@@ -532,7 +532,7 @@ mkdir -p "$MX/oc" "$MX/ocmix"
 printf 'function g(o) {\n  o?.f(1);\n  o?.f(2);\n  return 0;\n}\n' >"$MX/oc/a.js"
 printf 'function g(o, p) {\n  o?.f(1);\n  p.f(2);\n  return 0;\n}\n' >"$MX/ocmix/a.ts"
 ocSites="$( cat "$MX/oc/a.js" "$MX/ocmix/a.ts" | grep -o '?\.f(' | wc -l | tr -d ' ' )"
-[ "${ocSites:-0}" -eq 3 ] && ok "optchain premise: $ocSites \`?.f(\` call sites" || no "optchain premise: ${ocSites:-0} \`?.f(\` sites, expected 3 — the arms below would be vacuous"
+if [ "${ocSites:-0}" -eq 3 ]; then ok "optchain premise: $ocSites \`?.f(\` call sites"; else no "optchain premise: ${ocSites:-0} \`?.f(\` sites, expected 3 — the arms below would be vacuous"; fi
 XO="$( xroot "$MX/oc" 'f($X)' )"
 XON="$( printf '%s' "$XO" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
 printf '%s' "$XO" | grep -q ' unmatched_member="2" unmatched_member_optchain="2"' && [ "$XON" = '$O?.f($X)' ] \
@@ -554,7 +554,7 @@ args32="$( i=0; while [ $i -lt 32 ]; do printf '%s%s' "$( [ $i -gt 0 ] && printf
 pat32="f($( i=0; while [ $i -lt 32 ]; do printf '%s$M%d' "$( [ $i -gt 0 ] && printf ', ' )" "$i"; i=$(( i + 1 )); done ))"
 printf 'def h(o):\n    o.f(%s)\n' "$args32" >"$MX/lim32/a.py"
 nm="$( printf '%s' "$pat32" | grep -o '\$M[0-9]*' | sort -u | wc -l | tr -d ' ' )"
-[ "$nm" -eq 32 ] && ok "next-limits premise: the pattern spells $nm distinct metavariables (the limit)" || no "next-limits premise: $nm metavariables, expected 32"
+if [ "$nm" -eq 32 ]; then ok "next-limits premise: the pattern spells $nm distinct metavariables (the limit)"; else no "next-limits premise: $nm metavariables, expected 32"; fi
 X32="$( xroot "$MX/lim32" "$pat32" )"
 X32N="$( printf '%s' "$X32" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
 printf '%s' "$X32" | grep -q ' unmatched_member="1"' && [ -n "$X32N" ] && [ "$( xroot "$MX/lim32" "$X32N" | grep -c ' hits="1"' )" = 1 ] \
@@ -564,7 +564,7 @@ padlen=$(( 4095 - 9 ))   # f( $X , "" ) is 9 bytes
 pad="$( awk -v n=$padlen 'BEGIN { while( n-- > 0 ) printf "a" }' )"
 patB="f(\$X, \"$pad\")"
 printf 'def h(o):\n    o.f(1, "%s")\n' "$pad" >"$MX/limbytes/a.py"
-[ "${#patB}" -eq 4095 ] && ok "next-limits premise: a ${#patB}-byte pattern (the limit is 4096)" || no "next-limits premise: the pattern is ${#patB} bytes, expected 4095"
+if [ "${#patB}" -eq 4095 ]; then ok "next-limits premise: a ${#patB}-byte pattern (the limit is 4096)"; else no "next-limits premise: the pattern is ${#patB} bytes, expected 4095"; fi
 XB="$( xroot "$MX/limbytes" "$patB" )"
 printf '%s' "$XB" | grep -q ' unmatched_member="1"' && ! printf '%s' "$XB" | grep -q ' next=' \
     && ok "a continuation past the 4096-byte limit is not offered (unmatched_member=\"1\" rides, no next=)" \
