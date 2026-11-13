@@ -2504,6 +2504,115 @@ inline std::vector<std::string> graphSubjectCandidates( std::span<const std::str
     }
     return out;
 }
+
+using GraphSubjectWords = std::vector<std::string_view>;
+
+// the slots read from w[b, e) per range, in order; nullopt when a slot holds no candidate
+inline std::optional<GraphSubject> graphSubjectFill( const GraphSubjectWords& w, GraphSubjectForm form,
+                                                     std::initializer_list<std::pair<std::size_t, std::size_t>> ranges )
+{
+    GraphSubject gs;
+    gs.form = form;
+    for( const auto& [ b, e ] : ranges )
+    {
+        std::string              span;
+        std::vector<std::string> c = graphSubjectCandidates( std::span<const std::string_view>( w.data() + b, e - b ), span );
+        if( c.empty() )
+        {
+            return std::nullopt;
+        }
+        gs.spans.push_back( std::move( span ) );
+        gs.slots.push_back( std::move( c ) );
+    }
+    return gs;
+}
+
+// the first separator word at or after `from` (needs >= 1 word before it and >= 1 after it); w.size() when none
+inline std::size_t graphSubjectSep( const GraphSubjectWords& w, std::size_t from, std::string_view word )
+{
+    for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
+    {
+        if( routeLower( w[k] ) == word )
+        {
+            return k;
+        }
+    }
+    return w.size();
+}
+
+// one form's scan: `decided` stops the parse with `gs` (a form that matched decides even when a slot is empty)
+struct GraphFormScan
+{
+    bool                        decided = false;
+    std::optional<GraphSubject> gs;
+};
+
+inline GraphFormScan scanCommonForm( const GraphSubjectWords& w )   // common callers of A and B | calls both A and B
+{
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        const bool commonOf  = graphSubjectWordIs( w[i], { "common" } ) && graphSubjectWordIs( w[i + 1], { "caller", "callers" } ) && routeLower( w[i + 2] ) == "of";
+        const bool callsBoth = graphSubjectWordIs( w[i], { "call", "calls" } ) && routeLower( w[i + 1] ) == "both";
+        const std::size_t from = i + ( commonOf ? 3 : 2 );
+        const std::size_t a    = commonOf || callsBoth ? graphSubjectSep( w, from, "and" ) : w.size();
+        if( a < w.size() )
+        {
+            // `common callers of`: the form matched, its slots decide; `calls both` is a sentence's phrase, read only when its slots hold code
+            std::optional<GraphSubject> gs = graphSubjectFill( w, GraphSubjectForm::Common, { { from, a }, { a + 1, w.size() } } );
+            if( gs || commonOf )
+            {
+                return { true, std::move( gs ) };
+            }
+        }
+    }
+    return {};
+}
+
+inline GraphFormScan scanPathForm( const GraphSubjectWords& w )   // [call] path from A to B | [call] chain from A to B
+{
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        const std::size_t t = graphSubjectWordIs( w[i], { "path", "chain" } ) && routeLower( w[i + 1] ) == "from" ? graphSubjectSep( w, i + 2, "to" ) : w.size();
+        if( t < w.size() )
+        {
+            return { true, graphSubjectFill( w, GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } ) };
+        }
+    }
+    return {};
+}
+
+inline GraphFormScan scanReachForm( const GraphSubjectWords& w )   // A reach(es) B: A's span runs back to the previous clause word or stop
+{
+    for( std::size_t i = 1; i + 1 < w.size(); ++i )
+    {
+        if( !graphSubjectWordIs( w[i], { "reach", "reaches" } ) )
+        {
+            continue;
+        }
+        std::size_t b = i;
+        while( b > 0 && !graphSubjectQualifier( w[b - 1] ) && !graphSubjectTrimWord( w[b - 1] ).stop )
+        {
+            --b;
+        }
+        if( std::optional<GraphSubject> gs = graphSubjectFill( w, GraphSubjectForm::Path, { { b, i }, { i + 1, w.size() } } ) )
+        {
+            return { true, std::move( gs ) };
+        }
+    }
+    return {};
+}
+
+inline GraphFormScan scanCallersForm( const GraphSubjectWords& w )   // callers of X
+{
+    for( std::size_t i = 0; i + 2 < w.size(); ++i )
+    {
+        if( graphSubjectWordIs( w[i], { "caller", "callers" } ) && routeLower( w[i + 1] ) == "of" )
+        {
+            return { true, graphSubjectFill( w, GraphSubjectForm::Callers, { { i + 2, w.size() } } ) };
+        }
+    }
+    return {};
+}
 }   // namespace detail
 
 // nullopt unless the task holds one of the three forms AND every slot has a candidate. Forms are tried common,
@@ -2515,87 +2624,12 @@ inline std::vector<std::string> graphSubjectCandidates( std::span<const std::str
 // sentence that only uses the words ("which tests reach the cache", "a chain from start to finish") reads nothing.
 inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
 {
-    const std::vector<std::string_view> w = splitRouteWords( task );
-    const auto fill = [ & ]( GraphSubjectForm form, std::initializer_list<std::pair<std::size_t, std::size_t>> ranges ) -> std::optional<GraphSubject>
+    const detail::GraphSubjectWords w = splitRouteWords( task );
+    for( const auto scan : { &detail::scanCommonForm, &detail::scanPathForm, &detail::scanReachForm, &detail::scanCallersForm } )
     {
-        GraphSubject gs;
-        gs.form = form;
-        for( const auto& [ b, e ] : ranges )
+        if( detail::GraphFormScan r = scan( w ); r.decided )
         {
-            std::string span;
-            std::vector<std::string> c = detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + b, e - b ), span );
-            if( c.empty() )
-            {
-                return std::nullopt;
-            }
-            gs.spans.push_back( std::move( span ) );
-            gs.slots.push_back( std::move( c ) );
-        }
-        return gs;
-    };
-    // the first separator word at or after `from` (needs >= 1 word before it and >= 1 after it)
-    const auto sep = [ & ]( std::size_t from, std::string_view word ) -> std::size_t
-    {
-        for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
-        {
-            if( routeLower( w[k] ) == word )
-            {
-                return k;
-            }
-        }
-        return w.size();
-    };
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // common callers of A and B | calls both A and B
-    {
-        const bool commonOf = detail::graphSubjectWordIs( w[i], { "common" } ) && detail::graphSubjectWordIs( w[i + 1], { "caller", "callers" } )
-                              && routeLower( w[i + 2] ) == "of";
-        const bool callsBoth = detail::graphSubjectWordIs( w[i], { "call", "calls" } ) && routeLower( w[i + 1] ) == "both";
-        if( commonOf || callsBoth )
-        {
-            const std::size_t from = i + ( commonOf ? 3 : 2 );
-            const std::size_t a    = sep( from, "and" );
-            if( a < w.size() )
-            {
-                // `common callers of`: the form matched, its slots decide; `calls both` is a sentence's phrase, read only when its slots hold code
-                std::optional<GraphSubject> gs = fill( GraphSubjectForm::Common, { { from, a }, { a + 1, w.size() } } );
-                if( gs || commonOf )
-                {
-                    return gs;
-                }
-            }
-        }
-    }
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // [call] path from A to B | [call] chain from A to B
-    {
-        if( detail::graphSubjectWordIs( w[i], { "path", "chain" } ) && routeLower( w[i + 1] ) == "from" )
-        {
-            const std::size_t t = sep( i + 2, "to" );
-            if( t < w.size() )
-            {
-                return fill( GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } );
-            }
-        }
-    }
-    for( std::size_t i = 1; i + 1 < w.size(); ++i )   // A reach(es) B: A's span runs back to the previous clause word or stop
-    {
-        if( detail::graphSubjectWordIs( w[i], { "reach", "reaches" } ) )
-        {
-            std::size_t b = i;
-            while( b > 0 && !detail::graphSubjectQualifier( w[b - 1] ) && !detail::graphSubjectTrimWord( w[b - 1] ).stop )
-            {
-                --b;
-            }
-            if( std::optional<GraphSubject> gs = fill( GraphSubjectForm::Path, { { b, i }, { i + 1, w.size() } } ) )
-            {
-                return gs;
-            }
-        }
-    }
-    for( std::size_t i = 0; i + 2 < w.size(); ++i )   // callers of X
-    {
-        if( detail::graphSubjectWordIs( w[i], { "caller", "callers" } ) && routeLower( w[i + 1] ) == "of" )
-        {
-            return fill( GraphSubjectForm::Callers, { { i + 2, w.size() } } );
+            return std::move( r.gs );
         }
     }
     return std::nullopt;

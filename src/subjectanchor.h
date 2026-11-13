@@ -871,6 +871,35 @@ inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, c
     return attributeOneHopAnswer( ing, g, targets, rows, /*towardMatches=*/true ).groups.size() == 1;
 }
 
+// The <callers by="subject"> candidates of a conceptual route, from the source-class definitions only (a CI or vendored copy of the
+// name is not a second function to split the callers over):
+//   * SUBJECT-CALLERS-NATURAL: a descriptive or framed subject's exact symbols ("who calls f", "I need to change f; what depends on it?");
+//   * SENTENCE-SUBJECT: else the ONE symbol a code-marked sentence asks the dependents of.
+inline std::vector<std::vector<NodeId>> subjectCallerCandidates( const IngestResult& ing, SubjectReading reading )
+{
+    std::vector<std::vector<NodeId>> out;
+    const auto addSource = [ & ]( std::vector<NodeId> defs )
+    {
+        std::erase_if( defs, [ & ]( NodeId id ) { return !subject_detail::sourceClassDef( ing, id ); } );
+        if( !defs.empty() )
+        {
+            out.push_back( std::move( defs ) );
+        }
+    };
+    if( reading.framed && reading.sourceDef )
+    {
+        for( SubjectExactSymbol& e : reading.exact )
+        {
+            addSource( std::move( e.defs ) );
+        }
+    }
+    if( out.empty() )
+    {
+        addSource( std::move( reading.codeSubject ) );
+    }
+    return out;
+}
+
 // The route the subject reading picks, before the CONFIDENCE-ANCHOR check. `servesBodiesAndCallers`: the surface prints the anchor's
 // body and <callers> (the CLI --for does; the MCP `for` verb serves signatures only), so it may trade a ranked map for them.
 inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
@@ -905,27 +934,9 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
             return out;
         }
     }
-    // SUBJECT-CALLERS-NATURAL: the callers ride on a framed sentence too ("who calls f", "I need to change f; what depends on it?")
-    if( reading.framed && reading.sourceDef && out.route.which != LexMode::NameExact )
+    if( out.route.which != LexMode::NameExact )   // a conceptual route only gains <callers by="subject"> on top
     {
-        // the source-class definitions only: a CI or vendored copy of the name is not a second function to split the callers over
-        for( SubjectExactSymbol& e : reading.exact )
-        {
-            std::erase_if( e.defs, [ & ]( NodeId id ) { return !subject_detail::sourceClassDef( ing, id ); } );
-            if( !e.defs.empty() )
-            {
-                out.callerCandidates.push_back( std::move( e.defs ) );
-            }
-        }
-    }
-    // SENTENCE-SUBJECT: the same block for the ONE symbol a code-marked sentence asks the dependents of; only where the rule above added none
-    if( out.callerCandidates.empty() && !reading.codeSubject.empty() && out.route.which != LexMode::NameExact )
-    {
-        std::erase_if( reading.codeSubject, [ & ]( NodeId id ) { return !subject_detail::sourceClassDef( ing, id ); } );
-        if( !reading.codeSubject.empty() )
-        {
-            out.callerCandidates.push_back( std::move( reading.codeSubject ) );
-        }
+        out.callerCandidates = subjectCallerCandidates( ing, std::move( reading ) );
     }
     return out;
 }
