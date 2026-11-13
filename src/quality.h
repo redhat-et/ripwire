@@ -6322,6 +6322,16 @@ inline int openBaselineSidecar( const std::string& path )
 // than absorb — and it is written as two records the snapshot reader skips as unknown kinds (`dirty 1`,
 // `absorbed N`), exactly like the `head` stamp above: the fact has to outlive the process that knew it,
 // because the report it changes the meaning of is every LATER --quality-delta, not this run.
+// A key -> hash record family of a baseline sidecar: "<tag> <key> <hash>", both hex, one per record (bodyq, movec).
+template <class HexMap>
+inline void writeHexPairLines( std::ostream& f, std::string_view tag, const HexMap& m )
+{
+    for( const auto& [h, v] : m )
+    {
+        f << tag << ' ' << std::hex << h << ' ' << v << std::dec << '\n';
+    }
+}
+
 // The defect-shape records of a baseline sidecar: "defect <anchor> <site>", both hex, one per record.
 inline void writeDefectSiteLines( std::ostream& f, const std::vector<DefectSiteKey>& sites )
 {
@@ -6417,14 +6427,8 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "defs " << std::hex << h << std::dec << ' ' << v << '\n'; // overload-set CARDINALITY (a count, not a max)
     }
-    for( const auto& [h, v] : s.bodyHashBySym )
-    {
-        f << "bodyq " << std::hex << h << ' ' << v << std::dec << '\n'; // §D#4 short-horizon-churn raw-body hash, pathQualifiedKey-keyed (both hex)
-    }
-    for( const auto& [h, v] : s.moveCidBySym )
-    {
-        f << "movec " << std::hex << h << ' ' << v << std::dec << '\n'; // MOVED-BODY: the move identity of a body over a bar (both hex)
-    }
+    writeHexPairLines( f, "bodyq", s.bodyHashBySym ); // §D#4 short-horizon-churn raw-body hash, pathQualifiedKey-keyed
+    writeHexPairLines( f, "movec", s.moveCidBySym );  // MOVED-BODY: the move identity of a body over a bar
     for( std::uint64_t h : s.cloneGroups )
     {
         f << "clone " << std::hex << h << std::dec << '\n';
