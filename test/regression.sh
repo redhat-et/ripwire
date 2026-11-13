@@ -854,6 +854,7 @@ for _g in \
     qdclonepaircheck \
     qddegradecheck \
     qddialscheck \
+    qdentryceilingcheck \
     qdrefpaircheck \
     qdtestdeadcheck \
     qdtype3oncecheck \
