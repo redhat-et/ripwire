@@ -7367,9 +7367,7 @@ struct IdentityNarrower
         return !outer.empty() && ancestors.contains( outer );
     }
 
-    // every name derivesFromName( className, name, chaUp ) is true for: the names up to 12 chaUp steps above className. A
-    // breadth-first walk keeps each name once at its shortest distance, so it reaches exactly the names the bounded walk
-    // of derivesFromName reaches.
+    // every name derivesFromName( className, name, chaUp ) is true for, memoised per class name for the loop
     const ankerl::unordered_dense::set<std::string_view>& ancestorNamesOf( std::string_view className, const ChaUpNames& chaUp ) const
     {
         if( ancestorMemoOf != &chaUp )
@@ -7378,11 +7376,17 @@ struct IdentityNarrower
             ancestorMemoOf = &chaUp;
         }
         const auto [ at, inserted ] = ancestorMemo.try_emplace( std::string( className ) );
-        if( !inserted )
+        if( inserted )
         {
-            return at->second;
+            collectAncestorNames( className, chaUp, at->second );
         }
-        ankerl::unordered_dense::set<std::string_view>& ancestors = at->second;
+        return at->second;
+    }
+
+    // the names up to 12 chaUp steps above className, into `ancestors`. A breadth-first walk keeps each name once at its
+    // shortest distance, so it reaches exactly the names the bounded walk of derivesFromName reaches.
+    static void collectAncestorNames( std::string_view className, const ChaUpNames& chaUp, ankerl::unordered_dense::set<std::string_view>& ancestors )
+    {
         std::vector<std::string_view> frontier{ className };
         std::vector<std::string_view> next;
         for( int depth = 0; depth < 12 && !frontier.empty(); ++depth )
@@ -7391,11 +7395,7 @@ struct IdentityNarrower
             for( std::string_view name : frontier )
             {
                 const auto up = chaUp.find( std::string( name ) );
-                if( up == chaUp.end() )
-                {
-                    continue;
-                }
-                for( const std::string& base : up->second )
+                for( const std::string& base : ( up == chaUp.end() ? std::span<const std::string>{} : std::span<const std::string>( up->second ) ) )
                 {
                     if( ancestors.insert( base ).second )
                     {
@@ -7405,7 +7405,6 @@ struct IdentityNarrower
             }
             frontier.swap( next );
         }
-        return ancestors;
     }
 
     bool collectIf( const rw::SmallVec<NodeId, 2>& named, const auto& pick ) const

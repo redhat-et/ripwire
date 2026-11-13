@@ -968,17 +968,13 @@ inline void dropFieldDefinitionSites( IngestResult& result, const std::vector<Ra
                    } );
 }
 
-// P2-D Rule 2: attribute each local var→type binding to its enclosing def (same containment scan as refs),
-// in deterministic (file, byte, var) order. A binding whose position is file-scope (kNoNode) is kept too —
-// buildGraph keys on (fromSymbol, var), so a file-scope binding only ever matches a file-scope recvVar call.
-inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, const DefSpanIndex& spanIndex )
+// BIND-SORT: the order emitBindings emits bindings in, as row indices. A RawBind is 88 B with three strings, so sort a
+// (fileId, startByte) key beside a uint32 INDEX instead of the rows (orderReferences' posture). The packed key decides
+// almost every compare in one u64 test; equal keys fall to the rest of the total order, and a row equal on every
+// compared field keeps its input order (the index), so the order is deterministic and is the old comparator's order
+// wherever that order was defined.
+inline std::vector<std::uint32_t> orderBindings( const std::vector<RawBind>& rawBinds )
 {
-    PROFILE_SCOPE_DESCRIBE( "ingest/build-model: sort+emit binds" );
-
-    // BIND-SORT: a RawBind is 88 B with three strings, so sort a (fileId, startByte) key beside a uint32 INDEX instead of
-    // the rows (orderReferences' posture). The packed key decides almost every compare in one u64 test; equal keys fall to
-    // the rest of the total order, and a row equal on every compared field keeps its input order (the index), so the
-    // emitted order is deterministic and is the old comparator's order wherever that order was defined.
     const auto lessBindTail = []( const RawBind& a, const RawBind& b ) noexcept
     {
         if( a.var != b.var )
@@ -1002,12 +998,12 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
         std::uint32_t index;   // the row in rawBinds
     };
     ASSUME( rawBinds.size() <= UINT32_MAX, "a bind index is a uint32, as a reference's is (orderReferences)" );
-    std::vector<KeyedBind> bindOrder( rawBinds.size() );
-    for( std::uint32_t bindIndex = 0; bindIndex < bindOrder.size(); ++bindIndex )
+    std::vector<KeyedBind> keyed( rawBinds.size() );
+    for( std::uint32_t bindIndex = 0; bindIndex < keyed.size(); ++bindIndex )
     {
-        bindOrder[ bindIndex ] = { hashutil::packPair( rawBinds[ bindIndex ].fileId, rawBinds[ bindIndex ].startByte ), bindIndex };
+        keyed[ bindIndex ] = { hashutil::packPair( rawBinds[ bindIndex ].fileId, rawBinds[ bindIndex ].startByte ), bindIndex };
     }
-    std::sort( bindOrder.begin(), bindOrder.end(),
+    std::sort( keyed.begin(), keyed.end(),
                [ &rawBinds, &lessBindTail ]( const KeyedBind& a, const KeyedBind& b ) noexcept
                {
                    if( a.key != b.key )
@@ -1022,12 +1018,25 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
                    }
                    return !lessBindTail( rb, ra ) && a.index < b.index;
                } );
+    std::vector<std::uint32_t> bindOrder( keyed.size() );
+    std::ranges::transform( keyed, bindOrder.begin(), &KeyedBind::index );
+    return bindOrder;
+}
+
+// P2-D Rule 2: attribute each local var→type binding to its enclosing def (same containment scan as refs),
+// in deterministic (file, byte, var) order. A binding whose position is file-scope (kNoNode) is kept too —
+// buildGraph keys on (fromSymbol, var), so a file-scope binding only ever matches a file-scope recvVar call.
+inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, const DefSpanIndex& spanIndex )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/build-model: sort+emit binds" );
+
+    const std::vector<std::uint32_t> bindOrder = orderBindings( rawBinds );
     result.bindings.resize( rawBinds.size() );
     DefSweep bindSweep{ spanIndex.spans, spanIndex.fileSpanStart };
     std::size_t outBindIndex = 0;
-    for( const KeyedBind& keyed : bindOrder )   // rawBinds consumed here → move its 2 strings into the Binding
+    for( const std::uint32_t bindIndex : bindOrder )   // rawBinds consumed here → move its 2 strings into the Binding
     {
-        RawBind& rb = rawBinds[ keyed.index ];
+        RawBind& rb = rawBinds[ bindIndex ];
         Binding& b = result.bindings[ outBindIndex++ ];
         b.fileId     = rb.fileId;
         b.kind       = rb.kind;

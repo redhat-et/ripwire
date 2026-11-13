@@ -14,7 +14,7 @@
                                  // by hand with ingest.cpp's kLangTable per its own header comment)
 #include "infra/sparseCsr.h"     // first-party infra math (src/infra/)
 #include "infra/csrverify.h"     // structural gate, ASSUME'd after every production CSR build
-#include "infra/hashutil.h"      // hashBytes — internDeclinedList buckets a declined call's candidate list by its bytes
+#include "infra/hashutil.h"      // packPair — composite integer keys
 #include "pagerank.h"            // double-precision PageRank kernel over float CSR storage
 #include "prconverge.h"          // RankDisclosure — the power iteration's own account, carried with its result
 #include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
@@ -1771,7 +1771,7 @@ struct AsideMarks
 // localDefOutOfReach of every candidate, but the locals' spans are read from a dense per-name list instead of a Symbol
 // row and a binary search per candidate, and `out` is built only when one of them is set aside. A name can hold
 // thousands of function-local defs (`result`, `e` on vscode), so set-aside membership is a stamp, never a search.
-inline bool reachableByName( std::span<const FnLocalReach> locals, const rw::SmallVec<NodeId, 2>& ids, const Reference& r,
+inline bool reachableByNameFromLocals( std::span<const FnLocalReach> locals, const rw::SmallVec<NodeId, 2>& ids, const Reference& r,
                              AsideMarks& marks, rw::SmallVec<NodeId, 2>& out )
 {
     marks.nextCall();
@@ -1801,7 +1801,7 @@ inline bool reachableByName( std::span<const FnLocalReach> locals, const rw::Sma
             out.push_back( c );
         }
     }
-    ENSURES( out.size() <= ids.size(), "reachableByName only removes candidates" );
+    ENSURES( out.size() <= ids.size(), "reachableByNameFromLocals only removes candidates" );
     return setAside && !out.empty();
 }
 
@@ -12112,7 +12112,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // whichever same-named def competes, and yielding would move them from external= into declined=, so such a call
         // resolves exactly as it did before local defs had bodies.
         const bool localsYield = !scipPinned && !canonical && !narrowed && !builtinGated && it != byName.end() && !ing.fnLocalScopes.empty()
-                                 && reachableByName( localsOfName( it->second ), *baseIds, r, reachAside, reachScratch )
+                                 && reachableByNameFromLocals( localsOfName( it->second ), *baseIds, r, reachAside, reachScratch )
                                  && !( r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty() && externalVeto.isExternalBound( r ) );
         const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
         // FE-B: for a MEMBER call the include graph says which file the caller imports, never what its receiver is — the
@@ -19209,7 +19209,7 @@ inline GaugeClauses graphGaugeClauses( const Graph& g ) noexcept
 // alone — symbol-id order, each id once — and the decl/def collapse and every later filter (the namespace gate,
 // keepOwnJvmLanguageCandidates, keepRustQualifiedCandidates, keepStdQualifiedCandidates) keep a subset in order.
 //
-// The hash over the candidate bytes (hashutil::hashBytes, word-at-a-time wyhash) only picks a bucket; a hit is confirmed by length and memcmp against each list in
+// The hash over the candidate bytes (ankerl's wyhash, a word at a time) only picks a bucket; a hit is confirmed by length and memcmp against each list in
 // it, so a collision costs a compare, never a wrong share. List numbers are first-seen in the sequential resolve loop, and the
 // map is only probed and inserted into — neither reaches output.
 //
@@ -19223,7 +19223,7 @@ inline GaugeClauses graphGaugeClauses( const Graph& g ) noexcept
 inline std::uint32_t internDeclinedList( Graph& g, HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>>& listsByHash, std::span<const NodeId> cand )
 {
     EXPECTS( !cand.empty(), "tier 3 declines a set it could not narrow to one; the builtin-method gate a non-empty set it admitted none of" );
-    const std::uint64_t hash = hashutil::hashBytes( cand.data(), cand.size_bytes() );
+    const std::uint64_t hash = ankerl::unordered_dense::detail::wyhash::hash( cand.data(), cand.size_bytes() );   // the flat containers' own byte hash, a word at a time
     rw::SmallVec<std::uint32_t, 1>& bucket = listsByHash[ hash ];
     for( const std::uint32_t listIndex : bucket )
     {

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
 #include "platform.h" // infra::platform::multiplyLow64 — the sanitizer-clean wrapping multiply
@@ -67,14 +66,6 @@ inline constexpr std::uint64_t packPair( std::uint32_t high, std::uint32_t low )
 inline std::uint64_t hashMix( std::uint64_t key ) noexcept
 {
     return ankerl::unordered_dense::detail::wyhash::hash( key );
-}
-
-// Hash a byte range: the flat containers' own string hash (wyhash over 8-byte words, the one ankerl applies to a
-// std::string key). For a bucket key whose value never reaches output; FNV-1a above absorbs ONE byte per multiply,
-// which on a declined call's candidate list (graph.h internDeclinedList) was 1.2-3 % of a warm --deps main thread.
-inline std::uint64_t hashBytes( const void* data, std::size_t size ) noexcept
-{
-    return ankerl::unordered_dense::detail::wyhash::hash( data, size );
 }
 
 } // namespace rw::hashutil
