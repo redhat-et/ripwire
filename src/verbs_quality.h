@@ -896,9 +896,9 @@ inline constexpr const char* kQdLegendCore =
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
-    "because the code is NEW carries origin=\"new-symbol\" (origin=\"moved\" when the same body left another name or file in this diff); (3) MATERIALITY — a small numeric delta is "
-    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, or on "
-    "format-arity, or on a new function at the ceiling, the gating= count (ceiling= on the row); new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling (4x the bar: ccx 60 or 240 lines; not a moved body, not test code), so exit 0 "
+    "because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small numeric delta is "
+    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, the gating= count; "
+    "new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling, so exit 0 "
     "is NOT a verdict on them — nothing that existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
     "preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a "
     "FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger "
@@ -906,8 +906,7 @@ inline constexpr const char* kQdLegendCore =
     "api-new-surface= COUNTS the new PUBLIC symbols (never gates, not in regressions=, printed even at zero). "
     "register-macro-excluded= is a FLOOR, not a finding: symbols this run excluded from the dead-code kind "
     "because their own definition is a registered self-registering test/benchmark macro call. Never gates, "
-    "never counted in regressions=, printed even at zero (zero means none excluded, not that the check did "
-    "not run). "
+    "never counted in regressions=, printed even at zero (zero: none excluded, not a skipped check). "
     // P3 (L7): next= on gating rows, defined where the reader meets it
     "A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). "
     // P8 (L7): the threshold beside the number
@@ -1023,8 +1022,8 @@ inline constexpr const char* kQdIdentityLegend =
     "regression carried in with a rename is judged preexisting-worse and GATES instead of slipping through "
     "as new-symbol. FLOORS, stated because silence here would read as a guarantee: the two clone kinds key "
     "on a member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; ORIGIN follows the "
-    "rename record but never content, because the baseline stores no content id at all; and a move git "
-    "recorded no rename for still reads as new-symbol. ";
+    "rename record, not content: a move git recorded no rename for reads as new-symbol, or as moved (never "
+    "gating) when its unchanged body is over a bar. ";
 
 // How the two mechanisms decide, in full — printed only when an ack was actually SUPPRESSED by one of
 // them (acked= is non-zero), which is the only state in which a reader has a suppression to audit. The
@@ -1337,6 +1336,17 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     if( !p.rows.empty() || !p.disclosedRows.empty() )
     {
         std::fputs( kQdRowLegend, out );
+        // QD-ENTRY-CEILING: the two NEW-code readings are defined only on an answer that carries them (present-only), so every
+        // other answer keeps its legend bytes.
+        if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.isNewSymbol && r.isMoved; } ) )
+        {
+            rw::emitRaw( out, "origin=\"moved\": the same body left another name or file in this diff; it never gates. " );
+        }
+        if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.ceiling != 0; } ) )
+        {
+            rw::emitRaw( out, "ceiling= on a NEW complexity or verbosity row: it reached 4x the bar (ccx 60 or 240 lines; not a moved body, not test "
+                              "code), so it gates. " );
+        }
         if( anyCloneRow( p.rows ) || anyCloneRow( p.disclosedRows ) )
         {
             std::fputs( kQdCloneLegend, out );

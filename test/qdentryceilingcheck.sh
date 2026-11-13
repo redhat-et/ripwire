@@ -167,14 +167,17 @@ printf '%s' "$JM" | grep -q '"origin":"moved"' && ok "J: --json carries \"origin
 
 # ═══ L) LEGEND — the exception is stated wherever the rule is ═════════════════════════════════════════
 PHRASE='new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling'
+# compact spends fewer bytes (its prose has a stair-step target): the exception names the ceiling= row it defines
+CPHRASE='never gate, except defect-shape format-arity or a ceiling= row'
 for leg in full compact; do
     T="$( cd "$WORK/p1" && "$BIN" . --quality-delta --no-cache --legend=$leg 2>/dev/null | tr '\n' ' ' | tr -s ' ' )"
-    a="$( printf '%s' "$T" | grep -o 'new-symbol rows never gate' | wc -l | tr -d ' ' )"
-    q="$( printf '%s' "$T" | grep -o "$PHRASE" | wc -l | tr -d ' ' )"
+    a="$( printf '%s' "$T" | grep -o 'never gate, except defect-shape' | wc -l | tr -d ' ' )"
+    ph="$PHRASE"; [ "$leg" = compact ] && ph="$CPHRASE"
+    q="$( printf '%s' "$T" | grep -o "$ph" | wc -l | tr -d ' ' )"
     if [ "$q" -ge 1 ] && [ "$a" = "$q" ]; then ok "L: --legend=$leg states the ceiling exception ($q)"; else no "L: --legend=$leg: phrase x$q of $a"; fi
 done
 H="$( "$BIN" --help=quality-delta 2>/dev/null | tr '\n' ' ' | tr -s ' ' )"
-a="$( printf '%s' "$H" | grep -o 'new-symbol rows never gate' | wc -l | tr -d ' ' )"
+a="$( printf '%s' "$H" | grep -o 'never gate, except defect-shape' | wc -l | tr -d ' ' )"
 q="$( printf '%s' "$H" | grep -o "$PHRASE" | wc -l | tr -d ' ' )"
 if [ "$q" -ge 1 ] && [ "$a" = "$q" ]; then ok "L: --help=quality-delta states the ceiling exception ($q)"; else no "L: --help=quality-delta: phrase x$q of $a"; fi
 

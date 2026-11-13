@@ -969,7 +969,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "stale_by_kind", "stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "stale_next", "stale_next=: the call printing the sa rows and the full header", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    { "new-symbol", "new-symbol=N: findings on NEW code; new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "new-symbol", "new-symbol=N: NEW-code findings; never gate, except defect-shape format-arity or a ceiling= row", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "declined-call-excluded", "declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "api-new-surface", "api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
