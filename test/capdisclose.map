@@ -33,6 +33,7 @@ kForDetailFloorShareDivisor	pending:B43 no disclosure identifier in the cap site
 kForDispatchCtorRows	sink:shown,isFloor
 kForDispatchHopRows	sink:shown,isFloor
 kForDispatchHeldRows	sink:heldShown
+kForDispatchHeldText	sink:cut
 kForDocBodyBytes	pending:B43 no disclosure identifier in the cap site's function (src/fordocbody.h:892); audit: cut or work bound
 kForDocBodyFiles	sink:shown,shownSigIds
 kForDocBodyTriggerDocs	sink:shown,shownSigIds
