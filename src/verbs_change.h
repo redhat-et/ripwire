@@ -1594,9 +1594,15 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         }
         // C1 F-07: the per-gate <read> cap is a raisable DEFAULT now — --limit=N beats it through the
         // tool-wide effectiveRowCap rule, --detail still lifts it outright, and --offset=M pages it.
-        darkflags::writeFlags( stdout, result,
-                               cfg.detail ? SIZE_MAX : std::size_t( rw::effectiveRowCap( cfg.pageLimit, int( darkflags::kMaxSitesShown ) ) ),
-                               cfg.pageOffset );
+        const std::size_t flagsSiteCap = cfg.detail ? SIZE_MAX : std::size_t( rw::effectiveRowCap( cfg.pageLimit, int( darkflags::kMaxSitesShown ) ) );
+        if( cfg.json )
+        {
+            darkflags::writeFlagsJson( stdout, result, flagsSiteCap, cfg.pageOffset );   // the same rows, keys = the XML attribute names
+        }
+        else
+        {
+            darkflags::writeFlags( stdout, result, flagsSiteCap, cfg.pageOffset );
+        }
         return 0;
     }
 

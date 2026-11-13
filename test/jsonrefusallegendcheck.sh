@@ -164,7 +164,8 @@ check_json_refuses "--stray-content --abi"     "$ROOT"                "--abi"   
 check_json_refuses "--exercises"               "$ROOT/test/fixture"   "--exercises"     --exercises=notes.md
 check_json_refuses "--community=ID"            "$ROOT"                "--community"     --community=1
 check_json_refuses "--doc-drift"               "$SBX"                 "--doc-drift"     --doc-drift
-check_json_refuses "--flags"                   "$SBX"                 "--flags"         --flags
+# --flags is NOT here any more: it gained a JSON twin (writeFlagsJson, the shell env lane) and is in kJsonVerbs;
+# test/bashenvcheck.sh arm 8 holds its JSON contract.
 check_json_refuses "--layout"                  "$ROOT"                "--layout"        --layout=Config
 # lane/safe-delete + lane/paper-slice: the same forgotten-arm class two lanes later — each lane wired
 # dispatch (right after --edit-check) but not the deny-chain. $SBX reaches real dispatch for both (bare

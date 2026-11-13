@@ -242,7 +242,7 @@ Discloses: **none**
 
 ### `src/darkflags.h`
 
-Discloses: `capped`, `reads_capped`
+Discloses: `capped`, `reads_capped`, `writes_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

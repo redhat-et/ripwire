@@ -3787,7 +3787,7 @@ $ ./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all
 
 **Answers:** the dark-content dashboard: what is built but switched OFF in this repo the dark-content dashboard: what is BUILT but OFF in this repo.
 
-Harvests all three gate patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports gate, kind (compile/cmake/env), default, the size of the code it guards (#if regions and their LOC), and its read sites. When a name is BOTH a header gate and a CMake option the CMake default WINS (that is what the build actually passes) and both sites are listed. A gate whose default IS another gate's name (#define F_WALLS F_ALL) is resolved: it inherits the master's default and rolls its guarded size up, so a master switch shows <aliases n=..> rather than a misleading loc="0". LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used. A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region. Pair it with --flip=NAME below to size ONE gate instead of listing them all.
+Harvests all three gate patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports gate, kind (compile/cmake/env), default, the size of the code it guards (#if regions and their LOC), and its read sites. When a name is BOTH a header gate and a CMake option the CMake default WINS (that is what the build actually passes) and both sites are listed. A gate whose default IS another gate's name (#define F_WALLS F_ALL) is resolved: it inherits the master's default and rolls its guarded size up, so a master switch shows <aliases n=..> rather than a misleading loc="0". LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used. A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region. Pair it with --flip=NAME below to size ONE gate instead of listing them all. BASH: in .sh/.bash/.zsh every $X / ${X...} expansion is an env read unless the same file assigned X on an earlier line (X=, export X=, local/declare/readonly, read, for, mapfile; a prefix X=v cmd is not a write, and a function's local/declare hides reads only to that function's end). Each read row carries form= (required ${X:?}/${X?}, default ${X:-d}, unset-default ${X-d}, settest ${X:+w}/${X+w} or a -n/-z operand of [ / [[ / test, assign ${X:=d}, plain $X), colon=1|0 (does an EMPTY value count as unset), default= the literal word, and test=n|z; write rows list the name's assignments repo-wide; ambient="1" tags a name Bash or the login always sets (PWD, HOME, BASH_SOURCE, RANDOM and the like). A shell file whose header is a GENERATED/DO-NOT-EDIT banner is skipped (generated_skipped=N). Bash LIMITS: lexical order within one file, no flow — a name set only by eval, by printf -v "$1", in a function defined below the read, or in a sourced file still reads as external (the write rows let a consumer that follows source join them). .zsh files are read with Bash's rules (no zsh-only expansion flags), and a script with no .sh/.bash/.zsh extension (a bare #!/bin/bash file) is not scanned. --flags --json emits the same rows as JSON (raise --limit to lift the site cap).
 
 **Try it**
 
@@ -3812,12 +3812,13 @@ $ ./build/ripwire . --flags
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--flip`, `--limit`
+**Shaped by:** `--flip`, `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
 - LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used.
 - A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region.
+- a prefix X=v cmd is not a write, and a function's local/declare hides reads only to that function's end).
 
 ### `--flip=NAME`
 
@@ -4634,7 +4635,7 @@ ripwire.pack-top-n/v1 <ctx>: the ranked map plus <src p=> bodies of the top-N sy
 
 **Answers:** emit JSON instead of XML;
 
-keys mirror the XML attribute names one to one machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES them in lens= on the root (--for --json: lens="compose,lego,routes,docs" — their *_total counts are there, their rows are not) — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate, --metrics (the CI/scripting verbs), plus --plan-lanes which is JSON-native. That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML — a verb added tomorrow refuses by default. Deterministic: same 2-run byte-diff + stable key order contract as the XML.
+keys mirror the XML attribute names one to one machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES them in lens= on the root (--for --json: lens="compose,lego,routes,docs" — their *_total counts are there, their rows are not) — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate, --metrics, --flags (the CI/scripting verbs), plus --plan-lanes which is JSON-native. That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML — a verb added tomorrow refuses by default. Deterministic: same 2-run byte-diff + stable key order contract as the XML.
 
 **Try it**
 
@@ -4645,7 +4646,7 @@ $ ./build/ripwire . --hotspots --json
 (empty)
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`, `--for`, `--in`, `--legend`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--for`, `--flags`, `--in`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -5208,7 +5209,7 @@ $ ./build/ripwire --version
 ripwire 0.6.10 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=d1f3ba3d5)
 ```
 
-**Shaped by:** `--verify`, `--metrics`, `--deps`, `--naming-locals`, `--arch`, `--dry-run`, `--doc-drift`, `--from-trace`
+**Shaped by:** `--verify`, `--metrics`, `--deps`, `--naming-locals`, `--arch`, `--dry-run`, `--flags`, `--doc-drift`
 
 ---
 

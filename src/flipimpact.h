@@ -1125,8 +1125,7 @@ inline std::string qualifiedName( const Symbol& s )
 // pageWindow spells as limit <= 0.
 inline PageWindow flipRowWindow( std::size_t total, std::size_t maxRows, int pageOffset ) noexcept
 {
-    const int limit = maxRows >= std::size_t( INT_MAX ) ? 0 : int( maxRows );
-    return pageWindow( total, limit, pageOffset );
+    return darkflags::siteCapWindow( total, maxRows, pageOffset );   // the --flags site lists' window, one rule
 }
 
 template<class Seq, class Row>
