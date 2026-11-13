@@ -1668,6 +1668,34 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing )
     return out;
 }
 
+// EXTENT-CTOR (QD-ENTRY-CEILING card 1, 2026-11-12) — A CLASS IS NOT ITS CONSTRUCTOR'S BODY. A C++ class symbol is scoped by its
+// own name, so `class TextPool` and its constructor `TextPool::TextPool` share one canonical id, and every per-symbol kind keeps
+// the MAX over an id: the constructor's verbosity row read the CLASS's extent (TextPool::TextPool 129 lines, a 4-line
+// LayeredSearch::LayeredSearch 149, NameScan::NameScan 1,011 in the 11-04 replay). Where a callable (function or method) shares
+// the id, the non-callable symbols under it measure 0 code lines, so the row measures the callable's own body. A class with no
+// constructor keeps its id and its extent, as before; --metrics reads Symbol::loc and does not move. `keyOf[i]` is the
+// symbol's qualityKey, 0 for a symbol with no canonical id. Applied on both sides of the delta (computeSnapshot and computeDelta).
+inline void measureCallableNotItsContainer( const IngestResult& ing, const std::vector<std::uint64_t>& keyOf, std::vector<std::uint32_t>& codeLoc )
+{
+    const auto isCallable = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
+    std::vector<std::uint64_t> callableKeys;
+    for( NodeId i = 0; i < ing.symbols.size() && i < keyOf.size(); ++i )
+    {
+        if( keyOf[i] != 0 && isCallable( ing.symbols[i].kind ) )
+        {
+            callableKeys.push_back( keyOf[i] );
+        }
+    }
+    std::sort( callableKeys.begin(), callableKeys.end() );
+    for( NodeId i = 0; i < ing.symbols.size() && i < keyOf.size() && i < codeLoc.size(); ++i )
+    {
+        if( keyOf[i] != 0 && !isCallable( ing.symbols[i].kind ) && std::binary_search( callableKeys.begin(), callableKeys.end(), keyOf[i] ) )
+        {
+            codeLoc[i] = 0;
+        }
+    }
+}
+
 // Q-DIAL-4 (2026-09-10) — DOES THE LAST DECLARED PARAMETER CARRY A DEFAULT?
 //
 // 113 of the 132 `api-surface` acks in this repo's own committed ledger (85.6%) say the same sentence: "one
@@ -3747,6 +3775,8 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   pythonDispatchClasses     (quality.h) — downward-only inheritance reachability
 //   pythonDispatchedMethodIds  (quality.h) — Python inherited receiver-call evidence for the dead set
 //   isDeadCandidate            (quality.h) — the dead-set predicate itself
+//   codeLocByNode              (quality.h) — the locBySym VALUES (code lines per body)
+//   measureCallableNotItsContainer (quality.h) — EXTENT-CTOR: a container sharing a callable's id lends it no extent
 //   pythonFrameworkInvokedSymbol (quality.h) — the framework-hook exemption isDeadCandidate calls into (#228)
 //   pythonRecordParent         (quality.h) — fills the closure host and owner that pythonReceiverScope reads (#228)
 //   pythonReceiverScope        (quality.h) — which method a self./cls. call in a closure belongs to (#228)
@@ -3900,7 +3930,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v26 (2026-11-10, lane qd-fixes-1) — no blob shape change; two record SETS moved. The dead set: isDeadCandidate exempts Go and Rust
 // test-runner entry points (testRunnerInvokedSymbol). The clone set: baselineCloneGroupHashes also holds every pair its clone
 // relation implies (pushExactGroupPairs / pushTwinWidenedPairs, QD-CLONE-FALSE-GATE), so a v25 blob holds neither. Bumped 25 -> 26.
-constexpr std::uint32_t kQSnapCacheScheme = 26;
+// v27 (2026-11-12, lane entry-ceiling, EXTENT-CTOR) — no blob shape change; the locBySym VALUES moved: a class that shares its
+// canonical id with its constructor (C++ Foo::Foo) no longer lends the id its class extent (measureCallableNotItsContainer). A v26
+// blob holds the class extent there, and would read every such constructor as shrunk. Bumped 26 -> 27.
+constexpr std::uint32_t kQSnapCacheScheme = 27;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -5837,7 +5870,16 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
                                  const std::vector<char>* fileInBaseline, const KindScope& scope, TreePasses* passes )
 {
     Snapshot snap;
-    const std::vector<std::uint32_t> codeLoc = codeLocByNode( ing );                     // Q-DIAL-3: the verbosity kind's metric is CODE lines
+    std::vector<std::uint32_t> codeLoc = codeLocByNode( ing );                           // Q-DIAL-3: the verbosity kind's metric is CODE lines
+    std::vector<std::uint64_t> keyOf( ing.symbols.size(), 0 );                           // path-qualified ALWAYS — see qualityKey
+    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( i < g.canonId.size() && !g.canonId[i].empty() )
+        {
+            keyOf[i] = qualityKey( ing, i, root );
+        }
+    }
+    measureCallableNotItsContainer( ing, keyOf, codeLoc );                               // EXTENT-CTOR: the same rule computeDelta applies
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         if( i >= g.canonId.size() || g.canonId[i].empty() )
@@ -5849,7 +5891,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         {
             continue;   // IDENTITY BASIS: not a baseline file — every record below would be a phantom
         }
-        const std::uint64_t key = qualityKey( ing, i, root );   // path-qualified ALWAYS — see qualityKey
+        const std::uint64_t key = keyOf[i];
         // overloads share a canonical id (scope+name) → keep the MAX of each per-symbol metric per id, not
         // last-writer-wins; otherwise a low-metric overload written last makes every later delta report a
         // phantom regression forever (THE trap). Every new per-symbol kind mirrors this MAX exactly.
@@ -9836,7 +9878,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         }
     };
 
-    const std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing );   // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
+    std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing );   // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
+    measureCallableNotItsContainer( ing, keyByNode, nowCodeLoc );    // EXTENT-CTOR — and the same container rule
     perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   true,  base.ccxBySym,    [ & ]( NodeId i ){ return ing.symbols[i].ccx; } );
     perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   true,  base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
     perSymbolKind( "nesting",    kNestBar,  0,                false, base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
