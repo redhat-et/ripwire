@@ -2785,7 +2785,7 @@ inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view na
 // site does not vanish: it becomes a call-shaped use of the macro, which model.h retags role="macro".
 inline bool cFamilyMacroInvocationCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode roleNode, std::string_view src ) noexcept
 {
-    return ( lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC ) && ( defCapSv == "definition.function" || defCapSv == "definition.method" )
+    return macroRefLang( lang ) && ( defCapSv == "definition.function" || defCapSv == "definition.method" )
         && kindIs( ts_node_type( roleNode ), "function_declarator" ) && cFamilyMacroInvocationDecl( roleNode, name, src );
 }
 

@@ -296,17 +296,23 @@ WASM_EXPORT(uint32_t, proxy_on_vm_start, (uint32_t, uint32_t configuration_size)
   return 1;
 }
 EOF
-sverb(){ "$BIN" "$SF" "$1" --no-cache --legend=compact 2>/dev/null; }
+# sverb VERB: the answer, or FAILED-RUN when the run exits nonzero (every arm below then fails its match)
+sverb(){
+    local out rc
+    out="$( "$BIN" "$SF" "$1" --no-cache --legend=compact 2>/dev/null )"; rc=$?
+    if [ "$rc" != 0 ]; then printf 'FAILED-RUN'; return; fi
+    printf '%s' "$out"
+}
 # fnrows NAME: the function rows (t="fn" or t="method") --defs=NAME lists (-1 when the run printed no defs schema)
 fnrows(){
     local out
-    out="$( sverb "--defs=$1" )"
+    out="$( sverb "--defs=$1" )"   # status: sverb prints FAILED-RUN on a nonzero exit; no defs schema, so -1
     printf '%s' "$out" | grep -q 'schema="ripwire.defs/v1"' || { printf -- '-1'; return; }
     printf '%s' "$out" | grep -oE '<d [^>]*t="(fn|method)"' | grep -c .
 }
 # 9a) premise: the invocations are there to be counted, and the #define is indexed
 SITES="$( cat "$SF"/factory*.cc "$SF/shapes.cc" | grep -c 'REGISTER_FACTORY(' )"
-RD="$( sverb --defs=REGISTER_FACTORY )"
+RD="$( sverb --defs=REGISTER_FACTORY )"   # status: FAILED-RUN on a nonzero exit fails 9a's t="macro" match
 if [ "$SITES" -ge 13 ] && printf '%s' "$RD" | grep -q '<d [^>]*t="macro"'; then
     ok "MACRO-P0 premise: $SITES REGISTER_FACTORY invocations in the fixture, and the #define is indexed"
 else
@@ -322,7 +328,7 @@ for m in REGISTER_FACTORY DECLARE_LUA_FUNCTION MOCK_METHOD ASSIGN_OR_CO_RETURN E
         || no "MACRO-P0 trap: --defs=$m lists $n function def(s) — one phantom keeps the name shared and unbinds every invocation"
 done
 # 9c) every REGISTER_FACTORY invocation, brace-initialised or plain, is a role="macro" use of the #define
-RU="$( sverb --uses=REGISTER_FACTORY )"
+RU="$( sverb --uses=REGISTER_FACTORY )"   # status: FAILED-RUN on a nonzero exit fails 9c's site matches
 nu="$( printf '%s' "$RU" | grep -oE '<u role="macro"' | grep -c . )"
 [ "$nu" -ge "$SITES" ] && [ "$SITES" -gt 0 ] && ok "MACRO-P0: --uses=REGISTER_FACTORY lists $nu role=\"macro\" sites (fixture has $SITES)" \
     || no "MACRO-P0: --uses=REGISTER_FACTORY lists $nu role=\"macro\" sites, fixture has $SITES"
@@ -336,7 +342,7 @@ MIN="$( printf '%s' "$RD" | grep -oE '<d [^>]*t="macro"[^>]*' | grep -oE ' in="[
 [ "${MIN:-0}" -gt 0 ] && ok "MACRO-P0: the REGISTER_FACTORY #define reads in=\"$MIN\" (was 0 while phantoms shared its name)" \
     || no "MACRO-P0: the REGISTER_FACTORY #define reads in=\"${MIN:-<none>}\""
 # 9d) an in-function invocation (the error-recovered `co_await` shape) is a macro edge of its function, whose calls stay its own
-DC="$( sverb --callees=decodeLoop | tr '>' '\n' )"
+DC="$( sverb --callees=decodeLoop | tr '>' '\n' )"   # status: FAILED-RUN on a nonzero exit fails both 9d matches
 printf '%s\n' "$DC" | grep 'n="ASSIGN_OR_CO_RETURN"' | grep -q 'role="macro"' \
     && ok "MACRO-P0: decodeLoop() has a role=\"macro\" ASSIGN_OR_CO_RETURN row" \
     || no "MACRO-P0: decodeLoop() has no role=\"macro\" ASSIGN_OR_CO_RETURN row"
