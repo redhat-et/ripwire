@@ -34,7 +34,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>   // std::as_const: augDropsClass reads the sealed localType
 #include <vector>
 
 namespace rw
@@ -2344,8 +2343,9 @@ struct ReceiverEvidence
     {
         std::string_view cls;
         NodeId           id  = kNoNode;
-        bool             one = true;
-        for( const LocalFact& f : std::as_const( localType ).find( factScope( a ), a.var ) )
+        bool             one   = true;
+        const std::span<const LocalFact> facts = localType.find( factScope( a ), a.var );   // const member: the sealed table's view
+        for( const LocalFact& f : facts )
         {
             if( f.type.empty() )
             {
