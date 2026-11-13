@@ -350,6 +350,7 @@ for _g in \
     candheadcheck \
     candidatescheck \
     canoncheck \
+    capdisclosemapcheck \
     capdisclosurecheck \
     capsweepcheck \
     ccheck \
@@ -962,6 +963,7 @@ for _g in \
     runtracecheck \
     rustanccheck \
     rustimportprecisecheck \
+    rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \
     safedeletecheck \

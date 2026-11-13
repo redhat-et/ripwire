@@ -221,7 +221,7 @@ private:
             }
             else if( b.kind == LocalBindKind::VarDecl && !b.var.empty() )
             {
-                const bool             local = b.var.starts_with( kPythonLocalScopePrefix );   // a lambda parameter / comprehension target
+                const bool             local = b.var.str().starts_with( kPythonLocalScopePrefix );   // a lambda parameter / comprehension target
                 const std::string_view name  = local ? std::string_view( b.var ).substr( kPythonLocalScopePrefix.size() ) : std::string_view( b.var );
                 const NodeId           sc    = pythonBindScope( m_ing, b );   // the enclosing def / class; kNoNode: module scope
                 if( local && b.spanEnd > b.spanStart )
@@ -232,7 +232,7 @@ private:
                 {
                     addShadow( b, sc, name );
                 }
-                else if( !local && b.startByte > 0 && b.fileId < m_pyFile.size() && !b.var.starts_with( kPythonCondDefPrefix ) && isPyFile( b.fileId ) )
+                else if( !local && b.startByte > 0 && b.fileId < m_pyFile.size() && !b.var.str().starts_with( kPythonCondDefPrefix ) && isPyFile( b.fileId ) )
                 {
                     ++m_modWrites[ fk( b.fileId, name ) ];   // `global K` (byte 0) is not a write here
                 }
@@ -353,7 +353,7 @@ private:
             const std::uint32_t mf   = moduleFile( f, b->typeName, !js );
             // the name the imported module defines: JS `import { a as b }` → a; Python `from m import a as b` → a (never the alias)
             const std::string_view there = js ? ( b->importedName.empty() ? name : std::string_view( b->importedName ) )
-                                       : b->importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : name;
+                                       : b->importedName.str().starts_with( kPythonFromMemberMark ) ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : name;
             const bool          pyModule = !js && b->importedName == "module";   // `import m as K` binds a module, not a name of it
             NodeId              def  = mf == kNoFile || mf == f || pyModule ? kNoNode
                                      : depth < kRegReexportDepth ? resolveIdent( mf, there, depth + 1 ) : topLevel( mf, there );
@@ -386,11 +386,11 @@ private:
             {
                 return false;
             }
-            if( b->kind != LocalBindKind::Import || b->importedName == "module" || b->importedName.starts_with( kPythonFromMemberMark ) || sub == kNoFile )
+            if( b->kind != LocalBindKind::Import || b->importedName == "module" || b->importedName.str().starts_with( kPythonFromMemberMark ) || sub == kNoFile )
             {
                 return true;
             }
-            const std::string here = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+            const std::string here = b->typeName.str().ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
             return moduleFile( pkg, here, true ) != sub;
         } );
     }
@@ -437,15 +437,15 @@ private:
             std::uint32_t mf = kNoFile;
             if( b->importedName == "module" )
             {
-                const bool plain = b->typeName.size() > mod.size() && b->typeName.starts_with( mod ) && b->typeName[ mod.size() ] == '.';
+                const bool plain = b->typeName.size() > mod.size() && b->typeName.str().starts_with( mod ) && b->typeName[ mod.size() ] == '.';
                 mf               = moduleFile( f, plain ? mod : std::string_view( b->typeName ), true );
             }
             else
             {
-                const std::string_view member = b->importedName.starts_with( kPythonFromMemberMark )
+                const std::string_view member = b->importedName.str().starts_with( kPythonFromMemberMark )
                                                     ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : mod;
                 const std::uint32_t    pkg    = moduleFile( f, b->typeName, true );
-                const std::string      sub    = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+                const std::string      sub    = b->typeName.str().ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
                 mf                            = moduleFile( f, sub, true );
                 if( pkg != kNoFile && ( ( pkg != f && definesTop( pkg, member ) ) || bindsOtherThanSubmodule( pkg, member, b, mf ) ) )
                 {
@@ -555,24 +555,25 @@ private:
     }
 
     // TS ProviderRecord: `{ provide: K, useClass: C }` — the value pair and the ONE `provide` pair of the same object literal. A pair
-    // counts only when the extractor marked it (qualifier "<scope><shadow>@<start byte of its object literal>"): the literal is an
+    // counts only when the extractor marked it (Reference::litAt, 1 + the start byte of its object literal): the literal is an
     // ELEMENT of an array (a call argument, a `const` initialiser or a `providers` / `viewProviders` property) and the value is written bare. Key and value
     // pair only through the SAME literal, so a ternary / `||` / return / reassignment / second call can never join two objects.
     void collectProviderSites( std::vector<RegSite>& out ) const
     {
-        struct Pair { std::uint32_t ref; std::string_view lit; std::string_view field; };
-        HashMap<std::string, std::vector<Pair>> keysByLit;   // "<file>@<literal start>" → its `provide` pairs
-        std::vector<Pair>                       values;
+        struct Pair { std::uint32_t ref; std::string_view field; };
+        HashMap<std::uint64_t, std::vector<Pair>> keysByLit;   // ( file, literal start ) → its `provide` pairs
+        std::vector<Pair>                         values;
         const auto litKey = [ & ]( const Pair& p )
         {
-            return std::to_string( m_ing.references[ p.ref ].fileId ) + "@" + std::string( p.lit );
+            const Reference& r = m_ing.references[ p.ref ];
+            return ( std::uint64_t( r.fileId ) << 32 ) | r.litAt;
         };
         for( std::uint32_t i = 0; i < m_ing.references.size(); ++i )
         {
             const Reference& r   = m_ing.references[i];
             const RegLang*   row = r.role == RefRole::Value ? regLang( r.lang ) : nullptr;
             if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel().size() < 2
-                || r.composeRel()[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
+                || r.composeRel()[0] != '.' || r.litAt == 0 )
             {
                 continue;
             }
@@ -581,7 +582,7 @@ private:
             {
                 continue;   // the written slot was capped (vrClean): its object is not provable
             }
-            const Pair p{ i, std::string_view( r.qualifier ).substr( 3 ), field };
+            const Pair p{ i, field };
             if( field == row->keyField )
             {
                 keysByLit[ litKey( p ) ].push_back( p );
@@ -591,7 +592,7 @@ private:
                 values.push_back( p );
             }
         }
-        HashMap<std::string, std::uint32_t> valuesIn;   // the value pairs of one literal: two or more are not one record
+        HashMap<std::uint64_t, std::uint32_t> valuesIn;   // the value pairs of one literal: two or more are not one record
         for( const Pair& v : values )
         {
             ++valuesIn[ litKey( v ) ];

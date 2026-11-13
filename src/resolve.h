@@ -745,7 +745,7 @@ inline void pythonMemberFiles( const IngestResult& ing, const std::vector<Python
         {
             continue;   // a record sited at this byte that is not this statement's module
         }
-        const std::string_view member = b.importedName.starts_with( kPythonFromMemberMark )
+        const std::string_view member = std::string_view( b.importedName ).starts_with( kPythonFromMemberMark )
                                             ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() ) : std::string_view( b.var );
         std::uint32_t to = kNoFile;
         if( pkgFile != kNoFile )

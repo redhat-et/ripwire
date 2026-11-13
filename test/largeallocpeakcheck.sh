@@ -48,10 +48,13 @@ case "$( uname -s )" in
 esac
 if ! "$CXX" -std=c++20 -O1 -I "$ROOT/src" "$ROOT/test/largeallocfix/largealloc_test.cpp" "${EXTRA[@]}" -o "$TMP/ut" 2>"$TMP/ut.err"; then
     no "U: the unit test did not build"; sed 's/^/        /' "$TMP/ut.err" | head -20
-elif [ "$( "$TMP/ut" | tail -1 )" = "UNIT_OK" ]; then
-    ok "U: table, route, operators"
 else
-    no "U: unit arms"; "$TMP/ut" | head -20
+    "$TMP/ut" >"$TMP/ut.out" 2>&1; urc=$?   # its exit status carries its own arms (gateexitcheck H1), not only the last line
+    if [ "$urc" = 0 ] && [ "$( tail -1 "$TMP/ut.out" )" = "UNIT_OK" ]; then
+        ok "U: table, route, operators"
+    else
+        no "U: unit arms (exit $urc)"; head -20 "$TMP/ut.out"
+    fi
 fi
 
 # ---- does this binary carry a route? src/largealloc.cpp is the only source that spells RIPWIRE_TEST_LARGEALLOC, so the

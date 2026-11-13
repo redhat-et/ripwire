@@ -845,7 +845,7 @@ Discloses: **none**
 
 ### `src/ingest.h`
 
-Discloses: `ellipsis_capped`, `hits_capped`
+Discloses: `ellipsis_capped`, `hits_capped`, `unmatched_member_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -1201,7 +1201,7 @@ Discloses: `route_cands_capped`
 
 ### `src/pattern.h`
 
-Discloses: `hits_capped`
+Discloses: `ellipsis_capped`, `hits_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -1517,7 +1517,7 @@ Discloses: `capped`, `hits_capped`, `importers_capped`, `unindexed_candidates_ca
 
 ### `src/verbs_lint.h`
 
-Discloses: `capped`, `count_capped`, `ellipsis_capped`, `findings_capped`, `hits_capped`, `rows_capped`
+Discloses: `capped`, `count_capped`, `ellipsis_capped`, `findings_capped`, `hits_capped`, `rows_capped`, `unmatched_member_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

@@ -34,3 +34,5 @@ ripwire.pack-top-n/v1	map-rows	60	<s t="	s t= n=: kind, name	LEGEND-G-BLIND: the
 ripwire.pack-top-n/v1	map-rank	12	 k="	s k=: rank	LEGEND-G-BLIND: the ranked rows' k=; its own present-only clause, absent under --order=stable
 mcp:exemplar	body-kind	41	<b t="	b t= l=: the body's kind and first line	LEGEND-G-BLIND: the served body row's t=/l= rode undefined; present-only beside a <b> row (MCP twin)
 ripwire.pr-context/v1	changed-sym-name	80	<s t="	s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name	LEGEND-G-BLIND: a changed file's s rows and their caller rows printed t= n= undefined; present-only beside an <s> row (absent when the diff touches no symbol)
+ripwire.help-task/v1	abstain-next	36	 next="	next=: the one pasteable follow-up	B39 HELP-TASK (a): every abstain carries next= (the --for retry), so the next= clause rides on an abstain; present-only beside next=
+ripwire.exemplar/v1	off-task	172	 off_task="	off_task=1: not a fallback	B39 EXEMPLAR hedge: a trusted kind whose role pick shares no word with the task says so (exemplar.h hedgeOffTaskPick); present-only beside off_task=

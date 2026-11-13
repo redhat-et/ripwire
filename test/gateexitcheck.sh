@@ -697,5 +697,184 @@ else:
 sys.exit( bad )
 PY
 
+# ── (H) A GATE THAT RUNS THE BINARY TESTS THE RUN'S STATUS ────────────────────────────────────────────
+# (A)-(G) ask whether a failure the gate RECORDED reaches its exit status. (H) asks whether the command under
+# test can fail without the gate recording anything: its output is read, its exit status is not. CodeRabbit drew
+# that finding five times in one week:
+#   #615 4542253220  clonebandcheck W1 compared the uncapped bucket-walk harness's PAIR lines with the plain
+#                    harness's and never read its exit code; the harness prints its own determinism FAIL and
+#                    exits 1, and that FAIL line is filtered out of the compared lines, so W1 passed.
+#   #615 4542253228  qdtype3oncecheck's run_qd wrote each call's rc to $TMP/<tag>.rc, and no test compared any
+#                    of those files with 0 (one cmp'd two rc files with each other): an empty mod1.out passed
+#                    the head_basis= absence check.
+#   #616 4543056289  fordemoteallcheck read a failed undemoted twin's empty answer as 0 rows, so K >= 0 passed.
+# The status facts come from ONE matcher, test/lib/exitstatus.py (its docstring is the contract; the qd
+# shell-test facet reuses it). What is GATED is the two shapes where a status test is never optional:
+#   H1  a HARNESS this suite compiled (the -o target of a compiler command, or a `harness` path) carries its
+#       own assertions in its exit status, so every call of it must test that status (#615 4542253220).
+#   H2  a status that was CAPTURED (`rc=$?`, `echo $? > f.rc`) must be compared somewhere: capturing it and
+#       printing it in a message is the intent to check without the check (#615 4542253228).
+# What is PRINTED, not gated: every other ripwire call whose status nothing tests. That census is thousands of
+# calls, most of them read by POSITIVE output arms that a crash already reds; a static pass cannot tell those
+# from the #616 shape, so the rule for them is diff-scoped (a new or changed call in a reviewed diff must test
+# its status) and the whole-tree number is shown here so it can only be argued down, never silently grow.
+#   H0  the PREMISE: every gate in which a grep sees the binary variable ("$" + "BIN") in command position yields at least one call to the
+#       matcher (a blind parser would pass H1/H2 on nothing), and the planted controls below are classified as
+#       the CodeRabbit shapes they reproduce.
+python3 - "$ROOT" <<'PY' || fail=1
+import glob, os, re, sys
+ROOT = sys.argv[1]
+sys.path.insert( 0, os.path.join( ROOT, "test", "lib" ) )
+import exitstatus as es
+
+bad = 0
+def ok( m ): print( "  PASS  %s" % m )
+def no( m ):
+    global bad; bad = 1; print( "  FAIL  %s" % m )
+
+# (script, label) -> why its status is not tested. label is the command word for H1, the captured name for H2.
+# A row is a claim about the tree: a row that matches nothing is stale and fails. A row tagged pending=#N names
+# a gate an open PR adds; it is inert until that call exists, then binds like any other. Any other first field is
+# no tag: an absent call is stale (CodeRabbit #626 4548924335: a bare "#615" used to read as pending forever).
+# The two clonebandcheck rows bind since #615 merged.
+EXEMPT = {
+    ( "clonebandcheck.sh", '"$WORK/harness_cap"' ):     ( "", "the capped harnesses fail their own S2 check BY DESIGN (two pairs kept of three); W2 compares their PAIR lines, and the uncapped walk's exit code IS read" ),
+    ( "clonebandcheck.sh", '"$WORK/harness_capwalk"' ): ( "", "as harness_cap: the capped bucket walk fails its own S2 check by design" ),
+}
+
+def is_harness( c ):
+    return c.kind == "harness"
+
+def h2_label( c ):
+    m = re.match( r'^(\S+)=\$\? captured, never compared$', c.how )
+    if m: return m.group( 1 )
+    m = re.match( r'^rc file (\.\S+) written, never compared$', c.how )
+    return "rc file " + m.group( 1 ) if m else None
+
+# ── H0 premise + mutation controls: planted gates in the CodeRabbit shapes, classified by the same matcher ──
+PLANT = {
+    # (#615 4542253220) an uncapped harness whose output is compared and whose status is not
+    "h1_unchecked": ( 'build_one(){ "$CXX" -O1 h.cpp -o "$WORK/harness_$1"; }\nbuild_one walk\n'
+                      '"$WORK/harness_walk" "$WORK/fix" > "$WORK/out_walk.txt"\n'
+                      'grep PAIR "$WORK/out_walk.txt" > w; diff -q w ref && ok W1 || no W1\n', [ ( 3, "unchecked" ) ] ),
+    # the forms that DO test the status: if, || X, && .. || X, rc=$? compared, set -e, pipefail
+    "h1_checked":   ( '"$CXX" t.cpp -o "$WORK/h"\n'
+                      'if "$WORK/h" a > o; then ok a; else no a; fi\n'
+                      '"$WORK/h" b > o || no b\n'
+                      '"$WORK/h" c > o && ok c || no c\n'
+                      '"$WORK/h" d > o; rc=$?\n[ "$rc" = 0 ] || no d\n'
+                      'out="$( "$WORK/h" e )" || no e\n'
+                      'set -eo pipefail\n"$WORK/h" f | grep -q x\n"$WORK/h" g > o\n',
+                      [ ( 2, "checked" ), ( 3, "checked" ), ( 4, "checked" ), ( 5, "checked" ), ( 7, "checked" ), ( 9, "checked" ), ( 10, "checked" ) ] ),
+    # (#615 4542253228) every call's rc lands in a file; nothing compares one with 0
+    # (CodeRabbit #626 4548924380) errexit is read where the call is: before `set -e` and after `set +e` nothing fires
+    "h1_errexit":   ( '"$CXX" t.cpp -o "$WORK/h"\n"$WORK/h" a > o\nset -e\n"$WORK/h" b > o\nset +e\n"$WORK/h" c > o\necho done\n',
+                      [ ( 2, "unchecked" ), ( 4, "checked" ), ( 6, "unchecked" ) ] ),
+    # (CodeRabbit #626 4548924371) a status that is only printed is not tested
+    "h1_printed":   ( '"$CXX" t.cpp -o "$WORK/h"\n"$WORK/h" a > o; echo "exit $?"\n"$WORK/h" b > o; [ $? = 0 ] || no b\necho done\n',
+                      [ ( 2, "unchecked" ), ( 3, "checked" ) ] ),
+    # (CodeRabbit #633 4557724184) a status printed to stderr is still only printed, and a `$?` later in the next and-or
+    # list is the status of the test before it, not of the call
+    "h1_printed_fd": ( '"$CXX" t.cpp -o "$WORK/h"\n"$WORK/h" a > o; echo "exit $?" >&2\n"$WORK/h" b > o; printf \'rc=%s\\n\' $? >/dev/null\necho done\n',
+                      [ ( 2, "unchecked" ), ( 3, "unchecked" ) ] ),
+    # (the redirect after a compound is no pipeline of its own: the `||` after it tests the call, line 4)
+    "h1_later_rc":  ( '"$CXX" t.cpp -o "$WORK/h"\n"$WORK/h" a > o; [ -s o ] || no "empty (rc=$?)"\n"$WORK/h" b > o; [ $? = 0 ] && [ -s o ] || no b\n'
+                      '( cd d && "$WORK/h" c ) 2>/dev/null || { rc=$?; no "c rc=$rc"; }\necho done\n',
+                      [ ( 2, "unchecked" ), ( 3, "checked" ), ( 4, "checked" ) ] ),
+    # The binary variable is spelled @BIN@ in this file's planted shapes and substituted below, so this gate's own
+    # text never contains a literal "$" "BIN": it scans other gates as DATA and invokes no binary, and binoverridecheck
+    # (2b)'s static tell (RIPWIRE_BIN + "$" "BIN" in one file) holds that claim to the letter (CI red on #626).
+    "h2_rcfile":    ( 'run_qd(){ ( cd "$REPO" && @BIN@ . --quality-delta > "$TMP/$1.out" ); echo $? > "$TMP/$1.rc"; }\n'
+                      'run_qd a\nrun_qd b\ncmp -s "$TMP/a.rc" "$TMP/b.rc" || no "a and b differ (rc=$( cat "$TMP/a.rc" ))"\n', [ ( 1, "unchecked" ) ] ),
+    "h2_rcfile_ok": ( 'run_qd(){ ( cd "$REPO" && @BIN@ . --quality-delta > "$TMP/$1.out" ); echo $? > "$TMP/$1.rc"; }\n'
+                      'run_qd a\n[ "$( cat "$TMP/a.rc" )" = 0 ] || no a\n', [ ( 1, "checked" ) ] ),
+    "h2_var":       ( '@BIN@ . --x > o; rcZ=$?\n[ -s o ] && ok "answered (exit $rcZ)" || no empty\n', [ ( 1, "unchecked" ) ] ),
+    # (#616 4543056289) a wrapper and its twin: both outputs feed a count comparison, neither status is read --
+    # not gated (H3 census), but the matcher must SEE both calls as unchecked or the census undercounts
+    "h3_twin":      ( 'run(){ ( cd "$T" && @BIN@ . "$@" ); }\nrunoff(){ ( cd "$T" && "${OFF[@]}" @BIN@ . "$@" ); }\n'
+                      'run --token-budget=9 > b.xml; runoff --token-budget=9 > b.off\n[ "$( rk b.xml )" -ge "$( rk b.off )" ] && ok b || no b\n',
+                      [ ( 3, "unchecked" ), ( 3, "unchecked" ) ] ),
+}
+BINVAR = "$" + "BIN"
+PLANT = { k: ( src.replace( "@BIN@", '"%s"' % BINVAR ), want ) for k, ( src, want ) in PLANT.items() }
+ctl_bad = 0
+for name, ( src, want ) in PLANT.items():
+    got = [ ( c.line, c.verdict ) for c in es.scan( src ) ]
+    if sorted( got ) != sorted( want ):
+        ctl_bad += 1
+        no( "(H0 control) planted %s: the matcher says %s, the shape is %s -- H1/H2 below cannot be trusted" % ( name, got, want ) )
+if not ctl_bad:
+    ok( "(H0 control) %d planted gates classified as their CodeRabbit shapes: an unchecked harness and a never-compared rc are found, the six checked forms are not, the #616 twin is seen, errexit is read per call, a printed $? is not a test" % len( PLANT ) )
+
+gates = sorted( glob.glob( os.path.join( ROOT, "test", "*.sh" ) ) )
+CMDPOS = re.compile( r'(?:^\s*|[;&|(]\s*|\$\(\s*|\bthen\s+|\bdo\s+|\belse\s+)(?:[A-Z_]+=\S*\s+)*"\$' r'BIN"\s' )
+calls, blind, h1, h2 = {}, [], [], []
+for p in gates:
+    n = os.path.basename( p )
+    src = open( p, encoding="utf-8", errors="surrogateescape" ).read()
+    cs = es.scan( src )
+    calls[n] = cs
+    data = es.heredoc_lines( src )
+    if not cs and any( CMDPOS.search( l ) for i, l in enumerate( src.split( "\n" ), 1 ) if i not in data and not l.lstrip().startswith( "#" ) ):
+        blind.append( n )
+    for c in cs:
+        if c.verdict != "unchecked": continue
+        lab = h2_label( c )
+        if lab: h2.append( ( n, lab, c ) )
+        if is_harness( c ): h1.append( ( n, c.cmd, c ) )
+scanned = sum( 1 for n in calls if calls[n] )
+if blind:
+    no( "(H0) the matcher found NO call in %d gate(s) where a grep sees \"%s\" in command position: %s -- extend test/lib/exitstatus.py" % ( len( blind ), BINVAR, ", ".join( blind[:8] ) ) )
+elif scanned == 0:
+    no( "(H0) the matcher found no call in any of %d gates -- the sweep is inert" % len( gates ) )
+else:
+    ok( "(H0) premise: %d of %d gates run the binary or a harness (%d calls); every gate a grep sees running \"%s\" yields >= 1 call" % ( scanned, len( gates ), sum( len( v ) for v in calls.values() ), BINVAR ) )
+
+used = set()
+def gate_rows( tag, rows, what ):
+    hits = []
+    for n, lab, c in rows:
+        if ( n, lab ) in EXEMPT: used.add( ( n, lab ) ); continue
+        hits.append( "test/%s:%d %s (%s)" % ( n, c.line, lab, c.how ) )
+    for h in hits[:12]: no( "(%s) %s: %s" % ( tag, what, h ) )
+    if len( hits ) > 12: no( "(%s) ...and %d more" % ( tag, len( hits ) - 12 ) )
+    return len( hits )
+n1 = gate_rows( "H1", h1, "a harness this suite compiled runs and nothing tests its exit status -- its own assertions are lost" )
+if not n1:
+    nh = sum( 1 for v in calls.values() for c in v if is_harness( c ) )
+    ok( "(H1) every one of %d harness calls tests its exit status, or is exempt with a reason (%d rows)" % ( nh, len( used ) ) )
+n2 = gate_rows( "H2", h2, "a captured exit status is never compared -- the check was meant and not made" )
+if not n2:
+    ok( "(H2) every captured exit status (rc=$?, echo $? > f.rc) is compared somewhere in its gate" )
+def exempt_verdict( pend, present, why ):
+    """INFO for a pending=#N row whose call is not here yet; STALE for an absent call or an empty reason; else TESTED."""
+    if re.match( r'pending=#\d+$', pend ) and not present: return "INFO"
+    if not present or not why.strip(): return "STALE"
+    return "TESTED"
+ev = [ exempt_verdict( "#615", False, "r" ), exempt_verdict( "pending=#615", False, "r" ), exempt_verdict( "", False, "r" ), exempt_verdict( "", True, "" ) ]
+if ev == [ "STALE", "INFO", "STALE", "STALE" ]:
+    ok( "(H0 control) EXEMPT rows: an untagged absent row is STALE, only pending=#N stays INFO, an empty reason is STALE" )
+else:
+    no( "(H0 control) exempt_verdict misclassifies rows: %s, expected STALE INFO STALE STALE" % " ".join( ev ) )
+for ( n, lab ), ( pend, why ) in sorted( EXEMPT.items() ):
+    if ( n, lab ) in used: continue
+    present = n in calls and any( c.cmd == lab for c in calls[n] )
+    verdict = exempt_verdict( pend, present, why )
+    if verdict == "INFO":
+        print( "  INFO  (H1/H2) exempt row %s %s is %s (that call is not on this tree yet)" % ( n, lab, pend ) )
+    elif verdict == "STALE":
+        no( "(H1/H2) EXEMPT row (%s, %s) matches nothing on this tree -- a stale exemption is a hole waiting for a gate; delete it" % ( n, lab ) )
+    else:
+        no( "(H1/H2) EXEMPT row (%s, %s) exempts a call whose status IS tested now -- delete the row" % ( n, lab ) )
+
+# H3: printed, never asserted (see the header): the ripwire calls whose status nothing tests
+bin_calls = [ ( n, c ) for n, v in calls.items() for c in v if not is_harness( c ) ]
+unch = [ ( n, c ) for n, c in bin_calls if c.verdict == "unchecked" ]
+print( "  INFO  (H3) census, not gated: %d of %d ripwire / wrapper calls in %d gates test no status (%d gates test none); the rule for these is diff-scoped"
+       % ( len( unch ), len( bin_calls ), len( { n for n, _c in unch } ),
+           sum( 1 for n, v in calls.items() if v and not any( c.verdict == "checked" for c in v ) ) ) )
+sys.exit( bad )
+PY
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"
