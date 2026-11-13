@@ -29,7 +29,7 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-12 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-13 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
@@ -37,8 +37,8 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 | --- | --- | --- | --- |
 | 421 | 144 | 276 | **145** |
 
-Plus 9 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 421 + 9 is the 430 constants this generator parses out of `src/`.
+Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
+are not counted as caps, and 421 + 10 is the 431 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
