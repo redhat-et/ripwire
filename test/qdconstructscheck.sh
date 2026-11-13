@@ -20,6 +20,7 @@
 #         RIPWIRE_BIN=asan/ripwire bash test/qdconstructscheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"   # the fixture is a git repo: no inherited GIT_DIR / GIT_* may leak into it
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
