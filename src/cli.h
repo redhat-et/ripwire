@@ -2247,7 +2247,7 @@ inline constexpr char kHelpTail[] =
         "                               tell a name this repo never had from one it deleted, and content dropped by every tree\n"
         "                               is invisible. Add --with-history: a <fate> row then says v=\"never\" or v=\"removed\"\n"
         "                               with the commit, date and file that removed it. Remote-tracking refs are excluded\n"
-        "                               (they mirror local ones); refs are capped, narrow with --stray-content=SUBSTR.\n"
+        "                               (they mirror local ones); more than 512 refs refuse (the MCP twin narrows with kind=SUBSTR).\n"
         "                               LISTING: by default only the kind=\"def\" (and kind=\"text\") rows are listed and the kind=\"ref\" rows\n"
         "                               counted in one <refs count=N next=...> element, when that page lists MORE definitions\n"
         "                               than the --whereis-listing=all page under the row cap, or the same ones in strictly\n"

@@ -1646,6 +1646,12 @@ std::optional<int> runCrossRef( const MainDispatch& d )
                                                                  crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs }, parseBudget );
         if( !result.ok )
         {
+            if( result.tooManyRefs )   // a repository with many branches IS a git repository; the CLI verb has no ref filter to offer
+            {
+                rw::emitTo( stderr, "ripwire: --whereis: more than {} refs (local branches) to search — refused; the CLI --whereis has no ref filter "
+                                    "(the MCP whereis narrows with kind=SUBSTR), and `git branch --merged` lists branches safe to delete\n", crossref::kMaxRefs );
+                return 1;
+            }
             rw::emitTo( stderr, "ripwire: --whereis: {} is not a git repository (or has no HEAD commit) — no refs to search\n", root.c_str() );
             return 1;
         }

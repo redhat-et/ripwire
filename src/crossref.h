@@ -1604,6 +1604,7 @@ struct WhereResult
 {
     bool                  ok = true;
     bool                  nonGitRoot = false;
+    bool                  tooManyRefs = false;   // more than kMaxRefs local branches: refused, and said so (not "not a git repository")
     std::string           sym;
     std::string           headSha;
     bool                  onHead = false;     // SYM occurs in HEAD's tree
@@ -3698,7 +3699,7 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     RefEnumeration       enumeration;   // a dropped ref is searched nowhere, so it forfeits complete= like an empty tree
     std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha, nullptr, &enumeration );
     refs.insert( refs.begin(), RefInfo{ "HEAD", result.headSha, quality::gitCommitterDateIso( root ) } );
-    if( refs.size() > kMaxRefs ) { result.ok = false; return result; }
+    if( refs.size() > kMaxRefs ) { result.ok = false; result.tooManyRefs = true; return result; }
 
     // The CHECKOUT, not just HEAD's commit: every path that differs from HEAD is read from the working tree, and
     // HEAD's rows for exactly those paths are dropped below — the stale-and-silent answer the comparison table

@@ -553,7 +553,23 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
 // def labels (§A7 below), exactly as its CLI twin does. `flags` needs the crawled file list, so it goes
 // through getIndex() like every other index-backed verb.
 
-// `whereis` verb: which ref's tree defines or mentions SYM. "" ⇒ not a git repo (the caller reports it).
+// Why a git-sweep twin (whereis, stray_content) answered "" for a root that IS a git repository: the host names each
+// cause instead of "not a git repository" — K75's blob batch that never served every blob, or more than crossref::kMaxRefs
+// local branches (the CLI twins' "more than N refs match" refusal; a long-lived clone with hundreds of lane branches has it).
+enum class SweepFault : std::uint8_t
+{
+    None,
+    BlobsUnread,
+    TooManyRefs,
+};
+
+// SweepFault::TooManyRefs in the CLI's words, with this surface's filter: `kind` is the ref-name substring here.
+inline std::string tooManyRefsRefusal()
+{
+    return "more than " + std::to_string( crossref::kMaxRefs ) + " refs match — narrow it with kind=SUBSTR (a ref-name substring)";
+}
+
+// `whereis` verb: which ref's tree defines or mentions SYM. "" ⇒ not a git repo, or `fault` says why (the caller reports it).
 //
 // §A7 (0.6.6 command sweep, reversing the earlier "no index for a label" rule): this surface used to pass NO
 // WhereisEvidence, so its HEAD rows kept the lexical shape heuristic — and that heuristic called a wrapped call
@@ -581,7 +597,7 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
                                 std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
                                 crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll,
-                                bool* blobFault = nullptr, bool fullText = false )
+                                SweepFault* fault = nullptr, bool fullText = false )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -600,11 +616,12 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     crossref::WhereResult res = crossref::computeWhereis( root, sel, filter, crossref::WhereisEvidence{ nullptr, indexDefs } );
     if( !res.ok )
     {
+        if( res.tooManyRefs && fault != nullptr ) { *fault = SweepFault::TooManyRefs; }
         return {};
     }
     if( res.blobsUnread )   // the CLI twin's refusal: a hit count over blobs never read is not an answer
     {
-        if( blobFault != nullptr ) { *blobFault = true; }
+        if( fault != nullptr ) { *fault = SweepFault::BlobsUnread; }
         return {};
     }
     res.seedSpec  = std::move( seedSpec );
@@ -629,12 +646,15 @@ inline std::string whereisText( const std::string& root, const std::string& symb
 // M13: --stray-content is in cli.h's honorsPaging set — writeStrayContentPage is the entry point the
 // CLI already calls with cfg.pageLimit/cfg.pageOffset, so the twin passes the same pair rather than 0,0.
 inline std::string strayContentText( const std::string& root, const std::string& filter, std::size_t maxFiles,
-                                     McpPageArgs page = {}, bool* blobFault = nullptr )
+                                     McpPageArgs page = {}, SweepFault* fault = nullptr )
 {
     const crossref::StrayResult res = crossref::computeStrayContent( root, filter );
     if( !res.ok )
     {
-        if( res.blobsUnread && blobFault != nullptr ) { *blobFault = true; }   // K75: the host answers an error naming the cause, not "not a git repository"
+        if( fault != nullptr )   // K75 and the ref cap: the host answers an error naming the cause, not "not a git repository"
+        {
+            *fault = res.blobsUnread ? SweepFault::BlobsUnread : res.tooManyRefs ? SweepFault::TooManyRefs : SweepFault::None;
+        }
         return {};
     }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeStrayContentPage( f, res, maxFiles, page.limit, page.offset ); } );
