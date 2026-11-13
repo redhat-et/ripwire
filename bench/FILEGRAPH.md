@@ -117,6 +117,9 @@ that no step is a large outlier. Cells are wall s / max RSS MB / peak footprint 
 | cockroach --impact | 24.0 / 1779 / 2073 | 25.3 / 1875 / 1965 | 24.8 / 1689 / 2006 |
 | cockroach --for | 23.6 / 2094 / 2105 | 22.2 / 2003 / 2257 | 24.9 / 1532 / 2007 |
 
+(Since DEPS-NO-GRAPH, 2026-11-13, `--deps` and `--arch` skip the call-graph build they never read, so their rows above are not
+comparable with any measured after it: they include the graph's time and memory, which those verbs no longer pay.)
+
 Head against base is inside that noise on every step; no step shows a memory-guard degrade. The fold itself is some 50-100 ms of vscode's
 indexing, so it cannot move these totals; the umbrella tree is where it matters (80,001 files, `--deps`: 633 MB RSS before the
 fix, 172 MB after, 183 MB at base).
