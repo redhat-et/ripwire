@@ -11,7 +11,7 @@
 // mcpedit.h, and mcp.h. Also carries the index-side mcpdetail helpers (mtime/stat/watcher/
 // byte-hash/handle codec) — the JSON-side mcpdetail helpers live in mcpjson.h (same namespace).
 
-#include "infra/sharedOnce.h"   // sharedOnce — valueRefIndexOf
+#include "infra/sharedOnce.h"   // sharedOnce — valueRefIndexOf; the MCP-CALL-MEMO slots (McpIndex::impure, ::qmetrics)
 #include "mcpjson.h"
 
 #include "model.h"
@@ -68,6 +68,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <optional>     // MCP-CALL-MEMO: the per-index fact slots on McpIndex
 #include <string>
 #include <string_view>
 #include <thread>       // Phase-M: the DETACHED qsnap-prefetch worker
@@ -546,9 +547,9 @@ struct McpIndex
     // MCP-CALL-MEMO: the per-index facts the `for`, `pack`, `from_trace`, `lego` and `exemplar` verbs read on every call — the
     // purity fixpoint (computeImpure) and QMetrics (computeQMetrics) — are pure functions of (`ing`, `g`), so they are built on
     // first use and reused until the index is replaced, under the same rule as valueRefs: every writer of `ing` resets them
-    // (releaseMcpIndexMemory). Before, each call recomputed them (computeImpure 21 ms envoy, 84 ms vscode per `for` call).
-    mutable std::shared_ptr<const std::vector<char>> impure;
-    mutable std::shared_ptr<const QMetrics>          qmetrics;
+    // (releaseMcpIndexMemory), and the verb fills them with sharedOnce. Before, each call recomputed them (computeImpure 21 ms envoy, 84 ms vscode per `for` call).
+    mutable std::optional<std::vector<char>> impure;     // filled by sharedOnce at the verb
+    mutable std::optional<QMetrics>          qmetrics;
 
     // ── P1-15 incremental-pass disclosure (the `_reingest` envelope field; mcpReingestField below).
     //
@@ -1182,16 +1183,6 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
         catch( ... ) { /* optional work — drop silently (§2b rule 3) */ }
         if( timingsOn ) { rw::emitTo( stderr, "ripwire-prefetch done root={}\n", root.c_str() ); std::fflush( stderr ); }
     } ).detach();
-}
-
-// MCP-CALL-MEMO: the purity fixpoint and QMetrics of `ix`, built on first use and reused until `ix.ing` is replaced.
-inline const std::vector<char>& impureOf( const McpIndex& ix )
-{
-    return sharedOnce( ix.impure, [ & ] { return std::make_shared<const std::vector<char>>( computeImpure( ix.ing, ix.g ) ); } );
-}
-inline const QMetrics& qMetricsOf( const McpIndex& ix )
-{
-    return sharedOnce( ix.qmetrics, [ & ] { return std::make_shared<const QMetrics>( computeQMetrics( ix.ing, ix.g ) ); } );
 }
 
 // The value-reference index of `ix`, built on first use and reused until `ix.ing` is replaced (every writer of `ing`

@@ -2834,7 +2834,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         mcpForConf.note  += kForCoverageLegend;
     }
 
-    const std::vector<char>& impure    = impureOf( ix );   // MCP-CALL-MEMO: once per index
+    const std::vector<char>& impure    = sharedOnce( ix.impure, [ & ] { return computeImpure( ing, ix.g ); } );   // MCP-CALL-MEMO: once per index
 
     // fan-in counts: in-degree per node (how many symbols call this one — the "reuse" metric)
     std::vector<std::uint32_t> fanIn( S, 0 );
@@ -3168,7 +3168,7 @@ inline std::string legoText( const std::string& root, const std::string& type, R
         return {};
     }
 
-    const std::vector<char>& impure = impureOf( ix );   // MCP-CALL-MEMO: once per index
+    const std::vector<char>& impure = sharedOnce( ix.impure, [ & ] { return computeImpure( ing, ix.g ); } );   // MCP-CALL-MEMO: once per index
     const std::vector<float> flat( ing.symbols.size(), 0.f );
 
     return captureXml( [ & ]( std::FILE* mem )
@@ -3347,7 +3347,7 @@ inline std::optional<std::string> exemplarText( const std::string& root, const s
 
     // the selector's two inputs, built exactly as the CLI builds them: tested= from computeQMetrics, fan-in
     // from the in-edge CSR row lengths.
-    const QMetrics&            qm = qMetricsOf( ix );   // MCP-CALL-MEMO: once per index
+    const QMetrics&            qm = sharedOnce( ix.qmetrics, [ & ] { return computeQMetrics( ing, g ); } );   // MCP-CALL-MEMO: once per index
     const std::size_t          S  = ing.symbols.size();
     std::vector<std::uint32_t> fanIn( S, 0 );
     {
@@ -5199,7 +5199,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
         absorbCapDisclosure( docMentionInfo.caps, lr.docMentionNote, lr.capAttrs, lr.capJson );
     }
 
-    const std::vector<char>&   impure = impureOf( ix );   // MCP-CALL-MEMO: once per index
+    const std::vector<char>&   impure = sharedOnce( ix.impure, [ & ] { return computeImpure( ing, ix.g ); } );   // MCP-CALL-MEMO: once per index
     std::vector<std::uint32_t> fanIn( ing.symbols.size(), 0 );
     {
         const auto* ro = g.inEdges.rowOffsets();
@@ -5267,7 +5267,7 @@ inline FromTraceResult fromTraceText( const std::string& root, const std::string
     const IngestResult& ing = ix.ing;
     const Graph&        g   = ix.g;
 
-    const std::vector<char>&   impure = impureOf( ix );   // MCP-CALL-MEMO: once per index
+    const std::vector<char>&   impure = sharedOnce( ix.impure, [ & ] { return computeImpure( ing, ix.g ); } );   // MCP-CALL-MEMO: once per index
     std::vector<std::uint32_t> fanIn( ing.symbols.size(), 0 );
     {
         const auto* ro = g.inEdges.rowOffsets();
