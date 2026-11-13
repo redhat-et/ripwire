@@ -75,7 +75,7 @@ base(){ newrepo "$1"; printf 'int keep(){ return 1; }\nint usek(){ return keep()
 CAL="$WORK/cal"; mkdir -p "$CAL"
 printf 'int c61( int a ){ int s=0;%s return s; }\n' "$( ifs 61 )" > "$CAL/c.cpp"
 longfn l240 235 '' > "$CAL/l.cpp"
-MET="$( cd "$CAL" && "$BIN" . --metrics --no-cache 2>/dev/null )"
+MET="$( cd "$CAL" && "$BIN" . --metrics --no-cache 2>/dev/null )"   # status: output only — arm C FAILs when the parsed ccx/loc is empty
 CCX="$( printf '%s' "$MET" | tr '>' '\n' | grep 'n="c61"' | grep -o ' ccx="[0-9]*"' | cut -d'"' -f2 )"
 LOC="$( printf '%s' "$MET" | tr '>' '\n' | grep 'n="l240"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"
 if [ "$CCX" = 61 ]; then ok "C: ifs 61 measures ccx=61"; else no "C: ifs 61 measures ccx=${CCX:-<none>} (fixture calibration off)"; fi
@@ -151,7 +151,7 @@ fi
 # bar). The new name holds that body with 4 of 245 statements rewritten, so the exact identity differs and only the clone
 # sketch can say it is the same body.
 R="$WORK/n4"; base "$R"; variedfn flatten 245 A > "$R/src/html.cpp"; printf 'int usef(){ return flatten(1); }\n' >> "$R/src/html.cpp"; commitall "$R" flatten
-OLDLOC="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="flatten"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"
+OLDLOC="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="flatten"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"   # status: output only — the N4 premise FAILs on an empty loc
 { variedfn flatten_flat 245 A 4; printf 'int flatten( int a ){ return flatten_flat( a ); }\nint usef(){ return flatten(1); }\n'; } > "$R/src/html.cpp"
 run "$R"
 if ! crashed N4; then
@@ -167,12 +167,12 @@ fi
 # The same diff removes a ceiling-sized body (a move source the matcher must consider) and adds a ceiling-sized function whose
 # name is close (parse_rows -> parse_rows_v2) but whose body is another shape set. It must stay new-symbol and gate.
 R="$WORK/n5"; base "$R"; variedfn parse_rows 245 A > "$R/src/p.cpp"; printf 'int usep(){ return parse_rows(1); }\n' >> "$R/src/p.cpp"; commitall "$R" rows
-OLDLOC="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="parse_rows"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"
+OLDLOC="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="parse_rows"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"   # status: output only — the N5 premise FAILs on an empty loc
 { variedfn parse_rows_v2 245 B; printf 'int usep(){ return parse_rows_v2(1); }\n'; } > "$R/src/p.cpp"
 run "$R"
 if ! crashed N5; then
     ROW="$( rowof "$OUT" verbosity parse_rows_v2 )"
-    GONE="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep -c 'n="parse_rows"' | tr -d ' ' )"
+    GONE="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep -c 'n="parse_rows"' | tr -d ' ' )"   # status: output only — a failed run counts 0 and the N5 premise (loc, new row) still FAILs on empty
     CANDS=0; [ "${OLDLOC:-0}" -ge 240 ] && [ "$GONE" = 0 ] && [ -n "$ROW" ] && CANDS=1
     if [ "$CANDS" -lt 1 ]; then no "N5: premise — 0 candidate pairs (removed source loc=${OLDLOC:-<none>}, still present=$GONE, new row: ${ROW:-<none>})"
     elif [ "$RC" = 2 ] && printf '%s' "$ROW" | grep -q 'origin="new-symbol"' && printf '%s' "$ROW" | grep -q 'gating="1"'; then
@@ -190,7 +190,7 @@ R="$WORK/n3"; base "$R"
 } > "$R/src/wide.h"
 run "$R"
 if ! crashed N3; then
-    CLS="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 't="cls" n="Wide"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"
+    CLS="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 't="cls" n="Wide"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"   # status: output only — the N3 premise FAILs on an empty class loc
     N="$( newrows "$OUT" )"
     if [ "${CLS:-0}" -lt 240 ]; then no "N3: premise — the class extent is ${CLS:-<none>} lines, not over the ceiling"
     elif [ "$N" -lt 1 ]; then no "N3: premise — 0 new-symbol rows seen (the sibling's row is missing)"
@@ -216,7 +216,7 @@ JG="$( printf '%s' "$J" | grep -o '"gating":[0-9]*' | head -1 | cut -d: -f2 )"
 if [ "$JRC" = 2 ] && [ "$JG" = "$( hattr "$P1OUT" gating )" ] && printf '%s' "$J" | grep -q '"ceiling":240'; then
     ok "J: --json gating=$JG and \"ceiling\":240 match the XML (exit 2)"
 else no "J: json parity (rc=$JRC gating=$JG xml gating=$( hattr "$P1OUT" gating ))"; fi
-JM="$( cd "$WORK/n2" && "$BIN" . --quality-delta --json --no-cache 2>/dev/null )"
+JM="$( cd "$WORK/n2" && "$BIN" . --quality-delta --json --no-cache 2>/dev/null )"   # status: --quality-delta exits 2 by design here; the arm FAILs unless the output carries origin moved
 if printf '%s' "$JM" | grep -q '"origin":"moved"'; then ok "J: --json carries \"origin\":\"moved\""; else no "J: --json lacks origin moved"; fi
 
 # ═══ L) LEGEND — the exception is stated wherever the rule is ═════════════════════════════════════════
@@ -224,13 +224,13 @@ PHRASE='new-symbol rows never gate, except defect-shape format-arity and a new f
 # compact spends fewer bytes (its prose has a stair-step target): the exception names the ceiling= row it defines
 CPHRASE='never gate, except defect-shape format-arity or a ceiling= row'
 for leg in full compact; do
-    T="$( cd "$WORK/p1" && "$BIN" . --quality-delta --no-cache --legend=$leg 2>/dev/null | tr '\n' ' ' | tr -s ' ' )"
+    T="$( cd "$WORK/p1" && "$BIN" . --quality-delta --no-cache --legend=$leg 2>/dev/null | tr '\n' ' ' | tr -s ' ' )"   # status: output only — the L arm FAILs when the phrase count is 0
     a="$( printf '%s' "$T" | grep -o 'never gate, except defect-shape' | wc -l | tr -d ' ' )"
     ph="$PHRASE"; [ "$leg" = compact ] && ph="$CPHRASE"
     q="$( printf '%s' "$T" | grep -o "$ph" | wc -l | tr -d ' ' )"
     if [ "$q" -ge 1 ] && [ "$a" = "$q" ]; then ok "L: --legend=$leg states the ceiling exception ($q)"; else no "L: --legend=$leg: phrase x$q of $a"; fi
 done
-H="$( "$BIN" --help=quality-delta 2>/dev/null | tr '\n' ' ' | tr -s ' ' )"
+H="$( "$BIN" --help=quality-delta 2>/dev/null | tr '\n' ' ' | tr -s ' ' )"   # status: output only — the L arm FAILs when the phrase count is 0
 a="$( printf '%s' "$H" | grep -o 'never gate, except defect-shape' | wc -l | tr -d ' ' )"
 q="$( printf '%s' "$H" | grep -o "$PHRASE" | wc -l | tr -d ' ' )"
 if [ "$q" -ge 1 ] && [ "$a" = "$q" ]; then ok "L: --help=quality-delta states the ceiling exception ($q)"; else no "L: --help=quality-delta: phrase x$q of $a"; fi
