@@ -247,10 +247,11 @@ template <class T> union NoDestroy
     NoDestroy& operator=( const NoDestroy& ) = delete;
 };
 
-// Domain::pool().intern behind a per-thread, direct-mapped front cache of the ids this thread interned last: when texts repeat, a
-// hit skips the shard lock. A hit is proven, not guessed: the cached id's text must equal `text`. Every cached id came from the
-// same pool on this thread, so its slot was published to this thread under the shard lock (the read is race-free).
-template <class Domain> std::uint32_t internCached( std::string_view text )
+// Domain::pool().intern (kInsert) or .lookup behind a per-thread, direct-mapped front cache of the ids this thread got last: when
+// texts repeat, a hit skips the shard lock. A hit is proven, not guessed: the cached id's text must equal `text`. Every cached id
+// came from the same pool on this thread, so its slot was published to this thread under the shard lock (the read is race-free).
+// Each instantiation has its own cache. A lookup caches only hits: a text interned later is found by the next miss.
+template <class Domain, bool kInsert> std::uint32_t frontCached( std::string_view text )
 {
     if( text.empty() )
     {
@@ -271,40 +272,17 @@ template <class Domain> std::uint32_t internCached( std::string_view text )
     {
         return slot.id;
     }
-    slot = { tag, pool.intern( text, hash ) };
-    return slot.id;
-}
-
-// The id `text` has in Domain's pool, TextPool::kAbsentId when it was never interned: lookup behind a per-thread front cache of
-// the ids this thread found last (only hits are cached: a text interned later is found by the next miss). Never inserts.
-template <class Domain> std::uint32_t lookupCached( std::string_view text )
-{
-    if( text.empty() )
-    {
-        return TextPool::kEmptyId;
-    }
-    struct FrontSlot
-    {
-        std::uint32_t tag = 0;
-        std::uint32_t id  = TextPool::kEmptyId;
-    };
-    constexpr std::size_t kFrontSlots = 512;   // 4 KB per thread
-    thread_local FrontSlot front[ kFrontSlots ];
-    const TextPool&     pool = Domain::pool();
-    const std::uint64_t hash = TextPool::hashOf( text );
-    FrontSlot&          slot = front[ hash & ( kFrontSlots - 1 ) ];
-    const std::uint32_t tag  = std::uint32_t( hash >> 32 );
-    if( slot.id != TextPool::kEmptyId && slot.tag == tag && std::string_view( pool.text( slot.id ) ) == text )
-    {
-        return slot.id;
-    }
-    const std::uint32_t id = pool.lookup( text, hash );
+    const std::uint32_t id = kInsert ? pool.intern( text, hash ) : pool.lookup( text, hash );
     if( id != TextPool::kAbsentId )
     {
         slot = { tag, id };
     }
     return id;
 }
+// Domain::pool().intern behind the front cache
+template <class Domain> std::uint32_t internCached( std::string_view text ) { return frontCached<Domain, true>( text ); }
+// The id `text` has in Domain's pool, TextPool::kAbsentId when it was never interned. Never inserts.
+template <class Domain> std::uint32_t lookupCached( std::string_view text ) { return frontCached<Domain, false>( text ); }
 
 template <class Domain, class V> class IdKeyedMap;   // infra/idkeyedmap.h: the one reader of an id (lookup-only, no iteration)
 

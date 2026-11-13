@@ -2087,19 +2087,15 @@ struct ReceiverEvidence
     }
 
     // a binding's fact under ( scope, b.var ): its own written type
-    void addLocalFact( NodeId scope, const Binding& b )
-    {
-        LocalFact f = factOf( b, kNoNode );
-        f.type      = b.typeName;
-        addFact( scope, b.var, f );
-    }
+    void addLocalFact( NodeId scope, const Binding& b ) { addTypedFact( scope, b, b.typeName, kNoNode ); }
     // the same fact naming `type` instead of the binding's own (a qualified written type refused: ""), and the one class it
-    // resolved to (kNoNode: the name alone)
+    // resolved to (kNoNode: the name alone). Staged: build() seals the table, which keeps the first of equal facts of one name
+    // (the old "push unless present").
     void addTypedFact( NodeId scope, const Binding& b, std::string_view type, NodeId cls )
     {
         LocalFact f = factOf( b, cls );
         f.type.assign( type );
-        addFact( scope, b.var, f );
+        localType.addUnique( scope, b.var, f );
     }
     // the fact a binding states over its span ({0,0}: no span), naming class `cls` (its type text set by the caller)
     static LocalFact factOf( const Binding& b, NodeId cls )
@@ -2111,8 +2107,6 @@ struct ReceiverEvidence
         f.cls   = cls;
         return f;
     }
-    // staged; build() seals the table, which keeps the first of equal facts of one name (the old "push unless present")
-    void addFact( NodeId scope, rw::InternedText var, const LocalFact& f ) { localType.addUnique( scope, var, f ); }
 
     void buildOwners()
     {
@@ -2479,7 +2473,7 @@ struct ReceiverEvidence
         LocalFact f = factOf( d, kNoNode );   // the tombstone it stands in for, carrying the trait
         f.iface = trait;
         f.bound.assign( bound );
-        addFact( factScope( d ), d.var, f );
+        localType.addUnique( factScope( d ), d.var, f );
     }
     // is the result of the operator Python calls on a `cls` receiver (`inPlace`, else `binary`) provably `cls` (augDropsClass)
     bool operatorKeepsClass( std::string_view cls, NodeId id, std::string_view inPlace, std::string_view binary ) const
