@@ -5006,6 +5006,10 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
         {
             out += ",\"origin\":\"" + std::string( origin ) + "\""; // absent = preexisting-worse (mirrors the XML)
         }
+        if( r.ceiling != 0 )
+        {
+            out += ",\"ceiling\":" + std::to_string( r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
+        }
         out += "}";
     }
     out += "],";

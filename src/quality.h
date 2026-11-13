@@ -116,6 +116,14 @@ constexpr std::uint32_t   kSubBarGrowthPct   = 100;   // UNDER the bar: a DOUBLI
 // with the bar it belongs to and there is no third number to keep in sync: ccx 10, loc 40.
 inline constexpr std::uint32_t subBarGrowthFloor( std::uint32_t bar ) noexcept { return ( bar * 2 ) / 3; }
 
+// QD-ENTRY-CEILING (GE design E2, owner decision C4 2026-11-12) — THE NEW-FUNCTION CEILING. A new symbol never gated, whatever its
+// size, and that is how a 1,000-line function starts. A NEW complexity or verbosity row whose `now` reaches this multiple of its
+// kind's bar gates: ccx 60 or 240 code lines at 4. The step plan is 4, then 3, then 2, each step only while sampled precision holds
+// 0.8 and a typical lane diff prints at most one such row (GE design § 1.5). Report-only, never gating: a MOVED body (origin="moved")
+// and a TEST DRIVER (isTestPath — owner C4: every function under test/ is report-only). A knob, in the knob census.
+constexpr std::uint32_t   kNewSymbolCeilingMul = 4;
+inline constexpr std::uint32_t newSymbolCeiling( std::uint32_t bar ) noexcept { return bar * kNewSymbolCeilingMul; }
+
 // ─── ACK PROVENANCE / RE-SCORE — the per-symbol numeric kinds' materiality, as ONE declarative table ─────
 //
 // kind → the three constants perSymbolKind already compares (was,now) against. Pulled out as a table
@@ -7150,6 +7158,8 @@ struct Regression
                                   //   counted in new-symbol=, never gates); false = preexisting-worse. See the ORIGIN block in computeDelta.
     bool          isMoved     = false;// MOVED-BODY: a new-symbol row whose body this diff REMOVED from another name or file (emitted
                                   //   origin="moved" instead of origin="new-symbol"; still counted in new-symbol=; never gates).
+    std::uint32_t ceiling     = 0;    // QD-ENTRY-CEILING: the new-function ceiling (newSymbolCeiling of the kind's bar) this NEW,
+                                  //   unmoved, non-test complexity/verbosity row reached — emitted ceiling="N", and it GATES. 0 = none.
     // P2.5 (r27) — the LOCATOR. `sym` is a canonical id whose display tail is often a bare, one-letter local
     // (`sym="cc"`), so the report the agent is told to run at every "done" moment named findings it could not
     // grep for. path is ROOT-RELATIVE (the same relForHash spelling every other sidecar key uses), line is the
@@ -7177,7 +7187,8 @@ struct Regression
 // gating attribute, the --json / MCP "gating", the exit code, --ack-only=gating, the scoped-out would-gate
 // count, the allow-dirty absorbed count and the stderr naming line — asks this. A row gates when it is major
 // (not sev="minor") AND either preexisting-worse or a defect-shape format-arity row: new-symbol rows never
-// gate, except defect-shape format-arity, because a placeholder/argument mismatch is a defect, not debt.
+// gate, except defect-shape format-arity, because a placeholder/argument mismatch is a defect, not debt, and a new function at the
+// ceiling (Regression::ceiling, QD-ENTRY-CEILING), because a function that starts that large is how the 1,000-line function starts.
 // The origin= attribute VALUE every surface (XML, --json, MCP) emits; nullptr = preexisting-worse, which carries none.
 inline const char* originValue( const Regression& r ) noexcept
 {
@@ -7186,7 +7197,7 @@ inline const char* originValue( const Regression& r ) noexcept
 
 inline bool rowGates( const Regression& r ) noexcept
 {
-    return !r.isMinor && ( !r.isNewSymbol || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
+    return !r.isMinor && ( !r.isNewSymbol || r.ceiling != 0 || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
 }
 
 // B10.2 — kind → the ATTRIBUTE NAME its facet value is emitted under. `Regression::facet` carries only the
@@ -9927,7 +9938,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // `metricOf` takes the NodeId rather than the Symbol because verbosity's metric is not on the Symbol any
     // more (codeLoc is read off the body bytes); the other three still just read a field.
     const auto perSymbolKind =
-        [ & ]( const char* kindName, std::uint32_t bar, std::uint32_t minorDelta, bool growthTiered,
+        [ & ]( const char* kindName, std::uint32_t bar, std::uint32_t minorDelta, bool growthTiered, std::uint32_t ceilingAt,
                const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap,
                auto metricOf )
     {
@@ -9973,9 +9984,15 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 // one body, so the live report and a re-score can never silently disagree.
                 const bool material = numericRegressionIsMajor( was, now, bar, minorDelta, growthTiered, growthPct );
                 const bool isNew    = !existedAtBaseline( key );
+                const bool isMovedB = isNew && moved.isMoved( i );
                 regs.push_back( { kindName, g.canonId[i], was, now, key, !material,
-                                  {}, isNew, isNew && moved.isMoved( i ) } );          // origin: the finding IS this symbol
+                                  {}, isNew, isMovedB } );          // origin: the finding IS this symbol
                 stampLoc( i );
+                // QD-ENTRY-CEILING: a NEW function at the ceiling gates — unless its body moved, or it is a test driver.
+                if( isNew && !isMovedB && material && ceilingAt != 0 && now >= ceilingAt && !regs.back().path.empty() && !isTestPath( regs.back().path ) )
+                {
+                    regs.back().ceiling = ceilingAt;
+                }
             }
             else if( growthTiered && was > 0 && growthPct >= kSubBarGrowthPct && now >= subBarGrowthFloor( bar ) )
             {
@@ -9993,10 +10010,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         }
     };
 
-    perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   true,  base.ccxBySym,    [ & ]( NodeId i ){ return ing.symbols[i].ccx; } );
-    perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   true,  base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
-    perSymbolKind( "nesting",    kNestBar,  0,                false, base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
-    perSymbolKind( "params",     kParamBar, kMinorParamDelta, false, base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
+    perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   true,  newSymbolCeiling( kCcxBar ), base.ccxBySym,    [ & ]( NodeId i ){ return ing.symbols[i].ccx; } );
+    perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   true,  newSymbolCeiling( kLocBar ), base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
+    perSymbolKind( "nesting",    kNestBar,  0,                false, 0,                           base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
+    perSymbolKind( "params",     kParamBar, kMinorParamDelta, false, 0,                           base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
 
     // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
     // Type-3 pass alone is ~2.7-3.2 s (60 M intra-bucket pair-visits; tokenization is only ~3 %). It is a PURE

@@ -898,7 +898,7 @@ inline constexpr const char* kQdLegendCore =
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
     "because the code is NEW carries origin=\"new-symbol\" (origin=\"moved\" when the same body left another name or file in this diff); (3) MATERIALITY — a small numeric delta is "
     "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, or on "
-    "format-arity, the gating= count; new-symbol rows never gate, except defect-shape format-arity, so exit 0 "
+    "format-arity, or on a new function at the ceiling, the gating= count (ceiling= on the row); new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling (4x the bar: ccx 60 or 240 lines; not a moved body, not test code), so exit 0 "
     "is NOT a verdict on them — nothing that existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
     "preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a "
     "FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger "
@@ -2173,11 +2173,19 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
                 // for display (quality::displaySym); this stderr line was the one caller that skipped it,
                 // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
-                // a gating row on NEW code is only ever defect-shape format-arity (rowGates); the line names that
-                // part only when there is one, so every run without it keeps its bytes.
+                // a gating row on NEW code is defect-shape format-arity or a new function at the ceiling (rowGates); the line names
+                // either part only when there is one, so every run without them keeps its bytes.
                 const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
                                                                                        { return r.isNewSymbol && quality::rowGates( r ); } ) );
-                if( newGating == 0 )
+                const std::size_t ceilingGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                                           { return r.ceiling != 0 && quality::rowGates( r ); } ) );
+                if( ceilingGating != 0 )
+                {
+                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines); first: {} {}{} (was={} now={})\n",
+                                  gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ),
+                                  first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                }
+                else if( newGating == 0 )
                 {
                     rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
                                   gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
@@ -2267,6 +2275,10 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 if( const char* origin = quality::originValue( r ) )
                 {
                     rw::emitTo( stdout, ",\"origin\":\"{}\"", origin ); // absent = preexisting-worse (mirrors the XML)
+                }
+                if( r.ceiling != 0 )
+                {
+                    rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
                 }
                 rw::emitRaw( stdout, "}" );
             };
@@ -2380,6 +2392,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
             }
             const char* gatingAttr = ( gatingAllowed && quality::rowGates( r ) ) ? " gating=\"1\"" : "";
+            // QD-ENTRY-CEILING: the ceiling a NEW function reached, beside the gating= it causes (present-only)
+            const std::string ceilingAttr = r.ceiling != 0 ? " ceiling=\"" + std::to_string( r.ceiling ) + "\"" : std::string();
             // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
             const char* barAttr = r.kind == "complexity" ? " bar=\"15\"" : r.kind == "verbosity" ? " bar=\"60\""
@@ -2413,7 +2427,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             else
             {
-                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
+                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, ceilingAttr.c_str(), nextAttr.c_str() );
             }
         };
         // Fix round 1 (rv-lean-trio item 5, owner ruling 5): a fold ships only when it PAYS (compactlegend.h foldPays: shorter

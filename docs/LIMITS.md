@@ -89,7 +89,7 @@ measurement that chose it; listing them beside truncation caps invites tuning th
 
 The **anchor** column is read from each constant's own trailing comment. **unsourced** means the
 comment cites no measurement — the value came from somewhere, but not from anything a reader can
-check. All 9 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
+check. All 10 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
 the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per
 `docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider's)`. Sourcing them
 means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator
@@ -104,6 +104,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 | `kExemplarCcxCeilFactor` | `4` | `src/exemplar.h` | **unsourced** | — |
 | `kForDocTopShareTenths` | `6` | `src/fordocbody.h` | **unsourced** | a file's top-ranked section that does not fit is an excerpt of up to this many tenths of the file's share |
 | `kGeneratedMaxProseShare` | `0.15` | `src/docparse.h` | **unsourced** | of the document's bytes that are its own prose |
+| `kNewSymbolCeilingMul` | `4` | `src/quality.h` | **unsourced** | — |
 | `kSpecificMinLen` | `8` | `src/graph.h` | **unsourced** | ≥8 chars …  (aider's) |
 | `kZoneDistanceThreshold` | `0.5` | `src/arch.h` | **unsourced** | \|A+I-1\| past this → classify into pain/useless |
 
