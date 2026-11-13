@@ -8893,7 +8893,25 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healMap( base.maskReportBySym );
     healMap( base.placeholderBySym );
     healMap( base.bodyHashBySym );
-    healMap( base.moveCidBySym );
+    // MOVES: a move record is RE-KEYED, never copied. A copy left the old key behind as a VACATED body (MovedBodies) while the
+    // same body still sits at the new key, so its sketch could pass a new look-alike off as moved (#646 CR). Dropping the old key
+    // only removes a move source, so it can only make a row gate, never exempt one.
+    const auto rekeyMap = [ & ]( auto& m, bool counted )
+    {
+        for( const auto& [ from, to ] : al.toCurrent )
+        {
+            const auto src = m.find( from );
+            if( src != m.end() && m.find( to ) == m.end() )
+            {
+                auto v = std::move( src->second );
+                m.erase( src );
+                m[ to ] = std::move( v );
+                moved += counted ? 1 : 0;
+            }
+        }
+    };
+    rekeyMap( base.moveCidBySym, true );
+    rekeyMap( base.moveSketchBySym, false );   // its sketch follows it; not a separate healed key in the count
 
     // the two SORTED SETS — same add-never-overwrite rule, then restore the sorted invariant every
     // std::binary_search consumer depends on.
