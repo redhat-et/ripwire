@@ -155,9 +155,10 @@ mkdir -p "$TMP/coldxdg"
 env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg" "$BIN" "$REPO" --quality-delta --no-cache >"$TMP/e_truth" 2>/dev/null; rcet=$?
 for f in $( qsnapfiles ); do printf 'QSNP\xff\xff\xff\xffGARBAGE-not-a-valid-snapshot-blob\x00\x01\x02' > "$f"; done
 run --no-cache >"$TMP/e1" 2>"$TMP/e_err"; rce=$?
-[ "$rce" = "$rcet" ] && diff -q "$TMP/e1" "$TMP/e_truth" >/dev/null \
+# the ground truth must itself succeed (CodeRabbit #633): two runs that fail alike are no output-equivalent recompute
+[ "$rcet" -eq 0 ] && [ "$rce" = "$rcet" ] && diff -q "$TMP/e1" "$TMP/e_truth" >/dev/null \
     && ok "corrupt qsnap blob degrades to recompute — output byte-identical (degrade-don't-crash)" \
-    || { no "corrupt qsnap blob changed the output or the exit (exit=$rce, cold truth $rcet)"; diff "$TMP/e_truth" "$TMP/e1" | head -6; }
+    || { no "corrupt qsnap blob changed the output or the exit, or the cold ground truth failed (exit=$rce, cold truth $rcet)"; diff "$TMP/e_truth" "$TMP/e1" | head -6; }
 grep -qi 'Snapshot cache corrupt' "$TMP/e_err" \
     && ok "corrupt qsnap blob emits a DEGRADED alert to stderr" \
     || { no "no corrupt-blob alert on stderr"; head -3 "$TMP/e_err"; }
