@@ -46,6 +46,7 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -53,6 +54,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace rw
@@ -333,8 +335,21 @@ struct FileHarvest
     struct Def  { std::string name; std::string value; std::uint32_t line; GateKind kind; bool isShell = false; };
     struct Cond { std::vector<std::string> idents; std::uint32_t line; std::uint32_t lines; };
     // col (shell lane only): a read's `$`, or the column where a write takes effect; stmtCol: where that write's
-    // statement starts, so a read between the two is the write's own right-hand side.
-    struct Read { std::string name; std::uint32_t line; ShellRead sh = {}; std::uint32_t col = 0; std::uint32_t stmtCol = 0; };
+    // statement starts, so a read between the two is the write's own right-hand side. scopeLine/scopeCol: where a
+    // write STOPS shadowing (exclusive) — the `}` closing the function a `local` sits in, the end of the file
+    // otherwise. isElement: a subscripted read (`${X[1]}`) or an element write (`X[1]=v`). An element write hides
+    // only subscripted reads: it leaves the scalar `$X` (which is X[0]) as the caller set it.
+    struct Read
+    {
+        std::string   name;
+        std::uint32_t line;
+        ShellRead     sh = {};
+        std::uint32_t col = 0;
+        std::uint32_t stmtCol = 0;
+        std::uint32_t scopeLine = UINT32_MAX;
+        std::uint32_t scopeCol = UINT32_MAX;
+        bool          isElement = false;
+    };
 
     std::vector<Def>  defs;
     std::vector<Cond> conds;
@@ -797,13 +812,41 @@ inline std::string_view heredocDelimiterOn( std::string_view line )
 // The shell env lane's own heredoc reader, for a `<<` the Bash scanner met in CODE (never inside a string, which is
 // where the whole-line probe above can be fooled: `"operator<< missing"`). It needs more than the delimiter: an
 // UNQUOTED one (`<<EOF`) still expands `$X` in the body, while `<<'EOF'`, `<<"EOF"` and `<<\EOF` expand nothing.
-// Bash allows blanks before the word (`cat << EOF`). `at` is the first `<`; returns the word ("" when none) and the
-// index of its last byte in `end`.
+// Bash allows blanks before the word (`cat << EOF`), and the word is a shell WORD, not an identifier: it runs to the
+// next blank or operator byte with its quotes removed, so `<<'END-OF-HELP'`, `<<'!'` and `<<"E"OF` close at
+// `END-OF-HELP`, `!` and `EOF`. Any quote or backslash in it makes the body literal. `at` is the first `<`; returns
+// the word ("" when none) and the index of its last byte in `end`.
 struct HeredocOpener
 {
-    std::string_view word;
-    bool             isQuoted = false;
+    std::string word;
+    bool        isQuoted = false;
 };
+
+// The delimiter WORD from `i`: up to a blank or operator byte, quotes removed (any quote or backslash marks the
+// body literal). Returns the index one past the word.
+inline std::size_t shellHeredocWord( std::string_view line, std::size_t i, HeredocOpener& opener )
+{
+    for( ; i < line.size() && line[i] != ' ' && line[i] != '\t' && std::string_view( ";&|<>()" ).find( line[i] ) == std::string_view::npos; ++i )
+    {
+        const char c = line[i];
+        if( c != '\\' && c != '\'' && c != '"' )
+        {
+            opener.word += c;
+            continue;
+        }
+        opener.isQuoted = true;
+        if( c == '\\' )
+        {
+            if( i + 1 < line.size() ) { opener.word += line[ ++i ]; }
+            continue;
+        }
+        const std::size_t close = line.find( c, i + 1 );
+        const std::size_t stop  = close == std::string_view::npos ? line.size() : close;
+        opener.word.append( line.substr( i + 1, stop - i - 1 ) );
+        i = stop == line.size() ? stop - 1 : stop;
+    }
+    return i;
+}
 
 inline HeredocOpener heredocOpenerAt( std::string_view line, std::size_t at, std::size_t& end )
 {
@@ -816,20 +859,9 @@ inline HeredocOpener heredocOpenerAt( std::string_view line, std::size_t at, std
     }
     if( i < line.size() && line[i] == '-' ) { ++i; }
     while( i < line.size() && ( line[i] == ' ' || line[i] == '\t' ) ) { ++i; }
-    bool isQuoted = false;
-    if( i < line.size() && ( line[i] == '\'' || line[i] == '"' || line[i] == '\\' ) )
-    {
-        isQuoted = true;
-        ++i;
-    }
-    if( i >= line.size() || !( std::isalpha( (unsigned char)line[i] ) || line[i] == '_' ) )
-    {
-        return {};
-    }
-    const std::string_view word = takeIdent( line, i );
-    if( isQuoted && i < line.size() && ( line[i] == '\'' || line[i] == '"' ) ) { ++i; }
-    end = i - 1;
-    return HeredocOpener{ word, isQuoted };
+    HeredocOpener opener;
+    end = shellHeredocWord( line, i, opener ) - 1;
+    return opener;
 }
 
 // ── the shell env lane: Bash parameter-expansion READS and the assignments that make them internal ───────
@@ -881,7 +913,9 @@ inline bool hasGeneratedShellBanner( std::string_view bytes )
 }
 
 // `-n` / `-z` immediately before the expansion that opens at `dollarAt` (an optional `"` between): the operand
-// of a set test. Returns 'n', 'z' or 0.
+// of a set test. Returns 'n', 'z' or 0. The caller asks only inside `[`, `[[` or `test` (shellExpansionAt's
+// isTestCtx): `echo -n "$X"`, `kubectl -n "$NS"`, `head -n "$N"` consume the value, and calling them set tests
+// would tell a contract checker the script only asks whether X is set.
 inline char shellSetTestBefore( std::string_view line, std::size_t dollarAt ) noexcept
 {
     std::size_t k = dollarAt;
@@ -899,15 +933,75 @@ inline char shellSetTestBefore( std::string_view line, std::size_t dollarAt ) no
     return line[ k - 1 ];
 }
 
-// The index of the `}` closing the `${` whose body starts at `from` (nested `${` counted), or npos when the line
-// ends first.
+// The index of the quote closing the `'` or `"` at `at`, or npos when the line ends first. Bash's rules: `'…'` has
+// no escapes at all (`'a\'` closes at the second quote); inside `"…"` a backslash escapes the next byte.
+inline std::size_t shellQuoteEnd( std::string_view line, std::size_t at ) noexcept
+{
+    if( line[at] == '\'' )
+    {
+        return line.find( '\'', at + 1 );
+    }
+    std::size_t i = at + 1;
+    while( i < line.size() && line[i] != '"' )
+    {
+        i += line[i] == '\\' ? 2 : 1;
+    }
+    return i < line.size() ? i : std::string_view::npos;
+}
+
+// The index of the `)` matching the `(` at `at`, quotes and escapes skipped, or npos when the line ends first.
+inline std::size_t shellParenEnd( std::string_view line, std::size_t at ) noexcept
+{
+    std::uint32_t depth = 0;
+    for( std::size_t i = at; i < line.size(); ++i )
+    {
+        const char c = line[i];
+        if( c == '\\' ) { ++i; continue; }
+        if( c == '\'' || c == '"' )
+        {
+            i = shellQuoteEnd( line, i );
+            if( i == std::string_view::npos ) { return i; }
+            continue;
+        }
+        if( c == '(' ) { ++depth; }
+        if( c == ')' && --depth == 0 )
+        {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// The index of the `}` closing the `${` whose body starts at `from`, or npos when the line ends first. Nested `${`
+// count; a `}` inside a quote, after a backslash or inside a balanced `$( … )` does not close it
+// (`${X:-$(awk '{print $1}' f)}`, `"${X:-"a}b"}"`). A quote or `$(` the line never closes is an ordinary byte, so a
+// stray one cannot swallow the rest of the line.
+// The last byte of a `\x` escape, a quoted string or a balanced `$( … )` that starts at `i`, or npos when none
+// starts there (or the line never closes it, which makes its first byte ordinary).
+inline std::size_t shellNestedWordEnd( std::string_view line, std::size_t i ) noexcept
+{
+    const char c = line[i];
+    if( c == '\\' )
+    {
+        return i + 1 < line.size() ? i + 1 : std::string_view::npos;
+    }
+    if( c == '\'' || c == '"' )
+    {
+        return shellQuoteEnd( line, i );
+    }
+    const bool isSubst = c == '$' && i + 1 < line.size() && line[ i + 1 ] == '(';
+    return isSubst ? shellParenEnd( line, i + 1 ) : std::string_view::npos;
+}
+
 inline std::size_t shellBraceClose( std::string_view line, std::size_t from ) noexcept
 {
     std::uint32_t depth = 1;
     for( std::size_t i = from; i < line.size(); ++i )
     {
-        if( line[i] == '$' && i + 1 < line.size() && line[ i + 1 ] == '{' ) { ++depth; ++i; continue; }
-        if( line[i] == '}' && --depth == 0 )
+        const char c = line[i];
+        if( const std::size_t skipTo = shellNestedWordEnd( line, i ); skipTo != std::string_view::npos ) { i = skipTo; continue; }
+        if( c == '$' && i + 1 < line.size() && line[ i + 1 ] == '{' ) { ++depth; ++i; continue; }
+        if( c == '}' && --depth == 0 )
         {
             return i;
         }
@@ -920,15 +1014,15 @@ inline void shellLiteralReads( std::string_view line, std::size_t from, std::uin
 // One `$…` expansion at `at` (line[at] == '$'): records the read, returns the index of its LAST byte (so the
 // caller resumes after it), or `at` when nothing nameable starts here (`$1`, `$@`, `$(`, `${!X}`, a lone `$`).
 // A braced expansion's WORD (`${X:-$Y}`) is scanned for its own reads here, as literal text, so a quote inside
-// it can never unbalance the caller's quote state.
-inline std::size_t shellExpansionAt( std::string_view line, std::size_t at, std::uint32_t lineNo, FileHarvest& fh )
+// it can never unbalance the caller's quote state. isTestCtx: the expansion is an operand of `[`, `[[` or `test`.
+inline std::size_t shellExpansionAt( std::string_view line, std::size_t at, std::uint32_t lineNo, FileHarvest& fh, bool isTestCtx = false )
 {
     if( at + 1 >= line.size() )
     {
         return at;
     }
     ShellRead sh;
-    sh.test = shellSetTestBefore( line, at );
+    sh.test = isTestCtx ? shellSetTestBefore( line, at ) : '\0';
     if( line[ at + 1 ] != '{' )
     {
         std::size_t i = at + 1;
@@ -960,7 +1054,8 @@ inline std::size_t shellExpansionAt( std::string_view line, std::size_t at, std:
         return end == line.size() ? end - 1 : end;
     }
     const std::string_view name = takeIdent( line, i );
-    if( i < end && line[i] == '[' )
+    const bool             isSubscript = i < end && line[i] == '[';
+    if( isSubscript )
     {
         const std::size_t rb = line.find( ']', i );
         i = ( rb == std::string_view::npos || rb > end ) ? end : rb + 1;   // ${X[@]} / ${X[0]}: a read of the array X
@@ -1001,7 +1096,7 @@ inline std::size_t shellExpansionAt( std::string_view line, std::size_t at, std:
         {
             fh.writes.push_back( FileHarvest::Read{ std::string( name ), lineNo, {}, std::uint32_t( end ), std::uint32_t( at ) } );   // ${X:=d} sets X past its `}`
         }
-        fh.reads.push_back( FileHarvest::Read{ std::string( name ), lineNo, std::move( sh ), std::uint32_t( at ) } );
+        fh.reads.push_back( FileHarvest::Read{ std::string( name ), lineNo, std::move( sh ), std::uint32_t( at ), 0, UINT32_MAX, UINT32_MAX, isSubscript } );
     }
     if( wordFrom < end )
     {
@@ -1030,36 +1125,56 @@ struct ShellScan
 {
     // What the words after a command keyword mean, until the command ends.
     enum class Kw : std::uint8_t { None, Decl, Export, Read, MapFile, ForName, GetOpts, PrintfV };
+    static constexpr std::uint32_t kNoFunction = UINT32_MAX;
 
     struct Frame
     {
-        bool          isDq = false;        // inside "…" (no words, no comments: one string)
-        std::int32_t  parens = 0;          // a `$( … )` frame: open parens; 0 = the file's top level
+        bool          isDq = false;          // inside "…" (no words, no comments: one string)
+        std::int32_t  parens = 0;            // a `$( … )` / `(( … ))` frame: open parens; 0 = the file's top level
+        bool          isArith = false;       // `$(( … ))` / `(( … ))`: `<<` is a shift there, never a heredoc
         bool          atWordStart = true;
-        bool          isCmdPos = true;     // the next word is a command name (or a prefix assignment)
+        bool          isCmdPos = true;       // the next word is a command name (or a prefix assignment)
+        bool          isTest = false;        // the command is `[`, `[[` or `test`: a -n / -z operand is a set test
+        bool          isDblTest = false;     // inside `[[ … ]]`: && || ( ) do not end it, `]]` does
         Kw            kw = Kw::None;
-        char          optArg = 0;          // the option letter whose argument the next word is (read -p, mapfile -d, …)
-        std::uint8_t  wordsLeft = 0;       // getopts: optstring to skip before the name
+        bool          isDeclLocal = false;   // local, or declare/typeset inside a function: the write ends with it
+        bool          isDeclKeep = false;    // a bare NAME keeps its inherited value (readonly, -x, -g, top-level declare)
+        char          optArg = 0;            // the option letter whose argument the next word is (read -p, mapfile -d, …)
+        std::uint8_t  wordsLeft = 0;         // getopts: optstring to skip before the name
+        std::vector<FileHarvest::Read> pending;   // `X=v` at command position: a write only if no command word follows
     };
 
-    std::vector<Frame> frames{ Frame{} };
-    bool               isInSingle = false;
-    bool               isAnsiC = false;      // the open single quote is `$'…'`: backslash escapes inside it
-    bool               isContinued = false;  // the previous line ended in `\`: the same command goes on
-    std::string        heredocWord;          // non-empty: the lines until this delimiter are a heredoc BODY
-    bool               isHeredocQuoted = false;
+    struct Brace
+    {
+        bool          isFunction = false;    // this `{` opened a function body
+        std::uint32_t function = kNoFunction;   // the function the group sits in (its index in functionEnds)
+    };
+
+    std::vector<Frame>         frames{ Frame{} };
+    bool                       isInSingle = false;
+    bool                       isAnsiC = false;        // the open single quote is `$'…'`: backslash escapes inside it
+    bool                       isContinued = false;    // the previous line ended in `\`: the same command goes on
+    std::vector<HeredocOpener> heredocs;               // bodies still to come, in opening order (`cat <<A <<B`)
+    bool                       isFunctionNext = false; // `name()` or `function name` seen: the next `{` is its body
+    bool                       isFunctionName = false; // `function` seen: the next word is the name
+    std::vector<Brace>         braces;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> functionEnds;   // per function: its closing `}` (line, col)
+    std::vector<std::pair<std::size_t, std::uint32_t>>   scopedWrites;  // (fh.writes index, function) per local write
+
+    std::uint32_t function() const noexcept { return braces.empty() ? kNoFunction : braces.back().function; }
 };
 
 inline constexpr std::string_view kShellCmdSeparators = ";&|";   // the bytes that end a simple command
 
 // The shape of one WORD at `at`: its leading identifier (if any), whether that identifier IS the word (a bare
-// NAME), and whether it is an assignment (`NAME=`, `NAME+=`, `NAME[i]=`).
+// NAME), and whether it is an assignment (`NAME=`, `NAME+=`, `NAME[i]=` — an element write — but not `NAME==`).
 struct ShellWord
 {
     std::string_view name;
     std::string_view word;
-    bool             isBare   = false;
-    bool             isAssign = false;
+    bool             isBare    = false;
+    bool             isAssign  = false;
+    bool             isElement = false;
 };
 
 inline ShellWord shellWordShape( std::string_view line, std::size_t at )
@@ -1085,9 +1200,10 @@ inline ShellWord shellWordShape( std::string_view line, std::size_t at )
     {
         const std::size_t rb = line.find( ']', k );
         k = rb == std::string_view::npos ? line.size() : rb + 1;   // X[i]=v: an element write of X
+        w.isElement = true;
     }
     if( k < line.size() && line[k] == '+' ) { ++k; }
-    w.isAssign = k < line.size() && line[k] == '=';
+    w.isAssign = k < line.size() && line[k] == '=' && !( k + 1 < line.size() && line[ k + 1 ] == '=' );   // ((X==1)) tests
     return w;
 }
 
@@ -1108,11 +1224,41 @@ inline std::uint32_t shellWriteEffectCol( std::string_view line, std::size_t at 
     return std::uint32_t( std::min( effect, line.size() ) );
 }
 
+// `<f`, `>f`, `2>f`, `<`: a redirection, which ends a keyword's name list (`read -r line < VERSION` writes `line`).
+inline bool shellIsRedirect( std::string_view word ) noexcept
+{
+    std::size_t k = 0;
+    while( k < word.size() && std::isdigit( (unsigned char)word[k] ) ) { ++k; }
+    return k < word.size() && ( word[k] == '<' || word[k] == '>' );
+}
+
+// One option word of local / declare / typeset / readonly. -p, -f and -F print a variable or name functions:
+// nothing after them is written. -g makes an in-function declare global; -g and -x leave a bare NAME's inherited
+// value in place (`declare -x TOKEN` exports the caller's TOKEN, it does not set one).
+inline void shellDeclOption( ShellScan::Frame& f, std::string_view opt )
+{
+    for( const char c : opt.substr( 1 ) )
+    {
+        if( c == 'p' || c == 'f' || c == 'F' )
+        {
+            f.kw = ShellScan::Kw::None;
+            return;
+        }
+        if( c == 'g' ) { f.isDeclLocal = false; }
+        if( c == 'g' || c == 'x' ) { f.isDeclKeep = true; }
+    }
+}
+
 // A word inside a keyword's argument list (f.kw != None, or a pending option argument): does it WRITE its name?
 // Advances the keyword state. Only called while a keyword is open.
 inline bool shellKeywordArgWrites( ShellScan::Frame& f, const ShellWord& w )
 {
     using Kw = ShellScan::Kw;
+    if( shellIsRedirect( w.word ) )
+    {
+        f.kw = Kw::None;  f.optArg = 0;
+        return false;
+    }
     const bool isOption = w.word.size() > 1 && w.word[0] == '-';
     if( f.optArg != 0 )
     {
@@ -1122,7 +1268,9 @@ inline bool shellKeywordArgWrites( ShellScan::Frame& f, const ShellWord& w )
     }
     switch( f.kw )
     {
-        case Kw::Decl:      return !isOption && ( w.isBare || w.isAssign );   // local / declare / typeset / readonly
+        case Kw::Decl:      // local / declare / typeset / readonly
+            if( isOption ) { shellDeclOption( f, w.word ); return false; }
+            return w.isAssign || ( w.isBare && !f.isDeclKeep );
         case Kw::Export:    return w.isAssign;   // a bare `export X` publishes the inherited value — no write
         case Kw::Read:
         case Kw::MapFile:
@@ -1163,40 +1311,205 @@ inline constexpr std::string_view kShellReservedWords[] = {
     "if", "then", "else", "elif", "do", "while", "until", "!", "time", "{", "}", "function",
 };
 
-// One WORD that starts at `at` in a command context: an assignment, a declaration keyword, or the name a
-// keyword's argument list writes. Writes go to fh.writes; the frame's command state advances.
-inline void shellWordAt( std::string_view line, std::size_t at, std::uint32_t lineNo, ShellScan::Frame& f, FileHarvest& fh )
+// `name()`, `name ()`, `name(){`: a function definition's head, so the next `{` opens its body.
+inline bool shellIsFunctionHead( std::string_view line, std::size_t at, const ShellWord& w ) noexcept
 {
-    const ShellWord w        = shellWordShape( line, at );
-    const bool      isKwOpen = f.kw != ShellScan::Kw::None || f.optArg != 0;
-    // Outside a keyword list only command position can assign: `X=v`, or a prefix `X=v cmd` (position continues).
-    const bool      isWrite  = isKwOpen ? shellKeywordArgWrites( f, w ) : ( f.isCmdPos && w.isAssign );
-    if( isWrite )
+    const std::size_t parens = w.word.find( "()" );
+    if( parens != std::string_view::npos )
     {
-        fh.writes.push_back( FileHarvest::Read{ std::string( w.name ), lineNo, {}, shellWriteEffectCol( line, at ), std::uint32_t( at ) } );
+        return parens > 0;
     }
-    if( isKwOpen || !f.isCmdPos || w.isAssign )
+    std::size_t k = at + w.word.size();
+    while( k < line.size() && ( line[k] == ' ' || line[k] == '\t' ) ) { ++k; }
+    if( w.word.empty() || k >= line.size() || line[k] != '(' )
+    {
+        return false;
+    }
+    for( ++k; k < line.size() && ( line[k] == ' ' || line[k] == '\t' ); ++k ) {}
+    return k < line.size() && line[k] == ')';
+}
+
+// `{` / `}` at command position: a group opens or closes. A `{` right after a function head opens that function's
+// body, and its `}` is where the function's local writes stop shadowing.
+inline void shellBraceWord( bool isOpen, std::uint32_t lineNo, std::size_t at, ShellScan& st )
+{
+    if( isOpen )
+    {
+        const bool isFunction = std::exchange( st.isFunctionNext, false );
+        if( isFunction )
+        {
+            st.functionEnds.emplace_back( UINT32_MAX, UINT32_MAX );
+        }
+        st.braces.push_back( ShellScan::Brace{ isFunction, isFunction ? std::uint32_t( st.functionEnds.size() - 1 ) : st.function() } );
+        return;
+    }
+    if( st.braces.empty() )
     {
         return;
     }
-    f.isCmdPos = std::find( std::begin( kShellReservedWords ), std::end( kShellReservedWords ), w.word ) != std::end( kShellReservedWords );
+    if( st.braces.back().isFunction )
+    {
+        st.functionEnds[ st.braces.back().function ] = { lineNo, std::uint32_t( at ) };
+    }
+    st.braces.pop_back();
+}
+
+// The COMMAND word of a simple command: a test opens a test context, a keyword opens its argument list, a group or
+// function definition updates the scope state, and position-after-a-reserved-word continues.
+inline void shellCommandWord( std::string_view line, std::size_t at, const ShellWord& w, std::uint32_t lineNo, ShellScan& st )
+{
+    ShellScan::Frame& f = st.frames.back();
+    if( std::exchange( st.isFunctionName, false ) )
+    {
+        st.isFunctionNext = true;   // `function NAME`: the name; its body follows
+        return;
+    }
+    if( w.word == "{" || w.word == "}" )
+    {
+        shellBraceWord( w.word == "{", lineNo, at, st );
+        return;   // reserved words: a command still follows
+    }
+    st.isFunctionNext = shellIsFunctionHead( line, at, w );
+    st.isFunctionName = w.word == "function";
+    f.isTest    = w.word == "[" || w.word == "[[" || w.word == "test";
+    f.isDblTest = w.word == "[[";
+    f.isCmdPos  = std::find( std::begin( kShellReservedWords ), std::end( kShellReservedWords ), w.word ) != std::end( kShellReservedWords );
     const ShellKeyword* kw = findByField( kShellKeywords, &ShellKeyword::word, w.word );
     if( kw != nullptr )
     {
-        f.kw        = kw->kw;
-        f.wordsLeft = kw->wordsLeft;
+        const bool isInFunction = st.function() != ShellScan::kNoFunction;
+        const bool isScopable   = kw->kw == ShellScan::Kw::Decl && w.word != "readonly";
+        f.kw          = kw->kw;
+        f.wordsLeft   = kw->wordsLeft;
+        f.isDeclLocal = isScopable && ( w.word == "local" || isInFunction );
+        f.isDeclKeep  = kw->kw == ShellScan::Kw::Decl && !f.isDeclLocal;   // readonly X / top-level declare X keep X
     }
+}
+
+// One WORD that starts at `at` in a command context: an assignment, a declaration keyword, or the name a
+// keyword's argument list writes. Writes go to fh.writes (a prefix assignment waits in the frame's pending list
+// until the command ends); the frame's command state advances.
+inline void shellWordAt( std::string_view line, std::size_t at, std::uint32_t lineNo, ShellScan& st, FileHarvest& fh )
+{
+    ShellScan::Frame& f = st.frames.back();
+    const ShellWord   w = shellWordShape( line, at );
+    if( f.isDblTest )
+    {
+        if( w.word == "]]" ) { f.isDblTest = false;  f.isTest = false; }
+        return;   // inside [[ … ]] nothing is assigned and no command starts
+    }
+    if( f.kw != ShellScan::Kw::None || f.optArg != 0 )
+    {
+        const bool isLocal = f.kw == ShellScan::Kw::Decl && f.isDeclLocal && st.function() != ShellScan::kNoFunction;
+        if( shellKeywordArgWrites( f, w ) )
+        {
+            if( isLocal ) { st.scopedWrites.emplace_back( fh.writes.size(), st.function() ); }
+            fh.writes.push_back( FileHarvest::Read{ std::string( w.name ), lineNo, {}, shellWriteEffectCol( line, at ), std::uint32_t( at ) } );
+        }
+        return;
+    }
+    if( !f.isCmdPos )
+    {
+        return;
+    }
+    if( w.isAssign )
+    {
+        FileHarvest::Read write{ std::string( w.name ), lineNo, {}, shellWriteEffectCol( line, at ), std::uint32_t( at ) };
+        write.isElement = w.isElement;   // X[i]=v: hides ${X[…]} reads, not the scalar $X
+        f.pending.push_back( std::move( write ) );
+        return;   // command position continues: `X=v cmd`
+    }
+    f.pending.clear();   // `X=v cmd`: the assignments only reached cmd's environment
+    shellCommandWord( line, at, w, lineNo, st );
+}
+
+// A command ended (`;` `&` `|`, a paren, a new line, the end of `$( … )`): its standalone assignments are writes.
+inline void shellCommitPending( ShellScan::Frame& f, FileHarvest& fh )
+{
+    for( FileHarvest::Read& w : f.pending )
+    {
+        fh.writes.push_back( std::move( w ) );
+    }
+    f.pending.clear();
+}
+
+// Whether an expansion in the current frame is an operand of `[` / `[[` / `test`: the nearest CODE frame decides
+// (`[ -n "$X" ]` meets $X inside a "…" frame).
+inline bool shellIsTestCtx( const ShellScan& st ) noexcept
+{
+    for( auto it = st.frames.rbegin(); it != st.frames.rend(); ++it )
+    {
+        if( !it->isDq )
+        {
+            return it->isTest;
+        }
+    }
+    return false;
+}
+
+// A command separator or paren at `c` in a code frame. Returns true when it closed a `$( … )` / `(( … ))` frame.
+inline bool shellSeparator( char c, ShellScan& st, FileHarvest& fh )
+{
+    ShellScan::Frame& f = st.frames.back();
+    if( c == '(' && f.parens > 0 ) { ++f.parens; }
+    if( c == ')' && f.parens > 0 && --f.parens == 0 && st.frames.size() > 1 )
+    {
+        shellCommitPending( f, fh );
+        st.frames.pop_back();
+        return true;
+    }
+    f.atWordStart = true;
+    if( f.isDblTest )
+    {
+        return false;   // `[[ -n $A && -z $B ]]`: one test
+    }
+    shellCommitPending( f, fh );
+    f.isCmdPos = true;  f.isTest = false;  f.kw = ShellScan::Kw::None;  f.optArg = 0;
+    return false;
+}
+
+// A new line starts a new command unless the last one ended in `\` or a "…" is still open.
+inline void shellLineStart( ShellScan& st, FileHarvest& fh )
+{
+    ShellScan::Frame& f = st.frames.back();
+    if( !st.isContinued && !f.isDq )
+    {
+        shellCommitPending( f, fh );
+        f.atWordStart = true;
+        if( !f.isDblTest )
+        {
+            f.isCmdPos = true;  f.isTest = false;  f.kw = ShellScan::Kw::None;  f.optArg = 0;
+        }
+    }
+    st.isContinued = false;
+}
+
+// `$(`, `$((` or a command-position `((` at `i`: push its frame. Returns the index of its last opening byte, or
+// npos when nothing opens here.
+inline std::size_t shellOpenFrame( std::string_view line, std::size_t i, ShellScan& st )
+{
+    ShellScan::Frame& f = st.frames.back();
+    const bool isSubst = line[i] == '$' && i + 1 < line.size() && line[ i + 1 ] == '(';
+    const bool isArithCmd = !f.isDq && f.isCmdPos && line[i] == '(' && i + 1 < line.size() && line[ i + 1 ] == '(';
+    if( !isSubst && !isArithCmd )
+    {
+        return std::string_view::npos;
+    }
+    f.atWordStart = false;
+    if( isArithCmd )
+    {
+        st.frames.push_back( ShellScan::Frame{ .parens = 2, .isArith = true } );   // (( … )): an arithmetic command
+        return i + 1;
+    }
+    const bool isArith = i + 2 < line.size() && line[ i + 2 ] == '(';
+    st.frames.push_back( ShellScan::Frame{ .parens = 1, .isArith = isArith } );   // $( … ) and $(( … )): a fresh context
+    return i + 1;
 }
 
 // One CODE line of a shell file (not a heredoc body): every expansion read and every assignment on it.
 inline void harvestShellLine( std::string_view line, std::uint32_t lineNo, FileHarvest& fh, ShellScan& st )
 {
-    if( !st.isContinued && !st.frames.back().isDq )
-    {
-        ShellScan::Frame& f = st.frames.back();   // a new line is a new command
-        f.atWordStart = true;  f.isCmdPos = true;  f.kw = ShellScan::Kw::None;  f.optArg = 0;
-    }
-    st.isContinued = false;
+    shellLineStart( st, fh );
     for( std::size_t i = 0; i < line.size(); ++i )
     {
         const char c = line[i];
@@ -1206,87 +1519,139 @@ inline void harvestShellLine( std::string_view line, std::uint32_t lineNo, FileH
             if( c == '\'' ) { st.isInSingle = false; }
             continue;
         }
-        ShellScan::Frame& f = st.frames.back();
-        if( c == '$' && i + 1 < line.size() && line[ i + 1 ] == '(' )
+        if( const std::size_t opened = shellOpenFrame( line, i, st ); opened != std::string_view::npos )
         {
-            f.atWordStart = false;
-            st.frames.push_back( ShellScan::Frame{ false, 1 } );   // $( … ) and $(( … )): a fresh command context
-            ++i;
+            i = opened;
             continue;
         }
+        ShellScan::Frame& f = st.frames.back();
         if( f.isDq )
         {
             if( c == '\\' ) { ++i; continue; }
             if( c == '"' ) { st.frames.pop_back(); continue; }
-            if( c == '$' ) { i = shellExpansionAt( line, i, lineNo, fh ); }
+            if( c == '$' ) { i = shellExpansionAt( line, i, lineNo, fh, shellIsTestCtx( st ) ); }
             continue;
         }
         if( c == ' ' || c == '\t' ) { f.atWordStart = true; continue; }
         if( kShellCmdSeparators.find( c ) != std::string_view::npos || c == '(' || c == ')' )
         {
-            if( c == '(' && f.parens > 0 ) { ++f.parens; }
-            if( c == ')' && f.parens > 0 && --f.parens == 0 && st.frames.size() > 1 )
-            {
-                st.frames.pop_back();
-                continue;
-            }
-            f.atWordStart = true;  f.isCmdPos = true;  f.kw = ShellScan::Kw::None;  f.optArg = 0;
+            shellSeparator( c, st, fh );
             continue;
         }
         if( c == '#' && f.atWordStart )
         {
             return;   // a comment: the rest of the line is prose
         }
+        if( c == '\\' && i + 1 == line.size() )
+        {
+            st.isContinued = true;   // `X=$( … ) \` + `&& …`: a continuation, not a word (it must not end X's command)
+            continue;
+        }
         if( f.atWordStart )
         {
             f.atWordStart = false;
-            shellWordAt( line, i, lineNo, f, fh );
+            shellWordAt( line, i, lineNo, st, fh );
         }
         if( c == '\\' )
         {
-            if( i + 1 == line.size() ) { st.isContinued = true; }
             ++i;
             continue;
         }
         if( c == '\'' ) { st.isInSingle = true; st.isAnsiC = false; continue; }
-        if( c == '"' ) { st.frames.push_back( ShellScan::Frame{ true } ); continue; }
+        if( c == '"' ) { st.frames.push_back( ShellScan::Frame{ .isDq = true } ); continue; }
         if( c == '$' && i + 1 < line.size() && line[ i + 1 ] == '\'' )
         {
             st.isInSingle = true;  st.isAnsiC = true;  ++i;
             continue;
         }
-        if( c == '<' && i + 1 < line.size() && line[ i + 1 ] == '<' )
+        if( c == '<' && i + 1 < line.size() && line[ i + 1 ] == '<' && !st.frames.back().isArith )
         {
-            std::size_t         end    = i;
-            const HeredocOpener opener = heredocOpenerAt( line, i, end );
-            if( !opener.word.empty() && st.heredocWord.empty() )
+            std::size_t   end    = i;
+            HeredocOpener opener = heredocOpenerAt( line, i, end );
+            if( !opener.word.empty() )
             {
-                st.heredocWord.assign( opener.word );   // the body starts on the NEXT line
-                st.isHeredocQuoted = opener.isQuoted;
+                st.heredocs.push_back( std::move( opener ) );   // its body starts on the NEXT line, after any earlier one's
             }
             i = end;
             continue;
         }
-        if( c == '$' ) { i = shellExpansionAt( line, i, lineNo, fh ); }
+        if( c == '$' ) { i = shellExpansionAt( line, i, lineNo, fh, f.isTest ); }
     }
 }
 
 // One line of a shell file for the env lane: a heredoc body line (literal text, expanded unless quoted) or code.
 inline void harvestShellFileLine( std::string_view line, std::uint32_t lineNo, FileHarvest& fh, ShellScan& st )
 {
-    if( st.heredocWord.empty() )
+    if( st.heredocs.empty() )
     {
         harvestShellLine( line, lineNo, fh, st );
         return;
     }
-    if( trimView( line ) == st.heredocWord )
+    if( trimView( line ) == st.heredocs.front().word )
     {
-        st.heredocWord.clear();
+        st.heredocs.erase( st.heredocs.begin() );
     }
-    else if( !st.isHeredocQuoted )
+    else if( !st.heredocs.front().isQuoted )
     {
         shellLiteralReads( line, 0, lineNo, fh );
     }
+}
+
+// A write that reads its own name in its own statement (`X="${X:-}"`, `: "${X:=d}"`) passes the caller's value
+// through. `reads` is the file's Bash reads sorted by (name, line, col).
+inline bool shellWriteReadsItself( const std::vector<const FileHarvest::Read*>& reads, const FileHarvest::Read& w )
+{
+    const auto it = std::lower_bound( reads.begin(), reads.end(), w, []( const FileHarvest::Read* r, const FileHarvest::Read& x )
+    {
+        return std::tie( r->name, r->line, r->col ) < std::tie( x.name, x.line, x.stmtCol );
+    } );
+    return it != reads.end() && ( *it )->name == w.name && ( *it )->line == w.line && ( *it )->col < w.col;
+}
+
+// The writes that set the script's OWN value, in (name, line, col) order: every write except a pass-through one.
+// The Bash reads are indexed once, so this is a sort plus one binary search per write.
+inline std::vector<FileHarvest::Read> shellShadowingWrites( const FileHarvest& fh )
+{
+    std::vector<const FileHarvest::Read*> reads;
+    for( const FileHarvest::Read& r : fh.reads )
+    {
+        if( r.sh.form != ShellForm::None ) { reads.push_back( &r ); }
+    }
+    std::sort( reads.begin(), reads.end(), []( const FileHarvest::Read* a, const FileHarvest::Read* b )
+    {
+        return std::tie( a->name, a->line, a->col ) < std::tie( b->name, b->line, b->col );
+    } );
+    std::vector<FileHarvest::Read> shadowing;
+    std::copy_if( fh.writes.begin(), fh.writes.end(), std::back_inserter( shadowing ),
+                  [ & ]( const FileHarvest::Read& w ) { return !shellWriteReadsItself( reads, w ); } );
+    return shadowing;
+}
+
+// Each function-local write stops shadowing at its function's `}` (a function the file never closes runs to the end).
+inline void shellCloseScopes( const ShellScan& shell, FileHarvest& fh )
+{
+    for( const auto& [ writeIndex, function ] : shell.scopedWrites )
+    {
+        std::tie( fh.writes[ writeIndex ].scopeLine, fh.writes[ writeIndex ].scopeCol ) = shell.functionEnds[ function ];
+    }
+}
+
+// Whether a write in `shadowing` ((name, line, col) order) sets the script's own value before read `r`, within that
+// write's scope, and for the right shape (an element write hides only subscripted reads).
+inline bool shellIsShadowed( const std::vector<FileHarvest::Read>& shadowing, const FileHarvest::Read& r )
+{
+    const auto isBefore = []( std::uint32_t l1, std::uint32_t c1, std::uint32_t l2, std::uint32_t c2 ) { return l1 < l2 || ( l1 == l2 && c1 < c2 ); };
+    auto it = std::lower_bound( shadowing.begin(), shadowing.end(), r.name,
+                                []( const FileHarvest::Read& w, const std::string& n ) { return w.name < n; } );
+    for( ; it != shadowing.end() && it->name == r.name; ++it )
+    {
+        const bool isInScope = isBefore( it->line, it->col, r.line, r.col ) && isBefore( r.line, r.col, it->scopeLine, it->scopeCol );
+        if( isInScope && ( !it->isElement || r.isElement ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // The Bash env lane over one shell file, as its own pass: its quote, command and heredoc state is its own (a `<<` it
@@ -1300,37 +1665,23 @@ inline void harvestShellFileLine( std::string_view line, std::uint32_t lineNo, F
 // default standing in for it), so it shadows nothing. `X="${X:-}"` (the set -u normaliser) followed, a hundred lines
 // on, by `${X:-post-script-error}` still has a caller-facing default there. Measured on fullsend-ai agents: without
 // this, every `${POST_FAILURE_CATEGORY:-…}` after the library's normaliser vanished. A pass-through write is still
-// listed as a write.
+// listed as a write. A write also stops shadowing at its scope's end: a function's `local` at that function's `}`.
 inline void harvestShellEnv( std::string_view bytes, FileHarvest& fh )
 {
     ShellScan shell;
     forEachLine( bytes, [ & ]( std::string_view line, std::uint32_t lineIndex ) { harvestShellFileLine( line, lineIndex, fh, shell ); } );
-
+    for( ShellScan::Frame& f : shell.frames )
+    {
+        shellCommitPending( f, fh );   // a file that ends on `X=v`
+    }
+    shellCloseScopes( shell, fh );
     const auto byPosition = []( const FileHarvest::Read& a, const FileHarvest::Read& b )
     {
-        if( a.name != b.name ) { return a.name < b.name; }
-        return a.line != b.line ? a.line < b.line : a.col < b.col;
+        return std::tie( a.name, a.line, a.col ) < std::tie( b.name, b.line, b.col );
     };
     std::sort( fh.writes.begin(), fh.writes.end(), byPosition );
-    const auto readsItself = [ & ]( const FileHarvest::Read& w )
-    {
-        return std::any_of( fh.reads.begin(), fh.reads.end(), [ & ]( const FileHarvest::Read& r )
-        {
-            return r.sh.form != ShellForm::None && r.line == w.line && r.name == w.name && r.col >= w.stmtCol && r.col < w.col;
-        } );
-    };
-    std::vector<FileHarvest::Read> shadowing;   // the writes that set the script's OWN value, in byPosition order
-    std::copy_if( fh.writes.begin(), fh.writes.end(), std::back_inserter( shadowing ), [ & ]( const FileHarvest::Read& w ) { return !readsItself( w ); } );
-    std::erase_if( fh.reads, [ & ]( const FileHarvest::Read& r )
-    {
-        if( r.sh.form == ShellForm::None )
-        {
-            return false;
-        }
-        const auto it = std::lower_bound( shadowing.begin(), shadowing.end(), r.name,
-                                          []( const FileHarvest::Read& w, const std::string& n ) { return w.name < n; } );
-        return it != shadowing.end() && it->name == r.name && ( it->line < r.line || ( it->line == r.line && it->col < r.col ) );
-    } );
+    const std::vector<FileHarvest::Read> shadowing = shellShadowingWrites( fh );
+    std::erase_if( fh.reads, [ & ]( const FileHarvest::Read& r ) { return r.sh.form != ShellForm::None && shellIsShadowed( shadowing, r ); } );
     // Every surviving read declares an env gate, exactly as a getenv("X") does: default unset.
     for( const FileHarvest::Read& r : fh.reads )
     {
@@ -1741,7 +2092,9 @@ inline void attachReadsAndWrites( gtl::btree_map<std::string, Gate>& gates, cons
     for( const FileHarvest::Read& w : h.fh.writes )
     {
         const auto it = gates.find( w.name );
-        if( it != gates.end() && it->second.kind == GateKind::Env )   // a write only matters beside an env read
+        // A write only matters beside an env read — including one whose env declaration lost the headline to a CMake
+        // option() of the same name and sits in the <also/> slot.
+        if( it != gates.end() && ( it->second.kind == GateKind::Env || ( it->second.hasAlso && it->second.alsoKind == GateKind::Env ) ) )
         {
             it->second.writes.push_back( Site{ h.rel, w.line } );
         }
@@ -1996,12 +2349,14 @@ inline void writeShellLegend( std::FILE* out, const FlagsResult& res )
     rw::emitRaw( out, "<!-- BASH: a parameter expansion in a .sh/.bash/.zsh file is an env read (kind=\"env\") unless the same file "
                        "assigned that name on an EARLIER line (lexical order in one file: no flow, no source following). Each "
                        "Bash read row carries form= (required for :? and ?, default for :-, unset-default for -, settest for "
-                       "+ and :+ and a -n/-z test, assign for := and =, plain for $X and ${X}); colon=\"1\" when the colon "
+                       "+ and :+ and a -n/-z operand of [, [[ or test, assign for := and =, plain for $X and ${X}); colon=\"1\" when the colon "
                        "spelling makes an EMPTY value count as unset (colon=\"0\" when not, absent when the expansion has no "
                        "operator); default= the literal default word, possibly empty; test=\"n\" or \"z\" when the read is "
                        "the operand of that test. writes= on a gate counts, and write rows list, every Bash assignment of the "
                        "name anywhere in the repo (X=, export X=, local, declare, readonly, read, for, mapfile, printf -v, := "
-                       "expansions), paged like the reads (shown_writes= writes_capped= and more writes= as for "
+                       "expansions; not a prefix X=v cmd, which reaches only that command). A local, or a declare inside a "
+                       "function, hides reads only to the end of that function; an element write X[i]= is listed but hides "
+                       "none. Write rows are paged like the reads (shown_writes= writes_capped= and more writes= as for "
                        "reads). ambient=\"1\": a name Bash or the login always sets (BASH_*, PWD, HOME, PATH, RANDOM "
                        "and the like), never unsupplied. generated_skipped=N on the root: shell files this "
                        "verb read but did not harvest because a GENERATED and DO NOT EDIT banner opens them. -->" );

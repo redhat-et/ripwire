@@ -2463,7 +2463,7 @@ to it:
 - What does the linter flag? (`--lint`)
 - Which cross-module call seams does no test reach? (`--seams`)
 - What is built but switched off in this repo? (`--flags`)
-- Which environment variables do the shell scripts read, which ones must be set, and with what defaults? (`--flags --json`: each Bash read carries `form=` required/default/settest/plain, `colon=`, `default=`)
+- Which environment variables do the shell scripts read, which ones must be set, and with what defaults? (`--flags --json`: each Bash read carries `form=` required, default, unset-default, settest, assign or plain; `colon=` when the expansion has an operator, `default=` when it supplies a default word, and `test=` for a `-n`/`-z` operand)
 - How do the modules depend on each other? (`--deps`)
 - Does the code follow our layering rules? (`--arch`)
 - Which clusters of code belong together? (`--communities`)
