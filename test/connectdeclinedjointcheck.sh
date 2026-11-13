@@ -164,18 +164,21 @@ N1_DOC="$( "$BIN" "$RC" --no-cache "$CN" 2>/dev/null )" || no "N1_DOC: ripwire e
 if printf '%s' "$N1_DOC" | grep -q '<s n="driver"'; then ok "(N1) premise: driver is the resolved <s> joint"; else no "(N1) premise: driver is not the joint: $( brief "$N1_DOC" )"; fi
 noDj "N1" "$N1_DOC"
 
-n2p="$( "$BIN" "$TC" --no-cache --callers=Context.Apply 2>/dev/null | grep -c '<dc in="TestOpApply"' )"
+# run(): one call into $RUN, its exit status checked (a crashed run must not read as "no <dj> row")
+run(){ RUN="$( "$BIN" "$@" 2>/dev/null )" || { no "ripwire $* exited $?"; RUN=""; }; }
+
+run "$TC" --no-cache --callers=Context.Apply; n2p="$( printf '%s' "$RUN" | grep -c '<dc in="TestOpApply"' )"
 if [ "$n2p" -ge 1 ]; then ok "(N2) premise: --callers sees the test's declined call ($n2p)"; else no "(N2) premise: the test's declined call is not seen (0) — the arm would be vacuous"; fi
-noDj "N2" "$( "$BIN" "$TC" --no-cache "$CN" 2>/dev/null )"
+run "$TC" --no-cache "$CN"; noDj "N2" "$RUN"
 
-n3p="$( "$BIN" "$WD" --no-cache --callers=Context.Apply 2>/dev/null | grep -c '<dc in="opApply" [^>]*cands="17"' )"
+run "$WD" --no-cache --callers=Context.Apply; n3p="$( printf '%s' "$RUN" | grep -c '<dc in="opApply" [^>]*cands="17"' )"
 if [ "$n3p" -ge 1 ]; then ok "(N3) premise: the declined call holds 17 candidates ($n3p)"; else no "(N3) premise: no cands=\"17\" row (0) — the arm would be vacuous"; fi
-noDj "N3" "$( "$BIN" "$WD" --no-cache "$CN" 2>/dev/null )"
+run "$WD" --no-cache "$CN"; noDj "N3" "$RUN"
 
-n4a="$( "$BIN" "$ON" --no-cache --callers=Context.Plan 2>/dev/null | grep -c '<dc in="opPlan"' )"
-n4b="$( "$BIN" "$ON" --no-cache --callers=Context.Apply 2>/dev/null | grep -c '<dc in="opPlan"' )"
+run "$ON" --no-cache --callers=Context.Plan;  n4a="$( printf '%s' "$RUN" | grep -c '<dc in="opPlan"' )"
+run "$ON" --no-cache --callers=Context.Apply; n4b="$( printf '%s' "$RUN" | grep -c '<dc in="opPlan"' )"
 if [ "$n4a" -ge 1 ] && [ "$n4b" -eq 0 ]; then ok "(N4) premise: opPlan's declined call names Plan only"; else no "(N4) premise: Plan $n4a / Apply $n4b"; fi
-noDj "N4" "$( "$BIN" "$ON" --no-cache "$CN" 2>/dev/null )"
+run "$ON" --no-cache "$CN"; noDj "N4" "$RUN"
 
 # ── G) legend ────────────────────────────────────────────────────────────────────────────────────────────
 if printf '%s' "$A_FULL" | grep -q '<!-- ripwire connect: declined_joints=N: '; then ok "(G) full dialect defines declined_joints= and <dj>"; else no "(G) full legend lacks the declined_joints= clause"; fi
@@ -183,7 +186,7 @@ if printf '%s' "$A_CMP" | sed 's/<connect .*//' | grep -q 'declined_joints=N: .*
 if printf '%s' "$N1_DOC" | grep -q 'declined_joints'; then no "(G) the clause rides on an answer without a <dj> row"; else ok "(G) absent from an answer without a <dj> row"; fi
 
 # ── H) determinism + well-formedness ─────────────────────────────────────────────────────────────────────
-h1="$( "$BIN" "$AD" --no-cache "$CN" 2>/dev/null )"; h2="$( "$BIN" "$AD" --no-cache "$CN" 2>/dev/null )"; h3="$( "$BIN" "$AD" --no-cache "$CN" 2>/dev/null )"
+run "$AD" --no-cache "$CN"; h1="$RUN"; run "$AD" --no-cache "$CN"; h2="$RUN"; run "$AD" --no-cache "$CN"; h3="$RUN"
 if [ "$h1" = "$h2" ] && [ "$h2" = "$h3" ]; then ok "(H) 3 runs byte-identical"; else no "(H) runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then
     for doc in "$A_FULL" "$A_CMP" "$D_DOC" "$E_DOC"; do
