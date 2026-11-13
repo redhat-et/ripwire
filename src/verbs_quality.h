@@ -896,7 +896,7 @@ inline constexpr const char* kQdLegendCore =
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
-    "because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small numeric delta is "
+    "because the code is NEW carries origin=\"new-symbol\" (origin=\"moved\" when the same body left another name or file in this diff); (3) MATERIALITY — a small numeric delta is "
     "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, or on "
     "format-arity, the gating= count; new-symbol rows never gate, except defect-shape format-arity, so exit 0 "
     "is NOT a verdict on them — nothing that existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
@@ -2264,9 +2264,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                         rw::emitTo( stdout, ",\"{}\":\"{}\"", facetName, jsonStr( r.facet ).c_str() );
                     }
                 }
-                if( r.isNewSymbol )
+                if( const char* origin = quality::originValue( r ) )
                 {
-                    rw::emitRaw( stdout, ",\"origin\":\"new-symbol\"" ); // absent = preexisting-worse (mirrors the XML)
+                    rw::emitTo( stdout, ",\"origin\":\"{}\"", origin ); // absent = preexisting-worse (mirrors the XML)
                 }
                 rw::emitRaw( stdout, "}" );
             };
@@ -2366,7 +2366,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // on new-symbol rows (absent = preexisting-worse), the same "mark the exception" convention sev=
             // uses. api-surface's own surface="new-symbol" facet is the same fact narrowed to that kind; it
             // stays for shape compatibility, and origin= is what the exit gate reads.
-            const char* origin = r.isNewSymbol ? " origin=\"new-symbol\"" : "";
+            const char* origin = !r.isNewSymbol ? "" : r.isMoved ? " origin=\"moved\"" : " origin=\"new-symbol\"";   // quality::originValue
             // P2.5 — the two attributes that make a row ACTIONABLE, appended last so every pre-r27 attribute
             // keeps its position:
             //   p="path:line" — sym= is a canonical id whose display tail is often a bare one-letter local

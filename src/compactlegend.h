@@ -1486,7 +1486,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // comment-coherence: c_coeff= is spelled only in the purpose, which does not say HIGH c_coeff is BAD (restates the name); outside this gap list.
     // quality-delta rows (src/verbs_quality.h): the row facets the purpose line does not spell, present-only.
     { "sev", "r sev=minor: a small numeric delta, counted in minor=, never gating (absent: major)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "origin", "r origin=new-symbol: a finding on NEW code (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "origin", "r origin=new-symbol: a finding on NEW code; moved: a NEW function whose body this diff removed elsewhere (never gates; absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "churn", "r churn=self|ambient|unknown: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); unknown: the blame failed (unread_history=); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },

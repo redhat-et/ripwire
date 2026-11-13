@@ -285,6 +285,7 @@ struct Snapshot
     gtl::btree_map<std::uint64_t, std::uint32_t> maskReportBySym; // the REPORT-ONLY part of maskBySym's count: widened handler shapes that do not gate in the symbol's language (kHandlerShapeGates); absent = 0
     gtl::btree_map<std::uint64_t, std::uint32_t> placeholderBySym; // the placeholder kind — hash(canonId) → COUNT of stub / TODO constructs in the symbol (SUM over overloads, like maskBySym)
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — pathQualifiedKey(path,scope,name) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them). Path-qualified since v6: a bare canonId key folded every scope-less same-named symbol ACROSS FILES into one join identity (the W1-S2 cross-file churn misattribution)
+    gtl::btree_map<std::uint64_t, std::uint64_t> moveCidBySym;  // QD-ENTRY-CEILING MOVED-BODY — qualityKey → moveCidOf (the scrubbed hash of the callable's BODY), recorded only for a function or method over the ccx or the line bar: the baseline half of "this new function is a body the same diff removed elsewhere" (origin="moved"). A sidecar or blob without it recognizes no move
     std::vector<std::uint64_t>             cloneGroups; // sorted hash(sorted member canonIds)
     std::vector<std::uint64_t>             dead;        // sorted hash(canonId) of dead-candidate symbols
     std::vector<std::uint64_t>             publicApi;   // Q1 contract drift — sorted hash(canonId) of PUBLIC/exported symbols (see isPublicApi)
@@ -1645,12 +1646,35 @@ inline std::uint32_t codeLinesInBody( std::string_view body, Lang lang ) noexcep
 // files (forEachSymbolBody). A symbol with no readable body — a declaration, a prototype, an unreadable file —
 // keeps its physical `loc`: that span IS its signature, there is nothing to discount, and a silent 0 there
 // would read as "this symbol shrank to nothing" on the next delta.
-inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing )
+inline std::uint64_t scrubbedBodyHash( std::string_view body, std::string_view name );   // R1 IDENTITY, defined below
+
+// MOVED-BODY (QD-ENTRY-CEILING card 2, 2026-11-12) — THE MOVE IDENTITY of one callable: scrubbedBodyHash (whitespace and the
+// symbol's own name scrubbed, nothing semantic) over the BODY after its signature, so the same body under another name, in another
+// file, re-indented into a namespace or class, or with a reworded signature is one identity, and a body with one changed statement
+// is another. `def` is the [sigStartByte, endByte) view forEachSymbolBody hands out. 0 = no identity (not a callable).
+inline std::uint64_t moveCidOf( const Symbol& s, std::string_view def )
+{
+    if( s.kind != SymKind::Function && s.kind != SymKind::Method )
+    {
+        return 0;
+    }
+    const std::size_t bodyAt = ( s.sigEndByte > s.sigStartByte && s.sigEndByte - s.sigStartByte < def.size() ) ? s.sigEndByte - s.sigStartByte : 0;
+    const std::uint64_t cid = scrubbedBodyHash( def.substr( bodyAt ), s.name );
+    return cid != 0 ? cid : 1;
+}
+
+// `moveCidOut` (MOVED-BODY): when given, also each callable's moveCidOf — only for a body over the ccx or the line bar, the only
+// bodies a new-function row (and so a move) can be about; 0 elsewhere. Same pass, so the corpus is read once.
+inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, std::vector<std::uint64_t>* moveCidOut = nullptr )
 {
     std::vector<std::uint32_t> out( ing.symbols.size(), 0 );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         out[i] = ing.symbols[i].loc;
+    }
+    if( moveCidOut != nullptr )
+    {
+        moveCidOut->assign( ing.symbols.size(), 0 );
     }
     forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body )
     {
@@ -1664,6 +1688,10 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing )
                       // same reason ("doc sections churn by design").
         }
         out[i] = codeLinesInBody( body, s.lang );
+        if( moveCidOut != nullptr && ( s.ccx > kCcxBar || out[i] > kLocBar ) )
+        {
+            ( *moveCidOut )[i] = moveCidOf( s, body );
+        }
     } );
     return out;
 }
@@ -1675,6 +1703,60 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing )
 // the id, the non-callable symbols under it measure 0 code lines, so the row measures the callable's own body. A class with no
 // constructor keeps its id and its extent, as before; --metrics reads Symbol::loc and does not move. `keyOf[i]` is the
 // symbol's qualityKey, 0 for a symbol with no canonical id. Applied on both sides of the delta (computeSnapshot and computeDelta).
+// MOVED-BODY (QD-ENTRY-CEILING card 2) — WHICH NEW CALLABLE IS A BODY THIS DIFF MOVED. A body moved to another file or name gets a
+// new canonical id, so the origin axis read it as new code: the 11-04 replay's one moved row at the 4x ceiling (dispatchMainBody)
+// would gate as a "new 1,000-line function" on the commit that only relocated it. A current callable is a move when its move
+// identity (moveCidOf) equals the identity of a baseline body whose key is GONE from the current tree, and no other current
+// callable carries that identity (a body that is both kept and copied, or copied twice, is a copy: refuse, floors not guesses).
+// A rewrite is not a move: one changed statement changes the identity. Only bodies over the ccx or the line bar are recorded.
+struct MovedBodies
+{
+    std::vector<std::uint64_t> removed;   // sorted move identities of baseline bodies whose key the current tree no longer has
+    std::vector<std::uint64_t> current;   // sorted move identities of every current body over a bar (a multiset: the uniqueness test)
+    const std::vector<std::uint64_t>& cidOf;
+
+    MovedBodies( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const std::vector<std::uint64_t>& nowCid )
+        : cidOf( nowCid )
+    {
+        std::vector<std::uint64_t> keys;
+        keys.reserve( keyOf.size() );
+        for( std::uint64_t k : keyOf )
+        {
+            if( k != 0 )
+            {
+                keys.push_back( k );
+            }
+        }
+        std::sort( keys.begin(), keys.end() );
+        for( const auto& [ key, cid ] : base.moveCidBySym )
+        {
+            if( !std::binary_search( keys.begin(), keys.end(), key ) )
+            {
+                removed.push_back( cid );
+            }
+        }
+        std::sort( removed.begin(), removed.end() );
+        for( std::uint64_t c : nowCid )
+        {
+            if( c != 0 )
+            {
+                current.push_back( c );
+            }
+        }
+        std::sort( current.begin(), current.end() );
+    }
+
+    bool isMoved( NodeId i ) const
+    {
+        if( i >= cidOf.size() || cidOf[i] == 0 || !std::binary_search( removed.begin(), removed.end(), cidOf[i] ) )
+        {
+            return false;
+        }
+        const auto [ lo, hi ] = std::equal_range( current.begin(), current.end(), cidOf[i] );
+        return hi - lo == 1;
+    }
+};
+
 inline void measureCallableNotItsContainer( const IngestResult& ing, const std::vector<std::uint64_t>& keyOf, std::vector<std::uint32_t>& codeLoc )
 {
     const auto isCallable = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
@@ -3777,6 +3859,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   isDeadCandidate            (quality.h) — the dead-set predicate itself
 //   codeLocByNode              (quality.h) — the locBySym VALUES (code lines per body)
 //   measureCallableNotItsContainer (quality.h) — EXTENT-CTOR: a container sharing a callable's id lends it no extent
+//   moveCidOf                  (quality.h) — MOVED-BODY: the move identity moveCidBySym stores
 //   pythonFrameworkInvokedSymbol (quality.h) — the framework-hook exemption isDeadCandidate calls into (#228)
 //   pythonRecordParent         (quality.h) — fills the closure host and owner that pythonReceiverScope reads (#228)
 //   pythonReceiverScope        (quality.h) — which method a self./cls. call in a closure belongs to (#228)
@@ -3933,7 +4016,9 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v27 (2026-11-12, lane entry-ceiling, EXTENT-CTOR) — no blob shape change; the locBySym VALUES moved: a class that shares its
 // canonical id with its constructor (C++ Foo::Foo) no longer lends the id its class extent (measureCallableNotItsContainer). A v26
 // blob holds the class extent there, and would read every such constructor as shrunk. Bumped 26 -> 27.
-constexpr std::uint32_t kQSnapCacheScheme = 27;
+// v28 (2026-11-12, lane entry-ceiling, MOVED-BODY) — a BLOB SHAPE change: the Snapshot gained moveCidBySym (one hash map after
+// bodyHashBySym). A v27 blob is short by one map. Bumped 27 -> 28.
+constexpr std::uint32_t kQSnapCacheScheme = 28;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -4061,6 +4146,7 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
     putValMap( s.maskReportBySym );
     putValMap( s.placeholderBySym );
     putHashMap( s.bodyHashBySym );
+    putHashMap( s.moveCidBySym );   // v28 (MOVED-BODY)
     putVec( s.cloneGroups );
     putVec( s.dead );
     putVec( s.publicApi );
@@ -4213,7 +4299,7 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         return true;
     };
 
-    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
+    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
         || !getDefectSites( s.defectSites ) )
     {
         return false;
@@ -5870,7 +5956,8 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
                                  const std::vector<char>* fileInBaseline, const KindScope& scope, TreePasses* passes )
 {
     Snapshot snap;
-    std::vector<std::uint32_t> codeLoc = codeLocByNode( ing );                           // Q-DIAL-3: the verbosity kind's metric is CODE lines
+    std::vector<std::uint64_t> moveCid;                                                  // MOVED-BODY: the move identity of every body over a bar
+    std::vector<std::uint32_t> codeLoc = codeLocByNode( ing, &moveCid );                 // Q-DIAL-3: the verbosity kind's metric is CODE lines
     std::vector<std::uint64_t> keyOf( ing.symbols.size(), 0 );                           // path-qualified ALWAYS — see qualityKey
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
@@ -5899,6 +5986,11 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         { std::uint32_t& slot = snap.locBySym[ key ];    slot = std::max( slot, codeLoc[i] ); }   // Q-DIAL-3: CODE lines, not the physical span
         { std::uint32_t& slot = snap.nestBySym[ key ];   slot = std::max( slot, std::uint32_t( s.maxNest ) ); }
         { std::uint32_t& slot = snap.paramsBySym[ key ]; slot = std::max( slot, std::uint32_t( s.params ) ); }
+        if( moveCid[i] != 0 )
+        {
+            std::uint64_t& slot = snap.moveCidBySym[ key ];   // overloads share a key: the MAX, so the record is order-independent
+            slot = std::max( slot, moveCid[i] );
+        }
         // THE ONE KIND THAT IS NOT A MAX, and the reason is the MAX itself. Every metric above collapses the
         // overload set to its largest member, which makes the set's CARDINALITY unrecoverable — so removing an
         // overload whose metrics are below the max moves nothing at all, on either side of a comparison, while
@@ -6321,6 +6413,10 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "bodyq " << std::hex << h << ' ' << v << std::dec << '\n'; // §D#4 short-horizon-churn raw-body hash, pathQualifiedKey-keyed (both hex)
     }
+    for( const auto& [h, v] : s.moveCidBySym )
+    {
+        f << "movec " << std::hex << h << ' ' << v << std::dec << '\n'; // MOVED-BODY: the move identity of a body over a bar (both hex)
+    }
     for( std::uint64_t h : s.cloneGroups )
     {
         f << "clone " << std::hex << h << std::dec << '\n';
@@ -6516,6 +6612,10 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         else if( kind == "bodyq" )   // v3 tag — a v2 `body` line is bare-canonId-keyed (a different key space) and falls through to the unknown-kind skip
         {
             readHashMap( out.bodyHashBySym );
+        }
+        else if( kind == "movec" )   // MOVED-BODY; a sidecar written before it has none, and then no move is recognized
+        {
+            readHashMap( out.moveCidBySym );
         }
         else if( kind == "clone" )
         {
@@ -7048,6 +7148,8 @@ struct Regression
                                   //   defect-shape: "format-arity" | "utf8-cut" | "dedup-first" | "vacuous-assert". Empty = no facet.
     bool          isNewSymbol = false;// r26 ORIGIN axis: true = the finding exists ONLY because the code is new (emitted origin="new-symbol",
                                   //   counted in new-symbol=, never gates); false = preexisting-worse. See the ORIGIN block in computeDelta.
+    bool          isMoved     = false;// MOVED-BODY: a new-symbol row whose body this diff REMOVED from another name or file (emitted
+                                  //   origin="moved" instead of origin="new-symbol"; still counted in new-symbol=; never gates).
     // P2.5 (r27) — the LOCATOR. `sym` is a canonical id whose display tail is often a bare, one-letter local
     // (`sym="cc"`), so the report the agent is told to run at every "done" moment named findings it could not
     // grep for. path is ROOT-RELATIVE (the same relForHash spelling every other sidecar key uses), line is the
@@ -7076,6 +7178,12 @@ struct Regression
 // count, the allow-dirty absorbed count and the stderr naming line — asks this. A row gates when it is major
 // (not sev="minor") AND either preexisting-worse or a defect-shape format-arity row: new-symbol rows never
 // gate, except defect-shape format-arity, because a placeholder/argument mismatch is a defect, not debt.
+// The origin= attribute VALUE every surface (XML, --json, MCP) emits; nullptr = preexisting-worse, which carries none.
+inline const char* originValue( const Regression& r ) noexcept
+{
+    return !r.isNewSymbol ? nullptr : r.isMoved ? "moved" : "new-symbol";
+}
+
 inline bool rowGates( const Regression& r ) noexcept
 {
     return !r.isMinor && ( !r.isNewSymbol || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
@@ -8527,6 +8635,7 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healMap( base.maskReportBySym );
     healMap( base.placeholderBySym );
     healMap( base.bodyHashBySym );
+    healMap( base.moveCidBySym );
 
     // the two SORTED SETS — same add-never-overwrite rule, then restore the sorted invariant every
     // std::binary_search consumer depends on.
@@ -9795,6 +9904,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         regs.back().memberPaths = cloneMemberPaths( cg, ing, root );   // P1 SCOPE — see cloneMemberPaths
     };
 
+    std::vector<std::uint64_t> nowMoveCid;
+    std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing, &nowMoveCid );   // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
+    measureCallableNotItsContainer( ing, keyByNode, nowCodeLoc );                 // EXTENT-CTOR — and the same container rule
+    const MovedBodies moved( base, keyByNode, nowMoveCid );                       // MOVED-BODY — read by perSymbolKind below
+
     // One per-symbol metric kind: aggregate the CURRENT side to the same per-canonId MAX the snapshot stores
     // (overloads share an id), compare per-id MAX vs the baseline's per-id MAX, report each id once at its
     // first symbol, and flag only when it GREW and now exceeds the bar. `metricOf` reads the metric off a
@@ -9858,8 +9972,9 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 // re-scores this row's stored was=/now= off the ack ledger (see AckRecord's doc comment) —
                 // one body, so the live report and a re-score can never silently disagree.
                 const bool material = numericRegressionIsMajor( was, now, bar, minorDelta, growthTiered, growthPct );
+                const bool isNew    = !existedAtBaseline( key );
                 regs.push_back( { kindName, g.canonId[i], was, now, key, !material,
-                                  {}, !existedAtBaseline( key ) } );          // origin: the finding IS this symbol
+                                  {}, isNew, isNew && moved.isMoved( i ) } );          // origin: the finding IS this symbol
                 stampLoc( i );
             }
             else if( growthTiered && was > 0 && growthPct >= kSubBarGrowthPct && now >= subBarGrowthFloor( bar ) )
@@ -9878,8 +9993,6 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         }
     };
 
-    std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing );   // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
-    measureCallableNotItsContainer( ing, keyByNode, nowCodeLoc );    // EXTENT-CTOR — and the same container rule
     perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   true,  base.ccxBySym,    [ & ]( NodeId i ){ return ing.symbols[i].ccx; } );
     perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   true,  base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
     perSymbolKind( "nesting",    kNestBar,  0,                false, base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
