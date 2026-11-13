@@ -18665,7 +18665,9 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
 // another terminal keeps resolveFocus's pick (so <unconnected> there is true of EVERY definition). tiedOut[i] > 1 says
 // that many definitions joined exactly as well as the pick: the answer is about one of them, disclosed by the emitter
 // (ambiguous_terminal=), never a silent choice.
-inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, std::span<const NodeId> sources, std::uint32_t radius )
+// `notThrough` (empty = none): as connectSubgraph's, nodes reached but never expanded (a source is always expanded).
+inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, std::span<const NodeId> sources, std::uint32_t radius,
+                                                             std::span<const char> notThrough = {} )
 {
     const std::size_t N = g.wOutDeg.size();
     std::vector<std::uint16_t> dist( N, connectcfg::kUnreachable );
@@ -18694,7 +18696,7 @@ inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, st
     {
         const NodeId        u  = q[ head ];
         const std::uint16_t du = dist[ u ];
-        if( du >= radius )
+        if( du >= radius || ( du > 0 && u < notThrough.size() && notThrough[ u ] != 0 ) )
         {
             continue;
         }
@@ -18764,8 +18766,11 @@ inline TerminalChoice scoreTerminalCandidates( std::span<const NodeId> candidate
     return best;
 }
 
+// `notThrough` (CONNECT-SOURCE-JOINT; empty = none): the test-class nodes connectSourceJoint's search never walks through. A
+// candidate is scored on that same view first, so a definition joined only through a test never outranks one joined through
+// source; a terminal none of whose definitions joins on it is scored on the unrestricted view, as before (CodeRabbit #636).
 inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vector<NodeId>>& defsPerTerminal, std::vector<NodeId>& picks,
-                                    std::vector<std::uint32_t>& tiedOut, std::uint32_t radius )
+                                    std::vector<std::uint32_t>& tiedOut, std::uint32_t radius, std::span<const char> notThrough = {} )
 {
     EXPECTS( defsPerTerminal.size() == picks.size() );
     const std::size_t T = picks.size();
@@ -18777,20 +18782,34 @@ inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vecto
     }
     const std::uint32_t r = std::clamp( radius, connectcfg::kMinRadius, connectcfg::kMaxRadius );
     const std::vector<NodeId> firstPicks = picks;
-    for( int pass = 0; pass < 2; ++pass )
+    const auto distancesFrom = [ & ]( int pass, std::span<const char> mask )
     {
         std::vector<std::vector<std::uint16_t>> distFrom( T );
         for( std::size_t j = 0; j < T; ++j )
         {
-            distFrom[ j ] = pass == 0 ? connectUndirectedDistances( g, defsPerTerminal[ j ], r )
-                                      : connectUndirectedDistances( g, std::span<const NodeId>( &picks[ j ], 1 ), r );
+            distFrom[ j ] = pass == 0 ? connectUndirectedDistances( g, defsPerTerminal[ j ], r, mask )
+                                      : connectUndirectedDistances( g, std::span<const NodeId>( &picks[ j ], 1 ), r, mask );
         }
-        std::vector<NodeId> next = picks;
+        return distFrom;
+    };
+    for( int pass = 0; pass < 2; ++pass )
+    {
+        const std::vector<std::vector<std::uint16_t>> distFrom = distancesFrom( pass, notThrough );
+        std::vector<std::vector<std::uint16_t>>       anyFrom;   // the unrestricted view, computed only when a terminal needs it
+        std::vector<NodeId>                           next = picks;
         for( std::size_t i = 0; i < T; ++i )
         {
             if( defsPerTerminal[ i ].size() > 1 )
             {
-                const TerminalChoice choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, distFrom );
+                TerminalChoice choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, distFrom );
+                if( choice.reached == 0 && !notThrough.empty() )
+                {
+                    if( anyFrom.empty() )
+                    {
+                        anyFrom = distancesFrom( pass, {} );
+                    }
+                    choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, anyFrom );
+                }
                 next[ i ]    = choice.chosen;
                 tiedOut[ i ] = choice.tied;
             }
@@ -18865,7 +18884,12 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
         defsPerTerminal.push_back( resolveAllByNameQualified( ing, std::string_view( spec ), nullptr ) );
     }
     std::vector<std::uint32_t> tied;
-    chooseJoiningTerminals( g, defsPerTerminal, picks, tied, radius );
+    // CONNECT-SOURCE-JOINT: when no terminal is test code, connectSourceJoint never walks through a test, so the choice of
+    // definition reads the same source-only view (CodeRabbit #636)
+    const bool anyMany   = std::any_of( defsPerTerminal.begin(), defsPerTerminal.end(), []( const std::vector<NodeId>& d ) { return d.size() > 1; } );
+    const bool allSource = std::none_of( picks.begin(), picks.end(), [ & ]( NodeId t ) { return t < ing.symbols.size() && pathDefInTests( ing, t ); } );
+    const std::vector<char> notThrough = ( anyMany && allSource && picks.size() >= 2 ) ? connectTestMask( ing, g ) : std::vector<char>{};
+    chooseJoiningTerminals( g, defsPerTerminal, picks, tied, radius, notThrough );
     ConnectPicks out;
     for( std::size_t i = 0; i < picks.size(); ++i )
     {
