@@ -28,6 +28,9 @@
 #   K  the evidence is per LEG: one unrestricted group holds planIt/applyIt (source-joined, with a shorter abTest beside
 #      them) and cIt (joined to applyIt only through bcTest); test_joint= is bcTest, the test on the leg that crosses
 #      source components, not the lower-id abTest on a source-joined leg (CodeRabbit #636)
+#   L  a many-definition terminal is chosen on the source-only view: one::runIt joins planIt in 2 hops through a test,
+#      two::runIt in 4 hops through source; the answer joins planIt to two::runIt through source, with no test_joint=
+#      (CodeRabbit #636)
 #   H  determinism (3 runs) + xmllint
 #   M  mutations: each assertion sees its own regression
 #
@@ -75,6 +78,12 @@ XL="$TMP/crossleg";     mksrc "$XL"
 printf 'void cIt() {}\n' >> "$XL/src/core.cpp"
 printf 'void planIt(); void applyIt();\nvoid mid() { applyIt(); }\nvoid driver() { planIt(); mid(); }\n' > "$XL/src/driver.cpp"
 printf 'void planIt(); void applyIt(); void cIt();\nvoid abTest() { planIt(); applyIt(); }\nvoid bcTest() { applyIt(); cIt(); }\n' > "$XL/test/core_test.cpp"
+
+# runIt has two definitions: one::runIt joins planIt only through a test (2 hops), two::runIt through source (4 hops)
+MD="$TMP/manydefs";     mksrc "$MD"
+printf 'namespace one { void runIt() {} }\nnamespace two { void runIt() {} }\n' > "$MD/src/run.cpp"
+printf 'void planIt();\nnamespace two { void runIt(); }\nvoid m2() { two::runIt(); }\nvoid m1() { m2(); }\nvoid d1() { planIt(); m1(); }\n' > "$MD/src/driver.cpp"
+printf 'void planIt();\nnamespace one { void runIt(); }\nvoid pTest() { planIt(); one::runIt(); }\n' > "$MD/test/run_test.cpp"
 
 TT="$TMP/testterm";     mksrc "$TT"
 printf 'void helperT() {}\nvoid applyIt();\nvoid testDriver() { helperT(); applyIt(); }\n' > "$TT/test/helper_test.cpp"
@@ -190,6 +199,17 @@ if printf '%s' "$K_DOC" | grep -q '<connect [^>]*test_joint="bcTest" test_joint_
     ok "(K) test_joint= names bcTest, the test on the leg to the <unconnected> cIt"
 else
     no "(K) test_joint= is not bcTest (a test from a source-joined leg?): $( brief "$K_DOC" )"
+fi
+
+# ── L) a many-definition terminal is chosen on the source-only view ───────────────────────────────────────
+L_DOC="$( "$BIN" "$MD" --no-cache --connect=planIt,runIt 2>/dev/null )"
+lPrem=0
+for t in d1 pTest; do "$BIN" "$MD" --no-cache --callers=planIt 2>/dev/null | grep -q "$t" && lPrem=$(( lPrem + 1 )); done
+if [ "$lPrem" -eq 2 ]; then ok "(L) premise: planIt is called by d1 (source) and pTest (test)"; else no "(L) premise: planIt callers lack d1/pTest ($lPrem/2)"; fi
+if printf '%s' "$L_DOC" | grep -q '<g terminals="2">' && ! printf '%s' "$L_DOC" | grep -q 'test_joint='; then
+    ok "(L) planIt and runIt joined through source, no test_joint="
+else
+    no "(L) runIt was chosen on the unrestricted view (test-joined definition): $( brief "$L_DOC" )"
 fi
 
 # ── G) legend ────────────────────────────────────────────────────────────────────────────────────────────
