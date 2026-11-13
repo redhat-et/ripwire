@@ -18766,6 +18766,34 @@ inline TerminalChoice scoreTerminalCandidates( std::span<const NodeId> candidate
     return best;
 }
 
+// One pass's choice for every many-definition terminal, on `distFrom`; with `fallback`, a terminal none of whose definitions
+// joins on that view is scored on the unrestricted one, which `anyFrom()` computes once, on first need.
+template<class AnyFrom>
+inline void choosePassPicks( const std::vector<std::vector<NodeId>>& defsPerTerminal, const std::vector<NodeId>& firstPicks,
+                             const std::vector<std::vector<std::uint16_t>>& distFrom, bool fallback, AnyFrom anyFrom,
+                             std::vector<NodeId>& next, std::vector<std::uint32_t>& tiedOut )
+{
+    std::vector<std::vector<std::uint16_t>> unrestricted;
+    for( std::size_t i = 0; i < defsPerTerminal.size(); ++i )
+    {
+        if( defsPerTerminal[ i ].size() <= 1 )
+        {
+            continue;
+        }
+        TerminalChoice choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, distFrom );
+        if( choice.reached == 0 && fallback )
+        {
+            if( unrestricted.empty() )
+            {
+                unrestricted = anyFrom();
+            }
+            choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, unrestricted );
+        }
+        next[ i ]    = choice.chosen;
+        tiedOut[ i ] = choice.tied;
+    }
+}
+
 // `notThrough` (CONNECT-SOURCE-JOINT; empty = none): the test-class nodes connectSourceJoint's search never walks through. A
 // candidate is scored on that same view first, so a definition joined only through a test never outranks one joined through
 // source; a terminal none of whose definitions joins on it is scored on the unrestricted view, as before (CodeRabbit #636).
@@ -18794,26 +18822,9 @@ inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vecto
     };
     for( int pass = 0; pass < 2; ++pass )
     {
-        const std::vector<std::vector<std::uint16_t>> distFrom = distancesFrom( pass, notThrough );
-        std::vector<std::vector<std::uint16_t>>       anyFrom;   // the unrestricted view, computed only when a terminal needs it
-        std::vector<NodeId>                           next = picks;
-        for( std::size_t i = 0; i < T; ++i )
-        {
-            if( defsPerTerminal[ i ].size() > 1 )
-            {
-                TerminalChoice choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, distFrom );
-                if( choice.reached == 0 && !notThrough.empty() )
-                {
-                    if( anyFrom.empty() )
-                    {
-                        anyFrom = distancesFrom( pass, {} );
-                    }
-                    choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, anyFrom );
-                }
-                next[ i ]    = choice.chosen;
-                tiedOut[ i ] = choice.tied;
-            }
-        }
+        std::vector<NodeId> next = picks;
+        choosePassPicks( defsPerTerminal, firstPicks, distancesFrom( pass, notThrough ), !notThrough.empty(),
+                         [ & ] { return distancesFrom( pass, {} ); }, next, tiedOut );
         picks = std::move( next );
     }
     ENSURES( picks.size() == T && tiedOut.size() == T );
