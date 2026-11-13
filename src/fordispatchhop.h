@@ -66,7 +66,7 @@ inline constexpr std::size_t kForDispatchHopRows  = 8;   // candidate rows per c
 inline constexpr std::size_t kForDispatchCtorRows = 4;   // constructor-caller rows per call
 inline constexpr std::size_t kForDispatchSites    = 2;   // calls per answer (a task naming more is a different question)
 inline constexpr std::size_t kForDispatchHeldRows = 2;   // held-as declaration rows per call (DISPATCH-HELD-AS)
-inline constexpr std::size_t kForDispatchHeldText = 160; // bytes of one declaration line printed (a runaway guard, cut at a byte)
+inline constexpr std::size_t kForDispatchHeldText = 160; // bytes of one declaration line printed (a runaway guard: a cut line ends in "…", capped="1")
 
 inline bool forDispatchHopOn()
 {
@@ -625,15 +625,26 @@ inline std::vector<HeldAsRow> dispatchHeldAs( const IngestResult& ing, std::span
     return out;
 }
 
-// One <s held= of= n= p=file:line>declaration line</s> row (the line redacted like any served source, cut at kForDispatchHeldText).
-inline void appendHeldAsRow( std::string& x, const IngestResult& ing, const MemberOwners& owners, const HeldAsRow& h, FileTextCache& text,
+// One <s held= of= n= p=file:line>declaration line</s> row (the line redacted like any served source, then cut at kForDispatchHeldText
+// on a UTF-8 boundary, ending in "…"). True when the line was cut: the element then says capped="1".
+inline bool appendHeldAsRow( std::string& x, const IngestResult& ing, const MemberOwners& owners, const HeldAsRow& h, FileTextCache& text,
                              std::string_view rootArg, RedactCounts* redact, std::vector<char>& esc )
 {
     const Reference& r    = ing.references[ h.ref ];
     const Symbol&    from = ing.symbols[ h.from ];
     std::string      line( trimWs( dispatch_detail::sourceLine( text, r.fileId, h.line ) ) );
     redactInPlace( line, redact );   // BEFORE the cut: a secret crossing byte kForDispatchHeldText must reach the redactor whole
-    line.resize( std::min( line.size(), kForDispatchHeldText ) );
+    const bool cut = line.size() > kForDispatchHeldText;
+    if( cut )
+    {
+        std::size_t at = kForDispatchHeldText;
+        while( at > 0 && ( static_cast<unsigned char>( line[at] ) & 0xC0 ) == 0x80 )
+        {
+            --at;   // never split a UTF-8 sequence
+        }
+        line.resize( at );
+        line += "\xE2\x80\xA6";   // "…": the reader sees where the text stops
+    }
     const std::string_view rp = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] ) : sarif::rootRelativeUri( ing.files[ r.fileId ], rootArg );
     x += h.member ? "<s held=\"member\" of=\"" : "<s held=\"local\" of=\"";
     x += escapeXml( r.calleeName, esc );
@@ -644,6 +655,7 @@ inline void appendHeldAsRow( std::string& x, const IngestResult& ing, const Memb
     x += ':' + std::to_string( h.line ) + "\">";
     x += escapeXml( line, esc );
     x += "</s>";
+    return cut;
 }
 
 // `withBody` false: the MCP `for` twin, which serves no inline body (its bodies ride by fetch_body handle) — rows only.
@@ -702,6 +714,12 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
         }
         const std::vector<HeldAsRow> held      = dispatchHeldAs( ing, bare, text );
         const std::size_t            heldShown = std::min( held.size(), kForDispatchHeldRows );
+        std::string                  heldXml;   // rendered before the head: a cut declaration line sets capped="1"
+        bool                         heldCut = false;
+        for( std::size_t i = 0; i < heldShown; ++i )
+        {
+            heldCut |= appendHeldAsRow( heldXml, ing, owners, held[i], text, bodyIn.rootArg, bodyIn.redact, esc );
+        }
         const Symbol&          caller = ing.symbols[ g.declinedSiteCaller[ site ] ];
         // a structurally typed language (TS/JS/Go): the candidate list is a floor, an unlisted object literal / type can run too
         const bool isFloor = langFacts( caller.lang ).structuralTyping;
@@ -723,7 +741,7 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
             x += " floor=\"1\"";
         }
         x += " capped=\"";
-        x += ( shown < prod.size() || made.size() < madeTotal || heldShown < held.size() ) ? "1" : "0";
+        x += ( shown < prod.size() || made.size() < madeTotal || heldShown < held.size() || heldCut ) ? "1" : "0";
         x += '"';
         x += nextAttrXml( nextFlag( "--whereis=", r.calleeName ) );
         x += '>';
@@ -735,10 +753,7 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
         {
             appendCallerHopRow( x, rc, who, std::string( " ctor=\"" ) + std::string( escapeXml( qualifiedMemberName( owners, ing.symbols[ ctor ] ), esc ) ) + '"' );
         }
-        for( std::size_t i = 0; i < heldShown; ++i )
-        {
-            appendHeldAsRow( x, ing, owners, held[i], text, bodyIn.rootArg, bodyIn.redact, esc );
-        }
+        x += heldXml;
         if( withBody && prod.size() == 1 && !isFloor )   // a floor list names no single implementation
         {
             if( const std::optional<std::string> body = fold_detail::renderOneBody( bodyIn, prod.front() ) )

@@ -67,6 +67,7 @@
 #   H5 [P] a held declaration line past kForDispatchHeldText (fixture heldcut: an `api_key = ` 48-hex run straddling byte 160) is
 #          redacted BEFORE the cut: only the redactor's own 4-character kept prefix prints (cut first, the 9 characters left under the
 #          redactor's 32-character minimum printed as they are)
+#   H6 [P] a cut held line is disclosed: it ends in "…" and the element says capped="1" (one row, nothing else left out)
 #
 # Usage:  bash test/fordispatchhopcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fordispatchhopcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -203,6 +204,9 @@ key=$?   # the premise: the fixture's key is in the source
 if [ "$h5rc" = 0 ] && [ "$key" = 0 ] && has "$HC" '<s held="member" of="LongReader"' && has "$HC" 'api_key = 0123' && ! has "$HC" '01234'; then
     ok "(H5) a key crossing the 160-byte cut is redacted before the cut: no fragment prints"
 else no "(H5) rc=$h5rc premise=$key, expected the held row redacted with no key fragment: [$HC]"; fi
+if [ "$h5rc" = 0 ] && printf '%s' "$HC" | grep -q '…</s>' && has "$HC" 'capped="1"' && [ "$( printf '%s' "$HC" | grep -o '<s held=' | wc -l | tr -d ' ' )" = 1 ]; then
+    ok "(H6) a held line cut at kForDispatchHeldText ends in … and the element says capped=1"
+else no "(H6) expected the one held row to end in … and capped=1: [$HC]"; fi
 
 # ── N1 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 n1(){ local dir="$1" task="$2" why="$3"
