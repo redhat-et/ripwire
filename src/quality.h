@@ -116,6 +116,25 @@ constexpr std::uint32_t   kSubBarGrowthPct   = 100;   // UNDER the bar: a DOUBLI
 // with the bar it belongs to and there is no third number to keep in sync: ccx 10, loc 40.
 inline constexpr std::uint32_t subBarGrowthFloor( std::uint32_t bar ) noexcept { return ( bar * 2 ) / 3; }
 
+// QD-MONSTER-GROWTH (2026-11-12) — the 25 % tier bends the average and misses the monsters: on a function far
+// over the bar, a real tangle is a small PERCENTAGE forever (`buildGraph` ccx 1950 → 1968 was +0.9 %, minor).
+// So complexity growth of kMonsterGrowthCcx or more on a function that was already kMonsterMul × its bar is
+// major at any percentage, and the row says monster="1". Measured on 47 first-parent merges 09-05..11-11
+// (reports/qd-ge-card-verify-1112.md § E3): Δccx ≥ 3 was the designed trigger — 34 events on 38 % of merges,
+// precision 0.37, half of them flat branching (an `else if` option arm, a legend append). Δccx ≥ 10 left 10
+// events on 17 % of merges, 6 of 7 sampled ones tangle (0.86); the false one is `parseArgs` +12 (two flat
+// `else if( --flag= )` arms). Complexity ONLY: verbosity never triggers it (owner 11-05 — a long flat function
+// is fine), and a flat run of statements adds 0 ccx, so it cannot. Nesting needs no clause: every nesting row
+// is already major (no minor tier), monster or not.
+constexpr std::uint32_t   kMonsterMul        = 5;    // "monster" = was ≥ kMonsterMul × the bar (ccx 75 at kCcxBar 15)
+constexpr std::uint32_t   kMonsterGrowthCcx  = 10;   // …and grew by ≥ this in one change: major, whatever the percentage
+
+// The clause itself, one body for the live decision and the ack re-score. `monsterGrowth` 0 = the kind has none.
+inline constexpr bool isMonsterGrowth( std::uint32_t was, std::uint32_t now, std::uint32_t bar, std::uint32_t monsterGrowth ) noexcept
+{
+    return monsterGrowth != 0 && was >= kMonsterMul * bar && now >= was + monsterGrowth;
+}
+
 // ─── ACK PROVENANCE / RE-SCORE — the per-symbol numeric kinds' materiality, as ONE declarative table ─────
 //
 // kind → the three constants perSymbolKind already compares (was,now) against. Pulled out as a table
@@ -131,13 +150,18 @@ struct MaterialityBar
     std::uint32_t    bar;
     std::uint32_t    minorDelta;
     bool              growthTiered;
+    std::uint32_t    monsterGrowth;   // QD-MONSTER-GROWTH: growth that is major on a function ≥ kMonsterMul × bar (0 = none)
 };
 inline constexpr MaterialityBar kMaterialityBars[] = {
-    { "complexity", kCcxBar,   kMinorCcxDelta,   true  },
-    { "verbosity",  kLocBar,   kMinorLocDelta,   true  },
-    { "nesting",    kNestBar,  0,                false },
-    { "params",     kParamBar, kMinorParamDelta, false },
+    { "complexity", kCcxBar,   kMinorCcxDelta,   true,  kMonsterGrowthCcx },
+    { "verbosity",  kLocBar,   kMinorLocDelta,   true,  0 },
+    { "nesting",    kNestBar,  0,                false, 0 },
+    { "params",     kParamBar, kMinorParamDelta, false, 0 },
 };
+// computeDelta calls perSymbolKind with these rows by index; the order is the contract.
+static_assert( kMaterialityBars[0].kind == "complexity" && kMaterialityBars[1].kind == "verbosity" && kMaterialityBars[2].kind == "nesting"
+               && kMaterialityBars[3].kind == "params", "computeDelta's perSymbolKind calls index kMaterialityBars by kind order" );
+inline constexpr std::string_view kMonsterFacet = "1";   // a complexity row's facet, emitted as monster="1" (kFacetAttrs)
 
 // The linear scan behind every "kind → its declarative table row" lookup in this file — rescoreNumericMajor's
 // own lookup below and facetAttrName (kFacetAttrs, further down) are both this shape over a different small
@@ -157,12 +181,12 @@ inline const Row* findRowByKind( const Row* begin, const Row* end, std::string_v
 // The growth-vs-bar formula itself, factored out of perSymbolKind so it has exactly one body: the caller
 // already knows `now > was` and `now > bar` (perSymbolKind's own guards), and already has `growthPct` in
 // hand (it needs it for the sub-bar branch too), so this takes both rather than recomputing either.
-inline bool numericRegressionIsMajor( std::uint32_t was, std::uint32_t now, std::uint32_t bar, std::uint32_t minorDelta,
-                                       bool growthTiered, std::uint64_t growthPct ) noexcept
+inline bool numericRegressionIsMajor( std::uint32_t was, std::uint32_t now, const MaterialityBar& mb, std::uint32_t bar,
+                                       std::uint32_t minorDelta, std::uint64_t growthPct ) noexcept
 {
     const bool crossed = was <= bar;
-    return !growthTiered ? ( minorDelta == 0 || now - was >= minorDelta )
-                          : ( crossed || growthPct >= kMaterialGrowthPct );
+    return !mb.growthTiered ? ( minorDelta == 0 || now - was >= minorDelta )
+                             : ( crossed || growthPct >= kMaterialGrowthPct || isMonsterGrowth( was, now, bar, mb.monsterGrowth ) );
 }
 
 // RE-SCORE, mechanical: given a (kind, was, now) triple alone — no re-ingest, no git history — recompute
@@ -188,7 +212,7 @@ inline std::optional<bool> rescoreNumericMajor( std::string_view kind, std::uint
         return false;   // under the bar — never MAJOR (may still be a reported sev="minor" row; not this predicate's question)
     }
     const std::uint64_t growthPct = ( std::uint64_t( now - was ) * 100 ) / std::max( was, 1u );
-    return numericRegressionIsMajor( was, now, bar, minorDelta, mb->growthTiered, growthPct );
+    return numericRegressionIsMajor( was, now, *mb, bar, minorDelta, growthPct );
 }
 
 // Signal-to-noise round — the per-finding ACK RATCHET sidecar (`--quality-ack[=REASON]`): each line records one
@@ -7059,6 +7083,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "api-surface",                "surface" },   // new-symbol / contract-change
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
     { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert
+    { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
                                                     // is populated the same way, from the same CloneIdiomVerdict); this row was
                                                     // missing, so a demoted row's idiom name never reached the reader even
@@ -9772,10 +9797,9 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // `metricOf` takes the NodeId rather than the Symbol because verbosity's metric is not on the Symbol any
     // more (codeLoc is read off the body bytes); the other three still just read a field.
     const auto perSymbolKind =
-        [ & ]( const char* kindName, std::uint32_t bar, std::uint32_t minorDelta, bool growthTiered,
-               const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap,
-               auto metricOf )
+        [ & ]( const MaterialityBar& mb, const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap, auto metricOf )
     {
+        const std::uint32_t bar = mb.bar;
         ScratchMap<std::uint32_t> nowBySym( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
@@ -9816,12 +9840,15 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 // numericRegressionIsMajor is the SAME formula rescoreNumericMajor calls when a later run
                 // re-scores this row's stored was=/now= off the ack ledger (see AckRecord's doc comment) —
                 // one body, so the live report and a re-score can never silently disagree.
-                const bool material = numericRegressionIsMajor( was, now, bar, minorDelta, growthTiered, growthPct );
-                regs.push_back( { kindName, g.canonId[i], was, now, key, !material,
-                                  {}, !existedAtBaseline( key ) } );          // origin: the finding IS this symbol
+                const bool material = numericRegressionIsMajor( was, now, mb, bar, mb.minorDelta, growthPct );
+                // QD-MONSTER-GROWTH — facet "1" is emitted as monster="1" (kFacetAttrs): set whenever the clause
+                // holds, whether or not the 25 % tier would have made the row major on its own.
+                regs.push_back( { std::string( mb.kind ), g.canonId[i], was, now, key, !material,
+                                  isMonsterGrowth( was, now, bar, mb.monsterGrowth ) ? std::string( kMonsterFacet ) : std::string(),
+                                  !existedAtBaseline( key ) } );          // origin: the finding IS this symbol
                 stampLoc( i );
             }
-            else if( growthTiered && was > 0 && growthPct >= kSubBarGrowthPct && now >= subBarGrowthFloor( bar ) )
+            else if( mb.growthTiered && was > 0 && growthPct >= kSubBarGrowthPct && now >= subBarGrowthFloor( bar ) )
             {
                 // Q-DIAL-3 — still UNDER the bar, so this can never gate; it is the row that turns synthetics
                 // S4b (6 → 55 LOC) and S8-sub-bar (ccx 5 → 13) from silence into something a reader can see.
@@ -9830,7 +9857,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 // reported as "grew 4200%". Measured on the 40-commit ref-pair replay: 38 of the 57 rows this
                 // tier first produced were exactly that (`was="0"`), including every symbol of the vendored
                 // timsort landing at 08416403.
-                regs.push_back( { kindName, g.canonId[i], was, now, key, /*isMinor=*/true,
+                regs.push_back( { std::string( mb.kind ), g.canonId[i], was, now, key, /*isMinor=*/true,
                                   {}, !existedAtBaseline( key ) } );
                 stampLoc( i );
             }
@@ -9838,10 +9865,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     };
 
     const std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing );   // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
-    perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   true,  base.ccxBySym,    [ & ]( NodeId i ){ return ing.symbols[i].ccx; } );
-    perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   true,  base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
-    perSymbolKind( "nesting",    kNestBar,  0,                false, base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
-    perSymbolKind( "params",     kParamBar, kMinorParamDelta, false, base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
+    // Each kind's row of the ONE materiality table, so the live decision and rescoreNumericMajor cannot drift.
+    perSymbolKind( kMaterialityBars[0], base.ccxBySym,    [ & ]( NodeId i ){ return ing.symbols[i].ccx; } );
+    perSymbolKind( kMaterialityBars[1], base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
+    perSymbolKind( kMaterialityBars[2], base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
+    perSymbolKind( kMaterialityBars[3], base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
 
     // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
     // Type-3 pass alone is ~2.7-3.2 s (60 M intra-bucket pair-visits; tokenization is only ~3 %). It is a PURE

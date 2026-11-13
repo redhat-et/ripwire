@@ -332,7 +332,8 @@ inline void readCppHandler( TSNode n, std::string_view src, Handler& h )
 }
 
 // One row per grammar: which node is a handler there, and who reads it. A grammar absent from the table has
-// no handler shape (Go's `if err != nil` is its own reader below; Rust, Swift and the rest are not judged).
+// no handler shape (Go's `if err != nil` and Rust's `Err(..)` arm are their own readers below; Swift and the rest are
+// not judged).
 struct HandlerReader
 {
     Lang        lang;
@@ -554,6 +555,66 @@ inline constexpr std::string_view kLogVerbs[] = {
 
 inline constexpr std::string_view kBarePrintCalls[] = { "print", "println", "printf", "puts", "warn", "eprint", "eprintln", "p" };
 
+// C's print-to-a-stream calls, logging only when the stream is stderr: `fprintf( stderr, … )`, `fputs( "…", stderr )`.
+// A file handle is output, not a log, so `fprintf( fp, … )` answers no.
+inline constexpr std::string_view kStreamPrintCalls[] = { "fprintf", "fputs", "vfprintf", "fputc", "putc" };
+
+inline bool isStderrPrintCall( TSNode call, std::string_view verb, std::string_view src )
+{
+    verb = verb.starts_with( "std::" ) ? verb.substr( 5 ) : verb;
+    if( std::find( std::begin( kStreamPrintCalls ), std::end( kStreamPrintCalls ), verb ) == std::end( kStreamPrintCalls ) )
+    {
+        return false;
+    }
+    // the STREAM argument only: fprintf/vfprintf take it first, fputs/fputc/putc second (`fprintf( fp, "%p", stderr )` writes to
+    // fp); a comment is a named child too, so it is skipped, never counted as a position (CodeRabbit #636)
+    const std::uint32_t streamPos = ( verb == "fprintf" || verb == "vfprintf" ) ? 0u : 1u;
+    const TSNode        args      = field( call, "arguments" );
+    std::uint32_t       pos       = 0;
+    for( std::uint32_t i = 0; i < namedCount( args ); ++i )
+    {
+        const TSNode a = namedChild( args, i );
+        if( typeIs( a, "comment" ) )
+        {
+            continue;
+        }
+        if( pos++ == streamPos )
+        {
+            return nodeTextOf( a, src ) == "stderr";
+        }
+    }
+    return false;
+}
+
+// C++ stream logging, K6L-CXX: a `<<` chain whose LEFTMOST operand is a console stream (`std::cerr << "x" << std::endl`)
+// or a logging macro call (`LOG( ERROR ) << "x"`, `VLOG( 1 ) << …`: a callee isLogReceiver reads as a logger). Any
+// other leftmost operand — an `std::ostringstream`, a file stream, a shift — answers no.
+inline constexpr std::string_view kConsoleStreams[] = { "std::cerr", "std::clog", "std::cout", "cerr", "clog", "cout" };
+
+inline bool isStreamLogStatement( TSNode stmt, std::string_view src )
+{
+    TSNode e = statementExpression( stmt );
+    if( !typeIs( e, "binary_expression" ) )
+    {
+        return false;
+    }
+    while( typeIs( e, "binary_expression" ) )
+    {
+        if( nodeTextOf( field( e, "operator" ), src ) != "<<" )
+        {
+            return false;
+        }
+        e = field( e, "left" );
+    }
+    if( typeIs( e, "call_expression" ) )
+    {
+        const TSNode fn = field( e, "function" );
+        return typeIs( fn, "identifier" ) && isLogReceiver( nodeTextOf( fn, src ) );
+    }
+    const std::string_view head = nodeTextOf( e, src );
+    return std::find( std::begin( kConsoleStreams ), std::end( kConsoleStreams ), head ) != std::end( kConsoleStreams );
+}
+
 // Is this statement ONE logging/print call? An unrecognised callee answers no — the shape then does not
 // fire, which is a miss and never a finding.
 inline bool isLogCall( TSNode stmt, std::string_view src )
@@ -561,10 +622,14 @@ inline bool isLogCall( TSNode stmt, std::string_view src )
     const TSNode call = statementExpression( stmt );
     if( !isCallNode( call ) )
     {
-        return false;
+        return isStreamLogStatement( stmt, src );
     }
     std::string_view       recv;
     const std::string_view verb = calleeText( call, src, recv );
+    if( isStderrPrintCall( call, verb, src ) )
+    {
+        return true;
+    }
     if( recv.empty() )
     {
         for( std::string_view bare : kBarePrintCalls )
@@ -677,6 +742,114 @@ inline std::string_view goLogOnlyShape( TSNode n, std::string_view src, std::vec
         }
     }
     return mentionsError( body, src, nodeTextOf( left, src ) ) ? std::string_view() : kShapeLogOnly;
+}
+
+// Rust, QD-K6E-RUST's log-only half: an `Err(..)` arm, or an `if let Err(..) = … {}` with no else, whose body is only
+// print/log macros (eprintln!, println!, log::warn!, tracing::error!, a bare warn!/error!/…) and never names the Err
+// binding. Err is a Result's whole error side, so the handler is broad by construction. A guarded arm (`Err(_) if …`) is
+// conditional and not judged.
+inline constexpr std::string_view kRustPrintMacros[] = { "eprintln", "eprint", "println", "print" };
+inline constexpr std::string_view kRustLogLevels[]   = { "error", "warn", "info", "debug", "trace" };
+
+inline bool isRustLogMacro( TSNode stmt, std::string_view src )
+{
+    const TSNode e = statementExpression( stmt );
+    if( !typeIs( e, "macro_invocation" ) )
+    {
+        return false;
+    }
+    std::string_view m = nodeTextOf( field( e, "macro" ), src );
+    if( std::find( std::begin( kRustPrintMacros ), std::end( kRustPrintMacros ), m ) != std::end( kRustPrintMacros ) )
+    {
+        return true;
+    }
+    for( std::string_view crate : { std::string_view( "log::" ), std::string_view( "tracing::" ) } )
+    {
+        m = m.starts_with( crate ) ? m.substr( crate.size() ) : m;
+    }
+    return std::find( std::begin( kRustLogLevels ), std::end( kRustLogLevels ), m ) != std::end( kRustLogLevels );
+}
+
+// The Err binding of a tuple-struct pattern `Err( x )`, through `ref`/`mut` wrappers; empty for `_` or `..`. False
+// when the pattern is not `Err( … )` at all, or when its inner pattern is REFUTABLE — `Err( MyError::NotFound )`,
+// `Err( A | B )`, `Err( e @ MyError::Busy )`, an upper-case unit variant `Err( NotFound )`: that handles one variant,
+// not the whole error side, so it is not a broad handler (CR #632).
+inline bool rustErrBinding( TSNode pat, std::string_view src, std::string_view& name )
+{
+    name = {};
+    if( !typeIs( pat, "tuple_struct_pattern" ) || nodeTextOf( field( pat, "type" ), src ) != "Err" )
+    {
+        return false;
+    }
+    TSNode inner = namedChild( pat, 1 );   // child 0 is the type
+    while( typeIs( inner, "ref_pattern" ) || typeIs( inner, "mut_pattern" ) )
+    {
+        inner = namedChild( inner, ts_node_named_child_count( inner ) - 1 );   // `ref`/`mut` wrap the binding last
+    }
+    if( ts_node_is_null( inner ) || typeIs( inner, "remaining_field_pattern" ) )
+    {
+        return true;   // `Err( _ )` (`_` is an anonymous token) or `Err( .. )`
+    }
+    if( !typeIs( inner, "identifier" ) )
+    {
+        return false;
+    }
+    name = nodeTextOf( inner, src );
+    return name.empty() || name[0] < 'A' || name[0] > 'Z';   // an upper-case `Err( NotFound )` names a variant
+}
+
+// A Rust format string names its argument INSIDE the literal (`"{e}"`, `"{e:?}"`), where mentionsName cannot see it.
+inline bool rustFormatNames( TSNode body, std::string_view src, std::string_view name )
+{
+    const std::string_view text = nodeTextOf( body, src );
+    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
+    {
+        const char after = at + name.size() < text.size() ? text[at + name.size()] : '\0';
+        if( at > 0 && text[at - 1] == '{' && ( after == '}' || after == ':' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline std::string_view rustLogOnlyShape( TSNode n, std::string_view src, std::vector<TSNode>& stmts )
+{
+    const bool       isArm = typeIs( n, "match_arm" );
+    std::string_view name;
+    TSNode           body;
+    if( isArm )
+    {
+        const TSNode mp = field( n, "pattern" );
+        if( !ts_node_is_null( field( mp, "condition" ) ) || !rustErrBinding( namedChild( mp, 0 ), src, name ) )
+        {
+            return {};
+        }
+        body = field( n, "value" );
+    }
+    else
+    {
+        const TSNode cond = field( n, "condition" );
+        if( !typeIs( cond, "let_condition" ) || !ts_node_is_null( field( n, "alternative" ) ) || !rustErrBinding( field( cond, "pattern" ), src, name ) )
+        {
+            return {};
+        }
+        body = field( n, "consequence" );
+    }
+    if( typeIs( body, "block" ) )
+    {
+        statementsOf( body, stmts );
+    }
+    else
+    {
+        stmts.assign( 1, body );   // `Err(_) => eprintln!( "x" ),`
+    }
+    if( stmts.empty() || !std::all_of( stmts.begin(), stmts.end(), [ & ]( TSNode s ) { return isRustLogMacro( s, src ); } ) )
+    {
+        return {};
+    }
+    const bool named = !name.empty() && name != "_" && ( mentionsError( body, src, name ) || rustFormatNames( body, src, name ) );
+    return named ? std::string_view() : kShapeLogOnly;
 }
 
 // ── placeholders ──────────────────────────────────────────────────────────────────────────────────────
@@ -891,6 +1064,28 @@ inline const HandlerReader* handlerReaderFor( Lang lang, const char* type ) noex
     return ( row != nullptr && std::strcmp( row->nodeType, type ) == 0 ) ? row : nullptr;
 }
 
+// The languages whose error branch is not a catch clause: Go's `if err != nil` and Rust's Err arm / `if let Err`. One row
+// per (language, node type), read like kHandlerReaders.
+struct ErrBranchReader
+{
+    Lang        lang;
+    const char* nodeType;
+    std::string_view ( *shape )( TSNode, std::string_view, std::vector<TSNode>& );
+};
+
+inline constexpr ErrBranchReader kErrBranchReaders[] = {
+    { Lang::Go,   "if_statement",  goLogOnlyShape   },
+    { Lang::Rust, "match_arm",     rustLogOnlyShape },
+    { Lang::Rust, "if_expression", rustLogOnlyShape },
+};
+
+inline const ErrBranchReader* errBranchReaderFor( Lang lang, const char* type ) noexcept
+{
+    const auto it = std::find_if( std::begin( kErrBranchReaders ), std::end( kErrBranchReaders ),
+                                  [ & ]( const ErrBranchReader& r ) { return r.lang == lang && std::strcmp( r.nodeType, type ) == 0; } );
+    return it == std::end( kErrBranchReaders ) ? nullptr : it;
+}
+
 // A stub, and not an abstract-method contract (declaresAbstractContract) — the one test for every spelling.
 inline bool isPlaceholderStub( TSNode n, const char* type, std::string_view src, Lang lang )
 {
@@ -907,9 +1102,9 @@ inline std::string_view shapeOfNode( TSNode n, std::string_view src, Lang lang, 
         reader->read( n, src, h );
         return handlerShape( h, src, stmts );
     }
-    if( lang == Lang::Go && kindIs( type, "if_statement" ) )
+    if( const ErrBranchReader* reader = errBranchReaderFor( lang, type ) )
     {
-        return goLogOnlyShape( n, src, stmts );
+        return reader->shape( n, src, stmts );
     }
     if( isCommentNode( n ) )
     {

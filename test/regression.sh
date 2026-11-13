@@ -397,6 +397,7 @@ for _g in \
     connectcheck \
     connectcorecheck \
     connectjoincheck \
+    connectsourcejointcheck \
     constcheck \
     contextratiocheck \
     coplintcheck \
@@ -458,6 +459,7 @@ for _g in \
     dottedstringcheck \
     droppedpositivecheck \
     duprowcheck \
+    dupshortcheck \
     dynmapsimdcheck \
     edgemarkcheck \
     editcheckanswercheck \
@@ -855,6 +857,7 @@ for _g in \
     qdclonepaircheck \
     qddegradecheck \
     qddialscheck \
+    qdmonstercheck \
     qdrefpaircheck \
     qdtestdeadcheck \
     qdtype3oncecheck \

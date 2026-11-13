@@ -18275,10 +18275,15 @@ struct ConnectResult
     std::vector<ConnectGroup>  groups;        // ordered by lowest terminal id (first-seen over the ascending terminal list)
     std::uint32_t              radius    = connectcfg::kDefaultRadius;   // the CLAMPED radius actually searched
     bool                       truncated = false;   // a size cap dropped ≥1 MST path (emitter stamps truncated="paths")
+    // CONNECT-SOURCE-JOINT (connectSourceJoint below): the test-class intermediary that joins terminals this source-only search
+    // left apart (emitter: source_joint="none" test_joint= test_joint_p=); kNoNode when nothing was left apart that a test joins
+    NodeId                     testJoint = kNoNode;
 };
 
+// `notThrough` (empty = none): nodes the search never walks THROUGH — reached, but never expanded, so never an intermediary
+// of any leg. A terminal is always expanded (it is the source of its own search).
 inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>& terminalSpecs,
-                                      std::uint32_t radius = connectcfg::kDefaultRadius )
+                                      std::uint32_t radius = connectcfg::kDefaultRadius, std::span<const char> notThrough = {} )
 {
     const std::size_t N = g.wOutDeg.size();
     ConnectResult res;
@@ -18375,6 +18380,10 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
                 if( du >= res.radius )
                 {
                     continue; // radius bound: never expand past R undirected hops
+                }
+                if( u != src && u < notThrough.size() && notThrough[ u ] != 0 )
+                {
+                    continue; // CONNECT-SOURCE-JOINT: reached, never walked through (never a joint)
                 }
 
                 // out-edges first (ascending by construction — buildGraph stores targets ascending per source)
@@ -18656,7 +18665,9 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
 // another terminal keeps resolveFocus's pick (so <unconnected> there is true of EVERY definition). tiedOut[i] > 1 says
 // that many definitions joined exactly as well as the pick: the answer is about one of them, disclosed by the emitter
 // (ambiguous_terminal=), never a silent choice.
-inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, std::span<const NodeId> sources, std::uint32_t radius )
+// `notThrough` (empty = none): as connectSubgraph's, nodes reached but never expanded (a source is always expanded).
+inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, std::span<const NodeId> sources, std::uint32_t radius,
+                                                             std::span<const char> notThrough = {} )
 {
     const std::size_t N = g.wOutDeg.size();
     std::vector<std::uint16_t> dist( N, connectcfg::kUnreachable );
@@ -18685,7 +18696,7 @@ inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, st
     {
         const NodeId        u  = q[ head ];
         const std::uint16_t du = dist[ u ];
-        if( du >= radius )
+        if( du >= radius || ( du > 0 && u < notThrough.size() && notThrough[ u ] != 0 ) )
         {
             continue;
         }
@@ -18755,8 +18766,39 @@ inline TerminalChoice scoreTerminalCandidates( std::span<const NodeId> candidate
     return best;
 }
 
+// One pass's choice for every many-definition terminal, on `distFrom`; with `fallback`, a terminal none of whose definitions
+// joins on that view is scored on the unrestricted one, which `anyFrom()` computes once, on first need.
+template<class AnyFrom>
+inline void choosePassPicks( const std::vector<std::vector<NodeId>>& defsPerTerminal, const std::vector<NodeId>& firstPicks,
+                             const std::vector<std::vector<std::uint16_t>>& distFrom, bool fallback, AnyFrom anyFrom,
+                             std::vector<NodeId>& next, std::vector<std::uint32_t>& tiedOut )
+{
+    std::vector<std::vector<std::uint16_t>> unrestricted;
+    for( std::size_t i = 0; i < defsPerTerminal.size(); ++i )
+    {
+        if( defsPerTerminal[ i ].size() <= 1 )
+        {
+            continue;
+        }
+        TerminalChoice choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, distFrom );
+        if( choice.reached == 0 && fallback )
+        {
+            if( unrestricted.empty() )
+            {
+                unrestricted = anyFrom();
+            }
+            choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, unrestricted );
+        }
+        next[ i ]    = choice.chosen;
+        tiedOut[ i ] = choice.tied;
+    }
+}
+
+// `notThrough` (CONNECT-SOURCE-JOINT; empty = none): the test-class nodes connectSourceJoint's search never walks through. A
+// candidate is scored on that same view first, so a definition joined only through a test never outranks one joined through
+// source; a terminal none of whose definitions joins on it is scored on the unrestricted view, as before (CodeRabbit #636).
 inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vector<NodeId>>& defsPerTerminal, std::vector<NodeId>& picks,
-                                    std::vector<std::uint32_t>& tiedOut, std::uint32_t radius )
+                                    std::vector<std::uint32_t>& tiedOut, std::uint32_t radius, std::span<const char> notThrough = {} )
 {
     EXPECTS( defsPerTerminal.size() == picks.size() );
     const std::size_t T = picks.size();
@@ -18768,24 +18810,21 @@ inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vecto
     }
     const std::uint32_t r = std::clamp( radius, connectcfg::kMinRadius, connectcfg::kMaxRadius );
     const std::vector<NodeId> firstPicks = picks;
-    for( int pass = 0; pass < 2; ++pass )
+    const auto distancesFrom = [ & ]( int pass, std::span<const char> mask )
     {
         std::vector<std::vector<std::uint16_t>> distFrom( T );
         for( std::size_t j = 0; j < T; ++j )
         {
-            distFrom[ j ] = pass == 0 ? connectUndirectedDistances( g, defsPerTerminal[ j ], r )
-                                      : connectUndirectedDistances( g, std::span<const NodeId>( &picks[ j ], 1 ), r );
+            distFrom[ j ] = pass == 0 ? connectUndirectedDistances( g, defsPerTerminal[ j ], r, mask )
+                                      : connectUndirectedDistances( g, std::span<const NodeId>( &picks[ j ], 1 ), r, mask );
         }
+        return distFrom;
+    };
+    for( int pass = 0; pass < 2; ++pass )
+    {
         std::vector<NodeId> next = picks;
-        for( std::size_t i = 0; i < T; ++i )
-        {
-            if( defsPerTerminal[ i ].size() > 1 )
-            {
-                const TerminalChoice choice = scoreTerminalCandidates( defsPerTerminal[ i ], firstPicks[ i ], i, distFrom );
-                next[ i ]    = choice.chosen;
-                tiedOut[ i ] = choice.tied;
-            }
-        }
+        choosePassPicks( defsPerTerminal, firstPicks, distancesFrom( pass, notThrough ), !notThrough.empty(),
+                         [ & ] { return distancesFrom( pass, {} ); }, next, tiedOut );
         picks = std::move( next );
     }
     ENSURES( picks.size() == T && tiedOut.size() == T );
@@ -18805,6 +18844,33 @@ inline bool selectorIsBareName( std::string_view spec ) noexcept
 {
     return !spec.empty() && spec.front() != '@' && spec.find_first_of( ":/" ) == std::string_view::npos
         && spec.find_first_of( ".#", 1 ) == std::string_view::npos;
+}
+
+// CONNECT-SOURCE-JOINT: pathDefInTests per node, the nodes the source-only search never walks through. Its path half is read
+// once per file: a symbol with no testScope of its own answers exactly that file's half, so the first such symbol of each file
+// is asked and the answer reused (kFileUnread until then).
+inline std::vector<char> connectTestMask( const IngestResult& ing, const Graph& g )
+{
+    const std::size_t         N           = g.wOutDeg.size();
+    constexpr std::uint8_t    kFileUnread = 2;
+    std::vector<std::uint8_t> fileInTests( ing.files.size(), kFileUnread );
+    std::vector<char>         inTests( N, 0 );
+    for( std::size_t n = 0; n < N && n < ing.symbols.size(); ++n )
+    {
+        const Symbol& s = ing.symbols[ n ];
+        if( s.testScope != 0 || s.fileId >= fileInTests.size() )
+        {
+            inTests[ n ] = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
+            continue;
+        }
+        std::uint8_t& fileHalf = fileInTests[ s.fileId ];
+        if( fileHalf == kFileUnread )
+        {
+            fileHalf = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
+        }
+        inTests[ n ] = char( fileHalf );
+    }
+    return inTests;
 }
 
 // What joinTerminalPicks hands packConnect: the tied names (ambiguous_terminal=, "" when none) and, per terminal whose spec is
@@ -18829,7 +18895,12 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
         defsPerTerminal.push_back( resolveAllByNameQualified( ing, std::string_view( spec ), nullptr ) );
     }
     std::vector<std::uint32_t> tied;
-    chooseJoiningTerminals( g, defsPerTerminal, picks, tied, radius );
+    // CONNECT-SOURCE-JOINT: when no terminal is test code, connectSourceJoint never walks through a test, so the choice of
+    // definition reads the same source-only view (CodeRabbit #636)
+    const bool anyMany   = std::any_of( defsPerTerminal.begin(), defsPerTerminal.end(), []( const std::vector<NodeId>& d ) { return d.size() > 1; } );
+    const bool allSource = std::none_of( picks.begin(), picks.end(), [ & ]( NodeId t ) { return t < ing.symbols.size() && pathDefInTests( ing, t ); } );
+    const std::vector<char> notThrough = ( anyMany && allSource && picks.size() >= 2 ) ? connectTestMask( ing, g ) : std::vector<char>{};
+    chooseJoiningTerminals( g, defsPerTerminal, picks, tied, radius, notThrough );
     ConnectPicks out;
     for( std::size_t i = 0; i < picks.size(); ++i )
     {
@@ -18855,6 +18926,115 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
         }
     }
     return out;
+}
+
+// The lowest-id test-class intermediary on a shortest path, inside the group's own edges, between the two ends of a leg that
+// `crosses` (kNoNode when none): the leg's own intermediaries, which the group's flat steiner list does not record. Each leg is
+// two BFS over the group's nodes (terminals and steiner, a few dozen), never over the graph.
+template<class Crosses>
+inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const char> inTests, Crosses crosses )
+{
+    std::vector<NodeId> nodes( grp.terminals );
+    nodes.insert( nodes.end(), grp.steiner.begin(), grp.steiner.end() );
+    std::sort( nodes.begin(), nodes.end() );
+    const auto at = [ & ]( NodeId v ) { return std::size_t( std::lower_bound( nodes.begin(), nodes.end(), v ) - nodes.begin() ); };
+    std::vector<std::vector<std::uint32_t>> adj( nodes.size() );
+    for( const ConnectEdge& e : grp.edges )
+    {
+        const std::size_t a = at( e.from ), b = at( e.to );
+        if( a < nodes.size() && b < nodes.size() && nodes[ a ] == e.from && nodes[ b ] == e.to )
+        {
+            adj[ a ].push_back( std::uint32_t( b ) );
+            adj[ b ].push_back( std::uint32_t( a ) );
+        }
+    }
+    const auto bfs = [ & ]( std::size_t from )
+    {
+        std::vector<std::uint32_t> d( nodes.size(), UINT32_MAX );
+        std::vector<std::uint32_t> q{ std::uint32_t( from ) };
+        d[ from ] = 0;
+        for( std::size_t h = 0; h < q.size(); ++h )
+        {
+            for( const std::uint32_t v : adj[ q[ h ] ] )
+            {
+                if( d[ v ] == UINT32_MAX )
+                {
+                    d[ v ] = d[ q[ h ] ] + 1;
+                    q.push_back( v );
+                }
+            }
+        }
+        return d;
+    };
+    NodeId best = kNoNode;
+    for( const ConnectPath& leg : grp.paths )
+    {
+        const std::size_t a = at( leg.termA ), b = at( leg.termB );
+        if( !crosses( leg.termA, leg.termB ) || a >= nodes.size() || b >= nodes.size() || nodes[ a ] != leg.termA || nodes[ b ] != leg.termB )
+        {
+            continue;
+        }
+        const std::vector<std::uint32_t> da = bfs( a ), db = bfs( b );
+        if( da[ b ] == UINT32_MAX )
+        {
+            continue;
+        }
+        for( std::size_t k = 0; k < nodes.size(); ++k )
+        {
+            const NodeId v = nodes[ k ];
+            if( v < inTests.size() && inTests[ v ] != 0 && da[ k ] != UINT32_MAX && db[ k ] != UINT32_MAX && da[ k ] + db[ k ] == da[ b ]
+                && v != leg.termA && v != leg.termB && ( best == kNoNode || v < best ) )
+            {
+                best = v;
+            }
+        }
+    }
+    return best;
+}
+
+// CONNECT-SOURCE-JOINT (a): a test function is never the joint of terminals that are all source. terraform's
+// `--connect=Context.Plan,Context.Apply` joined the two through TestContext2Apply_nullableVariables and printed it as the
+// common caller, unhedged; and §2.4a's tie-break (fewer connects wins) hands an equal-distance join to a test, which usually
+// connects few. So when no terminal is test-class (filter.h pathDefInTests), the search never walks through a test-class
+// node. When that leaves apart terminals the unrestricted search joins, the result names the first test-class intermediary
+// (id order) of an unrestricted group that joins terminals the source search left apart as testJoint: test-only evidence,
+// disclosed by the emitter, never printed as a joint. A test
+// terminal keeps today's search unchanged (a test's own helpers are its honest joints).
+inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& terminals, std::uint32_t radius )
+{
+    if( terminals.size() < 2 || std::any_of( terminals.begin(), terminals.end(), [ & ]( NodeId t ) { return pathDefInTests( ing, t ); } ) )
+    {
+        return connectSubgraph( g, terminals, radius );
+    }
+    const std::vector<char> inTests = connectTestMask( ing, g );
+    ConnectResult res = connectSubgraph( g, terminals, radius, inTests );
+    if( res.groups.size() <= 1 )
+    {
+        return res;   // every terminal joined through source (or nothing to join): no test was needed
+    }
+    const ConnectResult any = connectSubgraph( g, terminals, radius );
+    if( any.groups.size() >= res.groups.size() )
+    {
+        return res;   // the tests join nothing the source search left apart
+    }
+    // Only a group of the unrestricted search that joins terminals the source search left APART is evidence for them: a test
+    // beside a source-joined pair (a shorter test path) says nothing about the <unconnected> ones (CodeRabbit #625).
+    const auto sourceComponentOf = [ & ]( NodeId t )
+    {
+        const auto it = std::lower_bound( res.terminals.begin(), res.terminals.end(), t );
+        return ( it != res.terminals.end() && *it == t ) ? res.componentOf[ std::size_t( it - res.terminals.begin() ) ] : UINT32_MAX;
+    };
+    // Per LEG, not per group: one group can hold a source-joined pair with a shorter test path beside it AND a test that joins
+    // a third terminal, so only the tests on a leg whose two ends lie in different source components count (CodeRabbit #636).
+    for( const ConnectGroup& grp : any.groups )
+    {
+        const NodeId hit = lowestTestOnCrossingLegs( grp, inTests, [ & ]( NodeId a, NodeId b ) { return sourceComponentOf( a ) != sourceComponentOf( b ); } );
+        if( hit != kNoNode && ( res.testJoint == kNoNode || hit < res.testJoint ) )
+        {
+            res.testJoint = hit;
+        }
+    }
+    return res;
 }
 
 // ---- community detection (--communities): one level of Louvain local-moving on the UNDIRECTED projection

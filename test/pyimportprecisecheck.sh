@@ -462,7 +462,20 @@ fi
 
 # #533 review: the importer each member edge resolves TO, not only the counts — `--impact=FILE` lists a file's importers, so a
 # swap of wide.py's pkg/mod.py edge with multi.py's pkg/ma.py edge (same afferent=, same cones) fails here.
-imp(){ "$BIN" "$1" --impact="$2" --no-cache --legend=compact 2>/dev/null | grep -oE '<f via="[^"]*" p="[^"]*"' | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '; }
+# imp ROOT... FILE: one root, or several for a multi-root workspace (FILE is then root-labeled, rb/pkg/mod.py). A run that fails
+# (rc != 0, or no <impact> answer) must never read as "no importers": an empty list is what the negative arms want. So it prints
+# IMPERR(...) in place of the list, which no arm accepts, and logs the call to $TMP/imp.err, which fails the gate at the end
+# (imp runs in a $( ) subshell, so it cannot set fail itself). #533 review (CodeRabbit, round 2).
+imp(){
+    local tgt="${!#}" out rc
+    echo "$tgt" >>"$TMP/imp.calls"
+    out="$( "$BIN" "${@:1:$#-1}" --impact="$tgt" --no-cache --legend=compact 2>/dev/null )"; rc=$?
+    if [ "$rc" -ne 0 ] || ! grep -q '<impact ' <<<"$out"; then
+        printf 'imp %s: rc=%s, impact answer %s\n' "$tgt" "$rc" "$( grep -q '<impact ' <<<"$out" && echo present || echo absent )" >>"$TMP/imp.err"
+        printf 'IMPERR(rc=%s) ' "$rc"; return 0
+    fi
+    grep -oE '<f via="[^"]*" p="[^"]*"' <<<"$out" | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '
+}
 IW="$( imp "$PB" pkg/mod.py )"; IM="$( imp "$PB" pkg/ma.py )"
 if [ "$IW" = "wide.py " ] && [ "$IM" = "multi.py " ]; then
     ok '#478 gap 1 targets: pkg/mod.py is imported by wide.py alone, pkg/ma.py by multi.py alone'
@@ -504,6 +517,22 @@ CT="$( imp "$PC" pkg2/tcmod.py )"; CY="$( imp "$PC" pkg2/trymod.py )"
 if [ "$CT" = "tc.py " ] && [ "$CY" = "tryimp.py " ]; then
     ok '#478 gap 1 shapes: a member import under `if TYPE_CHECKING:` and inside try/except ImportError keeps its edge'
 else no "#478 gap 1 shapes: pkg2/tcmod.py <- [$CT], pkg2/trymod.py <- [$CY]"; fi
+
+# #533 review (CodeRabbit, round 2): in a multi-root workspace the member probe is anchored at the PACKAGE's root, not the importer's.
+# pkgDir is the package's labeled dir (rb/pkg), so probing it with the importer's identity rejected root rb's own rb/pkg/mod.py as a
+# cross-root hit and fell back to the importer's disk directory, where root ra's same-path ra/rb/pkg/mod.py won: the real member
+# edge was lost and a false one drawn. Premise: the package edge itself resolves across the roots (ra/user.py → rb/pkg/__init__.py).
+MR="$TMP/pymultiroot"; mkdir -p "$MR/ra/rb/pkg" "$MR/rb/pkg"
+printf 'from ..rb.pkg import mod\n' >"$MR/ra/user.py"
+: >"$MR/rb/pkg/__init__.py"
+printf 'def pymr_member():\n    return 1\n' >"$MR/rb/pkg/mod.py"
+printf 'def pymr_decoy():\n    return 2\n' >"$MR/ra/rb/pkg/mod.py"
+MP="$( imp "$MR/ra" "$MR/rb" rb/pkg/__init__.py )"; MM="$( imp "$MR/ra" "$MR/rb" rb/pkg/mod.py )"; MD="$( imp "$MR/ra" "$MR/rb" ra/rb/pkg/mod.py )"
+if [ "$MP" != "ra/user.py " ]; then
+    no "#533 multi-root premise: the package edge did not resolve across roots (rb/pkg/__init__.py <- [$MP]), so the member arm saw nothing"
+elif [ "$MM" = "ra/user.py " ] && [ "$MD" = "" ]; then
+    ok '#533 multi-root: the member edge lands in the package'"'"'s root (rb/pkg/mod.py), not on the importer root'"'"'s same-path ra/rb/pkg/mod.py'
+else no "#533 multi-root: rb/pkg/mod.py <- [$MM] (want ra/user.py), ra/rb/pkg/mod.py <- [$MD] (want empty)"; fi
 
 # #478 gap 2: an aliased plain import records the MODULE as its Include target. tree-sitter-python's import_statement
 # carries name:(dotted_name|aliased_import), and the first-clause capture read the whole aliased_import span, so
@@ -569,5 +598,11 @@ if [ "$rc" -eq 0 ] && grep -q '<callers [^>]*count="0"' "$TMP/pa.other"; then
 else
     no "#478 gap 2 rule 3 negative: decoy gained a caller or the run failed (rc=$rc): $( cat "$TMP/pa.other" )"
 fi
+
+# every imp call above ran and answered (see imp): one that did not is a FAIL even where its arm compared equal.
+NIMP="$( wc -l <"$TMP/imp.calls" 2>/dev/null | tr -d ' ' )"
+if [ "${NIMP:-0}" -eq 0 ]; then no "imp premise: no --impact call was counted (the importer arms saw nothing)"
+elif [ -s "$TMP/imp.err" ]; then while IFS= read -r l; do no "imp: --impact did not answer: $l"; done <"$TMP/imp.err"
+else ok "imp: all $NIMP --impact calls exited 0 with an <impact> answer"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

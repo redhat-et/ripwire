@@ -126,11 +126,14 @@ echo "legendcoveragecheck: BIN=$BIN"
 # (CHECKLIST 14). A non-zero EXIT (--quality-delta 2, --doctor 1) is a verdict the verb returns, judged as before.
 # LEGENDCOV_JOBS=1 restores the serial run.
 cat > "$TMP/lcrun.py" <<'PYR'
-import os, subprocess, concurrent.futures as cf
+import os, json, subprocess, concurrent.futures as cf
 JOBS         = max( 1, int( os.environ.get( "LEGENDCOV_JOBS" ) or min( 4, os.cpu_count() or 1 ) ) )
 CALL_TIMEOUT = max( 1, int( os.environ.get( "LEGENDCOV_CALL_TIMEOUT" ) or 600 ) )
 def call( BIN, args ):
-    """-> (stdout, None) on a completed call (any exit code), (None, reason) on a timeout / signal / no start."""
+    """-> (stdout, None) on a completed call (any exit code), (None, reason) on a timeout / signal / no start.
+    `@mcp TOOL JSON` is one fresh MCP session (initialize, then that tools/call); its document is the result's text."""
+    if args and args[ 0 ] == "@mcp":
+        return mcpCall( BIN, args[ 1 ], args[ 2 ] )
     try:
         p = subprocess.run( [ BIN ] + args, capture_output = True, timeout = CALL_TIMEOUT )
     except subprocess.TimeoutExpired:
@@ -140,6 +143,26 @@ def call( BIN, args ):
     if p.returncode < 0:
         return None, f"ERROR (killed by signal {-p.returncode})"
     return p.stdout, None
+def mcpCall( BIN, tool, argsJson ):
+    req = ( '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n'
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":' + json.dumps( tool ) + ',"arguments":' + argsJson + '}}\n' )
+    try:
+        p = subprocess.run( [ BIN, "--mcp" ], input = req.encode(), capture_output = True, timeout = CALL_TIMEOUT )
+    except subprocess.TimeoutExpired:
+        return None, f"TIMEOUT (no answer within {CALL_TIMEOUT}s)"
+    except OSError as e:
+        return None, f"ERROR (could not start: {e})"
+    if p.returncode < 0:
+        return None, f"ERROR (killed by signal {-p.returncode})"
+    for line in reversed( p.stdout.decode( "utf-8", "replace" ).splitlines() ):
+        try:
+            r = json.loads( line )
+        except ValueError:
+            continue
+        if r.get( "id" ) == 2:
+            content = ( r.get( "result" ) or {} ).get( "content" ) or [ {} ]
+            return ( content[ 0 ].get( "text" ) or "" ).encode( "utf-8" ), None
+    return None, "ERROR (no tools/call reply on the MCP stream)"
 def runAll( BIN, argvs, first = lambda a: False, last = lambda a: False ):
     """Run argvs[i] once each; -> list of (stdout, reason) by index. `first` calls are submitted ahead of the rest;
     `last` calls run serially once the pool has drained."""
@@ -155,7 +178,7 @@ def isDoctor( a ): return "--doctor" in a
 PYR
 
 python3 - "$BIN" "$ROOT" "$BASELINE" "$TMP" <<'PY' > "$TMP/out" 2>"$TMP/pyerr"
-import subprocess, re, sys, os
+import subprocess, re, sys, os, json
 
 BIN, ROOT, BASELINE, TMP = sys.argv[1:5]
 sys.path.insert( 0, TMP )
@@ -285,6 +308,8 @@ ROSTER = [
 # of closing it. Owner ruling: compact shortens the dictionary, never a meaning, so the default answer defines every
 # attribute it emits. Arm (G) below holds that with the DEFINITIONAL predicate (`name=`, arm (B)'s), not the generous
 # one, and with an empty floor: a default first screen that emits one attribute its own legend does not define fails.
+# LEGEND-G-BLIND (2026-11-11) widened what (G) reads (rows below) and found 176 gaps the old reach could not see; those, and
+# only those, are pinned in test/legendcoverage_g_baseline.txt, which may only shrink. Every row above stays at zero.
 # Two kinds of row keep their spelling: a row that already names a posture (the *-compact rows, whose own lines stay theirs), and a run with
 # no XML legend (--report), which refuses an ASKED posture and has no default twin to take.
 NON_XML_ROWS = { "report" }
@@ -313,11 +338,16 @@ DET = os.path.join( TMP, "detached" )
 os.makedirs( os.path.join( DET, "src" ), exist_ok = True )
 open( os.path.join( DET, "src", "a.c" ), "w" ).write( "int alpha( int n ) { return n + 1; }\n" )
 gitc = [ "git", "-c", "user.email=g@example.invalid", "-c", "user.name=g" ]
-subprocess.run( [ "git", "init", "-q", DET ], capture_output = True )
-subprocess.run( gitc + [ "-C", DET, "add", "-A" ], capture_output = True )
-subprocess.run( gitc + [ "-C", DET, "commit", "-qm", "one" ], capture_output = True )
+# A caller's exported GIT_DIR / GIT_WORK_TREE (a git hook exports both) beats `git -C`, so a fixture built under it would commit
+# into the CALLER's repository (CodeRabbit 4546573988). Every fixture git call runs under fixtureGitEnv; arm (HIST0) pins it.
+GIT_REPO_VARS = ( "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR" )
+def fixtureGitEnv( env ): return { k: v for k, v in env.items() if k not in GIT_REPO_VARS }
+FIXENV = fixtureGitEnv( os.environ )
+subprocess.run( [ "git", "init", "-q", DET ], capture_output = True, env = FIXENV )
+subprocess.run( gitc + [ "-C", DET, "add", "-A" ], capture_output = True, env = FIXENV )
+subprocess.run( gitc + [ "-C", DET, "commit", "-qm", "one" ], capture_output = True, env = FIXENV )
 open( os.path.join( DET, "src", "a.c" ), "a" ).write( "int beta( int n ) { return alpha( n ) * 2; }\n" )
-subprocess.run( gitc + [ "-C", DET, "commit", "-qam", "two" ], capture_output = True )
+subprocess.run( gitc + [ "-C", DET, "commit", "-qam", "two" ], capture_output = True, env = FIXENV )
 subprocess.run( [ "git", "-C", DET, "checkout", "-q", "--detach", "HEAD" ], capture_output = True )
 CYC = os.path.join( TMP, "cycle", "src" )
 os.makedirs( CYC, exist_ok = True )
@@ -391,8 +421,108 @@ ROSTER += [
     ( "impact-columnar-default",  [ SMALL, "--impact=escapeXml", "--format=columnar" ] ),
 ]
 
-# the v1 core row keys, defined verbatim in every map legend and re-stated in the row dictionaries — excluded
-# so the report is about the attributes that genuinely have no home, not about the seven everyone knows.
+# LEGEND-G-BLIND (2026-11-11; the Fable answer audit's flag L, 377 cells, confirmed by the Opus audit verify). Arm (G) claimed
+# "every attribute the default posture emits is defined" and could not see four classes of cell. Each block below closes one.
+#   (1) ROSTER GAPS: six modifiers had no row, so nothing read their first screen at all.
+#   (2) ONE CORPUS: every row ran on this C++ tree, so an attribute only a TS/Python answer carries never reached the sweep.
+#   (3) NO MCP ROWS (stray_content aside, arm H): the agent surface's own answers were unread.
+#   (4) THE CORE EXEMPTION (below CORE).
+# Hermetic git fixtures for the two modifiers whose answer depends on repository state (--stray-content --plan reads unmerged
+# local branches, --cochange-groups reads history): a CI checkout has neither, so the rows build their own state here.
+def buildHist( root, env ):
+    """the history fixture at root: 4 commits on the default branch, one more on `side`; git runs under fixtureGitEnv( env )."""
+    e = fixtureGitEnv( env )
+    os.makedirs( os.path.join( root, "src" ), exist_ok = True )
+    gith = lambda *a: subprocess.run( gitc + [ "-c", "commit.gpgsign=false", "-C", root ] + list( a ), capture_output = True, env = e )
+    subprocess.run( [ "git", "init", "-q", root ], capture_output = True, env = e )
+    for i in range( 4 ):
+        for f in ( "route.ts", "handler.ts" ):
+            open( os.path.join( root, "src", f ), "a" ).write( f"export function {f[:-3]}{i}( x: number ) {{ return x + {i}; }}\n" )
+        open( os.path.join( root, "src", "util.ts" ), "a" ).write( f"export const u{i} = {i};\n" )
+        gith( "add", "-A" );  gith( "commit", "-qm", f"c{i}" )
+    gith( "checkout", "-q", "-b", "side" )
+    open( os.path.join( root, "src", "side.ts" ), "w" ).write( "export function sideOnly( y: number ) { return y * 2; }\n" )
+    open( os.path.join( root, "src", "route.ts" ), "a" ).write( "export function routeSide() { return 0; }\n" )
+    gith( "add", "-A" );  gith( "commit", "-qm", "side work" )
+    gith( "checkout", "-q", "-" )
+def gitCount( root, *a ):
+    r = subprocess.run( [ "git", "-C", root ] + list( a ), capture_output = True, text = True, env = FIXENV )
+    return len( r.stdout.split() ) if r.returncode == 0 else 0
+HIST = os.path.join( TMP, "hist" )
+buildHist( HIST, os.environ )
+# (HIST0) the fixture is real and stays put. Premise: HIST has its 4+1 commits and the `side` branch (counted; zero FAILs).
+# Leak arm: a decoy repository stands in for a caller's exported GIT_DIR / GIT_WORK_TREE while a second fixture is built; the
+# decoy must keep exactly its one commit and one branch (its own count is the premise: a decoy with no commit proves nothing).
+DECOY = os.path.join( TMP, "decoy" );  os.makedirs( DECOY, exist_ok = True )
+subprocess.run( [ "git", "init", "-q", DECOY ], capture_output = True, env = FIXENV )
+open( os.path.join( DECOY, "d.txt" ), "w" ).write( "decoy\n" )
+subprocess.run( gitc + [ "-c", "commit.gpgsign=false", "-C", DECOY, "add", "-A" ], capture_output = True, env = FIXENV )
+subprocess.run( gitc + [ "-c", "commit.gpgsign=false", "-C", DECOY, "commit", "-qm", "decoy" ], capture_output = True, env = FIXENV )
+decoyBefore = ( gitCount( DECOY, "rev-list", "--all" ), gitCount( DECOY, "branch", "--format=%(refname)" ) )
+buildHist( os.path.join( TMP, "hist-under-gitdir" ), { **os.environ, "GIT_DIR": os.path.join( DECOY, ".git" ), "GIT_WORK_TREE": DECOY } )
+decoyAfter  = ( gitCount( DECOY, "rev-list", "--all" ), gitCount( DECOY, "branch", "--format=%(refname)" ) )
+histCounts  = ( gitCount( HIST, "rev-list", "--all" ), gitCount( HIST, "branch", "--list", "side" ) )
+# The second corpora: two small committed fixtures other gates already use (ownerhopcheck, forsoftbudgetcheck) — a hono-shaped
+# TypeScript middleware tree with a test file, and a textual-shaped Python package. The verbs agents call most, on each.
+TSC = os.path.join( ROOT, "test", "ownerhopfix", "ts" )
+PYC = os.path.join( ROOT, "test", "forcompletefix", "py" )
+ROSTER += [
+    ( "pattern-default",          [ SMALL, "--pattern=escapeXml($X, ...)" ] ),
+    ( "grep-handles-default",     [ SMALL, "--grep=escapeXml", "--handles" ] ),
+    ( "stray-plan-default",       [ HIST,  "--stray-content", "--plan" ] ),
+    ( "gateability-default",      [ ROOT,  "--doc-drift", "--gateability" ] ),
+    ( "cochange-groups-default",  [ HIST,  "--cochange", "--cochange-groups" ] ),
+    ( "slice-flow-default",       [ SMALL, "--slice=connectSubgraph:res", "--slice-flow=both" ] ),
+    ( "defs-default",             [ SMALL, "--defs=escapeXml" ] ),
+    # --order=stable withholds k= (serialize.h) but keeps t= n= p= and <c n=>: the map-family readings must not ride on k= alone
+    # (CodeRabbit 4546573980). Arm (GST) counts the <s> rows these print WITHOUT k= — zero means the rows prove nothing.
+    ( "metrics-stable-default",          [ SMALL, "--metrics", "--order=stable" ] ),
+    ( "query-stable-default",            [ SMALL, "--query=rank symbols", "--order=stable" ] ),
+    ( "pack-signatures-stable-default",  [ SMALL, "--pack-signatures", "--order=stable" ] ),
+    ( "pack-top-n-stable-default",       [ SMALL, "--pack-top-n=2", "--order=stable" ] ),
+]
+for tag, corpus, task, sym, callee in ( ( "ts", TSC, "how does the gateway check the session cookie", "checkSessionToken", "gateway" ),
+                                        ( "py", PYC, "how does the message pump deliver a message", "resolve", "deliver" ) ):
+    ROSTER += [
+        ( f"{tag}-map-default",      [ corpus ] ),
+        ( f"{tag}-metrics-default",  [ corpus, "--metrics" ] ),
+        ( f"{tag}-for-default",      [ corpus, "--for=" + task ] ),
+        ( f"{tag}-for-auto-default", [ corpus, "--for=" + sym ] ),
+        ( f"{tag}-for-budget-default", [ corpus, "--for=" + task, "--token-budget=900" ] ),
+        ( f"{tag}-callers-default",  [ corpus, "--callers=" + sym ] ),
+        ( f"{tag}-callees-default",  [ corpus, "--callees=" + callee ] ),
+        ( f"{tag}-uses-default",     [ corpus, "--uses=" + sym ] ),
+        ( f"{tag}-defs-default",     [ corpus, "--defs=" + sym ] ),
+        ( f"{tag}-deps-default",     [ corpus, "--deps" ] ),
+        ( f"{tag}-lint-default",     [ corpus, "--lint" ] ),
+        ( f"{tag}-grep-default",     [ corpus, "--grep=" + sym ] ),
+        ( f"{tag}-pattern-default",  [ corpus, f"--pattern={sym}($X)" ] ),
+        ( f"{tag}-around-default",   [ corpus, "--around=" + sym ] ),
+        ( f"{tag}-query-default",    [ corpus, "--query=" + sym ] ),
+        ( f"{tag}-impact-default",   [ corpus, "--impact=" + sym ] ),
+        ( f"{tag}-ensemble-default", [ corpus, "--ensemble" ] ),
+        ( f"{tag}-pack-signatures-default", [ corpus, "--pack-signatures" ] ),
+    ]
+# MCP rows: one fresh session per row (initialize, then the one call), so the answer is the FIRST of its session and carries its
+# whole inline legend (a later call may legitimately ride legend="ref", which legendrefcheck owns). The call runner reads the
+# argv `@mcp TOOL JSON-ARGS` as that session; the document judged is the tool result's text.
+for tag, corpus, task, sym in ( ( "src", SMALL, "rank symbols by pagerank", "escapeXml" ),
+                                ( "ts",  TSC,   "how does the gateway check the session cookie", "checkSessionToken" ) ):
+    ROSTER += [
+        ( f"mcp-{tag}-for-default",        [ "@mcp", "for", json.dumps( { "path": corpus, "task": task } ) ] ),
+        ( f"mcp-{tag}-for-budget-default", [ "@mcp", "for", json.dumps( { "path": corpus, "task": task, "budget_tokens": 900 } ) ] ),
+        ( f"mcp-{tag}-analyze-default",    [ "@mcp", "analyze", json.dumps( { "path": corpus } ) ] ),
+        ( f"mcp-{tag}-uses-default",       [ "@mcp", "uses", json.dumps( { "path": corpus, "symbol": sym } ) ] ),
+        ( f"mcp-{tag}-impact-default",     [ "@mcp", "impact", json.dumps( { "path": corpus, "symbol": sym } ) ] ),
+    ]
+# MCP find_referencing_symbols / find_symbol (the callers / callees twins) answer in JSON, which carries no XML attribute to
+# judge: an XML row for them would read zero pairs and fail (G0). Their keys are outside this gate, by shape.
+
+# (4) THE CORE EXEMPTION, narrowed. These seven row keys used to be excluded from EVERY row on the claim that every map legend
+# defines them verbatim. That holds for the map, and is false elsewhere: <inc t=> on --deps is an include target, <hit n=> on
+# --grep a count, <s k=> rides --metrics/--query/--around with no k= clause. So a DEFAULT row (arm G) now judges them like any
+# other attribute: one is exempt only where that answer's own legend states it (`name=`, the defined predicate). The FULL rows
+# keep the exemption, because their floor (test/legendcoverage_baseline.txt) was recorded with it and may only shrink.
 CORE = { "p", "n", "t", "id", "l", "k", "c" }
 
 LEAD = re.compile( rb'\A(?:\s*<!--.*?-->)+', re.S )
@@ -419,6 +549,7 @@ def legendOf( doc, anyRoot = False ):
 # with anything but whitespace between it and the tag does not count, and a block's comment never defines an attribute outside
 # its block. TRAILING lists the tags; the reader below has no tag of its own (arm T pins all three properties).
 TRAILING = ( b"syms", b"decl_rows", b"graph_verb" )
+INNER    = re.compile( rb'<(bodies)\b[^>]*(?<!/)>\s*(<!--(?:(?!-->).)*-->)', re.S )
 TRAIL    = re.compile( rb'<!--(?:(?!-->).)*-->\s*(?=<(?:' + b"|".join( TRAILING ) + rb')[\s/>])', re.S )
 def trailingBlocks( doc ):
     """-> [ ( start, end, comment ) ]: each known trailing block's byte span (open tag through its close) and the comment just before it."""
@@ -429,7 +560,16 @@ def trailingBlocks( doc ):
         close = doc.find( b'</' + tag + b'>', m.end() )
         end  = m.end() + selfClosed.end() if selfClosed else ( len( doc ) if close < 0 else close + len( tag ) + 3 )
         out.append( ( m.end(), end, m.group( 0 ).decode( 'utf-8', 'replace' ) ) )
-    return out
+    # LEADING BLOCKS (LEGEND-G-BLIND): a block whose legend is the comment IMMEDIATELY AFTER its own open tag — the MCP `for` body
+    # slot opens `<bodies …><!-- via="name" on a row: … -->` — is read the same way: that comment counts for the block's own
+    # elements (the open tag through its close), never outside it. Anything but whitespace between the tag and the comment and
+    # it does not count. INNER lists the tags; arm (T8) pins it.
+    for m in INNER.finditer( doc ):
+        tag   = m.group( 1 )
+        close = doc.find( b'</' + tag + b'>', m.end() )
+        end   = len( doc ) if close < 0 else close + len( tag ) + 3
+        out.append( ( m.start(), end, m.group( 2 ).decode( 'utf-8', 'replace' ) ) )
+    return sorted( out )
 
 # The two predicates. `mentioned` is the generous one (arm A); `defined` is the house definition shape
 # `name=` (arm B). The lookbehind is what makes `defined` mean the attribute rather than a suffix of some
@@ -463,7 +603,7 @@ def gapsOf( doc, isDefault ):
             seen[ tag ] = [];  order.append( tag )
         seen[ tag ] += [ a for a in attrs if a not in seen[ tag ] ]
         for a in attrs: where.setdefault( ( tag, a ), set() ).add( legendAt( m.start() ) )
-    keys = sorted( { f"{tag}@{a}" for tag in order for a in seen[ tag ] if a not in CORE } )
+    keys = sorted( { f"{tag}@{a}" for tag in order for a in seen[ tag ] if isDefault or a not in CORE } )
     gapUnder = lambda k, pred: any( not pred( k.split( '@', 1 )[1], legends[ i ] ) for i in where[ tuple( k.split( '@', 1 ) ) ] )
     return legend, keys, [ k for k in keys if gapUnder( k, mentioned ) ], [ k for k in keys if gapUnder( k, defined ) ]
 
@@ -496,6 +636,18 @@ base = { l.strip() for l in open( BASELINE, encoding = 'utf-8' )
 isDefaultRow  = lambda line: line.split( ' | ', 1 )[ 0 ].endswith( '-default' )
 defaultGaps   = { g for g in gapsDefined if isDefaultRow( g ) }
 defaultRows   = { e.split( ' | ', 1 )[ 0 ] for e in emitted if isDefaultRow( e ) }
+# (G0) THE PREMISE, per row: how many (element, attribute) pairs each default row judged. A row whose document carried none
+# proves nothing about its legend, and it would pass (G) for that reason alone: it fails here by name.
+perRow = { n: 0 for n, _ in ROSTER if n.endswith( "-default" ) }
+for e in emitted:
+    if isDefaultRow( e ): perRow[ e.split( ' | ', 1 )[ 0 ] ] += 1
+failedRows = { l.split( ':', 1 )[ 0 ] for l in callfail } | set( silent )
+zeroRows   = sorted( n for n, c in perRow.items() if c == 0 and n not in failedRows )
+# (G) THE DEFAULT POSTURE'S FLOOR (LEGEND-G-BLIND). The six roster rows, the two second corpora, the MCP rows and the narrowed
+# CORE exemption above made arm (G) see gaps it was blind to; those are pinned in test/legendcoverage_g_baseline.txt (one
+# "row | element@attr" per line) and burned down from the most-used verb. The floor may only shrink: a gap NOT in it fails.
+BASELINE_G = os.path.join( ROOT, "test", "legendcoverage_g_baseline.txt" )
+baseG = { l.strip() for l in open( BASELINE_G, encoding = 'utf-8' ) if l.strip() and not l.startswith( '#' ) } if os.path.exists( BASELINE_G ) else None
 defaultKeys   = sum( 1 for e in emitted if isDefaultRow( e ) )
 gapsMentioned = { g for g in gapsMentioned if not isDefaultRow( g ) }
 gapsDefined   = { g for g in gapsDefined if not isDefaultRow( g ) }
@@ -515,8 +667,14 @@ writeLines( "gone",      base - emitted )                         # (B2) the ver
 writeLines( "notnested", gapsMentioned - gapsDefined )            # (D) must be empty by construction
 writeLines( "silent",    silent )
 writeLines( "callfail",  callfail )                               # TIMEOUT/ERROR rows fail on their own
-writeLines( "defaultgaps", defaultGaps )                          # (G) fails
-with open( os.path.join( TMP, "defaultcount" ), "w" ) as f: f.write( f"{len( defaultRows )} {defaultKeys}\n" )
+if baseG is None:
+    print( f"missing {BASELINE_G}: arm (G)'s floor", file = sys.stderr );  baseG = set()
+writeLines( "defaultgaps", defaultGaps - baseG )                  # (G) fails: a NEW undefined attribute on a default answer
+writeLines( "defaultclosed", baseG - defaultGaps )                # (G) shrink candidates: delete these floor lines
+writeLines( "defaultzero", zeroRows )                             # (G0) fails: a row that judged nothing
+writeLines( "defaultall", defaultGaps )                           # the live red list (LEGENDCOV_LIST=1 prints it)
+with open( os.path.join( TMP, "defaultcount" ), "w" ) as f:
+    f.write( f"{len( defaultRows )} {defaultKeys} {len( defaultGaps )} {len( baseG )} {min( perRow.values() ) if perRow else 0}\n" )
 closed = len( ( base & emitted ) - gapsDefined ) + len( base - emitted )
 print( f"COUNTS live={len(gapsMentioned)} baseline={len(base)} new={len(gapsMentioned-base)} "
        f"closed={closed} grey={len(grey)} silent={len(silent)}" )
@@ -527,9 +685,9 @@ if os.environ.get( "LEGENDCOV_LIST" ):
 
 # (T) THE TRAILING-BLOCK READER (K-LEGEND), on fixed documents and on a live one, through the same gapsOf the sweep uses. One
 # "PASS|FAIL text" line per property into $TMP/trail.
-def tdoc( mid ): return ( b'<ctx><!-- head: q= a head attribute --><d n="x" q="1"/>' + mid + b'</ctx>' )
+def tdoc( mid ): return ( b'<ctx><!-- head: q= a head attribute, n= its name --><d n="x" q="1"/>' + mid + b'</ctx>' )
 SYM  = b'<syms files="2" name="1"><y p="a.py:1" n="b" by="name"/></syms>'
-GOOD = b'<!-- syms: files= shown files, name= rows, by= the rule -->'
+GOOD = b'<!-- syms: files= shown files, name= rows, by= the rule, p= n= the row -->'   # p=/n= too: a default row judges CORE keys
 tl = []
 def tarm( good, text ): tl.append( ( "PASS " if good else "FAIL " ) + text )
 g = gapsOf( tdoc( GOOD + SYM ), True )[ 3 ]
@@ -548,26 +706,64 @@ tarm( g == [ "z@bogus" ], f"(T7) a block quoted inside CDATA defines nothing: a 
 g = gapsOf( tdoc( b'<![CDATA[x <!-- syms: bogus= --><syms>y]]>' + GOOD + SYM ), True )[ 3 ]
 tarm( g == [], f"(T7b) twin: a real block after the CDATA quote still reads its own comment (gaps {g})" )
 # (T6) live: a DEFAULT --for answer from the roster that carries a trailing block; the first open-tag attribute only its comment
-# defines is cut from that comment, and the same reader must report it
+# defines is cut from that comment, and the same reader must report it. cutOwnComment does the cut: a TRAILING block's comment
+# stands before lo, a LEADING block's (<bodies>, INNER) right after its open tag, inside [ lo, hi ) — CodeRabbit 4546574011: an
+# rfind before lo found no leading comment and cut the wrong bytes. -> ( tag, attr, before, after ), or ( tag, None, ... ).
+def cutOwnComment( d, lo, hi, c ):
+    head  = legendOf( d, anyRoot = True )
+    open_ = re.match( rb'<([\w-]+)((?:\s+[\w:.-]+="[^"]*")*)', d[ lo:hi ] )
+    tag   = open_.group( 1 ).decode()
+    only  = [ a for a in ( x.decode() for x in re.findall( rb'\s([\w:.-]+)="', open_.group( 2 ) ) ) if not defined( a, head ) ]
+    if not only:
+        return tag, None, None, None
+    a, cb = only[ 0 ], c.encode()
+    inner = d.find( cb, lo, hi )
+    cs    = inner if inner >= 0 else d.rfind( cb, 0, lo )
+    mut   = d[ :cs ] + re.sub( rb'(?<![\w:.-])' + re.escape( a.encode() ) + rb'\s*=', a.encode() + b' ', cb ) + d[ cs + len( cb ): ]
+    return tag, a, gapsOf( d, True )[ 3 ], gapsOf( mut, True )[ 3 ]
 live = [ ( n, d ) for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if e is None and d and n.endswith( "-default" ) and trailingBlocks( d ) ]
 if not live:
     tarm( False, "(T6) no default roster answer carries a trailing block: the live mutation has nothing to cut" )
 else:
     n, d = live[ 0 ]
-    lo, hi, c = trailingBlocks( d )[ 0 ]
-    head  = legendOf( d, anyRoot = True )
-    open_ = re.match( rb'<([\w-]+)((?:\s+[\w:.-]+="[^"]*")*)', d[ lo:hi ] )
-    tag   = open_.group( 1 ).decode()
-    only  = [ a for a in ( x.decode() for x in re.findall( rb'\s([\w:.-]+)="', open_.group( 2 ) ) ) if a not in CORE and not defined( a, head ) ]
-    if not only:
+    tag, a, before, after = cutOwnComment( d, *trailingBlocks( d )[ 0 ] )
+    if a is None:
         tarm( False, f"(T6) {n}: every attribute of <{tag}> is defined by the head legend: nothing to cut" )
     else:
-        a, cb = only[ 0 ], c.encode()
-        cs    = d.rfind( cb, 0, lo )
-        mut   = d[ :cs ] + re.sub( rb'(?<![\w:.-])' + re.escape( a.encode() ) + rb'\s*=', a.encode() + b' ', cb ) + d[ cs + len( cb ): ]
-        before, after = gapsOf( d, True )[ 3 ], gapsOf( mut, True )[ 3 ]
         tarm( f"{tag}@{a}" not in before and f"{tag}@{a}" in after,
               f"(T6) {n}: live <{tag}> defines {a}= in its own comment, and cutting it reds {tag}@{a} (before {before}, after {after})" )
+# (T6b) the same cut when the FIRST block is a LEADING one: the <bodies> comment that defines shown= follows its open tag. Premise:
+# the fixture's first block must be that leading block (counted; zero is a FAIL, not a pass).
+LD   = tdoc( b'<bodies shown="1"><!-- shown=N: bodies printed; via="name": matched by name alone --><b n="x"><c n="y" via="name"/></b></bodies>' )
+lead = [ b for b in trailingBlocks( LD ) if LD.startswith( b'<bodies', b[ 0 ] ) ]
+if not lead or trailingBlocks( LD )[ 0 ] != lead[ 0 ]:
+    tarm( False, f"(T6b) premise: the fixture's first block is not a leading <bodies> block ({len( lead )} leading blocks seen)" )
+else:
+    tag, a, before, after = cutOwnComment( LD, *lead[ 0 ] )
+    tarm( a == "shown" and "bodies@shown" not in before and "bodies@shown" in after,
+          f"(T6b) a leading <bodies> block's own comment is the one cut: {len( lead )} leading block(s), cut {tag}@{a} (before {before}, after {after})" )
+# (T8) a LEADING block: the comment right after <bodies>'s open tag defines that block's rows, and nothing outside it
+LB = b'<bodies shown="1"><!-- via="name": matched by name alone --><b t="fn"><c n="x" via="name"/></b></bodies>'
+g = gapsOf( tdoc( LB.replace( b't="fn"', b'' ) ), True )[ 3 ]
+tarm( g == [ "bodies@shown" ], f"(T8) a comment right after a block's open tag defines that block's rows (shown=, which it does not spell, stays a gap) (gaps {g})" )
+g = gapsOf( tdoc( LB.replace( b'<!--', b'<e/><!--' ).replace( b't="fn"', b'' ) ), True )[ 3 ]
+tarm( "c@via" in g, f"(T8b) mutant: an element between the open tag and the comment -> c@via is a gap (gaps {g})" )
+g = gapsOf( tdoc( LB.replace( b't="fn"', b'' ) + b'<z via="1"/>' ), True )[ 3 ]
+tarm( "z@via" in g, f"(T8c) the block's comment defines nothing after the block (gaps {g})" )
+# (HIST0) see buildHist: the premise counts, then the decoy that a leaking fixture would have written into
+tarm( histCounts[ 0 ] >= 5 and histCounts[ 1 ] == 1, f"(HIST0) premise: the history fixture holds {histCounts[ 0 ]} commits (want 5) and {histCounts[ 1 ]} side branch (want 1)" )
+tarm( decoyBefore[ 0 ] >= 1 and decoyAfter == decoyBefore,
+      f"(HIST0) a caller's exported GIT_DIR/GIT_WORK_TREE never receives the fixture: decoy commits/branches {decoyBefore} -> {decoyAfter}" )
+# (GST) the stable-order rows print <s> rows without k= (the premise of their judgement), counted
+noK = sum( len( [ m for m in re.findall( rb'<s\s[^>]*>', re.sub( rb'<!--.*?-->', b'', d, flags = re.S ) ) if b' k="' not in m ] )
+           for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if n.endswith( "-stable-default" ) and e is None and d )
+tarm( noK > 0, f"(GST) premise: the --order=stable rows print {noK} <s> rows without k= for (G) to judge" )
+# (GST2) element-qualified: (G)'s name-level predicate passed these rows on main only by coincidence (t= "defined" by the value
+# reading t=modscope=..., n= by <entry p= n=>), so each stable row's legend must name the <s> row keys themselves: an
+# `s t= n=` clause (or the map's own `<s t= n=`). Rows checked are counted; zero is a FAIL.
+stRows = [ ( n, d ) for ( n, _ ), ( d, e ) in zip( ROSTER, RESULTS ) if n.endswith( "-stable-default" ) and e is None and d ]
+stMiss = [ n for n, d in stRows if not re.search( r'(?<![\w:.=-])<?s t= n=', legendOf( d, anyRoot = True ) ) ]
+tarm( stRows and not stMiss, f"(GST2) {len( stRows )} --order=stable row(s) checked; each legend names the <s> row keys (s t= n=): missing on {stMiss}" )
 writeLines( "trail", tl )
 PY
 
@@ -609,16 +805,29 @@ fi
 
 # (G) THE DEFAULT POSTURE DEFINES EVERYTHING IT EMITS (L1 fix round, rv-r1-L1 HIGH-1). Every <row>-default twin — the answer
 #     a caller gets without asking for a posture — must define, in its own leading legend and in the `name=` form, every
-#     attribute its first screen carries (the root and the first instance of every element). No floor. Guarded against
-#     passing emptily: the default twins must have run and emitted attributes.
-read -r nDefRows nDefKeys < "$TMP/defaultcount" 2>/dev/null || { nDefRows=0; nDefKeys=0; }
+#     attribute its first screen carries (every instance of every element, outside comments and CDATA). The floor is
+#     test/legendcoverage_g_baseline.txt (LEGEND-G-BLIND: only the gaps the widened reach found; it may only shrink). Guarded
+#     against passing emptily: the default twins must have run and emitted attributes, and (G0) fails a row that judged none.
+read -r nDefRows nDefKeys nDefGaps nDefFloor nDefMin < "$TMP/defaultcount" 2>/dev/null || { nDefRows=0; nDefKeys=0; nDefGaps=0; nDefFloor=0; nDefMin=0; }
+if [ -s "$TMP/defaultzero" ]; then
+    no "(G0) $( wc -l < "$TMP/defaultzero" | tr -d ' ' ) default row(s) produced a document but judged ZERO (element, attribute) pairs — they prove nothing: $( tr '\n' ' ' < "$TMP/defaultzero" )"
+else
+    ok "(G0) every default row judged at least one (element, attribute) pair (fewest on a row: ${nDefMin:-0})"
+fi
 if [ "${nDefRows:-0}" -lt 40 ] || [ "${nDefKeys:-0}" -lt 400 ]; then
     no "(G) only ${nDefRows:-0} default rows / ${nDefKeys:-0} attributes were read — the default twins did not run, so (G) proves nothing"
 elif [ -s "$TMP/defaultgaps" ]; then
-    no "(G) $( wc -l < "$TMP/defaultgaps" | tr -d ' ' ) attribute(s) a DEFAULT answer emits with no definition (name=) in its own legend — define each in src/compactlegend.h (kCompactCompletenessTerms, key-qualified) or the verb's native compact legend:"
+    no "(G) $( wc -l < "$TMP/defaultgaps" | tr -d ' ' ) attribute(s) a DEFAULT answer emits with no definition (name=) in its own legend, and not on the floor test/legendcoverage_g_baseline.txt — define each in src/compactlegend.h (kCompactAttributeReadings, key-qualified) or the verb's native compact legend:"
     sed 's/^/          /' "$TMP/defaultgaps"
 else
-    ok "(G) every attribute the default posture emits is defined in its own legend: $nDefKeys attributes over $nDefRows default rows, no floor"
+    ok "(G) no NEW undefined attribute on a default answer: $nDefKeys attributes over $nDefRows default rows, $nDefGaps undefined, all on the pinned floor of $nDefFloor"
+fi
+if [ -s "$TMP/defaultclosed" ]; then
+    printf '  ..    (G) %s floor line(s) no longer reproduce (now defined, or no longer emitted) — delete them from test/legendcoverage_g_baseline.txt:\n' "$( wc -l < "$TMP/defaultclosed" | tr -d ' ' )"
+    sed 's/^/          /' "$TMP/defaultclosed"
+fi
+if [ -n "${LEGENDCOV_LIST:-}" ] && [ -s "$TMP/defaultall" ]; then
+    echo "  (G) live red list, one 'row | element@attr' per line:"; sed 's/^/          /' "$TMP/defaultall"
 fi
 
 # (T) the trailing-block reader (TRAILING BLOCKS above): an adjacent comment defines its own block and nothing else, any other
@@ -702,7 +911,7 @@ QUERY = "--for=rank symbols by pagerank"
 # MARGIN re-runs the same query 200 tokens ABOVE TIGHT and requires the note there too, which turns "the
 # probe has headroom" from a claim in this comment into a row that fails when it stops being true.
 TIGHT, MARGIN, WIDE = "--token-budget=900", "--token-budget=1100", "--token-budget=8000"
-CORE = { "p", "n", "t", "id", "l", "k", "c" }
+# (LEGEND-G-BLIND) no CORE exemption here: a shared-name sole closure of p=/n=/t= is as silent as any other.
 
 # The (F) floor: keys whose ONLY definition on the budgeted document is the rung-zero note, AND whose attribute
 # name the document carries on more than one element — so the closure cannot be attributed to a clause. Both
@@ -803,7 +1012,7 @@ for dialect, extra in DIALECTS:
         for a in seen[ tag ]:
             onElements.setdefault( a, set() ).add( tag )
     live = { f"{tag}@{a}" for tag in order for a in seen[ tag ]
-             if a not in CORE and len( onElements[ a ] ) > 1 and defined( a, tight ) and not defined( a, bare ) }
+             if len( onElements[ a ] ) > 1 and defined( a, tight ) and not defined( a, bare ) }
     census.append( f"{dialect}: {' '.join( sorted( live ) ) if live else '(none)'}" )
     entered += [ f"{dialect} | {k}" for k in sorted( live - FLOOR[ dialect ] ) ]
     left    += [ f"{dialect} | {k}" for k in sorted( FLOOR[ dialect ] - live ) ]
@@ -888,7 +1097,7 @@ def gaps( doc ):
     keys   = set()
     for m in re.finditer( r'<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*/?>', body ):
         for a in re.findall( r'\s([\w:.-]+)="', m.group( 2 ) ):
-            if a not in { "p", "n", "t", "id", "l", "k", "c" }: keys.add( m.group( 1 ) + "@" + a )
+            keys.add( m.group( 1 ) + "@" + a )   # no CORE exemption (LEGEND-G-BLIND): p=/n=/t= are judged too
     return sorted( k for k in keys if not defined( k.split( "@", 1 )[ 1 ], legend ) )
 dflt, full = rd( "h_def" ), rd( "h_full" )
 try:
@@ -955,7 +1164,7 @@ def gaps( doc, legend = None ):
     keys   = set()
     for m in re.finditer( r'<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*/?>', body ):
         for a in re.findall( r'\s([\w:.-]+)="', m.group( 2 ) ):
-            if a not in { "p", "n", "t", "id", "l", "k", "c" }: keys.add( m.group( 1 ) + "@" + a )
+            keys.add( m.group( 1 ) + "@" + a )   # no CORE exemption (LEGEND-G-BLIND): p=/n=/t= are judged too
     return sorted( k for k in keys if not defined( k.split( "@", 1 )[ 1 ], legend ) )
 docs = { k: rd( "s_" + k ) for k in ( "pdef", "pcmp", "idef", "icmp" ) }
 slot = re.compile( r'<s [^>]*via="slot"[^>]*slot_fns="\d+"' )

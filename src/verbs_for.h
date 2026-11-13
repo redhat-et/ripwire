@@ -5440,7 +5440,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         rw::emitTo( stdout, "<!-- ripwire exemplar for \"{}\"{}: the repo's best-in-class {} to imitate — {}. "
                      "On the root, the three attributes that ARE that ordering's evidence: in=reuse-count "
                      "(callers), ccx=cognitive complexity, tested=1 when a test reaches it (OMITTED, never 0, "
-                     "when none does). The body follows in a bodies section, its callee signatures in a calls "
+                     "when none does). The body follows in a bodies section (b t= its kind, l= its first line), its callee signatures in a calls "
                      "child; both disclose truncation the house way: total= is how many qualified, shown= how "
                      "many are printed, capped=1 when the two differ (calls omits shown= and capped= when its "
                      "list is complete). Copy its shape, not its text.{} -->",

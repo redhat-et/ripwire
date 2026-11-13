@@ -956,7 +956,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // PATH-HOP-BODY (src/hopbody.h): present-only, read only on a reached path's <bodies of="hops"> (value-qualified)
     { "of", "bodies of=hops: the body of the middle hop (never an endpoint) of a shown chain of 2 hops; b t= l= p= n= as expand prints it, no callee rows, whole up to 4000 B", true, "bodies", MapHeaderRead::No, "hops", "path" },
     // BODY-ON-ROUTE (src/pathgaps.h pathRouteBodies): present-only, read only on a reachable=0 path's <bodies of="route">
-    { "of", "bodies of=route proven=0: bodies of the route this answer names, never traced (bridge rows <=2 hops from from=, never to= nor the row calling through a slot into it; then hrd readers); <=4 (capped=1 next=), each whole to 4000 B; a hedge, never in reachable=/hops=", true, "bodies", MapHeaderRead::No, "route", "path" },
+    { "of", "bodies of=route proven=0: bodies of the route this answer names, never traced (bridge rows <=2 hops from from=, never to= nor the row calling through a slot into it; then hrd readers); <=4 (capped=1 next=), each whole to 4000 B; a hedge, never in reachable=/hops=; b t= l= p= n= as expand prints it", true, "bodies", MapHeaderRead::No, "route", "path" },
     // fix1 F1 + BODY-ON-ROUTE (src/hopbody.h chainHopHedge): present-only, on a path <b> whose hop is no proven call
     { "via", "b via= cands=: the hop into this body is no proven call (name: one of cands= same-named defs; a bridge crossing, slot_fns=K the functions that field holds; name-key: a handler_rule reader); a hedge, never the proven callee; a b with none is a proven call from the row above, inside a route that stays proven=0", true, "b", MapHeaderRead::No, {}, "path" },
     { "prov", "b prov=split: the hop into this body is one arm of an ambiguous pick; a hedge", true, "b", MapHeaderRead::No, {}, "path" },
@@ -1349,6 +1349,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // 0.6.6 D1: present-only — absent unless a many-definition terminal's pick tied with another equally-joining definition
     { "ambiguous_terminal", "ambiguous_terminal=: terminal names whose pick tied with another equally-joining definition (qualify file:name)", true, "connect", MapHeaderRead::No, {}, "connect" },
     { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "connect", MapHeaderRead::No, {}, "connect" },
+    // CONNECT-SOURCE-JOINT (src/mcpverbs.h kConnectTestJointLegend), present-only: only a test joins source terminals
+    { "source_joint", "source_joint=none: all terminals are source and no source function joins the unconnected ones (test/fixture code is not walked); test_joint=/test_joint_p=: a test-class function the undirected search joins them through, test-only evidence, not a source caller", false, "connect", MapHeaderRead::No, {}, "connect" },   // also defines test_joint=, test_joint_p=
     // grep: src/verbs_grep.h (the enc row's def count)
     { "defs", "enc defs=N: the enclosing name has N defs, the row unions them (only above 1)", true, "enc", MapHeaderRead::No, {}, "grep" },
     // owners: src/verbs_report.h (the of= form)
@@ -1491,6 +1493,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "origin", "r origin=new-symbol: a finding on NEW code (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "churn", "r churn=self|ambient|unknown: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); unknown: the blame failed (unread_history=); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },
@@ -1720,8 +1723,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "d", MapHeaderRead::No, {}, "pack-task" },
     // clones: src/verbs_report.h emitClonesReport (groupExemptKind, cloneIdiomAttrs)
     { "exempt", "group exempt=fixture|shell-runner: every member is on such a path; quality-delta duplication ignores it", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens, where one-statement leaves out parameter names, std:: chains and container words and never demotes a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
     // quality-delta: src/verbs_quality.h (range attrs, duplication r row); staleAcksXml in src/quality.h
     { "key", "sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires)", true, "sa", MapHeaderRead::No, {}, "quality-delta" },   // also defines why=
     { "members", "r members=/tokens=: a duplication row's clone group (member ids) / their shared normalized-token count", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines tokens=
@@ -1771,7 +1774,53 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "lines", "run lines=: non-empty captured lines; bytes=: the whole capture; dropped_bytes=: middle bytes the cap dropped", true, "run", MapHeaderRead::No, {}, "from-trace" },   // also defines bytes= dropped_bytes=
     { "frames", "run frames=0: the command FAILED but its output carried no mappable frame, so no bundle follows", true, "run", MapHeaderRead::No, {}, "from-trace" },
     { "view", "lines view=tail: the last shown= of total= output lines; view=relevant: shown= of relevant= error/frame-shaped ones", true, "lines", MapHeaderRead::No, {}, "from-trace" },
-    { "relevant", "lines relevant=N: captured lines that are error-marked or frame-shaped; the relevant view picks from these", true, "lines", MapHeaderRead::No, {}, "from-trace" },
+    { "relevant", "lines relevant=N: captured lines that are error-marked or frame-shaped; the relevant view picks from these", true, "lines", MapHeaderRead::No, {}, "from-trace" },    // ── LEGEND-G-BLIND (2026-11-11): the row keys (p= n= t= l= k= c=) arm (G) no longer exempts. The CORE exemption claimed "every
+    // map legend defines them"; the map's own purpose line does, and the answers below printed them under a legend that did not.
+    // Most-used verbs first (--for's MCP twin, the map family, grep, callees, from-trace). Present-only and key-qualified, so an
+    // answer without the element pays nothing and no other verb reads them.
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "map-diff" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "map-diff" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "around" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "around" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "query" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "query" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-signatures" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "pack-signatures" },
+    { "n", "f p=: a file; s t= n=: kind, name; c n=: a resolved callee", true, "s", MapHeaderRead::No, {}, "pack-top-n" },   // also defines p= t= c n=
+    { "k", "s k=: rank", true, "s", MapHeaderRead::No, {}, "pack-top-n" },
+    { "t", "s t=: the unit's kind (fn|cls|...)", true, "s", MapHeaderRead::No, {}, "context-ratio" },
+    { "t", "inc t=: one include/import target as written; one with no edge did not resolve to an indexed file", true, "inc", MapHeaderRead::No, {}, "deps" },
+    { "n", "enc n=: an enclosing symbol of this page's hits, first-appearance order", true, "enc", MapHeaderRead::No, {}, "grep" },
+    { "n", "hit n=N: N byte-identical sites in this file folded into this row, one sibling per extra site (absent: 1)", true, "hit", MapHeaderRead::No, {}, "grep" },
+    { "pattern_dispatch", "pattern_dispatch=N: lookups that build a member NAME from a template; pd l= pattern= cands=K shown=: its line, the template, the K members it can name (first 8 as t rows)", false, "callees", MapHeaderRead::No, {}, "callees" },
+    { "t", "b t= l=: the body's kind and first line", true, "b", MapHeaderRead::No, {}, "exemplar" },
+    { "n", "t n= / s n=: a terminal's / a join's symbol name", true, "t", MapHeaderRead::No, {}, "connect" },
+    { "t", "t=: sym='s kind (fn|cls|...)", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
+    { "n", "lang n=: a language this build extracted symbols from; files=/symbols= its counts", true, "lang", MapHeaderRead::No, {}, "skipped" },
+    { "p", "file p=: the stray file, repo-relative", true, "file", MapHeaderRead::No, {}, "stray-content" },
+    { "n", "frame n= t=: the bound symbol's name and kind (fn|cls|...); d, b and c n=: a ranked row's, a body's, a callee's name", true, "frame", MapHeaderRead::No, {}, "from-trace" },
+    { "n", "unresolved n=: the frame's own symbol name, no def bound", true, "unresolved", MapHeaderRead::No, {}, "from-trace" },
+    { "q", "q=: the pattern as given; grammars=/shapes=: grammars it resolved for and the node kind it became in each; unsupported=: families this verb never serves", false, "pattern", MapHeaderRead::No, {}, "pattern" },
+    { "eligible_files", "eligible_files=/skipped_files=/of_files=: files scanned / served-language files it did not resolve for, never read / all indexed", false, "pattern", MapHeaderRead::No, {}, "pattern" },
+    { "ellipsis", "ellipsis=first-match: one first-match-wins probe, not exhaustive; ellipsis_bound= its sibling cap; ellipsis_skipped= nodes abandoned over it (a floor)", false, "pattern", MapHeaderRead::No, {}, "pattern" },
+    { "in", "m p= in=: the hit's file:line and its enclosing symbol; the text is the matched node", true, "m", MapHeaderRead::No, {}, "pattern" },
+    // --for's MCP twin: its legend is the full dialect's prose (closeRosterGaps reads these, key "for", after the sigs budget)
+    { "task", "task=: the query", false, "ctx", MapHeaderRead::No, {}, "for" },
+    { "n", "d n= l=: the symbol's name and def line", true, "d", MapHeaderRead::No, {}, "for" },
+    { "t", "b t= n= p= l=: a served body's kind, name, file, first line", true, "b", MapHeaderRead::No, {}, "for" },
+    { "owner", "field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer", true, "field", MapHeaderRead::No, {}, "for" },
+    { "pure", "d pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "for" },
+    { "h", "enc h=: the edit handle, sym#<16hex>@<16hex> (identity, file content hash); stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
+    { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; their rule rows say applicable=0 (count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
+    { "unavailable", "unavailable=/unavailable_why=: families that could not be measured here, and why; s unavail=: those for that row (absent from fired= is then no evidence)", false, "ensemble", MapHeaderRead::No, {}, "ensemble" },
+    // merge-scout (mergescout.h writeSymRows): the <sym p= id=/> rows an arm's changed symbols print; seen only when an arm
+    // changed code (the working-tree arm on a dirty tree), so the floor could not pin it stably.
+    { "p", "sym p= id=: a changed symbol's file and identity (id= is the file itself on a file-level row)", true, "sym", MapHeaderRead::No, {}, "merge-scout" },
+    // pr-context (prcontext.h): a changed file's <s> rows and their <caller> rows print t= n=; seen only when the diff
+    // touches a symbol, so a HEAD~1 roster row whose last commit is test-only cannot pin it either way.
+    { "n", "s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name", true, "s", MapHeaderRead::No, {}, "pr-context" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
@@ -2261,6 +2310,11 @@ inline bool commentsSpellAttr( std::string_view doc, std::string_view attr )
 // root. The class it closes, generally: a completeness attribute riding an answer undefined — found on MCP `for` as
 // at= (stamped on the root, defined nowhere), ccx= (cx= alone was read) and next= (on the r=1 row). On a compact answer
 // it is a no-op by construction: compactLegendText reads every present term. Returns whether anything was added.
+// LEGEND-G-BLIND (2026-11-11), two corrections. The readings are the `for` key's (kRosterClosureKey): a key-qualified reading
+// belongs to that verb alone, and with no key the MCP `for` bundle was handed from-trace's "task=: the trace source this bundle
+// maps". And "spelled" means spelled in the LEGEND the reader meets first (the comments before the first row), not anywhere in
+// the answer: a clause inside a later block (the body slot's via="name" note) does not define a <c via=> row the head legend serves.
+inline constexpr std::string_view kRosterClosureKey = "for";   // the one native-legend answer this closes (mcpverbs.h)
 inline bool closeRosterGaps( std::string& doc )
 {
     const CompactRootInfo root = findCompactRoot( doc );
@@ -2269,24 +2323,6 @@ inline bool closeRosterGaps( std::string& doc )
         return false;
     }
     const std::string_view view = doc;
-    std::string add;
-    for( const std::uint16_t i : compactPresentTerms( compactDocHead( view, root ), view ) )
-    {
-        // compactPresentTerms returns a JOINT index over both reading tables, so it is resolved by compactReading and
-        // never by subscripting the first table — which is only 92 long and would be read past for every key-qualified
-        // reading the second table holds.
-        const CompactCompletenessTerm& t = compactReading( i );
-        if( !commentsSpellAttr( view, t.attr ) && add.find( std::string( t.attr ) + "=" ) == std::string::npos )
-        {
-            add += ' ';
-            add.append( t.reading );
-            add += '.';
-        }
-    }
-    if( add.empty() )
-    {
-        return false;
-    }
     // After the comments that follow the root's open tag (the legend a reader meets first), before the first row.
     std::size_t at = root.openEnd;
     while( view.substr( at ).starts_with( "<!--" ) )
@@ -2297,6 +2333,26 @@ inline bool closeRosterGaps( std::string& doc )
             break;
         }
         at = close + 3;
+    }
+    const std::string_view legend = view.substr( 0, at );
+    std::string add;
+    for( const std::uint16_t i : compactPresentTerms( compactDocHead( view, root ), view, kRosterClosureKey ) )
+    {
+        // compactPresentTerms returns a JOINT index over both reading tables, so it is resolved by compactReading and
+        // never by subscripting the first table — which is only 92 long and would be read past for every key-qualified
+        // reading the second table holds.
+        const CompactCompletenessTerm& t = compactReading( i );
+        // the same whole-name test for what this pass already added: "in=" must not read as "n=" spelled
+        if( !commentsSpellAttr( legend, t.attr ) && !commentsSpellAttr( "<!--" + add + "-->", t.attr ) )
+        {
+            add += ' ';
+            add.append( t.reading );
+            add += '.';
+        }
+    }
+    if( add.empty() )
+    {
+        return false;
     }
     doc.insert( at, "<!--" + add + " -->" );
     return true;
