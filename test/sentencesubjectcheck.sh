@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" TMPDIR="$TMP/home/"; mkdir -p "$HOME"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "sentencesubjectcheck: BIN=$BIN"
 ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null ) </dev/null; }
@@ -109,10 +109,10 @@ for q in 'How does `prepare_setup_platform` choose the name it returns, and wher
     case "$A" in *'<ctx '*) seen=$(( seen + 1 ));; *) no "CN no answer printed ($q)";; esac
     hasnt "$A" '<callers by="subject"' "CN ($q): no callers block"
 done
-[ "$seen" = 5 ] && ok "CN saw 5 answers" || no "CN saw $seen of 5 answers"
+if [ "$seen" = 5 ]; then ok "CN saw 5 answers"; else no "CN saw $seen of 5 answers"; fi
 
 # ── G: sentence graph forms run the verb the key runs ──
-gv(){ local A; A="$( ask "$R" "$1" )"; local V; V="$( verb "$A" )"; [ "$V" = "$2" ] && ok "G $3: verb=$V" || no "G $3: verb=$V (want $2)"; }
+gv(){ local A; A="$( ask "$R" "$1" )"; local V; V="$( verb "$A" )"; if [ "$V" = "$2" ]; then ok "G $3: verb=$V"; else no "G $3: verb=$V (want $2)"; fi; }
 gv 'Trace the exact call chain from `start_here` (app/flow.py) to `end_there`. Name every function with its file.' '--path=start_here,end_there' "call chain from A to B"
 gv 'How does `start_here()` reach `end_there` when the flow runs?' '--path=start_here,end_there' "A reach B"
 gv 'Which non-test function calls both `end_there` and `other_end`? Give the function and its file.' '--connect=end_there,other_end' "calls both A and B"
@@ -124,21 +124,21 @@ for q in 'Is there a chain from start to finish documented in the flow notes?' '
     case "$A" in *'<ctx '*) seen=$(( seen + 1 ));; *) no "GN no answer printed ($q)";; esac
     hasnt "$A" '<graph_verb' "GN ($q): no graph block"
 done
-[ "$seen" = 3 ] && ok "GN saw 3 answers" || no "GN saw $seen of 3 answers"
+if [ "$seen" = 3 ]; then ok "GN saw 3 answers"; else no "GN saw $seen of 3 answers"; fi
 
 # ── R: the re-ask hint ──
 runs(){ # $1 root $2 invocation $3 row it must print $4 label
     local out rc; out="$( cd "$1" && "$BIN" "$1" --no-cache "$2" 2>/dev/null </dev/null )"; rc=$?
-    { [ "$rc" = 0 ] || [ "$rc" = 4 ]; } && ok "R $4: next= runs (rc=$rc)" || no "R $4: next= rc=$rc"
+    if { [ "$rc" = 0 ] || [ "$rc" = 4 ]; }; then ok "R $4: next= runs (rc=$rc)"; else no "R $4: next= rc=$rc"; fi
     has "$out" "$3" "R $4: the bare call answers it"
 }
 A="$( ask "$R" 'I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?' )"
 hasnt "$A" '<callers by="subject"' "R callers: the sentence got no block (premise)"
-N="$( reask "$A" )"; [ "$N" = '--callers=prepare_setup_platform' ] && ok "R callers: next=$N" || no "R callers: next=$N"
+N="$( reask "$A" )"; if [ "$N" = '--callers=prepare_setup_platform' ]; then ok "R callers: next=$N"; else no "R callers: next=$N"; fi
 [ "${N#--}" != "$N" ] && runs "$R" "$N" first_caller "callers"
 A="$( ask "$R" 'What is the path, if any, between `start_here` and `other_end`?' )"
 hasnt "$A" '<graph_verb' "R path: the sentence got no block (premise)"
-N="$( reask "$A" )"; [ "$N" = '--path=start_here,other_end' ] && ok "R path: next=$N" || no "R path: next=$N"
+N="$( reask "$A" )"; if [ "$N" = '--path=start_here,other_end' ]; then ok "R path: next=$N"; else no "R path: next=$N"; fi
 [ "${N#--}" != "$N" ] && runs "$R" "$N" start_here "path"
 seen=0
 for q in 'If `prepare_setup_platform` (app/setup.py) gained a new required parameter, which functions call it directly?' \
@@ -148,7 +148,7 @@ for q in 'If `prepare_setup_platform` (app/setup.py) gained a new required param
     case "$A" in *'<ctx '*) seen=$(( seen + 1 ));; *) no "RN no answer printed ($q)";; esac
     hasnt "$A" '<reask' "RN ($q): no re-ask"
 done
-[ "$seen" = 4 ] && ok "RN saw 4 answers" || no "RN saw $seen of 4 answers"
+if [ "$seen" = 4 ]; then ok "RN saw 4 answers"; else no "RN saw $seen of 4 answers"; fi
 
 [ "$fail" = 0 ] && echo "sentencesubjectcheck: PASS" || echo "sentencesubjectcheck: FAIL"
 exit "$fail"
