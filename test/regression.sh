@@ -969,6 +969,7 @@ for _g in \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
+    scanoncecheck \
     scipcheck \
     scipjoincheck \
     scorecardcheck \

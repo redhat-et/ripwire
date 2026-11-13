@@ -127,6 +127,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -4909,6 +4910,58 @@ inline ForLiteralRender litLegendPresentOnly( ForLiteralRender r, bool compactLe
     eraseAbsentClause( r.xml, kForLiteralLongerClause, r.xml.contains( " longer=\"" ) );
     eraseAbsentClause( r.xml, kForLiteralTryClause, r.xml.contains( " try=\"" ) );
     return r;
+}
+
+// FOR-SCAN-ONCE: the table walk's first kForLiteralCandidates kept anchors (TableWalk::tryAnchor's keep rule; a late form is not foreseen
+// and reads alone)
+inline void appendTableScanPlan( const IngestResult& ing, std::string_view task, std::vector<std::string>& plan )
+{
+    const std::vector<TableAnchor> own = forTableAnchorsOf( task );
+    if( own.empty() )
+    {
+        return;
+    }
+    const TableCue cue  = forTableCueOf( task );
+    std::size_t    kept = 0;
+    for( const TableAnchor& anchor : own )
+    {
+        if( kept < kForLiteralCandidates && !namesIndexedFile( ing, anchor.text ) && forTableAnchorKeeps( ing, anchor.text, anchor.quoted )
+            && !( cue == TableCue::StrongRowOnly && isOneLowerWord( anchor.text ) ) )
+        {
+            ++kept;
+            plan.push_back( anchor.text );
+        }
+    }
+}
+
+// FOR-SCAN-ONCE: the patterns renderForLiteralOfTask may scan for `task`, in its order: every candidate its loop reaches (kForLiteralCandidates
+// scans, a message's tries besides), then the table walk's anchors. The loop stops at the first literal with a site and the walk runs only when
+// none has one, so this is a superset of one call's scans: the caller opens a GrepScanBatch with it, and one read of the corpus serves every
+// scan the block makes. The walk is foreseen with the loop because the commonest pair is a cue-less task's whole text (MSG-VERBATIM, which
+// rarely has a site) and then its table anchors: staged, they would be two reads.
+inline std::vector<std::string> forLiteralScanPlan( const IngestResult& ing, std::string_view task )
+{
+    std::vector<std::string> plan;
+    std::size_t              scans = 0;
+    for( const ForLiteral& lit : forLiteralCandidates( task ) )
+    {
+        const bool message = lit.shape == "message";
+        if( ( !message && lit.shape == "dotted" && namesIndexedFile( ing, lit.text ) ) || ( !message && scans >= kForLiteralCandidates ) )
+        {
+            continue;
+        }
+        scans += message ? 0 : 1;
+        if( message && !lit.verbatim )
+        {
+            std::ranges::move( forMessageTries( lit.text ), std::back_inserter( plan ) );
+        }
+        else
+        {
+            plan.push_back( lit.text );
+        }
+    }
+    appendTableScanPlan( ing, task, plan );
+    return plan;
 }
 
 inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
