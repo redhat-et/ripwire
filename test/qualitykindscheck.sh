@@ -679,6 +679,7 @@ qd_none "masking (c++)" error-masking routed "a re-throw ahead of a catch-all si
 #   before it; Rust: `if let Err(..) = f() {}` and `Err(..) => {}` / `=> ()`. Both GATE, as Python's `except: pass` does.
 #   Rust log-only: an Err arm / if-let Err whose body only prints or logs and never names the binding — sev=minor.
 #   C++ log-only: a catch whose body is only `std::cerr << …`, `LOG( x ) << …`, `fprintf( stderr, … )`, `fputs( …, stderr )`
+#   (stderr in the STREAM position only: `fprintf( fp, "%p", stderr )` writes to fp; a comment before it does not shift it)
 #   — sev=minor. Every negative arm first COUNTS the sites it judges (ripwire's own --match over the edited fixture) and
 #   FAILS on zero, so a fixture that stopped parsing as the shape cannot pass vacuously.
 premise(){   # LABEL DIR SYM QUERY → FAIL unless the query hits at least once inside SYM
@@ -945,6 +946,8 @@ void stream_log() { risky(); }
 void macro_log() { risky(); }
 void fprintf_log() { risky(); }
 void fputs_log() { risky(); }
+void fprintf_comment_log() { risky(); }
+void fprintf_fp_arg() { risky(); }
 void log_rethrow() { risky(); }
 void log_return_value() { risky(); }
 void oss_thrown() { risky(); }
@@ -958,18 +961,21 @@ void stream_log() { try { risky(); } catch( ... ) { std::cerr << "ignored" << st
 void macro_log() { try { risky(); } catch( ... ) { LOG( ERROR ) << "ignored"; } }
 void fprintf_log() { try { risky(); } catch( ... ) { fprintf( stderr, "ignored\n" ); } }
 void fputs_log() { try { risky(); } catch( ... ) { fputs( "ignored\n", stderr ); } }
+void fprintf_comment_log() { try { risky(); } catch( ... ) { fprintf( /* the stream */ stderr, "ignored\n" ); } }
+void fprintf_fp_arg() { try { risky(); } catch( ... ) { fprintf( trace_file, "%p\n", stderr ); } }
 void log_rethrow() { try { risky(); } catch( ... ) { std::cerr << "failed" << std::endl; throw; } }
 int log_return_value() { try { risky(); } catch( ... ) { std::cerr << "failed\n"; return -1; } return 0; }
 void oss_thrown() { try { risky(); } catch( ... ) { std::ostringstream os; os << "failed"; throw std::runtime_error( os.str() ); } }
 void oss_only() { try { risky(); } catch( ... ) { trace_buffer << "failed"; } }
 '
 qd_pair log_cpp a.cpp "$CXB" "$CXE"
-for s in stream_log macro_log fprintf_log fputs_log; do qd_has "log-only (c++)" error-masking "$s" minor; done
-for s in log_rethrow log_return_value oss_thrown oss_only; do premise "log-only (c++)" log_cpp "$s" '(catch_clause) @m'; done
+for s in stream_log macro_log fprintf_log fputs_log fprintf_comment_log; do qd_has "log-only (c++)" error-masking "$s" minor; done
+for s in log_rethrow log_return_value oss_thrown oss_only fprintf_fp_arg; do premise "log-only (c++)" log_cpp "$s" '(catch_clause) @m'; done
 qd_none "log-only (c++)" error-masking log_rethrow      "it logs and re-throws"
 qd_none "log-only (c++)" error-masking log_return_value "it logs and returns an error value"
 qd_none "log-only (c++)" error-masking oss_thrown       "the << builds an exception message that is thrown"
 qd_none "log-only (c++)" error-masking oss_only         "a << into a non-console stream is not logging"
+qd_none "log-only (c++)" error-masking fprintf_fp_arg   "fprintf writes to its FIRST argument, a file; stderr later is a value (CodeRabbit #636)"
 # the fixture's near-identical one-liners are duplication rows (those gate); no error-masking row may
 if printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<r kind="error-masking"' | grep -q 'gating='; then
     no "log-only (c++): an error-masking row gates"
