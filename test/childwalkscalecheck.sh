@@ -306,7 +306,7 @@ for n in ( 1000, 16000 ):
     # lists, so both sides execute nodesMatchExactly and only the flooded list differs (CodeRabbit, #130)
     w( "patmeta/n%d/big.c" % n, [ "int a( int x );", "int f( void )", "{", "    return a(" ] + [ C ] * n + [ "    1 ) == a(" ] + [ C ] * n + [ "    1 );", "}" ] )
     w( "patmeta_off/n%d/big.c" % n, [ "int a( int x );", "int f( void )", "{", "    return a( 1 ) == a( 1 );" ] + [ C ] * n + [ C ] * n + [ "}" ] )
-    # memberCalleeIsArrow (CodeRabbit #633 4557724164) — `p->f( 1 )` with the flood between `p` and `->f`, inside the
+    # memberCalleeOperator (CodeRabbit #633 4557724164) — `p->f( 1 )` with the flood between `p` and `->f`, inside the
     # field_expression the member near-miss probes; the control floods the body beside the same call
     w( "patarrow/n%d/big.cpp" % n, [ "struct S { int f( int x ); };", "int g( S* p )", "{", "    return p" ] + [ C ] * n + [ "        ->f( 1 );", "}" ] )
     w( "patarrow_off/n%d/big.cpp" % n, [ "struct S { int f( int x ); };", "int g( S* p )", "{", "    int r = p->f( 1 );" ] + [ C ] * n + [ "    return r;", "}" ] )
@@ -412,9 +412,9 @@ else
 fi
 "$BIN" "$TMP/patarrow/n1000" --no-cache --pattern='f($X)' >"$TMP/a_pa.xml" 2>/dev/null
 if grep -q ' unmatched_member="1" unmatched_member_arrow="1"' "$TMP/a_pa.xml"; then
-    ok "(A7b) memberCalleeIsArrow: the flooded \`p ->f( 1 )\` still counts as an arrow member near-miss (B39 reaches the walk)"
+    ok "(A7b) memberCalleeOperator: the flooded \`p ->f( 1 )\` still counts as an arrow member near-miss (B39 reaches the walk)"
 else
-    no "(A7b) memberCalleeIsArrow: the flooded arrow call lost its near-miss count: $( grep -o '<pattern [^>]*>' "$TMP/a_pa.xml" | head -c 300 )"
+    no "(A7b) memberCalleeOperator: the flooded arrow call lost its near-miss count: $( grep -o '<pattern [^>]*>' "$TMP/a_pa.xml" | head -c 300 )"
 fi
 callers_count(){ # $1 = corpus, $2 = fully qualified symbol -> the callers verb's count= attribute
     "$BIN" "$1" --no-cache --callers="$2" 2>/dev/null | sed -n 's/.*<callers [^>]*count="\([0-9]*\)".*/\1/p'
@@ -555,7 +555,7 @@ arm "(B36) nodesMatchExactly" "$b_pm_off" "$b_pm_walk" 8 0.30 "--pattern='\$X ==
 
 b_pa_off="$(  usercpu "$TMP/patarrow_off/n16000" "$BIN" --pattern='f($X)' )"
 b_pa_walk="$( usercpu "$TMP/patarrow/n16000"     "$BIN" --pattern='f($X)' )"
-arm "(B39) memberCalleeIsArrow" "$b_pa_off" "$b_pa_walk" 8 0.30 "--pattern='f(\$X)' near-miss on a 16000-comment \`p ->f\` callee vs the same call with the flood beside it"
+arm "(B39) memberCalleeOperator" "$b_pa_off" "$b_pa_walk" 8 0.30 "--pattern='f(\$X)' near-miss on a 16000-comment \`p ->f\` callee vs the same call with the flood beside it"
 
 # #358 — importContainerReach (src/ingest_importcap.h): ancestry read in ONE descent, not k ts_node_parent hops
 b_rjs_off="$(     usercpu "$TMP/reachjs_off"  "$BIN" --top-k=100000 )"

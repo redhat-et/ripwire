@@ -525,6 +525,27 @@ XS="$( xroot "$MX/short" 'foo(...)' )"
 printf '%s' "$XS" | grep -q ' unmatched_member="1"' && ! printf '%s' "$XS" | grep -q 'unmatched_member_capped' \
     && ok "control: a member call under the bound is counted (unmatched_member=\"1\") with no floor flag" \
     || no "a member call under the bound should read unmatched_member=\"1\" with no unmatched_member_capped: $XS"
+# -- 7d) optional chaining in next= (PATTERN-OPTCHAIN-NEXT, CodeRabbit #633 4557724153) -----------------------------
+# `o?.f(x)` counted toward unmatched_member= while next= spelled `$O.f($X)`, which matches no `?.` call (hits=0 on
+# main cd04d477e). An all-`?.` corpus now gets `$O?.f($X)`; a mixed one keeps the dot and says how many are `?.`.
+mkdir -p "$MX/oc" "$MX/ocmix"
+printf 'function g(o) {\n  o?.f(1);\n  o?.f(2);\n  return 0;\n}\n' >"$MX/oc/a.js"
+printf 'function g(o, p) {\n  o?.f(1);\n  p.f(2);\n  return 0;\n}\n' >"$MX/ocmix/a.ts"
+ocSites="$( cat "$MX/oc/a.js" "$MX/ocmix/a.ts" | grep -o '?\.f(' | wc -l | tr -d ' ' )"
+[ "${ocSites:-0}" -eq 3 ] && ok "optchain premise: $ocSites \`?.f(\` call sites" || no "optchain premise: ${ocSites:-0} \`?.f(\` sites, expected 3 — the arms below would be vacuous"
+XO="$( xroot "$MX/oc" 'f($X)' )"
+XON="$( printf '%s' "$XO" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
+printf '%s' "$XO" | grep -q ' unmatched_member="2" unmatched_member_optchain="2"' && [ "$XON" = '$O?.f($X)' ] \
+    && [ "$( xroot "$MX/oc" "$XON" | grep -c ' hits="2"' )" = 1 ] \
+    && ok "all-?. corpus: unmatched_member_optchain=\"2\", next='\$O?.f(\$X)' hits exactly the 2 counted calls" \
+    || no "an all-?. corpus should read unmatched_member_optchain=\"2\" with next='\$O?.f(\$X)' hitting 2: next='$XON' root=$XO"
+XOM="$( xroot "$MX/ocmix" 'f($X)' )"
+printf '%s' "$XOM" | grep -q ' unmatched_member="2" unmatched_member_optchain="1"' \
+    && printf '%s' "$XOM" | grep -qF "next=\"--pattern=&apos;\$O.f(\$X)&apos;\"" \
+    && ok "mixed . and ?.: unmatched_member_optchain=\"1\" of 2, next= keeps the dot spelling" \
+    || no "mixed . and ?. should read unmatched_member=\"2\" unmatched_member_optchain=\"1\" with the dot next=: $XOM"
+printf '%s' "$XM" | grep -q 'unmatched_member_optchain' \
+    && no "the C++ dot/arrow corpus carries unmatched_member_optchain: $XM" || ok "control: a C++ corpus carries no unmatched_member_optchain="
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

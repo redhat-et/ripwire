@@ -609,12 +609,14 @@ private:
 // The member-call near-miss counts of one pattern run (PATTERN-MEMBER-ZERO), summed across the parallel file walk
 // like ellipsisCappedOut: counted = calls the bare callee names as a member (unmatched_member=), capped = member
 // probes the ellipsis bound abandoned, so `counted` is a floor (unmatched_member_capped=), arrow = counted calls
-// spelled with `->` (unmatched_member_arrow=), which a `$O.f` next= cannot match.
+// spelled with `->` (unmatched_member_arrow=) and optchain = those spelled `?.` (unmatched_member_optchain=), which a
+// `$O.f` next= cannot match.
 struct MemberNearMissTally
 {
     std::atomic<std::uint64_t> counted{ 0 };
     std::atomic<std::uint64_t> capped{ 0 };
     std::atomic<std::uint64_t> arrow{ 0 };
+    std::atomic<std::uint64_t> optchain{ 0 };
 };
 
 struct AstQueryGroup
