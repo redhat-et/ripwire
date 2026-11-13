@@ -14,7 +14,7 @@
                                  // by hand with ingest.cpp's kLangTable per its own header comment)
 #include "infra/sparseCsr.h"     // first-party infra math (src/infra/)
 #include "infra/csrverify.h"     // structural gate, ASSUME'd after every production CSR build
-#include "infra/hashutil.h"      // fnv1aAbsorb — internDeclinedList buckets a declined call's candidate list by its bytes
+#include "infra/hashutil.h"      // hashBytes — internDeclinedList buckets a declined call's candidate list by its bytes
 #include "pagerank.h"            // double-precision PageRank kernel over float CSR storage
 #include "prconverge.h"          // RankDisclosure — the power iteration's own account, carried with its result
 #include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
@@ -19136,7 +19136,7 @@ inline GaugeClauses graphGaugeClauses( const Graph& g ) noexcept
 // alone — symbol-id order, each id once — and the decl/def collapse and every later filter (the namespace gate,
 // keepOwnJvmLanguageCandidates, keepRustQualifiedCandidates, keepStdQualifiedCandidates) keep a subset in order.
 //
-// The FNV-1a hash over the candidate bytes only picks a bucket; a hit is confirmed by length and memcmp against each list in
+// The hash over the candidate bytes (hashutil::hashBytes, word-at-a-time wyhash) only picks a bucket; a hit is confirmed by length and memcmp against each list in
 // it, so a collision costs a compare, never a wrong share. List numbers are first-seen in the sequential resolve loop, and the
 // map is only probed and inserted into — neither reaches output.
 //
@@ -19150,12 +19150,7 @@ inline GaugeClauses graphGaugeClauses( const Graph& g ) noexcept
 inline std::uint32_t internDeclinedList( Graph& g, HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>>& listsByHash, std::span<const NodeId> cand )
 {
     EXPECTS( !cand.empty(), "tier 3 declines a set it could not narrow to one; the builtin-method gate a non-empty set it admitted none of" );
-    std::uint64_t     hash  = 14695981039346656037ull;   // the FNV-1a 64-bit offset basis
-    const char* const bytes = reinterpret_cast<const char*>( cand.data() );
-    for( std::size_t byteIndex = 0; byteIndex < cand.size_bytes(); ++byteIndex )
-    {
-        hash = hashutil::fnv1aAbsorb( hash, bytes[ byteIndex ] );
-    }
+    const std::uint64_t hash = hashutil::hashBytes( cand.data(), cand.size_bytes() );
     rw::SmallVec<std::uint32_t, 1>& bucket = listsByHash[ hash ];
     for( const std::uint32_t listIndex : bucket )
     {
