@@ -723,6 +723,7 @@ for _g in \
     mcphandlecheck \
     mcpincrementalcheck \
     mcpmanifestcheck \
+    mcponeparsecheck \
     mcprangeedgecheck \
     mcpreadloopcheck \
     mcpredactcheck \
