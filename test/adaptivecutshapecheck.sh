@@ -46,8 +46,10 @@ else
     no "build failed"; cat "$TMP/build.err"; echo "FAILURES ABOVE"; exit 1
 fi
 
-OUT="$( "$TMP/t" )"
+OUT="$( "$TMP/t" )"; trc=$?
 printf '%s\n' "$OUT"
+# the harness's own exit status carries what it asserted (gateexitcheck H1): a crash after printing still reds
+if [ "$trc" = 0 ]; then ok "the harness exited 0"; else no "the harness exited $trc"; fi
 
 FULL_KEPT="$(  printf '%s\n' "$OUT" | grep '^full:'   | grep -oE 'kept=[0-9]+'       | cut -d= -f2 )"
 FULL_HIT="$(   printf '%s\n' "$OUT" | grep '^full:'   | grep -oE 'hitCeiling=[0-9]+' | cut -d= -f2 )"

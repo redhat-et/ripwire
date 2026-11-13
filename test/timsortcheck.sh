@@ -124,9 +124,12 @@ if [ "$harnessBuilt" -eq 1 ]; then
     fi
 
     # ── D: determinism ───────────────────────────────────────────────────────────────────────────────
-    "$WORK/h" correct 42 >"$WORK/det.a" 2>&1
-    "$WORK/h" correct 42 >"$WORK/det.b" 2>&1
-    if diff -q "$WORK/det.a" "$WORK/det.b" >/dev/null 2>&1; then
+    "$WORK/h" correct 42 >"$WORK/det.a" 2>&1; rda=$?
+    "$WORK/h" correct 42 >"$WORK/det.b" 2>&1; rdb=$?
+    # two runs that both CRASHED the same way are byte-identical too: each must also exit 0 (gateexitcheck H1)
+    if [ "$rda" != 0 ] || [ "$rdb" != 0 ]; then
+        no "D: a determinism run of the harness exited $rda / $rdb"
+    elif diff -q "$WORK/det.a" "$WORK/det.b" >/dev/null 2>&1; then
         ok "D: two runs of the harness are byte-identical"
     else
         no "D: harness output is not deterministic across runs"

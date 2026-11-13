@@ -503,6 +503,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // order, span-attributed families over the same DefSpanIndex (ingest_model.h).
     emitBindings( result, raw.binds, spanIndex );
     std::vector<RawBind>().swap( raw.binds );
+    retargetRustMacroAliases( result );   // RUST-MACRO-PATH: `define_rejection!` through `use … as define_rejection;` names the macro
 
     result.includes = std::move( raw.incs );   // physical dependencies (#include / import), for --deps
     result.constOpens = std::move( raw.constOpens );   // parser version 82: Ruby class/module opens → resolve.h's constant index

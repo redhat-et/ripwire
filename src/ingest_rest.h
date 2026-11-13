@@ -529,8 +529,7 @@ inline void emitRestLabelRef( std::uint32_t fileId, std::uint32_t at, std::strin
     RawRef r;
     r.fileId = fileId; r.startByte = at; r.lang = Lang::Markdown; r.isInherit = false;
     r.name = ":ref:" + label;
-    r.memberPathMut().assign( kRestLabelMark );
-    r.memberPathMut().append( label );
+    r.setMemberPath( std::string( kRestLabelMark ).append( label ) );
     refs.push_back( std::move( r ) );
 }
 
@@ -549,13 +548,14 @@ inline void emitRestDocRef( std::uint32_t fileId, std::uint32_t at, std::string_
     RawRef r;
     r.fileId = fileId; r.startByte = at; r.lang = Lang::Markdown; r.isInherit = false;
     r.name.assign( stem );
+    std::string path;
     if( target.front() == '/' )
     {
-        r.memberPathMut().assign( kRestDocRootMark );
+        path.assign( kRestDocRootMark );
         target.remove_prefix( 1 );
     }
-    r.memberPathMut().append( target );
-    r.memberPathMut().append( ownExt );
+    path.append( target ).append( ownExt );
+    r.setMemberPath( path );
     refs.push_back( std::move( r ) );
 }
 
