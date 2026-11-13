@@ -1494,13 +1494,16 @@ gating_split "$L" 0
 #   rule states the exception in ONE fixed phrase (PHRASE below), so no surface still reads unqualified.
 L="surfaces"
 PHRASE='new-symbol rows never gate, except defect-shape format-arity'
+#   QD-ENTRY-CEILING (2026-11-13) adds the second exception, a NEW function at 4x the bar: every statement of the
+#   rule names it too, in the long form (legend, help, MCP, docs) or the compact legend's ceiling= row.
+CEILX='( and a new function at the ceiling| or a ceiling= row)'
 phrase_ok(){  # LABEL TEXT — the text states the exception, and every "new-symbol rows never gate" in it carries it
     local all qual flat   # whitespace-normalized first: a sentence may wrap anywhere in a document
     flat="$( printf '%s' "$2" | tr '\n' ' ' | tr -s ' ' )"
     all="$( printf '%s' "$flat" | grep -o 'new-symbol rows never gate' | wc -l | tr -d ' ' )"
-    qual="$( printf '%s' "$flat" | grep -o "$PHRASE" | wc -l | tr -d ' ' )"
-    if [ "$qual" -ge 1 ] && [ "$all" = "$qual" ]; then ok "$1: states '$PHRASE' ($qual), no unqualified 'new-symbol rows never gate'"
-    else no "$1: '$PHRASE' x$qual, 'new-symbol rows never gate' x$all — the exception is missing or a sentence still reads unqualified"; fi
+    qual="$( printf '%s' "$flat" | grep -oE "$PHRASE$CEILX" | wc -l | tr -d ' ' )"
+    if [ "$qual" -ge 1 ] && [ "$all" = "$qual" ]; then ok "$1: states '$PHRASE' + the ceiling exception ($qual), no unqualified 'new-symbol rows never gate'"
+    else no "$1: '$PHRASE' + the ceiling exception x$qual, 'new-symbol rows never gate' x$all — an exception is missing or a sentence still reads unqualified"; fi
 }
 LEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
 if printf '%s' "$LEG" | grep -q '<quality-delta '; then
