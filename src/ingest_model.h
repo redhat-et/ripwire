@@ -975,37 +975,59 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: sort+emit binds" );
 
-    std::sort( rawBinds.begin(), rawBinds.end(),
-               []( const RawBind& a, const RawBind& b ) noexcept
+    // BIND-SORT: a RawBind is 88 B with three strings, so sort a (fileId, startByte) key beside a uint32 INDEX instead of
+    // the rows (orderReferences' posture). The packed key decides almost every compare in one u64 test; equal keys fall to
+    // the rest of the total order, and a row equal on every compared field keeps its input order (the index), so the
+    // emitted order is deterministic and is the old comparator's order wherever that order was defined.
+    const auto lessBindTail = []( const RawBind& a, const RawBind& b ) noexcept
+    {
+        if( a.var != b.var )
+        {
+            return a.var < b.var;
+        }
+        // L3: a decl can emit BOTH a Rule-2 type record and a fn record at one (file, byte, var) —
+        // kind+typeName make the order strict, so the merged-across-threads sort is a total order.
+        if( a.kind != b.kind )
+        {
+            return a.kind < b.kind;
+        }
+        if( a.typeName != b.typeName ) { return a.typeName < b.typeName; }
+        if( a.resultIndex != b.resultIndex ) { return a.resultIndex < b.resultIndex; }   // ReturnType: one record per position
+        if( a.unwrapDepth != b.unwrapDepth ) { return a.unwrapDepth < b.unwrapDepth; }
+        return a.importedName < b.importedName;
+    };
+    struct KeyedBind
+    {
+        std::uint64_t key;     // fileId << 32 | startByte: the first two fields of the order
+        std::uint32_t index;   // the row in rawBinds
+    };
+    ASSUME( rawBinds.size() <= UINT32_MAX, "a bind index is a uint32, as a reference's is (orderReferences)" );
+    std::vector<KeyedBind> bindOrder( rawBinds.size() );
+    for( std::uint32_t bindIndex = 0; bindIndex < bindOrder.size(); ++bindIndex )
+    {
+        bindOrder[ bindIndex ] = { hashutil::packPair( rawBinds[ bindIndex ].fileId, rawBinds[ bindIndex ].startByte ), bindIndex };
+    }
+    std::sort( bindOrder.begin(), bindOrder.end(),
+               [ &rawBinds, &lessBindTail ]( const KeyedBind& a, const KeyedBind& b ) noexcept
                {
-                   if( a.fileId != b.fileId )
+                   if( a.key != b.key )
                    {
-                       return a.fileId < b.fileId;
+                       return a.key < b.key;
                    }
-                   if( a.startByte != b.startByte )
+                   const RawBind& ra = rawBinds[ a.index ];
+                   const RawBind& rb = rawBinds[ b.index ];
+                   if( lessBindTail( ra, rb ) )
                    {
-                       return a.startByte < b.startByte;
+                       return true;
                    }
-                   if( a.var != b.var )
-                   {
-                       return a.var < b.var;
-                   }
-                   // L3: a decl can emit BOTH a Rule-2 type record and a fn record at one (file, byte, var) —
-                   // kind+typeName make the order strict, so the merged-across-threads sort is a total order.
-                   if( a.kind != b.kind )
-                   {
-                       return a.kind < b.kind;
-                   }
-                   if( a.typeName != b.typeName ) { return a.typeName < b.typeName; }
-                   if( a.resultIndex != b.resultIndex ) { return a.resultIndex < b.resultIndex; }   // ReturnType: one record per position
-                   if( a.unwrapDepth != b.unwrapDepth ) { return a.unwrapDepth < b.unwrapDepth; }
-                   return a.importedName < b.importedName;
+                   return !lessBindTail( rb, ra ) && a.index < b.index;
                } );
     result.bindings.resize( rawBinds.size() );
     DefSweep bindSweep{ spanIndex.spans, spanIndex.fileSpanStart };
     std::size_t outBindIndex = 0;
-    for( RawBind& rb : rawBinds )   // rawBinds consumed here → move its 2 strings into the Binding
+    for( const KeyedBind& keyed : bindOrder )   // rawBinds consumed here → move its 2 strings into the Binding
     {
+        RawBind& rb = rawBinds[ keyed.index ];
         Binding& b = result.bindings[ outBindIndex++ ];
         b.fileId     = rb.fileId;
         b.kind       = rb.kind;
