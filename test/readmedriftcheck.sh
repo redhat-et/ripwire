@@ -1144,6 +1144,36 @@ else
     fi
 fi
 
+# ── (R) the vendored-grammar count (README-GRAMMAR-COUNT, 2026-11-13). After proto landed README.md said 27 grammars in its
+# Languages section and 26 in a <summary> line. Every CURRENT-STATE spelling of the count must equal the binary's own grammar
+# table (--doctor's grammars row, expected=); a release note's count ("Kotlin and Dart bring it to 24") is history and is not
+# one of the spellings read. R0 counts the spellings (zero is a FAIL: the patterns no longer match the prose), R2 is (R1)'s
+# mutation control.
+r_tmp="$( mktemp -d )"
+r_expected="$( PATH="$( cd "$( dirname "$BIN" )" && pwd ):$PATH" "$BIN" "$r_tmp" --doctor 2>/dev/null \
+               | grep -oE '<c n="grammars"[^>]*>' | sed -nE 's/.* expected="([0-9]+)".*/\1/p' )"
+rm -rf "$r_tmp"
+r_stated="$( grep -oE '<b>[0-9]+</b> vendored grammars|vendors [0-9]+ tree-sitter grammars|two of the [0-9]+ grammars' "$README" | grep -oE '[0-9]+' )"
+r_n="$( printf '%s\n' "$r_stated" | grep -c . )"
+if [ -z "$r_expected" ]; then
+    no "(R0) --doctor printed no grammars row with expected= — the grammar count cannot be derived"
+elif [ "$r_n" -lt 3 ]; then
+    no "(R0) found $r_n of the 3 current-state grammar-count spellings in README.md — the patterns no longer match its prose"
+else
+    ok "(R0) README.md spells the vendored-grammar count $r_n times; the binary's grammar table has $r_expected"
+    r_bad="$( printf '%s\n' "$r_stated" | grep -vxF "$r_expected" | tr '\n' ' ' )"
+    if [ -z "$r_bad" ]; then
+        ok "(R1) every current-state grammar count in README.md equals the binary's $r_expected"
+    else
+        no "(R1) README.md states grammar count(s) $r_bad where the binary's grammar table has $r_expected"
+    fi
+    if printf '%s\n' "$r_stated" "$(( r_expected + 1 ))" | grep -vxqF "$r_expected"; then
+        ok "(R2) mutation control: a fabricated count ($(( r_expected + 1 ))) is seen as disagreeing with $r_expected"
+    else
+        no "(R2) mutation control: a fabricated count is not seen — (R1) is vacuous"
+    fi
+fi
+
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
 else
