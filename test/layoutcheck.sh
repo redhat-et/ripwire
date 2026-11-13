@@ -647,6 +647,20 @@ L="$( "$BIN" "$DN" --layout=FixedSpan --no-cache 2>/dev/null )"
 if [ "$( field s sz )" = "8" ]; then ok "dependent names (control): a non-template span<int, N> over the file constant is sized 8"; else no "dependent names (control): FixedSpan.s sz=$( field s sz ) why=$( field s why )"; fi
 [ "$nDep" -eq 2 ] && ok "dependent names: counted $nDep refusals" || no "dependent names: counted $nDep of 2 refusals"
 
+# LAYOUT-EBO-NESTED (CodeRabbit #630 4553235747): `struct A : E { int x; }; struct D : E { A a; int y; };` — a sits at 4, not 0,
+# because A holds an E at its own offset 0; the model refuses it (was size=8 with a at 0). Controls: a first member that holds
+# no E (B) is still placed at 0, and a two-level chain (C holds A holds E) refuses too. Red on main cd04d477e.
+EB="$TMP/ebo"; mkdir -p "$EB"
+printf 'struct E {};\nstruct A : E { int x; };\nstruct B { int x; };\nstruct C { A a; int z; };\nstruct NestA : E { A a; int y; };\nstruct NestC : E { C c; int y; };\nstruct PlainB : E { B b; int y; };\n' >"$EB/e.h"
+for c in NestA NestC; do
+    L="$( "$BIN" "$EB" --layout="$c" --no-cache 2>/dev/null )"
+    if [ "$( attr 'def ' modeled )" = "0" ] && has 'caveat k="base-class"'; then ok "EBO nested: $c is refused (its first member holds an E at offset 0)"
+    else no "EBO nested: $c modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) — the empty base cannot share an address with the member's E"; fi
+done
+L="$( "$BIN" "$EB" --layout=PlainB --no-cache 2>/dev/null )"
+if [ "$( attr 'def ' modeled )" = "1" ] && [ "$( attr 'def ' size )" = "8" ] && [ "$( field b off )" = "0" ]; then ok "EBO nested (control): a first member with no E is placed at 0 (size=8)"
+else no "EBO nested (control): PlainB modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) b.off=$( field b off )"; fi
+
 # exit-code control for the owner decision: a single readable definition still exits 0, a matching mirror 0, drift 2
 for ec in PadCase:0:"a single readable definition" TwinUniforms:0:"a matching mirror" MirrorUniforms:2:"mirror drift"; do
     ecName="${ec%%:*}"; ecRest="${ec#*:}"; ecWant="${ecRest%%:*}"; ecWhat="${ecRest#*:}"

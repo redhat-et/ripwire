@@ -1662,6 +1662,9 @@ struct ModelCtx
     std::vector<std::string> templateParams;    // while sizing an in-repo class template: its parameter names (never sized)
     bool                     allowTemplateHead = false;   // …and its `template <…>` head is not a refusal
     bool                     stdTableUsed      = false;   // a std:: table row sized something (std_abi= on the answer)
+    // LAYOUT-EBO-NESTED: an in-repo aggregate's name → the type names of the subobjects at its offset 0 (its base, its first
+    // member, and theirs, recursively). Filled as sizeNestedAggregate models a definition; read by the empty-base rule.
+    gtl::btree_map<std::string, std::vector<std::string>> zeroOffsetTypes;
 
     explicit ModelCtx( const IngestResult& i, const AggIndex& n )
         : ing( i ), byName( n ), bytes( i.files.size() ), stripped( i.files.size() ),
@@ -1822,6 +1825,35 @@ inline LayoutDef modelNestedDef( ModelCtx& ctx, std::uint32_t fileId, const DefS
     return d;
 }
 
+// The subobject types at offset 0 of a modelled definition (LAYOUT-EBO-NESTED, CodeRabbit #630): its base (always at 0) and, when
+// placed at 0 by value, its first member — each with the types already recorded for it, so the chain is transitive.
+inline void recordZeroOffsetTypes( ModelCtx& ctx, std::string_view typeName, const LayoutDef& d )
+{
+    std::vector<std::string> at0;
+    const auto add = [ & ]( std::string_view spec )
+    {
+        const std::string name( lastSegment( withoutCv( spec ) ) );
+        at0.push_back( name );
+        if( const auto it = ctx.zeroOffsetTypes.find( name ); it != ctx.zeroOffsetTypes.end() )
+        {
+            at0.insert( at0.end(), it->second.begin(), it->second.end() );
+        }
+    };
+    if( !d.baseSpec.empty() )
+    {
+        add( d.baseSpec );
+    }
+    if( !d.fields.empty() && d.fields.front().placed && d.fields.front().offset == 0
+        && d.fields.front().type.find_first_of( "*&" ) == std::string::npos )
+    {
+        add( d.fields.front().type );
+    }
+    if( !at0.empty() )
+    {
+        ctx.zeroOffsetTypes.emplace( std::string( typeName ), std::move( at0 ) );
+    }
+}
+
 inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, std::uint32_t preferFileId, std::string& note,
                                      bool templateId = false )
 {
@@ -1879,6 +1911,10 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
         // empty: no member, and no base or one the model placed at 0 B (`struct M : E {};`, CodeRabbit 4544554347)
         const bool     emptyAgg = d.fields.empty() && ( d.baseSpec.empty() || ( d.baseSized && d.baseSize == 0 ) );
         const TypeSize here{ d.size, d.align, true, d.tailPad, emptyAgg };
+        if( first )
+        {
+            recordZeroOffsetTypes( ctx, typeName, d );
+        }
         if( first ) { out = here; first = false; }
         else if( here.size != out.size || here.align != out.align ) { note = "nested-mirrors-disagree"; out = TypeSize{}; break; }
     }
@@ -2782,6 +2818,21 @@ inline bool modelDeclarator( BodyWalk& w, std::string_view part, bool first, std
         return false;
     }
     appendField( w, d, written );
+    // ...and the same rule one level down: a first member whose own offset 0 holds the empty base's type (`struct A : E { int x; };
+    // struct D : E { A a; };` puts a at 4, not 0) — LAYOUT-EBO-NESTED, CodeRabbit #630. Read after appendField sized the member, which
+    // recorded its offset-0 chain.
+    if( w.def.fields.size() == 1 && w.def.baseSized && w.def.baseSize == 0 && !d.isPointer && !d.isRef )
+    {
+        const auto it = w.ctx.zeroOffsetTypes.find( std::string( lastSegment( withoutCv( d.baseSpec ) ) ) );
+        if( it != w.ctx.zeroOffsetTypes.end()
+            && std::ranges::find( it->second, lastSegment( withoutCv( w.def.baseSpec ) ) ) != it->second.end() )
+        {
+            w.refuse( "base-class", flattenSpace( w.def.baseSpec, 120 ) + ": the first member " + std::string( d.name ) + " holds a "
+                                      + std::string( lastSegment( withoutCv( w.def.baseSpec ) ) )
+                                      + " at its own offset 0, so the empty base cannot share its address" );
+            return false;
+        }
+    }
     return true;
 }
 
