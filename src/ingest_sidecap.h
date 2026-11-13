@@ -2062,6 +2062,21 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 }
                 aliasShape = aliasShapeOf( Lang::Cpp, roleNode );
             }
+            if( isDef && cFamilyMacroInvocationCapture( defCapSv, le.lang, nameTxt, roleNode, src ) )
+            {
+                // MACRO-P0 (ingest_names.h): a macro invocation read as a typeless declarator mints no definition; the site is
+                // a call-shaped use of the macro (model.h retagMacroCallReferences makes it role="macro" when the #define is
+                // indexed and its name is uniquely a macro). No argument count: the "parameters" are macro arguments.
+                RawRef r;
+                r.fileId    = fileId;
+                r.startByte = ts_node_start_byte( roleNode );
+                r.line      = ts_node_start_point( roleNode ).row + 1;
+                r.lang      = le.lang;
+                r.role      = RefRole::Call;
+                r.name      = nameTxt;
+                refs.push_back( std::move( r ) );
+                continue;
+            }
             if( isDef && dropGatedCapture( defCapSv, le.lang, nameTxt, nameNode, roleNode, src ) )
             {
                 continue;

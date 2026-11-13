@@ -2613,6 +2613,145 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
         && nearestScopeOwnerIs( decl, { "function_definition", "lambda_expression" }, { "field_declaration_list", "declaration_list", "translation_unit" } );
 }
 
+// ---- MACRO-P0: a macro INVOCATION the grammar reads as a typeless declarator (test/macroedgecheck.sh section 9) ----
+// tree-sitter cannot expand a macro, so an invocation written where a declaration may stand parses as a function
+// declarator with no type: `REGISTER_FACTORY( F, B ){ "name" };` as a function_definition whose "body" is the brace
+// initialiser, `FALSE_RUNTIME_GUARD( x );` / a class-member `MOCK_METHOD( … );` / `DECLARE_LUA_FUNCTION( C, f );` as a
+// declaration, and an in-function `ASSIGN_OR_CO_RETURN( auto e, co_await f() );` inside an ERROR node. queries/c|cpp|objc
+// tags.scm minted a function definition named after the MACRO for each one (envoy 1,664, cpython 1,135). Worse than the
+// phantom rows: a phantom makes the macro's name non-unique, so model.h retagMacroCallReferences — which may only retag a
+// name that is UNIQUELY a macro — skipped every real invocation, and envoy's REGISTER_FACTORY read in=0 against 573
+// sites. THE TRAP: removing all but one phantom changes nothing (the name is still shared), so the rule must catch every
+// shape, which is why the gate counts phantoms and FAILs on any.
+//
+// The rule is syntactic and one-sided: the capture is an invocation only when ALL of these hold —
+//   * the name is SCREAMING_SNAKE (the macro convention) and not a block-forming test macro (kBlockFormingTestMacros: an
+//     empty `TEST( S, N ) {}` keeps its def, the documented floor of quality.h kBuiltinRegisterMacros);
+//   * the declarator names a plain identifier: a qualified `HSV::HSV() {}` is a member, and a macro is never qualified;
+//   * its owner (a function_definition, declaration or field_declaration, through `*` / `&` / init declarators) carries
+//     no type; or the owner is an ERROR node and no type node stands right before the declarator;
+//   * it is not a constructor (the enclosing class's own name: `struct RGB { RGB() {} };`);
+//   * a definition's braces hold no `;` before their own closing brace: a body with a statement is a block-forming macro
+//     (`TEST_F( S, N ) { … ; }`, cpython `TARGET( op ) { … ; }`) and keeps its def, named after the macro.
+// NOT this card: a trailing annotation macro (`T f() ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { body }`) parses as a typeless
+// def named after the annotation that OWNS f's real body; its body holds `;`, so it keeps its def here (the P1 card).
+inline constexpr std::array<std::string_view, 10> kBlockFormingTestMacros = {
+    "TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P",                                   // GoogleTest
+    "BENCHMARK", "BENCHMARK_F", "BENCHMARK_DEFINE_F", "BENCHMARK_TEMPLATE", "BENCHMARK_CAPTURE" // Google Benchmark
+};
+
+// Does a brace block's text hold a `;` before the `}` that closes its own `{`? Strings, character literals and comments
+// are skipped. Bounded by the matching brace on purpose: error recovery can stretch a recovered body past it
+// (`F( a, b ){ X( 1, { { … } } ) };` read the next declaration into the body).
+inline bool braceBlockHoldsStatement( std::string_view block ) noexcept
+{
+    int depth = 0;
+    for( std::size_t i = 0; i < block.size(); ++i )
+    {
+        const char c = block[i];
+        if( c == '"' || c == '\'' )
+        {
+            for( ++i; i < block.size() && block[i] != c; ++i )
+            {
+                i += block[i] == '\\' ? 1u : 0u;
+            }
+        }
+        else if( c == '/' && i + 1 < block.size() && ( block[i + 1] == '/' || block[i + 1] == '*' ) )
+        {
+            const std::size_t end = block[i + 1] == '/' ? block.find( '\n', i ) : block.find( "*/", i + 2 );
+            i                     = end == std::string_view::npos ? block.size() : end;
+        }
+        else if( c == '{' || c == '}' )
+        {
+            depth += c == '{' ? 1 : -1;
+            if( depth == 0 )
+            {
+                return false;
+            }
+        }
+        else if( c == ';' )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Is this ERROR-recovered declarator typeless — no type node right before it (cFamilyMacroInvocationDecl's ERROR arm)?
+inline bool errorDeclaratorUntyped( TSNode fnDeclarator ) noexcept
+{
+    static constexpr std::string_view kTypeKinds[] = { "primitive_type", "type_identifier", "qualified_identifier", "template_type", "sized_type_specifier",
+                                                       "struct_specifier", "class_specifier", "union_specifier", "enum_specifier", "type_qualifier",
+                                                       "storage_class_specifier", "placeholder_type_specifier", "macro_type_specifier" };
+    const TSNode prev = ts_node_prev_named_sibling( fnDeclarator );
+    if( ts_node_is_null( prev ) )
+    {
+        return true;
+    }
+    const std::string_view kind = ts_node_type( prev );
+    return std::ranges::find( kTypeKinds, kind ) == std::end( kTypeKinds );
+}
+
+// Is the definition/declaration `owner` a constructor of the class whose member list holds it?
+inline bool ownerIsConstructorOf( TSNode owner, std::string_view name, std::string_view src ) noexcept
+{
+    const TSNode list = parentOf( owner );
+    if( ts_node_is_null( list ) || !kindIs( ts_node_type( list ), "field_declaration_list" ) )
+    {
+        return false;
+    }
+    const TSNode cls = parentOf( list );
+    return !ts_node_is_null( cls ) && nodeFieldText( cls, NodeField::Name, src ) == name;
+}
+
+inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
+{
+    if( !isScreamingSnakeName( name ) || std::ranges::find( kBlockFormingTestMacros, name ) != kBlockFormingTestMacros.end() )
+    {
+        return false;
+    }
+    const TSNode declared = fieldChild( fnDeclarator, NodeField::Declarator );
+    if( ts_node_is_null( declared ) || !( kindIs( ts_node_type( declared ), "identifier" ) || kindIs( ts_node_type( declared ), "field_identifier" ) ) )
+    {
+        return false;
+    }
+    TSNode owner = parentOf( fnDeclarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( owner ) && ( kindIs( ts_node_type( owner ), "pointer_declarator" ) || kindIs( ts_node_type( owner ), "reference_declarator" ) ); ++guard )
+    {
+        owner = parentOf( owner );
+    }
+    if( !ts_node_is_null( owner ) && kindIs( ts_node_type( owner ), "init_declarator" ) )   // `F( a, b ){ { … } };` reads as a brace-initialised declarator
+    {
+        owner = parentOf( owner );
+    }
+    if( ts_node_is_null( owner ) )
+    {
+        return false;
+    }
+    const char* ownerKind = ts_node_type( owner );
+    if( kindIs( ownerKind, "ERROR" ) )
+    {
+        return errorDeclaratorUntyped( fnDeclarator );
+    }
+    const bool isDefinition = kindIs( ownerKind, "function_definition" );
+    if( !( isDefinition || kindIs( ownerKind, "declaration" ) || kindIs( ownerKind, "field_declaration" ) ) || !ts_node_is_null( fieldChild( owner, NodeField::Type ) )
+        || ownerIsConstructorOf( owner, name, src ) )
+    {
+        return false;
+    }
+    const TSNode body = isDefinition ? fieldChild( owner, NodeField::Body ) : TSNode {};
+    return ts_node_is_null( body ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) );
+}
+
+// The capture-side question: a C-family @definition.function/@definition.method on a function_declarator that
+// cFamilyMacroInvocationDecl reads as a macro invocation. Asked BEFORE dropGatedCapture (ingest_sidecap.h), because the
+// site does not vanish: it becomes a call-shaped use of the macro, which model.h retags role="macro".
+inline bool cFamilyMacroInvocationCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode roleNode, std::string_view src ) noexcept
+{
+    return ( lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC ) && ( defCapSv == "definition.function" || defCapSv == "definition.method" )
+        && kindIs( ts_node_type( roleNode ), "function_declarator" ) && cFamilyMacroInvocationDecl( roleNode, name, src );
+}
+
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept;
