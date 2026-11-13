@@ -683,7 +683,7 @@ qd_none "masking (c++)" error-masking routed "a re-throw ahead of a catch-all si
 #   — sev=minor. Every negative arm first COUNTS the sites it judges (ripwire's own --match over the edited fixture) and
 #   FAILS on zero, so a fixture that stopped parsing as the shape cannot pass vacuously.
 premise(){   # LABEL DIR SYM QUERY → FAIL unless the query hits at least once inside SYM
-    local n; n="$( cd "$WORK/$2" && "$BIN" . --match="$4" --no-cache 2>/dev/null | tr '>' '\n' | grep -c "<m p=[^ ]* in=\"$3\"" )"
+    local n; n="$( cd "$WORK/$2" && "$BIN" . --match="$4" --no-cache 2>/dev/null | tr '>' '\n' | grep -c "<m p=[^ ]* in=\"$3\"" )"   # status: a failed --match prints no <m> row, so n is 0 and the premise FAILs
     if [ "${n:-0}" -gt 0 ]; then ok "$1: premise — $n site(s) judged in $3"; else no "$1: premise — 0 sites in $3 (the negative arm is vacuous)"; fi
 }
 GOB='package p

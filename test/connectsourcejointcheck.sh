@@ -91,7 +91,8 @@ printf 'void helperT() {}\nvoid applyIt();\nvoid testDriver() { helperT(); apply
 # ── P) premise: the test-only joint exists (the test calls both terminals) ───────────────────────────────
 premise=0
 for t in planIt applyIt; do
-    "$BIN" "$TONLY" --no-cache --callers="$t" 2>/dev/null | grep -q 'testBoth' && premise=$(( premise + 1 ))
+    cl="$( "$BIN" "$TONLY" --no-cache --callers="$t" 2>/dev/null )" || no "premise: --callers=$t exited $?"
+    printf '%s' "$cl" | grep -q 'testBoth' && premise=$(( premise + 1 ))
 done
 if [ "$premise" -eq 2 ]; then
     ok "(P) premise: testBoth calls both terminals (seen by --callers on each: $premise/2)"
@@ -100,7 +101,8 @@ else
 fi
 premTie=0
 for t in planIt applyIt; do
-    "$BIN" "$TIE" --no-cache --callers="$t" 2>/dev/null | grep -q 'testBoth' && premTie=$(( premTie + 1 ))
+    cl="$( "$BIN" "$TIE" --no-cache --callers="$t" 2>/dev/null )" || no "premise: --callers=$t exited $?"
+    printf '%s' "$cl" | grep -q 'testBoth' && premTie=$(( premTie + 1 ))
 done
 if [ "$premTie" -eq 2 ]; then
     ok "(P) premise: tie fixture's testBoth calls both terminals ($premTie/2)"
@@ -119,12 +121,12 @@ checkTestOnly(){   # $1 label, $2 document
     if printf '%s' "$2" | grep -q '<connect [^>]*test_joint="testBoth" test_joint_p="test/core_test.cpp:2"'; then ok "($1) the test is named as test-only evidence (test_joint= test_joint_p=)"; else no "($1) test_joint=/test_joint_p= missing: $( brief "$2" )"; fi
     if printf '%s' "$2" | grep -q '<unconnected radius='; then ok "($1) the terminals are reported <unconnected> (no source joint within radius)"; else no "($1) no <unconnected> row: $( brief "$2" )"; fi
 }
-A_FULL="$( "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt --legend=full 2>/dev/null )"
-A_DEF="$( "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt 2>/dev/null )"
+A_FULL="$( "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt --legend=full 2>/dev/null )" || no "A_FULL: ripwire exited $?"
+A_DEF="$( "$BIN" "$TONLY" --no-cache --connect=planIt,applyIt 2>/dev/null )" || no "A_DEF: ripwire exited $?"
 checkTestOnly "A" "$A_FULL"
 
 # ── B) --for's <graph_verb> block ────────────────────────────────────────────────────────────────────────
-B_DOC="$( "$BIN" "$TONLY" --no-cache --for='common caller of planIt and applyIt' 2>/dev/null )"
+B_DOC="$( "$BIN" "$TONLY" --no-cache --for='common caller of planIt and applyIt' 2>/dev/null )" || no "B_DOC: ripwire exited $?"
 B_GV="$( printf '%s' "$B_DOC" | grep -o '<graph_verb .*</graph_verb>' )"
 if printf '%s' "$B_GV" | grep -q 'verb="--connect='; then
     ok "(B) premise: --for ran the --connect graph verb"
@@ -136,7 +138,8 @@ fi
 # ── C) MCP connect verb ──────────────────────────────────────────────────────────────────────────────────
 if command -v python3 >/dev/null 2>&1; then
     CMSG='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"connect","arguments":{"path":"'"$TONLY"'","symbols":["planIt","applyIt"]}}}'
-    C_DOC="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$CMSG" | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
+    C_RAW="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$CMSG" | "$BIN" --mcp 2>/dev/null )" || no "(C) ripwire --mcp exited $?"
+    C_DOC="$( printf '%s\n' "$C_RAW" | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
 print("__ERROR__:" + json.dumps(r["error"]) if "error" in r else r["result"]["content"][0]["text"])
@@ -150,12 +153,12 @@ else
 fi
 
 # ── D) positive control: a real source joint is still the joint ─────────────────────────────────────────
-D_DOC="$( "$BIN" "$SJ" --no-cache --connect=planIt,applyIt 2>/dev/null )"
+D_DOC="$( "$BIN" "$SJ" --no-cache --connect=planIt,applyIt 2>/dev/null )" || no "D_DOC: ripwire exited $?"
 if [ "$( steinerOf "$D_DOC" )" = "driver" ]; then ok "(D) a source joint (driver) still prints as <s>"; else no "(D) expected <s n=\"driver\">: $( brief "$D_DOC" )"; fi
 if printf '%s' "$D_DOC" | grep -q 'source_joint='; then no "(D) source_joint= printed beside a real source joint"; else ok "(D) no source_joint= when a source joint exists"; fi
 
 # ── E) a source joint the old tie-break lost to a test ───────────────────────────────────────────────────
-E_DOC="$( "$BIN" "$TIE" --no-cache --connect=planIt,applyIt 2>/dev/null )"
+E_DOC="$( "$BIN" "$TIE" --no-cache --connect=planIt,applyIt 2>/dev/null )" || no "E_DOC: ripwire exited $?"
 if [ "$( steinerOf "$E_DOC" )" = "driver" ]; then
     ok "(E) the source joint driver (connects 7) wins over the test testBoth (connects 2)"
 else
@@ -164,7 +167,7 @@ fi
 if printf '%s' "$E_DOC" | grep -q 'source_joint='; then no "(E) source_joint= printed though a source joint exists"; else ok "(E) no source_joint= (a source joint was found)"; fi
 
 # ── F) a test terminal keeps its test joint ──────────────────────────────────────────────────────────────
-F_DOC="$( "$BIN" "$TT" --no-cache --connect=helperT,applyIt 2>/dev/null )"
+F_DOC="$( "$BIN" "$TT" --no-cache --connect=helperT,applyIt 2>/dev/null )" || no "F_DOC: ripwire exited $?"
 if [ "$( steinerOf "$F_DOC" )" = "testDriver" ]; then
     ok "(F) with a test terminal, the test joint testDriver is still printed"
 else
@@ -173,7 +176,7 @@ fi
 if printf '%s' "$F_DOC" | grep -q 'source_joint='; then no "(F) source_joint= printed for a test terminal"; else ok "(F) no source_joint= for a test terminal"; fi
 
 # ── I) the evidence joins what the source search left apart ─────────────────────────────────────────────
-I_DOC="$( "$BIN" "$XC" --no-cache --connect=planIt,applyIt,cIt,dIt 2>/dev/null )"
+I_DOC="$( "$BIN" "$XC" --no-cache --connect=planIt,applyIt,cIt,dIt 2>/dev/null )" || no "I_DOC: ripwire exited $?"
 iPrem=0
 printf '%s' "$I_DOC" | grep -q '<g terminals="2"><t n="planIt"' && iPrem=$(( iPrem + 1 ))
 [ "$( printf '%s' "$I_DOC" | grep -o '<unconnected radius=' | wc -l | tr -d ' ' )" = 2 ] && iPrem=$(( iPrem + 1 ))
@@ -189,7 +192,7 @@ else
 fi
 
 # ── K) the evidence is the test on a leg that crosses source components ─────────────────────────────────
-K_DOC="$( "$BIN" "$XL" --no-cache --connect=planIt,applyIt,cIt 2>/dev/null )"
+K_DOC="$( "$BIN" "$XL" --no-cache --connect=planIt,applyIt,cIt 2>/dev/null )" || no "K_DOC: ripwire exited $?"
 if printf '%s' "$K_DOC" | grep -q '<g terminals="2"><t n="planIt"' && printf '%s' "$K_DOC" | grep -q '<unconnected radius='; then
     ok "(K) premise: planIt/applyIt joined through source, cIt <unconnected>"
 else
@@ -202,9 +205,10 @@ else
 fi
 
 # ── L) a many-definition terminal is chosen on the source-only view ───────────────────────────────────────
-L_DOC="$( "$BIN" "$MD" --no-cache --connect=planIt,runIt 2>/dev/null )"
+L_DOC="$( "$BIN" "$MD" --no-cache --connect=planIt,runIt 2>/dev/null )" || no "L_DOC: ripwire exited $?"
 lPrem=0
-for t in d1 pTest; do "$BIN" "$MD" --no-cache --callers=planIt 2>/dev/null | grep -q "$t" && lPrem=$(( lPrem + 1 )); done
+MD_CALLERS="$( "$BIN" "$MD" --no-cache --callers=planIt 2>/dev/null )" || no "(L) premise: --callers=planIt exited $?"
+for t in d1 pTest; do printf '%s' "$MD_CALLERS" | grep -q "$t" && lPrem=$(( lPrem + 1 )); done
 if [ "$lPrem" -eq 2 ]; then ok "(L) premise: planIt is called by d1 (source) and pTest (test)"; else no "(L) premise: planIt callers lack d1/pTest ($lPrem/2)"; fi
 if printf '%s' "$L_DOC" | grep -q '<g terminals="2">' && ! printf '%s' "$L_DOC" | grep -q 'test_joint='; then
     ok "(L) planIt and runIt joined through source, no test_joint="
@@ -234,9 +238,9 @@ done
 if printf '%s' "$D_DOC" | sed 's/<connect .*//' | grep -qF 'source_joint='; then no "(G) the source_joint= clause rides an answer that does not carry it"; else ok "(G) the clause is present-only (absent with a source joint)"; fi
 
 # ── H) determinism + well-formedness ─────────────────────────────────────────────────────────────────────
-"$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d1" 2>&1
-"$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d2" 2>&1
-"$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d3" 2>&1
+"$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d1" 2>&1 || no "(H) run 1: ripwire exited $?"
+"$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d2" 2>&1 || no "(H) run 2: ripwire exited $?"
+"$BIN" "$TONLY" --no-cache --connect=planIt,applyIt >"$TMP/d3" 2>&1 || no "(H) run 3: ripwire exited $?"
 if cmp -s "$TMP/d1" "$TMP/d2" && cmp -s "$TMP/d2" "$TMP/d3"; then ok "(H) 3 runs byte-identical"; else no "(H) non-deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
     xmlBad=0

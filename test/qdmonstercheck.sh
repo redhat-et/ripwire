@@ -97,7 +97,7 @@ body "" > "$S/m.py";               "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" c
 body "$flat" > "$S/m.py";          "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" commit -qm flat
 body "$flat$nested" > "$S/m.py";   "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" commit -qm nested
 body "$flat$nested$small" > "$S/m.py"; "${G[@]}" -C "$S" add -A; "${G[@]}" -C "$S" commit -qm small
-qd(){ ( cd "$1" && "$BIN" . --quality-delta="$2" --quality-kinds=complexity,nesting ) > "$3" 2> "$3.err"; echo $? > "$3.rc"; }
+qd(){ ( cd "$1" && "$BIN" . --quality-delta="$2" --quality-kinds=complexity,nesting ) > "$3" 2> "$3.err"; echo $? > "$3.rc"; }   # status: recorded in .rc and compared by the readers
 qd "$S" HEAD~3..HEAD~2 "$TMP/s1.xml"
 qd "$S" HEAD~2..HEAD~1 "$TMP/s2.xml"
 qd "$S" HEAD~1..HEAD   "$TMP/s3.xml"

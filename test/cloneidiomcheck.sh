@@ -175,7 +175,7 @@ done
 # (M) the DEFAULT (compact) legend's demoted=1 reading on a demoted one-statement pair: that pair may share its
 # parameter names (the identifier test leaves them out), so a reading that says only "no shared identifier"
 # states something false about the very row it explains (CodeRabbit #629). Premise: the row is demoted.
-CL="$( "$BIN" "$CORPUS/onestmt_demote" --clones --no-cache 2>/dev/null )"
+CL="$( "$BIN" "$CORPUS/onestmt_demote" --clones --no-cache 2>/dev/null )" || no "--clones on onestmt_demote exited $?"
 case "$CL" in
     *'idiom="one-statement" demoted="1"'*)
         DR="$( printf '%s' "$CL" | sed 's/<clones .*//' | grep -oE 'group demoted=1: [^;]*' | head -1 )"
@@ -254,7 +254,7 @@ esac
 
 # (O) the quality-delta half of the fourth idiom: the parameter-only pair is minor, the shared-constant pair gates
 mkrepo qd_onestmt "onestmt_demote/site.h" "onestmt_demote/ledger.h" || { echo "git fixture setup failed"; exit 2; }
-OROW="$( qd qd_onestmt | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"
+OROW="$( qd qd_onestmt | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"   # status: --quality-delta exits 0 or 2 (gating) by design; the row's sev= is the verdict, and an empty row FAILs
 case "$OROW" in
     *'idiom="one-statement"'*'sev="minor"'*|*'sev="minor"'*'idiom="one-statement"'*) ok "quality-delta: the parameter-only one-statement pair is minor, idiom named";;
     *) no "quality-delta: the parameter-only one-statement pair is not a minor one-statement row (row: ${OROW:-<none>})";;
@@ -271,7 +271,7 @@ case "$( qdfull qd_onestmt )" in
     *'one-statement is a body of one return statement'*) ok "quality-delta: the one-statement row's document defines the idiom's narrowed test";;
     *) no "quality-delta: a document with a one-statement row never defines the narrowed test";;
 esac
-LFULL="$( qdfull qd_demote )"
+LFULL="$( qdfull qd_demote )"   # status: --quality-delta exits 0 or 2 (gating) by design; the next case FAILs a document with no clone paragraph
 case "$LFULL" in
     *'CLONE ROWS name the whole group'*) ;;
     *) no "quality-delta: the ladder document's full legend has no clone paragraph — the next arm would be vacuous";;
@@ -281,7 +281,7 @@ case "$LFULL" in
     *) ok "quality-delta: a ladder-only document does not carry the one-statement sentence";;
 esac
 mkrepo qd_onestmt_const "onestmt_sharedconst/site.h" "onestmt_sharedconst/ledger.h" || { echo "git fixture setup failed"; exit 2; }
-CROW="$( qd qd_onestmt_const | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"
+CROW="$( qd qd_onestmt_const | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"   # status: --quality-delta exits 2 here by design (the pair gates); the row's gating= is the verdict, and an empty row FAILs
 case "$CROW" in
     *'idiom="one-statement"'*'gating="1"'*|*'gating="1"'*'idiom="one-statement"'*) ok "quality-delta: the shared-constant one-statement pair still gates";;
     *) no "quality-delta: the shared-constant one-statement pair stopped gating (row: ${CROW:-<none>})";;

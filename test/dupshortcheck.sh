@@ -65,8 +65,7 @@ EOF
 
 # One replay per commit, sequentially (each is a whole-repo quality-delta; never two at once).
 while read -r c _; do
-    ( cd "$REPO" && "$BIN" . --quality-delta="$c..$c^" --quality-kinds=duplication,new-clone-of-reused-helper ) \
-        >"$TMP/$c.xml" 2>"$TMP/$c.err"
+    ( cd "$REPO" && "$BIN" . --quality-delta="$c..$c^" --quality-kinds=duplication,new-clone-of-reused-helper ) >"$TMP/$c.xml" 2>"$TMP/$c.err"   # status: recorded in $c.rc and compared with the expected rc below
     echo "$?" >"$TMP/$c.rc"
 done <<EOF
 $COMMITS
