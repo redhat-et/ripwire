@@ -18816,6 +18816,33 @@ inline bool selectorIsBareName( std::string_view spec ) noexcept
         && spec.find_first_of( ".#", 1 ) == std::string_view::npos;
 }
 
+// CONNECT-SOURCE-JOINT: pathDefInTests per node, the nodes the source-only search never walks through. Its path half is read
+// once per file: a symbol with no testScope of its own answers exactly that file's half, so the first such symbol of each file
+// is asked and the answer reused (kFileUnread until then).
+inline std::vector<char> connectTestMask( const IngestResult& ing, const Graph& g )
+{
+    const std::size_t         N           = g.wOutDeg.size();
+    constexpr std::uint8_t    kFileUnread = 2;
+    std::vector<std::uint8_t> fileInTests( ing.files.size(), kFileUnread );
+    std::vector<char>         inTests( N, 0 );
+    for( std::size_t n = 0; n < N && n < ing.symbols.size(); ++n )
+    {
+        const Symbol& s = ing.symbols[ n ];
+        if( s.testScope != 0 || s.fileId >= fileInTests.size() )
+        {
+            inTests[ n ] = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
+            continue;
+        }
+        std::uint8_t& fileHalf = fileInTests[ s.fileId ];
+        if( fileHalf == kFileUnread )
+        {
+            fileHalf = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
+        }
+        inTests[ n ] = char( fileHalf );
+    }
+    return inTests;
+}
+
 // What joinTerminalPicks hands packConnect: the tied names (ambiguous_terminal=, "" when none) and, per terminal whose spec is
 // not a bare name, (its pick, the definitions its spelling searched). Fix 1 (NIT-1 / CodeRabbit): several specs can pick ONE
 // node (`--connect=useAlpha,run,Alpha.run`) and print ONE <t> row, so every spec's count is kept (barePicks for the bare ones)
@@ -18866,6 +18893,70 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
     return out;
 }
 
+// The lowest-id test-class intermediary on a shortest path, inside the group's own edges, between the two ends of a leg that
+// `crosses` (kNoNode when none): the leg's own intermediaries, which the group's flat steiner list does not record. Each leg is
+// two BFS over the group's nodes (terminals and steiner, a few dozen), never over the graph.
+template<class Crosses>
+inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const char> inTests, Crosses crosses )
+{
+    std::vector<NodeId> nodes( grp.terminals );
+    nodes.insert( nodes.end(), grp.steiner.begin(), grp.steiner.end() );
+    std::sort( nodes.begin(), nodes.end() );
+    const auto at = [ & ]( NodeId v ) { return std::size_t( std::lower_bound( nodes.begin(), nodes.end(), v ) - nodes.begin() ); };
+    std::vector<std::vector<std::uint32_t>> adj( nodes.size() );
+    for( const ConnectEdge& e : grp.edges )
+    {
+        const std::size_t a = at( e.from ), b = at( e.to );
+        if( a < nodes.size() && b < nodes.size() && nodes[ a ] == e.from && nodes[ b ] == e.to )
+        {
+            adj[ a ].push_back( std::uint32_t( b ) );
+            adj[ b ].push_back( std::uint32_t( a ) );
+        }
+    }
+    const auto bfs = [ & ]( std::size_t from )
+    {
+        std::vector<std::uint32_t> d( nodes.size(), UINT32_MAX );
+        std::vector<std::uint32_t> q{ std::uint32_t( from ) };
+        d[ from ] = 0;
+        for( std::size_t h = 0; h < q.size(); ++h )
+        {
+            for( const std::uint32_t v : adj[ q[ h ] ] )
+            {
+                if( d[ v ] == UINT32_MAX )
+                {
+                    d[ v ] = d[ q[ h ] ] + 1;
+                    q.push_back( v );
+                }
+            }
+        }
+        return d;
+    };
+    NodeId best = kNoNode;
+    for( const ConnectPath& leg : grp.paths )
+    {
+        const std::size_t a = at( leg.termA ), b = at( leg.termB );
+        if( !crosses( leg.termA, leg.termB ) || a >= nodes.size() || b >= nodes.size() || nodes[ a ] != leg.termA || nodes[ b ] != leg.termB )
+        {
+            continue;
+        }
+        const std::vector<std::uint32_t> da = bfs( a ), db = bfs( b );
+        if( da[ b ] == UINT32_MAX )
+        {
+            continue;
+        }
+        for( std::size_t k = 0; k < nodes.size(); ++k )
+        {
+            const NodeId v = nodes[ k ];
+            if( v < inTests.size() && inTests[ v ] != 0 && da[ k ] != UINT32_MAX && db[ k ] != UINT32_MAX && da[ k ] + db[ k ] == da[ b ]
+                && v != leg.termA && v != leg.termB && ( best == kNoNode || v < best ) )
+            {
+                best = v;
+            }
+        }
+    }
+    return best;
+}
+
 // CONNECT-SOURCE-JOINT (a): a test function is never the joint of terminals that are all source. terraform's
 // `--connect=Context.Plan,Context.Apply` joined the two through TestContext2Apply_nullableVariables and printed it as the
 // common caller, unhedged; and §2.4a's tie-break (fewer connects wins) hands an equal-distance join to a test, which usually
@@ -18876,31 +18967,11 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
 // terminal keeps today's search unchanged (a test's own helpers are its honest joints).
 inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& terminals, std::uint32_t radius )
 {
-    const std::size_t N = g.wOutDeg.size();
     if( terminals.size() < 2 || std::any_of( terminals.begin(), terminals.end(), [ & ]( NodeId t ) { return pathDefInTests( ing, t ); } ) )
     {
         return connectSubgraph( g, terminals, radius );
     }
-    // pathDefInTests per node, its path half read once per file: a symbol with no testScope of its own answers exactly that file's
-    // half, so the first such symbol of each file is asked and the answer reused (kFileUnread until then)
-    constexpr std::uint8_t    kFileUnread = 2;
-    std::vector<std::uint8_t> fileInTests( ing.files.size(), kFileUnread );
-    std::vector<char>         inTests( N, 0 );
-    for( std::size_t n = 0; n < N && n < ing.symbols.size(); ++n )
-    {
-        const Symbol& s = ing.symbols[ n ];
-        if( s.testScope != 0 || s.fileId >= fileInTests.size() )
-        {
-            inTests[ n ] = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
-            continue;
-        }
-        std::uint8_t& fileHalf = fileInTests[ s.fileId ];
-        if( fileHalf == kFileUnread )
-        {
-            fileHalf = pathDefInTests( ing, NodeId( n ) ) ? 1 : 0;
-        }
-        inTests[ n ] = char( fileHalf );
-    }
+    const std::vector<char> inTests = connectTestMask( ing, g );
     ConnectResult res = connectSubgraph( g, terminals, radius, inTests );
     if( res.groups.size() <= 1 )
     {
@@ -18918,18 +18989,14 @@ inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g
         const auto it = std::lower_bound( res.terminals.begin(), res.terminals.end(), t );
         return ( it != res.terminals.end() && *it == t ) ? res.componentOf[ std::size_t( it - res.terminals.begin() ) ] : UINT32_MAX;
     };
+    // Per LEG, not per group: one group can hold a source-joined pair with a shorter test path beside it AND a test that joins
+    // a third terminal, so only the tests on a leg whose two ends lie in different source components count (CodeRabbit #636).
     for( const ConnectGroup& grp : any.groups )
     {
-        const bool joinsApart = std::any_of( grp.terminals.begin(), grp.terminals.end(),
-                                             [ & ]( NodeId t ) { return sourceComponentOf( t ) != sourceComponentOf( grp.terminals.front() ); } );
-        if( !joinsApart )
+        const NodeId hit = lowestTestOnCrossingLegs( grp, inTests, [ & ]( NodeId a, NodeId b ) { return sourceComponentOf( a ) != sourceComponentOf( b ); } );
+        if( hit != kNoNode && ( res.testJoint == kNoNode || hit < res.testJoint ) )
         {
-            continue;
-        }
-        const auto hit = std::find_if( grp.steiner.begin(), grp.steiner.end(), [ & ]( NodeId v ) { return v < N && inTests[ v ] != 0; } );
-        if( hit != grp.steiner.end() && ( res.testJoint == kNoNode || *hit < res.testJoint ) )
-        {
-            res.testJoint = *hit;
+            res.testJoint = hit;
         }
     }
     return res;
