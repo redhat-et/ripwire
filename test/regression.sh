@@ -964,6 +964,7 @@ for _g in \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
+    savestreamcheck \
     scipcheck \
     scipjoincheck \
     scorecardcheck \
