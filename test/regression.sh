@@ -983,6 +983,7 @@ for _g in \
     selectorscopecheck \
     selfcheckcheck \
     selfcontainedcheck \
+    sentencesubjectcheck \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \
