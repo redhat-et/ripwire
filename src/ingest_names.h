@@ -2904,17 +2904,30 @@ inline AnnotationRename annotationRenamedName( TSNode macroDeclarator, std::stri
     {
         prev = ts_node_prev_named_sibling( prev );
     }
-    const char* kind = ts_node_is_null( prev ) ? "" : ts_node_type( prev );
-    if( !( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) ) || ts_node_is_null( fieldChild( prev, NodeField::Type ) ) )
-    {
-        return {};
-    }
-    const std::uint32_t count = ts_node_child_count( prev );
+    const std::uint32_t count = ts_node_is_null( prev ) ? 0u : ts_node_child_count( prev );
     if( count == 0 || !ts_node_is_missing( ts_node_child( prev, count - 1 ) ) )
     {
         return {};
     }
-    const TSNode name = emptyCallInitName( fieldChild( prev, NodeField::Declarator ), src );
+    const char* kind = ts_node_type( prev );
+    TSNode      name {};
+    if( ( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) ) && !ts_node_is_null( fieldChild( prev, NodeField::Type ) ) )
+    {
+        name = emptyCallInitName( fieldChild( prev, NodeField::Declarator ), src );
+    }
+    else if( kindIs( kind, "expression_statement" ) )
+    {
+        // `absl::flat_hash_set<const D*>& active()` read as the expression `a::b<…> & active()`: a reference or pointer
+        // return type taken for a multiplication or bitwise and, whose right side calls the real function's name
+        const TSNode expr     = ts_node_named_child( prev, 0 );
+        const bool   typeLike = !ts_node_is_null( expr ) && kindIs( ts_node_type( expr ), "binary_expression" )
+                              && ( nodeFieldText( expr, NodeField::Operator, src ) == "&" || nodeFieldText( expr, NodeField::Operator, src ) == "*" );
+        const TSNode call     = typeLike ? fieldChild( expr, NodeField::Right ) : TSNode {};
+        const TSNode callee   = !ts_node_is_null( call ) && kindIs( ts_node_type( call ), "call_expression" ) ? fieldChild( call, NodeField::Function ) : TSNode {};
+        const TSNode args     = ts_node_is_null( callee ) ? TSNode {} : fieldChild( call, NodeField::Arguments );
+        const bool   empty    = !ts_node_is_null( args ) && ts_node_named_child_count( args ) == 0;
+        name                  = empty && kindIs( ts_node_type( callee ), "identifier" ) && !isScreamingSnakeName( nodeTextOf( callee, src ) ) ? callee : TSNode {};
+    }
     return { name, ts_node_is_null( name ) ? TSNode {} : prev };
 }
 
@@ -2948,6 +2961,15 @@ inline bool annotationAfterErrorDeclarator( TSNode fnDeclarator, std::string_vie
     return ( kindIs( kind, "identifier" ) || kindIs( kind, "field_identifier" ) ) && !isScreamingSnakeName( nodeTextOf( last, src ) );
 }
 
+// A definition whose `type` is an ALL-CAPS type_identifier right after an annotated prototype: the first of two trailing
+// annotations, read as the type of a definition the second one names.
+inline bool annotationTypedAsType( TSNode definition, std::string_view src ) noexcept
+{
+    const TSNode type = fieldChild( definition, NodeField::Type );
+    return !ts_node_is_null( type ) && kindIs( ts_node_type( type ), "type_identifier" ) && isScreamingSnakeName( nodeTextOf( type, src ) )
+        && !ts_node_is_null( annotationHostDeclarator( definition, src ) );
+}
+
 inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
 {
     if( !isScreamingSnakeName( name ) || std::ranges::find( kBlockFormingTestMacros, name ) != kBlockFormingTestMacros.end() )
@@ -2955,6 +2977,18 @@ inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view na
         return false;
     }
     const TSNode declared = fieldChild( fnDeclarator, NodeField::Declarator );
+    if( !ts_node_is_null( declared ) && kindIs( ts_node_type( declared ), "qualified_identifier" ) && ts_node_has_error( declared ) )
+    {
+        // MACRO-P1: `T name ABSL_GUARDED_BY( mu );` at namespace scope recovered as `name ::ABSL_GUARDED_BY( mu )` behind a
+        // MISSING "::" — the "scope" is the variable, the "name" the annotation. A real qualified name has its own `::`.
+        for( std::uint32_t i = 0; i < ts_node_child_count( declared ); ++i )
+        {
+            if( ts_node_is_missing( ts_node_child( declared, i ) ) )
+            {
+                return true;
+            }
+        }
+    }
     if( ts_node_is_null( declared ) || !( kindIs( ts_node_type( declared ), "identifier" ) || kindIs( ts_node_type( declared ), "field_identifier" ) ) )
     {
         return false;
@@ -2984,7 +3018,9 @@ inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view na
     }
     if( !ts_node_is_null( fieldChild( owner, NodeField::Type ) ) )
     {
-        return annotationAfterErrorDeclarator( fnDeclarator, src );   // MACRO-P1: the real declarator sits in an ERROR before it
+        // MACRO-P1: the real declarator sits in an ERROR before it, or a FIRST annotation was read as the type
+        // (`void f() const ABSL_A( x ) ABSL_B( y ) { … }`: type ABSL_A, declarator ABSL_B)
+        return annotationAfterErrorDeclarator( fnDeclarator, src ) || ( isDefinition && annotationTypedAsType( owner, src ) );
     }
     const TSNode body = isDefinition ? fieldChild( owner, NodeField::Body ) : TSNode {};
     return ts_node_is_null( body ) || !bodyFollowsClosedParameters( fnDeclarator, body, src ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) )
@@ -3007,7 +3043,7 @@ inline TSNode annotatedDefinitionAfter( TSNode fnDeclarator, std::string_view sr
         return {};
     }
     const char* kind = ts_node_type( owner );
-    TSNode      outer;
+    TSNode      outer {};
     if( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) )
     {
         const std::uint32_t count = ts_node_child_count( owner );
@@ -3031,7 +3067,8 @@ inline TSNode annotatedDefinitionAfter( TSNode fnDeclarator, std::string_view sr
     {
         next = ts_node_next_named_sibling( next );
     }
-    if( ts_node_is_null( next ) || !kindIs( ts_node_type( next ), "function_definition" ) || !ts_node_is_null( fieldChild( next, NodeField::Type ) ) )
+    if( ts_node_is_null( next ) || !kindIs( ts_node_type( next ), "function_definition" )
+        || !( ts_node_is_null( fieldChild( next, NodeField::Type ) ) || annotationTypedAsType( next, src ) ) )
     {
         return {};
     }

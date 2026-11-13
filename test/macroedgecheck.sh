@@ -367,7 +367,12 @@ done
 #        const/noexcept/override) and the body or `;`; a constructor's host is an ERROR node, and a typed definition or field
 #        reads the real declarator inside an ERROR before the macro (`tryLock() DISABLE( ABSL_UNLOCK_FUNCTION() ) { … }`,
 #        `int g_ ABSL_GUARDED_BY( mu_ );`). An out-of-line `void A::f() ABSL_…( mu ) {` reads `A::f()` as a variable with an
-#        empty initialiser, so no prototype is captured: the annotation's definition is renamed to f (emptyOut). The trap arm counts every phantom (FAIL on >0); its premise counts the
+#        empty initialiser, so no prototype is captured: the annotation's definition is renamed to f (emptyOut; reg.cc's
+#        `T<…>& activeBalancers()` read as an expression). reg.cc also holds envoy's other recoveries: a namespace-scope
+#        `T<…> name ABSL_GUARDED_BY( mu );` read as `name::ABSL_GUARDED_BY` behind a MISSING "::", and two annotations
+#        whose first is read as the type of a definition the second names. THE TRAP AGAIN: where the #define is not in
+#        the tree (envoy's come from abseil), every annotation use stays call-shaped, and ONE surviving phantom binds
+#        them all (envoy's last ABSL_EXCLUSIVE_LOCKS_REQUIRED phantom read in="74"). The trap arm counts every phantom (FAIL on >0); its premise counts the
 #        annotation sites it saw (FAIL on zero). Keeps: a real ALL-CAPS function after a `;`-closed prototype,
 #        an annotated declaration stays a declaration, a leading annotation leaves its function alone, and cpython's
 #        `Py_LOCAL_INLINE( void * )` line (an ERROR before `CHECK_CALL( … ) { … }`) is no constructor prototype. ──
@@ -431,6 +436,32 @@ int callers()
     return c.waitFor( m, 1 ) + freeFn( 2 ) + CAPS_REAL( 3 ) + c.getConst();
 }
 EOF
+cat >"$AF/reg.cc" <<'EOF'
+#include "lock.h"
+#define ABSL_ASSERT_EXCLUSIVE_LOCK( ... ) __attribute__( ( assert_exclusive_lock( __VA_ARGS__ ) ) )
+namespace {
+absl::Mutex& registryMutex() {
+    static auto* m = new absl::Mutex();
+    return *m;
+}
+
+absl::flat_hash_set<const Balancer*>& activeBalancers()
+    ABSL_EXCLUSIVE_LOCKS_REQUIRED( registryMutex() ) {
+    static auto* s = new absl::flat_hash_set<const Balancer*>();
+    helperTwo( 10 );
+    return *s;
+}
+
+absl::Mutex function_registry_mutex;
+absl::flat_hash_map<std::string, void*> function_registry ABSL_GUARDED_BY( function_registry_mutex );
+}
+class Store
+{
+    void assertLocked( const Scope& scope ) const ABSL_EXCLUSIVE_LOCKS_REQUIRED( lock_ ) ABSL_ASSERT_EXCLUSIVE_LOCK( scope.lock_ ) {
+        helperOne( 11 );
+    }
+};
+EOF
 cat >"$AF/caps.c" <<'EOF'
 int proto_one( void );
 int CAPS_AFTER( int b ) { int c = b + proto_one(); return c; }
@@ -477,19 +508,19 @@ afnrows(){
     printf '%s' "$out" | grep -oE '<d [^>]*t="(fn|method)"' | grep -c .
 }
 # 10b) THE TRAP: no annotation is a function definition
-for m in ABSL_LOCKS_EXCLUDED ABSL_EXCLUSIVE_LOCKS_REQUIRED ABSL_UNLOCK_FUNCTION ABSL_GUARDED_BY DISABLE_ANNOT; do
+for m in ABSL_LOCKS_EXCLUDED ABSL_EXCLUSIVE_LOCKS_REQUIRED ABSL_UNLOCK_FUNCTION ABSL_GUARDED_BY DISABLE_ANNOT ABSL_ASSERT_EXCLUSIVE_LOCK; do
     n="$( afnrows "$m" )"
     [ "$n" = 0 ] && ok "MACRO-P1 trap: --defs=$m lists 0 function defs (every annotation is a use)" \
         || no "MACRO-P1 trap: --defs=$m lists $n function def(s) — an annotation owns a real function's body"
 done
 # 10c) each annotated function is ONE definition with a body (no decl_only="1" row left behind)
-for f in notifyOne waitFor getConst virt multiLine waitForT tryLock outOfClass emptyOut freeFn CondVar; do   # CondVar: the constructor (its prototype half is an ERROR node)
+for f in notifyOne waitFor getConst virt multiLine waitForT tryLock outOfClass emptyOut activeBalancers assertLocked freeFn CondVar; do   # CondVar: the constructor (its prototype half is an ERROR node)
     n="$( afnrows "$f" )"; d="$( afnrows "$f" decl )"
     [ "$n" = 1 ] && [ "$d" = 0 ] && ok "MACRO-P1: --defs=$f lists one function def, with its body" \
         || no "MACRO-P1: --defs=$f lists $n function def(s), $d of them decl_only — want 1 with its body"
 done
 # 10d) the body's calls and the annotation are the real function's: callees, and the caller side binds to it
-for fc in notifyOne:helperOne waitFor:helperTwo outOfClass:helperThree emptyOut:helperOne freeFn:helperTwo; do
+for fc in notifyOne:helperOne waitFor:helperTwo outOfClass:helperThree emptyOut:helperOne activeBalancers:helperTwo assertLocked:helperOne freeFn:helperTwo; do
     f="${fc%%:*}"; c="${fc##*:}"
     averb "--callees=$f" | tr '>' '\n' | grep -q "n=\"$c\"" && ok "MACRO-P1: --callees=$f lists $c (the body is $f's)" \
         || no "MACRO-P1: --callees=$f does not list $c"
