@@ -1128,18 +1128,18 @@ inline bool countQualifiedNearMiss( const PatternProgram& prog, TSNode n, std::s
 
 // Is this member callee spelled with the arrow operator (`ptr->f`)? The operator is an anonymous child, and a pattern
 // spelled `$O.f` never matches it, so the emitter needs the count to offer a next= that does.
+// A cursor walk (PATTERN-ARROW-CURSOR, CodeRabbit #633): a comment can sit between `obj` and `->f`, so the callee's
+// child list is as wide as the file makes it, and an indexed ts_node_child loop is quadratic (src/infra/tschildren.h).
 inline bool memberCalleeIsArrow( TSNode callee )
 {
-    const std::uint32_t n = ts_node_child_count( callee );
-    for( std::uint32_t i = 0; i < n; ++i )
+    bool        arrow = false;
+    ChildCursor cursor( callee );
+    forEachChild( callee, cursor.cur, [ & ]( TSNode c )
     {
-        const TSNode c = ts_node_child( callee, i );
-        if( !ts_node_is_named( c ) && std::string_view( ts_node_type( c ) ) == "->" )
-        {
-            return true;
-        }
-    }
-    return false;
+        arrow = !ts_node_is_named( c ) && std::string_view( ts_node_type( c ) ) == "->";
+        return !arrow;
+    } );
+    return arrow;
 }
 
 // The third ask (PATTERN-MEMBER-ZERO), same contract as the second: counted, never a hit. Its ellipsis abandons are
