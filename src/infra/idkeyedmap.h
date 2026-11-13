@@ -162,7 +162,7 @@ public:
 
     std::size_t keyCount() const noexcept { return slotCount_; }
     std::size_t valueCount() const noexcept { return values_.size(); }
-    // bytes held (the slot table's entries, the offsets, the values and any staging), for a RIPWIRE_STATS line
+    // bytes held (the slot table's entries, the offsets, the values and any staging), for the host's stats line
     std::size_t heapBytes() const noexcept
     {
         return slotOf_.size() * 16 + start_.capacity() * sizeof( std::uint32_t ) + values_.capacity() * sizeof( V )
