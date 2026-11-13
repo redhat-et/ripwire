@@ -2509,6 +2509,10 @@ inline std::vector<std::string> graphSubjectCandidates( std::span<const std::str
 // nullopt unless the task holds one of the three forms AND every slot has a candidate. Forms are tried common,
 // path, callers (parse.py PATS order); the first keyword occurrence of a form anchors it; the first span ends at
 // the form's first separator word (`to` / `and`), the last span runs to the end of the task.
+// SENTENCE-SUBJECT: the same three forms as a sentence spells them. `[call] chain from A to B` is `path from A to B`; `calls both A
+// and B` asks for their common callers; `A reach(es) B` is a path whose FROM span runs back from `reach` to the previous clause
+// word or sentence stop ("How does `ApplicationRef.tick()` reach `refreshView`"). Every slot still needs a code-like candidate, so a
+// sentence that only uses the words ("which tests reach the cache", "a chain from start to finish") reads nothing.
 inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
 {
     const std::vector<std::string_view> w = splitRouteWords( task );
@@ -2541,26 +2545,49 @@ inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
         }
         return w.size();
     };
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // common callers of A and B
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // common callers of A and B | calls both A and B
     {
-        if( detail::graphSubjectWordIs( w[i], { "common" } ) && detail::graphSubjectWordIs( w[i + 1], { "caller", "callers" } )
-            && routeLower( w[i + 2] ) == "of" )
+        const bool commonOf = detail::graphSubjectWordIs( w[i], { "common" } ) && detail::graphSubjectWordIs( w[i + 1], { "caller", "callers" } )
+                              && routeLower( w[i + 2] ) == "of";
+        const bool callsBoth = detail::graphSubjectWordIs( w[i], { "call", "calls" } ) && routeLower( w[i + 1] ) == "both";
+        if( commonOf || callsBoth )
         {
-            const std::size_t a = sep( i + 3, "and" );
+            const std::size_t from = i + ( commonOf ? 3 : 2 );
+            const std::size_t a    = sep( from, "and" );
             if( a < w.size() )
             {
-                return fill( GraphSubjectForm::Common, { { i + 3, a }, { a + 1, w.size() } } );   // the form matched: its slots decide
+                // `common callers of`: the form matched, its slots decide; `calls both` is a sentence's phrase, read only when its slots hold code
+                std::optional<GraphSubject> gs = fill( GraphSubjectForm::Common, { { from, a }, { a + 1, w.size() } } );
+                if( gs || commonOf )
+                {
+                    return gs;
+                }
             }
         }
     }
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // [call] path from A to B
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // [call] path from A to B | [call] chain from A to B
     {
-        if( detail::graphSubjectWordIs( w[i], { "path" } ) && routeLower( w[i + 1] ) == "from" )
+        if( detail::graphSubjectWordIs( w[i], { "path", "chain" } ) && routeLower( w[i + 1] ) == "from" )
         {
             const std::size_t t = sep( i + 2, "to" );
             if( t < w.size() )
             {
                 return fill( GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } );
+            }
+        }
+    }
+    for( std::size_t i = 1; i + 1 < w.size(); ++i )   // A reach(es) B: A's span runs back to the previous clause word or stop
+    {
+        if( detail::graphSubjectWordIs( w[i], { "reach", "reaches" } ) )
+        {
+            std::size_t b = i;
+            while( b > 0 && !detail::graphSubjectQualifier( w[b - 1] ) && !detail::graphSubjectTrimWord( w[b - 1] ).stop )
+            {
+                --b;
+            }
+            if( std::optional<GraphSubject> gs = fill( GraphSubjectForm::Path, { { b, i }, { i + 1, w.size() } } ) )
+            {
+                return gs;
             }
         }
     }
