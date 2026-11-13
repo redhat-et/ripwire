@@ -568,21 +568,21 @@ if [ "$rc" = 0 ] && [ "$( sed -n 1p <<<"$i2" )" = "make_registry@registry@conf/_
 else no "(i2) rc=$rc rows: $( tr '\n' '|' <<<"$i2" ) $( grep -o '<syms.*' "$TMP/i2.xml" | head -c 400 )"; fi
 # negatives, each with its premise counted: a literal initialiser (Gizmo, its def row printed), a callee a shown row stands on
 # (LazyConfig is the r=1 row beside `config = LazyConfig()`)
-run init "--for=where the Gizmo marker from @acme/core is defined" >"$TMP/i3.xml"
-run initpy "--for=where is the config object made" >"$TMP/i3p.xml"
+run init "--for=where the Gizmo marker from @acme/core is defined" >"$TMP/i3.xml"; i3rc=$?
+run initpy "--for=where is the config object made" >"$TMP/i3p.xml"; i3prc=$?
 seen=0
 grep -q '<def n="Gizmo"' "$TMP/i3.xml" && seen=$(( seen + 1 ))
 grep -q '<d [^>]*n="config"' "$TMP/i3p.xml" && grep -q '<d [^>]*n="LazyConfig"' "$TMP/i3p.xml" && seen=$(( seen + 1 ))
-if [ "$seen" = 2 ] && ! grep -q 'of="Gizmo"' "$TMP/i3.xml" && ! grep -q 'by="init"[^>]*of="config"' "$TMP/i3p.xml"; then
+if [ "$seen" = 2 ] && [ "$i3rc$i3prc" = 00 ] && ! grep -q 'of="Gizmo"' "$TMP/i3.xml" && ! grep -q 'by="init"[^>]*of="config"' "$TMP/i3p.xml"; then
     ok "(i3) no by=\"init\" row for an object-literal value or for a callee already shown (saw $seen of 2 premises)"
-else no "(i3) saw $seen of 2 premises, or a row printed: $( grep -o '<syms.*' "$TMP/i3.xml" "$TMP/i3p.xml" | head -c 500 )"; fi
-RIPWIRE_NO_INIT_ROWS=1 run init "--for=where the Widget marker from @acme/core is defined" >"$TMP/i4.off.xml"
-run init "--for=where the Widget marker from @acme/core is defined" --legend=full >"$TMP/i4f.xml"
+else no "(i3) rc=$i3rc/$i3prc, saw $seen of 2 premises, or a row printed: $( grep -o '<syms.*' "$TMP/i3.xml" "$TMP/i3p.xml" | head -c 500 )"; fi
+RIPWIRE_NO_INIT_ROWS=1 run init "--for=where the Widget marker from @acme/core is defined" >"$TMP/i4.off.xml"; i4orc=$?
+run init "--for=where the Widget marker from @acme/core is defined" --legend=full >"$TMP/i4f.xml"; i4frc=$?
 i4f="$( initrows "$TMP/i4f.xml" )"
-if [ "$( sed -n 2,3p <<<"$i1" | tr '\n' ' ' )" = "clause defs " ] && [ "$( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' )" = "clause defs " ] \
+if [ "$( sed -n 2,3p <<<"$i1" | tr '\n' ' ' )" = "clause defs " ] && [ "$( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' )" = "clause defs " ] && [ "$i4orc$i4frc" = 00 ] \
    && ! grep -q 'by="init"' "$TMP/i4.off.xml" && ! grep -q 'by=init\|by=\\"init' "$TMP/i4.off.xml" && [ "$( sed -n 2p <<<"$( initrows "$TMP/i3p.xml" )" )" = "noclause" ]; then
     ok "(i4) both legends define by=\"init\" of= at= beside a row, a block without one carries no clause; RIPWIRE_NO_INIT_ROWS=1 drops rows and clause"
-else no "(i4) compact: $( sed -n 2,3p <<<"$i1" | tr '\n' ' ' ) full: $( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/i4.off.xml" | head -c 300 )"; fi
+else no "(i4) rc=$i4orc/$i4frc compact: $( sed -n 2,3p <<<"$i1" | tr '\n' ' ' ) full: $( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/i4.off.xml" | head -c 300 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"

@@ -153,13 +153,13 @@ if grep -q 'DiskSource::Fetch' "$TMP/p6" && grep -q 'NetSource::Fetch' "$TMP/p6"
 else no "(P6) --whereis=Fetch does not list both candidates"; fi
 
 # ── H1-H3 DISPATCH-HELD-AS ────────────────────────────────────────────────────────────────────────────────────────────────────
-run "$F/heldas" "--for=Parser::Load file_reader_->ReadFile" >"$TMP/h1"
+run "$F/heldas" "--for=Parser::Load file_reader_->ReadFile" >"$TMP/h1"; h1rc=$?
 HH="$( hop "$TMP/h1" )"
 nheld="$( printf '%s' "$HH" | grep -o '<s held=' | wc -l | tr -d ' ' )"
 if has "$HH" '<s held="member" of="RealReader" n="App::reader_" p="src/app.cc:4">RealReader reader_;</s>' \
-   && has "$HH" '<s held="local" of="RealReader" n="App::Run" p="src/app.cc:10">RealReader scratch;</s>' && [ "$nheld" = 2 ] && has "$HH" 'capped="1"'; then
+   && has "$HH" '<s held="local" of="RealReader" n="App::Run" p="src/app.cc:10">RealReader scratch;</s>' && [ "$nheld" = 2 ] && has "$HH" 'capped="1"' && [ "$h1rc" = 0 ]; then
     ok "(H1) no constructor call makes RealReader: its by-value member and local declarations, two rows, capped=1 for the third"
-else no "(H1) expected App::reader_ + App::Run held rows (2) and capped=1: [$HH]"; fi
+else no "(H1) rc=$h1rc, expected App::reader_ + App::Run held rows (2) and capped=1: [$HH]"; fi
 # the premise of the negative half: every excluded shape is in the fixture, and none is a row
 seen=0
 for shape in 'RealReader\* borrowed_;' 'RealReader\* ptr' 'RealReader& ref' 'UseByParam( RealReader r )' 'RealReader inTest;' 'RealReader extra;'; do
@@ -171,8 +171,9 @@ else no "(H1n) saw $seen of 6 excluded shapes, or one printed: [$HH]"; fi
 nctor="$( printf '%s' "$H3" | grep -o ' ctor="' | wc -l | tr -d ' ' )"
 if [ "$nctor" -ge 1 ] && ! has "$H3" ' held="'; then ok "(H2) a candidate made by a production constructor call (saw $nctor ctor= rows) carries no held= row"
 else no "(H2) ctor rows $nctor (premise: at least 1) or a held= row on the rs fixture: [$H3]"; fi
-run "$F/heldas" "--for=Parser::Load file_reader_->ReadFile" --legend=full >"$TMP/h3f"
+run "$F/heldas" "--for=Parser::Load file_reader_->ReadFile" --legend=full >"$TMP/h3f"; h3rc=$?
 h3=0
+[ "$h3rc" = 0 ] || { h3=1; no "(H3) the --legend=full run exited $h3rc"; }
 for a in held of; do
     grep -qE "; dispatch ([^;]*[ (])?$a=" "$TMP/h3f" || { h3=1; no "(H3) full clause does not define $a="; }
     grep -qE "; dispatch ([^;]*[ (])?$a=" "$TMP/h1" || { h3=1; no "(H3) compact clause does not define $a="; }
