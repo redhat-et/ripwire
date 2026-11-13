@@ -1164,6 +1164,7 @@ std::optional<int> runUses( const MainDispatch& d )
         const rw::AliasUsesFacts usAliasFacts = appendAliasUseSites( ing, g, defs, usRootForId, cfg.columnar, sites );
         const std::size_t        usHedged     = usAliasFacts.hedged;   // M1: listed last, never in count=
         const bool               usUnindexed  = rw::usesRolesUnindexed( ing, defs );   // B31: count= cannot see this kind's reads
+        const bool               usDeclCapped = rw::memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED
 
         // §A6b(ii): a file: qualifier naming a file with NO definition of the name is a WRONG SELECTOR — its
         // three siblings all refuse it, and so does this one now.
@@ -1225,7 +1226,8 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
                        + rw::aliasUsesLegend( usAliasFacts, cfg.columnar )   // XF-ALIAS-HOP: exactly when a site is written through an alias
-                       + rw::unindexedRolesLegend( usUnindexed ) ).c_str(),   // B31: exactly when the root carries unindexed_roles=
+                       + rw::unindexedRolesLegend( usUnindexed )   // B31: exactly when the root carries unindexed_roles=
+                       + rw::memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries decl_scan=
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -1248,7 +1250,7 @@ std::optional<int> runUses( const MainDispatch& d )
             // a markdown SECTION heading reaches routinely. Same shape as runImpact / the callers arm.
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( defs.size() )
                                    + "\" external=\"" + ( external ? "1" : "0" ) + "\" count=\"" + std::to_string( sites.size() ) + "\""
-                                   + rw::unindexedRolesAttrXml( usUnindexed )
+                                   + rw::unindexedRolesAttrXml( usUnindexed ) + rw::memberDeclScanAttrXml( usDeclCapped )
                                    + rw::declinedLiteralCallsAttrXml( usDeclinedLiteralCalls )
                                    + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
                                    + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g )   // §H4 §3.4
@@ -1258,9 +1260,10 @@ std::optional<int> runUses( const MainDispatch& d )
             return 0;
         }
 
-        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}>",
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size() - usHedged,
                      rw::unindexedRolesAttrXml( usUnindexed ),   // B31: beside the count it qualifies; absent when armed
+                     rw::memberDeclScanAttrXml( usDeclCapped ),   // USES-DECL-SCAN-CAPPED: external="1" unchecked past the budget
                      rw::declinedLiteralCallsAttrXml( usDeclinedLiteralCalls ).c_str(),
                      rw::unprovenDefsAttrXml( usUnprovenDefs ).c_str(),   // H1: beside the count it qualifies; absent at zero
                      selectorAttrs.c_str(), usRootAttr.c_str(), upage,

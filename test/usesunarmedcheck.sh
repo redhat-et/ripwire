@@ -16,7 +16,7 @@
 # RED-FIRST: recorded 2026-11-11 against main ea25a7888 — (A2..A4) (A6) (B2) (B3) (C2..C5) (D2) (D3) FAIL there; the
 # premise, control and precision arms pass on both. B44 (CodeRabbit + CI round, 2026-11-12) added arms red on lane 1fd60ea1b:
 # (A7) (A8) (B5) (B6) (B7) (C6) (C7) (C8); (A5)'s MCP control now requires a served answer. CARD-SWEEP-1113: (B8) red
-# (alarm) and (B9) red on main cd04d477e.
+# (alarm), (B9) and (C13) red on main cd04d477e.
 #
 # Usage: test/usesunarmedcheck.sh [BIN]
 set -u
@@ -392,6 +392,27 @@ if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C11) precision
 else ok "(C11) precision: a member inside a multi-line /* */ declares nothing"; fi
 mo="$( mcp "$TMP/tsc" uses ',"symbol":"valueToken"' )"
 if printf '%s' "$mo" | grep -q 'declared as a member'; then no "(C11) precision: MCP uses valueToken names the commented-out member"; else ok "(C11) precision: MCP uses valueToken does not name the commented-out member"; fi
+
+# (C13) USES-DECL-SCAN-CAPPED (CodeRabbit #630 4553235778): past the 16 MiB member-declaration budget the served external="1"
+# answer says the scan stopped (decl_scan="capped"), CLI and MCP; a small corpus of the same shape carries no such attribute.
+# Five 3.6 MiB TS classes that CALL zz_capped_name (no member declares it); generated here, never committed. Red on main cd04d477e.
+mkdir -p "$TMP/declcap" "$TMP/declsmall"
+for k in 1 2 3 4 5; do
+    awk -v k=$k 'BEGIN { printf "export class Big%d {\n    run(): number { return zz_capped_name(); }\n", k; for( i = 0; i < 45000; ++i ) printf "    // padding padding padding padding padding padding padding padding %05d\n", i; printf "}\n" }' > "$TMP/declcap/big$k.ts"
+done
+printf 'export class Small {\n    run(): number { return zz_capped_name(); }\n}\n' > "$TMP/declsmall/small.ts"
+cb=$( cat "$TMP"/declcap/*.ts | wc -c | tr -d ' ' ); mx=$( wc -c "$TMP"/declcap/*.ts | awk '$2 != "total" && $1 > m { m = $1 } END { print m + 0 }' )
+if [ "$cb" -gt 16777216 ] && [ "$mx" -lt 4194304 ]; then ok "(C13) premise: $cb bytes of TS classes calling zz_capped_name (past the 16 MiB budget, each file under 4 MiB)"
+else no "(C13) premise: $cb bytes, largest file $mx — the budget cannot trip"; fi
+out="$( rw "$TMP/declcap" --uses=zz_capped_name )"
+if printf '%s' "$out" | grep -q '<uses [^>]*external="1"[^>]* decl_scan="capped"' && printf '%s' "$out" | grep -q 'decl_scan="\{0,1\}capped"\{0,1\}: the scan'; then ok "(C13) CLI --uses: past the budget the external answer carries decl_scan=\"capped\" and its legend"
+else no "(C13) CLI --uses past the budget: $( printf '%s' "$out" | grep -o '<uses [^>]*>' | head -1 )"; fi
+mo="$( mcp "$TMP/declcap" uses ',"symbol":"zz_capped_name"' )"
+if printf '%s' "$mo" | grep -q 'external=\\"1\\"[^>]* decl_scan=\\"capped\\"'; then ok "(C13) MCP uses: past the budget the external answer carries decl_scan=\"capped\""
+else no "(C13) MCP uses past the budget: $( printf '%s' "$mo" | grep -o '<uses [^>]*>' | head -1 | head -c 300 )"; fi
+out="$( rw "$TMP/declsmall" --uses=zz_capped_name )"
+if printf '%s' "$out" | grep -q '<uses [^>]*external="1"' && ! printf '%s' "$out" | grep -q 'decl_scan'; then ok "(C13) precision: a small corpus's external answer carries no decl_scan="
+else no "(C13) precision: small corpus: $( printf '%s' "$out" | grep -o '<uses [^>]*>' | head -1 )"; fi
 
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"

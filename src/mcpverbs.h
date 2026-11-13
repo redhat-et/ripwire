@@ -3867,6 +3867,7 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     const bool usUnindexed = usesRolesUnindexed( ing, defs );   // B31: the CLI --uses' unindexed_roles=, same predicate
+    const bool usDeclCapped = memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED: the CLI's decl_scan=, same predicate
 
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
@@ -3886,7 +3887,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
                   ( std::string( usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) ) )
                     + valueRefsDepthLegend( usDepthCut.files > 0 )
                     + declinedLiteralCallsLegend( declinedLiteralCalls > 0 )
-                    + unindexedRolesLegend( usUnindexed ) ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI
+                    + unindexedRolesLegend( usUnindexed )
+                    + memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),
                   graphCountDisclosure( rw::graphGaugeClauses( ix.g ) ).c_str(),
@@ -3898,8 +3900,9 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const bool         usSingleRoot = ing.realPaths.empty();
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}>",
-                  ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), unindexedRolesAttrXml( usUnindexed ), usRootAttr.c_str(), upage,
+    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}>",
+                  ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), unindexedRolesAttrXml( usUnindexed ),
+                  memberDeclScanAttrXml( usDeclCapped ), usRootAttr.c_str(), upage,
                   graphCountFloorAttrXml( ix.g ).c_str(),
                   ( valueRefsDepthAttrXml( ing, usDepthCut, VrRender{ usSingleRoot, usRootPrefix } )
                     + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
