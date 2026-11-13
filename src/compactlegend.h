@@ -877,7 +877,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "defaults_untied", "defaults_untied=N: N same-name C/C++ declarations with possible defaults could not be tied (not applied); a flag may be one", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
     // exemplar: src/verbs_for.h + src/exemplar.h selectExemplar/pickWinnerOfKind
     { "candidates", "candidates=N: instances of kind= under the ccx ceiling the pick was ranked from", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
-    { "low_confidence", "low_confidence=1: weak task-to-kind match, fell back to fn; pass a kind (fn|method|class...) instead", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
+    { "low_confidence", "low_confidence=1: weak task-to-kind match, fell back to fn unless off_task=1; pass a kind (fn|method|class...)", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
+    { "off_task", "off_task=1: not a fallback; the task matched the corpus, but the role pick shares no word with it or the names it matched: a shape to copy, not the code the task is about", false, "exemplar", MapHeaderRead::No, {}, "exemplar" },
     // exercises: src/verbs_change.h runExercises + exercisesHarnessAttr
     { "seed_files", "seed_files=N: test files the pattern matched", false, "exercises", MapHeaderRead::No, {}, "exercises" },
     { "shown_seed_files", "shown_seed_files=N: of those, printed as t rows (at most 20)", false, "exercises", MapHeaderRead::No, {}, "exercises" },
@@ -1474,6 +1475,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "git", "git=/dirty=: the root is a git repo / its tree differs from HEAD (the stamp's +dirty)", true, "facts", MapHeaderRead::No, {}, "help-task" },   // also defines dirty=
     { "trace", "trace=1: the task text has a stack/sanitizer trace shape; it routes to from-trace", true, "facts", MapHeaderRead::No, {}, "help-task" },
     { "resolved_symbols", "resolved_symbols=N: indexed names the task NAMES; a bare short/common word needs backticks or F()", true, "facts", MapHeaderRead::No, {}, "help-task" },
+    { "reason", "task-route reason=system-event: an abstain on a harness report, not a task (any other abstain carries next=)", false, "task-route", MapHeaderRead::No, {}, "help-task" },
     // doctor purpose line (compactlegend.h:179) spells c name= but the emitter writes n= (verbs_doctor.h row lambda, doctorAgentRows); the n row above defines it; consider fixing the purpose to c n= ok=.
     // doctor truncated= means two different things on two c rows (cache-dir: scan cut, bytes/blobs short; tracked-binaries: scan skipped, stale=0 unmeasured); one KEY-qualified row carries both.
     // doctor p0=/src0= are numbered: tracked-binaries emits p0..p7/src0..src7 (kShown=8); only p0/src0 get a reading, so p1..p7/src1..src7 stay undefined if a gate reads every name (needs 14 more rows or a prefix rule).

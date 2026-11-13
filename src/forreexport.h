@@ -519,7 +519,7 @@ struct Walk
         auto [ it, fresh ] = rustTargets.try_emplace( b );
         if( fresh )
         {
-            const std::string_view head = std::string_view( b->importedName ).substr( 0, b->importedName.find( "::" ) );
+            const std::string_view head = std::string_view( b->importedName ).substr( 0, b->importedName.str().find( "::" ) );
             it->second = resolveRustPath( rc, b->fileId, b->startByte, b->importedName, src.externCrateAs( b->fileId, head ) );
         }
         return it->second;

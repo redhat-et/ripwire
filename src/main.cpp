@@ -3560,7 +3560,10 @@ std::string renderHelpTask( const rw::Config& cfg, const rw::taskroute::TaskRout
     // place any of them was explained. One line, every attribute, no flag spelled (a literal double hyphen
     // is ill-formed inside an XML comment — G4).
     std::string out = "<!-- ripwire help-task: one task in, ONE safe command out, or an honest abstention. "
-                      "status=recommend|ambiguous|abstain and confidence=high|low|none track each other; "
+                      "status=recommend|ambiguous|abstain and confidence=high|low|none track each other, except that a "
+                      "recommend standing on a plain word the task names only after of reads confidence=low; an abstain "
+                      "names its next step: next= the ranked search over the same task text, or reason=system-event "
+                      "when the text is a harness report rather than a task; "
                       "score= is the winning card's evidence total and margin= its lead over the runner-up "
                       "(100/100 on a structural route, one the shipped parser itself accepts). <facts> is the "
                       "repository evidence the decision read: git= dirty= a git repo and an uncommitted diff, "
@@ -3575,9 +3578,18 @@ std::string renderHelpTask( const rw::Config& cfg, const rw::taskroute::TaskRout
     out += "<task-route status=\"";
     out += rw::taskroute::statusName( route.status );
     out += "\" confidence=\"";
-    out += route.status == rw::taskroute::RouteStatus::Recommend ? "high" :
+    out += route.status == rw::taskroute::RouteStatus::Recommend ? ( route.weakOfSlot ? "low" : "high" ) :
            route.status == rw::taskroute::RouteStatus::Ambiguous ? "low" : "none";
-    out += "\" score=\"" + std::to_string( route.score ) + "\" margin=\"" + std::to_string( route.margin ) + "\">";
+    out += "\" score=\"" + std::to_string( route.score ) + "\" margin=\"" + std::to_string( route.margin ) + "\"";
+    // HELP-TASK-ROUTE (a), audit-verify 2026-11-11: an abstain used to end the document with nothing to do next (hono `how
+    // does hono route a request to a handler`: status="abstain", no next step). The ranked --for search answers ANY task
+    // text, so it is always an honest next step; a harness event is not a task, and says so instead.
+    if( route.status == rw::taskroute::RouteStatus::Abstain )
+    {
+        out += rw::taskroute::looksLikeSystemEvent( cfg.helpTask ) ? std::string( " reason=\"system-event\"" )
+                                                                  : rw::nextAttrXml( rw::nextFlag( "--for=", cfg.helpTask ) );
+    }
+    out += ">";
     out += "<facts git=\"" + std::to_string( int( route.facts.git ) ) + "\" dirty=\"" + std::to_string( int( route.facts.dirty ) );
     out += "\" trace=\"" + std::to_string( int( route.facts.trace ) ) + "\" resolved_symbols=\"";
     out += std::to_string( route.facts.resolvedSymbols.size() ) + "\"/>";

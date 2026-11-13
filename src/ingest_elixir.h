@@ -720,6 +720,7 @@ struct ElixirContext
                 }
                 else if( elixirNodeIs( filter, "list" ) )
                 {
+                    std::string pairs;   // built here, interned once (MEM-B1: a pool name's += would intern every prefix)
                     for( std::uint32_t i = 0; i < ts_node_named_child_count( filter ); ++i )
                     {
                         const TSNode entries = ts_node_named_child( filter, i );
@@ -730,9 +731,10 @@ struct ElixirContext
                             auto key = nodeTextOf( fieldChild( pair, NodeField::Key ), src );
                             while( !key.empty() && ( key.back() == ':' || std::isspace( static_cast<unsigned char>( key.back() ) ) ) ) { key.remove_suffix( 1 ); }
                             const auto count = nodeTextOf( fieldChild( pair, NodeField::Value ), src );
-                            bind.importedName += "\n" + std::string( key ) + "/" + std::string( count ) + "\n";
+                            pairs += "\n" + std::string( key ) + "/" + std::string( count ) + "\n";
                         }
                     }
+                    bind.importedName = pairs;
                 }
                 binds.push_back( std::move( bind ) );
             }
@@ -761,11 +763,13 @@ struct ElixirContext
 void elixirExpandImplementations( const ElixirContext& context, std::vector<RawDef>& defs, std::size_t firstDef,
                                  std::vector<RawBind>& binds, std::size_t firstBind )
 {
-    const auto replacePrefix = []( std::string& text, const std::string& from, const std::string& to )
+    // `text` is a std::string (a def's scope / name) or a pool name (a bind's typeName, MEM-B1): build the new text, assign once
+    const auto replacePrefix = []( auto& text, const std::string& from, const std::string& to )
     {
-        if( text == from || ( text.starts_with( from ) && text.size() > from.size() && text[ from.size() ] == '.' ) )
+        const std::string_view was = text;
+        if( was == from || ( was.starts_with( from ) && was.size() > from.size() && was[ from.size() ] == '.' ) )
         {
-            text.replace( 0, from.size(), to );
+            text = to + std::string( was.substr( from.size() ) );
         }
     };
     for( TSNode call : context.calls )

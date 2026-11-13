@@ -1027,6 +1027,246 @@ inline std::string rustWrittenQualifier( TSNode nameNode, std::string_view src )
     return out.find_first_of( "<>" ) != std::string::npos || out.starts_with( "::" ) ? std::string{} : out;
 }
 
+// RUST-MACRO-PATH: a path macro invocation's qualifier from its written path (`crate`, `axum_core`, `$crate::a`), `$crate` (the crate
+// of the macro whose transcriber spells it) read as `crate`: the last segment into `qualifier`, and the whole path, blanks dropped, into
+// `written` when it has more than one segment — the pair rustQualifierOf / rustWrittenQualifier give a path call. A generic or
+// `<T as Trait>` segment, a leading `::` or a non-identifier segment leaves both empty (the site reads as a bare name).
+inline void rustMacroPathOf( std::string_view pathText, std::string& qualifier, std::string& written )
+{
+    qualifier.clear();
+    written.clear();
+    std::string out;
+    for( const char c : pathText )
+    {
+        if( c != ' ' && c != '\t' && c != '\n' && c != '\r' )
+        {
+            out.push_back( c );
+        }
+    }
+    if( out.starts_with( "$crate" ) && ( out.size() == 6 || out[ 6 ] == ':' ) )
+    {
+        out.erase( 0, 1 );
+    }
+    if( out.empty() || out.starts_with( "::" ) || out.find_first_of( "<>$" ) != std::string::npos )
+    {
+        return;
+    }
+    const std::size_t      sep  = out.rfind( "::" );
+    const std::string_view last = sep == std::string::npos ? std::string_view( out ) : std::string_view( out ).substr( sep + 2 );
+    if( !isRustIdentifier( last ) )
+    {
+        return;
+    }
+    qualifier.assign( last );
+    if( sep != std::string::npos )
+    {
+        written = std::move( out );
+    }
+}
+
+// RUST-MACRO-PATH: the `$crate::…::name!` invocations a `macro_rules!` transcriber spells, as Macro references at their own byte, so
+// the macro definition's span owns them and the graph connects THROUGH the macro (`wrap_thing` → `other_thing`, axum's
+// `__define_rejection` → `__log_rejection`). A token tree is not parsed, so this is a lexical scan over the definition, kept to the
+// `$crate`-rooted path: the one spelling that names the defining crate's macro by construction (a bare `name!` in a transcriber may
+// name a macro of the expansion site: not read, a floor). String, raw-string and char literals and (nested) comments are skipped;
+// `$crate::x != y` is no call.
+namespace rust_transcriber_scan
+{
+// blanks: space, tab, CR, LF (rw::isJsonWs is exactly that set); identifier bytes: namesplit::isIdentChar (ASCII)
+inline std::uint32_t skipBlanks( std::string_view src, std::uint32_t k, std::uint32_t end ) noexcept
+{
+    while( k < end && rw::isJsonWs( src[ k ] ) )
+    {
+        ++k;
+    }
+    return k;
+}
+// A string literal at `i` (`"` to its unescaped close): moves `i` past it, adding the newlines it holds to `line`, the one an escape
+// skips included (a string continuation, `"a \<newline> b"`: CodeRabbit #633).
+inline void skipStringLiteral( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    for( ++i; i < end && src[ i ] != '"'; i += ( src[ i ] == '\\' && i + 1 < end ) ? 2u : 1u )
+    {
+        const bool escaped = src[ i ] == '\\' && i + 1 < end;
+        line += src[ escaped ? i + 1 : i ] == '\n' ? 1u : 0u;
+    }
+    ++i;
+}
+// A comment at `i` (`//` or `/*`): moves `i` past it (a line comment stops at its newline, which the caller counts), adding the
+// newlines a block comment holds to `line`. Rust block comments nest (`/* a /* b */ still a comment */`), so the outer `*/` closes
+// it (CodeRabbit #627). False, `i` unmoved, when `i` starts none.
+inline bool skipComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    const char next = i + 1 < end ? src[ i + 1 ] : '\0';
+    if( src[ i ] != '/' || ( next != '/' && next != '*' ) )
+    {
+        return false;
+    }
+    if( next == '/' )
+    {
+        i = static_cast<std::uint32_t>( std::min<std::size_t>( src.find( '\n', i ), end ) );
+        return true;
+    }
+    std::uint32_t depth = 1;
+    for( i += 2; i < end && depth > 0; )
+    {
+        const std::string_view two = src.substr( i, 2 );
+        line += src[ i ] == '\n' ? 1u : 0u;
+        depth += two == "/*" ? 1u : 0u;
+        depth -= two == "*/" ? 1u : 0u;
+        i += two == "/*" || two == "*/" ? 2u : 1u;
+    }
+    return true;
+}
+// A raw string at `i` (`r"…"`, `r#"…"#`, `br##"…"##`: no escapes, closed only by `"` and as many `#` as opened it): moves `i` past
+// it, adding the newlines it holds to `line` (CodeRabbit #627: an embedded `"` does not close it). False, `i` unmoved, when the `r`
+// is part of an identifier or no raw string starts there.
+inline bool skipRawString( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    const bool tokenStart = i == 0 || !namesplit::isIdentChar( src[ i - 1 ] ) || ( src[ i - 1 ] == 'b' && ( i == 1 || !namesplit::isIdentChar( src[ i - 2 ] ) ) );
+    if( src[ i ] != 'r' || !tokenStart )
+    {
+        return false;
+    }
+    std::uint32_t q = i + 1;
+    while( q < end && src[ q ] == '#' )
+    {
+        ++q;
+    }
+    if( q >= end || src[ q ] != '"' )
+    {
+        return false;
+    }
+    const std::string closer = "\"" + std::string( q - i - 1, '#' );
+    const std::size_t close  = src.substr( 0, end ).find( closer, q + 1 );
+    const std::uint32_t stop = close == std::string_view::npos ? end : static_cast<std::uint32_t>( close + closer.size() );
+    line += static_cast<std::uint32_t>( std::count( src.begin() + i, src.begin() + stop, '\n' ) );
+    i = stop;
+    return true;
+}
+// A char literal at `i` (`'"'`, `'\''`, `'\u{22}'`): moves `i` past it, so its quote opens no string. False for a lifetime or label
+// (`'a`), which has no closing `'` right after one character or an escape.
+inline bool skipCharLiteral( std::string_view src, std::uint32_t& i, std::uint32_t end ) noexcept
+{
+    if( src[ i ] != '\'' || i + 2 >= end )
+    {
+        return false;
+    }
+    if( src[ i + 1 ] != '\\' )
+    {
+        if( src[ i + 2 ] != '\'' )
+        {
+            return false;   // a lifetime or a label
+        }
+        i += 3;
+        return true;
+    }
+    const std::size_t close = src.substr( 0, end ).find( '\'', i + 3 );
+    if( close == std::string_view::npos || close > i + 12 )
+    {
+        return false;
+    }
+    i = static_cast<std::uint32_t>( close + 1 );
+    return true;
+}
+// Any literal or comment at `i` that the scan must not read calls in: moves `i` past it. False, `i` unmoved, when none starts.
+inline bool skipLiteralOrComment( std::string_view src, std::uint32_t& i, std::uint32_t end, std::uint32_t& line ) noexcept
+{
+    if( src[ i ] == '"' )
+    {
+        skipStringLiteral( src, i, end, line );
+        return true;
+    }
+    return skipRawString( src, i, end, line ) || skipCharLiteral( src, i, end ) || skipComment( src, i, end, line );
+}
+// `$crate` at `at` followed by ( `::` ident )+ `!` (not `!=`): the last segment's [nameAt, nameEnd). Only peeks.
+inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
+{
+    nameAt = nameEnd = 0;
+    std::uint32_t j  = at + 6;
+    for( ;; )
+    {
+        std::uint32_t k = skipBlanks( src, j, end );
+        if( k + 1 >= end || src[ k ] != ':' || src[ k + 1 ] != ':' )
+        {
+            break;
+        }
+        const std::uint32_t segAt = skipBlanks( src, k + 2, end );
+        for( k = segAt; k < end && namesplit::isIdentChar( src[ k ] ); ++k )
+        {
+        }
+        if( k == segAt )
+        {
+            break;
+        }
+        nameAt  = segAt;
+        nameEnd = k;
+        j       = k;
+    }
+    j = skipBlanks( src, j, end );
+    return nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' );
+}
+// The Macro reference for `$crate::a::name!` at `at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
+inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::uint32_t nameAt, std::uint32_t nameEnd, std::uint32_t fileId, std::uint32_t line )
+{
+    std::string_view path = src.substr( at, nameAt - at );   // `$crate::a::` — its trailing `::` dropped
+    while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
+    {
+        path.remove_suffix( 1 );
+    }
+    RawRef r;
+    r.fileId    = fileId;
+    r.startByte = at;
+    r.line      = line;
+    r.lang      = Lang::Rust;
+    r.role      = RefRole::Macro;
+    r.name      = std::string( src.substr( nameAt, nameEnd - nameAt ) );
+    std::string qualifier;
+    std::string written;
+    rustMacroPathOf( path, qualifier, written );
+    r.qualifier = std::move( qualifier );
+    if( !written.empty() )
+    {
+        r.setFieldName( std::move( written ) );
+    }
+    return r;
+}
+}   // namespace rust_transcriber_scan
+
+inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+{
+    using namespace rust_transcriber_scan;
+    const std::uint32_t end  = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
+    std::uint32_t       line = ts_node_start_point( macroDef ).row + 1;
+    std::uint32_t       i    = ts_node_start_byte( macroDef );
+    while( i < end )
+    {
+        if( src[ i ] == '\n' )
+        {
+            ++line;
+            ++i;
+            continue;
+        }
+        if( skipLiteralOrComment( src, i, end, line ) )
+        {
+            continue;
+        }
+        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && namesplit::isIdentChar( src[ i + 6 ] ) );
+        if( !atCrate )
+        {
+            ++i;
+            continue;
+        }
+        std::uint32_t nameAt  = 0;
+        std::uint32_t nameEnd = 0;
+        if( cratePathMacroAt( src, i, end, nameAt, nameEnd ) )
+        {
+            refs.push_back( cratePathMacroRef( src, i, nameAt, nameEnd, fileId, line ) );
+        }
+        i += 6;   // resume past `$crate` so a newline inside the path is still counted
+    }
+}
+
 // The name a written type ends in: `Deb`, `*Deb` → "Deb"; `Stack[T]`, `*Stack[T]`, `Foo<T>` → the name, never the
 // argument list; Go `pkg.T` → "T"; a TS `a.b.C` member chain → "C". "" for any other form (a slice, map, func type).
 // Shared by the receiver evidence in ingest_binds.h and the Go receiver row of kScopeOwners below.

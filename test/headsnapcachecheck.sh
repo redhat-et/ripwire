@@ -78,9 +78,9 @@ if [ -n "$SF" ]; then ok "run 1 creates a HEAD-snapshot cache file"; else no "no
 I1="$( [ -n "$SF" ] && inode_of "$SF" )"
 
 run --no-cache >"$TMP/a2" 2>/dev/null; rc2=$?
-diff -q "$TMP/a1" "$TMP/a2" >/dev/null \
-    && ok "run 2 byte-identical to run 1 (cached == uncached output)" \
-    || { no "cached output diverges from run 1"; diff "$TMP/a1" "$TMP/a2" | head -6; }
+[ "$rc1" = 0 ] && [ "$rc2" = 0 ] && diff -q "$TMP/a1" "$TMP/a2" >/dev/null \
+    && ok "run 2 byte-identical to run 1 (cached == uncached output), both exit 0" \
+    || { no "cached output diverges from run 1, or a run failed (exit $rc1 / $rc2)"; diff "$TMP/a1" "$TMP/a2" | head -6; }
 
 I2="$( [ -n "$SF" ] && inode_of "$SF" )"
 [ -n "$I1" ] && [ "$I1" = "$I2" ] && ok "run 2 REUSED the cache (snapshot inode stable — no reparse/rewrite)" \
@@ -131,12 +131,12 @@ after="$( nsnap )"
 # ── (d) degrade on corrupt cache → cold parse, output unchanged ───────────────────────────────────────────
 # ground truth from a pristine cache dir, then corrupt every snapshot blob in our dir and re-run.
 mkdir -p "$TMP/coldxdg2"
-env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg2" "$BIN" "$REPO" --quality-delta --no-cache >"$TMP/d_truth" 2>/dev/null
+env -u TMPDIR XDG_CACHE_HOME="$TMP/coldxdg2" "$BIN" "$REPO" --quality-delta --no-cache >"$TMP/d_truth" 2>/dev/null; rcdt=$?
 for f in $( snapfiles ); do printf 'GARBAGE-not-a-valid-cache-blob-\x00\x01\x02' > "$f"; done
 run --no-cache >"$TMP/d1" 2>/dev/null; rcd=$?
-diff -q "$TMP/d1" "$TMP/d_truth" >/dev/null \
+[ "$rcd" = "$rcdt" ] && diff -q "$TMP/d1" "$TMP/d_truth" >/dev/null \
     && ok "corrupt cache degrades to cold parse — output byte-identical (degrade-don't-crash)" \
-    || { no "corrupt cache changed the output (exit=$rcd)"; diff "$TMP/d_truth" "$TMP/d1" | head -6; }
+    || { no "corrupt cache changed the output or the exit (exit=$rcd, cold truth $rcdt)"; diff "$TMP/d_truth" "$TMP/d1" | head -6; }
 
 # ── eviction hygiene: many sha's must not grow the cache dir past the per-repo cap (2) ────────────────────
 for i in 1 2 3 4 5; do

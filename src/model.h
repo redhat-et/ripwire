@@ -1200,14 +1200,19 @@ inline PyKwArgs pyKwArgsOf( std::string_view composeRel ) noexcept
 //   NOT here: Go and TS receivers fill it on half the references. Reads go through the accessors (an empty string when the
 //   block is absent); writes through setX (any text: string, view or literal; an empty one allocates nothing) or XMut. Value semantics: a copy copies the block.
 //   The cache record is unchanged: writeRef / readRef read and write the same five strings in the same order.
+// MEM-R1b: the five are 4 B pool ids (infra/internedtext.h), so a block is 20 B in a 32 B malloc bucket instead of 120 B in a 128 B
+//   one, on every ABI. Every text here is a name, a written path or type, a slot as written or a short mark (`k3o`, `.provide`,
+//   kCppElementMark + a container), never a byte position, so a server's pool still grows only with distinct texts. An accessor
+//   still returns `const std::string&`: the pool's text, which never moves.
 struct RefColdText
 {
-    std::string fieldName;
-    std::string composeRel;
-    std::string memberPath;
-    std::string memberCtor;
-    std::string memberVia;
+    rw::InternedText fieldName;
+    rw::InternedText composeRel;
+    rw::InternedText memberPath;
+    rw::InternedText memberCtor;
+    rw::InternedText memberVia;
 };
+static_assert( sizeof( RefColdText ) == 20, "five pool ids: see the MEM-R1b note above" );
 inline const std::string kNoRefColdText{};   // what every accessor returns without a block (constant-initialised: no guard)
 class RefColdFields
 {
@@ -1224,30 +1229,26 @@ public:
     ~RefColdFields()                                     = default;
 
     bool hasColdBlock() const noexcept { return cold_ != nullptr; }   // RIPWIRE_STATS counts the rows that carry a block
-    const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName : kNoRefColdText; }
-    const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel : kNoRefColdText; }
-    const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath : kNoRefColdText; }
-    const std::string& memberCtor() const noexcept { return cold_ ? cold_->memberCtor : kNoRefColdText; }
-    const std::string& memberVia() const noexcept { return cold_ ? cold_->memberVia : kNoRefColdText; }
+    const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName.str() : kNoRefColdText; }
+    const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel.str() : kNoRefColdText; }
+    const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath.str() : kNoRefColdText; }
+    const std::string& memberCtor() const noexcept { return cold_ ? cold_->memberCtor.str() : kNoRefColdText; }
+    const std::string& memberVia() const noexcept { return cold_ ? cold_->memberVia.str() : kNoRefColdText; }
 
-    template <class Text> void setFieldName( Text&& value ) { setText( &RefColdText::fieldName, std::forward<Text>( value ) ); }
-    template <class Text> void setComposeRel( Text&& value ) { setText( &RefColdText::composeRel, std::forward<Text>( value ) ); }
-    template <class Text> void setMemberPath( Text&& value ) { setText( &RefColdText::memberPath, std::forward<Text>( value ) ); }
-    template <class Text> void setMemberCtor( Text&& value ) { setText( &RefColdText::memberCtor, std::forward<Text>( value ) ); }
-    template <class Text> void setMemberVia( Text&& value ) { setText( &RefColdText::memberVia, std::forward<Text>( value ) ); }
-
-    std::string& memberPathMut() { return block().memberPath; }
-    std::string& memberCtorMut() { return block().memberCtor; }
-    std::string& memberViaMut() { return block().memberVia; }
+    void setFieldName( std::string_view value ) { setText( &RefColdText::fieldName, value ); }
+    void setComposeRel( std::string_view value ) { setText( &RefColdText::composeRel, value ); }
+    void setMemberPath( std::string_view value ) { setText( &RefColdText::memberPath, value ); }
+    void setMemberCtor( std::string_view value ) { setText( &RefColdText::memberCtor, value ); }
+    void setMemberVia( std::string_view value ) { setText( &RefColdText::memberVia, value ); }
 
     // emitReferences: a RawRef's block moves into its Reference whole (one pointer, no string moves).
     void takeColdFrom( RefColdFields& other ) noexcept { cold_ = std::move( other.cold_ ); }
 
 private:
     RefColdText& block() { return rw::sharedOnce( cold_, [] { return std::make_unique<RefColdText>(); } ); }
-    template <class Text> void setText( std::string RefColdText::* slot, Text&& value )
+    void setText( rw::InternedText RefColdText::* slot, std::string_view value )
     {
-        if( cold_ || !std::string_view( value ).empty() ) { block().*slot = std::forward<Text>( value ); }
+        if( cold_ || !value.empty() ) { block().*slot = value; }
     }
     std::unique_ptr<RefColdText> cold_;
 };
@@ -1301,6 +1302,8 @@ struct Reference : RefColdFields
                                           //   A fourth reading, on a Rust CALL reference (role Call, recv None): the whole qualifier a path call
                                           //   is written with when it has more than one segment (`crate::far` for `crate::far::helper()`), ""
                                           //   otherwise (ingest_names.h rustWrittenQualifier; read through rustWrittenQualifierOf below).
+                                          //   RUST-MACRO-PATH: a Rust MACRO reference carries the same reading (ingest_names.h rustMacroPathOf,
+                                          //   `$crate` read as `crate`; a `use … as` alias's path, ingest_model.h retargetRustMacroAliases).
     // composeRel() (RefColdFields): "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
@@ -1308,7 +1311,7 @@ struct Reference : RefColdFields
     //   is the field of a member access, and memberRoot is the receiver chain's ROOT identifier as written (`crypto` for
     //   `crypto.subtle.verify()`, `this`, a package alias), "" when the root is not an identifier (a call, a literal,
     //   `new X()`). Read only by graph.h's FalseEdgeRules. false/"" for every other language and every non-call ref.
-    std::string   memberRoot;   // memberCall sits beside qualifierRootsStd above: the bools share one padding slot
+    rw::InternedText memberRoot;   // MEM-R1a: a 4 B pool id like the three above (a name, an alias, a scope path: never a position)
     // FE-B (test/receiverevidencecheck.sh): the rest of a member call's receiver chain, for the receiver-evidence rule
     //   (graph.h ReceiverEvidence). memberPath is the member names BETWEEN memberRoot and the callee, '.'-joined —
     //   "bucket" for `this.bucket.listSchemas()`, "req.raw.headers" for `ctx.req.raw.headers.get()`, "" for `root.m()`.
@@ -1347,12 +1350,18 @@ struct Reference : RefColdFields
     //   memberCall is false there, so no member-call reader sees it. graph.h's implementors builder reads both (baseEvidence).
     //   Sits in memberFactory's alignment padding: sizeof(Reference) is unchanged.
     std::uint32_t baseBind = 0;
+    // MEM-R1a, a REGISTRAR Value ref only (model.h kRegLangs form ProviderRecord, ingest_valuerefs.h emitValueRef): 1 + the start byte
+    //   of the object literal the pair is read from, 0 = none. regindex.h collectProviderSites pairs a literal's key and value through
+    //   ( fileId, litAt ). It was the qualifier's "@<offset>" tail, a position-keyed pooled text (refnames.h GROWTH); the cache record
+    //   still spells it that way (writeRef / readRef), so the blob is unchanged.
+    std::uint32_t litAt = 0;
 };
-// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. One inline string (memberRoot), three 4 B pool
-// ids (calleeName, qualifier, recvVar: step 2, infra/internedtext.h), the cold block's pointer and 36 B of ids and flags: 80 B on
-// libc++ (step 1 144, before it 264), 88 B on libstdc++. A new std::string member, or a flag placed where it adds a padding slot,
-// fails here; move cold text into RefColdText, or a name into rw::InternedText, instead.
-static_assert( sizeof( Reference ) <= sizeof( std::string ) + 56, "Reference grew: see the MEM-REF-SHRINK note above" );
+// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. Four 4 B pool ids (calleeName, qualifier, recvVar,
+// memberRoot: step 2 and MEM-R1a, infra/internedtext.h), the cold block's pointer, 44 B of ids, counts and flags and litAt: exactly
+// 64 B, one row per 64 B line, on every ABI (no std::string member is left, so libc++, libstdc++ and MSVC agree; step 2 80 B on
+// libc++, step 1 144, before it 264). A new member, or a flag placed where it adds a padding slot, fails here; move cold text into
+// RefColdText, or a name into rw::InternedText, instead.
+static_assert( sizeof( Reference ) == 64, "Reference is one 64 B row: see the MEM-REF-SHRINK note above" );
 // The sentinels Reference::baseBind holds besides a real binding (1 + a name byte): ONE definition for the writer (ingest_relations.h
 // localBaseBinding) and every reader (graph.h provenBasesOf, valuerefindex.h inheritEdges / ClassFamilies::bindBase).
 inline constexpr std::uint32_t kBaseBindNone          = 0;            // no enclosing scope declares the name
@@ -1365,7 +1374,7 @@ static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= 
 // references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
 inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
 {
-    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName().empty();
+    const bool whole = ( r.role == RefRole::Call || r.role == RefRole::Macro ) && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName().empty();
     return whole ? std::string_view( r.fieldName() ) : std::string_view( r.qualifier );
 }
 
@@ -1926,17 +1935,20 @@ struct Binding
                                           //   declarations) from its scope's start. See suppressShadowedReferences.
                                           //   ES/Elixir bindings also use spans as documented in LocalBindKind.
                                           //   {0,0} on a scope-less shadow capture (contains nothing).
-    std::string   var;                    // the declared variable identifier (`x`)
-    std::string   importedName;           // JsImport: the requested export name; never a global-name fallback.
+    rw::InternedText var;                 // the declared variable identifier (`x`). MEM-B1 BIND-INTERN: the three texts are 4 B ids
+                                          //   into the reference names' pool (refnames.h), so a Binding is nine u32 (see the pin below)
+    rw::InternedText importedName;        // JsImport: the requested export name; never a global-name fallback.
                                           //   Type/ParamType: the written type WHOLE when it is qualified, else "".
                                           //   JsExport: the LOCAL name the exported spelling binds (empty when
                                           //   the two are identical). Elixir: see LocalBindKind's field contracts.
-    std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
+    rw::InternedText typeName;            // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
                                           //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.
 };
-static_assert( sizeof( Binding ) == 6 * sizeof( std::uint32_t ) + 3 * sizeof( std::string ),
-               "Binding's scalars are five u32, a u8 kind, a bool and two u8 in 24 bytes — the four ride one u32 slot" );
+// MEM-B1 BIND-INTERN: 36 B on every ABI (96 B on libc++ with three std::string, 120 B on libstdc++). Six u32 of scalars (five u32,
+// a u8 kind, a bool and two u8 riding one u32 slot) and three 4 B pool ids: no member's size depends on the standard library, so
+// the pin is exact everywhere. A std::string member fails it; intern the text (rw::InternedText) instead.
+static_assert( sizeof( Binding ) == 9 * sizeof( std::uint32_t ), "Binding grew: see the MEM-B1 note above" );
 
 // R5 cross-language FFI binding alias. A language-binding DECLARATION found in a C/C++ file (or a
 // ctypes-handle assignment in a Python file) that makes a C/C++ definition reachable under a DIFFERENT
