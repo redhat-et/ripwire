@@ -10206,15 +10206,24 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         [ & ]( const MaterialityBar& mb, std::uint32_t ceilingAt, const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap, auto metricOf )
     {
         const std::uint32_t bar = mb.bar;
-        ScratchMap<std::uint32_t> nowBySym( ing.symbols.size() );
+        struct MaxAt
+        {
+            std::uint32_t now = 0;
+            NodeId        at  = kNoNode;   // the overload that supplies `now` (the lowest NodeId on a tie): its move status is the row's
+        };
+        ScratchMap<MaxAt> nowBySym( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
             if( i >= g.canonId.size() || g.canonId[i].empty() )
             {
                 continue;
             }
-            std::uint32_t& slot = nowBySym[ keyByNode[i] ];
-            slot = std::max( slot, metricOf( i ) );
+            MaxAt&              slot = nowBySym[ keyByNode[i] ];
+            const std::uint32_t m    = metricOf( i );
+            if( slot.at == kNoNode || m > slot.now )
+            {
+                slot = { m, i };
+            }
         }
         ScratchMap<std::uint8_t> reported( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
@@ -10233,7 +10242,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             {
                 continue; // corrupt/inconsistent ids: degrade by skipping
             }
-            const std::uint32_t now = nowIt->second;
+            const std::uint32_t now = nowIt->second.now;
             const auto          it  = baseMap.find( key );
             const std::uint32_t was = ( it == baseMap.end() ) ? 0u : it->second;
             if( now <= was )
@@ -10248,7 +10257,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 // one body, so the live report and a re-score can never silently disagree.
                 const bool material = numericRegressionIsMajor( was, now, mb, bar, mb.minorDelta, growthPct );
                 const bool isNew    = !existedAtBaseline( key );
-                const bool isMovedB = isNew && moved.isMoved( i );
+                const bool isMovedB = isNew && moved.isMoved( nowIt->second.at );
                 // QD-MONSTER-GROWTH — facet "1" is emitted as monster="1" (kFacetAttrs): set whenever the clause
                 // holds, whether or not the 25 % tier would have made the row major on its own.
                 regs.push_back( { std::string( mb.kind ), g.canonId[i], was, now, key, !material,

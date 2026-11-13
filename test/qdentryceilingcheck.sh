@@ -17,6 +17,8 @@
 #   #646 CodeRabbit round (each RED on train head 6621e14e7):
 #   M1. a body moved UNCHANGED plus a lightly edited copy of it: the move is origin="moved", the copy is new-symbol and gates (the
 #       exact move claims its source; the copy never near-matches it);
+#   M2. overloads share a key: a small new overload first, then a 250-line overload that is a moved body: the row's move status is
+#       the overload that supplies the metric, so it prints origin="moved" and does not gate;
 #   J.  --json carries the same gating count and the per-row origin/ceiling;
 #   L.  every surface stating "new-symbol rows never gate" names the ceiling exception.
 #
@@ -195,6 +197,19 @@ if ! crashed M1; then
          && printf '%s' "$CR" | grep -q 'gating="1"'; then
         ok "M1: the unchanged move is origin=\"moved\"; its edited copy stays new-symbol and gates"
     else no "M1: the edited copy must not reuse the claimed source (rc=$RC moved: $MR copy: $CR)"; fi
+fi
+
+# ═══ M2) THE OVERLOAD THAT SUPPLIES THE METRIC DECIDES THE MOVE ══════════════════════════════════════════════════════
+R="$WORK/m2"; base "$R"; longfn big 245 '' > "$R/src/old.cpp"; printf 'int useb(){ return big(1); }\n' >> "$R/src/old.cpp"; commitall "$R" big
+rm "$R/src/old.cpp"
+{ printf 'int over( float a ){ return int( a ); }\n'; longfn over 245 '' | sed '1s/( int a )/( double a )/'; printf 'int useo(){ return over(1.0) + over(2.0f); }\n'; } > "$R/src/new.cpp"
+run "$R"
+if ! crashed M2; then
+    ROW="$( rowof "$OUT" verbosity over )"
+    if [ -z "$ROW" ] || ! printf '%s' "$ROW" | grep -q 'now="250"'; then no "M2: premise — one verbosity row for over at 250 lines (row: ${ROW:-<none>})"
+    elif [ "$RC" = 0 ] && printf '%s' "$ROW" | grep -q 'origin="moved"' && ! rows "$OUT" | grep -q 'gating="1"'; then
+        ok "M2: the 250-line overload is the moved body: origin=\"moved\", no gate, though a small overload comes first"
+    else no "M2: the row must read the move status of the overload that supplies now= (rc=$RC row: $ROW)"; fi
 fi
 
 # ═══ N3) CONSTRUCTOR EXTENT: measured over its own body, not the class ═════════════════════════════════
