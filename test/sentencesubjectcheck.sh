@@ -12,6 +12,10 @@
 #       form is unchanged
 #   R   RE-ASK: a code-spelling sentence that asks for callers or a path and got no block ends with ONE <reask next="..."/>, the bare
 #       call, which runs; an answer that has the block, a stored key and a sentence with no cue carry none
+# #646 CodeRabbit round (each arm RED on train head 6621e14e7):
+#   CQ  in a long sentence (the sentence reading, not the short-subject one), a spelling whose OUTER qualifier places nothing
+#       (`Missing.setup.prepare_setup_platform`) is no name: no callers block, no re-ask; its twin `setup.prepare_setup_platform` (the
+#       file stem) still gets the block
 # Usage: bash test/sentencesubjectcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -98,6 +102,11 @@ csub(){ # $1 root $2 task $3 caller row $4 label
 csub "$R" 'If `prepare_setup_platform` (app/setup.py) gained a new required parameter, exactly which non-test functions call it directly and would have to change? Give each function with its file; functions that merely receive the resulting EvalContext as a parameter do not count.' first_caller "long sentence, a second identifier in passing"
 csub "$R" 'Which functions call `prepare_setup_platform(hass, name)` and must change when it gains a third argument, in production code and in tests? Group them by file.' first_caller "a call's argument list"
 csub "$G" 'If `(*kv.Replica).NewEvalContext` gained a new required parameter, which functions call it directly and would have to change?' evaluateBatch "go receiver spelling"
+csub "$R" 'If `setup.prepare_setup_platform` gained a new required parameter, exactly which non-test functions call it directly and would have to change?' first_caller "CQ twin: the file-stem qualifier places it"
+A="$( ask "$R" 'If `Missing.setup.prepare_setup_platform` gained a new required parameter, exactly which non-test functions call it directly and would have to change?' )" || no "CQ: ripwire exited $?"
+case "$A" in *'<ctx '*) ok "CQ: an answer printed";; *) no "CQ: no answer printed";; esac
+hasnt "$A" '<callers by="subject"' "CQ: an outer qualifier that places nothing is no name (no callers block)"
+hasnt "$A" '<reask' "CQ: and no re-ask names it"
 
 # ── CN: no block (each arm also proves an answer printed; the arm FAILs when it saw nothing) ──
 seen=0

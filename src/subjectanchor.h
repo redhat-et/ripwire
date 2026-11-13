@@ -435,6 +435,71 @@ inline std::vector<std::string> backtickSpellings( std::string_view task )
     return out;
 }
 
+// The qualifiers a spelling names BEFORE the one parseSpelling keeps: `Missing::Model::save` is "Missing",
+// `concurrent.futures.ThreadPoolExecutor` is "concurrent", a one- or two-segment spelling has none.
+inline std::string_view outerQualifiers( std::string_view word, const subject_detail::Spelling& sp ) noexcept
+{
+    if( sp.qualifier.empty() || sp.qualifier.data() < word.data() || sp.qualifier.data() > word.data() + word.size() )
+    {
+        return {};
+    }
+    std::string_view outer = word.substr( 0, std::size_t( sp.qualifier.data() - word.data() ) );
+    while( !outer.empty() && ( outer.back() == ':' || outer.back() == '.' ) )
+    {
+        outer.remove_suffix( 1 );
+    }
+    return outer;
+}
+
+// Does every segment of `outer` place `s`? A segment places it when it is a segment of its scope, a directory or the stem on its
+// file's path, a Rust path keyword, or a whole word in its file (a C++ `namespace rw {`, a Rust `mod net {`): `Missing.Model.save`
+// names nothing of pkg/models/base.py's Model.save, `concurrent.futures.ThreadPoolExecutor` names Lib/concurrent/. Read only on
+// a word with outer qualifiers, and the file only when the cheap tests fail.
+inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer )
+{
+    const std::string_view path = rootRelPath( ing, s.fileId );
+    const auto namesSegment = []( std::string_view text, std::string_view seps, std::string_view seg )
+    {
+        for( std::size_t i = 0; i <= text.size(); )
+        {
+            const std::size_t e = std::min( text.find_first_of( seps, i ), text.size() );
+            if( text.substr( i, e - i ) == seg )
+            {
+                return true;
+            }
+            i = e + 1;
+        }
+        return false;
+    };
+    std::optional<std::string> bytes;
+    bool                       read = false;
+    for( std::size_t i = 0; i < outer.size(); )
+    {
+        const std::size_t      e   = std::min( outer.find_first_of( ".:", i ), outer.size() );
+        const std::string_view seg = outer.substr( i, e - i );
+        i                          = e + 1;
+        if( seg.empty() || seg == "crate" || seg == "self" || seg == "super" || namesSegment( s.scope, ".:", seg )
+            || namesSegment( path.substr( 0, path.size() - mention_detail::baseNameOf( path ).size() ), "/", seg ) || mention_detail::pathStem( path ) == seg )
+        {
+            continue;
+        }
+        if( !read )
+        {
+            bytes = darkflags::readWhole( diskPath( ing, s.fileId ) );
+            read  = true;
+        }
+        bool inFile = false;
+        for( std::size_t at = bytes ? bytes->find( seg ) : std::string::npos; at != std::string::npos && !inFile; at = bytes->find( seg, at + 1 ) )
+        {
+            inFile = darkflags::wholeWordAt( *bytes, at, seg.size() );
+        }
+        if( !inFile )
+        {
+            return false;
+        }
+    }
+    return true;
+}
 // The names a sentence spells as code, sentence order, each with the definitions it places (1 to kSubjectMaxDefs): its `backtick` spans
 // when it has any, else its identifier-syntax words. A spelling that places nothing (a file, a command, a field) is no name here.
 struct CodeName
@@ -465,6 +530,10 @@ inline std::vector<CodeName> sentenceCodeNames( const IngestResult& ing, std::st
     std::vector<CodeName>            out;
     for( std::size_t k = 0; k < spellings.size(); ++k )
     {
+        // the placement read only the leaf and the last qualifier: `Missing::Model::save` must not place `Model::save` (as
+        // sourceSyntaxAnchors filters it; CodeRabbit on #646)
+        const std::string_view outer = outerQualifiers( spellings[k], parsed[k] );
+        std::erase_if( placed[k], [ & ]( NodeId id ) { return !outerQualifiersPlace( ing, ing.symbols[id], outer ); } );
         // two spellings of one function (`ConfigWrapper.core_config(title)` and later `core_config`) are one name
         const bool same = std::ranges::any_of( out, [ & ]( const CodeName& c ) { return c.defs == placed[k]; } );
         if( !placed[k].empty() && placed[k].size() <= kSubjectMaxDefs && !same )
@@ -1056,71 +1125,6 @@ struct SourceSyntaxAnchor
     std::vector<NodeId> defs;   // its source-class placed definitions, never empty
 };
 
-// The qualifiers a spelling names BEFORE the one parseSpelling keeps: `Missing::Model::save` is "Missing",
-// `concurrent.futures.ThreadPoolExecutor` is "concurrent", a one- or two-segment spelling has none.
-inline std::string_view outerQualifiers( std::string_view word, const subject_detail::Spelling& sp ) noexcept
-{
-    if( sp.qualifier.empty() || sp.qualifier.data() < word.data() || sp.qualifier.data() > word.data() + word.size() )
-    {
-        return {};
-    }
-    std::string_view outer = word.substr( 0, std::size_t( sp.qualifier.data() - word.data() ) );
-    while( !outer.empty() && ( outer.back() == ':' || outer.back() == '.' ) )
-    {
-        outer.remove_suffix( 1 );
-    }
-    return outer;
-}
-
-// Does every segment of `outer` place `s`? A segment places it when it is a segment of its scope, a directory or the stem on its
-// file's path, a Rust path keyword, or a whole word in its file (a C++ `namespace rw {`, a Rust `mod net {`): `Missing.Model.save`
-// names nothing of pkg/models/base.py's Model.save, `concurrent.futures.ThreadPoolExecutor` names Lib/concurrent/. Read only on
-// a word with outer qualifiers, and the file only when the cheap tests fail.
-inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer )
-{
-    const std::string_view path = rootRelPath( ing, s.fileId );
-    const auto namesSegment = []( std::string_view text, std::string_view seps, std::string_view seg )
-    {
-        for( std::size_t i = 0; i <= text.size(); )
-        {
-            const std::size_t e = std::min( text.find_first_of( seps, i ), text.size() );
-            if( text.substr( i, e - i ) == seg )
-            {
-                return true;
-            }
-            i = e + 1;
-        }
-        return false;
-    };
-    std::optional<std::string> bytes;
-    bool                       read = false;
-    for( std::size_t i = 0; i < outer.size(); )
-    {
-        const std::size_t      e   = std::min( outer.find_first_of( ".:", i ), outer.size() );
-        const std::string_view seg = outer.substr( i, e - i );
-        i                          = e + 1;
-        if( seg.empty() || seg == "crate" || seg == "self" || seg == "super" || namesSegment( s.scope, ".:", seg )
-            || namesSegment( path.substr( 0, path.size() - mention_detail::baseNameOf( path ).size() ), "/", seg ) || mention_detail::pathStem( path ) == seg )
-        {
-            continue;
-        }
-        if( !read )
-        {
-            bytes = darkflags::readWhole( diskPath( ing, s.fileId ) );
-            read  = true;
-        }
-        bool inFile = false;
-        for( std::size_t at = bytes ? bytes->find( seg ) : std::string::npos; at != std::string::npos && !inFile; at = bytes->find( seg, at + 1 ) )
-        {
-            inFile = darkflags::wholeWordAt( *bytes, at, seg.size() );
-        }
-        if( !inFile )
-        {
-            return false;
-        }
-    }
-    return true;
-}
 inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query )
 {
     using namespace subject_detail;
