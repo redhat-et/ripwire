@@ -5019,9 +5019,13 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
                 out += ",\"" + std::string( facetName ) + "\":\"" + mcpdetail::jsonEscape( r.facet ) + "\"";
             }
         }
-        if( r.isNewSymbol )
+        if( const char* origin = rw::quality::originValue( r ) )
         {
-            out += ",\"origin\":\"new-symbol\""; // absent = preexisting-worse (mirrors the XML)
+            out += ",\"origin\":\"" + std::string( origin ) + "\""; // absent = preexisting-worse (mirrors the XML)
+        }
+        if( r.ceiling != 0 )
+        {
+            out += ",\"ceiling\":" + std::to_string( r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
         }
         out += "}";
     }

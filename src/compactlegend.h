@@ -970,7 +970,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "stale_by_kind", "stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "stale_next", "stale_next=: the call printing the sa rows and the full header", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    { "new-symbol", "new-symbol=N: findings on NEW code; new-symbol rows never gate, except defect-shape format-arity", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity or a ceiling= row", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "declined-call-excluded", "declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "api-new-surface", "api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -1490,7 +1490,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // comment-coherence: c_coeff= is spelled only in the purpose, which does not say HIGH c_coeff is BAD (restates the name); outside this gap list.
     // quality-delta rows (src/verbs_quality.h): the row facets the purpose line does not spell, present-only.
     { "sev", "r sev=minor: a small numeric delta, counted in minor=, never gating (absent: major)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "origin", "r origin=new-symbol: a finding on NEW code (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "ceiling", "r ceiling=: the new-function ceiling (4x bar=, not test code) a NEW row reached; it gates", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "origin", "r origin=new-symbol: a finding on NEW code; moved: its body left another name or file, never gating (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "churn", "r churn=self|ambient|unknown: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); unknown: the blame failed (unread_history=); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
