@@ -1045,7 +1045,7 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
         asked.push_back( result.bindings[ i ].typeName );
         asked.push_back( result.bindings[ i ].var );
     }
-    std::ranges::sort( asked );
+    std::ranges::sort( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
     asked.erase( std::ranges::unique( asked ).begin(), asked.end() );
     std::vector<std::uint8_t> macroNamed( asked.size(), 0 ), itemNamed( asked.size(), 0 );
     std::vector<std::pair<std::uint32_t, std::string_view>> fileMacros;   // (fileId, name) of every asked-about Rust macro
@@ -1055,7 +1055,7 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
         {
             continue;
         }
-        const auto at = std::ranges::lower_bound( asked, std::string_view( s.name ) );
+        const auto at = std::ranges::lower_bound( asked, std::string_view( s.name ), sortutil::svLess );
         if( at == asked.end() || *at != s.name )
         {
             continue;
@@ -1067,13 +1067,17 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
             fileMacros.emplace_back( s.fileId, *at );
         }
     }
-    std::ranges::sort( fileMacros );
-    const auto slotOf = [ & ]( std::string_view name ) { return std::size_t( std::ranges::lower_bound( asked, name ) - asked.begin() ); };
+    const auto byFileName = []( const std::pair<std::uint32_t, std::string_view>& a, const std::pair<std::uint32_t, std::string_view>& b ) noexcept
+    {
+        return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
+    };
+    std::ranges::sort( fileMacros, byFileName );
+    const auto slotOf = [ & ]( std::string_view name ) { return std::size_t( std::ranges::lower_bound( asked, name, sortutil::svLess ) - asked.begin() ); };
     std::erase_if( renames, [ & ]( std::uint32_t i )
     {
         const Binding&         b      = result.bindings[ i ];
         const std::size_t      source = slotOf( b.typeName );
-        const bool             local  = std::ranges::binary_search( fileMacros, std::pair<std::uint32_t, std::string_view>( b.fileId, b.var ) );
+        const bool             local  = std::ranges::binary_search( fileMacros, std::pair<std::uint32_t, std::string_view>( b.fileId, b.var ), byFileName );
         return local || ( macroNamed[ source ] == 0 && itemNamed[ source ] != 0 );
     } );
 }
