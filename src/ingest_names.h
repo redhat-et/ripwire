@@ -2736,13 +2736,9 @@ inline bool bodyFollowsClosedParameters( TSNode fnDeclarator, TSNode body, std::
 // Is the definition/declaration `owner` a constructor of the class whose member list holds it?
 inline bool ownerIsConstructorOf( TSNode owner, std::string_view name, std::string_view src ) noexcept
 {
-    const TSNode list = parentOf( owner );
-    if( ts_node_is_null( list ) || !kindIs( ts_node_type( list ), "field_declaration_list" ) )
-    {
-        return false;
-    }
-    const TSNode cls = parentOf( list );
-    return !ts_node_is_null( cls ) && nodeFieldText( cls, NodeField::Name, src ) == name;
+    const TSNode list     = parentOf( owner );
+    const bool   inMember = !ts_node_is_null( list ) && kindIs( ts_node_type( list ), "field_declaration_list" );
+    return inMember && nodeFieldText( parentOf( list ), NodeField::Name, src ) == name;
 }
 
 inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
