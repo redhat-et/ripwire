@@ -12,6 +12,7 @@
 #   N3 a subject that IS a `where` method keeps it in the head;
 #   N4 an outer qualifier that places nothing (`Missing.futures.ThreadPoolExecutor`) does not borrow the inner spelling's source anchor.
 #   N5 a C++ namespace the definition's file opens (`rw::detail::ConnPool`) still places it; its Missing:: twin does not.
+#   N8 a comment word or unrelated identifier in the definition's file is no scope (CARD-SWEEP-1113).
 #   Fixtures generated at test time; CLI and MCP; determinism; well-formed XML.
 # Usage: bash test/anchorhonestycheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/anchorhonestycheck.sh
 set -u
@@ -318,6 +319,40 @@ case "$R" in *'dropped: call'*) ok "N5 call: the frame word leaves beside a name
 R="$( route "$( ask "$C" 'what does Missing::detail::ConnPool::drainAll call' )" )"
 case "$R" in *'dropped: call'*) no "N5 Missing:: twin: the frame word was dropped (route $R)";; *) nP=$(( nP + 1 )); ok "N5 Missing:: twin: the frame word stays";; esac
 if [ "$nP" -eq 3 ]; then ok "N5 counted $nP namespace wordings read as expected"; else no "N5 counted $nP of 3 namespace wordings read as expected"; fi
+
+# ═══ N8 a qualifier the file only MENTIONS places nothing (ANCHOR-QUALIFIER-OWNERSHIP, CodeRabbit #630) ═══
+#   A comment word (`Legacy`) and an unrelated identifier (`Stale`) in the definition's file placed `Legacy::detail::ConnPool` and
+#   `Stale::detail::ConnPool` on main cd04d477e (whole word in the file); only a scope opener (`namespace rw`) places now.
+Q="$TMP/cppq"; mkdir -p "$Q/src/pool"
+printf '// Legacy: this pool replaced the Legacy one
+namespace rw
+{
+namespace detail
+{
+int Stale = 0;
+class ConnPool
+{
+public:
+    void drainAll();
+    int  sizeNow() const;
+};
+void ConnPool::drainAll() { sizeNow(); }
+int ConnPool::sizeNow() const { return Stale; }
+}
+}
+' >"$Q/src/pool/pool.cpp"
+printf 'int main() { rw::detail::ConnPool p; p.drainAll(); }
+' >"$Q/src/main.cpp"
+( cd "$Q" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+if grep -qw Legacy "$Q/src/pool/pool.cpp" && grep -qw Stale "$Q/src/pool/pool.cpp"; then ok "N8 premise: pool.cpp mentions Legacy (a comment) and Stale (an identifier)"; else no "N8 premise: the fixture lost its mentions"; fi
+nQ=0
+for w in Legacy Stale; do
+    R="$( route "$( ask "$Q" "what does $w::detail::ConnPool::drainAll call" )" )"
+    case "$R" in *'dropped: call'*) no "N8 $w:: (a mention, not a scope) placed the definition (route $R)";; *) nQ=$(( nQ + 1 )); ok "N8 $w:: is no source anchor: the frame word stays";; esac
+done
+R="$( route "$( ask "$Q" 'what does rw::detail::ConnPool::drainAll call' )" )"
+case "$R" in *'dropped: call'*) nQ=$(( nQ + 1 )); ok "N8 control: rw:: (namespace rw) still places on the same file";; *) no "N8 control: rw::detail::ConnPool::drainAll route $R";; esac
+if [ "$nQ" -eq 3 ]; then ok "N8 counted $nQ qualifier wordings read as expected"; else no "N8 counted $nQ of 3 qualifier wordings read as expected"; fi
 
 # ═══ N3 a subject that IS a where method keeps it ═══
 A="$( ask "$P" 'what does Icon.where call' )"
