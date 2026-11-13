@@ -471,6 +471,7 @@ Discloses: `capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kForDispatchCtorRows` | `4` | — | constructor-caller rows per call |
+| `kForDispatchHeldRows` | `2` | — | held-as declaration rows per call (DISPATCH-HELD-AS) |
 | `kForDispatchHopRows` | `8` | — | candidate rows per call |
 
 ### `src/fordocbody.h`
@@ -516,6 +517,7 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kForFileSymsFiles` | `6` | — | shown files whose symbols are candidates (files_total= when more were shown) |
 | `kForFileSymsHeadRows` | `8` | — | head <d> rows whose callees by="callee" reads (head= when fewer) |
+| `kForFileSymsInitHeadRows` | `5` | — | head <d> rows (plus the re-export walk's <def> rows) by="init" reads |
 | `kForFileSymsRowsPerRule` | `3` | — | rows per rule (name_total= / callee_total= when cut) |
 
 ### `src/forfold.h`

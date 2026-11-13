@@ -37,6 +37,9 @@
 #   (u1) a run that cannot buffer its bytes prints <syms held="uncaptured"/> and says so on stderr (non-NDEBUG flavour: SKIP otherwise)
 #   (p1) a shown path holding a tab (the answer writes it `a&#9;b.py`) is looked up as the indexed file: its symbols are offered, p= spelled as the answer spells it
 #   (t1) a shown TypeScript private member (`Router.#addRoute`, stored as `#addRoute`) is a head row for by="callee": the helpers it calls are offered
+#   (i1..i4) CONST-INIT-CALLEE by="init" (residual pass 11-12, card 3; i1 i2 i4 RED on main 0b8f0bf8d): a head row's name (one of the
+#        first 5 <d> rows, or the re-export walk's <def> row) whose module-level declaration's value is one file-scope call names that
+#        call's callee (of= the name, at= the declaration); a literal initialiser or an already-shown callee is no row; RIPWIRE_NO_INIT_ROWS=1
 #   (o1) overloads: the shown row's edge reaches one overload, the kept row is another: it says via="name"; twin (o2) one definition, the call is plain
 #   (h2) a held block's next= carries the origin call's ranking flags (--no-route, --anchor under RIPWIRE_DEV, --pack-top-n=N)
 #   (c2) a capture whose buffer fails to flush (RLIMIT_FSIZE, a real short write) is not read as the whole answer: stderr says so, exit 1, the stub says held="uncaptured", no rows; twin: unlimited, rows
@@ -463,6 +466,123 @@ b6="$( bindrows "$TMP/b6.xml" )"
 if [ "$rc" = 0 ] && sed -n 1p <<<"$b6" | tr ';' '\n' | grep -q '^wireBoth@(return).second@src/table.ts$' && [ "$( sed -n 1p <<<"$b6" | tr ';' '\n' | grep -c '^wireBoth@' )" = 1 ]; then ok "(b6) a binder alphaPred counted past its cap prints once under betaPred's free slot"; else no "(b6) rc=$rc: $( tr '\n' '|' <<<"$b6" ) $( grep -o '<syms.*' "$TMP/b6.xml" | head -c 400 )"; fi
 RIPWIRE_NO_BIND_ROWS=1 run bind "--for=isNodeShown" >"$TMP/b5.off.xml"
 if [ "$( sed -n 3,4p <<<"$b1" | tr '\n' ' ' )" = "clause defs " ] && ! grep -q 'by="bind"' "$TMP/b5.off.xml"; then ok "(b5) the legend before the block defines by=\"bind\" into= bind_total=; RIPWIRE_NO_BIND_ROWS=1 drops the rows"; else no "(b5) legend: $( sed -n 3,4p <<<"$b1" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/b5.off.xml" | head -c 300 )"; fi
+
+# CONST-INIT-CALLEE fixtures (by="init"): a TypeScript decorator-style value behind a spelled import, a Python module-level object
+mkdir -p "$TMP/init/packages/core/src/util" "$TMP/init/packages/router/src" "$TMP/initpy/conf"
+cat >"$TMP/init/packages/core/index.ts" <<'FIX'
+export * from './src/core';
+FIX
+cat >"$TMP/init/packages/core/package.json" <<'FIX'
+{ "name": "@acme/core", "main": "index.ts" }
+FIX
+cat >"$TMP/init/packages/core/src/core.ts" <<'FIX'
+export * from './widgets';
+FIX
+cat >"$TMP/init/packages/core/src/split.ts" <<'FIX'
+export function makeSplit(name: string): any {
+  return name + '!';
+}
+FIX
+cat >"$TMP/init/packages/core/src/widgets.ts" <<'FIX'
+import { forgeValue } from './util/factory';
+import { makeSplit } from './split';
+
+/** The Widget marker's options. */
+export interface Widget {
+  selector?: string;
+}
+
+export const Widget: any = forgeValue(
+  'Widget',
+  (w: Widget = {}) => ({ ...w }),
+);
+
+export interface Gizmo {
+  size?: number;
+}
+
+export const Gizmo: any = { size: 3 };
+
+export const Sprocket: any = makeSplit('Sprocket');
+FIX
+cat >"$TMP/init/packages/core/src/util/factory.ts" <<'FIX'
+export function forgeValue(name: string, props?: (x: any) => any): any {
+  const fn = (...args: any[]) => ({ name, args, props });
+  return fn;
+}
+export function makeSplit(name: string): any {
+  return name;
+}
+FIX
+cat >"$TMP/init/packages/router/src/outlet.ts" <<'FIX'
+import { Widget } from '@acme/core';
+
+@Widget({ selector: 'outlet' })
+export class Outlet {}
+FIX
+cat >"$TMP/initpy/app.py" <<'FIX'
+from conf import config
+
+
+def start():
+    return config.debug
+FIX
+cat >"$TMP/initpy/conf/__init__.py" <<'FIX'
+class LazyConfig:
+    """Loads the config on first attribute access."""
+
+    def __getattr__(self, name):
+        return name
+
+
+def make_registry():
+    return {}
+
+
+config = LazyConfig()
+registry = make_registry()
+FIX
+
+# initrows ANSWER: line 1 the by="init" rows as n@of@at@file;… line 2 clause|noclause, line 3 defs|nodefs
+initrows(){ python3 - "$1" <<'PYF'
+import re, sys
+s = open( sys.argv[1], encoding = "utf8" ).read()
+m = re.search( r'(<!-- (?:ripwire for )?syms:.*?-->)(<syms[^>]*>.*?</syms>)', s, re.S )
+legend, blk = ( m.group( 1 ), m.group( 2 ) ) if m else ( "", "" )
+rows = [ dict( re.findall( r'(\w+)="([^"]*)"', r ) ) for r in re.findall( r'<y [^>]*/>', blk ) ]
+print( ";".join( "%s@%s@%s@%s" % ( r["n"], r.get( "of", "" ), r.get( "at", "" ), r["p"] ) for r in rows if r.get( "by" ) == "init" ) )
+print( "clause" if 'by="init"' in legend or "by=init" in legend else "noclause" )
+print( "defs" if all( re.search( r'(?<![\w:.-])' + a + r'\s*=', legend ) for a in ( "by", "of", "at" ) ) else "nodefs" )
+PYF
+}
+run init "--for=where the Widget marker from @acme/core is defined" >"$TMP/i1.xml"; rc=$?
+i1="$( initrows "$TMP/i1.xml" )"
+if [ "$rc" = 0 ] && grep -q '<def n="Widget" p="packages/core/src/widgets.ts"' "$TMP/i1.xml" \
+   && [ "$( sed -n 1p <<<"$i1" )" = "forgeValue@Widget@packages/core/src/widgets.ts:9@packages/core/src/util/factory.ts:1" ]; then
+    ok "(i1) TypeScript: the re-export walk's def row Widget (an interface; its value is \`export const Widget = forgeValue(…)\`) gets by=\"init\" forgeValue"
+else no "(i1) rc=$rc rows: $( tr '\n' '|' <<<"$i1" ) $( grep -o '<syms.*' "$TMP/i1.xml" | head -c 400 )"; fi
+run initpy "--for=registry" >"$TMP/i2.xml"; rc=$?
+i2="$( initrows "$TMP/i2.xml" )"
+if [ "$rc" = 0 ] && [ "$( sed -n 1p <<<"$i2" )" = "make_registry@registry@conf/__init__.py:13@conf/__init__.py:8" ]; then
+    ok "(i2) Python: the module-level \`registry = make_registry()\` head row gets by=\"init\" make_registry"
+else no "(i2) rc=$rc rows: $( tr '\n' '|' <<<"$i2" ) $( grep -o '<syms.*' "$TMP/i2.xml" | head -c 400 )"; fi
+# negatives, each with its premise counted: a literal initialiser (Gizmo, its def row printed), a callee a shown row stands on
+# (LazyConfig is the r=1 row beside `config = LazyConfig()`)
+run init "--for=where the Gizmo marker from @acme/core is defined" >"$TMP/i3.xml"; i3rc=$?
+run initpy "--for=where is the config object made" >"$TMP/i3p.xml"; i3prc=$?
+seen=0
+grep -q '<def n="Gizmo"' "$TMP/i3.xml" && seen=$(( seen + 1 ))
+grep -q '<d [^>]*n="config"' "$TMP/i3p.xml" && grep -q '<d [^>]*n="LazyConfig"' "$TMP/i3p.xml" && seen=$(( seen + 1 ))
+if [ "$seen" = 2 ] && [ "$i3rc$i3prc" = 00 ] && ! grep -q 'of="Gizmo"' "$TMP/i3.xml" && ! grep -q 'by="init"[^>]*of="config"' "$TMP/i3p.xml"; then
+    ok "(i3) no by=\"init\" row for an object-literal value or for a callee already shown (saw $seen of 2 premises)"
+else no "(i3) rc=$i3rc/$i3prc, saw $seen of 2 premises, or a row printed: $( grep -o '<syms.*' "$TMP/i3.xml" "$TMP/i3p.xml" | head -c 500 )"; fi
+RIPWIRE_NO_INIT_ROWS=1 run init "--for=where the Widget marker from @acme/core is defined" >"$TMP/i4.off.xml"; i4orc=$?
+run init "--for=where the Widget marker from @acme/core is defined" --legend=full >"$TMP/i4f.xml"; i4frc=$?
+i4f="$( initrows "$TMP/i4f.xml" )"
+if [ "$( sed -n 2,3p <<<"$i1" | tr '\n' ' ' )" = "clause defs " ] && [ "$( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' )" = "clause defs " ] && [ "$i4orc$i4frc" = 00 ] \
+   && ! grep -q 'by="init"' "$TMP/i4.off.xml" && ! grep -q 'by=init\|by=\\"init' "$TMP/i4.off.xml" && [ "$( sed -n 2p <<<"$( initrows "$TMP/i3p.xml" )" )" = "noclause" ]; then
+    ok "(i4) both legends define by=\"init\" of= at= beside a row, a block without one carries no clause; RIPWIRE_NO_INIT_ROWS=1 drops rows and clause"
+else no "(i4) rc=$i4orc/$i4frc compact: $( sed -n 2,3p <<<"$i1" | tr '\n' ' ' ) full: $( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/i4.off.xml" | head -c 300 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"
