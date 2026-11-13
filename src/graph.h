@@ -1746,23 +1746,45 @@ struct FnLocalReach
     std::uint32_t end    = 0;
 };
 
+// reachableByName's per-call mark: one generation stamp per symbol id, so "is this candidate a local this call set
+// aside" is one load from a dense u32 array, whatever order the lists come in and however many locals a name holds
+struct AsideMarks
+{
+    std::vector<std::uint32_t> stamp;        // per symbol id: the generation that last set it aside
+    std::uint32_t              generation = 0;
+
+    explicit AsideMarks( std::size_t symbolCount ) : stamp( symbolCount, 0 ) {}
+
+    void nextCall()
+    {
+        if( ++generation == 0 )   // wrapped: no stale stamp may equal a live generation
+        {
+            std::ranges::fill( stamp, 0u );
+            generation = 1;
+        }
+    }
+};
+
 // the candidates of `ids` a call at `r` can reach BY NAME, into `out`; true iff a function-local def was set aside AND
 // something reachable is left (only then does the caller have a narrower set to try first). `locals` are the name's
 // function-local defs with their spans; `ids` is a subset of that name's candidate list. Same answer as asking
-// localDefOutOfReach of every candidate, but a call tests only the name's locals — on vscode a common name holds
-// hundreds of definitions and one local — and builds `out` only when one of them is set aside.
+// localDefOutOfReach of every candidate, but the locals' spans are read from a dense per-name list instead of a Symbol
+// row and a binary search per candidate, and `out` is built only when one of them is set aside. A name can hold
+// thousands of function-local defs (`result`, `e` on vscode), so set-aside membership is a stamp, never a search.
 inline bool reachableByName( std::span<const FnLocalReach> locals, const rw::SmallVec<NodeId, 2>& ids, const Reference& r,
-                             rw::SmallVec<NodeId, 2>& aside, rw::SmallVec<NodeId, 2>& out )
+                             AsideMarks& marks, rw::SmallVec<NodeId, 2>& out )
 {
-    aside.clear();
+    marks.nextCall();
+    bool anyAside = false;
     for( const FnLocalReach& local : locals )
     {
         if( local.fileId != r.fileId || r.startByte < local.start || r.startByte >= local.end )
         {
-            aside.push_back( local.id );
+            marks.stamp[ local.id ] = marks.generation;
+            anyAside                = true;
         }
     }
-    if( aside.empty() )
+    if( !anyAside )
     {
         return false;   // every local is in reach: nothing to set aside, the caller keeps `ids`
     }
@@ -1770,7 +1792,7 @@ inline bool reachableByName( std::span<const FnLocalReach> locals, const rw::Sma
     bool setAside = false;
     for( NodeId c : ids )
     {
-        if( std::ranges::find( aside, c ) != aside.end() )
+        if( marks.stamp[ c ] == marks.generation )
         {
             setAside = true;
         }
@@ -10103,7 +10125,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     ClassIdentity      classIds = buildClassIdentity( ing, chaUp );   // Rule 2's class identity: nesting, owners, real inheritance (resolve.h)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
     rw::SmallVec<NodeId, 2>  reachScratch; // reused per-call buffer: the candidates a call can reach by name (reachableByName)
-    rw::SmallVec<NodeId, 2>  reachAside;   // reused per-call buffer: the name's locals out of this call's reach (reachableByName)
+    AsideMarks               reachAside( ing.fnLocalScopes.empty() ? 0 : ing.symbols.size() );   // the name's locals out of this call's reach (reachableByName); unused, and empty, with no function-local def
     // FE-B (receiverevidence.h): the receiver-evidence tables, the per-edge hedge sets and the reused per-call buffers.
     // (L) fix round 1: "<fileId>#<local>" → the in-tree CLASS a TS named import pins (buildJsImportTables), for resultClassOf
     HashMap<std::string, NodeId> jsPinnedClasses;
