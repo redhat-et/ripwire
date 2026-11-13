@@ -148,7 +148,7 @@ P6R="$TMP/p6repo"; cp -R "$F/cpp" "$P6R"
 git -C "$P6R" init -q && git -C "$P6R" add -A \
     && git -C "$P6R" -c user.name=Dev -c user.email=dev@x.com -c commit.gpgsign=false commit -qm fixture >/dev/null 2>&1 \
     || no "(P6) could not build the one-commit fixture repository"
-run "$P6R" --whereis=Fetch >"$TMP/p6"
+run "$P6R" --whereis=Fetch >"$TMP/p6"   # status: both candidate names in the answer are the verdict; a refusal prints neither and FAILs
 if grep -q 'DiskSource::Fetch' "$TMP/p6" && grep -q 'NetSource::Fetch' "$TMP/p6"; then ok "(P6) next= --whereis=Fetch lists every candidate"
 else no "(P6) --whereis=Fetch does not list both candidates"; fi
 

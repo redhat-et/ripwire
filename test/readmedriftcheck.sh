@@ -1150,8 +1150,8 @@ fi
 # one of the spellings read. R0 counts the spellings (zero is a FAIL: the patterns no longer match the prose), R2 is (R1)'s
 # mutation control.
 r_tmp="$( mktemp -d )"
-r_expected="$( PATH="$( cd "$( dirname "$BIN" )" && pwd ):$PATH" "$BIN" "$r_tmp" --doctor 2>/dev/null \
-               | grep -oE '<c n="grammars"[^>]*>' | sed -nE 's/.* expected="([0-9]+)".*/\1/p' )"
+r_doctor="$( PATH="$( cd "$( dirname "$BIN" )" && pwd ):$PATH" "$BIN" "$r_tmp" --doctor 2>/dev/null )"   # status: --doctor exits 1 on any red row; the grammars row's expected= is the verdict, and none FAILs (R0)
+r_expected="$( printf '%s' "$r_doctor" | grep -oE '<c n="grammars"[^>]*>' | sed -nE 's/.* expected="([0-9]+)".*/\1/p' )"
 rm -rf "$r_tmp"
 r_stated="$( grep -oE '<b>[0-9]+</b> vendored grammars|vendors [0-9]+ tree-sitter grammars|two of the [0-9]+ grammars' "$README" | grep -oE '[0-9]+' )"
 r_n="$( printf '%s\n' "$r_stated" | grep -c . )"

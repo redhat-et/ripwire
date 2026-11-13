@@ -202,7 +202,7 @@ done
 # One fresh MCP session per call (initialize, then tools/call); prints the tools/call reply line.
 emcp(){ printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" \
-        | "$BIN" --mcp 2>/dev/null | grep -F '"id":2'; }
+        | "$BIN" --mcp 2>/dev/null | grep -F '"id":2'; }   # status: the tools/call reply line is the verdict (error vs document), asserted by each caller
 # E2 twin: the MCP whereis kind= filter the refusals name narrows under the cap and answers (the CLI --whereis has no ref
 # filter — --stray-content=SUBSTR is another verb that takes precedence, crossrefcheck's guard arm — so no CLI refusal names one).
 OUT="$( emcp whereis "{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\",\"kind\":\"b007\"}" )"

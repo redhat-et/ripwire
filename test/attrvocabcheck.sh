@@ -62,8 +62,8 @@ root_of(){ grep -o "<$1 [^>]*>" | head -1; }         # first START-TAG of elemen
 # long-lived dev clone or its linked worktree) there is no root element at all, so both ask test/lib/sweeproot.sh's root.
 . "$ROOT/test/lib/sweeproot.sh"
 SWEEP="$( sweepRoot "$ROOT" "$TMP/sweep" )"
-"$BIN" "$SWEEP" --stray-content --no-cache >"$TMP/stray.xml" 2>/dev/null
-"$BIN" "$SWEEP" --stray-content --abi --no-cache >"$TMP/abi.xml" 2>/dev/null
+"$BIN" "$SWEEP" --stray-content --no-cache >"$TMP/stray.xml" 2>/dev/null   # status: the root element is the verdict; a refusal leaves none and the arms below FAIL
+"$BIN" "$SWEEP" --stray-content --abi --no-cache >"$TMP/abi.xml" 2>/dev/null   # status: the root element is the verdict; a refusal leaves none and the arms below FAIL
 
 SC="$( root_of stray-content <"$TMP/stray.xml" )"
 AB="$( root_of abi          <"$TMP/abi.xml"   )"

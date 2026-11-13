@@ -563,6 +563,12 @@ enum class SweepFault : std::uint8_t
     TooManyRefs,
 };
 
+// The SweepFault a sweep result's refusal flags name; None is a non-git root (the host's "not a git repository").
+inline SweepFault sweepFaultOf( bool blobsUnread, bool tooManyRefs ) noexcept
+{
+    return blobsUnread ? SweepFault::BlobsUnread : tooManyRefs ? SweepFault::TooManyRefs : SweepFault::None;
+}
+
 // SweepFault::TooManyRefs in the CLI's words, with this surface's filter: `kind` is the ref-name substring here.
 inline std::string tooManyRefsRefusal()
 {
@@ -614,14 +620,9 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     }
     const std::vector<crossref::IndexDefSite> indexDefs = crossref::whereisIndexDefSites( getIndex( root ).ing, sel, root );
     crossref::WhereResult res = crossref::computeWhereis( root, sel, filter, crossref::WhereisEvidence{ nullptr, indexDefs } );
-    if( !res.ok )
+    if( !res.ok || res.blobsUnread )   // the CLI twin's refusals; a hit count over blobs never read is not an answer
     {
-        if( res.tooManyRefs && fault != nullptr ) { *fault = SweepFault::TooManyRefs; }
-        return {};
-    }
-    if( res.blobsUnread )   // the CLI twin's refusal: a hit count over blobs never read is not an answer
-    {
-        if( fault != nullptr ) { *fault = SweepFault::BlobsUnread; }
+        if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread, res.tooManyRefs ); }
         return {};
     }
     res.seedSpec  = std::move( seedSpec );
@@ -651,10 +652,7 @@ inline std::string strayContentText( const std::string& root, const std::string&
     const crossref::StrayResult res = crossref::computeStrayContent( root, filter );
     if( !res.ok )
     {
-        if( fault != nullptr )   // K75 and the ref cap: the host answers an error naming the cause, not "not a git repository"
-        {
-            *fault = res.blobsUnread ? SweepFault::BlobsUnread : res.tooManyRefs ? SweepFault::TooManyRefs : SweepFault::None;
-        }
+        if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread, res.tooManyRefs ); }   // K75 and the ref cap: named, not "not a git repository"
         return {};
     }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeStrayContentPage( f, res, maxFiles, page.limit, page.offset ); } );
