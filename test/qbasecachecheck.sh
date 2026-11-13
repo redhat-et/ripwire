@@ -24,7 +24,7 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "qbasecachecheck: BIN=$BIN"
 
@@ -74,6 +74,8 @@ PAIR="--quality-delta=HEAD~1..HEAD"
 run cold "$PAIR"
 regs="$( sed -n 's/.*<quality-delta [^>]* regressions="\([0-9]*\)".*/\1/p' "$WORK/cold.out" | head -1 )"
 if [ "${regs:-0}" -ge 1 ]; then ok "(P) the cold pair answers with $regs regression rows (rc $( cat "$WORK/cold.rc" ))"; else no "(P) the cold pair has no regression rows — nothing to compare"; sed 's/^/    /' "$WORK/cold.err" | head; fi
+# rc 2: the target made old code worse (the regression rows above), so the answer must say so in its exit status too
+if [ "$( cat "$WORK/cold.rc" )" = 2 ]; then ok "(P) the cold pair exits 2 (a regression)"; else no "(P) the cold pair exited $( cat "$WORK/cold.rc" ), expected 2"; fi
 if [ "$( ingests cold )" = 2 ]; then ok "(P) the cold pair ran two ingests"; else no "(P) the cold pair ran $( ingests cold ) ingests, expected 2"; fi
 if [ "$( blobs | wc -l | tr -d ' ' )" = 1 ]; then ok "(P) one qbase blob written"; else no "(P) $( blobs | wc -l | tr -d ' ' ) qbase blobs after the cold pair, expected 1"; fi
 BLOB="$( blobs | head -1 )"
@@ -82,7 +84,7 @@ BLOB="$( blobs | head -1 )"
 run hit "$PAIR"
 if [ "$( ingests hit )" = 1 ]; then ok "(H) the repeat call hit the blob (one ingest: the target)"; else no "(H) the repeat call ran $( ingests hit ) ingests, expected 1"; fi
 if same cold hit; then ok "(H) the hit answer is byte-identical to the cold one"; else no "(H) the hit answer differs from the cold one"; diff "$WORK/cold.out" "$WORK/hit.out" | head -5; fi
-[ "$( blobs | wc -l | tr -d ' ' )" = 1 ] && ok "(H) no new blob" || no "(H) a hit wrote another blob"
+if [ "$( blobs | wc -l | tr -d ' ' )" = 1 ]; then ok "(H) no new blob"; else no "(H) a hit wrote another blob"; fi
 
 # (N)
 run nocache "$PAIR" --no-cache

@@ -23,7 +23,7 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "qdconstructscheck: BIN=$BIN"
 
@@ -163,7 +163,8 @@ fi
 # (R) real trees, optional
 for repo in ${QDC_REPOS:-}; do
     for pass in cold warm; do
-        ( cd "$repo" && env HOME="$WORK/home" TMPDIR="$WORK/tmp-r" RIPWIRE_QD_CONSTRUCTS_VERIFY=1 "$BIN" . --quality-delta > /dev/null 2> "$WORK/r.err" )
+        ( cd "$repo" && env HOME="$WORK/home" TMPDIR="$WORK/tmp-r" RIPWIRE_QD_CONSTRUCTS_VERIFY=1 "$BIN" . --quality-delta > /dev/null 2> "$WORK/r.err" ); rrc=$?
+        case "$rrc" in 0|2) ;; *) no "(R) $repo $pass: --quality-delta exited $rrc" ;; esac
         v="$( verifyline "$WORK/r.err" )"
         n=$(( $( field "$v" carried_mask || echo 0 ) + $( field "$v" carried_placeholder || echo 0 ) ))
         if [ "$( field "$v" equal )" = 1 ] && [ "$n" -gt 0 ]; then ok "(R) $repo $pass: $v"; else no "(R) $repo $pass: ${v:-no verify line}"; fi
