@@ -76,13 +76,6 @@ inline void notePartialExtract( IngestFileScan& scan, std::size_t fileId, const 
 }
 
 // size the per-file arrays and classify each file's language — the fileId space is the crawl's sorted list.
-// QD-CONSTRUCTS-AT-INGEST (lazy): a record written without the construct pass cannot serve an ingest that wants the
-// hits, so that file is a miss here and in the parse pool: it is parsed again (once: the rewritten record carries them).
-inline bool recordServesThisIngest( const CachedRecordHead& head, const IngestFileScan& scan ) noexcept
-{
-    return !( scan.wantConstructHits && head.constructsAbsent );
-}
-
 inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
 {
     const std::size_t nfilesEarly = files.size();
@@ -383,9 +376,7 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Cac
                         // A4-P7 stat-gate first, else read+hash.
                         if( !cache.empty() )
                         {
-                            // a record that cannot serve this ingest is a miss like an absent path: its grammar is compiled
-                            const CachedRecordHead* head = cache.headOf( fi );
-                            if( head != nullptr && recordServesThisIngest( *head, scan ) )
+                            if( const CachedRecordHead* head = cache.headOf( fi ) )
                             {
                                 const CachedRecordHead& ff = *head;
 

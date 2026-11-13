@@ -270,7 +270,7 @@ inline WarmHitTotals markCacheHits( const CacheRecords& cache, const IngestFileS
             continue;
         }
         candidates[ fileId ] = head;
-        if( head->hash != scan.hash[ fileId ] || !recordServesThisIngest( *head, scan ) )
+        if( head->hash != scan.hash[ fileId ] )
         {
             continue;
         }
@@ -419,6 +419,44 @@ inline std::uint64_t rawDefCloneKey( const std::string& fileBytes, const RawDef&
         return kCloneKeyNone;
     }
     return cloneBodyKey( fileBytes, sigEnd, d.endByte, usesHashLineComments( d.lang ) );
+}
+
+// QD-CONSTRUCTS-AT-INGEST (lazy): a cache hit whose record was written by an ingest that ran no construct pass, in an
+// ingest that wants the hits. Its facts came from the record; only the hits are missing, so the file is parsed for them
+// alone — the tree the cold worker builds before its first use (the .h -> ObjC switch, the .astro frontmatter
+// restriction), with no extraction — and the blob is marked dirty so the record is rewritten with them. A file that can
+// no longer be read keeps "absent": the ingest then claims no hits, and --quality-delta re-parses (lintrules.h). A hit
+// is never a nest-refused file (a refusal is written with an UNKNOWN hash, which never hits), so no refusal check here.
+inline void fillAbsentConstructHits( ParsePoolShared& sh, std::size_t fileId, const std::string& path, const LangEntry* le, std::string& bytes,
+                                     bool bytesLoaded, TSParser* parser, TSQueryCursor* constructCursor, RawFacts& out )
+{
+    if( !bytesLoaded && ( !readFile( path, bytes ) || looksBinary( bytes ) ) )
+    {
+        return;
+    }
+    if( !bytesLoaded && le->ext == ".h" && looksObjC( bytes ) )
+    {
+        if( const LangEntry* objcLe = lookupLang( ".m" ) )
+        {
+            le = objcLe;
+        }
+    }
+    markMissDirty( sh );   // the record is rewritten with its hits (RIPWIRE_CACHE_STATS reparsed= counts this file)
+    sh.scan.constructsKnown[ fileId ] = 1;
+    if( !prepareParserFor( parser, *le ) )
+    {
+        return;   // the cold worker parses nothing here either: known, no hits
+    }
+    IncludedRangeGuard rangeGuard;
+    if( restrictAstroToFrontmatter( parser, *le, bytes, rangeGuard ) != AstroFrontmatter::Ok )
+    {
+        return;   // the cold worker extracts nothing from such an .astro either: known, no hits
+    }
+    TreeGuard tree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( parser, bytes ); } ) );
+    if( tree.get() != nullptr )
+    {
+        collectConstructHits( *le, static_cast<std::uint32_t>( fileId ), bytes, ts_tree_root_node( tree.get() ), constructCursor, out.constructs );
+    }
 }
 
 inline void runParseWorker( ParsePoolShared& sh, unsigned t )
@@ -601,7 +639,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 if( hit == nullptr )
                 {
                     const CachedRecordHead* candidate = sh.cacheCandidateFacts[ fileId ];
-                    if( candidate != nullptr && candidate->hash == h && recordServesThisIngest( *candidate, scan ) )
+                    if( candidate != nullptr && candidate->hash == h )
                     {
                         hit = candidate;
                     }
@@ -610,7 +648,12 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     if( decodeCachedRecordNoThrow( sh.cache, fileId, path, record ) )
                     {
+                        const bool hitsAbsent = record.facts.constructsAbsent;
                         warmGrowths += appendCacheHitFacts( record.facts, std::uint32_t( fileId ), scan, out );
+                        if( hitsAbsent && scan.wantConstructHits )
+                        {
+                            fillAbsentConstructHits( sh, fileId, path, le, bytes, bytesLoaded, pg.p, constructCursor, out );
+                        }
                     }
                     else
                     {
