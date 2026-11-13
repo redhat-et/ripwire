@@ -19,6 +19,8 @@
 #       exact move claims its source; the copy never near-matches it);
 #   M2. overloads share a key: a small new overload first, then a 250-line overload that is a moved body: the row's move status is
 #       the overload that supplies the metric, so it prints origin="moved" and does not gate;
+#   M3. a NEW class whose extent passes 240 code lines (no constructor, small methods) prints its row but never gates: the ceiling
+#       is for functions and methods;
 #   J.  --json carries the same gating count and the per-row origin/ceiling;
 #   L.  every surface stating "new-symbol rows never gate" names the ceiling exception.
 #
@@ -210,6 +212,23 @@ if ! crashed M2; then
     elif [ "$RC" = 0 ] && printf '%s' "$ROW" | grep -q 'origin="moved"' && ! rows "$OUT" | grep -q 'gating="1"'; then
         ok "M2: the 250-line overload is the moved body: origin=\"moved\", no gate, though a small overload comes first"
     else no "M2: the row must read the move status of the overload that supplies now= (rc=$RC row: $ROW)"; fi
+fi
+
+# ═══ M3) A NEW CLASS'S EXTENT NEVER REACHES THE CEILING ════════════════════════════════════════════════════════════════
+R="$WORK/m3"; base "$R"
+{
+    printf 'class Plain\n{\npublic:\n    int get() const { return m_x1; }\n'
+    i=1; while [ "$i" -le 260 ]; do printf '    int m_x%d = %d;\n' "$i" "$i"; i=$(( i + 1 )); done
+    printf '};\n'
+} > "$R/src/plain.h"
+run "$R"
+if ! crashed M3; then
+    CLS="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 't="cls" n="Plain"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"   # status: output only — the M3 premise FAILs on an empty class loc
+    ROW="$( rowof "$OUT" verbosity Plain )"
+    if [ "${CLS:-0}" -lt 240 ] || [ -z "$ROW" ]; then no "M3: premise — the class extent ${CLS:-<none>} lines with a verbosity row (row: ${ROW:-<none>})"
+    elif [ "$RC" = 0 ] && ! printf '%s' "$ROW" | grep -q 'ceiling=' && ! rows "$OUT" | grep -q 'gating="1"'; then
+        ok "M3: a new class of $CLS lines prints its row and never gates (the ceiling is for functions and methods)"
+    else no "M3: a class row must not gate (rc=$RC row: $ROW)"; fi
 fi
 
 # ═══ N3) CONSTRUCTOR EXTENT: measured over its own body, not the class ═════════════════════════════════

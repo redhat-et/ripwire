@@ -10264,8 +10264,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                   isMonsterGrowth( was, now, bar, mb.monsterGrowth ) ? std::string( kMonsterFacet ) : std::string(),
                                   isNew, isMovedB } );          // origin: the finding IS this symbol
                 stampLoc( i );
-                // QD-ENTRY-CEILING: a NEW function at the ceiling gates — unless its body moved, or it is a test driver.
-                if( isNew && !isMovedB && material && ceilingAt != 0 && now >= ceilingAt && !regs.back().path.empty() && !isTestPath( regs.back().path ) )
+                // QD-ENTRY-CEILING: a NEW function at the ceiling gates — unless its body moved, or it is a test driver. Only a
+                // function or method: the kind of the symbol that supplies the measured value, so a class's extent never gates.
+                const SymKind measured = ing.symbols[ nowIt->second.at ].kind;
+                if( isNew && !isMovedB && material && ( measured == SymKind::Function || measured == SymKind::Method ) && ceilingAt != 0
+                    && now >= ceilingAt && !regs.back().path.empty() && !isTestPath( regs.back().path ) )
                 {
                     regs.back().ceiling = ceilingAt;
                 }
