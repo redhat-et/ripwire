@@ -52,6 +52,7 @@
 #include "arch.h"        // §B1.3: relForHash — the root-relative path segment canonicalIdRelTo keys on
 #include "smallvec.h"
 #include "infra/namesplit.h"   // stripTemplateArgs — a C++ template-id scope's family (appendTemplateFamilyKey), a `using Base<T>::m;` qualifier (buildUsingReexports)
+#include "infra/hashutil.h"       // packPair — IdentityNarrower's (fromFile, defFile) visibility memo key
 #include "infra/fileSetStore.h"   // FileAdjacency, FileSetStore, buildFileClosure — the file graph's stores
 #include "memguard.h"                 // guardedFileClosure
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -7223,6 +7224,14 @@ struct IdentityNarrower
     mutable const Reference*                              claimRef       = nullptr;
     mutable bool                                          subclassClaim  = false;   // lane L6: claimRef's claim is step (3), the dispatch split
     mutable bool                                          lookupLexical  = false;   // classWalk came from an enclosing class or a class qualifier
+    // NARROW-MEMO: two pure functions the class walk asks again for every same-named class (envoy holds hundreds of
+    // `Impl` and `Config`), memoised for the loop. Neither memo reaches output: each returns what the walk computes.
+    //   ancestorMemo: a class NAME -> every name derivesFromName reaches from it (chaUp is fixed for the loop; keyed
+    //                 to the one table it was built from), so `nestedInAncestorOf` is one set probe per candidate
+    //   visibleMemo:  (fromFile, defFile) -> fileVisibleFrom's include-target suffix answer
+    mutable HashMap<std::string, ankerl::unordered_dense::set<std::string_view>> ancestorMemo;
+    mutable const ChaUpNames*                             ancestorMemoOf = nullptr;
+    mutable HashMap<std::uint64_t, bool>                  visibleMemo;
 
     IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const rw::FileSetStore& incl,
                       const std::vector<std::uint32_t>& symFile ) noexcept
@@ -7353,10 +7362,51 @@ struct IdentityNarrower
         return ( ids.ownerAmbiguous[ from ] != 0 ) ? kNoNode : ids.ownerClass[ from ];
     }
 
-    static bool nestedInAncestorOf( NodeId cls, std::string_view className, const ClassIdentity& ids, const ChaUpNames& chaUp )
+    // is `cls` nested directly in a class whose name `ancestors` (ancestorNamesOf) holds — derivesFromName( className, its outer )
+    static bool nestedInAncestorOf( NodeId cls, const ankerl::unordered_dense::set<std::string_view>& ancestors, const ClassIdentity& ids )
     {
         const std::string_view outer = outerNameOf( cls, ids );
-        return !outer.empty() && derivesFromName( className, outer, chaUp );
+        return !outer.empty() && ancestors.contains( outer );
+    }
+
+    // every name derivesFromName( className, name, chaUp ) is true for, memoised per class name for the loop
+    const ankerl::unordered_dense::set<std::string_view>& ancestorNamesOf( std::string_view className, const ChaUpNames& chaUp ) const
+    {
+        if( ancestorMemoOf != &chaUp )
+        {
+            ancestorMemo.clear();
+            ancestorMemoOf = &chaUp;
+        }
+        const auto [ at, inserted ] = ancestorMemo.try_emplace( std::string( className ) );
+        if( inserted )
+        {
+            collectAncestorNames( className, chaUp, at->second );
+        }
+        return at->second;
+    }
+
+    // the names up to 12 chaUp steps above className, into `ancestors`. A breadth-first walk keeps each name once at its
+    // shortest distance, so it reaches exactly the names the bounded walk of derivesFromName reaches.
+    static void collectAncestorNames( std::string_view className, const ChaUpNames& chaUp, ankerl::unordered_dense::set<std::string_view>& ancestors )
+    {
+        std::vector<std::string_view> frontier{ className };
+        std::vector<std::string_view> next;
+        for( int depth = 0; depth < 12 && !frontier.empty(); ++depth )
+        {
+            next.clear();
+            for( std::string_view name : frontier )
+            {
+                const auto up = chaUp.find( std::string( name ) );
+                for( const std::string& base : ( up == chaUp.end() ? std::span<const std::string>{} : std::span<const std::string>( up->second ) ) )
+                {
+                    if( ancestors.insert( base ).second )
+                    {
+                        next.push_back( base );
+                    }
+                }
+            }
+            frontier.swap( next );
+        }
     }
 
     bool collectIf( const rw::SmallVec<NodeId, 2>& named, const auto& pick ) const
@@ -7422,7 +7472,7 @@ struct IdentityNarrower
         {
             const std::string& scName = ( *ids.symbols )[ sc ].name;
             if( collectIf( named, [ & ]( NodeId c ) { return ids.enclosingClass[ c ] == sc; } )
-             || collectIf( named, [ & ]( NodeId c ) { return nestedInAncestorOf( c, scName, ids, chaUp ); } ) )
+             || collectIf( named, [ &, &ancestors = ancestorNamesOf( scName, chaUp ) ]( NodeId c ) { return nestedInAncestorOf( c, ancestors, ids ); } ) )
             {
                 return true;
             }
@@ -7444,7 +7494,7 @@ struct IdentityNarrower
             return collectIf( named, []( NodeId ) { return true; } );   // a member of a class of that very name: any of them, as before
         }
         return collectIf( named, [ & ]( NodeId c ) { return outerNameOf( c, ids ) == scope; } )
-            || collectIf( named, [ & ]( NodeId c ) { return nestedInAncestorOf( c, scope, ids, chaUp ); } );
+            || collectIf( named, [ &, &ancestors = ancestorNamesOf( scope, chaUp ) ]( NodeId c ) { return nestedInAncestorOf( c, ancestors, ids ); } );
     }
 
     // a hit owned by a NESTED class outside the nameable set whose file is visible from the caller
@@ -7489,6 +7539,18 @@ struct IdentityNarrower
         {
             return false;
         }
+        const auto [ memo, inserted ] = visibleMemo.try_emplace( hashutil::packPair( fromFile, defFile ), false );
+        if( !inserted )
+        {
+            return memo->second;
+        }
+        memo->second = includeNamesAsSuffix( fromFile, defFile, ids );
+        return memo->second;
+    }
+
+    // a DIRECT include of `fromFile` names `defFile`'s path as a suffix (fileVisibleFrom's last test; memoised there)
+    static bool includeNamesAsSuffix( std::uint32_t fromFile, std::uint32_t defFile, const ClassIdentity& ids )
+    {
         const std::string_view path             = ( *ids.files )[ defFile ];
         const auto [ firstInclude, endInclude ] = std::ranges::equal_range( ids.includeTargets, fromFile, {}, &ClassIdentity::IncludeTarget::fileId );
         return std::any_of( firstInclude, endInclude, [ & ]( const ClassIdentity::IncludeTarget& include )

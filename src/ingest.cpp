@@ -15,7 +15,7 @@
 #include "infra/nodekind.h"    // rw::kindIs - the inline node-kind compare the per-AST-node dispatch chains run on (OPTREMARKS F3)
 #include "infra/tsparent.h"    // rw::parentOf - ts_node_parent answered from one cached root-descent path per file (parent-carry lane)
 #include "infra/fieldid.h"     // rw::fieldChild - the same defect one layer down: the field NAME resolved once per grammar, not per node
-#include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication; packPair — orderBindings' sort key
 #include "externalnames.h"     // FE-A: the JS/TS global tables the shadow walk keys on (ingest_jsimports.h jsNoteGlobalSpellings)
 #include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
 #include "infra/jsonesc.h"     // rw::shSingleQuote - the git ignore probe quotes its root the same way every other git popen does
