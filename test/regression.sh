@@ -746,6 +746,7 @@ for _g in \
     mdsectioncheck \
     memguardcheck \
     memstatscheck \
+    depsnographcheck \
     mentioncapcheck \
     mentioncheck \
     mentionsverbcheck \
