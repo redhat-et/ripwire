@@ -1765,23 +1765,15 @@ struct AsideMarks
     }
 };
 
-// REACH-SPLIT's per-name index, built once before buildGraph's resolve loop: each name with a function-local def that
-// has a recorded span maps, by its byName entry's address, to that name's FnLocalReach rows. Nothing inserts into or
-// erases from byName past its construction, so the address is stable for the loop. A name with no such def has no
-// entry, and reachableByNameFromLocals then has nothing to set aside.
+// REACH-SPLIT's per-name index (buildFnLocalReachIndex): a byName entry's address -> its FnLocalReach rows; no entry = no local
 struct FnLocalReachIndex
 {
     std::vector<FnLocalReach> rows;
     ankerl::unordered_dense::map<const rw::SmallVec<NodeId, 2>*, std::pair<std::uint32_t, std::uint32_t>> rangeOfName;
-
-    // one byName entry's locals with their spans; empty when it holds none
     std::span<const FnLocalReach> localsOf( const rw::SmallVec<NodeId, 2>& ids ) const
     {
         const auto at = rangeOfName.find( &ids );
-        if( at == rangeOfName.end() )
-        {
-            return {};
-        }
+        if( at == rangeOfName.end() ) { return {}; }
         return std::span<const FnLocalReach>( rows ).subspan( at->second.first, at->second.second - at->second.first );
     }
 };
@@ -9685,36 +9677,22 @@ isBuiltinLiteralCall( const rw::IngestResult& ing, const rw::Reference& r,
     return true;
 }
 
-// REACH-SPLIT: buildGraph's FnLocalReachIndex — one row per function-local def that has a recorded span, grouped by the
-// byName entry that lists it (a def without a span is never out of reach, localDefOutOfReach, and gets no row).
+// REACH-SPLIT: one row per function-local def with a recorded span (a def without one is never out of reach), per byName entry
 inline FnLocalReachIndex buildFnLocalReachIndex( const IngestResult& ing, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName )
 {
     FnLocalReachIndex index;
-    if( ing.fnLocalScopes.empty() )
-    {
-        return index;
-    }
+    if( ing.fnLocalScopes.empty() ) { return index; }
     for( const auto& [ name, ids ] : byName )
     {
         const auto first = std::uint32_t( index.rows.size() );
         for( NodeId c : ids )
         {
             const Symbol& s = ing.symbols[ c ];
-            if( s.fnLocal == 0 )
-            {
-                continue;
-            }
-            const auto row = std::lower_bound( ing.fnLocalScopes.begin(), ing.fnLocalScopes.end(), c,
-                                               []( const FnLocalScope& f, NodeId id ) noexcept { return f.id < id; } );
-            if( row != ing.fnLocalScopes.end() && row->id == c )
-            {
-                index.rows.push_back( { c, s.fileId, row->start, row->end } );
-            }
+            if( s.fnLocal == 0 ) { continue; }
+            const auto row = std::lower_bound( ing.fnLocalScopes.begin(), ing.fnLocalScopes.end(), c, []( const FnLocalScope& f, NodeId id ) noexcept { return f.id < id; } );
+            if( row != ing.fnLocalScopes.end() && row->id == c ) { index.rows.push_back( { c, s.fileId, row->start, row->end } ); }
         }
-        if( index.rows.size() > first )
-        {
-            index.rangeOfName.emplace( &ids, std::pair{ first, std::uint32_t( index.rows.size() ) } );
-        }
+        if( index.rows.size() > first ) { index.rangeOfName.emplace( &ids, std::pair{ first, std::uint32_t( index.rows.size() ) } ); }
     }
     return index;
 }
