@@ -1474,6 +1474,48 @@ function storyCards(s, { kick, head, stories, footText }){
   ]);
 }
 
+/* ── S12g · the community ───────────────────────────────────────────────── */
+{
+  // Credit by PR, from CHANGELOG.md's [0.6.9] and [0.6.10] Thanks lines, changelog.d/ on main cd04d477e, and
+  // GitHub's merged pull requests since 2026-10-21 (authors other than the maintainer account). The owner's rule:
+  // credit contributors for everything possible.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// merged since 2026-10-21 — each names its PR or issue", GREEN);
+  title(s, "Built with the community", { size: 32 });
+  const people = [
+    ["@llvm-x86",        "#423 #437 #438 #442 #459 #460", "--situ and --test-gate start from changed symbols; Django and unittest hooks are not dead code; Kotlin scope functions; a runnable run= for a TS/JS test in a subpackage; Cargo and package.json entry points on --for"],
+    ["@lennix1337",      "#402 #410 #411 #422 #471",      "Windows: --quality-delta=A..B archives through stdin, clang-cl PGO builds; --uses on JS/TS literal receivers; language-facts slice 6c"],
+    ["@jflowers",        "#478 #530 #533",                "Python import a.b as c and from pkg import mod file edges; C / C++ include roots and the foreign-qualifier veto (#524, #526)"],
+    ["@pt-act",          "#397 #433",                     "the pattern screen refuses overlapping alternation; a committed filename can no longer be read as commit metadata"],
+    ["@mpapis",          "#432",                          "one order for every multi-definition name answer; --lsp says when a name has several definitions"],
+    ["@SeddonShen",      "#538",                          "C++ base clauses read through tags captures, the first language on that port"],
+    ["@LaimaWu",         "#456",                          "Clojure on the shared inert-region walk"],
+    ["@s0undt3ch · @rainhuang0220 · @liziye627-design", "#293 #330 #431", "the installer hardening list; the Vitest runner hint behind #442; a clone gate arm that now checks"],
+  ];
+  let y = 1.62;
+  for (const [who, prs, what] of people){
+    row(s, y, 0.5, [
+      { t: who,  w: 2.55, color: GREEN, bold: true, size: who.length > 20 ? 8.5 : 11.5, mono: true },
+      { t: prs,  w: 2.05, color: MUTED, size: 9.5, mono: true },
+      { t: what, w: 7.0,  color: TEXT,  size: 9.5 },
+    ]);
+    y += 0.56;
+  }
+  card(s, MX, y + 0.04, 12.09, 0.72, CARD2);
+  s.addText([
+    { text: "Reports that led to fixes: ", options: { color: AMBER, bold: true } },
+    { text: "@WingedGuardian (#594, cold prompt hooks, with measurements), @soarkit (#610, a Rust re-export), @muayyad-alsadi (#409, reST and Sphinx), @pguerrerolinares (#466, --for on a file name), @gucliti (#521, the router skill's language list), @hnipps (#228, Django dead code).", options: { color: MUTED } },
+  ], { x: MX+0.25, y: y + 0.09, w: 11.6, h: 0.62, fontFace: SANS, fontSize: 10.5, valign: "middle", margin: 0 });
+  foot(s, "CHANGELOG.md [0.6.9] and [0.6.10] Thanks lines · changelog.d/ · merged pull requests on GitHub · thank you");
+  notes(s, [
+    "SOURCES (community). Window: merged 2026-10-21 to main cd04d477e (2026-11-13).",
+    "- CHANGELOG.md [0.6.10] Thanks: \"@pt-act (#433, #469), @llvm-x86 (#442, #459, #460), @lennix1337 (#436, #447, #471, #472), @jflowers (#478, #524, #526, #530), @s0undt3ch (#293), @muayyad-alsadi (#409), @pguerrerolinares (#466), @gucliti (#521) and @rainhuang0220 (#330)\". [0.6.9] Thanks: \"@lennix1337 (#402, #410, #411, #422), @llvm-x86 (#423, #437, #438), @mpapis (#432), @pt-act (#397) and @liziye627-design (#431); reports that led to fixes: @hnipps (#228) and @s0undt3ch (#305)\".",
+    "- GitHub, merged pull requests since 2026-10-21, authors other than joyful-ii-V-I: #402 #411 (lennix1337), #423 #437 #438 #442 #459 #460 (llvm-x86), #431 (liziye627-design), #433 #397 (pt-act), #471 (lennix1337), #530 #533 (jflowers), #538 (SeddonShen), #456 (LaimaWu). #293 (s0undt3ch) and #330 (rainhuang0220) were closed with their work carried in #482 and #442; #524 and #526 carried @jflowers' #478 work.",
+    "- After 0.6.10, changelog.d/: 478-py-from-import-member-edges.md (thanks @jflowers), 538-cpp-base-capture.md (thanks @SeddonShen), route-hook-cold.md (#594, thanks @WingedGuardian — issue), 610-rust-reexport-dup.md (#610, thanks @soarkit — issue).",
+    "- Earlier contributors are credited on the slides for 0.6.0, 0.6.1 and 0.6.2 to 0.6.5; 0.6.7 and 0.6.8 contributors are in CHANGELOG.md [0.6.7] and [0.6.8] (that window's slide was not merged).",
+  ]);
+}
+
 /* ── S12f · in the field ────────────────────────────────────────────────── */
 {
   // OUTCOMES ONLY. Source: README.md's field report (merged: #361, merge commit 99dc46eb): one engagement, the orchestrating
@@ -1613,13 +1655,45 @@ function storyCards(s, { kick, head, stories, footText }){
   foot(s, "counts gated in-repo: readmedriftcheck arm E derives them from LINEAGE.md's own tables — the lineage is the design rationale");
 }
 
+/* ── S12h · 0.7.0: four axes ────────────────────────────────────────────── */
+{
+  // The 0.7.0 direction, as "coming": no number on this slide. Owner 2026-11-12: answers, speed and memory are comparison
+  // columns; quality delta is its own section because it is unique to ripwire.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// coming in 0.7.0 — the plan, not a result: no number on this slide", AMBER);
+  title(s, "0.7.0: four axes, measured in the open", { size: 32 });
+  const axes = [
+    ["answers", "complete, partial or wrong, per question, for ripwire and the tools it is compared with — on held-out questions sealed until the publish run, with the in-sample sets labelled as such", CYAN],
+    ["speed", "cold index and warm answer, per repository, small to large; one tool at a time on one machine, medians of repeated runs", CYAN],
+    ["memory", "peak footprint cold and warm, as a curve against repository size — and a tool that runs out of memory is a result, not a gap", GREEN],
+    ["quality delta", "its own section, not a column: a write-time check judged on its own terms — what it catches on fresh, unseen seeded changes, and its false alarms on real diffs", AMBER],
+  ];
+  let y = 1.72;
+  axes.forEach(([h2, b, c], i) => {
+    card(s, MX, y, 12.09, 1.0, i === 3 ? CARD2 : CARD);
+    s.addText(h2, { x: MX+0.25, y: y+0.08, w: 2.4, h: 0.84, fontFace: MONO, fontSize: 17, bold: true, color: c, valign: "middle", margin: 0 });
+    s.addText(b,  { x: MX+2.8, y: y+0.08, w: 9.1, h: 0.84, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
+    y += 1.1;
+  });
+  card(s, MX, y + 0.02, 12.09, 0.78, CARD2);
+  s.addText([
+    { text: "The same rules as this deck: ", options: { color: TEXT, bold: true } },
+    { text: "the method registered before the runs, a frozen grader applied to every tool alike, losses published beside wins, and a reproduce command for every number.", options: { color: MUTED } },
+  ], { x: MX+0.25, y: y + 0.08, w: 11.6, h: 0.66, fontFace: SANS, fontSize: 12, valign: "middle", margin: 0 });
+  foot(s, "until then: the published rounds r1–r10 (July–August 2026), and ripwire against its own past");
+  notes(s, [
+    "SOURCE (0.7.0 direction). The owner's direction of 2026-11-12: 0.7.0 publishes answers, speed, memory and quality delta; the comparison table has columns for answers, speed and memory, and quality delta gets its own section because it is unique to ripwire. The README's \"Measured\" section already says \"A held-out comparison comes with 0.7.0\"; CHANGELOG [0.6.10] says absolute seconds and megabytes \"come with the 0.7.0 table, measured on one other machine\".",
+    "- No figure, tool name or repository list for 0.7.0 is on this slide: none is published yet.",
+  ]);
+}
+
 /* ── S12c · re-derive this deck ─────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["194 long flags · 36 slides",        "bash test/deckclaimcheck.sh"],
+    ["194 long flags · 38 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["807 gate scripts (counts snapshot 2026-11-13)", "bash test/manifestcheck.sh"], // gatecount
