@@ -375,6 +375,7 @@ for _g in \
     clonelexcheck \
     clonepersistcheck \
     qdconstructscheck \
+    qbasecachecheck \
     clsrecvcheck \
     cochangeboostcheck \
     cochangecliocheck \

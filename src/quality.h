@@ -4714,6 +4714,117 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     return { std::move( snap ), true };
 }
 
+// ─── QD-PAIR-BASE-CACHE: the BASE side of --quality-delta=A..B, cached by its sha ─────────────────────────────────
+// On a warm `A..B` the base side was 59-70 % of the run (ML Stage 0 11-13): loadRefTree passes an ingest cache only when
+// the sha is HEAD, so the base commit was archived, cold-parsed, graphed and scored on EVERY call — and agents repeat
+// `origin/main..HEAD` with one base. Everything the comparison takes from that side is two values (verbs_quality.h
+// scoreBaseCommit): the base Snapshot for the selected kinds and the base tree's C-family macro names. Both are pure
+// functions of (repo, base sha, excludes, maxFileBytes, the selected kinds, the extraction and producer identity), so they
+// are stored in one blob of the "qbase" family keyed by exactly that, with the qsnap family's two never-stale guards:
+//  1) the FILENAME key folds the qsnap scheme, the producer identity and the kind mask into the excludes hash, the sha
+//     into the suffix — another sha, exclude set, kind selection or build names another file;
+//  2) the blob self-validates: its own magic and an fnv1a64 trailer over the whole body, and inside it a whole qsnap
+//     blob (magic, scheme, ingest format mirrors, producer hash, sha hash, its own trailer). A blob that fails either
+//     is refused, recomputed and rewritten (the caller alerts, the HEAD qsnap's corrupt-cache way).
+// Capped at two blobs per (repo, key) like qsnap: a working base and one previous.
+constexpr char kQBaseMagic[4] = { 'Q', 'B', 'A', 'S' };
+
+struct BaseCommitScore
+{
+    Snapshot                 snapshot;
+    std::vector<std::string> macros;   // cFamilyMacroNames of the base tree, in its order
+};
+
+inline std::string qbaseExclHex( const std::vector<std::string>& excludes, std::size_t maxFileBytes, KindMask kinds )
+{
+    return exclConfigHex( excludes, "qbase" + std::to_string( kQSnapCacheScheme ) + '\x1f' + std::string( producerIdentity() ) + '\x1f' + std::to_string( kinds ),
+                          maxFileBytes );
+}
+
+inline std::string qbaseCachePath( const std::string& repoHex, const std::string& exclHex, const std::string& baseSha )
+{
+    return shaKeyedCachePath( "qbase", repoHex, exclHex, baseSha );
+}
+
+inline void evictOldQBaseCaches( const std::string& dir, const std::string& repoHex, const std::string& exclHex,
+                                 const std::string& keepPath, std::size_t keep = 2 )
+{
+    evictOldCacheFamily( dir, "ripwire-qbase-" + repoHex + "-" + exclHex + "-", keepPath, keep );
+}
+
+// magic, the qsnap blob (length-prefixed), the macro names (count, then length-prefixed each), an fnv1a64 trailer
+inline std::string serializeBaseCommitScore( const BaseCommitScore& score, const std::string& baseSha )
+{
+    const std::string inner = serializeSnapshot( score.snapshot, baseSha );
+    std::string       buf;
+    buf.append( kQBaseMagic, 4 );
+    qsnapPut( buf, std::uint64_t( inner.size() ) );
+    buf.append( inner );
+    qsnapPut( buf, std::uint32_t( score.macros.size() ) );
+    for( const std::string& name : score.macros )
+    {
+        qsnapPut( buf, std::uint32_t( name.size() ) );
+        buf.append( name );
+    }
+    qsnapPut( buf, fnv1a64( buf ) );
+    return buf;
+}
+
+// false on ANY mismatch: short, bad trailer, bad magic, a length past the body, a qsnap blob that does not validate for
+// this sha, or bytes left over. Never throws.
+inline bool deserializeBaseCommitScore( const std::string& blob, const std::string& baseSha, BaseCommitScore& out )
+{
+    if( blob.size() < 4 + sizeof( std::uint64_t ) + sizeof( std::uint32_t ) + sizeof( std::uint64_t ) )
+    {
+        return false;
+    }
+    const std::size_t bodyLen = blob.size() - sizeof( std::uint64_t );
+    std::uint64_t     stored  = 0;
+    std::memcpy( &stored, blob.data() + bodyLen, sizeof( std::uint64_t ) );
+    if( stored != fnv1a64( std::string_view( blob.data(), bodyLen ) ) || std::memcmp( blob.data(), kQBaseMagic, 4 ) != 0 )
+    {
+        return false;
+    }
+    const char*   p        = blob.data() + 4;
+    const char*   end      = blob.data() + bodyLen;
+    std::uint64_t innerLen = 0;
+    if( !qsnapGet( p, end, innerLen ) || innerLen > std::uint64_t( end - p )
+        || !deserializeSnapshot( std::string( p, std::size_t( innerLen ) ), baseSha, out.snapshot ) )
+    {
+        return false;
+    }
+    p += innerLen;
+    std::uint32_t count = 0;
+    if( !qsnapGet( p, end, count ) || count > std::uint64_t( end - p ) / sizeof( std::uint32_t ) )
+    {
+        return false;   // every name costs at least its length word
+    }
+    out.macros.clear();
+    out.macros.reserve( count );
+    for( std::uint32_t nameIndex = 0; nameIndex < count; ++nameIndex )
+    {
+        std::uint32_t len = 0;
+        if( !qsnapGet( p, end, len ) || len > std::uint64_t( end - p ) )
+        {
+            return false;
+        }
+        out.macros.emplace_back( p, len );
+        p += len;
+    }
+    return p == end;
+}
+
+// 1 = a valid hit (`out` filled), 0 = a clean miss (absent, empty, not a regular file), -1 = present but refused
+inline int probeBaseCommitScore( const std::string& path, const std::string& baseSha, BaseCommitScore& out )
+{
+    const std::optional<std::string> blob = readQSnapBlob( path );
+    if( !blob )
+    {
+        return 0;
+    }
+    return deserializeBaseCommitScore( *blob, baseSha, out ) ? 1 : -1;
+}
+
 // ─── R-I: one materialized commit tree, ingested AND graphed, with an EXPLICIT lifetime ─────────────────
 //
 // `--quality-delta=A..B` reads file bytes through each materialized tree after this call returns: computeSnapshot
