@@ -6753,12 +6753,16 @@ inline void readMoveSketchLine( std::istream& is, gtl::btree_map<std::uint64_t, 
     is >> std::hex >> key >> std::dec >> hex;
     const auto nib = []( char c ) -> int { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; };
     CloneSketch sk{};
-    bool        ok = !is.fail() && hex.size() == 2 * sk.size();
+    bool        ok = VALIDATE( !is.fail(), "a moves record reads a hex key and a sketch" )
+                  && VALIDATE( hex.size() == 2 * sk.size(), "a moves record's sketch is 256 hex digits" );
     for( std::size_t j = 0; ok && j < sk.size(); ++j )
     {
         const int hi = nib( hex[ 2 * j ] ), lo = nib( hex[ 2 * j + 1 ] );
-        ok = hi >= 0 && lo >= 0;
-        sk[j] = std::uint8_t( ( hi << 4 ) | ( lo & 15 ) );
+        ok = VALIDATE( hi >= 0 && lo >= 0, "a moves record's sketch is lowercase hex digits" );
+        if( ok )
+        {
+            sk[j] = std::uint8_t( ( hi << 4 ) | lo );   // both digits checked first: a bad one never builds a byte
+        }
     }
     if( !ok )
     {
