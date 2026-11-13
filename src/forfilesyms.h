@@ -1465,30 +1465,31 @@ inline BindPicks pickBinds( const IngestResult& ing, const ShownFiles& sf, const
     return out;
 }
 // The legend, with the by="bind" clause spliced before its close when a bind row prints.
-inline std::string symsLegend( bool compactLegend, const BindPicks& binds, bool inits )
+inline std::string symsLegend( bool compactLegend, const BindPicks& binds )
 {
     std::string out( compactLegend ? kForFileSymsLegendCompact : kForFileSymsLegend );
     if( !binds.rows.empty() )
     {
         out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsBindLegendCompact : kForFileSymsBindLegend );
     }
-    if( inits )
-    {
-        out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
-    }
     return out;
+}
+// A <y> row's opening `<y p="file:line" n="Owner.name"` for symbol `s` (the attribute tail is the rule's own).
+inline void appendSymRowOpen( std::string& out, const IngestResult& ing, const MemberOwners& owners, const Symbol& s, std::vector<char>& esc )
+{
+    out += "<y p=\"";
+    out += escapeXml( rootRelPath( ing, s.fileId ), esc );
+    out += std::format( ":{}\" n=\"", s.line );
+    out += escapeXml( qualifiedMemberName( owners, s ), esc );
+    out += '"';
 }
 // The by="init" rows: p=file:line n=Owner.name of the callee, by="init" of=the head name at=the declaration [test="1"].
 inline void appendInitRows( std::string& out, const IngestResult& ing, const MemberOwners& owners, const std::vector<InitRow>& inits, std::vector<char>& esc )
 {
     for( const InitRow& r : inits )
     {
-        const Symbol& s = ing.symbols[r.callee];
-        out += "<y p=\"";
-        out += escapeXml( rootRelPath( ing, s.fileId ), esc );
-        out += std::format( ":{}\" n=\"", s.line );
-        out += escapeXml( qualifiedMemberName( owners, s ), esc );
-        out += "\" by=\"init\" of=\"";
+        appendSymRowOpen( out, ing, owners, ing.symbols[r.callee], esc );
+        out += " by=\"init\" of=\"";
         out += escapeXml( r.of, esc );
         out += "\" at=\"";
         out += escapeXml( rootRelPath( ing, r.file ), esc );
@@ -1501,12 +1502,8 @@ inline void appendBindRows( std::string& out, const IngestResult& ing, const Mem
 {
     for( const BindRow& b : binds.rows )
     {
-        const Symbol& s = ing.symbols[b.id];
-        out += "<y p=\"";
-        out += escapeXml( rootRelPath( ing, s.fileId ), esc );
-        out += std::format( ":{}\" n=\"", s.line );
-        out += escapeXml( qualifiedMemberName( owners, s ), esc );
-        out += "\" by=\"bind\" into=\"";
+        appendSymRowOpen( out, ing, owners, ing.symbols[b.id], esc );
+        out += " by=\"bind\" into=\"";
         out += escapeXml( ing.references[b.ref].fieldName(), esc );
         out += isTestSymbol( ing, b.id ) ? "\" test=\"1\"/>" : "\"/>";
     }
@@ -1517,7 +1514,11 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     const MemberOwners owners( ing );
     std::vector<char> esc;
     const BindPicks& binds = picks.binds;
-    std::string      out   = symsLegend( compactLegend, binds, !picks.inits.empty() );
+    std::string      out   = symsLegend( compactLegend, binds );
+    if( !picks.inits.empty() )   // the by="init" clause, present-only, before the legend's close like by="bind"'s
+    {
+        out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
+    }
     // Constants live in the legend (6 files read, 8 head rows, 3 rows per rule): an attribute prints only when it differs or says a cap cut.
     const auto attr = [&]( std::string_view name, std::size_t value, bool print )
     { out += print ? std::format( " {}=\"{}\"", name, value ) : std::string(); };

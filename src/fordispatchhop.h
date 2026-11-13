@@ -36,6 +36,7 @@
 #include "forcallerhop.h"    // appendCallerHopRow / CallerHopRowCtx — the caller hop's <s> row
 #include "forctorhop.h"     // ctor_detail::isCtorName — the language-gated constructor spelling
 #include "forfold.h"         // fold_detail::renderOneBody
+#include "infra/namesplit.h" // namesplit::isIdentChar — the one identifier-byte test
 #include "langfacts.h"       // langFacts( lang ).structuralTyping
 #include "graph.h"
 #include "memberowner.h"
@@ -43,6 +44,7 @@
 #include "nextverb.h"
 #include "receiverevidence.h"   // ReceiverEvidence::callableKind
 #include "redact.h"          // redactInPlace — a held-as row's text is source text
+#include "resolve.h"         // trimWs
 #include "sarif.h"           // rootRelativeUri
 #include "serialize.h"       // escapeXml
 
@@ -453,33 +455,16 @@ struct HeldAsRow
 };
 namespace dispatch_detail
 {
-inline bool identByte( char c ) noexcept
-{
-    return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_';
-}
-// The line trimmed of surrounding blanks.
-inline std::string_view trimmedLine( std::string_view line ) noexcept
-{
-    while( !line.empty() && std::isspace( static_cast<unsigned char>( line.front() ) ) )
-    {
-        line.remove_prefix( 1 );
-    }
-    while( !line.empty() && std::isspace( static_cast<unsigned char>( line.back() ) ) )
-    {
-        line.remove_suffix( 1 );
-    }
-    return line;
-}
 // A by-value declaration of `type` STARTING the (trimmed) line: optional `const`/`static`/`mutable` words and a `ns::` qualifier,
 // the type word, an identifier, then `;` `(` `{` `=` or `[`. `Foo* p;`, `Foo& r = x;`, `Foo<T> v;` and `int f(Foo x)` are not.
 inline bool byValueDecl( std::string_view line, std::string_view type ) noexcept
 {
-    line = trimmedLine( line );
+    line = trimWs( line );
     for( const std::string_view w : { std::string_view( "const " ), std::string_view( "static " ), std::string_view( "mutable " ) } )
     {
         if( line.starts_with( w ) )
         {
-            line = trimmedLine( line.substr( w.size() ) );
+            line = trimWs( line.substr( w.size() ) );
         }
     }
     const std::size_t at = line.find( type );
@@ -487,12 +472,12 @@ inline bool byValueDecl( std::string_view line, std::string_view type ) noexcept
     {
         return false;
     }
-    if( at > 0 && !std::ranges::all_of( line.substr( 0, at ), []( char c ) { return identByte( c ) || c == ':'; } ) )
+    if( at > 0 && !std::ranges::all_of( line.substr( 0, at ), []( char c ) { return namesplit::isIdentChar( c ) || c == ':'; } ) )
     {
         return false;
     }
     std::size_t i = at + type.size();
-    if( i < line.size() && identByte( line[i] ) )
+    if( i < line.size() && namesplit::isIdentChar( line[i] ) )
     {
         return false;   // a longer name (`FooBar`)
     }
@@ -501,7 +486,7 @@ inline bool byValueDecl( std::string_view line, std::string_view type ) noexcept
         ++i;
     }
     const std::size_t nameAt = i;
-    while( i < line.size() && identByte( line[i] ) )
+    while( i < line.size() && namesplit::isIdentChar( line[i] ) )
     {
         ++i;
     }
@@ -514,11 +499,6 @@ inline bool byValueDecl( std::string_view line, std::string_view type ) noexcept
         ++i;
     }
     return i < line.size() && std::string_view( ";({=[" ).find( line[i] ) != std::string_view::npos;
-}
-inline std::string_view ownerLeaf( std::string_view scope ) noexcept
-{
-    const std::size_t sep = scope.find_last_of( ".:" );
-    return sep == std::string_view::npos ? scope : scope.substr( sep + 1 );
 }
 // One source line, or "" when the file is unreadable, changed since indexing or shorter than `line`.
 inline std::string_view sourceLine( FileTextCache& text, std::uint32_t fid, std::uint32_t line )
@@ -534,7 +514,11 @@ inline std::string_view sourceLine( FileTextCache& text, std::uint32_t fid, std:
         return {};
     }
     const std::size_t b = starts[ line - 1 ];
-    const std::size_t e = line < starts.size() ? starts[ line ] : t->size();
+    std::size_t       e = line < starts.size() ? starts[ line ] : t->size();
+    while( e > b && ( ( *t )[ e - 1 ] == '\n' || ( *t )[ e - 1 ] == '\r' ) )
+    {
+        --e;   // the line without its end: trimWs keeps a newline
+    }
     return std::string_view( *t ).substr( b, e - b );
 }
 // A reference's 1-based line: its own, or (a HAS-A member record stores none) the line holding its start byte; 0 when unreadable.
@@ -566,6 +550,12 @@ inline std::vector<HeldAsRow> dispatchHeldAs( const IngestResult& ing, std::span
     {
         return members;
     }
+    std::vector<std::string_view> typeOf;   // each bare candidate's owner type: its scope's last segment
+    for( const NodeId c : bare )
+    {
+        const std::string_view scope = ing.symbols[c].scope;
+        typeOf.push_back( scope.substr( scope.find_last_of( ".:" ) == std::string_view::npos ? 0 : scope.find_last_of( ".:" ) + 1 ) );
+    }
     for( std::uint32_t i = 0; i < ing.references.size(); ++i )
     {
         const Reference& r = ing.references[i];
@@ -575,10 +565,11 @@ inline std::vector<HeldAsRow> dispatchHeldAs( const IngestResult& ing, std::span
         {
             continue;
         }
-        for( const NodeId c : bare )
+        for( std::size_t k = 0; k < bare.size(); ++k )
         {
+            const NodeId  c  = bare[k];
             const Symbol& cs = ing.symbols[c];
-            if( r.calleeName != dispatch_detail::ownerLeaf( cs.scope ) || r.lang != cs.lang )
+            if( r.calleeName != typeOf[k] || r.lang != cs.lang )
             {
                 continue;
             }
@@ -615,7 +606,7 @@ inline void appendHeldAsRow( std::string& x, const IngestResult& ing, const Memb
 {
     const Reference& r    = ing.references[ h.ref ];
     const Symbol&    from = ing.symbols[ h.from ];
-    std::string      line( dispatch_detail::trimmedLine( dispatch_detail::sourceLine( text, r.fileId, h.line ) ).substr( 0, kForDispatchHeldText ) );
+    std::string      line( trimWs( dispatch_detail::sourceLine( text, r.fileId, h.line ) ).substr( 0, kForDispatchHeldText ) );
     redactInPlace( line, redact );
     const std::string_view rp = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] ) : sarif::rootRelativeUri( ing.files[ r.fileId ], rootArg );
     x += h.member ? "<s held=\"member\" of=\"" : "<s held=\"local\" of=\"";

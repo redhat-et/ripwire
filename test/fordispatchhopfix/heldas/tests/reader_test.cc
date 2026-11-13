@@ -3,9 +3,11 @@ struct FakeReader : FileReader
 {
     int ReadFile( int k ) override { return k; }
 };
-int TestReadFile()
+bool ReaderPassesThrough()
 {
     RealReader inTest;
     FakeReader fake;
-    return inTest.ReadFile( 2 ) + fake.ReadFile( 3 );
+    const int real = inTest.ReadFile( 2 );
+    const int stub = fake.ReadFile( 3 );
+    return real == 3 && stub == 3;
 }
