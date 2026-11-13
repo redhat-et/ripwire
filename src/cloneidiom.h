@@ -685,10 +685,55 @@ inline std::size_t idiomParamListOpen( const std::vector<IdiomTok>& sig, std::st
     return sig.size();
 }
 
+// Whether the `<` at sig[at], inside a DEFAULT argument, opens template arguments (`= pick<Lo, Hi>()`) rather than comparing
+// (`= kLo < kHi`): it does when its matching `>` comes, at its own bracket depth, before any `=` (the next parameter's default
+// or a comparison's `==`/`<=`), `;`, `&&`/`||`, or the bracket that closes the list. A template argument list holds none of
+// those, and a comparison's `<` is never closed before the next parameter's own `=` or the list's `)` (CodeRabbit #636).
+inline bool idiomDefaultAngleOpens( const std::vector<IdiomTok>& sig, std::size_t at )
+{
+    std::size_t depth = 0, angle = 1;
+    for( std::size_t j = at + 1; j < sig.size(); ++j )
+    {
+        const std::string_view w    = sig[j].text;
+        const int              step = idiomBracketStep( w );
+        if( step != 0 )
+        {
+            if( step < 0 && depth == 0 )
+            {
+                return false;
+            }
+            depth = step > 0 ? depth + 1 : depth - 1;
+            continue;
+        }
+        if( depth != 0 )
+        {
+            continue;
+        }
+        if( w == "<" )
+        {
+            ++angle;
+        }
+        else if( w == ">" || w == ">>" )
+        {
+            angle -= std::min<std::size_t>( angle, w.size() );
+            if( angle == 0 )
+            {
+                return true;
+            }
+        }
+        else if( w == "=" || w == "==" || w == "<=" || w == ">=" || w == "!=" || w == ";" || w == "&&" || w == "||" )
+        {
+            return false;
+        }
+    }
+    return false;
+}
+
 // The parameter NAMES of one signature's parameter list, read off its tokens: the `(` that opens the
 // symbol's own parameter list (idiomParamListOpen: after its name, and after a generic signature's type
 // parameters), split at depth-1 commas (template angles counted, so `std::map<K, V> m` is one parameter),
-// the default after a depth-1 `=` ignored. A signature that spells no parameter list yields none. That is
+// the default after a depth-1 `=` ignored (a template comma inside it, `= pick<T, U>()`, ends no parameter:
+// idiomDefaultAngleOpens). A signature that spells no parameter list yields none. That is
 // safe for condition (2), since every name returned here LEAVES the identifier set, but NOT for the
 // alpha-rename refusal, which then sees two parameter-renamed copies as different bodies: so the list is
 // found through type parameters too (CodeRabbit #629, `function first<T>( value: T )`).
@@ -735,7 +780,15 @@ inline std::vector<std::string_view> idiomParamNames( const std::vector<IdiomTok
         }
         if( depth != 1 || inDefault )
         {
-            if( depth == 1 && w == "," && angle == 0 )
+            if( depth == 1 && w == "<" && idiomDefaultAngleOpens( sig, i ) )
+            {
+                ++angle;
+            }
+            else if( depth == 1 && ( w == ">" || w == ">>" ) && angle > 0 )
+            {
+                angle -= std::min<std::size_t>( angle, w.size() );
+            }
+            else if( depth == 1 && w == "," && angle == 0 )
             {
                 flush();
             }
