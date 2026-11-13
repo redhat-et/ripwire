@@ -427,9 +427,22 @@ inline std::uint64_t rawDefCloneKey( const std::string& fileBytes, const RawDef&
 // restriction), with no extraction — and the blob is marked dirty so the record is rewritten with them. A file that can
 // no longer be read keeps "absent": the ingest then claims no hits, and --quality-delta re-parses (lintrules.h). A hit
 // is never a nest-refused file (a refusal is written with an UNKNOWN hash, which never hits), so no refusal check here.
-inline void fillAbsentConstructHits( ParsePoolShared& sh, std::size_t fileId, const std::string& path, const LangEntry* le, std::string& bytes,
-                                     bool bytesLoaded, TSParser* parser, TSQueryCursor* constructCursor, RawFacts& out )
+// The worker's view of the file a cache hit is for: its id, path, language entry, and whether `bytes` already holds it.
+struct HitFile
 {
+    std::size_t        fileId;
+    const std::string& path;
+    const LangEntry*   le;
+    bool               bytesLoaded;
+};
+
+inline void fillAbsentConstructHits( ParsePoolShared& sh, const HitFile& file, std::string& bytes, TSParser* parser, TSQueryCursor* constructCursor,
+                                     RawFacts& out )
+{
+    const std::size_t  fileId      = file.fileId;
+    const std::string& path        = file.path;
+    const LangEntry*   le          = file.le;
+    const bool         bytesLoaded = file.bytesLoaded;
     if( !bytesLoaded && ( !readFile( path, bytes ) || looksBinary( bytes ) ) )
     {
         return;
@@ -456,6 +469,33 @@ inline void fillAbsentConstructHits( ParsePoolShared& sh, std::size_t fileId, co
     if( tree.get() != nullptr )
     {
         collectConstructHits( *le, static_cast<std::uint32_t>( fileId ), bytes, ts_tree_root_node( tree.get() ), constructCursor, out.constructs );
+    }
+}
+
+// A decoded cache hit into the worker's arrays; a record without construct hits, in an ingest that wants them, is filled.
+inline std::size_t takeCacheHit( ParsePoolShared& sh, FileFacts& hit, const HitFile& file, std::string& bytes, TSParser* parser,
+                                 TSQueryCursor* constructCursor, RawFacts& out )
+{
+    const bool        hitsAbsent = hit.constructsAbsent;
+    const std::size_t growths    = appendCacheHitFacts( hit, std::uint32_t( file.fileId ), sh.scan, out );
+    if( hitsAbsent && sh.scan.wantConstructHits )
+    {
+        fillAbsentConstructHits( sh, file, bytes, parser, constructCursor, out );
+    }
+    return growths;
+}
+
+// The parse's construct pass, when this ingest wants it; otherwise the file's record is written "constructs absent".
+inline void collectWantedConstructHits( IngestFileScan& scan, const LangEntry& le, std::size_t fileId, std::string_view bytes, TSNode root,
+                                        TSQueryCursor* constructCursor, RawFacts& out )
+{
+    if( scan.wantConstructHits )
+    {
+        collectConstructHits( le, static_cast<std::uint32_t>( fileId ), bytes, root, constructCursor, out.constructs );
+    }
+    else
+    {
+        scan.constructsKnown[ fileId ] = 0;
     }
 }
 
@@ -648,12 +688,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     if( decodeCachedRecordNoThrow( sh.cache, fileId, path, record ) )
                     {
-                        const bool hitsAbsent = record.facts.constructsAbsent;
-                        warmGrowths += appendCacheHitFacts( record.facts, std::uint32_t( fileId ), scan, out );
-                        if( hitsAbsent && scan.wantConstructHits )
-                        {
-                            fillAbsentConstructHits( sh, fileId, path, le, bytes, bytesLoaded, pg.p, constructCursor, out );
-                        }
+                        warmGrowths += takeCacheHit( sh, record.facts, { fileId, path, le, bytesLoaded }, bytes, pg.p, constructCursor, out );
                     }
                     else
                     {
@@ -764,14 +799,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 // QD-CONSTRUCTS-AT-INGEST: from THIS tree, before the member-macro re-parse below can swap it — the tree
                 // findQualityConstructs' own parse would build (ingest_astquery.h collectConstructHits says why).
                 // Only an ingest that wants them runs the pass (ingest.h WantConstructHits); otherwise the record says absent.
-                if( scan.wantConstructHits )
-                {
-                    collectConstructHits( *le, static_cast<std::uint32_t>( fileId ), bytes, ts_tree_root_node( tree.get() ), constructCursor, out.constructs );
-                }
-                else
-                {
-                    scan.constructsKnown[ fileId ] = 0;
-                }
+                collectWantedConstructHits( scan, *le, fileId, bytes, ts_tree_root_node( tree.get() ), constructCursor, out );
 
                 // §L1 — before `bytes` can be moved below. May swap `tree` for the member-macro re-parse (macroreparse.h).
                 scan.health[ fileId ] = measureHealthAdoptingMemberMacroReparse( pg.p, le->lang, bytes, tree, macroWork );
@@ -1150,7 +1178,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( !parseCut && !cacheFile.empty() && dirty.load() )
         {
             forgetNestRefusalsForCache( scan );   // a refused file is written UNKNOWN, so a warm run re-refuses it (ingest_prewarm.h)
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, raw.constructs, scan.constructsKnown, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown }, captureValueUses );
             memstats::mark( "save-cache" );   // M0: peak_mib holds the cache blob's own peak (card C1)
         }
     }
