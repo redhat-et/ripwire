@@ -416,6 +416,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     // lazy tags.scm prewarm: detect the cache-miss set (prefilling scan.hash/stat), launch the async
     // grammar compiles, and hand the compile/ready state to the parse pool via `prewarm` (ingest_prewarm.h).
+    scan.wantConstructHits = tlIngestWantsConstructHits;   // QD-CONSTRUCTS-AT-INGEST: read once, on the caller's thread, before the miss set
     QueryPrewarm   prewarm;
     prewarmTagsQueries( result.files, cache, cacheWriteNs, scan, prewarm );
 
@@ -507,6 +508,12 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     result.includes = std::move( raw.incs );   // physical dependencies (#include / import), for --deps
     result.constOpens = std::move( raw.constOpens );   // parser version 82: Ruby class/module opens → resolve.h's constant index
+    // QD-CONSTRUCTS-AT-INGEST: the --quality-delta construct hits of every file the pool parsed or read from its record.
+    // A memory-cut parse left files without them, and so did a pool that ran without the pass (ingest.h
+    // WantConstructHits) or carried a record that lacked it: then it hands back no claim and the reader re-parses.
+    const bool everyFileKnown    = std::ranges::find( scan.constructsKnown, std::uint8_t( 0 ) ) == scan.constructsKnown.end();
+    result.constructHits         = std::move( raw.constructs );
+    result.constructHitsForFiles = !result.memoryStop.parseCut && everyFileKnown ? result.files.size() : SIZE_MAX;
 
     emitBindingAliases( result, raw.ffis );
     emitRouteDefs( result, raw.routeDefs );

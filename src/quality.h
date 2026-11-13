@@ -2562,7 +2562,7 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 50;   // MUST equal ingest.cpp's kCacheVersion (gated); 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 51;   // MUST equal ingest.cpp's kCacheVersion (gated); 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
 constexpr std::uint32_t kIngestParserVerMirror    = 307;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 307 = 2026-11-11 (lane rust-macro-path placeholder: Rust path macro sites + `$crate::m!` in transcribers; rich 308)
                                                           // 305 = 2026-11-10 (#446 round 1: C++ base clauses as @reference.base captures; above main 303 and PR head 304; rich 306)
@@ -4712,6 +4712,95 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
         evictOldQSnapCaches( cacheDirLadder(), repoHex, qExclHex, qsnapPath, 2 );
     }
     return { std::move( snap ), true };
+}
+
+// ─── QD-PAIR-BASE-CACHE: the BASE side of --quality-delta=A..B, cached by its sha ─────────────────────────────────
+// On a warm `A..B` the base side was 59-70 % of the run (ML Stage 0 11-13): loadRefTree passes an ingest cache only when
+// the sha is HEAD, so the base commit was archived, cold-parsed, graphed and scored on EVERY call — and agents repeat
+// `origin/main..HEAD` with one base. Everything the comparison takes from that side is two values (verbs_quality.h
+// scoreBaseCommit): the base Snapshot for the selected kinds and the base tree's C-family macro names. Both are pure
+// functions of (repo, base sha, excludes, maxFileBytes, the selected kinds, the extraction and producer identity), so they
+// are stored in one blob of the "qbase" family keyed by exactly that, with the qsnap family's two never-stale guards:
+//  1) the FILENAME key is the qsnap one (qsnapExclHex: excludes, maxFileBytes, the qsnap scheme, the producer identity)
+//     plus the kind mask, the sha the suffix (verbs_quality.h scoreBaseCommit) — another sha, exclude set, kind selection
+//     or build names another file;
+//  2) the blob self-validates: its own magic and an fnv1a64 trailer over the whole body, and inside it a whole qsnap
+//     blob (magic, scheme, ingest format mirrors, producer hash, sha hash, its own trailer). A blob that fails either
+//     is refused, recomputed and rewritten (the caller alerts, the HEAD qsnap's corrupt-cache way).
+// Capped at two blobs per (repo, key) like qsnap: a working base and one previous.
+constexpr char kQBaseMagic[4] = { 'Q', 'B', 'A', 'S' };
+
+struct BaseCommitScore
+{
+    Snapshot                 snapshot;
+    std::vector<std::string> macros;   // cFamilyMacroNames of the base tree, in its order
+};
+
+inline std::string qbaseCachePath( const std::string& repoHex, const std::string& exclHex, const std::string& baseSha )
+{
+    return shaKeyedCachePath( "qbase", repoHex, exclHex, baseSha );
+}
+
+// magic, the qsnap blob (length-prefixed), the macro names (count, then length-prefixed each), an fnv1a64 trailer
+inline std::string serializeBaseCommitScore( const BaseCommitScore& score, const std::string& baseSha )
+{
+    const std::string inner = serializeSnapshot( score.snapshot, baseSha );
+    std::string       buf;
+    buf.append( kQBaseMagic, 4 );
+    qsnapPut( buf, std::uint64_t( inner.size() ) );
+    buf.append( inner );
+    qsnapPut( buf, std::uint32_t( score.macros.size() ) );
+    for( const std::string& name : score.macros )
+    {
+        qsnapPut( buf, std::uint32_t( name.size() ) );
+        buf.append( name );
+    }
+    qsnapPut( buf, fnv1a64( buf ) );
+    return buf;
+}
+
+// false on ANY mismatch: short, bad trailer, bad magic, a length past the body, a qsnap blob that does not validate for
+// this sha, or bytes left over. Never throws.
+inline bool deserializeBaseCommitScore( const std::string& blob, const std::string& baseSha, BaseCommitScore& out )
+{
+    if( blob.size() < 4 + sizeof( std::uint64_t ) + sizeof( std::uint32_t ) + sizeof( std::uint64_t ) )
+    {
+        return false;
+    }
+    const std::size_t bodyLen = blob.size() - sizeof( std::uint64_t );
+    std::uint64_t     stored  = 0;
+    std::memcpy( &stored, blob.data() + bodyLen, sizeof( std::uint64_t ) );
+    if( stored != fnv1a64( std::string_view( blob.data(), bodyLen ) ) || std::memcmp( blob.data(), kQBaseMagic, 4 ) != 0 )
+    {
+        return false;
+    }
+    const char*   p        = blob.data() + 4;
+    const char*   end      = blob.data() + bodyLen;
+    std::uint64_t innerLen = 0;
+    if( !qsnapGet( p, end, innerLen ) || innerLen > std::uint64_t( end - p )
+        || !deserializeSnapshot( std::string( p, std::size_t( innerLen ) ), baseSha, out.snapshot ) )
+    {
+        return false;
+    }
+    p += innerLen;
+    std::uint32_t count = 0;
+    if( !qsnapGet( p, end, count ) || count > std::uint64_t( end - p ) / sizeof( std::uint32_t ) )
+    {
+        return false;   // every name costs at least its length word
+    }
+    out.macros.clear();
+    out.macros.reserve( count );
+    for( std::uint32_t nameIndex = 0; nameIndex < count; ++nameIndex )
+    {
+        std::uint32_t len = 0;
+        if( !qsnapGet( p, end, len ) || len > std::uint64_t( end - p ) )
+        {
+            return false;
+        }
+        out.macros.emplace_back( p, len );
+        p += len;
+    }
+    return p == end;
 }
 
 // ─── R-I: one materialized commit tree, ingested AND graphed, with an EXPLICIT lifetime ─────────────────

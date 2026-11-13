@@ -111,6 +111,7 @@ struct RefPairDelta
     std::string               baseSha, targetSha;
     PhaseStop                 stop;                                // the guard's stop in a full tree, when there was one
     std::uint64_t             ingestPeak = 0;                      // this process's peak at the end of the base commit's ingest (the projection's input)
+    bool                      baseFromCache = false;               // QD-PAIR-BASE-CACHE: the base side came from its qbase blob (no base ingest to project from)
 
     const rw::quality::RefTree& target() const noexcept { return targetTree; }
     const std::vector<std::string>* macroOverride() const noexcept { return degraded && haveBaseMacros ? &baseMacros : nullptr; }
@@ -191,9 +192,45 @@ int refPairStopRefusal( const PhaseStop& stop, const RefPairDelta& refs, std::st
 // index, graph and temp dir are released on return, before the target tree is materialized. qd-memory-degrade: it also
 // keeps the base tree's C-family macro NAMES (defect-shape's one tree-wide input, names only) and reads this process's
 // peak at the end of the ingest, for the projection. Exit code on an environment failure; a memory stop goes to `stop`.
+// QD-PAIR-BASE-CACHE: the base side from its qbase blob (quality.h), when one validates for this sha and key. A refused blob
+// is said once on stderr, in every build type (the HEAD qsnap's corrupt-cache line), and the caller recomputes and rewrites it.
+bool takeCachedBase( const std::string& path, const std::string& sha, RefPairDelta& refs )
+{
+    using namespace rw;
+    // 1 = a valid hit, 0 = a clean miss (absent, empty, not a regular file), -1 = present but refused
+    quality::BaseCommitScore         cached;
+    const std::optional<std::string> blob = quality::readQSnapBlob( path );
+    const int                        hit  = !blob ? 0 : quality::deserializeBaseCommitScore( *blob, sha, cached ) ? 1 : -1;
+    if( hit == -1 )
+    {
+        rw::emitRaw( stderr, "ripwire: quality: base Snapshot cache corrupt — recomputing\n" );
+        DISCLOSE( Diagnostics::answerUnchanged, "the corrupt cache is recomputed from the base tree: same answer, slower", "quality: base Snapshot cache corrupt — recomputing" );
+    }
+    if( hit != 1 )
+    {
+        return false;
+    }
+    refs.baseSnapshot   = std::move( cached.snapshot );
+    refs.baseMacros     = std::move( cached.macros );
+    refs.haveBaseMacros = true;
+    refs.baseFromCache  = true;
+    return true;
+}
+
 std::optional<int> scoreBaseCommit( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& refs )
 {
     using namespace rw;
+    // QD-PAIR-BASE-CACHE: keyed by the base sha, the excludes, maxFileBytes, the selected kinds and the build; --no-cache
+    // neither reads nor writes it, so the flag that asks for a fresh answer gets one.
+    const bool        useCache = !cfg.noCache;
+    const std::string repoHex  = useCache ? quality::cacheRootKeyHex( root ) : std::string();
+    // the qsnap key (excludes, maxFileBytes, scheme, producer identity) plus the selected kinds: a base Snapshot holds only those
+    const std::string exclHex  = useCache ? quality::qsnapExclHex( cfg.excludes, cfg.maxFileBytes ) + "k" + std::to_string( refs.selected ) : std::string();
+    const std::string path     = useCache ? quality::qbaseCachePath( repoHex, exclHex, sha ) : std::string();
+    if( useCache && takeCachedBase( path, sha, refs ) )
+    {
+        return std::nullopt;
+    }
     quality::TmpTreeGuard      baseGuard;
     quality::RefTree           baseTree;
     const quality::RefTreeLoad load = quality::loadRefTree( root, sha, cfg.excludes, cfg.maxFileBytes, "qdpair-base", baseGuard, baseTree );
@@ -210,6 +247,11 @@ std::optional<int> scoreBaseCommit( const std::string& root, const std::string& 
     refs.baseMacros     = quality::cFamilyMacroNames( baseTree.ing );
     refs.haveBaseMacros = true;
     (void)hardLineStops( "snapshot of the base commit", refs.stop );
+    if( useCache && !refs.stop.stopped )   // a stopped side is never persisted: the next call must not read a partial floor as whole
+    {
+        (void)quality::atomicWriteFile( path, quality::serializeBaseCommitScore( { refs.baseSnapshot, refs.baseMacros }, sha ) );
+        quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + repoHex + "-" + exclHex + "-", path, 2 );
+    }
     return std::nullopt;
 }
 
@@ -370,8 +412,10 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
         {
             return failed;
         }
-        // #387: the base tree's index, graph and temp dir were released when scoreBaseCommit returned.
-        if( out.stop.stopped || hardLineStops( "base commit's snapshot, with its index released", out.stop ) || certainLocal == 0 )
+        // #387: the base tree's index, graph and temp dir were released when scoreBaseCommit returned. QD-PAIR-BASE-CACHE: a base
+        // read from its qbase blob built no tree, so there is no base ingest to project the target from: the target is read in
+        // full, and only a real stop in it sends the answer to the changed files.
+        if( out.stop.stopped || hardLineStops( "base commit's snapshot, with its index released", out.stop ) || certainLocal == 0 || out.baseFromCache )
         {
             return out.stop.stopped ? std::nullopt : loadTargetCommit( root, out.targetSha, cfg, out );
         }

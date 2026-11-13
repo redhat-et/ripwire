@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-13, lane qd-constructs (base main cd04d477e): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kCacheVersion 50 -> 51: a file record carries the --quality-delta construct hits (u32 count + 9-byte rows, ingest_cache.h),
+#   found in the parse worker (ingest_astquery.h collectConstructHits); quality.h's kIngestCacheVersionMirror with it. kQSnapCacheScheme stays:
+#   no watched function moved and findQualityConstructs returns the same hits (test/qdconstructscheck.sh compares carried against re-parsed).
 # 2026-11-10, lane qd-fixes-1 (base main b8032471f): RE-PINNED ONCE with UPDATE_GOLDEN=1, kQSnapCacheScheme 25 -> 26.
 #   Watched text: isDeadCandidate exempts Go/Rust test-runner entry points (testRunnerInvokedSymbol, QD-TEST-DEAD), and the clone
 #   set computeSnapshot stores also holds every pair the baseline's clone relation implies (pushExactGroupPairs / pushTwinWidenedPairs,

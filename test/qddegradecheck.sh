@@ -528,15 +528,19 @@ PT="$WORK/ptmp"; mkdir -p "$PT"
 blobsum(){ find "$PT" -type f -name '*.bin' -exec cksum {} + 2>/dev/null | sort; }
 ( cd "$FX" && TMPDIR="$PT" "$BIN" . --quality-delta=HEAD~1..HEAD >"$WORK/P1.xml" 2>/dev/null ); p1=$?
 s1="$( blobsum )"
+# QD-PAIR-BASE-CACHE: P1 cached the base side by sha; a hit has no base ingest to project from, so project:1 would never
+# trip. Drop that one blob so P2 scores the base again (and rewrites it whole, deterministically: s1 = s2 still holds).
+nqb="$( find "$PT" -type f -name 'ripwire-qbase-*.bin' | grep -c . )"
+find "$PT" -type f -name 'ripwire-qbase-*.bin' -exec rm -f {} +
 ( cd "$FX" && TMPDIR="$PT" RIPWIRE_TEST_MEMGUARD=project:1 "$BIN" . --quality-delta=HEAD~1..HEAD >"$WORK/P2.xml" 2>/dev/null ); p2=$?
 s2="$( blobsum )"
 ( cd "$FX" && TMPDIR="$PT" "$BIN" . --quality-delta=HEAD~1..HEAD >"$WORK/P3.xml" 2>/dev/null ); p3=$?
-if [ -n "$s1" ] && [ "$p1" = "$ARC" ] && cmp -s "$WORK/P1.xml" "$WORK/A.xml"; then
+if [ -n "$s1" ] && [ "$nqb" = 1 ] && [ "$p1" = "$ARC" ] && cmp -s "$WORK/P1.xml" "$WORK/A.xml"; then
     if [ -n "$( attr "$WORK/P2.xml" kinds_skipped )" ] && [ "$p2" = "$( degrc "$WORK/P2.xml" )" ] && [ "$s1" = "$s2" ] && [ "$p3" = "$ARC" ] && cmp -s "$WORK/P3.xml" "$WORK/A.xml"; then
         ok "(P) P1 with the cache on: degraded (rc=$p2), every cache blob unchanged, and the next cached run is byte-identical to (A)"
     else no "(P) p2=$p2 degraded=$( attr "$WORK/P2.xml" ingest_scope ) blobs_unchanged=$( [ "$s1" = "$s2" ] && echo yes || echo no ) p3=$p3 identical=$( cmp -s "$WORK/P3.xml" "$WORK/A.xml" && echo yes || echo no )"; fi
 else
-    no "(P) premise: the cached unpressured run wrote no blob or differs from (A) (rc=$p1, blobs: $( echo "$s1" | grep -c . ))"
+    no "(P) premise: the cached unpressured run wrote no blob or differs from (A) (rc=$p1, blobs: $( echo "$s1" | grep -c . ), qbase: $nqb)"
 fi
 
 # ── (Q) R5: the target phase stops after the projection said it fits ───────────────────────────────────────────

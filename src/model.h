@@ -1542,6 +1542,19 @@ struct ConstOpen
     std::string   written;                // the name as written: `Base`, `App::Audited`, `::Top`
 };
 
+// QD-CONSTRUCTS-AT-INGEST: one --quality-delta construct hit (an error-masking block or a handler / placeholder
+// shape), found in the parse worker from the tree ingest already built and carried in the file's cache record, so
+// a warm --quality-delta reads and parses no file to count them. `tag` indexes lintrules.h's construct-tag table
+// (constructTagName): a kErrorMaskRules row, then the four kShape* walk tags. Same fields as lintrules.h ErrorMaskHit,
+// with the id packed to a byte.
+struct ConstructHit
+{
+    std::uint32_t fileId    = 0;
+    std::uint32_t startByte = 0;
+    std::uint32_t line      = 0;
+    std::uint8_t  tag       = 0;
+};
+
 // P2-D Rule 2 LOCAL-VARIABLE TYPE BINDING (`var : typeName`) captured at ingest. One record per
 // `Foo x;` / `Foo* x;` / `auto x = Foo()` / `x = Foo()` (C++) or `x = Foo()` (Python) inside a function
 // body — the variable→type fact that lets resolve.h narrow a later `x.m()` / `x->m()` to `typeName::m`.
@@ -2345,6 +2358,10 @@ struct IngestResult
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)
+    std::vector<ConstructHit> constructHits;   // QD-CONSTRUCTS-AT-INGEST: every file's construct hits, any order (lintrules.h findQualityConstructs sorts)
+    std::size_t constructHitsForFiles = SIZE_MAX;   // == files.size() when constructHits covers EVERY file (a whole parse pool, no memory
+                                                    // cut); anything else (a merged, preview or partial IngestResult) makes the reader
+                                                    // re-parse the tree for them, exactly as before the hits were carried
     std::vector<Binding>     bindings;     // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-var narrowing
     std::vector<BindingAlias> bindingAliases;  // R5: cross-language FFI binding declarations (pybind/extern-C/ctypes)
     std::vector<RouteDef>    routeDefs;     // B6.3: HTTP server-side route registrations (unresolved handler names)
