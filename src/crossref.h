@@ -3786,6 +3786,7 @@ struct EvalReport
                                                  // refused, never scored (see evalStray below)
     bool                     ok = true;
     bool                     blobsUnread = false;   // K75: the sweep's blob batch was unread — refused, like a non-git root
+    bool                     tooManyRefs = false;   // the sweep refused past kMaxRefs local branches — said so, not "not a git repository"
 };
 
 inline bool parseVerdict( std::string_view s, Verdict& out )
@@ -3815,7 +3816,7 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
     }
 
     const StrayResult res = computeStrayContent( root, {} );
-    if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; return rep; }
+    if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; rep.tooManyRefs = res.tooManyRefs; return rep; }
 
     // Reported refs carry their verdict; every ref NOT reported was scanned and found merged (writeStrayContent
     // omits those), so an absent ref scores as `merged` rather than as a miss.

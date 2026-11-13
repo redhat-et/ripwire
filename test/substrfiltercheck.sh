@@ -34,7 +34,7 @@
 # ARM E (MAIN-LOCAL-REDS, 2026-11-13) covers the other refusal the sweep verbs share: more than 512 local branches (crossref
 # kMaxRefs). The CLI --stray-content already said "more than 512 refs match — narrow it with --stray-content=SUBSTR"; --whereis
 # said "is not a git repository (or has no HEAD commit)", and the MCP whereis and stray_content twins said the same. RED-FIRST
-# (main cd04d477e): E1 (both roots), E3 and E4 fail; E0, E2 and E5 hold on both binaries.
+# (main cd04d477e): E1 (both roots), E3, E4 and E6 fail; E0, E2 and E5 hold on both binaries.
 #
 # Usage:  bash test/substrfiltercheck.sh [BIN]   |   RIPWIRE_BIN=build_base/ripwire bash test/…
 # Exits non-zero on any failure.
@@ -227,6 +227,14 @@ if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs match"; 
     ok "E5 --stray-content over 513 branches refuses naming the ref cap (control)"
 else
     no "E5 --stray-content over 513 branches → exit $RC: $OUT"
+fi
+# E6 --eval-stray scores that sweep: its refusal said "cannot read '<labels>', or <root> is not a git repository" — both false.
+printf 'b001\tunmerged\n' >"$EFIX/labels.tsv"
+OUT="$( "$BIN" "$EFIX/linked" --eval-stray="$EFIX/labels.tsv" --no-cache 2>&1 1>/dev/null )"; RC=$?
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs" && ! printf '%s' "$OUT" | grep -qF "not a git repository"; then
+    ok "E6 --eval-stray over 513 branches refuses naming the ref cap"
+else
+    no "E6 --eval-stray over 513 branches → exit $RC: $OUT"
 fi
 
 echo

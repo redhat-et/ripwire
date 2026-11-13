@@ -3625,7 +3625,7 @@ $ ./build/ripwire . --stray-content=fix/
 </stray-content>
 ```
 
-**Shaped by:** `--plan`, `--abi`, `--whereis`, `--limit`, `--eval-stray`
+**Shaped by:** `--plan`, `--abi`, `--limit`, `--eval-stray`
 
 **Caveats (stated by the binary):**
 

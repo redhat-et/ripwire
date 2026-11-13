@@ -1552,6 +1552,12 @@ std::optional<int> runCrossRef( const MainDispatch& d )
                 printBlobsUnreadRefusal( "--eval-stray: " );   // K75
                 return 1;
             }
+            if( rep.tooManyRefs )   // the sweep it scores refused past the ref cap: the labels file and the repository are both fine
+            {
+                rw::emitTo( stderr, "ripwire: --eval-stray: the --stray-content sweep it scores refused — more than {} refs (local branches) in {}\n",
+                            crossref::kMaxRefs, root.c_str() );
+                return 1;
+            }
             if( !rep.badRefs.empty() )
             {
                 // H13: the file read fine and this IS a git repo — the refusal is that one or more
