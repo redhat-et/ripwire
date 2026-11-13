@@ -78,7 +78,8 @@ X
 # ── C: a code-marked sentence naming ONE function and asking who calls it ──
 additive(){ # $1 root $2 task $3 label: the answer minus the block equals the no-hop answer
     local A="$3"
-    if python3 - "$A" "$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null </dev/null )" <<'X'
+    local B; B="$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null </dev/null )" || no "C $4: the no-hop answer exited $?"
+    if python3 - "$A" "$B" <<'X'
 import re,sys
 a,b=sys.argv[1:3]
 m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)
@@ -89,7 +90,7 @@ X
     then ok "C $4: the rest of the answer is byte-identical"; else no "C $4: the block displaced something (or no answer)"; fi
 }
 csub(){ # $1 root $2 task $3 caller row $4 label
-    local A; A="$( ask "$1" "$2" )"
+    local A; A="$( ask "$1" "$2" )" || no "C $4: ripwire exited $?"
     has "$A" '<callers by="subject"' "C $4: callers ride by subject"
     has "$( blk "$A" )" "$3" "C $4: the caller row"
     additive "$1" "$2" "$A" "$4"
@@ -105,14 +106,14 @@ for q in 'How does `prepare_setup_platform` choose the name it returns, and wher
          'What does `prepare_setup_platform` call internally, and which values does it update along the way?' \
          'I changed nothing in `prepare_setup_platform`; where is the 404 fallback decided for the platform setup?' \
          'When I run the setup, how does the app invoke the task and run the `prepare_setup_platform` step in parallel?'; do
-    A="$( ask "$R" "$q" )"
+    A="$( ask "$R" "$q" )" || no "CN ($q): ripwire exited $?"
     case "$A" in *'<ctx '*) seen=$(( seen + 1 ));; *) no "CN no answer printed ($q)";; esac
     hasnt "$A" '<callers by="subject"' "CN ($q): no callers block"
 done
 if [ "$seen" = 5 ]; then ok "CN saw 5 answers"; else no "CN saw $seen of 5 answers"; fi
 
 # ── G: sentence graph forms run the verb the key runs ──
-gv(){ local A; A="$( ask "$R" "$1" )"; local V; V="$( verb "$A" )"; if [ "$V" = "$2" ]; then ok "G $3: verb=$V"; else no "G $3: verb=$V (want $2)"; fi; }
+gv(){ local A; A="$( ask "$R" "$1" )" || no "G $3: ripwire exited $?"; local V; V="$( verb "$A" )"; if [ "$V" = "$2" ]; then ok "G $3: verb=$V"; else no "G $3: verb=$V (want $2)"; fi; }
 gv 'Trace the exact call chain from `start_here` (app/flow.py) to `end_there`. Name every function with its file.' '--path=start_here,end_there' "call chain from A to B"
 gv 'How does `start_here()` reach `end_there` when the flow runs?' '--path=start_here,end_there' "A reach B"
 gv 'Which non-test function calls both `end_there` and `other_end`? Give the function and its file.' '--connect=end_there,other_end' "calls both A and B"
@@ -120,7 +121,7 @@ gv 'path from start_here to end_there' '--path=start_here,end_there' "the key fo
 gv 'Which function calls both `end_there` and `other_end`, and which other callers of end_there do not?' '--callers=end_there' "a key form in the same sentence keeps its block (nothing replaced)"
 seen=0
 for q in 'Is there a chain from start to finish documented in the flow notes?' 'Which tests reach the cache when the flow runs?' 'Does the setup call both handlers and the logger?'; do
-    A="$( ask "$R" "$q" )"
+    A="$( ask "$R" "$q" )" || no "GN ($q): ripwire exited $?"
     case "$A" in *'<ctx '*) seen=$(( seen + 1 ));; *) no "GN no answer printed ($q)";; esac
     hasnt "$A" '<graph_verb' "GN ($q): no graph block"
 done
@@ -132,11 +133,11 @@ runs(){ # $1 root $2 invocation $3 row it must print $4 label
     if { [ "$rc" = 0 ] || [ "$rc" = 4 ]; }; then ok "R $4: next= runs (rc=$rc)"; else no "R $4: next= rc=$rc"; fi
     has "$out" "$3" "R $4: the bare call answers it"
 }
-A="$( ask "$R" 'I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?' )"
+A="$( ask "$R" 'I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?' )" || no "R callers: ripwire exited $?"
 hasnt "$A" '<callers by="subject"' "R callers: the sentence got no block (premise)"
 N="$( reask "$A" )"; if [ "$N" = '--callers=prepare_setup_platform' ]; then ok "R callers: next=$N"; else no "R callers: next=$N"; fi
 [ "${N#--}" != "$N" ] && runs "$R" "$N" first_caller "callers"
-A="$( ask "$R" 'What is the path, if any, between `start_here` and `other_end`?' )"
+A="$( ask "$R" 'What is the path, if any, between `start_here` and `other_end`?' )" || no "R path: ripwire exited $?"
 hasnt "$A" '<graph_verb' "R path: the sentence got no block (premise)"
 N="$( reask "$A" )"; if [ "$N" = '--path=start_here,other_end' ]; then ok "R path: next=$N"; else no "R path: next=$N"; fi
 [ "${N#--}" != "$N" ] && runs "$R" "$N" start_here "path"
@@ -144,7 +145,7 @@ seen=0
 for q in 'If `prepare_setup_platform` (app/setup.py) gained a new required parameter, which functions call it directly?' \
          'Trace the exact call chain from `start_here` (app/flow.py) to `end_there`.' \
          'prepare_setup_platform gains a required parameter' 'How does `prepare_setup_platform` choose the name it returns?'; do
-    A="$( ask "$R" "$q" )"
+    A="$( ask "$R" "$q" )" || no "RN ($q): ripwire exited $?"
     case "$A" in *'<ctx '*) seen=$(( seen + 1 ));; *) no "RN no answer printed ($q)";; esac
     hasnt "$A" '<reask' "RN ($q): no re-ask"
 done

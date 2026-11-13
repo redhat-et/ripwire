@@ -44,13 +44,13 @@ for_text(){ grep '"id":2' "$1" | python3 -c 'import sys,json; r=json.load(sys.st
 
 # ── arms 1-3: CLI first, then the server ─────────────────────────────────────────────────────────────
 C1="$TMP/c1/"; mkdir -p "$C1"
-( cd "$WORK" && TMPDIR="$C1" RIPWIRE_CACHE_STATS=1 "$BIN" "$WORK" --for="$TASK" >"$TMP/cli1.out" 2>"$TMP/cli1.err" )
+( cd "$WORK" && TMPDIR="$C1" RIPWIRE_CACHE_STATS=1 "$BIN" "$WORK" --for="$TASK" >"$TMP/cli1.out" 2>"$TMP/cli1.err" ) || no "arm 1: the CLI --for exited $?"
 r1="$( reparsed "$TMP/cli1.err" )"
 rich1="$( find "$C1" -type f -name 'ripwire-*-rich*.bin' | wc -l | tr -d ' ' )"
 if [ "${r1:-0}" -gt 0 ] && [ "$rich1" -ge 1 ]; then ok "arm 1: a CLI --for on a fresh cache dir parses ($r1 files) and writes a rich blob"
 else no "arm 1: premise — CLI --for reparsed=${r1:-none}, rich blobs=$rich1 (want > 0 and >= 1)"; fi
 
-mcp_for "$C1" "$TMP/m1.out" "$TMP/m1.err"
+mcp_for "$C1" "$TMP/m1.out" "$TMP/m1.err" || no "arm 2: ripwire --mcp exited $?"
 r2="$( reparsed "$TMP/m1.err" )"
 if [ "${r2:-x}" = 0 ]; then ok "arm 2: an MCP server after the CLI --for re-parses nothing (reparsed=0)"
 else no "arm 2: the MCP server after a CLI --for re-parsed ${r2:-?} files — it does not read the CLI rich blob"; fi
@@ -62,9 +62,9 @@ else no "arm 3: $mcpb MCP-only blob(s) and $rich2 rich blob(s) — want 0 and 1"
 
 # ── arm 4: the server first, then the CLI ────────────────────────────────────────────────────────────
 C2="$TMP/c2/"; mkdir -p "$C2"
-mcp_for "$C2" "$TMP/m2.out" "$TMP/m2.err"
+mcp_for "$C2" "$TMP/m2.out" "$TMP/m2.err" || no "arm 4: ripwire --mcp exited $?"
 r3="$( reparsed "$TMP/m2.err" )"
-( cd "$WORK" && TMPDIR="$C2" RIPWIRE_CACHE_STATS=1 "$BIN" "$WORK" --for="$TASK" >"$TMP/cli2.out" 2>"$TMP/cli2.err" )
+( cd "$WORK" && TMPDIR="$C2" RIPWIRE_CACHE_STATS=1 "$BIN" "$WORK" --for="$TASK" >"$TMP/cli2.out" 2>"$TMP/cli2.err" ) || no "arm 4: the CLI --for exited $?"
 r4="$( reparsed "$TMP/cli2.err" )"
 if [ "${r3:-0}" -gt 0 ] && [ "${r4:-x}" = 0 ]; then ok "arm 4: a CLI --for after an MCP server re-parses nothing (server parsed $r3, CLI reparsed=0)"
 else no "arm 4: server-first reparsed=${r3:-none} (want > 0), CLI after it reparsed=${r4:-none} (want 0)"; fi
@@ -73,7 +73,7 @@ cmp -s "$TMP/cli1.out" "$TMP/cli2.out" && ok "arm 4: the CLI --for answer is the
 
 # ── arm 5: identity against a cold server ────────────────────────────────────────────────────────────
 C3="$TMP/c3/"; mkdir -p "$C3"
-mcp_for "$C3" "$TMP/m3.out" "$TMP/m3.err"
+mcp_for "$C3" "$TMP/m3.out" "$TMP/m3.err" || no "arm 5: ripwire --mcp exited $?"
 a="$( for_text "$TMP/m1.out" )"; b="$( for_text "$TMP/m3.out" )"
 if [ -n "$a" ] && [ "$a" = "$b" ] && [ "${#a}" -gt 200 ]; then ok "arm 5: the warm-from-CLI server answers 'for' byte-identically to a cold server (${#a} B)"
 else no "arm 5: the warm-from-CLI 'for' answer (${#a} B) differs from a cold server's (${#b} B)"; fi
