@@ -1795,6 +1795,46 @@ int qualityDeltaExit( std::size_t gatingCount, bool partial ) noexcept
     return gatingCount > 0 ? 2 : partial ? 6 : 0;
 }
 
+// P2.5 — the stderr line NAMING the first gating finding of a --quality-delta answer (the sorted list's first row that
+// gates), so a caller that only checks `$?` has a subject on the channel a human reads. Nothing when no row gates.
+inline void emitQdGatingLine( const std::vector<rw::quality::Regression>& regs, std::size_t gatingCount, const std::string& deltaRoot )
+{
+    using namespace rw;
+    const auto firstGating = std::find_if( regs.begin(), regs.end(), []( const quality::Regression& r ) { return quality::rowGates( r ); } );
+    if( gatingCount == 0 || firstGating == regs.end() )
+    {
+        return;
+    }
+    const quality::Regression* const first = &*firstGating;
+    const std::string at = first->path.empty() ? std::string{}
+                                               : " at " + first->path + ":" + std::to_string( first->line );
+    // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
+    // for display (quality::displaySym); this stderr line was the one caller that skipped it,
+    // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
+    // a gating row on NEW code is defect-shape format-arity or a new function at the ceiling (rowGates); the line names
+    // either part only when there is one, so every run without them keeps its bytes.
+    const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                           { return r.isNewSymbol && quality::rowGates( r ); } ) );
+    const std::size_t ceilingGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                               { return r.ceiling != 0 && quality::rowGates( r ); } ) );
+    if( ceilingGating != 0 )
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines); first: {} {}{} (was={} now={})\n",
+                      gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ),
+                      first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+    }
+    else if( newGating == 0 )
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
+                      gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+    }
+    else
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them defect-shape format-arity on new code; first: {} {}{} (was={} now={})\n",
+                      gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+    }
+}
+
 std::optional<int> runQualityDelta( const MainDispatch& d )
 {
     using namespace rw;
@@ -2200,44 +2240,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // §A4 (minor): emitted BEFORE the format fork, not after the XML tail — under --json the fork returned
         // first, so exactly the caller most likely to be a script reading `$?` got the bare exit=2 with no
         // subject. The line is about the EXIT CODE, which both formats share, so it belongs to neither.
-        if( gatingCount > 0 )
-        {
-            const quality::Regression* first = nullptr;
-            for( const quality::Regression& r : regs )
-            {
-                if( quality::rowGates( r ) ) { first = &r; break; }
-            }
-            if( first )
-            {
-                const std::string at = first->path.empty() ? std::string{}
-                                                           : " at " + first->path + ":" + std::to_string( first->line );
-                // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
-                // for display (quality::displaySym); this stderr line was the one caller that skipped it,
-                // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
-                // a gating row on NEW code is defect-shape format-arity or a new function at the ceiling (rowGates); the line names
-                // either part only when there is one, so every run without them keeps its bytes.
-                const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
-                                                                                       { return r.isNewSymbol && quality::rowGates( r ); } ) );
-                const std::size_t ceilingGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
-                                                                                           { return r.ceiling != 0 && quality::rowGates( r ); } ) );
-                if( ceilingGating != 0 )
-                {
-                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines); first: {} {}{} (was={} now={})\n",
-                                  gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ),
-                                  first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
-                }
-                else if( newGating == 0 )
-                {
-                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
-                                  gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
-                }
-                else
-                {
-                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them defect-shape format-arity on new code; first: {} {}{} (was={} now={})\n",
-                                  gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
-                }
-            }
-        }
+        emitQdGatingLine( regs, gatingCount, deltaRoot );
 
         // L2: --json — same regressions, keys mirror the XML attr names (kind/sym/members/tokens/was/now/
         // sev/churn/surface). jsonUnsupportedVerb already refused --quality-baseline/--quality-ack, so
