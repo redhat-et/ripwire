@@ -1735,15 +1735,42 @@ inline bool localDefOutOfReach( const IngestResult& ing, NodeId c, const Referen
     return s.fileId != r.fileId || r.startByte < row->start || r.startByte >= row->end;
 }
 
-// the candidates of `ids` a call at `r` can reach BY NAME, into `out`; true iff a function-local def was set aside AND
-// something reachable is left (only then does the caller have a narrower set to try first).
-inline bool reachableByName( const IngestResult& ing, const rw::SmallVec<NodeId, 2>& ids, const Reference& r, rw::SmallVec<NodeId, 2>& out )
+// One function-local definition of a name with the one span a call can name it from (REACH-SPLIT): the Symbol row's
+// fileId and the FnLocalScope row's [start, end), copied once per name so a call reads neither. A local def with no
+// recorded span is never out of reach (localDefOutOfReach) and gets no row.
+struct FnLocalReach
 {
+    NodeId        id     = kNoNode;
+    std::uint32_t fileId = 0;
+    std::uint32_t start  = 0;
+    std::uint32_t end    = 0;
+};
+
+// the candidates of `ids` a call at `r` can reach BY NAME, into `out`; true iff a function-local def was set aside AND
+// something reachable is left (only then does the caller have a narrower set to try first). `locals` are the name's
+// function-local defs with their spans; `ids` is a subset of that name's candidate list. Same answer as asking
+// localDefOutOfReach of every candidate, but a call tests only the name's locals — on vscode a common name holds
+// hundreds of definitions and one local — and builds `out` only when one of them is set aside.
+inline bool reachableByName( std::span<const FnLocalReach> locals, const rw::SmallVec<NodeId, 2>& ids, const Reference& r,
+                             rw::SmallVec<NodeId, 2>& aside, rw::SmallVec<NodeId, 2>& out )
+{
+    aside.clear();
+    for( const FnLocalReach& local : locals )
+    {
+        if( local.fileId != r.fileId || r.startByte < local.start || r.startByte >= local.end )
+        {
+            aside.push_back( local.id );
+        }
+    }
+    if( aside.empty() )
+    {
+        return false;   // every local is in reach: nothing to set aside, the caller keeps `ids`
+    }
     out.clear();
     bool setAside = false;
     for( NodeId c : ids )
     {
-        if( localDefOutOfReach( ing, c, r ) )
+        if( std::ranges::find( aside, c ) != aside.end() )
         {
             setAside = true;
         }
@@ -10076,6 +10103,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     ClassIdentity      classIds = buildClassIdentity( ing, chaUp );   // Rule 2's class identity: nesting, owners, real inheritance (resolve.h)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
     rw::SmallVec<NodeId, 2>  reachScratch; // reused per-call buffer: the candidates a call can reach by name (reachableByName)
+    rw::SmallVec<NodeId, 2>  reachAside;   // reused per-call buffer: the name's locals out of this call's reach (reachableByName)
     // FE-B (receiverevidence.h): the receiver-evidence tables, the per-edge hedge sets and the reused per-call buffers.
     // (L) fix round 1: "<fileId>#<local>" → the in-tree CLASS a TS named import pins (buildJsImportTables), for resultClassOf
     HashMap<std::string, NodeId> jsPinnedClasses;
@@ -10830,15 +10858,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // call got an owner (24bb6e5d), the test scripts' top-level `ok "…"` / `no "…"` calls (~650 same-named shell
     // definitions each, ~28k calls on this repository) reached those walks, and the loop went 22 -> 79 ms on that commit
     // alone. symLang/symKind are copies of the two Symbol fields those walks read (symFileId, above, is the third), so
-    // each walk reads a dense array in id order instead: same values, same order, same answer. `nameHasFnLocalDef` is
-    // the one precomputed fact reachableByName needs to say "nothing to set aside": a name none of whose definitions is
-    // function-local cannot yield (localDefOutOfReach is false for every candidate, and every list the loop hands
-    // reachableByName is a subset of the name's byName list), so its walk — a Symbol load plus a binary search per
-    // candidate — is skipped with the answer it would have returned. Keyed by the byName entry's address: nothing
-    // inserts into or erases from byName past its construction, so the address is stable for the loop.
+    // each walk reads a dense array in id order instead: same values, same order, same answer. `fnLocalReachOfName` is
+    // the one precomputed fact reachableByName needs: a name none of whose definitions is function-local with a recorded
+    // span cannot yield (localDefOutOfReach is false for every candidate, and every list the loop hands reachableByName
+    // is a subset of the name's byName list), so it has no entry and the call is skipped with the answer the walk would
+    // have returned; a name that has one maps to its locals' rows in `fnLocalReach` (REACH-SPLIT), so a call tests those
+    // and never loads a Symbol or searches fnLocalScopes. Keyed by the byName entry's address: nothing inserts into or
+    // erases from byName past its construction, so the address is stable for the loop.
     std::vector<Lang>    symLang( N );
     std::vector<SymKind> symKind( N );
-    ankerl::unordered_dense::set<const rw::SmallVec<NodeId, 2>*> nameHasFnLocalDef;
+    std::vector<FnLocalReach> fnLocalReach;
+    ankerl::unordered_dense::map<const rw::SmallVec<NodeId, 2>*, std::pair<std::uint32_t, std::uint32_t>> fnLocalReachOfName;
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2l: dense candidate views + function-local name set" );
         for( std::size_t symIndex = 0; symIndex < N; ++symIndex )
@@ -10850,13 +10880,34 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             for( const auto& [ name, ids ] : byName )
             {
-                if( std::any_of( ids.begin(), ids.end(), [ & ]( NodeId c ) { return ing.symbols[ c ].fnLocal != 0; } ) )
+                const auto first = std::uint32_t( fnLocalReach.size() );
+                for( NodeId c : ids )
                 {
-                    nameHasFnLocalDef.insert( &ids );
+                    const Symbol& s = ing.symbols[ c ];
+                    if( s.fnLocal == 0 )
+                    {
+                        continue;
+                    }
+                    const auto row = std::lower_bound( ing.fnLocalScopes.begin(), ing.fnLocalScopes.end(), c,
+                                                       []( const FnLocalScope& f, NodeId id ) noexcept { return f.id < id; } );
+                    if( row != ing.fnLocalScopes.end() && row->id == c )
+                    {
+                        fnLocalReach.push_back( { c, s.fileId, row->start, row->end } );
+                    }
+                }
+                if( fnLocalReach.size() > first )
+                {
+                    fnLocalReachOfName.emplace( &ids, std::pair{ first, std::uint32_t( fnLocalReach.size() ) } );
                 }
             }
         }
     }
+    const auto localsOfName = [ &fnLocalReach, &fnLocalReachOfName ]( const rw::SmallVec<NodeId, 2>& ids ) -> std::span<const FnLocalReach>
+    {
+        const auto at = fnLocalReachOfName.find( &ids );
+        return at == fnLocalReachOfName.end() ? std::span<const FnLocalReach>{}
+                                              : std::span<const FnLocalReach>( fnLocalReach ).subspan( at->second.first, at->second.second - at->second.first );
+    };
     ENSURES( symLang.size() == N && symKind.size() == N && symFileId.size() == N, "the dense views cover every symbol id the loop can hold" );
 
     // ---- the per-(name, language) candidate memo: work that is invariant across the calls to one name ---------------
@@ -12039,7 +12090,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // whichever same-named def competes, and yielding would move them from external= into declined=, so such a call
         // resolves exactly as it did before local defs had bodies.
         const bool localsYield = !scipPinned && !canonical && !narrowed && !builtinGated && it != byName.end() && !ing.fnLocalScopes.empty()
-                                 && nameHasFnLocalDef.contains( &it->second ) && reachableByName( ing, *baseIds, r, reachScratch )
+                                 && reachableByName( localsOfName( it->second ), *baseIds, r, reachAside, reachScratch )
                                  && !( r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty() && externalVeto.isExternalBound( r ) );
         const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
         // FE-B: for a MEMBER call the include graph says which file the caller imports, never what its receiver is — the
