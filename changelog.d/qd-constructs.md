@@ -6,9 +6,11 @@ on every call, warm or cold. They are now found in the parse worker from the tre
 each file's cache record, and read back on a warm call. A warm working-tree `--quality-delta` retires 43 % (envoy),
 27 % (cockroach) and 69 % (vscode) fewer instructions (median of five interleaved pairs; cycles fall 41 / 28 / 65 %)
 with the same answer bytes. The cache format moves to 51 (each file record gains its construct hits, 9 bytes each), so
-an older cache is rebuilt once. The pass now runs in every cold ingest, so every verb's first run pays for it: a cold
-`--deps` retires 15 % (envoy), 21 % (cockroach) and 18 % (vscode) more instructions, while a cold working-tree
-`--quality-delta` retires 17 / 12 / 18 % fewer.
+an older cache is rebuilt once. Only a `--quality-delta` (or `--quality-baseline`) run finds the hits: any other verb
+writes its records "constructs absent" and pays nothing: cold `--deps` and the cold default map stay within 0.2 % of
+before. The next `--quality-delta` decodes such a record as usual and parses the file for the hits alone, which costs
+about what every warm `--quality-delta` used to (1-2 % fewer instructions), and the rewritten record carries them. A cold
+working-tree `--quality-delta` retires 17 / 12 / 18 % fewer instructions than before.
 
 The base side of `--quality-delta=A..B` (its Snapshot for the selected kinds and its C-family macro names) is now
 stored by base commit sha in a self-checking blob beside the head-snapshot cache, keyed also by the excludes, the
