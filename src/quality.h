@@ -144,7 +144,16 @@ inline constexpr bool isMonsterGrowth( std::uint32_t was, std::uint32_t now, std
 // moved body. Picked from the 30-PR replay (last 30 merges to 0b8f0bf8d): the three real moves scored 0.851 (extractHtmlFlat, #572),
 // 0.922 and 0.976; the best non-move scored 0.310; the gate's 4-of-245-statement rename scores 0.804. 0.70 sits in that gap, ~5
 // standard errors of the 128-component estimate from either side.
-constexpr float           kMoveSketchMinJaccard = 0.70f;
+// Kept as an exact percentage: the decision runs on the integer sketch-match count (moveSketchAtThreshold), never on a float.
+constexpr std::uint32_t   kMoveSketchMinJaccardPct = 70;
+// cloneSketchJaccard's estimate J = (256 m - K) / (255 K) for m matching components of K, so J >= pct/100 is the exact integer test
+// 100 (256 m - K) >= pct 255 K: the 0.70 threshold is m >= 90 of 128.
+inline constexpr bool moveSketchAtThreshold( std::uint32_t matches ) noexcept
+{
+    const std::uint64_t k = kSketchHashes;
+    return 100 * ( 256 * std::uint64_t( matches ) ) >= std::uint64_t( kMoveSketchMinJaccardPct ) * 255 * k + 100 * k;
+}
+static_assert( !moveSketchAtThreshold( 89 ) && moveSketchAtThreshold( 90 ), "0.70 of a 128-component sketch is 90 matches" );
 constexpr std::uint32_t   kNewSymbolCeilingMul = 4;
 inline constexpr std::uint32_t newSymbolCeiling( std::uint32_t bar ) noexcept { return bar * kNewSymbolCeilingMul; }
 
@@ -1763,7 +1772,7 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveId
 // changes: (1) a baseline body is VACATED when its key no longer carries a body over a bar (gone, or shrunk under the bars: the
 // wrapper case), not only when the key is gone; (2) a NEW callable (its key absent from the baseline) whose exact identity matches
 // nothing is still a move when it and one vacated body are each other's best clone-sketch match (cloneSketchJaccard, the Type-3
-// matcher's own minhash) at kMoveSketchMinJaccard or more, with no tie on either side. A copy is still not a move (the original keeps
+// matcher's own minhash) at kMoveSketchMinJaccardPct or more, with no tie on either side. A copy is still not a move (the original keeps
 // its body, so nothing is vacated), and two candidates for one vacated body refuse (the mutual-best test).
 struct MovedBodies
 {
@@ -1826,8 +1835,9 @@ struct MovedBodies
     }
 
 private:
-    // The best index by score, or -1 when the best is shared (a tie refuses: floors, not guesses).
-    static std::ptrdiff_t uniqueBest( std::span<const float> scores )
+    // The best index by sketch-match count, or -1 when the best is shared (a tie refuses: floors, not guesses). Integer counts:
+    // two equal counts are a tie exactly, never a float-equality accident.
+    static std::ptrdiff_t uniqueBest( std::span<const std::uint32_t> scores )
     {
         std::ptrdiff_t best = -1;
         bool           tie  = false;
@@ -1866,20 +1876,20 @@ private:
     {
         const std::vector<std::size_t> cands = nearMoveCandidates( base, keyOf, now );
         const std::size_t              nv    = vacated.size();
-        std::vector<float>             sim( cands.size() * nv );   // row = candidate, column = vacated body
+        std::vector<std::uint32_t>     sim( cands.size() * nv );   // row = candidate, column = vacated body: matching sketch components
         for( std::size_t a = 0; a < cands.size(); ++a )
         {
             for( std::size_t v = 0; v < nv; ++v )
             {
-                sim[ a * nv + v ] = cloneSketchJaccard( now.sketch[ cands[a] ].second, *vacated[v] );
+                sim[ a * nv + v ] = cloneSketchMatches( now.sketch[ cands[a] ].second.data(), vacated[v]->data() );
             }
         }
-        std::vector<float> col( cands.size() );
+        std::vector<std::uint32_t> col( cands.size() );
         for( std::size_t a = 0; a < cands.size() && nv != 0; ++a )
         {
-            const std::span<const float> row( sim.data() + a * nv, nv );
-            const std::ptrdiff_t         v = uniqueBest( row );
-            if( v < 0 || row[ std::size_t( v ) ] < kMoveSketchMinJaccard )
+            const std::span<const std::uint32_t> row( sim.data() + a * nv, nv );
+            const std::ptrdiff_t                 v = uniqueBest( row );
+            if( v < 0 || !moveSketchAtThreshold( row[ std::size_t( v ) ] ) )
             {
                 continue;
             }
