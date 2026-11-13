@@ -5497,6 +5497,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         family( "references", ing.references );
         family( "includes", ing.includes );
         family( "constOpens", ing.constOpens );
+        family( "constructHits", ing.constructHits );
         family( "bindings", ing.bindings );
         family( "bindingAliases", ing.bindingAliases );
         family( "routeDefs", ing.routeDefs );

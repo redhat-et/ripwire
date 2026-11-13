@@ -304,6 +304,7 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
                                            std::vector<IngestResult>&        parts )
 {
     IngestResult m;
+    m.constructHitsForFiles = 0;   // QD-CONSTRUCTS-AT-INGEST: zero files covered so far; each covering part extends it below
     ASSUME( roots.size() == parts.size() );
     // §N6-C: seed the merged ignore mode from the FIRST part, not from IngestResult's own default. The
     // merge below keeps the WEAKEST mode across roots (mergeCrawlDisclosures), and a reduction seeded with
@@ -416,6 +417,17 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         {
             m.cloneKeys.clear();
             m.cloneKeys.shrink_to_fit();
+        }
+        // QD-CONSTRUCTS-AT-INGEST: the construct hits ride their file's id; a part that does not cover all its files makes
+        // the merged claim false (constructHitsForFiles stays short of m.files), and the reader re-parses the merged tree.
+        if( p.constructHitsForFiles == p.files.size() && m.constructHitsForFiles == fileOff )
+        {
+            for( ConstructHit ch : p.constructHits )
+            {
+                ch.fileId += fileOff;
+                m.constructHits.push_back( ch );
+            }
+            m.constructHitsForFiles = fileOff + p.files.size();
         }
         for( Symbol& s : p.symbols )
         {

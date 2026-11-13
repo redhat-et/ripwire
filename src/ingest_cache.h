@@ -155,7 +155,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
+constexpr std::uint32_t kCacheVersion = 51;           // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
+                                                      //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
+                                                      // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
                                                       // 49: lane warm-direct — the FILE record's head gains the eight family counts
                                                       //    (FileFactCounts, right after FileHealth) so a warm run can size and plan every
                                                       //    record from its head alone and decode the body in the parse worker.
@@ -2391,7 +2393,7 @@ inline std::pair<std::size_t, std::size_t> cacheEntryRange( const std::vector<Ca
 // not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
 // so it is what makes a same-(mtime,size) edit visible for free. -1 ⇒ unknown (the file was unstatable at
 // hash time) → the gate always re-hashes, which is the safe direction.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; };
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; std::vector<ConstructHit> constructs; };
 
 // v49 (WARM-DIRECT): the eight per-file fact-family counts. The record carries them in its HEAD as well as before each
 // family, so a reader holding only the head (the warm planner, CacheRecords below) knows every record's exact sizes:
@@ -2399,7 +2401,8 @@ struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long m
 struct FileFactCounts
 {
     std::uint32_t defs = 0, refs = 0, incs = 0, binds = 0, ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0;
-    bool none() const noexcept { return ( defs | refs | incs | binds | ffis | routeDefs | routeUses | constOpens ) == 0; }
+    std::uint32_t constructs = 0;   // v51 (QD-CONSTRUCTS-AT-INGEST): the ninth family, after constOpens
+    bool none() const noexcept { return ( defs | refs | incs | binds | ffis | routeDefs | routeUses | constOpens | constructs ) == 0; }
 };
 
 // A record's head: everything a warm run decides on before the body is decoded — the stat gate, the hit test, the
@@ -2814,6 +2817,7 @@ inline constexpr std::size_t kMinFfiRecordBytes      = 14;   // 2×u8 (kind,lowC
 inline constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
 inline constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
 inline constexpr std::size_t kMinConstOpenRecordBytes = 13;  // parser version 82: 2×u32 (startByte,endByte) + 1×u8 (namespaceOnly) + 1×str(len u32, empty)
+inline constexpr std::size_t kConstructRecordBytes    = 9;   // v51: 2×u32 (startByte,line) + 1×u8 (tag) — fixed size
 
 // Read a record's HEAD: its root-relative key (a view into the reader's bytes), hash, stat triple, health and the v49
 // family counts. readFileRecord starts with it; the warm planner (loadCache) reads only this much of each record.
@@ -2839,6 +2843,7 @@ inline bool readRecordHead( ByteR& r, std::string_view& relOut, CachedRecordHead
     c.routeDefs  = r.u32();
     c.routeUses  = r.u32();
     c.constOpens = r.u32();
+    c.constructs = r.u32();                  // v51
     return r.ok;
 }
 
@@ -2850,7 +2855,8 @@ inline bool headCountsFit( const FileFactCounts& c, std::uint64_t recLength, boo
     const std::uint64_t need = std::uint64_t( c.defs ) * minDefRecordBytes( captureValueUses ) + std::uint64_t( c.refs ) * kMinRefRecordBytes
                              + std::uint64_t( c.incs ) * kMinIncRecordBytes + std::uint64_t( c.binds ) * kMinBindRecordBytes
                              + std::uint64_t( c.ffis ) * kMinFfiRecordBytes + std::uint64_t( c.routeDefs ) * kMinRouteDefRecordBytes
-                             + std::uint64_t( c.routeUses ) * kMinRouteUseRecordBytes + std::uint64_t( c.constOpens ) * kMinConstOpenRecordBytes;
+                             + std::uint64_t( c.routeUses ) * kMinRouteUseRecordBytes + std::uint64_t( c.constOpens ) * kMinConstOpenRecordBytes
+                             + std::uint64_t( c.constructs ) * kConstructRecordBytes;
     return need <= recLength;
 }
 
@@ -3020,6 +3026,20 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         co.written       = r.str();
         ffOut.constOpens.push_back( std::move( co ) );
     }
+    const std::uint32_t nch = r.u32();
+    if( !countFits( nch, kConstructRecordBytes, head.counts.constructs ) )
+    {
+        return false;
+    }
+    ffOut.constructs.reserve( nch );
+    for( std::uint32_t j = 0; j < nch && r.ok; ++j )
+    {
+        ConstructHit ch;                                // v51 (fileId re-labelled by the caller)
+        ch.startByte = r.u32();
+        ch.line      = r.u32();
+        ch.tag       = r.enumU8<std::uint8_t>( kConstructTagCount );   // a tag past the table is a corrupt record
+        ffOut.constructs.push_back( ch );
+    }
     return r.ok;
 }
 
@@ -3165,6 +3185,7 @@ struct CacheRecords
         out.routeDefs.clear();
         out.routeUses.clear();
         out.constOpens.clear();
+        out.constructs.clear();
         ByteR       r{ recBuf.data(), recBuf.data() + recBuf.size() };
         std::string rel;
         bool        decoded = false;
@@ -3350,7 +3371,7 @@ struct CacheFileIndexes
 {
     std::vector<rw::SmallVec<std::uint32_t, 8>> defIndex;
     std::vector<std::vector<std::uint32_t>>     refIndex, bindIndex;
-    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex;
+    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex, constructIndex;
 };
 
 inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
@@ -3358,7 +3379,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
                                                const std::vector<Include>& incs, const std::vector<RawBind>& binds,
                                                const std::vector<BindingAlias>& ffis,
                                                const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,
-                                               const std::vector<ConstOpen>& constOpens )
+                                               const std::vector<ConstOpen>& constOpens, const std::vector<ConstructHit>& constructs )
 {
     CacheFileIndexes ix;
     ix.defIndex.resize( fileCount );
@@ -3369,6 +3390,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     ix.routeDefIndex.resize( fileCount );
     ix.routeUseIndex.resize( fileCount );
     ix.constOpenIndex.resize( fileCount );
+    ix.constructIndex.resize( fileCount );
 
     // One generic grouping pass per family — an out-of-range fileId is DROPPED, never clamped, exactly as
     // the seven hand-written loops this replaces did.
@@ -3390,6 +3412,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     group( routeDefs, ix.routeDefIndex );   // B6.3
     group( routeUses, ix.routeUseIndex );   // B6.3
     group( constOpens, ix.constOpenIndex ); // parser version 82
+    group( constructs, ix.constructIndex ); // v51
     return ix;
 }
 
@@ -3549,6 +3572,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
                        const std::vector<ConstOpen>& constOpens,                                             // parser version 82
+                       const std::vector<ConstructHit>& constructs,                                          // v51
                        bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
@@ -3563,7 +3587,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
 
     const std::size_t      F  = files.size();
-    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens );
+    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens, constructs );
 
     // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
@@ -3713,7 +3737,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             // v49: the head copy of the eight family counts (readRecordHead), in the body's family order
             for( const std::size_t familyCount : { std::size_t( ix.defIndex[f].size() ), ix.refIndex[f].size(), std::size_t( ix.incIndex[f].size() ),
                                                    ix.bindIndex[f].size(), std::size_t( ix.ffiIndex[f].size() ), std::size_t( ix.routeDefIndex[f].size() ),
-                                                   std::size_t( ix.routeUseIndex[f].size() ), std::size_t( ix.constOpenIndex[f].size() ) } )
+                                                   std::size_t( ix.routeUseIndex[f].size() ), std::size_t( ix.constOpenIndex[f].size() ),
+                                                   std::size_t( ix.constructIndex[f].size() ) } )
             {
                 w.u32( std::uint32_t( familyCount ) );
             }
@@ -3838,6 +3863,13 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u32( constOpens[i].endByte );
                 w.u8( constOpens[i].namespaceOnly ? 1 : 0 );
                 w.str( constOpens[i].written );
+            }
+            w.u32( std::uint32_t( ix.constructIndex[f].size() ) );
+            for( std::uint32_t i : ix.constructIndex[f] )
+            {                                        // v51: span start + line + tag byte (fileId is the record's)
+                w.u32( constructs[i].startByte );
+                w.u32( constructs[i].line );
+                w.u8( constructs[i].tag );
             }
             table.push_back( CacheEntry{ row.pathHash, recOffset,
                                          f < fileHash.size() ? fileHash[f] : 0,
