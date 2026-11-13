@@ -81,7 +81,7 @@ OUT="$( run 2>"$TMP/xerr" )"; rc=$?
 printf '%s' "$OUT" > "$TMP/x"
 ROWS="$( tr '<' '\n' < "$TMP/x" | grep '^r kind=' )"
 NROWS="$( printf '%s\n' "$ROWS" | grep -c . )"
-[ "$NROWS" -gt 0 ] && ok "fixture produced $NROWS row(s) under an absolute root (non-vacuous)" \
+{ [ "$rc" = 0 ] || [ "$rc" = 2 ]; } && [ "$NROWS" -gt 0 ] && ok "fixture produced $NROWS row(s) under an absolute root (non-vacuous, exit $rc)" \
                    || { no "fixture produced 0 rows — the checks below would be vacuous"; cat "$TMP/xerr"; exit 1; }
 
 # ── (a) NO row's sym= carries an absolute-path prefix ("/" or the repo's own absolute root) ────────────

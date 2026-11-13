@@ -14,12 +14,15 @@
 // ingest) can still be interning when main returns, so a pool freed by static destruction would be a use-after-free at exit
 // (test/textpoolcheck.sh arm H). It is constant-initialised (RW_REF_CONSTINIT below), so no dynamic initialiser can intern first.
 //
+// BINDINGS TOO (MEM-B1 BIND-INTERN). Binding::var / importedName / typeName and RawBind's three share this pool: 36 B rows instead
+// of 96 (libc++), ~1.7 M bindings on vscode. Every binding text is a name, a written type or module path, or a fixed mark
+// (kFnBindLambdaTarget, kPythonFromMemberMark, the `?` / `~` / `?:` prefixes on a name): none is keyed by a position, so a server's
+// re-index adds only names it has not seen.
+//
 // GROWTH. The pool keeps every distinct name it has seen and never frees one, so a long-running server (--mcp / --listen / --lsp)
-// grows with the distinct names of the trees it re-indexes: about 3 MB of string headers per 100 K names. One field is keyed by a
-// POSITION rather than a name — a registrar Value row's qualifier ends in "@<byte offset>" of its object literal
-// (ingest_valuerefs.h emitValueRef, read by regindex.h) — so an edit that shifts a file's registrar literals adds that file's
-// registrar sites again. Small per edit (only the reparsed file's registrar sites), but not bounded by names; moving the offset
-// into a numeric row field is the follow-up that bounds it.
+// grows with the distinct names of the trees it re-indexes: about 3 MB of string headers per 100 K names. No pooled field is keyed
+// by a POSITION: a registrar Value row's object-literal offset, once a "@<byte offset>" tail on its qualifier, is the numeric
+// Reference::litAt (MEM-R1a), so the pool is bounded by the distinct names (and two-character scope codes) a server ever sees.
 //
 // FRONT CACHE. Names go through rw::internCached (a per-thread, 512-slot cache before the shard lock). Measured: without it the
 // warm (--cache) path, which re-interns every cached row's names from parallel readers, cost envoy +7.6 % user / +2.7 %

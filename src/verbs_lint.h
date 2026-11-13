@@ -1302,13 +1302,71 @@ struct PatternSearchOutcome
     bool                      ellipsisCapped = false;   // an ellipsis probe abandoned a node at the bound (V-2)
     std::uint64_t             ellipsisSkipped = 0;      // how many times — a floor on the nodes left unevaluated
     std::uint64_t             qualifiedUnmatched = 0;   // nodes only a qualified spelling of a pattern leaf matches (not hits)
+    std::uint64_t             memberUnmatched    = 0;   // member calls only the bare callee names (kMemberCallShapes; not hits)
+    std::uint64_t             memberCapped       = 0;   // member probes the ellipsis bound abandoned: memberUnmatched is a floor
+    std::uint64_t             memberArrow        = 0;   // of memberUnmatched, the calls spelled `->`
 };
 
-// unmatched_qualified= (present only when non-zero): its reading rides the answer that carries it, beside the root.
+// unmatched_qualified= / unmatched_member= (present only when non-zero): their reading rides the answer that carries
+// either, beside the root. ONE comment for both near-miss counts, emitted once.
 inline constexpr std::string_view kPatternQualifiedLegend =
     "<!-- unmatched_qualified=N: N more nodes match only when a name in q= is read as the last segment of a "
     "scope-qualified name (ns::name, a::b::name) - NOT in hits=; spell the qualifier in the pattern to match them. "
+    "unmatched_member=N: N more calls match only when the called name is read as a member (obj.f(x), self.f(x)) "
+    "- NOT in hits=; next= is the pattern with a receiver metavariable that matches them (C, C++, Go, Rust, "
+    "JS/TS, Python, C#; Java, Swift and ObjC member calls are not counted). "
+    "unmatched_member_arrow=K: K of them call through a pointer (the arrow); next= spells the arrow only when all do, "
+    "else repeat it with the arrow. unmatched_member_capped=1: a member call too long to probe was skipped (the "
+    "ellipsis bound), so unmatched_member= is a floor. "
     "A floor when the hit budget stops the walk (hits_capped=1): nodes past the stop are not counted -->";
+
+// unmatched_member='s next=: the same pattern with a receiver metavariable in front of its leading callee name, or ""
+// when the pattern does not start with `name(` (then the count still rides, with no follow-up to offer). The receiver
+// is the first of `$O`, `$RECV`, `$RW_RECEIVER`, `$RW_RECEIVER2`, ... the pattern does not already spell, so it never
+// binds to one of the pattern's own metavariables (CR #624). `arrow` spells `->` (every counted call is a pointer call).
+inline std::string memberPatternNext( std::string_view pattern, bool arrow )
+{
+    std::size_t start = 0;
+    while( start < pattern.size() && ( pattern[start] == ' ' || pattern[start] == '\t' ) )
+    {
+        ++start;
+    }
+    std::size_t end = start;
+    while( end < pattern.size() && rw::namesplit::isIdentChar( pattern[end] ) )
+    {
+        ++end;
+    }
+    std::size_t paren = end;
+    while( paren < pattern.size() && pattern[paren] == ' ' )
+    {
+        ++paren;
+    }
+    if( end == start || !rw::namesplit::isIdentStart( pattern[start] ) || paren >= pattern.size() || pattern[paren] != '(' )
+    {
+        return {};
+    }
+    static constexpr std::string_view kReceivers[] = { "$O", "$RECV", "$RW_RECEIVER" };
+    std::string                       receiver( kReceivers[0] );
+    for( std::size_t k = 1; pattern.find( receiver ) != std::string_view::npos; ++k )
+    {
+        receiver = k < std::size( kReceivers ) ? std::string( kReceivers[k] ) : std::string( kReceivers[2] ) + std::to_string( k - 1 );
+    }
+    std::string next( pattern.substr( 0, start ) );
+    next += receiver;
+    next += arrow ? "->" : ".";
+    next += pattern.substr( start );
+    return rw::nextFlag( "--pattern=", next );
+}
+
+// The member near-miss attributes, in reading order: the count, its floor and arrow facts, then the pasteable next=.
+inline std::string memberNearMissAttrs( const PatternSearchOutcome& ps, std::string_view pattern )
+{
+    const bool allArrow = ps.memberUnmatched > 0 && ps.memberArrow == ps.memberUnmatched;
+    return " unmatched_member=\"" + std::to_string( ps.memberUnmatched ) + "\""
+         + ( ps.memberArrow > 0 ? " unmatched_member_arrow=\"" + std::to_string( ps.memberArrow ) + "\"" : std::string() )
+         + ( ps.memberCapped > 0 ? std::string( " unmatched_member_capped=\"1\"" ) : std::string() )
+         + rw::nextAttrXml( memberPatternNext( pattern, allArrow ) );
+}
 
 // Compile the pattern for every served grammar, decide refusal-or-proceed, run the walk, and assemble the
 // disclosures. The refusal path is the load-bearing half: §P0.1's rule one level out — a pattern nothing
@@ -1330,6 +1388,7 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
 
     std::atomic<std::uint64_t> ellipsisCapped{ 0 };
     std::atomic<std::uint64_t> qualifiedUnmatched{ 0 };
+    rw::MemberNearMissTally    member;
 
     rw::AstQueryGroup grp;
     grp.walk              = rw::AstWalk::Pattern;
@@ -1337,11 +1396,15 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
     grp.maxMatches        = rw::pattern::kMaxHits;
     grp.ellipsisCappedOut = &ellipsisCapped;
     grp.qualifiedUnmatchedOut = &qualifiedUnmatched;
+    grp.memberOut             = &member;
     out.matches           = std::move( rw::astQueryGrouped( ing, { grp } )[0] );
 
     out.ellipsisSkipped = ellipsisCapped.load( std::memory_order_relaxed );
     out.ellipsisCapped  = out.ellipsisSkipped != 0;
     out.qualifiedUnmatched = qualifiedUnmatched.load( std::memory_order_relaxed );
+    out.memberUnmatched    = member.counted.load( std::memory_order_relaxed );
+    out.memberCapped       = member.capped.load( std::memory_order_relaxed );
+    out.memberArrow        = member.arrow.load( std::memory_order_relaxed );
 
     out.grammarsAttr                 = joinOwned( rw::pattern::resolvedNames( progs ), "," );
     out.shapesAttr                   = joinOwned( rw::pattern::resolvedShapes( progs ), "," );
@@ -1581,7 +1644,8 @@ std::optional<int> runLint( const MainDispatch& d )
             const std::size_t patShown = patPage.end - patPage.begin;
             char              ppab[ kPageDisclosureCap ];
             lintPrintOut( "{}", kPatternLegend );
-            if( ps.qualifiedUnmatched > 0 )
+            const bool memberNearMiss = ps.memberUnmatched > 0 || ps.memberCapped > 0;
+            if( ps.qualifiedUnmatched > 0 || memberNearMiss )
             {
                 lintPrintOut( "{}", kPatternQualifiedLegend );
             }
@@ -1595,7 +1659,8 @@ std::optional<int> runLint( const MainDispatch& d )
             const std::string patNestRefusedAttr = ( ing.crawlSkips.nestRefusedFiles > 0
                 ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\""
                 : std::string() )
-                + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() );
+                + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() )
+                + ( memberNearMiss ? memberNearMissAttrs( ps, cfg.pattern ) : std::string() );
             lintPrintOut( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}{}>",
                         ps.matches.size(),
                         pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,

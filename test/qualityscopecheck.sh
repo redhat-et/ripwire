@@ -168,9 +168,9 @@ if cmp -s "$TMP/alpha.xml" "$TMP/alpha2.xml"; then ok "(3) two scoped runs are b
 inscope_part "$TMP/beta.xml" >"$TMP/beta.in"
 B_GATING_BEFORE="$( attr "$TMP/beta.xml" gating )"
 if grep -q 'kind="duplication"' "$TMP/plain.xml"; then
-    grep -q 'kind="duplication"' "$TMP/alpha.in" && grep -q 'kind="duplication"' "$TMP/beta.in" \
+    { [ "$b_rc" = 0 ] || [ "$b_rc" = 2 ]; } && grep -q 'kind="duplication"' "$TMP/alpha.in" && grep -q 'kind="duplication"' "$TMP/beta.in" \
         && ok "(4) the straddling clone group is in-scope for BOTH members' owners" \
-        || { no "(4) a clone group with a member in the scope was filed out-of-scope"; grep -o '<r kind="duplication"[^>]*>' "$TMP/alpha.xml" "$TMP/beta.xml"; }
+        || { no "(4) --scope=beta exited $b_rc, or a clone group with a member in the scope was filed out-of-scope"; grep -o '<r kind="duplication"[^>]*>' "$TMP/alpha.xml" "$TMP/beta.xml"; }
 else
     no "(4) fixture premise broken: the a_twin/b_twin pair did not clone-group, so the any-member rule is untested"
 fi

@@ -528,7 +528,6 @@ alloccount.cpp	countedAlloc	malloc	1	the counting allocator's own storage, freed
 alloccount.cpp	operator new	aligned_alloc	1	the counting allocator's aligned storage, freed by its operator delete (A/B instrument, never shipped)
 infra/dynamic_map.hpp	compact	new	4	the rebuilt pools replace the old ones (delete[] before the swap, owned by ~dynamic_map after it); the two scratch arrays are delete[]d before the return
 infra/dynamic_map.hpp	dynamic_map	new	2	the constructor's pools, owned by ~dynamic_map
-infra/internedtext.h	makeSlot	new	1	a TextPool segment, published once by compare_exchange (the loser is delete[]d at once); the pool lives in rw::NoDestroy and is never freed, so a detached thread may still read or intern after main returns — reachable from the global, so LSan stays quiet
 infra/os.h	pipe_cloexec	pipe	1	POSIX body of os::pipe_cloexec: closes both ends itself when the FD_CLOEXEC step fails, else hands them to the caller, as pipe() does (helpdeadline.h ChildPipes owns them as pathguard::OwnedFd)
 infra/os_win32.cpp	pipe_cloexec	pipe	1	Windows body of os::pipe_cloexec: forwards to os::pipe, which hands both ends to the caller (helpdeadline.h ChildPipes owns them as pathguard::OwnedFd)
 infra/os_win32.cpp	getline	realloc	1	Windows body of os::getline: POSIX getline's contract hands the grown *line buffer to the caller, who frees it (pathguard.h NoFollowRead frees its lineBuf)

@@ -13,3 +13,5 @@ ripwire.connect/v1	hop-site	76	 site="	e site=: a call of t= in f=	HOP-CONTEXT-1
 ripwire.connect/v1	hop-call	48	 call="	e call=: its text	HOP-CONTEXT-1: a <e> row carries the call's text (arguments at the site); present-only beside call=
 ripwire.connect/v1	hop-sig	50	 sig="	e sig=: t='s signature	HOP-CONTEXT-1: a <e> row carries the callee's signature once per callee (the agent's R2 read); present-only beside <e sig=>
 ripwire.for/v1	tail-sym-skip	17	<tail	its top symbols not in sigs/syms	R-DEDUP: a tail row skips the names a sigs row or the syms block shows; the compact legend says so (verbs_for.h kForCompactLegendTail, 17 B); present-only beside <tail
+ripwire.help-task/v1	abstain-next	36	 next="	next=: the one pasteable follow-up	B39 HELP-TASK (a): every abstain carries next= (the --for retry), so the next= clause rides on an abstain; present-only beside next=
+ripwire.exemplar/v1	off-task	172	 off_task="	off_task=1: not a fallback	B39 EXEMPLAR hedge: a trusted kind whose role pick shares no word with the task says so (exemplar.h hedgeOffTaskPick); present-only beside off_task=

@@ -5424,9 +5424,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // `--exemplar=$'a\nb'` emitted a raw newline outside CDATA. xmlCommentText is the shared scrub (it runs
         // BEFORE ex(), so entity escaping is unchanged and control-free input stays byte-identical).
         const std::string reqNote = xmlCommentText( cfg.exemplar );
-        const std::string kindNote = pick.fromTask ? ( " (task -> kind=" + std::string( symTag( pick.targetKind ) )
-                                                       + ( pick.lowConfidence ? ", low-confidence: weak match, fell back to fn" : "" ) + ")" )
-                                                    : std::string();   // stable storage for %s
+        const std::string kindNote = exemplarKindNote( pick );   // stable storage for %s
         // §B6 M13: the rule is exemplar.h's kExemplarSelectionRule, RENDERED — this legend used to lead with
         // complexity while the composite leads with the fixture penalty, and the MCP twin said a third thing.
         // §B7.9 (CA4): the root element carries in=, ccx= and (conditionally) tested=, and this legend
@@ -5455,7 +5453,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
                      symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
                      ex( tvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ wsym.fileId ], tvRootPrefix ) : std::string_view( ing.files[ wsym.fileId ] ) ).c_str(), wsym.line,
                      fin( pick.winner ), wsym.ccx, exemplarRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
-                     pick.lowConfidence ? " low_confidence=\"1\"" : "",
+                     exemplarHedgeAttrs( pick ),
                      pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
         packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                    /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
