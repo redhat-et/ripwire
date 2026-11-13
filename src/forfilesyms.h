@@ -1474,6 +1474,16 @@ inline std::string symsLegend( bool compactLegend, const BindPicks& binds )
     }
     return out;
 }
+// The legend for these picks: symsLegend, plus the by="init" clause (present-only, before the close like by="bind"'s).
+inline std::string symsLegendOf( bool compactLegend, const Picks& picks )
+{
+    std::string out = symsLegend( compactLegend, picks.binds );
+    if( !picks.inits.empty() )
+    {
+        out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
+    }
+    return out;
+}
 // A <y> row's opening `<y p="file:line" n="Owner.name"` for symbol `s` (the attribute tail is the rule's own).
 inline void appendSymRowOpen( std::string& out, const IngestResult& ing, const MemberOwners& owners, const Symbol& s, std::vector<char>& esc )
 {
@@ -1514,11 +1524,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     const MemberOwners owners( ing );
     std::vector<char> esc;
     const BindPicks& binds = picks.binds;
-    std::string      out   = symsLegend( compactLegend, binds );
-    if( !picks.inits.empty() )   // the by="init" clause, present-only, before the legend's close like by="bind"'s
-    {
-        out.insert( out.size() - kLegendClose.size(), compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
-    }
+    std::string      out   = symsLegendOf( compactLegend, picks );
     // Constants live in the legend (6 files read, 8 head rows, 3 rows per rule): an attribute prints only when it differs or says a cap cut.
     const auto attr = [&]( std::string_view name, std::size_t value, bool print )
     { out += print ? std::format( " {}=\"{}\"", name, value ) : std::string(); };
