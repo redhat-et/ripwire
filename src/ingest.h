@@ -401,6 +401,11 @@ private:
     bool prev_;
 };
 
+// The footprint this process's construct tables added when they were compiled (ingest_astquery.h warmConstructTables):
+// fixed bytes, one table per language, held to the end of the process, so a later ingest pays none of it again. The
+// --quality-delta=A..B projection counts them once instead of scaling them with the tree (memguard.h FIXED BYTES).
+std::uint64_t constructTablesFootprint() noexcept;
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr = {},
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
                      bool captureValueUses = true, std::string_view excludeLabel = {},

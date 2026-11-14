@@ -623,6 +623,43 @@ else
     printf '  SKIP  (T) no /usr/bin/time that reports a peak (-l or -v) — the near-the-line arm needs a measured peak\n'
 fi
 
+# ── (T2) TRAIN-1111g fix 1: the projection leaves (T)'s run room, with the construct pass on ────────────────────────────
+# (T) answers at twice the measured peak only when the projection's two lines sit under that limit by more than one run's
+# noise. #650's construct tables are fixed bytes (~10 MiB here, compiled once per language), and scaled as growth they put
+# the projected base ingest AT this fixture's peak: the parse line, half of (T)'s limit, sat on it, and (T) failed by chance
+# on one Linux CI leg (6caa09da5). This arm reads the projection off ONE run (RIPWIRE_STATS), beside that run's own peak,
+# and asks for 2 MiB under each line of (T)'s limit, so it fails where (T) only might:
+#   ingest_need <= peak_mb - 2      (the parse line of 2 * peak_mb)
+#   need        <= 2 * peak_mb - 2  (the hard line)
+#   fixed       >= 1                (premise: the construct pass ran here, and its tables were measured)
+# A binary that prints no fixed= / ingest_need= is judged by what it projected then: ingest_need = max( after, ingest_peak ).
+pline=""; peak2=""
+if /usr/bin/time -l true >/dev/null 2>&1; then
+    ( cd "$FX" && TMPDIR="$WORK/tmp" RIPWIRE_STATS=1 /usr/bin/time -l "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache >/dev/null 2>"$WORK/t2.err" )
+    peak2="$( awk '/peak memory footprint/ { printf "%d", $1 / 1048576 + 1 }' "$WORK/t2.err" )"
+    [ -n "$peak2" ] || peak2="$( awk '/maximum resident set size/ { printf "%d", $1 / 1048576 + 1 }' "$WORK/t2.err" )"
+elif /usr/bin/time -v true >/dev/null 2>&1; then
+    ( cd "$FX" && TMPDIR="$WORK/tmp" RIPWIRE_STATS=1 /usr/bin/time -v "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache >/dev/null 2>"$WORK/t2.err" )
+    peak2="$( awk -F: '/Maximum resident set size/ { printf "%d", $2 / 1024 + 1 }' "$WORK/t2.err" )"
+fi
+pline="$( grep '^ripwire: memory-projection ' "$WORK/t2.err" 2>/dev/null | head -n 1 )"
+pget(){ printf '%s\n' "$pline" | sed -n 's/.* '"$1"'=\([0-9]*\)M.*/\1/p'; }
+if [ -z "$peak2" ]; then
+    printf '  SKIP  (T2) no /usr/bin/time that reports a peak (-l or -v)\n'
+elif [ -z "$pline" ] || ! isnum "$( pget need )" || ! isnum "$( pget ingest_peak )" || ! isnum "$( pget after )"; then
+    no "(T2) premise: no memory-projection line from a --no-cache A..B run under RIPWIRE_STATS: $( head -c 300 "$WORK/t2.err" )"
+else
+    p_need="$( pget need )"; p_ing="$( pget ingest_need )"; p_fixed="$( pget fixed )"
+    if ! isnum "$p_ing"; then p_ing="$( pget ingest_peak )"; [ "$( pget after )" -gt "$p_ing" ] && p_ing="$( pget after )"; fi
+    t2why=""
+    [ "$p_ing" -le $(( peak2 - 2 )) ] || t2why="$t2why ingest_need=${p_ing}M is within 2 MiB of the parse line ${peak2}M (half of $(( peak2 * 2 ))M);"
+    [ "$p_need" -le $(( peak2 * 2 - 2 )) ] || t2why="$t2why need=${p_need}M is within 2 MiB of $(( peak2 * 2 ))M;"
+    { isnum "$p_fixed" && [ "$p_fixed" -ge 1 ]; } || t2why="$t2why premise: fixed=${p_fixed:-absent} (the construct tables were not measured);"
+    if [ -z "$t2why" ]; then
+        ok "(T2) one run's projection under (T)'s ${peak2}M-peak limit with room: ingest_need=${p_ing}M <= $(( peak2 - 2 ))M, need=${p_need}M <= $(( peak2 * 2 - 2 ))M, fixed=${p_fixed}M counted once"
+    else no "(T2)$t2why line: $pline"; fi
+fi
+
 # ── (V) R8: a degraded answer with rows and no gating row exits 6 ──────────────────────────────────────────────
 FV="$WORK/fv"; mkfx "$FV"; printf 'def other():\n    # TODO: later\n    return 1\n' >"$FV/py/mod.py"; g "$FV" add -A; g "$FV" commit -qm todo
 qdin "$FV" RIPWIRE_TEST_MEMGUARD=project:1 "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache

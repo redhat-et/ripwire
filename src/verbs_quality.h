@@ -407,7 +407,8 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
                                          : static_cast<quality::KindMask>( out.selected & ~( quality::kWholeTreeKinds | quality::kindBit( "defect-shape" ) ) );
     if( !out.sameRef )
     {
-        const std::uint64_t before = os::mem_footprint();
+        const std::uint64_t before      = os::mem_footprint();
+        const std::uint64_t fixedBefore = constructTablesFootprint();   // construct tables an earlier ingest compiled are in `before`
         if( const std::optional<int> failed = scoreBaseCommit( root, out.baseSha, cfg, out ) )
         {
             return failed;
@@ -421,15 +422,17 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
         }
         const std::uint64_t              basePeak = os::mem_footprint_peak();
         const std::uint64_t              after    = memguard::measuredFootprint();
-        const memguard::TargetProjection proj     = memguard::projectTargetPhase( before, out.ingestPeak, basePeak, after );
+        const std::uint64_t              fixed    = constructTablesFootprint() - fixedBefore;   // the base phase's own (memguard.h FIXED BYTES)
+        const memguard::TargetProjection proj     = memguard::projectTargetPhase( before, out.ingestPeak, basePeak, after, fixed );
         out.needBytes       = proj.needBytes;
         out.ingestNeedBytes = proj.ingestNeedBytes;
         projectedNoFit = !proj.fits;
         if( std::getenv( "RIPWIRE_STATS" ) )   // the projection's own readings, the calibration's instrument (kProjectionScalePct)
         {
-            rw::emitTo( stderr, "ripwire: memory-projection before={} ingest_peak={} base_peak={} after={} need={} measured={} fits={}\n",
+            rw::emitTo( stderr, "ripwire: memory-projection before={} ingest_peak={} base_peak={} after={} fixed={} need={} ingest_need={} measured={} fits={}\n",
                         memguard::limitSpelling( before ), memguard::limitSpelling( out.ingestPeak ), memguard::limitSpelling( basePeak ),
-                        memguard::limitSpelling( after ), memguard::limitSpelling( proj.needBytes ), proj.measured ? 1 : 0, proj.fits ? 1 : 0 );
+                        memguard::limitSpelling( after ), memguard::limitSpelling( proj.fixedBytes ), memguard::limitSpelling( proj.needBytes ),
+                        memguard::limitSpelling( proj.ingestNeedBytes ), proj.measured ? 1 : 0, proj.fits ? 1 : 0 );
         }
         if( projectedNoFit )
         {

@@ -2485,4 +2485,59 @@ void collectConstructHits( const LangEntry& le, std::uint32_t fileId, std::strin
     appendFileConstructHits( perGroup[0], perGroup[1], bytes, out );
 }
 
+// QD-PROJECTION-FIXED (TRAIN-1111g fix 1): the construct tables of the rows this ingest will parse, compiled before its
+// parse workers start — one thread per row, as the workers' call_once would have, joined here — so the footprint they add
+// is read with no other work of this ingest running. A row compiled by an earlier ingest adds nothing. The total is what
+// the --quality-delta=A..B projection counts once (memguard.h FIXED BYTES); a reading that went down records nothing.
+namespace
+{
+std::atomic<std::uint64_t>& constructTablesFootprintSlot() noexcept
+{
+    static std::atomic<std::uint64_t> held{ 0 };
+    return held;
+}
+}   // namespace
+
+std::uint64_t constructTablesFootprint() noexcept
+{
+    return constructTablesFootprintSlot().load( std::memory_order_relaxed );
+}
+
+void warmConstructTables( const std::array<bool, kLangTable.size()>& rows )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: construct tables" );
+    ConstructQueryTable&     table = constructQueryTable();
+    std::vector<std::size_t> todo;
+    for( std::size_t row = 0; row < rows.size(); ++row )
+    {
+        if( rows[row] && kLangTable[row].grammar != nullptr )
+        {
+            todo.push_back( row );
+        }
+    }
+    if( todo.empty() )
+    {
+        return;
+    }
+    const std::uint64_t      before = os::mem_footprint();
+    std::vector<std::thread> compilers;
+    compilers.reserve( todo.size() );
+    for( const std::size_t row : todo )
+    {
+        compilers.emplace_back( [ &table, row ]() noexcept
+        {
+            std::call_once( table.compiled[row], [ & ] { table.byRow[row] = compileGrammarQueries( kLangTable[row].grammar(), table.groups ); } );
+        } );
+    }
+    for( std::thread& th : compilers )
+    {
+        th.join();
+    }
+    const std::uint64_t after = os::mem_footprint();
+    if( after > before )
+    {
+        constructTablesFootprintSlot().fetch_add( after - before, std::memory_order_relaxed );
+    }
+}
+
 }   // namespace rw — ingest_astquery.h section of ingest.cpp

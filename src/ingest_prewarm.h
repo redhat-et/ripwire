@@ -15,6 +15,9 @@
 
 namespace rw
 {
+// The construct tables (ingest_astquery.h, below in the TU): compiles the tables of the flagged kLangTable rows now, before
+// any parse worker runs, and records the footprint they added (constructTablesFootprint).
+void warmConstructTables( const std::array<bool, kLangTable.size()>& rows );
 
 namespace
 {
@@ -276,6 +279,36 @@ struct QueryPrewarm
     std::mutex                    mutex;
     std::condition_variable       cv;
 };
+
+// The rows whose construct tables this ingest's parse will use: each parsed file's row (no cache, a miss, or the ObjC row of
+// a missed .h that sniffs ObjC), and a hit whose record lacks its hits (the pool parses it for them alone). A .h hit that
+// sniffs ObjC there, or a hit whose record fails late, compiles its table in the worker as before, unmeasured: the
+// projection then counts those bytes as growth, the cautious side.
+inline std::array<bool, kLangTable.size()> constructRowsNeeded( const CacheRecords& cache, const IngestFileScan& scan,
+                                                                const std::vector<char>& isMiss, const std::vector<char>& isObjCHeaderMiss )
+{
+    std::array<bool, kLangTable.size()> rows {};
+    const LangEntry* objcLe = lookupLang( ".m" );
+    for( std::size_t fi = 0; fi < scan.lang.size(); ++fi )
+    {
+        const LangEntry* le = scan.lang[ fi ];
+        if( le == nullptr || le->grammar == nullptr )
+        {
+            continue;
+        }
+        const CachedRecordHead* head = cache.empty() ? nullptr : cache.headOf( fi );
+        if( !cache.empty() && !isMiss[ fi ] && ( head == nullptr || !head->constructsAbsent ) )
+        {
+            continue;   // a hit that carries its hits (or a file no worker parses): no table
+        }
+        if( isObjCHeaderMiss[ fi ] && objcLe != nullptr )
+        {
+            le = objcLe;
+        }
+        rows[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
+    }
+    return rows;
+}
 
 // pre-warm the per-language tags.scm cache single-threaded; workers then only READ it.
 // LAZY: compile ONLY grammars needed by changed/uncached files (the miss set).
@@ -568,6 +601,13 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Cac
                 prewarm.toCompile.push_back( &e );
             }
         }
+    }
+
+    // QD-PROJECTION-FIXED: the construct tables, before the tags compiles launch — no other thread of this ingest runs here
+    // (the hash pool has joined), so the footprint they add is theirs alone.
+    if( scan.wantConstructHits )
+    {
+        warmConstructTables( constructRowsNeeded( cache, scan, isMiss, isObjCHeaderMiss ) );
     }
 
     // Compile distinct grammars IN PARALLEL (ts_query_new is compute-bound — PMC IPC 4.0) and install

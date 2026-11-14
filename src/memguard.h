@@ -507,26 +507,43 @@ inline FileSetStore guardedFileClosure( const FileAdjacency& adj )
 // margin below the limit may be answered degraded; the projection never lets a run past the limit by its own choice (an
 // under-projection is caught by the guard's stops, which degrade). An unknown peak (0) projects nothing: the full attempt
 // runs, and a stop in it still degrades.
+//
+// FIXED BYTES (TRAIN-1111g fix 1). Both scales above are for memory that grows with the tree. `fixed` is the footprint the
+// base phase added that does not: the --quality-delta construct tables (ingest_astquery.h warmConstructTables), compiled
+// once per process, per language, and held to the end — the target phase reuses them and compiles none. It is measured,
+// not modelled (constructTablesFootprint), and the projection counts it ONCE in each line:
+//     need       = max( after, before + fixed + k * ( basePeak - before - fixed ) )
+//     ingestNeed = max( after, ingestPeak ) - fixed / 2,   so 2 * ingestNeed = 2 * ( the part that grows ) + fixed.
+// Before this, a small tree's construct tables (11 MiB on qddegradecheck's fixture, where the whole run peaks at 15-17 MiB)
+// were scaled as if they grew with it: the projected base ingest sat on the run's peak, so the parse line of arm (T)'s
+// limit, twice that peak, was within noise of it (qddegradecheck (T2)). On a large tree `fixed` is MiBs of a GiB-scale need.
+// The guard's own parse line (Watch) still reads the whole footprint after five seconds: a long target ingest within
+// fixed / 2 of half the limit can stop there, and that stop degrades like any other.
 inline constexpr std::uint64_t kProjectionScalePct = 175;   // max measured 1.48 over 11 cold runs on 5 corpora (qd-memory-degrade report), + ~18%
 struct TargetProjection
 {
     bool          measured        = false;   // false: no peak reading — nothing was projected
     bool          fits            = true;
     std::uint64_t needBytes       = 0;       // the projected need (0 when not measured)
-    std::uint64_t ingestNeedBytes = 0;       // max( after, ingestPeak ), judged against half the limit (0 when not measured)
+    std::uint64_t ingestNeedBytes = 0;       // max( after, ingestPeak ) - fixed / 2, judged against half the limit (0 when not measured)
+    std::uint64_t fixedBytes      = 0;       // the fixed bytes counted once (the reading, at most the phase's growth)
 };
-inline TargetProjection projectTargetPhase( std::uint64_t before, std::uint64_t ingestPeak, std::uint64_t basePeak, std::uint64_t after )
+inline TargetProjection projectTargetPhase( std::uint64_t before, std::uint64_t ingestPeak, std::uint64_t basePeak, std::uint64_t after,
+                                            std::uint64_t fixedBytes )
 {
     TargetProjection    p;
     const std::uint64_t limit = limits().hardBytes;
     p.measured = basePeak != 0 && ingestPeak != 0 && after != 0 && basePeak >= before;
     if( p.measured )
     {
-        const std::uint64_t growth     = basePeak - before;
+        const std::uint64_t fixed      = std::min( fixedBytes, basePeak - before );   // a reading never exceeds what the phase grew by
+        const std::uint64_t growth     = basePeak - before - fixed;
         const std::uint64_t scaled     = growth / 100 * kProjectionScalePct + growth % 100 * kProjectionScalePct / 100;   // no overflow below 2^57 B
-        p.needBytes                    = std::max( after, before + scaled );
-        const std::uint64_t ingestNeed = std::max( after, ingestPeak );
+        p.needBytes                    = std::max( after, before + fixed + scaled );
+        const std::uint64_t ingestPart = std::max( after, ingestPeak );
+        const std::uint64_t ingestNeed = ingestPart - std::min( fixed / 2, ingestPart );
         p.ingestNeedBytes              = ingestNeed;
+        p.fixedBytes                   = fixed;
         p.fits = limit == 0 || ( p.needBytes < limit && ingestNeed < limit / 2 );
     }
     if( seamCallTrips( TripAt::Project, seamCounters().projections, /*laterToo=*/false ) )
