@@ -234,7 +234,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxGitWorkers` | `12` | — | matches the ingest pool's measured ~12-way; these are |
-| `kMaxRefs` | `512` | INDEXING | refusal bound — a sweep, not a fork-network crawl |
+| `kMaxRefs` | `512` | INDEXING | ref window — past it the newest refs are read, refs_omitted= counts the rest |
 | `kMaxRenameProbeFiles` | `32` | INDEXING | HEAD copies one rename probe reads; past it the probe stops (a hint, never a claim) |
 | `kMaxWorktreePaths` | `8192` | INDEXING | — |
 | `kWhereisHits` | `60` | OUTPUT | — |
