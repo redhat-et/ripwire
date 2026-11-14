@@ -1581,10 +1581,13 @@ inline ConnectResult connectDeclinedJoints( const IngestResult& ing, const Graph
             found.push_back( std::move( *j ) );
         }
     }
+    // (path, line, name), then the source byte range: two definitions on one line in different scopes must not tie, or the sort
+    // (not stable) would let NodeId order pick which survive the cap (CodeRabbit 4570577964; sigStartByte alone is no total order)
     const auto key = [ & ]( const ConnectResult::DeclinedJoint& j )
     {
         const Symbol& s = ing.symbols[ j.fn ];
-        return std::tuple<std::string_view, std::uint32_t, std::string_view>( ing.files[ s.fileId ], s.line, s.name );
+        return std::tuple<std::string_view, std::uint32_t, std::string_view, std::uint32_t, std::uint32_t>( ing.files[ s.fileId ], s.line, s.name,
+                                                                                                            s.sigStartByte, s.endByte );
     };
     std::ranges::sort( found, [ & ]( const auto& a, const auto& b ) { return key( a ) < key( b ); } );
     res.declinedJointTotal = found.size();
