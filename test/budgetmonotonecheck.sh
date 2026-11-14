@@ -15,13 +15,12 @@
 # then the <sigs> rows from the last, down to a floor of four. answer(B) = U with the SHORTEST prefix of that sequence
 # removed that brings est_tokens to B (all of it when none does: the overflow is then visible as est_tokens > the budget
 # named on the root, and a --max-tokens ceiling says over_ceiling="1").
-#   (a) --token-budget=B >= E (U's est_tokens): the answer IS U, byte for byte, plus only the budget's own disclosure — the
-#       root's budget_tokens="B" and its legend clause " [budget_tokens=: …]" (unpriced, so est_tokens is U's too).
+#   (a) --token-budget=B >= E (U's est_tokens): the answer IS U — stdout, stderr and exit code byte for byte. A budget that
+#       cuts nothing says nothing (no budget_tokens=, no clause); the disclosure rides only an answer something was shed from.
 #   (b) B < E: est_tokens <= B, or every tier below the <sigs> rows is shed and the rows are at their floor; every <sigs>
 #       and <tail> row kept is U's row in U's order (a prefix of U's rows), and a <sigs> row is missing only when the tail
 #       and fold are already gone. At B = E - 1 every <sigs> row of U is kept.
-#   (c) the same two arms for --detail=N --max-tokens=M against the unbudgeted --detail=N answer (max_tokens= and its
-#       " [max_tokens=: …]" clause are the disclosure).
+#   (c) the same two arms for --detail=N --max-tokens=M against the unbudgeted --detail=N answer.
 #   (d) monotone: B1 < B2 => every <sigs>/<tail> row of answer(B1) is in answer(B2), in the same order (both are prefixes
 #       of U's rows, the B1 one no longer), answer(B1) carries a <fold> only if answer(B2) does, and est(B1) <= est(B2).
 #       That is the exact relation the fixed shed sequence guarantees — not a byte prefix: the shown= counts move.
@@ -109,21 +108,21 @@ while IFS='	' read -r corpus q; do
     [ -z "$corpus" ] && continue
     i=$(( i + 1 ))
     d="$TMP/q$i"; mkdir -p "$d"; printf '%s\n%s\n' "$corpus" "$q" >"$d/what"
-    ( cd "$corpus" && "$BIN" . --for="$q" ) >"$d/U" 2>/dev/null || echo "rc=$?" >"$d/U.rc"
+    ( cd "$corpus" && "$BIN" . --for="$q" ) >"$d/U" 2>"$d/U.err"; echo "$?" >"$d/U.rc"
     E="$( est_of "$d/U" )"
     [ -n "$E" ] || { echo "  INFO  q$i: the unbudgeted answer carries no est_tokens — skipped (counted as not judged)"; continue; }
     echo "$E" >"$d/E"
     for B in $(( E / 4 )) $(( E / 2 )) $(( E - 1 )) "$E" $(( E + 1 )) $(( E * 2 )); do
         [ "$B" -ge 1 ] || continue
-        ( cd "$corpus" && "$BIN" . --for="$q" --token-budget="$B" ) >"$d/tb.$B" 2>/dev/null || echo "rc=$?" >"$d/tb.$B.rc"
+        ( cd "$corpus" && "$BIN" . --for="$q" --token-budget="$B" ) >"$d/tb.$B" 2>"$d/tb.$B.err"; echo "$?" >"$d/tb.$B.rc"
     done
     if [ "$i" -le "$DETAIL_ROWS" ]; then
-        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 ) >"$d/D" 2>/dev/null
+        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 ) >"$d/D" 2>"$d/D.err"; echo "$?" >"$d/D.rc"
         ED="$( est_of "$d/D" )"
         if [ -n "$ED" ]; then
             echo "$ED" >"$d/ED"
             for M in $(( ED / 2 )) "$ED" $(( ED * 2 )); do
-                ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --max-tokens="$M" ) >"$d/mt.$M" 2>/dev/null
+                ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --max-tokens="$M" ) >"$d/mt.$M" 2>"$d/mt.$M.err"; echo "$?" >"$d/mt.$M.rc"
             done
         fi
     fi
@@ -140,13 +139,9 @@ def ok( m ): print( "  PASS  " + m )
 def no( m ): print( "  FAIL  " + m ); fails.append( m )
 def raw( p ): return open( p, encoding = "utf-8", errors = "replace" ).read()
 
-def strip_disclosure( s, attr ):
-    # the budget's own disclosure: the root attribute and its one legend clause — nothing else may differ
-    m = re.match( r"<ctx [^>]*>", s )
-    if m:
-        root = re.sub( r' %s="\d+"' % attr, "", m.group( 0 ) )
-        s = root + s[ m.end(): ]
-    return re.sub( r" \[%s=: [^\]]*\]" % attr, "", s )
+def same_run( p, q ):
+    # rule 12 byte identity: stdout, stderr and exit code
+    return all( os.path.exists( p + x ) and os.path.exists( q + x ) and raw( p + x ) == raw( q + x ) for x in ( "", ".err", ".rc" ) )
 
 def parse( p ):
     try:
@@ -194,18 +189,15 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
     E = int( raw( os.path.join( d, "E" ) ) )
     Uraw = raw( os.path.join( d, "U" ) ); U = parse( os.path.join( d, "U" ) )
     if U is None: continue
-    # (a) at and above the price: U plus the disclosure, byte for byte
+    # (a) at and above the price: U, byte for byte
     good = True
     for B in ( E, E + 1, 2 * E ):
         p = os.path.join( d, f"tb.{B}" )
-        if not os.path.exists( p ): continue
-        a = raw( p )
-        if not re.search( r'<ctx [^>]*budget_tokens="%d"' % B, a ):
-            no( f"(a) {tag} B={B}: the root does not name budget_tokens=\"{B}\"" ); good = False
-        if strip_disclosure( a, "budget_tokens" ) != Uraw:
-            no( f"(a) {tag} B={B} >= E={E}: the answer is not the unbudgeted one ({len( a.encode() )} B vs {len( Uraw.encode() )} B)" ); good = False
+        if not os.path.exists( p ): good = False; no( f"(a) {tag} B={B}: no run" ); continue
+        if not same_run( p, os.path.join( d, "U" ) ):
+            no( f"(a) {tag} B={B} >= E={E}: the answer is not the unbudgeted one ({os.path.getsize( p )} B vs {len( Uraw.encode() )} B, or stderr/rc differ)" ); good = False
     counts[ "a" ] += 1
-    if good: ok( f"(a) {tag}: --token-budget >= E={E} returns the unbudgeted answer byte for byte (+ budget_tokens= and its clause)" )
+    if good: ok( f"(a) {tag}: --token-budget >= E={E} returns the unbudgeted answer byte for byte (stdout, stderr, rc)" )
     # (b) below the price
     good = True
     for B in ( E - 1, E // 2, E // 4 ):
@@ -241,7 +233,7 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
         for M in ( ED, 2 * ED ):
             p = os.path.join( d, f"mt.{M}" )
             if not os.path.exists( p ): good = False; continue
-            if strip_disclosure( raw( p ), "max_tokens" ) != Draw:
+            if not same_run( p, os.path.join( d, "D" ) ):
                 no( f"(c) {tag} M={M} >= E={ED}: --detail=2 --max-tokens is not the unbudgeted --detail=2 answer ({os.path.getsize( p )} B vs {len( Draw.encode() )} B)" ); good = False
         p = os.path.join( d, f"mt.{ED // 2}" )
         A = parse( p ) if os.path.exists( p ) else None

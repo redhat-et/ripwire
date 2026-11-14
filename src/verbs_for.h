@@ -6,6 +6,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
+#include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
 #include "fordemoteall.h" // DEMOTE-ALL-DIALECTS: the demote rules in --json and under a soft target
@@ -2883,9 +2884,36 @@ inline bool candidatePageWindowed( const rw::Config& cfg )
 // The --for lens's RENDER over the ranking runForLens computed once (`lr`). `forAtStamp` (train 26c, CodeRabbit on #383): the
 // at= stamp, read ONCE per run by runForLens. forbudget-soft: one render per run — the C3 payment modes (unpaid / paid /
 // overrun re-renders of a charged <sigs> continuation) went with the hard ceiling they priced against.
+// TOKEN-BUDGET-MONOTONE: which <bodies> section the ledger names (--detail's, or the auto bundle's when it was emitted)
+struct ForLedgerBodies
+{
+    bool detail     = false;   // --detail=N asked: `bodies` is its section
+    bool autoServed = false;   // otherwise: the auto section is emitted (not the hops-cut marker path)
+};
+// The answer's price ledger as finishForLensHeaderPriced converged it, with the shares a budget may shed (forbudgetfit.h).
+inline rw::ForAnswerLedger forAnswerLedgerOf( const std::optional<rw::PricedRootInputs>& inputs, const rw::BodyFoldRender& fold,
+                                              const rw::ChargedSection& bodies, ForLedgerBodies which )
+{
+    if( !inputs )
+    {
+        return {};
+    }
+    const bool served = bodies.isRendered && !bodies.xml.empty() && ( which.detail || which.autoServed );
+    return rw::ForAnswerLedger{ .priced          = true,
+                                .markupBytes     = inputs->markupBytes,
+                                .bodyTokens      = inputs->bodyTokens,
+                                .foldXmlBytes    = fold.xml.size(),
+                                .foldMarkupBytes = fold.markupBytes,
+                                .foldBodyTokens  = fold.bodyTokens,
+                                .detailXmlBytes  = served ? bodies.xml.size() : 0u,
+                                .detailTokens    = served ? bodies.tokens : 0u,
+                                .autoBodies      = served && !which.detail };
+}
+
 struct ForLensPassMode
 {
-    std::string_view forAtStamp;
+    std::string_view     forAtStamp;
+    rw::ForAnswerLedger* ledger = nullptr; // TOKEN-BUDGET-MONOTONE: what the answer's est_tokens was converged from (runForLensFitted)
 };
 // the verb sections (verbs_navigate.h) come later in this translation unit; the --for block calls their CLI entry points
 std::optional<int> runPath( const MainDispatch& d );
@@ -3096,6 +3124,7 @@ public:
     StdoutCapture& operator=( const StdoutCapture& ) = delete;
     ~StdoutCapture() { if( active_ ) { (void)finish(); } }
     bool wanted() const noexcept { return wanted_; }
+    bool active() const noexcept { return active_; }
     // ONE-SIDE-REACH: what the captured answer's root est_tokens= was converged from (null when the root prints none): the demote pass
     // (foronesidereach.h) rewrites priced rows in these bytes, and re-prices the root through it.
     // The captured bytes, stdout restored; nullopt when nothing was captured. A failed flush or a stream error is `failed`: the bytes read are
@@ -3196,12 +3225,25 @@ struct CapturedForAnswer
 {
     StdoutCapture&                      capture;
     std::optional<rw::PricedRootInputs> price;
+    rw::ForAnswerLedger*                ledger = nullptr; // TOKEN-BUDGET-MONOTONE: its markup follows the edits below
 };
 
 // The capture holds the whole answer: a buffer, flushed and read back without error, and stdout restored.
 inline bool capturedWhole( const std::optional<StdoutCaptured>& cap )
 {
     return cap && !cap->failed && cap->restored;
+}
+
+// TOKEN-BUDGET-MONOTONE: the demote passes edit the captured answer after it was priced, and the root re-prices over
+// markupBytes + edited - captured (repriceRootAfterCut), each side's own est_tokens= excluded; the ledger follows.
+inline void ledgerFollowsEdit( rw::ForAnswerLedger* ledger, const std::optional<StdoutCaptured>& cap, std::string_view edited )
+{
+    if( ledger == nullptr || !ledger->priced || edited.empty() || !cap )
+    {
+        return;
+    }
+    const auto priced = []( std::string_view doc ) { return doc.size() - rw::attrOf( doc.substr( 0, doc.find( '>' ) ), "est_tokens" ).size(); };
+    ledger->markupBytes = ledger->markupBytes + priced( edited ) - priced( cap->bytes );
 }
 
 inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
@@ -3235,6 +3277,7 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
         d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = held,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut } );
     const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price, held ) : std::string();
+    ledgerFollowsEdit( answer.ledger, cap, edited );
     const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
     std::fwrite( bytes.data(), 1, at, stdout );
@@ -5172,6 +5215,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         ForLensPricedHeader pricedHeader     = finishForLensHeaderPriced( std::move( headerStr ), rootFinish );
         headerStr                            = std::move( pricedHeader.header );
         const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
+        if( mode.ledger != nullptr )   // TOKEN-BUDGET-MONOTONE: the shares a budget may shed, priced as the root priced them
+        {
+            *mode.ledger = forAnswerLedgerOf( pricedHeader.inputs, fold, cfg.detail > 0 ? detailSection : autoSection,
+                                              ForLedgerBodies{ .detail = cfg.detail > 0, .autoServed = !enrich.hopsCutMarker } );
+        }
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
@@ -5341,7 +5389,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
         }
         // K-WRONGSYM (forfilesyms.h): last before </ctx>, read off the bytes the run emitted since the root tag
-        const int answerRc = appendForFileSyms( d, CapturedForAnswer{ forAnswerBytes, pricedHeader.inputs } );
+        const int answerRc = appendForFileSyms( d, CapturedForAnswer{ forAnswerBytes, pricedHeader.inputs, mode.ledger } );
 
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
@@ -5352,20 +5400,115 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
 
 // The --for lens: the ranking runs once, the render once (forbudget-soft: no payment-mode re-renders — the lens has no hard
 // ceiling left to land a charged continuation under).
-std::optional<int> runForLens( const MainDispatch& d )
+std::optional<int> runForLensPosture( const MainDispatch& d, rw::ForAnswerLedger* ledger );
+
+// TOKEN-BUDGET-MONOTONE (forbudgetfit.h): the budgets this answer applies AFTER its posture — --token-budget, and --max-tokens
+// where --for reads it (under --detail=N) — on the XML answer of one root, unpaged. The other dialects and the budgeted page
+// keep their own budget paths (--json, --format=columnar|candidates, --limit/--offset: test/budgetpolicycheck.sh ARM D/E/F).
+inline bool forBudgetFitsAfterPosture( const MainDispatch& d ) noexcept
 {
     const rw::Config& cfg = d.cfg;
-    if( cfg.forTask.empty() )
+    return ( cfg.tokenBudget > 0 || ( cfg.maxTokens > 0 && cfg.detail > 0 ) ) && !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot
+        && cfg.pageLimit == 0 && cfg.pageOffset == 0;
+}
+
+// Why the budgeted answer is the posture's answer unshed, or the old budget path: the sink names it on stderr (an MCP client
+// never runs this path: the CLI's stdout is the answer).
+struct ForBudgetFit
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        NoCapture,    // no buffer to render the unbudgeted answer into: the budget path that re-decides the posture answers
+        NotWhole,     // the buffer lost bytes or stdout could not be restored: those bytes are written as they are, unshed
+        NoRoot,       // the answer has no <ctx> root to shed from: written as it is, unshed
+    };
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        rw::emitTo( stderr, "ripwire: --for: {}\n",
+                    why == DisclosureWhy::NoCapture ? "no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)"
+                    : why == DisclosureWhy::NotWhole ? "the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget"
+                                                      : "the unbudgeted answer has no root to shed from, so it is written as it is" );
+    }
+};
+
+// The same --for call without its budget: what a shed unit's next= re-asks (the posture flags it was answered under, the ranking's).
+inline std::string forUnbudgetedCall( const rw::Config& cfg )
+{
+    std::string call = rw::nextFlag( "--for=", cfg.forTask ) + forHeldNextFlags( cfg );
+    call += cfg.detail > 0 ? " --detail=" + std::to_string( cfg.detail ) : std::string();
+    call += cfg.signaturesOnly ? " --signatures-only" : "";
+    call += cfg.autoBodies ? " --auto-bodies" : "";
+    call += cfg.sections.empty() ? std::string() : " --sections=" + std::string( cfg.sections );
+    call += cfg.compress ? " --compress" : "";
+    call += cfg.withGraph ? " --with-graph" : "";
+    return call;
+}
+
+// The answer under a budget: the posture's answer (no budget) rendered into a buffer, then shed to the budget.
+inline int runForLensFitted( const MainDispatch& d )
+{
+    const rw::Config& cfg     = d.cfg;
+    rw::Config        posture = cfg;
+    posture.tokenBudget       = 0;
+    posture.maxTokens         = 0;
+    const MainDispatch pd{ posture, d.ing, d.g, d.root, d.multiRoot, d.ws, d.fanIn, d.fanInPtr, d.qmetrics, d.ampPtr, d.cboPtr, d.testedPtr,
+                           d.lcom4Ptr, d.impurePtr, d.forChurn, d.redactCounts, d.redactPtr, d.notesPtr, d.notesDegraded, d.grepPhases, d.valueUses };
+    ForBudgetFit        sink;
+    StdoutCapture       capture( true );
+    if( !capture.active() )
+    {
+        DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoCapture, "runForLensFitted: no capture buffer for the unbudgeted answer" );
+        return runForLensPosture( d, nullptr ).value_or( 0 );
+    }
+    rw::ForAnswerLedger                  ledger;
+    const int                            rc  = runForLensPosture( pd, &ledger ).value_or( 0 );
+    const std::optional<StdoutCaptured>  cap = capture.finish();
+    if( !capturedWhole( cap ) )
+    {
+        DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NotWhole, "runForLensFitted: the unbudgeted answer did not buffer whole" );
+        if( cap && cap->restored )
+        {
+            std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+        }
+        return rc != 0 ? rc : 1;
+    }
+    const std::string                 unbudgeted = forUnbudgetedCall( cfg );
+    const rw::ForBudgetAsk            ask{ .targetTokens  = std::size_t( cfg.tokenBudget ),
+                                           .ceilingTokens = cfg.detail > 0 && cfg.maxTokens > 0 ? std::size_t( cfg.maxTokens ) : 0u,
+                                           .continuation  = unbudgeted };
+    const std::optional<std::string>  fitted = rw::fitForAnswerToBudget( cap->bytes, ask, ledger );
+    if( !fitted )
+    {
+        DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
+    }
+    const std::string& out = fitted ? *fitted : cap->bytes;
+    std::fwrite( out.data(), 1, out.size(), stdout );
+    return rc;
+}
+
+std::optional<int> runForLens( const MainDispatch& d )
+{
+    if( d.cfg.forTask.empty() )
     {
         return std::nullopt;
     }
+    if( forBudgetFitsAfterPosture( d ) )
+    {
+        return runForLensFitted( d );
+    }
+    return runForLensPosture( d, nullptr );
+}
+
+std::optional<int> runForLensPosture( const MainDispatch& d, rw::ForAnswerLedger* ledger )
+{
+    const rw::Config& cfg = d.cfg;
     rw::armRowFeatures( forFileSymsWanted( d ) && cfg.pageLimit == 0 && cfg.pageOffset == 0 );   // ROW-FEATURE-DUMP: one getenv when unset
     rw::LensRanking lr = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
                                              /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
     // the at= stamp (gitstamp.h): one read per run — every payment-mode render below shares it, like the ranking
     const bool        forSingleRoot = d.ing.realPaths.empty() && cfg.roots.size() == 1;
     const std::string forAtStamp    = forSingleRoot ? rw::gitstamp::stampAt( d.root ) : std::string();
-    return runForLensPass( d, std::move( lr ), ForLensPassMode{ .forAtStamp = forAtStamp } );
+    return runForLensPass( d, std::move( lr ), ForLensPassMode{ .forAtStamp = forAtStamp, .ledger = ledger } );
 }
 
 std::optional<int> runTargetedViews( const MainDispatch& d )
