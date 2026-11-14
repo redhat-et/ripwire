@@ -67,7 +67,7 @@ topArtifacts="$( find "$SHARED" -mindepth 1 -maxdepth 1 -name 'ripwire-*' -print
 [ -z "$topArtifacts" ] && ok "shared TMPDIR root has no ripwire-* artifacts" \
     || { no "ripwire artifacts leaked into shared TMPDIR root"; printf '%s\n' "$topArtifacts"; }
 
-cacheCount="$( find "$PRIVATE" -mindepth 2 -maxdepth 2 -type f -name 'ripwire-mcp-*.cache' 2>/dev/null | wc -l | tr -d ' ' )"
+cacheCount="$( find "$PRIVATE" -mindepth 2 -maxdepth 2 -type f -name 'ripwire-*-rich*.bin' 2>/dev/null | wc -l | tr -d ' ' )"
 lockCount="$( find "$PRIVATE/locks" -mindepth 2 -maxdepth 2 -type f -name 'ripwire-edit-*.lock' 2>/dev/null | wc -l | tr -d ' ' )"
 if [ "$cacheCount" -ge 1 ]; then ok "MCP cache is sharded under the private directory"; else no "no sharded MCP cache found"; fi
 if [ "$lockCount" -ge 1 ]; then ok "edit lock is sharded under the private locks subtree"; else no "no sharded edit lock found"; fi

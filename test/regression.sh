@@ -723,6 +723,7 @@ for _g in \
     mcphandlecheck \
     mcpincrementalcheck \
     mcpmanifestcheck \
+    mcponeparsecheck \
     mcprangeedgecheck \
     mcpreadloopcheck \
     mcpredactcheck \
@@ -857,6 +858,7 @@ for _g in \
     qdclonepaircheck \
     qddegradecheck \
     qddialscheck \
+    qdentryceilingcheck \
     qdmonstercheck \
     qdrefpaircheck \
     qdtestdeadcheck \
@@ -982,6 +984,7 @@ for _g in \
     selectorscopecheck \
     selfcheckcheck \
     selfcontainedcheck \
+    sentencesubjectcheck \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \

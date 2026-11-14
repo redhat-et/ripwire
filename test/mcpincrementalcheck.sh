@@ -353,7 +353,7 @@ b = open(p, "rb").read()
 open(p, "wb").write(b.replace(b"perimeterEdited", b"perimeterRaceA"))
 PY
 warm_for 15 "$TASK"      # forces a rebuild → rewrites the cache blob under $WARMTMP
-BLOB="$( find "$WARMTMP" -name 'ripwire-mcp-*.cache' 2>/dev/null | sort | head -1 )"
+BLOB="$( find "$WARMTMP" -name 'ripwire-*-rich*.bin' 2>/dev/null | sort | head -1 )"
 python3 - "$GEO" <<'PY'
 import sys
 p = sys.argv[1]

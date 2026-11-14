@@ -32,6 +32,8 @@ kForDeclSubjectTries	pending:B43 no disclosure identifier in the cap site's func
 kForDetailFloorShareDivisor	pending:B43 no disclosure identifier in the cap site's function (src/verbs_for.h:2080); audit: cut or work bound
 kForDispatchCtorRows	sink:shown,isFloor
 kForDispatchHopRows	sink:shown,isFloor
+kForDispatchHeldRows	sink:heldShown
+kForDispatchHeldText	sink:cut
 kForDocBodyBytes	pending:B43 no disclosure identifier in the cap site's function (src/fordocbody.h:892); audit: cut or work bound
 kForDocBodyFiles	sink:shown,shownSigIds
 kForDocBodyTriggerDocs	sink:shown,shownSigIds
@@ -51,6 +53,8 @@ kForFilePageTopLines	sink:shownLines,shownBytes
 kForFileSymsBindPerHead	pending:B43 no disclosure identifier in the cap site's function (src/forfilesyms.h:1201); audit: cut or work bound
 kForFileSymsFiles	sink:shownAt,ShownFiles
 kForFileSymsHeadRows	pending:B43 no disclosure identifier in the cap site's function (src/forfilesyms.h:544); audit: cut or work bound
+kForFileSymsInitHeadRows	legend
+kForFileSymsInitSpan	none:a parse window, not a cut: the 200 bytes after `=` hold the initialiser callee head (identifier and dot bytes up to its `(`); no real declaration spells a longer one, so a hit changes no row (read by hand at DECL-PRINT fix 1)
 kForFileSymsRowsPerRule	sink:cut
 kForFlagDefaultMaxBytes	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:177 (no cap site)); audit: cut or work bound
 kForFlagOwnerMaxLines	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:3832); audit: cut or work bound

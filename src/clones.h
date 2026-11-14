@@ -857,6 +857,48 @@ inline std::uint64_t cloneTokenHash( const std::string& t, std::uint64_t seed ) 
     return h;
 }
 
+// The sorted, de-duplicated kFpGram-gram fingerprint set of one normalized token stream (empty under kFpGram tokens): the one
+// definition the Type-3 pass buckets and Jaccard-compares on, and the moved-body sketch (cloneSketchOfStream) is built from.
+inline std::vector<std::uint64_t> cloneGramFingerprints( const std::vector<std::string>& raw )
+{
+    std::vector<std::uint64_t> fp;
+    if( raw.size() >= kFpGram )
+    {
+        fp.reserve( raw.size() - kFpGram + 1 );
+        for( std::size_t i = 0; i + kFpGram <= raw.size(); ++i )
+        {
+            std::uint64_t g = 1469598103934665603ull;
+            for( std::uint32_t k = 0; k < kFpGram; ++k )
+            {
+                g = cloneTokenHash( raw[i + k], g );
+            }
+            fp.push_back( g );
+        }
+        std::sort( fp.begin(), fp.end() );
+        fp.erase( std::unique( fp.begin(), fp.end() ), fp.end() );
+    }
+    return fp;
+}
+
+// QD-ENTRY-CEILING MOVES (2026-11-13) — the Type-3 pass's own minhash sketch of one body, kept as a value so a Snapshot can carry it
+// (128 bytes) where it cannot carry the body: --quality-delta reads a moved-and-edited body by comparing the sketch of a NEW body with
+// the sketch the baseline recorded for a body that left its key. Same normalization (identifiers, numbers, strings erased), same
+// grams, same fixed permutations as the pre-gate above, so a near-miss here is a near-miss there.
+using CloneSketch = std::array<std::uint8_t, kSketchHashes>;
+inline CloneSketch cloneSketchOfStream( const std::vector<std::string>& raw )
+{
+    CloneSketch sig{};
+    cloneSketchSig( cloneGramFingerprints( raw ), sig.data() );
+    return sig;
+}
+// The k-gram Jaccard the two sketches estimate: the matching-component share, with the 8-bit truncation's 1/256 collision floor
+// taken out (the RECALL BOUND table above: p = J + (1-J)/256). Standard error about sqrt(J(1-J)/128): 0.03 at J = 0.85.
+inline float cloneSketchJaccard( const CloneSketch& a, const CloneSketch& b ) noexcept
+{
+    const float p = float( cloneSketchMatches( a.data(), b.data() ) ) / float( kSketchHashes );
+    return std::max( 0.0f, ( p - 1.0f / 256.0f ) / ( 1.0f - 1.0f / 256.0f ) );
+}
+
 // LCS length of two token-ID sequences via rolling two-row DP. O(|a|·|b|) time, O(min) space. Comparing interned
 // u32 ids (A4-P2) instead of std::string cells makes each DP cell a scalar compare. Sequences are clamped to
 // kType3MaxTokensForLcs by the caller so this stays a bounded constant per pair.
@@ -1208,22 +1250,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
 
             // k-gram fingerprint set (sorted+unique for Jaccard by merge) — hashed over the token TEXT, exactly as
             // before, so bucketing + Jaccard are unchanged. (Only the LCS below moved to interned u32 ids.)
-            std::vector<std::uint64_t> fp;
-            if( raw.size() >= kFpGram )
-            {
-                fp.reserve( raw.size() - kFpGram + 1 );
-                for( std::size_t i = 0; i + kFpGram <= raw.size(); ++i )
-                {
-                    std::uint64_t g = 1469598103934665603ull;
-                    for( std::uint32_t k = 0; k < kFpGram; ++k )
-                    {
-                        g = cloneTokenHash( raw[i + k], g );
-                    }
-                    fp.push_back( g );
-                }
-                std::sort( fp.begin(), fp.end() );
-                fp.erase( std::unique( fp.begin(), fp.end() ), fp.end() );
-            }
+            std::vector<std::uint64_t> fp = cloneGramFingerprints( raw );
 
             // intern each token text → dense u32 id: the LCS DP (the O(n·m) hot loop, item 2) then compares scalars
             // instead of std::strings. Interning order is process-local and feeds only equality-compares.

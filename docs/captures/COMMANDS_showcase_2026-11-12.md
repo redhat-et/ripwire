@@ -6072,7 +6072,7 @@ ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwir
 *The session legend dictionary the MCP server serves as ripwire://legend-dict/full — one definition per line, headed by its dictv= version; no corpus needed. =roster lists the completeness attributes it defines.*
 
 `````
-ripwire legend dictionary ripwire.dict/v1 dictv=f7d122c82741a996 entries=1107
+ripwire legend dictionary ripwire.dict/v1 dictv=9310a33a6cc8c16c entries=1108
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)

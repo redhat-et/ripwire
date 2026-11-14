@@ -53,6 +53,22 @@
 #          candidate that is a double by its OWN path (FakeDisk) stays in test=1 (kills a mutant that drops the demotion wholesale)
 #   C3 [G] the CLI over the whole fixture is unchanged (the CLI refuses a cut index before --for runs)
 #
+# DISPATCH-HELD-AS (residual pass 11-12, card 4; H1 and H3 are RED on main 0b8f0bf8d, H2 a twin that holds on both):
+#   H1 [P] a candidate type no constructor CALL makes (fixture heldas: RealReader, held by value in App and in App::Run): <s held="member"
+#          of="RealReader" n="App::reader_" p="src/app.cc:4">RealReader reader_;</s> and <s held="local" … n="App::Run" p="src/app.cc:10">,
+#          two rows, capped="1" for the third (extra); a pointer or reference member/local, a by-value PARAMETER and a test file's local are no row
+#   H2 [G] a candidate whose type a production call constructs (fixture rs: pick_renderers ctor="Cmd::new") carries no held= row
+#   H3 [P] both legends define held= and of= beside the element
+#
+# #646 CodeRabbit round (each [P] arm RED on train head 6621e14e7):
+#   H4 [P] a short type name two types carry (fixture heldqual: a::Reader the candidate, b::Reader a plain struct; the index keeps
+#          no namespace): no declaration of `Reader` is a row (b::Reader's `other_`/`plain_` are not a::Reader's evidence), capped="0";
+#          H4pre: the fixture spells all three
+#   H5 [P] a held declaration line past kForDispatchHeldText (fixture heldcut: an `api_key = ` 48-hex run straddling byte 160) is
+#          redacted BEFORE the cut: only the redactor's own 4-character kept prefix prints (cut first, the 9 characters left under the
+#          redactor's 32-character minimum printed as they are)
+#   H6 [P] a cut held line is disclosed: it ends in "…" and the element says capped="1" (one row, nothing else left out)
+#
 # Usage:  bash test/fordispatchhopcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fordispatchhopcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
 
@@ -74,7 +90,8 @@ cd "$ROOT"
 F="test/fordispatchhopfix"
 [ -f "$F/cpp/loader.cc" ] && [ -f "$F/cpp1/tests/loader_test.cc" ] && [ -f "$F/rs/src/pick.rs" ] && [ -f "$F/cppwrap/cached.cc" ] && [ -f "$F/ladder/main.py" ] \
     && [ -f "$F/factory/pg_store.cc" ] && [ -f "$F/double/loader_test.cc" ] && [ -f "$F/recv/loader.cc" ] && [ -f "$F/initm/loader.cc" ] \
-    && [ -f "$F/ts/src/loader.ts" ] && [ -f "$F/alltest/tests/fakes.cc" ] && [ -f "$F/recvbound/rc.cc" ] && [ -f "$F/dumpfs/src/test.cc" ] && [ -f "$F/osentry/src/disk.cc" ] && [ -f "$F/cutmcp/src/zmain.cc" ] || { echo "fixture $F missing"; exit 2; }
+    && [ -f "$F/ts/src/loader.ts" ] && [ -f "$F/alltest/tests/fakes.cc" ] && [ -f "$F/recvbound/rc.cc" ] && [ -f "$F/dumpfs/src/test.cc" ] && [ -f "$F/osentry/src/disk.cc" ] && [ -f "$F/cutmcp/src/zmain.cc" ] && [ -f "$F/heldas/src/app.cc" ] \
+    && [ -f "$F/heldqual/src/app.cc" ] && [ -f "$F/heldcut/src/app.cc" ] || { echo "fixture $F missing"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -126,7 +143,7 @@ run "$F/cpp" "--for=Loader::Load src_->Fetch" --legend=full >"$TMP/p4f"
 if grep -q '; dispatch call=: the task names a call' "$TMP/p4f" && grep -q '; dispatch call= in= p=: a task-named call' "$TMP/p1" \
    && [ -n "$( hop "$TMP/p4f" )" ]; then ok "(P4) the clause rides in both legends with the element"
 else no "(P4) the dispatch clause is missing from a legend that carries the element"; fi
-for a in call in p cands shown test floor capped next ctor; do
+for a in call in p cands shown test floor capped next ctor held of; do
     grep -qE "; dispatch ([^;]*[ (])?$a=" "$TMP/p4f" || no "(P4) full clause does not define $a="
     grep -qE "; dispatch ([^;]*[ (])?$a=" "$TMP/p1" || no "(P4) compact clause does not define $a="
 done
@@ -144,6 +161,52 @@ done
 run "$F/cpp" --whereis=Fetch >"$TMP/p6"
 if grep -q 'DiskSource::Fetch' "$TMP/p6" && grep -q 'NetSource::Fetch' "$TMP/p6"; then ok "(P6) next= --whereis=Fetch lists every candidate"
 else no "(P6) --whereis=Fetch does not list both candidates"; fi
+
+# ── H1-H3 DISPATCH-HELD-AS ────────────────────────────────────────────────────────────────────────────────────────────────────
+run "$F/heldas" "--for=Parser::Load file_reader_->ReadFile" >"$TMP/h1"; h1rc=$?
+HH="$( hop "$TMP/h1" )"
+nheld="$( printf '%s' "$HH" | grep -o '<s held=' | wc -l | tr -d ' ' )"
+if has "$HH" '<s held="member" of="RealReader" n="App::reader_" p="src/app.cc:4">RealReader reader_;</s>' \
+   && has "$HH" '<s held="local" of="RealReader" n="App::Run" p="src/app.cc:10">RealReader scratch;</s>' && [ "$nheld" = 2 ] && has "$HH" 'capped="1"' && [ "$h1rc" = 0 ]; then
+    ok "(H1) no constructor call makes RealReader: its by-value member and local declarations, two rows, capped=1 for the third"
+else no "(H1) rc=$h1rc, expected App::reader_ + App::Run held rows (2) and capped=1: [$HH]"; fi
+# the premise of the negative half: every excluded shape is in the fixture, and none is a row
+seen=0
+for shape in 'RealReader\* borrowed_;' 'RealReader\* ptr' 'RealReader& ref' 'UseByParam( RealReader r )' 'RealReader inTest;' 'RealReader extra;'; do
+    grep -rq -- "$shape" "$F/heldas" && seen=$(( seen + 1 ))
+done
+if [ "$seen" = 6 ] && ! has "$HH" 'borrowed_' && ! has "$HH" 'ptr' && ! has "$HH" 'ref' && ! has "$HH" 'UseByParam' && ! has "$HH" 'inTest' && ! has "$HH" 'extra'; then
+    ok "(H1n) a pointer/reference member or local, a by-value parameter, a test local and the capped third are no row (saw $seen of 6 shapes)"
+else no "(H1n) saw $seen of 6 excluded shapes, or one printed: [$HH]"; fi
+nctor="$( printf '%s' "$H3" | grep -o ' ctor="' | wc -l | tr -d ' ' )"
+if [ "$nctor" -ge 1 ] && ! has "$H3" ' held="'; then ok "(H2) a candidate made by a production constructor call (saw $nctor ctor= rows) carries no held= row"
+else no "(H2) ctor rows $nctor (premise: at least 1) or a held= row on the rs fixture: [$H3]"; fi
+run "$F/heldas" "--for=Parser::Load file_reader_->ReadFile" --legend=full >"$TMP/h3f"; h3rc=$?
+h3=0
+[ "$h3rc" = 0 ] || { h3=1; no "(H3) the --legend=full run exited $h3rc"; }
+for a in held of; do
+    grep -qE "; dispatch ([^;]*[ (])?$a=" "$TMP/h3f" || { h3=1; no "(H3) full clause does not define $a="; }
+    grep -qE "; dispatch ([^;]*[ (])?$a=" "$TMP/h1" || { h3=1; no "(H3) compact clause does not define $a="; }
+done
+[ "$h3" = 0 ] && ok "(H3) both legends define held= and of= beside the element"
+run "$F/heldqual" "--for=Parser::Load file_reader_->ReadFile" >"$TMP/h4"; h4rc=$?
+HQ="$( hop "$TMP/h4" )"
+nq="$( printf '%s' "$HQ" | grep -o '<s held=' | wc -l | tr -d ' ' )"
+grep -q 'b::Reader other_;' "$F/heldqual/src/app.cc" && grep -q 'Reader plain_;' "$F/heldqual/src/app.cc" && grep -q 'a::Reader mine_;' "$F/heldqual/src/app.cc"
+verdict $? "(H4pre) the heldqual fixture declares b::Reader twice and a::Reader once by value" "(H4pre) the heldqual fixture lost a declaration"
+if [ "$h4rc" = 0 ] && [ "$nq" = 0 ] && has "$HQ" 'n="Reader::ReadFile"' && has "$HQ" 'capped="0"'; then
+    ok "(H4) a short name two types carry: the element stands with no held row (b::Reader's fields are never a::Reader's evidence)"
+else no "(H4) rc=$h4rc, expected the element with 0 held rows and capped=0: [$HQ]"; fi
+run "$F/heldcut" "--for=Parser::Load file_reader_->ReadFile" >"$TMP/h5"; h5rc=$?
+HC="$( hop "$TMP/h5" )"
+grep -q '0123456789abcdef0123456789abcdef0123456789abcdef' "$F/heldcut/src/app.cc"
+key=$?   # the premise: the fixture's key is in the source
+if [ "$h5rc" = 0 ] && [ "$key" = 0 ] && has "$HC" '<s held="member" of="LongReader"' && has "$HC" 'api_key = 0123' && ! has "$HC" '01234'; then
+    ok "(H5) a key crossing the 160-byte cut is redacted before the cut: no fragment prints"
+else no "(H5) rc=$h5rc premise=$key, expected the held row redacted with no key fragment: [$HC]"; fi
+if [ "$h5rc" = 0 ] && printf '%s' "$HC" | grep -q '…</s>' && has "$HC" 'capped="1"' && [ "$( printf '%s' "$HC" | grep -o '<s held=' | wc -l | tr -d ' ' )" = 1 ]; then
+    ok "(H6) a held line cut at kForDispatchHeldText ends in … and the element says capped=1"
+else no "(H6) expected the one held row to end in … and capped=1: [$HC]"; fi
 
 # ── N1 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 n1(){ local dir="$1" task="$2" why="$3"

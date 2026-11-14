@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 807 gate scripts (counts snapshot 2026-11-13) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 810 gate scripts (counts snapshot 2026-11-13) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5888,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**807 gate scripts** at the counts snapshot 2026-11-13; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**810 gate scripts** at the counts snapshot 2026-11-13; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6203,7 +6203,7 @@ The first ten each target a failure mode measured in the literature; `placeholde
 honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
 facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
-defect-shape format-arity). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
+defect-shape format-arity; since QD-ENTRY-CEILING also a new function at the ceiling). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
 on the Python 3.13 standard library (405 calls) and on libc++'s std::format tests (80 calls; the 24 hits are its
 deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
@@ -7008,7 +7008,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 807 at the counts snapshot 2026-11-13. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 810 at the counts snapshot 2026-11-13. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites

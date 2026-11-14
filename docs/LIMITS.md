@@ -35,10 +35,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 421 | 144 | 276 | **145** |
+| 423 | 144 | 277 | **146** |
 
-Plus 9 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 421 + 9 is the 430 constants this generator parses out of `src/`.
+Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
+are not counted as caps, and 423 + 10 is the 433 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 421 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 279 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 423 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 281 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -89,7 +89,7 @@ measurement that chose it; listing them beside truncation caps invites tuning th
 
 The **anchor** column is read from each constant's own trailing comment. **unsourced** means the
 comment cites no measurement — the value came from somewhere, but not from anything a reader can
-check. All 9 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
+check. All 10 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
 the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per
 `docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider's)`. Sourcing them
 means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator
@@ -104,6 +104,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 | `kExemplarCcxCeilFactor` | `4` | `src/exemplar.h` | **unsourced** | — |
 | `kForDocTopShareTenths` | `6` | `src/fordocbody.h` | **unsourced** | a file's top-ranked section that does not fit is an excerpt of up to this many tenths of the file's share |
 | `kGeneratedMaxProseShare` | `0.15` | `src/docparse.h` | **unsourced** | of the document's bytes that are its own prose |
+| `kNewSymbolCeilingMul` | `4` | `src/quality.h` | **unsourced** | — |
 | `kSpecificMinLen` | `8` | `src/graph.h` | **unsourced** | ≥8 chars …  (aider's) |
 | `kZoneDistanceThreshold` | `0.5` | `src/arch.h` | **unsourced** | \|A+I-1\| past this → classify into pain/useless |
 
@@ -471,6 +472,7 @@ Discloses: `capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kForDispatchCtorRows` | `4` | — | constructor-caller rows per call |
+| `kForDispatchHeldRows` | `2` | — | held-as declaration rows per call (DISPATCH-HELD-AS) |
 | `kForDispatchHopRows` | `8` | — | candidate rows per call |
 
 ### `src/fordocbody.h`
@@ -516,6 +518,7 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kForFileSymsFiles` | `6` | — | shown files whose symbols are candidates (files_total= when more were shown) |
 | `kForFileSymsHeadRows` | `8` | — | head <d> rows whose callees by="callee" reads (head= when fewer) |
+| `kForFileSymsInitHeadRows` | `5` | — | head <d> rows (plus the re-export walk's <def> rows) by="init" reads |
 | `kForFileSymsRowsPerRule` | `3` | — | rows per rule (name_total= / callee_total= when cut) |
 
 ### `src/forfold.h`

@@ -542,13 +542,13 @@ def legendOf( doc, anyRoot = False ):
     return lead.decode( 'utf-8', 'replace' )
 
 # TRAILING BLOCKS (K-LEGEND, 2026-11-05). A block a verb appends AFTER its ordinary answer — <syms> (forfilesyms.h), <decl_rows>
-# (fordeclrow.h), <graph_verb> (forgraphverb.h) — carries its legend in the comment IMMEDIATELY before its open tag
+# (fordeclrow.h), <graph_verb> (forgraphverb.h), <reask> (verbs_for.h appendSentenceReask) — carries its legend in the comment IMMEDIATELY before its open tag
 # (`<!-- … --><syms`), so the answer before it stays byte-identical with the block off; the reader meets that comment right where
 # the block starts, which is the first screen of the block. legendOf reads only the head, so that comment counts here, for the
 # block's OWN elements only (its open tag through its close tag, or its self-closing tag), on top of the head legend: a comment
 # with anything but whitespace between it and the tag does not count, and a block's comment never defines an attribute outside
 # its block. TRAILING lists the tags; the reader below has no tag of its own (arm T pins all three properties).
-TRAILING = ( b"syms", b"decl_rows", b"graph_verb" )
+TRAILING = ( b"syms", b"decl_rows", b"graph_verb", b"reask" )
 INNER    = re.compile( rb'<(bodies)\b[^>]*(?<!/)>\s*(<!--(?:(?!-->).)*-->)', re.S )
 TRAIL    = re.compile( rb'<!--(?:(?!-->).)*-->\s*(?=<(?:' + b"|".join( TRAILING ) + rb')[\s/>])', re.S )
 def trailingBlocks( doc ):

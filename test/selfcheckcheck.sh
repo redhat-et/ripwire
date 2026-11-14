@@ -149,7 +149,7 @@ ALLOW = {
     "std::max":               "comparison of two values",
     "std::string_view":       "a non-owning view over storage the caller already holds",
     "rfind":                  "read-only search of a string the caller owns",
-    "ends_with":              "read-only suffix comparison of a string the caller owns (mcpCachePath's .cache postcondition)",
+    "ends_with":              "read-only suffix comparison of a string the caller owns (mcpCachePath's .bin postcondition)",
     "starts_with":            "read-only prefix comparison of a string the caller owns (serialize.h writeSigHeadWithEnd / spliceJsonEndLine: the row head opens with its l= field)",
     "std::all_of":            "read-only walk of the given range (#150 keepStdQualifiedCandidates postcondition)",
     "isDefinitionNotDeclaration": "read-only span comparison (model.h); no state — the predicate std::all_of walks above",

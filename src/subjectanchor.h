@@ -73,6 +73,7 @@ struct SubjectReading
     bool                            sourceDef   = false;   // one exact symbol has a source-class definition
     bool                            descriptive = false;   // no question lead, and few enough plain words: not prose
     bool                            framed      = false;   // descriptive, or asks what depends on it with few plain words beside the frame
+    std::vector<NodeId>             codeSubject;           // SENTENCE-SUBJECT: the ONE `backticked` symbol a sentence asks the dependents of
 };
 
 // What a --for or MCP route uses: the route, and the query the ranker and the mention anchor read.
@@ -383,6 +384,227 @@ inline bool asksDependents( const std::vector<std::string_view>& words, const st
     const auto plain = []( const std::string& w ) { return !isTaskFrameWord( w ); };
     return cue && !name.empty() && std::size_t( std::ranges::count_if( dropped, plain ) ) <= kSubjectMaxPlainWords;
 }
+
+// A Go receiver spelling read as the name it qualifies: `(*pkg.T).M` and `(T).M` are pkg.T.M and T.M; "" when `w` is not one.
+// Anything after the method name stays (a sentence word's closing backtick or `?`).
+inline std::string goReceiverRead( std::string_view w )
+{
+    const std::size_t rp = w.find( ')' );
+    if( !w.starts_with( '(' ) || rp == std::string_view::npos || rp + 1 >= w.size() || w[rp + 1] != '.' )
+    {
+        return {};
+    }
+    std::string_view recv = w.substr( 1, rp - 1 );
+    recv.remove_prefix( recv.starts_with( '*' ) ? 1 : 0 );
+    return std::string( recv ) + std::string( w.substr( rp + 1 ) );
+}
+
+// SENTENCE-SUBJECT. A sentence that marks its code (`backticks`) says which words are names, so the guards above that tell a name from
+// prose (one identifier-syntax word, at most kSubjectMaxPlainWords plain words) have nothing left to guess: "If
+// `kvserver.NewReplicaEvalContext` (pkg/...) gained a new required parameter, exactly which non-test functions call it directly ...;
+// functions that merely receive the resulting EvalContext ... do not count" names ONE function, however long it is and whatever
+// other identifier it mentions in passing. Each span spells one name: a call's argument list is dropped (`f(title)` is f), a Go
+// receiver is unwrapped (`(*pkg.T).M` is pkg.T.M), a span with a space in it (`nu script.nu`) is a command, not a name.
+inline std::vector<std::string> backtickSpellings( std::string_view task )
+{
+    std::vector<std::string> out;
+    for( std::size_t open = task.find( '`' ); open != std::string_view::npos; )
+    {
+        const std::size_t close = task.find( '`', open + 1 );
+        if( close == std::string_view::npos )
+        {
+            break;
+        }
+        std::string_view span = task.substr( open + 1, close - open - 1 );
+        open                  = task.find( '`', close + 1 );
+        std::string name = span.starts_with( '(' ) ? goReceiverRead( span ) : std::string( span );   // a Go receiver: `(*pkg.T).M`, `(T).M`
+        if( name.empty() )
+        {
+            continue;
+        }
+        if( const std::size_t lp = name.find( '(' ); lp != std::string::npos )   // a call: `f(title)`, `f()`, `f(...)`
+        {
+            if( !name.ends_with( ')' ) )
+            {
+                continue;
+            }
+            name.resize( lp );
+        }
+        if( !name.empty() && parseSpelling( name ).valid && std::ranges::find( out, name ) == out.end() )
+        {
+            out.push_back( std::move( name ) );
+        }
+    }
+    return out;
+}
+
+// The qualifiers a spelling names BEFORE the one parseSpelling keeps: `Missing::Model::save` is "Missing",
+// `concurrent.futures.ThreadPoolExecutor` is "concurrent", a one- or two-segment spelling has none.
+inline std::string_view outerQualifiers( std::string_view word, const subject_detail::Spelling& sp ) noexcept
+{
+    if( sp.qualifier.empty() || sp.qualifier.data() < word.data() || sp.qualifier.data() > word.data() + word.size() )
+    {
+        return {};
+    }
+    std::string_view outer = word.substr( 0, std::size_t( sp.qualifier.data() - word.data() ) );
+    while( !outer.empty() && ( outer.back() == ':' || outer.back() == '.' ) )
+    {
+        outer.remove_suffix( 1 );
+    }
+    return outer;
+}
+
+// Does every segment of `outer` place `s`? A segment places it when it is a segment of its scope, a directory or the stem on its
+// file's path, a Rust path keyword, or a whole word in its file (a C++ `namespace rw {`, a Rust `mod net {`): `Missing.Model.save`
+// names nothing of pkg/models/base.py's Model.save, `concurrent.futures.ThreadPoolExecutor` names Lib/concurrent/. Read only on
+// a word with outer qualifiers, and the file only when the cheap tests fail.
+inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer )
+{
+    const std::string_view path = rootRelPath( ing, s.fileId );
+    const auto namesSegment = []( std::string_view text, std::string_view seps, std::string_view seg )
+    {
+        for( std::size_t i = 0; i <= text.size(); )
+        {
+            const std::size_t e = std::min( text.find_first_of( seps, i ), text.size() );
+            if( text.substr( i, e - i ) == seg )
+            {
+                return true;
+            }
+            i = e + 1;
+        }
+        return false;
+    };
+    std::optional<std::string> bytes;
+    bool                       read = false;
+    for( std::size_t i = 0; i < outer.size(); )
+    {
+        const std::size_t      e   = std::min( outer.find_first_of( ".:", i ), outer.size() );
+        const std::string_view seg = outer.substr( i, e - i );
+        i                          = e + 1;
+        if( seg.empty() || seg == "crate" || seg == "self" || seg == "super" || namesSegment( s.scope, ".:", seg )
+            || namesSegment( path.substr( 0, path.size() - mention_detail::baseNameOf( path ).size() ), "/", seg ) || mention_detail::pathStem( path ) == seg )
+        {
+            continue;
+        }
+        if( !read )
+        {
+            bytes = darkflags::readWhole( diskPath( ing, s.fileId ) );
+            read  = true;
+        }
+        bool inFile = false;
+        for( std::size_t at = bytes ? bytes->find( seg ) : std::string::npos; at != std::string::npos && !inFile; at = bytes->find( seg, at + 1 ) )
+        {
+            inFile = darkflags::wholeWordAt( *bytes, at, seg.size() );
+        }
+        if( !inFile )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+// The names a sentence spells as code, sentence order, each with the definitions it places (1 to kSubjectMaxDefs): its `backtick` spans
+// when it has any, else its identifier-syntax words. A spelling that places nothing (a file, a command, a field) is no name here.
+struct CodeName
+{
+    std::string         spelling;
+    std::vector<NodeId> defs;
+};
+inline std::vector<CodeName> sentenceCodeNames( const IngestResult& ing, std::string_view task, const std::vector<std::string_view>& words )
+{
+    std::vector<std::string> spellings = backtickSpellings( task );
+    if( spellings.empty() )
+    {
+        for( const std::string_view w : words )
+        {
+            const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+            if( hasNameSyntax( t ) && parseSpelling( t ).valid && !isRouteStopword( routeLower( t ) ) && std::ranges::find( spellings, t ) == spellings.end() )
+            {
+                spellings.emplace_back( t );
+            }
+        }
+    }
+    std::vector<Spelling> parsed;
+    for( const std::string& sp : spellings )
+    {
+        parsed.push_back( parseSpelling( sp ) );
+    }
+    std::vector<std::vector<NodeId>> placed = placeCandidates( ing, parsed );
+    std::vector<CodeName>            out;
+    for( std::size_t k = 0; k < spellings.size(); ++k )
+    {
+        // the placement read only the leaf and the last qualifier: `Missing::Model::save` must not place `Model::save` (as
+        // sourceSyntaxAnchors filters it; CodeRabbit on #646)
+        const std::string_view outer = outerQualifiers( spellings[k], parsed[k] );
+        std::erase_if( placed[k], [ & ]( NodeId id ) { return !outerQualifiersPlace( ing, ing.symbols[id], outer ); } );
+        // two spellings of one function (`ConfigWrapper.core_config(title)` and later `core_config`) are one name
+        const bool same = std::ranges::any_of( out, [ & ]( const CodeName& c ) { return c.defs == placed[k]; } );
+        if( !placed[k].empty() && placed[k].size() <= kSubjectMaxDefs && !same )
+        {
+            out.push_back( CodeName{ spellings[k], std::move( placed[k] ) } );
+        }
+    }
+    return out;
+}
+
+// The sentence's words as the name tests compare them: trimmed, and a Go receiver word read as backtickSpellings reads it
+// (`(*kv.Replica).NewEvalContext` is kv.Replica.NewEvalContext). `text` views `goRead`'s strings or the words themselves.
+struct SentenceWordText
+{
+    std::vector<std::string_view> text;
+    std::vector<std::string>      goRead;
+};
+inline SentenceWordText sentenceWordText( const std::vector<std::string_view>& words )
+{
+    SentenceWordText r;
+    r.goRead.reserve( words.size() );   // no reallocation: `text` views these strings (a move of `r` keeps the buffer)
+    for( std::string_view w : words )
+    {
+        w.remove_prefix( w.starts_with( '`' ) ? 1 : 0 );
+        r.goRead.push_back( goReceiverRead( w ) );
+        r.text.push_back( r.goRead.back().empty() ? detail::graphSubjectTrimWord( w ).text : std::string_view( r.goRead.back() ) );
+    }
+    return r;
+}
+
+// does the sentence ask what depends on `spelling`? A dependents cue in that sense anywhere (no plain-word bound: the code is marked)
+// whose object is the name: the name, or a pronoun for it, within kCueObjectWords words after the cue ("which functions call it
+// directly", "who invokes `f`", "callers does `f` have"). A cue about something else ("how does rake invoke the task ... `multitask`
+// prerequisites") asks nothing about the name.
+inline constexpr std::size_t      kCueObjectWords = 3;
+inline constexpr std::string_view kCuePronouns[]  = { "it", "them", "its" };
+inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::string_view spelling )
+{
+    const SentenceWordText        read = sentenceWordText( words );
+    const std::vector<std::string_view>& text = read.text;
+    bool callee = false;
+    for( std::size_t k = 0; k < text.size(); ++k )
+    {
+        if( text[k].find( spelling ) != std::string_view::npos )
+        {
+            callee = callee || ( k > 0 && wordIn( text[k - 1], kCalleeAux ) ) || ( k + 1 < text.size() && wordIn( text[k + 1], kAgentCues ) );
+        }
+    }
+    const auto objectAfter = [ & ]( std::size_t k )
+    {
+        for( std::size_t j = k + 1; j < text.size() && j <= k + kCueObjectWords; ++j )
+        {
+            if( text[j].find( spelling ) != std::string_view::npos || wordIn( text[j], kCuePronouns ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    for( std::size_t k = 0; k < text.size(); ++k )
+    {
+        if( cueInDependentsSense( text, k, callee ) && objectAfter( k ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
 }   // namespace subject_detail
 
 inline SubjectReading subjectReading( const IngestResult& ing, std::string_view task )
@@ -393,6 +615,14 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
     if( words.size() < 2 || queryshape::classify( task ).fires() || isGraphForm( task, words ) )
     {
         return r;
+    }
+    if( !backtickSpellings( task ).empty() )   // SENTENCE-SUBJECT: a code-marked sentence naming ONE symbol and asking what depends on it
+    {
+        std::vector<CodeName> code = sentenceCodeNames( ing, task, words );
+        if( code.size() == 1 && asksDependentsOf( words, code.front().spelling ) )
+        {
+            r.codeSubject = std::move( code.front().defs );
+        }
     }
     SubjectWords sw;
     if( !sortSubjectWords( words, sw, r.dropped ) )
@@ -746,6 +976,35 @@ inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, c
     return attributeOneHopAnswer( ing, g, targets, rows, /*towardMatches=*/true ).groups.size() == 1;
 }
 
+// The <callers by="subject"> candidates of a conceptual route, from the source-class definitions only (a CI or vendored copy of the
+// name is not a second function to split the callers over):
+//   * SUBJECT-CALLERS-NATURAL: a descriptive or framed subject's exact symbols ("who calls f", "I need to change f; what depends on it?");
+//   * SENTENCE-SUBJECT: else the ONE symbol a code-marked sentence asks the dependents of.
+inline std::vector<std::vector<NodeId>> subjectCallerCandidates( const IngestResult& ing, SubjectReading reading )
+{
+    std::vector<std::vector<NodeId>> out;
+    const auto addSource = [ & ]( std::vector<NodeId> defs )
+    {
+        std::erase_if( defs, [ & ]( NodeId id ) { return !subject_detail::sourceClassDef( ing, id ); } );
+        if( !defs.empty() )
+        {
+            out.push_back( std::move( defs ) );
+        }
+    };
+    if( reading.framed && reading.sourceDef )
+    {
+        for( SubjectExactSymbol& e : reading.exact )
+        {
+            addSource( std::move( e.defs ) );
+        }
+    }
+    if( out.empty() )
+    {
+        addSource( std::move( reading.codeSubject ) );
+    }
+    return out;
+}
+
 // The route the subject reading picks, before the CONFIDENCE-ANCHOR check. `servesBodiesAndCallers`: the surface prints the anchor's
 // body and <callers> (the CLI --for does; the MCP `for` verb serves signatures only), so it may trade a ranked map for them.
 inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
@@ -753,7 +1012,7 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
     SubjectRoute out;
     out.route = chooseForRanker( ing, task );
     SubjectReading reading = subjectReading( ing, task );
-    if( reading.exact.empty() )
+    if( reading.exact.empty() && reading.codeSubject.empty() )
     {
         return out;
     }
@@ -780,20 +1039,78 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
             return out;
         }
     }
-    // SUBJECT-CALLERS-NATURAL: the callers ride on a framed sentence too ("who calls f", "I need to change f; what depends on it?")
-    if( reading.framed && reading.sourceDef && out.route.which != LexMode::NameExact )
+    if( out.route.which != LexMode::NameExact )   // a conceptual route only gains <callers by="subject"> on top
     {
-        // the source-class definitions only: a CI or vendored copy of the name is not a second function to split the callers over
-        for( SubjectExactSymbol& e : reading.exact )
-        {
-            std::erase_if( e.defs, [ & ]( NodeId id ) { return !subject_detail::sourceClassDef( ing, id ); } );
-            if( !e.defs.empty() )
-            {
-                out.callerCandidates.push_back( std::move( e.defs ) );
-            }
-        }
+        out.callerCandidates = subjectCallerCandidates( ing, std::move( reading ) );
     }
     return out;
+}
+
+// RE-ASK (SENTENCE-SUBJECT card 2). A sentence that spells code and asks a graph question the answer did not carry a block for (no
+// <callers by="subject">, no <graph_verb>): the bare form of the same question, the one call that does answer it. The shape is read
+// from the sentence's own words, as the blocks read it: ONE code name and a dependents cue is `--callers=X`; two or more code names and
+// a graph cue (path, chain, reach, calls both, common caller) is `--path=A,B` (`--connect=A,B` for both / common), the first two names
+// in sentence order unless a `from`/`to` marker states the direction. A sentence is a question mark, a `backticked` name or a question lead; a stored key ("X gains a parameter") is not
+// one. Anything else is "" (nothing to suggest).
+inline std::string sentenceReaskInvocation( const IngestResult& ing, std::string_view task )
+{
+    using namespace subject_detail;
+    const std::vector<std::string_view> words = splitRouteWords( task );
+    if( words.size() < 3 || queryshape::classify( task ).fires() )
+    {
+        return {};
+    }
+    const bool sentence = task.find( '?' ) != std::string_view::npos || task.find( '`' ) != std::string_view::npos || isQuestionLead( words.front() );
+    if( !sentence )
+    {
+        return {};
+    }
+    const std::vector<CodeName> names = sentenceCodeNames( ing, task, words );
+    bool graphCue = false;
+    bool common   = false;
+    // the cue words as the sentence spells them, punctuation trimmed ("the path, if any, between ...")
+    const auto is = [ & ]( std::size_t k, std::initializer_list<std::string_view> any )
+    { return k < words.size() && std::ranges::find( any, std::string_view( routeLower( detail::graphSubjectTrimWord( words[k] ).text ) ) ) != any.end(); };
+    for( std::size_t k = 0; k < words.size(); ++k )
+    {
+        const bool both         = is( k, { "call", "calls" } ) && is( k + 1, { "both" } );
+        const bool commonCaller = is( k, { "common" } ) && is( k + 1, { "caller", "callers" } );
+        common   = common || both || commonCaller;
+        graphCue = graphCue || both || commonCaller || is( k, { "path", "chain", "reach", "reaches" } );
+    }
+    if( graphCue && names.size() >= 2 && common )
+    {
+        return "--connect=" + names[0].spelling + "," + names[1].spelling;
+    }
+    if( graphCue && names.size() >= 2 )
+    {
+        // the direction as the sentence states it: `from X` is the source and `to X` the destination, so "the path to B from A" is
+        // --path=A,B; no marker keeps sentence order, as `A reaches B` reads; two sources or two destinations suggest nothing
+        const SentenceWordText read = sentenceWordText( words );
+        const auto role = [ & ]( std::string_view spelling )
+        {
+            for( std::size_t k = 0; k < read.text.size(); ++k )
+            {
+                if( read.text[k].find( spelling ) != std::string_view::npos )
+                {
+                    return k > 0 && is( k - 1, { "from" } ) ? -1 : k > 0 && is( k - 1, { "to", "into" } ) ? 1 : 0;
+                }
+            }
+            return 0;
+        };
+        const int from0 = role( names[0].spelling ), from1 = role( names[1].spelling );
+        if( from0 == from1 && from0 != 0 )
+        {
+            return {};
+        }
+        const bool swap = from0 == 1 || from1 == -1;
+        return "--path=" + names[ swap ? 1 : 0 ].spelling + "," + names[ swap ? 0 : 1 ].spelling;
+    }
+    if( names.size() == 1 && asksDependentsOf( words, names.front().spelling ) )
+    {
+        return "--callers=" + names.front().spelling;
+    }
+    return {};
 }
 
 // ANCHOR-TEST-ONLY: does a name-exact route with no source-backed anchor stay committed to it? It does when the anchors name ONE
@@ -852,71 +1169,6 @@ struct SourceSyntaxAnchor
     std::vector<NodeId> defs;   // its source-class placed definitions, never empty
 };
 
-// The qualifiers a spelling names BEFORE the one parseSpelling keeps: `Missing::Model::save` is "Missing",
-// `concurrent.futures.ThreadPoolExecutor` is "concurrent", a one- or two-segment spelling has none.
-inline std::string_view outerQualifiers( std::string_view word, const subject_detail::Spelling& sp ) noexcept
-{
-    if( sp.qualifier.empty() || sp.qualifier.data() < word.data() || sp.qualifier.data() > word.data() + word.size() )
-    {
-        return {};
-    }
-    std::string_view outer = word.substr( 0, std::size_t( sp.qualifier.data() - word.data() ) );
-    while( !outer.empty() && ( outer.back() == ':' || outer.back() == '.' ) )
-    {
-        outer.remove_suffix( 1 );
-    }
-    return outer;
-}
-
-// Does every segment of `outer` place `s`? A segment places it when it is a segment of its scope, a directory or the stem on its
-// file's path, a Rust path keyword, or a whole word in its file (a C++ `namespace rw {`, a Rust `mod net {`): `Missing.Model.save`
-// names nothing of pkg/models/base.py's Model.save, `concurrent.futures.ThreadPoolExecutor` names Lib/concurrent/. Read only on
-// a word with outer qualifiers, and the file only when the cheap tests fail.
-inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer )
-{
-    const std::string_view path = rootRelPath( ing, s.fileId );
-    const auto namesSegment = []( std::string_view text, std::string_view seps, std::string_view seg )
-    {
-        for( std::size_t i = 0; i <= text.size(); )
-        {
-            const std::size_t e = std::min( text.find_first_of( seps, i ), text.size() );
-            if( text.substr( i, e - i ) == seg )
-            {
-                return true;
-            }
-            i = e + 1;
-        }
-        return false;
-    };
-    std::optional<std::string> bytes;
-    bool                       read = false;
-    for( std::size_t i = 0; i < outer.size(); )
-    {
-        const std::size_t      e   = std::min( outer.find_first_of( ".:", i ), outer.size() );
-        const std::string_view seg = outer.substr( i, e - i );
-        i                          = e + 1;
-        if( seg.empty() || seg == "crate" || seg == "self" || seg == "super" || namesSegment( s.scope, ".:", seg )
-            || namesSegment( path.substr( 0, path.size() - mention_detail::baseNameOf( path ).size() ), "/", seg ) || mention_detail::pathStem( path ) == seg )
-        {
-            continue;
-        }
-        if( !read )
-        {
-            bytes = darkflags::readWhole( diskPath( ing, s.fileId ) );
-            read  = true;
-        }
-        bool inFile = false;
-        for( std::size_t at = bytes ? bytes->find( seg ) : std::string::npos; at != std::string::npos && !inFile; at = bytes->find( seg, at + 1 ) )
-        {
-            inFile = darkflags::wholeWordAt( *bytes, at, seg.size() );
-        }
-        if( !inFile )
-        {
-            return false;
-        }
-    }
-    return true;
-}
 inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query )
 {
     using namespace subject_detail;

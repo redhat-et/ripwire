@@ -34,6 +34,16 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-13, lane entry-ceiling MOVES (after the main merge e57136074): RE-PINNED with UPDATE_GOLDEN=1, kQSnapCacheScheme 28 -> 29. A
+#   BLOB SHAPE change: the Snapshot gained moveSketchBySym (recordMoveSketches fills it beside moveCidBySym; serialize/deserialize carry
+#   it), and codeLocByNode now returns the sketch with the identity. The manifest gains moveSketchOf and recordMoveSketches.
+# 2026-11-12, lane entry-ceiling MOVED-BODY (same lane, next commit): RE-PINNED with UPDATE_GOLDEN=1, kQSnapCacheScheme 27 -> 28. A BLOB
+#   SHAPE change: the Snapshot gained moveCidBySym (computeSnapshot fills it, serialize/deserializeSnapshot carry it); the manifest
+#   gains moveCidOf, the identity it stores.
+# 2026-11-12, lane entry-ceiling EXTENT-CTOR (base main 0b8f0bf8d; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1,
+#   kQSnapCacheScheme 26 -> 27. The manifest gains codeLocByNode and measureCallableNotItsContainer. Watched text: computeSnapshot
+#   zeroes the code lines of a container that shares its canonical id with a callable (C++ Foo and Foo::Foo), so the locBySym VALUES
+#   a v26 blob holds moved for every such class.
 # 2026-11-10, lane qd-fixes-1 (base main b8032471f): RE-PINNED ONCE with UPDATE_GOLDEN=1, kQSnapCacheScheme 25 -> 26.
 #   Watched text: isDeadCandidate exempts Go/Rust test-runner entry points (testRunnerInvokedSymbol, QD-TEST-DEAD), and the clone
 #   set computeSnapshot stores also holds every pair the baseline's clone relation implies (pushExactGroupPairs / pushTwinWidenedPairs,

@@ -3278,23 +3278,24 @@ inline void appendMetBridge( const MainDispatch& d, const rw::Config& sub, std::
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
 // --json / columnar dialects keep their single document; the verb is one call away there).
-inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const rw::NodeId> served )
+// Returns whether the block (or its held tag) was printed.
+inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const rw::NodeId> served )
 {
     const rw::Config& cfg = d.cfg;
     if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
     {
-        return;
+        return false;
     }
     const std::optional<rw::GraphSubjectArgs> args = rw::chooseGraphSubjectArgs( d.ing, cfg.forTask );
     if( !args )
     {
-        return;
+        return false;
     }
     if( cfg.tokenBudget > 0 )   // --token-budget (the budget --for honours; shapingflagcheck (A) pins the --max-tokens read sites, so this reads only the one)
     {
         // a token budget is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .held = true } ).c_str() );
-        return;
+        return true;
     }
     rw::Config sub = cfg;   // the verb runs as its own bare call: its default caps, no page window, no --for shaping
     sub.forTask    = {};
@@ -3351,6 +3352,29 @@ inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
         }
     }
     rw::emitRaw( stdout, std::string( rw::kGraphSubjectCloseXml ).c_str() );
+    return true;
+}
+
+// RE-ASK (SENTENCE-SUBJECT card 2, src/subjectanchor.h sentenceReaskInvocation): a sentence that spells code and asks for its callers
+// or a path, answered with no <callers> and no <graph_verb> block, gets ONE <reask next="…"/> naming the bare call that answers it,
+// just before </ctx>. XML only, like the blocks it stands in for; outside est_tokens. "" otherwise.
+inline constexpr std::string_view kReaskLegend =
+    "<!-- ripwire for reask: the task names code in a sentence and asks for its callers or a call path, and this answer carries no "
+    "callers or graph_verb block for it; next= is the same question in its bare form, the one call that answers it -->";
+inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted )
+{
+    const rw::Config& cfg = d.cfg;
+    if( subjectBlockPrinted || cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
+    {
+        return;
+    }
+    const std::string invocation = rw::sentenceReaskInvocation( d.ing, cfg.forTask );
+    // the callers form stands in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns it off with it
+    if( invocation.empty() || ( invocation.starts_with( "--callers=" ) && !rw::forCallerHopOn() ) )
+    {
+        return;
+    }
+    rw::emitRaw( stdout, ( std::string( kReaskLegend ) + "<reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
 }
 
 std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, const ForLensPassMode& mode )
@@ -5247,7 +5271,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
         }
         appendForTaskRowBlocks( d );                                     // DECL-ROW: "" unless the task reads as a signature change of one C/C++/Go function
-        appendSubjectGraphVerbBlock( d, servedAnswerBodies().bodies );   // FOR-ROUTE-DECLINED: "" unless the task is spelled as a graph question that resolves; the bodies this answer carries print no second copy in its path hop bodies
+        const bool graphBlock = appendSubjectGraphVerbBlock( d, servedAnswerBodies().bodies );   // FOR-ROUTE-DECLINED: "" unless the task is spelled as a graph question that resolves; the bodies this answer carries print no second copy in its path hop bodies
+        appendSentenceReask( d, graphBlock || headerParts.callerHopPresent );   // RE-ASK: "" unless a code-spelling sentence's callers / path got no block
         // ALIAS-IMPORT (forreexport.h): the `pub use` / `export … from` hops to a definition the task names; "" when none. XML only, like the block above.
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && rw::forReexportOn() )
         {
