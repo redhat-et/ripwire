@@ -1875,19 +1875,28 @@ inline std::optional<std::vector<std::string>> zeroOffsetChain( const ModelCtx& 
     return at0;
 }
 
-// Publish a type's chain once every accepted definition was read: equal chains are recorded, differing ones mark it mixed.
-inline void recordZeroOffsetTypes( ModelCtx& ctx, std::string_view typeName, const std::optional<std::vector<std::string>>& chain, bool chainsDiffer )
+// The offset-0 chains of a type's accepted definitions, seen one by one and published once all were read: equal chains are
+// recorded, differing ones (or one with a mixed link) mark the type mixed, so NodeId order never picks (CodeRabbit 4570578038).
+struct ZeroChainVote
 {
-    const std::string key = zeroOffsetKey( typeName );
-    if( chainsDiffer || !chain )
+    std::optional<std::vector<std::string>> chain;
+    bool                                    seen   = false;
+    bool                                    differ = false;
+
+    void see( const ModelCtx& ctx, const LayoutDef& d )
     {
-        ctx.zeroOffsetMixed.emplace( key, true );
+        std::optional<std::vector<std::string>> c = zeroOffsetChain( ctx, d );
+        differ                                    = differ || ( seen && c != chain );
+        if( !seen ) { chain = std::move( c ); seen = true; }
     }
-    else if( !chain->empty() )
+    void publish( ModelCtx& ctx, std::string_view typeName, bool known ) const
     {
-        ctx.zeroOffsetTypes.emplace( key, *chain );
+        const std::string key = zeroOffsetKey( typeName );
+        if( !known || !seen ) { return; }
+        if( differ || !chain ) { ctx.zeroOffsetMixed.emplace( key, true ); }
+        else if( !chain->empty() ) { ctx.zeroOffsetTypes.emplace( key, *chain ); }
     }
-}
+};
 
 inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, std::uint32_t preferFileId, std::string& note,
                                      bool templateId = false )
@@ -1916,10 +1925,9 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
 
     ctx.inProgress.emplace_back( typeName );
     ++ctx.depth;
-    bool                                    first = true;
-    gtl::btree_map<std::uint64_t, bool>     seenSite;                      // dedupe the typedef-alias twin
-    std::optional<std::vector<std::string>> chain;                         // the first accepted definition's offset-0 chain
-    bool                                    chainsDiffer = false;
+    bool                                first = true;
+    gtl::btree_map<std::uint64_t, bool> seenSite;                      // dedupe the typedef-alias twin
+    ZeroChainVote                       chains;
     for( NodeId id : order )
     {
         const Symbol& s = ctx.ing.symbols[ id ];
@@ -1948,14 +1956,11 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
         // empty: no member, and no base or one the model placed at 0 B (`struct M : E {};`, CodeRabbit 4544554347)
         const bool     emptyAgg = d.fields.empty() && ( d.baseSpec.empty() || ( d.baseSized && d.baseSize == 0 ) );
         const TypeSize here{ d.size, d.align, true, d.tailPad, emptyAgg };
-        if( first ) { chain = zeroOffsetChain( ctx, d ); out = here; first = false; }
+        chains.see( ctx, d );
+        if( first ) { out = here; first = false; }
         else if( here.size != out.size || here.align != out.align ) { note = "nested-mirrors-disagree"; out = TypeSize{}; break; }
-        else { chainsDiffer = chainsDiffer || zeroOffsetChain( ctx, d ) != chain; }
     }
-    if( out.known )
-    {
-        recordZeroOffsetTypes( ctx, typeName, chain, chainsDiffer );
-    }
+    chains.publish( ctx, typeName, out.known );
     --ctx.depth;
     ctx.inProgress.pop_back();
     return out;
