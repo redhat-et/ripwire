@@ -63,7 +63,7 @@ namespace landingplan
 
 // Default cap on how many UNMERGED refs get the expensive merge-scout treatment, ranked by stray line
 // count. Picked to clear the dogfood repo's own 9-unmerged-branch fleet with room to spare while still
-// bounding a runaway branch count (kMaxRefs=512 is --stray-content's OWN refusal ceiling — 512 arms through
+// bounding a runaway branch count (kMaxRefs=512 is --stray-content's OWN ref window — 512 arms through
 // merge-scout would be a different order of cost problem entirely). --detail overrides it to unbounded.
 constexpr std::size_t kMaxPlanScout = 12;
 
@@ -71,7 +71,6 @@ struct PlanResult
 {
     bool                      ok          = true;
     bool                      nonGitRoot  = false;    // --stray-content's own refusal reasons, passed through
-    bool                      tooManyRefs = false;    // verbatim — this verb adds no refusal of its own
     bool                      filterMatchedNothing = false;   // H7: the filter selected no ref NAME — a refusal, never refs="0"
     bool                      blobsUnread = false;    // K75: the sweep's blob batch was unread — passed through, a refusal
     crossref::StrayResult     stray;                  // the full sweep (headSha/refsScanned/mergedRefs/refs)
@@ -125,7 +124,6 @@ inline PlanResult computePlan( const std::string& root, std::string_view filter,
     {
         result.ok          = false;
         result.nonGitRoot   = result.stray.nonGitRoot;
-        result.tooManyRefs  = result.stray.tooManyRefs;
         result.filterMatchedNothing = result.stray.filterMatchedNothing;
         result.blobsUnread          = result.stray.blobsUnread;
         return result;
@@ -240,7 +238,10 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
                        "at= (it is the one spelling every other repo reading verb uses, and the only one that tells you "
                        "whether uncommitted work was in scope); head= is kept for callers already keyed to it. "
                        "refs_dropped= (present only when non-zero) counts local branches git listed that the sweep could "
-                       "NOT read (a tip that is not an object name): they are in none of the counts and none of the rows. -->" );
+                       "NOT read (a tip that is not an object name): they are in none of the counts and none of the rows. "
+                       "refs_omitted= (present only when non-zero) is the sweep's REF WINDOW: past 512 local branches the newest 512 by "
+                       "committer date are read and this many older ones are not (in no count or row); --stray-content=SUBSTR picks "
+                       "which branches fill it. -->" );
     // r26-stamp Task A: head= (pre-existing, bare 9-char sha, unchanged) and at= (this round's sha[+dirty]
     // anchor) are BOTH kept here rather than converged onto one: head= is an established attribute name this
     // verb already shipped and other callers may already key off, so it stays byte-for-byte what it was;
@@ -252,7 +253,8 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
     // DOCUMENTED instead: the header above states the containment in the OUTPUT, where consumers read it.
     // Converge by retiring head= across the whole family at once, never one verb at a time.
     const std::string atAttr = p.atStamp.empty() ? std::string() : ( " at=\"" + p.atStamp + "\"" );
-    const std::string droppedAttr = p.stray.refsDropped == 0 ? std::string() : ( " refs_dropped=\"" + std::to_string( p.stray.refsDropped ) + "\"" );
+    const std::string droppedAttr = ( p.stray.refsDropped == 0 ? std::string() : ( " refs_dropped=\"" + std::to_string( p.stray.refsDropped ) + "\"" ) )
+                                  + crossref::refsOmittedAttr( p.stray.refsOmitted );
     rw::emitTo( out, "<landing-plan head=\"{:.9}\" refs=\"{}\" unmerged=\"{}\" superseded=\"{}\" merged=\"{}\" "
                        "undetermined=\"{}\" scouted=\"{}\" bounded=\"{}\" scout-ok=\"{}\"{}{}>",
                   p.stray.headSha.c_str(), p.stray.refsScanned, p.scouted.size() + p.bounded.size(),

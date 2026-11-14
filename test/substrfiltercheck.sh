@@ -31,10 +31,10 @@
 #
 # RED-FIRST (base binary ec5e3c3): A/B fail on --flags and --stray-content, D fails on both whereis arms.
 #
-# ARM E (MAIN-LOCAL-REDS, 2026-11-13) covers the other refusal the sweep verbs share: more than 512 local branches (crossref
-# kMaxRefs). The CLI --stray-content already said "more than 512 refs match — narrow it with --stray-content=SUBSTR"; --whereis
-# said "is not a git repository (or has no HEAD commit)", and the MCP whereis and stray_content twins said the same. RED-FIRST
-# (main cd04d477e): E1 (both roots), E3, E4 and E6 fail; E0, E2 and E5 hold on both binaries.
+# ARM E (MAIN-LOCAL-REDS, 2026-11-13; CROSSREF-MAXREFS) covers the sweep verbs past 512 local branches (crossref kMaxRefs).
+# They refused there ("is not a git repository", then the cap's name); now they read the newest 512 by committer date and the
+# root's refs_omitted= counts the rest. ARM H is the same at 4,096 branches. RED-FIRST (c6802ebdc): E1, E3-E7 and H1-H4 fail;
+# E0, E2 and H0 hold on both binaries.
 #
 # Usage:  bash test/substrfiltercheck.sh [BIN]   |   RIPWIRE_BIN=build_base/ripwire bash test/…
 # Exits non-zero on any failure.
@@ -165,11 +165,13 @@ else
 fi
 rm -rf "$WFIX"
 
-# ── E: a repository with more than 512 local branches IS a git repository ────────────────────────────────────────────────
-# A long-lived clone with hundreds of lane branches has the cap (the operator's checkout this was found in: 518 heads), and a
-# linked worktree shares its branches. An agent told "not a git repository" stops using every git verb; the honest refusal
-# names the cap and the filter that narrows under it. The fixture: 513 branches with DISTINCT tips (a branch at HEAD's sha is
-# not swept, so it would not count toward the cap), asked from the main checkout and from a linked worktree (.git a file).
+# ── E: a repository with more than 512 local branches IS a git repository, and its sweep answers ─────────────────────────
+# A long-lived clone with hundreds of lane branches passes the ref window (the operator's checkout this was found in: 518
+# heads), and a linked worktree shares its branches. The sweep verbs refused there (#651 named the cap instead of "not a git
+# repository"); CROSSREF-MAXREFS made them ANSWER: past crossref kMaxRefs (512) they read the newest refs by committer date and
+# the root's refs_omitted= counts the rest. The fixture: 513 branches with DISTINCT tips, b001 the oldest and b513 the newest
+# (a branch at HEAD's sha is not swept, so it would not count), asked from the main checkout and from a linked worktree (.git
+# a file). RED-FIRST (c6802ebdc, the refusal): E1 and E3-E7 fail; E0 and E2 hold on both binaries.
 EGIT(){ git -c user.name=Dev -c user.email=dev@x.com -c commit.gpgsign=false "$@"; }
 EGIT -C "$EFIX" init -q main
 printf 'int capProbe( int x ) { return x + 1; }\n' >"$EFIX/main/cap.cpp"
@@ -177,64 +179,143 @@ EGIT -C "$EFIX/main" add -A
 GIT_AUTHOR_DATE="2026-06-01T12:00:00" GIT_COMMITTER_DATE="2026-06-01T12:00:00" EGIT -C "$EFIX/main" commit -qm init
 ETREE="$( git -C "$EFIX/main" rev-parse 'HEAD^{tree}' )"; EHEAD="$( git -C "$EFIX/main" rev-parse HEAD )"
 for i in $( seq -w 1 513 ); do
+    edate="$(( 1780318800 + 60 * 10#$i )) +0000"   # 2026-06-01T13:00Z plus i minutes: b001 the oldest branch, b513 the newest
     tip="$( GIT_AUTHOR_NAME=Dev GIT_AUTHOR_EMAIL=dev@x.com GIT_COMMITTER_NAME=Dev GIT_COMMITTER_EMAIL=dev@x.com \
-            GIT_AUTHOR_DATE="2026-06-01T13:00:00" GIT_COMMITTER_DATE="2026-06-01T13:00:00" git -C "$EFIX/main" commit-tree "$ETREE" -p "$EHEAD" -m "b$i" )"
+            GIT_AUTHOR_DATE="$edate" GIT_COMMITTER_DATE="$edate" git -C "$EFIX/main" commit-tree "$ETREE" -p "$EHEAD" -m "b$i" )"
     printf 'create refs/heads/b%s %s\n' "$i" "$tip"
 done | git -C "$EFIX/main" update-ref --stdin
 EGIT -C "$EFIX/main" worktree add -q "$EFIX/linked" b001 2>/dev/null
 # E0 the premise, counted: more than 512 branches whose tip is not HEAD's, and the linked root's .git is a FILE.
 ESWEPT="$( git -C "$EFIX/main" for-each-ref refs/heads --format='%(objectname)' | grep -vcF "$EHEAD" )"
 if [ "$ESWEPT" -gt 512 ] && [ -f "$EFIX/linked/.git" ]; then
-    ok "E0 fixture: $ESWEPT branches off HEAD's sha (cap 512), and a linked worktree whose .git is a file"
+    ok "E0 fixture: $ESWEPT branches off HEAD's sha (window 512), and a linked worktree whose .git is a file"
 else
-    no "E0 fixture: $ESWEPT branches off HEAD's sha, linked .git a file: $( [ -f "$EFIX/linked/.git" ] && echo yes || echo no ) — E1-E5 would prove nothing"
+    no "E0 fixture: $ESWEPT branches off HEAD's sha, linked .git a file: $( [ -f "$EFIX/linked/.git" ] && echo yes || echo no ) — E1-E6 would prove nothing"
 fi
-# E1 the CLI --whereis refusal names the cap, from both roots.
-for eroot in main linked; do
-    OUT="$( "$BIN" "$EFIX/$eroot" --whereis=capProbe --no-cache 2>&1 1>/dev/null )"; RC=$?
-    if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs" && ! printf '%s' "$OUT" | grep -qF "not a git repository" \
-       && ! printf '%s' "$OUT" | grep -qF -- "--stray-content="; then
-        ok "E1 --whereis over 513 branches ($eroot root) refuses naming the ref cap, and no CLI filter it does not have"
+# The root element of an answer (its first <whereis / <stray-content / <stray-eval tag).
+eroot(){ printf '%s' "$1" | grep -o "<$2 [^>]*>" | head -1; }
+# E1 the CLI --whereis answers from both roots: 513 refs besides HEAD, 511 read with HEAD in the window of 512, 2 counted.
+for eroot_dir in main linked; do
+    OUT="$( "$BIN" "$EFIX/$eroot_dir" --whereis=capProbe --no-cache 2>"$EFIX/e1.err" )"; RC=$?
+    ROOTEL="$( eroot "$OUT" whereis )"
+    if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs_scanned="511"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="2"' \
+       && ! printf '%s' "$ROOTEL" | grep -qF 'complete="1"' && printf '%s' "$OUT" | grep -qF 'refs_omitted=K'; then
+        ok "E1 --whereis over 513 branches ($eroot_dir root) answers: refs_scanned=511 refs_omitted=2, no complete=, the reading rides"
     else
-        no "E1 --whereis over 513 branches ($eroot root) → exit $RC: $OUT"
+        no "E1 --whereis over 513 branches ($eroot_dir root) → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/e1.err" )}"
     fi
 done
 # One fresh MCP session per call (initialize, then tools/call); prints the tools/call reply line.
 emcp(){ printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" \
         | "$BIN" --mcp 2>/dev/null | grep -F '"id":2'; }   # status: the tools/call reply line is the verdict (error vs document), asserted by each caller
-# E2 twin: the MCP whereis kind= filter the refusals name narrows under the cap and answers (the CLI --whereis has no ref
-# filter — --stray-content=SUBSTR is another verb that takes precedence, crossrefcheck's guard arm — so no CLI refusal names one).
+# E2 control: the MCP whereis kind= filter narrows under the window, so nothing is omitted (holds on both binaries).
 OUT="$( emcp whereis "{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\",\"kind\":\"b007\"}" )"
-if printf '%s' "$OUT" | grep -qF '<whereis ' && printf '%s' "$OUT" | grep -qF 'filter=\"b007\"'; then
-    ok "E2 MCP whereis kind=b007 (linked root) answers under the cap"
+if printf '%s' "$OUT" | grep -qF '<whereis ' && printf '%s' "$OUT" | grep -qF 'filter=\"b007\"' && ! printf '%s' "$OUT" | grep -qF 'refs_omitted='; then
+    ok "E2 MCP whereis kind=b007 (linked root) answers under the window, nothing omitted"
 else
     no "E2 MCP whereis kind=b007 (linked root): $( printf '%s' "$OUT" | head -c 300 )"
 fi
-# E3/E4 the MCP twins answer an error naming the cap, never "not a git repository".
+# E3/E4 the MCP twins answer a document with refs_omitted=, never an error ("not a git repository" or the old cap refusal).
 for etool in whereis stray_content; do
-    eargs="{\"path\":\"$EFIX/linked\"}"; [ "$etool" = whereis ] && eargs="{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\"}"
+    eargs="{\"path\":\"$EFIX/linked\"}"; ewant='refs_omitted=\"1\"'
+    [ "$etool" = whereis ] && { eargs="{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\"}"; ewant='refs_omitted=\"2\"'; }
     OUT="$( emcp "$etool" "$eargs" )"
-    if printf '%s' "$OUT" | grep -qF '"error"' && printf '%s' "$OUT" | grep -qF "more than 512 refs match" && ! printf '%s' "$OUT" | grep -qF "not a git repository"; then
-        ok "E3/E4 MCP $etool over 513 branches answers an error naming the ref cap"
+    if ! printf '%s' "$OUT" | grep -qF '"error"' && printf '%s' "$OUT" | grep -qF "$ewant"; then
+        ok "E3/E4 MCP $etool over 513 branches answers, disclosing $ewant"
     else
         no "E3/E4 MCP $etool over 513 branches: $( printf '%s' "$OUT" | head -c 300 )"
     fi
 done
-# E5 control: the CLI --stray-content twin already said so (holds on both binaries).
-OUT="$( "$BIN" "$EFIX/linked" --stray-content --no-cache 2>&1 1>/dev/null )"; RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs match"; then
-    ok "E5 --stray-content over 513 branches refuses naming the ref cap (control)"
+# E5 the CLI --stray-content answers: 512 read (refs=), the oldest one counted.
+OUT="$( "$BIN" "$EFIX/linked" --stray-content --no-cache 2>"$EFIX/e5.err" )"; RC=$?
+ROOTEL="$( eroot "$OUT" stray-content )"
+if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs="512"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="1"'; then
+    ok "E5 --stray-content over 513 branches answers: refs=512 refs_omitted=1"
 else
-    no "E5 --stray-content over 513 branches → exit $RC: $OUT"
+    no "E5 --stray-content over 513 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/e5.err" )}"
 fi
-# E6 --eval-stray scores that sweep: its refusal said "cannot read '<labels>', or <root> is not a git repository" — both false.
-printf 'b001\tunmerged\n' >"$EFIX/labels.tsv"
-OUT="$( "$BIN" "$EFIX/linked" --eval-stray="$EFIX/labels.tsv" --no-cache 2>&1 1>/dev/null )"; RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "more than 512 refs" && ! printf '%s' "$OUT" | grep -qF "not a git repository"; then
-    ok "E6 --eval-stray over 513 branches refuses naming the ref cap"
+# E6 --eval-stray scores that sweep, and a LABELLED ref is read even when it is the oldest (the window keeps labels first):
+# b001, from the main root, is the one ref the newest-512 rule would leave out.
+printf 'b001\tmerged\n' >"$EFIX/labels.tsv"
+OUT="$( "$BIN" "$EFIX/main" --eval-stray="$EFIX/labels.tsv" --no-cache 2>"$EFIX/e6.err" )"; RC=$?
+ROOTEL="$( eroot "$OUT" stray-eval )"
+if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'cases="1"' && ! printf '%s' "$ROOTEL" | grep -qF 'labels_omitted=' \
+   && printf '%s' "$OUT" | grep -qF '<case ref="b001" want="merged" got="merged"'; then
+    ok "E6 --eval-stray over 513 branches scores the oldest branch when it is labelled (cases=1, b001 read)"
 else
-    no "E6 --eval-stray over 513 branches → exit $RC: $OUT"
+    no "E6 --eval-stray over 513 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/e6.err" )}"
+fi
+
+# E7 the sweep's two other hosts, --stray-content --plan and --stray-content --abi, read the same window and say so on their roots.
+for ev in --plan --abi; do
+    etag=landing-plan; [ "$ev" = --abi ] && etag=abi
+    OUT="$( "$BIN" "$EFIX/linked" --stray-content "$ev" --no-cache 2>"$EFIX/e7.err" )"; RC=$?
+    ROOTEL="$( eroot "$OUT" "$etag" )"
+    if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs="512"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="1"'; then
+        ok "E7 --stray-content $ev over 513 branches answers: refs=512 refs_omitted=1 on <$etag>"
+    else
+        no "E7 --stray-content $ev over 513 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/e7.err" )}"
+    fi
+done
+
+# ── H: 4,096 branches — the window reads the NEWEST and names how many it left out ─────────────────────────────────────────
+# Eight commits off HEAD, t1 the oldest and t8 the newest, each adding tier.cpp with its own probe name, and 512 branches on
+# each (4,096). Past the window the sweep reads t8's branches only; t1-t7's probes are on no read tree. RED-FIRST (c6802ebdc):
+# H1-H4 fail (refused); H0 holds on both binaries.
+HFIX="$EFIX/h4096"
+EGIT -C "$EFIX" init -q h4096
+cp "$EFIX/main/cap.cpp" "$HFIX/cap.cpp"
+EGIT -C "$HFIX" add -A
+GIT_AUTHOR_DATE="2026-06-01T12:00:00" GIT_COMMITTER_DATE="2026-06-01T12:00:00" EGIT -C "$HFIX" commit -qm init
+HHEAD="$( git -C "$HFIX" rev-parse HEAD )"; HCAP="$( git -C "$HFIX" rev-parse HEAD:cap.cpp )"
+for k in 1 2 3 4 5 6 7 8; do
+    hblob="$( printf 'int tierProbe%s( void ) { return %s; }\n' "$k" "$k" | git -C "$HFIX" hash-object -w --stdin )"
+    htree="$( printf '100644 blob %s\tcap.cpp\n100644 blob %s\ttier.cpp\n' "$HCAP" "$hblob" | git -C "$HFIX" mktree )"
+    hdate="$(( 1780318800 + 3600 * k )) +0000"
+    htip="$( GIT_AUTHOR_NAME=Dev GIT_AUTHOR_EMAIL=dev@x.com GIT_COMMITTER_NAME=Dev GIT_COMMITTER_EMAIL=dev@x.com \
+             GIT_AUTHOR_DATE="$hdate" GIT_COMMITTER_DATE="$hdate" git -C "$HFIX" commit-tree "$htree" -p "$HHEAD" -m "t$k" )"
+    for n in $( seq -w 0 511 ); do printf 'create refs/heads/t%s_%s %s\n' "$k" "$n" "$htip"; done
+done | git -C "$HFIX" update-ref --stdin
+# H0 the premise, counted: 4,096 branches off HEAD's sha.
+HSWEPT="$( git -C "$HFIX" for-each-ref refs/heads --format='%(objectname)' | grep -vcF "$HHEAD" )"
+if [ "$HSWEPT" -eq 4096 ]; then
+    ok "H0 fixture: $HSWEPT branches off HEAD's sha on 8 commits (window 512)"
+else
+    no "H0 fixture: $HSWEPT branches off HEAD's sha, want 4096 — H1-H4 would prove nothing"
+fi
+# H1 --whereis answers and names the omitted count: 511 read beside HEAD, 3,585 counted, and the newest tier is the one read.
+OUT="$( "$BIN" "$HFIX" --whereis=tierProbe8 --no-cache 2>"$EFIX/h1.err" )"; RC=$?
+ROOTEL="$( eroot "$OUT" whereis )"
+if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs_scanned="511"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="3585"' \
+   && ! printf '%s' "$ROOTEL" | grep -qF 'hits="0"'; then
+    ok "H1 --whereis over 4,096 branches answers: refs_scanned=511 refs_omitted=3585, the newest tier's probe found"
+else
+    no "H1 --whereis=tierProbe8 over 4,096 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/h1.err" )}"
+fi
+# H2 an older tier's probe lives only on omitted refs: hits="0" beside refs_omitted=, never complete="1" (the zero is windowed).
+OUT="$( "$BIN" "$HFIX" --whereis=tierProbe7 --no-cache 2>"$EFIX/h2.err" )"; RC=$?
+ROOTEL="$( eroot "$OUT" whereis )"
+if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'hits="0"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="3585"' \
+   && ! printf '%s' "$ROOTEL" | grep -qF 'complete="1"'; then
+    ok "H2 --whereis=tierProbe7 (only on omitted refs): hits=0 beside refs_omitted=3585, no complete="
+else
+    no "H2 --whereis=tierProbe7 over 4,096 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/h2.err" )}"
+fi
+# H3 the widening lever the reading names: the MCP whereis kind=t7_ picks tier 7's branches to fill the window, and finds it.
+OUT="$( emcp whereis "{\"path\":\"$HFIX\",\"symbol\":\"tierProbe7\",\"kind\":\"t7_\"}" )"
+if printf '%s' "$OUT" | grep -qF '<whereis ' && ! printf '%s' "$OUT" | grep -qF 'hits=\"0\"' && printf '%s' "$OUT" | grep -qF 'refs_omitted=\"1\"'; then
+    ok "H3 MCP whereis kind=t7_ reads tier 7 (512 match, 511 read beside HEAD, 1 counted) and finds tierProbe7"
+else
+    no "H3 MCP whereis kind=t7_ over 4,096 branches: $( printf '%s' "$OUT" | head -c 300 )"
+fi
+# H4 --stray-content answers over 4,096 branches: 512 read, 3,584 counted.
+OUT="$( "$BIN" "$HFIX" --stray-content --no-cache 2>"$EFIX/h4.err" )"; RC=$?
+ROOTEL="$( eroot "$OUT" stray-content )"
+if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs="512"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="3584"'; then
+    ok "H4 --stray-content over 4,096 branches answers: refs=512 refs_omitted=3584"
+else
+    no "H4 --stray-content over 4,096 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/h4.err" )}"
 fi
 
 echo

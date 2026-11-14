@@ -241,7 +241,7 @@ check_eval_refuses "--eval"           "$ROOT/src"    "--eval"           "0"   --
 check_eval_refuses "--eval-retrieval" "$ROOT/src"    "--eval-retrieval" "0"   --eval-retrieval
 check_eval_refuses "--eval-mined"     "$SBX"         "--eval-mined"     "0"   "--eval-mined=$TMP/mined.jsonl"
 check_eval_refuses "--eval-skills"    "$ROOT/skills" "--eval-skills"    "0"   "--eval-skills=$ROOT/test/skillevalfix/prompts.tsv" --no-cache
-# --eval-stray runs the --stray-content sweep, which refuses past 512 local branches (a long-lived dev clone or its linked
+# --eval-stray runs the --stray-content sweep, which reads only the newest 512 local branches past its window (a dev clone or its linked
 # worktree): the control asks it from test/lib/sweeproot.sh's root, this checkout under the cap (CI) or a stand-in with CI's ref shape.
 . "$ROOT/test/lib/sweeproot.sh"
 check_eval_refuses "--eval-stray"     "$( sweepRoot "$ROOT" "$TMP/sweep" )" "--eval-stray" "0 3" "--eval-stray=$TMP/strayfixture.tsv"

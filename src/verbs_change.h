@@ -1434,13 +1434,10 @@ int runAbiCheck( const MainDispatch& d )
         {
             printStrayFilterNoMatch( "--abi: ", d.cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
         }
-        else if( result.blobsUnread )
-        {
-            printBlobsUnreadRefusal( "--abi: " );
-        }
         else
         {
-            rw::emitTo( stderr, "ripwire: --abi: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+            ASSUME( result.blobsUnread, "computeAbiCheck refuses for a non-git root, an empty filter or an unread blob batch only" );
+            printBlobsUnreadRefusal( "--abi: " );
         }
         return 1;
     }
@@ -1487,13 +1484,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             {
                 printStrayFilterNoMatch( "--plan: ", cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
             }
-            else if( result.blobsUnread )
-            {
-                printBlobsUnreadRefusal( "--plan: " );
-            }
             else
             {
-                rw::emitTo( stderr, "ripwire: --plan: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+                ASSUME( result.blobsUnread, "computePlan refuses for a non-git root, an empty filter or an unread blob batch only" );
+                printBlobsUnreadRefusal( "--plan: " );
             }
             return 1;
         }
@@ -1525,13 +1519,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
                 // branch carries stray work" — from a sweep that matched no branch NAME at all.
                 printStrayFilterNoMatch( "", cfg.strayFilter );
             }
-            else if( result.blobsUnread )
-            {
-                printBlobsUnreadRefusal( "--stray-content: " );   // K75
-            }
             else
             {
-                rw::emitTo( stderr, "ripwire: --stray-content: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+                ASSUME( result.blobsUnread, "computeStrayContent refuses for a non-git root, an empty filter or an unread blob batch only" );
+                printBlobsUnreadRefusal( "--stray-content: " );   // K75
             }
             return 1;
         }
@@ -1550,12 +1541,6 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             if( rep.blobsUnread )
             {
                 printBlobsUnreadRefusal( "--eval-stray: " );   // K75
-                return 1;
-            }
-            if( rep.tooManyRefs )   // the sweep it scores refused past the ref cap: the labels file and the repository are both fine
-            {
-                rw::emitTo( stderr, "ripwire: --eval-stray: the --stray-content sweep it scores refused — more than {} refs (local branches) in {}\n",
-                            crossref::kMaxRefs, root.c_str() );
                 return 1;
             }
             if( !rep.badRefs.empty() )
@@ -1652,12 +1637,6 @@ std::optional<int> runCrossRef( const MainDispatch& d )
                                                                  crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs }, parseBudget );
         if( !result.ok )
         {
-            if( result.tooManyRefs )   // a repository with many branches IS a git repository; the CLI verb has no ref filter to offer
-            {
-                rw::emitTo( stderr, "ripwire: --whereis: more than {} refs (local branches) to search — refused; the CLI --whereis has no ref filter "
-                                    "(the MCP whereis narrows with kind=SUBSTR), and `git branch --merged` lists branches safe to delete\n", crossref::kMaxRefs );
-                return 1;
-            }
             rw::emitTo( stderr, "ripwire: --whereis: {} is not a git repository (or has no HEAD commit) — no refs to search\n", root.c_str() );
             return 1;
         }

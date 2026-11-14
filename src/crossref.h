@@ -110,6 +110,7 @@
 #include <algorithm>
 #include <atomic>       // the git-spawn pool's work index
 #include <cctype>
+#include <charconv>     // enumerateRefs: the committer date's unix seconds (the ref window's order)
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>   // the worktree overlay: symlink_status / read_symlink / file_size on a changed path
@@ -118,6 +119,7 @@
 #include <limits>       // parseCatFileHeader: the size field never overflows
 #include <mutex>        // labelBranchRowsByParse holds quality::headSnapshotIngestMutex around the blob parse
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>       // the git-spawn pool (fork/exec is the cost, not compute)
@@ -140,7 +142,13 @@ constexpr float         kRedoDelMin      = 0.60f;    // deletion-site overlap th
 constexpr float         kSimSupersede    = 0.90f;    // minhash containment bar for the PURE-ADDITION lane
 constexpr std::uint32_t kSimMinStray     = 8;        // …and its minimum stray size (tiny bodies match by luck)
 constexpr float         kRefSupersedeMin = 0.60f;    // stray-line-weighted share that marks a whole ref superseded
-constexpr std::uint32_t kMaxRefs         = 512;      // refusal bound — a sweep, not a fork-network crawl
+// The REF WINDOW: a sweep reads at most kMaxRefs refs (HEAD included, for --whereis). Past it the NEWEST by committer date
+// are read and the rest counted on the answer's root (refs_omitted=), never refused and never dropped unsaid (windowNewestRefs).
+// Measured (CROSSREF-MAXREFS, synthetic one-commit-per-branch repos and a 524-branch, 5,239-file worktree): --stray-content
+// pays ~2 git spawns per ref (77 s at 511 refs, 278 s at 2,048 on an M2, peak flat at 13-19 MB, ~240 B of answer per ref);
+// --whereis holds every ref's tree listing at once (~0.1 MB per ref on a 200-file tree, 849 MB at 8,192 refs; 0.7-1.0 GB at
+// 524 refs of a 5,239-file tree). Linear, but not small on a large repo, so the window stays and only its refusal went.
+constexpr std::uint32_t kMaxRefs         = 512;      // ref window — past it the newest refs are read, refs_omitted= counts the rest
 
 // Display caps (--detail lifts both): the ranked head is the answer, and a 30-branch sweep would otherwise
 // bury it under thousands of rows. What is dropped is always COUNTED in a <more/> element, never silently.
@@ -786,6 +794,7 @@ struct RefInfo
     std::string name;
     std::string tip;
     std::string date;      // YYYY-MM-DD
+    std::int64_t when = 0; // committer date in unix seconds: the ref window's order (windowNewestRefs), never printed
 };
 
 // Every local branch plus every worktree branch, sorted by name (determinism), excluding the ref HEAD is
@@ -819,17 +828,22 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
 {
     RefEnumeration  unread;   // the sink when the caller keeps none
     RefEnumeration& dropSink = enumeration != nullptr ? *enumeration : unread;
-    const std::string raw = gitCapture( root, "for-each-ref --sort=refname --format='%(refname:short)|%(objectname)|%(committerdate:short)' refs/heads 2>/dev/null" );
+    const std::string raw = gitCapture( root, "for-each-ref --sort=refname --format='%(refname:short)|%(objectname)|%(committerdate:short)|%(committerdate:unix)' refs/heads 2>/dev/null" );
     std::vector<RefInfo> out;
     for( std::string_view line : splitLines( raw ) )
     {
         // Parse from the RIGHT, not by splitting left-to-right: '|' is a LEGAL byte in a git ref name (git
         // forbids space, ~ ^ : ? * [ \ and control bytes — not the pipe), so a branch named `feat|x` split
         // into four fields and handed `x` back as the tip sha. That ref then failed merge-base and landed in
-        // the degraded path, i.e. a legally-named branch silently became unanalysable. The two TRAILING
+        // the degraded path, i.e. a legally-named branch silently became unanalysable. The three TRAILING
         // fields are git-generated and pipe-free by construction (an object name is hex, a short committer
-        // date is YYYY-MM-DD), so everything before the second-to-last '|' is the name, whatever it contains.
-        const std::size_t lastPipe = line.rfind( '|' );
+        // date is YYYY-MM-DD, a unix committer date is decimal), so everything before the third-to-last '|' is the name.
+        const std::size_t unixPipe = line.rfind( '|' );
+        if( unixPipe == std::string_view::npos || unixPipe == 0 )
+        {
+            continue;
+        }
+        const std::size_t lastPipe = line.rfind( '|', unixPipe - 1 );
         if( lastPipe == std::string_view::npos || lastPipe == 0 )
         {
             continue;
@@ -842,7 +856,9 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
 
         const std::string_view name = line.substr( 0, firstPipe );
         const std::string_view tip  = line.substr( firstPipe + 1, lastPipe - firstPipe - 1 );
-        const std::string_view date = line.substr( lastPipe + 1 );
+        const std::string_view date = line.substr( lastPipe + 1, unixPipe - lastPipe - 1 );
+        std::int64_t           when = 0;   // a malformed date sorts as the oldest: the window may omit it, and counts it
+        std::from_chars( line.data() + unixPipe + 1, line.data() + line.size(), when );
         if( filterNameHits != nullptr && !name.empty() && ( filter.empty() || name.find( filter ) != std::string_view::npos ) )
         {
             ++*filterNameHits;
@@ -863,9 +879,43 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
         {
             continue;
         }
-        out.push_back( RefInfo{ std::string( name ), std::string( tip ), std::string( date ) } );
+        out.push_back( RefInfo{ std::string( name ), std::string( tip ), std::string( date ), when } );
     }
     return out;
+}
+
+// The ref window (kMaxRefs): keeps `keep` of `refs` and returns the names of the rest, sorted, for the root's refs_omitted=.
+// Kept first: the `pinned` names (sorted; --eval-stray's labels, so a labelled ref is scored, not windowed out), then the
+// newest by committer date, ties by name. The kept refs stay in name order, so a sweep under the window is unchanged.
+inline std::vector<std::string> windowNewestRefs( std::vector<RefInfo>& refs, std::size_t keep, std::span<const std::string> pinned = {} )
+{
+    if( refs.size() <= keep )
+    {
+        return {};
+    }
+    const auto newestFirst = []( const RefInfo& a, const RefInfo& b ) { return a.when != b.when ? a.when > b.when : a.name < b.name; };
+    const auto pinnedEnd   = std::partition( refs.begin(), refs.end(), [ & ]( const RefInfo& r )
+                                             { return std::binary_search( pinned.begin(), pinned.end(), r.name ); } );
+    std::sort( refs.begin(), pinnedEnd, newestFirst );
+    std::sort( pinnedEnd, refs.end(), newestFirst );
+    std::vector<std::string> omitted;
+    omitted.reserve( refs.size() - keep );
+    for( std::size_t i = keep; i < refs.size(); ++i )
+    {
+        omitted.push_back( std::move( refs[ i ].name ) );
+    }
+    refs.resize( keep );
+    const auto byName = []( const RefInfo& a, const RefInfo& b ) { return a.name < b.name; };
+    std::sort( refs.begin(), refs.end(), byName );
+    std::sort( omitted.begin(), omitted.end() );
+    ENSURES( refs.size() == keep && !omitted.empty(), "the window keeps exactly `keep` refs and names every other one" );
+    return omitted;
+}
+
+// The root's refs_omitted= (present only when the window left refs out): every sweep verb spells it the same way.
+inline std::string refsOmittedAttr( const std::vector<std::string>& omitted )
+{
+    return omitted.empty() ? std::string() : ( " refs_omitted=\"" + std::to_string( omitted.size() ) + "\"" );
 }
 
 // One `diff --raw` row: both sides' blob shas for one path. `git diff --raw` is the ONE call that yields
@@ -1171,7 +1221,6 @@ struct StrayResult
 {
     bool                 ok = true;
     bool                 nonGitRoot = false;
-    bool                 tooManyRefs = false;
     // H7 (capture-audit 2026-09-04): the --stray-content=SUBSTR filter named no local ref at all. refs="0"
     // unknown="0" at exit 0 reads as "no branch carries stray work" — the most reassuring possible answer,
     // from a sweep that never happened. ok=false, so the caller refuses in the --doc-drift/--dead-code words.
@@ -1191,6 +1240,7 @@ struct StrayResult
     // refs for-each-ref listed that enumerateRefs DROPPED (a tip that is not an object name): in none of the counts
     // above, so while it is non-zero refs= and the four buckets describe a sweep that skipped them — refs_dropped= says so.
     std::uint32_t        refsDropped   = 0;
+    std::vector<std::string> refsOmitted;    // the ref window's leftovers (windowNewestRefs), sorted: refs_omitted= counts them
     std::vector<RefRow>  refs;                // only refs with stray content — merged ones are noise in a 30-ref sweep
 };
 
@@ -1443,7 +1493,8 @@ inline void registerSweepBlobs( const DiffPairTable& diffs, std::vector<RefPlumb
     blobs.fill();
 }
 
-inline StrayResult computeStrayContent( const std::string& root, std::string_view filter )
+// `pinned` (sorted ref names) are kept first when the sweep is past the ref window — --eval-stray passes its labels.
+inline StrayResult computeStrayContent( const std::string& root, std::string_view filter, std::span<const std::string> pinned = {} )
 {
     StrayResult result;
     result.filter = std::string( filter );   // H14/M6: echoed on the root — a count under a filter is not a repo total
@@ -1455,11 +1506,11 @@ inline StrayResult computeStrayContent( const std::string& root, std::string_vie
 
     std::size_t                filterNameHits = 0;
     RefEnumeration             enumeration;   // a dropped ref is in no count below, so the root discloses it (refs_dropped=)
-    const std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha, &filterNameHits, &enumeration );
+    std::vector<RefInfo>       refs = enumerateRefs( root, filter, result.headSha, &filterNameHits, &enumeration );
     result.refsDropped = enumeration.refsDropped;
     result.filterMatchedNothing = !filter.empty() && filterNameHits == 0;
     if( result.filterMatchedNothing ) { result.ok = false; return result; }
-    if( refs.size() > kMaxRefs ) { result.ok = false; result.tooManyRefs = true; return result; }
+    result.refsOmitted = windowNewestRefs( refs, kMaxRefs, pinned );   // past the window: the newest, the rest counted
 
     // ── phase 1: the merge-base probe, one git call per ref, ACROSS THE POOL ────────────────────────────
     // Refs are independent and each worker writes only its own slot, so this is the serial answer computed
@@ -1604,7 +1655,6 @@ struct WhereResult
 {
     bool                  ok = true;
     bool                  nonGitRoot = false;
-    bool                  tooManyRefs = false;   // more than kMaxRefs local branches: refused, and said so (not "not a git repository")
     std::string           sym;
     std::string           headSha;
     bool                  onHead = false;     // SYM occurs in HEAD's tree
@@ -1612,6 +1662,7 @@ struct WhereResult
     bool                  indexKnowsNoDef = false;       // honest-lex: the parsed index defines no symbol of this name (head_defs="0")
     BranchLabelCensus     branchLabels;      // how the OTHER refs' rows got kind= (labelBranchRowsByParse; <unparsed> on the page)
     std::size_t           refsScanned = 0;
+    std::vector<std::string> refsOmitted;     // the ref window's leftovers (windowNewestRefs): refs_omitted=, and no complete=
     std::size_t           distinctBlobs = 0;
     std::string           filter;             // H14/M6: the --stray-filter SUBSTR this scan was narrowed by ("" = none)
     std::vector<WhereHit> hits;
@@ -3698,8 +3749,8 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
 
     RefEnumeration       enumeration;   // a dropped ref is searched nowhere, so it forfeits complete= like an empty tree
     std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha, nullptr, &enumeration );
+    result.refsOmitted = windowNewestRefs( refs, kMaxRefs - 1 );   // HEAD is read too, and is one of the window's kMaxRefs
     refs.insert( refs.begin(), RefInfo{ "HEAD", result.headSha, quality::gitCommitterDateIso( root ) } );
-    if( refs.size() > kMaxRefs ) { result.ok = false; result.tooManyRefs = true; return result; }
 
     // The CHECKOUT, not just HEAD's commit: every path that differs from HEAD is read from the working tree, and
     // HEAD's rows for exactly those paths are dropped below — the stale-and-silent answer the comparison table
@@ -3743,7 +3794,8 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     // T1: exhaustive-over-text iff every sha streamed clean AND no ref's tree listing was suspect. An empty
     // sha list (every scanned tree empty, or none) trivially streamed clean — anyEmptyTree covers that shape.
     // The overlay's half: Clean or Read means every HEAD row kept is also the checkout's content (enum order).
-    result.scanExhaustive = blobStats.exhaustiveOverText() && !anyEmptyTree && enumeration.refsDropped == 0 && worktree.state <= WorktreeOverlay::Read;
+    result.scanExhaustive = blobStats.exhaustiveOverText() && !anyEmptyTree && enumeration.refsDropped == 0 && result.refsOmitted.empty()
+                          && worktree.state <= WorktreeOverlay::Read;
     result.hits.insert( result.hits.end(), std::make_move_iterator( worktree.hits.begin() ), std::make_move_iterator( worktree.hits.end() ) );
 
     // §A7: HEAD's rows are the INDEX's answer, not the shape test's — before the sort, because "definitions
@@ -3786,7 +3838,7 @@ struct EvalReport
                                                  // refused, never scored (see evalStray below)
     bool                     ok = true;
     bool                     blobsUnread = false;   // K75: the sweep's blob batch was unread — refused, like a non-git root
-    bool                     tooManyRefs = false;   // the sweep refused past kMaxRefs local branches — said so, not "not a git repository"
+    std::vector<std::string> omittedLabels;     // labelled refs the sweep's ref window left out (only past kMaxRefs labels): never scored
 };
 
 inline bool parseVerdict( std::string_view s, Verdict& out )
@@ -3815,17 +3867,9 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
         std::fclose( fp );
     }
 
-    const StrayResult res = computeStrayContent( root, {} );
-    if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; rep.tooManyRefs = res.tooManyRefs; return rep; }
-
-    // Reported refs carry their verdict; every ref NOT reported was scanned and found merged (writeStrayContent
-    // omits those), so an absent ref scores as `merged` rather than as a miss.
-    gtl::btree_map<std::string, Verdict> got;
-    for( const RefRow& r : res.refs )
-    {
-        got.emplace( r.ref.name, r.verdict );
-    }
-
+    // The labels first: past the ref window the sweep keeps every labelled ref before the newest others, so a label is scored
+    // whenever the labels alone fit the window (a windowed-out label is in omittedLabels, never scored as merged).
+    std::vector<EvalCase> labelled;
     for( std::string_view line : splitLines( bytes ) )
     {
         if( line.empty() || line[0] == '#' )
@@ -3839,11 +3883,38 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
         }
         EvalCase c;
         c.ref = std::string( line.substr( 0, tab ) );
-        if( !parseVerdict( line.substr( tab + 1 ), c.expected ) )
+        if( parseVerdict( line.substr( tab + 1 ), c.expected ) )
         {
+            labelled.push_back( std::move( c ) );
+        }
+    }
+    std::vector<std::string> pinned;
+    pinned.reserve( labelled.size() );
+    for( const EvalCase& c : labelled )
+    {
+        pinned.push_back( c.ref );
+    }
+    std::sort( pinned.begin(), pinned.end() );
+    pinned.erase( std::unique( pinned.begin(), pinned.end() ), pinned.end() );
+
+    const StrayResult res = computeStrayContent( root, {}, pinned );
+    if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; return rep; }
+
+    // Reported refs carry their verdict; every ref NOT reported was scanned and found merged (writeStrayContent
+    // omits those), so an absent ref scores as `merged` rather than as a miss.
+    gtl::btree_map<std::string, Verdict> got;
+    for( const RefRow& r : res.refs )
+    {
+        got.emplace( r.ref.name, r.verdict );
+    }
+
+    for( EvalCase& c : labelled )
+    {
+        if( std::binary_search( res.refsOmitted.begin(), res.refsOmitted.end(), c.ref ) )
+        {
+            rep.omittedLabels.push_back( c.ref );   // a ref the window did not read is neither merged nor a miss: unscored, counted
             continue;
         }
-
         const auto it = got.find( c.ref );
         c.found = it != got.end();
         if( c.found )
@@ -3898,8 +3969,14 @@ inline void writeStrayEval( std::FILE* out, const EvalReport& rep )
                        "(merged refs are omitted by design); a label naming a ref that does not exist is refused, "
                        "not scored (see badRefs on refusal). unknown= on the root counts cases whose verdict "
                        "is unknown (no merge-base / unrelated history); its own bucket, never folded into merged. "
+                       "labels_omitted= (present only when non-zero) counts labelled refs past the sweep's 512-ref window "
+                       "(it keeps every labelled ref first, so only more than 512 labels leave any out): never scored. "
                        "Use this to MEASURE a threshold change instead of eyeballing it. -->" );
-    rw::emitTo( out, "<stray-eval cases=\"{}\" correct=\"{}\" unknown=\"{}\" accuracy=\"{:.1f}\">", n, rep.correct, rep.unknownCount, acc );
+    // labels_omitted= (present only when non-zero): labelled refs past the sweep's ref window, read by no one and scored nowhere.
+    const std::string labelsOmittedAttr = rep.omittedLabels.empty() ? std::string()
+                                                                     : ( " labels_omitted=\"" + std::to_string( rep.omittedLabels.size() ) + "\"" );
+    rw::emitTo( out, "<stray-eval cases=\"{}\" correct=\"{}\" unknown=\"{}\" accuracy=\"{:.1f}\"{}>", n, rep.correct, rep.unknownCount, acc,
+                labelsOmittedAttr.c_str() );
     for( const EvalCase& c : rep.cases )
     {
         rw::emitTo( out, "<case ref=\"{}\" want=\"{}\" got=\"{}\" hit=\"{}\" reported=\"{}\"/>",
@@ -4016,6 +4093,7 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
                        "by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. "
                        "at= is the git commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree "
                        "differed from that commit (head= is the same commit, bare sha, kept for compatibility). "
+                       "refs_omitted= (present only when non-zero) is the REF WINDOW: past 512 local branches the newest 512 by committer date are read and this many older ones are not, so they are in none of the counts or rows; a ref name substring (--stray-content=SUBSTR, or kind= over MCP) picks which branches fill the window. "
                        "refs_dropped= (present only when non-zero) is how many local branches git listed that this sweep "
                        "could NOT read (a tip that is not an object name): they are in none of the counts, so refs= and the "
                        "four buckets describe only the branches that were swept. -->" );
@@ -4031,7 +4109,8 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
     // H14/M6: refs="2" under a ref-name filter reads as "this repo has two branches" unless the filter is
     // named. --doc-drift already echoed its own filter=; this is the same attribute on a sibling that did not.
     const std::string filterAttr = res.filter.empty() ? std::string() : ( " filter=\"" + ex( res.filter ) + "\"" );
-    const std::string droppedAttr = res.refsDropped == 0 ? std::string() : ( " refs_dropped=\"" + std::to_string( res.refsDropped ) + "\"" );
+    const std::string droppedAttr = ( res.refsDropped == 0 ? std::string() : ( " refs_dropped=\"" + std::to_string( res.refsDropped ) + "\"" ) )
+                                  + refsOmittedAttr( res.refsOmitted );
     rw::emitTo( out, "<stray-content head=\"{:.9}\" head_ref=\"{}\" refs=\"{}\" blobs=\"{}\" unmerged=\"{}\" superseded=\"{}\" merged=\"{}\" unknown=\"{}\"{}{}{}{}>",
                   res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.distinctBlobs, unmerged, superseded, res.mergedRefs, unknown,
                   filterAttr.c_str(), droppedAttr.c_str(),
@@ -4433,7 +4512,8 @@ inline void writeWhereisRoot( std::FILE* out, const WhereResult& res, const Wher
     const bool completeClaim = res.scanExhaustive && hitPage.begin == 0 && hitPage.end == listedCount && res.dottedRetry.empty();
     // H14/M6: refs_scanned="80" under a ref-name filter is a total for the FILTER, not for the repo (the
     // audit measured 80 filtered vs 189 unfiltered) — so the filter is named beside the number it bounds.
-    const std::string whFilterAttr = res.filter.empty() ? std::string() : ( " filter=\"" + ex( res.filter ) + "\"" );
+    const std::string whFilterAttr = ( res.filter.empty() ? std::string() : ( " filter=\"" + ex( res.filter ) + "\"" ) )
+                                   + refsOmittedAttr( res.refsOmitted );   // the ref window's leftovers, beside the refs_scanned= they bound
     // The overlay's two marks, both absent on a clean checkout (so its answer is byte-identical to before): +dirty
     // on the stamp whenever a differing path was seen, and worktree= naming what the overlay managed.
     static constexpr std::string_view kWorktreeAttr[] = { "", " worktree=\"read\"", " worktree=\"partial\"", " worktree=\"unlisted\"" };
@@ -4681,7 +4761,10 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "string. It still reads prose whose declaration word sits right before the name as a definition and can miss an unusual "
                        "declarator; head_defs=\"0\" beside it means the parsed index defines no symbol of this name, so no HEAD kind=\"def\" row "
                        "has an indexed definition behind it. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a "
-                       "count of refs that matched — hits= and the rows are the matched set. on-head=\"0\" alongside ref hits is the case this verb exists "
+                       "count of refs that matched — hits= and the rows are the matched set. refs_omitted= (present only when non-zero) is the REF "
+                       "WINDOW: past 512 refs (HEAD included) the newest local branches by committer date are read and this many older ones are "
+                       "not, so their rows are in no count and complete= is withheld; over MCP kind=SUBSTR picks which branches fill the window "
+                       "(the CLI --whereis has no ref filter). on-head=\"0\" alongside ref hits is the case this verb exists "
                        "for: content that lives only on a branch. A TREE scan can only find content some ref still carries, "
                        "so hits=\"0\" on its own does not distinguish a name this repo never had from one it deleted; run "
                        "with the with_history flag and the fate row says which, naming the commit that removed it. "

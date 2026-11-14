@@ -2443,10 +2443,6 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
                         }
-                        if( sweepFault == SweepFault::TooManyRefs )
-                        {
-                            return errResultMsg( -32602, tooManyRefsRefusal() );
-                        }
                         if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "whereis (MCP): the blob stream did not serve every blob — a -32603 error names it, no hit count" );
@@ -2462,10 +2458,6 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                         SweepFault        sweepFault = SweepFault::None;
                         const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &sweepFault );
-                        if( sweepFault == SweepFault::TooManyRefs )
-                        {
-                            return errResultMsg( -32602, tooManyRefsRefusal() );
-                        }
                         if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
