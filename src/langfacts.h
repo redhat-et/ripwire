@@ -305,6 +305,11 @@ struct LangFacts
     /// written-spelling tier (graph.h resolveAllByWrittenSpelling) reads the body's name off those binds. The other languages' owners are symbols.
     bool namespaceBodies = false;
 
+    /// Rust: `crate`, `self` and `super` lead a written path as keywords, so the written-spelling tier (graph.h
+    /// resolveAllByWrittenSpelling) drops them before placing the prefix. Elsewhere they are segments like any other: a C++
+    /// `self::` names a namespace called self, a Python `self.` a receiver (SELECTOR-SELF-ANY-LANG).
+    bool selectorPathKeywords = false;
+
     /// TypeScript, JavaScript: an object literal's members are indexed with no owner (an unnamed container), so the written-spelling
     /// tier treats such a member as a candidate whose object name is unknown (graph.h resolveAllByWrittenSpelling).
     bool objectLiteralMembers = false;
@@ -442,7 +447,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
       .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
+      .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
       .testRunnerEntry = TestRunnerEntry::RustTestAttr },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },

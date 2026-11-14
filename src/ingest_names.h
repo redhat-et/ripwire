@@ -2613,6 +2613,559 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
         && nearestScopeOwnerIs( decl, { "function_definition", "lambda_expression" }, { "field_declaration_list", "declaration_list", "translation_unit" } );
 }
 
+// ---- MACRO-P0: a macro INVOCATION the grammar reads as a typeless declarator (test/macroedgecheck.sh section 9) ----
+// tree-sitter cannot expand a macro, so an invocation written where a declaration may stand parses as a function
+// declarator with no type: `REGISTER_FACTORY( F, B ){ "name" };` as a function_definition whose "body" is the brace
+// initialiser, `FALSE_RUNTIME_GUARD( x );` / a class-member `MOCK_METHOD( … );` / `DECLARE_LUA_FUNCTION( C, f );` as a
+// declaration, and an in-function `ASSIGN_OR_CO_RETURN( auto e, co_await f() );` inside an ERROR node. queries/c|cpp|objc
+// tags.scm minted a function definition named after the MACRO for each one (envoy 1,664, cpython 1,135). Worse than the
+// phantom rows: a phantom makes the macro's name non-unique, so model.h retagMacroCallReferences — which may only retag a
+// name that is UNIQUELY a macro — skipped every real invocation, and envoy's REGISTER_FACTORY read in=0 against 573
+// sites. THE TRAP: removing all but one phantom changes nothing (the name is still shared), so the rule must catch every
+// shape, which is why the gate counts phantoms and FAILs on any.
+//
+// The rule is syntactic and one-sided: the capture is an invocation only when ALL of these hold —
+//   * the name is SCREAMING_SNAKE (the macro convention) and not a block-forming test macro (kBlockFormingTestMacros: an
+//     empty `TEST( S, N ) {}` keeps its def, the documented floor of quality.h kBuiltinRegisterMacros);
+//   * the declarator names a plain identifier: a qualified `HSV::HSV() {}` is a member, and a macro is never qualified;
+//   * its owner (a function_definition, declaration or field_declaration, through `*` / `&` / init declarators) carries
+//     no type; or the owner is an ERROR node and no type node stands right before the declarator;
+//   * it is not a constructor (the enclosing class's own name: `struct RGB { RGB() {} };`);
+//   * a definition's braces hold no `;` before their own closing brace, or they do not follow the invocation's own closed
+//     `( … )` (bodyFollowsClosedParameters: error recovery read a later body): a body with a statement right after the
+//     parentheses is a block-forming macro (`TEST_F( S, N ) { … ; }`, cpython `TARGET( op ) { … ; }`) and keeps its def,
+//     named after the macro.
+// A trailing annotation macro (`T f() ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { body }`) is one too, though its body holds `;`:
+// MACRO-P1 below (annotationHostDeclarator), and the prototype half adopts the body.
+inline constexpr std::array<std::string_view, 10> kBlockFormingTestMacros = {
+    "TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P",                                   // GoogleTest
+    "BENCHMARK", "BENCHMARK_F", "BENCHMARK_DEFINE_F", "BENCHMARK_TEMPLATE", "BENCHMARK_CAPTURE" // Google Benchmark
+};
+
+// Does a declarator name a plain identifier? A qualified `HSV::HSV() {}` is a member, and a macro is never qualified.
+inline bool plainDeclaratorName( TSNode declared ) noexcept
+{
+    return !ts_node_is_null( declared ) && ( kindIs( ts_node_type( declared ), "identifier" ) || kindIs( ts_node_type( declared ), "field_identifier" ) );
+}
+
+// A name a macro invocation can carry: SCREAMING_SNAKE (the macro convention), and not a block-forming test macro.
+inline bool macroInvocationName( std::string_view name ) noexcept
+{
+    return isScreamingSnakeName( name ) && std::ranges::find( kBlockFormingTestMacros, name ) == kBlockFormingTestMacros.end();
+}
+
+// Is the `'` at `i` a C++14 digit separator (`1'000`, `0x1'FF`) — inside a numeric literal, i.e. the token it splits starts with a
+// digit — rather than a character literal's quote (`'a'`, and the prefixed `L'a'` / `u8'a'`, whose token starts with a letter)?
+inline bool digitSeparatorAt( std::string_view text, std::size_t i ) noexcept
+{
+    if( i == 0 || i + 1 >= text.size() || !std::isalnum( static_cast<unsigned char>( text[i + 1] ) ) )
+    {
+        return false;
+    }
+    std::size_t start = i;
+    while( start > 0 && ( std::isalnum( static_cast<unsigned char>( text[start - 1] ) ) || text[start - 1] == '\'' || text[start - 1] == '.' ) )
+    {
+        --start;
+    }
+    return start < i && std::isdigit( static_cast<unsigned char>( text[start] ) );
+}
+
+// Does a brace block's text hold a `;` before the `}` that closes its own `{`? Strings, character literals and comments
+// are skipped (a digit separator is no quote: digitSeparatorAt). Bounded by the matching brace on purpose: error recovery
+// can stretch a recovered body past it (`F( a, b ){ X( 1, { { … } } ) };` read the next declaration into the body).
+inline bool braceBlockHoldsStatement( std::string_view block ) noexcept
+{
+    int depth = 0;
+    for( std::size_t i = 0; i < block.size(); ++i )
+    {
+        const char c = block[i];
+        if( c == '\'' && digitSeparatorAt( block, i ) )
+        {
+            continue;
+        }
+        if( c == '"' || c == '\'' )
+        {
+            for( ++i; i < block.size() && block[i] != c; ++i )
+            {
+                i += block[i] == '\\' ? 1u : 0u;
+            }
+        }
+        else if( c == '/' && i + 1 < block.size() && ( block[i + 1] == '/' || block[i + 1] == '*' ) )
+        {
+            const std::size_t end = block[i + 1] == '/' ? block.find( '\n', i ) : block.find( "*/", i + 2 );
+            i                     = end == std::string_view::npos ? block.size() : end;
+        }
+        else if( c == '{' || c == '}' )
+        {
+            depth += c == '{' ? 1 : -1;
+            if( depth == 0 )
+            {
+                return false;
+            }
+        }
+        else if( c == ';' )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Is this ERROR-recovered declarator typeless — no type node right before it (cFamilyMacroInvocationDecl's ERROR arm)?
+// A macro_type_specifier (`NAME( x )`) does not count as a type here: in a C run of `;`-less invocations
+// (`EXPORT_FUNC( a )` `EXPORT_FUNC( b )`, cpython PC/python3dll.c) tree-sitter-c reads the previous invocation as one.
+inline bool errorDeclaratorUntyped( TSNode fnDeclarator ) noexcept
+{
+    static constexpr std::string_view kTypeKinds[] = { "primitive_type", "type_identifier", "qualified_identifier", "template_type", "sized_type_specifier",
+                                                       "struct_specifier", "class_specifier", "union_specifier", "enum_specifier", "type_qualifier",
+                                                       "storage_class_specifier", "placeholder_type_specifier" };
+    const TSNode prev = ts_node_prev_named_sibling( fnDeclarator );
+    if( ts_node_is_null( prev ) )
+    {
+        return true;
+    }
+    const std::string_view kind = ts_node_type( prev );
+    return std::ranges::find( kTypeKinds, kind ) == std::end( kTypeKinds );
+}
+
+// Does a definition's body follow its declarator's own CLOSED parameter list, with only blanks and comments between? A
+// block-forming macro does (`TEST_F( S, N ) { … }`, `WASM_EXPORT( T, f, ( a ) ) { … }`). Error recovery that read an
+// invocation's arguments past its `)` does not: `CONSTRUCT_ON_FIRST_USE( int, []() -> int { … }() );` closes the list with a
+// MISSING ")" and reads the argument lambda's body as the def's, and envoy's multi-line MOCK_METHOD( …, ( a, ( b ) ), (const) );
+// recovers with the NEXT method's body, error nodes between.
+inline bool bodyFollowsClosedParameters( TSNode fnDeclarator, TSNode body, std::string_view src ) noexcept
+{
+    const TSNode        parameters = fieldChild( fnDeclarator, NodeField::Parameters );
+    const std::uint32_t childCount = ts_node_is_null( parameters ) ? 0u : ts_node_child_count( parameters );
+    if( childCount == 0 )
+    {
+        return false;
+    }
+    const TSNode close = ts_node_child( parameters, childCount - 1 );
+    if( ts_node_is_missing( close ) || !kindIs( ts_node_type( close ), ")" ) || ts_node_start_byte( body ) < ts_node_end_byte( parameters ) )
+    {
+        return false;
+    }
+    const std::string_view gap = src.substr( ts_node_end_byte( parameters ), ts_node_start_byte( body ) - ts_node_end_byte( parameters ) );
+    for( std::size_t i = 0; i < gap.size(); )
+    {
+        const std::string_view rest = gap.substr( i );
+        if( rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\n' || rest[0] == '\r' )
+        {
+            ++i;
+            continue;
+        }
+        if( !rest.starts_with( "//" ) && !rest.starts_with( "/*" ) )
+        {
+            return false;
+        }
+        const std::size_t close = rest.starts_with( "//" ) ? rest.find( '\n' ) : rest.find( "*/", 2 );
+        i                       = close == std::string_view::npos ? gap.size() : i + close + ( rest[1] == '*' ? 2u : 1u );
+    }
+    return true;
+}
+
+// Is the definition/declaration `owner` a constructor of the class whose member list holds it? A templated constructor
+// (`template <class T> RGB( T ) {}`) sits under a template_declaration inside that list.
+inline bool ownerIsConstructorOf( TSNode owner, std::string_view name, std::string_view src ) noexcept
+{
+    TSNode list = parentOf( owner );
+    if( !ts_node_is_null( list ) && kindIs( ts_node_type( list ), "template_declaration" ) )
+    {
+        list = parentOf( list );
+    }
+    const bool   inMember = !ts_node_is_null( list ) && kindIs( ts_node_type( list ), "field_declaration_list" );
+    return inMember && nodeFieldText( parentOf( list ), NodeField::Name, src ) == name;
+}
+
+// ---- MACRO-P1: a trailing ANNOTATION macro (test/macroedgecheck.sh section 10) ----
+// `T f( a ) ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { body }` — an ALL-CAPS macro call between a declarator's `)` (or its
+// const/noexcept/override) and the body — parses as a prototype `f` closed by a MISSING ";" and a typeless definition named
+// after the annotation that OWNS f's body and calls (envoy: 41 sites, CondVar::waitFor at thread.h:70). A constructor's or
+// destructor's prototype half is an ERROR node instead (it has no type to make a declaration of). The annotation is a use of
+// the macro (cFamilyMacroInvocationDecl), and the prototype adopts the body (annotatedDefinitionAfter, ingest_sidecap.h).
+// The syntax decides, never a name list: Q_INVOKABLE-style LEADING annotations and no-argument trailing ones in a class
+// parse cleanly already.
+
+// The last named child of `n` that is not a comment (null when there is none).
+inline TSNode lastNamedNonComment( TSNode n ) noexcept
+{
+    for( std::uint32_t i = ts_node_named_child_count( n ); i > 0; --i )
+    {
+        const TSNode c = ts_node_named_child( n, i - 1 );
+        if( !kindIs( ts_node_type( c ), "comment" ) )
+        {
+            return c;
+        }
+    }
+    return {};
+}
+
+// The function declarator under a declaration's `declarator:` field, through `*` / `&` wrappers (null when it is not one).
+inline TSNode functionDeclaratorOf( TSNode owner ) noexcept
+{
+    TSNode d = fieldChild( owner, NodeField::Declarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( d ) && ( kindIs( ts_node_type( d ), "pointer_declarator" ) || kindIs( ts_node_type( d ), "reference_declarator" ) ); ++guard )
+    {
+        d = fieldChild( d, NodeField::Declarator );
+    }
+    return !ts_node_is_null( d ) && kindIs( ts_node_type( d ), "function_declarator" ) ? d : TSNode {};
+}
+
+// Does the function declarator `fn`, the last child of the ERROR node `error`, declare a constructor or destructor: `~A()`,
+// `A::A( … )`, `A::~A()`, or in a class body `A( … )` named after its class? Only those have no type to make a declaration of;
+// anything else in an ERROR before a definition is a different recovery (cpython's `Py_LOCAL_INLINE( void * )` line before
+// `CHECK_CALL( Parser* p, … ) { … }`, a real function).
+inline bool constructorOrDestructorDeclarator( TSNode error, TSNode fn, std::string_view src ) noexcept
+{
+    const TSNode declared = fieldChild( fn, NodeField::Declarator );
+    if( ts_node_is_null( declared ) )
+    {
+        return false;
+    }
+    const char* kind = ts_node_type( declared );
+    if( kindIs( kind, "destructor_name" ) )
+    {
+        return true;
+    }
+    if( kindIs( kind, "qualified_identifier" ) )
+    {
+        TSNode innermost = declared;   // tree-sitter-cpp nests `a::B::B` right-recursively
+        for( int guard = 0; guard < 16; ++guard )
+        {
+            const TSNode name = fieldChild( innermost, NodeField::Name );
+            if( ts_node_is_null( name ) || !kindIs( ts_node_type( name ), "qualified_identifier" ) )
+            {
+                break;
+            }
+            innermost = name;
+        }
+        const TSNode name = fieldChild( innermost, NodeField::Name );
+        return !ts_node_is_null( name ) && ( kindIs( ts_node_type( name ), "destructor_name" ) || nodeTextOf( name, src ) == nodeFieldText( innermost, NodeField::Scope, src ) );
+    }
+    return kindIs( kind, "identifier" ) && ownerIsConstructorOf( error, nodeTextOf( declared, src ), src );
+}
+
+// The prototype half of an annotated function that stands right before `owner` (comments skipped): the function declarator
+// of a declaration closed by a MISSING ";" (inside a template_declaration too), or of an ERROR node's last child when that
+// declares a constructor or destructor, or an out-of-line destructor's `A::~A()` the grammar read as a call (inside an
+// ERROR, or as an expression statement closed by a MISSING ";"). Null when `owner` follows anything else.
+inline TSNode annotationHostDeclarator( TSNode owner, std::string_view src ) noexcept
+{
+    TSNode prev = ts_node_prev_named_sibling( owner );
+    while( !ts_node_is_null( prev ) && kindIs( ts_node_type( prev ), "comment" ) )
+    {
+        prev = ts_node_prev_named_sibling( prev );
+    }
+    if( ts_node_is_null( prev ) )
+    {
+        return {};
+    }
+    const TSNode inner = kindIs( ts_node_type( prev ), "template_declaration" ) ? lastNamedNonComment( prev ) : prev;
+    if( ts_node_is_null( inner ) )
+    {
+        return {};
+    }
+    const char*         kind    = ts_node_type( inner );
+    const std::uint32_t count   = ts_node_child_count( inner );
+    const bool          missing = count != 0 && ts_node_is_missing( ts_node_child( inner, count - 1 ) );
+    if( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) )
+    {
+        return missing ? functionDeclaratorOf( inner ) : TSNode {};
+    }
+    if( !( kindIs( kind, "ERROR" ) || ( missing && kindIs( kind, "expression_statement" ) ) ) )
+    {
+        return {};
+    }
+    const TSNode last = lastNamedNonComment( inner );
+    if( ts_node_is_null( last ) )
+    {
+        return {};
+    }
+    if( kindIs( ts_node_type( last ), "function_declarator" ) )
+    {
+        return constructorOrDestructorDeclarator( inner, last, src ) ? last : TSNode {};
+    }
+    const TSNode callee = kindIs( ts_node_type( last ), "call_expression" ) ? fieldChild( last, NodeField::Function ) : TSNode {};
+    const TSNode tail   = ts_node_is_null( callee ) || !kindIs( ts_node_type( callee ), "qualified_identifier" ) ? TSNode {} : fieldChild( callee, NodeField::Name );
+    return !ts_node_is_null( tail ) && kindIs( ts_node_type( tail ), "destructor_name" ) ? last : TSNode {};
+}
+
+// The empty-parentheses shape: `void A::f() ABSL_EXCLUSIVE_LOCKS_REQUIRED( mu ) { … }` reads `A::f()` as a variable
+// initialised by an empty argument list (an init_declarator), so tags.scm captures no prototype and the function is MISSING
+// from the index (envoy: AdminResponse::sendErrorLockHeld, SymbolTable::newSymbol, ReleasableLockGuard::release). The name
+// node such an init_declarator declares — an identifier or field_identifier, the innermost of a qualified one, never an
+// ALL-CAPS one — or null.
+inline TSNode emptyCallInitName( TSNode init, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( init ) || !kindIs( ts_node_type( init ), "init_declarator" ) )
+    {
+        return {};
+    }
+    const TSNode value = fieldChild( init, NodeField::Value );
+    if( ts_node_is_null( value ) || !kindIs( ts_node_type( value ), "argument_list" ) || ts_node_named_child_count( value ) != 0 )
+    {
+        return {};
+    }
+    TSNode name = fieldChild( init, NodeField::Declarator );
+    for( int guard = 0; guard < 16 && !ts_node_is_null( name ) && kindIs( ts_node_type( name ), "qualified_identifier" ); ++guard )
+    {
+        name = fieldChild( name, NodeField::Name );
+    }
+    const bool plain = !ts_node_is_null( name ) && ( kindIs( ts_node_type( name ), "identifier" ) || kindIs( ts_node_type( name ), "field_identifier" ) );
+    return plain && !isScreamingSnakeName( nodeTextOf( name, src ) ) ? name : TSNode {};
+}
+
+// The annotation definition that must carry the REAL function's name, because no prototype half was captured: where the
+// definition (`macroDeclarator`'s function_definition) and the node its span starts at. `start` is the declaration closed by
+// a MISSING ";" for a typeless definition, and null for a typed one (whose ERROR child already lies inside its span).
+struct AnnotationRename
+{
+    TSNode name;
+    TSNode start;
+};
+inline AnnotationRename annotationRenamedName( TSNode macroDeclarator, std::string_view src ) noexcept
+{
+    const TSNode owner = parentOf( macroDeclarator );
+    if( ts_node_is_null( owner ) || !kindIs( ts_node_type( owner ), "function_definition" ) )
+    {
+        return {};
+    }
+    if( !ts_node_is_null( fieldChild( owner, NodeField::Type ) ) )
+    {
+        const TSNode prev = ts_node_prev_named_sibling( macroDeclarator );
+        return { !ts_node_is_null( prev ) && kindIs( ts_node_type( prev ), "ERROR" ) ? emptyCallInitName( lastNamedNonComment( prev ), src ) : TSNode {}, {} };
+    }
+    TSNode prev = ts_node_prev_named_sibling( owner );
+    while( !ts_node_is_null( prev ) && kindIs( ts_node_type( prev ), "comment" ) )
+    {
+        prev = ts_node_prev_named_sibling( prev );
+    }
+    const std::uint32_t count = ts_node_is_null( prev ) ? 0u : ts_node_child_count( prev );
+    if( count == 0 || !ts_node_is_missing( ts_node_child( prev, count - 1 ) ) )
+    {
+        return {};
+    }
+    const char* kind = ts_node_type( prev );
+    TSNode      name {};
+    if( ( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) ) && !ts_node_is_null( fieldChild( prev, NodeField::Type ) ) )
+    {
+        name = emptyCallInitName( fieldChild( prev, NodeField::Declarator ), src );
+    }
+    else if( kindIs( kind, "expression_statement" ) )
+    {
+        // `absl::flat_hash_set<const D*>& active()` read as the expression `a::b<…> & active()`: a reference or pointer
+        // return type taken for a multiplication or bitwise and, whose right side calls the real function's name
+        const TSNode expr     = ts_node_named_child( prev, 0 );
+        const bool   typeLike = !ts_node_is_null( expr ) && kindIs( ts_node_type( expr ), "binary_expression" )
+                              && ( nodeFieldText( expr, NodeField::Operator, src ) == "&" || nodeFieldText( expr, NodeField::Operator, src ) == "*" );
+        const TSNode call     = typeLike ? fieldChild( expr, NodeField::Right ) : TSNode {};
+        const TSNode callee   = !ts_node_is_null( call ) && kindIs( ts_node_type( call ), "call_expression" ) ? fieldChild( call, NodeField::Function ) : TSNode {};
+        const TSNode args     = ts_node_is_null( callee ) ? TSNode {} : fieldChild( call, NodeField::Arguments );
+        const bool   empty    = !ts_node_is_null( args ) && ts_node_named_child_count( args ) == 0;
+        name                  = empty && kindIs( ts_node_type( callee ), "identifier" ) && !isScreamingSnakeName( nodeTextOf( callee, src ) ) ? callee : TSNode {};
+    }
+    return { name, ts_node_is_null( name ) ? TSNode {} : prev };
+}
+
+// A TYPED owner whose real declarator the grammar read into an ERROR right before the macro's: `bool tryLock()
+// DISABLE( ABSL_UNLOCK_FUNCTION() ) { … }` (the ERROR holds `tryLock()`, which keeps the def and its body) and a data
+// member `int g_ ABSL_GUARDED_BY( mu_ );` (the ERROR holds `g_`). An ALL-CAPS identifier there is a calling-convention
+// macro in front of a real function (`int WINAPI CAPS_FN( int )`), so it does not count.
+inline bool annotationAfterErrorDeclarator( TSNode fnDeclarator, std::string_view src ) noexcept
+{
+    const TSNode wrapper = parentOf( fnDeclarator );
+    const TSNode anchor  = !ts_node_is_null( wrapper ) && ( kindIs( ts_node_type( wrapper ), "pointer_declarator" ) || kindIs( ts_node_type( wrapper ), "reference_declarator" ) ) ? wrapper : fnDeclarator;
+    TSNode       prev    = ts_node_prev_named_sibling( fnDeclarator );
+    if( ts_node_is_null( prev ) || !kindIs( ts_node_type( prev ), "ERROR" ) )
+    {
+        prev = ts_node_eq( anchor, fnDeclarator ) ? TSNode {} : ts_node_prev_named_sibling( anchor );
+    }
+    if( ts_node_is_null( prev ) || !kindIs( ts_node_type( prev ), "ERROR" ) )
+    {
+        return false;
+    }
+    const TSNode last = lastNamedNonComment( prev );
+    if( ts_node_is_null( last ) )
+    {
+        return false;
+    }
+    const char* kind = ts_node_type( last );
+    if( kindIs( kind, "function_declarator" ) || !ts_node_is_null( emptyCallInitName( last, src ) ) )
+    {
+        return true;   // the real function: kept by its own capture, or renamed onto this definition (annotationRenamedName)
+    }
+    return ( kindIs( kind, "identifier" ) || kindIs( kind, "field_identifier" ) ) && !isScreamingSnakeName( nodeTextOf( last, src ) );
+}
+
+// A definition whose `type` is an ALL-CAPS type_identifier right after an annotated prototype: the first of two trailing
+// annotations, read as the type of a definition the second one names.
+inline bool annotationTypedAsType( TSNode definition, std::string_view src ) noexcept
+{
+    const TSNode type = fieldChild( definition, NodeField::Type );
+    return !ts_node_is_null( type ) && kindIs( ts_node_type( type ), "type_identifier" ) && isScreamingSnakeName( nodeTextOf( type, src ) )
+        && !ts_node_is_null( annotationHostDeclarator( definition, src ) );
+}
+
+inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
+{
+    if( !macroInvocationName( name ) )
+    {
+        return false;
+    }
+    if( !plainDeclaratorName( fieldChild( fnDeclarator, NodeField::Declarator ) ) )
+    {
+        return false;
+    }
+    TSNode owner = parentOf( fnDeclarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( owner ) && ( kindIs( ts_node_type( owner ), "pointer_declarator" ) || kindIs( ts_node_type( owner ), "reference_declarator" ) ); ++guard )
+    {
+        owner = parentOf( owner );
+    }
+    if( !ts_node_is_null( owner ) && kindIs( ts_node_type( owner ), "init_declarator" ) )   // `F( a, b ){ { … } };` reads as a brace-initialised declarator
+    {
+        owner = parentOf( owner );
+    }
+    if( ts_node_is_null( owner ) )
+    {
+        return false;
+    }
+    const char* ownerKind = ts_node_type( owner );
+    if( kindIs( ownerKind, "ERROR" ) )
+    {
+        return errorDeclaratorUntyped( fnDeclarator );
+    }
+    const bool isDefinition = kindIs( ownerKind, "function_definition" );
+    if( !( isDefinition || kindIs( ownerKind, "declaration" ) || kindIs( ownerKind, "field_declaration" ) ) || !ts_node_is_null( fieldChild( owner, NodeField::Type ) )
+        || ownerIsConstructorOf( owner, name, src ) )
+    {
+        return false;
+    }
+    const TSNode body = isDefinition ? fieldChild( owner, NodeField::Body ) : TSNode {};
+    return ts_node_is_null( body ) || !bodyFollowsClosedParameters( fnDeclarator, body, src ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) );
+}
+
+// The node that owns a declarator: its parent, through `*` / `&` wrappers (null at the root).
+inline TSNode declaratorOwner( TSNode fnDeclarator ) noexcept
+{
+    TSNode owner = parentOf( fnDeclarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( owner ) && ( kindIs( ts_node_type( owner ), "pointer_declarator" ) || kindIs( ts_node_type( owner ), "reference_declarator" ) ); ++guard )
+    {
+        owner = parentOf( owner );
+    }
+    return owner;
+}
+
+// `T name ABSL_GUARDED_BY( mu );` at namespace scope recovered as `name ::ABSL_GUARDED_BY( mu )` behind a MISSING "::": the
+// "scope" is the variable, the "name" the annotation. A real qualified name has its own `::`.
+inline bool qualifiedBehindMissingScope( TSNode declared ) noexcept
+{
+    if( ts_node_is_null( declared ) || !kindIs( ts_node_type( declared ), "qualified_identifier" ) || !ts_node_has_error( declared ) )
+    {
+        return false;
+    }
+    for( std::uint32_t i = 0; i < ts_node_child_count( declared ); ++i )
+    {
+        if( ts_node_is_missing( ts_node_child( declared, i ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// MACRO-P1: is the ALL-CAPS function declarator `fnDeclarator` a trailing ANNOTATION — a use of the macro, never a definition?
+// A typeless definition right after the annotated prototype (annotationHostDeclarator) or after a real function the grammar
+// read as a variable (annotationRenamedName); a typed definition or declaration whose real declarator sits in an ERROR
+// before it (annotationAfterErrorDeclarator) or whose type is a first annotation (annotationTypedAsType); a qualified name
+// behind a MISSING "::". P0's cFamilyMacroInvocationDecl keeps every one of these as a definition.
+inline bool cFamilyAnnotationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
+{
+    const TSNode declared = fieldChild( fnDeclarator, NodeField::Declarator );
+    if( !macroInvocationName( name ) )
+    {
+        return false;
+    }
+    if( qualifiedBehindMissingScope( declared ) )
+    {
+        return true;
+    }
+    if( !plainDeclaratorName( declared ) )
+    {
+        return false;
+    }
+    const TSNode owner = declaratorOwner( fnDeclarator );
+    const char*  kind  = ts_node_is_null( owner ) ? "" : ts_node_type( owner );
+    const bool   isDefinition = kindIs( kind, "function_definition" );
+    if( !( isDefinition || kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) ) )
+    {
+        return false;
+    }
+    if( !ts_node_is_null( fieldChild( owner, NodeField::Type ) ) )
+    {
+        return annotationAfterErrorDeclarator( fnDeclarator, src ) || ( isDefinition && annotationTypedAsType( owner, src ) );
+    }
+    return isDefinition && ( !ts_node_is_null( annotationHostDeclarator( owner, src ) ) || !ts_node_is_null( annotationRenamedName( fnDeclarator, src ).name ) );
+}
+
+// MACRO-P1, the prototype side: the annotated definition whose body the prototype declarator `fnDeclarator` owns — the
+// typeless definition right after it whose annotationHostDeclarator is this very declarator. Null for every other
+// declarator; only a declaration closed by a MISSING ";", or an ERROR's last child, looks at its next sibling.
+inline TSNode annotatedDefinitionAfter( TSNode fnDeclarator, std::string_view src ) noexcept
+{
+    const TSNode owner = declaratorOwner( fnDeclarator );
+    if( ts_node_is_null( owner ) )
+    {
+        return {};
+    }
+    const char* kind = ts_node_type( owner );
+    TSNode      outer {};
+    if( kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) )
+    {
+        const std::uint32_t count = ts_node_child_count( owner );
+        if( count == 0 || !ts_node_is_missing( ts_node_child( owner, count - 1 ) ) )
+        {
+            return {};
+        }
+        const TSNode up = parentOf( owner );
+        outer           = !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "template_declaration" ) ? up : owner;
+    }
+    else if( kindIs( kind, "ERROR" ) && ts_node_eq( lastNamedNonComment( owner ), fnDeclarator ) )
+    {
+        outer = owner;
+    }
+    else
+    {
+        return {};
+    }
+    TSNode next = ts_node_next_named_sibling( outer );
+    while( !ts_node_is_null( next ) && kindIs( ts_node_type( next ), "comment" ) )
+    {
+        next = ts_node_next_named_sibling( next );
+    }
+    if( ts_node_is_null( next ) || !kindIs( ts_node_type( next ), "function_definition" )
+        || !( ts_node_is_null( fieldChild( next, NodeField::Type ) ) || annotationTypedAsType( next, src ) ) )
+    {
+        return {};
+    }
+    const TSNode macro = fieldChild( next, NodeField::Declarator );
+    if( ts_node_is_null( macro ) || !kindIs( ts_node_type( macro ), "function_declarator" ) || !ts_node_eq( annotationHostDeclarator( next, src ), fnDeclarator )
+        || !cFamilyAnnotationDecl( macro, nodeFieldText( macro, NodeField::Declarator, src ), src ) )
+    {
+        return {};
+    }
+    return next;
+}
+
+// The capture-side question: a C-family @definition.function/@definition.method on a function_declarator that
+// cFamilyMacroInvocationDecl reads as a macro invocation. Asked BEFORE dropGatedCapture (ingest_sidecap.h), because the
+// site does not vanish: it becomes a call-shaped use of the macro, which model.h retags role="macro".
+inline bool cFamilyMacroInvocationCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode roleNode, std::string_view src ) noexcept
+{
+    return macroRefLang( lang ) && ( defCapSv == "definition.function" || defCapSv == "definition.method" ) && kindIs( ts_node_type( roleNode ), "function_declarator" )
+        && ( cFamilyMacroInvocationDecl( roleNode, name, src ) || cFamilyAnnotationDecl( roleNode, name, src ) );
+}
+
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept;

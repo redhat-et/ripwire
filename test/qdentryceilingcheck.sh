@@ -6,6 +6,7 @@
 # What this pins (each arm counts the premise it needs and FAILS on zero, so no arm can pass blind):
 #   P1. a seeded new 250-line src function gates (exit 2, gating="1", ceiling="240", origin="new-symbol");
 #   P2. a seeded new ccx-61 src function gates (ceiling="60");
+#   P3. exactly AT the ceiling (ccx 60, 240 code lines) gates too: the comparison is `>=`;
 #   N1. a new ccx-59 function and a new 239-line function stay printed, origin="new-symbol", and do not gate;
 #   N2. MOVED-BODY: the same 250-line body moved to another file under another name (re-indented) prints
 #       origin="moved" and does not gate; a COPY (the original kept) is not a move and still gates;
@@ -110,6 +111,20 @@ if ! crashed P2; then
     if [ "$RC" = 2 ] && printf '%s' "$ROW" | grep -q 'now="61"' && printf '%s' "$ROW" | grep -q 'gating="1"' && printf '%s' "$ROW" | grep -q 'ceiling="60"'; then
         ok "P2: new ccx-61 function gates (exit 2, ceiling=\"60\")"
     else no "P2: new ccx-61 function should gate (rc=$RC row: ${ROW:-<none>})"; fi
+fi
+
+# ═══ P3) EXACTLY AT THE CEILING GATES: ccx 60 and 240 code lines (a `>=` → `>` mutant survives P1/P2) ═════════
+R="$WORK/p3"; base "$R"
+printf 'int cx60( int a ){ int s=0;%s return s; }\n' "$( ifs 60 )" > "$R/src/cx.cpp"
+longfn l240 235 '' > "$R/src/l.cpp"
+run "$R"
+if ! crashed P3; then
+    C="$( rowof "$OUT" complexity cx60 )"; V="$( rowof "$OUT" verbosity l240 )"
+    if [ -z "$C" ] || [ -z "$V" ]; then no "P3: premise — rows for both at-ceiling functions (ccx: ${C:-<none>}; loc: ${V:-<none>})"
+    elif [ "$RC" = 2 ] && printf '%s' "$C" | grep -q 'now="60"' && printf '%s' "$C" | grep -q 'gating="1"' && printf '%s' "$C" | grep -q 'ceiling="60"' \
+         && printf '%s' "$V" | grep -q 'now="240"' && printf '%s' "$V" | grep -q 'gating="1"' && printf '%s' "$V" | grep -q 'ceiling="240"'; then
+        ok "P3: a new ccx-60 function and a new 240-line function gate at the ceiling exactly (exit 2)"
+    else no "P3: at-ceiling rows must gate (rc=$RC; $C; $V)"; fi
 fi
 
 # ═══ N1) JUST UNDER THE CEILING: printed, never gating ═════════════════════════════════════════════════

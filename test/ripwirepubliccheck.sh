@@ -1304,6 +1304,8 @@ fi
 #       train 43b capture (train 42b's 669ff03d did this for 2026-10-30); nothing widens: each entry names its date and hash.
 #   docs/captures/COMMANDS_showcase_2026-11-02.md:616,631 — the same two prose lines, byte for byte (same content hashes), in the
 #       lane/rule3-member-guard re-capture; re-keyed under this date as above.
+#   test/lib/sweeproot.sh:20 — counts refs/heads only to decide whether the checkout is past the 512-ref cap (then the gate
+#       sweeps a one-commit clone pinned at HEAD); it measures nothing and feeds no published number.
 ARM9_OK='bench/cppbench/run_cppbench.py:e5d3f485c59b0187
 bench/cppbench/run_cppbench.py:7e89ac16d50cd5d2
 bench/cppbench/run_cppbench.py:5d65fe73e9406e01
@@ -1328,7 +1330,8 @@ docs/captures/COMMANDS_showcase_2026-10-30.md:22be6025a57af773
 docs/captures/COMMANDS_showcase_2026-10-31.md:118fbfbb8f6823fe
 docs/captures/COMMANDS_showcase_2026-10-31.md:22be6025a57af773
 docs/captures/COMMANDS_showcase_2026-11-02.md:118fbfbb8f6823fe
-docs/captures/COMMANDS_showcase_2026-11-02.md:22be6025a57af773'
+docs/captures/COMMANDS_showcase_2026-11-02.md:22be6025a57af773
+test/lib/sweeproot.sh:67ee2c894bbf3cf5'
 python3 - "$TMP/tracked.z" "$ARM9_OK" > "$TMP/arm9" <<'PY'
 import hashlib, os, re, sys
 paths = [p.decode('utf-8', 'surrogateescape')

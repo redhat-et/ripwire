@@ -1434,13 +1434,10 @@ int runAbiCheck( const MainDispatch& d )
         {
             printStrayFilterNoMatch( "--abi: ", d.cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
         }
-        else if( result.blobsUnread )
-        {
-            printBlobsUnreadRefusal( "--abi: " );
-        }
         else
         {
-            rw::emitTo( stderr, "ripwire: --abi: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+            ASSUME( result.blobsUnread, "computeAbiCheck refuses for a non-git root, an empty filter or an unread blob batch only" );
+            printBlobsUnreadRefusal( "--abi: " );
         }
         return 1;
     }
@@ -1487,13 +1484,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             {
                 printStrayFilterNoMatch( "--plan: ", cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
             }
-            else if( result.blobsUnread )
-            {
-                printBlobsUnreadRefusal( "--plan: " );
-            }
             else
             {
-                rw::emitTo( stderr, "ripwire: --plan: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+                ASSUME( result.blobsUnread, "computePlan refuses for a non-git root, an empty filter or an unread blob batch only" );
+                printBlobsUnreadRefusal( "--plan: " );
             }
             return 1;
         }
@@ -1525,13 +1519,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
                 // branch carries stray work" — from a sweep that matched no branch NAME at all.
                 printStrayFilterNoMatch( "", cfg.strayFilter );
             }
-            else if( result.blobsUnread )
-            {
-                printBlobsUnreadRefusal( "--stray-content: " );   // K75
-            }
             else
             {
-                rw::emitTo( stderr, "ripwire: --stray-content: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
+                ASSUME( result.blobsUnread, "computeStrayContent refuses for a non-git root, an empty filter or an unread blob batch only" );
+                printBlobsUnreadRefusal( "--stray-content: " );   // K75
             }
             return 1;
         }
