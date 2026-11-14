@@ -382,6 +382,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # est_tokens= ("2244" -> "2227"), the tail legend clause (", minus names a sigs row or the syms block shows", serialize.h
 # kForFileTailLegend) and the <tail> rows: each file whose positive-score names the sigs rows already show prints p= only
 # (geometry.h, geometry.cpp, sub/consumer.cpp, notes.md; same four rows, same order). 5762 -> 5718 B. The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-11-14 (lane LARGE-PARTIAL-1, GREP-OVERSIZE-COMPLETE), grep.xml only: the lane's intended legend change,
+# nothing else. Checked mechanically: the previous pin equals the fade32332 binary's --legend=full output byte for byte; the new pin
+# differs only in three legend sentences (unindexed_files_scanned= now counts the corpus_oversize= files, read whole however large;
+# unindexed_files_skipped= drops the size-ceiling reason; corpus_oversize= says grep still reads those files). 7565 -> 7703 B. The six other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
