@@ -28,6 +28,7 @@
 #include "graph.h"             // Graph::implementors / implementorBound, legoImplementorClosure
 #include "graphlegend.h"       // implsFieldOrEmpty / implsLegend — the path root's from_impls=/to_impls= and its legend clause
 #include "langfacts.h"         // structuralTyping — the method-set rule's language column
+#include "infra/sortutil.h"     // svLess — the byte order every string_view sort here uses (portablebuildcheck #6)
 #include "model.h"
 #include "receiverevidence.h"  // memberOwnerRuleOf — a scoped member's owner by package directory (Go)
 
@@ -80,7 +81,7 @@ public:
                 scopes.push_back( sc );
             }
         }
-        std::ranges::sort( scopes );
+        std::ranges::sort( scopes, sortutil::svLess );
         const auto [ dupFirst, dupLast ] = std::ranges::unique( scopes );
         scopes.erase( dupFirst, dupLast );
         for( const Symbol& t : ing.symbols )
@@ -93,7 +94,7 @@ public:
             {
                 inFiles_.push_back( t.id );
             }
-            if( std::binary_search( scopes.begin(), scopes.end(), std::string_view( t.name ) ) )
+            if( std::binary_search( scopes.begin(), scopes.end(), std::string_view( t.name ), sortutil::svLess ) )
             {
                 named_.push_back( t.id );
             }
@@ -190,7 +191,7 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
             names.push_back( s.name );
         }
     }
-    std::sort( names.begin(), names.end() );
+    std::sort( names.begin(), names.end(), sortutil::svLess );
     names.erase( std::unique( names.begin(), names.end() ), names.end() );
     if( names.empty() )
     {
@@ -198,7 +199,7 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
     }
     for( const Symbol& s : ing.symbols )
     {
-        if( ReceiverEvidence::callableKind( s.kind ) && !bodiless( s ) && s.lang == t.lang && std::binary_search( names.begin(), names.end(), std::string_view( s.name ) ) )
+        if( ReceiverEvidence::callableKind( s.kind ) && !bodiless( s ) && s.lang == t.lang && std::binary_search( names.begin(), names.end(), std::string_view( s.name ), sortutil::svLess ) )
         {
             bodied.push_back( s.id );
         }
@@ -212,7 +213,9 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
             covered.emplace_back( o, ing.symbols[ b ].name );
         }
     }
-    std::sort( covered.begin(), covered.end() );
+    std::sort( covered.begin(), covered.end(), []( const auto& a, const auto& b ) {
+        return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
+    } );
     covered.erase( std::unique( covered.begin(), covered.end() ), covered.end() );
     std::vector<NodeId> out;
     for( std::size_t i = 0; i < covered.size(); )

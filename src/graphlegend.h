@@ -893,7 +893,11 @@ inline std::string implsFieldOrEmpty( std::string_view name, std::size_t contrac
 {
     // present whenever the selector named a contract: countFieldOrEmpty's spelling, and the zero it omits spelled out
     const std::string zero = json ? ",\"" + std::string( name ) + "\":0" : " " + std::string( name ) + "=\"0\"";
-    return contracts == 0 ? std::string() : impls > 0 ? countFieldOrEmpty( name, impls, json ) : zero;
+    if( contracts == 0 )
+    {
+        return {};
+    }
+    return impls > 0 ? countFieldOrEmpty( name, impls, json ) : zero;
 }
 inline std::string implsAttrXml( std::size_t contracts, std::size_t impls )
 {
