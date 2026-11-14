@@ -25,6 +25,7 @@
 # Usage:  bash test/qbasechildcheck.sh          (BIN=build/ripwire)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT

@@ -20,10 +20,8 @@
 #include <cstring>
 #include <format>
 #include <mutex>
-#include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace Diagnostics
 {
@@ -135,11 +133,15 @@ RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcep
     std::fflush( stderr );
 }
 
-// adoptNotices' sites, as "FILE:LINE" — the location a notice prints. Read only on the cold notice path.
+// adoptNotices' sites, as "FILE:LINE" — the location a notice prints. Fixed storage, no allocation: read and written only
+// on the cold notice path, and a site past the capacity (or longer than a slot) is not adopted, so it may print twice.
 struct AdoptedSites
 {
-    std::mutex               mutex;
-    std::vector<std::string> sites;
+    static constexpr std::size_t kCapacity = 64;
+    static constexpr std::size_t kSlotBytes = 256;
+    std::mutex                   mutex;
+    char                         sites[ kCapacity ][ kSlotBytes ] = {};
+    std::size_t                  count = 0;
 };
 AdoptedSites& adoptedSites() noexcept
 {
@@ -151,16 +153,19 @@ bool siteAdopted( const char* file, int line ) noexcept
 {
     AdoptedSites&                     adopted = adoptedSites();
     const std::lock_guard<std::mutex> lock( adopted.mutex );
-    if( adopted.sites.empty() )
+    if( adopted.count == 0 )
     {
         return false;
     }
-    char              key[ 512 ];
+    char              key[ AdoptedSites::kSlotBytes ];
     const std::size_t keyBytes = rw::formatTo( key, sizeof( key ), "{}:{}", orEmpty( file ), line );
-    const std::string_view site( key, keyBytes < sizeof( key ) ? keyBytes : sizeof( key ) - 1 );
-    for( const std::string& adoptedSite : adopted.sites )
+    if( keyBytes >= sizeof( key ) )
     {
-        if( adoptedSite == site )
+        return false;
+    }
+    for( std::size_t siteIndex = 0; siteIndex < adopted.count; ++siteIndex )
+    {
+        if( std::strcmp( adopted.sites[ siteIndex ], key ) == 0 )
         {
             return true;
         }
@@ -192,13 +197,13 @@ void ConsoleLog::adoptNotices( const char* stderrText ) noexcept
         {
             continue;
         }
-        try
+        const std::string_view            site = line.substr( open + 3, comma - open - 3 );
+        const std::lock_guard<std::mutex> lock( adopted.mutex );
+        if( adopted.count < AdoptedSites::kCapacity && site.size() < AdoptedSites::kSlotBytes )
         {
-            const std::lock_guard<std::mutex> lock( adopted.mutex );
-            adopted.sites.emplace_back( line.substr( open + 3, comma - open - 3 ) );
-        }
-        catch( ... )   // out of memory on a debug notice: the site may print twice, nothing worse
-        {
+            std::memcpy( adopted.sites[ adopted.count ], site.data(), site.size() );
+            adopted.sites[ adopted.count ][ site.size() ] = '\0';
+            ++adopted.count;
         }
     }
 }

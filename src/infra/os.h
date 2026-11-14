@@ -508,8 +508,8 @@ inline pid_t spawn_self( const char* const argv[], const std::string& extraEnv, 
     {
         ++envCount;
     }
-    std::unique_ptr<char*[]> childEnv( new char*[ envCount + 2 ] );
-    std::size_t              kept = 0;
+    const std::unique_ptr<char*[]> childEnv = std::make_unique<char*[]>( envCount + 2 );
+    std::size_t                    kept     = 0;
     for( std::size_t envIndex = 0; envIndex < envCount; ++envIndex )
     {
         if( nameCount == 0 || std::strncmp( env[ envIndex ], extraEnv.c_str(), nameCount ) != 0 )
