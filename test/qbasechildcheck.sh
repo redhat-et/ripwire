@@ -19,9 +19,10 @@
 #   (D)  a once-per-site notice that fires in BOTH phases prints as often as in-process (debug builds print it once;
 #        release builds never) — the fixture's symlink leaves the tree in both commits (the escaped-root notice);
 #   (U)  a base the child must not store (quality.h baseScoreStorable: its ingest refused a file for nesting, or extracted
-#        one partially — CodeRabbit 4572576455 on #655): the child writes no blob, not even the --no-cache temp one, and
-#        the parent falls back (why=unstorable) to the in-process answer, byte for byte, which stores none either; a repeat
-#        spawns again. Red before the merge's fix: the child stored the weakened base (outcome=child, one blob);
+#        one partially — CodeRabbit 4572576455 on #655): the child hands it over in the temp blob only (outcome=child
+#        blob=temp), no qbase blob is written, the answer is the in-process one byte for byte (which stores none either),
+#        and a repeat spawns again. Red before the merge's fix: the child cached the weakened base (one qbase blob, and the
+#        repeat hit it);
 #   (W)  a warm repeat hits the blob and spawns no child;
 #   (S)  a stray RIPWIRE_QBASE_CHILD naming another parent is ignored: the run answers, and spawns its own child;
 #   (Z)  the size floor: unforced, the fixture (a git index far below 1 MiB) scores its base in-process
@@ -167,19 +168,20 @@ for cell in "nest:$FU:" "partial:$FX:RIPWIRE_TEST_EXTRACT_THROW=rw-throw-here"; 
         mkdir -p "$WORK/t-$t" "$WORK/t-$t-in"
         runu "$t" "$dir" "$WORK/t-$t" RIPWIRE_TEST_QBASE_CHILD=force ${ue[@]+"${ue[@]}"} -- "$PAIR" $nc_
         runu "$t-in" "$dir" "$WORK/t-$t-in" RIPWIRE_TEST_QBASE_CHILD=inproc ${ue[@]+"${ue[@]}"} -- "$PAIR" $nc_
-        if [ "$( outcome "$t" )" = "fallback unstorable;" ] && [ "$( blobs "$WORK/t-$t" )" = 0 ] && [ "$( blobs "$WORK/home-$t" )" = 0 ]; then
-            useen=$(( useen + 1 )); ok "(U) $c ${nc_:-cached}: the child stored nothing and the parent fell back (why=unstorable)"
+        if [ "$( outcome "$t" )" = "child -;" ] && grep -q '^ripwire: stats qbase-child outcome=child .* blob=temp$' "$WORK/$t.err" \
+            && [ "$( blobs "$WORK/t-$t" )" = 0 ] && [ "$( blobs "$WORK/home-$t" )" = 0 ]; then
+            useen=$(( useen + 1 )); ok "(U) $c ${nc_:-cached}: the child answered through the temp blob and stored no qbase blob"
         else
-            no "(U) $c ${nc_:-cached}: outcome '$( outcome "$t" )', $( blobs "$WORK/t-$t" ) qbase blob(s) — the child stored a weakened base"
+            no "(U) $c ${nc_:-cached}: outcome '$( outcome "$t" )', $( blobs "$WORK/t-$t" ) qbase blob(s), $( grep -o 'blob=[a-z-]*$' "$WORK/$t.err" ) — the child stored a weakened base"
         fi
         if same "$t-in" "$t" && [ "$( blobs "$WORK/t-$t-in" )" = 0 ]; then ok "(U) $c ${nc_:-cached}: byte-identical to in-process, which stores none either"; else no "(U) $c ${nc_:-cached}: differs from in-process (or in-process stored $( blobs "$WORK/t-$t-in" ) blob(s))"; diff <( answer_err "$t-in" ) <( answer_err "$t" ) | head -6 | sed 's/^/    /'; fi
     done
     # the premise: the base really was weakened, so the run said so (a nest-refusal line, or the extract-partial disclosure)
     if grep -q -e 'json nesting > 512 levels' -e 'RIPWIRE_TEST_EXTRACT_THROW' -e 'extract-partial' "$WORK/u-$c.err"; then ok "(U) $c premise: the weakened base was disclosed"; else no "(U) $c premise: no nest-refusal or extract-partial line — the fixture no longer weakens the base"; fi
     runu "u-$c-2" "$dir" "$WORK/t-u-$c" RIPWIRE_TEST_QBASE_CHILD=force ${ue[@]+"${ue[@]}"} -- "$PAIR"
-    if [ "$( outcome "u-$c-2" )" = "fallback unstorable;" ] && same "u-$c" "u-$c-2"; then ok "(U) $c: the repeat finds no blob, spawns again, same answer"; else no "(U) $c repeat: outcome '$( outcome "u-$c-2" )'"; fi
+    if [ "$( outcome "u-$c-2" )" = "child -;" ] && same "u-$c" "u-$c-2"; then ok "(U) $c: the repeat finds no blob, spawns again, same answer"; else no "(U) $c repeat: outcome '$( outcome "u-$c-2" )'"; fi
 done
-[ "$useen" = 4 ] || no "(U) saw $useen of 4 unstorable fallbacks"
+[ "$useen" = 4 ] || no "(U) saw $useen of 4 temp-only hand-overs"
 
 # (W)
 run warm "$WORK/t-cold" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR"

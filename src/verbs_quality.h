@@ -427,7 +427,10 @@ std::uint64_t gitIndexBytes( const std::string& root )
     return 0;
 }
 
-// The child's blob: the cache when it can be written, else the parent's temp path. Where it went: "cache", "temp" or "" (nowhere).
+// The child's blob: the cache when it may and can be written, else the parent's temp path. Where it went: "cache", "temp" or
+// "" (nowhere). A base whose ingest refused or partially extracted a file is never cached (quality.h baseScoreStorable,
+// CodeRabbit 4572576455 on #655): it goes to the temp path, the hand-over the parent reads once and removes, so this run
+// answers as in-process — the disclosures that ingest printed are passed through — and the next one builds the base again.
 std::string_view writeChildBlob( const std::string& root, const rw::Config& cfg, const RefPairDelta& out, const std::string& tempPath )
 {
     using namespace rw;
@@ -437,7 +440,7 @@ std::string_view writeChildBlob( const std::string& root, const rw::Config& cfg,
         blob.resize( blob.size() / 2 );
     }
     const BaseCacheKey key = baseCacheKey( root, out.baseSha, cfg, out.selected );
-    if( key.use() && quality::atomicWriteFile( key.path, blob ) )
+    if( out.baseStorable && key.use() && quality::atomicWriteFile( key.path, blob ) )
     {
         quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + key.repoHex + "-" + key.exclHex + "-", key.path, 2 );
         return "cache";
@@ -464,12 +467,9 @@ int runBaseChild( const std::string& root, const rw::Config& cfg, RefPairDelta& 
     const std::optional<int> failed      = buildBaseInProcess( root, out.baseSha, cfg, out );
     const std::uint64_t      basePeak    = os::mem_footprint_peak();
     const std::uint64_t      after       = memguard::measuredFootprint();
-    // A stopped side is never persisted, nor is a base whose ingest refused or partially extracted a file (quality.h
-    // baseScoreStorable) — not even as the --no-cache temp blob: the parent re-runs the phase in-process, as it would have
-    // run it, so the disclosures only that ingest prints are its own and nothing replays the answer without them.
-    const bool             keep   = !failed && !out.stop.stopped && out.baseStorable;
-    const std::string_view where  = keep ? writeChildBlob( root, cfg, out, tempPath ) : std::string_view();
-    const std::string_view status = failed ? "failed" : out.stop.stopped ? "stopped" : !out.baseStorable ? "unstorable" : where.empty() ? "nowrite" : "ok";
+    // a stopped side is never persisted: the parent re-runs it in-process (an unstorable base is handed over, writeChildBlob)
+    const std::string_view where  = failed || out.stop.stopped ? std::string_view() : writeChildBlob( root, cfg, out, tempPath );
+    const std::string_view status = failed ? "failed" : out.stop.stopped ? "stopped" : where.empty() ? "nowrite" : "ok";
     memguard::answerStops();   // the parent answers for a stop (it re-runs the phase): this process prints no backstop of its own
     rw::emitTo( stderr, "{}status=\"{}\" rc=\"{}\" blob=\"{}\" before=\"{}\" ingest_peak=\"{}\" base_peak=\"{}\" after=\"{}\" fixed=\"{}\" peak=\"{}\" type3_runs=\"{}\" type3_pairs=\"{}\"\n",
                 kBaseChildEnd, status, failed ? *failed : 0, where, before, out.ingestPeak, basePeak, after, constructTablesFootprint() - fixedBefore,
@@ -504,7 +504,8 @@ struct BaseChildResult
 {
     BaseChildOutcome outcome = BaseChildOutcome::Fallback;
     int              rc      = 0;
-    std::string_view why;   // the fallback's cause, for the stats line
+    std::string_view why;    // the fallback's cause, for the stats line
+    std::string_view blob;   // where an answering child left its blob: "cache", or "temp" (--no-cache, an unstorable base)
 };
 
 // The child run, read to its end: everything it printed on stderr, and its wait status.
@@ -566,7 +567,7 @@ BaseChildResult takeChildEnd( std::string_view line, int exitRc, const std::stri
     }
     if( status != "ok" || exitRc != 0 )
     {
-        result.why = status == "stopped" ? "stopped" : status == "unstorable" ? "unstorable" : "exit";
+        result.why = status == "stopped" ? "stopped" : "exit";
         return result;
     }
     quality::BaseCommitScore         score;
@@ -592,7 +593,7 @@ BaseChildResult takeChildEnd( std::string_view line, int exitRc, const std::stri
     // the Type-3 cost counters (RIPWIRE_STATS' quality-passes line) count the child's passes too, as they did in-process
     gType3PassRuns.fetch_add( std::uint32_t( baseChildField( line, "type3_runs" ) ), std::memory_order_relaxed );
     gType3PassPairs.fetch_add( baseChildField( line, "type3_pairs" ), std::memory_order_relaxed );
-    return { BaseChildOutcome::Answered, 0, {} };
+    return { BaseChildOutcome::Answered, 0, {}, baseChildWord( line, "blob" ) == "cache" ? "cache" : "temp" };
 }
 
 // The parent's side: spawn, read the child to its end, take its blob. `key` is the cache key (empty under --no-cache).
@@ -656,8 +657,8 @@ BaseChildResult tryBaseChild( const std::string& root, const rw::Config& cfg, co
     if( stats )
     {
         constexpr std::string_view kOutcome[] = { "child", "failed", "fallback" };
-        rw::emitTo( stderr, "ripwire: stats qbase-child outcome={} why={} child_peak_mib={}\n", kOutcome[ std::size_t( child.outcome ) ],
-                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( 1024 * 1024 ) );
+        rw::emitTo( stderr, "ripwire: stats qbase-child outcome={} why={} child_peak_mib={} blob={}\n", kOutcome[ std::size_t( child.outcome ) ],
+                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( 1024 * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
     }
     if( child.outcome == BaseChildOutcome::Fallback )
     {
