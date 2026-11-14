@@ -1841,6 +1841,48 @@ inline bool isCFamilyTypeSpecifier( Lang lang, TSNode node ) noexcept
     return kindIs( t, "enum_specifier" ) || kindIs( t, "struct_specifier" ) || kindIs( t, "union_specifier" ) || kindIs( t, "class_specifier" );
 }
 
+// MACRO-P1 (ingest_names.h annotatedDefinitionAfter): `T f( a ) ABSL_LOCKS_EXCLUDED( mu ) { body }` reads as a prototype closed
+// by a MISSING ";" and a typeless definition named after the annotation; the annotation is a macro use, and a C-family
+// function prototype with no body of its own adopts that definition's body. `body` comes back unchanged otherwise.
+inline TSNode annotatedSiblingBody( TSNode body, Lang lang, SymKind kind, TSNode roleNode, std::string_view src ) noexcept
+{
+    if( !ts_node_is_null( body ) || !macroRefLang( lang ) || !( kind == SymKind::Function || kind == SymKind::Method )
+        || !kindIs( ts_node_type( roleNode ), "function_declarator" ) )
+    {
+        return body;
+    }
+    const TSNode annotated = annotatedDefinitionAfter( roleNode, src );
+    return ts_node_is_null( annotated ) ? body : fieldChild( annotated, NodeField::Body );
+}
+
+// MACRO-P1: the kind of the real function an annotation's definition is renamed to (ingest_names.h annotationRenamedName) —
+// a method when it is a class member or qualified, as the tags query's own patterns would have captured it.
+inline SymKind renamedAnnotationKind( TSNode name ) noexcept
+{
+    const TSNode qualifier = parentOf( name );
+    const bool   member    = kindIs( ts_node_type( name ), "field_identifier" ) || ( !ts_node_is_null( qualifier ) && kindIs( ts_node_type( qualifier ), "qualified_identifier" ) );
+    return member ? SymKind::Method : SymKind::Function;
+}
+
+// MACRO-P1: a renamed annotation definition's facts that are the real function's, not the macro's: the parameter list in it is
+// the ANNOTATION's (`( mu_ )`), the real one was the empty `()` emptyCallInitName requires, and its span and rows start at
+// the real function's own declaration. No-op when nothing was renamed.
+inline void applyAnnotationRename( RawDef& d, const AnnotationRename& renamed, TSNode defNode ) noexcept
+{
+    if( ts_node_is_null( renamed.name ) )
+    {
+        return;
+    }
+    d.params     = 0;
+    d.paramsMin  = 0;
+    d.arityExact = 1;
+    if( !ts_node_is_null( renamed.start ) )
+    {
+        d.startByte = ts_node_start_byte( renamed.start );
+        d.loc       = ts_node_end_point( defNode ).row - ts_node_start_point( renamed.start ).row + 1u;
+    }
+}
+
 // The two postures of one tags pass. Full: every fact the index keeps. DefinitionsOnly (definitionLinesInBlobs, --whereis on
 // other refs): the SAME definitions — every step that decides a definition's existence, name, line, kind or scope runs
 // unchanged — without the work only references, imports and metrics read: the @reference arm, @import emission,
@@ -2062,6 +2104,33 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 }
                 aliasShape = aliasShapeOf( Lang::Cpp, roleNode );
             }
+            AnnotationRename renamed {};
+            if( cFamilyMacroInvocationCapture( defCapSv, le.lang, nameTxt, roleNode, src ) )   // defCapSv: set by a @definition capture only
+            {
+                // MACRO-P0 (ingest_names.h): a macro invocation read as a typeless declarator mints no definition of its own; the site is
+                // a call-shaped use of the macro (model.h retagMacroCallReferences makes it role="macro" when the #define is
+                // indexed and its name is uniquely a macro). No argument count: the "parameters" are macro arguments.
+                RawRef r;
+                r.fileId    = fileId;
+                r.startByte = ts_node_start_byte( roleNode );
+                r.line      = ts_node_start_point( roleNode ).row + 1;
+                r.lang      = le.lang;
+                r.role      = RefRole::Call;
+                r.name      = nameTxt;
+                refs.push_back( std::move( r ) );
+                // MACRO-P1: when the grammar read the real function's own `f()` as a variable (ingest_names.h
+                // annotationRenamedName), this definition is the only one f gets — it carries f's name, from f's own start.
+                renamed = annotationRenamedName( roleNode, src );
+                if( ts_node_is_null( renamed.name ) )
+                {
+                    continue;
+                }
+                nameNode = renamed.name;
+                nameTxt  = nodeTextOf( renamed.name, src );
+                nameByte = ts_node_start_byte( renamed.name );
+                nameRow  = ts_node_start_point( renamed.name ).row;
+                kind     = renamedAnnotationKind( renamed.name );
+            }
             if( isDef && dropGatedCapture( defCapSv, le.lang, nameTxt, nameNode, roleNode, src ) )
             {
                 continue;
@@ -2251,6 +2320,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 continue;   // a body-less C/C++ specifier in a function's signature: a type use, never a definition
             }
 
+            // MACRO-P1: a prototype adopts its trailing annotation's definition body, its span running THROUGH that sibling
+            const TSNode ownBody       = body;
+            body                       = annotatedSiblingBody( body, le.lang, kind, roleNode, src );
+            const bool   annotatedBody = !ts_node_eq( body, ownBody );
+
             // ObjC/Kotlin body-field fallback for the grammars that expose a body as an unnamed CHILD, not a
             // named "body" field. C++ function_definition owns a "body" field (found above); the ObjC grammar
             // never does, so the field lookup returns null and bodyByte would stay 0 for a real definition —
@@ -2295,15 +2369,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // Dart's body is a SIBLING of the signature, so neither defBodyNodeOf nor the climb above can
             // find it and the span would stop at the signature — see dartFollowingBody (ingest_relations.h)
             // for the measurement and for why an abstract member still comes back null.
-            bool dartSiblingBody = false;
+            bool siblingBody = annotatedBody;   // MACRO-P1's annotated sibling above, or Dart's here
             if( ts_node_is_null( body ) && le.lang == Lang::Dart )
             {
-                body            = dartFollowingBody( defNode );
-                dartSiblingBody = !ts_node_is_null( body );
+                body        = dartFollowingBody( defNode );
+                siblingBody = !ts_node_is_null( body );
             }
             // Both flags mean the same thing to the three span consumers below: the code this symbol
             // owns lives in a SIBLING node, so byte/row extents and complexity must run through it.
-            const bool spanThroughBody = isTestMacroBlock || dartSiblingBody;
+            const bool spanThroughBody = isTestMacroBlock || siblingBody;
 
             d.startByte = ts_node_start_byte( defNode );
             d.endByte   = spanThroughBody ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
@@ -2344,6 +2418,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             const ParamShape shape = ( fnOrMethod && !isTestMacroBlock && le.lang != Lang::Clojure ) ? cc_paramShape( metricNode, le.lang, kind, src ) : ParamShape{};
             d.arityExact = shape.exact ? std::uint8_t( 1 ) : std::uint8_t( 0 );
             d.paramsMin  = shape.minimum <= d.params ? shape.minimum : std::uint16_t( 0 );
+            applyAnnotationRename( d, renamed, defNode );   // MACRO-P1: the real function's parameters and start, not the annotation's
             // L8: the in-file test-scope bit, for EVERY kind (a `#[cfg(test)] mod` and a `class TestFoo`
             // are themselves symbols, and dropping the members while keeping the shell would be a worse
             // answer than either). Runs on defNode, whose ancestors are the enclosing scopes.

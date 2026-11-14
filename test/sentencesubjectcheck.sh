@@ -16,6 +16,8 @@
 #   CQ  in a long sentence (the sentence reading, not the short-subject one), a spelling whose OUTER qualifier places nothing
 #       (`Missing.setup.prepare_setup_platform`) is no name: no callers block, no re-ask; its twin `setup.prepare_setup_platform` (the
 #       file stem) still gets the block
+#   CQs the SHORT subject reading ("Which functions call `Missing.setup.prepare_setup_platform` directly?") validates every
+#       qualifier too: no callers block; its `setup.` twin keeps it (SUBJECT-EXACT-OUTER-QUAL, found fixing CodeRabbit on #646)
 #   CG  a Go receiver spelling with no pronoun after the cue ("Which functions call `(*kv.Replica).NewEvalContext`?") gets the block
 #   RD  the re-ask keeps the stated direction: "the path to `end_there` from `start_here`" is --path=start_here,end_there
 # Usage: bash test/sentencesubjectcheck.sh [BIN]
@@ -110,6 +112,12 @@ A="$( ask "$R" 'If `Missing.setup.prepare_setup_platform` gained a new required 
 case "$A" in *'<ctx '*) ok "CQ: an answer printed";; *) no "CQ: no answer printed";; esac
 hasnt "$A" '<callers by="subject"' "CQ: an outer qualifier that places nothing is no name (no callers block)"
 hasnt "$A" '<reask' "CQ: and no re-ask names it"
+# CQs: the SHORT subject (subjectReading's exact reading, not the sentence one) validates every qualifier too
+A="$( ask "$R" 'Which functions call `Missing.setup.prepare_setup_platform` directly?' )" || no "CQs: ripwire exited $?"
+case "$A" in *'<ctx '*) ok "CQs: an answer printed";; *) no "CQs: no answer printed";; esac
+hasnt "$A" '<callers by="subject"' "CQs: a short subject whose outer qualifier places nothing is no name (no callers block)"
+A="$( ask "$R" 'Which functions call `setup.prepare_setup_platform` directly?' )" || no "CQs twin: ripwire exited $?"
+has "$( blk "$A" )" first_caller "CQs twin: the file-stem qualifier still places the short subject"
 
 # ── CN: no block (each arm also proves an answer printed; the arm FAILs when it saw nothing) ──
 seen=0

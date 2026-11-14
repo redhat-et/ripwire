@@ -40,6 +40,12 @@
 #   (i1..i4) CONST-INIT-CALLEE by="init" (residual pass 11-12, card 3; i1 i2 i4 RED on main 0b8f0bf8d): a head row's name (one of the
 #        first 5 <d> rows, or the re-export walk's <def> row) whose module-level declaration's value is one file-scope call names that
 #        call's callee (of= the name, at= the declaration); a literal initialiser or an already-shown callee is no row; RIPWIRE_NO_INIT_ROWS=1
+#   (i5) FORFILESYMS-INIT-WINDOW-LEGEND (CodeRabbit on #646; RED on main 44f7d3326): an initialiser whose `(` sits past the 200-byte
+#        window is disclosed (<syms init_cut="1">, both legends state the window); (i5n) its short twin is an ordinary row, no init_cut
+#   (i6) FORFILESYMS-COMMENT-DECL (CodeRabbit on #646; RED on main 44f7d3326): a docstring or /* */ twin declaration earlier in the
+#        file is skipped (no file-scope call stands in it): the real declaration's callee prints
+#   (i7) FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646; RED on main 44f7d3326): an external initialiser call is not credited with
+#        another module-scope call's same-named edge (no row); two calls written alike (angular's makeDecorator) keep the row
 #   (o1) overloads: the shown row's edge reaches one overload, the kept row is another: it says via="name"; twin (o2) one definition, the call is plain
 #   (h2) a held block's next= carries the origin call's ranking flags (--no-route, --anchor under RIPWIRE_DEV, --pack-top-n=N)
 #   (c2) a capture whose buffer fails to flush (RLIMIT_FSIZE, a real short write) is not read as the whole answer: stderr says so, exit 1, the stub says held="uncaptured", no rows; twin: unlimited, rows
@@ -583,6 +589,170 @@ if [ "$( sed -n 2,3p <<<"$i1" | tr '\n' ' ' )" = "clause defs " ] && [ "$( sed -
    && ! grep -q 'by="init"' "$TMP/i4.off.xml" && ! grep -q 'by=init\|by=\\"init' "$TMP/i4.off.xml" && [ "$( sed -n 2p <<<"$( initrows "$TMP/i3p.xml" )" )" = "noclause" ]; then
     ok "(i4) both legends define by=\"init\" of= at= beside a row, a block without one carries no clause; RIPWIRE_NO_INIT_ROWS=1 drops rows and clause"
 else no "(i4) rc=$i4orc/$i4frc compact: $( sed -n 2,3p <<<"$i1" | tr '\n' ' ' ) full: $( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/i4.off.xml" | head -c 300 )"; fi
+
+# (i5) FORFILESYMS-INIT-WINDOW-LEGEND (CodeRabbit on #646): the initialiser's `(` sits past the 200-byte window (a dotted callee head
+# generated here, 230 bytes): no row, but <syms init_cut="1"> and the init clause stating the window, in both legends
+mkdir -p "$TMP/initcut"
+LONGHEAD="$( python3 -c 'print( ".".join( [ "segment%02d" % i for i in range( 23 ) ] ) )' )"
+printf 'def make_big():\n    return {}\n\n\nbig_registry = %s.make_big()\n' "$LONGHEAD" >"$TMP/initcut/app.py"
+run initcut "--for=big_registry" >"$TMP/i5.xml"; i5rc=$?
+run initcut "--for=big_registry" --legend=full >"$TMP/i5f.xml"; i5frc=$?
+i5pre="$( python3 -c 'import sys; t=open(sys.argv[1]).read(); a=t.index("= ")+2; print( len( t[a:t.index("(", a)] ) )' "$TMP/initcut/app.py" )"
+if [ "$i5rc$i5frc" = 00 ] && [ "${i5pre:-0}" -gt 200 ] && grep -q '<syms[^>]* init_cut="1"' "$TMP/i5.xml" && grep -q '<syms[^>]* init_cut="1"' "$TMP/i5f.xml" \
+   && grep -q 'within 200 bytes' "$TMP/i5.xml" && grep -q 'within 200 bytes' "$TMP/i5f.xml" \
+   && [ "$( sed -n 3p <<<"$( initrows "$TMP/i5.xml" )" )" = defs ] && [ "$( sed -n 3p <<<"$( initrows "$TMP/i5f.xml" )" )" = defs ]; then
+    ok "(i5) a call head past the 200-byte window ($i5pre bytes before its \`(\`) is disclosed: init_cut=\"1\", both legends state the window"
+else no "(i5) rc=$i5rc/$i5frc head=$i5pre bytes: $( grep -o '<syms.*' "$TMP/i5.xml" | head -c 400 )"; fi
+# (i5n) the window's control: the same declaration with a short head is an ordinary by="init" row and no init_cut
+mkdir -p "$TMP/initshort"
+printf 'def make_big():\n    return {}\n\n\nbig_registry = make_big()\n' >"$TMP/initshort/app.py"
+run initshort "--for=big_registry" >"$TMP/i5n.xml"; i5nrc=$?
+if [ "$i5nrc" = 0 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i5n.xml" )" )" = "make_big@big_registry@app.py:5@app.py:1" ] && ! grep -q '<syms[^>]* init_cut=' "$TMP/i5n.xml"; then
+    ok "(i5n) the short twin prints its by=\"init\" row and no init_cut"
+else no "(i5n) rc=$i5nrc rows: $( initrows "$TMP/i5n.xml" | tr '\n' '|' ) $( grep -o '<syms.*' "$TMP/i5n.xml" | head -c 300 )"; fi
+
+# (i5m) TRAIN-1111g FIX2 (CodeRabbit 4572576414 on #655): init_cut= counts DECLARATIONS, as both legends say: two declarations of
+# the same head in one file, each past the window, count 2. Red before: one per head name (init_cut="1").
+mkdir -p "$TMP/initcut2"
+printf 'def make_big():\n    return {}\n\n\nbig_registry = %s.make_big()\nbig_registry = %s.make_big()\n' "$LONGHEAD" "$LONGHEAD" >"$TMP/initcut2/app.py"
+run initcut2 "--for=big_registry" >"$TMP/i5m.xml"; i5mrc=$?
+i5mdecl="$( grep -c '^big_registry = ' "$TMP/initcut2/app.py" )"
+if [ "$i5mrc" = 0 ] && [ "$i5mdecl" = 2 ] && grep -q '<syms[^>]* init_cut="2"' "$TMP/i5m.xml"; then
+    ok "(i5m) two past-window declarations of one head count init_cut=\"2\""
+else no "(i5m) rc=$i5mrc decls=$i5mdecl: $( grep -o '<syms[^>]*>' "$TMP/i5m.xml" | head -c 300 )"; fi
+
+# (i6) FORFILESYMS-COMMENT-DECL (CodeRabbit on #646): a declaration twin inside a string or a block comment EARLIER in the file is no
+# declaration: the row comes from the real one (no file-scope call stands in the twin). Python: a module docstring; TypeScript: /* */.
+mkdir -p "$TMP/initdoc/conf" "$TMP/initcmt/src"
+cat >"$TMP/initdoc/conf/__init__.py" <<'FIX'
+"""Settings.
+
+registry = old_registry()
+was the shape before the factory moved; see make_registry below.
+"""
+
+
+def old_registry():
+    return []
+
+
+def make_registry():
+    return {}
+
+
+registry = make_registry()
+FIX
+cat >"$TMP/initcmt/src/marks.ts" <<'FIX'
+import { forgeMark } from './forge';
+
+/*
+export const Banner: any = legacyMark(
+  'Banner',
+);
+*/
+
+export interface Banner {
+  title?: string;
+}
+
+export const Banner: any = forgeMark('Banner');
+FIX
+cat >"$TMP/initcmt/src/forge.ts" <<'FIX'
+export function forgeMark(name: string): any {
+  return { name };
+}
+export function legacyMark(name: string): any {
+  return name;
+}
+FIX
+run initdoc "--for=registry" >"$TMP/i6.xml"; i6rc=$?
+run initcmt "--for=Banner" >"$TMP/i6t.xml"; i6trc=$?
+i6seen=0
+grep -q '^registry = old_registry()' "$TMP/initdoc/conf/__init__.py" && i6seen=$(( i6seen + 1 ))
+grep -q '^export const Banner: any = legacyMark(' "$TMP/initcmt/src/marks.ts" && i6seen=$(( i6seen + 1 ))
+if [ "$i6rc$i6trc" = 00 ] && [ "$i6seen" = 2 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i6.xml" )" )" = "make_registry@registry@conf/__init__.py:16@conf/__init__.py:12" ] \
+   && [ "$( sed -n 1p <<<"$( initrows "$TMP/i6t.xml" )" )" = "forgeMark@Banner@src/marks.ts:13@src/forge.ts:1" ]; then
+    ok "(i6) a docstring or block-comment twin earlier in the file is skipped: the real declaration's callee prints (saw $i6seen of 2 twins)"
+else no "(i6) rc=$i6rc/$i6trc twins $i6seen of 2: py $( initrows "$TMP/i6.xml" | head -1 ) ts $( initrows "$TMP/i6t.xml" | head -1 ) $( grep -o '<syms.*' "$TMP/i6.xml" "$TMP/i6t.xml" | head -c 500 )"; fi
+
+# (i7) FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646): the declaration's call `ext.makeThing(…)` is external, and ANOTHER module-scope
+# call `makeThing(…)` supplies the module scope's only edge named makeThing: that edge is not the declaration's call, so no row
+# (fails closed); (i7n) the same file with the declaration's call written like the other one (`makeThing(…)` twice: angular's many
+# `X = makeDecorator(…)`) keeps its row
+mkdir -p "$TMP/initref/src" "$TMP/initrefok/src"
+cat >"$TMP/initref/src/real.ts" <<'FIX'
+export function makeThing(name: string): any {
+  return { name };
+}
+FIX
+cp "$TMP/initref/src/real.ts" "$TMP/initrefok/src/real.ts"
+cat >"$TMP/initref/src/use.ts" <<'FIX'
+import { Thing } from './things';
+
+export function useThing(): any {
+  return Thing;
+}
+FIX
+cp "$TMP/initref/src/use.ts" "$TMP/initrefok/src/use.ts"
+cat >"$TMP/initref/src/things.ts" <<'FIX'
+import { makeThing } from './real';
+import * as ext from 'ext-lib';
+
+export interface Thing {
+  size?: number;
+}
+
+export const Thing: any = ext.makeThing('Thing');
+
+export const helper: any = makeThing('helper');
+FIX
+cat >"$TMP/initrefok/src/things.ts" <<'FIX'
+import { makeThing } from './real';
+
+export interface Thing {
+  size?: number;
+}
+
+export const Thing: any = makeThing('Thing');
+
+export const helper: any = makeThing('helper');
+FIX
+run initref "--for=Thing" >"$TMP/i7.xml"; i7rc=$?
+run initrefok "--for=Thing" >"$TMP/i7n.xml"; i7nrc=$?
+i7pre=0
+grep -q "^export const Thing: any = ext.makeThing('Thing');" "$TMP/initref/src/things.ts" && grep -q "^export const helper: any = makeThing('helper');" "$TMP/initref/src/things.ts" && i7pre=1
+if [ "$i7rc$i7nrc" = 00 ] && [ "$i7pre" = 1 ] && ! grep -q 'by="init"' "$TMP/i7.xml" \
+   && [ "$( sed -n 1p <<<"$( initrows "$TMP/i7n.xml" )" )" = "makeThing@Thing@src/things.ts:7@src/real.ts:1" ]; then
+    ok "(i7) an external initialiser call is never credited with another module-scope call's edge (no row); written alike, both calls share it and the row stays"
+else no "(i7) rc=$i7rc/$i7nrc premise=$i7pre: wrong $( initrows "$TMP/i7.xml" | head -1 ) ok $( initrows "$TMP/i7n.xml" | head -1 )"; fi
+
+
+# (i8) TRAIN-1111g FIX2 (CodeRabbit 4572576421 on #655): a docstring twin `registry = old_registry()` (column 0, so a declaration
+# shape; a `#` comment is not one) sits within 200 bytes of a LATER statement's call `other = old_registry()`. The twin may only take a call that starts before its own `(`, so the later
+# statement's call stands in no twin, and the real declaration's callee prints. Red before: the twin's window was the full 200 bytes,
+# took `other`'s call, and headDone kept the real `registry = make_registry()` from printing (the row named old_registry).
+mkdir -p "$TMP/initnext/conf"
+cat >"$TMP/initnext/conf/__init__.py" <<'FIX'
+def old_registry():
+    return []
+
+
+def make_registry():
+    return {}
+
+
+"""
+registry = old_registry()
+"""
+other = old_registry()
+registry = make_registry()
+FIX
+run initnext "--for=registry" >"$TMP/i8.xml"; i8rc=$?
+i8pre=0
+grep -q '^registry = old_registry()$' "$TMP/initnext/conf/__init__.py" && grep -q '^other = old_registry()$' "$TMP/initnext/conf/__init__.py" && i8pre=1
+if [ "$i8rc" = 0 ] && [ "$i8pre" = 1 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i8.xml" )" )" = "make_registry@registry@conf/__init__.py:13@conf/__init__.py:5" ]; then
+    ok "(i8) a docstring twin does not take a later statement's call in its window: the real declaration's make_registry prints"
+else no "(i8) rc=$i8rc premise=$i8pre rows: $( initrows "$TMP/i8.xml" | head -1 ) $( grep -o '<syms.*' "$TMP/i8.xml" | head -c 400 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"
