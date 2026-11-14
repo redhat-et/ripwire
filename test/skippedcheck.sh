@@ -140,14 +140,14 @@ MINGW*|MSYS*|CYGWIN*) ok "(9) hard-limit arm skipped on Windows (a 1 GiB sparse 
         || perl -e 'open(my $f, ">", $ARGV[0]) or die; truncate($f, (1<<30)+4096) or die' "$TMP/hard/huge.c"
     hugeBytes="$( wc -c < "$TMP/hard/huge.c" | tr -d ' ' )"
     if [ "${hugeBytes:-0}" -gt 1073741824 ]; then ok "(9) premise: huge.c is over 1 GiB ($hugeBytes B)"; else no "(9) premise: huge.c is not over 1 GiB (${hugeBytes:-?} B)"; fi
-    "$BIN" hard --skipped --no-cache > "$TMP/hard.xml" 2>"$TMP/hard.err"
+    "$BIN" hard --skipped --no-cache > "$TMP/hard.xml" 2>"$TMP/hard.err"   # status: exits 0 with or without the oversize row; the row and header read below are the verdict
     grep -q "<f p=\"huge.c\" why=\"oversize\" bytes=\"$hugeBytes\" limit=\"1073741824\"/>" "$TMP/hard.xml" \
         && ok "(9) the >1 GiB file is the one dropped file, at limit=\"1073741824\"" \
         || { no "(9) hard-limit row missing or wrong"; head -c 600 "$TMP/hard.xml"; echo; }
     if grep -q 'oversize="1"' "$TMP/hard.xml"; then ok "(9) root reports oversize=\"1\""; else no "(9) root does not report oversize=\"1\""; fi
     grep -q 'huge.c (.*) exceeds the .* hard limit; not indexed (no option raises it)' "$TMP/hard.err" \
         && ok "(9) stderr warns that the hard limit dropped it" || { no "(9) no hard-limit warning on stderr"; cat "$TMP/hard.err"; }
-    "$BIN" hard --no-cache --legend=full > "$TMP/hardmap.xml" 2>/dev/null
+    "$BIN" hard --no-cache --legend=full > "$TMP/hardmap.xml" 2>/dev/null   # status: exits 0 with or without the oversize row; the row and header read below are the verdict
     if grep -q 'skipped_oversize=1' "$TMP/hardmap.xml"; then ok "(9) map header skipped_oversize=1 agrees"; else no "(9) map header lacks skipped_oversize=1"; fi
     rm -f "$TMP/hard/huge.c" ;;
 esac

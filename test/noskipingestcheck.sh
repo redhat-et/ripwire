@@ -69,23 +69,23 @@ w(f"{t}/fit/d.json", json.dumps({f"fit_{j}": "v" * 3000 for j in range(100)}, in
 EOF
 
 # ── 1. a code file over --max-file-size is read lexically, its symbols and calls reachable ───────────────────────────
-"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --legend=compact >"$TMP/1.map" 2>"$TMP/1.err"
+"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --legend=compact >"$TMP/1.map" 2>"$TMP/1.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 lex="$( attr "$TMP/1.map" lexical_files )"
 if [ "${lex:-0}" = 1 ]; then ok "1: --max-file-size=1M map: lexical_files=1 ($( hdr "$TMP/1.map" ))"; else no "1: no lexical_files=1 ($( hdr "$TMP/1.map" ))"; fi
 grep -q 'skipped_oversize=' "$TMP/1.map" && no "1: skipped_oversize= still on the map (the file was dropped)" || ok "1: nothing dropped (no skipped_oversize=)"
-"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --callers=huge_target --legend=compact >"$TMP/1.callers" 2>/dev/null
+"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --callers=huge_target --legend=compact >"$TMP/1.callers" 2>/dev/null   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 c="$( grep -oE '<callers [^>]*' "$TMP/1.callers" | grep -oE ' count="[0-9]+' | grep -oE '[0-9]+' )"
 if [ "${c:-0}" -ge 1000 ]; then ok "1: --callers=huge_target count=$c (lexical call sites reach it)"; else no "1: --callers=huge_target count=${c:-none}"; fi
 if grep -q 'graph_lexical="1"' "$TMP/1.callers"; then ok "1: --callers root carries graph_lexical=\"1\""; else no "1: --callers root lacks graph_lexical="; fi
-"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --callees=filler_7 --legend=compact >"$TMP/1.callees" 2>/dev/null
+"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --callees=filler_7 --legend=compact >"$TMP/1.callees" 2>/dev/null   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 if grep -qE '<callees [^>]* count="[1-9]' "$TMP/1.callees"; then ok "1: --callees=filler_7 finds huge_target"; else no "1: --callees=filler_7: $( grep -oE '<callees [^>]*' "$TMP/1.callees" )"; fi
 n="$( grep -c 'exceeds --max-file-size 1.0 MiB; indexed lexically (raise with --max-file-size=N)' "$TMP/1.err" )"
 if [ "$n" = 1 ]; then ok "1: exactly one stderr warning naming the limit and the flag"; else no "1: $n warnings ($( head -3 "$TMP/1.err" ))"; fi
 grep -q 'ripwire: warning' "$TMP/1.map" && no "1: a warning reached stdout" || ok "1: stdout carries no warning"
-"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --skipped >"$TMP/1.sk" 2>/dev/null
+"$BIN" "$TMP/c5" --no-cache --max-file-size=1M --skipped >"$TMP/1.sk" 2>/dev/null   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 if grep -qE '<h p="[^"]*big\.c" why="lexical-size"' "$TMP/1.sk"; then ok "1: --skipped rows big.c why=lexical-size"; else no "1: no lexical-size row in --skipped"; fi
 # the default ceiling (64 MiB) parses it: no lexical read, no warning (negative arm: the map was seen)
-"$BIN" "$TMP/c5" --no-cache --legend=compact >"$TMP/1d.map" 2>"$TMP/1d.err"
+"$BIN" "$TMP/c5" --no-cache --legend=compact >"$TMP/1d.map" 2>"$TMP/1d.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 files="$( attr "$TMP/1d.map" files )"
 if [ "${files:-0}" = 2 ]; then
     grep -q 'lexical_files=' "$TMP/1d.map" && no "1: the default run read big.c lexically" || ok "1: default 64 MiB ceiling parses the 5 MiB file (files=2, no lexical_files=)"
@@ -109,33 +109,33 @@ if grep -q 'why="lexical-budget"' "$TMP/2.sk"; then ok "2: --skipped rows it why
 
 # ── 3. data files past the ceiling: bounded keys, disclosed, raisable ─────────────────────────────────────────────
 for d in json3 yaml1; do
-    "$BIN" "$TMP/$d" --no-cache --legend=compact >"$TMP/3$d.map" 2>"$TMP/3$d.err"
+    "$BIN" "$TMP/$d" --no-cache --legend=compact >"$TMP/3$d.map" 2>"$TMP/3$d.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
     sy="$( attr "$TMP/3$d.map" symbols )"; cut="$( attr "$TMP/3$d.map" keys_cut )"
     if [ "${sy:-0}" = 256 ] && [ "${cut:-0}" -gt 1000 ]; then ok "3: $d symbols=256 keys_cut=$cut"; else no "3: $d $( hdr "$TMP/3$d.map" )"; fi
     if grep -q 'full-index ceiling .* cut at 256 (raise with RIPWIRE_DATA_KEYS=N)' "$TMP/3$d.err"; then ok "3: $d warning names the cap and the knob"; else no "3: $d warning: $( head -1 "$TMP/3$d.err" )"; fi
 done
-RIPWIRE_DATA_KEYS=1000 "$BIN" "$TMP/json3" --no-cache --legend=compact >"$TMP/3r.map" 2>/dev/null
+RIPWIRE_DATA_KEYS=1000 "$BIN" "$TMP/json3" --no-cache --legend=compact >"$TMP/3r.map" 2>/dev/null   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 if [ "$( attr "$TMP/3r.map" symbols )" = 1000 ]; then ok "3: RIPWIRE_DATA_KEYS=1000 raises it to 1000 keys"; else no "3: raised: $( hdr "$TMP/3r.map" )"; fi
 if grep -q 'n="record_0"' "$TMP/3json3.map"; then ok "3: the first top-level key is a symbol"; else no "3: record_0 missing"; fi
 
 # ── 4. warm runs keep the mode and the warning; a changed ceiling re-extracts ────────────────────────────────────────
 C="$TMP/c5.cache"
-"$BIN" "$TMP/c5" --cache="$C" --max-file-size=1M --legend=compact >"$TMP/4a" 2>"$TMP/4a.err"
-"$BIN" "$TMP/c5" --cache="$C" --max-file-size=1M --legend=compact >"$TMP/4b" 2>"$TMP/4b.err"
+"$BIN" "$TMP/c5" --cache="$C" --max-file-size=1M --legend=compact >"$TMP/4a" 2>"$TMP/4a.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
+"$BIN" "$TMP/c5" --cache="$C" --max-file-size=1M --legend=compact >"$TMP/4b" 2>"$TMP/4b.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 if cmp -s "$TMP/4a" "$TMP/4b" && [ "$( attr "$TMP/4b" lexical_files )" = 1 ]; then ok "4: warm run byte-identical, lexical_files=1 kept"; else no "4: warm differs or lost the mode"; fi
 if [ "$( warns "$TMP/4b.err" )" = 1 ]; then ok "4: the warm run warns again"; else no "4: warm warnings: $( warns "$TMP/4b.err" )"; fi
-"$BIN" "$TMP/c5" --cache="$C" --legend=compact >"$TMP/4c" 2>"$TMP/4c.err"
-"$BIN" "$TMP/c5" --no-cache --legend=compact >"$TMP/4d" 2>/dev/null
+"$BIN" "$TMP/c5" --cache="$C" --legend=compact >"$TMP/4c" 2>"$TMP/4c.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
+"$BIN" "$TMP/c5" --no-cache --legend=compact >"$TMP/4d" 2>/dev/null   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 if cmp -s "$TMP/4c" "$TMP/4d"; then ok "4: warm run at the default ceiling equals the cold one (the lexical record was re-extracted)"; else no "4: stale lexical record reused at the default ceiling"; fi
 
 # ── 5. the warning collapses after five lines ───────────────────────────────────────────────────────────────────────
-"$BIN" "$TMP/many" --no-cache --legend=compact >"$TMP/5.map" 2>"$TMP/5.err"
+"$BIN" "$TMP/many" --no-cache --legend=compact >"$TMP/5.map" 2>"$TMP/5.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 [ "$( warns "$TMP/5.err" )" = 6 ] && grep -q 'and 2 more file(s) met an index limit' "$TMP/5.err" \
     && ok "5: seven events → five lines + 'and 2 more'" || no "5: $( warns "$TMP/5.err" ) warning lines: $( tail -1 "$TMP/5.err" )"
 if [ "$( attr "$TMP/5.map" lexical_files )" = 7 ]; then ok "5: lexical_files=7 (every file disclosed in the answer)"; else no "5: $( hdr "$TMP/5.map" )"; fi
 
 # ── 7. keys-bounded with nothing cut: disclosed in the answer, silent on stderr (the key cap is the limit that loses data) ──
-"$BIN" "$TMP/fit" --no-cache --legend=compact >"$TMP/7.map" 2>"$TMP/7.err"
+"$BIN" "$TMP/fit" --no-cache --legend=compact >"$TMP/7.map" 2>"$TMP/7.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 fsz="$( wc -c < "$TMP/fit/d.json" | tr -d ' ' )"; sy="$( attr "$TMP/7.map" symbols )"
 if [ "${fsz:-0}" -gt 262144 ] && [ "${sy:-0}" = 100 ]; then
     if [ "$( attr "$TMP/7.map" lexical_files )" = 1 ]; then ok "7: a ${fsz} B .json with 100 keys: lexical_files=1, symbols=100"; else no "7: $( hdr "$TMP/7.map" )"; fi
@@ -145,8 +145,8 @@ else
 fi
 
 # ── 6. negative arm: a small corpus meets no limit — no warning, no attribute (counts what it saw) ─────────────────
-"$BIN" "$TMP/small" --no-cache --legend=compact >"$TMP/6.map" 2>"$TMP/6.err"
-"$BIN" "$TMP/small" --no-cache --callers=g --legend=compact >"$TMP/6.callers" 2>>"$TMP/6.err"
+"$BIN" "$TMP/small" --no-cache --legend=compact >"$TMP/6.map" 2>"$TMP/6.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
+"$BIN" "$TMP/small" --no-cache --callers=g --legend=compact >"$TMP/6.callers" 2>>"$TMP/6.err"   # status: the map/verb exits 0 on any corpus; the attributes and warning lines read below are the verdict, and a missing one FAILs
 files="$( attr "$TMP/6.map" files )"; sy="$( attr "$TMP/6.map" symbols )"
 if [ "${files:-0}" -ge 3 ] && [ "${sy:-0}" -ge 3 ]; then
     if [ "$( warns "$TMP/6.err" )" = 0 ]; then ok "6: no warning on a corpus under every limit (saw files=$files symbols=$sy)"; else no "6: warned: $( head -1 "$TMP/6.err" )"; fi

@@ -169,13 +169,12 @@ struct GaugeClauses
     bool unindexed = false; // graph_unindexed= is on the root
     bool rubyUnscoped = false; // ruby_bases_unscoped= is on the root
     bool lexical = false; // graph_lexical= is on the root
-    constexpr GaugeClauses( bool u = false, bool r = false ) noexcept : unindexed( u ), rubyUnscoped( r ) {}   // lexical: set by its member
+    constexpr GaugeClauses( bool u = false, bool r = false ) noexcept : unindexed( u ), rubyUnscoped( r ) {} // lexical: set by its member
     constexpr bool any() const noexcept { return unindexed || rubyUnscoped || lexical; }
 };
 inline std::string graphUnindexedLegend( GaugeClauses on )
 {
-    return std::string( on.unindexed ? kGraphUnindexedLegend : "" ) + ( on.rubyUnscoped ? kRubyBasesUnscopedLegend : "" )
-         + ( on.lexical ? kGraphLexicalLegend : "" );
+    return std::string( on.unindexed ? kGraphUnindexedLegend : "" ) + ( on.rubyUnscoped ? kRubyBasesUnscopedLegend : "" ) + ( on.lexical ? kGraphLexicalLegend : "" );
 }
 
 // The same sentence as its OWN XML comment, for the legends that are one closed <!-- ... --> literal rather

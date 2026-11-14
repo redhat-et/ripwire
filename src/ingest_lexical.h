@@ -147,12 +147,22 @@ inline bool opensParenAfter( std::string_view line, std::size_t end ) noexcept
     return next != rest.end() && *next == '(';
 }
 
+// A quote that opens a literal in the lexical scan: everywhere but Rust, whose ' also starts a lifetime.
+inline constexpr bool singleQuotesDelimitLiterals( Lang lang ) noexcept
+{
+    switch( lang )
+    {
+        case Lang::Rust: return false;
+        default:         return true;
+    }
+}
+
 // The code reader. Appends this file's lexical definitions and calls; returns nothing (the mode is the caller's).
 inline void extractLexicalCode( std::uint32_t fileId, Lang lang, std::string_view bytes, std::vector<RawDef>& defs, std::vector<RawRef>& refs )
 {
     LexicalLineScan scan;
     scan.hashComments = usesHashLineComments( lang );
-    scan.singleQuotes = lang != Lang::Rust;
+    scan.singleQuotes = singleQuotesDelimitLiterals( lang );
     const std::size_t firstDef = defs.size();
     std::uint32_t     lineNo   = 0;
     for( std::size_t lineStart = 0; lineStart < bytes.size(); )

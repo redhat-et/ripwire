@@ -30,7 +30,7 @@ echo "maxfilesizecheck: BIN=$BIN  ROOT=$ROOT"
 hdrnum(){ grep -oE "<!-- [^>]*$2=[0-9]+" "$1" | head -1 | grep -oE "(^| )$2=[0-9]+" | grep -oE '[0-9]+'; }
 
 # ── 1. a low ceiling reads files lexically and MUST disclose how many — and drop none
-"$BIN" "$ROOT" --max-file-size=8K --top-k=3 >"$TMP/small" 2>"$TMP/small.err"
+"$BIN" "$ROOT" --max-file-size=8K --top-k=3 >"$TMP/small" 2>"$TMP/small.err"   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
 LEX="$( hdrnum "$TMP/small" lexical_files )"
 [ "${LEX:-0}" -gt 200 ] && ok "--max-file-size=8K header carries lexical_files=$LEX (> 200, the expected order of magnitude)" \
     || no "--max-file-size=8K lexical_files=${LEX:-<none>} (header: $( grep -oE '<!-- files=[^>]*' "$TMP/small" | head -1 ))"
@@ -58,7 +58,7 @@ grep -qE 'skipped_oversize=|lexical_files=' "$TMP/big" \
 # ── 4. the .json lane's 256 KB ceiling indexes with bounded keys, and nothing drops at any setting ──────────
 # files= is the SAME population at every --max-file-size setting (nothing is dropped below the 1 GiB hard limit), and
 # the JSON-lane files past the ceiling are rowed why="keys-bounded" at every setting. Derived, never hardcoded.
-filesAt(){ "$BIN" "$ROOT" $1 --top-k=1 >"$TMP/at" 2>/dev/null; hdrnum "$TMP/at" files; }
+filesAt(){ "$BIN" "$ROOT" $1 --top-k=1 >"$TMP/at" 2>/dev/null; hdrnum "$TMP/at" files; }   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
 F64K="$( filesAt --max-file-size=64K )"; F1M="$( filesAt --max-file-size=1M )"; FDEF="$( filesAt '' )"
 [ "${F64K:-0}" -gt 0 ] && [ "$F64K" = "$F1M" ] && [ "$F64K" = "$FDEF" ] \
     && ok "files= = $FDEF at 64K/1M/default alike (no ceiling drops a file)" \
@@ -68,7 +68,7 @@ BIGJSON="$( cd "$ROOT" && git ls-files -z '*.json' | xargs -0 -I{} sh -c 'test $
 [ "${BIGJSON:-0}" -ge 1 ] \
     && ok "premise holds: $BIGJSON .json over the 256 KB JSON-lane ceiling exist in this tree" \
     || no "premise FAILED: no >256K .json in the tree — the keys-bounded arm below cannot discriminate"
-"$BIN" "$ROOT" --max-file-size=1M --skipped 2>/dev/null | tr '>' '\n' >"$TMP/sk1m"
+"$BIN" "$ROOT" --max-file-size=1M --skipped 2>/dev/null | tr '>' '\n' >"$TMP/sk1m"   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
 JSONROWS="$( grep 'why="keys-bounded"' "$TMP/sk1m" | grep -c '\.json"' | tr -d ' ' )"
 SIZEROWS="$( grep -c 'why="lexical-size"' "$TMP/sk1m" | tr -d ' ' )"
 [ "${JSONROWS:-0}" = "${BIGJSON:-0}" ] \
@@ -84,7 +84,7 @@ EOF_ROWS
 [ "$UNDER" = 0 ] \
     && ok "every lexical-size row at 1M ($SIZEROWS) names a file really over 1,048,576 B (a ceiling never fires under it)" \
     || no "$UNDER lexical-size row(s) at 1M name files UNDER the ceiling"
-LEX1M="$( "$BIN" "$ROOT" --max-file-size=1M --top-k=1 2>/dev/null | grep -oE ' lexical_files=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
+LEX1M="$( "$BIN" "$ROOT" --max-file-size=1M --top-k=1 2>/dev/null | grep -oE ' lexical_files=[0-9]+' | head -1 | grep -oE '[0-9]+' )"   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
 ALLLEX="$( grep -cE 'why="(lexical-size|lexical-budget|keys-bounded)"' "$TMP/sk1m" | tr -d ' ' )"
 [ "${LEX1M:-0}" = "${ALLLEX:-x}" ] \
     && ok "lexical_files=$LEX1M equals the rows itemized ($ALLLEX)" \
@@ -101,8 +101,8 @@ fi
 # ── adversarial-round extension: the disclosure must reach --json consumers too ──────────────────────
 # The JSON header is built separately from the XML one; §P0.5d's first landing covered only XML, so an
 # MCP/json reader was still shown the survivors as if they were the corpus.
-jlex="$( "$BIN" "$ROOT" --max-file-size=8K --json --top-k=3 2>/dev/null \
-          | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("lexical_files","ABSENT"))' )"
+"$BIN" "$ROOT" --max-file-size=8K --json --top-k=3 >"$TMP/jlex.json" 2>/dev/null   # status: --json exits 0 on any corpus; the lexical_files key read next is the verdict and ABSENT FAILs
+jlex="$( python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("lexical_files","ABSENT"))' <"$TMP/jlex.json" )"
 case "$jlex" in
     ABSENT ) no "--json at 8K carries no lexical_files key (JSON reader gets zero disclosure)" ;;
     0 ) no "--json at 8K says lexical_files=0 — a false zero" ;;
@@ -113,8 +113,8 @@ jdef="$( "$BIN" "$ROOT/test/fixture" --json --top-k=3 2>/dev/null \
 [ "$jdef" = "absent" ] && ok "--json on test/fixture omits skipped_oversize/lexical_files (absent = nothing happened)" \
                        || no "--json on test/fixture unexpectedly carries skipped_oversize/lexical_files"
 # the two dialects report ONE population on the default run
-jroot="$( "$BIN" "$ROOT" --json --top-k=1 2>/dev/null \
-          | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("lexical_files","ABSENT"))' )"
+"$BIN" "$ROOT" --json --top-k=1 >"$TMP/jroot.json" 2>/dev/null   # status: --json exits 0 on any corpus; the lexical_files key read next is the verdict and ABSENT FAILs
+jroot="$( python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("lexical_files","ABSENT"))' <"$TMP/jroot.json" )"
 xroot="$( hdrnum "$TMP/full" lexical_files )"
 [ "$jroot" = "${xroot:-ABSENT}" ] \
     && ok "--json default run on \$ROOT says lexical_files=$jroot, same as XML" \

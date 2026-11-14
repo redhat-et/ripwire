@@ -416,7 +416,7 @@ MIDSZ="$( wc -c < "$BIGY/mid_config.yml" )"; HUGESZ="$( wc -c < "$BIGY/huge_data
 # RE-PINNED 2026-11-14 (NO-SKIP-INGEST, owner: "we should not be skipping files"): over the 512 KB line a .yml is no
 # longer dropped — its top-level keys are indexed lexically, the first 256 as symbols, the rest counted as keys_cut=.
 HUGESZ="$( printf "%s" "$HUGESZ" | tr -d " " )"
-SBIG="$( $BIN "$BIGY" --skipped --no-cache 2>/dev/null )"
+SBIG="$( $BIN "$BIGY" --skipped --no-cache 2>/dev/null )"   # status: exits 0 either way; the keys-bounded row and header attributes read below are the verdict
 printf '%s' "$SBIG" | grep -q 'p="mid_config.yml"' \
     && no "ceiling: the ${MIDSZ}-byte .yml (under 512 KB) got a skipped/lexical row — YAML inherited JSON's 256 KB ceiling" \
     || ok "ceiling: a ${MIDSZ}-byte .yml (over JSON's 256 KB line) is fully parsed (no row)"
@@ -426,7 +426,7 @@ printf '%s' "$SBIG" | grep -q "<h p=\"huge_data.yml\" why=\"keys-bounded\" bytes
 printf '%s' "$SBIG" | grep -q '<lang n="yaml" files="2" symbols="9257"/>' \
     && ok "ceiling: symbols = 9001 parsed + 256 bounded keys (both files indexed)" \
     || no "ceiling: yaml census is not files=2 symbols=9257"
-OBIG="$( $BIN "$BIGY" --no-cache --legend=full 2>"$TMP/bigy.err" )"
+OBIG="$( $BIN "$BIGY" --no-cache --legend=full 2>"$TMP/bigy.err" )"   # status: exits 0 either way; the keys-bounded row and header attributes read below are the verdict
 printf '%s' "$OBIG" | grep -q 'lexical_files=1' && ! printf '%s' "$OBIG" | grep -q 'skipped_oversize=' \
     && ok "ceiling: map header says lexical_files=1 and drops nothing — disclosure, not disappearance" \
     || no "ceiling: map header lacks lexical_files=1 or still claims skipped_oversize="
