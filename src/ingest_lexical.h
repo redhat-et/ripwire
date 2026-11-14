@@ -49,16 +49,25 @@ inline bool lexicalNotCallee( std::string_view name ) noexcept
 // is a scope, not a symbol: no definition (nullopt). Anything else shaped like a definition is a function.
 inline std::optional<SymKind> lexicalDefKind( std::string_view prior, bool isDefine ) noexcept
 {
+    struct KeywordKind
+    {
+        std::string_view       keyword;
+        std::optional<SymKind> kind;   // nullopt: a scope opener (namespace, impl, …), not a definition of its own
+    };
+    static constexpr KeywordKind kKeywordKinds[] =
+    {
+        { "class", SymKind::Class },          { "enum", SymKind::Class },          { "struct", SymKind::Struct },
+        { "union", SymKind::Struct },         { "interface", SymKind::Interface }, { "trait", SymKind::Interface },
+        { "protocol", SymKind::Interface },   { "type", SymKind::NamedType },      { "typedef", SymKind::NamedType },
+        { "using", SymKind::NamedType },      { "namespace", std::nullopt },       { "impl", std::nullopt },
+        { "extension", std::nullopt },        { "module", std::nullopt },
+    };
     if( isDefine )
     {
         return SymKind::Macro;
     }
-    if( prior == "class" || prior == "enum" ) { return SymKind::Class; }
-    if( prior == "struct" || prior == "union" ) { return SymKind::Struct; }
-    if( prior == "interface" || prior == "trait" || prior == "protocol" ) { return SymKind::Interface; }
-    if( prior == "type" || prior == "typedef" || prior == "using" ) { return SymKind::NamedType; }
-    if( prior == "namespace" || prior == "impl" || prior == "extension" || prior == "module" ) { return std::nullopt; }
-    return SymKind::Function;
+    const auto* hit = std::ranges::find( kKeywordKinds, prior, &KeywordKind::keyword );
+    return hit != std::end( kKeywordKinds ) ? hit->kind : std::optional<SymKind>( SymKind::Function );
 }
 
 // One line's names outside comments and string literals, in order. `inBlock` carries a /* … */ comment across lines;
@@ -133,8 +142,9 @@ struct LexicalLineScan
 
 inline bool opensParenAfter( std::string_view line, std::size_t end ) noexcept
 {
-    const std::size_t p = line.find_first_not_of( " \t", end );
-    return p != std::string_view::npos && line[ p ] == '(';
+    const std::string_view rest = line.substr( std::min( end, line.size() ) );
+    const auto             next = std::ranges::find_if( rest, []( char c ) { return c != ' ' && c != '\t'; } );
+    return next != rest.end() && *next == '(';
 }
 
 // The code reader. Appends this file's lexical definitions and calls; returns nothing (the mode is the caller's).
@@ -402,8 +412,12 @@ inline bool isDataKeysLang( Lang lang ) noexcept
 
 // The mode a file of this size and language is indexed in BEFORE any parse runs: Parsed (then the budget decides), the
 // bounded-keys read of a data file past its ceiling, or the lexical read of any other file past --max-file-size.
-inline FileIndexMode preParseIndexMode( Lang lang, std::size_t bytes, std::size_t maxFileBytes ) noexcept
+inline FileIndexMode preParseIndexMode( Lang lang, std::size_t bytes, std::size_t maxFileBytes, bool ownReader = false ) noexcept
 {
+    if( ownReader )
+    {
+        return FileIndexMode::Parsed;   // a reader that bounds itself (reST's flat reader) keeps the file
+    }
     if( isDataKeysLang( lang ) )
     {
         return bytes > dataFullIndexCeiling( lang ) ? FileIndexMode::DataKeysBounded : FileIndexMode::Parsed;

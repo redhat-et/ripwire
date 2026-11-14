@@ -2284,15 +2284,8 @@ inline bool isLexicallyIndexed( const FileHealth& health ) noexcept
 // The --skipped / warning word for a mode: lexical-size, lexical-budget, keys-bounded, lexical-nest ("" for Parsed).
 inline std::string_view fileIndexModeWord( std::uint32_t mode ) noexcept
 {
-    switch( FileIndexMode( mode ) )
-    {
-        case FileIndexMode::LexicalOverSize:    return "lexical-size";
-        case FileIndexMode::LexicalOverBudget:  return "lexical-budget";
-        case FileIndexMode::DataKeysBounded:    return "keys-bounded";
-        case FileIndexMode::LexicalNestRefused: return "lexical-nest";
-        case FileIndexMode::Parsed:             break;
-    }
-    return {};
+    static constexpr std::string_view kWords[ kFileIndexModeCount ] = { "", "lexical-size", "lexical-budget", "keys-bounded", "lexical-nest" };
+    return mode < kFileIndexModeCount ? kWords[ mode ] : std::string_view{};
 }
 
 

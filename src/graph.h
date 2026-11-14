@@ -19399,7 +19399,9 @@ inline std::string graphCountFloorAttrJson( const Graph& g )
 // The legend clauses a root's absent-at-zero gauges call for, read off the same two fields the attribute is.
 inline GaugeClauses graphGaugeClauses( const Graph& g ) noexcept
 {
-    return GaugeClauses( g.unindexedFiles > 0, g.rubyBasesUnscoped > 0, g.lexicalFiles > 0 );
+    GaugeClauses on( g.unindexedFiles > 0, g.rubyBasesUnscoped > 0 );
+    on.lexical = g.lexicalFiles > 0;
+    return on;
 }
 
 // THE DECLINED-LIST INTERNER — tier 3's record of what a declined call could equally have meant, stored once per DISTINCT

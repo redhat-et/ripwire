@@ -375,8 +375,13 @@ struct ParsePoolShared
 // NO-SKIP-INGEST: a cached record whose index mode this run would not choose is re-extracted (as a late miss, so its
 // grammar is installed first): a file that now fits --max-file-size, or has grown past it, a lexical-budget record under
 // a RIPWIRE_PARSE_BUDGET scale (a raised budget retries the parse), and a cut data record under a RIPWIRE_DATA_KEYS cap.
-inline bool cachedIndexModeStale( const CachedRecordHead& rec, const LangEntry& le, std::size_t maxFileBytes )
+inline bool cachedIndexModeStale( const CachedRecordHead* hit, const LangEntry& le, std::size_t maxFileBytes )
 {
+    if( hit == nullptr )
+    {
+        return false;
+    }
+    const CachedRecordHead& rec  = *hit;
     const FileIndexMode mode    = FileIndexMode( rec.health.indexMode );
     const bool          overNow = !isDataKeysLang( le.lang ) && rec.sizeBytes >= 0 && std::size_t( rec.sizeBytes ) > maxFileBytes;
     if( overNow != ( mode == FileIndexMode::LexicalOverSize ) )
@@ -474,6 +479,29 @@ inline std::uint64_t rawDefCloneKey( const std::string& fileBytes, const RawDef&
     return cloneBodyKey( fileBytes, sigEnd, d.endByte, usesHashLineComments( d.lang ) );
 }
 
+inline constexpr std::size_t kMaxPendingParsedFiles = 4;
+inline constexpr std::size_t kMaxPendingParsedBytes = 8u * 1024u * 1024u;
+
+// The parsed-tree queue (files whose tags pass waits for the query prewarm) takes a file only while the prewarm is not
+// ready and the queue has room. NO-SKIP-INGEST: and only a file up to 256 KiB — a larger file's tags pass runs inline,
+// under the deadline its parse started (ExtractDeadlineScope is per worker and per file).
+inline bool canQueueParsedFile( std::size_t fileBytes, bool prewarmReady, std::size_t pendingFiles, std::size_t pendingBytes ) noexcept
+{
+    constexpr std::size_t kMaxQueuedParsedFileBytes = 256u * 1024u;
+    return fileBytes <= kMaxQueuedParsedFileBytes && !prewarmReady && pendingFiles < kMaxPendingParsedFiles
+        && pendingBytes + fileBytes <= kMaxPendingParsedBytes;
+}
+
+// A parse that returned no tree: read the file lexically only when its budget, not an error, stopped it.
+template <class IndexLexically>
+inline void whenOverBudget( bool overBudget, IndexLexically& indexLexically )
+{
+    if( overBudget )
+    {
+        indexLexically( FileIndexMode::LexicalOverBudget );
+    }
+}
+
 inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 {
     IngestFileScan& scan = sh.scan;
@@ -517,9 +545,6 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         }
     };
 
-    constexpr std::size_t kMaxPendingParsedFiles = 4;
-    constexpr std::size_t kMaxQueuedParsedFileBytes = 256u * 1024u;   // NO-SKIP-INGEST: larger files run their tags pass under their deadline
-    constexpr std::size_t kMaxPendingParsedBytes = 8u * 1024u * 1024u;
     std::vector<PendingParsedFile> pendingParsed;
     pendingParsed.reserve( kMaxPendingParsedFiles );
     std::size_t pendingParsedBytes = 0;
@@ -656,7 +681,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                         hit = candidate;
                     }
                 }
-                if( hit != nullptr && cachedIndexModeStale( *hit, *le, sh.maxFileBytes ) )
+                if( cachedIndexModeStale( hit, *le, sh.maxFileBytes ) )
                 {
                     sh.lateMiss[ fileId ] = 1;   // re-extracted after the join, in the mode this run chooses
                     continue;
@@ -719,7 +744,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 indexFileLexically( static_cast<std::uint32_t>( fileId ), *le, bytes, mode, out.defs, out.refs, scan.health[ fileId ] );
                 finishNewDefs( out.defs, firstNewDefIndex, bytes );   // lexical stats; a lexical span (bodyByte = endByte) has no clone key
             };
-            if( const FileIndexMode preMode = preParseIndexMode( le->lang, bytes.size(), sh.maxFileBytes ); !isRest && preMode != FileIndexMode::Parsed )
+            if( const FileIndexMode preMode = preParseIndexMode( le->lang, bytes.size(), sh.maxFileBytes, isRest ); preMode != FileIndexMode::Parsed )
             {
                 markMissDirty( sh );
                 indexLexically( preMode );
@@ -751,10 +776,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 TreeGuard mdTree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &overBudget ); } ) );
                 if( mdTree.get() == nullptr )
                 {
-                    if( overBudget )
-                    {
-                        indexLexically( FileIndexMode::LexicalOverBudget );   // a doc keeps its file, with no symbols, disclosed
-                    }
+                    whenOverBudget( overBudget, indexLexically );   // a doc keeps its file, with no symbols, disclosed
                     continue;
                 }
                 scan.health[ fileId ] = measureFileHealth( ts_tree_root_node( mdTree.get() ), bytes );
@@ -797,10 +819,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 TreeGuard tree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &overBudget ); } ) );
                 if( tree.get() == nullptr )
                 {
-                    if( overBudget )
-                    {
-                        indexLexically( FileIndexMode::LexicalOverBudget );   // the parse ran past its budget: cancelled, read lexically
-                    }
+                    whenOverBudget( overBudget, indexLexically );   // the parse ran past its budget: cancelled, read lexically
                     continue;
                 }
 
@@ -819,10 +838,8 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 notePartialExtract( scan, fileId, shortfall, bytes.size() );   // before a queued file's tags pass, which notes its own
                 appendBlankedMacroUses( macroWork, le->lang, static_cast<std::uint32_t>( fileId ), bytes, out.refs, ppDead );
 
-                const bool canQueueParsed = bytes.size() <= kMaxQueuedParsedFileBytes   // a large file's tags pass runs under its deadline, now
-                                         && !sh.prewarm.ready.load( std::memory_order_acquire )
-                                         && pendingParsed.size() < kMaxPendingParsedFiles
-                                         && pendingParsedBytes + bytes.size() <= kMaxPendingParsedBytes;
+                const bool canQueueParsed = canQueueParsedFile( bytes.size(), sh.prewarm.ready.load( std::memory_order_acquire ),
+                                                                pendingParsed.size(), pendingParsedBytes );
                 if( canQueueParsed )
                 {
                     pendingParsedBytes += bytes.size();

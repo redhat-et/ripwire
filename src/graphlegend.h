@@ -169,7 +169,7 @@ struct GaugeClauses
     bool unindexed = false; // graph_unindexed= is on the root
     bool rubyUnscoped = false; // ruby_bases_unscoped= is on the root
     bool lexical = false; // graph_lexical= is on the root
-    constexpr GaugeClauses( bool u = false, bool r = false, bool l = false ) noexcept : unindexed( u ), rubyUnscoped( r ), lexical( l ) {}
+    constexpr GaugeClauses( bool u = false, bool r = false ) noexcept : unindexed( u ), rubyUnscoped( r ) {}   // lexical: set by its member
     constexpr bool any() const noexcept { return unindexed || rubyUnscoped || lexical; }
 };
 inline std::string graphUnindexedLegend( GaugeClauses on )
