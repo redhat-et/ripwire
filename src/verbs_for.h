@@ -33,6 +33,7 @@
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
 #include "forrowfeatures.h" // ROW-FEATURE-DUMP: RIPWIRE_ROW_FEATURES=<path>, the ranker's per-row internals beside the answer's placement (dev only)
+#include "memstats.h"       // FOR-SCAN-ONCE: RIPWIRE_STATS gates the [scan] line (literal asks, corpus reads)
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -2896,10 +2897,15 @@ std::optional<int> runConnect( const MainDispatch& d );
 // and their owner bodies inside <lit>, just before </ctx>, after every byte of the ordinary answer. `served` is the answer's own
 // body text: a body it already printed is not repeated. `answerIds` (LIT-SITE-DECOY): the answer's shown rows and whole bodies, which order
 // the literal's sites by nearness (none: no site is near, the old order). XML, the default regime and a single root only.
+inline bool literalAnchorBlockOn( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || cfg.tokenBudget > 0 || !rw::forLiteralOn() );
+}
 inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view rootArg, std::string_view served, std::span<const rw::NodeId> answerIds = {} )
 {
     const rw::Config& cfg = d.cfg;
-    if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || cfg.tokenBudget > 0 || !rw::forLiteralOn() )
+    if( !literalAnchorBlockOn( d ) )
     {
         return;
     }
@@ -5279,6 +5285,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::string reexports = rw::renderForReexports( ing, cfg.forTask, /*held=*/cfg.tokenBudget > 0 );   // CR pre-pass 42b: held under --token-budget
             std::fwrite( reexports.data(), 1, reexports.size(), stdout );
         }
+        // FOR-SCAN-ONCE (search.h GrepScanBatch): the literal block's candidates are expected from here, so the short key's scan, if it runs,
+        // reads the corpus for them too, and the block's own scans share one read; closed after the block (the held collections go with it)
+        std::optional<rw::GrepScanBatch> forScans( std::in_place, ing, literalAnchorBlockOn( d ) ? rw::forLiteralScanPlan( ing, cfg.forTask ) : std::vector<std::string>{} );
         // SHORT-KEY-FOR (forreexport.h): a name-exact route that served no signature row gets the fallback ladder, and so does a task read
         // as words whose one code-shaped name resolved to no definition (SHORT-KEY-SENTENCE: from="sentence"); "" otherwise. Its own
         // byte allowance, outside est_tokens: no auto-served body pays for it. XML only, like the block above.
@@ -5307,6 +5316,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         litAnswerIds.insert( litAnswerIds.end(), enrich.emitted.begin(), enrich.emitted.end() );   // the auto <bodies> printed
         appendLiteralAnchorBlock( d, flRootArg, detailSection.xml + autoSection.xml + slot.xml + fold.xml + callerHop.xml + dispatchHop.xml, litAnswerIds );   // MF1-LIT: "" unless the task names a literal with a site (dispatchHop: train 42b, its single-candidate <b>)
+        if( rw::memstats::enabled() )
+        {
+            rw::emitTo( stderr, "[scan] for literal_asks={} corpus_reads={} expected_unasked={}\n", forScans->asks(), forScans->reads(), forScans->unasked() );
+        }
+        forScans.reset();
         if( peerManifestRegime )   // STRING-IMPORT (fordottedstring.h): after the ordinary answer, outside est_tokens; "" unless a dotted string names a shown row
         {
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );
