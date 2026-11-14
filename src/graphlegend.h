@@ -891,12 +891,9 @@ inline constexpr const char* kImplsLegend =
 inline const char* implsLegend( bool on ) noexcept { return on ? kImplsLegend : ""; }
 inline std::string implsFieldOrEmpty( std::string_view name, std::size_t contracts, std::size_t impls, bool json )
 {
-    if( contracts == 0 )
-    {
-        return {};
-    }
-    const std::string n = std::to_string( impls );
-    return json ? ",\"" + std::string( name ) + "\":" + n : " " + std::string( name ) + "=\"" + n + "\"";
+    // present whenever the selector named a contract: countFieldOrEmpty's spelling, and the zero it omits spelled out
+    const std::string zero = json ? ",\"" + std::string( name ) + "\":0" : " " + std::string( name ) + "=\"0\"";
+    return contracts == 0 ? std::string() : impls > 0 ? countFieldOrEmpty( name, impls, json ) : zero;
 }
 inline std::string implsAttrXml( std::size_t contracts, std::size_t impls )
 {
@@ -905,11 +902,6 @@ inline std::string implsAttrXml( std::size_t contracts, std::size_t impls )
 inline std::string implsKeyJson( std::size_t contracts, std::size_t impls )
 {
     return implsFieldOrEmpty( "impls", contracts, impls, /*json=*/true );
-}
-// the path root's spelling: one per endpoint, each present exactly when that endpoint names a contract method
-inline std::string pathImplsFields( std::size_t fromContracts, std::size_t fromImpls, std::size_t toContracts, std::size_t toImpls, bool json )
-{
-    return implsFieldOrEmpty( "from_impls", fromContracts, fromImpls, json ) + implsFieldOrEmpty( "to_impls", toContracts, toImpls, json );
 }
 
 // ── Depth-labelled --impact (0.6.5): by_depth= on the root, d= on the rows ──────────────────────────────────────────

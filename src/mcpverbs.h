@@ -3979,12 +3979,10 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     std::size_t               dstUnprovenDefs = 0;
     bool                      srcGlob         = false;   // ix2-slice (IX-2 P4): a `*` endpoint, as on the CLI
     bool                      dstGlob         = false;
-    // BODILESS-SEED (contractseed.h): an endpoint naming a contract method also stands for its implementors' bodies, as on the CLI
-    const ContractSeeds        ptSrc           = widenContractSeeds( ing, g, resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob ) );
-    const ContractSeeds        ptDst           = widenContractSeeds( ing, g, resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob ) );
-    const std::vector<NodeId>& srcDefs         = ptSrc.seeds;
-    const std::vector<NodeId>& dstDefs         = ptDst.seeds;
-    const std::size_t          unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
+    std::vector<NodeId>       srcDefs         = resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob );
+    std::vector<NodeId>       dstDefs         = resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob );
+    const PathContracts       ptContracts     = widenPathContracts( ing, g, srcDefs, dstDefs );   // BODILESS-SEED, as on the CLI
+    const std::size_t         unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
     if( srcDefs.empty() || dstDefs.empty() )
     {
         return std::string{}; // an endpoint not found → caller reports not-found
@@ -4076,13 +4074,12 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
                   ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
                     + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
-                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) + implsLegend( ptSrc.contracts + ptDst.contracts > 0 ) ).c_str(),   // BODILESS-SEED
+                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) + ptContracts.legend() ).c_str(),
                   graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
     rw::emitTo( mem, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                   ex( from ).c_str(), ex( to ).c_str(), ptBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                   ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob )
-                                                    + pathImplsFields( ptSrc.contracts, ptSrc.impls, ptDst.contracts, ptDst.impls, /*json=*/false ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
+                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) + ptContracts.attrXml() ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
                   ptRows.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
                   ( ptRootAttrs + hopRootAttrsXml( ptHops ) + ptRootAttr ).c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker

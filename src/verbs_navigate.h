@@ -2969,9 +2969,6 @@ struct PathEndpointsBound
     bool                     srcGlob     = false;
     bool                     dstGlob     = false;
     std::vector<std::string> narrowed;
-    // BODILESS-SEED (contractseed.h): an endpoint naming a contract method gains its implementors' bodies (from_impls=/to_impls=)
-    std::size_t              srcContracts = 0, srcImpls = 0;
-    std::size_t              dstContracts = 0, dstImpls = 0;
 };
 
 // The narrowed spellings of the endpoints that bound nothing, slot order; nullopt when one of them is still refused.
@@ -2994,7 +2991,7 @@ inline std::optional<std::vector<std::string>> narrowedPathSpellings( const rw::
     return narrowed;
 }
 
-inline PathEndpointsBound bindPathEndpoints( const rw::IngestResult& ing, const rw::Graph& g, std::string_view srcN, std::string_view dstN )
+inline PathEndpointsBound bindPathEndpoints( const rw::IngestResult& ing, std::string_view srcN, std::string_view dstN )
 {
     PathEndpointsBound ep;
     ep.src = srcN;
@@ -3019,16 +3016,6 @@ inline PathEndpointsBound bindPathEndpoints( const rw::IngestResult& ing, const 
         }
     }
     ep.spec = ep.src + "," + ep.dst;
-    // BODILESS-SEED: each endpoint that names a contract method also stands for its implementors' bodies (after the M1 rule, so a
-    // refused spelling is refused exactly as before)
-    rw::ContractSeeds src = rw::widenContractSeeds( ing, g, std::move( ep.srcDefs ) );
-    rw::ContractSeeds dst = rw::widenContractSeeds( ing, g, std::move( ep.dstDefs ) );
-    ep.srcDefs = std::move( src.seeds );
-    ep.dstDefs = std::move( dst.seeds );
-    ep.srcContracts = src.contracts;
-    ep.srcImpls     = src.impls;
-    ep.dstContracts = dst.contracts;
-    ep.dstImpls     = dst.impls;
     return ep;
 }
 
@@ -3083,7 +3070,8 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         // GV-PATH-BIND (bindPathEndpoints): an endpoint refused over several fitting definitions runs as the ONE source definition's
         // own spelling, so the answer is the explicit call's plus narrowed=; while either endpoint binds nothing, every name below is
         // the spelling as typed and the refusal is byte-for-byte as before.
-        const PathEndpointsBound    pthEp           = bindPathEndpoints( ing, g, srcN, dstN );
+        PathEndpointsBound          pthEp           = bindPathEndpoints( ing, srcN, dstN );
+        const rw::PathContracts     pthContracts    = rw::widenPathContracts( ing, g, pthEp.srcDefs, pthEp.dstDefs );   // BODILESS-SEED, after the M1 rule
         srcN                                        = pthEp.src;
         dstN                                        = pthEp.dst;
         spec                                        = pthEp.spec;
@@ -3217,15 +3205,13 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                      ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
                      ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + rw::pathBridgeLegend( pthBridge )
                        + rw::nearSinkLegend( pthNear ) + std::string( rw::pathHandlerRuleLegend( pthHandler ) ) + std::string( rw::pathRouteBodiesLegend( !pthRouteEl.xml.empty() ) )
-                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) + std::string( rw::narrowedVerbLegend( !pthEp.narrowed.empty() ) )
-                       + rw::implsLegend( pthEp.srcContracts + pthEp.dstContracts > 0 ) ).c_str(),   // BODILESS-SEED: from_impls=/to_impls=
+                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) + std::string( rw::narrowedVerbLegend( !pthEp.narrowed.empty() ) ) + pthContracts.legend() ).c_str(),
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), pthBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                      pthBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
                      srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob )
-                                                       + rw::narrowedAttrXml( pthEp.narrowed )
-                                                       + rw::pathImplsFields( pthEp.srcContracts, pthEp.srcImpls, pthEp.dstContracts, pthEp.dstImpls, /*json=*/false ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint; GV-PATH-BIND
+                                                       + rw::narrowedAttrXml( pthEp.narrowed ) + pthContracts.attrXml() ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint; GV-PATH-BIND
                      pthRows.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
                      ( pthRootAttrs + rw::hopRootAttrsXml( pthHops ) + pthRootAttr ).c_str(),
                      rw::graphCountFloorAttrXml( g ).c_str() );

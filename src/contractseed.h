@@ -26,6 +26,7 @@
 // body and some bodied def (a bare name): contracts and impls read 0 there, since the seeds are unchanged.
 
 #include "graph.h"             // Graph::implementors / implementorBound, legoImplementorClosure
+#include "graphlegend.h"       // implsFieldOrEmpty / implsLegend — the path root's from_impls=/to_impls= and its legend clause
 #include "langfacts.h"         // structuralTyping — the method-set rule's language column
 #include "model.h"
 #include "receiverevidence.h"  // memberOwnerRuleOf — a scoped member's owner by package directory (Go)
@@ -33,8 +34,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <span>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rw
@@ -49,29 +53,14 @@ struct ContractSeeds
 
 namespace contractseed_detail
 {
-// a type a method can belong to: a class, an interface, a struct or a named type (Go `type N int` owns methods too)
-inline bool ownerKind( SymKind k ) noexcept
-{
-    return k == SymKind::Class || k == SymKind::Interface || isStructOrNamedType( k );
-}
-
-inline bool callableKind( SymKind k ) noexcept
-{
-    return k == SymKind::Method || k == SymKind::Function;
-}
+// A type a method can belong to is graph.h namespaceCompatible's Type rule (a class, an interface, a struct or a named type: Go
+// `type N int` owns methods too); a callable is ReceiverEvidence::callableKind's (a method or a function).
 
 // a declaration with no body, by the house test (model.h isDefinitionNotDeclaration): Ruby has no declarations, so its empty
 // `def hook; end` is a definition and never a contract
 inline bool bodiless( const Symbol& s ) noexcept
 {
     return !isDefinitionNotDeclaration( s );
-}
-
-inline std::string_view dirOf( const IngestResult& ing, std::uint32_t fileId )
-{
-    const std::string_view path = ing.files[ fileId ];
-    const std::size_t      cut  = path.rfind( '/' );
-    return cut == std::string_view::npos ? std::string_view() : path.substr( 0, cut );
 }
 
 // Owners by containment and by scope, for one widening: the owner types of the files the members live in, and the owner types
@@ -81,25 +70,26 @@ class OwnerIndex
 public:
     OwnerIndex( const IngestResult& ing, std::span<const NodeId> members ) : ing_( ing )
     {
-        std::vector<std::uint32_t>    files;
+        std::vector<char>             memberFile( ing.files.size(), 0 );   // indexed by file id
         std::vector<std::string_view> scopes;
         for( const NodeId m : members )
         {
-            files.push_back( ing.symbols[ m ].fileId );
+            memberFile[ ing.symbols[ m ].fileId ] = 1;
             if( const std::string_view sc = scopeLastSegment( ing.symbols[ m ].scope ); !sc.empty() )
             {
                 scopes.push_back( sc );
             }
         }
-        sortUnique( files );
-        sortUnique( scopes );
+        std::ranges::sort( scopes );
+        const auto [ dupFirst, dupLast ] = std::ranges::unique( scopes );
+        scopes.erase( dupFirst, dupLast );
         for( const Symbol& t : ing.symbols )
         {
-            if( !ownerKind( t.kind ) )
+            if( !namespaceCompatible( RefRole::Type, t.kind ) )
             {
                 continue;
             }
-            if( std::binary_search( files.begin(), files.end(), t.fileId ) )
+            if( memberFile[ t.fileId ] != 0 )
             {
                 inFiles_.push_back( t.id );
             }
@@ -126,21 +116,17 @@ public:
     // for a body declared outside its type (a Go receiver method, a C++ out-of-line definition)
     NodeId containerOf( NodeId m ) const
     {
-        const Symbol&       s    = ing_.symbols[ m ];
-        const std::uint32_t last = std::max( s.endByte, s.sigEndByte );   // a bodiless member ends at its signature
-        NodeId              best = kNoNode;
-        for( const NodeId t : inFiles_ )
-        {
-            // the type starts BEFORE the member and ends after its whole signature: a type spelled inside the member's own
-            // declaration (C `static enum E f( int );` indexes `enum E` as a type) never holds it
+        // graph.h typeEnclosesMember, and strictly: the type starts BEFORE the member and ends after its whole signature (a
+        // bodiless member ends at it), so a type spelled inside the member's own declaration (C `static enum E f( int );`
+        // indexes `enum E` as a type) never holds it
+        const Symbol&       s = ing_.symbols[ m ];
+        std::vector<NodeId> holders;
+        std::ranges::copy_if( inFiles_, std::back_inserter( holders ), [ & ]( NodeId t ) {
             const Symbol& ty = ing_.symbols[ t ];
-            if( t != m && ty.fileId == s.fileId && ty.sigStartByte < s.sigStartByte && last <= ty.endByte
-                && ( best == kNoNode || ty.sigStartByte >= ing_.symbols[ best ].sigStartByte ) )
-            {
-                best = t;   // a later start inside the same file is the more inner type
-            }
-        }
-        return best;
+            return t != m && typeEnclosesMember( ty, s ) && ty.sigStartByte < s.sigStartByte && s.sigEndByte <= ty.endByte;
+        } );
+        // the innermost: the latest start (a nested type starts inside its outer one), the higher id on a tie
+        return holders.empty() ? kNoNode : std::ranges::max( holders, {}, [ & ]( NodeId t ) { return std::pair( ing_.symbols[ t ].sigStartByte, t ); } );
     }
 
     // the owner type `m`'s scope names: in its file, else (a package-scoped language) in its package directory, else the only
@@ -168,7 +154,7 @@ public:
             }
             ++count;
             only = t;
-            if( dirOf( ing_, ty.fileId ) == dirOf( ing_, s.fileId ) )
+            if( includerDir( ing_.files[ ty.fileId ] ) == includerDir( ing_.files[ s.fileId ] ) )
             {
                 ++sameDirCount;
                 sameDir = t;
@@ -182,31 +168,10 @@ public:
     }
 
 private:
-    template<class T>
-    static void sortUnique( std::vector<T>& v )
-    {
-        std::sort( v.begin(), v.end() );
-        v.erase( std::unique( v.begin(), v.end() ), v.end() );
-    }
-
     const IngestResult& ing_;
     std::vector<NodeId> inFiles_;   // owner types of the members' files
     std::vector<NodeId> named_;     // owner types named like a member's scope
 };
-
-// the callables named `name` (bodied or not), ascending ids
-inline std::vector<NodeId> callablesNamed( const IngestResult& ing, std::string_view name )
-{
-    std::vector<NodeId> out;
-    for( const Symbol& s : ing.symbols )
-    {
-        if( callableKind( s.kind ) && s.name == name )
-        {
-            out.push_back( s.id );
-        }
-    }
-    return out;
-}
 
 // The structural rule (a language whose types implement an interface by having its methods, and whose extends/implements map
 // lists no implementor of T): the owner types whose BODIED methods cover every method name T declares. By name only.
@@ -218,7 +183,7 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
     std::vector<NodeId>           bodied;    // the bodied callables of the same language carrying one of those names
     for( const Symbol& s : ing.symbols )
     {
-        if( callableKind( s.kind ) && bodiless( s ) && s.lang == t.lang && s.fileId == t.fileId
+        if( ReceiverEvidence::callableKind( s.kind ) && bodiless( s ) && s.lang == t.lang && s.fileId == t.fileId
             && ( scopeLastSegment( s.scope ) == t.name || ( t.sigStartByte <= s.sigStartByte && s.endByte <= t.endByte ) ) )
         {
             members.push_back( s.id );
@@ -233,7 +198,7 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
     }
     for( const Symbol& s : ing.symbols )
     {
-        if( callableKind( s.kind ) && !bodiless( s ) && s.lang == t.lang && std::binary_search( names.begin(), names.end(), std::string_view( s.name ) ) )
+        if( ReceiverEvidence::callableKind( s.kind ) && !bodiless( s ) && s.lang == t.lang && std::binary_search( names.begin(), names.end(), std::string_view( s.name ) ) )
         {
             bodied.push_back( s.id );
         }
@@ -292,7 +257,7 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
     std::vector<NodeId> contracts;
     for( const NodeId m : matches )
     {
-        if( m < ing.symbols.size() && callableKind( ing.symbols[ m ].kind ) && bodiless( ing.symbols[ m ] ) )
+        if( m < ing.symbols.size() && ReceiverEvidence::callableKind( ing.symbols[ m ].kind ) && bodiless( ing.symbols[ m ] ) )
         {
             contracts.push_back( m );
         }
@@ -301,7 +266,8 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
     std::vector<NodeId> implBodies;
     for( const NodeId c : contracts )
     {
-        const std::vector<NodeId> named = callablesNamed( ing, ing.symbols[ c ].name );
+        std::vector<NodeId> named = resolveAllByName( ing, ing.symbols[ c ].name );   // the callables of its name, bodied or not
+        std::erase_if( named, [ & ]( NodeId n ) { return !ReceiverEvidence::callableKind( ing.symbols[ n ].kind ); } );
         const OwnerIndex          owners( ing, named );
         const NodeId              type = owners.containerOf( c );
         if( type == kNoNode )
@@ -352,6 +318,27 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
         out.impls     = 0;
     }
     ENSURES( out.contracts > 0 || out.impls == 0, "only a contract seed adds implementor bodies" );
+    return out;
+}
+
+// --path: both endpoints widened in place (the CLI after bindPathEndpoints, the MCP twin after resolvePathEndpoint), and the
+// counts its root spells as from_impls=/to_impls=, each present exactly when that endpoint names a contract method.
+struct PathContracts
+{
+    ContractSeeds from;   // seeds moved back into the caller's endpoint defs; the counts stay
+    ContractSeeds to;
+
+    std::string attrXml() const
+    {
+        return implsFieldOrEmpty( "from_impls", from.contracts, from.impls, /*json=*/false ) + implsFieldOrEmpty( "to_impls", to.contracts, to.impls, /*json=*/false );
+    }
+    const char* legend() const noexcept { return implsLegend( from.contracts + to.contracts > 0 ); }
+};
+inline PathContracts widenPathContracts( const IngestResult& ing, const Graph& g, std::vector<NodeId>& srcDefs, std::vector<NodeId>& dstDefs )
+{
+    PathContracts out{ widenContractSeeds( ing, g, std::move( srcDefs ) ), widenContractSeeds( ing, g, std::move( dstDefs ) ) };
+    srcDefs = std::move( out.from.seeds );
+    dstDefs = std::move( out.to.seeds );
     return out;
 }
 
