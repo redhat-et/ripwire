@@ -14713,6 +14713,138 @@ If the resolve loop's output cannot be serialized without also serializing the r
 reduces to the CSR-only variant. That is a legitimate outcome, to be recorded as a narrowing with the
 measured reason, not retried until it passes.
 
+### RESULT — the warm snapshot, measured 2026-11-14 against the bands above
+
+Implementation `a23dc3982` on `67b08d46b`. Every figure below is in **bytes** or in **instructions
+retired**; the unit defect disclosed under Band 3 is the reason this section refuses round "MB".
+Instrument for CPU is `instructions retired` from `/usr/bin/time -l`, which is contention-invariant —
+the machine was not quiet (load 3.48) and wall time could not have carried this verdict.
+
+Numbers marked **(v)** were re-measured independently of the implementing agent, on the restored
+corpus, with the A/B taken on **one binary** (`RIPWIRE_NO_WARMSNAP=1` versus the feature on), which
+removes the binary-provenance confound from the comparison entirely.
+
+#### Deviation from the registered design, and why it is accepted
+
+The registration says "section", meaning a section inside the cache blob. The implementation puts the
+state in a **sidecar file beside the blob** (`<cache>.snap`). Accepted, for three reasons, the second
+of which is measured and was not anticipated when the card was written:
+
+1. **Structural.** `saveCache` publishes the blob from inside the parse pool, before the model exists;
+   the graph exists only after `buildGraph`. An in-blob section would require a second whole-blob
+   rewrite — 154,596,199 B on envoy, 284,593,343 B on vscode — charged to the recording run.
+2. **The sidecar adds no cache invalidation at all.** `kCacheVersion` stays **51** and
+   `kIngestParserVerMirror` stays **309**, both identical to the lane's parent **(v)**. Every blob in
+   the field therefore stays valid, and an absent or refused sidecar degrades to exactly today's warm
+   run. An in-blob section would have had to bump `kCacheVersion`, invalidating every existing blob —
+   a strictly worse migration than the one the card imagined it was choosing.
+3. **The refusal direction holds under an adversarial case no gate arm covers (v).** A *foreign*
+   ripwire build (parser mirror 307) was made to rewrite the blob underneath a live sidecar. The lane
+   then reported `why=stale model_why=stale graph_why=stale`, refused all three sections, rebuilt, and
+   emitted stdout **byte-identical to a verified `--no-cache` from-scratch build**. Stale input
+   produced a slow correct answer, never a fast wrong one.
+
+#### Band 1 — CPU: PASS, and the projection was too conservative
+
+| repo | feature OFF | feature ON | ratio |
+|---|---|---|---|
+| envoy, instructions **(v)** | 20,340,025,905 | **2,389,840,225** | **8.51x** |
+| envoy, user CPU | 1.30 s | **0.18 s** | 7.2x |
+| vscode, user CPU | 3.49 s | **0.35 s** | 10.0x |
+
+Refutation threshold was 0.50 s on envoy and 0.80 s on vscode; measured 0.18 s and 0.35 s. The result
+fell **below the projected band** (0.23-0.29 s on envoy), so it is recorded as what it is — the
+projection under-predicted — and not as "as projected". The reason is accounted for: the projection
+removed only the `buildGraph` and crawl shares, while the implementation also removed stored PageRank
+and most of per-record decode.
+
+#### Band 2 — memory: PASS, peak FELL, and the one rise is reported as a trade
+
+Warm peak footprint, envoy: **357,647,032 B -> 277,971,544 B (v)** — a fall of 79,675,488 B. On
+vscode the implementing agent reports 601.0 -> 469.3 MiB; that pair is carried in its own rounded unit
+rather than converted, because an exact-looking byte count derived from a rounded MiB figure would be
+fabricated precision. Peak fell on every repo, as the band expected, and no ceiling is approached: both ceilings govern the
+**cold** peak, which this lane does not touch.
+
+**The trade, stated per the band's own clause 3:** the single run that *writes* the snapshot is more
+expensive — envoy 22,577,115,139 instructions and 409,731,816 B peak **(v)**, against 20.34e9 and
+357.6e6 for a plain warm run. A run that re-parsed anything writes no model or graph section, and five
+edit-then-run cycles on a private nushell copy cost +2.9 % instructions and +9 MB.
+
+#### Band 3 — disk: PASS on the registered constraint, with a unit defect in the card disclosed
+
+The ceiling applies to **blob + sidecar**, not to the blob alone. Applied literally to "the blob" it
+would pass vacuously, because a sidecar leaves blob growth at exactly zero — the registration's own
+first non-negotiable forbids a metric that cannot fail, so the stricter reading is the one used here.
+
+| repo | blob B | sidecar B | total B | smallest peer index B | ratio | required |
+|---|---|---|---|---|---|---|
+| envoy | 154,596,199 | 62,892,120 | 217,488,319 | graft 524,177,408 | **2.410x** | 1.5x |
+| cpython | 151,559,415 | 76,873,824 | 228,433,239 | graphify 424,792,064 | **1.860x** | 1.5x |
+| vscode | 284,593,343 | 112,642,120 | **397,235,463** | graphify 612,589,568 | **1.542x** | 1.5x |
+
+**PASS on all three**, binding at vscode with **2.8 % of margin** on the ratio.
+
+**The defect, disclosed because it decides the verdict.** The card's derived figures — "under 270 MB
+on cpython, 333 MB on envoy, 389 MB on vscode", and the index table they came from — are labelled MB
+but every value in them is **MiB** (verified against the harness's own `index_on_disk_bytes`:
+284,452,991 B is the 271.3 the card prints, which is MiB, not the 284.5 that decimal MB would give).
+Read as MiB, vscode measures 378.8 against 389 and PASSES. Read as decimal MB, the same bytes measure
+397.2 against 389 and **FAIL**. The unit ambiguity is 4.9 %; the margin is 2.8 %; so the reading
+decides the outcome.
+
+The verdict is taken on the band's **primary registered sentence** — "the smallest on-disk index
+measured, with at least 1.5x of margin" — because it is unit-invariant, it is the constraint the MB
+figures were derived *from*, and both sides of the ratio come from the same harness field. That is a
+disambiguation of the band's derived form, not a move of its threshold; the threshold, 1.5x, is
+untouched. Nothing else in the card has moved, and this is recorded rather than quietly fixed
+precisely because it is not verdict-neutral.
+
+**Owner call left open, for the next round and not retroactively:** a 1.5x requirement met at 1.542x
+will not survive the next large repo. Whether 1.5x is still the right constraint is a decision for
+before the next measurement, not after this one.
+
+#### Band 4 — correctness: PASS, on the stronger form of the contract
+
+Byte identity was asserted not merely load-versus-build but against a `--no-cache` run that reads no
+blob at all. On envoy, **seven runs share one stdout sha256 (v)**: the recording run, three loading
+runs, two runs with the feature off, and the from-scratch `--no-cache` build. The gate
+`test/warmsnapcheck.sh` is red-first (40 PASS / 67 FAIL against the parent binary, failing on the
+vacuity lines rather than on trivially-equal output) and green after at 132 PASS / 0 FAIL on both the
+dev and the ASan/UBSan build. Its vacuity guard requires a `RIPWIRE_SNAPSHOT_STATS=1` line on the very
+run compared, so a build without the feature cannot pass. All five invalidation arms the band named —
+a file added, deleted, modified in place at the same size, added inside a new subdirectory, and a
+changed `.gitignore` — are present, plus version, checksum at four offsets, truncation, dependency and
+options-key arms.
+
+#### The registered honest failure mode did NOT occur
+
+The card predicted the section might grow past Band 3 if the resolve-only tables (`varType`,
+`localNameSet`, `localShadowSpans`, `acc`) had to be serialized with it. They did not: only resolve
+*outcomes* are stored. What did bind was the row layout — a fixed-row encoding put vscode's sidecar at
+251.9 MB and over the ceiling, and it took a delta+varint row stream, sparse per-symbol arrays and
+front-coded path lists to reach 112,642,120 B.
+
+#### Correction to the analysis that MOTIVATED this registration
+
+The phase shares quoted in the registration above (`buildGraph` 41.7 % of a warm envoy run, 54.4 % on
+vscode; "19.6k records") were profiled on a **contaminated checkout** — 34.2 GB of peer indexes across
+15 of 28 corpus trees, found and removed the same day. envoy indexes **11,036** files on the restored
+tree **(v)**, not the ~19.6k those shares were computed over, and its warm baseline is 1.23 s, not the
+1.46 s the Band 1 projection was built on. The *conclusion* survived re-measurement on the clean tree
+and the direction held or strengthened; the *shares themselves* are superseded and should not be
+re-quoted. The registration's bands are unaffected: all four were adjudicated above on numbers taken
+after the restore.
+
+#### Not measured, and therefore not claimed
+
+Linux; Release builds; verbs other than the flagless map on the large repos (the rich `--for` class is
+in the gate but not timed); the cold path, which Band 3b puts out of scope by owner ruling.
+Multi-root, `--scip`, `--pin-census`, `--max-memory` and single-file roots are not served by the
+snapshot at all. Stored PageRank is the uniform-teleport default only. One envoy run in one batch of
+nine refused part of the snapshot and did not reproduce in 25 consecutive attempts; refusal is the safe
+direction, but the cause was not found and is recorded here rather than left out.
+
 ## `--impact`'s inline importer ring, gated on two fields the header already prints — PRE-REGISTERED 2026-11-15 (before any `src/` change and before the readout below exists)
 
 **What this registers.** `--impact` prints the `<f>` importer ring — "files that `#include`/`import`
