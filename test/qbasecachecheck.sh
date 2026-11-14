@@ -16,10 +16,6 @@
 #   (C)  a corrupt blob is REFUSED: the corrupt line on stderr, two ingests, the same answer, and the rewritten blob hits
 #        on the next call;
 #   (T)  a truncated blob is refused the same way.
-#   (R)  QD-PAIR-RESIDUE: a pair that BUILT its base tree hands the freed tree's pages back before the target is read, and
-#        says so under RIPWIRE_STATS: exactly one `[mem] phase=pair-base-released` line, after the base's graph-end
-#        reading and before the target's pool-join; a pair whose base came from the blob built no tree and prints none.
-#        The hand-back changes no answer: stdout and rc equal the cold call's (red before the card: no such line).
 #
 # Usage:  bash test/qbasecachecheck.sh          (BIN=build/ripwire)
 set -u
@@ -125,30 +121,6 @@ p = sys.argv[1]; b = open( p, "rb" ).read(); open( p, "wb" ).write( b[ : len( b 
 PY
 run trunc "$PAIR"
 if grep -q 'base Snapshot cache corrupt — recomputing' "$WORK/trunc.err" && [ "$( ingests trunc )" = 2 ] && same cold trunc; then ok "(T) a truncated blob is refused and recomputed"; else no "(T) truncated blob: ingests=$( ingests trunc )"; fi
-
-# (R) its own HOME and TMPDIR, so the first call builds the base tree and the second hits the blob
-mkdir -p "$WORK/rhome" "$WORK/rtmp"
-rrun(){   # rrun <tag>: the pair under RIPWIRE_STATS in the (R) cache dirs
-    ( cd "$FX" && env HOME="$WORK/rhome" TMPDIR="$WORK/rtmp" RIPWIRE_STATS=1 "$BIN" . "$PAIR" > "$WORK/$1.out" 2> "$WORK/$1.err" ); echo $? > "$WORK/$1.rc"
-}
-rrun rcold
-rrun rhit
-order="$( grep -oE '^\[mem\] phase=(graph-end|pair-base-released|pool-join) ' "$WORK/rcold.err" | sed -E 's/^\[mem\] phase=//; s/ $//' | tr '\n' ' ' )"
-case "$order" in
-    "pool-join graph-end pair-base-released pool-join "*) ok "(R) the cold pair reads the base's graph-end, the hand-back, then the target's pool-join" ;;
-    *) no "(R) the cold pair's [mem] order was: ${order:-none} (want: pool-join graph-end pair-base-released pool-join ...)" ;;
-esac
-if [ "$( grep -c '^\[mem\] phase=pair-base-released ' "$WORK/rcold.err" )" = 1 ]; then ok "(R) one hand-back line on the cold pair"; else no "(R) $( grep -c '^\[mem\] phase=pair-base-released ' "$WORK/rcold.err" ) hand-back lines on the cold pair, expected 1"; fi
-if [ "$( grep -c '^\[mem\] phase=pool-join ' "$WORK/rhit.err" )" = 1 ] && [ "$( grep -c '^\[mem\] phase=pair-base-released ' "$WORK/rhit.err" )" = 0 ]; then
-    ok "(R) the blob hit built one tree and handed nothing back"
-else
-    no "(R) the blob hit: $( grep -c '^\[mem\] phase=pool-join ' "$WORK/rhit.err" ) pool-joins, $( grep -c '^\[mem\] phase=pair-base-released ' "$WORK/rhit.err" ) hand-back lines (want 1, 0)"
-fi
-if cmp -s "$WORK/cold.out" "$WORK/rcold.out" && cmp -s "$WORK/cold.rc" "$WORK/rcold.rc" && cmp -s "$WORK/cold.out" "$WORK/rhit.out"; then
-    ok "(R) the hand-back changes no answer (stdout and rc equal the cold call's, cold and hit)"
-else
-    no "(R) the stats pair's answer differs from the cold call's"; diff "$WORK/cold.out" "$WORK/rcold.out" | head -5
-fi
 
 [ "$fail" = 0 ] && echo "qbasecachecheck: PASS" || echo "qbasecachecheck: FAIL"
 exit "$fail"

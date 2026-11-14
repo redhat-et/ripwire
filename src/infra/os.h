@@ -111,7 +111,6 @@ inline constexpr int kDirwatchBatch = 32;
 #if defined( __APPLE__ )
   #include <mach-o/dyld.h>          // _NSGetExecutablePath
   #include <mach/mach.h>            // task_info( TASK_VM_INFO ) — mem_footprint's phys_footprint
-  #include <malloc/malloc.h>        // malloc_zone_pressure_relief — mem_return_free_pages
   #include <sys/sysctl.h>           // sysctlbyname — mem_physical (hw.memsize), mem_pressure (kern.memorystatus_vm_pressure_level)
 #elif defined( __linux__ )
   #include <sys/syscall.h>          // SYS_gettid
@@ -636,13 +635,6 @@ struct dirwatch_event
 // mem_pressure: 0 unknown, 1 normal, 2 warning, 3 critical. macOS kern.memorystatus_vm_pressure_level (1/2/4);
 //   Linux /proc/pressure/memory, critical when "full avg10" (every non-idle task stalled on memory, 10 s mean)
 //   reaches 20%, warning when "some avg10" does. Integer percent only — no float parse, no locale.
-// mem_return_free_pages: hand the allocator's free pages back to the OS, between two phases of one run when the first
-//   phase's structures are all freed and the second builds the same kind of structures again (QD-PAIR-RESIDUE:
-//   --quality-delta=A..B's base tree, then its target tree). macOS: malloc_zone_pressure_relief over every zone. Measured
-//   on vscode, the target tree's build otherwise stacked on the base tree's freed pages: its pool join read 803-892 MiB
-//   where a target built alone reads 537, and the run peaked at 1215-1324 MiB instead of 941-953. Its return value (bytes
-//   released) read 0 on those runs even when the target then stacked on nothing, so it is not reported. Elsewhere a no-op:
-//   glibc's malloc_trim and the Windows heap are unmeasured here. No effect on any output: the same blocks stay free.
 
 #if defined( __APPLE__ )
 // the Mach reader the two footprint bodies below share. A static member of a struct, like the Linux branch's procfs: a
@@ -669,7 +661,6 @@ struct machvm
 };
 inline std::uint64_t mem_footprint() { return machvm::footprint( false ); }
 inline std::uint64_t mem_footprint_peak() { return machvm::footprint( true ); }
-inline void          mem_return_free_pages() { (void)::malloc_zone_pressure_relief( nullptr, 0 ); }
 inline std::uint64_t mem_physical()
 {
     std::uint64_t bytes = 0;
@@ -777,7 +768,6 @@ inline std::uint64_t mem_footprint()
     const long      pageSize = ::sysconf( _SC_PAGESIZE );
     return pages > 0 && pageSize > 0 ? std::uint64_t( pages ) * std::uint64_t( pageSize ) : 0;
 }
-inline void mem_return_free_pages() {}   // glibc's malloc_trim is unmeasured here (see the macOS branch)
 inline std::uint64_t mem_footprint_peak()
 {
     char buf[ 4096 ];   // /proc/self/status is ~1.4 KiB; VmHWM sits in its first third
@@ -852,7 +842,6 @@ inline int mem_pressure()
 }
 #else
 inline std::uint64_t mem_footprint()  { return 0; }
-inline void          mem_return_free_pages() {}
 inline std::uint64_t mem_footprint_peak() { return 0; }
 inline std::uint64_t mem_physical()   { return 0; }
 inline std::uint64_t mem_cgroup_max() { return 0; }
@@ -1268,7 +1257,6 @@ std::uint64_t mem_footprint_peak();
 std::uint64_t mem_physical();
 [[gnu::always_inline]] inline std::uint64_t mem_cgroup_max() { return 0; }
 [[gnu::always_inline]] inline std::uint64_t mem_cgroup_unreclaimable() { return 0; }
-[[gnu::always_inline]] inline void          mem_return_free_pages() {}   // unmeasured on Windows: the heap keeps its pages
 int           mem_pressure();
 
 }   // namespace rw::os
