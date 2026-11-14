@@ -170,6 +170,25 @@ else
     no "(e) a metadata-only chmod DROPPED the file's symbols — the ctime discriminator is costing an answer"
 fi
 
+# ── (f) TRAIN-1111g FIX2 (CodeRabbit 4572576431 on #655): a long root-relative key still warm-hits ─────────────────
+# The warm planner reads a record's head in one 512-byte probe, and a key too long for it in a second read sized as the key plus
+# the head's fixed bytes. Format 51 made the head 4 u64 + 15 u32 (the construct count is the ninth family count); the size said
+# 14, so a key of 417 bytes or more read 4 bytes short, the head failed to parse, and that file reparsed on EVERY warm run.
+WF="$TMP/f"; CF="$TMP/f.bin"
+LONGDIR="$( python3 -c "print( '/'.join( 'd%02d_' % i + 'x' * 40 for i in range( 10 ) ) )" )"
+mkdir -p "$WF/$LONGDIR"
+printf 'def deep_f():\n    return 1\n' >"$WF/$LONGDIR/m.py"
+printf 'def shallow_g():\n    return 2\n' >"$WF/short.py"
+RIPWIRE_CACHE_STATS=1 "$BIN" "$WF" --cache="$CF" --no-stable >"$TMP/f.cold" 2>"$TMP/f.cold.err"; frc_cold=$?
+RIPWIRE_CACHE_STATS=1 "$BIN" "$WF" --cache="$CF" --no-stable >"$TMP/f.warm" 2>"$TMP/f.warm.err"; frc_warm=$?
+fkey=$(( ${#LONGDIR} + 5 ))
+freparsed="$( sed -n 's/.*cache-stats reparsed=\([0-9]*\).*/\1/p' "$TMP/f.warm.err" | head -n 1 )"
+if [ "$frc_cold" = 0 ] && [ "$frc_warm" = 0 ] && [ "$fkey" -ge 417 ] && [ "$freparsed" = 0 ] && diff -q "$TMP/f.cold" "$TMP/f.warm" >/dev/null 2>&1 && grep -q 'n="deep_f"' "$TMP/f.warm"; then
+    ok "(f) a ${fkey}-byte root-relative key warm-hits (reparsed=0), output unchanged"
+else
+    no "(f) a ${fkey}-byte key: rc cold=$frc_cold warm=$frc_warm, warm reparsed=${freparsed:-?} (want 0): $( grep cache-stats "$TMP/f.warm.err" | head -c 200 )"
+fi
+
 # ── well-formed XML on the representative outputs ─────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
     allok=1

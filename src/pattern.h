@@ -927,6 +927,7 @@ struct MatchStats
     std::uint64_t          memberUnmatchedCount = 0;
     std::uint64_t          memberCappedCount    = 0;       // third-ask probes the ellipsis bound abandoned: the count is a floor
     std::uint64_t          memberArrowCount     = 0;       // counted calls whose member callee is spelled `->` (C, C++)
+    std::uint64_t          memberOptChainCount  = 0;       // counted calls whose member callee is spelled `?.` (JS, TS)
     bool                   relaxMember          = false;   // set for the third ask only
 };
 
@@ -1126,20 +1127,35 @@ inline bool countQualifiedNearMiss( const PatternProgram& prog, TSNode n, std::s
     return counted;
 }
 
-// Is this member callee spelled with the arrow operator (`ptr->f`)? The operator is an anonymous child, and a pattern
-// spelled `$O.f` never matches it, so the emitter needs the count to offer a next= that does.
-inline bool memberCalleeIsArrow( TSNode callee )
+// Which operator spells this member callee: `.`, the arrow (`ptr->f`, an anonymous child) or JS/TS optional chaining
+// (`obj?.f`, a named `optional_chain` child)? A pattern spelled `$O.f` matches neither of the last two, so the emitter
+// needs both counts to offer a next= that does (PATTERN-OPTCHAIN-NEXT, CodeRabbit #633).
+// A cursor walk (PATTERN-ARROW-CURSOR, CodeRabbit #633): a comment can sit between `obj` and `->f`, so the callee's
+// child list is as wide as the file makes it, and an indexed ts_node_child loop is quadratic (src/infra/tschildren.h).
+enum class MemberOperator : std::uint8_t
 {
-    const std::uint32_t n = ts_node_child_count( callee );
-    for( std::uint32_t i = 0; i < n; ++i )
+    Dot,
+    Arrow,
+    OptionalChain,
+};
+inline MemberOperator memberCalleeOperator( TSNode callee )
+{
+    MemberOperator op = MemberOperator::Dot;
+    ChildCursor    cursor( callee );
+    forEachChild( callee, cursor.cur, [ & ]( TSNode c )
     {
-        const TSNode c = ts_node_child( callee, i );
-        if( !ts_node_is_named( c ) && std::string_view( ts_node_type( c ) ) == "->" )
+        const std::string_view type( ts_node_type( c ) );
+        if( !ts_node_is_named( c ) && type == "->" )
         {
-            return true;
+            op = MemberOperator::Arrow;
         }
-    }
-    return false;
+        else if( ts_node_is_named( c ) && type == "optional_chain" )
+        {
+            op = MemberOperator::OptionalChain;
+        }
+        return op == MemberOperator::Dot;
+    } );
+    return op;
 }
 
 // The third ask (PATTERN-MEMBER-ZERO), same contract as the second: counted, never a hit. Its ellipsis abandons are
@@ -1160,7 +1176,9 @@ inline void countMemberNearMiss( const PatternProgram& prog, TSNode n, std::stri
     const bool relaxedMatch = matchAt( prog, 0, n, src, relaxedEnv, stats, 0 );
     const bool counted      = relaxedMatch && stats.relaxedLeafHit;
     stats.memberUnmatchedCount += counted ? 1u : 0u;
-    stats.memberArrowCount += ( counted && memberCalleeIsArrow( ts_node_named_child( n, 0 ) ) ) ? 1u : 0u;
+    const MemberOperator op = counted ? memberCalleeOperator( ts_node_named_child( n, 0 ) ) : MemberOperator::Dot;
+    stats.memberArrowCount += op == MemberOperator::Arrow ? 1u : 0u;
+    stats.memberOptChainCount += op == MemberOperator::OptionalChain ? 1u : 0u;
     stats.memberCappedCount += stats.ellipsisCappedCount - ellipsisBefore;
     stats.relaxMember         = false;
     stats.ellipsisCappedCount = ellipsisBefore;

@@ -379,6 +379,33 @@ inline bool crawlPathStaysInRoot( const std::string& path, const std::string& ro
 template<std::size_t kSymbolBytes, std::size_t kIngestResultBytes> struct IngestLayoutStamp {};
 using IngestLayout = IngestLayoutStamp<sizeof( Symbol ), sizeof( IngestResult )>;
 
+// QD-CONSTRUCTS-AT-INGEST, lazy: does an ingest on THIS thread find --quality-delta's construct hits in its parse workers
+// (ingest_astquery.h collectConstructHits)? Only a run that will read them pays for them: a cold map or --deps runs no
+// construct pass, its cache records say "constructs absent", and the next --quality-delta treats such a record as a miss
+// and re-parses that file once, which writes the hits into the record. A hint, never a correctness input:
+// findQualityConstructs uses carried hits only when the ingest claims every file (IngestResult::constructHitsForFiles)
+// and re-parses otherwise, so an ingest that ran without the hint answers the same, only slower.
+inline thread_local bool tlIngestWantsConstructHits = false;
+
+// Scoped: main.cpp holds one for the whole --quality-delta / --quality-baseline run, so the working-tree ingest and the
+// verb's own re-ingests (the HEAD snapshot, both sides of A..B) all carry the hits.
+class WantConstructHits
+{
+public:
+    explicit WantConstructHits( bool on ) noexcept : prev_( tlIngestWantsConstructHits ) { tlIngestWantsConstructHits = prev_ || on; }
+    ~WantConstructHits() { tlIngestWantsConstructHits = prev_; }
+    WantConstructHits( const WantConstructHits& )            = delete;
+    WantConstructHits& operator=( const WantConstructHits& ) = delete;
+
+private:
+    bool prev_;
+};
+
+// The footprint this process's construct tables added when they were compiled (ingest_astquery.h warmConstructTables):
+// fixed bytes, one table per language, held to the end of the process, so a later ingest pays none of it again. The
+// --quality-delta=A..B projection counts them once instead of scaling them with the tree (memguard.h FIXED BYTES).
+std::uint64_t constructTablesFootprint() noexcept;
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr = {},
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
                      bool captureValueUses = true, std::string_view excludeLabel = {},
@@ -609,12 +636,14 @@ private:
 // The member-call near-miss counts of one pattern run (PATTERN-MEMBER-ZERO), summed across the parallel file walk
 // like ellipsisCappedOut: counted = calls the bare callee names as a member (unmatched_member=), capped = member
 // probes the ellipsis bound abandoned, so `counted` is a floor (unmatched_member_capped=), arrow = counted calls
-// spelled with `->` (unmatched_member_arrow=), which a `$O.f` next= cannot match.
+// spelled with `->` (unmatched_member_arrow=) and optchain = those spelled `?.` (unmatched_member_optchain=), which a
+// `$O.f` next= cannot match.
 struct MemberNearMissTally
 {
     std::atomic<std::uint64_t> counted{ 0 };
     std::atomic<std::uint64_t> capped{ 0 };
     std::atomic<std::uint64_t> arrow{ 0 };
+    std::atomic<std::uint64_t> optchain{ 0 };
 };
 
 struct AstQueryGroup

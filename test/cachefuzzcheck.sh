@@ -204,7 +204,7 @@ size_off  = hash_off + 8
 mtime_off = size_off + 8
 ctime_off = mtime_off + 8
 hd_off    = ctime_off + 8 + 24   # past ctimeNs and the six FileHealth u32s (v20 macroBlanked, v44 useBoundsBlanked): the v49 HEAD's family counts (defs first)
-nd_off    = hd_off + 8 * 4       # past the eight head family counts: the BODY's LEAN def-record count (readFileRecord's first count)
+nd_off    = hd_off + 9 * 4       # past the nine head family counts (v51): the BODY's LEAN def-record count (readFileRecord's first count)
 
 mutations = {}
 
@@ -263,7 +263,7 @@ mutations["huge_def_count_recomputed_checksum"] = mut_huge_defcount
 # record[0] refused). The head's counts are what the warm planner reserves from; the body's are what readFileRecord
 # reserves from; the two must agree and each must fit the record's own bytes. Mutants (a)-(d) are the review's.
 def head_count(slot):
-    return hd_off + 4 * slot          # defs refs incs binds ffis routeDefs routeUses constOpens
+    return hd_off + 4 * slot          # defs refs incs binds ffis routeDefs routeUses constOpens constructs (v51)
 def mut_huge_head_defcount(b):        # the planner's headCountsFit: reserve() never sees it
     p = bytearray(b[:payload_len]); struct.pack_into("<I", p, head_count(0), 0xFFFFFFF0); return with_recomputed_trailer(p)
 mutations["huge_head_def_count_recomputed_checksum"] = mut_huge_head_defcount
@@ -280,7 +280,7 @@ def mut_head_refcount_off_by_one(b):  # the same lie in another family (refs): h
     p = bytearray(b[:payload_len]); v = struct.unpack_from("<I", p, head_count(1))[0]; struct.pack_into("<I", p, head_count(1), v + 1); return with_recomputed_trailer(p)
 mutations["head_ref_count_plus_one_recomputed_checksum"] = mut_head_refcount_off_by_one
 def mut_head_zeroed(b):               # the head says factless while the body has rows
-    p = bytearray(b[:payload_len]); struct.pack_into("<8I", p, hd_off, 0, 0, 0, 0, 0, 0, 0, 0); return with_recomputed_trailer(p)
+    p = bytearray(b[:payload_len]); struct.pack_into("<9I", p, hd_off, 0, 0, 0, 0, 0, 0, 0, 0, 0); return with_recomputed_trailer(p)
 mutations["head_counts_zeroed_recomputed_checksum"] = mut_head_zeroed
 
 def mut_overflow_size(b):
@@ -1015,7 +1015,7 @@ for i in range(n):
         sites.setdefault(cls, (p, blob[p])); skip(1)
     def site32(cls, rel):                                                 # a u32 slot `rel` bytes ahead; p does not move
         sites.setdefault(cls, (p + rel, struct.unpack_from("<I", blob, p + rel)[0]))
-    s(); skip(4 * 8 + 6 * 4 + 8 * 4)                                      # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44), head family counts (8 u32 since v49)
+    s(); skip(4 * 8 + 6 * 4 + 9 * 4)                                      # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44), head family counts (8 u32 since v49, 9 since v51)
     for _ in range(u32()):                                                # defs (LEAN family: no subtoken rows)
         site32("def.ppAlt", 9 * 4); site32("def.params", 13 * 4)
         if "def.paramsMin" not in pmin and struct.unpack_from("<I", blob, p + 13 * 4)[0] >= 1:   # B2.2 pair rule: a def with params >= 1
@@ -1036,6 +1036,7 @@ for i in range(n):
         skip(8); site("routeuse.method"); s()
     for _ in range(u32()):                                                # const-opens
         skip(9); s()
+    skip(u32() * 9)                                                       # cache v51: construct hits (startByte, line u32; tag u8)
     if p != rec_off + rec_len:
         raise SystemExit(f"walker desynchronised from the record layout at entry {i}: ended at {p}, record ends at {rec_off + rec_len}")
 

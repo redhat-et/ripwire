@@ -177,6 +177,10 @@ def runAll( BIN, argvs, first = lambda a: False, last = lambda a: False ):
 def isDoctor( a ): return "--doctor" in a
 PYR
 
+# The git-sweep rows (--whereis, --stray-content) ask from CI's ref shape when this repository is past their 512-branch refusal
+# (test/lib/sweeproot.sh says why; a long-lived dev clone and its linked worktrees were red here, CI green).
+. "$ROOT/test/lib/sweeproot.sh"
+export LEGENDCOV_SWEEP="$( sweepRoot "$ROOT" "$TMP/sweep" )"
 python3 - "$BIN" "$ROOT" "$BASELINE" "$TMP" <<'PY' > "$TMP/out" 2>"$TMP/pyerr"
 import subprocess, re, sys, os, json
 
@@ -184,6 +188,7 @@ BIN, ROOT, BASELINE, TMP = sys.argv[1:5]
 sys.path.insert( 0, TMP )
 from lcrun import runAll, isDoctor, JOBS, CALL_TIMEOUT
 SMALL = os.path.join( ROOT, "src" )
+SWEEP = os.environ.get( "LEGENDCOV_SWEEP" ) or ROOT   # ROOT, or its stand-in past the sweep verbs' ref cap (sweeproot.sh)
 
 # The roster: one runnable invocation per first-screen shape. Value-taking verbs get a symbol that exists in
 # this tree; nothing here writes into the corpus (no --quality-baseline / --quality-ack / --note-add /
@@ -282,8 +287,8 @@ ROSTER = [
     # vs 13, 4 gaps vs 2 (it adds no-ref-work@note and pr-context@base_sha), so pinning costs no coverage.
     ("pr-context",         [ROOT,  "--pr-context=HEAD~1"]),
     ("merge-scout",        [ROOT,  "--merge-scout=HEAD~1"]),
-    ("whereis",            [ROOT,  "--whereis=escapeXml"]),
-    ("stray-content",      [ROOT,  "--stray-content"]),
+    ("whereis",            [SWEEP, "--whereis=escapeXml"]),
+    ("stray-content",      [SWEEP, "--stray-content"]),
     ("doc-drift",          [SMALL, "--doc-drift"]),
     ("layout",             [SMALL, "--layout=MapAnnotations"]),
     ("notes",              [ROOT,  "--notes"]),
@@ -542,13 +547,13 @@ def legendOf( doc, anyRoot = False ):
     return lead.decode( 'utf-8', 'replace' )
 
 # TRAILING BLOCKS (K-LEGEND, 2026-11-05). A block a verb appends AFTER its ordinary answer — <syms> (forfilesyms.h), <decl_rows>
-# (fordeclrow.h), <graph_verb> (forgraphverb.h) — carries its legend in the comment IMMEDIATELY before its open tag
+# (fordeclrow.h), <graph_verb> (forgraphverb.h), <reask> (verbs_for.h appendSentenceReask) — carries its legend in the comment IMMEDIATELY before its open tag
 # (`<!-- … --><syms`), so the answer before it stays byte-identical with the block off; the reader meets that comment right where
 # the block starts, which is the first screen of the block. legendOf reads only the head, so that comment counts here, for the
 # block's OWN elements only (its open tag through its close tag, or its self-closing tag), on top of the head legend: a comment
 # with anything but whitespace between it and the tag does not count, and a block's comment never defines an attribute outside
 # its block. TRAILING lists the tags; the reader below has no tag of its own (arm T pins all three properties).
-TRAILING = ( b"syms", b"decl_rows", b"graph_verb" )
+TRAILING = ( b"syms", b"decl_rows", b"graph_verb", b"reask" )
 INNER    = re.compile( rb'<(bodies)\b[^>]*(?<!/)>\s*(<!--(?:(?!-->).)*-->)', re.S )
 TRAIL    = re.compile( rb'<!--(?:(?!-->).)*-->\s*(?=<(?:' + b"|".join( TRAILING ) + rb')[\s/>])', re.S )
 def trailingBlocks( doc ):

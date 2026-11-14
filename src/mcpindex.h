@@ -11,7 +11,7 @@
 // mcpedit.h, and mcp.h. Also carries the index-side mcpdetail helpers (mtime/stat/watcher/
 // byte-hash/handle codec) — the JSON-side mcpdetail helpers live in mcpjson.h (same namespace).
 
-#include "infra/sharedOnce.h"   // sharedOnce — valueRefIndexOf
+#include "infra/sharedOnce.h"   // sharedOnce — valueRefIndexOf; the MCP-CALL-MEMO slots (McpIndex::impure, ::qmetrics)
 #include "mcpjson.h"
 
 #include "model.h"
@@ -68,6 +68,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <optional>     // MCP-CALL-MEMO: the per-index fact slots on McpIndex
 #include <string>
 #include <string_view>
 #include <thread>       // Phase-M: the DETACHED qsnap-prefetch worker
@@ -543,6 +544,13 @@ struct McpIndex
     mutable std::shared_ptr<const ValueRefIndex> valueRefs;
     mutable std::uint64_t                        valueRefBuilds = 0;   // monotone: McpRequestTiming's vri= reads it
 
+    // MCP-CALL-MEMO: the per-index facts the `for`, `pack`, `from_trace`, `lego` and `exemplar` verbs read on every call — the
+    // purity fixpoint (computeImpure) and QMetrics (computeQMetrics) — are pure functions of (`ing`, `g`), so they are built on
+    // first use and reused until the index is replaced, under the same rule as valueRefs: every writer of `ing` resets them
+    // (releaseMcpIndexMemory), and the verb fills them with sharedOnce. Before, each call recomputed them (computeImpure 21 ms envoy, 84 ms vscode per `for` call).
+    mutable std::optional<std::vector<char>> impure;     // filled by sharedOnce at the verb
+    mutable std::optional<QMetrics>          qmetrics;
+
     // ── P1-15 incremental-pass disclosure (the `_reingest` envelope field; mcpReingestField below).
     //
     // incrementalPasses counts ONLY rebuilds that refreshed an index this process ALREADY held for this
@@ -580,13 +588,17 @@ struct McpIndex
 // diverged from the CLI's twice over: a different offset basis, and a key that followed the SPELLING of the
 // root (a trailing slash or a symlinked checkout minted a second blob).
 //
-// The name carries the build tag too (`ripwire-mcp-<rootKey>-c<format>p<parser>.cache`, quality.h rootBlobTail): two MCP
-// servers of different formats on one root — an agent wired to an older install beside one wired to a newer —
-// each keep their own warm index instead of refusing and rewriting one file on every start.
+// ONE-PARSE (MCP half): the server reads and writes the CLI's RICH blob (`ripwire-<rootKey>-rich-<tag>.bin`, main.cpp
+// defaultCachePath with captureValueUses), not a third file of its own. Its ingest is the CLI rich verbs' ingest with the
+// CLI defaults — no excludes, kDefaultMaxFileBytes, captureValueUses, .gitignore respected, the workspace label passed the
+// same way — so the records are the same records, and a server started after a CLI `--for` (or the reverse) loads the
+// tree warm instead of parsing it a second time (envoy: 350 G of a cold parse per server start). Two writers on one blob
+// are the case saveCache already handles (an exclusive temp file, then rename). The build tag still separates formats.
+// RootBlobFamily::Mcp stays in the table only so the eviction sweep keeps reading the root key of blobs older servers wrote.
 inline std::string mcpCachePath( const std::string& root )
 {
-    std::string path = quality::rootKeyedCachePath( root, quality::RootBlobFamily::Mcp );
-    ENSURES( path.ends_with( ".cache" ), "the MCP index family's row names a .cache blob, flat or sharded" );
+    std::string path = quality::rootKeyedCachePath( root, quality::RootBlobFamily::Rich );
+    ENSURES( path.ends_with( ".bin" ), "the MCP index is the CLI rich family's .bin blob, flat or sharded" );
     return path;
 }
 
@@ -819,11 +831,14 @@ inline void invalidateMcpIndex()
 
 // #350: over the memory guard's hard limit, drop the resident index's bulk (the ingest, the graph, the ranks and the
 // per-file arrays) and mark it stale, so the footprint can fall back under the line; the next getIndex() rebuilds.
+// getIndex() also calls it first on every rebuild (S1), so a rebuild never holds the old index beside the new one.
 inline void releaseMcpIndexMemory()
 {
     McpIndex& ix = mcpIndexSlot();
     ix.valid = false;
     ix.valueRefs.reset();   // it points into `ing` (see McpIndex::valueRefs) — and it is resident bulk too
+    ix.impure.reset();      // MCP-CALL-MEMO: derived from the `ing` and `g` released below
+    ix.qmetrics.reset();
     ix.ing   = IngestResult{};
     ix.g     = Graph{};
     std::vector<float>().swap( ix.rank );
@@ -1240,9 +1255,13 @@ inline const McpIndex& getIndex( const std::string& root )
     // touches the warm reuse that returned above.
     const McpRebuildBaseline a3Before = mcpRebuildBaseline( ix, isIncrementalPass );
 
-    // `ing` is about to be replaced: the value-reference index points into it (McpIndex::valueRefs), so it goes first —
-    // whether or not the file content moved.
-    ix.valueRefs.reset();
+    // S1 (mem-audit-fable-1111): the old index goes BEFORE the new ingest, not when the new one is assigned over it. Everything
+    // the rebuild still needs from it was taken just above (a3Before) or lives outside the bulk (root, cacheFile, dirMtime, the
+    // watcher, the counters); the ingest reads the cache blob on disk, never the old model. Holding both meant a rebuild peaked
+    // at the old model + graph on top of a fresh build (envoy: about 565 MiB extra). The value-reference index and the
+    // MCP-CALL-MEMO facts point into or derive from `ing`, and releaseMcpIndexMemory drops them first. A failed ingest or graph
+    // build now leaves an invalid slot, the state the FileGraphStopped path below already leaves; the next request rebuilds.
+    releaseMcpIndexMemory();
 
     // Multi-root workspace key (A11): per-root ingest (each with ITS OWN mcpCachePath blob — an edit in
     // one root never reparses another) merged into one IngestResult; else the single-root path unchanged.

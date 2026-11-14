@@ -20,7 +20,16 @@
 //   H  (run as `textpool_harness exitrace`, by the gate, several times) a DETACHED thread keeps interning reference names while
 //      main returns: the process pool must outlive static destruction (refnames.h NoDestroy). Under ASan a destroyed pool is a
 //      heap-use-after-free (seen in 4 of 5 runs of the mutant; the gate runs it 5 times).
+//   I  TextPool::lookup / InternedText::ifInterned never insert: an absent text is nullopt and idCount does not move; an interned
+//      one comes back equal to its InternedText; the empty text is the empty value; a shard+tag collision (arm G's pair) is
+//      told apart by text.
+//   J  IdKeyedCsr (K1a LOCALTYPE-PACK): a key's values come back in add order, a repeat within a key is dropped, keys never
+//      mix (same owner other name, same name other owner), an add after seal() + seal() appends after the sealed values,
+//      found values are mutable in place, and an absent key is an empty span.
+//   K  determinism: two tables fed the same adds, whose names were interned in OPPOSITE orders in two pools (so every id
+//      differs), answer every lookup identically, value for value.
 #include "refnames.h"
+#include "infra/idkeyedmap.h"
 
 #include <chrono>
 
@@ -70,6 +79,105 @@ int exitRace()
     std::this_thread::sleep_for( std::chrono::milliseconds( 80 ) );
     std::printf( "textpool: exitrace returning while the detached thread interns\n" );
     return 0;   // static destruction runs now, with the thread still interning
+}
+
+// I. Lookup without insert.
+static void armLookup()
+{
+    const std::uint32_t before = rw::RefNames::pool().idCount();
+    const auto absent = rw::InternedText::ifInterned( "never_interned_lookup_text_7f3a" );
+    check( !absent.has_value() && rw::RefNames::pool().idCount() == before, "I", "an absent text is nullopt and is not interned" );
+    const rw::InternedText have( std::string_view( "lookup_present_text" ) );
+    const auto found = rw::InternedText::ifInterned( "lookup_present_text" );
+    const auto again = rw::InternedText::ifInterned( "lookup_present_text" );   // the front-cache hit
+    check( found.has_value() && *found == have && again.has_value() && *again == have, "I", "an interned text comes back equal" );
+    const auto empty = rw::InternedText::ifInterned( "" );
+    check( empty.has_value() && empty->empty(), "I", "the empty text is the empty value" );
+    rw::TextPool        g;
+    const std::uint32_t a = g.intern( "n85186" );
+    check( g.lookup( "n85186", rw::TextPool::hashOf( "n85186" ) ) == a && g.lookup( "n1381407", rw::TextPool::hashOf( "n1381407" ) ) == rw::TextPool::kAbsentId,
+           "I", "pool lookup tells a shard+tag collision apart by text" );
+}
+
+// J. IdKeyedCsr semantics.
+static void armCsr()
+{
+    struct Fact
+    {
+        int  v = 0;
+        bool operator==( const Fact& ) const = default;
+    };
+    rw::IdKeyedCsr<rw::RefNames, Fact> t;
+    const rw::InternedText x( std::string_view( "csr_x" ) ), y( std::string_view( "csr_y" ) );
+    t.addUnique( 1, x, { 10 } );
+    t.addUnique( 2, x, { 20 } );
+    t.addUnique( 1, y, { 30 } );
+    t.addUnique( 1, x, { 11 } );
+    t.addUnique( 1, x, { 10 } );   // a repeat: dropped
+    t.seal();
+    const auto ones = t.find( 1, x );
+    check( ones.size() == 2 && ones[ 0 ].v == 10 && ones[ 1 ].v == 11, "J", "add order kept, a repeat within a key dropped" );
+    check( t.find( 2, x ).size() == 1 && t.find( 2, x )[ 0 ].v == 20 && t.find( 1, y ).size() == 1 && t.find( 1, y )[ 0 ].v == 30,
+           "J", "keys never mix across owner or name" );
+    check( t.find( 3, x ).empty() && !t.contains( 3, x ) && t.contains( 1, y ), "J", "an absent key is an empty span" );
+    t.addUnique( 1, x, { 12 } );
+    t.addUnique( 1, x, { 11 } );   // repeats a SEALED value: dropped
+    t.addUnique( 4, y, { 40 } );
+    t.seal();
+    const auto more = t.find( 1, x );
+    check( more.size() == 3 && more[ 0 ].v == 10 && more[ 1 ].v == 11 && more[ 2 ].v == 12 && t.find( 4, y ).size() == 1 && t.find( 2, x )[ 0 ].v == 20,
+           "J", "a re-seal appends after the sealed values, dropping a repeat of one" );
+    t.find( 1, y )[ 0 ].v = 31;
+    check( t.find( 1, y )[ 0 ].v == 31 && t.keyCount() == 4 && t.valueCount() == 6, "J", "found values mutate in place" );
+}
+
+// K. Same answers whatever the ids.
+static void armIdsInvisible()
+{
+    struct DomA
+    {
+        static rw::TextPool& pool() { static rw::TextPool p; return p; }
+    };
+    struct DomB
+    {
+        static rw::TextPool& pool() { static rw::TextPool p; return p; }
+    };
+    constexpr std::size_t kNames = 2000;
+    std::vector<std::string> names;
+    for( std::size_t i = 0; i < kNames; ++i )
+    {
+        names.push_back( "k_" + std::to_string( i ) );
+    }
+    for( std::size_t i = 0; i < kNames; ++i )
+    {
+        DomA::pool().intern( names[ i ] );
+        DomB::pool().intern( names[ kNames - 1 - i ] );
+    }
+    rw::IdKeyedCsr<DomA, int> a;
+    rw::IdKeyedCsr<DomB, int> b;
+    for( std::size_t i = 0; i < 6 * kNames; ++i )
+    {
+        const std::size_t   n     = ( i * 7919 ) % kNames;
+        const std::uint32_t owner = std::uint32_t( i % 5 );
+        a.addUnique( owner, rw::InternedTextOf<DomA>( names[ n ] ), int( i % 7 ) );
+        b.addUnique( owner, rw::InternedTextOf<DomB>( names[ n ] ), int( i % 7 ) );
+    }
+    a.seal();
+    b.seal();
+    bool same     = rw::InternedTextOf<DomA>( names[ 0 ] ).str() == names[ 0 ];
+    std::size_t differingIds = 0;   // the premise: the two pools really gave the names different ids
+    for( std::size_t n = 0; n < kNames; ++n )
+    {
+        differingIds += DomA::pool().lookup( names[ n ], rw::TextPool::hashOf( names[ n ] ) ) != DomB::pool().lookup( names[ n ], rw::TextPool::hashOf( names[ n ] ) ) ? 1 : 0;
+        for( std::uint32_t owner = 0; owner < 6; ++owner )
+        {
+            const auto x = a.find( owner, rw::InternedTextOf<DomA>( names[ n ] ) );
+            const auto y = b.find( owner, rw::InternedTextOf<DomB>( names[ n ] ) );
+            same = same && std::equal( x.begin(), x.end(), y.begin(), y.end() );
+        }
+    }
+    check( differingIds > kNames / 2, "K", "premise: the two pools gave most names different ids" );
+    check( same, "K", "two tables over different ids answer every lookup identically" );
 }
 
 int main( int argc, char** argv )
@@ -243,6 +351,10 @@ int main( int argc, char** argv )
         const rw::InternedText x( std::string_view( "n900597" ) ), y( std::string_view( "n2694216" ) ), x2( std::string_view( "n900597" ) );
         check( !( x == y ) && x == x2 && x.str() == "n900597" && y.str() == "n2694216", "G", "front cache: a slot+tag collision gets two ids" );
     }
+
+    armLookup();   // I
+    armCsr();      // J
+    armIdsInvisible();   // K
 
     std::printf( "textpool: %s\n", gFails == 0 ? "ALL PASS" : "FAILURES" );
     return gFails == 0 ? 0 : 1;

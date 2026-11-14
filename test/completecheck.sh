@@ -253,11 +253,13 @@ if command -v git >/dev/null 2>&1; then
     # The fault is planted with a PATH shim around the real git that appends one malformed row to for-each-ref's
     # output — a seam that reaches the Release binary too, unlike the non-NDEBUG fault switches. Control: the same
     # shim passing everything through keeps the claim, so the arm cannot pass by breaking git.
+    # The planted row has for-each-ref's four fields (name|tip|date|unix date: CROSSREF-MAXREFS added the unix committer date
+    # the ref window orders by), so only its tip is wrong.
     REALGIT="$( command -v git )"; SHIM="$TMP/gitshim"; mkdir -p "$SHIM"
     cat >"$SHIM/git" <<SHEOF
 #!/usr/bin/env bash
 case " \$* " in
-    *" for-each-ref "*) "$REALGIT" "\$@"; rc=\$?; [ -n "\${RW_SHIM_MANGLE:-}" ] && printf 'zz-dropped|not-an-object-name|2026-01-01\n'; exit \$rc ;;
+    *" for-each-ref "*) "$REALGIT" "\$@"; rc=\$?; [ -n "\${RW_SHIM_MANGLE:-}" ] && printf 'zz-dropped|not-an-object-name|2026-01-01|1767225600\n'; exit \$rc ;;
     *) exec "$REALGIT" "\$@" ;;
 esac
 SHEOF

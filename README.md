@@ -110,7 +110,7 @@ measurements are in [docs/EVALS.md](docs/EVALS.md).*
 </details>
 
 <details>
-<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 76 papers folded — McCabe (1976) through to <b>seven published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 79 papers folded — McCabe (1976) through to <b>seven published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
 
 Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
@@ -882,8 +882,9 @@ AI-authored commits, a function rewritten again inside two weeks **+15%** more l
 `--quality-delta`'s 12 kinds each target one measured mode like those (the eleventh, `placeholder`,
 lists the stubs and TODOs a change adds, and never gates; the twelfth, `defect-shape`, catches four
 defect shapes review kept finding by hand —
-new-symbol rows never gate, except defect-shape format-arity,
-because a format/argument mismatch is a defect, not debt), and it reports **only what your
+new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling,
+because a format/argument mismatch is a defect, not debt, and a new function at 4x the bar — ccx 60 or 240 lines —
+is how a 1,000-line function starts), and it reports **only what your
 change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
 names the tests that must run before "done."
 
@@ -968,7 +969,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 36 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 39 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -1984,10 +1985,10 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 <details>
-<summary>49 repositories, 76 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+<summary>49 repositories, 79 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**49 repositories and 76 papers** into one deterministic executable, alongside a labelled
+**49 repositories and 79 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
@@ -2141,9 +2142,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>807 gate scripts</b> (counts snapshot 2026-11-13), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>810 gate scripts</b> (counts snapshot 2026-11-13), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **807 gate scripts** at the counts snapshot 2026-11-13 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **810 gate scripts** at the counts snapshot 2026-11-13 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2336,7 +2337,7 @@ are one contributor's corpus away from being measurably better, and we cannot se
 ## Languages
 
 <details>
-<summary><b>26</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
+<summary><b>27</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
 
 C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal` — indexed with the
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
@@ -2397,7 +2398,7 @@ full command reference. Run `ripwire --help` for the current flag list. The bina
 `--help`, report this guide as a defect.
 
 <details>
-<summary><b>Evidence basis.</b> Fifty years of software-engineering results. 49 repositories and 76 papers are folded. A survey of 237 tools is separate.</summary>
+<summary><b>Evidence basis.</b> Fifty years of software-engineering results. 49 repositories and 79 papers are folded. A survey of 237 tools is separate.</summary>
 
 The counts come from `docs/LINEAGE.md`. Counts are current as of 2026-09-14. Seventeen of the folded papers are from 2026, seven published in the last two months, and three in the last thirty days. The survey describes 237 tools that contributed no lesson. The two sets are disjoint, so the counts add.
 
@@ -2904,7 +2905,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-13 the tool had 421 compile-time caps and 9 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-13 the tool had 423 compile-time caps and 10 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of the caps the sweep has measured, and names the ones it has not.
@@ -3215,7 +3216,7 @@ record, and this line is only the pointer to it.
 | The compile-time cap inventory | [`docs/LIMITS.md`](docs/LIMITS.md) |
 | The measured cost of the caps the sweep covers | [`docs/TUNING.md`](docs/TUNING.md) |
 | Skill-file security checks | [`docs/COMMANDS.md`](docs/COMMANDS.md#--scan-skillsdir) |
-| The whole tool in 36 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 39 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 

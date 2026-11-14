@@ -397,6 +397,7 @@ for _g in \
     composelangcheck \
     connectcheck \
     connectcorecheck \
+    connectdeclinedjointcheck \
     connectjoincheck \
     connectsourcejointcheck \
     constcheck \
@@ -439,6 +440,7 @@ for _g in \
     demoterefillcheck \
     dependencypincheck \
     deplangscheck \
+    depsnographcheck \
     depsprecisecheck \
     det-gate \
     detailcheck \
@@ -669,6 +671,7 @@ for _g in \
     layerquerycheck \
     layoutcheck \
     lb3namecheck \
+    lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
     legenddriftcheck \
@@ -724,6 +727,7 @@ for _g in \
     mcphandlecheck \
     mcpincrementalcheck \
     mcpmanifestcheck \
+    mcponeparsecheck \
     mcprangeedgecheck \
     mcpreadloopcheck \
     mcpredactcheck \
@@ -852,12 +856,15 @@ for _g in \
     pyshapecheck \
     qackconcurrencycheck \
     qackorigincheck \
+    qbasecachecheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
     qdclonepaircheck \
+    qdconstructscheck \
     qddegradecheck \
     qddialscheck \
+    qdentryceilingcheck \
     qdmonstercheck \
     qdrefpaircheck \
     qdtestdeadcheck \
@@ -970,6 +977,7 @@ for _g in \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
+    scanoncecheck \
     scipcheck \
     scipjoincheck \
     scorecardcheck \
@@ -983,6 +991,7 @@ for _g in \
     selectorscopecheck \
     selfcheckcheck \
     selfcontainedcheck \
+    sentencesubjectcheck \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \

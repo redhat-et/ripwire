@@ -774,6 +774,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // (on each <arm>) and render_failed= (also on the <sigs>/<bodies> element it marks).
     { "disk_walk_failed",  "disk_walk_failed=1: the root could not be listed, so a missing-file row may name an unindexed file that exists" },
     { "refs_dropped",      "refs_dropped=K: K listed branches could not be read, in no count or row" },
+    // CROSSREF-MAXREFS: the git sweeps' ref window (crossref kMaxRefs). Past 512 refs they read the newest and count the rest,
+    // where they used to refuse; present only then, so a sweep under the window is byte-identical. Head terms like refs_dropped=.
+    { "refs_omitted",      "refs_omitted=K: past the 512-ref window the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which are read)" },
+    { "labels_omitted",    "labels_omitted=K: K labelled refs past the sweep's 512-ref window, never scored" },
     { "head_conflicts_ok", "head_conflicts_ok=0: that arm's base or HEAD tree was unavailable, head_conflicts= unknown", true, "arm" },
     { "render_failed",     "render_failed=: sections whose render FAILED (empty, not budget-omitted)", true },
     // notes.h follow-up round (CodeRabbit 4053600616, declined at train-7, landed here): the ONE marker every
@@ -970,7 +974,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "stale_by_kind", "stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "stale_next", "stale_next=: the call printing the sa rows and the full header", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    { "new-symbol", "new-symbol=N: findings on NEW code; new-symbol rows never gate, except defect-shape format-arity", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity or a ceiling= row", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "declined-call-excluded", "declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "api-new-surface", "api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -1323,6 +1327,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "count", "count=N: unhedged use-site rows (a floor)", false, "uses", MapHeaderRead::No, {}, "uses" },
     // B31 USES-UNARMED-DISCLOSE (src/countfloor.h usesRolesUnindexed), present-only
     { "unindexed_roles", "unindexed_roles=read,write,type: such sites go uncaptured for some or all users of this definition (its language, or the C users of a C-family header), so count= is a floor: every call, value, import and extends site, only the captured read, write and type ones; a zero is not a count of its uses (grep lists the text uses)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "decl_scan", "decl_scan=capped: the scan for a lexical member declaration of this name (a field of a type whose language extracts no fields) stopped at its 16 MiB budget, so external=1 is unchecked past it (grep finds the declaration)", false, "uses", MapHeaderRead::No, {}, "uses" },
     // XF-ALIAS-HOP (src/aliashop.h AliasReach): the sites written through an alias of of=, present-only
     { "via", "<u via=\"alias\" alias=A>: the site is written as the alias A, whose written target reaches of= (the head or a template argument, up to 4 alias hops); never a call edge; listed after the direct rows, counted in count= when that A is the one in scope at the site (its file, or a namespace or class enclosing it)", true, "u", MapHeaderRead::No, "alias", "uses" },
     { "hedge", "<u hedge=\"name\">: the alias site is matched by name only (no reaching alias encloses it, or a namesake does); listed last, in no count=", true, "u", MapHeaderRead::No, {}, "uses" },
@@ -1351,6 +1356,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "connect", MapHeaderRead::No, {}, "connect" },
     // CONNECT-SOURCE-JOINT (src/mcpverbs.h kConnectTestJointLegend), present-only: only a test joins source terminals
     { "source_joint", "source_joint=none: all terminals are source and no source function joins the unconnected ones (test/fixture code is not walked); test_joint=/test_joint_p=: a test-class function the undirected search joins them through, test-only evidence, not a source caller", false, "connect", MapHeaderRead::No, {}, "connect" },   // also defines test_joint=, test_joint_p=
+    // CONNECT-SOURCE-JOINT (b) (src/mcpverbs.h kConnectDeclinedJointLegend), present-only: a declined common caller is printed
+    { "declined_joints", "declined_joints=N: no source fn has a call edge to every terminal; N (a floor: a declined call over 16 cands is not followed) reach every terminal by an edge or a DECLINED call; dj n= t= p= is one (first 3 by path), one e t= site= call= per terminal; e via=declined cands=K: that call is declined, K candidates (the terminal one); a hedge, never an edge, node or count", false, "connect", MapHeaderRead::No, {}, "connect" },   // also defines dj, e via=declined, e cands=
     // grep: src/verbs_grep.h (the enc row's def count)
     { "defs", "enc defs=N: the enclosing name has N defs, the row unions them (only above 1)", true, "enc", MapHeaderRead::No, {}, "grep" },
     // owners: src/verbs_report.h (the of= form)
@@ -1490,7 +1497,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // comment-coherence: c_coeff= is spelled only in the purpose, which does not say HIGH c_coeff is BAD (restates the name); outside this gap list.
     // quality-delta rows (src/verbs_quality.h): the row facets the purpose line does not spell, present-only.
     { "sev", "r sev=minor: a small numeric delta, counted in minor=, never gating (absent: major)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "origin", "r origin=new-symbol: a finding on NEW code (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "ceiling", "r ceiling=: the new-function ceiling (4x bar=, not test code) a NEW row reached; it gates", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "origin", "r origin=new-symbol: a finding on NEW code; moved: its body left another name or file, never gating (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "churn", "r churn=self|ambient|unknown: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); unknown: the blame failed (unread_history=); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },

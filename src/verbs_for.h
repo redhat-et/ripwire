@@ -33,6 +33,7 @@
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
 #include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
 #include "forrowfeatures.h" // ROW-FEATURE-DUMP: RIPWIRE_ROW_FEATURES=<path>, the ranker's per-row internals beside the answer's placement (dev only)
+#include "memstats.h"       // FOR-SCAN-ONCE: RIPWIRE_STATS gates the [scan] line (literal asks, corpus reads)
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -2896,10 +2897,15 @@ std::optional<int> runConnect( const MainDispatch& d );
 // and their owner bodies inside <lit>, just before </ctx>, after every byte of the ordinary answer. `served` is the answer's own
 // body text: a body it already printed is not repeated. `answerIds` (LIT-SITE-DECOY): the answer's shown rows and whole bodies, which order
 // the literal's sites by nearness (none: no site is near, the old order). XML, the default regime and a single root only.
+inline bool literalAnchorBlockOn( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    return !( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || cfg.tokenBudget > 0 || !rw::forLiteralOn() );
+}
 inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view rootArg, std::string_view served, std::span<const rw::NodeId> answerIds = {} )
 {
     const rw::Config& cfg = d.cfg;
-    if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || cfg.tokenBudget > 0 || !rw::forLiteralOn() )
+    if( !literalAnchorBlockOn( d ) )
     {
         return;
     }
@@ -3278,23 +3284,24 @@ inline void appendMetBridge( const MainDispatch& d, const rw::Config& sub, std::
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
 // --json / columnar dialects keep their single document; the verb is one call away there).
-inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const rw::NodeId> served )
+// Returns whether the block (or its held tag) was printed.
+inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const rw::NodeId> served )
 {
     const rw::Config& cfg = d.cfg;
     if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
     {
-        return;
+        return false;
     }
     const std::optional<rw::GraphSubjectArgs> args = rw::chooseGraphSubjectArgs( d.ing, cfg.forTask );
     if( !args )
     {
-        return;
+        return false;
     }
     if( cfg.tokenBudget > 0 )   // --token-budget (the budget --for honours; shapingflagcheck (A) pins the --max-tokens read sites, so this reads only the one)
     {
         // a token budget is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .held = true } ).c_str() );
-        return;
+        return true;
     }
     rw::Config sub = cfg;   // the verb runs as its own bare call: its default caps, no page window, no --for shaping
     sub.forTask    = {};
@@ -3351,6 +3358,29 @@ inline void appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
         }
     }
     rw::emitRaw( stdout, std::string( rw::kGraphSubjectCloseXml ).c_str() );
+    return true;
+}
+
+// RE-ASK (SENTENCE-SUBJECT card 2, src/subjectanchor.h sentenceReaskInvocation): a sentence that spells code and asks for its callers
+// or a path, answered with no <callers> and no <graph_verb> block, gets ONE <reask next="…"/> naming the bare call that answers it,
+// just before </ctx>. XML only, like the blocks it stands in for; outside est_tokens. "" otherwise.
+inline constexpr std::string_view kReaskLegend =
+    "<!-- ripwire for reask: the task names code in a sentence and asks for its callers or a call path, and this answer carries no "
+    "callers or graph_verb block for it; next= is the same question in its bare form, the one call that answers it -->";
+inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted )
+{
+    const rw::Config& cfg = d.cfg;
+    if( subjectBlockPrinted || cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
+    {
+        return;
+    }
+    const std::string invocation = rw::sentenceReaskInvocation( d.ing, cfg.forTask );
+    // the callers form stands in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns it off with it
+    if( invocation.empty() || ( invocation.starts_with( "--callers=" ) && !rw::forCallerHopOn() ) )
+    {
+        return;
+    }
+    rw::emitRaw( stdout, ( std::string( kReaskLegend ) + "<reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
 }
 
 std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, const ForLensPassMode& mode )
@@ -5247,13 +5277,17 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
         }
         appendForTaskRowBlocks( d );                                     // DECL-ROW: "" unless the task reads as a signature change of one C/C++/Go function
-        appendSubjectGraphVerbBlock( d, servedAnswerBodies().bodies );   // FOR-ROUTE-DECLINED: "" unless the task is spelled as a graph question that resolves; the bodies this answer carries print no second copy in its path hop bodies
+        const bool graphBlock = appendSubjectGraphVerbBlock( d, servedAnswerBodies().bodies );   // FOR-ROUTE-DECLINED: "" unless the task is spelled as a graph question that resolves; the bodies this answer carries print no second copy in its path hop bodies
+        appendSentenceReask( d, graphBlock || headerParts.callerHopPresent );   // RE-ASK: "" unless a code-spelling sentence's callers / path got no block
         // ALIAS-IMPORT (forreexport.h): the `pub use` / `export … from` hops to a definition the task names; "" when none. XML only, like the block above.
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && rw::forReexportOn() )
         {
             const std::string reexports = rw::renderForReexports( ing, cfg.forTask, /*held=*/cfg.tokenBudget > 0 );   // CR pre-pass 42b: held under --token-budget
             std::fwrite( reexports.data(), 1, reexports.size(), stdout );
         }
+        // FOR-SCAN-ONCE (search.h GrepScanBatch): the literal block's candidates are expected from here, so the short key's scan, if it runs,
+        // reads the corpus for them too, and the block's own scans share one read; closed after the block (the held collections go with it)
+        std::optional<rw::GrepScanBatch> forScans( std::in_place, ing, literalAnchorBlockOn( d ) ? rw::forLiteralScanPlan( ing, cfg.forTask ) : std::vector<std::string>{} );
         // SHORT-KEY-FOR (forreexport.h): a name-exact route that served no signature row gets the fallback ladder, and so does a task read
         // as words whose one code-shaped name resolved to no definition (SHORT-KEY-SENTENCE: from="sentence"); "" otherwise. Its own
         // byte allowance, outside est_tokens: no auto-served body pays for it. XML only, like the block above.
@@ -5282,6 +5316,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         litAnswerIds.insert( litAnswerIds.end(), enrich.emitted.begin(), enrich.emitted.end() );   // the auto <bodies> printed
         appendLiteralAnchorBlock( d, flRootArg, detailSection.xml + autoSection.xml + slot.xml + fold.xml + callerHop.xml + dispatchHop.xml, litAnswerIds );   // MF1-LIT: "" unless the task names a literal with a site (dispatchHop: train 42b, its single-candidate <b>)
+        if( rw::memstats::enabled() )
+        {
+            rw::emitTo( stderr, "[scan] for literal_asks={} corpus_reads={} expected_unasked={}\n", forScans->asks(), forScans->reads(), forScans->unasked() );
+        }
+        forScans.reset();
         if( peerManifestRegime )   // STRING-IMPORT (fordottedstring.h): after the ordinary answer, outside est_tokens; "" unless a dotted string names a shown row
         {
             const std::string dottedStrings = rw::renderDottedStrings( ing, shownSigIds );

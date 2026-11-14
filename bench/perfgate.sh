@@ -61,6 +61,9 @@ if [ -n "$LABEL" ]; then
 fi
 NAV_ARG="${RIPWIRE_PERF_NAV_ARG:-}"
 NAV_KEY="${RIPWIRE_PERF_NAV_KEY:-}"
+# DEPS-NO-GRAPH (2026-11-13): --deps answers from the ingest alone and no longer builds the call graph, so a deps_cpp row
+# measured after that card is not comparable with an earlier one (it lost the graph's share of the time and the peak). A
+# graph-reading nav row is RIPWIRE_PERF_NAV_ARG=--callers=SYM, or the default map (the cold/warm rows above).
 if [ "$LABEL" = "cpp" ] && [ -z "$NAV_ARG" ] && [ -z "$NAV_KEY" ]; then
     NAV_ARG="--deps"
     NAV_KEY="deps_cpp"
