@@ -20,7 +20,10 @@
 #        release builds never) — the fixture's deep JSON is skipped in both trees (two skip lines prove both phases ran);
 #   (W)  a warm repeat hits the blob and spawns no child;
 #   (S)  a stray RIPWIRE_QBASE_CHILD naming another parent is ignored: the run answers, and spawns its own child;
+#   (Z)  the size floor: unforced, the fixture (a git index far below 1 MiB) scores its base in-process
+#        (outcome=inproc why=small) with the same answer;
 #   (L)  no ripwire-qbase-child-* file is left under TMPDIR by any run above.
+# The fixture is small, so every child-path run above sets RIPWIRE_TEST_QBASE_CHILD=force (the seams imply it).
 #
 # Usage:  bash test/qbasechildcheck.sh          (BIN=build/ripwire)
 set -u
@@ -63,6 +66,7 @@ def main():
     return helper(2)
 EOF
 git_ commit -qam target || no "fixture: target commit"
+BASESHA="$( git_ rev-parse HEAD~1 )"
 
 # run <tag> <tmpdir> [VAR=value…] -- <args…>: stdout/stderr/rc in $WORK/<tag>.{out,err,rc}; a fresh HOME per tag
 run(){
@@ -75,7 +79,7 @@ run(){
     echo $? > "$WORK/$tag.rc"
 }
 outcome(){ sed -n 's/^ripwire: stats qbase-child outcome=\([a-z]*\) why=\([a-z-]*\).*/\1 \2/p' "$WORK/$1.err" | tr '\n' ';'; }
-spawns(){ grep -c '^ripwire: stats qbase-child ' "$WORK/$1.err"; }
+spawns(){ grep -c '^ripwire: stats qbase-child outcome=[cf]' "$WORK/$1.err"; }
 ingests(){ grep -c 'ripwire: cache-stats ' "$WORK/$1.err"; }
 answer_err(){   # stderr without the stats families and the fallback's own debug disclosure
     grep -v -E '^ripwire: (stats|memory-projection|cache-stats|quality-passes)|^\[mem\]|base child unavailable' "$WORK/$1.err" \
@@ -87,7 +91,7 @@ leftovers(){ find "$WORK" -name 'ripwire-qbase-child-*' 2>/dev/null | wc -l | tr
 PAIR="--quality-delta=HEAD~1..HEAD"
 
 # (P)
-mkdir -p "$WORK/t-cold"; run cold "$WORK/t-cold" -- "$PAIR"
+mkdir -p "$WORK/t-cold"; run cold "$WORK/t-cold" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR"
 regs="$( sed -n 's/.*<quality-delta [^>]* regressions="\([0-9]*\)".*/\1/p' "$WORK/cold.out" | head -1 )"
 if [ "${regs:-0}" -ge 1 ] && [ "$( cat "$WORK/cold.rc" )" = 2 ]; then ok "(P) the cold pair answers with $regs regression rows, exit 2"; else no "(P) the cold pair: ${regs:-no} regression rows, rc $( cat "$WORK/cold.rc" )"; sed 's/^/    /' "$WORK/cold.err" | grep -v '^\s*\[mem\]' | head; fi
 if [ "$( outcome cold )" = "child -;" ]; then ok "(P) the base came from the child (outcome=child)"; else no "(P) outcome '$( outcome cold )', expected 'child -;' — the child path never ran"; fi
@@ -120,15 +124,15 @@ else
     no "(F) crash: outcome '$( outcome crash )', seam line $( grep -c 'base child aborts' "$WORK/crash.err" ), stdout/rc $( cmp -s "$WORK/inproc.out" "$WORK/crash.out" && echo same || echo differ )"
 fi
 # the partial blob was removed and the in-process phase rewrote a valid one: the next call hits it
-run partial2 "$WORK/t-partial" -- "$PAIR"
+run partial2 "$WORK/t-partial" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR"
 if [ "$( spawns partial2 )" = 0 ] && [ "$( ingests partial2 )" = 1 ] && same inproc-warm partial2; then ok "(F) after partial, the rewritten blob hits (no spawn, one ingest, same answer)"; else no "(F) after partial: $( spawns partial2 ) spawns, $( ingests partial2 ) ingests"; fi
 
 # (N)
-mkdir -p "$WORK/t-nocache"; run nocache "$WORK/t-nocache" -- "$PAIR" --no-cache
+mkdir -p "$WORK/t-nocache"; run nocache "$WORK/t-nocache" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR" --no-cache
 if [ "$( outcome nocache )" = "child -;" ] && [ "$( blobs "$WORK/t-nocache" )" = 0 ] && same inproc nocache; then ok "(N) --no-cache: the child handed over a temp blob — same answer, no qbase blob"; else no "(N) --no-cache: outcome '$( outcome nocache )', $( blobs "$WORK/t-nocache" ) blobs"; fi
 
 # (R) a TMPDIR that does not exist: no commit tree can be materialized, in the child or in-process
-run refuse "$WORK/t-absent" -- "$PAIR"
+run refuse "$WORK/t-absent" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR"
 run refuse-inproc "$WORK/t-absent" RIPWIRE_TEST_QBASE_CHILD=inproc -- "$PAIR"
 if [ "$( outcome refuse )" = "failed -;" ] && [ "$( cat "$WORK/refuse.rc" )" != 0 ] && grep -q 'could not materialize' "$WORK/refuse.err"; then ok "(R) the child's refusal is passed through (outcome=failed, rc $( cat "$WORK/refuse.rc" ))"; else no "(R) refusal: outcome '$( outcome refuse )', rc $( cat "$WORK/refuse.rc" )"; fi
 if [ "$( grep -c 'could not materialize' "$WORK/refuse.err" )" = 1 ] && same refuse-inproc refuse; then ok "(R) said once, byte-identical to in-process"; else no "(R) the refusal differs from in-process"; diff <( answer_err refuse-inproc ) <( answer_err refuse ) | head -6 | sed 's/^/    /'; fi
@@ -140,12 +144,16 @@ nc="$( grep -c '^\[math degraded\] ingest: a .json file nests' "$WORK/cold.err" 
 if [ "$nc" = "$ni" ] && [ "$nc" -le 1 ]; then ok "(D) the once-per-site notice printed $nc time(s), as in-process ($ni)"; else no "(D) the notice printed $nc time(s) on the child path, $ni in-process"; fi
 
 # (W)
-run warm "$WORK/t-cold" -- "$PAIR"
+run warm "$WORK/t-cold" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR"
 if [ "$( spawns warm )" = 0 ] && [ "$( ingests warm )" = 1 ] && same inproc-warm warm; then ok "(W) the warm repeat hit the blob: no child, one ingest, same answer"; else no "(W) warm: $( spawns warm ) spawns, $( ingests warm ) ingests"; fi
 
 # (S)
-mkdir -p "$WORK/t-stray"; run stray "$WORK/t-stray" RIPWIRE_QBASE_CHILD=1:"$WORK/stray.bin" -- "$PAIR"
+mkdir -p "$WORK/t-stray"; run stray "$WORK/t-stray" RIPWIRE_TEST_QBASE_CHILD=force RIPWIRE_QBASE_CHILD=1:"$BASESHA":"$BASESHA":"$WORK/stray.bin" -- "$PAIR"
 if [ "$( outcome stray )" = "child -;" ] && same inproc stray && [ ! -e "$WORK/stray.bin" ]; then ok "(S) a stray RIPWIRE_QBASE_CHILD is ignored (own child, same answer)"; else no "(S) stray: outcome '$( outcome stray )'"; fi
+
+# (Z)
+mkdir -p "$WORK/t-small"; run small "$WORK/t-small" -- "$PAIR"
+if [ "$( outcome small )" = "inproc small;" ] && [ "$( spawns small )" = 0 ] && same inproc small; then ok "(Z) below the size floor the base is scored in-process (why=small), same answer"; else no "(Z) small: outcome '$( outcome small )', $( spawns small ) spawns"; fi
 
 # (L)
 if [ "$( leftovers )" = 0 ]; then ok "(L) no ripwire-qbase-child-* file left"; else no "(L) $( leftovers ) ripwire-qbase-child-* files left"; find "$WORK" -name 'ripwire-qbase-child-*' | sed 's/^/    /'; fi

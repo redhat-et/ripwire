@@ -294,32 +294,100 @@ char**& baseChildArgv() noexcept
     return argv;
 }
 
-// RIPWIRE_TEST_QBASE_CHILD (gates only): `inproc` never spawns; `spawnfail` hands the spawn a bad descriptor so the real
-// spawn fails; `exit` makes the child exit 70 before its base phase; `partial` makes it write half the blob; `crash` makes
-// it abort inside its base phase. Each falls back to the in-process answer: byte for byte, but for a crash, whose own
-// lines are passed through so it is never silent.
+// RIPWIRE_TEST_QBASE_CHILD (gates only): `inproc` never spawns; `force` spawns below the size floor (a fixture is small);
+// `spawnfail` hands the spawn a bad descriptor so the real spawn fails; `exit` makes the child exit 70 before its base phase;
+// `partial` makes it write half the blob; `crash` makes it abort inside its base phase. The last four imply `force`; each
+// falls back to the in-process answer: byte for byte, but for a crash, whose own lines are passed through so it is never
+// silent.
 std::string_view baseChildSeam() noexcept
 {
     const char* const v = std::getenv( "RIPWIRE_TEST_QBASE_CHILD" );
     return v == nullptr ? std::string_view() : std::string_view( v );
 }
 
-// This process's role: the temp blob path when it is the child its parent spawned (the variable names the parent's pid, so
-// a stray value in a user's environment is ignored), else empty.
-std::string baseChildTempPath()
+// This process's role when it is the child its parent spawned: the two commits the parent already resolved (so the child
+// asks git nothing to find them) and the temp blob path. The variable names the parent's pid, so a stray value in a user's
+// environment is ignored: `child` is then false and the process runs as any other.
+struct BaseChildRole
 {
+    bool        child = false;
+    std::string baseSha, targetSha, tempPath;
+};
+BaseChildRole baseChildRole()
+{
+    BaseChildRole     role;
     const char* const v = std::getenv( kBaseChildEnv );
     if( v == nullptr )
     {
-        return {};
+        return role;
     }
-    const std::string_view value( v );
-    const std::size_t      colon = value.find( ':' );
-    if( colon == std::string_view::npos || colon + 1 >= value.size() || value.substr( 0, colon ) != std::to_string( rw::os::getppid() ) )
+    // "<pid>:<base sha>:<target sha>:<temp path>" — the path last, so it may hold a ':'
+    std::string_view rest( v );
+    std::string_view fields[ 3 ];
+    for( std::string_view& field : fields )
     {
-        return {};
+        const std::size_t colon = rest.find( ':' );
+        if( colon == std::string_view::npos )
+        {
+            return role;
+        }
+        field = rest.substr( 0, colon );
+        rest.remove_prefix( colon + 1 );
     }
-    return std::string( value.substr( colon + 1 ) );
+    if( fields[ 0 ] != std::to_string( rw::os::getppid() ) || fields[ 1 ].empty() || fields[ 2 ].empty() || rest.empty() )
+    {
+        return role;
+    }
+    role.child     = true;
+    role.baseSha   = std::string( fields[ 1 ] );
+    role.targetSha = std::string( fields[ 2 ] );
+    role.tempPath  = std::string( rest );
+    return role;
+}
+
+// The size floor: below it the base phase runs in-process. A small tree's freed pages are a small residue, while the
+// child's fixed cost — a second process start, its own query compilation and the blob round trip — is a large share of a
+// short run (measured 11-14 on the loaded M2: hono, a 35 KB index, 7.3 → 9.9 s; textual, 68 KB, 9.9 → 11.8 s; envoy,
+// cockroach and vscode, 1.9-3.0 MB, within 1.3 % of the in-process CPU). The proxy is the repository's git index, one
+// stat: ~70-100 bytes per tracked file, so 1 MiB is ~10,000-15,000 files. No index found (not a plain .git, an unusual
+// layout) reads as small: the in-process phase, the answer this form always gave.
+inline constexpr std::uint64_t kBaseChildMinIndexBytes = std::uint64_t( 1 ) << 20;
+std::uint64_t gitIndexBytes( const std::string& root )
+{
+    using namespace rw;
+    char resolved[ PATH_MAX ];
+    if( os::realpath( root.c_str(), resolved ) == nullptr )
+    {
+        return 0;
+    }
+    std::string dir( resolved );
+    for( int levelIndex = 0; levelIndex < 64 && !dir.empty(); ++levelIndex )   // the bound: a hostile-symlink guard, as hasEnclosingGitRepo
+    {
+        os::stat_t st;
+        if( os::stat( ( dir + "/.git" ).c_str(), &st ) == 0 )
+        {
+            std::string gitDir = dir + "/.git";
+            if( S_ISREG( st.st_mode ) )   // a worktree or submodule: "gitdir: <path>" names its own git dir
+            {
+                const std::optional<std::string> file = pathguard::readRegularFileNoFollow( gitDir );
+                if( !file || !file->starts_with( "gitdir: " ) )
+                {
+                    return 0;
+                }
+                std::string target = file->substr( 8, file->find( '\n' ) == std::string::npos ? std::string::npos : file->find( '\n' ) - 8 );
+                gitDir             = target.starts_with( "/" ) ? target : dir + "/" + target;
+            }
+            os::stat_t index;
+            return os::stat( ( gitDir + "/index" ).c_str(), &index ) == 0 && S_ISREG( index.st_mode ) ? std::uint64_t( index.st_size ) : 0;
+        }
+        const std::size_t slash = dir.rfind( '/' );
+        if( dir == "/" || slash == std::string::npos )
+        {
+            break;
+        }
+        dir.resize( slash == 0 ? 1 : slash );
+    }
+    return 0;
 }
 
 // The child's side: the base phase, the blob (the cache when it can be written, else the parent's temp path), the end line.
@@ -419,7 +487,7 @@ struct BaseChildRun
     int         status = 0;
     bool        spawned = false;
 };
-BaseChildRun spawnBaseChild( const std::string& tempPath )
+BaseChildRun spawnBaseChild( const std::string& tempPath, const RefPairDelta& refs )
 {
     using namespace rw;
     BaseChildRun run;
@@ -428,7 +496,7 @@ BaseChildRun spawnBaseChild( const std::string& tempPath )
     {
         return run;
     }
-    const std::string env = std::string( kBaseChildEnv ) + "=" + std::to_string( os::getpid() ) + ":" + tempPath;
+    const std::string env = std::string( kBaseChildEnv ) + "=" + std::to_string( os::getpid() ) + ":" + refs.baseSha + ":" + refs.targetSha + ":" + tempPath;
     const os::pid_t   pid = os::spawn_self( baseChildArgv(), env, baseChildSeam() == "spawnfail" ? -1 : fds[ 1 ] );
     os::close( fds[ 1 ] );
     if( pid < 0 )
@@ -471,7 +539,7 @@ BaseChildResult baseInChild( const BaseCacheKey& key, RefPairDelta& refs )
         ~RemoveOnExit() { rw::os::remove( path.c_str() ); }
     } removeTemp{ tempPath };
 
-    const BaseChildRun run = spawnBaseChild( tempPath );
+    const BaseChildRun run = spawnBaseChild( tempPath, refs );
     if( !run.spawned )
     {
         result.why = "spawn";
@@ -546,7 +614,14 @@ std::optional<int> scoreBaseCommit( const std::string& root, const std::string& 
     }
     // QD-BASE-CHILD: the CLI's own route only; never under --quality-ack (its ledger lock is this process's) or a memory-guard
     // test seam (its counters are this process's ordinals)
-    if( baseChildArgv() != nullptr && !cfg.qualityAck && std::getenv( "RIPWIRE_TEST_MEMGUARD" ) == nullptr && baseChildSeam() != "inproc" )
+    const std::string_view seam     = baseChildSeam();
+    const bool             eligible = baseChildArgv() != nullptr && !cfg.qualityAck && std::getenv( "RIPWIRE_TEST_MEMGUARD" ) == nullptr && seam != "inproc";
+    const std::uint64_t    index    = eligible ? gitIndexBytes( root ) : 0;
+    if( eligible && index < kBaseChildMinIndexBytes && seam.empty() && std::getenv( "RIPWIRE_STATS" ) )
+    {
+        rw::emitTo( stderr, "ripwire: stats qbase-child outcome=inproc why=small index_bytes={}\n", index );
+    }
+    if( eligible && ( index >= kBaseChildMinIndexBytes || !seam.empty() ) )
     {
         const BaseChildResult child = baseInChild( key, refs );
         if( std::getenv( "RIPWIRE_STATS" ) )
@@ -731,9 +806,9 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
     if( !out.sameRef )
     {
         const std::uint64_t before = os::mem_footprint();
-        if( const std::string tempPath = baseChildTempPath(); !tempPath.empty() )
+        if( const BaseChildRole role = baseChildRole(); role.child )
         {
-            return runBaseChild( root, cfg, out, before, tempPath );   // QD-BASE-CHILD: this process is the child, and ends here
+            return runBaseChild( root, cfg, out, before, role.tempPath );   // QD-BASE-CHILD: this process is the child, and ends here
         }
         if( const std::optional<int> failed = scoreBaseCommit( root, out.baseSha, cfg, out ) )
         {
@@ -791,7 +866,9 @@ std::optional<int> loadRefPairDelta( const std::string& root, std::string_view s
 {
     using namespace rw;
 
-    const quality::RefSpec ref = quality::resolveRefSpec( root, spec );
+    // QD-BASE-CHILD: the child takes the two commits its parent resolved, and asks git nothing to find them again
+    const BaseChildRole    role = baseChildRole();
+    const quality::RefSpec ref  = role.child ? quality::RefSpec{ quality::RefSpecStatus::Ok, role.baseSha, role.targetSha } : quality::resolveRefSpec( root, spec );
     switch( ref.status )
     {
         case quality::RefSpecStatus::BadRev:
