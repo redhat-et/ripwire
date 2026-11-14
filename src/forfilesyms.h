@@ -1214,6 +1214,34 @@ inline std::vector<InitDecl> initDecls( const std::vector<InitHead>& heads, File
     }
     return decls;
 }
+// A file-scope call reference (its owner is the module scope or a module-level variable): the only calls by="init" reads.
+inline bool fileScopeCall( const IngestResult& ing, const Reference& r ) noexcept
+{
+    return r.role == RefRole::Call && !r.isInherit && !r.isDocLink && !r.isCompose && r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size()
+        && ( ing.symbols[ r.fromSymbol ].kind == SymKind::ModuleScope || ing.symbols[ r.fromSymbol ].kind == SymKind::Var );
+}
+// FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646): the index keeps no per-call target, so the owner's one out-edge named like the
+// callee is the SELECTED call's own target only when that call is the owner's one call by that name. With two (`ext.makeThing()`,
+// external, beside an in-tree `makeThing()`) the edge may be the other call's: drop the row (fails closed, never a wrong row).
+inline void dropSharedNameCalls( const IngestResult& ing, const std::vector<InitDecl>& decls, const std::vector<NodeId>& ownerOf, std::vector<NodeId>& rowFor )
+{
+    std::vector<std::uint32_t> calls( decls.size(), 0 );
+    for( const Reference& r : ing.references )
+    {
+        if( !fileScopeCall( ing, r ) )
+        {
+            continue;
+        }
+        for( std::size_t k = 0; k < decls.size(); ++k )
+        {
+            calls[k] += std::uint32_t( rowFor[k] != kNoNode && r.fromSymbol == ownerOf[k] && r.calleeName == decls[k].callee );
+        }
+    }
+    for( std::size_t k = 0; k < decls.size(); ++k )
+    {
+        rowFor[k] = calls[k] > 1 ? kNoNode : rowFor[k];
+    }
+}
 inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads, InitWindowCut& cut )
 {
     std::vector<InitRow> out;
@@ -1229,23 +1257,25 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
     }
     std::vector<NodeId>        rowFor( decls.size(), kNoNode );
     std::vector<std::uint32_t> lineFor( decls.size(), 0 );   // nonzero: a file-scope call to the callee starts in the window (the evidence)
+    std::vector<NodeId>        ownerOf( decls.size(), kNoNode );   // that call's owner
     for( const Reference& r : ing.references )
     {
-        if( r.role != RefRole::Call || r.isInherit || r.isDocLink || r.isCompose || r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size()
-            || ( ing.symbols[ r.fromSymbol ].kind != SymKind::ModuleScope && ing.symbols[ r.fromSymbol ].kind != SymKind::Var ) )
+        if( !fileScopeCall( ing, r ) )
         {
             continue;
         }
         for( std::size_t k = 0; k < decls.size(); ++k )
         {
             const InitDecl& d = decls[k];
-            if( rowFor[k] == kNoNode && r.fileId == d.file && r.startByte >= d.from && r.startByte < d.to && r.calleeName == d.callee )
+            if( lineFor[k] == 0 && r.fileId == d.file && r.startByte >= d.from && r.startByte < d.to && r.calleeName == d.callee )
             {
                 rowFor[k]  = moduleScopeCallee( ing, g, r.fromSymbol, d.callee );
                 lineFor[k] = r.line;
+                ownerOf[k] = r.fromSymbol;
             }
         }
     }
+    dropSharedNameCalls( ing, decls, ownerOf, rowFor );
     std::vector<char> headDone( heads.size(), 0 );   // the head's declaration is its first one with a file-scope call in the window
     for( std::size_t k = 0; k < decls.size(); ++k )
     {

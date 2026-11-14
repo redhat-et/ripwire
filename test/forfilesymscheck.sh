@@ -44,6 +44,8 @@
 #        window is disclosed (<syms init_cut="1">, both legends state the window); (i5n) its short twin is an ordinary row, no init_cut
 #   (i6) FORFILESYMS-COMMENT-DECL (CodeRabbit on #646; RED on main 44f7d3326): a docstring or /* */ twin declaration earlier in the
 #        file is skipped (no file-scope call stands in it): the real declaration's callee prints
+#   (i7) FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646; RED on main 44f7d3326): an external initialiser call is not credited with
+#        another module-scope call's same-named edge (no row); its in-tree twin keeps the row
 #   (o1) overloads: the shown row's edge reaches one overload, the kept row is another: it says via="name"; twin (o2) one definition, the call is plain
 #   (h2) a held block's next= carries the origin call's ranking flags (--no-route, --anchor under RIPWIRE_DEV, --pack-top-n=N)
 #   (c2) a capture whose buffer fails to flush (RLIMIT_FSIZE, a real short write) is not read as the whole answer: stderr says so, exit 1, the stub says held="uncaptured", no rows; twin: unlimited, rows
@@ -662,6 +664,54 @@ if [ "$i6rc$i6trc" = 00 ] && [ "$i6seen" = 2 ] && [ "$( sed -n 1p <<<"$( initrow
    && [ "$( sed -n 1p <<<"$( initrows "$TMP/i6t.xml" )" )" = "forgeMark@Banner@src/marks.ts:13@src/forge.ts:1" ]; then
     ok "(i6) a docstring or block-comment twin earlier in the file is skipped: the real declaration's callee prints (saw $i6seen of 2 twins)"
 else no "(i6) rc=$i6rc/$i6trc twins $i6seen of 2: py $( initrows "$TMP/i6.xml" | head -1 ) ts $( initrows "$TMP/i6t.xml" | head -1 ) $( grep -o '<syms.*' "$TMP/i6.xml" "$TMP/i6t.xml" | head -c 500 )"; fi
+
+# (i7) FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646): the declaration's call `ext.makeThing(…)` is external, and ANOTHER module-scope
+# call `makeThing(…)` supplies the module scope's only edge named makeThing: that edge is not the declaration's call, so no row
+# (fails closed); (i7n) the same file without the external twin keeps its row
+mkdir -p "$TMP/initref/src" "$TMP/initrefok/src"
+cat >"$TMP/initref/src/real.ts" <<'FIX'
+export function makeThing(name: string): any {
+  return { name };
+}
+FIX
+cp "$TMP/initref/src/real.ts" "$TMP/initrefok/src/real.ts"
+cat >"$TMP/initref/src/use.ts" <<'FIX'
+import { Thing } from './things';
+
+export function useThing(): any {
+  return Thing;
+}
+FIX
+cp "$TMP/initref/src/use.ts" "$TMP/initrefok/src/use.ts"
+cat >"$TMP/initref/src/things.ts" <<'FIX'
+import { makeThing } from './real';
+import * as ext from 'ext-lib';
+
+export interface Thing {
+  size?: number;
+}
+
+export const Thing: any = ext.makeThing('Thing');
+
+export const helper: any = makeThing('helper');
+FIX
+cat >"$TMP/initrefok/src/things.ts" <<'FIX'
+import { makeThing } from './real';
+
+export interface Thing {
+  size?: number;
+}
+
+export const Thing: any = makeThing('Thing');
+FIX
+run initref "--for=Thing" >"$TMP/i7.xml"; i7rc=$?
+run initrefok "--for=Thing" >"$TMP/i7n.xml"; i7nrc=$?
+i7pre=0
+grep -q "^export const Thing: any = ext.makeThing('Thing');" "$TMP/initref/src/things.ts" && grep -q "^export const helper: any = makeThing('helper');" "$TMP/initref/src/things.ts" && i7pre=1
+if [ "$i7rc$i7nrc" = 00 ] && [ "$i7pre" = 1 ] && ! grep -q 'by="init"' "$TMP/i7.xml" \
+   && [ "$( sed -n 1p <<<"$( initrows "$TMP/i7n.xml" )" )" = "makeThing@Thing@src/things.ts:7@src/real.ts:1" ]; then
+    ok "(i7) an external initialiser call is never credited with another module-scope call's edge (no row); its in-tree twin keeps the row"
+else no "(i7) rc=$i7rc/$i7nrc premise=$i7pre: wrong $( initrows "$TMP/i7.xml" | head -1 ) ok $( initrows "$TMP/i7n.xml" | head -1 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"
