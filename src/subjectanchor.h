@@ -1386,13 +1386,18 @@ inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& i
     const std::string_view          query      = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
     std::size_t                     unreadDefs = 0;
     std::vector<SourceSyntaxAnchor> src        = sourceSyntaxAnchors( ing, query, &unreadDefs );
-    if( unreadDefs != 0 )
+    // appended once the route is final, so a name-exact route that replaces it below keeps the disclosure (CodeRabbit 4570578098)
+    const auto discloseUnread = [ & ]
     {
-        out.route.reason += "; " + std::to_string( unreadDefs ) + " definition(s) not placed: the file is unreadable or over 4 MiB, so its "
-                            "outer qualifier was not checked";
-    }
+        if( unreadDefs != 0 )
+        {
+            out.route.reason += "; " + std::to_string( unreadDefs ) + " definition(s) not placed: the file is unreadable or over 4 MiB, so "
+                                "its outer qualifier was not checked";
+        }
+    };
     if( src.empty() )
     {
+        discloseUnread();
         return src;
     }
     if( out.rankQuery.empty() )
@@ -1422,6 +1427,7 @@ inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& i
         }
     }
     preferSourceAnchorDefs( ing, out.route, src );
+    discloseUnread();
     return src;
 }
 

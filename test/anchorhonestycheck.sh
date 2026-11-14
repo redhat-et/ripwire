@@ -383,6 +383,14 @@ R="$( route "$( cd "$H" && HOME="$TMP/home" TMPDIR="$TMP/home/" "$BIN" "$H" --no
 case "$R" in *'not placed: the file is unreadable or over 4 MiB'*) ok "N9 the route says the definition's file was too big to check";; *) no "N9 the unread definition file is silent (route $R)";; esac
 R="$( route "$( ask "$C" 'what does Missing::detail::ConnPool::drainAll call' )" )"
 case "$R" in *'unreadable or over 4 MiB'*) no "N9 precision: a readable file carries the unread note (route $R)";; *) ok "N9 precision: a readable definition file carries no unread note";; esac
+# N9b (CodeRabbit 4570578098): the same unread definition beside a READABLE one that `namespace Outer` places: the anchor is source,
+#   the frame word drops and that route replaces the first one; the unread note was lost with it (red on 1c920292f).
+H2="$TMP/huge2"; mkdir -p "$H2/src"; cp "$H/src/huge.cpp" "$H/src/main.cpp" "$H2/src/"
+printf 'namespace Outer\n{\nnamespace detail\n{\nclass Huge\n{\npublic:\n    void drainAll();\n};\nvoid Huge::drainAll() { }\n}\n}\n' >"$H2/src/small.cpp"
+( cd "$H2" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+R="$( route "$( cd "$H2" && HOME="$TMP/home" TMPDIR="$TMP/home/" "$BIN" "$H2" --no-cache --max-file-size=8M '--for=what does Outer::detail::Huge::drainAll call' 2>/dev/null </dev/null )" )"   # status: --for exits 0 on a routed answer; the route reason is the verdict and an empty route FAILs the arm below
+case "$R" in *'dropped: call'*) ok "N9b premise: the readable Outer definition anchors and the frame word drops";; *) no "N9b premise: the route was not replaced (route $R) — the arm is vacuous";; esac
+case "$R" in *'not placed: the file is unreadable or over 4 MiB'*) ok "N9b the replaced route keeps the unread-definition note";; *) no "N9b the unread note was lost when the route was replaced (route $R)";; esac
 
 # ═══ N3 a subject that IS a where method keeps it ═══
 A="$( ask "$P" 'what does Icon.where call' )"
