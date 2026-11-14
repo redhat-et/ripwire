@@ -341,6 +341,7 @@ struct Snapshot
     // QD-GIT-RENAME-HEAL — NEVER SERIALIZED: the git-recorded earlier paths (newest first) of each current file the rename record
     // re-filed this baseline across (healIdentity). Read only by the clone-group hold, which re-spells a moved member at its old path.
     gtl::btree_map<std::string, std::vector<std::string>> renamedFrom;
+    std::vector<std::uint64_t>                            renamedKeys;   // sorted: the current keys the rename record re-filed (dead-code rows on them read origin="moved")
 };
 
 // ─── THE TWELVE KINDS AS A SET (qd-memory-degrade) ─────────────────────────────────────────────────────────
@@ -8948,6 +8949,24 @@ inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, cons
     std::sort( al.schemeAmbiguousKeys.begin(), al.schemeAmbiguousKeys.end() );
 }
 
+// The two transient rename facts the delta reads (Snapshot::renamedFrom, Snapshot::renamedKeys), from the RENAME aliases only and
+// BEFORE remapSnapshotIdentity: a key counts as re-filed only when the alias fills a hole (its source is in the baseline and its
+// target is not), so a file renamed long before the baseline (the ledger's 400-commit window) marks nothing.
+inline void noteRenamedIdentities( Snapshot& base, const IdentityAliases& al )
+{
+    base.renamedFrom = al.renamedFrom;
+    base.renamedKeys.clear();
+    for( const auto& [ from, to ] : al.toCurrent )
+    {
+        if( base.locBySym.contains( from ) && !base.locBySym.contains( to ) )
+        {
+            base.renamedKeys.push_back( to );
+        }
+    }
+    std::sort( base.renamedKeys.begin(), base.renamedKeys.end() );
+    base.renamedKeys.erase( std::unique( base.renamedKeys.begin(), base.renamedKeys.end() ), base.renamedKeys.end() );
+}
+
 // The defect-shape records: a renamed definition's sites are re-filed under its current anchor, add-never-
 // overwrite like the per-symbol maps (an anchor the baseline already holds keeps its own records). Whether a site
 // is NEW never depends on this — that is decided by its text, repo-wide — only the row's was= count does.
@@ -9077,6 +9096,20 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
 
     moved += healDefectSites( base, al );
     return moved;
+}
+
+// QD-GIT-RENAME-HEAL — dead-code rows from `from` on whose symbol the git rename record re-filed: non-gating, origin="moved", as a
+// ContentMoves match reads (a move does not decide reachability; a caller the move left pointing at the old path, or one the
+// resolver cannot follow to the new one, would otherwise gate as a live function that died).
+inline void markRenamedDeadRows( std::vector<Regression>& regs, std::size_t from, const std::vector<std::uint64_t>& renamedKeys )
+{
+    for( std::size_t k = from; k < regs.size() && !renamedKeys.empty(); ++k )
+    {
+        if( !regs[k].isNewSymbol && std::binary_search( renamedKeys.begin(), renamedKeys.end(), regs[k].key ) )
+        {
+            regs[k].isNewSymbol = regs[k].isMoved = true;
+        }
+    }
 }
 
 // QD-RENAME-IDENTITY (2026-11-14) — A RENAME OR A MOVE KEEPS ITS IDENTITY. The quality key is path::scope::name, so renaming a
@@ -9436,12 +9469,13 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
         h.gitOnly           = true;
         h.renames           = span.empty() ? gitUncommittedRenameMap( gitRoot ) : gitRenameMap( gitRoot, span );
         h.aliases           = identityAliases( ing, g, corpusRoot, h.renames );
+        noteRenamedIdentities( base, h.aliases );
         h.baselineKeysMoved = remapSnapshotIdentity( base, h.aliases );
-        base.renamedFrom    = h.aliases.renamedFrom;
         return h;
     }
     h.renames           = gitRenameMap( gitRoot, span );
     h.aliases           = identityAliases( ing, g, corpusRoot, h.renames );
+    noteRenamedIdentities( base, h.aliases );   // before the scheme aliases join toCurrent: only what the rename record re-filed
     // The SCHEME migration is not gated on git: the key rule changed in the binary, not in the history, so a
     // repo with no rename record at all still needs its committed acks re-filed. Runs after the rename pass so
     // a git-recorded move keeps precedence over the mechanical rekey (add-never-overwrite).
@@ -9450,7 +9484,6 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
         addSchemeAliases( h.aliases, ing, g, corpusRoot );
     }
     h.baselineKeysMoved = remapSnapshotIdentity( base, h.aliases );
-    base.renamedFrom    = h.aliases.renamedFrom;
 
     // Ack rows whose old identity FOLDED across files — countable only here, where both the ledger and the
     // poisoned set are in scope. Disclosed, never silently dropped: they stay in the ledger at their old key
@@ -10812,6 +10845,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         appendDeadCodeRows( regs, ing, g, base, root, keyByNode, existedAtBaseline, stampLoc,
                             DeadExclusionCounts{ registerMacroExcludedOut, declinedCallExcludedOut, valueRefExcludedOut } );
         contentMoves.markMovedDeadRows( regs, deadFrom );   // QD-RENAME-IDENTITY
+        markRenamedDeadRows( regs, deadFrom, base.renamedKeys );   // QD-GIT-RENAME-HEAL: the same reading for a file rename git recorded
     }
 
     // api-surface (contract drift) — B10.2e TIERED into two shapes on the PUBLIC/exported surface:
