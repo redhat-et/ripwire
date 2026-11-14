@@ -7,16 +7,17 @@
 #   P1. a seeded new 250-line src function gates (exit 2, gating="1", ceiling="240", origin="new-symbol");
 #   P2. a seeded new ccx-61 src function gates (ceiling="60");
 #   N1. a new ccx-59 function and a new 239-line function stay printed, origin="new-symbol", and do not gate;
-#   N2. MOVED-BODY: the same 250-line body moved to another file under another name (re-indented) prints
-#       origin="moved" and does not gate; a COPY (the original kept) is not a move and still gates;
+#   N2. MOVED-BODY: the same 250-line body moved to another file under another name (re-indented) prints no row at all and does
+#       not gate (QD-RENAME-IDENTITY: an unchanged body keeps its identity, test/qdrenameidentitycheck.sh); a COPY (the original
+#       kept) is not a move and still gates;
 #   N4. a body RENAMED with a small edit (4 of 245 statements), the old name kept as a wrapper, prints origin="moved";
 #   N5. a genuinely new function with a similar name, beside a removed ceiling-sized body, stays new-symbol and gates;
 #   N3. EXTENT-CTOR: a class whose constructor shares its canonical id (C++: Foo::Foo) is measured over the
 #       constructor's own body — the class extent (well over 240 lines) never reaches a verbosity row;
 #   T.  TEST DRIVERS are report-only: the same 250-line new function under test/ prints and does not gate;
 #   #646 CodeRabbit round (each RED on train head 6621e14e7):
-#   M1. a body moved UNCHANGED plus a lightly edited copy of it: the move is origin="moved", the copy is new-symbol and gates (the
-#       exact move claims its source; the copy never near-matches it);
+#   M1. a body moved UNCHANGED plus a lightly edited copy of it: the move prints no row (QD-RENAME-IDENTITY), the copy is new-symbol
+#       and gates (the exact move claims its source; the copy never near-matches it);
 #   M2. overloads share a key: a small new overload first, then a 250-line overload that is a moved body: the row's move status is
 #       the overload that supplies the metric, so it prints origin="moved" and does not gate;
 #   M3. a NEW class whose extent passes 240 code lines (no constructor, small methods) prints its row but never gates: the ceiling
@@ -131,16 +132,13 @@ fi
 R="$WORK/n2"; base "$R"; longfn big 245 '' > "$R/src/old.cpp"; printf 'int useb(){ return big(1); }\n' >> "$R/src/old.cpp"; commitall "$R" big
 rm "$R/src/old.cpp"
 { printf 'namespace lib\n{\n'; longfn moved_big 245 '    '; printf '}\nint useb(){ return lib::moved_big(1); }\n'; } > "$R/src/new.cpp"
+MVIDX="$( cd "$R" && "$BIN" . --metrics --no-cache 2>/dev/null | tr '>' '\n' | grep 'n="moved_big"' | grep -o ' loc="[0-9]*"' | cut -d'"' -f2 )"   # status: output only — the N2 premise FAILs on an empty loc
 run "$R"
 if ! crashed N2; then
-    MV="$( rows "$OUT" | grep -c 'origin="moved"' | tr -d ' ' )"
-    if [ "$MV" -lt 1 ]; then no "N2: premise — 0 moved bodies seen (rows: $( rows "$OUT" | tr '\n' ' ' ))"
-    elif [ "$RC" = 0 ] && ! rows "$OUT" | grep -q 'gating="1"' && rowof "$OUT" verbosity 'lib::moved_big' | grep -q 'origin="moved"'; then
-        ok "N2: the 250-line body moved to another file and name prints origin=\"moved\" ($MV row(s)) and does not gate"
-    else no "N2: a moved body must not gate (rc=$RC rows: $( rows "$OUT" | tr '\n' ' ' ))"; fi
-    MH="$( hattr "$OUT" 'new-symbol' )"
-    if [ "$MH" = "$( newrows "$OUT" )" ]; then ok "N2: new-symbol= counts the moved rows too ($MH)"
-    else no "N2: header new-symbol=$MH but $( newrows "$OUT" ) rows carry origin=new-symbol|moved"; fi
+    if [ "${MVIDX:-0}" -lt 240 ]; then no "N2: premise — the moved body is ${MVIDX:-<none>} lines, not ceiling-sized"
+    elif [ "$RC" = 0 ] && ! rows "$OUT" | grep -q 'moved_big' && ! rows "$OUT" | grep -q 'gating="1"'; then
+        ok "N2: the $MVIDX-line body moved unchanged to another file and name prints no row and does not gate"
+    else no "N2: a moved body must not read as new (rc=$RC rows: $( rows "$OUT" | tr '\n' ' ' ))"; fi
 fi
 R="$WORK/n2c"; base "$R"; longfn big 245 '' > "$R/src/old.cpp"; printf 'int useb(){ return big(1); }\n' >> "$R/src/old.cpp"; commitall "$R" big
 { printf 'namespace lib\n{\n'; longfn copy_big 245 '    '; printf '}\nint usec(){ return lib::copy_big(1); }\n'; } > "$R/src/new.cpp"
@@ -168,6 +166,9 @@ if ! crashed N4; then
     elif [ "$RC" = 0 ] && printf '%s' "$ROW" | grep -q 'origin="moved"' && ! rows "$OUT" | grep -q 'gating="1"'; then
         ok "N4: a body renamed with a 4-statement edit (old name kept as a wrapper) prints origin=\"moved\" and does not gate"
     else no "N4: a renamed-and-edited body must read as moved (rc=$RC row: $ROW)"; fi
+    MH="$( hattr "$OUT" 'new-symbol' )"
+    if [ "$MH" = "$( newrows "$OUT" )" ]; then ok "N4: new-symbol= counts the moved rows too ($MH)"
+    else no "N4: header new-symbol=$MH but $( newrows "$OUT" ) rows carry origin=new-symbol|moved"; fi
 fi
 
 # ═══ N5) A GENUINELY NEW FUNCTION WITH A SIMILAR NAME IS STILL NEW ════════════════════════════════════════════════════
@@ -194,10 +195,10 @@ rm "$R/src/a.cpp"
 run "$R"
 if ! crashed M1; then
     MR="$( rowof "$OUT" verbosity moved_body )"; CR="$( rowof "$OUT" verbosity edited_copy )"
-    if [ -z "$MR" ] || [ -z "$CR" ]; then no "M1: premise — rows for both new bodies (moved: ${MR:-<none>}; copy: ${CR:-<none>})"
-    elif [ "$RC" = 2 ] && printf '%s' "$MR" | grep -q 'origin="moved"' && printf '%s' "$CR" | grep -q 'origin="new-symbol"' \
+    if [ -z "$CR" ]; then no "M1: premise — a row for the edited copy (copy: ${CR:-<none>})"
+    elif [ "$RC" = 2 ] && [ -z "$MR" ] && printf '%s' "$CR" | grep -q 'origin="new-symbol"' \
          && printf '%s' "$CR" | grep -q 'gating="1"'; then
-        ok "M1: the unchanged move is origin=\"moved\"; its edited copy stays new-symbol and gates"
+        ok "M1: the unchanged move prints no row; its edited copy stays new-symbol and gates"
     else no "M1: the edited copy must not reuse the claimed source (rc=$RC moved: $MR copy: $CR)"; fi
 fi
 
@@ -267,7 +268,7 @@ JG="$( printf '%s' "$J" | grep -o '"gating":[0-9]*' | head -1 | cut -d: -f2 )"
 if [ "$JRC" = 2 ] && [ "$JG" = "$( hattr "$P1OUT" gating )" ] && printf '%s' "$J" | grep -q '"ceiling":240'; then
     ok "J: --json gating=$JG and \"ceiling\":240 match the XML (exit 2)"
 else no "J: json parity (rc=$JRC gating=$JG xml gating=$( hattr "$P1OUT" gating ))"; fi
-JM="$( cd "$WORK/n2" && "$BIN" . --quality-delta --json --no-cache 2>/dev/null )"   # status: --quality-delta exits 2 by design here; the arm FAILs unless the output carries origin moved
+JM="$( cd "$WORK/n4" && "$BIN" . --quality-delta --json --no-cache 2>/dev/null )"   # status: --quality-delta exits 2 by design here; the arm FAILs unless the output carries origin moved
 if printf '%s' "$JM" | grep -q '"origin":"moved"'; then ok "J: --json carries \"origin\":\"moved\""; else no "J: --json lacks origin moved"; fi
 
 # ═══ L) LEGEND — the exception is stated wherever the rule is ═════════════════════════════════════════

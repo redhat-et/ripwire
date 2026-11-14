@@ -351,6 +351,11 @@ GATE_BUDGET_SEC = {
     # code). A budget here is a hang tripwire, never a perf bar.
     "cppbenchcheck.sh":          2400,
     "regexbombcheck.sh":         1200,
+    # 2026-11-14 (lane qd-rename-identity): qdrenameidentitycheck runs ~25 --quality-delta/--clones/--metrics calls over five
+    # languages' git repos (five per language). Each call on a two-file repo is ~0.3 s CPU but 2-6 s wall on a loaded host (git
+    # spawns, the HEAD-baseline archive); the first 9-call-per-language draft took 455 s solo and hit the 300 s cap under -j 3.
+    # A budget here is a hang tripwire, never a perf bar.
+    "qdrenameidentitycheck.sh":   900,
 }
 parallel_gates = [g for g in gates if g not in exclusive]
 exclusive_gates = [g for g in gates if g in exclusive]

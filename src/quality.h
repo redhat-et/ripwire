@@ -332,6 +332,7 @@ struct Snapshot
     gtl::btree_map<std::uint64_t, std::uint32_t> placeholderBySym; // the placeholder kind — hash(canonId) → COUNT of stub / TODO constructs in the symbol (SUM over overloads, like maskBySym)
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — pathQualifiedKey(path,scope,name) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them). Path-qualified since v6: a bare canonId key folded every scope-less same-named symbol ACROSS FILES into one join identity (the W1-S2 cross-file churn misattribution)
     gtl::btree_map<std::uint64_t, std::uint64_t> moveCidBySym;  // QD-ENTRY-CEILING MOVED-BODY — qualityKey → moveCidOf (the scrubbed hash of the callable's BODY), recorded only for a function or method over the ccx or the line bar: the baseline half of "this new function is a body the same diff removed elsewhere" (origin="moved"). A sidecar or blob without it recognizes no move
+    gtl::btree_map<std::uint64_t, std::uint64_t> bodyCidBySym;  // QD-RENAME-IDENTITY — qualityKey → moveCidOf of EVERY function or method (the MAX over overloads, read only where defsBySym is 1): the baseline half of "this new key is a vacated key's body under a new name or file" (ContentMoves). A sidecar or blob without it matches no rename
     gtl::btree_map<std::uint64_t, CloneSketch>   moveSketchBySym; // QD-ENTRY-CEILING MOVES — qualityKey → the clone matcher's minhash sketch (cloneSketchOfStream, 128 B) of the same body moveCidBySym identifies, so a body moved WITH a small edit is still recognized (MovedBodies). A sidecar or blob without it recognizes exact moves only
     std::vector<std::uint64_t>             cloneGroups; // sorted hash(sorted member canonIds)
     std::vector<std::uint64_t>             dead;        // sorted hash(canonId) of dead-candidate symbols
@@ -1726,10 +1727,12 @@ struct MoveIdentities
 {
     std::vector<std::uint64_t>                       cid;
     std::vector<std::pair<NodeId, CloneSketch>>      sketch;
+    std::vector<std::uint64_t>                       body;   // QD-RENAME-IDENTITY: moveCidOf of EVERY callable, under the bars too (0 = not a callable)
 };
 
 // `moveOut` (MOVED-BODY): when given, also each callable's moveCidOf and its sketch — only for a body over the ccx or the line bar, the only
-// bodies a new-function row (and so a move) can be about; 0 elsewhere. Same pass, so the corpus is read once.
+// bodies a new-function row (and so a move) can be about; 0 elsewhere. Same pass, so the corpus is read once. QD-RENAME-IDENTITY: and
+// moveCidOf of every callable in `body`, the identity a rename or move keeps (ContentMoves).
 inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveIdentities* moveOut = nullptr )
 {
     std::vector<std::uint32_t> out( ing.symbols.size(), 0 );
@@ -1740,6 +1743,7 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveId
     if( moveOut != nullptr )
     {
         moveOut->cid.assign( ing.symbols.size(), 0 );
+        moveOut->body.assign( ing.symbols.size(), 0 );
     }
     forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body )
     {
@@ -1753,8 +1757,13 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveId
                       // same reason ("doc sections churn by design").
         }
         out[i] = codeLinesInBody( body, s.lang );
-        if( moveOut != nullptr && ( s.ccx > kCcxBar || out[i] > kLocBar ) && ( moveOut->cid[i] = moveCidOf( s, body ) ) != 0 )
+        if( moveOut == nullptr || ( moveOut->body[i] = moveCidOf( s, body ) ) == 0 )
         {
+            return;
+        }
+        if( s.ccx > kCcxBar || out[i] > kLocBar )
+        {
+            moveOut->cid[i] = moveOut->body[i];
             moveOut->sketch.emplace_back( i, moveSketchOf( s, body ) );
         }
     } );
@@ -4019,6 +4028,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   moveCidOf                  (quality.h) — MOVED-BODY: the move identity moveCidBySym stores
 //   moveSketchOf               (quality.h) — MOVES: the clone sketch moveSketchBySym stores (clones.h cloneSketchOfStream builds it)
 //   recordMoveSketches         (quality.h) — MOVES: which overload's sketch a key keeps
+//   recordMoveIdentity         (quality.h) — QD-RENAME-IDENTITY: the per-key MAX moveCidBySym and bodyCidBySym record
 //   pythonFrameworkInvokedSymbol (quality.h) — the framework-hook exemption isDeadCandidate calls into (#228)
 //   pythonRecordParent         (quality.h) — fills the closure host and owner that pythonReceiverScope reads (#228)
 //   pythonReceiverScope        (quality.h) — which method a self./cls. call in a closure belongs to (#228)
@@ -4179,7 +4189,9 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // bodyHashBySym). A v27 blob is short by one map. Bumped 27 -> 28.
 // v29 (2026-11-13, lane entry-ceiling, MOVES) — a BLOB SHAPE change: the Snapshot gained moveSketchBySym (key + 128-byte clone sketch
 // records after moveCidBySym), and a VACATED body now includes a key that shrank under the bars. Bumped 28 -> 29.
-constexpr std::uint32_t kQSnapCacheScheme = 29;
+// v30 (2026-11-14, lane qd-rename-identity) — a BLOB SHAPE change: the Snapshot gained bodyCidBySym (one hash map after moveCidBySym,
+// moveCidOf of every callable, the identity a rename or move keeps). A v29 blob is short by one map. Bumped 29 -> 30.
+constexpr std::uint32_t kQSnapCacheScheme = 30;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -4308,6 +4320,7 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
     putValMap( s.placeholderBySym );
     putHashMap( s.bodyHashBySym );
     putHashMap( s.moveCidBySym );   // v28 (MOVED-BODY)
+    putHashMap( s.bodyCidBySym );   // v30 (QD-RENAME-IDENTITY)
     qsnapPut( buf, std::uint32_t( s.moveSketchBySym.size() ) );   // v29 (MOVES): key, then the 128 sketch bytes
     for( const auto& [ k, sk ] : s.moveSketchBySym )
     {
@@ -4485,7 +4498,7 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         return true;
     };
 
-    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getSketchMap( s.moveSketchBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
+    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getHashMap( s.bodyCidBySym ) || !getSketchMap( s.moveSketchBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
         || !getDefectSites( s.defectSites ) )
     {
         return false;
@@ -4855,6 +4868,16 @@ inline RefSpec resolveRefSpec( const std::string& root, std::string_view spec )
         r.reason = noParentReason( root, r.targetSha );
     }
     return r;
+}
+
+// One move identity into a key's record: the MAX over the key's overloads, so the record is order-independent; 0 (none) records nothing.
+inline void recordMoveIdentity( gtl::btree_map<std::uint64_t, std::uint64_t>& m, std::uint64_t key, std::uint64_t cid )
+{
+    if( cid != 0 )
+    {
+        std::uint64_t& slot = m[ key ];
+        slot = std::max( slot, cid );
+    }
 }
 
 // MOVES (2026-11-13): the baseline half of a near-identical move — beside each key's recorded move identity, the sketch of the body
@@ -6188,11 +6211,8 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         { std::uint32_t& slot = snap.locBySym[ key ];    slot = std::max( slot, codeLoc[i] ); }   // Q-DIAL-3: CODE lines, not the physical span
         { std::uint32_t& slot = snap.nestBySym[ key ];   slot = std::max( slot, std::uint32_t( s.maxNest ) ); }
         { std::uint32_t& slot = snap.paramsBySym[ key ]; slot = std::max( slot, std::uint32_t( s.params ) ); }
-        if( moveCid[i] != 0 )
-        {
-            std::uint64_t& slot = snap.moveCidBySym[ key ];   // overloads share a key: the MAX, so the record is order-independent
-            slot = std::max( slot, moveCid[i] );
-        }
+        recordMoveIdentity( snap.moveCidBySym, key, moveCid[i] );       // overloads share a key: the MAX, so the record is order-independent
+        recordMoveIdentity( snap.bodyCidBySym, key, moveIds.body[i] );   // QD-RENAME-IDENTITY: every callable (an overload set never matches)
         // THE ONE KIND THAT IS NOT A MAX, and the reason is the MAX itself. Every metric above collapses the
         // overload set to its largest member, which makes the set's CARDINALITY unrecoverable — so removing an
         // overload whose metrics are below the max moves nothing at all, on either side of a comparison, while
@@ -6639,6 +6659,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     }
     writeHexPairLines( f, "bodyq", s.bodyHashBySym ); // §D#4 short-horizon-churn raw-body hash, pathQualifiedKey-keyed
     writeHexPairLines( f, "movec", s.moveCidBySym );  // MOVED-BODY: the move identity of a body over a bar
+    writeHexPairLines( f, "bodyc", s.bodyCidBySym );  // QD-RENAME-IDENTITY: the same identity for every callable
     writeMoveSketchLines( f, s.moveSketchBySym );      // MOVES: the clone sketch of that body
     for( std::uint64_t h : s.cloneGroups )
     {
@@ -6865,6 +6886,10 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         else if( kind == "movec" )   // MOVED-BODY; a sidecar written before it has none, and then no move is recognized
         {
             readHashMap( out.moveCidBySym );
+        }
+        else if( kind == "bodyc" )   // QD-RENAME-IDENTITY; a sidecar written before it has none, and then no rename or move is matched by body
+        {
+            readHashMap( out.bodyCidBySym );
         }
         else if( kind == "moves" )   // MOVES; a sidecar written before it has none, and then only exact moves are recognized
         {
@@ -8915,6 +8940,7 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healMap( base.placeholderBySym );
     healMap( base.bodyHashBySym );
     moved += rekeyMoveRecords( base.moveCidBySym, al );
+    (void) rekeyMoveRecords( base.bodyCidBySym, al );      // QD-RENAME-IDENTITY: re-keyed like the move record, so the old key is no vacated body
     (void) rekeyMoveRecords( base.moveSketchBySym, al );   // its sketch follows it; not a separate healed key in the count
 
     // the two SORTED SETS — same add-never-overwrite rule, then restore the sorted invariant every
@@ -8944,6 +8970,169 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     moved += healDefectSites( base, al );
     return moved;
 }
+
+// QD-RENAME-IDENTITY (2026-11-14) — A RENAME OR A MOVE KEEPS ITS IDENTITY. The quality key is path::scope::name, so renaming a
+// function (callers renamed with it) or moving it to a sibling file gave it a new key: every kind read it as new code. Measured on
+// the QD-CATCH-HONEST neutrals (reports/qd-catch-fresh-2026-11-13.md, ADDENDUM 2026-11-14): 13/45 renames and 5/30 moves left a
+// row, 4 renames GATED — each renamed function was one member of an existing clone pair, and the pair's member-set hash changed
+// with the name, so the old pair read as new duplication. The other rows were the renamed or moved body re-reported as new
+// (params, dead-code, error-masking) or as moved (complexity, nesting, verbosity).
+// THE ONE MATCHING RULE, for every kind: a baseline key whose body is GONE (no current symbol at the key carries it: the key is gone,
+// or only a declaration or another body is left there, the MOVES "vacated" rule) and a NEW key (absent
+// from the baseline) whose one callable carries the SAME body identity (moveCidOf: the body after the signature, whitespace and its
+// own name scrubbed) are one symbol, when that identity is carried by exactly one gone key and exactly one new key (a tie refuses:
+// floors, not guesses) and neither key is an overload set. EXACT equality, never similarity: a body that also changed is not
+// matched here and keeps today's reading (new-symbol, or moved by sketch over a bar), so a worsening carried in with a rename still
+// shows. The match RE-FILES the baseline forward (remapSnapshotIdentity, the git-rename route's own healing, on a copy), so every
+// per-symbol kind compares the renamed body with itself and finds nothing — except the short-horizon-churn body hash, which is a
+// raw-byte hash over the signature too (it would read the rename as a rewrite), and two facts a body does not decide, which stay
+// non-gating as before: a matched symbol that is dead now reads origin="moved"; one that turned public counts in api-new-surface=.
+// The two clone kinds keep their member-set hash; a current group the baseline did not hold is held when one member is a matched
+// symbol and every member's body identity equals its (re-filed) baseline one: the same bodies, so the same duplication.
+struct ContentMoves
+{
+    gtl::btree_map<std::uint64_t, std::uint64_t> toCurrent;   // gone baseline key → the new key that carries its body
+    gtl::btree_set<std::uint64_t>                targetSet;   // the new keys
+
+    ContentMoves( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const std::vector<std::uint64_t>& bodyOf )
+    {
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> fresh = newKeyBodies( base, keyOf, bodyOf );   // (identity, key)
+        if( fresh.empty() )
+        {
+            return;   // nothing new: nothing can be a renamed or moved body (the common case, one pass over the keys)
+        }
+        const std::vector<std::pair<std::uint64_t, std::uint64_t>> gone = goneKeyBodies( base, keyOf, bodyOf );   // (identity, key), sorted
+        std::sort( fresh.begin(), fresh.end() );
+        for( std::size_t a = 0; a < fresh.size(); ++a )
+        {
+            const std::uint64_t cid = fresh[a].first;
+            const bool          one = ( a == 0 || fresh[ a - 1 ].first != cid ) && ( a + 1 == fresh.size() || fresh[ a + 1 ].first != cid );
+            const auto [ lo, hi ]   = std::equal_range( gone.begin(), gone.end(), std::pair<std::uint64_t, std::uint64_t>{ cid, 0 },
+                                                        []( const auto& x, const auto& y ) { return x.first < y.first; } );
+            if( one && hi - lo == 1 )
+            {
+                toCurrent.emplace( lo->second, fresh[a].second );
+                targetSet.insert( fresh[a].second );
+            }
+        }
+    }
+
+    bool empty() const noexcept { return toCurrent.empty(); }
+    bool isTarget( std::uint64_t key ) const { return targetSet.contains( key ); }
+
+    // The baseline re-filed under the new keys (add-never-overwrite, remapSnapshotIdentity). The churn body hash is not: see above.
+    Snapshot healed( const Snapshot& base ) const
+    {
+        Snapshot        out = base;
+        IdentityAliases al;
+        al.toCurrent = toCurrent;
+        (void) remapSnapshotIdentity( out, al );
+        for( std::uint64_t k : targetSet )
+        {
+            out.bodyHashBySym.erase( k );
+        }
+        return out;
+    }
+
+    // The baseline the delta reads: `baseline` itself when nothing matched, else the healed copy kept in `store`.
+    const Snapshot& baseFor( const Snapshot& baseline, std::optional<Snapshot>& store ) const
+    {
+        if( empty() )
+        {
+            return baseline;
+        }
+        store.emplace( healed( baseline ) );
+        return *store;
+    }
+
+    // Dead-code rows from `from` on: a matched symbol dead now stays non-gating (origin="moved") — a body does not decide reachability.
+    void markMovedDeadRows( std::vector<Regression>& regs, std::size_t from ) const
+    {
+        for( std::size_t k = from; k < regs.size(); ++k )
+        {
+            if( !regs[k].isNewSymbol && isTarget( regs[k].key ) )
+            {
+                regs[k].isNewSymbol = regs[k].isMoved = true;
+            }
+        }
+    }
+
+    // A current clone group the baseline did not hold by its member set, held because a matched symbol is in it and every member's
+    // body is the one the (re-filed) baseline recorded under its key. `base` is the healed snapshot.
+    bool holdsCloneGroup( const CloneGroup& cg, const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const std::vector<std::uint64_t>& bodyOf ) const
+    {
+        if( empty() )
+        {
+            return false;
+        }
+        bool matched = false;
+        for( NodeId m : cg.members )
+        {
+            const std::uint64_t key = m < keyOf.size() ? keyOf[m] : 0;
+            const auto          cid = base.bodyCidBySym.find( key );
+            const auto          defs = base.defsBySym.find( key );
+            if( key == 0 || m >= bodyOf.size() || cid == base.bodyCidBySym.end() || cid->second != bodyOf[m] || defs == base.defsBySym.end() || defs->second != 1 )
+            {
+                return false;
+            }
+            matched = matched || isTarget( key );
+        }
+        return matched;
+    }
+
+private:
+    // (identity, key) of each baseline key whose one callable's body no current symbol at the key carries, sorted.
+    static std::vector<std::pair<std::uint64_t, std::uint64_t>> goneKeyBodies( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const std::vector<std::uint64_t>& bodyOf )
+    {
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> held;   // (key, identity) of every current symbol (identity 0: no callable body)
+        for( NodeId i = 0; i < keyOf.size(); ++i )
+        {
+            if( keyOf[i] != 0 )
+            {
+                held.emplace_back( keyOf[i], i < bodyOf.size() ? bodyOf[i] : 0 );
+            }
+        }
+        std::sort( held.begin(), held.end() );
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> gone;   // (identity, key): the key no longer carries that body (gone, or a
+                                                                     // declaration or other body left at it: the MOVES "vacated" rule)
+        for( const auto& [ key, cid ] : base.bodyCidBySym )
+        {
+            const auto defs = base.defsBySym.find( key );
+            if( defs != base.defsBySym.end() && defs->second == 1 && !std::binary_search( held.begin(), held.end(), std::pair{ key, cid } ) )
+            {
+                gone.emplace_back( cid, key );
+            }
+        }
+        std::sort( gone.begin(), gone.end() );
+        return gone;
+    }
+
+    // (identity, key) of each new key (absent from the baseline) that one callable alone carries.
+    static std::vector<std::pair<std::uint64_t, std::uint64_t>> newKeyBodies( const Snapshot& base, const std::vector<std::uint64_t>& keyOf, const std::vector<std::uint64_t>& bodyOf )
+    {
+        std::vector<std::pair<std::uint64_t, NodeId>> fresh;   // (key, node)
+        for( NodeId i = 0; i < keyOf.size(); ++i )
+        {
+            if( keyOf[i] != 0 && base.locBySym.find( keyOf[i] ) == base.locBySym.end() )
+            {
+                fresh.emplace_back( keyOf[i], i );
+            }
+        }
+        std::sort( fresh.begin(), fresh.end() );
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> out;
+        for( std::size_t a = 0; a < fresh.size(); ++a )
+        {
+            const bool          one  = ( a == 0 || fresh[ a - 1 ].first != fresh[a].first ) && ( a + 1 == fresh.size() || fresh[ a + 1 ].first != fresh[a].first );
+            const NodeId        i    = fresh[a].second;
+            const std::uint64_t body = i < bodyOf.size() ? bodyOf[i] : 0;
+            if( one && body != 0 )
+            {
+                out.emplace_back( body, fresh[a].first );
+            }
+        }
+        return out;
+    }
+};
 
 // Which mechanism rescued a given ack row. Kept per-row (not just as a total) so the report can disclose the
 // ROUTE — "your ack survived because git recorded the rename" and "because the body is byte-for-byte the
@@ -10032,7 +10221,7 @@ inline std::uint32_t newSymbolCeilingGate( const Regression& r, SymKind measured
 // `excludes`/`maxFileBytes` mirror the working-tree ingest config and are threaded into the churn kind's
 // window-ref snapshot (computeWindowRefBodyHashes) so both sides of the evidence compare see one file set —
 // the same A4-F5 discipline computeHeadSnapshot follows. Defaults keep the MCP call site unchanged.
-inline std::vector<Regression> computeDelta( const IngestResult& ing, const Graph& g, const Snapshot& base,
+inline std::vector<Regression> computeDelta( const IngestResult& ing, const Graph& g, const Snapshot& baseline,
                                              std::string_view root = {},
                                              const std::vector<std::string>& excludes = {},
                                              std::size_t maxFileBytes = kDefaultMaxFileBytes,
@@ -10084,6 +10273,15 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             keyByNode[i] = qualityKey( ing, i, root );
         }
     }
+
+    MoveIdentities nowMove;
+    std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing, &nowMove );      // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
+    measureCallableNotItsContainer( ing, keyByNode, nowCodeLoc );                 // EXTENT-CTOR — and the same container rule
+    // QD-RENAME-IDENTITY — a renamed or moved body keeps its identity: the baseline every kind below reads is re-filed under the new
+    // keys first (a copy, only when something matched; see ContentMoves).
+    const ContentMoves      contentMoves( baseline, keyByNode, nowMove.body );
+    std::optional<Snapshot> healedBase;
+    const Snapshot&         base = contentMoves.baseFor( baseline, healedBase );
 
     // ─── r26 ORIGIN AXIS: preexisting-worse vs new-symbol ──────────────────────────────────────────────
     // The exit code used to fire on ANY major unacked finding, which meant every large-but-fine NEW symbol
@@ -10222,10 +10420,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         regs.back().memberPaths = cloneMemberPaths( cg, ing, root );   // P1 SCOPE — see cloneMemberPaths
     };
 
-    MoveIdentities nowMove;
-    std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing, &nowMove );      // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
-    measureCallableNotItsContainer( ing, keyByNode, nowCodeLoc );                 // EXTENT-CTOR — and the same container rule
-    const MovedBodies moved( base, keyByNode, nowMove );                          // MOVED-BODY — read by perSymbolKind below
+    const MovedBodies moved( base, keyByNode, nowMove );
+    // a current clone group the baseline holds: by its member set or pairs, or (QD-RENAME-IDENTITY) by its members' unchanged bodies
+    const auto isHeld = [ & ]( const CloneGroup& cg, std::uint64_t h )
+    { return cloneGroupHeldAtBaseline( cg, h, base.cloneGroups, ing, root ) || contentMoves.holdsCloneGroup( cg, base, keyByNode, nowMove.body ); };                          // MOVED-BODY — read by perSymbolKind below
 
     // One per-symbol metric kind: aggregate the CURRENT side to the same per-canonId MAX the snapshot stores
     // (overloads share an id), compare per-id MAX vs the baseline's per-id MAX, report each id once at its
@@ -10434,7 +10632,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             const CloneGroup&        cg = cgs[ci];
             const CloneIdiomVerdict& vd = vx[ci];
             const std::uint64_t h = cloneGroupHash( cg, ing, root );
-            if( cloneGroupHeldAtBaseline( cg, h, base.cloneGroups, ing, root ) )
+            if( isHeld( cg, h ) )
             {
                 continue;
             }
@@ -10488,8 +10686,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 
     if( kindSelected( scope.kinds, "dead-code" ) )   // qd-memory-degrade: the pass and its four evidence structures, only for its kind
     {
+        const std::size_t deadFrom = regs.size();
         appendDeadCodeRows( regs, ing, g, base, root, keyByNode, existedAtBaseline, stampLoc,
                             DeadExclusionCounts{ registerMacroExcludedOut, declinedCallExcludedOut, valueRefExcludedOut } );
+        contentMoves.markMovedDeadRows( regs, deadFrom );   // QD-RENAME-IDENTITY
     }
 
     // api-surface (contract drift) — B10.2e TIERED into two shapes on the PUBLIC/exported surface:
@@ -10558,7 +10758,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         if( !std::binary_search( base.publicApi.begin(), base.publicApi.end(), key ) )
         {
             const bool isNewSymbol = !existedAtBaseline( key );                // SAME oracle the r26 origin axis uses — one source of truth
-            if( isNewSymbol )
+            if( isNewSymbol || contentMoves.isTarget( key ) )                  // QD-RENAME-IDENTITY: a matched symbol's export is no body fact; counted as before the match
             {
                 // Q-DIAL-4 — A COUNT, NOT N ROWS. This row could never gate (the legend says so), it is one
                 // per new export, and it dominated the document: 103 of 119 api-surface rows over 40 replayed
@@ -10835,7 +11035,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 const CloneGroup&        cg = cgs[ci];
                 const CloneIdiomVerdict& vd = vx[ci];
                 const std::uint64_t h = cloneGroupHash( cg, ing, root );
-                if( cloneGroupHeldAtBaseline( cg, h, base.cloneGroups, ing, root ) )
+                if( isHeld( cg, h ) )
                 {
                     continue; // group already existed → not new
                 }

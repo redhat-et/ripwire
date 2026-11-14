@@ -1022,8 +1022,9 @@ inline constexpr const char* kQdIdentityLegend =
     "regression carried in with a rename is judged preexisting-worse and GATES instead of slipping through "
     "as new-symbol. FLOORS, stated because silence here would read as a guarantee: the two clone kinds key "
     "on a member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; ORIGIN follows the "
-    "rename record, not content: a move git recorded no rename for reads as new-symbol, or as moved (never "
-    "gating) when its body, unchanged or nearly so, is over a bar. ";
+    "rename record and an unchanged body (whitespace and its own name aside): a function keeps its identity "
+    "across a rename or move git recorded no rename for when its body did not change; one whose body also "
+    "changed reads as new-symbol, or as moved (never gating) when it is over a bar and nearly unchanged. ";
 
 // How the two mechanisms decide, in full — printed only when an ack was actually SUPPRESSED by one of
 // them (acked= is non-zero), which is the only state in which a reader has a suppression to audit. The
