@@ -45,7 +45,7 @@
 #   (i6) FORFILESYMS-COMMENT-DECL (CodeRabbit on #646; RED on main 44f7d3326): a docstring or /* */ twin declaration earlier in the
 #        file is skipped (no file-scope call stands in it): the real declaration's callee prints
 #   (i7) FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646; RED on main 44f7d3326): an external initialiser call is not credited with
-#        another module-scope call's same-named edge (no row); its in-tree twin keeps the row
+#        another module-scope call's same-named edge (no row); two calls written alike (angular's makeDecorator) keep the row
 #   (o1) overloads: the shown row's edge reaches one overload, the kept row is another: it says via="name"; twin (o2) one definition, the call is plain
 #   (h2) a held block's next= carries the origin call's ranking flags (--no-route, --anchor under RIPWIRE_DEV, --pack-top-n=N)
 #   (c2) a capture whose buffer fails to flush (RLIMIT_FSIZE, a real short write) is not read as the whole answer: stderr says so, exit 1, the stub says held="uncaptured", no rows; twin: unlimited, rows
@@ -667,7 +667,8 @@ else no "(i6) rc=$i6rc/$i6trc twins $i6seen of 2: py $( initrows "$TMP/i6.xml" |
 
 # (i7) FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646): the declaration's call `ext.makeThing(…)` is external, and ANOTHER module-scope
 # call `makeThing(…)` supplies the module scope's only edge named makeThing: that edge is not the declaration's call, so no row
-# (fails closed); (i7n) the same file without the external twin keeps its row
+# (fails closed); (i7n) the same file with the declaration's call written like the other one (`makeThing(…)` twice: angular's many
+# `X = makeDecorator(…)`) keeps its row
 mkdir -p "$TMP/initref/src" "$TMP/initrefok/src"
 cat >"$TMP/initref/src/real.ts" <<'FIX'
 export function makeThing(name: string): any {
@@ -703,6 +704,8 @@ export interface Thing {
 }
 
 export const Thing: any = makeThing('Thing');
+
+export const helper: any = makeThing('helper');
 FIX
 run initref "--for=Thing" >"$TMP/i7.xml"; i7rc=$?
 run initrefok "--for=Thing" >"$TMP/i7n.xml"; i7nrc=$?
@@ -710,7 +713,7 @@ i7pre=0
 grep -q "^export const Thing: any = ext.makeThing('Thing');" "$TMP/initref/src/things.ts" && grep -q "^export const helper: any = makeThing('helper');" "$TMP/initref/src/things.ts" && i7pre=1
 if [ "$i7rc$i7nrc" = 00 ] && [ "$i7pre" = 1 ] && ! grep -q 'by="init"' "$TMP/i7.xml" \
    && [ "$( sed -n 1p <<<"$( initrows "$TMP/i7n.xml" )" )" = "makeThing@Thing@src/things.ts:7@src/real.ts:1" ]; then
-    ok "(i7) an external initialiser call is never credited with another module-scope call's edge (no row); its in-tree twin keeps the row"
+    ok "(i7) an external initialiser call is never credited with another module-scope call's edge (no row); written alike, both calls share it and the row stays"
 else no "(i7) rc=$i7rc/$i7nrc premise=$i7pre: wrong $( initrows "$TMP/i7.xml" | head -1 ) ok $( initrows "$TMP/i7n.xml" | head -1 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"

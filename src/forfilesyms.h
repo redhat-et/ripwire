@@ -1220,26 +1220,32 @@ inline bool fileScopeCall( const IngestResult& ing, const Reference& r ) noexcep
     return r.role == RefRole::Call && !r.isInherit && !r.isDocLink && !r.isCompose && r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size()
         && ( ing.symbols[ r.fromSymbol ].kind == SymKind::ModuleScope || ing.symbols[ r.fromSymbol ].kind == SymKind::Var );
 }
-// FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646): the index keeps no per-call target, so the owner's one out-edge named like the
-// callee is the SELECTED call's own target only when that call is the owner's one call by that name. With two (`ext.makeThing()`,
-// external, beside an in-tree `makeThing()`) the edge may be the other call's: drop the row (fails closed, never a wrong row).
-inline void dropSharedNameCalls( const IngestResult& ing, const std::vector<InitDecl>& decls, const std::vector<NodeId>& ownerOf, std::vector<NodeId>& rowFor )
+// Two calls written alike (the same qualifier and receiver chain) in one owner resolve alike.
+inline bool sameCallSpelling( const Reference& a, const Reference& b )
 {
-    std::vector<std::uint32_t> calls( decls.size(), 0 );
+    return a.calleeName == b.calleeName && a.qualifier == b.qualifier && a.memberCall == b.memberCall && a.memberRoot == b.memberRoot
+        && a.memberPath() == b.memberPath();
+}
+// FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646): the index keeps no per-call target, so the owner's one out-edge named like the
+// callee is the SELECTED call's own target only when every call the owner makes by that name is written as it is (angular's many
+// `X = makeDecorator(…)`). One written otherwise (`ext.makeThing()`, external, beside an in-tree `makeThing()`) may own that edge:
+// drop the row (fails closed, never a wrong row).
+inline void dropSharedNameCalls( const IngestResult& ing, const std::vector<const Reference*>& selected, std::vector<NodeId>& rowFor )
+{
     for( const Reference& r : ing.references )
     {
         if( !fileScopeCall( ing, r ) )
         {
             continue;
         }
-        for( std::size_t k = 0; k < decls.size(); ++k )
+        for( std::size_t k = 0; k < selected.size(); ++k )
         {
-            calls[k] += std::uint32_t( rowFor[k] != kNoNode && r.fromSymbol == ownerOf[k] && r.calleeName == decls[k].callee );
+            const Reference* sel = selected[k];
+            if( rowFor[k] != kNoNode && r.fromSymbol == sel->fromSymbol && r.calleeName == sel->calleeName && !sameCallSpelling( r, *sel ) )
+            {
+                rowFor[k] = kNoNode;
+            }
         }
-    }
-    for( std::size_t k = 0; k < decls.size(); ++k )
-    {
-        rowFor[k] = calls[k] > 1 ? kNoNode : rowFor[k];
     }
 }
 inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads, InitWindowCut& cut )
@@ -1257,7 +1263,7 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
     }
     std::vector<NodeId>        rowFor( decls.size(), kNoNode );
     std::vector<std::uint32_t> lineFor( decls.size(), 0 );   // nonzero: a file-scope call to the callee starts in the window (the evidence)
-    std::vector<NodeId>        ownerOf( decls.size(), kNoNode );   // that call's owner
+    std::vector<const Reference*> selected( decls.size(), nullptr );   // that call
     for( const Reference& r : ing.references )
     {
         if( !fileScopeCall( ing, r ) )
@@ -1271,11 +1277,11 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
             {
                 rowFor[k]  = moduleScopeCallee( ing, g, r.fromSymbol, d.callee );
                 lineFor[k] = r.line;
-                ownerOf[k] = r.fromSymbol;
+                selected[k] = &r;
             }
         }
     }
-    dropSharedNameCalls( ing, decls, ownerOf, rowFor );
+    dropSharedNameCalls( ing, selected, rowFor );
     std::vector<char> headDone( heads.size(), 0 );   // the head's declaration is its first one with a file-scope call in the window
     for( std::size_t k = 0; k < decls.size(); ++k )
     {
