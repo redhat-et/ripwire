@@ -7,9 +7,10 @@ struct App
 };
 int App::Run()
 {
-    RealReader* ptr = &reader_;
     RealReader& ref = reader_;
-    return ptr != nullptr && &ref == ptr ? 0 : 1;
+    const int k = ref.ReadFile( 2 );
+    RealReader* ptr = borrowed_ != nullptr ? borrowed_ : &ref;
+    return k + ( ptr == &ref ? 0 : 1 );
 }
 int UseByParam( RealReader r ) { return r.ReadFile( 1 ); }
 int main()

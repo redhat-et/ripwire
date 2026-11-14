@@ -1248,18 +1248,25 @@ inline void dropSharedNameCalls( const IngestResult& ing, const std::vector<cons
         }
     }
 }
-inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads, InitWindowCut& cut )
+// pickInits' answer: the rows, and the declarations the window cut (init_cut=).
+struct InitPicks
 {
-    std::vector<InitRow> out;
+    std::vector<InitRow> rows;
+    InitWindowCut        cut;
+};
+inline InitPicks pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads )
+{
+    InitPicks             picked;
+    std::vector<InitRow>& out = picked.rows;
     if( !forFileSymsInitOn() || heads.empty() )
     {
-        return out;
+        return picked;
     }
     FileTextCache               text( ing );
-    const std::vector<InitDecl> decls = initDecls( heads, text, cut );
+    const std::vector<InitDecl> decls = initDecls( heads, text, picked.cut );
     if( decls.empty() )
     {
-        return out;   // COST: no declaration of a head name: no reference scan
+        return picked;   // COST: no declaration of a head name: no reference scan
     }
     std::vector<NodeId>        rowFor( decls.size(), kNoNode );
     std::vector<std::uint32_t> lineFor( decls.size(), 0 );   // nonzero: a file-scope call to the callee starts in the window (the evidence)
@@ -1296,7 +1303,7 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
             out.push_back( InitRow { rowFor[k], heads[ decls[k].head ].name, decls[k].file, lineFor[k] } );
         }
     }
-    return out;
+    return picked;
 }
 
 struct Picks
@@ -1692,7 +1699,9 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     fd::collapseDeclarations( home, cands );
     fd::Picks picks = fd::pickRows( ing, g, cands );
     picks.binds     = fd::pickBinds( ing, sf, head, picks, a.answer );
-    picks.inits     = fd::pickInits( ing, g, sf, fd::initHeads( ing, rows, sf, a.answer ), picks.initCut );
+    fd::InitPicks inits = fd::pickInits( ing, g, sf, fd::initHeads( ing, rows, sf, a.answer ) );
+    picks.inits         = std::move( inits.rows );
+    picks.initCut       = inits.cut;
     if( picks.byName.empty() && picks.byCallee.empty() && picks.binds.rows.empty() && picks.inits.empty() && picks.initCut.count == 0 )
     {
         return {};
