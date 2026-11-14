@@ -36,6 +36,8 @@ PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
 # 2026-11-14, TRAIN-1111g (main d624cff5f + lane qd-constructs): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree; both log entries
 #   below are kept (main's entry-ceiling 27 -> 29 and the lane's kCacheVersion 50 -> 51 touch different watched text).
+#   Re-pinned again after lane macro-p0 (kParserVer 307 -> 309, mirrored in quality.h; kQSnapCacheScheme stays: the parser key already
+#   keys the qsnap cache on extraction).
 # 2026-11-13, lane qd-constructs (base main cd04d477e): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kCacheVersion 50 -> 51: a file record carries the --quality-delta construct hits (u32 count + 9-byte rows, ingest_cache.h),
 #   found in the parse worker (ingest_astquery.h collectConstructHits); quality.h's kIngestCacheVersionMirror with it. kQSnapCacheScheme stays:
