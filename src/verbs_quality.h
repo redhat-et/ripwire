@@ -295,8 +295,9 @@ char**& baseChildArgv() noexcept
 }
 
 // RIPWIRE_TEST_QBASE_CHILD (gates only): `inproc` never spawns; `spawnfail` hands the spawn a bad descriptor so the real
-// spawn fails; `exit` makes the child exit 70 before its base phase; `partial` makes it write half the blob. Each of the
-// last three must fall back to the in-process answer, byte for byte.
+// spawn fails; `exit` makes the child exit 70 before its base phase; `partial` makes it write half the blob; `crash` makes
+// it abort inside its base phase. Each falls back to the in-process answer: byte for byte, but for a crash, whose own
+// lines are passed through so it is never silent.
 std::string_view baseChildSeam() noexcept
 {
     const char* const v = std::getenv( "RIPWIRE_TEST_QBASE_CHILD" );
@@ -331,6 +332,11 @@ int runBaseChild( const std::string& root, const rw::Config& cfg, RefPairDelta& 
         return 70;
     }
     rw::emitRaw( stderr, std::string( kBaseChildBegin ).c_str() );
+    if( baseChildSeam() == "crash" )
+    {
+        rw::emitRaw( stderr, "ripwire: test seam: the base child aborts\n" );
+        std::abort();
+    }
     const std::optional<int> failed = buildBaseInProcess( root, out.baseSha, cfg, out );
     const std::uint64_t      basePeak = os::mem_footprint_peak();
     const std::uint64_t      after    = memguard::measuredFootprint();
@@ -473,9 +479,17 @@ BaseChildResult baseInChild( const BaseCacheKey& key, RefPairDelta& refs )
     }
     const std::size_t begin   = run.text.find( kBaseChildBegin );
     const std::size_t endLine = run.text.rfind( kBaseChildEnd );
-    if( begin == std::string::npos || endLine == std::string::npos || endLine < begin || !WIFEXITED( run.status ) )
+    if( !WIFEXITED( run.status ) )
     {
-        result.why = WIFEXITED( run.status ) ? "exit" : "signal";
+        // a crash is a bug, never a quiet fallback: what the child said after `begin` (a sanitizer report, an abort's
+        // line) is passed through before the in-process phase runs, at the cost of its base-phase lines printing twice
+        rw::emitRaw( stderr, run.text.substr( begin == std::string::npos ? 0 : begin + kBaseChildBegin.size() ).c_str() );
+        result.why = "signal";
+        return result;
+    }
+    if( begin == std::string::npos || endLine == std::string::npos || endLine < begin )
+    {
+        result.why = "exit";
         return result;
     }
     const std::string_view line   = std::string_view( run.text ).substr( endLine, run.text.find( '\n', endLine ) - endLine );

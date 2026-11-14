@@ -853,6 +853,7 @@ for _g in \
     qackconcurrencycheck \
     qackorigincheck \
     qbasecachecheck \
+    qbasechildcheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
