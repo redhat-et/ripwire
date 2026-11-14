@@ -374,6 +374,26 @@ BaseChildRole baseChildRole()
 // stat: ~70-100 bytes per tracked file, so 1 MiB is ~10,000-15,000 files. No index found (not a plain .git, an unusual
 // layout) reads as small: the in-process phase, the answer this form always gave.
 inline constexpr std::uint64_t kBaseChildMinIndexBytes = std::uint64_t( 1 ) << 20;
+
+// The git dir a `.git` entry at `dir` names: itself, or — a worktree or submodule's `.git` file — its "gitdir: <path>".
+// Empty when the file does not say.
+std::string gitDirAt( const std::string& dir, const rw::os::stat_t& dotGit )
+{
+    using namespace rw;
+    const std::string gitDir = dir + "/.git";
+    if( !S_ISREG( dotGit.st_mode ) )
+    {
+        return gitDir;
+    }
+    const std::optional<std::string> file = pathguard::readRegularFileNoFollow( gitDir );
+    if( !file || !file->starts_with( "gitdir: " ) )
+    {
+        return {};
+    }
+    const std::string target = file->substr( 8, file->find( '\n' ) == std::string::npos ? std::string::npos : file->find( '\n' ) - 8 );
+    return target.starts_with( "/" ) ? target : dir + "/" + target;
+}
+
 std::uint64_t gitIndexBytes( const std::string& root )
 {
     using namespace rw;
@@ -388,19 +408,9 @@ std::uint64_t gitIndexBytes( const std::string& root )
         os::stat_t st;
         if( os::stat( ( dir + "/.git" ).c_str(), &st ) == 0 )
         {
-            std::string gitDir = dir + "/.git";
-            if( S_ISREG( st.st_mode ) )   // a worktree or submodule: "gitdir: <path>" names its own git dir
-            {
-                const std::optional<std::string> file = pathguard::readRegularFileNoFollow( gitDir );
-                if( !file || !file->starts_with( "gitdir: " ) )
-                {
-                    return 0;
-                }
-                std::string target = file->substr( 8, file->find( '\n' ) == std::string::npos ? std::string::npos : file->find( '\n' ) - 8 );
-                gitDir             = target.starts_with( "/" ) ? target : dir + "/" + target;
-            }
-            os::stat_t index;
-            return os::stat( ( gitDir + "/index" ).c_str(), &index ) == 0 && S_ISREG( index.st_mode ) ? std::uint64_t( index.st_size ) : 0;
+            const std::string gitDir = gitDirAt( dir, st );
+            os::stat_t        index;
+            return !gitDir.empty() && os::stat( ( gitDir + "/index" ).c_str(), &index ) == 0 && S_ISREG( index.st_mode ) ? std::uint64_t( index.st_size ) : 0;
         }
         const std::size_t slash = dir.rfind( '/' );
         if( dir == "/" || slash == std::string::npos )
@@ -412,8 +422,6 @@ std::uint64_t gitIndexBytes( const std::string& root )
     return 0;
 }
 
-// The child's side: the base phase, the blob (the cache when it can be written, else the parent's temp path), the end line.
-// The process's exit code: 0 once the end line is out, the refusal's own code after an environment failure (said in the line).
 // The child's blob: the cache when it can be written, else the parent's temp path. Where it went: "cache", "temp" or "" (nowhere).
 std::string_view writeChildBlob( const std::string& root, const rw::Config& cfg, const RefPairDelta& out, const std::string& tempPath )
 {
@@ -432,6 +440,8 @@ std::string_view writeChildBlob( const std::string& root, const rw::Config& cfg,
     return quality::atomicWriteFile( tempPath, blob ) ? "temp" : "";
 }
 
+// The child's side: the base phase, the blob, the end line. The process's exit code: 0 once the end line is out, the
+// refusal's own code after an environment failure (said in the line).
 int runBaseChild( const std::string& root, const rw::Config& cfg, RefPairDelta& out, std::uint64_t before, const std::string& tempPath )
 {
     using namespace rw;
