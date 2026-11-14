@@ -670,6 +670,7 @@ for _g in \
     layerquerycheck \
     layoutcheck \
     lb3namecheck \
+    lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
     legenddriftcheck \
