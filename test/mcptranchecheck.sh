@@ -189,7 +189,7 @@ IMP_CLI="$( "$BIN" "$ROOT" --impact=escapeXml --limit=3 --offset=2 --legend=full
 # lane/lean-answers-068: the whereis default may list only the definitions (listing="defs", references counted), and on a
 # single-branch checkout runMcp has ONE def row, so limit=2 there cannot show 2. The arm keeps its exact assertion on the
 # whole list (listing:"all", the pre-listing answer); the twin below holds limit= on the default's LISTED rows.
-# Both ask test/lib/sweeproot.sh's root: whereis refuses past 512 local branches (a long-lived dev clone or its linked worktree).
+# Both ask test/lib/sweeproot.sh's root: whereis reads only the newest 512 local branches past its window (a dev clone or its worktree).
 . "$ROOT/test/lib/sweeproot.sh"
 WROOT="$( sweepRoot "$ROOT" "$TMP/sweep" )"
 WH="$( mcp_text "$( call whereis '{"path":"'"$WROOT"'","symbol":"runMcp","limit":2,"listing":"all"}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"

@@ -553,26 +553,19 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
 // def labels (§A7 below), exactly as its CLI twin does. `flags` needs the crawled file list, so it goes
 // through getIndex() like every other index-backed verb.
 
-// Why a git-sweep twin (whereis, stray_content) answered "" for a root that IS a git repository: the host names each
-// cause instead of "not a git repository" — K75's blob batch that never served every blob, or more than crossref::kMaxRefs
-// local branches (the CLI twins' "more than N refs match" refusal; a long-lived clone with hundreds of lane branches has it).
+// Why a git-sweep twin (whereis, stray_content) answered "" for a root that IS a git repository: the host names the cause
+// instead of "not a git repository" — K75's blob batch that never served every blob. (More than crossref::kMaxRefs local
+// branches is no refusal: the sweep reads the newest ones and the root's refs_omitted= counts the rest.)
 enum class SweepFault : std::uint8_t
 {
     None,
     BlobsUnread,
-    TooManyRefs,
 };
 
-// The SweepFault a sweep result's refusal flags name; None is a non-git root (the host's "not a git repository").
-inline SweepFault sweepFaultOf( bool blobsUnread, bool tooManyRefs ) noexcept
+// The SweepFault a sweep result's refusal flag names; None is a non-git root (the host's "not a git repository").
+inline SweepFault sweepFaultOf( bool blobsUnread ) noexcept
 {
-    return blobsUnread ? SweepFault::BlobsUnread : tooManyRefs ? SweepFault::TooManyRefs : SweepFault::None;
-}
-
-// SweepFault::TooManyRefs in the CLI's words, with this surface's filter: `kind` is the ref-name substring here.
-inline std::string tooManyRefsRefusal()
-{
-    return "more than " + std::to_string( crossref::kMaxRefs ) + " refs match — narrow it with kind=SUBSTR (a ref-name substring)";
+    return blobsUnread ? SweepFault::BlobsUnread : SweepFault::None;
 }
 
 // `whereis` verb: which ref's tree defines or mentions SYM. "" ⇒ not a git repo, or `fault` says why (the caller reports it).
@@ -622,7 +615,7 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     crossref::WhereResult res = crossref::computeWhereis( root, sel, filter, crossref::WhereisEvidence{ nullptr, indexDefs } );
     if( !res.ok || res.blobsUnread )   // the CLI twin's refusals; a hit count over blobs never read is not an answer
     {
-        if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread, res.tooManyRefs ); }
+        if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread ); }
         return {};
     }
     res.seedSpec  = std::move( seedSpec );
@@ -652,7 +645,7 @@ inline std::string strayContentText( const std::string& root, const std::string&
     const crossref::StrayResult res = crossref::computeStrayContent( root, filter );
     if( !res.ok )
     {
-        if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread, res.tooManyRefs ); }   // K75 and the ref cap: named, not "not a git repository"
+        if( fault != nullptr ) { *fault = sweepFaultOf( res.blobsUnread ); }   // K75: named, not "not a git repository"
         return {};
     }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeStrayContentPage( f, res, maxFiles, page.limit, page.offset ); } );
