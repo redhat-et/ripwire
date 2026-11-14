@@ -66,6 +66,12 @@ struct FileExtractThrew
     void disclose( DisclosureWhy ) noexcept
     {
         scan.markExtractPartial( fileId );
+        // QD-CONSTRUCTS-AT-INGEST: a throw may have cut the file's construct pass, so its hits are not KNOWN: the ingest claims
+        // no carried hits, and --quality-delta re-parses (CodeRabbit 4572576449 on #655). Every slot starts at 1 (known-empty).
+        if( fileId < scan.constructsKnown.size() )
+        {
+            scan.constructsKnown[ fileId ] = 0;
+        }
     }
 };
 

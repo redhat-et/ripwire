@@ -247,7 +247,9 @@ std::optional<int> scoreBaseCommit( const std::string& root, const std::string& 
     refs.baseMacros     = quality::cFamilyMacroNames( baseTree.ing );
     refs.haveBaseMacros = true;
     (void)hardLineStops( "snapshot of the base commit", refs.stop );
-    if( useCache && !refs.stop.stopped )   // a stopped side is never persisted: the next call must not read a partial floor as whole
+    // A stopped side is never persisted: the next call must not read a partial floor as whole. Nor is a base whose ingest
+    // refused or partially extracted a file: a hit would answer without that disclosure (quality.h baseScoreStorable).
+    if( useCache && !refs.stop.stopped && quality::baseScoreStorable( baseTree.ing ) )
     {
         (void)quality::atomicWriteFile( path, quality::serializeBaseCommitScore( { refs.baseSnapshot, refs.baseMacros }, sha ) );
         quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + repoHex + "-" + exclHex + "-", path, 2 );

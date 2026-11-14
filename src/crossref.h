@@ -809,17 +809,21 @@ struct RefInfo
 //
 // `enumeration` (optional out) is the DISCLOSE sink for a ref DROPPED here (a tip that is not an object name): it is
 // in no count the caller prints, so a caller that claims completeness must read refsDropped — --whereis withholds
-// complete= on it. A caller passing none has no such claim to withhold.
+// complete= on it. A caller passing none has no such claim to withhold. It also records a ref KEPT with an unreadable
+// committer date (a commit object whose committer line has none — git prints an empty field): the ref window ranks it as
+// the oldest, so past kMaxRefs it is the first left out, and refs_omitted= counts it like any other.
 struct RefEnumeration
 {
     enum class DisclosureWhy : std::uint8_t
     {
         TipNotObjectName,
+        DateUnreadable,
     };
     std::uint32_t refsDropped = 0;
-    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    std::uint32_t datesUnread = 0;
+    void disclose( DisclosureWhy why ) noexcept
     {
-        ++refsDropped;
+        ++( why == DisclosureWhy::DateUnreadable ? datesUnread : refsDropped );
     }
 };
 
@@ -857,8 +861,14 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
         const std::string_view name = line.substr( 0, firstPipe );
         const std::string_view tip  = line.substr( firstPipe + 1, lastPipe - firstPipe - 1 );
         const std::string_view date = line.substr( lastPipe + 1, unixPipe - lastPipe - 1 );
-        std::int64_t           when = 0;   // a malformed date sorts as the oldest: the window may omit it, and counts it
-        std::from_chars( line.data() + unixPipe + 1, line.data() + line.size(), when );
+        std::int64_t           when = 0;   // an unreadable date sorts as the oldest: the window may omit it, and counts it
+        const char* const      whenEnd = line.data() + line.size();
+        const std::from_chars_result parsed = std::from_chars( line.data() + unixPipe + 1, whenEnd, when );
+        if( !VALIDATE( parsed.ec == std::errc() && parsed.ptr == whenEnd ) )
+        {
+            when = 0;
+            DISCLOSE( dropSink, RefEnumeration::DisclosureWhy::DateUnreadable, "crossref: for-each-ref yielded a ref with no readable committer date — the ref window ranks it as the oldest" );
+        }
         if( filterNameHits != nullptr && !name.empty() && ( filter.empty() || name.find( filter ) != std::string_view::npos ) )
         {
             ++*filterNameHits;

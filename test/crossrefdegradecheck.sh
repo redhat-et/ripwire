@@ -397,6 +397,33 @@ if [ -n "${M6:-}" ]; then
     esac
 fi
 
+# 7 (TRAIN-1111g FIX2, CodeRabbit 4572576410): a branch whose tip commit has no committer date (a committer line with no date at all: git prints an empty
+# %(committerdate:unix), measured on git 2.5x) is KEPT, ranked as the oldest for the ref window, and its unreadable date is
+# disclosed through the enumeration's sink. Red before: the empty field fell through std::from_chars as 0, unchecked and
+# unsaid. The trace reaches stderr only where DISCLOSE prints (not Release / RelWithDebInfo / MinSizeRel).
+R7="$TMP/r7"; mkdir -p "$R7"; git -C "$R7" init -q . && printf 'int foo( int x ) { return x; }\n' >"$R7/a.c" \
+    && git -C "$R7" add -A && git -C "$R7" commit -qm one
+t7="$( git -C "$R7" rev-parse 'HEAD^{tree}' )"; p7="$( git -C "$R7" rev-parse HEAD )"
+c7="$( printf 'tree %s\nparent %s\nauthor a <a@b> 1 +0000\ncommitter a <a@b>\n\nno date\n' "$t7" "$p7" | git -C "$R7" hash-object -t commit -w --literally --stdin )"
+git -C "$R7" update-ref refs/heads/nodate "$c7"
+e7="$( git -C "$R7" for-each-ref --format='%(committerdate:unix)' refs/heads/nodate )"
+if [ -n "$e7" ]; then
+    no "7 premise: git printed committerdate:unix='$e7' for a commit with no committer date (the arm needs the empty field)"
+else
+    ( cd "$R7" && "$BIN" . --whereis=foo >"$TMP/r7.xml" 2>"$TMP/r7.err" ); rc7=$?
+    refs7="$( attr refs_scanned < "$TMP/r7.xml" )"
+    flav7="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+    if [ "$rc7" != 0 ] || [ -z "$refs7" ]; then
+        no "7 --whereis over a dateless branch: rc=$rc7 refs=$refs7 $( head -c 300 "$TMP/r7.err" )"
+    else
+        case "$flav7" in
+            Release|RelWithDebInfo|MinSizeRel) ok "7 --whereis answers over a dateless branch (refs=$refs7); the disclosure trace is compiled out in this $flav7 build" ;;
+            *) if grep -q 'no readable committer date' "$TMP/r7.err"; then ok "7 --whereis answers over a dateless branch (refs=$refs7) and discloses the unreadable date"
+               else no "7 the dateless branch's date was not disclosed (rc=$rc7 refs=$refs7): $( head -c 300 "$TMP/r7.err" )"; fi ;;
+        esac
+    fi
+fi
+
 # G4: every emitted document must survive xmllint
 if command -v xmllint >/dev/null 2>&1; then
     g4=0

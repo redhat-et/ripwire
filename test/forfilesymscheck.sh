@@ -611,6 +611,16 @@ if [ "$i5nrc" = 0 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i5n.xml" )" )" = "m
     ok "(i5n) the short twin prints its by=\"init\" row and no init_cut"
 else no "(i5n) rc=$i5nrc rows: $( initrows "$TMP/i5n.xml" | tr '\n' '|' ) $( grep -o '<syms.*' "$TMP/i5n.xml" | head -c 300 )"; fi
 
+# (i5m) TRAIN-1111g FIX2 (CodeRabbit 4572576414 on #655): init_cut= counts DECLARATIONS, as both legends say: two declarations of
+# the same head in one file, each past the window, count 2. Red before: one per head name (init_cut="1").
+mkdir -p "$TMP/initcut2"
+printf 'def make_big():\n    return {}\n\n\nbig_registry = %s.make_big()\nbig_registry = %s.make_big()\n' "$LONGHEAD" "$LONGHEAD" >"$TMP/initcut2/app.py"
+run initcut2 "--for=big_registry" >"$TMP/i5m.xml"; i5mrc=$?
+i5mdecl="$( grep -c '^big_registry = ' "$TMP/initcut2/app.py" )"
+if [ "$i5mrc" = 0 ] && [ "$i5mdecl" = 2 ] && grep -q '<syms[^>]* init_cut="2"' "$TMP/i5m.xml"; then
+    ok "(i5m) two past-window declarations of one head count init_cut=\"2\""
+else no "(i5m) rc=$i5mrc decls=$i5mdecl: $( grep -o '<syms[^>]*>' "$TMP/i5m.xml" | head -c 300 )"; fi
+
 # (i6) FORFILESYMS-COMMENT-DECL (CodeRabbit on #646): a declaration twin inside a string or a block comment EARLIER in the file is no
 # declaration: the row comes from the real one (no file-scope call stands in the twin). Python: a module docstring; TypeScript: /* */.
 mkdir -p "$TMP/initdoc/conf" "$TMP/initcmt/src"
@@ -715,6 +725,34 @@ if [ "$i7rc$i7nrc" = 00 ] && [ "$i7pre" = 1 ] && ! grep -q 'by="init"' "$TMP/i7.
    && [ "$( sed -n 1p <<<"$( initrows "$TMP/i7n.xml" )" )" = "makeThing@Thing@src/things.ts:7@src/real.ts:1" ]; then
     ok "(i7) an external initialiser call is never credited with another module-scope call's edge (no row); written alike, both calls share it and the row stays"
 else no "(i7) rc=$i7rc/$i7nrc premise=$i7pre: wrong $( initrows "$TMP/i7.xml" | head -1 ) ok $( initrows "$TMP/i7n.xml" | head -1 )"; fi
+
+
+# (i8) TRAIN-1111g FIX2 (CodeRabbit 4572576421 on #655): a docstring twin `registry = old_registry()` (column 0, so a declaration
+# shape; a `#` comment is not one) sits within 200 bytes of a LATER statement's call `other = old_registry()`. The twin may only take a call that starts before its own `(`, so the later
+# statement's call stands in no twin, and the real declaration's callee prints. Red before: the twin's window was the full 200 bytes,
+# took `other`'s call, and headDone kept the real `registry = make_registry()` from printing (the row named old_registry).
+mkdir -p "$TMP/initnext/conf"
+cat >"$TMP/initnext/conf/__init__.py" <<'FIX'
+def old_registry():
+    return []
+
+
+def make_registry():
+    return {}
+
+
+"""
+registry = old_registry()
+"""
+other = old_registry()
+registry = make_registry()
+FIX
+run initnext "--for=registry" >"$TMP/i8.xml"; i8rc=$?
+i8pre=0
+grep -q '^registry = old_registry()$' "$TMP/initnext/conf/__init__.py" && grep -q '^other = old_registry()$' "$TMP/initnext/conf/__init__.py" && i8pre=1
+if [ "$i8rc" = 0 ] && [ "$i8pre" = 1 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i8.xml" )" )" = "make_registry@registry@conf/__init__.py:13@conf/__init__.py:5" ]; then
+    ok "(i8) a docstring twin does not take a later statement's call in its window: the real declaration's make_registry prints"
+else no "(i8) rc=$i8rc premise=$i8pre rows: $( initrows "$TMP/i8.xml" | head -1 ) $( grep -o '<syms.*' "$TMP/i8.xml" | head -c 400 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"

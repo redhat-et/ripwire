@@ -3299,9 +3299,10 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
     out.entryOf.assign( crawledFiles.size(), CacheRecords::kNoCacheEntry );
     out.head.resize( crawledFiles.size() );
 
-    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 14 u32. One prefix read covers
-    // every key up to about 400 bytes; a longer key takes a second read of exactly what the head needs.
-    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 14 * 4;
+    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 15 u32 (6 health fields and the 9
+    // family counts readRecordHead reads, v51's construct count the ninth). One prefix read covers every key up to 416
+    // bytes; a longer key takes a second read of exactly what the head needs (test/statgatecheck.sh (f)).
+    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 15 * 4;
     constexpr std::size_t kHeadProbeBytes = 512;
     std::string headBuf;
     {

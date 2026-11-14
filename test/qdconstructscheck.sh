@@ -190,14 +190,41 @@ runl L6 --no-cache
 if [ "$( cat "$WORK/L5.rc" )" = 0 ] && [ -s "$WORK/L5.out" ] && cmp -s "$WORK/L5.out" "$WORK/L6.out"; then ok "(L) a warm map off the rewritten records equals the --no-cache map"; else no "(L) warm map rc $( cat "$WORK/L5.rc" ) differs from the --no-cache map"; fi
 if [ "$( reparsed L3 )" = 0 ] && [ "$( reparsed L4 )" = 0 ] && [ "$( field "$( verifyline "$WORK/L4.err" )" equal )" = 1 ]; then ok "(L) the rewritten records serve a warm --deps and the next --quality-delta (reparsed=0 both)"; else no "(L) after the rewrite: --deps reparsed=$( reparsed L3 ), --quality-delta reparsed=$( reparsed L4 )"; fi
 
-# (R) real trees, optional
+# (X) a worker that throws on a file after its construct pass began (RIPWIRE_TEST_EXTRACT_THROW: a file holding the marker
+#     throws right after its hits were collected) leaves that file's hits UNKNOWN: the ingest claims no carried hits, so
+#     no qd-constructs-verify line prints (the reader re-parses), and the answer stays byte-identical to (N). Red before
+#     (CodeRabbit 4572576449 on #655): the catch kept the file "known", and the partial list was read as complete.
+#     Control: the same marker file without the seam is carried (the verify line prints).
+cp -R "$FX" "$WORK/fxx"
+printf '# rw-throw-here\n' >> "$WORK/fxx/src/b.py"
+runx(){
+    local tag="$1"; shift
+    ( cd "$WORK/fxx" && env HOME="$WORK/home" TMPDIR="$WORK/tmp" RIPWIRE_QD_CONSTRUCTS_VERIFY=1 "$@" "$BIN" . --quality-delta --no-cache \
+        > "$WORK/$tag.out" 2> "$WORK/$tag.err" ); echo $? > "$WORK/$tag.rc"
+}
+runx X0
+runx X1 RIPWIRE_TEST_EXTRACT_THROW=rw-throw-here
+x0="$( verifyline "$WORK/X0.err" )"
+if [ -n "$x0" ] && [ -z "$( verifyline "$WORK/X1.err" )" ] && [ "$( cat "$WORK/X1.rc" )" = "$( cat "$WORK/X0.rc" )" ] && cmp -s "$WORK/X0.out" "$WORK/X1.out"; then
+    ok "(X) a file whose worker threw is not carried (no verify line; control carried: $x0); the answer is byte-identical"
+else
+    no "(X) control verify '${x0:-missing}', seam verify '$( verifyline "$WORK/X1.err" )', rc $( cat "$WORK/X0.rc" )/$( cat "$WORK/X1.rc" )"
+fi
+
+# (R) real trees, optional. Each repository gets a fresh TMPDIR that exists (the cache ladder needs it to create its
+#     ripwire/ child, else every pass runs uncached: CodeRabbit 4572576463 on #655), and the warm pass must re-parse nothing.
 for repo in ${QDC_REPOS:-}; do
+    rm -rf "$WORK/tmp-r"; mkdir -p "$WORK/tmp-r"
     for pass in cold warm; do
-        ( cd "$repo" && env HOME="$WORK/home" TMPDIR="$WORK/tmp-r" RIPWIRE_QD_CONSTRUCTS_VERIFY=1 "$BIN" . --quality-delta > /dev/null 2> "$WORK/r.err" ); rrc=$?
+        ( cd "$repo" && env HOME="$WORK/home" TMPDIR="$WORK/tmp-r" RIPWIRE_QD_CONSTRUCTS_VERIFY=1 RIPWIRE_CACHE_STATS=1 "$BIN" . --quality-delta > /dev/null 2> "$WORK/r.err" ); rrc=$?
         case "$rrc" in 0|2) ;; *) no "(R) $repo $pass: --quality-delta exited $rrc" ;; esac
         v="$( verifyline "$WORK/r.err" )"
         n=$(( $( field "$v" carried_mask || echo 0 ) + $( field "$v" carried_placeholder || echo 0 ) ))
         if [ "$( field "$v" equal )" = 1 ] && [ "$n" -gt 0 ]; then ok "(R) $repo $pass: $v"; else no "(R) $repo $pass: ${v:-no verify line}"; fi
+        if [ "$pass" = warm ]; then
+            rr="$( sed -n 's/.*ripwire: cache-stats reparsed=\([0-9]*\).*/\1/p' "$WORK/r.err" | head -n 1 )"
+            if [ "$rr" = 0 ]; then ok "(R) $repo warm: the hits came from the cache (reparsed=0)"; else no "(R) $repo warm: reparsed=${rr:-missing} (the cache was not used)"; fi
+        fi
     done
     rm -rf "$WORK/tmp-r"
 done

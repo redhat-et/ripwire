@@ -492,6 +492,13 @@ inline void collectWantedConstructHits( IngestFileScan& scan, const LangEntry& l
     if( scan.wantConstructHits )
     {
         collectConstructHits( le, static_cast<std::uint32_t>( fileId ), bytes, root, constructCursor, out.constructs );
+        // Test seam (test/qdconstructscheck.sh): a file holding this marker throws here, after its hits were collected, so the
+        // worker's catch runs on a file whose construct pass began (FileExtractThrew then marks its hits unknown).
+        static const char* const throwMarker = std::getenv( "RIPWIRE_TEST_EXTRACT_THROW" );
+        if( throwMarker != nullptr && *throwMarker != '\0' && bytes.find( throwMarker ) != std::string_view::npos )
+        {
+            throw std::runtime_error( "RIPWIRE_TEST_EXTRACT_THROW" );
+        }
     }
     else
     {

@@ -20,6 +20,7 @@
 # Usage:  bash test/qbasecachecheck.sh          (BIN=build/ripwire)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"   # the fixture is a git repo: no inherited GIT_DIR / GIT_WORK_TREE may select the caller's (CodeRabbit 4572576459)
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
@@ -121,6 +122,25 @@ p = sys.argv[1]; b = open( p, "rb" ).read(); open( p, "wb" ).write( b[ : len( b 
 PY
 run trunc "$PAIR"
 if grep -q 'base Snapshot cache corrupt — recomputing' "$WORK/trunc.err" && [ "$( ingests trunc )" = 2 ] && same cold trunc; then ok "(T) a truncated blob is refused and recomputed"; else no "(T) truncated blob: ingests=$( ingests trunc )"; fi
+
+# (D) a base whose ingest extracted a file only partially is answered but never stored (quality.h baseScoreStorable): a hit
+#     would replay the answer without the extract-partial disclosure only the ingest prints. RIPWIRE_TEST_EXTRACT_THROW makes
+#     the worker throw on the file holding the marker (it is in both commits). Red before (CodeRabbit 4572576455 on #655): the
+#     pair wrote a blob, and the repeat hit it (one ingest) with no disclosure of the base side.
+FD="$WORK/fd"; cp -R "$FX" "$FD"; rm -rf "$WORK/home-d" "$WORK/tmp-d"; mkdir -p "$WORK/home-d" "$WORK/tmp-d"
+git -C "$FD" -c user.name=t -c user.email=t@t checkout -q HEAD~1 && printf '# rw-throw-here\n' >> "$FD/tests/test_a.py" \
+    && git -C "$FD" -c user.name=t -c user.email=t@t commit -qam "base with marker" && git -C "$FD" -c user.name=t -c user.email=t@t cherry-pick "$( git -C "$FX" rev-parse HEAD )" >/dev/null \
+    || no "(D) fixture: marker commits"
+rund(){ local tag="$1"; shift; ( cd "$FD" && env HOME="$WORK/home-d" TMPDIR="$WORK/tmp-d" RIPWIRE_CACHE_STATS=1 RIPWIRE_TEST_EXTRACT_THROW=rw-throw-here "$BIN" . "$@" > "$WORK/$tag.out" 2> "$WORK/$tag.err" ); echo $? > "$WORK/$tag.rc"; }
+dblobs(){ find "$WORK/home-d" "$WORK/tmp-d" -name 'ripwire-qbase-*' -type f 2>/dev/null | grep -v '\.tmp\.' | grep -c .; }
+rund d1 "$PAIR"
+rund d2 "$PAIR"
+dpart="$( grep -c 'extract-partial\|worker exception' "$WORK/d2.err" )"
+if [ "$( cat "$WORK/d1.rc" )" = 2 ] && [ "$( dblobs )" = 0 ] && [ "$( ingests d2 )" = 2 ] && cmp -s "$WORK/d1.out" "$WORK/d2.out"; then
+    ok "(D) a base with a partially extracted file answers (rc 2) but writes no blob; the repeat ingests both commits again"
+else
+    no "(D) rc $( cat "$WORK/d1.rc" ), $( dblobs ) blob(s), repeat ingests $( ingests d2 ), same=$( cmp -s "$WORK/d1.out" "$WORK/d2.out" && echo 1 || echo 0 ), partial lines $dpart"
+fi
 
 [ "$fail" = 0 ] && echo "qbasecachecheck: PASS" || echo "qbasecachecheck: FAIL"
 exit "$fail"

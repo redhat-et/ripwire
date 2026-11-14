@@ -5032,6 +5032,15 @@ struct BaseCommitScore
     std::vector<std::string> macros;   // cFamilyMacroNames of the base tree, in its order
 };
 
+// May a base commit's score be stored? Only when its ingest refused no file for nesting and extracted none partially
+// (CodeRabbit 4572576455 on #655). Such a base still answers, but its disclosures (the stderr notes, the --skipped rows)
+// come from the ingest a hit never runs, so a stored score would replay the answer without them. Every writer of the qbase
+// blob asks this, wherever it runs (verbs_quality.h scoreBaseCommit).
+inline bool baseScoreStorable( const IngestResult& baseIngest ) noexcept
+{
+    return baseIngest.crawlSkips.nestRefusedFiles == 0 && baseIngest.crawlSkips.extractPartialFiles == 0;
+}
+
 inline std::string qbaseCachePath( const std::string& repoHex, const std::string& exclHex, const std::string& baseSha )
 {
     return shaKeyedCachePath( "qbase", repoHex, exclHex, baseSha );

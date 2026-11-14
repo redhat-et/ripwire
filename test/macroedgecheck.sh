@@ -299,6 +299,17 @@ WASM_EXPORT(uint32_t, proxy_on_vm_start, (uint32_t, uint32_t configuration_size)
   return 1;
 }
 EOF
+# TRAIN-1111g FIX2 keeps (CodeRabbit on #655): a C++14 digit separator in a block-forming macro's body is no character literal
+# (4572576435: `1'000` hid the body's only `;`, so the def read as an invocation and was dropped), and a templated constructor's
+# definition sits under a template_declaration inside the member list (4572576439: the constructor test missed it).
+cat >"$SF/keep2.cc" <<'EOF'
+#define DEFINE_SEPARATED( name ) int name##Sep()
+DEFINE_SEPARATED( limits ) { auto limit = 1'000; }
+struct XYZ
+{
+    template <class T> XYZ( T ) {}
+};
+EOF
 # sverb VERB: the answer, or FAILED-RUN when the run exits nonzero (every arm below then fails its match)
 sverb(){
     local out rc
@@ -353,7 +364,7 @@ printf '%s\n' "$DC" | grep -q 'n="consume"' \
     && ok "MACRO-P0: decodeLoop() keeps its consume() callee" \
     || no "MACRO-P0: decodeLoop() lost its consume() callee"
 # 9e) keeps: each must stay a function definition
-for kv in TEST_F:1 TEST:1 COMPUTE_SUM:1 RGB:2 HSV:1 DEFINE_HANDLER:1 WASM_EXPORT:1; do
+for kv in TEST_F:1 TEST:1 COMPUTE_SUM:1 RGB:2 HSV:1 DEFINE_HANDLER:1 WASM_EXPORT:1 DEFINE_SEPARATED:1 XYZ:1; do
     k="${kv%%:*}"; want="${kv##*:}"
     n="$( fnrows "$k" )"
     [ "$n" = "$want" ] && ok "MACRO-P0 keep: --defs=$k lists $n function def(s)" \

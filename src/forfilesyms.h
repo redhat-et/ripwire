@@ -1139,7 +1139,7 @@ inline bool initRunsPastWindow( std::string_view t, std::size_t p )
     const bool             pastWindow = goesOn && std::ranges::all_of( seg, []( char c ) { return identByte( c ) || c == '.' || c == ' ' || c == '\t'; } );
     return pastWindow;
 }
-// by="init"'s disclosure sink: the head names whose declaration ran past the window (init_cut= on <syms>).
+// by="init"'s disclosure sink: the declarations of head names whose initialiser ran past the window (init_cut= on <syms>), each one.
 struct InitWindowCut
 {
     enum class DisclosureWhy : std::uint8_t
@@ -1154,7 +1154,7 @@ struct InitDecl
 {
     std::size_t      head;   // index into the heads
     std::uint32_t    file;
-    std::size_t      from, to;   // the initialiser call's byte window [from, to)
+    std::size_t      from, to;   // the initialiser call's byte window [from, to): its callee head through its `(`
     std::string_view callee;
 };
 // The owner's one out-edge to a definition named `name` (kNoNode: none, or several). The owner is the file's module scope, or the
@@ -1193,7 +1193,6 @@ inline std::vector<InitDecl> initDecls( const std::vector<InitHead>& heads, File
             continue;
         }
         const std::string_view tv( *t ), name( heads[h].name );
-        bool                   cutHere = false;   // one init_cut per head name
         for( std::size_t at = tv.find( name ); at != std::string_view::npos; at = tv.find( name, at + 1 ) )
         {
             const std::size_t p = declInitAt( tv, at, name );
@@ -1203,11 +1202,13 @@ inline std::vector<InitDecl> initDecls( const std::vector<InitHead>& heads, File
             }
             if( const std::string_view callee = initCallName( tv, p ); !callee.empty() )
             {
-                decls.push_back( InitDecl { h, heads[h].file, p, std::min( tv.size(), p + kForFileSymsInitSpan ), callee } );
+                // The call that stands in this declaration starts before its `(` (CodeRabbit 4572576421 on #655): a window to the
+                // full span would take a LATER statement's call to the same name, and a docstring twin would then claim it.
+                const std::size_t open = tv.find( '(', p );
+                decls.push_back( InitDecl { h, heads[h].file, p, open + 1, callee } );
             }
-            else if( !cutHere && initRunsPastWindow( tv, p ) )
+            else if( initRunsPastWindow( tv, p ) )   // each such declaration counts (CodeRabbit 4572576414 on #655: the legend's unit)
             {
-                cutHere = true;
                 DISCLOSE( cut, InitWindowCut::DisclosureWhy::PastWindow, "for syms: a by=init declaration's initialiser ran past the 200-byte window before its call; init_cut= counts it" );
             }
         }

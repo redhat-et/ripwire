@@ -2654,15 +2654,35 @@ inline bool macroInvocationName( std::string_view name ) noexcept
     return isScreamingSnakeName( name ) && std::ranges::find( kBlockFormingTestMacros, name ) == kBlockFormingTestMacros.end();
 }
 
+// Is the `'` at `i` a C++14 digit separator (`1'000`, `0x1'FF`) — inside a numeric literal, i.e. the token it splits starts with a
+// digit — rather than a character literal's quote (`'a'`, and the prefixed `L'a'` / `u8'a'`, whose token starts with a letter)?
+inline bool digitSeparatorAt( std::string_view text, std::size_t i ) noexcept
+{
+    if( i == 0 || i + 1 >= text.size() || !std::isalnum( static_cast<unsigned char>( text[i + 1] ) ) )
+    {
+        return false;
+    }
+    std::size_t start = i;
+    while( start > 0 && ( std::isalnum( static_cast<unsigned char>( text[start - 1] ) ) || text[start - 1] == '\'' || text[start - 1] == '.' ) )
+    {
+        --start;
+    }
+    return start < i && std::isdigit( static_cast<unsigned char>( text[start] ) );
+}
+
 // Does a brace block's text hold a `;` before the `}` that closes its own `{`? Strings, character literals and comments
-// are skipped. Bounded by the matching brace on purpose: error recovery can stretch a recovered body past it
-// (`F( a, b ){ X( 1, { { … } } ) };` read the next declaration into the body).
+// are skipped (a digit separator is no quote: digitSeparatorAt). Bounded by the matching brace on purpose: error recovery
+// can stretch a recovered body past it (`F( a, b ){ X( 1, { { … } } ) };` read the next declaration into the body).
 inline bool braceBlockHoldsStatement( std::string_view block ) noexcept
 {
     int depth = 0;
     for( std::size_t i = 0; i < block.size(); ++i )
     {
         const char c = block[i];
+        if( c == '\'' && digitSeparatorAt( block, i ) )
+        {
+            continue;
+        }
         if( c == '"' || c == '\'' )
         {
             for( ++i; i < block.size() && block[i] != c; ++i )
@@ -2745,10 +2765,15 @@ inline bool bodyFollowsClosedParameters( TSNode fnDeclarator, TSNode body, std::
     return true;
 }
 
-// Is the definition/declaration `owner` a constructor of the class whose member list holds it?
+// Is the definition/declaration `owner` a constructor of the class whose member list holds it? A templated constructor
+// (`template <class T> RGB( T ) {}`) sits under a template_declaration inside that list.
 inline bool ownerIsConstructorOf( TSNode owner, std::string_view name, std::string_view src ) noexcept
 {
-    const TSNode list     = parentOf( owner );
+    TSNode list = parentOf( owner );
+    if( !ts_node_is_null( list ) && kindIs( ts_node_type( list ), "template_declaration" ) )
+    {
+        list = parentOf( list );
+    }
     const bool   inMember = !ts_node_is_null( list ) && kindIs( ts_node_type( list ), "field_declaration_list" );
     return inMember && nodeFieldText( parentOf( list ), NodeField::Name, src ) == name;
 }
