@@ -115,6 +115,8 @@
 #include <cstdlib>
 #include <filesystem>   // the worktree overlay: symlink_status / read_symlink / file_size on a changed path
 #include <format>       // blobsUnreadCause — the one refusal sentence
+#include <type_traits>  // streamBlobs: a stream with no piece reader keeps the whole-or-skip rule
+#include "infra/pieceread.h"   // LARGE-PARTIAL-1: a lexical reader reads a blob of any size, in line-aligned pieces
 #include <functional>
 #include <limits>       // parseCatFileHeader: the size field never overflows
 #include <mutex>        // labelBranchRowsByParse holds quality::headSnapshotIngestMutex around the blob parse
@@ -515,7 +517,8 @@ struct StreamBlobStats
     std::uint32_t missing    = 0;      // "<oid> missing" / malformed header — the object could not be read
     std::vector<std::string> missingShas;   // those objects' names, in the order asked: a partial clone's blobs (git will not download them)
     std::uint32_t nonBlob    = 0;      // wrong object type or negative size — never scanned
-    std::uint32_t oversized  = 0;      // > kMaxBlobBytes, consumed but DISCARDED unread
+    std::uint32_t oversized  = 0;      // > kMaxBlobBytes, consumed but DISCARDED unread (a stream with no piece reader)
+    std::uint32_t streamed   = 0;      // > kMaxBlobBytes and READ, in pieces, by the caller's piece reader (LARGE-PARTIAL-1)
     std::uint32_t binary     = 0;      // NUL in the probe window — outside a text-scoped claim, not a failure
     bool          endedEarly = false;  // the batch pipe died before serving every sha
     bool          startFailed = false; // the batch never started (list file / popen failure)
@@ -542,10 +545,71 @@ struct StreamBlobStats
     }
 };
 
-template<class OnBlob>
-inline void streamBlobs( const std::string& root, const std::vector<std::string>& shas, OnBlob onBlob,
-                         StreamBlobStats* stats = nullptr )
+// LARGE-PARTIAL-1: a LEXICAL reader (whereis' scan, stray-content's line and shingle facts) passes `onPiece`, and a text blob
+// over kMaxBlobBytes is then READ, in line-aligned pieces of at most rw::kPieceBytes (readInPieces), instead of being skipped:
+// onPiece( sha, piece ) runs once per piece and onBlob is NOT called for that blob, unless it turns out binary or the stream
+// ends inside it (then onBlob( sha, {}, false ) as before). A stream without one (NoPieces: --abi, which parses whole files)
+// keeps the old rule: over the cap is consumed unread and counted in `oversized`.
+struct NoPieces
 {
+};
+
+// One payload of `size` bytes off a cat-file stream, consumed unread (a blob over the cap on a stream with no piece reader):
+// the bytes consumed, short when the stream ended inside it.
+inline std::size_t discardPayload( std::FILE* pipe, std::size_t size )
+{
+    char        sink[ 65536 ];
+    std::size_t got = 0;
+    while( got < size )
+    {
+        const std::size_t n = std::fread( sink, 1, std::min( size - got, sizeof( sink ) ), pipe );
+        if( n == 0 )
+        {
+            break;
+        }
+        got += n;
+    }
+    return got;
+}
+
+// One payload of `size` bytes off a cat-file stream, read whole into `body`: the bytes read.
+inline std::size_t readPayload( std::FILE* pipe, std::size_t size, std::vector<char>& body )
+{
+    body.resize( size );
+    return size > 0 ? std::fread( body.data(), 1, size, pipe ) : 0;
+}
+
+// One blob over kMaxBlobBytes read in pieces (readInPieces) and its framing LF consumed. False when the stream ended inside it
+// (disclosed; the caller stops the batch). A binary one is reported through onBlob as unreadable text, as a whole blob is.
+template<class OnBlob, class OnPiece>
+inline bool streamOversizeInPieces( std::FILE* pipe, const std::string& sha, std::size_t size, std::string& window, StreamBlobStats& st,
+                                    OnBlob& onBlob, OnPiece& onPiece )
+{
+    const PieceRead read = readInPieces( size, [ & ]( char* dst, std::size_t n ) { return std::fread( dst, 1, n, pipe ); }, window,
+                                         [ & ]( const BlobPiece& piece ) { onPiece( sha, piece ); } );
+    (void)std::fgetc( pipe );                                                // the framing LF after the payload
+    if( read == PieceRead::Short )
+    {
+        DISCLOSE( st, StreamBlobStats::DisclosureWhy::StreamEndedMidBlob,
+                  "crossref: git cat-file stream ended mid-blob — stopping the batch rather than risk misattributing content" );
+        onBlob( sha, std::string_view{}, false );
+        return false;
+    }
+    if( read == PieceRead::Binary )
+    {
+        ++st.binary;
+        onBlob( sha, std::string_view{}, false );
+        return true;
+    }
+    ++st.streamed;
+    return true;
+}
+
+template<class OnBlob, class OnPiece = NoPieces>
+inline void streamBlobs( const std::string& root, const std::vector<std::string>& shas, OnBlob onBlob,
+                         StreamBlobStats* stats = nullptr, OnPiece onPiece = {} )
+{
+    constexpr bool kReadsPieces = !std::is_same_v<OnPiece, NoPieces>;
     // Null-object: count unconditionally into a local sink when the caller did not ask, so the body below
     // carries no per-site null test (the branch count stays what the streaming logic needs, nothing more).
     StreamBlobStats  localStats;
@@ -586,6 +650,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
     PROFILE_SCOPE_DESCRIBE( "crossref: git cat-file --batch stream (every blob, callback included)" );
     std::vector<char> body;
     std::string       header;
+    std::string       window;   // readInPieces' window: one per stream, whatever the blob's size
     for( std::size_t served = 0; served < shas.size(); ++served )
     {
         // header: "<oid> <type> <size>\n", or "<oid> missing\n" for an unreadable object
@@ -612,28 +677,19 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         // desync every subsequent header and start attributing content to the wrong sha. But an oversized
         // blob is DISCARDED as it is consumed rather than buffered: a repo can hold a 500 MB object, and
         // resizing to it just to throw it away would spike RSS by that much for a blob we never look at.
-        const bool        tooBig = std::size_t( size ) > kMaxBlobBytes;
-        std::size_t       got    = 0;
-        if( tooBig )
+        const bool tooBig = std::size_t( size ) > kMaxBlobBytes;
+        if constexpr( kReadsPieces )
         {
-            char        sink[ 65536 ];
-            std::size_t left = std::size_t( size );
-            while( left > 0 )
+            if( tooBig )
             {
-                const std::size_t n = std::fread( sink, 1, std::min( left, sizeof( sink ) ), pipe );
-                if( n == 0 )
+                if( !streamOversizeInPieces( pipe, shas[ served ], std::size_t( size ), window, st, onBlob, onPiece ) )
                 {
                     break;
                 }
-                left -= n;
-                got  += n;
+                continue;
             }
         }
-        else
-        {
-            body.resize( std::size_t( size ) );
-            got = ( size > 0 ) ? std::fread( body.data(), 1, std::size_t( size ), pipe ) : 0;
-        }
+        const std::size_t got = tooBig ? discardPayload( pipe, std::size_t( size ) ) : readPayload( pipe, std::size_t( size ), body );
         (void)std::fgetc( pipe );                                            // the framing LF after the payload
 
         // A SHORT read means the pipe died mid-payload (git killed, disk error). The stream can no longer be
@@ -707,6 +763,7 @@ public:
 
         streamBlobs( root_, todo, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
         {
+            pieceFacts_ = BlobFacts{};   // a blob whose pieces stopped short (or turned out binary) keeps none of them
             BlobFacts f;
             f.isText = isText;
             if( isText )
@@ -717,7 +774,31 @@ public:
             }
             facts_.emplace( sha, std::move( f ) );
             ++fetched_;
-        }, &stats_ );
+        }, &stats_, [ & ]( const std::string& sha, const BlobPiece& piece )
+        {
+            // LARGE-PARTIAL-1: a blob over kMaxBlobBytes, read in pieces (it used to be "not diffable", its lines in no count).
+            // The line multiset is exact over whole lines; a line longer than half a piece is hashed as its pieces (the carried
+            // overlap skipped). The sketch is the bottom-k of the union of the pieces' shingles (a set, so the overlap's repeats
+            // are harmless); only the few shingles that span a newline-aligned cut are not formed.
+            const std::vector<std::uint64_t> lines  = lineMultiset( piece.bytes.substr( piece.carried ) );
+            const std::vector<std::uint64_t> sketch = minhashSketch( piece.bytes );
+            pieceFacts_.lineHashes.insert( pieceFacts_.lineHashes.end(), lines.begin(), lines.end() );
+            pieceFacts_.sketch.insert( pieceFacts_.sketch.end(), sketch.begin(), sketch.end() );
+            std::sort( pieceFacts_.sketch.begin(), pieceFacts_.sketch.end() );
+            pieceFacts_.sketch.erase( std::unique( pieceFacts_.sketch.begin(), pieceFacts_.sketch.end() ), pieceFacts_.sketch.end() );
+            if( pieceFacts_.sketch.size() > kSketchSize )
+            {
+                pieceFacts_.sketch.resize( kSketchSize );
+            }
+            if( piece.last )
+            {
+                std::sort( pieceFacts_.lineHashes.begin(), pieceFacts_.lineHashes.end() );
+                pieceFacts_.lineCount = std::uint32_t( pieceFacts_.lineHashes.size() );
+                facts_.emplace( sha, std::move( pieceFacts_ ) );
+                pieceFacts_ = BlobFacts{};
+                ++fetched_;
+            }
+        } );
         missing_.insert( stats_.missingShas.begin(), stats_.missingShas.end() );
     }
 
@@ -753,6 +834,7 @@ private:
     std::vector<std::string>                 pending_;
     std::size_t                              fetched_ = 0;
     StreamBlobStats                          stats_;
+    BlobFacts                                pieceFacts_;   // the blob being read in pieces (fill's piece reader), until its last piece
 };
 
 // K75: the words every host of a blob-reading verb refuses in when the one `git cat-file --batch` behind it did not
@@ -1068,9 +1150,11 @@ inline void parallelIndexed( std::size_t count, Body body, ParallelSweep& sweep 
 // withholds every completeness claim.
 constexpr std::size_t kWhereisStreamSlices = 4;
 
-template<class OnBlob>
+// `onPiece( index, sha, piece )` (optional): the piece reader streamBlobs hands a blob over kMaxBlobBytes to; a served sha
+// reaches exactly one of onBlob or its pieces (the last one carrying piece.last).
+template<class OnBlob, class OnPiece = NoPieces>
 inline void streamBlobsInSlices( const std::string& root, const std::vector<std::string>& shas, std::size_t slices, OnBlob onBlob,
-                                 StreamBlobStats& stats )
+                                 StreamBlobStats& stats, OnPiece onPiece = {} )
 {
     slices = std::max<std::size_t>( 1, std::min( slices, shas.size() ) );
     std::vector<StreamBlobStats> sliceStats( slices );
@@ -1081,8 +1165,19 @@ inline void streamBlobsInSlices( const std::string& root, const std::vector<std:
         const std::size_t              end   = shas.size() * ( t + 1 ) / slices;
         const std::vector<std::string> part( shas.begin() + std::ptrdiff_t( begin ), shas.begin() + std::ptrdiff_t( end ) );
         std::size_t                    next = begin;   // streamBlobs serves its list in order, one call per served sha
-        streamBlobs( root, part, [ & ]( const std::string& sha, std::string_view bytes, bool isText ) { onBlob( next++, sha, bytes, isText ); },
-                     &sliceStats[ t ] );
+        const auto     blobAt = [ & ]( const std::string& sha, std::string_view bytes, bool isText ) { onBlob( next++, sha, bytes, isText ); };
+        if constexpr( std::is_same_v<OnPiece, NoPieces> )
+        {
+            streamBlobs( root, part, blobAt, &sliceStats[ t ] );
+        }
+        else
+        {
+            streamBlobs( root, part, blobAt, &sliceStats[ t ], [ & ]( const std::string& sha, const BlobPiece& piece )
+            {
+                onPiece( next, sha, piece );
+                next += piece.last ? 1 : 0;
+            } );
+        }
     }, sweep );
     for( std::size_t t = 0; t < slices; ++t )
     {
@@ -1090,6 +1185,7 @@ inline void streamBlobsInSlices( const std::string& root, const std::vector<std:
         stats.missing    += st.missing;
         stats.nonBlob    += st.nonBlob;
         stats.oversized  += st.oversized;
+        stats.streamed   += st.streamed;
         stats.binary     += st.binary;
         stats.endedEarly  = stats.endedEarly || st.endedEarly;
         stats.startFailed = stats.startFailed || st.startFailed;
@@ -2317,6 +2413,29 @@ inline void scanBlobForSymbol( std::string_view bytes, std::string_view sym,
     }
 }
 
+// One PIECE of a blob over kMaxBlobBytes (readInPieces), scanned like a whole blob: its rows renumbered to the blob's lines, and
+// a row on the line a mid-line cut split skipped when the previous piece already holds one (one hit per line). True when
+// the piece holds the name's bytes at all.
+inline bool scanPieceForSymbol( const BlobPiece& piece, std::string_view sym, const RefInfo& ref, const std::string& path, std::vector<WhereHit>& out )
+{
+    if( piece.bytes.find( sym ) == std::string_view::npos )
+    {
+        return false;
+    }
+    std::vector<WhereHit> rows;
+    scanBlobForSymbol( piece.bytes, sym, ref, path, rows );
+    for( WhereHit& h : rows )
+    {
+        h.line += piece.firstLine - 1;
+        if( piece.midLine && !out.empty() && out.back().line == h.line )
+        {
+            continue;
+        }
+        out.push_back( std::move( h ) );
+    }
+    return true;
+}
+
 // Every (path, blob) in one ref's tree. `git ls-tree -r` is one process per ref and the ONLY tree-wide call
 // --whereis makes; the blobs behind it are shared across refs and reduced once each.
 inline std::vector<RawRow> lsTree( const std::string& root, const std::string& rev )
@@ -2920,6 +3039,31 @@ struct BranchBlobReadBack
     void disclose( DisclosureWhy ) noexcept { whole = false; }   // its one reason: the entry confirms nothing
 };
 
+// readBranchParseBatch's collector: each distinct blob's bytes and whether it was served whole. A blob over kMaxBlobBytes
+// the guard chose (its size is in the guard's byte budget) is rebuilt whole for the parse, each piece minus the prefix the
+// previous piece already served (LARGE-PARTIAL-1).
+struct ReadBackBytes
+{
+    std::vector<std::string> bytes;
+    std::vector<char>        served;
+
+    explicit ReadBackBytes( std::size_t n ) : bytes( n ), served( n, 0 ) {}
+
+    void blob( std::size_t i, std::string_view b, bool isText )
+    {
+        if( isText )
+        {
+            bytes[ i ].assign( b );
+            served[ i ] = 1;
+        }
+    }
+    void piece( std::size_t i, const BlobPiece& p )
+    {
+        bytes[ i ].append( p.bytes.substr( p.carried ) );
+        served[ i ] = char( p.last );
+    }
+};
+
 inline std::vector<BranchBlobReadBack> readBranchParseBatch( const std::string& root, std::vector<BranchParseJob>& jobs,
                                                              std::span<const std::size_t> batch )
 {
@@ -2935,17 +3079,13 @@ inline std::vector<BranchBlobReadBack> readBranchParseBatch( const std::string& 
         shaOf[ k ]             = std::size_t( it - shas.begin() );
         if( it == shas.end() ) { shas.push_back( sha ); }
     }
-    std::vector<std::string> bytes( shas.size() );
-    std::vector<char>        served( shas.size(), 0 );
-    StreamBlobStats          stats;
-    streamBlobsInSlices( root, shas, kWhereisStreamSlices, [ & ]( std::size_t i, const std::string&, std::string_view b, bool isText )
-    {
-        if( isText )
-        {
-            bytes[ i ].assign( b );
-            served[ i ] = 1;
-        }
-    }, stats );
+    ReadBackBytes   got( shas.size() );
+    StreamBlobStats stats;
+    streamBlobsInSlices( root, shas, kWhereisStreamSlices,
+                         [ & ]( std::size_t i, const std::string&, std::string_view b, bool isText ) { got.blob( i, b, isText ); }, stats,
+                         [ & ]( std::size_t i, const std::string&, const BlobPiece& piece ) { got.piece( i, piece ); } );
+    std::vector<std::string>& bytes  = got.bytes;
+    const std::vector<char>&  served = got.served;
     std::vector<BranchBlobReadBack> reads( batch.size() );
     for( std::size_t k = 0; k < batch.size(); ++k )
     {
@@ -3062,7 +3202,8 @@ enum class WorktreeCopy : std::uint8_t
     Text,      // read: scan it, and it REPLACES HEAD's blob for this path
     Gone,      // absent from disk (deleted): no rows, and HEAD's rows for it are dropped
     NotText,   // binary, or a non-file that is not a directory (a FIFO, a socket): no text symbol can occur, HEAD's rows dropped
-    Unread,    // exists but could not be read (permission, oversized, a git-quoted name), or a DIRECTORY — an untracked
+    Large,     // a regular file over the caller's whole-read size: not read here, the caller streams it (scanWorktreeLarge)
+    Unread,    // exists but could not be read (permission, a git-quoted name), or a DIRECTORY — an untracked
                // nested repository or a submodule, whose files are another repository's and are not read here: HEAD's
                // rows STAND and the answer is worktree="partial", never a complete claim over files it never opened
 };
@@ -3084,9 +3225,10 @@ inline bool beyondSymlinkedDir( const std::string& root, const std::string& relP
 }
 
 // The bytes git would store for this path: a regular file's contents, or a symbolic link's target text (git
-// stores the link, not what it points at). Mirrors streamBlobs' rules: over kMaxBlobBytes is UNREAD (it could
-// hold the symbol, so it forfeits the claim), a NUL in the probe window is binary (it cannot).
-inline WorktreeCopy readWorktreeCopy( const std::string& root, const std::string& relPath, std::string& bytes )
+// stores the link, not what it points at). Mirrors streamBlobs' rules: over `maxBytes` is Large (the overlay streams it in
+// pieces, LARGE-PARTIAL-1; it used to be UNREAD), a NUL in the probe window is binary (it cannot hold a text symbol).
+inline WorktreeCopy readWorktreeCopy( const std::string& root, const std::string& relPath, std::string& bytes,
+                                      std::uintmax_t maxBytes = kMaxBlobBytes )
 {
     bytes.clear();
     if( relPath.empty() || relPath.front() == '"' )
@@ -3128,9 +3270,13 @@ inline WorktreeCopy readWorktreeCopy( const std::string& root, const std::string
         return WorktreeCopy::NotText;
     }
     const std::uintmax_t size = std::filesystem::file_size( p, ec );
-    if( ec || size > kMaxBlobBytes )
+    if( ec )
     {
         return WorktreeCopy::Unread;
+    }
+    if( size > maxBytes )
+    {
+        return WorktreeCopy::Large;
     }
     std::optional<std::string> got = pathguard::readRegularFileNoFollow( p.string() );
     if( !got )
@@ -3138,10 +3284,10 @@ inline WorktreeCopy readWorktreeCopy( const std::string& root, const std::string
         return WorktreeCopy::Unread;
     }
     bytes = std::move( *got );
-    if( bytes.size() > kMaxBlobBytes )
+    if( bytes.size() > maxBytes )
     {
         bytes.clear();
-        return WorktreeCopy::Unread;   // grew between the size probe and the read
+        return WorktreeCopy::Large;    // grew between the size probe and the read
     }
     if( std::string_view( bytes ).substr( 0, std::min( bytes.size(), kBinaryProbe ) ).find( '\0' ) != std::string_view::npos )
     {
@@ -3169,6 +3315,35 @@ struct WorktreeScan
     static constexpr WorktreeOverlay kStateAfter[] = { WorktreeOverlay::Unlisted, WorktreeOverlay::Partial, WorktreeOverlay::Partial };
     void disclose( DisclosureWhy why ) noexcept { state = kStateAfter[ std::size_t( why ) ]; }
 };
+
+// A changed working copy over kMaxBlobBytes, scanned in pieces (LARGE-PARTIAL-1: it used to be left unread, its HEAD rows
+// standing). False when it could not be read whole; a binary one holds no row and is still replaced.
+inline bool scanWorktreeLarge( const std::string& root, const std::string& relPath, std::string_view sym, const RefInfo& ref, WorktreeScan& scan )
+{
+    const std::string full = ( std::filesystem::path( root ) / relPath ).string();
+    std::error_code   ec;
+    const std::uintmax_t size = std::filesystem::file_size( full, ec );
+    std::FILE*        fp   = ec ? nullptr : std::fopen( full.c_str(), "rb" );
+    if( fp == nullptr )
+    {
+        return false;
+    }
+    std::string           window;
+    std::vector<WhereHit> rows;
+    const PieceRead   read  = readInPieces( std::size_t( size ), [ & ]( char* dst, std::size_t n ) { return std::fread( dst, 1, n, fp ); }, window,
+                                            [ & ]( const BlobPiece& piece ) { scan.mentions = scanPieceForSymbol( piece, sym, ref, relPath, rows ) || scan.mentions; } );
+    std::fclose( fp );
+    if( read == PieceRead::Short )
+    {
+        return false;
+    }
+    for( WhereHit& h : rows )
+    {
+        h.fromWorktree = true;
+        scan.hits.push_back( std::move( h ) );
+    }
+    return true;
+}
 
 // Read the working copy of every path under the root that differs from HEAD and scan it for SYM. A row found
 // here is ref="worktree" (tip=/date= the HEAD commit it overlays); a path read here (or gone) has its HEAD rows
@@ -3200,6 +3375,11 @@ inline WorktreeScan scanWorktree( const std::string& root, std::string_view sym,
         const std::string& relPath = changed.lines[ pathIndex ];
         const WorktreeCopy copy    = readWorktreeCopy( root, relPath, bytes );
         if( copy == WorktreeCopy::Unread )
+        {
+            DISCLOSE( scan, WorktreeScan::DisclosureWhy::CopyUnread, "whereis: a changed path could not be read from the working tree — its HEAD rows stand, complete= withheld" );
+            continue;
+        }
+        if( copy == WorktreeCopy::Large && !scanWorktreeLarge( root, relPath, sym, worktreeRef, scan ) )
         {
             DISCLOSE( scan, WorktreeScan::DisclosureWhy::CopyUnread, "whereis: a changed path could not be read from the working tree — its HEAD rows stand, complete= withheld" );
             continue;
@@ -3350,7 +3530,7 @@ inline RenameEvidence renameEvidenceOf( const std::string& root, const std::stri
     }
     ev.headCopy = gitCapture( root, "show --no-ext-diff --no-textconv " + shSingleQuote( "HEAD:./" + path ) + " 2>/dev/null" );
     std::string        work;
-    const WorktreeCopy copy = readWorktreeCopy( root, path, work );
+    const WorktreeCopy copy = readWorktreeCopy( root, path, work, UINTMAX_MAX );   // whole, like the HEAD copy it is compared with
     ev.definitionLeft       = ( copy == WorktreeCopy::Text || copy == WorktreeCopy::Gone ) && definitionLeftCopy( ev.headCopy, work, missing );
     return ev;
 }
@@ -3632,7 +3812,15 @@ inline std::vector<WhereisBlobScan> scanWhereisBlobs( const std::string& root, c
         {
             b.parseBytes = bytes.size();
         }
-    }, stats );
+    }, stats, [ & ]( std::size_t i, const std::string&, const BlobPiece& piece )
+    {
+        WhereisBlobScan& b = scans[ i ];   // LARGE-PARTIAL-1: a blob over kMaxBlobBytes, read in pieces rather than skipped
+        b.hasSym           = scanPieceForSymbol( piece, sym, RefInfo{}, std::string(), b.rows ) || b.hasSym;
+        if( piece.last && std::any_of( b.rows.begin(), b.rows.end(), []( const WhereHit& h ) { return h.parseWorthy; } ) )
+        {
+            b.parseBytes = piece.total;
+        }
+    } );
     return scans;
 }
 
@@ -4295,7 +4483,7 @@ inline void writeWhereisLegendTail( std::FILE* out, const WhereResult& res )
                            "HEAD's commit alone: on-head=\"0\" there means the checkout lacks the name, which HEAD's commit may still "
                            "hold. A path beyond a symbolic link to a directory is not in the checkout (git's own reading) and is never "
                            "read through the link. worktree=read: every differing path was read, and complete= keeps its meaning over "
-                           "the checkout. worktree=partial: some differing path could not be read (permission, over the 2 MB ceiling, a "
+                           "the checkout. worktree=partial: some differing path could not be read (permission, a "
                            "name git had to quote, a directory such as an untracked nested repository or a submodule, whose files are "
                            "another repository's, or more changed paths than one answer reads), so its HEAD rows stand and may be stale. worktree=unlisted: git "
                            "could not list the changes, so any HEAD row may be stale. Under partial or unlisted complete= is never "
@@ -4828,10 +5016,9 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "re-derive it: every occurrence of the symbol in every TEXT blob of every scanned ref's full tree is printed "
                        "above, or under listing=\"defs\" every such kind=\"def\" and kind=\"text\" row is printed and every kind=\"ref\" row counted "
                        "by the refs element (under listing=\"refs\", every kind=\"ref\" row) — nothing was capped or paged out, and "
-                       "no blob was oversized (over the 2 MB blob ceiling), missing or cut short by the stream. The denominator is refs_scanned= plus HEAD, under SCOPE above (local heads only), "
+                       "no blob was missing or cut short by the stream (a blob of any size is read, a large one in pieces). The denominator is refs_scanned= plus HEAD, under SCOPE above (local heads only), "
                        "so with complete= present a ref absent from the rows genuinely lacks the symbol in its committed tree. "
-                       "Binary blobs are outside the claim (a text symbol cannot occur in one); an oversized TEXT blob suppresses "
-                       "the claim instead of being silently skipped. Its ABSENCE claims nothing. "
+                       "Binary blobs are outside the claim (a text symbol cannot occur in one). Its ABSENCE claims nothing. "
                        "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). " );
     if( std::any_of( listed.rows.begin() + std::ptrdiff_t( hitPage.begin ), listed.rows.begin() + std::ptrdiff_t( hitPage.end ),
                      [ & ]( std::size_t i ) { return !whereisSharedAttr( listed, res.hits[ i ] ).empty(); } ) )
