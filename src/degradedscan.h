@@ -133,15 +133,62 @@ struct LexicalDefHit
     char          errRatio[ 16 ] = {};
 };
 
-// Does byte `at` of `hay` sit inside a `/* … */` opened on an earlier line? The last opener before it is newer than the last
-// closer. A `/*` inside a string or a `//` comment reads as an opener too: the scan then claims nothing, the safe direction.
-inline bool insideBlockCommentAt( std::string_view hay, std::size_t at ) noexcept
+// Does byte `at` sit inside a C++ raw string literal `R"delim( … )delim"` (also u8R / uR / UR / LR)? A `#define GHOST` line
+// inside one is text, not a macro (LEXDEF-RAWSTRING, CodeRabbit #630). One forward pass like BlockCommentState: `at` must not
+// decrease; each raw string is located once. An `R"(` inside a comment or an ordinary string reads as an opener too: the scan
+// then claims nothing in its span, the safe direction.
+class RawStringState
 {
-    const std::string_view before = hay.substr( 0, std::min( at, hay.size() ) );
-    const std::size_t      opened = before.rfind( "/*" );
-    const std::size_t      closed = before.rfind( "*/" );
-    return opened != std::string_view::npos && ( closed == std::string_view::npos || closed < opened );
-}
+public:
+    explicit RawStringState( std::string_view hay ) noexcept : hay_( hay ) { advance( 0 ); }
+
+    bool insideAt( std::size_t at ) noexcept
+    {
+        DASSERT( at >= last_ );
+        last_ = at;
+        while( spanEnd_ <= at && spanStart_ != std::string_view::npos )
+        {
+            advance( spanEnd_ );
+        }
+        return spanStart_ != std::string_view::npos && spanStart_ < at && at < spanEnd_;
+    }
+
+private:
+    // The first raw string opening at or after `from`: [spanStart_, spanEnd_), the end at the hay's end when it never closes.
+    void advance( std::size_t from ) noexcept
+    {
+        for( std::size_t o = hay_.find( "R\"", from ); o != std::string_view::npos; o = hay_.find( "R\"", o + 2 ) )
+        {
+            std::size_t p = o;   // the prefix: R, or u8R / uR / UR / LR
+            if( p >= 2 && hay_.substr( p - 2, 2 ) == "u8" ) { p -= 2; }
+            else if( p >= 1 && ( hay_[ p - 1 ] == 'u' || hay_[ p - 1 ] == 'U' || hay_[ p - 1 ] == 'L' ) ) { --p; }
+            if( p > 0 && darkflags::identByte( (unsigned char)hay_[ p - 1 ] ) )
+            {
+                continue;   // FOO_R"…" is an identifier's tail, not a raw-string prefix
+            }
+            const std::size_t paren = hay_.find( '(', o + 2 );
+            if( paren == std::string_view::npos || paren - ( o + 2 ) > 16
+                || hay_.substr( o + 2, paren - ( o + 2 ) ).find_first_of( " \t\n\\)\"" ) != std::string_view::npos )
+            {
+                continue;   // not a raw-string delimiter (at most 16 characters, none of space, backslash, parens, quote)
+            }
+            std::string close = ")";
+            close.append( hay_.substr( o + 2, paren - ( o + 2 ) ) );
+            close.push_back( '"' );
+            const std::size_t end = hay_.find( close, paren + 1 );
+            spanStart_ = o;
+            spanEnd_   = end == std::string_view::npos ? hay_.size() : end + close.size();
+            return;
+        }
+        spanStart_ = std::string_view::npos;
+        spanEnd_   = std::string_view::npos;
+    }
+
+    std::string_view hay_;
+    std::size_t      last_      = 0;
+    std::size_t      spanStart_ = std::string_view::npos;
+    std::size_t      spanEnd_   = std::string_view::npos;
+};
 
 // `#define NAME` with NO parameter list: the byte after the name is not '('.
 inline bool objectMacroAt( std::string_view line, std::size_t at, std::size_t nameLen ) noexcept
@@ -218,11 +265,14 @@ inline LexicalDefHit lexicalDefHit( const IngestResult& ing, std::string_view na
             return capped;
         }
         bool                macro = false;
+        darkflags::BlockCommentState comments( *bytes );
+        RawStringState               rawStrings( *bytes );
         const std::uint32_t line  = firstLineWhere( *bytes, name, [ & ]( std::string_view text, std::size_t at )
         {
-            if( insideBlockCommentAt( *bytes, std::size_t( text.data() - bytes->data() ) ) )
+            const std::size_t lineAt = std::size_t( text.data() - bytes->data() );
+            if( comments.insideAt( lineAt ) || rawStrings.insideAt( lineAt ) )
             {
-                return false;   // a commented-out `#define` (or definition) defines nothing
+                return false;   // a commented-out `#define` (or definition), or one inside a raw string, defines nothing
             }
             macro = cppPath && objectMacroAt( text, at, name.size() );
             return macro || ( degraded && crossref::definitionShaped( text, name, at ) && !forwardDeclarationAt( text, at, name.size() ) );

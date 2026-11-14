@@ -15,7 +15,8 @@
 #
 # RED-FIRST: recorded 2026-11-11 against main ea25a7888 — (A2..A4) (A6) (B2) (B3) (C2..C5) (D2) (D3) FAIL there; the
 # premise, control and precision arms pass on both. B44 (CodeRabbit + CI round, 2026-11-12) added arms red on lane 1fd60ea1b:
-# (A7) (A8) (B5) (B6) (B7) (C6) (C7) (C8); (A5)'s MCP control now requires a served answer.
+# (A7) (A8) (B5) (B6) (B7) (C6) (C7) (C8); (A5)'s MCP control now requires a served answer. CARD-SWEEP-1113: (B8) red
+# (alarm), (B9) and (C13) red on main cd04d477e.
 #
 # Usage: test/usesunarmedcheck.sh [BIN]
 set -u
@@ -263,6 +264,32 @@ mo="$( mcp "$TMP/big" find_symbol ',"symbol":"never_defined_zz"' )"
 if printf '%s' "$mo" | grep -q 'lexical definition scan stopped at its budget'; then ok "(B7) MCP find_symbol: a miss past the budget says the scan stopped"
 else no "(B7) MCP find_symbol past the budget: $( printf '%s' "$mo" | head -c 300 )"; fi
 
+# (B8) LEXDEF-ONEPASS (CodeRabbit #630 4553235640): a 3.6 MiB `//`-only header naming an unindexed name on 45000 lines.
+# The block-comment test rfound the whole prefix per candidate line (quadratic: over 120 s on main cd04d477e); one
+# forward pass answers in about 2 s. Generated here, never committed (a whole-repo run must not see it).
+mkdir -p "$TMP/lexq"
+awk 'BEGIN { for( i = 0; i < 45000; ++i ) printf "// note: zz_ghost_name appears here in a line comment, padding padding padd %05d\n", i }' > "$TMP/lexq/big.h"
+printf 'int use_it( void ) { return 1; }\n' > "$TMP/lexq/user.c"
+nq=$( grep -c zz_ghost_name "$TMP/lexq/big.h" ); bq=$( wc -c < "$TMP/lexq/big.h" | tr -d ' ' )
+if [ "$nq" -eq 45000 ] && [ "$bq" -gt 3000000 ] && [ "$bq" -lt 4194304 ]; then ok "(B8) premise: big.h is $bq bytes (under the 4 MiB read cap) with $nq mentions"
+else no "(B8) premise: big.h is $bq bytes with $nq mentions — the arm cannot show the quadratic"; fi
+qrc=0; out="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$TMP/lexq" --no-cache --legend=compact --defs=zz_ghost_name 2>&1 )" || qrc=$?
+if [ "$qrc" -eq 1 ] && printf '%s' "$out" | grep -q 'not found' && ! printf '%s' "$out" | grep -q 'object-like'; then ok "(B8) --defs=zz_ghost_name over 45000 commented mentions refuses within 30 s (rc=1)"
+else no "(B8) --defs=zz_ghost_name over 45000 commented mentions: rc=$qrc (142 = the 30 s alarm), $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
+# (B9) LEXDEF-RAWSTRING (CodeRabbit #630 4553235650): a `#define` line inside a C++ raw string R"( … )" is text, not a macro;
+# a real #define after the raw string closes is still named (control). Red on main cd04d477e (the raw-string line was named).
+mkdir -p "$TMP/raw"
+printf '#ifndef RAW_H\n#define RAW_H\nstatic const char* kDoc = R"doc(\n#define GHOST_SOCK "/tmp/ghost"\n)doc";\n#define REAL_SOCK "/tmp/real"\nint rawproc( int x );\n#endif\n' > "$TMP/raw/raw.h"
+printf '#include "raw.h"\nint rawproc( int x ) { return x; }\n' > "$TMP/raw/main.c"
+if grep -q '^#define GHOST_SOCK ' "$TMP/raw/raw.h" && grep -q 'R"doc(' "$TMP/raw/raw.h"; then ok "(B9) premise: raw.h holds a #define GHOST_SOCK line inside a raw string"; else no "(B9) premise: fixture lost the raw-string #define"; fi
+out="$( rw "$TMP/raw" --defs=GHOST_SOCK )"   # status: --defs exits 1 on a refusal by design; the answer text is the verdict and an empty one FAILs
+if printf '%s' "$out" | grep -q 'not found' && ! printf '%s' "$out" | grep -q 'object-like macro'; then ok "(B9) CLI --defs=GHOST_SOCK: a #define inside a raw string is not named as the definition"
+else no "(B9) CLI --defs=GHOST_SOCK: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
+mo="$( mcp "$TMP/raw" find_symbol ',"symbol":"GHOST_SOCK"' )"   # status: the MCP reply text is the verdict; an empty reply FAILs the arm below
+if [ -z "$mo" ] || printf '%s' "$mo" | grep -q 'object-like macro'; then no "(B9) MCP find_symbol GHOST_SOCK names a raw-string #define (or replied nothing)"; else ok "(B9) MCP find_symbol GHOST_SOCK: no macro note for a raw-string #define"; fi
+out="$( rw "$TMP/raw" --defs=REAL_SOCK )"   # status: --defs exits 1 on a refusal by design; the answer text is the verdict and an empty one FAILs
+if printf '%s' "$out" | grep -q 'object-like macro, #define at .*raw.h:6'; then ok "(B9) control: REAL_SOCK after the raw string closes is named at raw.h:6"
+else no "(B9) control: REAL_SOCK after the raw string: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
 # Ruby declares no member lexically (instance variables are @ivars; the attr_* family is indexed, rubyattrscheck): a
 # class-body DSL call `has_many :posts` is a call with a symbol argument, never `name: Type`.
 mkdir -p "$TMP/rb"
@@ -365,6 +392,27 @@ if printf '%s' "$out" | grep -q 'declared as a member'; then no "(C11) precision
 else ok "(C11) precision: a member inside a multi-line /* */ declares nothing"; fi
 mo="$( mcp "$TMP/tsc" uses ',"symbol":"valueToken"' )"
 if printf '%s' "$mo" | grep -q 'declared as a member'; then no "(C11) precision: MCP uses valueToken names the commented-out member"; else ok "(C11) precision: MCP uses valueToken does not name the commented-out member"; fi
+
+# (C13) USES-DECL-SCAN-CAPPED (CodeRabbit #630 4553235778): past the 16 MiB member-declaration budget the served external="1"
+# answer says the scan stopped (decl_scan="capped"), CLI and MCP; a small corpus of the same shape carries no such attribute.
+# Five 3.6 MiB TS classes that CALL zz_capped_name (no member declares it); generated here, never committed. Red on main cd04d477e.
+mkdir -p "$TMP/declcap" "$TMP/declsmall"
+for k in 1 2 3 4 5; do
+    awk -v k=$k 'BEGIN { printf "export class Big%d {\n    run(): number { return zz_capped_name(); }\n", k; for( i = 0; i < 45000; ++i ) printf "    // padding padding padding padding padding padding padding padding %05d\n", i; printf "}\n" }' > "$TMP/declcap/big$k.ts"
+done
+printf 'export class Small {\n    run(): number { return zz_capped_name(); }\n}\n' > "$TMP/declsmall/small.ts"
+cb=$( cat "$TMP"/declcap/*.ts | wc -c | tr -d ' ' ); mx=$( wc -c "$TMP"/declcap/*.ts | awk '$2 != "total" && $1 > m { m = $1 } END { print m + 0 }' )
+if [ "$cb" -gt 16777216 ] && [ "$mx" -lt 4194304 ]; then ok "(C13) premise: $cb bytes of TS classes calling zz_capped_name (past the 16 MiB budget, each file under 4 MiB)"
+else no "(C13) premise: $cb bytes, largest file $mx — the budget cannot trip"; fi
+out="$( rw "$TMP/declcap" --uses=zz_capped_name )"   # status: --uses exit status is not the contract here; the <uses> attributes are the verdict and an empty answer FAILs
+if printf '%s' "$out" | grep -q '<uses [^>]*external="1"[^>]* decl_scan="capped"' && printf '%s' "$out" | grep -q 'decl_scan="\{0,1\}capped"\{0,1\}: the scan'; then ok "(C13) CLI --uses: past the budget the external answer carries decl_scan=\"capped\" and its legend"
+else no "(C13) CLI --uses past the budget: $( printf '%s' "$out" | grep -o '<uses [^>]*>' | head -1 )"; fi
+mo="$( mcp "$TMP/declcap" uses ',"symbol":"zz_capped_name"' )"   # status: the MCP reply text is the verdict; an empty reply FAILs
+if printf '%s' "$mo" | grep -q 'external=\\"1\\"[^>]* decl_scan=\\"capped\\"'; then ok "(C13) MCP uses: past the budget the external answer carries decl_scan=\"capped\""
+else no "(C13) MCP uses past the budget: $( printf '%s' "$mo" | grep -o '<uses [^>]*>' | head -1 | head -c 300 )"; fi
+out="$( rw "$TMP/declsmall" --uses=zz_capped_name )"   # status: --uses exit status is not the contract here; the <uses> attributes are the verdict and an empty answer FAILs
+if printf '%s' "$out" | grep -q '<uses [^>]*external="1"' && ! printf '%s' "$out" | grep -q 'decl_scan'; then ok "(C13) precision: a small corpus's external answer carries no decl_scan="
+else no "(C13) precision: small corpus: $( printf '%s' "$out" | grep -o '<uses [^>]*>' | head -1 )"; fi
 
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"

@@ -525,6 +525,50 @@ XS="$( xroot "$MX/short" 'foo(...)' )"
 printf '%s' "$XS" | grep -q ' unmatched_member="1"' && ! printf '%s' "$XS" | grep -q 'unmatched_member_capped' \
     && ok "control: a member call under the bound is counted (unmatched_member=\"1\") with no floor flag" \
     || no "a member call under the bound should read unmatched_member=\"1\" with no unmatched_member_capped: $XS"
+# -- 7d) optional chaining in next= (PATTERN-OPTCHAIN-NEXT, CodeRabbit #633 4557724153) -----------------------------
+# `o?.f(x)` counted toward unmatched_member= while next= spelled `$O.f($X)`, which matches no `?.` call (hits=0 on
+# main cd04d477e). An all-`?.` corpus now gets `$O?.f($X)`; a mixed one keeps the dot and says how many are `?.`.
+mkdir -p "$MX/oc" "$MX/ocmix"
+printf 'function g(o) {\n  o?.f(1);\n  o?.f(2);\n  return 0;\n}\n' >"$MX/oc/a.js"
+printf 'function g(o, p) {\n  o?.f(1);\n  p.f(2);\n  return 0;\n}\n' >"$MX/ocmix/a.ts"
+ocSites="$( cat "$MX/oc/a.js" "$MX/ocmix/a.ts" | grep -o '?\.f(' | wc -l | tr -d ' ' )"
+if [ "${ocSites:-0}" -eq 3 ]; then ok "optchain premise: $ocSites \`?.f(\` call sites"; else no "optchain premise: ${ocSites:-0} \`?.f(\` sites, expected 3 — the arms below would be vacuous"; fi
+XO="$( xroot "$MX/oc" 'f($X)' )"
+XON="$( printf '%s' "$XO" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
+printf '%s' "$XO" | grep -q ' unmatched_member="2" unmatched_member_optchain="2"' && [ "$XON" = '$O?.f($X)' ] \
+    && [ "$( xroot "$MX/oc" "$XON" | grep -c ' hits="2"' )" = 1 ] \
+    && ok "all-?. corpus: unmatched_member_optchain=\"2\", next='\$O?.f(\$X)' hits exactly the 2 counted calls" \
+    || no "an all-?. corpus should read unmatched_member_optchain=\"2\" with next='\$O?.f(\$X)' hitting 2: next='$XON' root=$XO"
+XOM="$( xroot "$MX/ocmix" 'f($X)' )"
+printf '%s' "$XOM" | grep -q ' unmatched_member="2" unmatched_member_optchain="1"' \
+    && printf '%s' "$XOM" | grep -qF "next=\"--pattern=&apos;\$O.f(\$X)&apos;\"" \
+    && ok "mixed . and ?.: unmatched_member_optchain=\"1\" of 2, next= keeps the dot spelling" \
+    || no "mixed . and ?. should read unmatched_member=\"2\" unmatched_member_optchain=\"1\" with the dot next=: $XOM"
+printf '%s' "$XM" | grep -q 'unmatched_member_optchain' \
+    && no "the C++ dot/arrow corpus carries unmatched_member_optchain: $XM" || ok "control: a C++ corpus carries no unmatched_member_optchain="
+# -- 7e) next= stays inside the pattern limits (PATTERN-NEXT-LIMITS, CodeRabbit #633 4557724172) -------------------
+# next= adds a receiver metavariable: a 32-metavariable pattern gave a 33-metavariable continuation that refuses when
+# pasted, and a pattern a few bytes under the 4096-byte limit gave one over it (both on main cd04d477e).
+mkdir -p "$MX/lim32" "$MX/limbytes"
+args32="$( i=0; while [ $i -lt 32 ]; do printf '%s%s' "$( [ $i -gt 0 ] && printf ', ' )" "$i"; i=$(( i + 1 )); done )"
+pat32="f($( i=0; while [ $i -lt 32 ]; do printf '%s$M%d' "$( [ $i -gt 0 ] && printf ', ' )" "$i"; i=$(( i + 1 )); done ))"
+printf 'def h(o):\n    o.f(%s)\n' "$args32" >"$MX/lim32/a.py"
+nm="$( printf '%s' "$pat32" | grep -o '\$M[0-9]*' | sort -u | wc -l | tr -d ' ' )"
+if [ "$nm" -eq 32 ]; then ok "next-limits premise: the pattern spells $nm distinct metavariables (the limit)"; else no "next-limits premise: $nm metavariables, expected 32"; fi
+X32="$( xroot "$MX/lim32" "$pat32" )"
+X32N="$( printf '%s' "$X32" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
+printf '%s' "$X32" | grep -q ' unmatched_member="1"' && [ -n "$X32N" ] && [ "$( xroot "$MX/lim32" "$X32N" | grep -c ' hits="1"' )" = 1 ] \
+    && ok "at the metavariable limit next= takes an anonymous receiver and pasting it hits the 1 counted call ('${X32N%%(*}(…)')" \
+    || no "at the metavariable limit next= should compile and hit the counted call: next='$X32N' root=$( printf '%s' "$X32" | head -c 300 )"
+padlen=$(( 4095 - 9 ))   # f( $X , "" ) is 9 bytes
+pad="$( awk -v n=$padlen 'BEGIN { while( n-- > 0 ) printf "a" }' )"
+patB="f(\$X, \"$pad\")"
+printf 'def h(o):\n    o.f(1, "%s")\n' "$pad" >"$MX/limbytes/a.py"
+if [ "${#patB}" -eq 4095 ]; then ok "next-limits premise: a ${#patB}-byte pattern (the limit is 4096)"; else no "next-limits premise: the pattern is ${#patB} bytes, expected 4095"; fi
+XB="$( xroot "$MX/limbytes" "$patB" )"
+printf '%s' "$XB" | grep -q ' unmatched_member="1"' && ! printf '%s' "$XB" | grep -q ' next=' \
+    && ok "a continuation past the 4096-byte limit is not offered (unmatched_member=\"1\" rides, no next=)" \
+    || no "a 4095-byte pattern should keep unmatched_member=\"1\" and offer no next= over the byte limit: $( printf '%s' "$XB" | grep -o ' unmatched_member="[0-9]*"\| next="[^"]\{0,40\}' | tr '\n' ' ' )"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

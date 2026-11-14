@@ -664,6 +664,7 @@ inline void pat_walkTree( const pattern::PatternProgramSet* set, TSNode root, st
         memberOut->counted.fetch_add( stats.memberUnmatchedCount, std::memory_order_relaxed );   // same reduction, same reason
         memberOut->capped.fetch_add( stats.memberCappedCount, std::memory_order_relaxed );
         memberOut->arrow.fetch_add( stats.memberArrowCount, std::memory_order_relaxed );
+        memberOut->optchain.fetch_add( stats.memberOptChainCount, std::memory_order_relaxed );
     }
     for( const auto& [a, b] : spans )
     {
