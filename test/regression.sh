@@ -864,6 +864,7 @@ for _g in \
     qddegradecheck \
     qddialscheck \
     qdentryceilingcheck \
+    qdgitrenamehealcheck \
     qdmonstercheck \
     qdrefpaircheck \
     qdrenameidentitycheck \

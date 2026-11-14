@@ -338,6 +338,10 @@ struct Snapshot
     std::vector<std::uint64_t>             dead;        // sorted hash(canonId) of dead-candidate symbols
     std::vector<std::uint64_t>             publicApi;   // Q1 contract drift — sorted hash(canonId) of PUBLIC/exported symbols (see isPublicApi)
     std::vector<DefectSiteKey>             defectSites; // the defect-shape kind — sorted (anchor, site) records, one per offending site (a multiset), plus each scanned file's presence record
+    // QD-GIT-RENAME-HEAL — NEVER SERIALIZED: the git-recorded earlier paths (newest first) of each current file the rename record
+    // re-filed this baseline across (healIdentity). Read only by the clone-group hold, which re-spells a moved member at its old path.
+    gtl::btree_map<std::string, std::vector<std::string>> renamedFrom;
+    std::vector<std::uint64_t>                            renamedKeys;   // sorted: the current keys the rename record re-filed (dead-code rows on them read origin="moved")
 };
 
 // ─── THE TWELVE KINDS AS A SET (qd-memory-degrade) ─────────────────────────────────────────────────────────
@@ -2424,6 +2428,62 @@ struct RenameMap
     }
 };
 
+// Fold one `--name-status` listing's rename rows into `rm` (new path → its previous path), first writer wins, capped at kRenameMaxPairs.
+inline void absorbRenameRows( RenameMap& rm, const std::string& raw )
+{
+    std::size_t at = 0;
+    while( at <= raw.size() )
+    {
+        const std::size_t nl   = raw.find( '\n', at );
+        const std::string line = raw.substr( at, ( nl == std::string::npos ? raw.size() : nl ) - at );
+        at = ( nl == std::string::npos ) ? raw.size() + 1 : nl + 1;
+        if( line.empty() || line[0] != 'R' )
+        {
+            continue;   // only rename rows; the R-score suffix (R100/R089) is part of the status token
+        }
+        const std::size_t t1 = line.find( '\t' );
+        if( t1 == std::string::npos )
+        {
+            continue;
+        }
+        const std::size_t t2 = line.find( '\t', t1 + 1 );
+        if( t2 == std::string::npos )
+        {
+            continue;
+        }
+        const std::string oldPath = line.substr( t1 + 1, t2 - t1 - 1 );
+        const std::string newPath = line.substr( t2 + 1 );
+        if( oldPath.empty() || newPath.empty() || oldPath == newPath )
+        {
+            continue;
+        }
+        if( rm.previousOf.size() >= kRenameMaxPairs )
+        {
+            rm.truncatedPairs = true;
+            return;
+        }
+        // FIRST writer wins: the log is walked newest-first, so the first row for a path is its most
+        // recent rename, and ancestorsOf walks backwards from there one link at a time.
+        rm.previousOf.emplace( newPath, oldPath );
+        rm.pairsRecorded = rm.previousOf.size();
+    }
+}
+
+// The UNCOMMITTED half: staged and unstaged renames against HEAD. `pinned` = the git prefix with quotepath/renames pinned and -C root.
+inline void absorbUncommittedRenames( RenameMap& rm, const std::string& pinned )
+{
+    // BOTH uncommitted queries are needed, and this is not belt-and-braces. Measured while building
+    // test/identitycheck.sh arm (2): after a plain `git mv`, `git diff -M50% --name-status HEAD` reports
+    // `A src/core/lib.h` + `D src/lib.h` — no rename row at all — while `git diff --cached` over the
+    // IDENTICAL state reports `R100 src/lib.h src/core/lib.h`. Rename detection did not fail; the
+    // index-vs-HEAD diff is simply the one that sees the pair. Querying only the worktree form would have
+    // silently dropped the most common rename an agent ever makes — and the gate would still have passed,
+    // because the content route rescues that same ack by a different mechanism. That near-miss is why the
+    // gate asserts the ROUTE (acked_by_rename) and not merely the outcome.
+    absorbRenameRows( rm, popenTrimmed( pinned + "diff --no-ext-diff --no-textconv --ignore-submodules=dirty -M50% --diff-filter=R --name-status --cached 2>/dev/null" ) );
+    absorbRenameRows( rm, popenTrimmed( pinned + "diff --no-ext-diff --no-textconv --ignore-submodules=dirty -M50% --diff-filter=R --name-status HEAD 2>/dev/null" ) );
+}
+
 // Both halves of "what has been renamed since the ack was written": the UNCOMMITTED half (a `git mv` staged
 // in the working tree — the moment an agent is most likely to run --quality-delta) and the COMMITTED half
 // (the durable case, `git log -M50%` over the window). Read in that order so a path renamed twice — once in
@@ -2465,72 +2525,39 @@ inline RenameMap gitRenameMap( const std::string& root, const std::string& span 
         return rm;
     }
 
-    const auto absorb = [ & ]( const std::string& raw )
-    {
-        std::size_t at = 0;
-        while( at <= raw.size() )
-        {
-            const std::size_t nl   = raw.find( '\n', at );
-            const std::string line = raw.substr( at, ( nl == std::string::npos ? raw.size() : nl ) - at );
-            at = ( nl == std::string::npos ) ? raw.size() + 1 : nl + 1;
-            if( line.empty() || line[0] != 'R' )
-            {
-                continue;   // only rename rows; the R-score suffix (R100/R089) is part of the status token
-            }
-            const std::size_t t1 = line.find( '\t' );
-            if( t1 == std::string::npos )
-            {
-                continue;
-            }
-            const std::size_t t2 = line.find( '\t', t1 + 1 );
-            if( t2 == std::string::npos )
-            {
-                continue;
-            }
-            const std::string oldPath = line.substr( t1 + 1, t2 - t1 - 1 );
-            const std::string newPath = line.substr( t2 + 1 );
-            if( oldPath.empty() || newPath.empty() || oldPath == newPath )
-            {
-                continue;
-            }
-            if( rm.previousOf.size() >= kRenameMaxPairs )
-            {
-                rm.truncatedPairs = true;
-                return;
-            }
-            // FIRST writer wins: the log is walked newest-first, so the first row for a path is its most
-            // recent rename, and ancestorsOf walks backwards from there one link at a time.
-            rm.previousOf.emplace( newPath, oldPath );
-            rm.pairsRecorded = rm.previousOf.size();
-        }
-    };
-
     const std::string pinned = gitCmd( " -c core.quotepath=false -c diff.renames=true -C " ) + shSingleQuote( root ) + " ";
     if( span.empty() )
     {
         // Uncommitted first (a staged `git mv` is the single moment an agent is most likely to run this),
         // then history — in that order so a path renamed in history AND again in the working tree chains
         // through both.
-        //
-        // BOTH uncommitted queries are needed, and this is not belt-and-braces. Measured while building
-        // test/identitycheck.sh arm (2): after a plain `git mv`, `git diff -M50% --name-status HEAD` reports
-        // `A src/core/lib.h` + `D src/lib.h` — no rename row at all — while `git diff --cached` over the
-        // IDENTICAL state reports `R100 src/lib.h src/core/lib.h`. Rename detection did not fail; the
-        // index-vs-HEAD diff is simply the one that sees the pair. Querying only the worktree form would have
-        // silently dropped the most common rename an agent ever makes — and the gate would still have passed,
-        // because the content route rescues that same ack by a different mechanism. That near-miss is why the
-        // gate asserts the ROUTE (acked_by_rename) and not merely the outcome.
-        absorb( popenTrimmed( pinned + "diff --no-ext-diff --no-textconv --ignore-submodules=dirty -M50% --diff-filter=R --name-status --cached 2>/dev/null" ) );
-        absorb( popenTrimmed( pinned + "diff --no-ext-diff --no-textconv --ignore-submodules=dirty -M50% --diff-filter=R --name-status HEAD 2>/dev/null" ) );
-        absorb( popenTrimmed( pinned + "log --no-ext-diff --no-textconv -M50% --diff-filter=R --name-status --format= -n "
+        absorbUncommittedRenames( rm, pinned );
+        absorbRenameRows( rm, popenTrimmed( pinned + "log --no-ext-diff --no-textconv -M50% --diff-filter=R --name-status --format= -n "
                               + std::to_string( kRenameWindowCommits ) + " 2>/dev/null" ) );
     }
     else
     {
         rm.truncatedWindow = false;   // the range IS the scope; nothing outside it was in question
         rm.commitsScanned  = 0;
-        absorb( popenTrimmed( pinned + "log --no-ext-diff --no-textconv -M50% --diff-filter=R --name-status --format= " + shSingleQuote( span ) + " 2>/dev/null" ) );
+        absorbRenameRows( rm, popenTrimmed( pinned + "log --no-ext-diff --no-textconv -M50% --diff-filter=R --name-status --format= " + shSingleQuote( span ) + " 2>/dev/null" ) );
     }
+    return rm;
+}
+
+// QD-GIT-RENAME-HEAL — the no-ledger read (healIdentity with no ack ledger, working-tree form): only the staged and unstaged
+// renames, no commit scanned (rename_window_commits="0"). The baseline that form compares against is HEAD's (a pinned sidecar
+// is used only when pinned at HEAD), so a rename already in history cannot separate the two sides; the window is the ledger's,
+// whose rows may be older than any commit. No depth probe (it walks the whole history); on a partial clone the read is not
+// made and nothing is claimed unread (an unavailable map, as before this read existed).
+inline RenameMap gitUncommittedRenameMap( const std::string& root )
+{
+    RenameMap rm;
+    if( gitOneLine( root, "rev-parse --verify --quiet HEAD 2>/dev/null" ).empty() || gitIsPartialClone( root ) )
+    {
+        return rm;
+    }
+    rm.available = true;
+    absorbUncommittedRenames( rm, gitCmd( " -c core.quotepath=false -c diff.renames=true -C " ) + shSingleQuote( root ) + " " );
     return rm;
 }
 
@@ -5998,6 +6025,23 @@ struct HeldClonePairSink
     }
 };
 
+// `pred( a, b )` for every index pair a < b < n, in order, stopping at the first false; true when none was false.
+template<class Pred>
+inline bool everyIndexPair( std::size_t n, Pred&& pred )
+{
+    for( std::size_t a = 0; a < n; ++a )
+    {
+        for( std::size_t b = a + 1; b < n; ++b )
+        {
+            if( !pred( a, b ) )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // (1) every pair inside an exact group of three or more (a two-member group's pair hash is already its own).
 inline void pushExactGroupPairs( const HeldClonePairSink& sink, const std::vector<CloneGroup>& exact )
 {
@@ -6008,13 +6052,7 @@ inline void pushExactGroupPairs( const HeldClonePairSink& sink, const std::vecto
         {
             continue;
         }
-        for( std::size_t a = 0; a < n; ++a )
-        {
-            for( std::size_t b = a + 1; b < n; ++b )
-            {
-                sink.push( cg.members[a], cg.members[b] );
-            }
-        }
+        (void) everyIndexPair( n, [ & ]( std::size_t a, std::size_t b ) { sink.push( cg.members[a], cg.members[b] ); return true; } );
     }
 }
 
@@ -6081,6 +6119,18 @@ inline std::vector<std::uint64_t> baselineCloneGroupHashes( const IngestResult& 
     return out;
 }
 
+// Every pair of the member ids `ids` (three or more, under kClonePairExpandCap pairs) is in the baseline set.
+inline bool everyClonePairHeld( const std::vector<std::string>& ids, const std::vector<std::uint64_t>& baseCloneGroups )
+{
+    const std::size_t n = ids.size();
+    if( n < 3 || n * ( n - 1 ) / 2 > kClonePairExpandCap )
+    {
+        return false;
+    }
+    return everyIndexPair( n, [ & ]( std::size_t a, std::size_t b )
+                           { return std::binary_search( baseCloneGroups.begin(), baseCloneGroups.end(), cloneMemberSetHash( { ids[a], ids[b] } ) ); } );
+}
+
 // The delta's side of QD-CLONE-FALSE-GATE (see HeldClonePairSink and the two passes after it): a current clone group is the baseline's when its own
 // member set is in the baseline set, or when every pair of its members is (a group the edit only shrank or re-paired). A
 // two-member group's pair IS its set, so only a group of three or more reads the pairs. `h` = cloneGroupHash( cg ).
@@ -6106,17 +6156,74 @@ inline bool cloneGroupHeldAtBaseline( const CloneGroup& cg, std::uint64_t h, con
         }
         ids.push_back( baselineCanonId( ing, m, root ) );
     }
-    for( std::size_t a = 0; a < n; ++a )
+    return everyClonePairHeld( ids, baseCloneGroups );
+}
+
+// QD-GIT-RENAME-HEAL — a current clone group with a member in a file git recorded as renamed is the baseline's when, re-spelled
+// at the earlier paths (`renamedFrom`: depth d takes each moved member's d-th earlier path, or its oldest), its member set or every
+// pair of it is in the baseline set (cloneGroupHeldAtBaseline). The record names the file, the member keeps its scope and name,
+// so twins elsewhere do not matter. A member that is new, or renamed inside the moved file, still makes a set the baseline never
+// held, so a genuinely new clone still gates.
+using EarlierPaths = std::vector<const std::vector<std::string>*>;   // per member: its file's recorded earlier paths, or nullptr
+
+// Each member's recorded earlier paths, and in `depth` the longest chain among them (0: no member sits in a renamed file).
+inline EarlierPaths membersEarlierPaths( const CloneGroup& cg, const gtl::btree_map<std::string, std::vector<std::string>>& renamedFrom,
+                                         const IngestResult& ing, std::string_view root, std::size_t& depth )
+{
+    EarlierPaths earlier( cg.members.size(), nullptr );
+    depth = 0;
+    for( std::size_t k = 0; k < cg.members.size(); ++k )
     {
-        for( std::size_t b = a + 1; b < n; ++b )
+        const NodeId m = cg.members[k];
+        if( m >= ing.symbols.size() || ing.symbols[m].fileId >= ing.files.size() )
         {
-            if( !std::binary_search( baseCloneGroups.begin(), baseCloneGroups.end(), cloneMemberSetHash( { ids[a], ids[b] } ) ) )
-            {
-                return false;
-            }
+            depth = 0;   // a member the index cannot place: no re-spelling is claimed
+            return earlier;
+        }
+        const auto it = renamedFrom.find( std::string( relForHash( ing.files[ ing.symbols[m].fileId ], root ) ) );
+        if( it != renamedFrom.end() && !it->second.empty() )
+        {
+            earlier[k] = &it->second;
+            depth      = std::max( depth, it->second.size() );
         }
     }
-    return true;
+    return earlier;
+}
+
+// The members' baseline ids with each moved member spelled at its d-th earlier path (or its oldest, when its chain is shorter).
+inline std::vector<std::string> cloneIdsAtRenameDepth( const CloneGroup& cg, const EarlierPaths& earlier, std::size_t d,
+                                                       const IngestResult& ing, std::string_view root )
+{
+    std::vector<std::string> ids;
+    ids.reserve( cg.members.size() );
+    for( std::size_t k = 0; k < cg.members.size(); ++k )
+    {
+        const Symbol& s = ing.symbols[ cg.members[k] ];
+        ids.push_back( earlier[k] ? canonicalId( ( *earlier[k] )[ std::min( d, earlier[k]->size() ) - 1 ], s.scope, s.name )
+                                  : baselineCanonId( ing, cg.members[k], root ) );
+    }
+    return ids;
+}
+
+inline bool cloneGroupHeldAcrossRenames( const CloneGroup& cg, const std::vector<std::uint64_t>& baseCloneGroups,
+                                         const gtl::btree_map<std::string, std::vector<std::string>>& renamedFrom,
+                                         const IngestResult& ing, std::string_view root )
+{
+    if( renamedFrom.empty() )
+    {
+        return false;
+    }
+    std::size_t        depth   = 0;
+    const EarlierPaths earlier = membersEarlierPaths( cg, renamedFrom, ing, root, depth );
+    for( std::size_t d = 1; d <= depth; ++d )
+    {
+        const std::vector<std::string> ids = cloneIdsAtRenameDepth( cg, earlier, d, ing, root );
+        if( std::binary_search( baseCloneGroups.begin(), baseCloneGroups.end(), cloneMemberSetHash( ids ) ) || everyClonePairHeld( ids, baseCloneGroups ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Every defect-shape site in the tree, anchored on the innermost enclosing definition (byte-span containment,
@@ -8800,6 +8907,7 @@ struct IdentityAliases
     // every other one in the tree, and --quality-delta correctly reports it as a new clone of a reused helper.
     std::vector<std::uint64_t>                   schemeKeys;            // old-scheme key → new-scheme key, unambiguously
     std::vector<std::uint64_t>                   schemeAmbiguousKeys;   // old-scheme identity that FOLDED across files — refused
+    gtl::btree_map<std::string, std::vector<std::string>> renamedFrom;  // current relative path → its recorded earlier paths (Snapshot::renamedFrom)
 };
 
 // Derive every alias the rename map licenses for the CURRENT tree. Costs nothing when nothing was renamed:
@@ -8850,6 +8958,7 @@ inline IdentityAliases identityAliases( const IngestResult& ing, const Graph& g,
         {
             continue;
         }
+        al.renamedFrom.try_emplace( rel, ancByFile[ s.fileId ] );
         const bool          hasCanon = ( i < g.canonId.size() && !g.canonId[i].empty() );
         const std::uint64_t curCanon = hasCanon ? fnv1a64( canonicalId( rel, s.scope, s.name ) ) : 0;
         const std::uint64_t curPath  = pathQualifiedKey( rel, s );
@@ -8937,6 +9046,24 @@ inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, cons
     }
     std::sort( al.schemeKeys.begin(), al.schemeKeys.end() );
     std::sort( al.schemeAmbiguousKeys.begin(), al.schemeAmbiguousKeys.end() );
+}
+
+// The two transient rename facts the delta reads (Snapshot::renamedFrom, Snapshot::renamedKeys), from the RENAME aliases only and
+// BEFORE remapSnapshotIdentity: a key counts as re-filed only when the alias fills a hole (its source is in the baseline and its
+// target is not), so a file renamed long before the baseline (the ledger's 400-commit window) marks nothing.
+inline void noteRenamedIdentities( Snapshot& base, const IdentityAliases& al )
+{
+    base.renamedFrom = al.renamedFrom;
+    base.renamedKeys.clear();
+    for( const auto& [ from, to ] : al.toCurrent )
+    {
+        if( base.locBySym.contains( from ) && !base.locBySym.contains( to ) )
+        {
+            base.renamedKeys.push_back( to );
+        }
+    }
+    std::sort( base.renamedKeys.begin(), base.renamedKeys.end() );
+    base.renamedKeys.erase( std::unique( base.renamedKeys.begin(), base.renamedKeys.end() ), base.renamedKeys.end() );
 }
 
 // The defect-shape records: a renamed definition's sites are re-filed under its current anchor, add-never-
@@ -9068,6 +9195,20 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
 
     moved += healDefectSites( base, al );
     return moved;
+}
+
+// QD-GIT-RENAME-HEAL — dead-code rows from `from` on whose symbol the git rename record re-filed: non-gating, origin="moved", as a
+// ContentMoves match reads (a move does not decide reachability; a caller the move left pointing at the old path, or one the
+// resolver cannot follow to the new one, would otherwise gate as a live function that died).
+inline void markRenamedDeadRows( std::vector<Regression>& regs, std::size_t from, const std::vector<std::uint64_t>& renamedKeys )
+{
+    for( std::size_t k = from; k < regs.size() && !renamedKeys.empty(); ++k )
+    {
+        if( !regs[k].isNewSymbol && std::binary_search( renamedKeys.begin(), renamedKeys.end(), regs[k].key ) )
+        {
+            regs[k].isNewSymbol = regs[k].isMoved = true;
+        }
+    }
 }
 
 // QD-RENAME-IDENTITY (2026-11-14) — A RENAME OR A MOVE KEEPS ITS IDENTITY. The quality key is path::scope::name, so renaming a
@@ -9380,8 +9521,9 @@ inline void countAckRescues( const std::vector<Regression>& regs, const gtl::btr
 // same question differently in the same second. So the whole identity pre-pass is one call, and neither
 // surface gets to decide any part of it.
 //
-// COST, and why it is not paid by default: `renames` costs two short git spawns and is skipped entirely for
-// an empty ledger (nothing to heal). `cids` costs one pass over the corpus's file bytes and is skipped
+// COST, and why it is not paid by default: `renames` costs a few short git spawns; with an empty ledger only the
+// uncommitted renames (or the range) are read, since the baseline itself must still follow a recorded rename
+// (QD-GIT-RENAME-HEAL), and the 400-commit window is the ledger's alone. `cids` costs one pass over the corpus's file bytes and is skipped
 // unless the ledger can actually USE it — i.e. some row carries a cid, or we are about to WRITE cids under
 // --quality-ack. A repo that has never acked under an R1 binary therefore pays nothing at all, and one that
 // has pays the pass once per delta. That gating is the reason contentIdsBySym is not folded into
@@ -9393,6 +9535,7 @@ struct IdentityHealing
     IdentityAliases aliases;
     AckRemap        ackRemap;
     bool            cidsComputed        = false;
+    bool            gitOnly             = false;   // QD-GIT-RENAME-HEAL: no ledger — only the baseline was re-filed, by the git record alone
     std::size_t     baselineKeysMoved   = 0;
     std::size_t     ackedByRename       = 0;   // filled by countAckRescues, AFTER computeDelta
     std::size_t     ackedByContent      = 0;
@@ -9417,10 +9560,21 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
     IdentityHealing h;
     if( acks.empty() && !wantContentIds )
     {
-        return h;   // nothing to heal and nothing to write — do not spawn git, do not read the corpus
+        // QD-GIT-RENAME-HEAL: no ledger to heal or write, but the BASELINE still follows a git-recorded rename (a whole-file `git mv`
+        // whose functions have twins elsewhere matches no body uniquely, so ContentMoves cannot carry it). Only what can separate
+        // the two sides is read — the uncommitted renames (the baseline is HEAD's), or the range — and nothing the ledger needs
+        // runs: no scheme re-key (it re-files ack rows), no content ids, no ack remap. A tree with no rename pays three small git
+        // spawns; the disclosure stays silent unless a pair was recorded (identityDisclosure).
+        h.gitOnly           = true;
+        h.renames           = span.empty() ? gitUncommittedRenameMap( gitRoot ) : gitRenameMap( gitRoot, span );
+        h.aliases           = identityAliases( ing, g, corpusRoot, h.renames );
+        noteRenamedIdentities( base, h.aliases );
+        h.baselineKeysMoved = remapSnapshotIdentity( base, h.aliases );
+        return h;
     }
     h.renames           = gitRenameMap( gitRoot, span );
     h.aliases           = identityAliases( ing, g, corpusRoot, h.renames );
+    noteRenamedIdentities( base, h.aliases );   // before the scheme aliases join toCurrent: only what the rename record re-filed
     // The SCHEME migration is not gated on git: the key rule changed in the binary, not in the history, so a
     // repo with no rename record at all still needs its committed acks re-filed. Runs after the rename pass so
     // a git-recorded move keeps precedence over the mechanical rekey (add-never-overwrite).
@@ -9475,9 +9629,9 @@ inline std::pair<std::string, std::string> identityDisclosure( const IdentityHea
     // convention of this root), so an absent one is never a silent "no".
     if( h.ackRemap.schemeRekeyed )   { add( "acks_rekeyed_by_scheme", h.ackRemap.schemeRekeyed ); }
     if( h.schemeAmbiguousAcks )      { add( "scheme_ambiguous", h.schemeAmbiguousAcks ); }
-    if( !h.renames.available )
+    if( !h.renames.available || ( h.gitOnly && h.renames.pairsRecorded == 0 ) )
     {
-        return { attrs, json };
+        return { attrs, json };   // QD-GIT-RENAME-HEAL: a no-ledger run that read no rename says nothing (it re-filed nothing)
     }
     add( "renames", h.renames.pairsRecorded );
     add( "rename_window_commits", h.renames.commitsScanned );
@@ -10522,7 +10676,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     const MovedBodies moved( base, keyByNode, nowMove );
     // a current clone group the baseline holds: by its member set or pairs, or (QD-RENAME-IDENTITY) by its members' unchanged bodies
     const auto isHeld = [ & ]( const CloneGroup& cg, std::uint64_t h )
-    { return cloneGroupHeldAtBaseline( cg, h, base.cloneGroups, ing, root ) || contentMoves.holdsCloneGroup( cg, base, keyByNode, nowMove.body ); };                          // MOVED-BODY — read by perSymbolKind below
+    { return cloneGroupHeldAtBaseline( cg, h, base.cloneGroups, ing, root ) || contentMoves.holdsCloneGroup( cg, base, keyByNode, nowMove.body )
+             || cloneGroupHeldAcrossRenames( cg, base.cloneGroups, base.renamedFrom, ing, root ); };                          // MOVED-BODY — read by perSymbolKind below
 
     // One per-symbol metric kind: aggregate the CURRENT side to the same per-canonId MAX the snapshot stores
     // (overloads share an id), compare per-id MAX vs the baseline's per-id MAX, report each id once at its
@@ -10789,6 +10944,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         appendDeadCodeRows( regs, ing, g, base, root, keyByNode, existedAtBaseline, stampLoc,
                             DeadExclusionCounts{ registerMacroExcludedOut, declinedCallExcludedOut, valueRefExcludedOut } );
         contentMoves.markMovedDeadRows( regs, deadFrom );   // QD-RENAME-IDENTITY
+        markRenamedDeadRows( regs, deadFrom, base.renamedKeys );   // QD-GIT-RENAME-HEAL: the same reading for a file rename git recorded
     }
 
     // api-surface (contract drift) — B10.2e TIERED into two shapes on the PUBLIC/exported surface:
