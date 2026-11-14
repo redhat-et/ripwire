@@ -401,6 +401,11 @@ private:
     bool prev_;
 };
 
+// The footprint this process's construct tables added when they were compiled (ingest_astquery.h warmConstructTables):
+// fixed bytes, one table per language, held to the end of the process, so a later ingest pays none of it again. The
+// --quality-delta=A..B projection counts them once instead of scaling them with the tree (memguard.h FIXED BYTES).
+std::uint64_t constructTablesFootprint() noexcept;
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr = {},
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
                      bool captureValueUses = true, std::string_view excludeLabel = {},
@@ -631,12 +636,14 @@ private:
 // The member-call near-miss counts of one pattern run (PATTERN-MEMBER-ZERO), summed across the parallel file walk
 // like ellipsisCappedOut: counted = calls the bare callee names as a member (unmatched_member=), capped = member
 // probes the ellipsis bound abandoned, so `counted` is a floor (unmatched_member_capped=), arrow = counted calls
-// spelled with `->` (unmatched_member_arrow=), which a `$O.f` next= cannot match.
+// spelled with `->` (unmatched_member_arrow=) and optchain = those spelled `?.` (unmatched_member_optchain=), which a
+// `$O.f` next= cannot match.
 struct MemberNearMissTally
 {
     std::atomic<std::uint64_t> counted{ 0 };
     std::atomic<std::uint64_t> capped{ 0 };
     std::atomic<std::uint64_t> arrow{ 0 };
+    std::atomic<std::uint64_t> optchain{ 0 };
 };
 
 struct AstQueryGroup

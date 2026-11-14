@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 807 gate scripts (counts snapshot 2026-11-13) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 810 gate scripts (counts snapshot 2026-11-13) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5888,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**807 gate scripts** at the counts snapshot 2026-11-13; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**810 gate scripts** at the counts snapshot 2026-11-13; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6203,7 +6203,7 @@ The first ten each target a failure mode measured in the literature; `placeholde
 honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
 facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
-defect-shape format-arity). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
+defect-shape format-arity; since QD-ENTRY-CEILING also a new function at the ceiling). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
 on the Python 3.13 standard library (405 calls) and on libc++'s std::format tests (80 calls; the 24 hits are its
 deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
@@ -7008,7 +7008,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 807 at the counts snapshot 2026-11-13. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 810 at the counts snapshot 2026-11-13. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites
@@ -14511,3 +14511,39 @@ legends and `--help=all` (DEV-5); this registration's text above names no file o
 any A binary ran, because `--anchor` refuses without it (DEV-12); Gate S masks the MCP `_index` stamp (it folds file mtimes, so BASE differs
 from itself there) and the initialize reply's `dictv=` (DEV-9); I2 is read at the emitted 4-dp precision (DEV-10); B does not
 re-pick `--tree`, whose own offset paging a window swap would break (DEV-11).
+
+## Memory by release: warm `--deps` peak, v0.6.9 → v0.6.10 → main (2026-11-13)
+
+**What it measures.** The peak memory footprint of one warm `--deps` run (the index already cached) on three large
+repositories, for the two latest release tags and main. Measured for the showcase deck's memory slide. The question is
+the same command on the same tree; the answers differ between the binaries (each release changed `--deps` output), so
+this is not a byte-identity claim.
+
+**Published as percent change only.** The machine is a shared 16 GB Apple M2 Pro laptop that other work was using
+(load average 10 to 28 during the runs). Absolute megabytes for publication come only from the 0.7.0 run on another
+machine, so the deck and this section quote the percent change against v0.6.9, not the megabytes.
+
+**Method.**
+- Binaries: plain dev builds (no build type, AppleClang) of `v0.6.9` (bedc0cdcf), `v0.6.10` (ac869640e) and main
+  (cd04d477e).
+- Repositories, pinned checkouts: envoy (C++, 744a11b5be), cockroach (Go, d30c905fff), vscode (TypeScript, de1c71b869).
+- Argv, run from the repository root: `/usr/bin/time -l BIN REPO --cache=DIR --deps`. Peak = the `peak memory footprint`
+  line. One cache directory per binary and repository.
+- Per repository: one cold run per binary (it writes that binary's cache), then three warm rounds with the three binaries
+  in a rotating order (v0.6.9, v0.6.10, main; then main, v0.6.9, v0.6.10; then v0.6.10, main, v0.6.9). One ripwire process
+  at a time, each started only with at least 40 % of memory free. The figure is the median of the three warm runs.
+- Each binary printed one stdout md5 per repository on all four runs. Every run exited 0.
+
+| repository | v0.6.10 vs v0.6.9 | main vs v0.6.9 | spread of the three warm runs |
+|---|---|---|---|
+| envoy | −57 % | −79 % | v0.6.9 ±4 %; v0.6.10 and main under 0.3 % |
+| cockroach | −44 % | −74 % | v0.6.9 under 1.5 %; the others under 0.3 % |
+| vscode | −51 % | −75 % | v0.6.9 −7 % to +1 % of its median; the others under 0.2 % |
+
+The cold runs (one per binary, the run that writes the cache) moved the same way: main is −77 %, −76 % and −77 % against
+v0.6.9 on envoy, cockroach and vscode.
+
+**Caveats.** Three warm runs per cell, on a loaded machine; v0.6.9's warm peak varied most between runs, which is why the
+median is quoted. Dev builds, not release builds. One verb (`--deps`); other verbs have other peaks. The per-step
+mechanisms and their own measurements are in CHANGELOG.md [0.6.10] (#497, #505, #556) and, for main since 0.6.10, in
+`changelog.d/mem-ref-shrink.md` and the other `changelog.d/` fragments.

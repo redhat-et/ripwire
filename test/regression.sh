@@ -396,6 +396,7 @@ for _g in \
     composelangcheck \
     connectcheck \
     connectcorecheck \
+    connectdeclinedjointcheck \
     connectjoincheck \
     connectsourcejointcheck \
     constcheck \
@@ -438,6 +439,7 @@ for _g in \
     demoterefillcheck \
     dependencypincheck \
     deplangscheck \
+    depsnographcheck \
     depsprecisecheck \
     det-gate \
     detailcheck \
@@ -724,6 +726,7 @@ for _g in \
     mcphandlecheck \
     mcpincrementalcheck \
     mcpmanifestcheck \
+    mcponeparsecheck \
     mcprangeedgecheck \
     mcpreadloopcheck \
     mcpredactcheck \
@@ -861,6 +864,7 @@ for _g in \
     qdconstructscheck \
     qddegradecheck \
     qddialscheck \
+    qdentryceilingcheck \
     qdmonstercheck \
     qdrefpaircheck \
     qdtestdeadcheck \
@@ -973,6 +977,7 @@ for _g in \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
+    scanoncecheck \
     scipcheck \
     scipjoincheck \
     scorecardcheck \
@@ -986,6 +991,7 @@ for _g in \
     selectorscopecheck \
     selfcheckcheck \
     selfcontainedcheck \
+    sentencesubjectcheck \
     shadowcheck \
     shallowhistorycheck \
     shapingflagcheck \

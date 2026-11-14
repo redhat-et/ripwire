@@ -355,8 +355,15 @@ inline std::uint32_t memberDeclLine( const IngestResult& ing, const Symbol& owne
     return 0;
 }
 
-// The bare-name refusal: "" unless `name` (no qualifier) is declared as a member of an unserved owner.
-inline std::string unservedMemberDeclRefusal( const IngestResult& ing, std::string_view name )
+// The bare-name scan: `refusal` is "" unless `name` (no qualifier) is declared as a member of an unserved owner; `capped` says
+// the scan stopped at its 16 MiB budget before finding one (USES-DECL-SCAN-CAPPED, CodeRabbit #630): the served answer then
+// carries decl_scan="capped" (memberDeclScanAttrXml), because its external="1" was never checked against the unread files.
+struct MemberDeclScan
+{
+    std::string refusal;
+    bool        capped = false;
+};
+inline MemberDeclScan memberDeclScan( const IngestResult& ing, std::string_view name )
 {
     if( name.empty() || name.size() > 256 || name.find_first_of( ".:@ " ) != std::string_view::npos )
     {
@@ -383,7 +390,7 @@ inline std::string unservedMemberDeclRefusal( const IngestResult& ing, std::stri
             bytes      = darkflags::readWhole( diskPath( ing, s.fileId ) );
             if( bytes && ( scannedBytes += bytes->size() ) > kLexicalDefScanBytes )
             {
-                return {};   // budget — absent claims nothing
+                return MemberDeclScan{ {}, true };   // budget: no refusal, and the served answer says the scan stopped
             }
         }
         if( !bytes )
@@ -392,11 +399,36 @@ inline std::string unservedMemberDeclRefusal( const IngestResult& ing, std::stri
         }
         if( const std::uint32_t line = memberDeclLine( ing, s, *bytes, name, fileFirst ); line != 0 )
         {
-            return "'" + std::string( name ) + "' is declared as a member of '" + s.name + "' at " + ing.files[ s.fileId ] + ":" + std::to_string( line )
-                 + " and has no other indexed definition — " + memberUnservedSentence( ing, s.name + "." + std::string( name ), s );
+            return MemberDeclScan{ "'" + std::string( name ) + "' is declared as a member of '" + s.name + "' at " + ing.files[ s.fileId ] + ":"
+                                       + std::to_string( line ) + " and has no other indexed definition — "
+                                       + memberUnservedSentence( ing, s.name + "." + std::string( name ), s ),
+                                   false };
         }
     }
     return {};
+}
+inline std::string unservedMemberDeclRefusal( const IngestResult& ing, std::string_view name )
+{
+    return memberDeclScan( ing, name ).refusal;
+}
+
+// decl_scan="capped" on a served external="1" answer: the bare-name member-declaration scan stopped at its budget, so a
+// lexical member declaration past it was not ruled out. Asked only for an external answer (no indexed definition) of a
+// name with no field: the scan runs again there (a cold path, at most the 16 MiB budget).
+inline bool memberDeclScanCapped( const IngestResult& ing, std::string_view name, bool external )
+{
+    return external && resolveFieldSelector( ing, name ).empty() && memberDeclScan( ing, name ).capped;
+}
+inline const char* memberDeclScanAttrXml( bool capped ) noexcept
+{
+    return capped ? " decl_scan=\"capped\"" : "";
+}
+inline const char* memberDeclScanLegend( bool capped ) noexcept
+{
+    return capped ? "decl_scan=\"capped\": the scan for a lexical member declaration of SYM (a field of a type whose language the index "
+                    "extracts no fields for) stopped at its 16 MiB budget, so external=\"1\" is unchecked past it; the grep verb finds the "
+                    "declaration. "
+                  : "";
 }
 
 inline std::optional<int> memberUsesArm( const IngestResult& ing, const Graph& g, std::span<const NodeId> defs, std::string_view sym,

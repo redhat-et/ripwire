@@ -17,7 +17,11 @@
 #   (R)  a base tree the child cannot materialize: the child's refusal is said once (outcome=failed) with its exit code,
 #        exactly as in-process;
 #   (D)  a once-per-site notice that fires in BOTH phases prints as often as in-process (debug builds print it once;
-#        release builds never) — the fixture's deep JSON is skipped in both trees (two skip lines prove both phases ran);
+#        release builds never) — the fixture's symlink leaves the tree in both commits (the escaped-root notice);
+#   (U)  a base the child must not store (quality.h baseScoreStorable: its ingest refused a file for nesting, or extracted
+#        one partially — CodeRabbit 4572576455 on #655): the child writes no blob, not even the --no-cache temp one, and
+#        the parent falls back (why=unstorable) to the in-process answer, byte for byte, which stores none either; a repeat
+#        spawns again. Red before the merge's fix: the child stored the weakened base (outcome=child, one blob);
 #   (W)  a warm repeat hits the blob and spawns no child;
 #   (S)  a stray RIPWIRE_QBASE_CHILD naming another parent is ignored: the run answers, and spawns its own child;
 #   (Z)  the size floor: unforced, the fixture (a git index far below 1 MiB) scores its base in-process
@@ -45,8 +49,11 @@ def helper(x):
 def main():
     return helper(2)
 EOF
-# deep JSON (generated here, never committed): skipped by the ingest of each commit, through one once-per-site notice
-python3 -c 'print("[" * 600 + "]" * 600)' > "$FX/data/deep.json"
+# a symlink whose target leaves the tree: refused by the ingest of each commit, through one once-per-site notice. (Not a
+# nest-refused file: that base is never stored, so the child never answers it — arm (U).)
+printf 'outside\n' > "$WORK/outside.txt"; ln -s "$WORK/outside.txt" "$FX/data/escape.txt"
+# the (U) arm's extract-throw marker, in a file both commits hold; it throws only under RIPWIRE_TEST_EXTRACT_THROW
+printf 'def other():\n    return 3  # rw-throw-here\n' > "$FX/src/b.py"
 git_(){ git -C "$FX" -c user.name=t -c user.email=t@t "$@"; }
 git_ init -q && git_ add -A && git_ commit -qm base || no "fixture: base commit"
 cat > "$FX/src/a.py" <<'EOF'
@@ -83,7 +90,7 @@ spawns(){ grep -c '^ripwire: stats qbase-child outcome=[cf]' "$WORK/$1.err"; }
 ingests(){ grep -c 'ripwire: cache-stats ' "$WORK/$1.err"; }
 answer_err(){   # stderr without the stats families and the fallback's own debug disclosure
     grep -v -E '^ripwire: (stats|memory-projection|cache-stats|quality-passes)|^\[mem\]|base child unavailable' "$WORK/$1.err" \
-        | sed -E 's/ripwire-qdpair-(base|target)[-a-z]*-[0-9]+/ripwire-qdpair-\1-PID/g; s#/(tmp|t)-[a-z]+/#/T/#g'
+        | sed -E 's/ripwire-qdpair-(base|target)[-a-z]*-[0-9]+/ripwire-qdpair-\1-PID/g; s#/(tmp|t)-[a-z-]+/#/T/#g'
 }
 same(){ cmp -s "$WORK/$1.out" "$WORK/$2.out" && cmp -s "$WORK/$1.rc" "$WORK/$2.rc" && [ "$( answer_err "$1" )" = "$( answer_err "$2" )" ]; }
 blobs(){ find "$1" -name 'ripwire-qbase-*' -type f 2>/dev/null | grep -v -e '\.tmp\.' -e 'qbase-child' | wc -l | tr -d ' '; }
@@ -138,10 +145,41 @@ if [ "$( outcome refuse )" = "failed -;" ] && [ "$( cat "$WORK/refuse.rc" )" != 
 if [ "$( grep -c 'could not materialize' "$WORK/refuse.err" )" = 1 ] && same refuse-inproc refuse; then ok "(R) said once, byte-identical to in-process"; else no "(R) the refusal differs from in-process"; diff <( answer_err refuse-inproc ) <( answer_err refuse ) | head -6 | sed 's/^/    /'; fi
 
 # (D)
-skips="$( grep -c 'json nesting > 512 levels' "$WORK/cold.err" )"
-if [ "$skips" = 2 ]; then ok "(D) premise: the deep JSON was skipped in both phases (2 lines)"; else no "(D) premise: $skips skip lines, expected 2 — the fixture no longer reaches both phases"; fi
-nc="$( grep -c '^\[math degraded\] ingest: a .json file nests' "$WORK/cold.err" )"; ni="$( grep -c '^\[math degraded\] ingest: a .json file nests' "$WORK/inproc.err" )"
+NOTICE="ingest: a symlink's target leaves the crawl root"
+mkdir -p "$WORK/t-escaped"; run escaped "$WORK/t-escaped" -- --skipped   # the tree both commits hold the link in
+esc="$( grep -o '<f p="data/escape.txt" why="escaped-root"' "$WORK/escaped.out" | grep -c . )"
+if [ "$esc" = 1 ]; then ok "(D) premise: the symlink is refused as escaped-root (one --skipped row; both commits hold it)"; else no "(D) premise: $esc escaped-root rows, expected 1 — the fixture no longer reaches the notice"; fi
+nc="$( grep -c "$NOTICE" "$WORK/cold.err" )"; ni="$( grep -c "$NOTICE" "$WORK/inproc.err" )"
 if [ "$nc" = "$ni" ] && [ "$nc" -le 1 ]; then ok "(D) the once-per-site notice printed $nc time(s), as in-process ($ni)"; else no "(D) the notice printed $nc time(s) on the child path, $ni in-process"; fi
+
+# (U) — two weakened bases: a nest-refused file (deep JSON in both commits) and a partially extracted one (the marker)
+FU="$WORK/fu"; cp -R "$FX" "$FU"
+gitu(){ git -C "$FU" -c user.name=t -c user.email=t@t "$@"; }
+gitu checkout -q HEAD~1 && python3 -c 'print("[" * 600 + "]" * 600)' > "$FU/data/deep.json" && gitu add -A && gitu commit -qm "base with deep json" \
+    && gitu cherry-pick "$( git -C "$FX" rev-parse HEAD )" >/dev/null || no "(U) fixture: deep-json commits"
+runu(){ local tag="$1" dir="$2"; shift 2; ( FX="$dir"; run "$tag" "$@" ); }
+useen=0
+for cell in "nest:$FU:" "partial:$FX:RIPWIRE_TEST_EXTRACT_THROW=rw-throw-here"; do
+    c="${cell%%:*}"; rest="${cell#*:}"; dir="${rest%%:*}"; thr="${rest#*:}"
+    ue=( ${thr:+"$thr"} )
+    for nc_ in "" "--no-cache"; do
+        t="u-$c${nc_:+-nc}"
+        mkdir -p "$WORK/t-$t" "$WORK/t-$t-in"
+        runu "$t" "$dir" "$WORK/t-$t" RIPWIRE_TEST_QBASE_CHILD=force ${ue[@]+"${ue[@]}"} -- "$PAIR" $nc_
+        runu "$t-in" "$dir" "$WORK/t-$t-in" RIPWIRE_TEST_QBASE_CHILD=inproc ${ue[@]+"${ue[@]}"} -- "$PAIR" $nc_
+        if [ "$( outcome "$t" )" = "fallback unstorable;" ] && [ "$( blobs "$WORK/t-$t" )" = 0 ] && [ "$( blobs "$WORK/home-$t" )" = 0 ]; then
+            useen=$(( useen + 1 )); ok "(U) $c ${nc_:-cached}: the child stored nothing and the parent fell back (why=unstorable)"
+        else
+            no "(U) $c ${nc_:-cached}: outcome '$( outcome "$t" )', $( blobs "$WORK/t-$t" ) qbase blob(s) — the child stored a weakened base"
+        fi
+        if same "$t-in" "$t" && [ "$( blobs "$WORK/t-$t-in" )" = 0 ]; then ok "(U) $c ${nc_:-cached}: byte-identical to in-process, which stores none either"; else no "(U) $c ${nc_:-cached}: differs from in-process (or in-process stored $( blobs "$WORK/t-$t-in" ) blob(s))"; diff <( answer_err "$t-in" ) <( answer_err "$t" ) | head -6 | sed 's/^/    /'; fi
+    done
+    # the premise: the base really was weakened, so the run said so (a nest-refusal line, or the extract-partial disclosure)
+    if grep -q -e 'json nesting > 512 levels' -e 'RIPWIRE_TEST_EXTRACT_THROW' -e 'extract-partial' "$WORK/u-$c.err"; then ok "(U) $c premise: the weakened base was disclosed"; else no "(U) $c premise: no nest-refusal or extract-partial line — the fixture no longer weakens the base"; fi
+    runu "u-$c-2" "$dir" "$WORK/t-u-$c" RIPWIRE_TEST_QBASE_CHILD=force ${ue[@]+"${ue[@]}"} -- "$PAIR"
+    if [ "$( outcome "u-$c-2" )" = "fallback unstorable;" ] && same "u-$c" "u-$c-2"; then ok "(U) $c: the repeat finds no blob, spawns again, same answer"; else no "(U) $c repeat: outcome '$( outcome "u-$c-2" )'"; fi
+done
+[ "$useen" = 4 ] || no "(U) saw $useen of 4 unstorable fallbacks"
 
 # (W)
 run warm "$WORK/t-cold" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR"

@@ -882,8 +882,9 @@ AI-authored commits, a function rewritten again inside two weeks **+15%** more l
 `--quality-delta`'s 12 kinds each target one measured mode like those (the eleventh, `placeholder`,
 lists the stubs and TODOs a change adds, and never gates; the twelfth, `defect-shape`, catches four
 defect shapes review kept finding by hand —
-new-symbol rows never gate, except defect-shape format-arity,
-because a format/argument mismatch is a defect, not debt), and it reports **only what your
+new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling,
+because a format/argument mismatch is a defect, not debt, and a new function at 4x the bar — ccx 60 or 240 lines —
+is how a 1,000-line function starts), and it reports **only what your
 change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
 names the tests that must run before "done."
 
@@ -968,7 +969,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 36 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 39 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -2141,9 +2142,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>807 gate scripts</b> (counts snapshot 2026-11-13), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>810 gate scripts</b> (counts snapshot 2026-11-13), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **807 gate scripts** at the counts snapshot 2026-11-13 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **810 gate scripts** at the counts snapshot 2026-11-13 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2336,7 +2337,7 @@ are one contributor's corpus away from being measurably better, and we cannot se
 ## Languages
 
 <details>
-<summary><b>26</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
+<summary><b>27</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
 
 C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal` — indexed with the
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
@@ -2903,7 +2904,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-13 the tool had 421 compile-time caps and 9 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-13 the tool had 423 compile-time caps and 10 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of the caps the sweep has measured, and names the ones it has not.
@@ -3214,7 +3215,7 @@ record, and this line is only the pointer to it.
 | The compile-time cap inventory | [`docs/LIMITS.md`](docs/LIMITS.md) |
 | The measured cost of the caps the sweep covers | [`docs/TUNING.md`](docs/TUNING.md) |
 | Skill-file security checks | [`docs/COMMANDS.md`](docs/COMMANDS.md#--scan-skillsdir) |
-| The whole tool in 36 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 39 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 

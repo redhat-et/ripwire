@@ -492,12 +492,35 @@ inline void collectWantedConstructHits( IngestFileScan& scan, const LangEntry& l
     if( scan.wantConstructHits )
     {
         collectConstructHits( le, static_cast<std::uint32_t>( fileId ), bytes, root, constructCursor, out.constructs );
+        // Test seam (test/qdconstructscheck.sh): a file holding this marker throws here, after its hits were collected, so the
+        // worker's catch runs on a file whose construct pass began (FileExtractThrew then marks its hits unknown).
+        static const char* const throwMarker = std::getenv( "RIPWIRE_TEST_EXTRACT_THROW" );
+        if( throwMarker != nullptr && *throwMarker != '\0' && bytes.find( throwMarker ) != std::string_view::npos )
+        {
+            throw std::runtime_error( "RIPWIRE_TEST_EXTRACT_THROW" );
+        }
     }
     else
     {
         scan.constructsKnown[ fileId ] = 0;
     }
 }
+
+// QD-CONSTRUCTS-AT-INGEST: the construct pass's own query cursor, released on every exit of the worker (ParserGuard's shape).
+struct ConstructCursorGuard
+{
+    TSQueryCursor* c = ts_query_cursor_new();
+    ConstructCursorGuard() = default;
+    ConstructCursorGuard( const ConstructCursorGuard& )            = delete;
+    ConstructCursorGuard& operator=( const ConstructCursorGuard& ) = delete;
+    ~ConstructCursorGuard()
+    {
+        if( c )
+        {
+            ts_query_cursor_delete( c );
+        }
+    }
+};
 
 inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 {
@@ -512,7 +535,8 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     ASSUME( cursor != nullptr, "ts_query_cursor_new: the default tree-sitter allocator aborts on failure" );
     // QD-CONSTRUCTS-AT-INGEST: its own cursor, never configured, like astQueryGrouped's — the tags cursor above carries
     // whatever the tags capture set on it.
-    TSQueryCursor* constructCursor = ts_query_cursor_new();
+    const ConstructCursorGuard constructCursorOwner;
+    TSQueryCursor* const       constructCursor = constructCursorOwner.c;
     ASSUME( constructCursor != nullptr, "ts_query_cursor_new: the default tree-sitter allocator aborts on failure" );
 
     // B0.2: per-worker subtoken-stats builder — after a file's defs are extracted (and the file's
@@ -850,7 +874,6 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     }
     flushPendingParsed();
     ts_query_cursor_delete( cursor );
-    ts_query_cursor_delete( constructCursor );
     sh.warmGrowths.fetch_add( warmGrowths, std::memory_order_relaxed );   // P1-11: one relaxed add per worker, ordered by the pool join
 }
 
