@@ -184,7 +184,9 @@ callee r1 'add a new argument to `API_FUNC(int) api_proto(int a)`' api_proto
 callee r1 'add a new argument to `static inline int run_it(int a)`' run_it
 silent v1 '--for=change the signature of `sh_fn` used by `oth_fn`'
 callee v1 'change the signature of `oth_fn`' oth_fn
-run "--for=run_it" --token-budget=4000 >"$TMP/s2n.xml"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (the old
+# 4000 held it at any budget; that answer fits 4000 whole now, so it comes back byte for byte, block and all): 100 forces the hold.
+run "--for=run_it" --token-budget=100 >"$TMP/s2n.xml"
 nxt="$( grep -o 'held="budget" next="[^"]*"' "$TMP/s2n.xml" | sed 's/^held="budget" next="//; s/"$//; s/&apos;/'"'"'/g' )"
 if [ -n "$nxt" ] && python3 -c '
 import shlex, subprocess, sys, os
@@ -194,7 +196,7 @@ sys.exit( 0 if "p=\"api.h:1\"" in r.stdout and "decl_only=\"1\"" in r.stdout els
 ' "$nxt" "$BIN" "$FX"; then ok "(s2) the held next= ($nxt) prints the tied prototype row api.h:1"; else no "(s2) the held next= ($nxt) does not reach api.h:1"; fi
 run "--for=run_it" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'decl_rows' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
-run "--for=run_it" --token-budget=4000 >"$TMP/s2.xml"
+run "--for=run_it" --token-budget=100 >"$TMP/s2.xml"
 if [ -s "$TMP/s2.xml" ] && grep -q '<decl_rows of="run_it" held="budget" next="--for=run_it"/></ctx>$' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
 if python3 -c '
 import sys, xml.dom.minidom as M

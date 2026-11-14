@@ -10,19 +10,24 @@
 #
 # THE CONTRACT (owner rule "budget serves answers": shed optional attributes first, never cut the answer; an answer already
 # under the budget must not change). The posture is decided as if no budget were given; the budget is a ceiling applied
-# after it, by ONE fixed shed sequence over that unbudgeted answer U: the <sigs> rows' optional attributes, then the <tail>
-# rows from the last, then the <fold> bodies, then (--max-tokens with --detail only) the --detail bodies from the last,
-# then the <sigs> rows from the last, down to a floor of four. answer(B) = U with the SHORTEST prefix of that sequence
+# after it, by ONE fixed shed sequence over that unbudgeted answer U: the blocks outside est_tokens a budget holds (<syms>,
+# <doc_body> … when U plus their price does not fit: U is rendered again with them held), the <sigs> rows' optional
+# attributes, then the <tail> rows from the last, the <hops> rows, then the <fold> bodies, then the <bodies> section from the
+# last, then (--token-budget only) the <sigs> rows from the last, down to a floor of four. answer(B) = U with the SHORTEST prefix of that sequence
 # removed that brings est_tokens to B (all of it when none does: the overflow is then visible as est_tokens > the budget
 # named on the root, and a --max-tokens ceiling says over_ceiling="1").
-#   (a) --token-budget=B >= E (U's est_tokens): the answer IS U — stdout, stderr and exit code byte for byte. A budget that
-#       cuts nothing says nothing (no budget_tokens=, no clause); the disclosure rides only an answer something was shed from.
+#   (a) --token-budget=B >= E (U's est_tokens plus its held blocks' price, <syms> on these fixtures): the answer IS U —
+#       stdout, stderr and exit code byte for byte. A budget that cuts nothing says nothing (no budget_tokens=, no clause); the disclosure rides only an answer something was shed from.
 #   (b) B < E: est_tokens <= B, or every tier below the <sigs> rows is shed and the rows are at their floor; every <sigs>
-#       and <tail> row kept is U's row in U's order (a prefix of U's rows), and a <sigs> row is missing only when the tail
-#       and fold are already gone. At B = E - 1 every <sigs> row of U is kept.
-#   (c) the same two arms for --detail=N --max-tokens=M against the unbudgeted --detail=N answer.
-#   (d) monotone: B1 < B2 => every <sigs>/<tail> row of answer(B1) is in answer(B2), in the same order (both are prefixes
-#       of U's rows, the B1 one no longer), answer(B1) carries a <fold> only if answer(B2) does, and est(B1) <= est(B2).
+#       and <tail> row kept is U's row in U's order — the <tail> rows a prefix of U's, the <sigs> rows U's best-ranked ones
+#       (the cut takes the worst r= first: U's document order is not rank order under the head round-robin) — and a <sigs>
+#       row is missing only when the tail and fold are already gone. At B = E - 1 every <sigs> row of U is kept.
+#   (c) the same two arms for --detail=N --max-tokens=M against the unbudgeted --detail=N answer, except that a ceiling never
+#       cuts a ranked <sigs> row (METHODOLOGY §9 #2): past the tail, fold and --detail bodies it says over_ceiling="1".
+#   (d) monotone: B1 < B2 => every <sigs>/<tail> row of answer(B1) is in answer(B2), in the same order (the <tail> rows a
+#       prefix, the <sigs> rows a subsequence: both are U's best-ranked, the B1 set no larger), answer(B1) carries a <fold>
+#       only if answer(B2) does, and price(B1) <= price(B2) (est_tokens plus the held blocks' price: a held answer's
+#       est_tokens carries its own disclosure).
 #       That is the exact relation the fixed shed sequence guarantees — not a byte prefix: the shown= counts move.
 # Each arm counts the questions it judged and FAILS on zero (a vacuous arm is a red arm).
 #
@@ -33,6 +38,7 @@
 # Exits non-zero on any failure.
 
 set -u
+fail=0   # the failure accumulator (the judge below reports each FAIL; its exit lands here)
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -102,7 +108,34 @@ EOF
 DETAIL_ROWS=3   # (c) runs on the first DETAIL_ROWS questions (the fixtures plus none of src/: --detail bodies there are large and slow)
 
 # ── the runs ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-est_of(){ python3 -c 'import re,sys; s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); m=re.search(r"<ctx [^>]*?\best_tokens=\"(\d+)\"",s); print(m.group(1) if m else "")' "$1"; }
+# E = the answer's whole price: the root's est_tokens plus the blocks outside it a budget holds (src/forbudgetfit.h
+# kForHeldBlocks, heldBlocksPrice: <doc_body> by its own est_tokens=, the others' bytes at the 2.50 markup rate). A budget at or
+# above E cuts nothing; under it the answer is rendered with those blocks held, then shed.
+cat >"$TMP/price_of.py" <<'PYEOF'
+import re, sys
+def price( path ):
+  s = open( path, 'rb' ).read().decode( 'latin-1' )   # byte offsets, as the binary counts them
+  m = re.search( r'<ctx [^>]*?\best_tokens="(\d+)"', s )
+  if not m: return None
+  held = ( "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" )
+  masked = re.sub( r'<!\[CDATA\[.*?\]\]>|<!--.*?-->', lambda x: ' ' * len( x.group( 0 ) ), s, flags = re.S )
+  depth, heldp, open_at, open_tag = 0, 0, None, None
+  for t in re.finditer( r'<(/?)([A-Za-z_][\w-]*)([^>]*?)(/?)>', masked ):
+      close, name, attrs, selfc = t.groups()
+      if close:
+          depth -= 1
+          if depth == 1 and open_at is not None:
+              e = re.search( r'\best_tokens="(\d+)"', open_tag ) if name == "doc_body" else None
+              heldp += int( e.group( 1 ) ) if e and int( e.group( 1 ) ) > 0 else int( ( t.end() - open_at ) / 2.5 + 0.5 )
+              open_at = None
+          continue
+      if depth == 1 and name in held:
+          if selfc: heldp += int( ( t.end() - t.start() ) / 2.5 + 0.5 )
+          else: open_at, open_tag = t.start(), t.group( 0 )
+      if not selfc: depth += 1
+  return int( m.group( 1 ) ) + heldp
+PYEOF
+est_of(){ python3 -c 'import sys; sys.path.insert( 0, sys.argv[ 1 ] ); import price_of; p = price_of.price( sys.argv[ 2 ] ); print( "" if p is None else p )' "$TMP" "$1"; }
 i=0
 while IFS='	' read -r corpus q; do
     [ -z "$corpus" ] && continue
@@ -159,27 +192,43 @@ def detail_bodies( root ):
     b = root.find( "bodies" ) if root is not None else None
     return [ ( c.get( "p" ) or "", c.get( "n" ) or "" ) for c in b if c.tag == "b" ] if b is not None else []
 def is_prefix( a, b ): return len( a ) <= len( b ) and b[ :len( a ) ] == a
+def is_subseq( a, b ):
+    it = iter( b ); return all( x in it for x in a )
+def best_ranked( U, k ):
+    """U's k best-ranked <sigs> rows in U's order: the rows:N unit cuts the worst rank first (no r= = worst; ties: the later row)."""
+    s = U.find( "sigs" ) if U is not None else None
+    if s is None: return []
+    rs = [ c for c in s if c.tag in ( "d", "t" ) ]
+    key = lambda i: ( int( rs[ i ].get( "r" ) or 10**9 ), i )
+    keep = sorted( sorted( range( len( rs ) ), key = key )[ :k ] )
+    return [ ident( rs[ i ] ) for i in keep ]
 
-def judge_fit( label, U, A, budget, hard ):
+sys.path.insert( 0, tmp ); import price_of
+def judge_fit( label, U, A, budget, hard, pu, pa ):
     """(b)/(c) below the price: est within the budget or every lower tier gone and rows at the floor; kept rows are U's prefix."""
     su, sa = rows( U, "sigs" ), rows( A, "sigs" )
     tu, ta = rows( U, "tail" ), rows( A, "tail" )
     good = True
-    if not is_prefix( sa, su ):
-        no( f"{label}: the <sigs> rows are not a prefix of the unbudgeted answer's ({len( sa )} vs {len( su )})" ); good = False
+    if sa != best_ranked( U, len( sa ) ):
+        no( f"{label}: the <sigs> rows are not U's {len( sa )} best-ranked rows in U's order ({len( sa )} vs {len( su )})" ); good = False
     if not is_prefix( ta, tu ):
         no( f"{label}: the <tail> rows are not a prefix of the unbudgeted answer's ({len( ta )} vs {len( tu )})" ); good = False
     if len( sa ) < len( su ) and ( ta or has_fold( A ) ):
         no( f"{label}: a <sigs> row was cut while {len( ta )} tail rows / a fold were still served (rows are shed last)" ); good = False
     floor = min( 4, len( su ) )
+    if hard and len( sa ) != len( su ):   # a --max-tokens ceiling never cuts a ranked row (METHODOLOGY §9 #2: over_ceiling="1" instead)
+        no( f"{label}: the ceiling cut a <sigs> row ({len( sa )} of {len( su )} kept)" ); good = False
     if est( A ) > budget:
-        at_floor = len( sa ) <= floor and not ta and not has_fold( A )
+        at_floor = ( hard or len( sa ) <= floor ) and not ta and not has_fold( A )
         if not at_floor:
             no( f"{label}: est_tokens={est( A )} > {budget} while optional tiers remain (rows {len( sa )}, tail {len( ta )}, fold {has_fold( A )})" ); good = False
         if hard and A.get( "over_ceiling" ) != "1":
             no( f"{label}: est_tokens={est( A )} > max_tokens={budget} and no over_ceiling=\"1\"" ); good = False
-    if est( A ) > est( U ):
-        no( f"{label}: the budgeted answer prices {est( A )} > the unbudgeted {est( U )}" ); good = False
+    # a budget never grows the answer — except by the over_ceiling= disclosure a --max-tokens ceiling owes when nothing below the
+    # ranked rows was left to shed (rows are never cut against a ceiling): that label and its clause are priced markup too
+    # the whole price (est_tokens plus the held blocks, price_of): a held answer's est_tokens grows by its own disclosure
+    if price_of.price( pa ) > price_of.price( pu ) and not ( hard and A.get( "over_ceiling" ) == "1" ):
+        no( f"{label}: the budgeted answer prices {price_of.price( pa )} > the unbudgeted {price_of.price( pu )} (est_tokens + held blocks)" ); good = False
     return good
 
 for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
@@ -205,7 +254,7 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
         if B < 1 or not os.path.exists( p ): continue
         A = parse( p )
         if A is None: good = False; continue
-        good = judge_fit( f"(b) {tag} B={B}", U, A, B, hard = False ) and good
+        good = judge_fit( f"(b) {tag} B={B}", U, A, B, False, os.path.join( d, "U" ), p ) and good
         if B == E - 1 and len( rows( A, "sigs" ) ) != len( rows( U, "sigs" ) ):
             no( f"(b) {tag} B=E-1: a <sigs> row was cut one token under the price" ); good = False
     counts[ "b" ] += 1
@@ -216,13 +265,15 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
     good = len( answers ) >= 3
     for ( b1, a1 ), ( b2, a2 ) in zip( answers, answers[ 1: ] ):
         if a1 is None or a2 is None: good = False; continue
-        for sec in ( "sigs", "tail" ):
-            if not is_prefix( rows( a1, sec ), rows( a2, sec ) ):
-                no( f"(d) {tag}: <{sec}> rows at B={b1} are not a prefix of those at B={b2}" ); good = False
+        if not is_subseq( rows( a1, "sigs" ), rows( a2, "sigs" ) ):
+            no( f"(d) {tag}: <sigs> rows at B={b1} are not a subsequence of those at B={b2}" ); good = False
+        if not is_prefix( rows( a1, "tail" ), rows( a2, "tail" ) ):
+            no( f"(d) {tag}: <tail> rows at B={b1} are not a prefix of those at B={b2}" ); good = False
         if has_fold( a1 ) and not has_fold( a2 ):
             no( f"(d) {tag}: B={b1} serves a <fold> that B={b2} does not" ); good = False
-        if est( a1 ) > est( a2 ):
-            no( f"(d) {tag}: est_tokens {est( a1 )} at B={b1} > {est( a2 )} at B={b2}" ); good = False
+        p1, p2 = price_of.price( os.path.join( d, f"tb.{b1}" ) ), price_of.price( os.path.join( d, f"tb.{b2}" ) )
+        if p1 > p2:
+            no( f"(d) {tag}: the price (est_tokens + held blocks) {p1} at B={b1} > {p2} at B={b2}" ); good = False
     counts[ "d" ] += 1
     if good: ok( f"(d) {tag}: monotone over B={ladder}" )
     # (c) --detail=2 --max-tokens
@@ -239,7 +290,7 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
         A = parse( p ) if os.path.exists( p ) else None
         if A is None or D is None: good = False
         else:
-            good = judge_fit( f"(c) {tag} M={ED // 2}", D, A, ED // 2, hard = True ) and good
+            good = judge_fit( f"(c) {tag} M={ED // 2}", D, A, ED // 2, True, os.path.join( d, "D" ), p ) and good
             if not is_prefix( detail_bodies( A ), detail_bodies( D ) ):
                 no( f"(c) {tag} M={ED // 2}: the --detail bodies are not a prefix of the unbudgeted ones" ); good = False
         counts[ "c" ] += 1
@@ -252,5 +303,6 @@ sys.exit( 1 if fails else 0 )
 PYEOF
 rc=$?
 echo
-[ "$rc" = 0 ] && echo "budgetmonotonecheck: PASS" || echo "budgetmonotonecheck: FAIL"
-exit "$rc"
+[ "$rc" = 0 ] || { fail=1; echo "budgetmonotonecheck: FAIL (the judge exited $rc)"; }
+[ "$fail" = 0 ] && echo "budgetmonotonecheck: PASS"
+exit "$fail"

@@ -20,7 +20,7 @@
 #        of the decoy's overload set is a pointer, its declarations included (a row stands for its implementation)
 #   (d)  a single-endpoint task (bare, and as a question) is byte-identical to the rule disabled
 #   (e)  est_tokens= is re-priced by the signed byte change (within one token; on this tiny tree the legend outweighs the one row, so it goes up); (w) well formed; (l) one legend comment, no "--" in it
-#   (t)  --token-budget leaves the answer as shaped: no pointer, no legend
+#   (t)  --token-budget on an answer that fits returns the demoted answer byte for byte (TOKEN-BUDGET-MONOTONE)
 #   (x)  MCP `for` (one renderer): its answer equals its RIPWIRE_NO_ONE_SIDE_REACH=1 twin with the same rows as pointers, and they are the
 #        CLI's pointers
 # A SECOND tree (paths.ts, many.ts, same.cpp), so its rows do not move the first tree's answers:
@@ -205,8 +205,12 @@ if [ "$nd" = 3 ] && [ "$nt" = 3 ]; then ok "(c) the driver's 3 overload rows sta
 ident d 'alpha_start'
 ident d2 'What does alpha_start do?'
 
-run "--for=sink_left_value + sink_right_value" --token-budget=4000 >"$TMP/t.on"
-if [ -s "$TMP/t.on" ] && ! grep -q '<!-- one-side:' "$TMP/t.on" && ! grep -q 'sym="sink_left_only_caller" r=' "$TMP/t.on"; then ok "(t) --token-budget: no pointer, no legend"; else no "(t) a budgeted answer was demoted"; fi
+# (t) TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer switches the demote off — it was posture under a budget (the
+# old arm wanted "no pointer, no legend" at --token-budget=4000). The budget now trims the answer asked without it, so an
+# answer that fits comes back byte for byte, the pointer and its legend included (test/budgetmonotonecheck.sh (a)).
+run "--for=sink_left_value + sink_right_value" >"$TMP/t.off"
+run "--for=sink_left_value + sink_right_value" --token-budget=100000 >"$TMP/t.on"
+if [ -s "$TMP/t.on" ] && grep -q '<!-- one-side:' "$TMP/t.off" && cmp -s "$TMP/t.on" "$TMP/t.off"; then ok "(t) --token-budget=100000: the demoted answer byte for byte ($( wc -c <"$TMP/t.on" | tr -d ' ' ) B)"; else no "(t) the budgeted answer is not the demoted unbudgeted one (or the unbudgeted one has no pointer: vacuous)"; fi
 
 mcp(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$TMP/ts" "$1" \
   | ( cd "$TMP/ts" || exit 1; "$BIN" --mcp 2>/dev/null ) | python3 -c '

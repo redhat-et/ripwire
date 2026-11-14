@@ -477,6 +477,7 @@ for f in range( 2 ):
 PY
 docs_arm(){ python3 -c '
 import re, sys
+budgeted = len( sys.argv ) > 1   # a budgeted state may have shed every doc-less row (then no docs_dropped=: zero is the count)
 s = sys.stdin.read()
 m = re.search( r"<sigs([^>]*)>(.*?)</sigs>", s, re.S )
 if not m: print( "FAIL no <sigs>" ); sys.exit( 1 )
@@ -484,12 +485,12 @@ rows = re.findall( r"<d [^>]*\br=\"([0-9]+)\"[^>]*>(.*?)</d>", m.group( 2 ), re.
 nodoc = [ int( r ) for r, inner in rows if "<doc>" not in inner ]
 dd = re.search( r"docs_dropped=\"([0-9]+)\"", m.group( 1 ) )
 got = int( dd.group( 1 ) ) if dd else 0
-if got != len( nodoc ) or got == 0: print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
-if "[docs_dropped=N:" not in s[ : s.find( "<sigs" ) ]: print( "FAIL docs_dropped= rides with no legend clause ahead of <sigs>" ); sys.exit( 1 )
+if got != len( nodoc ) or ( got == 0 and not budgeted ): print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
+if got > 0 and "[docs_dropped=N:" not in s[ : s.find( "<sigs" ) ]: print( "FAIL docs_dropped= rides with no legend clause ahead of <sigs>" ); sys.exit( 1 )
 sh = re.search( r"shown=\"([0-9]+)\"", m.group( 1 ) ); tt = re.search( r"total=\"([0-9]+)\"", m.group( 1 ) )
 shrunk = bool( sh and tt and sh.group( 1 ) == tt.group( 1 ) )
-if shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
-print( "OK docs_dropped=%d rows=%d %s" % ( got, len( rows ), "<sigs%s>" % m.group( 1 ) ) )'; }
+if not budgeted and shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
+print( "OK docs_dropped=%d rows=%d %s" % ( got, len( rows ), "<sigs%s>" % m.group( 1 ) ) )' "$@"; }
 if v="$( cd "$TMP" && "$BIN" fxdocs --for="widget helper" --no-cache 2>/dev/null | docs_arm )"; then
     case "$v" in
         # head round-robin (lane hrr): the tag may also carry files_first= (the reorder's reading; forheadrrcheck)
@@ -504,13 +505,17 @@ if [ "$jd" = "16 16" ]; then ok "(8) JSON twin: docs_dropped=16 = the rows with 
 first_capped=""
 for tb in 3400 3200 3000 2800 2600 2400 2200 2000; do
     out="$( cd "$TMP" && "$BIN" fxdocs --for="widget helper" --no-cache --token-budget=$tb 2>/dev/null )"
-    v="$( printf '%s' "$out" | docs_arm )" || { no "(8) --token-budget=$tb: $v"; continue; }
+    v="$( printf '%s' "$out" | docs_arm budgeted )" || { no "(8) --token-budget=$tb: $v"; continue; }
     if [ -z "$first_capped" ] && printf '%s' "$v" | grep -q 'capped="1"'; then first_capped="$tb $v"; fi
 done
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer runs the ladder's doc shrink; it sheds the unbudgeted answer, the
+# worst-ranked rows last of all — so the first capped state cuts the doc-less r>24 rows first (shown < 40) and docs_dropped=
+# falls by the doc-less rows it cut (the loop above holds the count in every state). The old "shrunk-not-dropped" first state
+# (shown == total, docs shrunk) is the ladder's, which a budget no longer switches to.
 case "$first_capped" in
-    *'shown="40" total="40" capped="1"'*) ok "(8) the ladder's first capped state is shrunk-not-dropped and says so: --token-budget=$first_capped" ;;
-    "") no "(8) no --token-budget in 3400..2000 capped the fixture — the shrunk arm measured nothing" ;;
-    *) no "(8) first capped state is not shrunk-not-dropped: $first_capped" ;;
+    *'shown="'[0-9]*'" total="40" capped="1"'*) ok "(8) the first capped state cuts the worst-ranked rows and keeps docs_dropped= honest: --token-budget=$first_capped" ;;
+    "") no "(8) no --token-budget in 3400..2000 capped the fixture — the capped arm measured nothing" ;;
+    *) no "(8) first capped state carries no shown= total=40 capped=1: $first_capped" ;;
 esac
 
 # ── (9) A CAPPED <sigs> NAMES THE CALL THAT SERVES IT UNCUT (knob-honesty-068; PROCESS rule 5) ───────────────────

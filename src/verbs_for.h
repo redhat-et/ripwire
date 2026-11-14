@@ -2945,6 +2945,13 @@ inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view ro
 // DECL-ROW (src/fordeclrow.h): the task-read row blocks, just before </ctx> and outside every charge above: an element with its own
 // byte allowance, so no auto-served body pays for it. XML only; under a token budget the block is named, not printed
 // (held="budget", next= the call that lists the rows): "" on every task they do not read as theirs, so the answer is byte-identical.
+// TOKEN-BUDGET-MONOTONE: the budget the blocks outside est_tokens (forbudgetfit.h kForHeldBlocks) hold under: --token-budget on
+// the paths that still read it, the fitted re-render's Config::forHoldBudget on the --for XML one (0: none; they print whole).
+inline std::size_t forHeldBlocksBudget( const rw::Config& cfg ) noexcept
+{
+    return cfg.tokenBudget > 0 ? cfg.tokenBudget : cfg.forHoldBudget;
+}
+
 inline void appendForTaskRowBlocks( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
@@ -2952,8 +2959,8 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     {
         return;
     }
-    rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0 ).c_str() );
-    rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
+    rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0 ).c_str() );
+    rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
 }
 
 // Runs `run` with stdout pointed at a temporary file and returns what it printed, compacted by the same applyCompactDialect +
@@ -3102,19 +3109,20 @@ inline void writeAllTo( int fd, const std::string& bytes ) noexcept
 
 // stdout pointed at an anonymous file for the lifetime of the object (the dup2 capture runWithCompactLegend and the graph_verb block use):
 // finish() restores stdout and returns every byte written meanwhile; the destructor restores it on any other exit. Inactive when not wanted.
+// TOKEN-BUDGET-MONOTONE: the same capture of stderr (stream/fd), so a render the budget re-runs does not say its notices twice.
 class StdoutCapture
 {
 public:
-    explicit StdoutCapture( bool wanted ) : wanted_( wanted )
+    explicit StdoutCapture( bool wanted, std::FILE* stream = stdout, int fd = STDOUT_FILENO ) : wanted_( wanted ), stream_( stream ), fd_( fd )
     {
         if( !wanted )
         {
             return;
         }
-        std::fflush( stdout );
+        std::fflush( stream_ );
         file_  = rw::isChargeBufferFaultInjected() ? nullptr : std::tmpfile();   // the est_tokens family's fault switch: no buffer to capture into
-        saved_ = file_ != nullptr ? rw::os::dup( STDOUT_FILENO ) : -1;
-        active_ = file_ != nullptr && saved_ >= 0 && rw::os::dup2( rw::os::fileno( file_ ), STDOUT_FILENO ) >= 0;
+        saved_ = file_ != nullptr ? rw::os::dup( fd_ ) : -1;
+        active_ = file_ != nullptr && saved_ >= 0 && rw::os::dup2( rw::os::fileno( file_ ), fd_ ) >= 0;
         if( !active_ )
         {
             release();
@@ -3138,9 +3146,9 @@ public:
         }
         active_ = false;
         StdoutCaptured out;
-        out.failed = std::fflush( stdout ) != 0 || std::ferror( stdout ) != 0; // a short write to the buffer (disk full, a file-size limit) lands here
-        std::clearerr( stdout ); // the error was the buffer's; the restored stdout starts clean
-        out.restored = rw::os::dup2( saved_, STDOUT_FILENO ) >= 0;
+        out.failed = std::fflush( stream_ ) != 0 || std::ferror( stream_ ) != 0; // a short write to the buffer (disk full, a file-size limit) lands here
+        std::clearerr( stream_ ); // the error was the buffer's; the restored stdout starts clean
+        out.restored = rw::os::dup2( saved_, fd_ ) >= 0;
         out.bytes    = readBackAll( file_, out.failed );
         if( !out.restored )
         {
@@ -3160,6 +3168,8 @@ private:
         file_  = nullptr;
     }
     bool       wanted_ = false, active_ = false;
+    std::FILE* stream_ = stdout;
+    int        fd_     = STDOUT_FILENO;
     std::FILE* file_   = nullptr;
     int        saved_  = -1;
 };
@@ -3271,11 +3281,13 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
     const bool        whole = capturedWhole( cap );   // restored: the branch above returned otherwise
-    const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;
+    const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;   // the demote passes' read (shapedForFileSymsAnswer)
+    const bool        symsHeld = held || cfg.forHoldBudget > 0;            // the block's: the fitted re-render holds it too (kForHeldBlocks)
     std::string       cut;   // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
     std::string       syms  = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = held,
-                                      .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut } );
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = symsHeld,
+                                      .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut,
+                                      .cutWhenHeld = !held } );
     const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price, held ) : std::string();
     ledgerFollowsEdit( answer.ledger, cap, edited );
     const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
@@ -3340,7 +3352,7 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
     {
         return false;
     }
-    if( cfg.tokenBudget > 0 )   // --token-budget (the budget --for honours; shapingflagcheck (A) pins the --max-tokens read sites, so this reads only the one)
+    if( forHeldBlocksBudget( cfg ) > 0 )   // --token-budget, or the fitted re-render's hold (shapingflagcheck (A) pins the --max-tokens read sites, so this reads neither)
     {
         // a token budget is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .held = true } ).c_str() );
@@ -5330,7 +5342,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // ALIAS-IMPORT (forreexport.h): the `pub use` / `export … from` hops to a definition the task names; "" when none. XML only, like the block above.
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && rw::forReexportOn() )
         {
-            const std::string reexports = rw::renderForReexports( ing, cfg.forTask, /*held=*/cfg.tokenBudget > 0 );   // CR pre-pass 42b: held under --token-budget
+            const std::string reexports = rw::renderForReexports( ing, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0 );   // CR pre-pass 42b: held under --token-budget
             std::fwrite( reexports.data(), 1, reexports.size(), stdout );
         }
         // FOR-SCAN-ONCE (search.h GrepScanBatch): the literal block's candidates are expected from here, so the short key's scan, if it runs,
@@ -5342,7 +5354,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot )
         {
             const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = sigsPreRendered && shownSigIds.empty(),
-                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .compress = cfg.compress,
+                                                                                             .held = forHeldBlocksBudget( cfg ) > 0, .redact = redactPtr, .compress = cfg.compress,
                                                                                              .rootArg = flRootArg, .task = cfg.forTask, .served = sigsPreRendered ? &shownSigIds : nullptr } );
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }
@@ -5352,7 +5364,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && sigsPreRendered )
         {
             const std::string aliasHops = rw::renderForAliasHops( ing, rw::ForAliasHopArgs{ .task = cfg.forTask, .routeNote = routeNoteRaw, .printed = &shownSigIds,
-                                                                                            .held = cfg.tokenBudget > 0, .shed = forBodyCeiling, .redact = redactPtr } );
+                                                                                            .held = forHeldBlocksBudget( cfg ) > 0, .shed = forBodyCeiling, .redact = redactPtr } );
             std::fwrite( aliasHops.data(), 1, aliasHops.size(), stdout );
         }
         std::vector<rw::NodeId> litAnswerIds = shownSigIds;   // LIT-SITE-DECOY: the answer's rows and whole bodies order the literal's sites
@@ -5383,7 +5395,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             { return computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, /*rankOrder=*/true ); }, flRootArg, &tailPrinted );
             // both ceilings that are active bind: the smaller of --token-budget and the --max-tokens the root was priced with (forBodyCeiling)
             const std::size_t        ceiling   = forBodyCeiling ? std::size_t( rootFinish.maxTokens ) : 0u;
-            const std::size_t        docBudget = cfg.tokenBudget > 0 && ceiling > 0 ? std::min( std::size_t( cfg.tokenBudget ), ceiling ) : cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : ceiling;
+            const std::size_t        heldBudget = forHeldBlocksBudget( cfg );
+            const std::size_t        docBudget = heldBudget > 0 && ceiling > 0 ? std::min( heldBudget, ceiling ) : heldBudget > 0 ? heldBudget : ceiling;
             const std::string        docBody = rw::renderForDocBody( rw::ForDocBodyInputs{ ing, g.outOff, g.outTargets, cfg.forTask, docPick, redactPtr, flRootArg },
                                                                      rw::ForDocBodyBudget{ docBudget, forAnswerEstTokens, rootFinish.measured }, rw::ForDocDialect::Xml );
             std::fwrite( docBody.data(), 1, docBody.size(), stdout );
@@ -5444,7 +5457,42 @@ inline std::string forUnbudgetedCall( const rw::Config& cfg )
     return call;
 }
 
-// The answer under a budget: the posture's answer (no budget) rendered into a buffer, then shed to the budget.
+// One render of the posture into buffers: its stdout (the answer), its stderr (the notices: a render the budget re-runs says
+// them once), its ledger and its exit code. `stdoutCaptured` false: no buffer to render into (nothing was rendered).
+struct ForPostureRender
+{
+    bool                          stdoutCaptured = false;
+    int                           rc             = 0;
+    std::optional<StdoutCaptured> out, err;
+    rw::ForAnswerLedger           ledger;
+};
+inline ForPostureRender renderForPostureCaptured( const MainDispatch& pd )
+{
+    ForPostureRender r;
+    StdoutCapture    err( true, stderr, STDERR_FILENO );
+    StdoutCapture    out( true );
+    if( !out.active() )
+    {
+        r.err = err.finish();
+        return r;
+    }
+    r.stdoutCaptured = true;
+    r.rc             = runForLensPosture( pd, &r.ledger ).value_or( 0 );
+    r.out            = out.finish();
+    r.err            = err.finish();
+    return r;
+}
+// A render's notices to the real stderr (a failed stderr buffer already wrote them there on restore, or kept them)
+inline void replayForPostureNotices( const ForPostureRender& r )
+{
+    if( r.err && r.err->restored )
+    {
+        std::fwrite( r.err->bytes.data(), 1, r.err->bytes.size(), stderr );
+    }
+}
+
+// The answer under a budget: the posture's answer (no budget) rendered into a buffer, then shed to the budget. An answer that
+// prints blocks a budget holds (forbudgetfit.h kForHeldBlocks) and does not fit whole is rendered once more with them held.
 inline int runForLensFitted( const MainDispatch& d )
 {
     const rw::Config& cfg     = d.cfg;
@@ -5453,37 +5501,45 @@ inline int runForLensFitted( const MainDispatch& d )
     posture.maxTokens         = 0;
     const MainDispatch pd{ posture, d.ing, d.g, d.root, d.multiRoot, d.ws, d.fanIn, d.fanInPtr, d.qmetrics, d.ampPtr, d.cboPtr, d.testedPtr,
                            d.lcom4Ptr, d.impurePtr, d.forChurn, d.redactCounts, d.redactPtr, d.notesPtr, d.notesDegraded, d.grepPhases, d.valueUses };
-    ForBudgetFit        sink;
-    StdoutCapture       capture( true );
-    if( !capture.active() )
+    ForBudgetFit       sink;
+    const std::string  unbudgeted = forUnbudgetedCall( cfg );
+    rw::ForBudgetAsk   ask{ .targetTokens  = std::size_t( cfg.tokenBudget ),
+                            .ceilingTokens = cfg.detail > 0 && cfg.maxTokens > 0 ? std::size_t( cfg.maxTokens ) : 0u,
+                            .continuation  = unbudgeted };
+    const rw::RedactCounts redactedBefore = d.redactCounts;
+    ForPostureRender   u = renderForPostureCaptured( pd );
+    if( !u.stdoutCaptured )
     {
+        replayForPostureNotices( u );
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoCapture, "runForLensFitted: no capture buffer for the unbudgeted answer" );
         return runForLensPosture( d, nullptr ).value_or( 0 );
     }
-    rw::ForAnswerLedger                  ledger;
-    const int                            rc  = runForLensPosture( pd, &ledger ).value_or( 0 );
-    const std::optional<StdoutCaptured>  cap = capture.finish();
-    if( !capturedWhole( cap ) )
+    rw::ForBudgetFitResult fit = capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+    if( fit.verdict == rw::ForBudgetFitResult::Verdict::HoldBlocks )
+    {
+        d.redactCounts        = redactedBefore;   // the first render's tally is discarded with its answer: the run reports the one it prints
+        posture.forHoldBudget = ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens ) : std::max( ask.targetTokens, ask.ceilingTokens );
+        ask.heldPass          = true;
+        u                     = renderForPostureCaptured( pd );   // pd reads `posture`: the same posture, its held blocks held
+        fit = u.stdoutCaptured && capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+    }
+    replayForPostureNotices( u );
+    if( !u.stdoutCaptured || !capturedWhole( u.out ) )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NotWhole, "runForLensFitted: the unbudgeted answer did not buffer whole" );
-        if( cap && cap->restored )
+        if( u.out && u.out->restored )
         {
-            std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+            std::fwrite( u.out->bytes.data(), 1, u.out->bytes.size(), stdout );
         }
-        return rc != 0 ? rc : 1;
+        return u.rc != 0 ? u.rc : 1;
     }
-    const std::string                 unbudgeted = forUnbudgetedCall( cfg );
-    const rw::ForBudgetAsk            ask{ .targetTokens  = std::size_t( cfg.tokenBudget ),
-                                           .ceilingTokens = cfg.detail > 0 && cfg.maxTokens > 0 ? std::size_t( cfg.maxTokens ) : 0u,
-                                           .continuation  = unbudgeted };
-    const std::optional<std::string>  fitted = rw::fitForAnswerToBudget( cap->bytes, ask, ledger );
-    if( !fitted )
+    if( fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string& out = fitted ? *fitted : cap->bytes;
+    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? u.out->bytes : fit.xml;
     std::fwrite( out.data(), 1, out.size(), stdout );
-    return rc;
+    return u.rc;
 }
 
 std::optional<int> runForLens( const MainDispatch& d )

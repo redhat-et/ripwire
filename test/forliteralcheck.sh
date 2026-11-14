@@ -181,10 +181,14 @@ for t in APPTOOL_RENDER_MODE '"dependency cycle detected" error' APPTOOL_BIG_FLA
     if [ -n "$b" ] && [ "$a" = "$b" ]; then ok "L7 prefix identity vs RIPWIRE_NO_LITERAL_ANCHOR=1: $t"; else no "L7 answer outside the block changed: $t"; fi
 done
 # ── L8 ──
-for f in --json --token-budget=3000 --format=candidates; do
+for f in --json --format=candidates; do
     a="$( run --for=APPTOOL_RENDER_MODE "$f" )"; b="$( off --for=APPTOOL_RENDER_MODE "$f" )"
     if [ -n "$a" ] && [ "$a" = "$b" ] && ! has "$a" '<lit '; then ok "L8 $f: no block, byte-identical"; else no "L8 $f carries a block or differs"; fi
 done
+# L8t TOKEN-BUDGET-MONOTONE (2026-11-14): --token-budget no longer switches the block off (it was in L8's list). The XML answer
+# under a budget is the unbudgeted answer trimmed, so a budget that fits returns it byte for byte, the block included.
+a="$( run --for=APPTOOL_RENDER_MODE --token-budget=100000 )"; b="$( run --for=APPTOOL_RENDER_MODE )"
+if [ -n "$a" ] && [ "$a" = "$b" ] && has "$a" '<lit '; then ok "L8t --token-budget=100000: the unbudgeted answer byte for byte, block included"; else no "L8t --token-budget=100000 is not the unbudgeted answer (or it has no block)"; fi
 co="$( run --for=APPTOOL_RENDER_MODE --format=columnar )"; crc=$?
 if [ "$crc" -ne 0 ] && [ -z "$co" ]; then ok "L8 --format=columnar: the CLI refuses it with --for (the columnar guard in the block is defensive, unreachable)"
 else no "L8 --format=columnar with --for no longer refused (rc=$crc): the lit block's columnar guard is now reachable and needs an arm"; fi
@@ -314,9 +318,11 @@ if command -v xmllint >/dev/null 2>&1; then
 else ok "K8 SKIP: xmllint not installed"; fi
 K9="$( krun '--for=many.sites.key' | lit )"
 if has "$K9" 'src="11" shown="8" capped="1"' && has "$K9" 'next="--grep=many.sites.key"'; then ok "K9 [P] the row guard discloses the cut with next="; else no "K9 cap: ${K9:0:300}"; fi
-for j in --json --token-budget=3000; do
+for j in --json; do
     if [ "$( krun '--for=files.autoSave setting' "$j" )" = "$( koff '--for=files.autoSave setting' "$j" )" ]; then ok "K10 [G] $j carries no block"; else no "K10 $j moved"; fi
 done
+# K10t TOKEN-BUDGET-MONOTONE: a budget that fits returns the unbudgeted answer byte for byte (it was "--token-budget carries no block")
+if [ "$( krun '--for=files.autoSave setting' --token-budget=100000 )" = "$( krun '--for=files.autoSave setting' )" ]; then ok "K10t --token-budget=100000 is the unbudgeted answer"; else no "K10t --token-budget=100000 moved the answer"; fi
 # messages: the stored --for subject is unquoted, so the text around the cue word IS the message
 M1="$( krun '--for=Invalid user settings file notification' | lit )"
 if has "$M1" 's="Invalid user settings file" shape="message"' && has "$M1" 'k="string" in="fail"' && ! has "$M1" 'frag='; then ok "M1 [P] an unquoted message with a trailing cue"; else no "M1: ${M1:0:500}"; fi

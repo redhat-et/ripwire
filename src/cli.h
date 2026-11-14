@@ -188,6 +188,9 @@ struct Config
                                                             // both numbers on stderr; within budget, exit 0 and emit the map unchanged. Composable with
                                                             // --max-tokens: that flag SHAPES the map to fit a target, this one ASSERTS and fails —
                                                             // set neither, either, or both.
+    std::size_t      forHoldBudget     = 0;                // TOKEN-BUDGET-MONOTONE (verbs_for.h runForLensFitted): set only on the --for re-render
+                                                            // of an answer a budget cannot hold whole: the blocks outside est_tokens (<syms>, <doc_body>,
+                                                            // <decl_rows> …, forbudgetfit.h kForHeldBlocks) hold under it, the posture does not read it
     // T2 pagination for high-cardinality verbs (--deps/--callers/--callees/--hotspots/--tree/--lint). Default
     // limit=0 = NO pagination (whole result, byte-identical to pre-T2 callers/gates). --limit=N bounds one
     // response to N items; --offset=M skips the first M. §P8: seven more verbs honor these now (--clones /

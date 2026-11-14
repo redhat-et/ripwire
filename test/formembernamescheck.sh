@@ -26,7 +26,7 @@
 #   D1 [P] two TaskWorker classes (amb): neither row carries mem=; the unique TaskQueue beside them does
 #   E1 [P] the cap: LedgerBook's 30 members print 8 names and mem_more="22"
 #   F1 [G] byte identity with RIPWIRE_NO_MEMBER_NAMES=1: name-exact --for, --expand, the map, the --limit=40 file page, --json,
-#          --signatures-only, --token-budget=3000 — and none of them carries mem=
+#          --signatures-only — and none of them carries mem=; F1t: --token-budget that fits is the unbudgeted answer byte for byte
 #   G1 [P] the ledger: est_tokens(on) > est_tokens(off) by the names' bytes at the markup rate (within 2 tokens); the <d> rows
 #          (n, p, l, r) are the handle-off rows, one for one (a name never costs a row)
 #   G2 [G] prefix identity: the answer minus mem=/mem_more= and the clause, est_tokens masked, equals the handle-off answer
@@ -215,7 +215,12 @@ fpair map        "$FIX/cap"
 fpair filepage   "$FIX/cap" --for="$Q_CAP" --limit=40
 fpair json       "$FIX/cap" --for="$Q_CAP" --json
 fpair sigsonly   "$FIX/cap" --for="$Q_CAP" --signatures-only
-fpair budget     "$FIX/cap" --for="$Q_CAP" --token-budget=3000
+# F1t TOKEN-BUDGET-MONOTONE (2026-11-14): --token-budget no longer switches the compact route off (it was in F1's list: the
+# budget answer had no mem= because the budget re-decided the posture). It trims the answer asked without it, so a budget
+# that fits returns that answer byte for byte, mem= included (test/budgetmonotonecheck.sh (a)).
+run f_budget_off "$FIX/cap" RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_CAP"
+run f_budget     "$FIX/cap" RIPWIRE_NO_BODY_FOLD=1 -- --for="$Q_CAP" --token-budget=100000
+if [ -s "$TMP/f_budget.xml" ] && cmp -s "$TMP/f_budget.xml" "$TMP/f_budget_off.xml"; then ok "F1t --token-budget=100000 is the unbudgeted answer byte for byte ($( grep -c ' mem="' "$TMP/f_budget.xml" ) line(s) with mem=)"; else no "F1t the budgeted answer differs from the unbudgeted one (or is empty)"; fi
 
 echo "=== G: the ledger ==="
 run cap_noff "$FIX/cap" RIPWIRE_NO_BODY_FOLD=1 RIPWIRE_NO_MEMBER_NAMES=1 -- --for="$Q_CAP"

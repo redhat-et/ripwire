@@ -785,7 +785,9 @@ if ! grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2.xml"
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
-run ts "--for=add a new dialect" --token-budget=4000 >"$TMP/s2.xml"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (the old
+# 4000 held it at any budget; that answer fits 4000 whole now, so it comes back byte for byte, block and all): 100 forces the hold.
+run ts "--for=add a new dialect" --token-budget=100 >"$TMP/s2.xml"
 if grep -q '<exemplar_family of="dialect" held="budget"/></ctx>$' "$TMP/s2.xml" && ! grep -q '<m n=' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block"
 else no "(s2) budget: $( grep -o '<exemplar_family.*' "$TMP/s2.xml" | head -c 300 )"; fi
 run ts "--for=add a new dialect" >"$TMP/a1.xml"

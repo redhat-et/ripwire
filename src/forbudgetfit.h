@@ -6,6 +6,10 @@
 //
 // THE RULE. The posture is decided as if no budget were given (runForLens renders that answer, U, into a buffer); the
 // budget is then a ceiling applied by ONE fixed shed sequence over U's bytes, cheapest-to-lose first:
+//   held       the blocks outside est_tokens (kForHeldBlocks: <syms>, <doc_body>, <decl_rows> …): U prices them on top of its
+//              est_tokens, and when the sum does not fit the answer is rendered ONCE more with them held (Config::forHoldBudget:
+//              each block's own held="budget" stub and next=, <doc_body> served into what the answer leaves); what they still
+//              print comes off the target before the units below are walked
 //   attrs      the <sigs> rows' optional attributes (forpage.h kForPageShedRungMetrics: cx= ccx= layer= next=)
 //   tail:N     the last N <tail> rows
 //   hops:N     the last N <hops> rows (the compact route's one hop of callees; all of them: the counted marker
@@ -13,10 +17,13 @@
 //   fold       the <fold> bodies (the top rows' whole bodies, "not the answer")
 //   bodies:N   the last N bodies of the <bodies> section (--detail's, or the auto bundle's: the root's bodies= then counts
 //              what is left, and bodies="0" says reason="budget")
-//   rows:N     the last N <sigs> rows, down to a floor of kForBudgetRowFloor
-// answer(B) = U with the SHORTEST prefix of that sequence removed whose est_tokens is <= B; the whole sequence when none
+//   rows:N     the N worst-ranked <sigs> rows (r= from the highest; a row with no r= first), down to a floor of
+//              kForBudgetRowFloor: the kept rows are the best-ranked, in U's order — against --token-budget only: a --max-tokens
+//              ceiling never cuts a ranked row (METHODOLOGY §9 #2: exceed it with over_ceiling="1" rather than drop the row
+//              that would have terminated the search; formaxtokenscheck (E): the body ceiling moves no row)
+// answer(B) = U with the SHORTEST prefix of that sequence removed whose est_tokens (plus the held blocks' price) is <= B; the whole sequence when none
 // is (the root then prices more than it names; a --max-tokens ceiling also says over_ceiling="1"). Three consequences the
-// gate (test/budgetmonotonecheck.sh) holds: B >= est(U) returns U byte for byte (a budget that fits cuts nothing, so it
+// gate (test/budgetmonotonecheck.sh) holds: B >= est(U) + its held blocks' price returns U byte for byte (a budget that fits cuts nothing, so it
 // says nothing: no attribute, no clause); every row kept is U's row in U's order; and B1 < B2 removes a longer prefix, so
 // answer(B1)'s rows are a prefix of answer(B2)'s. A cut ranked row is a dropped positive: dropped_positive= grows by it.
 //
@@ -66,20 +73,25 @@ struct ForBudgetAsk
     std::size_t      targetTokens  = 0;
     std::size_t      ceilingTokens = 0;
     std::string_view continuation;   // the call without the budget (it serves what was shed): next= on every element a unit cut
+    bool             heldPass = false; // the answer is the re-render with kForHeldBlocks held: shed= names held, their price comes off the target
 };
+
+// The blocks printed outside est_tokens that a budget holds (each renders its own held="budget" stub and next= under
+// Config::forHoldBudget). <doc_body> prices itself (its est_tokens=); the others are priced at the markup rate.
+inline constexpr std::string_view kForHeldBlocks[] = { "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" };
 
 inline constexpr std::string_view kForBudgetTargetLegend =
     " [budget_tokens=: the token target asked. The answer is the one asked without it; only past the target is it shed, in this"
-    " order, shed= naming what went: attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
-    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), rows:N (the last N sigs rows; four always ship), and a cut block's next= is the"
+    " order, shed= naming what went: held (the blocks outside est_tokens, each held=budget with its next=; what they still print comes off the target), attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
+    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), rows:N (the N worst-ranked sigs rows; ranks 1..4 always ship), and a cut block's next= is the"
     " call without it. shown= counts what is left,"
     " the other counts describe the whole answer, est_tokens prices it with this disclosure and may still exceed the target;"
     " shed=unpriced: the price could not be reproduced, so nothing was shed]";
 inline constexpr std::string_view kForBudgetCeilingLegend =
     " [max_tokens=: the token ceiling asked. The answer is the one asked without it; only past the ceiling is it shed, in this"
-    " order, shed= naming what went: attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
-    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), rows:N (the last N sigs rows; four always ship), and a cut block's next= is the"
-    " call without it. shown= counts what is left,"
+    " order, shed= naming what went: held (the blocks outside est_tokens, each held=budget with its next=; what they still print comes off the ceiling), attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
+    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), and a cut block's next= is the call without it; a ranked sigs row"
+    " is never cut against the ceiling (rows:N is the token target's). shown= counts what is left,"
     " the other counts describe the whole answer, est_tokens prices it with this disclosure; over_ceiling=1 when it still exceeds it;"
     " shed=unpriced: the price could not be reproduced, so nothing was shed]";
 
@@ -288,6 +300,23 @@ struct ShedState
     std::size_t tailCut = 0, hopCut = 0, detailCut = 0, rowCut = 0;
 };
 
+// The price of the root's kForHeldBlocks children: <doc_body>'s own est_tokens=, the others' bytes at the markup rate.
+inline std::size_t heldBlocksPrice( std::string_view answer, std::span<const Child> top )
+{
+    std::size_t tokens = 0;
+    for( const Child& c : top )
+    {
+        if( std::find( std::begin( kForHeldBlocks ), std::end( kForHeldBlocks ), c.name ) == std::end( kForHeldBlocks ) )
+        {
+            continue;
+        }
+        const TagSpan     open   = tagSpan( answer, c.at );
+        const std::size_t priced = c.name == "doc_body" ? attrNumber( answer.substr( c.at, open.end - c.at ), "est_tokens" ) : 0;
+        tokens += priced > 0 ? priced : tokensForEmittedBytes( c.end - c.at, kBytesPerTokenDefault );
+    }
+    return tokens;
+}
+
 // One unbudgeted answer U, parsed once: its sections, their row counts, and whether its price can be reproduced. walk() finds the
 // shortest prefix of the shed sequence whose price fits; render() writes U with that prefix removed and the disclosure added.
 class ForBudgetFitter
@@ -319,10 +348,15 @@ public:
         foldShed_ = fold_.found() && fold_.end - fold_.at == ledger.foldXmlBytes;
         const bool detailShed = detail_.found() && tokensForEmittedBytes( ledger.detailXmlBytes, kBytesPerTokenBody ) == ledger.detailTokens;
         sigRows_    = sigs_.found() ? countRows( sigs_, isSigRow ) : 0;
+        rowCutPos_  = rowCutOrder();
         tailRows_   = tail_.found() ? countRows( tail_, []( std::string_view name ) { return name == "t"; } ) : 0;
         hopRows_    = hops_.found() ? countRows( hops_, []( std::string_view name ) { return name == "h"; } ) : 0;
         detailRows_ = detailShed ? countRows( detail_, []( std::string_view name ) { return name == "b"; } ) : 0;
         legendEnd_  = answer.substr( rootEnd_ ).starts_with( "<!--" ) ? answer.find( " -->", rootEnd_ ) : std::string_view::npos;
+        heldTokens_ = heldBlocksPrice( answer, top_ );
+        const std::size_t heldOff = ask.heldPass ? heldTokens_ : 0;   // what the held re-render's blocks still print comes off each target
+        walkTarget_ = target_ - std::min( target_, heldOff );
+        rowTarget_  = ask.targetTokens - std::min( ask.targetTokens, heldOff );   // 0: no --token-budget, no ranked row is cut
         // U's own dropped_positive= (the default ceiling's cut) rides the header comments before <sigs>: it grows by the rows cut here
         const std::string_view key = "dropped_positive=\"";
         const std::size_t      keyAt = answer.substr( 0, sigs_.found() ? sigs_.at : rootEnd_ ).find( key, rootEnd_ );
@@ -335,20 +369,22 @@ public:
     }
 
     bool parsed() const noexcept { return parsed_; }
-    // B >= est(U): nothing to shed
-    bool fitsWhole() const noexcept { return trusted_ && estU_ <= target_; }
+    // B >= est(U) + the held blocks' price: nothing to shed
+    bool fitsWhole() const noexcept { return trusted_ && estU_ + heldTokens_ <= target_; }
+    // the answer prints blocks a budget holds: re-render it with them held before walking the sequence
+    bool holdsBlocks() const noexcept { return heldTokens_ > 0; }
 
     // the first state, in sequence order, whose price (its own disclosure included) fits; the whole sequence when none does
     ShedState walk() const
     {
         ShedState  st;
-        bool       fits = !trusted_;
+        bool       fits = !trusted_ || priceOf( st, false ) <= walkTarget_;   // the held re-render may fit with nothing more shed
         const auto step = [ & ]( auto&& apply, std::size_t times )
         {
             for( std::size_t k = 0; k < times && !fits; ++k )
             {
                 apply();
-                fits = priceOf( st, false ) <= target_;
+                fits = priceOf( st, false ) <= walkTarget_;
             }
         };
         const bool attrsShed = sigs_.found() && sigRows_ > 0 && sigsXml( ShedState{ .attrs = true } ).size() != sigs_.end - sigs_.at;
@@ -357,7 +393,12 @@ public:
         step( [ & ] { ++st.hopCut; }, hopRows_ );
         step( [ & ] { st.fold = true; }, foldShed_ ? 1 : 0 );
         step( [ & ] { ++st.detailCut; }, detailRows_ );
-        step( [ & ] { ++st.rowCut; }, sigRows_ - std::min( sigRows_, kForBudgetRowFloor ) );
+        fits = fits || ask_.targetTokens == 0 || rowsPriceOf( st ) <= rowTarget_;   // rows answer to the token target alone
+        for( std::size_t k = 0, rowsCuttable = sigRows_ - std::min( sigRows_, kForBudgetRowFloor ); k < rowsCuttable && !fits; ++k )
+        {
+            ++st.rowCut;
+            fits = rowsPriceOf( st ) <= rowTarget_;
+        }
         return st;
     }
 
@@ -394,6 +435,28 @@ private:
         std::string xml;
     };
     static bool isSigRow( std::string_view name ) noexcept { return name == "d" || name == "t"; }   // a row, or the pointer a demote put in its place
+    // Each <sigs> row's place in the cut order (rows:N cuts places 0..N-1): the worst rank first — a row with no r= before every
+    // ranked one, then r= from the highest — so the kept rows are always the best-ranked ones (ranks 1..4 ship), in U's order.
+    // U's document order is not rank order when the head round-robin interleaves files (forbodyslotcheck E2h/E3h).
+    std::vector<std::size_t> rowCutOrder() const
+    {
+        std::vector<std::pair<std::size_t, std::size_t>> byRank;   // (rank, document index); no r= = the worst rank
+        for( const Child& c : sigs_.kids )
+        {
+            if( isSigRow( c.name ) )
+            {
+                const std::size_t r = attrNumber( answer_.substr( c.at, tagSpan( answer_, c.at ).end - c.at ), "r" );
+                byRank.emplace_back( r == 0 ? SIZE_MAX : r, byRank.size() );
+            }
+        }
+        std::sort( byRank.begin(), byRank.end(), []( const auto& a, const auto& b ) { return a.first != b.first ? a.first > b.first : a.second > b.second; } );
+        std::vector<std::size_t> pos( byRank.size() );
+        for( std::size_t k = 0; k < byRank.size(); ++k )
+        {
+            pos[byRank[k].second] = k;
+        }
+        return pos;
+    }
 
     std::string withNext( std::string open ) const { return nextVal_.empty() ? open : withAttr( open, "next", nextVal_ ); }
 
@@ -411,11 +474,21 @@ private:
         const std::size_t past = attrNumber( out, "past_target" );   // the rows past the 7.5 KB target are the last ones: the cut ones leave it
         out = past > st.rowCut ? withAttr( out, "past_target", std::to_string( past - st.rowCut ) ) : withoutAttr( out, "past_target" );
         out = attrNumber( out, "files_first" ) > keep ? withAttr( out, "files_first", std::to_string( keep ) ) : out;
+        // docs_dropped= counts the shown rows that print no <doc>: the cut ones leave the count (forrankordercheck (8))
+        std::size_t docless = 0, seen = 0;
+        for( const Child& c : sigs_.kids )
+        {
+            if( isSigRow( c.name ) && rowCutPos_[seen++] < st.rowCut )
+            {
+                docless += c.name == "d" && answer_.substr( c.at, c.end - c.at ).find( "<doc>" ) == std::string_view::npos ? 1 : 0;   // a pointer prints no doc either way
+            }
+        }
+        const std::size_t docsDropped = attrNumber( out, "docs_dropped" );
+        out = docsDropped == 0 ? out : docsDropped > docless ? withAttr( out, "docs_dropped", std::to_string( docsDropped - docless ) ) : withoutAttr( out, "docs_dropped" );
         return withNext( std::move( out ) );   // the r=1 row keeps its own --expand next=; the block's names the shed rows' call
     }
     std::string sigsXml( const ShedState& st ) const
     {
-        const std::size_t keep = sigRows_ - st.rowCut;
         std::string       out  = sigsOpen( st );
         std::size_t       at   = sigs_.openEnd, seen = 0;
         for( const Child& c : sigs_.kids )
@@ -423,7 +496,7 @@ private:
             out.append( answer_.substr( at, c.at - at ) );
             at = c.end;
             const bool row = isSigRow( c.name );
-            if( row && seen++ >= keep )
+            if( row && rowCutPos_[seen++] < st.rowCut )
             {
                 continue;
             }
@@ -448,7 +521,21 @@ private:
         }
         const std::size_t pOnly = attrNumber( o, "p_only" );
         o = pOnly == 0 ? o : pOnly > pOnlyCut ? withAttr( o, "p_only", std::to_string( pOnly - pOnlyCut ) ) : withoutAttr( o, "p_only" );
-        return withNext( std::move( o ) );
+        // U's tail continues on the --for file page (FOLD C: from its first unprinted row, --offset=K): the cut rows sit before
+        // K, so the page from its first row covers them (fordisclosurecheck #1c); a tail with no page call takes the block's
+        const std::string_view uNext = attrOf( open, "next" );
+        if( uNext.find( " --limit=" ) == std::string_view::npos )
+        {
+            return withNext( std::move( o ) );
+        }
+        std::string       page( uNext );
+        const std::size_t offAt = page.find( " --offset=" );
+        if( offAt != std::string::npos )
+        {
+            const std::size_t offEnd = page.find( ' ', offAt + 1 );
+            page.erase( offAt, ( offEnd == std::string::npos ? page.size() : offEnd ) - offAt );
+        }
+        return withAttr( o, "next", page );
     }
     std::string tailXml( const ShedState& st ) const
     {
@@ -512,6 +599,7 @@ private:
         {
             shed += !cut ? std::string() : ( shed.empty() ? "" : "," ) + std::string( unit ) + ( n > 0 ? ":" + std::to_string( n ) : std::string() );
         };
+        note( ask_.heldPass, "held", 0 );
         note( st.attrs, "attrs", 0 );
         note( st.tailCut > 0, "tail", st.tailCut );
         note( st.hopCut > 0, "hops", st.hopCut );
@@ -526,7 +614,7 @@ private:
         std::size_t cutRanked = 0, seen = 0;
         for( const Child& c : sigs_.kids )
         {
-            const bool cut = isSigRow( c.name ) && seen++ >= sigRows_ - st.rowCut;
+            const bool cut = isSigRow( c.name ) && rowCutPos_[seen++] < st.rowCut;
             cutRanked += cut && !attrOf( answer_.substr( c.at, tagSpan( answer_, c.at ).end - c.at ), "r" ).empty() ? 1 : 0;
         }
         return cutRanked;
@@ -583,6 +671,16 @@ private:
         return bytes;
     }
     std::size_t priceOf( const ShedState& st, bool over ) const { return estOf( st, disclosureBytes( st, over ) ); }
+    // the price the token target cuts rows against: the ceiling's own disclosure (max_tokens= and its clause, beside a target) is
+    // not the target's to pay, so a ceiling never moves a ranked row (formaxtokenscheck (E): the same rows with or without it)
+    std::size_t rowsPriceOf( const ShedState& st ) const
+    {
+        const bool        both    = ask_.ceilingTokens > 0 && ask_.targetTokens > 0;
+        const std::size_t ceiling = !both ? 0
+                                  : std::string_view( " max_tokens=\"\"" ).size() + std::to_string( ask_.ceilingTokens ).size()
+                                        + ( legendEnd_ != std::string_view::npos ? kForBudgetCeilingLegend.size() : 0 );
+        return estOf( st, disclosureBytes( st, false ) - std::ptrdiff_t( ceiling ) );
+    }
 
     std::vector<Swap> swapsFor( const ShedState& st ) const
     {
@@ -612,27 +710,48 @@ private:
     const ForAnswerLedger& ledger_;
     std::vector<Child>     top_;
     std::size_t            rootClose_ = 0, rootEnd_ = 0, target_ = 0, estU_ = 0, legendEnd_ = std::string_view::npos;
+    std::size_t            heldTokens_ = 0, walkTarget_ = 0, rowTarget_ = 0;   // kForHeldBlocks' price; the targets the units / the rows are walked against
     std::string_view       rootTag_;
     std::string            nextVal_;
     bool                   parsed_ = false, trusted_ = false, foldShed_ = false;
     Section                sigs_, tail_, hops_, fold_, detail_;
+    std::vector<std::size_t> rowCutPos_;   // per <sigs> row in document order: its place in the cut order (rowCutOrder)
     std::size_t            sigRows_ = 0, tailRows_ = 0, hopRows_ = 0, detailRows_ = 0;
     std::size_t            droppedValAt_ = 0, droppedValEnd_ = 0, droppedHad_ = 0;   // U's own dropped_positive= value (0: none)
 };
 }   // namespace budgetfit_detail
 
-// U fitted to `ask` (see the header). `answer` is the whole unbudgeted document; nullopt when it has no <ctx> root to edit.
-inline std::optional<std::string> fitForAnswerToBudget( std::string_view answer, const ForBudgetAsk& ask, const ForAnswerLedger& ledger )
+// What fitting U to a budget came to: the answer to print, or the call for the re-render that holds kForHeldBlocks.
+struct ForBudgetFitResult
 {
+    enum class Verdict : std::uint8_t
+    {
+        NoRoot,       // no <ctx> root to edit: print U as it is
+        Whole,        // B >= est(U) + the held blocks' price: xml is U byte for byte
+        HoldBlocks,   // U prints blocks a budget holds and does not fit whole: re-render with Config::forHoldBudget, fit that (heldPass)
+        Shed,         // xml is U with the shortest fitting prefix of the shed sequence removed, disclosed
+    };
+    Verdict     verdict = Verdict::NoRoot;
+    std::string xml;
+};
+
+// U fitted to `ask` (see the header). `answer` is the whole unbudgeted document (the held re-render under ask.heldPass).
+inline ForBudgetFitResult fitForAnswerToBudget( std::string_view answer, const ForBudgetAsk& ask, const ForAnswerLedger& ledger )
+{
+    using Verdict = ForBudgetFitResult::Verdict;
     const budgetfit_detail::ForBudgetFitter fit( answer, ask, ledger );
     if( !fit.parsed() )
     {
-        return std::nullopt;
+        return { Verdict::NoRoot, {} };
     }
-    if( fit.fitsWhole() )
+    if( !ask.heldPass && fit.fitsWhole() )
     {
-        return std::string( answer );   // B >= est(U): the answer asked without the budget, byte for byte
+        return { Verdict::Whole, std::string( answer ) };   // the answer asked without the budget, byte for byte
     }
-    return fit.render( fit.walk() );
+    if( !ask.heldPass && fit.holdsBlocks() )
+    {
+        return { Verdict::HoldBlocks, {} };
+    }
+    return { Verdict::Shed, fit.render( fit.walk() ) };
 }
 }   // namespace rw

@@ -177,11 +177,15 @@ run "$FC" --for="how does the client start the server and listen on a socket" >"
 if [ -s "$TMP/n1c" ] && ! grep -q '<callers ' "$TMP/n1c"; then ok "(N1c) no hop on a conceptual question"; else no "(N1c) a hop rode on a conceptual question"; fi
 
 # ── N2: postures that never carry it ─────────────────────────────────────────────────────────────────────────────────────────
-for extra in --json --signatures-only --detail=1 --token-budget=3000; do
+for extra in --json --signatures-only --detail=1; do
     run "$FC" --for=start_server "$extra" >"$TMP/n2.on"
     RIPWIRE_NO_CALLER_HOP=1 run "$FC" --for=start_server "$extra" >"$TMP/n2.off"
     if [ -s "$TMP/n2.on" ] && cmp -s "$TMP/n2.on" "$TMP/n2.off" && ! grep -q '<callers \|"callers"' "$TMP/n2.on"; then ok "(N2) $extra: no hop, byte-identical"; else no "(N2) $extra: a hop rode or bytes moved"; fi
 done
+# (N2t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the posture (it used to drop the hop with it); a
+# budget the answer fits returns the unbudgeted answer byte for byte, the hop as it is there
+run "$FC" --for=start_server --token-budget=3000 >"$TMP/n2t.on"; run "$FC" --for=start_server >"$TMP/n2t.off"
+if [ -s "$TMP/n2t.on" ] && cmp -s "$TMP/n2t.on" "$TMP/n2t.off"; then ok "(N2t) --token-budget=3000: the unbudgeted answer byte for byte"; else no "(N2t) --token-budget=3000 is not the unbudgeted answer"; fi
 
 # ── FIX ROUND 1 (rv-mf1-nx B1-B3): exact or no row — the block fires only when the callers verb's own resolution of the name is
 #    ONE function (one def group, one kind). [P] arms are RED on df6952a7 (they printed a block the verb's rows contradict) ──────────────
@@ -385,11 +389,14 @@ PY
 done
 r8on="$( est "$TMP/r7on.compact" )"; r8off="$( est "$TMP/r7off.compact" )"
 if [ -n "$r8on" ] && [ -n "$r8off" ] && [ "$r8on" -gt "$r8off" ]; then ok "(R8) est_tokens prices the ranked hop ($r8off -> $r8on)"; else no "(R8) est_tokens did not grow with the ranked hop (on=[$r8on] off=[$r8off])"; fi
-for extra in --json --signatures-only --token-budget=3000; do
+for extra in --json --signatures-only; do
     run "$FR" --for="dependency cycle error" "$extra" >"$TMP/r9.on"
     RIPWIRE_NO_CALLER_HOP=1 run "$FR" --for="dependency cycle error" "$extra" >"$TMP/r9.off"
     if [ -s "$TMP/r9.on" ] && cmp -s "$TMP/r9.on" "$TMP/r9.off"; then ok "(R9) [G] $extra: no ranked hop, byte-identical to the hop-off answer"; else no "(R9) $extra: the ranked hop changed the answer"; fi
 done
+# (R9t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a budget the answer fits returns the unbudgeted answer (ranked hop included) byte for byte
+run "$FR" --for="dependency cycle error" --token-budget=3000 >"$TMP/r9t.on"; run "$FR" --for="dependency cycle error" >"$TMP/r9t.off"
+if [ -s "$TMP/r9t.on" ] && cmp -s "$TMP/r9t.on" "$TMP/r9t.off"; then ok "(R9t) [G] --token-budget=3000: the unbudgeted answer byte for byte"; else no "(R9t) --token-budget=3000 is not the unbudgeted answer"; fi
 run "$FR" --callers=verify_dag >"$TMP/r10"
 python3 - "$TMP/r1" "$TMP/r10" <<'PY'
 import re, sys
