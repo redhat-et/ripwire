@@ -741,6 +741,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMentionsNameMaxDepth` | `512` | INDEXING | undisclosed: a deeper subtree answers "mentions it", so a log-only handler that deep is never flagged |
+| `kTsHelperHops` | `1` | — | the try body's own calls, then one helper hop: "within depth 2" |
 
 ### `src/handoff.h`
 
