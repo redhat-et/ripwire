@@ -29,8 +29,11 @@
 // noexcept by construction: the chain's capacity is reserved once per scope and never grown; a path deeper than that keeps
 // its first kChainCapacity entries (still a root-descent prefix, still exact) and the rest is descended without caching.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <string_view>
 #include <vector>
 
 #include <tree_sitter/api.h>
@@ -185,5 +188,39 @@ struct AncestorCacheScope
     AncestorCacheScope& operator=( const AncestorCacheScope& ) = delete;
     ~AncestorCacheScope() { tAncestorCache = previous; }
 };
+
+// ── the ancestor climbs every ingest section shares (one body each, over parentOf) ──
+
+// the nearest proper ancestor of `n` that `pred` accepts; null when none within 64 levels
+template< class Pred >
+inline TSNode ancestorWhere( TSNode n, const Pred& pred )
+{
+    TSNode p = ts_node_is_null( n ) ? TSNode{} : parentOf( n );
+    for( int guard = 0; guard < 64 && !ts_node_is_null( p ); ++guard )
+    {
+        if( pred( p ) )
+        {
+            return p;
+        }
+        p = parentOf( p );
+    }
+    return TSNode{};
+}
+
+// the nearest proper ancestor of `n` whose kind is one of `kinds`; null when none within 64 levels
+inline TSNode ancestorOfKind( TSNode n, std::initializer_list<std::string_view> kinds )
+{
+    return ancestorWhere( n, [ kinds ]( TSNode p ) { return std::ranges::find( kinds, std::string_view( ts_node_type( p ) ) ) != kinds.end(); } );
+}
+
+// the tree root above `n` (the global scope a C++ `::Mid` names)
+inline TSNode rootOf( TSNode n ) noexcept
+{
+    for( TSNode p = parentOf( n ); !ts_node_is_null( p ); p = parentOf( p ) )
+    {
+        n = p;
+    }
+    return n;
+}
 
 }   // namespace rw

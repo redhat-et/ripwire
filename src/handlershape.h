@@ -16,6 +16,8 @@
 //                   that does nothing. Sole handler, because `catch( Specific e ) { throw e; }` ahead of a
 //                   `catch( Exception e )` sibling is the idiom that routes one type PAST the broad
 //                   handler, and that is not redundant.
+//     failure-default  a read, parse or spawn failure returned as an empty success (TypeScript catch / .catch,
+//                   C++ value_or on a read); REPORT-ONLY in every language — see its section below.
 //   PLACEHOLDER (kind placeholder):
 //     stub          raise NotImplementedError, todo!()/unimplemented!(), Kotlin TODO(), throw new
 //                   NotImplementedException(), and any throw/raise/panic/fatalError/assert whose string
@@ -50,7 +52,8 @@
 #include "infra/strkern.h"       // strkern::lowerFoldAscii — the ONE ASCII case fold
 #include "infra/tablelookup.h"   // findByField
 #include "infra/tschildren.h"
-#include "ingest.h"              // the four kShape* tags, Lang
+#include "infra/tsparent.h"     // ancestorWhere / ancestorOfKind / rootOf — the failure-default readers climb with them
+#include "ingest.h"              // the five kShape* tags, Lang
 
 namespace rw::hshape
 {
@@ -60,7 +63,7 @@ struct ShapeSpan
 {
     std::uint32_t    startByte = 0;
     std::uint32_t    endByte   = 0;
-    std::string_view tag;   // one of the four kShape* tags (ingest.h) — static storage, never a view into the file
+    std::string_view tag;   // one of the five kShape* tags (ingest.h) — static storage, never a view into the file
 };
 
 // ── small readers ─────────────────────────────────────────────────────────────────────────────────────
@@ -89,6 +92,14 @@ template< std::size_t N >
 inline bool typeIs( TSNode n, const char ( &kind )[N] ) noexcept
 {
     return kindIs( typeOf( n ), kind );
+}
+
+// Is n's type one of `kinds`? A null node's type is "", which no table spells.
+template< std::size_t N >
+inline bool typeIsOneOf( TSNode n, const char* const ( &kinds )[N] ) noexcept
+{
+    const char* t = typeOf( n );
+    return std::any_of( std::begin( kinds ), std::end( kinds ), [ t ]( const char* k ) { return std::strcmp( t, k ) == 0; } );
 }
 
 inline bool isCommentNode( TSNode n ) noexcept
@@ -129,29 +140,38 @@ inline void statementsOf( TSNode body, std::vector<TSNode>& out )
 // (walkHandlerShapes' frame.depth > 512).
 inline constexpr int kMentionsNameMaxDepth = 512;   // undisclosed: a deeper subtree answers "mentions it", so a log-only handler that deep is never flagged
 
-// mentionsName's walk: true when a named leaf below n spells `name`, OR when it meets a node with named children at
-// kMentionsNameMaxDepth levels down — a subtree too deep to read answers "mentions it", which excludes the handler from
-// log-only: a miss, never a finding. An explicit stack, like walkHandlerShapes: a recursive walk 512 levels deep
-// overflowed a 512 KiB worker-thread stack under AddressSanitizer's larger frames.
-inline bool mentionsNameBelow( TSNode n, std::string_view src, std::string_view name )
+// Does `pred( node, depth )` accept n or a named node below it (depth 0 is n)? A node with named children met at
+// kMentionsNameMaxDepth levels down is not opened: the walk answers `deepAnswers` there. An explicit stack, like
+// walkHandlerShapes: a recursive walk 512 levels deep overflowed a 512 KiB worker-thread stack under AddressSanitizer's
+// larger frames. A null n answers false.
+template< class Pred >
+inline bool anyNamedNodeBelow( TSNode n, bool deepAnswers, const Pred& pred )
 {
     struct Frame { TSNode node; int depth; };
-    std::vector<Frame> stack( 1, Frame{ n, 0 } );
+    std::vector<Frame> stack;
+    if( !ts_node_is_null( n ) )
+    {
+        stack.push_back( { n, 0 } );
+    }
     while( !stack.empty() )
     {
         const Frame frame = stack.back();
         stack.pop_back();
+        if( pred( frame.node, frame.depth ) )
+        {
+            return true;
+        }
         if( ts_node_named_child_count( frame.node ) == 0 )
         {
-            if( frame.depth > 0 && nodeTextOf( frame.node, src ) == name )
-            {
-                return true;
-            }
             continue;
         }
         if( frame.depth >= kMentionsNameMaxDepth )
         {
-            return true;
+            if( deepAnswers )
+            {
+                return true;
+            }
+            continue;
         }
         ChildCursor cursor( frame.node );
         forEachNamedChild( frame.node, cursor.cur, [ & ]( TSNode c )
@@ -161,6 +181,15 @@ inline bool mentionsNameBelow( TSNode n, std::string_view src, std::string_view 
         } );
     }
     return false;
+}
+
+// mentionsName's walk: true when a named leaf below n spells `name`, OR when it meets a node with named children at
+// kMentionsNameMaxDepth levels down — a subtree too deep to read answers "mentions it", which excludes the handler from
+// log-only: a miss, never a finding.
+inline bool mentionsNameBelow( TSNode n, std::string_view src, std::string_view name )
+{
+    return anyNamedNodeBelow( n, true, [ & ]( TSNode c, int depth )
+                              { return depth > 0 && ts_node_named_child_count( c ) == 0 && nodeTextOf( c, src ) == name; } );
 }
 
 // Does any NAMED LEAF below n spell `name`? Identifiers in every grammar are leaves, so this reads an
@@ -354,14 +383,22 @@ inline constexpr HandlerReader kHandlerReaders[] = {
 
 // ── what a statement IS ───────────────────────────────────────────────────────────────────────────────
 
+// Unwrap every layer of `kind` that holds exactly one named child: an expression_statement to its expression, a
+// parenthesized expression to what it holds.
+template< std::size_t N >
+inline TSNode unwrapSole( TSNode n, const char ( &kind )[N] ) noexcept
+{
+    while( typeIs( n, kind ) && namedCount( n ) == 1 )
+    {
+        n = namedChild( n, 0 );
+    }
+    return n;
+}
+
 // Unwrap a statement to the expression it evaluates (expression_statement → its one child).
 inline TSNode statementExpression( TSNode s ) noexcept
 {
-    if( typeIs( s, "expression_statement" ) && namedCount( s ) == 1 )
-    {
-        return namedChild( s, 0 );
-    }
-    return s;
+    return unwrapSole( s, "expression_statement" );
 }
 
 // Python/Ruby, JS/TS/Go/Kotlin/C++/Rust/Swift, Java, C#.
@@ -369,8 +406,7 @@ inline constexpr const char* kCallNodeTypes[] = { "call", "call_expression", "me
 
 inline bool isCallNode( TSNode n ) noexcept
 {
-    const char* t = typeOf( n );
-    return std::any_of( std::begin( kCallNodeTypes ), std::end( kCallNodeTypes ), [ t ]( const char* k ) { return std::strcmp( t, k ) == 0; } );
+    return typeIsOneOf( n, kCallNodeTypes );
 }
 
 // The callee of a call, as source text: `print`, `logger.warning`, `console.error`, `System.out.println`,
@@ -1055,6 +1091,456 @@ inline bool opensWithTodo( std::string_view c ) noexcept
     return false;
 }
 
+// The row of a (language, node type) table — kErrBranchReaders, kFailureDefaultReaders — for this node, or null.
+template< class Row, std::size_t N >
+inline const Row* langTypeRow( const Row ( &table )[N], Lang lang, const char* type ) noexcept
+{
+    const Row* it = std::find_if( std::begin( table ), std::end( table ), [ & ]( const Row& r ) { return r.lang == lang && std::strcmp( r.nodeType, type ) == 0; } );
+    return it == std::end( table ) ? nullptr : it;
+}
+
+// ── failure-default (an error-masking facet) ──────────────────────────────────────────────────────────
+//
+// A read, parse or spawn failure collapsed into a value a success can also return, in a function whose declared
+// result has no room for the failure: the caller cannot tell "no advisories" from "the audit's JSON did not parse".
+// Two spellings, each REPORT-ONLY in every language (lintrules.h errorMaskHitGates), so a row it adds is sev="minor":
+//   TypeScript  a `catch` whose only statement returns an empty value (null, undefined, [], {}, false, 0, ''), or a
+//               promise `.catch( () => <empty> )`, where the try body (the promise chain) calls JSON.parse, an fs
+//               read, readFile*, exec*/spawn*, fetch, or a helper this FILE defines that calls one of them (two hops);
+//               and the enclosing function DECLARES a return type that cannot carry the failure — an array or tuple,
+//               boolean, an object type, Record/Map/Set, or Promise of one of those (never a union, unknown, any or a
+//               named alias, which may hold null);
+//   C++         `.value_or( <empty> )` (an empty string or view, {}, "", 0, false) on a file read (readWholeFile,
+//               readRegularFile, readText…), directly or through a local the read initialized, in a function whose
+//               result is not an optional, expected, variant or pointer.
+// Refused, each a miss and never a finding: a handler with a comment or any second statement (a log call); a TS
+// function with no declared return type; a C++ local read anywhere between the read and the value_or (the
+// `if( !bytes ) DISCLOSE(…)` house pattern), a value_or result the next statement tests with `.empty()` (the empty
+// text is the handled "unread" answer), or a comment on the value_or's line (the documented floor).
+// Measured on a hand-read sample before it was built (reports/qd-ge-card-verify-1112.md): TS 4 of 9 sites a defect,
+// C++ 0 of 6 with 2 borderline; Python, Go and Rust are not read here (0 of 18).
+
+inline bool hasCommentChild( TSNode n )
+{
+    return !ts_node_is_null( firstChildOfKind( n, false, { "comment" } ) );
+}
+
+// ── TypeScript ──
+
+// null, undefined, [], {}, false, 0, '' / "" — an array or object with any child (a comment included) is not empty.
+inline bool isTsEmptyValue( TSNode e, std::string_view src )
+{
+    e = unwrapSole( e, "parenthesized_expression" );
+    if( typeIs( e, "null" ) || typeIs( e, "undefined" ) || typeIs( e, "false" ) )
+    {
+        return true;
+    }
+    if( typeIs( e, "array" ) || typeIs( e, "object" ) )
+    {
+        return ts_node_child_count( e ) == 2;   // the two brackets alone
+    }
+    if( typeIs( e, "string" ) )
+    {
+        return namedCount( e ) == 0;
+    }
+    return typeIs( e, "number" ) && nodeTextOf( e, src ) == "0";
+}
+
+inline bool isTsEmptyReturn( TSNode stmt, std::string_view src )
+{
+    return typeIs( stmt, "return_statement" ) && namedCount( stmt ) == 1 && isTsEmptyValue( namedChild( stmt, 0 ), src );
+}
+
+inline constexpr const char* kTsFunctionTypes[] = { "function_declaration", "function_expression", "function", "arrow_function",
+                                                    "method_definition", "generator_function_declaration", "generator_function" };
+
+inline bool isTsFunction( TSNode n ) noexcept
+{
+    return typeIsOneOf( n, kTsFunctionTypes );
+}
+
+// The generic containers whose value is a collection a caller reads as "none", never "failed".
+inline constexpr std::string_view kTsCollectionGenerics[] = { "Array", "ReadonlyArray", "Record", "Map", "Set", "ReadonlyMap", "ReadonlySet" };
+
+// Can a value of this declared type say "it failed"? No for a collection, boolean or object type; Promise<T> is judged
+// by T (once). Everything else answers "it can" — a union, unknown, any, void, and a named type, which may alias one.
+inline bool tsTypeCannotCarryFailure( TSNode t, std::string_view src, bool insidePromise )
+{
+    while( ( typeIs( t, "parenthesized_type" ) || typeIs( t, "readonly_type" ) ) && namedCount( t ) == 1 )
+    {
+        t = namedChild( t, 0 );
+    }
+    if( typeIs( t, "array_type" ) || typeIs( t, "tuple_type" ) || typeIs( t, "object_type" ) )
+    {
+        return true;
+    }
+    if( typeIs( t, "predefined_type" ) )
+    {
+        return nodeTextOf( t, src ) == "boolean";
+    }
+    if( !typeIs( t, "generic_type" ) )
+    {
+        return false;
+    }
+    const std::string_view name = nodeTextOf( field( t, "name" ), src );
+    if( name == "Promise" && !insidePromise )
+    {
+        const TSNode args = field( t, "type_arguments" );
+        return namedCount( args ) == 1 && tsTypeCannotCarryFailure( namedChild( args, 0 ), src, true );
+    }
+    return std::find( std::begin( kTsCollectionGenerics ), std::end( kTsCollectionGenerics ), name ) != std::end( kTsCollectionGenerics );
+}
+
+inline bool tsReturnCannotCarryFailure( TSNode site, std::string_view src )
+{
+    const TSNode fn         = ancestorWhere( site, isTsFunction );
+    const TSNode annotation = field( fn, "return_type" );
+    return namedCount( annotation ) == 1 && tsTypeCannotCarryFailure( namedChild( annotation, 0 ), src, false );
+}
+
+inline constexpr std::string_view kTsSpawnMembers[] = { "execSync", "execFile", "execFileSync", "spawn", "spawnSync", "execa", "execaSync", "execaCommand", "fork" };
+
+// A call to JSON.parse, an fs read, readFile*, exec*/spawn* or fetch, by its callee's spelling. A member `exec` alone is
+// not one: RegExp.prototype.exec is the common reading.
+inline bool isTsReadParseSpawnCallee( TSNode callee, std::string_view src )
+{
+    if( typeIs( callee, "identifier" ) )
+    {
+        const std::string_view name = nodeTextOf( callee, src );
+        return name == "fetch" || name.starts_with( "exec" ) || name.starts_with( "spawn" ) || name.starts_with( "readFile" );
+    }
+    if( !typeIs( callee, "member_expression" ) )
+    {
+        return false;
+    }
+    const std::string_view object   = nodeTextOf( field( callee, "object" ), src );
+    const std::string_view property = nodeTextOf( field( callee, "property" ), src );
+    if( object == "JSON" )
+    {
+        return property == "parse";
+    }
+    const bool fsObject = object.ends_with( "fs" ) || object.ends_with( "promises" ) || object == "fsp" || object == "fse" || object == "fsPromises";
+    return ( fsObject && property.starts_with( "read" ) )
+        || std::find( std::begin( kTsSpawnMembers ), std::end( kTsSpawnMembers ), property ) != std::end( kTsSpawnMembers );
+}
+
+// The body of a function this file defines under `name`: `function name`, `const name = ( … ) => …`, or a method.
+inline TSNode tsHelperBody( TSNode root, std::string_view name, std::string_view src )
+{
+    TSNode body = {};
+    anyNamedNodeBelow( root, false, [ & ]( TSNode n, int )
+    {
+        TSNode fn = {};
+        if( typeIs( n, "function_declaration" ) || typeIs( n, "method_definition" ) || typeIs( n, "generator_function_declaration" ) )
+        {
+            fn = nodeTextOf( field( n, "name" ), src ) == name ? n : TSNode{};
+        }
+        else if( typeIs( n, "variable_declarator" ) && nodeTextOf( field( n, "name" ), src ) == name )
+        {
+            fn = field( n, "value" );
+            fn = isTsFunction( fn ) ? fn : TSNode{};
+        }
+        body = field( fn, "body" );
+        return !ts_node_is_null( body );
+    } );
+    return body;
+}
+
+// Does code below n call a read, parse or spawn — directly, or through a helper this file defines (hopsLeft more
+// hops)? `this.helper()` and `helper()` are looked up by name; an imported helper is a miss.
+inline bool tsCallsReadParseSpawn( TSNode n, std::string_view src, int hopsLeft )
+{
+    TSNode root = {};
+    return anyNamedNodeBelow( n, false, [ & ]( TSNode c, int )
+    {
+        if( !typeIs( c, "call_expression" ) )
+        {
+            return false;
+        }
+        const TSNode callee = field( c, "function" );
+        if( isTsReadParseSpawnCallee( callee, src ) )
+        {
+            return true;
+        }
+        if( hopsLeft == 0 )
+        {
+            return false;
+        }
+        std::string_view helper;
+        if( typeIs( callee, "identifier" ) )
+        {
+            helper = nodeTextOf( callee, src );
+        }
+        else if( typeIs( callee, "member_expression" ) && nodeTextOf( field( callee, "object" ), src ) == "this" )
+        {
+            helper = nodeTextOf( field( callee, "property" ), src );
+        }
+        if( helper.empty() )
+        {
+            return false;
+        }
+        root = ts_node_is_null( root ) ? rootOf( n ) : root;
+        const TSNode body = tsHelperBody( root, helper, src );
+        return !ts_node_is_null( body ) && !ts_node_eq( body, n ) && tsCallsReadParseSpawn( body, src, hopsLeft - 1 );
+    } );
+}
+
+inline constexpr int kTsHelperHops = 1;   // the try body's own calls, then one helper hop: "within depth 2"
+
+// `try { <reads> } catch { return []; }` — the catch's ONLY child is the empty return (a comment is a child too).
+inline bool tsCatchFailureDefault( TSNode n, std::string_view src )
+{
+    const TSNode body = field( n, "body" );
+    if( namedCount( body ) != 1 || !isTsEmptyReturn( namedChild( body, 0 ), src ) )
+    {
+        return false;
+    }
+    const TSNode tryNode = ts_node_parent( n );
+    return typeIs( tryNode, "try_statement" ) && tsReturnCannotCarryFailure( n, src )
+        && tsCallsReadParseSpawn( field( tryNode, "body" ), src, kTsHelperHops );
+}
+
+// `<chain that reads>.catch( () => [] )`, or a handler block whose only statement is the empty return.
+inline bool tsPromiseCatchFailureDefault( TSNode call, std::string_view src )
+{
+    const TSNode callee = field( call, "function" );
+    if( !typeIs( callee, "member_expression" ) || nodeTextOf( field( callee, "property" ), src ) != "catch" )
+    {
+        return false;
+    }
+    const TSNode args    = field( call, "arguments" );
+    const TSNode handler = namedChild( args, 0 );
+    if( namedCount( args ) != 1 || !isTsFunction( handler ) || hasCommentChild( handler ) )
+    {
+        return false;
+    }
+    const TSNode body  = field( handler, "body" );
+    const bool   empty = typeIs( body, "statement_block" ) ? namedCount( body ) == 1 && isTsEmptyReturn( namedChild( body, 0 ), src )
+                                                           : isTsEmptyValue( body, src );
+    return empty && tsReturnCannotCarryFailure( call, src ) && tsCallsReadParseSpawn( field( callee, "object" ), src, kTsHelperHops );
+}
+
+// ── C++ ──
+
+// The empty value a `.value_or( … )` falls back to, compared with whitespace removed.
+inline constexpr std::string_view kCxxEmptyValues[] = { "std::string()", "std::string{}", "std::string_view()", "std::string_view{}", "{}", "\"\"", "0", "0u", "false" };
+
+inline bool isCxxEmptyValue( TSNode e, std::string_view src )
+{
+    const std::string_view text = nodeTextOf( e, src );
+    std::string            squeezed;
+    squeezed.reserve( text.size() );
+    for( char c : text )
+    {
+        if( std::isspace( static_cast<unsigned char>( c ) ) == 0 )
+        {
+            squeezed.push_back( c );
+        }
+    }
+    return std::find( std::begin( kCxxEmptyValues ), std::end( kCxxEmptyValues ), squeezed ) != std::end( kCxxEmptyValues );
+}
+
+// The read helpers whose optional result says "could not read": ripwire's own and the common spellings.
+inline constexpr std::string_view kCxxReadPrefixes[] = { "readWhole", "readRegularFile", "readText", "readFile", "readAll" };
+
+inline bool isCxxReadCall( TSNode n, std::string_view src )
+{
+    if( !typeIs( n, "call_expression" ) )
+    {
+        return false;
+    }
+    std::string_view name = nodeTextOf( field( n, "function" ), src );
+    const std::size_t cut = name.find_last_of( ":.>" );
+    name = cut == std::string_view::npos ? name : name.substr( cut + 1 );
+    return std::any_of( std::begin( kCxxReadPrefixes ), std::end( kCxxReadPrefixes ), [ name ]( std::string_view p ) { return name.starts_with( p ); } );
+}
+
+// `std::move( x )` → x.
+inline TSNode unwrapStdMove( TSNode n, std::string_view src )
+{
+    const TSNode args = field( n, "arguments" );
+    if( typeIs( n, "call_expression" ) && nodeTextOf( field( n, "function" ), src ) == "std::move" && namedCount( args ) == 1 )
+    {
+        return namedChild( args, 0 );
+    }
+    return n;
+}
+
+// The source line that holds byte `at`, without its newline.
+inline std::string_view lineAt( std::string_view src, std::uint32_t at ) noexcept
+{
+    const std::size_t from  = at == 0 ? std::string_view::npos : src.rfind( '\n', at - 1 );
+    const std::size_t begin = from == std::string_view::npos ? 0 : from + 1;
+    const std::size_t to    = src.find( '\n', at );
+    return src.substr( begin, ( to == std::string_view::npos ? src.size() : to ) - begin );
+}
+
+// A comment anywhere on the source line that holds `at` — the line that says the empty value is a floor.
+inline bool lineHasComment( std::string_view src, std::uint32_t at ) noexcept
+{
+    const std::string_view line = lineAt( src, at );
+    char quote = 0;   // the open string or character literal's quote, 0 outside one
+    for( std::size_t i = 0; i + 1 < line.size(); ++i )
+    {
+        if( quote != 0 && line[i] == '\\' )
+        {
+            ++i;
+        }
+        else if( line[i] == '"' || line[i] == '\'' )
+        {
+            quote = quote == 0 ? line[i] : ( quote == line[i] ? 0 : quote );
+        }
+        else if( quote == 0 && line[i] == '/' && ( line[i + 1] == '/' || line[i + 1] == '*' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline constexpr std::string_view kCxxFailureCarriers[] = { "optional", "expected", "variant", "Result" };
+
+// Can this function's result say "it failed"? An optional/expected/variant/Result return type (a trailing one
+// included) or a pointer declarator can.
+inline bool cxxReturnCanCarryFailure( TSNode fn, std::string_view src )
+{
+    const TSNode declarator = field( fn, "declarator" );
+    if( typeIs( declarator, "pointer_declarator" ) )
+    {
+        return true;
+    }
+    const auto carries = [ & ]( TSNode t )
+    {
+        const std::string_view text = nodeTextOf( t, src );
+        return std::any_of( std::begin( kCxxFailureCarriers ), std::end( kCxxFailureCarriers ), [ text ]( std::string_view w ) { return text.find( w ) != std::string_view::npos; } );
+    };
+    return carries( field( fn, "type" ) ) || carries( firstChildOfKind( declarator, true, { "trailing_return_type" } ) );
+}
+
+// Was the local `name` initialized or assigned from a read, and NOT read anywhere else before byte `before` in this
+// function body? Any other use — `if( !bytes )`, `failed = !bytes.has_value()` — is the failure being looked at.
+inline bool cxxLocalFromUntestedRead( TSNode body, std::string_view name, std::uint32_t before, std::string_view src )
+{
+    std::uint32_t reads    = 0;   // initializations and assignments from a read
+    std::uint32_t mentions = 0;   // every identifier spelling the name, those included
+    anyNamedNodeBelow( body, false, [ & ]( TSNode n, int )
+    {
+        if( ts_node_start_byte( n ) >= before )
+        {
+            return false;
+        }
+        if( typeIs( n, "identifier" ) && nodeTextOf( n, src ) == name )
+        {
+            ++mentions;
+        }
+        else if( typeIs( n, "init_declarator" ) && nodeTextOf( field( n, "declarator" ), src ) == name )
+        {
+            reads += isCxxReadCall( field( n, "value" ), src ) ? 1u : 0u;
+        }
+        else if( typeIs( n, "assignment_expression" ) && nodeTextOf( field( n, "left" ), src ) == name )
+        {
+            reads += isCxxReadCall( field( n, "right" ), src ) ? 1u : 0u;
+        }
+        return false;
+    } );
+    return reads > 0 && mentions == reads;
+}
+
+// The statement after the one in a block that holds n (comments skipped); null when there is none.
+inline TSNode nextStatementAfter( TSNode n )
+{
+    const TSNode stmt = ancestorWhere( n, []( TSNode p ) { return typeIs( ts_node_parent( p ), "compound_statement" ); } );
+    TSNode       next = ts_node_is_null( stmt ) ? TSNode{} : ts_node_next_named_sibling( stmt );
+    while( !ts_node_is_null( next ) && isCommentNode( next ) )
+    {
+        next = ts_node_next_named_sibling( next );
+    }
+    return next;
+}
+
+// Does `text` ask `<name>.empty()` (spaces allowed before the dot)?
+inline bool asksEmpty( std::string_view text, std::string_view name ) noexcept
+{
+    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
+    {
+        std::string_view rest = text.substr( at + name.size() );
+        while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) )
+        {
+            rest.remove_prefix( 1 );
+        }
+        if( rest.starts_with( ".empty()" ) || rest.starts_with( ".empty( )" ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The statement after the one that holds `call`, when that statement stores the value_or into a name: true when it
+// asks `<name>.empty()` — the empty text IS the handled "unread" answer there (`if( bytes.empty() ) continue;`).
+inline bool cxxEmptyTestedNext( TSNode call, std::string_view src )
+{
+    const TSNode     holder = ts_node_parent( call );
+    std::string_view stored;
+    if( typeIs( holder, "init_declarator" ) && ts_node_eq( field( holder, "value" ), call ) )
+    {
+        stored = nodeTextOf( field( holder, "declarator" ), src );
+    }
+    else if( typeIs( holder, "assignment_expression" ) && ts_node_eq( field( holder, "right" ), call ) )
+    {
+        stored = nodeTextOf( field( holder, "left" ), src );
+    }
+    return !stored.empty() && asksEmpty( nodeTextOf( nextStatementAfter( holder ), src ), stored );
+}
+
+// `read( … ).value_or( std::string() )`, or `bytes.value_or( {} )` with `bytes` an untested read — and the empty
+// result not tested by the next statement.
+inline bool cxxValueOrFailureDefault( TSNode call, std::string_view src )
+{
+    const TSNode callee = field( call, "function" );
+    if( !typeIs( callee, "field_expression" ) || nodeTextOf( field( callee, "field" ), src ) != "value_or" )
+    {
+        return false;
+    }
+    const TSNode args = field( call, "arguments" );
+    if( namedCount( args ) != 1 || !isCxxEmptyValue( namedChild( args, 0 ), src ) || lineHasComment( src, ts_node_start_byte( args ) ) )
+    {
+        return false;
+    }
+    const TSNode fn = ancestorOfKind( call, { "function_definition" } );   // a lambda is transparent: its value flows into the named function
+    if( ts_node_is_null( fn ) || cxxReturnCanCarryFailure( fn, src ) || cxxEmptyTestedNext( call, src ) )
+    {
+        return false;
+    }
+    const TSNode receiver = unwrapStdMove( field( callee, "argument" ), src );
+    if( isCxxReadCall( receiver, src ) )
+    {
+        return true;
+    }
+    return typeIs( receiver, "identifier" ) && cxxLocalFromUntestedRead( field( fn, "body" ), nodeTextOf( receiver, src ), ts_node_start_byte( call ), src );
+}
+
+// One row per (language, node type), read like kHandlerReaders.
+struct FailureDefaultReader
+{
+    Lang        lang;
+    const char* nodeType;
+    bool ( *matches )( TSNode, std::string_view );
+};
+
+inline constexpr FailureDefaultReader kFailureDefaultReaders[] = {
+    { Lang::TypeScript, "catch_clause",    tsCatchFailureDefault        },
+    { Lang::TypeScript, "call_expression", tsPromiseCatchFailureDefault },
+    { Lang::Cpp,        "call_expression", cxxValueOrFailureDefault     },
+};
+
+// kShapeFailureDefault when this node is one, else empty.
+inline std::string_view failureDefaultShape( TSNode n, const char* type, std::string_view src, Lang lang )
+{
+    const FailureDefaultReader* row = langTypeRow( kFailureDefaultReaders, lang, type );
+    return ( row != nullptr && row->matches( n, src ) ) ? kShapeFailureDefault : std::string_view();
+}
+
 // ── the walk ──────────────────────────────────────────────────────────────────────────────────────────
 
 // One row per language, so the language finds the row and the node type confirms it.
@@ -1081,9 +1567,7 @@ inline constexpr ErrBranchReader kErrBranchReaders[] = {
 
 inline const ErrBranchReader* errBranchReaderFor( Lang lang, const char* type ) noexcept
 {
-    const auto it = std::find_if( std::begin( kErrBranchReaders ), std::end( kErrBranchReaders ),
-                                  [ & ]( const ErrBranchReader& r ) { return r.lang == lang && std::strcmp( r.nodeType, type ) == 0; } );
-    return it == std::end( kErrBranchReaders ) ? nullptr : it;
+    return langTypeRow( kErrBranchReaders, lang, type );
 }
 
 // A stub, and not an abstract-method contract (declaresAbstractContract) — the one test for every spelling.
@@ -1100,7 +1584,12 @@ inline std::string_view shapeOfNode( TSNode n, std::string_view src, Lang lang, 
     {
         Handler h;
         reader->read( n, src, h );
-        return handlerShape( h, src, stmts );
+        const std::string_view shape = handlerShape( h, src, stmts );
+        return shape.empty() ? failureDefaultShape( n, type, src, lang ) : shape;
+    }
+    if( const std::string_view shape = failureDefaultShape( n, type, src, lang ); !shape.empty() )
+    {
+        return shape;
     }
     if( const ErrBranchReader* reader = errBranchReaderFor( lang, type ) )
     {
@@ -1138,7 +1627,8 @@ inline void walkHandlerShapes( TSNode root, std::string_view src, Lang lang, std
             const std::string_view tag = shapeOfNode( frame.node, src, lang, stmts );
             if( !tag.empty() )
             {
-                ASSUME( tag == kShapeLogOnly || tag == kShapeRethrowOnly || tag == kShapeStub || tag == kShapeTodo, "shapeOfNode answers one of the four tags or none" );
+                ASSUME( tag == kShapeLogOnly || tag == kShapeRethrowOnly || tag == kShapeFailureDefault || tag == kShapeStub || tag == kShapeTodo,
+                        "shapeOfNode answers one of the five tags or none" );
                 out.push_back( { ts_node_start_byte( frame.node ), ts_node_end_byte( frame.node ), tag } );
             }
         }

@@ -505,6 +505,7 @@ for _g in \
     expandtopk0check \
     extentcheck \
     externalvetocheck \
+    failuredefaultcheck \
     falseedgecheck \
     fcallforwardcheck \
     fficheck \

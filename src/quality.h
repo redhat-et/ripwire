@@ -329,6 +329,7 @@ struct Snapshot
     gtl::btree_map<std::uint64_t, std::uint32_t> defsBySym;   // hash(canonId) → COUNT of definitions sharing the id (an overload set's CARDINALITY, deliberately NOT a MAX — see computeSnapshot)
     gtl::btree_map<std::uint64_t, std::uint32_t> maskBySym;   // §D#4 error-masking — hash(canonId) → COUNT of error-masking constructs in the symbol (SUM over overloads, see computeSnapshot)
     gtl::btree_map<std::uint64_t, std::uint32_t> maskReportBySym; // the REPORT-ONLY part of maskBySym's count: widened handler shapes that do not gate in the symbol's language (kHandlerShapeGates); absent = 0
+    gtl::btree_map<std::uint64_t, std::uint32_t> failureDefaultBySym; // the failure-default part of maskBySym's count (handlershape.h): a row whose count of it grew carries facet="failure-default"; absent = 0
     gtl::btree_map<std::uint64_t, std::uint32_t> placeholderBySym; // the placeholder kind — hash(canonId) → COUNT of stub / TODO constructs in the symbol (SUM over overloads, like maskBySym)
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — pathQualifiedKey(path,scope,name) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them). Path-qualified since v6: a bare canonId key folded every scope-less same-named symbol ACROSS FILES into one join identity (the W1-S2 cross-file churn misattribution)
     gtl::btree_map<std::uint64_t, std::uint64_t> moveCidBySym;  // QD-ENTRY-CEILING MOVED-BODY — qualityKey → moveCidOf (the scrubbed hash of the callable's BODY), recorded only for a function or method over the ccx or the line bar: the baseline half of "this new function is a body the same diff removed elsewhere" (origin="moved"). A sidecar or blob without it recognizes no move
@@ -1104,6 +1105,7 @@ struct ConstructCounts
     gtl::btree_map<std::uint64_t, std::uint32_t> mask;         // every error-masking hit (→ Snapshot::maskBySym)
     gtl::btree_map<std::uint64_t, std::uint32_t> maskReport;   // the REPORT-ONLY subset of `mask` (→ maskReportBySym): widened shapes whose (shape, language) is not in kHandlerShapeGates
     gtl::btree_map<std::uint64_t, std::uint32_t> placeholder;  // stub / TODO hits (→ Snapshot::placeholderBySym)
+    gtl::btree_map<std::uint64_t, std::uint32_t> failureDefault; // the failure-default subset of `mask` (→ failureDefaultBySym): it names the row's facet
 };
 
 // The innermost def whose span holds `startByte` in file `fileId`, or kNoNode. Smallest enclosing def wins
@@ -1129,6 +1131,21 @@ inline NodeId enclosingDefOf( const IngestResult& ing, const SymbolsByFile& byFi
     return owner;
 }
 
+// One error-masking hit, counted under its owner's key: in the total, in the report-only part when it does not gate in
+// the owner's language, and in the failure-default part when it is that facet.
+inline void tallyMaskHit( ConstructCounts& counts, std::uint64_t key, std::string_view id, Lang lang )
+{
+    ++counts.mask[ key ];
+    if( !errorMaskHitGates( id, lang ) )
+    {
+        ++counts.maskReport[ key ];
+    }
+    if( id == kShapeFailureDefault )
+    {
+        ++counts.failureDefault[ key ];
+    }
+}
+
 inline ConstructCounts constructCountsBySym( const IngestResult& ing, std::string_view root )
 {
     ConstructCounts            counts;
@@ -1141,6 +1158,9 @@ inline ConstructCounts constructCountsBySym( const IngestResult& ing, std::strin
     // per-file symbol id list (only real-body defs can enclose a masking block). `symbols[i].id == i`, so
     // the shared bucket-and-sort's `s.id` is the same value the hand-written loop pushed as `i`.
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
+    // RIPWIRE_TEST_FAILURE_DEFAULT_SITES=1: list each failure-default hit an owning symbol holds on stderr, the whole-tree
+    // sweep the facet's precision read is drawn from. Test-only; no output and no cost on any normal run.
+    const bool listSites = std::getenv( "RIPWIRE_TEST_FAILURE_DEFAULT_SITES" ) != nullptr;
     // pathQualifiedKey, via the SAME rule maskBySym is stored under (see qualityKey). These counts are compared
     // against that map key-for-key, so a scheme that differs by one byte silently reports every construct as new.
     const auto keyOf = [ & ]( NodeId owner ) { return pathQualifiedKey( relForHash( ing.files[ing.symbols[owner].fileId], root ), ing.symbols[owner] ); };
@@ -1151,11 +1171,10 @@ inline ConstructCounts constructCountsBySym( const IngestResult& ing, std::strin
         {
             continue;
         }
-        const std::uint64_t key = keyOf( owner );
-        ++counts.mask[ key ];
-        if( !errorMaskHitGates( h.id, ing.symbols[owner].lang ) )
+        tallyMaskHit( counts, keyOf( owner ), h.id, ing.symbols[owner].lang );
+        if( listSites && h.id == kShapeFailureDefault )
         {
-            ++counts.maskReport[ key ];
+            rw::emitTo( stderr, "ripwire: failure-default-site {}:{}\n", ing.files[h.fileId], h.line );
         }
     }
     for( const ErrorMaskHit& h : hits.placeholder )
@@ -1166,7 +1185,8 @@ inline ConstructCounts constructCountsBySym( const IngestResult& ing, std::strin
             ++counts.placeholder[ keyOf( owner ) ];
         }
     }
-    ENSURES( counts.maskReport.size() <= counts.mask.size(), "every report-only hit was also counted in the total, under the same key" );
+    ENSURES( counts.maskReport.size() <= counts.mask.size() && counts.failureDefault.size() <= counts.maskReport.size(),
+             "every report-only hit was also counted in the total, and every failure-default hit is report-only, under the same key" );
     return counts;
 }
 
@@ -2840,7 +2860,7 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 51;   // MUST equal ingest.cpp's kCacheVersion (gated); 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 52;   // MUST equal ingest.cpp's kCacheVersion (gated); 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
 constexpr std::uint32_t kIngestParserVerMirror    = 309;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 309 = 2026-11-13 (lane macro-p0 placeholder: C-family macro invocations read as typeless declarators are uses, not defs; + macro-p1 trailing annotation macros; rich 310)
                                                           // 307 = 2026-11-11 (lane rust-macro-path placeholder: Rust path macro sites + `$crate::m!` in transcribers; rich 308)
@@ -4219,7 +4239,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // records after moveCidBySym), and a VACATED body now includes a key that shrank under the bars. Bumped 28 -> 29.
 // v30 (2026-11-14, lane qd-rename-identity) — a BLOB SHAPE change: the Snapshot gained bodyCidBySym (one hash map after moveCidBySym,
 // moveCidOf of every callable, the identity a rename or move keeps). A v29 blob is short by one map. Bumped 29 -> 30.
-constexpr std::uint32_t kQSnapCacheScheme = 30;
+// v31 (2026-11-14, lane failure-default; landed as v31 in TRAIN-1111h over qd-rename-identity's v30) — a BLOB SHAPE change: the Snapshot gained failureDefaultBySym (one count map after
+// maskReportBySym), and maskBySym / maskReportBySym now count the failure-default facet. A v30 blob is short by one map and its
+// mask counts are low, so it would read every failure-default site as added. Bumped 30 -> 31.
+constexpr std::uint32_t kQSnapCacheScheme = 31;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -4345,6 +4368,7 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
     putValMap( s.defsBySym );
     putValMap( s.maskBySym );
     putValMap( s.maskReportBySym );
+    putValMap( s.failureDefaultBySym );   // v31 (failure-default)
     putValMap( s.placeholderBySym );
     putHashMap( s.bodyHashBySym );
     putHashMap( s.moveCidBySym );   // v28 (MOVED-BODY)
@@ -4526,7 +4550,7 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         return true;
     };
 
-    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getHashMap( s.bodyCidBySym ) || !getSketchMap( s.moveSketchBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
+    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.failureDefaultBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getHashMap( s.bodyCidBySym ) || !getSketchMap( s.moveSketchBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
         || !getDefectSites( s.defectSites ) )
     {
         return false;
@@ -5975,7 +5999,7 @@ inline void dropNonBaselineKeys( Snapshot& snap, const IngestResult& ing, std::s
     std::sort( dropKeys.begin(), dropKeys.end() );
     const auto dropped = [ & ]( std::uint64_t k ) noexcept
     { return std::binary_search( dropKeys.begin(), dropKeys.end(), k ); };
-    for( gtl::btree_map<std::uint64_t, std::uint32_t>* m : { &snap.maskBySym, &snap.maskReportBySym, &snap.placeholderBySym } )
+    for( gtl::btree_map<std::uint64_t, std::uint32_t>* m : { &snap.maskBySym, &snap.maskReportBySym, &snap.failureDefaultBySym, &snap.placeholderBySym } )
     {
         for( auto it = m->begin(); it != m->end(); )
         {
@@ -6359,6 +6383,7 @@ inline void addKindPasses( Snapshot& snap, const IngestResult& ing, std::string_
         ConstructCounts counts = passes.constructCounts( ing, root );   // a copy: a shared value is read again by the delta
         snap.maskBySym         = std::move( counts.mask );
         snap.maskReportBySym   = std::move( counts.maskReport );
+        snap.failureDefaultBySym = std::move( counts.failureDefault );
         snap.placeholderBySym  = std::move( counts.placeholder );
     }
     // the defect-shape baseline: every offending site (a sorted multiset of anchor + site identity) and each
@@ -6855,6 +6880,10 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "maskr " << std::hex << h << std::dec << ' ' << v << '\n'; // the report-only part of that count
     }
+    for( const auto& [h, v] : s.failureDefaultBySym )
+    {
+        f << "maskfd " << std::hex << h << std::dec << ' ' << v << '\n'; // the failure-default part of it
+    }
     for( const auto& [h, v] : s.placeholderBySym )
     {
         f << "stub " << std::hex << h << std::dec << ' ' << v << '\n'; // the placeholder count
@@ -7047,7 +7076,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         { std::uint64_t h = 0, v = 0; is >> std::hex >> h >> v;
           if( is.fail() ) { DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine ); return; } m[h] = v; };
 
-        if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "maskr" || kind == "stub" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs"
+        if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "maskr" || kind == "maskfd" || kind == "stub" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs"
          || kind == "producer" || kind == "defect" )
         {
             ++recognizedLineCount;                                    // structure seen — this file IS a baseline
@@ -7076,6 +7105,10 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         else if( kind == "maskr" )
         {
             readValMap( out.maskReportBySym );
+        }
+        else if( kind == "maskfd" )
+        {
+            readValMap( out.failureDefaultBySym );
         }
         else if( kind == "stub" )
         {
@@ -7695,6 +7728,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "api-surface",                "surface" },   // new-symbol / contract-change
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
     { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert
+    { "error-masking",              "facet"   },   // failure-default: the growth includes a read failure returned as an empty success
     { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
                                                     // is populated the same way, from the same CloneIdiomVerdict); this row was
@@ -9163,6 +9197,7 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healMap( base.defsBySym );
     healMap( base.maskBySym );
     healMap( base.maskReportBySym );
+    healMap( base.failureDefaultBySym );
     healMap( base.placeholderBySym );
     healMap( base.bodyHashBySym );
     moved += rekeyMoveRecords( base.moveCidBySym, al );
@@ -11111,7 +11146,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             {
                 const std::uint32_t nowGating = nowMask - std::min( nowMask, countIn( nowCounts.maskReport, key ) );
                 const std::uint32_t wasGating = wasMask - std::min( wasMask, countIn( base.maskReportBySym, key ) );
-                regs.push_back( { "error-masking", g.canonId[i], wasMask, nowMask, key, nowGating <= wasGating, {}, !existedAtBaseline( key ) } );
+                // facet="failure-default" when that facet's own count grew: the row's growth includes a site it names
+                const bool failureDefault = countIn( nowCounts.failureDefault, key ) > countIn( base.failureDefaultBySym, key );
+                regs.push_back( { "error-masking", g.canonId[i], wasMask, nowMask, key, nowGating <= wasGating,
+                                  failureDefault ? std::string( kShapeFailureDefault ) : std::string(), !existedAtBaseline( key ) } );
                 stampLoc( i );
             }
             const std::uint32_t wasStub = countIn( base.placeholderBySym, key );

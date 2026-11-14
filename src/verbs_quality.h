@@ -1611,7 +1611,15 @@ inline constexpr const char* kQdPlaceholderLegend =
 inline constexpr const char* kQdMaskReportOnlyLegend =
     "An error-masking row is sev=\"minor\" when every construct it added is a widened shape that does not "
     "gate in that language yet: log-only (a broad handler whose body only logs and never names the error) "
-    "or rethrow-only (the sole handler re-throws the error unchanged). ";
+    "or rethrow-only (the sole handler re-throws the error unchanged), or failure-default (below). ";
+
+// Emitted only when an error-masking row carries facet="failure-default".
+inline constexpr const char* kQdFailureDefaultLegend =
+    "facet=\"failure-default\" on an error-masking row: the change added a read, parse or spawn failure returned as an empty "
+    "success, in a function whose declared result cannot say it failed (a TypeScript catch or .catch returning [], null, {}, "
+    "false, 0 or '' around JSON.parse, an fs read, exec/spawn or fetch; a C++ value_or( empty ) on a file read). Report-only in "
+    "every language: a caller reads the failure as \"none\". A comment on the handler or the value_or line, a log call, or an "
+    "if that tests the read first refuses it. ";
 
 // QD-MONSTER-GROWTH — emitted only when a monster="1" row is in the document.
 inline constexpr const char* kQdMonsterLegend =
@@ -1773,6 +1781,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && r.isMinor; } );
     };
+    const auto anyFailureDefaultRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && !r.facet.empty(); } );
+    };
     const auto anyPlaceholderRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "placeholder"; } );
@@ -1885,6 +1897,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdMaskReportOnlyLegend );
+        }
+        if( anyFailureDefaultRow( p.rows ) || anyFailureDefaultRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdFailureDefaultLegend );
         }
         if( anyPlaceholderRow( p.rows ) || anyPlaceholderRow( p.disclosedRows ) )
         {

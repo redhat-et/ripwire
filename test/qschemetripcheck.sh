@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-14, TRAIN-1111h, member 5 (lane failure-default): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. The lane bumped
+#   kQSnapCacheScheme 29 -> 30 against main; qd-rename-identity already took 30 in this train, so failure-default lands as 30 -> 31
+#   (main's number + 1 after the earlier member). kCacheVersion 51 -> 52 is kept as the lane made it (main is 51). Both lanes' log entries
+#   are kept below.
 # 2026-11-14, TRAIN-1111h (main 67b08d46b + lane qd-rename-identity): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. Main's
 #   kQSnapCacheScheme was 29 (#650 qd-constructs and #649 macro-p0 kept it), so the lane's bump lands as main's number + 1 = 30; both
 #   log entries below are kept (the lane's bodyCidBySym blob change and the 1111g kCacheVersion/kParserVer entries watch different text).
@@ -41,6 +45,11 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   change: the Snapshot gained bodyCidBySym (computeSnapshot records moveCidOf of every callable; serialize/deserialize carry it), and
 #   codeLocByNode returns that identity for every callable beside the over-bar one. The manifest gains recordMoveIdentity (the per-key MAX
 #   both identity maps record).
+# 2026-11-14, lane failure-default (merged with main be84a97de): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree, kQSnapCacheScheme 29 -> 30 (landed as 30 -> 31 in TRAIN-1111h). A BLOB SHAPE change: the Snapshot
+#   gained failureDefaultBySym (serialize/deserialize carry it after maskReportBySym), and maskBySym / maskReportBySym now count the
+#   error-masking failure-default facet (constructCountsBySym through tallyMaskHit).
+#   Also kCacheVersion 51 -> 52 (with quality.h's mirror): the ingest record's construct hits gain the failure-default shape tag
+#   (lintrules.h kConstructShapeTags), so a record an older build wrote, which lacks those hits, is a miss.
 # 2026-11-14, TRAIN-1111g (main d624cff5f + lane qd-constructs): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree; both log entries
 #   below are kept (main's entry-ceiling 27 -> 29 and the lane's kCacheVersion 50 -> 51 touch different watched text).
 #   Re-pinned again after lane macro-p0 (kParserVer 307 -> 309, mirrored in quality.h; kQSnapCacheScheme stays: the parser key already
