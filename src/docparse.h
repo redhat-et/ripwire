@@ -22,6 +22,7 @@
                         // to below instead of carrying a local copy; STL-only, no coupling cost here.
 
 #include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
+#include "infra/depwatch.h"  // readWholeFile reports each read to the warm snapshot's dependency log when one is armed
 #include "infra/ownedfile.h" // rw::OwnedFile — the whole-file readers own their stream, so every return closes it
 #include "htmldoc.h"          // DOCS-UNITS D5: the HTML section tree (line-preserving body text + units)
 #include "pathguard.h"        // rw::pathguard::NoFollowRead — the owned line stream a fixed-name file is read through
@@ -293,14 +294,16 @@ inline std::optional<std::string> readWholeFile( const std::string& path )
     OwnedFile fp = openOwnedFile( path.c_str(), "rb" );
     if( !fp )
     {
+        depwatch::note( depwatch::Seam::WholeFile, path, nullptr );
         return std::nullopt;
     }
     std::optional<std::string> out      = readAllOfStream( fp.file );
     const bool                 closedOk = fp.close();
     if( !closedOk )
     {
-        return std::nullopt;
+        out.reset();
     }
+    depwatch::note( depwatch::Seam::WholeFile, path, out ? &*out : nullptr );   // the warm snapshot's dependency log (infra/depwatch.h)
     return out;
 }
 

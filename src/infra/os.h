@@ -92,6 +92,7 @@ inline constexpr int kDirwatchBatch = 32;
 }   // namespace rw::os
 
 #if !defined( _WIN32 )
+extern char** environ;   // POSIX names the process environment and declares it in no header: rw::os::environment() below is its one reader
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -239,6 +240,9 @@ inline int pipe_cloexec( int fds[ 2 ] )
 [[gnu::always_inline]] inline int   access( const char* path, int mode )                           { return ::access( path, mode ); }
 [[gnu::always_inline]] inline char* realpath( const char* path, char* resolved )                   { return ::realpath( path, resolved ); }
 [[gnu::always_inline]] inline char* getcwd( char* buf, std::size_t size )                          { return ::getcwd( buf, size ); }
+// The process environment as "NAME=value" strings, null-terminated: for the one caller that must see EVERY variable of a
+// family (a cache key built from each variable with a given prefix), which getenv( name ) cannot enumerate.
+[[gnu::always_inline]] inline char** environment() noexcept                                         { return ::environ; }
 [[gnu::always_inline]] inline int   setenv( const char* name, const char* value, int overwrite )   { return ::setenv( name, value, overwrite ); }
 
 // rebased_path: the spelling of `path` that THIS layer's own calls above actually touch — identity on POSIX,
@@ -1229,6 +1233,7 @@ int   chmod( const char* path, mode_t mode );
 int   access( const char* path, int mode );
 char* realpath( const char* path, char* resolved );
 char* getcwd( char* buf, std::size_t size );
+char** environment() noexcept;
 int   setenv( const char* name, const char* value, int overwrite );
 
 // rebased_path: the spelling of `path` os::open/os::stat/os::mkdir/… above actually touch, for a caller that must

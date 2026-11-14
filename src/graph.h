@@ -7544,7 +7544,7 @@ struct CargoNames
 inline std::optional<std::string> readTextIfPresent( const std::string& path, bool& unreadable )
 {
     std::error_code ec;
-    if( !std::filesystem::exists( path, ec ) )
+    if( !depwatch::noted( depwatch::Seam::FsExists, path, std::filesystem::exists( path, ec ) ) )   // infra/depwatch.h: the warm snapshot's log
     {
         return std::nullopt;
     }

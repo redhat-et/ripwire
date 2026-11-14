@@ -367,6 +367,7 @@ verbs_lint.h	parseProfTsv	fopen	1	closes	returns only on a failed open; fclose a
 verbs_navigate.h	runSafeDelete	fopen	1	closes	if-scoped; fclose after the sized read
 verbs_navigate.h	runSlice	fopen	1	closes	if-scoped; fclose after the read loop
 verbs_quality.h	runQualityViews	fopen	1	closes	returns on a failed open; fclose before the other return
+warmsnap.h	collectGitInputs	popen	1	closes	no return between the popen and the pclose: the read loop leaves by its own condition, and a non-null pipe is always closed on the next line
 REGISTRY
 
 # The allocations S1 reports inside a reader function whose size is NOT a decoded count, with why.
