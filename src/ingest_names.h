@@ -2642,6 +2642,18 @@ inline constexpr std::array<std::string_view, 10> kBlockFormingTestMacros = {
     "BENCHMARK", "BENCHMARK_F", "BENCHMARK_DEFINE_F", "BENCHMARK_TEMPLATE", "BENCHMARK_CAPTURE" // Google Benchmark
 };
 
+// Does a declarator name a plain identifier? A qualified `HSV::HSV() {}` is a member, and a macro is never qualified.
+inline bool plainDeclaratorName( TSNode declared ) noexcept
+{
+    return !ts_node_is_null( declared ) && ( kindIs( ts_node_type( declared ), "identifier" ) || kindIs( ts_node_type( declared ), "field_identifier" ) );
+}
+
+// A name a macro invocation can carry: SCREAMING_SNAKE (the macro convention), and not a block-forming test macro.
+inline bool macroInvocationName( std::string_view name ) noexcept
+{
+    return isScreamingSnakeName( name ) && std::ranges::find( kBlockFormingTestMacros, name ) == kBlockFormingTestMacros.end();
+}
+
 // Does a brace block's text hold a `;` before the `}` that closes its own `{`? Strings, character literals and comments
 // are skipped. Bounded by the matching brace on purpose: error recovery can stretch a recovered body past it
 // (`F( a, b ){ X( 1, { { … } } ) };` read the next declaration into the body).
@@ -2972,24 +2984,11 @@ inline bool annotationTypedAsType( TSNode definition, std::string_view src ) noe
 
 inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
 {
-    if( !isScreamingSnakeName( name ) || std::ranges::find( kBlockFormingTestMacros, name ) != kBlockFormingTestMacros.end() )
+    if( !macroInvocationName( name ) )
     {
         return false;
     }
-    const TSNode declared = fieldChild( fnDeclarator, NodeField::Declarator );
-    if( !ts_node_is_null( declared ) && kindIs( ts_node_type( declared ), "qualified_identifier" ) && ts_node_has_error( declared ) )
-    {
-        // MACRO-P1: `T name ABSL_GUARDED_BY( mu );` at namespace scope recovered as `name ::ABSL_GUARDED_BY( mu )` behind a
-        // MISSING "::" — the "scope" is the variable, the "name" the annotation. A real qualified name has its own `::`.
-        for( std::uint32_t i = 0; i < ts_node_child_count( declared ); ++i )
-        {
-            if( ts_node_is_missing( ts_node_child( declared, i ) ) )
-            {
-                return true;
-            }
-        }
-    }
-    if( ts_node_is_null( declared ) || !( kindIs( ts_node_type( declared ), "identifier" ) || kindIs( ts_node_type( declared ), "field_identifier" ) ) )
+    if( !plainDeclaratorName( fieldChild( fnDeclarator, NodeField::Declarator ) ) )
     {
         return false;
     }
@@ -3012,20 +3011,76 @@ inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view na
         return errorDeclaratorUntyped( fnDeclarator );
     }
     const bool isDefinition = kindIs( ownerKind, "function_definition" );
-    if( !( isDefinition || kindIs( ownerKind, "declaration" ) || kindIs( ownerKind, "field_declaration" ) ) || ownerIsConstructorOf( owner, name, src ) )
+    if( !( isDefinition || kindIs( ownerKind, "declaration" ) || kindIs( ownerKind, "field_declaration" ) ) || !ts_node_is_null( fieldChild( owner, NodeField::Type ) )
+        || ownerIsConstructorOf( owner, name, src ) )
+    {
+        return false;
+    }
+    const TSNode body = isDefinition ? fieldChild( owner, NodeField::Body ) : TSNode {};
+    return ts_node_is_null( body ) || !bodyFollowsClosedParameters( fnDeclarator, body, src ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) );
+}
+
+// The node that owns a declarator: its parent, through `*` / `&` wrappers (null at the root).
+inline TSNode declaratorOwner( TSNode fnDeclarator ) noexcept
+{
+    TSNode owner = parentOf( fnDeclarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( owner ) && ( kindIs( ts_node_type( owner ), "pointer_declarator" ) || kindIs( ts_node_type( owner ), "reference_declarator" ) ); ++guard )
+    {
+        owner = parentOf( owner );
+    }
+    return owner;
+}
+
+// `T name ABSL_GUARDED_BY( mu );` at namespace scope recovered as `name ::ABSL_GUARDED_BY( mu )` behind a MISSING "::": the
+// "scope" is the variable, the "name" the annotation. A real qualified name has its own `::`.
+inline bool qualifiedBehindMissingScope( TSNode declared ) noexcept
+{
+    if( ts_node_is_null( declared ) || !kindIs( ts_node_type( declared ), "qualified_identifier" ) || !ts_node_has_error( declared ) )
+    {
+        return false;
+    }
+    for( std::uint32_t i = 0; i < ts_node_child_count( declared ); ++i )
+    {
+        if( ts_node_is_missing( ts_node_child( declared, i ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// MACRO-P1: is the ALL-CAPS function declarator `fnDeclarator` a trailing ANNOTATION — a use of the macro, never a definition?
+// A typeless definition right after the annotated prototype (annotationHostDeclarator) or after a real function the grammar
+// read as a variable (annotationRenamedName); a typed definition or declaration whose real declarator sits in an ERROR
+// before it (annotationAfterErrorDeclarator) or whose type is a first annotation (annotationTypedAsType); a qualified name
+// behind a MISSING "::". P0's cFamilyMacroInvocationDecl keeps every one of these as a definition.
+inline bool cFamilyAnnotationDecl( TSNode fnDeclarator, std::string_view name, std::string_view src ) noexcept
+{
+    const TSNode declared = fieldChild( fnDeclarator, NodeField::Declarator );
+    if( !macroInvocationName( name ) )
+    {
+        return false;
+    }
+    if( qualifiedBehindMissingScope( declared ) )
+    {
+        return true;
+    }
+    if( !plainDeclaratorName( declared ) )
+    {
+        return false;
+    }
+    const TSNode owner = declaratorOwner( fnDeclarator );
+    const char*  kind  = ts_node_is_null( owner ) ? "" : ts_node_type( owner );
+    const bool   isDefinition = kindIs( kind, "function_definition" );
+    if( !( isDefinition || kindIs( kind, "declaration" ) || kindIs( kind, "field_declaration" ) ) )
     {
         return false;
     }
     if( !ts_node_is_null( fieldChild( owner, NodeField::Type ) ) )
     {
-        // MACRO-P1: the real declarator sits in an ERROR before it, or a FIRST annotation was read as the type
-        // (`void f() const ABSL_A( x ) ABSL_B( y ) { … }`: type ABSL_A, declarator ABSL_B)
         return annotationAfterErrorDeclarator( fnDeclarator, src ) || ( isDefinition && annotationTypedAsType( owner, src ) );
     }
-    const TSNode body = isDefinition ? fieldChild( owner, NodeField::Body ) : TSNode {};
-    return ts_node_is_null( body ) || !bodyFollowsClosedParameters( fnDeclarator, body, src ) || !braceBlockHoldsStatement( nodeTextOf( body, src ) )
-        || !ts_node_is_null( annotationHostDeclarator( owner, src ) )         // MACRO-P1: a trailing annotation owning a real body
-        || !ts_node_is_null( annotationRenamedName( fnDeclarator, src ).name );   // … whose prototype half was read as a variable
+    return isDefinition && ( !ts_node_is_null( annotationHostDeclarator( owner, src ) ) || !ts_node_is_null( annotationRenamedName( fnDeclarator, src ).name ) );
 }
 
 // MACRO-P1, the prototype side: the annotated definition whose body the prototype declarator `fnDeclarator` owns — the
@@ -3033,11 +3088,7 @@ inline bool cFamilyMacroInvocationDecl( TSNode fnDeclarator, std::string_view na
 // declarator; only a declaration closed by a MISSING ";", or an ERROR's last child, looks at its next sibling.
 inline TSNode annotatedDefinitionAfter( TSNode fnDeclarator, std::string_view src ) noexcept
 {
-    TSNode owner = parentOf( fnDeclarator );
-    for( int guard = 0; guard < 8 && !ts_node_is_null( owner ) && ( kindIs( ts_node_type( owner ), "pointer_declarator" ) || kindIs( ts_node_type( owner ), "reference_declarator" ) ); ++guard )
-    {
-        owner = parentOf( owner );
-    }
+    const TSNode owner = declaratorOwner( fnDeclarator );
     if( ts_node_is_null( owner ) )
     {
         return {};
@@ -3074,7 +3125,7 @@ inline TSNode annotatedDefinitionAfter( TSNode fnDeclarator, std::string_view sr
     }
     const TSNode macro = fieldChild( next, NodeField::Declarator );
     if( ts_node_is_null( macro ) || !kindIs( ts_node_type( macro ), "function_declarator" ) || !ts_node_eq( annotationHostDeclarator( next, src ), fnDeclarator )
-        || !cFamilyMacroInvocationDecl( macro, nodeFieldText( macro, NodeField::Declarator, src ), src ) )
+        || !cFamilyAnnotationDecl( macro, nodeFieldText( macro, NodeField::Declarator, src ), src ) )
     {
         return {};
     }
@@ -3086,8 +3137,8 @@ inline TSNode annotatedDefinitionAfter( TSNode fnDeclarator, std::string_view sr
 // site does not vanish: it becomes a call-shaped use of the macro, which model.h retags role="macro".
 inline bool cFamilyMacroInvocationCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode roleNode, std::string_view src ) noexcept
 {
-    return macroRefLang( lang ) && ( defCapSv == "definition.function" || defCapSv == "definition.method" )
-        && kindIs( ts_node_type( roleNode ), "function_declarator" ) && cFamilyMacroInvocationDecl( roleNode, name, src );
+    return macroRefLang( lang ) && ( defCapSv == "definition.function" || defCapSv == "definition.method" ) && kindIs( ts_node_type( roleNode ), "function_declarator" )
+        && ( cFamilyMacroInvocationDecl( roleNode, name, src ) || cFamilyAnnotationDecl( roleNode, name, src ) );
 }
 
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
