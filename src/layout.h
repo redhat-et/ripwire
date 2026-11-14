@@ -71,6 +71,7 @@
 #include <functional>
 #include <limits>       // std::numeric_limits — IntEval::apply refuses the one quotient int64 cannot hold
 #include <memory>       // std::unique_ptr / shared_ptr / weak_ptr — the std:: table's sizeof rows
+#include <optional>     // zeroOffsetChain: an unknown (mixed) chain
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1665,6 +1666,9 @@ struct ModelCtx
     // LAYOUT-EBO-NESTED: an in-repo aggregate's name → the type names of the subobjects at its offset 0 (its base, its first
     // member, and theirs, recursively). Filled as sizeNestedAggregate models a definition; read by the empty-base rule.
     gtl::btree_map<std::string, std::vector<std::string>> zeroOffsetTypes;
+    // …and the names whose accepted definitions disagree on that chain (`struct A { int x; };` beside `struct A : E { int x; };`,
+    // CodeRabbit 4570578038): the empty-base rule cannot tell which applies, so it refuses rather than let NodeId order decide.
+    gtl::btree_map<std::string, bool> zeroOffsetMixed;
 
     explicit ModelCtx( const IngestResult& i, const AggIndex& n )
         : ing( i ), byName( n ), bytes( i.files.size() ), stripped( i.files.size() ),
@@ -1825,19 +1829,33 @@ inline LayoutDef modelNestedDef( ModelCtx& ctx, std::uint32_t fileId, const DefS
     return d;
 }
 
+// The key the offset-0 chain is recorded and looked up under (CodeRabbit 4570578044): the bare aggregate name, template arguments
+// dropped. A class template is sized from its own definition only when no member depends on its parameters, so every
+// specialization the model sizes shares one chain; a specialization with a different body is another definition of the same
+// name, and disagreeing definitions are refused (zeroOffsetMixed).
+inline std::string zeroOffsetKey( std::string_view spec )
+{
+    std::string_view t = withoutCv( spec );
+    t                  = t.substr( 0, t.find( '<' ) );
+    return std::string( lastSegment( trimView( t ) ) );
+}
+
 // The subobject types at offset 0 of a modelled definition (LAYOUT-EBO-NESTED, CodeRabbit #630): its base (always at 0) and, when
-// placed at 0 by value, its first member — each with the types already recorded for it, so the chain is transitive.
-inline void recordZeroOffsetTypes( ModelCtx& ctx, std::string_view typeName, const LayoutDef& d )
+// placed at 0 by value, its first member — each with the types already recorded for it, so the chain is transitive. Sorted and
+// unique, so two definitions' chains compare as sets. nullopt when a link's own chain is mixed: then this one is unknown too.
+inline std::optional<std::vector<std::string>> zeroOffsetChain( const ModelCtx& ctx, const LayoutDef& d )
 {
     std::vector<std::string> at0;
+    bool                     mixed = false;
     const auto add = [ & ]( std::string_view spec )
     {
-        const std::string name( lastSegment( withoutCv( spec ) ) );
-        at0.push_back( name );
+        std::string name = zeroOffsetKey( spec );
+        mixed            = mixed || ctx.zeroOffsetMixed.find( name ) != ctx.zeroOffsetMixed.end();
         if( const auto it = ctx.zeroOffsetTypes.find( name ); it != ctx.zeroOffsetTypes.end() )
         {
             at0.insert( at0.end(), it->second.begin(), it->second.end() );
         }
+        at0.push_back( std::move( name ) );
     };
     if( !d.baseSpec.empty() )
     {
@@ -1848,9 +1866,26 @@ inline void recordZeroOffsetTypes( ModelCtx& ctx, std::string_view typeName, con
     {
         add( d.fields.front().type );
     }
-    if( !at0.empty() )
+    if( mixed )
     {
-        ctx.zeroOffsetTypes.emplace( std::string( typeName ), std::move( at0 ) );
+        return std::nullopt;
+    }
+    std::ranges::sort( at0 );
+    at0.erase( std::ranges::unique( at0 ).begin(), at0.end() );
+    return at0;
+}
+
+// Publish a type's chain once every accepted definition was read: equal chains are recorded, differing ones mark it mixed.
+inline void recordZeroOffsetTypes( ModelCtx& ctx, std::string_view typeName, const std::optional<std::vector<std::string>>& chain, bool chainsDiffer )
+{
+    const std::string key = zeroOffsetKey( typeName );
+    if( chainsDiffer || !chain )
+    {
+        ctx.zeroOffsetMixed.emplace( key, true );
+    }
+    else if( !chain->empty() )
+    {
+        ctx.zeroOffsetTypes.emplace( key, *chain );
     }
 }
 
@@ -1881,8 +1916,10 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
 
     ctx.inProgress.emplace_back( typeName );
     ++ctx.depth;
-    bool                                first = true;
-    gtl::btree_map<std::uint64_t, bool> seenSite;                      // dedupe the typedef-alias twin
+    bool                                    first = true;
+    gtl::btree_map<std::uint64_t, bool>     seenSite;                      // dedupe the typedef-alias twin
+    std::optional<std::vector<std::string>> chain;                         // the first accepted definition's offset-0 chain
+    bool                                    chainsDiffer = false;
     for( NodeId id : order )
     {
         const Symbol& s = ctx.ing.symbols[ id ];
@@ -1911,8 +1948,13 @@ inline TypeSize sizeNestedAggregate( ModelCtx& ctx, std::string_view typeName, s
         // empty: no member, and no base or one the model placed at 0 B (`struct M : E {};`, CodeRabbit 4544554347)
         const bool     emptyAgg = d.fields.empty() && ( d.baseSpec.empty() || ( d.baseSized && d.baseSize == 0 ) );
         const TypeSize here{ d.size, d.align, true, d.tailPad, emptyAgg };
-        if( first ) { recordZeroOffsetTypes( ctx, typeName, d ); out = here; first = false; }
+        if( first ) { chain = zeroOffsetChain( ctx, d ); out = here; first = false; }
         else if( here.size != out.size || here.align != out.align ) { note = "nested-mirrors-disagree"; out = TypeSize{}; break; }
+        else { chainsDiffer = chainsDiffer || zeroOffsetChain( ctx, d ) != chain; }
+    }
+    if( out.known )
+    {
+        recordZeroOffsetTypes( ctx, typeName, chain, chainsDiffer );
     }
     --ctx.depth;
     ctx.inProgress.pop_back();
@@ -2780,14 +2822,25 @@ inline bool refuseNestedEmptyBase( BodyWalk& w, const Declarator& d )
     {
         return false;
     }
-    const std::string_view base = lastSegment( withoutCv( w.def.baseSpec ) );
-    const auto             it   = w.ctx.zeroOffsetTypes.find( std::string( lastSegment( withoutCv( d.baseSpec ) ) ) );
+    const std::string base   = zeroOffsetKey( w.def.baseSpec );
+    const std::string member = zeroOffsetKey( d.baseSpec );
+    // the refused placement is withdrawn too, so the emitter prints no off= for it (CodeRabbit 4570578051)
+    const auto withdrawFirst = [ & ] { w.def.fields.front().placed = false; w.def.fields.front().offset = 0; };
+    if( w.ctx.zeroOffsetMixed.find( member ) != w.ctx.zeroOffsetMixed.end() )
+    {
+        withdrawFirst();
+        w.refuse( "base-class", flattenSpace( w.def.baseSpec, 120 ) + ": the definitions of the first member's type " + member
+                                  + " disagree on what sits at its offset 0, so whether the empty base can share its address is not modeled" );
+        return true;
+    }
+    const auto it = w.ctx.zeroOffsetTypes.find( member );
     if( it == w.ctx.zeroOffsetTypes.end() || std::ranges::find( it->second, base ) == it->second.end() )
     {
         return false;
     }
+    withdrawFirst();
     w.refuse( "base-class", flattenSpace( w.def.baseSpec, 120 ) + ": the first member " + std::string( d.name ) + " holds a "
-                              + std::string( base ) + " at its own offset 0, so the empty base cannot share its address" );
+                              + base + " at its own offset 0, so the empty base cannot share its address" );
     return true;
 }
 

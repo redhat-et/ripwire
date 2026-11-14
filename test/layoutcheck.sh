@@ -660,6 +660,35 @@ done
 L="$( "$BIN" "$EB" --layout=PlainB --no-cache 2>/dev/null )"   # status: --layout exits nonzero on a refused type by design; the modeled=/size= attributes are the verdict and an empty answer FAILs
 if [ "$( attr 'def ' modeled )" = "1" ] && [ "$( attr 'def ' size )" = "8" ] && [ "$( field b off )" = "0" ]; then ok "EBO nested (control): a first member with no E is placed at 0 (size=8)"
 else no "EBO nested (control): PlainB modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) b.off=$( field b off )"; fi
+# (CodeRabbit 4570578051; red on 1c920292f: a.off="0") the refused first member prints no offset: the refusal withdraws it.
+L="$( "$BIN" "$EB" --layout=NestA --no-cache 2>/dev/null )"   # status: --layout exits nonzero on a refused type by design; the field rows are the verdict and an empty answer FAILs
+if printf '%s' "$L" | grep -q '<f n="a" '; then
+    if [ -z "$( field a off )" ]; then ok "EBO nested: the refused member a prints no off="
+    else no "EBO nested: the refused member a still prints off=$( field a off )"; fi
+else no "EBO nested (premise): NestA printed no row for its member a — the arm is vacuous"; fi
+# (CodeRabbit 4570578038; red on 1c920292f: size=8, a at 0) two accepted definitions of A disagree on what sits at offset 0 (one
+# derives from the empty E): which one NodeId order picked decided the verdict, so the model refuses. Control: two definitions
+# that agree (both plain) still place a at 0.
+ZC="$TMP/zerochain"; mkdir -p "$ZC/mixed/a" "$ZC/mixed/b" "$ZC/same/a" "$ZC/same/b"
+printf 'struct E {};\nstruct A { int x; };\nstruct DZero : E { A a; int y; };\n' >"$ZC/mixed/a/a.h"
+printf 'struct E {};\nstruct A : E { int x; };\n'                               >"$ZC/mixed/b/b.h"
+cp "$ZC/mixed/a/a.h" "$ZC/same/a/a.h"; printf 'struct E {};\nstruct A { int x; };\n' >"$ZC/same/b/b.h"
+L="$( "$BIN" "$ZC/mixed" --layout=DZero --no-cache 2>/dev/null )"   # status: --layout exits nonzero on a refused type by design; the modeled= attribute is the verdict and an empty answer FAILs
+if [ "$( attr 'def ' modeled )" = "0" ] && has 'caveat k="base-class"'; then ok "EBO nested: definitions of A that disagree on offset 0 refuse DZero"
+else no "EBO nested: DZero modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) a.off=$( field a off ) — mixed offset-0 chains must refuse"; fi
+L="$( "$BIN" "$ZC/same" --layout=DZero --no-cache 2>/dev/null )"   # status: as above
+if [ "$( attr 'def ' modeled )" = "1" ] && [ "$( field a off )" = "0" ]; then ok "EBO nested (control): two agreeing definitions of A still place a at 0"
+else no "EBO nested (control): DZero modeled=$( attr 'def ' modeled ) a.off=$( field a off )"; fi
+# (CodeRabbit 4570578044; red on 1c920292f: size=8, a at 0) a template member: the chain was recorded under TA and looked up as
+# TA<int>, so the refusal missed. Control: a template whose offset 0 holds no E is still placed at 0.
+TP="$TMP/ebotemplate"; mkdir -p "$TP"
+printf 'struct E {};\ntemplate <class T> struct TA : E { int x; };\ntemplate <class T> struct TC { int x; };\nstruct DTemp : E { TA<int> a; int y; };\nstruct DTc : E { TC<int> c; int y; };\n' >"$TP/t.h"
+L="$( "$BIN" "$TP" --layout=DTemp --no-cache 2>/dev/null )"   # status: as above
+if [ "$( attr 'def ' modeled )" = "0" ] && has 'caveat k="base-class"'; then ok "EBO nested: a template member TA<int> holding an E at offset 0 refuses DTemp"
+else no "EBO nested: DTemp modeled=$( attr 'def ' modeled ) size=$( attr 'def ' size ) a.off=$( field a off ) — TA<int> holds an E at its offset 0"; fi
+L="$( "$BIN" "$TP" --layout=DTc --no-cache 2>/dev/null )"   # status: as above
+if [ "$( attr 'def ' modeled )" = "1" ] && [ "$( field c off )" = "0" ]; then ok "EBO nested (control): a template member TC<int> with no E is placed at 0"
+else no "EBO nested (control): DTc modeled=$( attr 'def ' modeled ) c.off=$( field c off )"; fi
 
 # exit-code control for the owner decision: a single readable definition still exits 0, a matching mirror 0, drift 2
 for ec in PadCase:0:"a single readable definition" TwinUniforms:0:"a matching mirror" MirrorUniforms:2:"mirror drift"; do
