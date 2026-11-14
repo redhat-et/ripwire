@@ -348,6 +348,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // lane recall: absent at zero, callers and impact only (graphlegend.h kDeclinedIfaceLegend).
     { "declined_iface",    "declined_iface=K: K declined TS calls sharing a name with an interface/abstract signature, by name only (MAY go through it); not a subset of declined_calls=" },
     { "declined_literal_calls", "declined_literal_calls=K: K built-in member calls on JS/TS literals dropped (shares an in-repo name), in no row" },
+    // BODILESS-SEED (contractseed.h, graphlegend.h kImplsLegend): present exactly when the selector names a bodiless contract method.
+    { "impls",             "impls=K: the selector is an interface/abstract method with no body; its implementors' K same-named bodies (Go: by method names) join defs= as seeds; 0 = none in the tree, a zero beside it is none found" },
     // graph.h StdMemberGate: the callees answer's <stdm> line, absent when the definitions made no such call (graphlegend.h kStdMemberCallsLegend).
     // Keyed on n= (read on <stdm> only): the attribute the full clause opens with, which compactlegendcheck (S) reads.
     { "n",                 "stdm n= calls=: of declined_calls=, calls named like a standard-type member of their language (C++ container/string/optional/smart pointer, Rust collection/string/Option/Result; n=) on a receiver no rule tied to an in-tree class (Rust: one of an in-tree type no rule typed too: a generic bound, dyn or impl Trait, a type alias, a glob of a glob, a tuple-struct field, a non-plain pattern, behind Option / Result / Rc / Arc / RefCell / Cell / Mutex / RwLock); no edge or row (may be the std member)", false, "stdm" },
@@ -936,6 +938,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "slot_fns", "s slot_fns=K: K functions that struct field holds (the width the crossing picks from); NOT capped, a wide table is still crossed; a hedge", true, {}, MapHeaderRead::No, {}, "path" },
     { "to_glob", "to_glob=1: to='s * matched every function or method definition fitting it (to_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
     { "from_glob", "from_glob=1: from='s * matched every function or method definition fitting it (from_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
+    { "to_impls", "to_impls=K: to= is an interface/abstract method with no body; its implementors' K same-named bodies (Go: by method names) join to_defs=; 0 = none in the tree", false, "path", MapHeaderRead::No, {}, "path" },
+    { "from_impls", "from_impls=K: from= is an interface/abstract method with no body; its implementors' K same-named bodies (Go: by method names) join from_defs=; 0 = none in the tree", false, "path", MapHeaderRead::No, {}, "path" },
     // GV-PATH-BIND (src/forgraphverb.h kNarrowedVerbLegend), present-only: an endpoint / terminal / selector the M1 rule narrowed
     { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "path", MapHeaderRead::No, {}, "path" },
     // PATH-ROUTE v2 (src/pathroute.h pathRouteLegend): present-only, on a single-chain reached answer of >= 2 by-name hops

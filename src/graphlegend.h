@@ -882,6 +882,36 @@ inline std::string declinedIfaceKeyJson( std::size_t declinedIface )
     return countFieldOrEmpty( "declined_iface", declinedIface, /*json=*/true );
 }
 
+// ── impls= on the impact, callers and safe-delete roots, from_impls=/to_impls= on path (contractseed.h widenContractSeeds) ──
+// BODILESS-SEED: the selector named a contract method (an interface or abstract member with no body of its own), so the
+// answer is seeded from its implementors' same-named bodied methods as well, and defs= counts them. Present exactly when a
+// contract seed is (0 included: no implementor in the tree, so the zero beside it is none found); absent otherwise.
+inline constexpr const char* kImplsLegend =
+    "impls=K (path: from_impls=/to_impls=; absent unless the selector names a method with no body of its own on an interface or abstract type) counts the same-named bodied methods of that type's implementors (the extends/implements map the lego verb lists; a structurally typed language whose map lists none, such as Go, the types whose methods cover every name the type declares, by name). A call through the interface binds to one of those bodies or is declined with them as candidates, never to the signature, so they join defs= as seeds and the answer reads what such a call runs. impls=0: no implementor in this tree, so a zero beside it is none found; an implementor outside the tree, a generated one or an object literal may exist. ";
+inline const char* implsLegend( bool on ) noexcept { return on ? kImplsLegend : ""; }
+inline std::string implsFieldOrEmpty( std::string_view name, std::size_t contracts, std::size_t impls, bool json )
+{
+    if( contracts == 0 )
+    {
+        return {};
+    }
+    const std::string n = std::to_string( impls );
+    return json ? ",\"" + std::string( name ) + "\":" + n : " " + std::string( name ) + "=\"" + n + "\"";
+}
+inline std::string implsAttrXml( std::size_t contracts, std::size_t impls )
+{
+    return implsFieldOrEmpty( "impls", contracts, impls, /*json=*/false );
+}
+inline std::string implsKeyJson( std::size_t contracts, std::size_t impls )
+{
+    return implsFieldOrEmpty( "impls", contracts, impls, /*json=*/true );
+}
+// the path root's spelling: one per endpoint, each present exactly when that endpoint names a contract method
+inline std::string pathImplsFields( std::size_t fromContracts, std::size_t fromImpls, std::size_t toContracts, std::size_t toImpls, bool json )
+{
+    return implsFieldOrEmpty( "from_impls", fromContracts, fromImpls, json ) + implsFieldOrEmpty( "to_impls", toContracts, toImpls, json );
+}
+
 // ── Depth-labelled --impact (0.6.5): by_depth= on the root, d= on the rows ──────────────────────────────────────────
 // `counts` is graph.h depthCounts over the FULL reach set: element k counts the rows first reached at hop k+1. One
 // spelling per dialect, shared by the CLI --impact and its MCP twin so the two cannot drift. Absent when the reach set

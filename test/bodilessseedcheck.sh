@@ -25,8 +25,37 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 echo "bodilessseedcheck: BIN=$BIN"
 
-TS="$TMP/ts"; GO="$TMP/go"
-mkdir -p "$TS/src" "$GO/pk" "$GO/cmd"
+TS="$TMP/ts"; GO="$TMP/go"; CPP="$TMP/cpp"; JAVA="$TMP/java"
+mkdir -p "$TS/src" "$GO/pk" "$GO/cmd" "$CPP" "$JAVA"
+# C++ (a pure virtual, one override out of line, one inline) and Java (an interface): the shared helper covers them too
+cat > "$CPP/router.h" <<'EOF'
+#pragma once
+class Router {
+public:
+    virtual ~Router() = default;
+    virtual int match( int path ) = 0;
+};
+class Linear : public Router {
+public:
+    int match( int path ) override;
+};
+class Trie : public Router {
+public:
+    int match( int path ) override { return path * 2; }
+};
+EOF
+cat > "$CPP/router.cpp" <<'EOF'
+#include "router.h"
+int Linear::match( int path ) { return path + 1; }
+int dispatch( Router& r, int p ) { return r.match( p ); }
+int serve() { Linear l; return dispatch( l, 3 ); }
+EOF
+cat > "$JAVA/Router.java" <<'EOF'
+interface Router { int match(int p); }
+class Linear implements Router { public int match(int p) { return p + 1; } }
+class Trie implements Router { public int match(int p) { return p * 2; } }
+class App { Router r; int dispatch(int p) { return r.match(p); } int serve() { return dispatch(3); } }
+EOF
 cat > "$TS/src/router.ts" <<'EOF'
 export interface Router<T> {
   add(method: string, path: string, handler: T): void
@@ -134,9 +163,9 @@ func main() {
 }
 EOF
 
-python3 - "$BIN" "$TS" "$GO" <<'PY'
+python3 - "$BIN" "$TS" "$GO" "$CPP" "$JAVA" <<'PY'
 import re, subprocess, sys
-BIN, TS, GO = sys.argv[ 1:4 ]
+BIN, TS, GO, CPP, JAVA = sys.argv[ 1:6 ]
 npass = nfail = 0
 seen = { "pos": 0, "safe": 0, "neg": 0, "zero": 0 }
 
@@ -187,6 +216,22 @@ for lang, root, sel, entry in ( ( "ts", TS, "Router.match", "serve" ), ( "go", G
     say( a.get( "to_impls" ) == "2" and ( a.get( "reachable" ) == "1" or "<bridge" in out ),
          "[%s] path" % lang, "--path=%s,%s reaches an implementor or bridges the declined dispatch, to_impls=2" % ( entry, sel ),
          "to_impls=%s reachable=%s bridge=%s" % ( a.get( "to_impls" ), a.get( "reachable" ), "<bridge" in out ) )
+
+# ── the same helper, C++ (pure virtual) and Java (interface): impact and safe-delete ─────────────────────────────────────
+for lang, root in ( ( "cpp", CPP ), ( "java", JAVA ) ):
+    rc, out = run( root, "--impact=Router.match" ); a = root_attrs( out, "impact" ) or {}
+    seen[ "pos" ] += 1 if a else 0
+    say( a.get( "impls" ) == "2" and ( num( a, "reaches" ) > 0 or num( a, "declined_calls" ) > 0 ), "[%s] impact" % lang,
+         "--impact=Router.match seeds the 2 overrides (impls=2) and names the dispatch", "attrs=%s" % a )
+    rc, out = run( root, "--safe-delete=Router.match" ); a = root_attrs( out, "safe-delete" ) or {}
+    seen[ "pos" ] += 1 if a else 0; seen[ "safe" ] += 1 if a else 0
+    say( a.get( "impls" ) == "2" and a.get( "risk" ) not in ( None, "none-found" ), "[%s] safe-delete" % lang,
+         "--safe-delete=Router.match never says risk=none-found", "attrs=%s" % a )
+    rc, out = run( root, "--impact=Linear.match" ); a = root_attrs( out, "impact" ) or {}
+    seen[ "neg" ] += 1 if a else 0
+    want = "2" if lang == "cpp" else "1"   # C++: the in-class declaration beside its out-of-line definition, as on main (own body: no contract)
+    say( a != {} and "impls" not in a and a.get( "defs" ) == want, "[%s] concrete impact" % lang,
+         "--impact=Linear.match: an override keeps defs=%s and carries no impls=" % want, "attrs=%s" % a )
 
 # ── negative arms: a bodied concrete method is no contract (no impls=, defs stays 1) ──────────────────────────────────────
 for lang, root, sel, entry in ( ( "ts", TS, "LinearRouter.match", "serve" ), ( "go", GO, "Deb.Package", "main" ) ):

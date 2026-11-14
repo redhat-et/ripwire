@@ -915,6 +915,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
          + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's dc_shown= / dc_next=, absent when nothing was cut
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
+         + implsKeyJson( chRows.contractSeeds, chRows.implBodies )   // BODILESS-SEED: the CLI root's impls= (callers direction only)
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
          + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, name, chNextSelector );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
@@ -3430,7 +3431,9 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // H1: the decl→def residue, the CLI --impact's unproven_defs= — same resolver, same helpers, so the two surfaces
     // cannot disagree about the number.
     std::size_t               unprovenDefs = 0;
-    const std::vector<NodeId> seeds        = resolveAllByNameQualified( ing, symbol, &unprovenDefs );
+    // BODILESS-SEED (contractseed.h): a contract method seeds from its implementors' bodies too, as on the CLI (impls=)
+    const ContractSeeds        imContract = widenContractSeeds( ing, g, resolveAllByNameQualified( ing, symbol, &unprovenDefs ) );
+    const std::vector<NodeId>& seeds      = imContract.seeds;
     if( seeds.empty() )
     {
         return std::string{}; // symbol not found → caller reports not-found
@@ -3516,7 +3519,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
-                  unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
+                  ( unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ) + implsLegend( imContract.contracts > 0 ) ).c_str(),   // H1, BODILESS-SEED: exactly when the root carries them, as on the CLI
                   declinedCallsLegendForRows( declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
                     + declinedSitesLegend( declinedSitesLegendFlags( imDc.views, /*callersForm=*/true, imDc.cut ) ),   // exactly when the root carries declined_calls=; ix2-slice: + the <dc> rows, as on the CLI
                   declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
@@ -3541,7 +3544,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // root=, MCP does not) and every row answered the same question in a different path dialect.
     const std::string  imRootAttr   = imSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
     rw::emitTo( mem, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}{}>",
-                  ex( symbol ).c_str(), seeds.size(), reach.size(), impactRingAttrXml( imRing ) + unprovenDefsAttrXml( unprovenDefs ) + defsListedAttrXml( imAttr.groups, imListing ),   // HOP1, as on the CLI; H1: where the CLI root carries it; attrib-multidef
+                  ex( symbol ).c_str(), seeds.size(), reach.size(), impactRingAttrXml( imRing ) + unprovenDefsAttrXml( unprovenDefs ) + implsAttrXml( imContract.contracts, imContract.impls ) + defsListedAttrXml( imAttr.groups, imListing ),   // HOP1, as on the CLI; H1: where the CLI root carries it; attrib-multidef
                   byDepthAttrXml( byDepth ),                                                                        // 0.6.5: the CLI root's by_depth=
                   imports.xmlAttrs.c_str(), radiusTested, radiusUntested, ( declinedCallsAttrXml( declinedCalls ) + declinedSiteCutAttrXml( imDc.cut ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
                   ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } ) ), imRootAttr.c_str(),
@@ -3976,9 +3979,12 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     std::size_t               dstUnprovenDefs = 0;
     bool                      srcGlob         = false;   // ix2-slice (IX-2 P4): a `*` endpoint, as on the CLI
     bool                      dstGlob         = false;
-    const std::vector<NodeId> srcDefs         = resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob );
-    const std::vector<NodeId> dstDefs         = resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob );
-    const std::size_t         unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
+    // BODILESS-SEED (contractseed.h): an endpoint naming a contract method also stands for its implementors' bodies, as on the CLI
+    const ContractSeeds        ptSrc           = widenContractSeeds( ing, g, resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob ) );
+    const ContractSeeds        ptDst           = widenContractSeeds( ing, g, resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob ) );
+    const std::vector<NodeId>& srcDefs         = ptSrc.seeds;
+    const std::vector<NodeId>& dstDefs         = ptDst.seeds;
+    const std::size_t          unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
     if( srcDefs.empty() || dstDefs.empty() )
     {
         return std::string{}; // an endpoint not found → caller reports not-found
@@ -4070,12 +4076,13 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
                   ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
                     + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
-                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
+                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) + implsLegend( ptSrc.contracts + ptDst.contracts > 0 ) ).c_str(),   // BODILESS-SEED
                   graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
     rw::emitTo( mem, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                   ex( from ).c_str(), ex( to ).c_str(), ptBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                   ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
+                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob )
+                                                    + pathImplsFields( ptSrc.contracts, ptSrc.impls, ptDst.contracts, ptDst.impls, /*json=*/false ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
                   ptRows.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
                   ( ptRootAttrs + hopRootAttrsXml( ptHops ) + ptRootAttr ).c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
