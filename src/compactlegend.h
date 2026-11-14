@@ -776,7 +776,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "refs_dropped",      "refs_dropped=K: K listed branches could not be read, in no count or row" },
     // CROSSREF-MAXREFS: the git sweeps' ref window (crossref kMaxRefs). Past 512 refs they read the newest and count the rest,
     // where they used to refuse; present only then, so a sweep under the window is byte-identical. Head terms like refs_dropped=.
-    { "refs_omitted",      "refs_omitted=K: past the 512-ref window the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which are read)" },
+    { "refs_omitted",      "refs_omitted=K: past the ref window (512 refs; whereis: 2097152 tree entries) the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which; detail=1 reads all)" },
     { "labels_omitted",    "labels_omitted=K: K labelled refs past the sweep's 512-ref window, never scored" },
     { "head_conflicts_ok", "head_conflicts_ok=0: that arm's base or HEAD tree was unavailable, head_conflicts= unknown", true, "arm" },
     { "render_failed",     "render_failed=: sections whose render FAILED (empty, not budget-omitted)", true },

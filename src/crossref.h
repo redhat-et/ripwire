@@ -117,6 +117,7 @@
 #include <format>       // blobsUnreadCause — the one refusal sentence
 #include <type_traits>  // streamBlobs: a stream with no piece reader keeps the whole-or-skip rule
 #include "infra/pieceread.h"   // LARGE-PARTIAL-1: a lexical reader reads a blob of any size, in line-aligned pieces
+#include "infra/limitwarn.h"   // LARGE-PARTIAL-1: a ref window or parse guard that cuts says so on stderr too
 #include <functional>
 #include <limits>       // parseCatFileHeader: the size field never overflows
 #include <mutex>        // labelBranchRowsByParse holds quality::headSnapshotIngestMutex around the blob parse
@@ -150,7 +151,16 @@ constexpr float         kRefSupersedeMin = 0.60f;    // stray-line-weighted shar
 // pays ~2 git spawns per ref (77 s at 511 refs, 278 s at 2,048 on an M2, peak flat at 13-19 MB, ~240 B of answer per ref);
 // --whereis holds every ref's tree listing at once (~0.1 MB per ref on a 200-file tree, 849 MB at 8,192 refs; 0.7-1.0 GB at
 // 524 refs of a 5,239-file tree). Linear, but not small on a large repo, so the window stays and only its refusal went.
+//
+// REF-WINDOW-COST (LARGE-PARTIAL-1): the per-ref git spawns are gone (one rev-list walk for the merge bases, batched
+// `diff-tree --stdin`), so the window bounds WORK now, sized by measurement on an M2 under load: --stray-content 4.3 s and
+// --abi 2.3 s at 602 branches of a one-file repo (86 s and 125 s before), 8.0 s and 5.4 s at 602 branches of cockroach
+// (20,517 files). 1,024 refs of cockroach would pass 10 s, so 512 stays. --whereis is bounded by SITES instead (one per
+// tree entry per ref, kWhereisSiteBudget): it holds every listed site at once, ~4.5 MB per cockroach ref (2.8 GB and 15.5 s
+// at 512 refs). --detail lifts both, and every cut prints one stderr warning naming the limit (rw::warnLimitReached).
 constexpr std::uint32_t kMaxRefs         = 512;      // ref window — past it the newest refs are read, refs_omitted= counts the rest
+constexpr std::size_t   kWhereisSiteBudget = std::size_t( 2 ) << 20;   // whereis: refs × HEAD tree entries it reads at most
+constexpr std::size_t   kWhereisMinRefs    = 16;     // …but never fewer refs than this (HEAD included), however large the tree
 
 // Display caps (--detail lifts both): the ranked head is the answer, and a 30-branch sweep would otherwise
 // bury it under thousands of rows. What is dropped is always COUNTED in a <more/> element, never silently.
@@ -865,6 +875,19 @@ inline std::string gitCapture( const std::string& root, const std::string& tail 
     return quality::gitOneLine( root, tail );
 }
 
+struct GitListing
+{
+    std::vector<std::string> lines;
+    bool                     ok = false;
+};
+
+inline GitListing gitListChecked( const std::string& root, const std::string& tail )
+{
+    GitCommandLines res = gitCommandLines( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " " + tail + " 2>/dev/null" );
+    return GitListing{ std::move( res.lines ), res.isStarted && WIFEXITED( res.status ) && WEXITSTATUS( res.status ) == 0 };
+}
+
+
 inline std::vector<std::string_view> splitLines( std::string_view s )
 {
     return wsdetail::segmentsOf( s, '\n' );
@@ -1000,6 +1023,18 @@ inline std::string refsOmittedAttr( const std::vector<std::string>& omitted )
     return omitted.empty() ? std::string() : ( " refs_omitted=\"" + std::to_string( omitted.size() ) + "\"" );
 }
 
+// The person's half of the same disclosure (owner 2026-11-14): one stderr line when the window cut, never in the answer.
+inline void warnRefWindow( std::string_view verb, std::size_t read, const std::vector<std::string>& omitted, std::string_view limit )
+{
+    if( omitted.empty() )
+    {
+        return;
+    }
+    warnLimitReached( std::format( "{} read the newest {} of {} local branches; {} older were not read (limit: {})", verb, read, read + omitted.size(),
+                                   omitted.size(), limit ),
+                      "pass --detail=1 to read every branch, or narrow the branches with a ref-name filter" );
+}
+
 // One `diff --raw` row: both sides' blob shas for one path. `git diff --raw` is the ONE call that yields
 // the changed path set AND both blob shas together — no follow-up ls-tree per file.
 struct RawRow
@@ -1014,6 +1049,26 @@ struct RawRow
 // --no-abbrev is load-bearing, not cosmetic: `diff --raw` abbreviates object names to ~8 hex by default, and
 // an abbreviated name is NOT a key — it cannot be handed to cat-file as a stable identity, and two blobs can
 // share a prefix. The full name is what makes the per-sha memo sound.
+// One raw row (":<modeA> <modeB> <shaA> <shaB> <status>\t<path>") into `out`; any other line, or a malformed row, adds nothing.
+inline void appendRawRow( std::string_view line, std::vector<RawRow>& out )
+{
+    if( line.empty() || line[0] != ':' )
+    {
+        return;
+    }
+    const std::size_t tab = line.find( '\t' );
+    if( tab == std::string_view::npos )
+    {
+        return;
+    }
+    const std::vector<std::string_view> f = wsdetail::segmentsOf( line.substr( 1, tab - 1 ), ' ' );
+    if( f.size() < 4 || !isBlobSha( f[2] ) || !isBlobSha( f[3] ) )
+    {
+        return; // malformed row — skip, never splice
+    }
+    out.push_back( RawRow{ std::string( line.substr( tab + 1 ) ), std::string( f[2] ), std::string( f[3] ) } );
+}
+
 inline std::vector<RawRow> diffRaw( const std::string& root, const std::string& a, const std::string& b )
 {
     // Both sides must be RESOLVED object names before they reach `git diff`, which honours --output=FILE.
@@ -1027,25 +1082,7 @@ inline std::vector<RawRow> diffRaw( const std::string& root, const std::string& 
     std::vector<RawRow> out;
     for( std::string_view line : splitLines( raw ) )
     {
-        if( line.empty() || line[0] != ':' )
-        {
-            continue;
-        }
-        const std::size_t tab = line.find( '\t' );
-        if( tab == std::string_view::npos )
-        {
-            continue;
-        }
-        const std::vector<std::string_view> f = wsdetail::segmentsOf( line.substr( 1, tab - 1 ), ' ' );
-        if( f.size() < 4 )
-        {
-            continue;
-        }
-        if( !isBlobSha( f[2] ) || !isBlobSha( f[3] ) )
-        {
-            continue; // malformed row — skip, never splice
-        }
-        out.push_back( RawRow{ std::string( line.substr( tab + 1 ) ), std::string( f[2] ), std::string( f[3] ) } );
+        appendRawRow( line, out );
     }
     std::sort( out.begin(), out.end(), []( const RawRow& x, const RawRow& y ) { return x.path < y.path; } );
     return out;
@@ -1061,6 +1098,7 @@ inline std::vector<RawRow> diffRaw( const std::string& root, const std::string& 
 constexpr std::size_t   kMaxGitWorkers = 12;          // matches the ingest pool's measured ~12-way; these are
                                                       // processes, so more workers stops paying well before this
 constexpr std::uint32_t kNoPair        = 0xFFFFFFFFu; // "this ref needs no diff" (see RefPlumbing::isAncestor)
+constexpr std::size_t   kDiffTreeSlices = 4;           // `git diff-tree --stdin` processes one DiffPairTable::run shares its pairs across
 
 // Run `body( i )` for every i in [0,count), across a small pool. DETERMINISM: every body writes only to the
 // slot its OWN index owns and reads nothing another body writes, so the result is identical to the serial
@@ -1196,6 +1234,111 @@ inline void streamBlobsInSlices( const std::string& root, const std::vector<std:
     }
 }
 
+// A pair of revisions to diff, a -> b (DiffPairTable's registered pairs).
+struct RevisionPair
+{
+    std::string a, b;
+};
+
+// Each pair's raw rows, and whether a diff answered it (DiffPairTable::run, REF-WINDOW-COST).
+struct DiffPairRows
+{
+    std::vector<std::vector<RawRow>> rows;         // one per pair, sorted by path once answered
+    std::vector<char>                unfinished;   // 1 => no diff answered that pair (a thrown worker never reached it)
+};
+
+// Pairs [begin, end) through one `git diff-tree --stdin`: each input line "<b> <a>" diffs a against b (diff-tree reads
+// the second name as the first one's parent), and --always prints the header line (the first name) even for an empty
+// diff, so the output is one header per input line, in order, each followed by that pair's raw rows. A pair is whole
+// when the process exited 0, or when a later pair's header follows it; the rest stay unfinished for diffPairsBatched's fallback.
+inline void diffTreeSlice( const std::string& root, std::span<const RevisionPair> pairs, std::size_t begin, std::size_t end, DiffPairRows& out )
+{
+    static std::atomic<std::uint64_t> listSeq{ 0 };
+    const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-pairs-" + std::to_string( os::getpid() ) + "-"
+                               + std::to_string( listSeq.fetch_add( 1, std::memory_order_relaxed ) ) + ".txt";
+    std::vector<std::size_t> asked;   // the pairs written to the list, in order
+    {
+        std::FILE* lf = std::fopen( listPath.c_str(), "wb" );
+        if( lf == nullptr )
+        {
+            return;   // every pair stays unfinished: diffPairsBatched diffs each on its own
+        }
+        for( std::size_t i = begin; i < end; ++i )
+        {
+            if( isRevisionToken( pairs[ i ].a ) && isRevisionToken( pairs[ i ].b ) )
+            {
+                rw::emitTo( lf, "{} {}\n", pairs[ i ].b, pairs[ i ].a );
+                asked.push_back( i );
+            }
+        }
+        std::fclose( lf );
+    }
+    const GitListing listing = gitListChecked( root, "diff-tree --stdin -r --raw --no-abbrev --no-renames --always < " + shSingleQuote( listPath ) );
+    os::unlink( listPath.c_str() );
+    std::size_t seen = 0;   // headers read so far; rows belong to asked[ seen - 1 ]
+    for( const std::string& line : listing.lines )
+    {
+        if( line.empty() )
+        {
+            continue;
+        }
+        if( line[ 0 ] != ':' )
+        {
+            if( seen == asked.size() )
+            {
+                break;   // more headers than pairs: the output is not the shape asked for, so stop reading it
+            }
+            ++seen;
+            continue;
+        }
+        if( seen > 0 )
+        {
+            appendRawRow( line, out.rows[ asked[ seen - 1 ] ] );
+        }
+    }
+    const std::size_t whole = ( listing.ok && seen == asked.size() ) ? seen : ( seen > 0 ? seen - 1 : 0 );
+    for( std::size_t k = 0; k < whole; ++k )
+    {
+        std::vector<RawRow>& rows = out.rows[ asked[ k ] ];
+        std::sort( rows.begin(), rows.end(), []( const RawRow& x, const RawRow& y ) { return x.path < y.path; } );
+        out.unfinished[ asked[ k ] ] = 0;
+    }
+    for( std::size_t k = whole; k < asked.size(); ++k )
+    {
+        out.rows[ asked[ k ] ].clear();   // a partial pair's rows are discarded; diffPairsBatched diffs it again on its own
+    }
+}
+
+// Every DISTINCT registered pair, diffed through kDiffTreeSlices `git diff-tree --stdin` processes (REF-WINDOW-COST,
+// LARGE-PARTIAL-1). One process per pair cost a spawn each, ~0.2 s under load on an M2 (the /usr/bin/git shim), so a
+// 512-ref sweep spent most of its 86 s starting processes; one `diff-tree --stdin` answers a whole slice. A pair the
+// batch did not answer whole (a slice that failed, a revision it could not read) falls back to its own diffRaw, so
+// the rows are the ones the per-pair path gives.
+inline DiffPairRows diffPairsBatched( const std::string& root, std::span<const RevisionPair> pairs )
+{
+    DiffPairRows out;
+    out.rows.assign( pairs.size(), {} );
+    out.unfinished.assign( pairs.size(), 1 );
+    const std::size_t slices = std::min( kDiffTreeSlices, pairs.size() );
+    ParallelSweep     sliceSweep;
+    parallelIndexed( slices, [ & ]( std::size_t t ) { diffTreeSlice( root, pairs, pairs.size() * t / slices, pairs.size() * ( t + 1 ) / slices, out ); }, sliceSweep );
+    std::vector<std::size_t> rest;
+    for( std::size_t i = 0; i < pairs.size(); ++i )
+    {
+        if( out.unfinished[ i ] != 0 )
+        {
+            rest.push_back( i );
+        }
+    }
+    ParallelSweep sweep;
+    parallelIndexed( rest.size(), [ & ]( std::size_t k ) { out.rows[ rest[ k ] ] = diffRaw( root, pairs[ rest[ k ] ].a, pairs[ rest[ k ] ].b ); }, sweep );
+    for( std::size_t k = 0; k < rest.size(); ++k )
+    {
+        out.unfinished[ rest[ k ] ] = sweep.isDone( k ) ? 0 : 1;
+    }
+    return out;
+}
+
 // The DISTINCT (a,b) object-name pairs the sweep needs diffed, and their rows. Same reasoning the BlobStore
 // rests on: a diff between two IMMUTABLE object names is a pure function of that pair, so asking twice can
 // only ever spend a process for an answer already held. It pays because the sweep genuinely repeats itself —
@@ -1216,22 +1359,17 @@ public:
         if( it != index_.end() ) { ++reuseCount_; return it->second; }
 
         const std::uint32_t pairIndex = std::uint32_t( pairs_.size() );
-        pairs_.push_back( DiffPair{ a, b } );
+        pairs_.push_back( RevisionPair{ a, b } );
         index_.emplace( key, pairIndex );
         return pairIndex;
     }
 
-    // One `git diff --raw` per DISTINCT registered pair, across the pool.
+    // Every DISTINCT registered pair, diffed in batches (diffPairsBatched, REF-WINDOW-COST LARGE-PARTIAL-1).
     void run( const std::string& root )
     {
-        rows_.resize( pairs_.size() );
-        ParallelSweep sweep;
-        parallelIndexed( pairs_.size(), [ & ]( std::size_t i ) { rows_[i] = diffRaw( root, pairs_[i].a, pairs_[i].b ); }, sweep );
-        unfinished_.assign( pairs_.size(), 0 );
-        for( std::size_t i = 0; i < pairs_.size(); ++i )
-        {
-            unfinished_[ i ] = sweep.isDone( i ) ? 0 : 1;
-        }
+        DiffPairRows got = diffPairsBatched( root, pairs_ );
+        rows_            = std::move( got.rows );
+        unfinished_      = std::move( got.unfinished );
     }
 
     // Was this pair's diff actually RUN? An empty row list is also what a diff nobody ran holds, and it reads as "no
@@ -1255,9 +1393,7 @@ public:
     std::size_t reuseCount() const noexcept { return reuseCount_; }
 
 private:
-    struct DiffPair { std::string a, b; };
-
-    std::vector<DiffPair>                     pairs_;
+    std::vector<RevisionPair>                 pairs_;
     std::vector<std::vector<RawRow>>          rows_;        // sized once in run(), one owner per slot
     std::vector<char>                         unfinished_;  // 1 ⇒ a thrown worker never ran that pair's diff
     gtl::btree_map<std::string, std::uint32_t> index_;
@@ -1437,6 +1573,162 @@ inline RefPlumbing probeRefBase( const std::string& root, const RefInfo& ref, co
     return plumb;
 }
 
+// ── every ref's merge base from ONE history walk (REF-WINDOW-COST, LARGE-PARTIAL-1) ─────────────────────────────
+//
+// probeRefBase is one `git merge-base` process per ref: ~0.2 s each under load on an M2 (the spawn, not git's work: the
+// command itself takes ~1 ms), so 512 refs paid ~86 s in --stray-content and 125 s in --abi on a one-file repo. One
+// `git rev-list --parents --boundary <tips> ^HEAD` lists every commit some ref holds and HEAD does not, with its parents.
+// For one ref, the parents its exclusive commits reach outside that set are its candidates: every common ancestor of the
+// ref and HEAD lies at or behind one of them. No exclusive commit at all: the tip is an ancestor of HEAD, and is the base.
+// Exactly one candidate: it is the unique best common ancestor, which is what `git merge-base` prints. No candidate: the
+// walk ended at a root or a shallow boundary, and there is no merge base (git prints none either). Two or more (a branch
+// that merged the live line, a criss-cross) are left to probeRefBase, which asks git, so no answer rests on a choice this
+// walk would have to make. Refs whose tip is not a resolved object name, or a walk that failed, are left to it too.
+struct BatchedBases
+{
+    std::vector<std::string> base;    // per ref: its merge base, "" for none
+    std::vector<char>        known;   // per ref: 1 when the walk decided it; 0 → probeRefBase asks git
+};
+
+inline BatchedBases mergeBasesByOneWalk( const std::string& root, const std::vector<RefInfo>& refs, const std::string& headSha )
+{
+    BatchedBases out;
+    out.base.assign( refs.size(), std::string() );
+    out.known.assign( refs.size(), 0 );
+    if( refs.empty() || !isRevisionToken( headSha ) )
+    {
+        return out;
+    }
+    static std::atomic<std::uint64_t> listSeq{ 0 };
+    const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-tips-" + std::to_string( os::getpid() ) + "-"
+                               + std::to_string( listSeq.fetch_add( 1, std::memory_order_relaxed ) ) + ".txt";
+    {
+        std::FILE* lf = std::fopen( listPath.c_str(), "wb" );
+        if( lf == nullptr )
+        {
+            return out;
+        }
+        for( const RefInfo& r : refs )
+        {
+            if( isRevisionToken( r.tip ) )
+            {
+                rw::emitTo( lf, "{}\n", r.tip );
+            }
+        }
+        rw::emitTo( lf, "^{}\n", headSha );
+        std::fclose( lf );
+    }
+    const GitListing listing = gitListChecked( root, "rev-list --parents --boundary --stdin < " + shSingleQuote( listPath ) );
+    os::unlink( listPath.c_str() );
+    if( !listing.ok )
+    {
+        return out;
+    }
+    // The exclusive commits, sorted by sha: (sha, its parents). Boundary lines ('-' first) are HEAD-side parents, implied.
+    std::vector<std::pair<std::string, std::vector<std::string>>> exclusive;
+    for( const std::string& line : listing.lines )
+    {
+        if( line.empty() || line[ 0 ] == '-' )
+        {
+            continue;
+        }
+        const std::vector<std::string_view> f = wsdetail::segmentsOf( line, ' ' );
+        if( f.empty() || !isRevisionToken( f[ 0 ] ) )
+        {
+            return out;   // not the shape asked for: decide nothing
+        }
+        std::vector<std::string> parents;
+        for( std::size_t k = 1; k < f.size(); ++k )
+        {
+            parents.emplace_back( f[ k ] );
+        }
+        exclusive.emplace_back( std::string( f[ 0 ] ), std::move( parents ) );
+    }
+    std::sort( exclusive.begin(), exclusive.end(), []( const auto& a, const auto& b ) { return a.first < b.first; } );
+    const auto indexOf = [ & ]( std::string_view sha ) -> std::size_t
+    {
+        const auto at = std::lower_bound( exclusive.begin(), exclusive.end(), sha, []( const auto& e, std::string_view v ) { return sortutil::svLess( e.first, v ); } );
+        return ( at != exclusive.end() && at->first == sha ) ? std::size_t( at - exclusive.begin() ) : SIZE_MAX;
+    };
+    std::vector<std::uint32_t> visitedBy( exclusive.size(), UINT32_MAX );   // the ref index whose walk last reached it
+    std::vector<std::size_t>   stack;
+    for( std::size_t i = 0; i < refs.size(); ++i )
+    {
+        if( !isRevisionToken( refs[ i ].tip ) )
+        {
+            continue;
+        }
+        const std::size_t tipAt = indexOf( refs[ i ].tip );
+        if( tipAt == SIZE_MAX )
+        {
+            out.base[ i ]  = refs[ i ].tip;   // the tip is HEAD's ancestor: it is its own merge base
+            out.known[ i ] = 1;
+            continue;
+        }
+        std::vector<std::string_view> candidates;
+        stack.assign( 1, tipAt );
+        visitedBy[ tipAt ] = std::uint32_t( i );
+        while( !stack.empty() && candidates.size() < 2 )
+        {
+            const std::size_t at = stack.back();
+            stack.pop_back();
+            for( const std::string& parent : exclusive[ at ].second )
+            {
+                const std::size_t pAt = indexOf( parent );
+                if( pAt == SIZE_MAX )
+                {
+                    if( std::find( candidates.begin(), candidates.end(), parent ) == candidates.end() )
+                    {
+                        candidates.push_back( parent );
+                    }
+                }
+                else if( visitedBy[ pAt ] != std::uint32_t( i ) )
+                {
+                    visitedBy[ pAt ] = std::uint32_t( i );
+                    stack.push_back( pAt );
+                }
+            }
+        }
+        if( candidates.size() < 2 )
+        {
+            out.base[ i ]  = candidates.empty() ? std::string() : std::string( candidates.front() );
+            out.known[ i ] = 1;
+        }
+    }
+    return out;
+}
+
+// Every ref's probe: the one-walk bases where the walk decided, probeRefBase (one git process each, across the pool) for
+// the rest. Each ref's plumbing is what probeRefBase alone would give it.
+inline std::vector<RefPlumbing> probeRefBases( const std::string& root, const std::vector<RefInfo>& refs, const std::string& headSha )
+{
+    std::vector<RefPlumbing>  plumbing( refs.size() );
+    const BatchedBases        walked = mergeBasesByOneWalk( root, refs, headSha );
+    std::vector<std::size_t>  asked;
+    for( std::size_t i = 0; i < refs.size(); ++i )
+    {
+        if( walked.known[ i ] == 0 )
+        {
+            asked.push_back( i );
+            continue;
+        }
+        plumbing[ i ].base = walked.base[ i ];
+        if( plumbing[ i ].base.empty() )
+        {
+            DISCLOSE( plumbing[ i ], RefPlumbing::DisclosureWhy::NoMergeBase, "crossref: no merge-base for ref (shallow clone or unrelated history?) — verdict is unknown, not merged" );
+            continue;
+        }
+        plumbing[ i ].isAncestor = ( refs[ i ].tip == plumbing[ i ].base );
+    }
+    ParallelSweep probeSweep;
+    parallelIndexed( asked.size(), [ & ]( std::size_t k ) { plumbing[ asked[ k ] ] = probeRefBase( root, refs[ asked[ k ] ], headSha ); }, probeSweep );
+    for( std::size_t k = 0; k < asked.size(); ++k )
+    {
+        plumbing[ asked[ k ] ].ok = plumbing[ asked[ k ] ].ok && probeSweep.isDone( k );   // a probe never run is a failed analysis, not a default
+    }
+    return plumbing;
+}
+
 // One ref's whole answer, computed from ALREADY-FETCHED plumbing and an ALREADY-FILLED blob store. Pure:
 // no git call, no I/O, no shared mutable state — so the verdict is a function of the evidence and nothing
 // else. `plumb.headBlobAt` is diff(base, HEAD) indexed by path — the live line's own change over the SAME
@@ -1589,8 +1881,15 @@ inline void registerSweepBlobs( const DiffPairTable& diffs, std::vector<RefPlumb
     blobs.fill();
 }
 
-// `pinned` (sorted ref names) are kept first when the sweep is past the ref window — --eval-stray passes its labels.
-inline StrayResult computeStrayContent( const std::string& root, std::string_view filter, std::span<const std::string> pinned = {} )
+// The ref window computeStrayContent reads: at most `maxRefs` local branches (SIZE_MAX under --detail), the `pinned` names
+// (sorted ref names; --eval-stray passes its labels) kept first, the newest by committer date after them.
+struct StrayRefWindow
+{
+    std::span<const std::string> pinned  = {};
+    std::size_t                  maxRefs = kMaxRefs;
+};
+
+inline StrayResult computeStrayContent( const std::string& root, std::string_view filter, StrayRefWindow window = {} )
 {
     StrayResult result;
     result.filter = std::string( filter );   // H14/M6: echoed on the root — a count under a filter is not a repo total
@@ -1606,18 +1905,13 @@ inline StrayResult computeStrayContent( const std::string& root, std::string_vie
     result.refsDropped = enumeration.refsDropped;
     result.filterMatchedNothing = !filter.empty() && filterNameHits == 0;
     if( result.filterMatchedNothing ) { result.ok = false; return result; }
-    result.refsOmitted = windowNewestRefs( refs, kMaxRefs, pinned );   // past the window: the newest, the rest counted
+    result.refsOmitted = windowNewestRefs( refs, window.maxRefs, window.pinned );   // past the window: the newest, the rest counted
+    warnRefWindow( "--stray-content", refs.size(), result.refsOmitted, std::format( "{} refs", kMaxRefs ) );
 
     // ── phase 1: the merge-base probe, one git call per ref, ACROSS THE POOL ────────────────────────────
     // Refs are independent and each worker writes only its own slot, so this is the serial answer computed
     // in parallel — not a different answer.
-    std::vector<RefPlumbing> plumbing( refs.size() );
-    ParallelSweep            probeSweep;
-    parallelIndexed( refs.size(), [ & ]( std::size_t i ) { plumbing[i] = probeRefBase( root, refs[i], result.headSha ); }, probeSweep );
-    for( std::size_t i = 0; i < refs.size(); ++i )
-    {
-        plumbing[ i ].ok = plumbing[ i ].ok && probeSweep.isDone( i );   // a probe never run is a failed analysis, not a default
-    }
+    std::vector<RefPlumbing> plumbing = probeRefBases( root, refs, result.headSha );   // REF-WINDOW-COST: one walk, git for the rest
 
     // ── phases 2-4: the distinct diffs, then ONE batched blob read for the whole sweep ───────────────────
     const DiffPairTable diffs = gatherRefDiffs( root, refs, result.headSha, plumbing );
@@ -2876,7 +3170,20 @@ struct WhereisParseBudget
 {
     std::size_t maxBlobs = kWhereisParseMaxBlobs;
     std::size_t maxBytes = kWhereisParseMaxBytes;
+    std::size_t maxSites = kWhereisSiteBudget;   // the ref window's work bound (REF-WINDOW-COST); SIZE_MAX under --detail
 };
+
+// --whereis' ref window, HEAD included: as many refs as kWhereisSiteBudget's sites allow at HEAD's tree size (each ref's
+// tree is about HEAD's), at least kWhereisMinRefs. One `git ls-tree` of HEAD measures it.
+inline std::size_t whereisRefWindow( const std::string& root, const std::string& headSha, std::size_t maxSites, std::size_t refCount )
+{
+    if( maxSites == SIZE_MAX || refCount <= kWhereisMinRefs )   // no window can cut kWhereisMinRefs refs: skip HEAD's ls-tree
+    {
+        return SIZE_MAX;
+    }
+    const std::size_t entries = std::max<std::size_t>( 1, lsTree( root, headSha ).size() );
+    return std::max( kWhereisMinRefs, maxSites / entries );
+}
 
 struct BranchParseJob
 {
@@ -2971,6 +3278,12 @@ inline std::vector<std::size_t> branchParseBatch( const std::vector<BranchParseJ
         bytes += size;
     }
     census.leftByGuard = want.size() - batch.size();
+    if( census.leftByGuard > 0 )
+    {
+        warnLimitReached( std::format( "--whereis left {} branch blobs unparsed, their rows kind=text (limit: {} blobs or {} MB per answer)", census.leftByGuard,
+                                       kWhereisParseMaxBlobs, kWhereisParseMaxBytes >> 20 ),
+                          "pass --detail=1 to parse every one" );
+    }
     ENSURES( batch.size() <= budget.maxBlobs && bytes <= budget.maxBytes, "the batch stays inside the runaway guard" );
     return batch;
 }
@@ -3162,18 +3475,6 @@ inline void labelBranchRowsByParse( const std::string& root, WhereResult& result
 // fix exists to remove. gitmine.h's gitCommandLines reads the lines and keeps pclose's status; same command
 // prefix as gitOneLine (core.quotepath=false, -C root), so the paths are spelled exactly as lsTree spells
 // them: cwd-relative to the root, git-quoted only when a byte forces it.
-struct GitListing
-{
-    std::vector<std::string> lines;
-    bool                     ok = false;
-};
-
-inline GitListing gitListChecked( const std::string& root, const std::string& tail )
-{
-    GitCommandLines res = gitCommandLines( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " " + tail + " 2>/dev/null" );
-    return GitListing{ std::move( res.lines ), res.isStarted && WIFEXITED( res.status ) && WEXITSTATUS( res.status ) == 0 };
-}
-
 // Every path under the root whose working copy differs from HEAD: tracked paths modified, staged, or deleted
 // (`diff HEAD`, renames split into their two sides) plus untracked, not-ignored files. Sorted and de-duplicated
 // (determinism). ok=false when either listing failed — the caller then cannot vouch for any HEAD row.
@@ -3937,7 +4238,10 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
 
     RefEnumeration       enumeration;   // a dropped ref is searched nowhere, so it forfeits complete= like an empty tree
     std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha, nullptr, &enumeration );
-    result.refsOmitted = windowNewestRefs( refs, kMaxRefs - 1 );   // HEAD is read too, and is one of the window's kMaxRefs
+    const std::size_t window = whereisRefWindow( root, result.headSha, budget.maxSites, refs.size() + 1 );   // HEAD is read too, and is one of the window
+    result.refsOmitted = windowNewestRefs( refs, window == SIZE_MAX ? SIZE_MAX : window - 1 );
+    warnRefWindow( "--whereis", refs.size(), result.refsOmitted,
+                   std::format( "{} tree entries across all refs, {} refs with HEAD at this tree's size", kWhereisSiteBudget, window ) );
     refs.insert( refs.begin(), RefInfo{ "HEAD", result.headSha, quality::gitCommitterDateIso( root ) } );
 
     // The CHECKOUT, not just HEAD's commit: every path that differs from HEAD is read from the working tree, and
@@ -4085,7 +4389,7 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
     std::sort( pinned.begin(), pinned.end() );
     pinned.erase( std::unique( pinned.begin(), pinned.end() ), pinned.end() );
 
-    const StrayResult res = computeStrayContent( root, {}, pinned );
+    const StrayResult res = computeStrayContent( root, {}, { .pinned = pinned } );
     if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; return rep; }
 
     // Reported refs carry their verdict; every ref NOT reported was scanned and found merged (writeStrayContent
@@ -4281,7 +4585,7 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
                        "by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. "
                        "at= is the git commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree "
                        "differed from that commit (head= is the same commit, bare sha, kept for compatibility). "
-                       "refs_omitted= (present only when non-zero) is the REF WINDOW: past 512 local branches the newest 512 by committer date are read and this many older ones are not, so they are in none of the counts or rows; a ref name substring (the stray-content=SUBSTR flag, or kind= over MCP) picks which branches fill the window. "
+                       "refs_omitted= (present only when non-zero) is the REF WINDOW: past 512 local branches the newest 512 by committer date are read and this many older ones are not, so they are in none of the counts or rows; a ref name substring (the stray-content=SUBSTR flag, or kind= over MCP) picks which branches fill the window, and the detail flag reads every branch. "
                        "refs_dropped= (present only when non-zero) is how many local branches git listed that this sweep "
                        "could NOT read (a tip that is not an object name): they are in none of the counts, so refs= and the "
                        "four buckets describe only the branches that were swept. -->" );
@@ -4950,9 +5254,10 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "declarator; head_defs=\"0\" beside it means the parsed index defines no symbol of this name, so no HEAD kind=\"def\" row "
                        "has an indexed definition behind it. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a "
                        "count of refs that matched — hits= and the rows are the matched set. refs_omitted= (present only when non-zero) is the REF "
-                       "WINDOW: past 512 refs (HEAD included) the newest local branches by committer date are read and this many older ones are "
+                       "WINDOW: past what about 2 million tree entries allow (2097152 divided by HEAD's tree size, refs HEAD included, never under 16) the newest local "
+                       "branches by committer date are read and this many older ones are "
                        "not, so their rows are in no count and complete= is withheld; over MCP kind=SUBSTR picks which branches fill the window "
-                       "(the CLI whereis verb has no ref filter). on-head=\"0\" alongside ref hits is the case this verb exists "
+                       "(the CLI whereis verb has no ref filter; the detail flag reads every branch). on-head=\"0\" alongside ref hits is the case this verb exists "
                        "for: content that lives only on a branch. A TREE scan can only find content some ref still carries, "
                        "so hits=\"0\" on its own does not distinguish a name this repo never had from one it deleted; run "
                        "with the with_history flag and the fate row says which, naming the commit that removed it. "
