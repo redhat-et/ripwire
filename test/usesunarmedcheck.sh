@@ -438,6 +438,64 @@ out="$( rw "$TMP/declsmall" --uses=zz_capped_name )"   # status: --uses exit sta
 if printf '%s' "$out" | grep -q '<uses [^>]*external="1"' && ! printf '%s' "$out" | grep -q 'decl_scan'; then ok "(C13) precision: a small corpus's external answer carries no decl_scan="
 else no "(C13) precision: small corpus: $( printf '%s' "$out" | grep -o '<uses [^>]*>' | head -1 )"; fi
 
+# (C14) USES-UNSERVED-OWNER: the refusal answers the QUESTION, not one symbol. The owner scan returned on the FIRST
+# same-named symbol that was UNSERVED and never asked whether a SERVED owner of that name also existed, so `Pair.ghost`
+# on a tree holding a java `Pair` and a python `Pair` refused "'Pair' is a lang=java type" — a confident refusal over an
+# available answer (the python owner's members ARE indexed; `ghost` simply is not one of them, which is the found="0"
+# the same selector already gets when the only owner is served). A same-named owner in a fields-served language (C, C++,
+# Python) now suppresses the refusal; an owner whose every same-named definition is unserved still refuses with the
+# byte-identical sentence, and when several unserved owners share the name the sentence keeps naming the LOWEST-id one
+# (crawl order: path, then line), which --limit cannot move (the scan reads the whole index, not the limited answer).
+# RED-FIRST on main d624cff5f: (C14b) (C14c) (C14d) (C14i) FAIL there — the refusal fires and stdout carries no answer
+# at all; the controls (C14e..g) and determinism (C14h) pass on both.
+mkdir -p "$TMP/mixowner/java/aa" "$TMP/mixowner/java/bb" "$TMP/mixowner/py"
+printf 'package pair;\n\nclass Pair\n{\n    int jone()\n    {\n        return 1;\n    }\n}\n' > "$TMP/mixowner/java/Pair.java"
+printf 'package pair;\n\nclass Only\n{\n    int jtwo()\n    {\n        return 2;\n    }\n}\n' > "$TMP/mixowner/java/Only.java"
+printf 'package aa;\n\nclass Multi\n{\n    int jthree()\n    {\n        return 3;\n    }\n}\n' > "$TMP/mixowner/java/aa/Multi.java"
+printf 'package bb;\n\nclass Multi\n{\n    int jfour()\n    {\n        return 4;\n    }\n}\n' > "$TMP/mixowner/java/bb/Multi.java"
+printf 'class Pair:\n    size = 1\n\n    def ptwo(self):\n        return self.size\n' > "$TMP/mixowner/py/pair.py"
+dp="$( rw "$TMP/mixowner" --defs=Pair )"; dz="$( rw "$TMP/mixowner" --defs=Only )"; dm="$( rw "$TMP/mixowner" --defs=Multi )"
+pj=$( printf '%s' "$dp" | grep -o 'lang="java"' | wc -l | tr -d ' ' ); pp=$( printf '%s' "$dp" | grep -o 'lang="py"' | wc -l | tr -d ' ' )
+oj=$( printf '%s' "$dz" | grep -o 'lang="java"' | wc -l | tr -d ' ' ); op=$( printf '%s' "$dz" | grep -o 'lang="py"' | wc -l | tr -d ' ' )
+mj=$( printf '%s' "$dm" | grep -o 'lang="java"' | wc -l | tr -d ' ' )
+if [ "$pj" -eq 1 ] && [ "$pp" -eq 1 ] && [ "$oj" -eq 1 ] && [ "$op" -eq 0 ] && [ "$mj" -eq 2 ]; then
+    ok "(C14a) premise: Pair is indexed as a java AND a python class, Only is java-only, Multi is two java classes"
+else no "(C14a) premise: Pair java=$pj py=$pp, Only java=$oj py=$op, Multi java=$mj — the C14 arms are vacuous"; fi
+out="$( rw "$TMP/mixowner" --uses=Pair.ghost )"
+if ! printf '%s' "$out" | grep -q 'field symbols are extracted' && printf '%s' "$out" | grep -q '<uses [^>]*of="Pair.ghost"[^>]*found="0"' \
+   && printf '%s' "$out" | grep -q 'zero = none found, not none exists'; then
+    ok "(C14b) CLI --uses=Pair.ghost: a python owner of that name suppresses the refusal, and the answer is found=\"0\" with its zero-means-none-found legend"
+else no "(C14b) CLI --uses=Pair.ghost refused by a java namesake, or answered nothing: $( printf '%s' "$out" | head -c 300 )"; fi
+out="$( rw "$TMP/mixowner" --uses=Pair.gh )"
+if printf '%s' "$out" | grep -q '<uses [^>]*of="Pair.gh"[^>]*found="0" near="Pair"'; then
+    ok "(C14c) CLI --uses=Pair.gh: the suppressed path carries the retry hint near=\"Pair\" — the answer the refusal was masking"
+else no "(C14c) CLI --uses=Pair.gh lost the retry hint: $( printf '%s' "$out" | head -c 300 )"; fi
+mo="$( mcp "$TMP/mixowner" uses ',"symbol":"Pair.ghost"' )"
+if printf '%s' "$mo" | grep -q 'Pair.ghost' && ! printf '%s' "$mo" | grep -q 'field symbols are extracted'; then
+    ok "(C14d) MCP uses Pair.ghost answers the selector and is not refused by the java namesake's language"
+else no "(C14d) MCP uses Pair.ghost: $( printf '%s' "$mo" | head -c 300 )"; fi
+exp="ripwire: --uses member selector 'Only.ghost': field symbols are extracted for C, C++ and Python only — 'Only' is a lang=java type ($TMP/mixowner/java/Only.java), so its members are not indexed and their use-sites cannot be resolved"
+out="$( rw "$TMP/mixowner" --uses=Only.ghost )"
+if [ "$out" = "$exp" ]; then ok "(C14e) control: CLI --uses=Only.ghost, whose every namesake is unserved, refuses with the byte-identical sentence"
+else no "(C14e) control: CLI --uses=Only.ghost is not the pinned sentence: $( printf '%s' "$out" | head -c 300 )"; fi
+mo="$( mcp "$TMP/mixowner" uses ',"symbol":"Only.ghost"' )"
+if printf '%s' "$mo" | grep -q "member selector 'Only.ghost': field symbols are extracted for C, C++ and Python only" \
+   && printf '%s' "$mo" | grep -q "'Only' is a lang=java type"; then ok "(C14f) control: MCP uses Only.ghost keeps the same sentence"
+else no "(C14f) control: MCP uses Only.ghost: $( printf '%s' "$mo" | head -c 300 )"; fi
+m1="$( rw "$TMP/mixowner" --uses=Multi.ghost )"; m2="$( rw "$TMP/mixowner" --limit=1 --uses=Multi.ghost )"
+if printf '%s' "$m1" | grep -q "'Multi' is a lang=java type ($TMP/mixowner/java/aa/Multi.java)" && [ "$m1" = "$m2" ]; then
+    ok "(C14g) control: two unserved namesakes — the sentence names the lowest-id one (java/aa/Multi.java), and --limit=1 does not move it"
+else no "(C14g) control: Multi.ghost named the wrong owner or moved under --limit: $( printf '%s' "$m1" | head -c 300 )"; fi
+a1="$( rw "$TMP/mixowner" --uses=Pair.ghost )"; a2="$( rw "$TMP/mixowner" --uses=Pair.ghost )"
+c1="$( rw "$TMP/mixowner" --uses=Only.ghost )"; c2="$( rw "$TMP/mixowner" --uses=Only.ghost )"
+if [ "$a1" = "$a2" ] && [ "$c1" = "$c2" ]; then ok "(C14h) determinism: the suppressed answer and the refusal are each byte-identical across runs"
+else no "(C14h) the suppressed answer or the refusal differs run to run"; fi
+if command -v xmllint >/dev/null 2>&1; then
+    px="$( "$BIN" "$TMP/mixowner" --no-cache --legend=compact --uses=Pair.ghost 2>/dev/null )"   # status: the suppressed answer exits 1 (found="0"); the XML on stdout is the verdict and an empty one FAILs
+    if printf '%s' "$px" | grep -q '<uses ' && printf '%s' "$px" | xmllint --noout - 2>/dev/null; then ok "(C14i) the suppressed answer's XML is well-formed"
+    else no "(C14i) the suppressed answer's XML is empty or malformed: $( printf '%s' "$px" | head -c 200 )"; fi
+else printf '  SKIP  (C14i) xml well-formed (no xmllint)\n'; fi
+
 # ── (D) TMUX-STRUCT-WINDOW honesty note ──────────────────────────────────────────────────────────────────────
 sk="$( "$BIN" "$TMP/deg" --no-cache --skipped 2>/dev/null )"
 dg=$( printf '%s' "$sk" | grep -o 'why="degraded-parse"' | wc -l | tr -d ' ' )

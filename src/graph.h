@@ -16244,15 +16244,25 @@ inline std::string memberOwnerRefusal( const IngestResult& ing, std::span<const 
     return msg;
 }
 
-// A member selector whose OWNER resolves to a type in a language that extracts no fields refuses BY LANGUAGE
-// NAME — an empty answer there would read as "no uses", which is the zero-means-none-exists lie. "" when the
-// spec is not a member selector or the owner is not an indexed unserved type.
+// The owner SHAPE, named so the served and unserved sides below can share one spelling of it.
+inline bool classLikeOwner( const Symbol& s ) noexcept
+{
+    return s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
+}
+
 // An owner whose members the index never extracts: a class-like definition in a language with no field capture.
 inline bool fieldsUnservedOwner( const Symbol& s ) noexcept
 {
-    const bool classLike  = s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
     const bool fieldsLang = s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::Python;   // queries/{c,cpp,python}/tags.scm carry @definition.field
-    return classLike && !fieldsLang;
+    return classLikeOwner( s ) && !fieldsLang;
+}
+
+// An owner whose members the index DOES extract — the veto on the refusal below. The complement is taken INSIDE the
+// class-like shape on purpose: "not unserved" alone would also admit every non-owner symbol of that name (a function,
+// a variable), and one of those must not speak for the owner either way. One language list, read from one place.
+inline bool fieldsServedOwner( const Symbol& s ) noexcept
+{
+    return classLikeOwner( s ) && !fieldsUnservedOwner( s );
 }
 
 // THE sentence for a member of an unserved owner — the qualified selector's refusal, and (B31 USES-FIELD-EXTERNAL) the bare
@@ -16264,6 +16274,10 @@ inline std::string memberUnservedSentence( const IngestResult& ing, std::string_
          + "), so its members are not indexed and their use-sites cannot be resolved";
 }
 
+// A member selector whose OWNER resolves to a type in a language that extracts no fields refuses BY LANGUAGE
+// NAME — an empty answer there would read as "no uses", which is the zero-means-none-exists lie. "" when the
+// spec is not a member selector, when no indexed owner of that name is unserved, or when a SERVED owner of that
+// name also exists — the normal path answers that one, and a refusal would speak over an available answer.
 inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::string_view spec )
 {
     if( !looksLikeMemberSelector( spec ) )
@@ -16272,14 +16286,29 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
     }
     const std::size_t      dot   = spec.find( '.' );
     const std::string_view owner = spec.substr( 0, dot );
-    for( const Symbol& s : ing.symbols )
+    // The refusal is about the QUESTION, not about one symbol: a SERVED owner of that name means the normal path can
+    // answer the selector, so refusing by a namesake's language would be a confident no over an available answer (the
+    // scan used to return on the first unserved namesake and never ask). One pass in symbol id order — any served
+    // namesake vetoes, and the sentence names the LOWEST-id unserved one (crawl order: path, then line), so the pick
+    // is deterministic and independent of --limit, which narrows the answer and never the index this reads.
+    NodeId unservedPick = kNoNode;
+    for( NodeId id = 0; id < ing.symbols.size(); ++id )
     {
-        if( s.name == owner && fieldsUnservedOwner( s ) )
+        const Symbol& s = ing.symbols[ id ];
+        if( s.name != owner )
         {
-            return memberUnservedSentence( ing, spec, s );
+            continue;
+        }
+        if( fieldsServedOwner( s ) )
+        {
+            return {};
+        }
+        if( unservedPick == kNoNode && fieldsUnservedOwner( s ) )
+        {
+            unservedPick = id;
         }
     }
-    return {};
+    return unservedPick == kNoNode ? std::string{} : memberUnservedSentence( ing, spec, ing.symbols[ unservedPick ] );
 }
 
 // resolve a --around/--lego/--connect spec to ONE matching symbol; kNoNode if none. A PROJECTION of
