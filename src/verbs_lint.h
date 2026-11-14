@@ -1376,9 +1376,10 @@ inline std::string memberPatternNext( std::string_view pattern, std::string_view
 // The member near-miss attributes, in reading order: the count, its floor and arrow facts, then the pasteable next=.
 inline std::string memberNearMissAttrs( const PatternSearchOutcome& ps, std::string_view pattern )
 {
-    const bool             allArrow    = ps.memberUnmatched > 0 && ps.memberArrow == ps.memberUnmatched;
-    const bool             allOptChain = ps.memberUnmatched > 0 && ps.memberOptChain == ps.memberUnmatched;
-    const std::string_view op          = allArrow ? "->" : allOptChain ? "?." : ".";
+    // the operator next= spells is one the counted calls use (CodeRabbit 4570578110): `.` while any dot call is among them, else
+    // `->`, else `?.` (a fixed priority: C++ `p->f(1)` beside JS `o?.f(1)` with no dot call took `.`, which matched neither)
+    const auto             dots = ps.memberUnmatched - std::min( ps.memberUnmatched, ps.memberArrow + ps.memberOptChain );
+    const std::string_view op   = dots > 0 || ps.memberUnmatched == 0 ? "." : ps.memberArrow > 0 ? "->" : ps.memberOptChain > 0 ? "?." : ".";
     return " unmatched_member=\"" + std::to_string( ps.memberUnmatched ) + "\""
          + ( ps.memberArrow > 0 ? " unmatched_member_arrow=\"" + std::to_string( ps.memberArrow ) + "\"" : std::string() )
          + ( ps.memberOptChain > 0 ? " unmatched_member_optchain=\"" + std::to_string( ps.memberOptChain ) + "\"" : std::string() )

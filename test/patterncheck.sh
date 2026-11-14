@@ -546,6 +546,19 @@ printf '%s' "$XOM" | grep -q ' unmatched_member="2" unmatched_member_optchain="1
     || no "mixed . and ?. should read unmatched_member=\"2\" unmatched_member_optchain=\"1\" with the dot next=: $XOM"
 printf '%s' "$XM" | grep -q 'unmatched_member_optchain' \
     && no "the C++ dot/arrow corpus carries unmatched_member_optchain: $XM" || ok "control: a C++ corpus carries no unmatched_member_optchain="
+# -- 7f) next= picks an operator the counted calls use (CodeRabbit 4570578110) ---------------------------------------
+# C++ `p->f(1)` beside JS `o?.f(1)` and no dot call: neither all-arrow nor all-?., so next= fell back to `$O.f($X)`, which matches
+# neither (hits=0 on 1c920292f). With no dot call it now takes the arrow (fixed priority -> then ?.), and pasted it hits.
+mkdir -p "$MX/arrowoc"
+printf 'struct P { int f(int); };\nint g(P* p) { return p->f(1); }\n' >"$MX/arrowoc/a.cpp"
+printf 'function h(o) {\n  return o?.f(1);\n}\n' >"$MX/arrowoc/b.js"
+XAO="$( xroot "$MX/arrowoc" 'f($X)' )"
+XAON="$( printf '%s' "$XAO" | sed -n 's/.* next="--pattern=&apos;\(.*\)&apos;".*/\1/p' | sed 's/&gt;/>/g' )"
+if printf '%s' "$XAO" | grep -q ' unmatched_member="2" unmatched_member_arrow="1" unmatched_member_optchain="1"'; then
+    ok "arrow+optchain premise: 2 counted member calls, 1 -> and 1 ?., no dot call"
+    if [ "$XAON" = '$O->f($X)' ] && [ "$( xroot "$MX/arrowoc" "$XAON" | grep -c ' hits="1"' )" = 1 ]; then ok "arrow+optchain: next='\$O->f(\$X)' (an operator the calls use) hits the arrow call"
+    else no "arrow+optchain: next='$XAON' should be '\$O->f(\$X)' and hit 1 call: $( xroot "$MX/arrowoc" "${XAON:-f}" | head -c 300 )"; fi
+else no "arrow+optchain premise: want unmatched_member=2 arrow=1 optchain=1: $XAO"; fi
 # -- 7e) next= stays inside the pattern limits (PATTERN-NEXT-LIMITS, CodeRabbit #633 4557724172) -------------------
 # next= adds a receiver metavariable: a 32-metavariable pattern gave a 33-metavariable continuation that refuses when
 # pasted, and a pattern a few bytes under the 4096-byte limit gave one over it (both on main cd04d477e).
