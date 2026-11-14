@@ -1244,12 +1244,145 @@ decltype( auto ) underExtractScope( Lang lang, Work&& work )
     return inExtractScope<Phase, ExtractFamily::DocsData>( work );
 }
 
-TSTree* parseTree( TSParser* parser, std::string_view src )
+// NO-SKIP-INGEST: every ingest parse runs under the parse budget (ingest.h kParseBudget*). tree-sitter calls the progress
+// callback every ~100 parser operations; past the deadline it returns true, the parse is cancelled, and the caller sees a
+// null tree with *overBudget set — the file is then read lexically (FileIndexMode::LexicalOverBudget). A cancelled parser
+// keeps resumable state, so it is reset before it can see another file. RIPWIRE_PARSE_BUDGET=<scale> multiplies the
+// budget (read once; a value <= 0 or unparseable keeps 1).
+inline double parseBudgetScale()
+{
+    static const double scale = []
+    {
+        const char*  env = std::getenv( "RIPWIRE_PARSE_BUDGET" );
+        const double v   = env != nullptr ? std::strtod( env, nullptr ) : 0.0;
+        return v > 0.0 ? v : 1.0;
+    }();
+    return scale;
+}
+
+inline double parseBudgetSecondsFor( std::size_t bytes )
+{
+    return parseBudgetScale() * ( kParseBudgetFloorSeconds + kParseBudgetSecondsPerMiB * double( bytes ) / ( 1024.0 * 1024.0 ) );
+}
+
+struct ParseDeadline
+{
+    std::chrono::steady_clock::time_point at;
+    bool                                  hit    = false;
+    std::uint32_t                         checks = 0;   // progress callbacks so far: every 64th also reads the footprint
+
+    // Past the wall budget, or — every 64 checks — past the memory guard's soft line (memguard.h: half the limit,
+    // --max-memory): a degenerate parse also grows fast (4 MiB of `{` held 1.6 GB at its 8 s budget), so memory is the
+    // budget's second edge, read from the same footprint the guard itself reads.
+    bool expired()
+    {
+        if( !hit && std::chrono::steady_clock::now() >= at )
+        {
+            hit = true;
+        }
+        if( !hit && ( ++checks & 63u ) == 0 )
+        {
+            const std::uint64_t hard = memguard::limits().hardBytes;
+            const std::uint64_t used = memguard::measuredFootprint();
+            hit = hard != 0 && used != 0 && used >= hard / 2;
+        }
+        return hit;
+    }
+};
+
+inline std::chrono::steady_clock::time_point parseDeadlineFor( std::size_t bytes )
+{
+    return std::chrono::steady_clock::now()
+         + std::chrono::duration_cast<std::chrono::steady_clock::duration>( std::chrono::duration<double>( parseBudgetSecondsFor( bytes ) ) );
+}
+
+// The budget covers a file's whole EXTRACTION, not the parse alone: on a degenerate tree (4 MiB of `{`) the parse may
+// finish inside its budget and the tags query cursor then goes quadratic walking it (measured 2026-11-14: > 3 min).
+// The parse worker opens one deadline per file; while it is open, parseTree and the tags query (execTagsQuery) both
+// check it, and the worker reads hit() after the tags pass to roll the file's facts back and read it lexically.
+inline thread_local ParseDeadline* tlsExtractDeadline = nullptr;
+
+struct ExtractDeadlineScope
+{
+    ParseDeadline  deadline;
+    ParseDeadline* previous;
+
+    explicit ExtractDeadlineScope( std::size_t bytes ) : deadline{ parseDeadlineFor( bytes ) }, previous( tlsExtractDeadline )
+    {
+        tlsExtractDeadline = &deadline;
+    }
+    ExtractDeadlineScope( const ExtractDeadlineScope& ) = delete;
+    ExtractDeadlineScope& operator=( const ExtractDeadlineScope& ) = delete;
+    ~ExtractDeadlineScope() { tlsExtractDeadline = previous; }
+    bool hit() const noexcept { return deadline.hit; }
+};
+
+struct ParseSource
+{
+    const char*   data;
+    std::uint32_t size;
+};
+
+inline const char* readParseSource( void* payload, std::uint32_t byte, TSPoint, std::uint32_t* bytesRead )
+{
+    const ParseSource* in = static_cast<const ParseSource*>( payload );
+    if( byte >= in->size )
+    {
+        *bytesRead = 0;
+        return "";
+    }
+    *bytesRead = in->size - byte;
+    return in->data + byte;
+}
+
+inline bool parsePastDeadline( TSParseState* state )
+{
+    return static_cast<ParseDeadline*>( state->payload )->expired();
+}
+
+// The tags query under the open extraction deadline, if any (else the plain exec). tree-sitter keeps a POINTER to the
+// options for the cursor's whole iteration, so they live in a thread_local beside the deadline they point at.
+inline bool queryPastDeadline( TSQueryCursorState* state )
+{
+    return static_cast<ParseDeadline*>( state->payload )->expired();
+}
+
+inline void execTagsQuery( TSQueryCursor* cursor, const TSQuery* query, TSNode root )
+{
+    if( tlsExtractDeadline == nullptr )
+    {
+        ts_query_cursor_exec( cursor, query, root );
+        return;
+    }
+    static thread_local TSQueryCursorOptions options{};
+    options = TSQueryCursorOptions{ tlsExtractDeadline, &queryPastDeadline };
+    ts_query_cursor_exec_with_options( cursor, query, root, &options );
+}
+
+TSTree* parseTree( TSParser* parser, std::string_view src, bool* overBudget = nullptr )
 {
     TSTree* tree = nullptr;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tree-sitter parse" );
-        tree = ts_parser_parse_string( parser, nullptr, src.data(), static_cast<uint32_t>( src.size() ) );
+        ParseSource    in{ src.data(), static_cast<std::uint32_t>( src.size() ) };
+        ParseDeadline  ownDeadline{ tlsExtractDeadline == nullptr ? parseDeadlineFor( src.size() ) : std::chrono::steady_clock::time_point{} };
+        ParseDeadline& deadline = tlsExtractDeadline != nullptr ? *tlsExtractDeadline : ownDeadline;
+        const TSInput        input{ &in, &readParseSource, TSInputEncodingUTF8, nullptr };
+        const TSParseOptions options{ &deadline, &parsePastDeadline };
+        tree = ts_parser_parse_with_options( parser, nullptr, input, options );
+        if( deadline.hit )
+        {
+            if( tree != nullptr )
+            {
+                ts_tree_delete( tree );   // defensive: a cancelled parse returns null; never read a cut tree as whole
+                tree = nullptr;
+            }
+            ts_parser_reset( parser );
+        }
+        if( overBudget != nullptr )
+        {
+            *overBudget = deadline.hit;
+        }
     }
     return tree;
 }
@@ -1895,7 +2028,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
-        ts_query_cursor_exec( cursor, query, root );
+        execTagsQuery( cursor, query, root );   // NO-SKIP-INGEST: under the file's extraction deadline, when one is open
 
         TSQueryMatch match;
         while( ts_query_cursor_next_match( cursor, &match ) )

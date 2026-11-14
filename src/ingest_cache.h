@@ -155,7 +155,10 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
+constexpr std::uint32_t kCacheVersion = 51;           // 51: lane no-skip-ingest — the FILE record's FileHealth gains indexMode + keysCut
+                                                      //    (how a file too large / too slow / too data-shaped to parse was indexed), so a
+                                                      //    warm run keeps the lexical read's disclosure; an older record must be rejected.
+                                                      // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
                                                       // 49: lane warm-direct — the FILE record's head gains the eight family counts
                                                       //    (FileFactCounts, right after FileHealth) so a warm run can size and plan every
                                                       //    record from its head alone and decode the body in the parse worker.
@@ -375,7 +378,10 @@ constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 307;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 308;          // bump on any grammar/.scm/extraction change
+                                                      // 308 = 2026-11-14 (lane no-skip-ingest, PLACEHOLDER: the train renumbers): no crawled file is
+                                                      //   skipped for size — a file over --max-file-size or past its parse budget is read lexically, a
+                                                      //   .json/.yml over its full-index ceiling yields at most kDataFileKeyCap keys. kCacheVersion 51.
                                                       // 307 = 2026-11-11 (lane rust-macro-path, PLACEHOLDER: the train renumbers; above main's 305/306): a Rust path
                                                       //   macro invocation (`crate::m!`, `serde_json::json!`) is captured with its written path, and a transcriber's
                                                       //   `$crate::m!` is a Macro reference of its `macro_rules!`. Rich file tag 308. kCacheVersion unchanged.
@@ -2830,6 +2836,8 @@ inline bool readRecordHead( ByteR& r, std::string_view& relOut, CachedRecordHead
     head.health.wsBytes   = r.u32();
     head.health.macroBlanked     = r.u32();  // v20: member-macro re-parse — rides the record so the disclosure survives a warm run
     head.health.useBoundsBlanked = r.u32();  // v44: its Rust layer (use<..> bounds blanked) — same reason
+    head.health.indexMode        = r.u32();  // v51: NO-SKIP-INGEST — FileIndexMode (0 parsed) and the data keys cut
+    head.health.keysCut          = r.u32();
     FileFactCounts& c = head.counts;         // v49: the eight family counts, in the body's family order
     c.defs       = r.u32();
     c.refs       = r.u32();
@@ -3255,9 +3263,9 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
     out.entryOf.assign( crawledFiles.size(), CacheRecords::kNoCacheEntry );
     out.head.resize( crawledFiles.size() );
 
-    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 14 u32. One prefix read covers
+    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 16 u32. One prefix read covers
     // every key up to about 400 bytes; a longer key takes a second read of exactly what the head needs.
-    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 14 * 4;
+    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 16 * 4;
     constexpr std::size_t kHeadProbeBytes = 512;
     std::string headBuf;
     {
@@ -3709,6 +3717,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u32( fh.errNodes );  w.u32( fh.errBytes );  w.u32( fh.fileBytes );  w.u32( fh.wsBytes );
                 w.u32( fh.macroBlanked );   // v20: the member-macro re-parse's per-file count (0 ⇒ the first parse was kept)
                 w.u32( fh.useBoundsBlanked );   // v44: the Rust precise-capture re-parse's per-file count (0 ⇒ first parse kept)
+                w.u32( fh.indexMode );  w.u32( fh.keysCut );   // v51: NO-SKIP-INGEST — how the file was indexed when not parsed
             }
             // v49: the head copy of the eight family counts (readRecordHead), in the body's family order
             for( const std::size_t familyCount : { std::size_t( ix.defIndex[f].size() ), ix.refIndex[f].size(), std::size_t( ix.incIndex[f].size() ),

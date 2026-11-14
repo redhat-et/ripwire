@@ -12,7 +12,7 @@
 # Asserts:
 #   (1) [re-verification, not new work] a one-edit typo of an indexed symbol still gets near=/next=
 #   (2) corpus_excluded= appears (and is exact) when --exclude= drops files from the crawl
-#   (3) corpus_oversize= appears (and is exact) when --max-file-size= drops files from the crawl
+#   (3) a file over --max-file-size stays searchable (lexical index) and corpus_oversize= stays absent
 #   (4) both attributes are ABSENT on a corpus with neither exclusion (purely additive — no re-run hint
 #       leaking onto a clean run)
 #   (5) the legend defines both attributes in-band
@@ -66,9 +66,15 @@ printf '%s' "$EXCL_OUT" | grep -qE 'corpus_excluded="1"' \
     || { no "(2) corpus_excluded= missing or wrong"; printf '%s' "$EXCL_OUT" | grep -o '<grep[^>]*>'; }
 
 SIZE_OUT="$( "$BIN" "$SB" --no-cache --max-file-size=64 --grep=CORPUSTOKEN --legend=full 2>/dev/null )"
-printf '%s' "$SIZE_OUT" | grep -qE 'corpus_oversize="1"' \
-    && ok "(3) corpus_oversize=\"1\" when --max-file-size= drops exactly 1 file" \
-    || { no "(3) corpus_oversize= missing or wrong"; printf '%s' "$SIZE_OUT" | grep -o '<grep[^>]*>'; }
+# NO-SKIP-INGEST (2026-11-14): --max-file-size no longer DROPS a file — over it the file is indexed lexically and stays
+# in the grep corpus, so the token in it is found and corpus_oversize= stays absent (it now counts only files over the
+# fixed 1 GiB hard limit; test/skippedcheck.sh (9) fixtures that one with a sparse file).
+printf '%s' "$SIZE_OUT" | grep -q 'oversized.cpp' \
+    && ok "(3) a file over --max-file-size is still searched (its hit is in the answer)" \
+    || { no "(3) the file over --max-file-size vanished from --grep"; printf '%s' "$SIZE_OUT" | grep -o '<grep[^>]*>'; }
+printf '%s' "$SIZE_OUT" | grep -o '<grep[^>]*>' | grep -q 'corpus_oversize=' \
+    && no "(3) corpus_oversize= claims a drop that no longer happens under --max-file-size" \
+    || ok "(3) no corpus_oversize= — nothing was dropped"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (4) purely additive: absent on a corpus with no exclusion ==="

@@ -2244,6 +2244,17 @@ struct CrawlSkips
 // guess this lane exists to remove.
 // Round-trips the incremental cache (ingest_cache.h, since kCacheVersion 13): the auto-cache is the DEFAULT path, and
 // a disclosure that evaporates on the warm run is worse than none.
+// NO-SKIP-INGEST (owner 11-14: "we should not be skipping files"): every crawled file is indexed; a file a full parse
+// cannot or should not take is indexed LEXICALLY instead, and says so. FileHealth::indexMode holds which (0 = parsed):
+//   LexicalOverSize   — larger than --max-file-size: never handed to the parser; definitions by line shape, calls by `name(`;
+//   LexicalOverBudget — the parse ran past its time budget (kParseBudget*, ingest.h) and was cancelled: the same lexical facts;
+//   DataKeysBounded   — a .json/.yml/.yaml above its full-index ceiling: its top- and second-level keys, at most
+//                       kDataFileKeyCap of them (keysCut counts the rest), read without a parse;
+//   LexicalNestRefused — the nesting guard refused the parse (ingest.h kMax*NestDepth): the same bounded keys.
+// The map header counts them (lexical_files= / keys_cut=), --skipped rows them, and stderr warns once per file.
+enum class FileIndexMode : std::uint8_t { Parsed = 0, LexicalOverSize = 1, LexicalOverBudget = 2, DataKeysBounded = 3, LexicalNestRefused = 4 };
+inline constexpr std::uint32_t kFileIndexModeCount = 5;
+
 struct FileHealth
 {
     std::uint32_t errNodes  = 0;   // ERROR + MISSING nodes in the file's parse tree, plus invalid UTF-8
@@ -2257,9 +2268,33 @@ struct FileHealth
                                       // errBytes above always describe the parse extraction actually read.
     std::uint32_t useBoundsBlanked = 0;   // its Rust layer (src/rustusebounds.h): precise-capturing use<..> bounds
                                           // blanked for the ADOPTED parse; 0 ⇒ the first parse was kept
+    std::uint32_t indexMode = 0;   // NO-SKIP-INGEST: a FileIndexMode — how the file's facts were extracted when it was
+                                   // not a full parse (0 = parsed); rides the cache record so a warm run discloses it too
+    std::uint32_t keysCut   = 0;   // DataKeysBounded: keys found past kDataFileKeyCap and not made symbols (keys_cut=)
 
     bool operator==( const FileHealth& ) const noexcept = default;   // the parse pool's "blob already holds this record" test
 };
+
+// NO-SKIP-INGEST: this file's symbols come from a lexical read (FileIndexMode), not a parse — any mode but Parsed.
+inline bool isLexicallyIndexed( const FileHealth& health ) noexcept
+{
+    return health.indexMode != std::uint32_t( FileIndexMode::Parsed );
+}
+
+// The --skipped / warning word for a mode: lexical-size, lexical-budget, keys-bounded, lexical-nest ("" for Parsed).
+inline std::string_view fileIndexModeWord( std::uint32_t mode ) noexcept
+{
+    switch( FileIndexMode( mode ) )
+    {
+        case FileIndexMode::LexicalOverSize:    return "lexical-size";
+        case FileIndexMode::LexicalOverBudget:  return "lexical-budget";
+        case FileIndexMode::DataKeysBounded:    return "keys-bounded";
+        case FileIndexMode::LexicalNestRefused: return "lexical-nest";
+        case FileIndexMode::Parsed:             break;
+    }
+    return {};
+}
+
 
 // Output of ingestion. Deterministic: files sorted lexicographically, symbol ids assigned
 // in (file, line, name) order so the whole pipeline is reproducible run-to-run.
@@ -2536,6 +2571,40 @@ inline const std::string& diskPath( const IngestResult& ing, std::uint32_t fileI
 // the same errNodes > 0 rule when it builds its rows; grep's parse_degraded= file-row flag and the
 // selector refusals' degraded clause both route through HERE, so the three surfaces can never disagree
 // about what "degraded" means.
+// NO-SKIP-INGEST: how many indexed files were read lexically (any FileIndexMode but Parsed) and how many data keys the
+// bounded reads cut — the map header's lexical_files= / keys_cut=, the --skipped root's twins and the graph verbs' floor.
+struct LexicalIndexCounts
+{
+    std::uint64_t files   = 0;
+    std::uint64_t keysCut = 0;
+};
+
+inline LexicalIndexCounts lexicalIndexCounts( const IngestResult& ing ) noexcept
+{
+    LexicalIndexCounts counts;
+    for( const FileHealth& health : ing.fileHealth )
+    {
+        counts.files += isLexicallyIndexed( health ) ? 1u : 0u;
+        counts.keysCut += health.keysCut;
+    }
+    return counts;
+}
+
+// This file's index mode word when it was read lexically ("" when parsed, or the slot is out of range).
+inline std::string_view fileLexicalModeWord( const IngestResult& ing, std::size_t fileIndex ) noexcept
+{
+    return fileIndex < ing.fileHealth.size() ? fileIndexModeWord( ing.fileHealth[ fileIndex ].indexMode ) : std::string_view{};
+}
+
+// The structural-query walk (--match/--pattern/--lint, ingest_astquery.h) parses what the ingest parsed and nothing
+// else: a file the nesting guard refused (#157), or one the ingest read lexically because a parse would not fit its
+// size or its budget (NO-SKIP-INGEST), is never handed to that walk's own, unbudgeted parse.
+inline bool structuralWalkRefuses( const IngestResult& ing, std::size_t fileId ) noexcept
+{
+    return ( fileId < ing.nestRefusedFile.size() && ing.nestRefusedFile[ fileId ] != 0 )
+        || ( fileId < ing.fileHealth.size() && isLexicallyIndexed( ing.fileHealth[ fileId ] ) );
+}
+
 inline bool fileParseDegraded( const IngestResult& ing, std::size_t fileIndex ) noexcept
 {
     return fileIndex < ing.fileHealth.size()

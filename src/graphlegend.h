@@ -73,7 +73,7 @@ inline std::pair<std::size_t, std::size_t> graphGaugeTotals( const std::vector<s
 
 // an agent correctly learns to skip. Gate: test/blindspotcheck.sh arms (A) value-equality and (B) absence.
 inline std::string graphGaugeAttrXml( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut,
-                                      std::size_t unindexedFiles = 0, std::size_t rubyBasesUnscoped = 0 )
+                                      std::size_t unindexedFiles = 0, std::size_t rubyBasesUnscoped = 0, std::size_t lexicalFiles = 0 )
 {
     const auto [amb, unresolved] = graphGaugeTotals( ambOut, unresolvedOut );
     char buf[160];
@@ -91,10 +91,15 @@ inline std::string graphGaugeAttrXml( const std::vector<std::uint32_t>& ambOut, 
         rw::formatTo( buf, sizeof( buf ), " ruby_bases_unscoped=\"{}\"", rubyBasesUnscoped );
         out += buf;
     }
+    if( lexicalFiles > 0 ) // NO-SKIP-INGEST, absent at zero like graph_unindexed=
+    {
+        rw::formatTo( buf, sizeof( buf ), " graph_lexical=\"{}\"", lexicalFiles );
+        out += buf;
+    }
     return out;
 }
 inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut,
-                                       std::size_t unindexedFiles = 0, std::size_t rubyBasesUnscoped = 0 )
+                                       std::size_t unindexedFiles = 0, std::size_t rubyBasesUnscoped = 0, std::size_t lexicalFiles = 0 )
 {
     const auto [amb, unresolved] = graphGaugeTotals( ambOut, unresolvedOut );
     char buf[160];
@@ -110,6 +115,11 @@ inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut,
     if( rubyBasesUnscoped > 0 ) // #325, absent at zero like graph_unindexed=
     {
         rw::formatTo( buf, sizeof( buf ), ",\"ruby_bases_unscoped\":{}", rubyBasesUnscoped );
+        out += buf;
+    }
+    if( lexicalFiles > 0 ) // NO-SKIP-INGEST, the XML twin
+    {
+        rw::formatTo( buf, sizeof( buf ), ",\"graph_lexical\":{}", lexicalFiles );
         out += buf;
     }
     return out;
@@ -145,18 +155,27 @@ inline constexpr const char* kRubyBasesUnscopedLegend =
     "directive at their class open, so each base was matched by its final name segment instead of Ruby's constant "
     "lookup; an implementor or base-walk edge through one may name a same-named class elsewhere. ";
 
+// NO-SKIP-INGEST's gauge: code files read lexically (over the max file size, or past the parse budget), whose definitions
+// are line-shaped and whose calls are name-only. Rides every clause graph_unindexed= does, absent at zero with its attribute.
+inline constexpr const char* kGraphLexicalLegend =
+    "graph_lexical=N (absent when zero, and so is this sentence): N code files were read lexically, not parsed (over the max "
+    "file size or past the parse budget): their definitions are line-shaped and their calls name-only, so edges into and out "
+    "of them are rougher; the skipped verb rows them. ";
+
 // Which absent-at-zero gauge clauses a root calls for. Built from a bool so a caller that knows only the #66
 // gauge still reads the way it did; graph.h graphGaugeClauses( g ) fills both.
 struct GaugeClauses
 {
     bool unindexed = false; // graph_unindexed= is on the root
     bool rubyUnscoped = false; // ruby_bases_unscoped= is on the root
-    constexpr GaugeClauses( bool u = false, bool r = false ) noexcept : unindexed( u ), rubyUnscoped( r ) {}
-    constexpr bool any() const noexcept { return unindexed || rubyUnscoped; }
+    bool lexical = false; // graph_lexical= is on the root
+    constexpr GaugeClauses( bool u = false, bool r = false, bool l = false ) noexcept : unindexed( u ), rubyUnscoped( r ), lexical( l ) {}
+    constexpr bool any() const noexcept { return unindexed || rubyUnscoped || lexical; }
 };
 inline std::string graphUnindexedLegend( GaugeClauses on )
 {
-    return std::string( on.unindexed ? kGraphUnindexedLegend : "" ) + ( on.rubyUnscoped ? kRubyBasesUnscopedLegend : "" );
+    return std::string( on.unindexed ? kGraphUnindexedLegend : "" ) + ( on.rubyUnscoped ? kRubyBasesUnscopedLegend : "" )
+         + ( on.lexical ? kGraphLexicalLegend : "" );
 }
 
 // The same sentence as its OWN XML comment, for the legends that are one closed <!-- ... --> literal rather

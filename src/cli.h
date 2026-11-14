@@ -110,7 +110,7 @@ struct Config
     bool             noIgnore = false;                     // --no-ignore (§N6-C): crawl gitignored paths too — the pre-2026-09-03
                                                            // walk. Default OFF: a git root's own ignore rules shape the corpus and
                                                            // the header discloses ignored_files=/ignored_dirs=
-    std::size_t      maxFileBytes = kDefaultMaxFileBytes;  // --max-file-size=N[K|M|G]: crawl size ceiling (default 4 MB)
+    std::size_t      maxFileBytes = kDefaultMaxFileBytes;  // --max-file-size=N[K|M|G]: files over it are read lexically (default 64 MiB)
     std::size_t      maxMemoryBytes = 0;                   // --max-memory=N[K|M|G] (#350): the memory guard's limit; 0 = not given (memguard.h)
     std::string_view scipIndex;                            // --scip=index.scip: SCIP precision overlay — precise edges REPLACE name-based guesses; prov="scip" tags them
     std::string_view pinCensus;                            // --pin-census=FILE: eval-only side file naming, per DECIDED call site, the mechanism
@@ -2867,12 +2867,14 @@ inline constexpr char kHelpTail[] =
         "                               ignored_dirs= when it dropped anything. A non-git root, a missing git binary, or a\n"
         "                               root that is ITSELF inside an ignored subtree all keep the full walk; --skipped's\n"
         "                               ignore_mode= says which of the four applied, and rows the ignored set.\n"
-        "    --max-file-size=N[K|M|G]   skip files larger than N bytes; default 4MB\n"
-        "                               skip files larger than N bytes (default 4MB; raise for repos with\n"
-        "                               big hand-authored source, e.g. --max-file-size=100M; suffix = 1024^n).\n"
-        "                               .json carries a SECOND, fixed 256KB ceiling this flag does not raise\n"
-        "                               (that size of .json is data, not config, and explodes the symbol\n"
-        "                               table); files it drops are counted in the header's skipped_oversize=\n"
+        "    --max-file-size=N[K|M|G]   read files larger than N bytes lexically; default 64MB\n"
+        "                               files over N bytes are still indexed, read lexically instead of parsed: defs by\n"
+        "                               line shape, calls by name( (default 64MB; suffix = 1024^n). Every file is also\n"
+        "                               parsed under a time budget (4 s + 1 s/MiB, env RIPWIRE_PARSE_BUDGET=<scale>);\n"
+        "                               one that runs past it is read lexically too. .json over 256KB / .yaml over\n"
+        "                               512KB index their first 256 top-level keys (env RIPWIRE_DATA_KEYS=N). Only a\n"
+        "                               file over 1GB is dropped. Each event warns on stderr; the header counts them\n"
+        "                               (lexical_files=, keys_cut=, skipped_oversize=) and the skipped verb rows them\n"
         "    --max-memory=N[K|M|G]      the memory guard's limit (default 65% of this machine's memory, env RIPWIRE_MAX_MEMORY)\n"
         "                               the memory guard is on for every run and silent on normal ones: it measures this\n"
         "                               process's footprint (on Linux, in a cgroup v2 leaf with a memory.max, the leaf's\n"

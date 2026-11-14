@@ -212,6 +212,7 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
     "<!-- shallow=",                    // 0.6.6 shallow-history honesty: gitstamp.h kShallowLegendComment, the full clause
                                        // beside a history verb's shallow="1" root; the completeness table reads it back.
     "<!-- ruby_bases_unscoped=",       // #325: the same own-comment clause when only the Ruby gauge is on (graphUnindexedLegendComment)
+    "<!-- graph_lexical=",             // NO-SKIP-INGEST: the same own-comment clause when only the lexical gauge is on
     "<!-- notes_degraded=",             // L3 follow-up (CodeRabbit 4053600616): the map/--expand root's standalone
                                        // clause (serialize.h kNotesDegradedComment) — the graph_unindexed= precedent
                                        // exactly. Every OTHER emitter splices the same reading as plain text inside
@@ -330,6 +331,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "graph_unindexed",   "graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge" },
     // #325: absent at zero like graph_unindexed=, so it needs its own present-only row for the same reason.
     { "ruby_bases_unscoped", "ruby_bases_unscoped=N: N Ruby superclass refs with no directive at their class open; base matched by final name segment" },
+    // NO-SKIP-INGEST: absent at zero like graph_unindexed=, its own present-only row for the same reason.
+    { "graph_lexical", "graph_lexical=N: N code files read lexically, not parsed (over the max file size or past the parse budget); their defs and calls are line-shaped" },
     // THE COUNT QUALIFIERS the graph_unindexed row above did not bring along (2026-09-12). Each is absent at zero and
     // its full clause rides only a document that carries it (graphlegend.h declinedCallsLegend( bool ),
     // unprovenDefsLegend( bool ), the callees-only clause of callHierarchyLegendOpen( bool )), so the prose strip removed
@@ -597,7 +600,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "files",             "files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable)", false, {}, MapHeaderRead::Only },
     { "roots",             "roots=N: N workspace roots", false, {}, MapHeaderRead::Only },
     { "changed",           "changed=K: K indexed git-changed files seed the PageRank teleport (0: uniform, incl. no git)", false, {}, MapHeaderRead::Only },
-    { "skipped_oversize",  "skipped_oversize=K: K files over a size ceiling, not indexed", false, {}, MapHeaderRead::Only },
+    { "skipped_oversize",  "skipped_oversize=K: K files over the 1 GiB hard limit, not indexed", false, {}, MapHeaderRead::Only },
+    { "lexical_files",     "lexical_files=K: K files read lexically, not parsed (over the max file size, past the parse budget, or data past its key ceiling): defs by line shape, calls by name(; skipped verb rows them", false, {}, MapHeaderRead::Only },
+    { "keys_cut",          "keys_cut=K: K data-file keys past the per-file key cap not made symbols", false, {}, MapHeaderRead::Only },
     // #350 layer 3: the memory guard's stop (serialize.h buildMemoryStopAttr). Present only on a run the guard cut, so each
     // is a present-only header term; the readings avoid the flag's spelling because a legend is an XML comment.
     { "memory_stop",       "memory_stop=crawl|parse: the memory guard stopped that phase; files= and every count are floors of the tree", false, {}, MapHeaderRead::Only },
@@ -1606,7 +1611,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "rules", "rules=N: rules in the built-in registry, one rule row each, never cut", false, "lintcatalog", MapHeaderRead::No, {}, "lint-catalog" },
     // skipped: src/verbs_report.h writeSkippedHeader / writeUnindexedExtRows / writeLangRows (+ kSkippedLegend)
     { "indexed", "indexed=N: the map's files=; indexed= + oversize= + excluded= + ignored= = every file the crawl enumerated", false, "skipped", MapHeaderRead::No, {}, "skipped" },
-    { "oversize", "oversize=N: files dropped for exceeding a size ceiling (row limit= names which)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
+    { "oversize", "oversize=N: files dropped over the 1 GiB hard limit (row limit=), the one size that still drops a file", false, "skipped", MapHeaderRead::No, {}, "skipped" },
+    { "lexical_files", "lexical_files=N: indexed files read lexically, not parsed (the lexical-size/lexical-budget/keys-bounded h rows)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
+    { "keys_cut", "keys_cut=N: data-file keys past the per-file key cap, not made symbols", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "excluded", "excluded=N: files dropped by an exclude substring you passed", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "unsupported_ext", "unsupported_ext=N: source/text files no grammar reads; binary assets and excluded/ignored files not counted", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "excluded_dirs", "excluded_dirs=N: subtrees an exclude pruned; their files are UNKNOWN, not zero, and in no count here", false, "skipped", MapHeaderRead::No, {}, "skipped" },
@@ -1615,8 +1622,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "ignore_mode", "ignore_mode=: git (rules applied), off (no-ignore flag), unavailable/root-ignored (not consulted, full walk)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "degraded_parse", "degraded_parse=/minified_suspect=: counts of the h rows of each why=; those files stay indexed", false, "skipped", MapHeaderRead::No, {}, "skipped" },   // also defines minified_suspect=
     { "unmeasured", "unmeasured=N: indexed files never parsed (doc pass, binary sniff, nest guard, read error); not health-counted", false, "skipped", MapHeaderRead::No, {}, "skipped" },
-    { "max_file_size", "max_file_size=B: the effective per-file size ceiling in bytes (the max-file-size flag raises it)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
-    { "json_ceiling", "json_ceiling=/yaml_ceiling=: fixed .json/.yaml byte ceilings the max-file-size flag does NOT raise", false, "skipped", MapHeaderRead::No, {}, "skipped" },   // also defines yaml_ceiling=
+    { "max_file_size", "max_file_size=B: files over B bytes are read lexically, not parsed (the max-file-size flag raises it)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
+    { "json_ceiling", "json_ceiling=/yaml_ceiling=: .json/.yaml over these bytes yield bounded keys (keys-bounded rows), not a full parse", false, "skipped", MapHeaderRead::No, {}, "skipped" },   // also defines yaml_ceiling=
     { "ws_freq", "ws_freq=R: whitespace share of the leading 4096 bytes; under 0.070 = minified-suspect (never under 256 B)", true, "h", MapHeaderRead::No, {}, "skipped" },
     { "x", "x=/files=: an unindexed extension and its file count (full list; the map's unindexed= is the top 6)", true, "e", MapHeaderRead::No, {}, "skipped" },   // also defines files= on <e>
     { "files", "files=/symbols=: per language, files with its symbols (FLOOR: symbol-less files uncounted) / symbols (exact)", true, "lang", MapHeaderRead::No, {}, "skipped" },   // also defines symbols=
@@ -1744,7 +1751,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "unknown", "unknown=N: refs that could not be analysed (v=unknown, e.g. no merge base); never counted merged", false, "stray-content", MapHeaderRead::No, {}, "stray-content" },
     // grep: src/verbs_grep.h grepCorpusAttrs / grepUnindexedAttrs (each absent at 0)
     { "corpus_excluded", "corpus_excluded=N: files an exclude filter kept out of the index, never searched; skipped verb lists them", false, "grep", MapHeaderRead::No, {}, "grep" },
-    { "corpus_oversize", "corpus_oversize=N: files the crawl saw but dropped over the size ceiling, never searched; skipped verb lists", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "corpus_oversize", "corpus_oversize=N: files the crawl saw but dropped over the 1 GiB hard limit, never searched; skipped verb lists", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "corpus_pruned_dirs", "corpus_pruned_dirs=N: DIRECTORIES the built-in crawl denylist pruned whole (vendor, build etc), unsearched", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "unindexed_files_skipped", "unindexed_files_skipped=N: off-index candidates not read: over max-file-size, binary, or unreadable", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "count", "unindexed count=N: off-index hits, equal to unindexed_hits=; paged by the same window as the f rows", true, "unindexed", MapHeaderRead::No, {}, "grep" },

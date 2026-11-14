@@ -130,6 +130,30 @@ struct RawFacts
     std::vector<ConstOpen>    constOpens;  // parser version 82: Ruby class/module opens (model.h ConstOpen)
 };
 
+// NO-SKIP-INGEST: the size of every fact family before one file's extraction, so a file whose extraction ran past its
+// budget part-way through the tags pass leaves nothing behind before it is read lexically (rollBackFacts).
+struct RawFactsMark
+{
+    std::size_t defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens;
+};
+
+inline RawFactsMark markFacts( const RawFacts& f ) noexcept
+{
+    return { f.defs.size(), f.refs.size(), f.incs.size(), f.binds.size(), f.ffis.size(), f.routeDefs.size(), f.routeUses.size(), f.constOpens.size() };
+}
+
+inline void rollBackFacts( RawFacts& f, const RawFactsMark& m )
+{
+    f.defs.resize( m.defs );
+    f.refs.resize( m.refs );
+    f.incs.resize( m.incs );
+    f.binds.resize( m.binds );
+    f.ffis.resize( m.ffis );
+    f.routeDefs.resize( m.routeDefs );
+    f.routeUses.resize( m.routeUses );
+    f.constOpens.resize( m.constOpens );
+}
+
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
 // the flush hands them to captureTagsFacts (move-only; the tree is freed on destruction if unflushed).
 // It also owns the file's decided-dead byte ranges (#72 follow-up): those are walked ONCE, beside the
@@ -345,7 +369,26 @@ struct ParsePoolShared
     bool                             needsCacheHash;
     bool                             captureValueUses;
     memguard::Watch*                 memWatch;              // #350: null = unguarded; else checked before each claim
+    std::size_t                      maxFileBytes;          // NO-SKIP-INGEST: --max-file-size; a file over it is read lexically
 };
+
+// NO-SKIP-INGEST: a cached record whose index mode this run would not choose is re-extracted (as a late miss, so its
+// grammar is installed first): a file that now fits --max-file-size, or has grown past it, a lexical-budget record under
+// a RIPWIRE_PARSE_BUDGET scale (a raised budget retries the parse), and a cut data record under a RIPWIRE_DATA_KEYS cap.
+inline bool cachedIndexModeStale( const CachedRecordHead& rec, const LangEntry& le, std::size_t maxFileBytes )
+{
+    const FileIndexMode mode    = FileIndexMode( rec.health.indexMode );
+    const bool          overNow = !isDataKeysLang( le.lang ) && rec.sizeBytes >= 0 && std::size_t( rec.sizeBytes ) > maxFileBytes;
+    if( overNow != ( mode == FileIndexMode::LexicalOverSize ) )
+    {
+        return true;
+    }
+    if( mode == FileIndexMode::LexicalOverBudget )
+    {
+        return parseBudgetScale() != 1.0;
+    }
+    return mode == FileIndexMode::DataKeysBounded && rec.health.keysCut > 0 && dataFileKeyCap() != kDataFileKeyCap;
+}
 
 // WARM-REWRITE: true when the blob's record for a file is exactly the record saveCache would write for it now —
 // `expect` carries that record's key (hash, stat triple, health) and no facts, so the record must hold none in any
@@ -475,6 +518,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     };
 
     constexpr std::size_t kMaxPendingParsedFiles = 4;
+    constexpr std::size_t kMaxQueuedParsedFileBytes = 256u * 1024u;   // NO-SKIP-INGEST: larger files run their tags pass under their deadline
     constexpr std::size_t kMaxPendingParsedBytes = 8u * 1024u * 1024u;
     std::vector<PendingParsedFile> pendingParsed;
     pendingParsed.reserve( kMaxPendingParsedFiles );
@@ -612,6 +656,11 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                         hit = candidate;
                     }
                 }
+                if( hit != nullptr && cachedIndexModeStale( *hit, *le, sh.maxFileBytes ) )
+                {
+                    sh.lateMiss[ fileId ] = 1;   // re-extracted after the join, in the mode this run chooses
+                    continue;
+                }
                 if( hit != nullptr )   // unchanged → decode its record straight into this worker's arrays, skip parse
                 {
                     if( decodeCachedRecordNoThrow( sh.cache, fileId, path, record ) )
@@ -660,6 +709,22 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             // A reST file takes no grammar, so the guard has nothing to protect: ingest_rest.h's scan is flat and bounds itself.
             const std::string restExt = lowerExtensionOf( path );
             const bool        isRest  = docparse::isRestExtension( restExt );
+
+            // NO-SKIP-INGEST: a file the parse should not take — over --max-file-size, or a .json/.yml past its full-index
+            // ceiling — is read lexically here, before any prescan or parse (both readers are linear and nesting-blind).
+            // A reST file keeps its own flat reader, which bounds itself.
+            const auto indexLexically = [ & ]( FileIndexMode mode )
+            {
+                const std::size_t firstNewDefIndex = out.defs.size();
+                indexFileLexically( static_cast<std::uint32_t>( fileId ), *le, bytes, mode, out.defs, out.refs, scan.health[ fileId ] );
+                finishNewDefs( out.defs, firstNewDefIndex, bytes );   // lexical stats; a lexical span (bodyByte = endByte) has no clone key
+            };
+            if( const FileIndexMode preMode = preParseIndexMode( le->lang, bytes.size(), sh.maxFileBytes ); !isRest && preMode != FileIndexMode::Parsed )
+            {
+                markMissDirty( sh );
+                indexLexically( preMode );
+                continue;
+            }
             if( !isRest && refuseNesting( *le, bytes, path.c_str(), fileId, scan ) )
             {
                 noteFactlessMiss( sh, fileId, true );
@@ -682,9 +747,14 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     continue;
                 }
-                TreeGuard mdTree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes ); } ) );
+                bool      overBudget = false;
+                TreeGuard mdTree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &overBudget ); } ) );
                 if( mdTree.get() == nullptr )
                 {
+                    if( overBudget )
+                    {
+                        indexLexically( FileIndexMode::LexicalOverBudget );   // a doc keeps its file, with no symbols, disclosed
+                    }
                     continue;
                 }
                 scan.health[ fileId ] = measureFileHealth( ts_tree_root_node( mdTree.get() ), bytes );
@@ -719,9 +789,18 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     continue;
                 }
 
-                TreeGuard tree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes ); } ) );
+                // NO-SKIP-INGEST: one budget for this file's whole extraction — the parse and the tags query (ingest_sidecap.h
+                // ExtractDeadlineScope). A file past it is rolled back to the mark and read lexically.
+                const RawFactsMark   factsMark = markFacts( out );
+                ExtractDeadlineScope extractDeadline( bytes.size() );
+                bool      overBudget = false;
+                TreeGuard tree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &overBudget ); } ) );
                 if( tree.get() == nullptr )
                 {
+                    if( overBudget )
+                    {
+                        indexLexically( FileIndexMode::LexicalOverBudget );   // the parse ran past its budget: cancelled, read lexically
+                    }
                     continue;
                 }
 
@@ -740,7 +819,8 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 notePartialExtract( scan, fileId, shortfall, bytes.size() );   // before a queued file's tags pass, which notes its own
                 appendBlankedMacroUses( macroWork, le->lang, static_cast<std::uint32_t>( fileId ), bytes, out.refs, ppDead );
 
-                const bool canQueueParsed = !sh.prewarm.ready.load( std::memory_order_acquire )
+                const bool canQueueParsed = bytes.size() <= kMaxQueuedParsedFileBytes   // a large file's tags pass runs under its deadline, now
+                                         && !sh.prewarm.ready.load( std::memory_order_acquire )
                                          && pendingParsed.size() < kMaxPendingParsedFiles
                                          && pendingParsedBytes + bytes.size() <= kMaxPendingParsedBytes;
                 if( canQueueParsed )
@@ -761,6 +841,13 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs, ppDead, shortfall,
                                       TagsCapture::Full, cjsExportStem( le->lang, path ) );
                 } );
+                if( extractDeadline.hit() )
+                {
+                    rollBackFacts( out, factsMark );
+                    scan.extractPartial[ fileId ] = 0;   // the lexical read below is the whole of this file's facts, disclosed as such
+                    indexLexically( FileIndexMode::LexicalOverBudget );
+                    continue;
+                }
                 notePartialExtract( scan, fileId, shortfall, bytes.size() );
                 finishNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: bytes still in memory
             }
@@ -866,7 +953,7 @@ inline std::size_t parseLateMisses( const ParsePoolShared& pool, std::vector<con
     std::vector<std::uint8_t> noLateMiss;   // never written: no file of this pass is a hit
     ParsePoolShared           shared{ pool.files, pool.cache, pool.scan, pool.prewarm, pool.gate, candidates, hits, noLateMiss,
                                       pool.tFacts, late, next, pool.dirty, pool.reparsedCount, pool.warmGrowths, late.size(),
-                                      pool.needsCacheHash, pool.captureValueUses, nullptr };
+                                      pool.needsCacheHash, pool.captureValueUses, nullptr, pool.maxFileBytes };
     runParseWorker( shared, 0 );
     return late.size();
 }
@@ -901,7 +988,7 @@ inline bool applyMemoryParseCut( IngestResult& result, memguard::Watch* memWatch
 
 inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::string_view cacheFile, bool captureValueUses,
                               CacheRecords& cache, const CacheLoadStats& cacheStats,
-                              IngestFileScan& scan, QueryPrewarm& prewarm, memguard::Watch* memWatch = nullptr )
+                              IngestFileScan& scan, QueryPrewarm& prewarm, memguard::Watch* memWatch, std::size_t maxFileBytes )
 {
     RawFacts raw;
     const bool needsCacheHash = !cacheFile.empty();
@@ -1037,7 +1124,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
 
         ParsePoolShared shared{ result.files, cache, scan, prewarm, queryReadyGate, cacheCandidateFacts, cacheHitFacts, lateMiss,
                                 tFacts, parseOrder, nextFile, dirty, reparsedCount, warmGrowths, nfiles, needsCacheHash, captureValueUses,
-                                memWatch };
+                                memWatch, maxFileBytes };
 
         for( unsigned t = 0; t < nthreads; ++t )
         {

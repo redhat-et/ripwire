@@ -707,6 +707,7 @@ for _g in \
     matchcapturecheck \
     matchgrammarcheck \
     maxfilesizecheck \
+    noskipingestcheck \
     mcpattrparitycheck \
     mcpaudit4hardencheck \
     mcpclidiffcheck \

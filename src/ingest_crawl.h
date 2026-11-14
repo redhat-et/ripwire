@@ -1246,10 +1246,9 @@ bool looksObjC( std::string_view bytes ) noexcept
 // §P0.5d: the crawl also reports WHICH otherwise-indexable files it dropped for exceeding A SIZE CEILING,
 // so the map header can say `skipped_oversize=` (the count) and --skipped can name the rows, instead of
 // presenting a truncated corpus as the whole tree.
-// §B13.1: "a size ceiling" is TWO ceilings — maxFileBytes (--max-file-size) and the fixed kMaxJsonConfigBytes
-// the .json lane applies on top of it — and the list covers both, because a file the reader cannot see is
-// equally invisible whichever ceiling dropped it. They are mutually exclusive per file (see the drop sites);
-// each row records the ceiling that dropped it as limitBytes.
+// §B13.1 named TWO ceilings here (--max-file-size and the .json lane's). NO-SKIP-INGEST (2026-11-14) retired both as
+// drops — the parse pool reads such a file lexically or with bounded keys — so the one ceiling left is
+// kHardMaxFileBytes, and each row records it as limitBytes.
 // §L1: record ONE non-size drop. The count is exact and always incremented; the ROW is collected only
 // while the class is under its ceiling, and `file_size()` is only paid for a row that will actually be
 // printed — the tally itself must not cost a stat per asset file on a monorepo crawl. Extracted rather
@@ -1925,7 +1924,7 @@ private:
 };
 
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
-                            std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true,
+                            std::string_view excludeLabel = {}, bool respectGitignore = true,
                             memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr )
 {
     std::vector<std::string>     out;
@@ -1957,13 +1956,13 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             if( lookupLang( ext ) != nullptr || docparse::isDocExtension( ext ) )
             {
                 const std::uintmax_t sz = fs::file_size( root, ec );
-                if( !ec && sz <= maxFileBytes )
+                if( !ec && sz <= kHardMaxFileBytes )
                 {
-                    out.push_back( rootDir );
+                    out.push_back( rootDir );   // NO-SKIP-INGEST: past --max-file-size it is read lexically, not dropped
                 }
-                else if( !ec && sz > maxFileBytes )
+                else if( !ec )
                 {
-                    skipped.push_back( { rootDir, sz, maxFileBytes } );
+                    skipped.push_back( { rootDir, sz, kHardMaxFileBytes } );
                 }
             }
             else if( !isNonTextExtension( ext ) )
@@ -2133,47 +2132,20 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 continue;
             }
 
+            // NO-SKIP-INGEST (owner 2026-11-14): no size drops a file any more. A file over --max-file-size is read
+            // lexically by the parse pool, and a .json/.yml past its full-index ceiling (kMaxJsonConfigBytes /
+            // kMaxYamlConfigBytes) yields bounded keys — both decided there, where the bytes are, and disclosed per file
+            // (FileHealth::indexMode). Only kHardMaxFileBytes still drops one: past it no u32 byte offset can name a
+            // position. The list keeps its §P0.5d/§B13.1 role for that one ceiling (skipped_oversize=, --skipped rows),
+            // and the header's accounting invariant (files= + skipped_oversize= = the candidates) holds unchanged.
             const std::uintmax_t sz = it->file_size( ec );
-            if( ec || sz > maxFileBytes )
+            if( ec || sz > kHardMaxFileBytes )
             {
-                if( !ec && sz > maxFileBytes )
+                if( !ec )
                 {
-                    // §P0.5d: a size drop is reportable, not invisible — path + size + the ceiling that dropped it
-                    skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( maxFileBytes ) } );
+                    skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kHardMaxFileBytes ) } );
                 }
                 ec.clear();
-                continue;
-            }
-
-            // JSON-lane ceiling (see kMaxJsonConfigBytes): big .json is data, not config — skip it before it
-            // mints a symbol-table explosion. Applies only to the .json extension; --max-file-size does not
-            // override it upward (config files this large do not exist; data files this large are the hazard).
-            //
-            // §B13.1: COUNTED, exactly like the generic size drop 8 lines above. Both are "an otherwise-indexable
-            // file the crawl dropped for exceeding a size ceiling", which is what skipped_oversize means, and the
-            // two are mutually exclusive BY CONSTRUCTION — the generic ceiling is tested first, so a .json over
-            // both ceilings is counted once, there — which is why one list serves both and no file is counted
-            // twice. Uncounted, this drop broke the header's own accounting invariant
-            // (files= + skipped_oversize= = the candidate population the crawl considered): on this repo the
-            // DEFAULT map reported files=866 with the attribute absent (implying 866) while --max-file-size=256K
-            // reported files=861 + skipped_oversize=8 = 869. Three files — the >256 KB .json under
-            // bench/locbench/ — vanished with no counter, no stderr and no legend clause, which is the exact
-            // class skipped_oversize exists to kill. The ceiling itself is deliberately NOT lifted here: it is a
-            // content-class guard (data vs config) that merely uses size as its proxy, so letting a SIZE flag
-            // override it would trade a disclosure defect for a corpus one.
-            if( sz > kMaxJsonConfigBytes && ext == ".json" )
-            {
-                skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxJsonConfigBytes ) } );
-                continue;
-            }
-
-            // YAML-lane ceiling (see kMaxYamlConfigBytes): the same hazard class as .json — a machine-written
-            // DATA population behind a config extension — at YAML's own measured calibration: 512 KB, because
-            // JSON's 256 KB would drop real hand-maintained config (NeMo's 293 KB cicd-main.yml). Counted in
-            // skipped_oversize exactly like its two siblings above, for the same accounting invariant.
-            if( sz > kMaxYamlConfigBytes && ( ext == ".yml" || ext == ".yaml" ) )
-            {
-                skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxYamlConfigBytes ) } );
                 continue;
             }
 

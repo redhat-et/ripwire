@@ -82,18 +82,20 @@ bigBytes="$( wc -c < "$TMP/corpus/big.cpp" | tr -d ' ' )"
 # ── (1) why= vocabulary ──────────────────────────────────────────────────────────────────────────────
 "$BIN" corpus --skipped --max-file-size=1K --exclude=vendorgen --no-cache > "$TMP/sk.xml" 2>/dev/null
 
-hasrow(){ # hasrow <path-substr> <why>
-  python3 - "$TMP/sk.xml" "$1" "$2" <<'PY'
+hasrow(){ # hasrow <path-substr> <why> [tag]   (tag f = dropped, h = indexed but disclosed; default f)
+  python3 - "$TMP/sk.xml" "$1" "$2" "${3:-f}" <<'PY'
 import re,sys
-x=open(sys.argv[1]).read(); p=sys.argv[2]; w=sys.argv[3]
-for m in re.finditer(r'<f\b[^>]*/>', x):
+x=open(sys.argv[1]).read(); p=sys.argv[2]; w=sys.argv[3]; t=sys.argv[4]
+for m in re.finditer(r'<%s\b[^>]*/>' % t, x):
     r=m.group(0)
     if p in r and ('why="%s"'%w) in r:
         sys.exit(0)
 sys.exit(1)
 PY
 }
-if hasrow 'big.cpp'       oversize; then ok '(1) big.cpp     row carries why="oversize"'; else no '(1) NO why="oversize" row for corpus/big.cpp'; fi
+# NO-SKIP-INGEST (2026-11-14): over --max-file-size a file is no longer dropped — it is indexed lexically and rowed <h why="lexical-size"/>.
+if hasrow 'big.cpp'       lexical-size h; then ok '(1) big.cpp     row carries why="lexical-size" (indexed, not dropped)'; else no '(1) NO why="lexical-size" h row for corpus/big.cpp'; fi
+if hasrow 'big.cpp'       oversize; then no '(1) big.cpp is still DROPPED as oversize under --max-file-size'; else ok '(1) big.cpp has no oversize drop row'; fi
 if hasrow 'vendorgen.cpp' excluded; then ok '(1) vendorgen.cpp row carries why="excluded"'; else no '(1) NO why="excluded" row for corpus/vendorgen.cpp'; fi
 if hasrow 'mod1.ml'       unsupported-ext; then ok '(1) mod1.ml     row carries why="unsupported-ext"'; else no '(1) NO why="unsupported-ext" row for corpus/mod1.ml'; fi
 grep -q 'p="keep.cpp"' "$TMP/sk.xml" && no '(1) keep.cpp is INDEXED — it must not appear as a skip row' \

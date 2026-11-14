@@ -795,7 +795,7 @@ static void computeGrammarDisclosure( const IngestResult& ing, const std::vector
                 // #157: a file the nesting guard refused is never scanned (see the walk's own skip above),
                 // so it must not count as "eligible" here — eligible_files= would otherwise claim a file was
                 // scanned that the same run's own refusal excluded from the walk.
-                if( fileId < ing.nestRefusedFile.size() && ing.nestRefusedFile[ fileId ] != 0 )
+                if( structuralWalkRefuses( ing, fileId ) )   // the nesting guard's refusal, or a file the ingest read lexically
                 {
                     continue;
                 }
@@ -1102,7 +1102,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     // or the structural-query walk (--match/--pattern/--lint) would return hits from content
                     // the map itself declined to index. Ask ing.nestRefusedFile (model.h) rather than
                     // re-running the prescan: same source of truth, no second guard to drift out of sync.
-                    if( fileId < ing.nestRefusedFile.size() && ing.nestRefusedFile[ fileId ] != 0 )
+                    if( structuralWalkRefuses( ing, fileId ) )   // the nesting guard's refusal, or a file the ingest read lexically
                     {
                         continue;
                     }
@@ -1433,7 +1433,7 @@ PatternFileCensus eligiblePatternFiles( const IngestResult& ing, const pattern::
     {
         // #157: excluded from both eligible= and skipped= — the walk never reaches it (see the walk's own
         // skip), so counting it as either would claim a fact about a file this run never scanned.
-        if( fileId < ing.nestRefusedFile.size() && ing.nestRefusedFile[ fileId ] != 0 )
+        if( structuralWalkRefuses( ing, fileId ) )   // the nesting guard's refusal, or a file the ingest read lexically
         {
             continue;
         }

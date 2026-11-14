@@ -3066,8 +3066,12 @@ graphify 0.9.34 with `--code-only --no-cluster`. The measurement is in `bench/he
 
 **What the crawl skips, and how to change it**
 
-- Files over 4 MB: `--max-file-size=N[K|M|G]`.
-- JSON files over 256 KB, and YAML files over 512 KB.
+- Files over 1 GB, the one size that still drops a file. Nothing raises it.
+- Big files are indexed, not skipped, but read more coarsely, and each one prints a stderr warning:
+  over 64 MB (`--max-file-size=N[K|M|G]`), or past the per-file parse budget (4 s + 1 s per MiB,
+  `RIPWIRE_PARSE_BUDGET=<scale>`), a file is read lexically, with definitions by line shape and calls by
+  name. JSON files over 256 KB and YAML files over 512 KB index their first 256 top-level keys
+  (`RIPWIRE_DATA_KEYS=N`). The header counts them (`lexical_files=`, `keys_cut=`).
 - Paths covered by `.gitignore`: `--no-ignore`.
 - Every symlink, whether it points at a file or a directory. A symlinked source file is not indexed
   at all, so a tree that reaches its sources through symlinks reads as if they were not there.
