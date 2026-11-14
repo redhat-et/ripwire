@@ -93,7 +93,7 @@ mapLexical="$( grep -o 'lexical_files=[0-9]*' "$TMP/map.xml" | head -1 | cut -d=
 mapFiles="$(   grep -o 'files=[0-9]*'         "$TMP/map.xml" | head -1 | cut -d= -f2 )"
 [ "${mapLexical:-}" = "2" ] && ok "(3) map header says lexical_files=2 — same count the verb itemizes" \
     || no "(3) map header lexical_files=${mapLexical:-<absent>}, verb said 2 — the two surfaces disagree"
-[ "${mapFiles:-0}" = "3" ] && ok "(3) files=3 = the whole 3-file candidate population" || no "(3) files=${mapFiles:-<absent>}, expected 3"
+if [ "${mapFiles:-0}" = "3" ]; then ok "(3) files=3 = the whole 3-file candidate population"; else no "(3) files=${mapFiles:-<absent>}, expected 3"; fi
 grep -q 'skipped_oversize=' "$TMP/map.xml" && no "(3) map header claims a dropped file" || ok "(3) map header has no skipped_oversize= (nothing dropped)"
 
 # ── (4) zero means none found ────────────────────────────────────────────────────────────────────────────────────
@@ -144,11 +144,11 @@ MINGW*|MSYS*|CYGWIN*) ok "(9) hard-limit arm skipped on Windows (a 1 GiB sparse 
     grep -q "<f p=\"huge.c\" why=\"oversize\" bytes=\"$hugeBytes\" limit=\"1073741824\"/>" "$TMP/hard.xml" \
         && ok "(9) the >1 GiB file is the one dropped file, at limit=\"1073741824\"" \
         || { no "(9) hard-limit row missing or wrong"; head -c 600 "$TMP/hard.xml"; echo; }
-    grep -q 'oversize="1"' "$TMP/hard.xml" && ok "(9) root reports oversize=\"1\"" || no "(9) root does not report oversize=\"1\""
+    if grep -q 'oversize="1"' "$TMP/hard.xml"; then ok "(9) root reports oversize=\"1\""; else no "(9) root does not report oversize=\"1\""; fi
     grep -q 'huge.c (.*) exceeds the .* hard limit; not indexed (no option raises it)' "$TMP/hard.err" \
         && ok "(9) stderr warns that the hard limit dropped it" || { no "(9) no hard-limit warning on stderr"; cat "$TMP/hard.err"; }
     "$BIN" hard --no-cache --legend=full > "$TMP/hardmap.xml" 2>/dev/null
-    grep -q 'skipped_oversize=1' "$TMP/hardmap.xml" && ok "(9) map header skipped_oversize=1 agrees" || no "(9) map header lacks skipped_oversize=1"
+    if grep -q 'skipped_oversize=1' "$TMP/hardmap.xml"; then ok "(9) map header skipped_oversize=1 agrees"; else no "(9) map header lacks skipped_oversize=1"; fi
     rm -f "$TMP/hard/huge.c" ;;
 esac
 

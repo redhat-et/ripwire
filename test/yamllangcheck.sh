@@ -430,7 +430,7 @@ OBIG="$( $BIN "$BIGY" --no-cache --legend=full 2>"$TMP/bigy.err" )"
 printf '%s' "$OBIG" | grep -q 'lexical_files=1' && ! printf '%s' "$OBIG" | grep -q 'skipped_oversize=' \
     && ok "ceiling: map header says lexical_files=1 and drops nothing — disclosure, not disappearance" \
     || no "ceiling: map header lacks lexical_files=1 or still claims skipped_oversize="
-printf '%s' "$OBIG" | grep -q 'n="hugemarker"' && ok "ceiling: the over-ceiling file's first key is a symbol" || no "ceiling: hugemarker is not a symbol"
+if printf '%s' "$OBIG" | grep -q 'n="hugemarker"'; then ok "ceiling: the over-ceiling file's first key is a symbol"; else no "ceiling: hugemarker is not a symbol"; fi
 grep -q 'huge_data.yml (.*) exceeds the yaml full-index ceiling 512 KiB; top-level keys indexed lexically, 17745 cut at 256' "$TMP/bigy.err" \
     && ok "ceiling: stderr warns once, naming the file, ceiling and the keys cut" || { no "ceiling: no yaml ceiling warning on stderr"; cat "$TMP/bigy.err"; }
 

@@ -71,25 +71,25 @@ EOF
 # ── 1. a code file over --max-file-size is read lexically, its symbols and calls reachable ───────────────────────────
 "$BIN" "$TMP/c5" --no-cache --max-file-size=1M --legend=compact >"$TMP/1.map" 2>"$TMP/1.err"
 lex="$( attr "$TMP/1.map" lexical_files )"
-[ "${lex:-0}" = 1 ] && ok "1: --max-file-size=1M map: lexical_files=1 ($( hdr "$TMP/1.map" ))" || no "1: no lexical_files=1 ($( hdr "$TMP/1.map" ))"
+if [ "${lex:-0}" = 1 ]; then ok "1: --max-file-size=1M map: lexical_files=1 ($( hdr "$TMP/1.map" ))"; else no "1: no lexical_files=1 ($( hdr "$TMP/1.map" ))"; fi
 grep -q 'skipped_oversize=' "$TMP/1.map" && no "1: skipped_oversize= still on the map (the file was dropped)" || ok "1: nothing dropped (no skipped_oversize=)"
 "$BIN" "$TMP/c5" --no-cache --max-file-size=1M --callers=huge_target --legend=compact >"$TMP/1.callers" 2>/dev/null
 c="$( grep -oE '<callers [^>]*' "$TMP/1.callers" | grep -oE ' count="[0-9]+' | grep -oE '[0-9]+' )"
-[ "${c:-0}" -ge 1000 ] && ok "1: --callers=huge_target count=$c (lexical call sites reach it)" || no "1: --callers=huge_target count=${c:-none}"
-grep -q 'graph_lexical="1"' "$TMP/1.callers" && ok "1: --callers root carries graph_lexical=\"1\"" || no "1: --callers root lacks graph_lexical="
+if [ "${c:-0}" -ge 1000 ]; then ok "1: --callers=huge_target count=$c (lexical call sites reach it)"; else no "1: --callers=huge_target count=${c:-none}"; fi
+if grep -q 'graph_lexical="1"' "$TMP/1.callers"; then ok "1: --callers root carries graph_lexical=\"1\""; else no "1: --callers root lacks graph_lexical="; fi
 "$BIN" "$TMP/c5" --no-cache --max-file-size=1M --callees=filler_7 --legend=compact >"$TMP/1.callees" 2>/dev/null
-grep -qE '<callees [^>]* count="[1-9]' "$TMP/1.callees" && ok "1: --callees=filler_7 finds huge_target" || no "1: --callees=filler_7: $( grep -oE '<callees [^>]*' "$TMP/1.callees" )"
+if grep -qE '<callees [^>]* count="[1-9]' "$TMP/1.callees"; then ok "1: --callees=filler_7 finds huge_target"; else no "1: --callees=filler_7: $( grep -oE '<callees [^>]*' "$TMP/1.callees" )"; fi
 n="$( grep -c 'exceeds --max-file-size 1.0 MiB; indexed lexically (raise with --max-file-size=N)' "$TMP/1.err" )"
-[ "$n" = 1 ] && ok "1: exactly one stderr warning naming the limit and the flag" || no "1: $n warnings ($( head -3 "$TMP/1.err" ))"
+if [ "$n" = 1 ]; then ok "1: exactly one stderr warning naming the limit and the flag"; else no "1: $n warnings ($( head -3 "$TMP/1.err" ))"; fi
 grep -q 'ripwire: warning' "$TMP/1.map" && no "1: a warning reached stdout" || ok "1: stdout carries no warning"
 "$BIN" "$TMP/c5" --no-cache --max-file-size=1M --skipped >"$TMP/1.sk" 2>/dev/null
-grep -qE '<h p="[^"]*big\.c" why="lexical-size"' "$TMP/1.sk" && ok "1: --skipped rows big.c why=lexical-size" || no "1: no lexical-size row in --skipped"
+if grep -qE '<h p="[^"]*big\.c" why="lexical-size"' "$TMP/1.sk"; then ok "1: --skipped rows big.c why=lexical-size"; else no "1: no lexical-size row in --skipped"; fi
 # the default ceiling (64 MiB) parses it: no lexical read, no warning (negative arm: the map was seen)
 "$BIN" "$TMP/c5" --no-cache --legend=compact >"$TMP/1d.map" 2>"$TMP/1d.err"
 files="$( attr "$TMP/1d.map" files )"
 if [ "${files:-0}" = 2 ]; then
     grep -q 'lexical_files=' "$TMP/1d.map" && no "1: the default run read big.c lexically" || ok "1: default 64 MiB ceiling parses the 5 MiB file (files=2, no lexical_files=)"
-    [ "$( warns "$TMP/1d.err" )" = 0 ] && ok "1: default run printed no warning (saw files=$files)" || no "1: default run warned: $( head -2 "$TMP/1d.err" )"
+    if [ "$( warns "$TMP/1d.err" )" = 0 ]; then ok "1: default run printed no warning (saw files=$files)"; else no "1: default run warned: $( head -2 "$TMP/1d.err" )"; fi
 else
     no "1: default run saw files=${files:-none}, expected 2"
 fi
@@ -99,47 +99,47 @@ t0=$( date +%s )
 # perl's alarm bounds the arm: a binary without the budget parses this for many minutes (quadratic), and must FAIL, not hang
 RIPWIRE_PARSE_BUDGET=0.25 perl -e 'alarm 90; exec @ARGV' "$BIN" "$TMP/patho" --no-cache --legend=compact >"$TMP/2.map" 2>"$TMP/2.err"
 t1=$( date +%s )
-[ $(( t1 - t0 )) -le 60 ] && ok "2: degenerate 1 MiB file finished in $(( t1 - t0 )) s (main: quadratic, minutes)" || no "2: took $(( t1 - t0 )) s"
-[ "$( attr "$TMP/2.map" lexical_files )" = 1 ] && ok "2: lexical_files=1" || no "2: $( hdr "$TMP/2.map" )"
+if [ $(( t1 - t0 )) -le 60 ]; then ok "2: degenerate 1 MiB file finished in $(( t1 - t0 )) s (main: quadratic, minutes)"; else no "2: took $(( t1 - t0 )) s"; fi
+if [ "$( attr "$TMP/2.map" lexical_files )" = 1 ]; then ok "2: lexical_files=1"; else no "2: $( hdr "$TMP/2.map" )"; fi
 grep -q 'ran past its parse budget of .* s; indexed lexically (raise with RIPWIRE_PARSE_BUDGET=<scale>)' "$TMP/2.err" \
     && ok "2: the budget warning names the knob" || no "2: no budget warning ($( head -2 "$TMP/2.err" ))"
-grep -q 'n="deep_entry"' "$TMP/2.map" && ok "2: deep_entry still indexed (lexical definition)" || no "2: deep_entry missing"
+if grep -q 'n="deep_entry"' "$TMP/2.map"; then ok "2: deep_entry still indexed (lexical definition)"; else no "2: deep_entry missing"; fi
 RIPWIRE_PARSE_BUDGET=0.25 perl -e 'alarm 90; exec @ARGV' "$BIN" "$TMP/patho" --no-cache --skipped >"$TMP/2.sk" 2>/dev/null
-grep -q 'why="lexical-budget"' "$TMP/2.sk" && ok "2: --skipped rows it why=lexical-budget" || no "2: no lexical-budget row"
+if grep -q 'why="lexical-budget"' "$TMP/2.sk"; then ok "2: --skipped rows it why=lexical-budget"; else no "2: no lexical-budget row"; fi
 
 # ── 3. data files past the ceiling: bounded keys, disclosed, raisable ─────────────────────────────────────────────
 for d in json3 yaml1; do
     "$BIN" "$TMP/$d" --no-cache --legend=compact >"$TMP/3$d.map" 2>"$TMP/3$d.err"
     sy="$( attr "$TMP/3$d.map" symbols )"; cut="$( attr "$TMP/3$d.map" keys_cut )"
-    [ "${sy:-0}" = 256 ] && [ "${cut:-0}" -gt 1000 ] && ok "3: $d symbols=256 keys_cut=$cut" || no "3: $d $( hdr "$TMP/3$d.map" )"
-    grep -q 'full-index ceiling .* cut at 256 (raise with RIPWIRE_DATA_KEYS=N)' "$TMP/3$d.err" && ok "3: $d warning names the cap and the knob" || no "3: $d warning: $( head -1 "$TMP/3$d.err" )"
+    if [ "${sy:-0}" = 256 ] && [ "${cut:-0}" -gt 1000 ]; then ok "3: $d symbols=256 keys_cut=$cut"; else no "3: $d $( hdr "$TMP/3$d.map" )"; fi
+    if grep -q 'full-index ceiling .* cut at 256 (raise with RIPWIRE_DATA_KEYS=N)' "$TMP/3$d.err"; then ok "3: $d warning names the cap and the knob"; else no "3: $d warning: $( head -1 "$TMP/3$d.err" )"; fi
 done
 RIPWIRE_DATA_KEYS=1000 "$BIN" "$TMP/json3" --no-cache --legend=compact >"$TMP/3r.map" 2>/dev/null
-[ "$( attr "$TMP/3r.map" symbols )" = 1000 ] && ok "3: RIPWIRE_DATA_KEYS=1000 raises it to 1000 keys" || no "3: raised: $( hdr "$TMP/3r.map" )"
-grep -q 'n="record_0"' "$TMP/3json3.map" && ok "3: the first top-level key is a symbol" || no "3: record_0 missing"
+if [ "$( attr "$TMP/3r.map" symbols )" = 1000 ]; then ok "3: RIPWIRE_DATA_KEYS=1000 raises it to 1000 keys"; else no "3: raised: $( hdr "$TMP/3r.map" )"; fi
+if grep -q 'n="record_0"' "$TMP/3json3.map"; then ok "3: the first top-level key is a symbol"; else no "3: record_0 missing"; fi
 
 # ── 4. warm runs keep the mode and the warning; a changed ceiling re-extracts ────────────────────────────────────────
 C="$TMP/c5.cache"
 "$BIN" "$TMP/c5" --cache="$C" --max-file-size=1M --legend=compact >"$TMP/4a" 2>"$TMP/4a.err"
 "$BIN" "$TMP/c5" --cache="$C" --max-file-size=1M --legend=compact >"$TMP/4b" 2>"$TMP/4b.err"
-cmp -s "$TMP/4a" "$TMP/4b" && [ "$( attr "$TMP/4b" lexical_files )" = 1 ] && ok "4: warm run byte-identical, lexical_files=1 kept" || no "4: warm differs or lost the mode"
-[ "$( warns "$TMP/4b.err" )" = 1 ] && ok "4: the warm run warns again" || no "4: warm warnings: $( warns "$TMP/4b.err" )"
+if cmp -s "$TMP/4a" "$TMP/4b" && [ "$( attr "$TMP/4b" lexical_files )" = 1 ]; then ok "4: warm run byte-identical, lexical_files=1 kept"; else no "4: warm differs or lost the mode"; fi
+if [ "$( warns "$TMP/4b.err" )" = 1 ]; then ok "4: the warm run warns again"; else no "4: warm warnings: $( warns "$TMP/4b.err" )"; fi
 "$BIN" "$TMP/c5" --cache="$C" --legend=compact >"$TMP/4c" 2>"$TMP/4c.err"
 "$BIN" "$TMP/c5" --no-cache --legend=compact >"$TMP/4d" 2>/dev/null
-cmp -s "$TMP/4c" "$TMP/4d" && ok "4: warm run at the default ceiling equals the cold one (the lexical record was re-extracted)" || no "4: stale lexical record reused at the default ceiling"
+if cmp -s "$TMP/4c" "$TMP/4d"; then ok "4: warm run at the default ceiling equals the cold one (the lexical record was re-extracted)"; else no "4: stale lexical record reused at the default ceiling"; fi
 
 # ── 5. the warning collapses after five lines ───────────────────────────────────────────────────────────────────────
 "$BIN" "$TMP/many" --no-cache --legend=compact >"$TMP/5.map" 2>"$TMP/5.err"
 [ "$( warns "$TMP/5.err" )" = 6 ] && grep -q 'and 2 more file(s) met an index limit' "$TMP/5.err" \
     && ok "5: seven events → five lines + 'and 2 more'" || no "5: $( warns "$TMP/5.err" ) warning lines: $( tail -1 "$TMP/5.err" )"
-[ "$( attr "$TMP/5.map" lexical_files )" = 7 ] && ok "5: lexical_files=7 (every file disclosed in the answer)" || no "5: $( hdr "$TMP/5.map" )"
+if [ "$( attr "$TMP/5.map" lexical_files )" = 7 ]; then ok "5: lexical_files=7 (every file disclosed in the answer)"; else no "5: $( hdr "$TMP/5.map" )"; fi
 
 # ── 7. keys-bounded with nothing cut: disclosed in the answer, silent on stderr (the key cap is the limit that loses data) ──
 "$BIN" "$TMP/fit" --no-cache --legend=compact >"$TMP/7.map" 2>"$TMP/7.err"
 fsz="$( wc -c < "$TMP/fit/d.json" | tr -d ' ' )"; sy="$( attr "$TMP/7.map" symbols )"
 if [ "${fsz:-0}" -gt 262144 ] && [ "${sy:-0}" = 100 ]; then
-    [ "$( attr "$TMP/7.map" lexical_files )" = 1 ] && ok "7: a ${fsz} B .json with 100 keys: lexical_files=1, symbols=100" || no "7: $( hdr "$TMP/7.map" )"
-    [ "$( warns "$TMP/7.err" )" = 0 ] && ok "7: no warning when no key was cut" || no "7: warned: $( head -1 "$TMP/7.err" )"
+    if [ "$( attr "$TMP/7.map" lexical_files )" = 1 ]; then ok "7: a ${fsz} B .json with 100 keys: lexical_files=1, symbols=100"; else no "7: $( hdr "$TMP/7.map" )"; fi
+    if [ "$( warns "$TMP/7.err" )" = 0 ]; then ok "7: no warning when no key was cut"; else no "7: warned: $( head -1 "$TMP/7.err" )"; fi
 else
     no "7: premise: fit/d.json is ${fsz:-?} B (want > 262144) with symbols=${sy:-?} (want 100)"
 fi
@@ -149,7 +149,7 @@ fi
 "$BIN" "$TMP/small" --no-cache --callers=g --legend=compact >"$TMP/6.callers" 2>>"$TMP/6.err"
 files="$( attr "$TMP/6.map" files )"; sy="$( attr "$TMP/6.map" symbols )"
 if [ "${files:-0}" -ge 3 ] && [ "${sy:-0}" -ge 3 ]; then
-    [ "$( warns "$TMP/6.err" )" = 0 ] && ok "6: no warning on a corpus under every limit (saw files=$files symbols=$sy)" || no "6: warned: $( head -1 "$TMP/6.err" )"
+    if [ "$( warns "$TMP/6.err" )" = 0 ]; then ok "6: no warning on a corpus under every limit (saw files=$files symbols=$sy)"; else no "6: warned: $( head -1 "$TMP/6.err" )"; fi
     grep -qE 'lexical_files=|keys_cut=|graph_lexical=' "$TMP/6.map" "$TMP/6.callers" && no "6: a lexical attribute with nothing lexical" || ok "6: no lexical attribute anywhere"
 else
     no "6: the negative corpus was not seen (files=${files:-none} symbols=${sy:-none})"

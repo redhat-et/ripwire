@@ -1611,7 +1611,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "rules", "rules=N: rules in the built-in registry, one rule row each, never cut", false, "lintcatalog", MapHeaderRead::No, {}, "lint-catalog" },
     // skipped: src/verbs_report.h writeSkippedHeader / writeUnindexedExtRows / writeLangRows (+ kSkippedLegend)
     { "indexed", "indexed=N: the map's files=; indexed= + oversize= + excluded= + ignored= = every file the crawl enumerated", false, "skipped", MapHeaderRead::No, {}, "skipped" },
-    { "oversize", "oversize=N: files dropped over the 1 GiB hard limit (row limit=), the one size that still drops a file", false, "skipped", MapHeaderRead::No, {}, "skipped" },
+    { "oversize", "oversize=N: files over the 1 GiB hard limit, dropped (row limit=)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "lexical_files", "lexical_files=N: indexed files read lexically, not parsed (the lexical-size/lexical-budget/keys-bounded h rows)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "keys_cut", "keys_cut=N: data-file keys past the per-file key cap, not made symbols", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "excluded", "excluded=N: files dropped by an exclude substring you passed", false, "skipped", MapHeaderRead::No, {}, "skipped" },
@@ -1622,8 +1622,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "ignore_mode", "ignore_mode=: git (rules applied), off (no-ignore flag), unavailable/root-ignored (not consulted, full walk)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "degraded_parse", "degraded_parse=/minified_suspect=: counts of the h rows of each why=; those files stay indexed", false, "skipped", MapHeaderRead::No, {}, "skipped" },   // also defines minified_suspect=
     { "unmeasured", "unmeasured=N: indexed files never parsed (doc pass, binary sniff, nest guard, read error); not health-counted", false, "skipped", MapHeaderRead::No, {}, "skipped" },
-    { "max_file_size", "max_file_size=B: files over B bytes are read lexically, not parsed (the max-file-size flag raises it)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
-    { "json_ceiling", "json_ceiling=/yaml_ceiling=: .json/.yaml over these bytes yield bounded keys (keys-bounded rows), not a full parse", false, "skipped", MapHeaderRead::No, {}, "skipped" },   // also defines yaml_ceiling=
+    { "max_file_size", "max_file_size=B: files over B bytes are read lexically (the max-file-size flag raises it)", false, "skipped", MapHeaderRead::No, {}, "skipped" },
+    { "json_ceiling", "json_ceiling=/yaml_ceiling=: .json/.yaml over these bytes yield bounded keys, not a full parse", false, "skipped", MapHeaderRead::No, {}, "skipped" },   // also defines yaml_ceiling=
     { "ws_freq", "ws_freq=R: whitespace share of the leading 4096 bytes; under 0.070 = minified-suspect (never under 256 B)", true, "h", MapHeaderRead::No, {}, "skipped" },
     { "x", "x=/files=: an unindexed extension and its file count (full list; the map's unindexed= is the top 6)", true, "e", MapHeaderRead::No, {}, "skipped" },   // also defines files= on <e>
     { "files", "files=/symbols=: per language, files with its symbols (FLOOR: symbol-less files uncounted) / symbols (exact)", true, "lang", MapHeaderRead::No, {}, "skipped" },   // also defines symbols=
