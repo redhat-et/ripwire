@@ -8,6 +8,7 @@
 #include "epmanifest.h"       // D1: collectManifestsAbove — the entry-point targets a setup.cfg / pyproject.toml names (unindexed by the crawl)
 #include "forunused.h"        // forUnusedOn: --dead-code=PATH names the table only when the table is on
 #include "infra/sortutil.h"   // svLess: the explicit byte order the test-only name vetting sorts by (portablebuildcheck #6)
+#include "memstats.h"         // QD-PAIR-RESIDUE: the [mem] reading after the base tree's pages go back
 
 // verbs_quality.h — the quality family, moved VERBATIM from main.cpp in the 2026-08-29 split:
 // the delta-basis plumbing (noBaselineFatalMessage, loadRefPairDelta, resolveDeltaBasis),
@@ -411,6 +412,15 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
         if( const std::optional<int> failed = scoreBaseCommit( root, out.baseSha, cfg, out ) )
         {
             return failed;
+        }
+        // QD-PAIR-RESIDUE: the base tree's structures are all freed here, but the allocator kept their pages, and the target
+        // tree's build stacked on them instead of reusing them (vscode: 1215-1324 MiB peak, 941-953 with the pages handed
+        // back). The snapshot and macro names the target needs are live blocks, untouched. A base from its qbase blob built
+        // no tree, so there is nothing to hand back.
+        if( !out.baseFromCache )
+        {
+            os::mem_return_free_pages();
+            memstats::mark( "pair-base-released" );
         }
         // #387: the base tree's index, graph and temp dir were released when scoreBaseCommit returned. QD-PAIR-BASE-CACHE: a base
         // read from its qbase blob built no tree, so there is no base ingest to project the target from: the target is read in
