@@ -379,6 +379,28 @@ inline bool crawlPathStaysInRoot( const std::string& path, const std::string& ro
 template<std::size_t kSymbolBytes, std::size_t kIngestResultBytes> struct IngestLayoutStamp {};
 using IngestLayout = IngestLayoutStamp<sizeof( Symbol ), sizeof( IngestResult )>;
 
+// QD-CONSTRUCTS-AT-INGEST, lazy: does an ingest on THIS thread find --quality-delta's construct hits in its parse workers
+// (ingest_astquery.h collectConstructHits)? Only a run that will read them pays for them: a cold map or --deps runs no
+// construct pass, its cache records say "constructs absent", and the next --quality-delta treats such a record as a miss
+// and re-parses that file once, which writes the hits into the record. A hint, never a correctness input:
+// findQualityConstructs uses carried hits only when the ingest claims every file (IngestResult::constructHitsForFiles)
+// and re-parses otherwise, so an ingest that ran without the hint answers the same, only slower.
+inline thread_local bool tlIngestWantsConstructHits = false;
+
+// Scoped: main.cpp holds one for the whole --quality-delta / --quality-baseline run, so the working-tree ingest and the
+// verb's own re-ingests (the HEAD snapshot, both sides of A..B) all carry the hits.
+class WantConstructHits
+{
+public:
+    explicit WantConstructHits( bool on ) noexcept : prev_( tlIngestWantsConstructHits ) { tlIngestWantsConstructHits = prev_ || on; }
+    ~WantConstructHits() { tlIngestWantsConstructHits = prev_; }
+    WantConstructHits( const WantConstructHits& )            = delete;
+    WantConstructHits& operator=( const WantConstructHits& ) = delete;
+
+private:
+    bool prev_;
+};
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr = {},
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
                      bool captureValueUses = true, std::string_view excludeLabel = {},

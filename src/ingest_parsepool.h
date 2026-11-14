@@ -20,6 +20,11 @@
 namespace rw
 {
 
+// QD-CONSTRUCTS-AT-INGEST (defined in the ingest_astquery.h section, below): one file's --quality-delta construct hits,
+// from the tree the worker just built.
+void collectConstructHits( const LangEntry& le, std::uint32_t fileId, std::string_view bytes, TSNode root, TSQueryCursor* cur,
+                           std::vector<ConstructHit>& out );
+
 // Per-worker capacity floor for the COLD parse pool, sized from the crawl's parseable byte count.
 //
 // WHY THIS EXISTS. The warm reserve sums cached FileFacts, so it only runs when a cache is loaded; a cold
@@ -128,6 +133,7 @@ struct RawFacts
     std::vector<RouteDef>     routeDefs;   // B6.3: HTTP server-side route registrations
     std::vector<RawRouteUse>  routeUses;   // B6.3: HTTP client-side calls (pre fromSymbol attribution)
     std::vector<ConstOpen>    constOpens;  // parser version 82: Ruby class/module opens (model.h ConstOpen)
+    std::vector<ConstructHit> constructs;  // QD-CONSTRUCTS-AT-INGEST: --quality-delta construct hits (collectConstructHits)
 };
 
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
@@ -194,6 +200,17 @@ struct PendingParsedFile
 // makes "the warm path does not reallocate" an executable fact instead of a profile reading — the same
 // posture `reparsed=`/`cached_records=` already take for their claims. One capacity() compare per family
 // per file; nothing in the per-element loops changes.
+// One family of a cache hit: re-stamp today's fileId on every row and move it into the worker's accumulator.
+template <typename Row>
+inline void appendRelabelled( std::vector<Row>& rows, std::uint32_t fileId, std::vector<Row>& dst )
+{
+    for( Row& row : rows )
+    {
+        row.fileId = fileId;
+        dst.push_back( std::move( row ) );
+    }
+}
+
 inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, IngestFileScan& scan, RawFacts& out )
 {
     const auto willGrow = []( const auto& dst, std::size_t need ) noexcept
@@ -207,49 +224,20 @@ inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, In
                               + willGrow( out.ffis, hit.ffis.size() )
                               + willGrow( out.routeDefs, hit.routeDefs.size() )
                               + willGrow( out.routeUses, hit.routeUses.size() )
-                              + willGrow( out.constOpens, hit.constOpens.size() );
+                              + willGrow( out.constOpens, hit.constOpens.size() )
+                              + willGrow( out.constructs, hit.constructs.size() );
 
-    scan.health[ fileId ] = hit.health;   // §L1
-    for( RawDef& d : hit.defs )
-    {
-        d.fileId = fileId;
-        out.defs.push_back( std::move( d ) );
-    }
-    for( RawRef& rr : hit.refs )
-    {
-        rr.fileId = fileId;
-        out.refs.push_back( std::move( rr ) );
-    }
-    for( Include& in : hit.incs )
-    {
-        in.fileId = fileId;
-        out.incs.push_back( std::move( in ) );
-    }
-    for( RawBind& b : hit.binds )
-    {
-        b.fileId = fileId;
-        out.binds.push_back( std::move( b ) );
-    }
-    for( BindingAlias& a : hit.ffis )
-    {
-        a.fileId = fileId;
-        out.ffis.push_back( std::move( a ) );
-    }
-    for( RouteDef& rd : hit.routeDefs )        // B6.3
-    {
-        rd.fileId = fileId;
-        out.routeDefs.push_back( std::move( rd ) );
-    }
-    for( RawRouteUse& ru : hit.routeUses )     // B6.3
-    {
-        ru.fileId = fileId;
-        out.routeUses.push_back( std::move( ru ) );
-    }
-    for( ConstOpen& co : hit.constOpens )      // parser version 82
-    {
-        co.fileId = fileId;
-        out.constOpens.push_back( std::move( co ) );
-    }
+    scan.health[ fileId ]          = hit.health;   // §L1
+    scan.constructsKnown[ fileId ] = hit.constructsAbsent ? 0 : 1;   // QD-CONSTRUCTS-AT-INGEST: the record says whether it has them
+    appendRelabelled( hit.defs, fileId, out.defs );
+    appendRelabelled( hit.refs, fileId, out.refs );
+    appendRelabelled( hit.incs, fileId, out.incs );
+    appendRelabelled( hit.binds, fileId, out.binds );
+    appendRelabelled( hit.ffis, fileId, out.ffis );
+    appendRelabelled( hit.routeDefs, fileId, out.routeDefs );     // B6.3
+    appendRelabelled( hit.routeUses, fileId, out.routeUses );     // B6.3
+    appendRelabelled( hit.constOpens, fileId, out.constOpens );   // parser version 82
+    appendRelabelled( hit.constructs, fileId, out.constructs );   // QD-CONSTRUCTS-AT-INGEST
     return growths;
 }
 
@@ -263,7 +251,7 @@ inline std::size_t appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, In
 struct WarmHitTotals
 {
     std::size_t defs = 0, refs = 0, incs = 0, binds = 0;
-    std::size_t ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0;
+    std::size_t ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0, constructs = 0;
 };
 
 // One pass over the fileId space: fill `candidates` (a record head present in the blob, hash not yet compared) and `hits`
@@ -295,6 +283,7 @@ inline WarmHitTotals markCacheHits( const CacheRecords& cache, const IngestFileS
         tot.routeDefs   += head->counts.routeDefs;
         tot.routeUses   += head->counts.routeUses;
         tot.constOpens  += head->counts.constOpens;
+        tot.constructs  += head->counts.constructs;
     }
     return tot;
 }
@@ -320,6 +309,7 @@ inline void reserveWarmFamilies( std::vector<RawFacts>& tFacts, const WarmHitTot
         tf.routeDefs.reserve( share( tot.routeDefs ) );
         tf.routeUses.reserve( share( tot.routeUses ) );
         tf.constOpens.reserve( share( tot.constOpens ) );
+        tf.constructs.reserve( share( tot.constructs ) );
     }
 }
 
@@ -353,7 +343,7 @@ struct ParsePoolShared
 inline bool blobHoldsFactlessRecord( const CachedRecordHead* rec, const CachedRecordHead& expect ) noexcept
 {
     return rec != nullptr && rec->hash == expect.hash && rec->sizeBytes == expect.sizeBytes && rec->mtimeNs == expect.mtimeNs
-        && rec->ctimeNs == expect.ctimeNs && rec->health == expect.health && rec->counts.none();
+        && rec->ctimeNs == expect.ctimeNs && rec->health == expect.health && rec->counts.none() && !rec->constructsAbsent;
 }
 
 // A cache miss is about to change the blob: mark it dirty and count the file as drift (RIPWIRE_CACHE_STATS reparsed=).
@@ -431,6 +421,100 @@ inline std::uint64_t rawDefCloneKey( const std::string& fileBytes, const RawDef&
     return cloneBodyKey( fileBytes, sigEnd, d.endByte, usesHashLineComments( d.lang ) );
 }
 
+// QD-CONSTRUCTS-AT-INGEST (lazy): a cache hit whose record was written by an ingest that ran no construct pass, in an
+// ingest that wants the hits. Its facts came from the record; only the hits are missing, so the file is parsed for them
+// alone — the tree the cold worker builds before its first use (the .h -> ObjC switch, the .astro frontmatter
+// restriction), with no extraction — and the blob is marked dirty so the record is rewritten with them. A file that can
+// no longer be read keeps "absent": the ingest then claims no hits, and --quality-delta re-parses (lintrules.h). A hit
+// is never a nest-refused file (a refusal is written with an UNKNOWN hash, which never hits), so no refusal check here.
+// The worker's view of the file a cache hit is for: its id, path, language entry, and whether `bytes` already holds it.
+struct HitFile
+{
+    std::size_t        fileId;
+    const std::string& path;
+    const LangEntry*   le;
+    bool               bytesLoaded;
+};
+
+inline void fillAbsentConstructHits( ParsePoolShared& sh, const HitFile& file, std::string& bytes, TSParser* parser, TSQueryCursor* constructCursor,
+                                     RawFacts& out )
+{
+    const std::size_t  fileId      = file.fileId;
+    const std::string& path        = file.path;
+    const LangEntry*   le          = file.le;
+    const bool         bytesLoaded = file.bytesLoaded;
+    if( !bytesLoaded && ( !readFile( path, bytes ) || looksBinary( bytes ) ) )
+    {
+        return;
+    }
+    if( !bytesLoaded && le->ext == ".h" && looksObjC( bytes ) )
+    {
+        if( const LangEntry* objcLe = lookupLang( ".m" ) )
+        {
+            le = objcLe;
+        }
+    }
+    markMissDirty( sh );   // the record is rewritten with its hits (RIPWIRE_CACHE_STATS reparsed= counts this file)
+    sh.scan.constructsKnown[ fileId ] = 1;
+    if( !prepareParserFor( parser, *le ) )
+    {
+        return;   // the cold worker parses nothing here either: known, no hits
+    }
+    IncludedRangeGuard rangeGuard;
+    if( restrictAstroToFrontmatter( parser, *le, bytes, rangeGuard ) != AstroFrontmatter::Ok )
+    {
+        return;   // the cold worker extracts nothing from such an .astro either: known, no hits
+    }
+    TreeGuard tree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( parser, bytes ); } ) );
+    if( tree.get() != nullptr )
+    {
+        collectConstructHits( *le, static_cast<std::uint32_t>( fileId ), bytes, ts_tree_root_node( tree.get() ), constructCursor, out.constructs );
+    }
+}
+
+// A decoded cache hit into the worker's arrays; a record without construct hits, in an ingest that wants them, is filled.
+inline std::size_t takeCacheHit( ParsePoolShared& sh, FileFacts& hit, const HitFile& file, std::string& bytes, TSParser* parser,
+                                 TSQueryCursor* constructCursor, RawFacts& out )
+{
+    const bool        hitsAbsent = hit.constructsAbsent;
+    const std::size_t growths    = appendCacheHitFacts( hit, std::uint32_t( file.fileId ), sh.scan, out );
+    if( hitsAbsent && sh.scan.wantConstructHits )
+    {
+        fillAbsentConstructHits( sh, file, bytes, parser, constructCursor, out );
+    }
+    return growths;
+}
+
+// The parse's construct pass, when this ingest wants it; otherwise the file's record is written "constructs absent".
+inline void collectWantedConstructHits( IngestFileScan& scan, const LangEntry& le, std::size_t fileId, std::string_view bytes, TSNode root,
+                                        TSQueryCursor* constructCursor, RawFacts& out )
+{
+    if( scan.wantConstructHits )
+    {
+        collectConstructHits( le, static_cast<std::uint32_t>( fileId ), bytes, root, constructCursor, out.constructs );
+    }
+    else
+    {
+        scan.constructsKnown[ fileId ] = 0;
+    }
+}
+
+// QD-CONSTRUCTS-AT-INGEST: the construct pass's own query cursor, released on every exit of the worker (ParserGuard's shape).
+struct ConstructCursorGuard
+{
+    TSQueryCursor* c = ts_query_cursor_new();
+    ConstructCursorGuard() = default;
+    ConstructCursorGuard( const ConstructCursorGuard& )            = delete;
+    ConstructCursorGuard& operator=( const ConstructCursorGuard& ) = delete;
+    ~ConstructCursorGuard()
+    {
+        if( c )
+        {
+            ts_query_cursor_delete( c );
+        }
+    }
+};
+
 inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 {
     IngestFileScan& scan = sh.scan;
@@ -442,6 +526,11 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     ASSUME( pg.p != nullptr, "ts_parser_new: the default tree-sitter allocator aborts on failure" );
     TSQueryCursor* cursor = ts_query_cursor_new();
     ASSUME( cursor != nullptr, "ts_query_cursor_new: the default tree-sitter allocator aborts on failure" );
+    // QD-CONSTRUCTS-AT-INGEST: its own cursor, never configured, like astQueryGrouped's — the tags cursor above carries
+    // whatever the tags capture set on it.
+    const ConstructCursorGuard constructCursorOwner;
+    TSQueryCursor* const       constructCursor = constructCursorOwner.c;
+    ASSUME( constructCursor != nullptr, "ts_query_cursor_new: the default tree-sitter allocator aborts on failure" );
 
     // B0.2: per-worker subtoken-stats builder — after a file's defs are extracted (and the file's
     // bytes are STILL in memory), tokenize each new def's doc/body spans ONCE into its persisted
@@ -616,7 +705,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     if( decodeCachedRecordNoThrow( sh.cache, fileId, path, record ) )
                     {
-                        warmGrowths += appendCacheHitFacts( record.facts, std::uint32_t( fileId ), scan, out );
+                        warmGrowths += takeCacheHit( sh, record.facts, { fileId, path, le, bytesLoaded }, bytes, pg.p, constructCursor, out );
                     }
                     else
                     {
@@ -724,6 +813,10 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     continue;
                 }
+                // QD-CONSTRUCTS-AT-INGEST: from THIS tree, before the member-macro re-parse below can swap it — the tree
+                // findQualityConstructs' own parse would build (ingest_astquery.h collectConstructHits says why).
+                // Only an ingest that wants them runs the pass (ingest.h WantConstructHits); otherwise the record says absent.
+                collectWantedConstructHits( scan, *le, fileId, bytes, ts_tree_root_node( tree.get() ), constructCursor, out );
 
                 // §L1 — before `bytes` can be moved below. May swap `tree` for the member-macro re-parse (macroreparse.h).
                 scan.health[ fileId ] = measureHealthAdoptingMemberMacroReparse( pg.p, le->lang, bytes, tree, macroWork );
@@ -813,6 +906,7 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
     mergeFamily( tFacts, &RawFacts::routeDefs, raw.routeDefs );
     mergeFamily( tFacts, &RawFacts::routeUses, raw.routeUses );
     mergeFamily( tFacts, &RawFacts::constOpens, raw.constOpens );
+    mergeFamily( tFacts, &RawFacts::constructs, raw.constructs );
     return raw;
 }
 
@@ -1100,7 +1194,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( !parseCut && !cacheFile.empty() && dirty.load() )
         {
             forgetNestRefusalsForCache( scan );   // a refused file is written UNKNOWN, so a warm run re-refuses it (ingest_prewarm.h)
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, { raw.constructs, scan.constructsKnown }, captureValueUses );
             memstats::mark( "save-cache" );   // M0: peak_mib holds the cache blob's own peak (card C1)
         }
     }

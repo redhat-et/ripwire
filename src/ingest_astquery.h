@@ -459,6 +459,66 @@ GrammarQueries compileGrammarQueries( const TSLanguage* g, const std::vector<Ast
     return gqs;
 }
 
+// Run one grammar's compiled specs over one file's tree and file every capture under its spec's group. The query half of
+// astQueryGrouped's per-file work, shared with the parse worker's construct pass (collectConstructHits below) so the
+// two cannot capture differently from the same tree.
+inline void execGrammarQueries( TSQueryCursor* cur, const GrammarQueries& qs, TSNode root, std::uint32_t fileId, std::string_view bytes,
+                                const std::vector<std::uint32_t>& nlOffsets, const std::vector<AstQueryGroup>& groups,
+                                std::vector<std::vector<AstMatch>>& perGroupHits )
+{
+    // Every capture of one match, filed under the spec that owns the pattern. Shared by both
+    // execution shapes below so the ONE walk and the fallback walks cannot drift apart.
+    const auto emitCaptures = [ & ]( const TSQueryMatch& m, const GroupedQuery& owner )
+    {
+        for( std::uint16_t c = 0; c < m.capture_count; ++c )
+        {
+            const TSNode        n = m.captures[c].node;
+            const std::uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+            if( a >= b || b > bytes.size() )
+            {
+                continue;
+            }
+            // The snippet cut (120 bytes, UTF-8-safe, whitespace-scrubbed) lives in
+            // makeAstMatch — the pattern walk emits rows through the same helper.
+            perGroupHits[owner.groupIndex].push_back( makeAstMatch( fileId, bytes, nlOffsets, a, b, owner.tag ) );
+        }
+    };
+
+    if( qs.combined != nullptr )
+    {
+        TSQuery* const q = qs.combined;   // ONE walk for every spec this grammar has
+        ts_query_cursor_exec( cur, q, root );
+        TSQueryMatch m;
+        while( ts_query_cursor_next_match( cur, &m ) )
+        {
+            if( m.pattern_index >= qs.patternOwner.size() )
+            {
+                continue;   // unreachable: patternOwner was verified against ts_query_pattern_count
+            }
+            const GroupedQuery& owner = qs.perSpec[ qs.patternOwner[ m.pattern_index ] ];
+            if( !passesPredicates( q, qs.combinedRx, m, bytes, { groups[ owner.groupIndex ].regexUndecidedOut, fileId, nlOffsets } ) )
+            {
+                continue; // honour #eq? / #match? etc. — predicates are per PATTERN, so this reads the right ones
+            }
+            emitCaptures( m, owner );
+        }
+        return;
+    }
+    for( const GroupedQuery& gq : qs.perSpec )
+    {
+        ts_query_cursor_exec( cur, gq.query, root );
+        TSQueryMatch m;
+        while( ts_query_cursor_next_match( cur, &m ) )
+        {
+            if( !passesPredicates( gq.query, gq.rx, m, bytes, { groups[ gq.groupIndex ].regexUndecidedOut, fileId, nlOffsets } ) )
+            {
+                continue; // honour #eq? / #match? etc.
+            }
+            emitCaptures( m, gq );
+        }
+    }
+}
+
 // octocode F3: the "compiled for no grammar" refusal (below) used to hand back the query verbatim and
 // nothing else, so `(call_expresion)` — one deleted 's' away from the real `call_expression` — got no
 // nearer a fix than staring at the S-expression. This is the hint: pull every token that LOOKS like a
@@ -1192,59 +1252,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     }
 
                     PROFILE_SCOPE_DESCRIBE( "astQuery/worker: cursor exec + captures" );
-                    // Every capture of one match, filed under the spec that owns the pattern. Shared by both
-                    // execution shapes below so the ONE walk and the fallback walks cannot drift apart.
-                    const auto emitCaptures = [ & ]( const TSQueryMatch& m, const GroupedQuery& owner )
-                    {
-                        for( std::uint16_t c = 0; c < m.capture_count; ++c )
-                        {
-                            const TSNode        n = m.captures[c].node;
-                            const std::uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
-                            if( a >= b || b > bytes.size() )
-                            {
-                                continue;
-                            }
-                            // The snippet cut (120 bytes, UTF-8-safe, whitespace-scrubbed) lives in
-                            // makeAstMatch — the pattern walk emits rows through the same helper.
-                            tHits[t][owner.groupIndex].push_back( makeAstMatch( std::uint32_t( fileId ), bytes, nlOffsets, a, b, owner.tag ) );
-                        }
-                    };
-
-                    if( it->second.combined != nullptr )
-                    {
-                        TSQuery* const q = it->second.combined;   // ONE walk for every spec this grammar has
-                        ts_query_cursor_exec( cur, q, root );
-                        TSQueryMatch m;
-                        while( ts_query_cursor_next_match( cur, &m ) )
-                        {
-                            if( m.pattern_index >= it->second.patternOwner.size() )
-                            {
-                                continue;   // unreachable: patternOwner was verified against ts_query_pattern_count
-                            }
-                            const GroupedQuery& owner = it->second.perSpec[ it->second.patternOwner[ m.pattern_index ] ];
-                            if( !passesPredicates( q, it->second.combinedRx, m, bytes, { groups[ owner.groupIndex ].regexUndecidedOut, std::uint32_t( fileId ), nlOffsets } ) )
-                            {
-                                continue; // honour #eq? / #match? etc. — predicates are per PATTERN, so this reads the right ones
-                            }
-                            emitCaptures( m, owner );
-                        }
-                    }
-                    else
-                    {
-                        for( const GroupedQuery& gq : it->second.perSpec )
-                        {
-                            ts_query_cursor_exec( cur, gq.query, root );
-                            TSQueryMatch m;
-                            while( ts_query_cursor_next_match( cur, &m ) )
-                            {
-                                if( !passesPredicates( gq.query, gq.rx, m, bytes, { groups[ gq.groupIndex ].regexUndecidedOut, std::uint32_t( fileId ), nlOffsets } ) )
-                                {
-                                    continue; // honour #eq? / #match? etc.
-                                }
-                                emitCaptures( m, gq );
-                            }
-                        }
-                    }
+                    execGrammarQueries( cur, it->second, root, std::uint32_t( fileId ), bytes, nlOffsets, groups, tHits[t] );
                     ts_tree_delete( tree );
                 }
                 catch( ... ) { /* per-file degrade — never abort the pass */ }
@@ -2392,6 +2400,89 @@ std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> b
         w.join();
     }
     return out;
+}
+
+// ---- QD-CONSTRUCTS-AT-INGEST: the --quality-delta construct hits, found in the parse worker's own tree ----------
+// findQualityConstructs (lintrules.h) used to re-read and re-parse every file on every --quality-delta call — the
+// largest item of a warm working-tree call (43 / 22 / 68 % of envoy / cockroach / vscode instructions, ML Stage 0
+// 11-13). The parse worker already holds the tree, so it runs the SAME two groups over it here (the kErrorMaskRules
+// specs through execGrammarQueries, the HandlerShapes walk through runWalkGroups), the hits ride the file's cache
+// record, and a warm call reads them back with no file I/O.
+//
+// IDENTITY with the re-parse: the worker parses with the same grammar row (lookupLangOfCrawledFile plus the same .h
+// ObjC sniff), after the same nest refusal, binary sniff and .astro frontmatter restriction astQueryGrouped applies,
+// and calls this BEFORE the member-macro re-parse can swap the tree. Two classes of file the re-parse reads are not
+// handed here, and both can hold no hit: Markdown and reST (the markdown grammar has no comment, handler or stub node
+// kind and no kErrorMaskRules query compiles for it). test/qdconstructscheck.sh compares the two lists on real trees.
+//
+// The compiled specs are per kLangTable row, compiled once per process on first use (call_once) and owned by a
+// function-local static, the house shape of compiledQueryCache(). Lines are resolved only when a file has a row.
+namespace
+{
+struct ConstructQueryTable
+{
+    std::vector<AstQuerySpec>                     specs  = errorMaskQuerySpecs();
+    std::vector<AstQueryGroup>                    groups = constructQueryGroups( specs );   // borrows `specs`: the table never moves
+    std::array<std::once_flag, kLangTable.size()> compiled;
+    std::array<GrammarQueries, kLangTable.size()> byRow;
+
+    ConstructQueryTable() = default;
+    ConstructQueryTable( const ConstructQueryTable& ) = delete;
+    ConstructQueryTable& operator=( const ConstructQueryTable& ) = delete;
+    ~ConstructQueryTable()
+    {
+        for( GrammarQueries& qs : byRow )
+        {
+            for( GroupedQuery& gq : qs.perSpec )
+            {
+                ts_query_delete( gq.query );
+            }
+            if( qs.combined != nullptr )
+            {
+                ts_query_delete( qs.combined );
+            }
+        }
+    }
+};
+
+ConstructQueryTable& constructQueryTable()
+{
+    static ConstructQueryTable table;
+    return table;
+}
+}   // namespace
+
+void collectConstructHits( const LangEntry& le, std::uint32_t fileId, std::string_view bytes, TSNode root, TSQueryCursor* cur,
+                           std::vector<ConstructHit>& out )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: quality construct hits" );
+    ConstructQueryTable& table = constructQueryTable();
+    const std::size_t    row   = std::size_t( &le - kLangTable.data() );
+    ASSUME( row < kLangTable.size(), "a parse worker's LangEntry is a kLangTable row (lookupLang answers into the table)" );
+    const TSLanguage* grammar = le.grammar();
+    std::call_once( table.compiled[row], [ & ] { table.byRow[row] = compileGrammarQueries( grammar, table.groups ); } );
+
+    // No newline index up front: almost every file has no row, so lines are filled in only when one does.
+    const std::vector<std::uint32_t>  noLines;
+    std::vector<std::vector<AstMatch>> perGroup( table.groups.size() );
+    runWalkGroups( table.groups, root, fileId, bytes, noLines, grammar, le.lang, perGroup );
+    if( !table.byRow[row].perSpec.empty() )
+    {
+        execGrammarQueries( cur, table.byRow[row], root, fileId, bytes, noLines, table.groups, perGroup );
+    }
+    if( perGroup[0].empty() && perGroup[1].empty() )
+    {
+        return;
+    }
+    const std::vector<std::uint32_t> nlOffsets = buildNewlineOffsets( bytes );
+    for( std::vector<AstMatch>& rows : perGroup )
+    {
+        for( AstMatch& m : rows )
+        {
+            m.line = lineAtByte( nlOffsets, m.startByte );
+        }
+    }
+    appendFileConstructHits( perGroup[0], perGroup[1], bytes, out );
 }
 
 }   // namespace rw — ingest_astquery.h section of ingest.cpp

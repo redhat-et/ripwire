@@ -854,10 +854,12 @@ for _g in \
     pyshapecheck \
     qackconcurrencycheck \
     qackorigincheck \
+    qbasecachecheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
     qdclonepaircheck \
+    qdconstructscheck \
     qddegradecheck \
     qddialscheck \
     qdentryceilingcheck \

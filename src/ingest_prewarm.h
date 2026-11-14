@@ -33,6 +33,12 @@ struct IngestFileScan
     std::vector<std::uint32_t>    nestRefusedBytes;   // the Kotlin nesting guard: the refused file's size, 0 = not refused (one writer per slot)
     std::vector<std::uint8_t>     extractPartial;     // 1 = the file's facts are PARTIAL (an ExtractShortfall, or a throw mid-file) (one writer per slot)
     std::vector<std::uint32_t>    extractPartialBytes;   // its size as observed at hash time, 0 = not captured (the row's bytes=)
+    // QD-CONSTRUCTS-AT-INGEST (lazy): does this ingest find construct hits (ingest.h tlIngestWantsConstructHits, read once
+    // by runParsePool), and per fileId, are its hits KNOWN — found by this parse, or carried by a record that had them.
+    // 0 only for a code file parsed without the pass or carried from a record that lacked it; saveCache writes the
+    // record "constructs absent" then. One writer per slot.
+    bool                          wantConstructHits = false;
+    std::vector<std::uint8_t>     constructsKnown;
 
     // `knownBytes` is the file's size where the caller holds its bytes; otherwise the stat taken at hash time, which is
     // read HERE, before the save path may forget it for the cache. 0 = neither was captured.
@@ -83,6 +89,7 @@ inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
     scan.nestRefusedBytes.assign( nfilesEarly, 0u );
     scan.extractPartial.assign( nfilesEarly, 0u );
     scan.extractPartialBytes.assign( nfilesEarly, 0u );
+    scan.constructsKnown.assign( nfilesEarly, 1u );   // known-empty until a parse without the pass says otherwise
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: classify file languages" );
         for( std::size_t fileId = 0; fileId < nfilesEarly; ++fileId )
