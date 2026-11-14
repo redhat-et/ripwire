@@ -183,7 +183,7 @@ def parse(path, sha):
     if shaAt < 16:
         print("fnv1a64(sha) not found in the header"); sys.exit(3)
     cur = shaAt + 8
-    for recBytes in (12, 12, 12, 12, 12, 12, 12, 12, 16, 16, 136, 8):   # ccx loc nest params defs mask maskReport placeholder | bodyHash | moveCid (v28) | moveSketch key+128 B (v29) | cloneGroups
+    for recBytes in (12, 12, 12, 12, 12, 12, 12, 12, 16, 16, 16, 136, 8):   # ccx loc nest params defs mask maskReport placeholder | bodyHash | moveCid (v28) | bodyCid (v30) | moveSketch key+128 B (v29) | cloneGroups
         n = struct.unpack_from("<I", body, cur)[0]; cur += 4 + n * recBytes
     deadAt = cur
     n = struct.unpack_from("<I", body, cur)[0]

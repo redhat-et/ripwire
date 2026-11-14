@@ -866,6 +866,7 @@ for _g in \
     qdentryceilingcheck \
     qdmonstercheck \
     qdrefpaircheck \
+    qdrenameidentitycheck \
     qdtestdeadcheck \
     qdtype3oncecheck \
     qextractionkeycheck \
