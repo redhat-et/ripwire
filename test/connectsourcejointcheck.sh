@@ -226,12 +226,15 @@ TJ="$TMP/twotests";     mksrc "$TJ"
 printf 'void unrelatedIt() {}\n' > "$TJ/src/zz_unrelated.cpp"
 printf 'void planIt(); void applyIt();\nvoid mTest() { planIt(); applyIt(); }\n' > "$TJ/test/m_test.cpp"
 printf 'void planIt(); void applyIt();\nvoid kTest() { planIt(); applyIt(); }\n' > "$TJ/test/k_test.cpp"
-tjOf(){ "$BIN" "$1" --no-cache --connect=planIt,applyIt 2>/dev/null | grep -o '<connect [^>]*test_joint="[^"]*" test_joint_p="[^"]*"' | sed 's/.*test_joint=/test_joint=/'; }
-N_BEFORE="$( tjOf "$TJ" )"
+tjOf(){ printf '%s' "$1" | grep -o '<connect [^>]*test_joint="[^"]*" test_joint_p="[^"]*"' | sed 's/.*test_joint=/test_joint=/'; }
+N_DOC="$( "$BIN" "$TJ" --no-cache --connect=planIt,applyIt 2>/dev/null )" || no "(N) before the rename: ripwire exited $?"
+N_BEFORE="$( tjOf "$N_DOC" )"
 mv "$TJ/src/zz_unrelated.cpp" "$TJ/src/aa_unrelated.cpp"
-N_AFTER="$( tjOf "$TJ" )"
+N_DOC="$( "$BIN" "$TJ" --no-cache --connect=planIt,applyIt 2>/dev/null )" || no "(N) after the rename: ripwire exited $?"
+N_AFTER="$( tjOf "$N_DOC" )"
 rm "$TJ/test/k_test.cpp"
-N_ONE="$( tjOf "$TJ" )"
+N_DOC="$( "$BIN" "$TJ" --no-cache --connect=planIt,applyIt 2>/dev/null )" || no "(N) mTest alone: ripwire exited $?"
+N_ONE="$( tjOf "$N_DOC" )"
 if [ "$N_ONE" = 'test_joint="mTest" test_joint_p="test/m_test.cpp:2"' ]; then
     ok "(N) premise: mTest alone qualifies too (the pair is a real tie between two tests)"
 else
