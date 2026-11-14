@@ -454,11 +454,76 @@ inline std::string_view outerQualifiers( std::string_view word, const subject_de
     return outer;
 }
 
+// ANCHOR-QUALIFIER-OWNERSHIP (CodeRabbit #630): does `bytes` OPEN a scope named `seg` outside a comment — `namespace X` (or
+// `namespace a::X`), `mod X`, `package X` (or `package a.X`), `module X`, `class X`, `struct X`, `impl X`? A bare whole word (a
+// comment, an unrelated identifier) placed a wrong qualifier before; `using namespace X;` names a scope, it opens none.
+inline bool opensScopeNamed( std::string_view bytes, std::string_view seg )
+{
+    static constexpr std::string_view kOpeners[] = { "namespace", "mod", "package", "module", "class", "struct", "impl" };
+    const auto identAt = [ & ]( std::size_t i ) { return namesplit::isIdentChar( bytes[ i ] ); };
+    // the identifier ending at `end` after whitespace, line breaks included (`namespace\nrw {`, CodeRabbit 4570578087), as [start, end)
+    const auto wordBefore = [ & ]( std::size_t end )
+    {
+        std::size_t e = end;
+        while( e > 0 && ( bytes[ e - 1 ] == ' ' || bytes[ e - 1 ] == '\t' || bytes[ e - 1 ] == '\n' || bytes[ e - 1 ] == '\r' ) )
+        {
+            --e;
+        }
+        std::size_t b = e;
+        while( b > 0 && identAt( b - 1 ) )
+        {
+            --b;
+        }
+        return std::pair{ b, e };
+    };
+    darkflags::BlockCommentState comments( bytes );
+    for( std::size_t at = bytes.find( seg ); at != std::string_view::npos; at = bytes.find( seg, at + 1 ) )
+    {
+        if( !darkflags::wholeWordAt( bytes, at, seg.size() ) )
+        {
+            continue;
+        }
+        std::size_t b = at;   // back over a qualified prefix (`a::b::X`, `a.b.X`)
+        for( ;; )
+        {
+            const std::size_t sep = b >= 2 && bytes.substr( b - 2, 2 ) == "::" ? 2 : ( b >= 1 && bytes[ b - 1 ] == '.' ? 1 : 0 );
+            if( sep == 0 || b - sep == 0 || !identAt( b - sep - 1 ) )
+            {
+                break;
+            }
+            b -= sep;
+            while( b > 0 && identAt( b - 1 ) )
+            {
+                --b;
+            }
+        }
+        const auto [ kb, ke ] = wordBefore( b );
+        if( ke == b || std::ranges::find( kOpeners, bytes.substr( kb, ke - kb ) ) == std::end( kOpeners ) )
+        {
+            continue;
+        }
+        if( const auto [ ub, ue ] = wordBefore( kb ); bytes.substr( ub, ue - ub ) == "using" )
+        {
+            continue;
+        }
+        const std::size_t      nl   = kb == 0 ? std::string_view::npos : bytes.rfind( '\n', kb - 1 );
+        const std::string_view lead = bytes.substr( nl == std::string_view::npos ? 0 : nl + 1, kb - ( nl == std::string_view::npos ? 0 : nl + 1 ) );
+        if( lead.find( "//" ) != std::string_view::npos || lead.find( '#' ) != std::string_view::npos || comments.insideAt( kb ) )
+        {
+            continue;   // a line comment (`//`, `#`) or a block comment: it opens nothing
+        }
+        return true;
+    }
+    return false;
+}
+
 // Does every segment of `outer` place `s`? A segment places it when it is a segment of its scope, a directory or the stem on its
-// file's path, a Rust path keyword, or a whole word in its file (a C++ `namespace rw {`, a Rust `mod net {`): `Missing.Model.save`
+// file's path, a Rust path keyword, or a scope its file opens (a C++ `namespace rw {`, a Rust `mod net {`; opensScopeNamed): `Missing.Model.save`
 // names nothing of pkg/models/base.py's Model.save, `concurrent.futures.ThreadPoolExecutor` names Lib/concurrent/. Read only on
 // a word with outer qualifiers, and the file only when the cheap tests fail.
-inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer )
+// ANCHOR-READ-DISCLOSE (CodeRabbit #630): a definition file the read cannot open (unreadable, or over darkflags::readWhole's
+// 4 MiB) is not placed, and `*unread` says so, so the route reason discloses it instead of reading the qualifier as absent.
+inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std::string_view outer, bool* unread = nullptr )
 {
     const std::string_view path = rootRelPath( ing, s.fileId );
     const auto namesSegment = []( std::string_view text, std::string_view seps, std::string_view seg )
@@ -491,12 +556,11 @@ inline bool outerQualifiersPlace( const IngestResult& ing, const Symbol& s, std:
             bytes = darkflags::readWhole( diskPath( ing, s.fileId ) );
             read  = true;
         }
-        bool inFile = false;
-        for( std::size_t at = bytes ? bytes->find( seg ) : std::string::npos; at != std::string::npos && !inFile; at = bytes->find( seg, at + 1 ) )
+        if( !bytes && unread != nullptr )
         {
-            inFile = darkflags::wholeWordAt( *bytes, at, seg.size() );
+            *unread = true;
         }
-        if( !inFile )
+        if( !bytes || !opensScopeNamed( *bytes, seg ) )
         {
             return false;
         }
@@ -1169,7 +1233,24 @@ struct SourceSyntaxAnchor
     std::vector<NodeId> defs;   // its source-class placed definitions, never empty
 };
 
-inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query )
+// Drop the definitions the outer qualifiers do not place; `*unreadDefs` (optional) counts the ones dropped because their file
+// could not be read, so the caller discloses them instead of reading the qualifier as absent (ANCHOR-READ-DISCLOSE).
+inline void dropOuterUnplaced( const IngestResult& ing, std::vector<NodeId>& defs, std::string_view outer, std::size_t* unreadDefs )
+{
+    std::erase_if( defs, [ & ]( NodeId id )
+    {
+        bool       unread = false;
+        const bool drop   = !subject_detail::outerQualifiersPlace( ing, ing.symbols[id], outer, &unread );
+        if( drop && unread && unreadDefs != nullptr )
+        {
+            ++*unreadDefs;
+        }
+        return drop;
+    } );
+}
+
+// `*unreadDefs` (optional) counts the placed definitions dropped because their file could not be read (outerQualifiersPlace).
+inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& ing, std::string_view query, std::size_t* unreadDefs = nullptr )
 {
     using namespace subject_detail;
     std::vector<std::string_view> words;
@@ -1200,7 +1281,7 @@ inline std::vector<SourceSyntaxAnchor> sourceSyntaxAnchors( const IngestResult& 
         // the placement read only the leaf and the last qualifier: `Missing::Model::save` placed the indexed `Model::save`, so the
         // qualifiers before that one must place the definition too (CodeRabbit 4545021751)
         const std::string_view outer = outerQualifiers( words[k], spelled[k] );
-        std::erase_if( placed[k], [ & ]( NodeId id ) { return !outerQualifiersPlace( ing, ing.symbols[id], outer ); } );
+        dropOuterUnplaced( ing, placed[k], outer, unreadDefs );
         for( const NodeId id : resolveAllByNameQualified( ing, words[k] ) )
         {
             if( std::ranges::find( placed[k], id ) == placed[k].end() )
@@ -1302,10 +1383,21 @@ inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& i
     {
         return {};
     }
-    const std::string_view          query = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
-    std::vector<SourceSyntaxAnchor> src   = sourceSyntaxAnchors( ing, query );
+    const std::string_view          query      = out.rankQuery.empty() ? task : std::string_view( out.rankQuery );
+    std::size_t                     unreadDefs = 0;
+    std::vector<SourceSyntaxAnchor> src        = sourceSyntaxAnchors( ing, query, &unreadDefs );
+    // appended once the route is final, so a name-exact route that replaces it below keeps the disclosure (CodeRabbit 4570578098)
+    const auto discloseUnread = [ & ]
+    {
+        if( unreadDefs != 0 )
+        {
+            out.route.reason += "; " + std::to_string( unreadDefs ) + " definition(s) not placed: the file is unreadable or over 4 MiB, so "
+                                "its outer qualifier was not checked";
+        }
+    };
     if( src.empty() )
     {
+        discloseUnread();
         return src;
     }
     if( out.rankQuery.empty() )
@@ -1335,6 +1427,7 @@ inline std::vector<SourceSyntaxAnchor> applyAnchorHonesty( const IngestResult& i
         }
     }
     preferSourceAnchorDefs( ing, out.route, src );
+    discloseUnread();
     return src;
 }
 

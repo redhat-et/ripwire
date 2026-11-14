@@ -40,6 +40,9 @@
 #      the phase lines it saw and FAILS on fewer than six (red before the fix: the lines printed 0.0-free numbers and the seam was
 #      ignored, so a reader's 0 would have printed as 0.0 MiB).
 #
+# N, E and U read the graph phases, so they run --callers (a graph verb): --deps builds no graph since DEPS-NO-GRAPH
+# (test/depsnographcheck.sh). Q and S read only the ingest's lines and keep --deps.
+#
 # Usage: bash test/memstatscheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -94,7 +97,7 @@ else
 fi
 
 # ---- N ----
-( cd "$REPO" && RIPWIRE_STATS=1 "$BIN" "$REPO" --cache="$TMP/c.bin" --deps >/dev/null 2>"$TMP/n.err" ); rcn=$?
+( cd "$REPO" && RIPWIRE_STATS=1 "$BIN" "$REPO" --cache="$TMP/c.bin" --callers=fn_0_0 >/dev/null 2>"$TMP/n.err" ); rcn=$?
 [ "$rcn" -eq 0 ] || no "N: the --cache= run exited $rcn"
 seen=0
 for phase in pool-join save-cache model graph-tables graph-resolved graph-end; do
@@ -172,7 +175,7 @@ import sys, os
 for f in range( 8 ):
     open( os.path.join( sys.argv[1], f"t{f}.c" ), "w" ).write( "".join( f"void f{f}_{i}(void) {{}}\n" for i in range( 600 ) ) )
 PY
-( cd "$EREPO" && RIPWIRE_STATS=1 "$BIN" "$EREPO" --no-cache --deps >/dev/null 2>"$TMP/e.err" ) || no "E: the --deps run exited non-zero"
+( cd "$EREPO" && RIPWIRE_STATS=1 "$BIN" "$EREPO" --no-cache --callers=f0_0 >/dev/null 2>"$TMP/e.err" ) || no "E: the --callers run exited non-zero"
 esyms="$( grep '^\[mem\] family symbols ' "$TMP/e.err" | sed -E 's/.* size=([0-9]+) .*/\1/' )"
 erefs="$( grep '^\[mem\] family references ' "$TMP/e.err" | sed -E 's/.* size=([0-9]+) .*/\1/' )"
 eacc="$( grep '^\[mem\] tables ' "$TMP/e.err" | tr ' ' '\n' | sed -n 's/^acc=[0-9]*\///p' | head -1 )"
@@ -250,7 +253,7 @@ else
 fi
 
 # ---- U ----
-( cd "$REPO" && RIPWIRE_STATS=1 RIPWIRE_TEST_MEMSTATS_UNREAD=1 "$BIN" "$REPO" --cache="$TMP/u.bin" --deps >/dev/null 2>"$TMP/u.err" ); rcu=$?
+( cd "$REPO" && RIPWIRE_STATS=1 RIPWIRE_TEST_MEMSTATS_UNREAD=1 "$BIN" "$REPO" --cache="$TMP/u.bin" --callers=fn_0_0 >/dev/null 2>"$TMP/u.err" ); rcu=$?
 nphase="$( grep -c '^\[mem\] phase=' "$TMP/u.err" )"
 nunread="$( grep -cE '^\[mem\] phase=[a-z-]+ cur_mib=unavailable peak_mib=unavailable$' "$TMP/u.err" )"
 nnum="$( grep -cE '^\[mem\] phase=.* (cur|peak)_mib=[0-9]' "$TMP/u.err" )"

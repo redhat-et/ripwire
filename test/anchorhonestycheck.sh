@@ -12,6 +12,8 @@
 #   N3 a subject that IS a `where` method keeps it in the head;
 #   N4 an outer qualifier that places nothing (`Missing.futures.ThreadPoolExecutor`) does not borrow the inner spelling's source anchor.
 #   N5 a C++ namespace the definition's file opens (`rw::detail::ConnPool`) still places it; its Missing:: twin does not.
+#   N8 a comment word or unrelated identifier in the definition's file is no scope; N9 an unread (>4 MiB) definition file is
+#   disclosed on the route (CARD-SWEEP-1113).
 #   Fixtures generated at test time; CLI and MCP; determinism; well-formed XML.
 # Usage: bash test/anchorhonestycheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/anchorhonestycheck.sh
 set -u
@@ -318,6 +320,77 @@ case "$R" in *'dropped: call'*) ok "N5 call: the frame word leaves beside a name
 R="$( route "$( ask "$C" 'what does Missing::detail::ConnPool::drainAll call' )" )"
 case "$R" in *'dropped: call'*) no "N5 Missing:: twin: the frame word was dropped (route $R)";; *) nP=$(( nP + 1 )); ok "N5 Missing:: twin: the frame word stays";; esac
 if [ "$nP" -eq 3 ]; then ok "N5 counted $nP namespace wordings read as expected"; else no "N5 counted $nP of 3 namespace wordings read as expected"; fi
+
+# ═══ N8 a qualifier the file only MENTIONS places nothing (ANCHOR-QUALIFIER-OWNERSHIP, CodeRabbit #630) ═══
+#   A comment word (`Legacy`) and an unrelated identifier (`Stale`) in the definition's file placed `Legacy::detail::ConnPool` and
+#   `Stale::detail::ConnPool` on main cd04d477e (whole word in the file); only a scope opener (`namespace rw`) places now.
+Q="$TMP/cppq"; mkdir -p "$Q/src/pool"
+printf '// Legacy: this pool replaced the Legacy one
+namespace rw
+{
+namespace detail
+{
+int Stale = 0;
+class ConnPool
+{
+public:
+    void drainAll();
+    int  sizeNow() const;
+};
+void ConnPool::drainAll() { sizeNow(); }
+int ConnPool::sizeNow() const { return Stale; }
+}
+}
+' >"$Q/src/pool/pool.cpp"
+printf 'int main() { rw::detail::ConnPool p; p.drainAll(); }
+' >"$Q/src/main.cpp"
+( cd "$Q" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+if grep -qw Legacy "$Q/src/pool/pool.cpp" && grep -qw Stale "$Q/src/pool/pool.cpp"; then ok "N8 premise: pool.cpp mentions Legacy (a comment) and Stale (an identifier)"; else no "N8 premise: the fixture lost its mentions"; fi
+nQ=0
+for w in Legacy Stale; do
+    R="$( route "$( ask "$Q" "what does $w::detail::ConnPool::drainAll call" )" )"
+    case "$R" in *'dropped: call'*) no "N8 $w:: (a mention, not a scope) placed the definition (route $R)";; *) nQ=$(( nQ + 1 )); ok "N8 $w:: is no source anchor: the frame word stays";; esac
+done
+R="$( route "$( ask "$Q" 'what does rw::detail::ConnPool::drainAll call' )" )"
+case "$R" in *'dropped: call'*) nQ=$(( nQ + 1 )); ok "N8 control: rw:: (namespace rw) still places on the same file";; *) no "N8 control: rw::detail::ConnPool::drainAll route $R";; esac
+if [ "$nQ" -eq 3 ]; then ok "N8 counted $nQ qualifier wordings read as expected"; else no "N8 counted $nQ of 3 qualifier wordings read as expected"; fi
+# N8b (CodeRabbit 4570578087): a scope keyword and its name on two lines (Rust `mod` / `netio`) still open the scope; the keyword
+#   scan stopped at the line break, so netio:: placed nothing (red on 1c920292f: the frame word stayed). Control: zzzio::, which
+#   no scope opens, still places nothing.
+NL="$TMP/rsnl"; mkdir -p "$NL/src"
+printf 'mod\nnetio\n{\n    pub struct Conn;\n    impl Conn\n    {\n        pub fn drain_all(&self) { self.size_now(); }\n        pub fn size_now(&self) -> u32 { 0 }\n    }\n}\n\nfn main() { netio::Conn.drain_all(); }\n' >"$NL/src/lib.rs"
+printf '[package]\nname = "x"\nversion = "0.1.0"\n' >"$NL/Cargo.toml"
+( cd "$NL" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+if grep -qx 'mod' "$NL/src/lib.rs" && grep -qx 'netio' "$NL/src/lib.rs"; then ok "N8b premise: lib.rs spells mod and netio on two lines"; else no "N8b premise: the fixture lost its split mod"; fi
+R="$( route "$( ask "$NL" 'what does netio::Conn::drain_all call' )" )"
+case "$R" in *'dropped: call'*) ok "N8b netio:: (mod on the line before) places the definition";; *) no "N8b netio:: across a line break placed nothing (route $R)";; esac
+R="$( route "$( ask "$NL" 'what does zzzio::Conn::drain_all call' )" )"
+case "$R" in *'dropped: call'*) no "N8b control: zzzio:: (no scope opens it) placed the definition (route $R)";; *) ok "N8b control: zzzio:: places nothing";; esac
+
+# ═══ N9 a definition file too big to read says so (ANCHOR-READ-DISCLOSE, CodeRabbit #630) ═══
+#   Huge::drainAll lives in a 4.3 MiB file, indexed under --max-file-size=8M but past readWhole's 4 MiB. `Outer::` is in no scope or
+#   path, so only the file could place it, and the file cannot be read: the definition is not placed, and the route reason now says
+#   the qualifier went unchecked instead of reading `Outer` as absent (silent on main cd04d477e).
+#   Generated here, never committed.
+H="$TMP/huge"; mkdir -p "$H/src"
+{ printf 'namespace rw\n{\nnamespace detail\n{\nclass Huge\n{\npublic:\n    void drainAll();\n    int  sizeNow() const;\n};\nvoid Huge::drainAll() { sizeNow(); }\nint Huge::sizeNow() const { return 0; }\n}\n}\n'
+  awk 'BEGIN { for( i = 0; i < 60000; ++i ) printf "// padding padding padding padding padding padding padding padding %05d\n", i }'; } >"$H/src/huge.cpp"
+printf 'int main() { rw::detail::Huge h; h.drainAll(); }\n' >"$H/src/main.cpp"
+( cd "$H" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+hb=$( wc -c <"$H/src/huge.cpp" | tr -d ' ' )
+if [ "$hb" -gt 4194304 ] && [ "$hb" -lt 8388608 ]; then ok "N9 premise: huge.cpp is $hb bytes, past the 4 MiB read"; else no "N9 premise: huge.cpp is $hb bytes"; fi
+R="$( route "$( cd "$H" && HOME="$TMP/home" TMPDIR="$TMP/home/" "$BIN" "$H" --no-cache --max-file-size=8M '--for=what does Outer::detail::Huge::drainAll call' 2>/dev/null </dev/null )" )"   # status: --for exits 0 on a routed answer; the route reason is the verdict and an empty route FAILs the arm below
+case "$R" in *'not placed: the file is unreadable or over 4 MiB'*) ok "N9 the route says the definition's file was too big to check";; *) no "N9 the unread definition file is silent (route $R)";; esac
+R="$( route "$( ask "$C" 'what does Missing::detail::ConnPool::drainAll call' )" )"
+case "$R" in *'unreadable or over 4 MiB'*) no "N9 precision: a readable file carries the unread note (route $R)";; *) ok "N9 precision: a readable definition file carries no unread note";; esac
+# N9b (CodeRabbit 4570578098): the same unread definition beside a READABLE one that `namespace Outer` places: the anchor is source,
+#   the frame word drops and that route replaces the first one; the unread note was lost with it (red on 1c920292f).
+H2="$TMP/huge2"; mkdir -p "$H2/src"; cp "$H/src/huge.cpp" "$H/src/main.cpp" "$H2/src/"
+printf 'namespace Outer\n{\nnamespace detail\n{\nclass Huge\n{\npublic:\n    void drainAll();\n};\nvoid Huge::drainAll() { }\n}\n}\n' >"$H2/src/small.cpp"
+( cd "$H2" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+R="$( route "$( cd "$H2" && HOME="$TMP/home" TMPDIR="$TMP/home/" "$BIN" "$H2" --no-cache --max-file-size=8M '--for=what does Outer::detail::Huge::drainAll call' 2>/dev/null </dev/null )" )"   # status: --for exits 0 on a routed answer; the route reason is the verdict and an empty route FAILs the arm below
+case "$R" in *'dropped: call'*) ok "N9b premise: the readable Outer definition anchors and the frame word drops";; *) no "N9b premise: the route was not replaced (route $R) — the arm is vacuous";; esac
+case "$R" in *'not placed: the file is unreadable or over 4 MiB'*) ok "N9b the replaced route keeps the unread-definition note";; *) no "N9b the unread note was lost when the route was replaced (route $R)";; esac
 
 # ═══ N3 a subject that IS a where method keeps it ═══
 A="$( ask "$P" 'what does Icon.where call' )"

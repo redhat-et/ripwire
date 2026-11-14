@@ -20,6 +20,7 @@
 // What it does NOT do: infer a function's return type (`s = self.get_screen(); s.refresh()`), follow a property, or type
 // a value that crossed a call boundary. Those receivers stay name-only — the honest answer, not a guess.
 
+#include "infra/idkeyedmap.h"   // IdKeyedCsr: localType's packed ( scope, name ) → facts table (K1a LOCALTYPE-PACK)
 #include "infra/sortutil.h"   // svLess: the explicit byte order the operatorResult sort takes (portablebuildcheck #6)
 #include "langfacts.h"   // langFacts(l).overloadsWithoutArity — overloadedAbove's language column
 #include "model.h"
@@ -2015,18 +2016,22 @@ struct ReceiverEvidence
     HashMap<std::string, std::string>                     nameAlias;       // "<fileId>#local" → the class name it imports
     // FE-B (review B4): one binding of a local name — the class it names ("" = unknown: it hides an outer binding of the
     // name and proves nothing) and the bytes it is visible in. end == 0: a record with no span (a Python name, a reassignment,
-    // a base pass Type record): somewhere in its definition, extent unknown.
+    // a base pass Type record): somewhere in its definition, extent unknown. K1a LOCALTYPE-PACK: six 4 B fields, 24 B (the two
+    // texts were std::string, 64 B a fact); ~600 K facts on cockroach and vscode are live at buildGraph's resolve-loop peak.
     struct LocalFact
     {
-        std::uint32_t start = 0;
-        std::uint32_t end   = 0;
-        std::string   type;
-        NodeId        cls   = kNoNode;   // (L) fix round 1: the ONE in-tree class `type` resolved to (kNoNode: the name alone)
-        NodeId        iface = kNoNode;   // lane L6: a binding typed only as SOME implementor of this trait (type stays "")
-        std::string   bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise
+        std::uint32_t    start = 0;
+        std::uint32_t    end   = 0;
+        rw::InternedText type;              // "" = a tombstone
+        NodeId           cls   = kNoNode;   // (L) fix round 1: the ONE in-tree class `type` resolved to (kNoNode: the name alone)
+        NodeId           iface = kNoNode;   // lane L6: a binding typed only as SOME implementor of this trait (type stays "")
+        rw::InternedText bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise
         bool operator==( const LocalFact& ) const = default;
     };
-    HashMap<std::string, std::vector<LocalFact>>          localType;       // "<fromSymbol>#var" → its bindings
+    static_assert( sizeof( LocalFact ) == 24, "K1a: a local fact is six 4 B fields" );
+    // ( fromSymbol scope, var ) → its bindings in record order: a CSR behind a packed u64 key (K1a LOCALTYPE-PACK; it was a
+    // HashMap<std::string "<scope>#var", std::vector<LocalFact>>, 107 MiB on cockroach). Lookup-only: build() seals it.
+    rw::IdKeyedCsr<rw::RefNames, LocalFact>               localType;
     HashMap<std::string, std::pair<std::string, std::string>> methodAlias; // "<fromSymbol>#var" → ( object var, method )
     HashMap<std::string, std::string>                     moduleAlias;     // "<fileId>#name" → module as written ("" = tombstone)
     std::vector<std::vector<NodeId>>                      fnsByFile;       // fileId → functions/methods sorted by start (enclosing walk)
@@ -2080,26 +2085,26 @@ struct ReceiverEvidence
         }
     }
 
-    void addLocalFact( const std::string& k, const Binding& b ) { addTypedFact( k, b, b.typeName, kNoNode ); }
+    // a binding's fact under ( scope, b.var ): its own written type
+    void addLocalFact( NodeId scope, const Binding& b ) { addTypedFact( scope, b, b.typeName, kNoNode ); }
     // the same fact naming `type` instead of the binding's own (a qualified written type refused: ""), and the one class it
-    // resolved to (kNoNode: the name alone)
-    void addTypedFact( const std::string& k, const Binding& b, std::string_view type, NodeId cls )
+    // resolved to (kNoNode: the name alone). Staged: build() seals the table, which keeps the first of equal facts of one name
+    // (the old "push unless present").
+    void addTypedFact( NodeId scope, const Binding& b, std::string_view type, NodeId cls )
     {
-        addFact( k, factOf( b, type, cls ) );
+        LocalFact f = factOf( b, cls );
+        f.type.assign( type );
+        localType.addUnique( scope, b.var, f );
     }
-    // the fact a binding states over its span ({0,0}: no span), naming `type` / `cls`
-    static LocalFact factOf( const Binding& b, std::string_view type, NodeId cls )
+    // the fact a binding states over its span ({0,0}: no span), naming class `cls` (its type text set by the caller)
+    static LocalFact factOf( const Binding& b, NodeId cls )
     {
         const bool spanned = b.spanEnd > b.spanStart;
-        return LocalFact{ spanned ? b.spanStart : 0u, spanned ? b.spanEnd : 0u, std::string( type ), cls };
-    }
-    void addFact( const std::string& k, LocalFact f )
-    {
-        std::vector<LocalFact>&     facts = localType[ k ];
-        if( std::none_of( facts.begin(), facts.end(), [ & ]( const LocalFact& g ) { return g == f; } ) )
-        {
-            facts.push_back( std::move( f ) );
-        }
+        LocalFact  f;
+        f.start = spanned ? b.spanStart : 0u;
+        f.end   = spanned ? b.spanEnd : 0u;
+        f.cls   = cls;
+        return f;
     }
 
     void buildOwners()
@@ -2268,7 +2273,7 @@ struct ReceiverEvidence
             }
             else if( typedLocal && !b.var.empty() )
             {
-                addLocalFact( keyOf( from, '#', b.var ), b );
+                addLocalFact( from, b );
             }
             else if( b.kind == LocalBindKind::MemberType && !b.var.empty() )
             {
@@ -2306,32 +2311,41 @@ struct ReceiverEvidence
         }
         std::ranges::sort( operatorResult, []( const std::pair<NodeId, std::string_view>& a, const std::pair<NodeId, std::string_view>& b )
                            { return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second ); } );
+        localType.seal();   // every fact but the AugAssign drops below: their reads see the sealed table
         active = true;
+        std::vector<const Binding*> dropped;
         for( const Binding* a : augAssigns )
         {
-            noteAugAssign( *a );   // reads methodOf: after `active`
+            if( augDropsClass( *a ) )   // reads methodOf: after `active`
+            {
+                dropped.push_back( a );
+            }
         }
+        // K1a: the drops are added after every read. Equivalent to adding each as it is decided: a drop is a tombstone
+        // (type ""), and augDropsClass reads only the typed facts of a name.
+        for( const Binding* a : dropped )
+        {
+            addTypedFact( factScope( *a ), *a, {}, kNoNode );
+            augDropped.push_back( a );
+        }
+        localType.seal();
     }
     // Lane h1-annot: a Python `x op= v` rebinds `x` to what the operator returns. The class C `x` holds in its scope — every
     // typed fact of the name agreeing on ONE class — survives only when the method Python calls is ONE definition whose
     // OperatorResult record names "self" or C: C's in-place method `a.typeName` (`__iadd__`; its own, else the shallowest
     // base's: methodOf), else — C defines none in its cone — its binary method `a.importedName` (`__add__`: `x = x + v`).
     // Otherwise (a result that is not provably C, two definitions, neither method) `x` gets a tombstone, as a plain
-    // reassignment does. A name with no typed fact is left alone (nothing to drop).
+    // reassignment does. A name with no typed fact is left alone (nothing to drop). True: `a` drops the class (build() adds
+    // the tombstone and records it in augDropped).
     // test/receiverevidencecheck.sh (Q) AugNotSelf / AugNoDunder / AugOtherOp [N], AugSelf / AugIorSelf / AugInherited /
     // AugBinaryAnnotated [P].
-    void noteAugAssign( const Binding& a )
+    bool augDropsClass( const Binding& a ) const
     {
-        const std::string k   = keyOf( factScope( a ), '#', a.var );   // a copy: methodOf reuses the key buffer
-        const auto        it  = localType.find( k );
-        if( it == localType.end() )
-        {
-            return;
-        }
         std::string_view cls;
         NodeId           id  = kNoNode;
-        bool             one = true;
-        for( const LocalFact& f : it->second )
+        bool             one   = true;
+        const std::span<const LocalFact> facts = localType.find( factScope( a ), a.var );   // const member: the sealed table's view
+        for( const LocalFact& f : facts )
         {
             if( f.type.empty() )
             {
@@ -2344,12 +2358,7 @@ struct ReceiverEvidence
                 id  = f.cls;
             }
         }
-        if( cls.empty() || ( one && operatorKeepsClass( cls, id, a.typeName, a.importedName ) ) )
-        {
-            return;
-        }
-        addTypedFact( k, a, {}, kNoNode );
-        augDropped.push_back( &a );
+        return !cls.empty() && !( one && operatorKeepsClass( cls, id, a.typeName, a.importedName ) );
     }
     // (L) the call-result facts one binding feeds: the file's imports (CallResultTypes) and the function's call-initialised
     // bindings of each name (typeCallResult's TS guess rule)
@@ -2402,7 +2411,7 @@ struct ReceiverEvidence
             noteMemberType( q, type );
             return;
         }
-        addTypedFact( keyOf( factScope( q ), '#', q.var ), q, type, cls );
+        addTypedFact( factScope( q ), q, type, cls );
     }
     // rust-receivers: a Rust local, parameter or field WRITTEN as a type (or constructed: `T { .. }`, `T::default()`) names the
     // ONE in-tree class that spelling resolves to at its own site, by the call-result rule (CallResultTypes::resultClassOf: the
@@ -2430,7 +2439,7 @@ struct ReceiverEvidence
             }
             return;
         }
-        addTypedFact( keyOf( factScope( w ), '#', w.var ), w, type, cls );
+        addTypedFact( factScope( w ), w, type, cls );
     }
     // lane L6: a Rust parameter, local or field typed only as SOME implementor of a trait (model.h LocalBindKind::DispatchType)
     // — `&dyn T`, `Box<dyn T>`, `impl T`, a generic bounded by T. The trait resolves at the binding's own site like a written
@@ -2461,12 +2470,12 @@ struct ReceiverEvidence
             }
             return;
         }
-        LocalFact f = factOf( d, std::string_view{}, kNoNode );   // the tombstone it stands in for, carrying the trait
+        LocalFact f = factOf( d, kNoNode );   // the tombstone it stands in for, carrying the trait
         f.iface = trait;
         f.bound.assign( bound );
-        addFact( keyOf( factScope( d ), '#', d.var ), std::move( f ) );
+        localType.addUnique( factScope( d ), d.var, f );
     }
-    // is the result of the operator Python calls on a `cls` receiver (`inPlace`, else `binary`) provably `cls` (noteAugAssign)
+    // is the result of the operator Python calls on a `cls` receiver (`inPlace`, else `binary`) provably `cls` (augDropsClass)
     bool operatorKeepsClass( std::string_view cls, NodeId id, std::string_view inPlace, std::string_view binary ) const
     {
         if( !methodOf( cls, inPlace, false, id ) && ( binary.empty() || !methodOf( cls, binary, false, id ) ) )
@@ -2538,13 +2547,14 @@ struct ReceiverEvidence
     // = b.make()` type neither. False when nothing was replaced.
     bool typeCallResult( const Binding& b, std::string_view cls, NodeId id )
     {
-        const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
-        if( it == localType.end() || cls.empty() )
+        const NodeId               scope = factScope( b );
+        const std::span<LocalFact> facts = localType.find( scope, b.var );
+        if( facts.empty() || cls.empty() )
         {
             return false;
         }
         const bool spanned = b.spanEnd > b.spanStart;
-        for( LocalFact& f : it->second )
+        for( LocalFact& f : facts )
         {
             if( f.start == ( spanned ? b.spanStart : 0u ) && f.end == ( spanned ? b.spanEnd : 0u ) && f.type.empty() )
             {
@@ -2553,10 +2563,10 @@ struct ReceiverEvidence
                 return true;
             }
         }
-        const auto decls = callResultDecls.find( it->first );
-        for( LocalFact& f : it->second )
+        const auto decls = callResultDecls.find( keyOf( scope, '#', b.var ) );
+        for( LocalFact& f : facts )
         {
-            if( f.type == b.typeName && !classNames.contains( f.type ) && decls != callResultDecls.end() && decls->second == 1 )
+            if( f.type == b.typeName && !classNames.contains( f.type.str() ) && decls != callResultDecls.end() && decls->second == 1 )
             {
                 f.type.assign( cls );
                 f.cls = id;
@@ -2573,8 +2583,8 @@ struct ReceiverEvidence
     // tombstone, a class of that name, an unresolved or ambiguous trait.
     bool typeCallResultDispatch( const Binding& b, const Binding& rt )
     {
-        const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
-        if( it == localType.end() )
+        const std::span<LocalFact> facts = localType.find( factScope( b ), b.var );
+        if( facts.empty() )
         {
             return false;
         }
@@ -2585,7 +2595,7 @@ struct ReceiverEvidence
             return false;
         }
         const bool spanned = b.spanEnd > b.spanStart;
-        for( LocalFact& f : it->second )
+        for( LocalFact& f : facts )
         {
             if( f.start == ( spanned ? b.spanStart : 0u ) && f.end == ( spanned ? b.spanEnd : 0u ) && f.type.empty() && f.iface == kNoNode )
             {
@@ -2632,23 +2642,29 @@ struct ReceiverEvidence
     static SeenLocal seenOf( const LocalFact& f ) noexcept
     {
         SeenLocal seen;
-        seen.type  = f.type;
+        seen.type  = std::string_view( f.type );   // pool texts never move: the views outlive the table
         seen.cls   = f.cls;
         seen.iface = f.iface;   // lane L6
-        seen.bound = f.bound;
+        seen.bound = std::string_view( f.bound );
         return seen;
     }
     std::optional<SeenLocal> seenLocal( NodeId scope, std::string_view var, std::uint32_t site ) const
     {
-        const auto it = localType.find( keyOf( scope, '#', var ) );
-        if( it == localType.end() )
+        const std::optional<rw::InternedText> name = rw::InternedText::ifInterned( var );
+        return name.has_value() ? seenLocal( scope, *name, site ) : std::nullopt;
+    }
+    // the same, for a name already looked up (a never-interned name has no binding: the caller stops before)
+    std::optional<SeenLocal> seenLocal( NodeId scope, rw::InternedText var, std::uint32_t site ) const
+    {
+        const std::span<const LocalFact> facts = localType.find( scope, var );
+        if( facts.empty() )
         {
             return std::nullopt;
         }
         const LocalFact*         inner = nullptr;
         bool                     innerSplit = false;
         std::optional<SeenLocal> whole;
-        for( const LocalFact& f : it->second )
+        for( const LocalFact& f : facts )
         {
             if( f.end == 0 )
             {
@@ -2688,9 +2704,14 @@ struct ReceiverEvidence
     std::optional<SeenLocal> localSeenAt( NodeId from, std::string_view var, std::uint32_t site ) const
     {
         std::optional<SeenLocal> hit;
+        const std::optional<rw::InternedText> name = rw::InternedText::ifInterned( var );   // once, not per scope (hoisted)
+        if( !name.has_value() )
+        {
+            return hit;   // never interned: no binding anywhere
+        }
         walkScopes( from, [ & ]( NodeId scope )
         {
-            hit = seenLocal( scope, var, site );
+            hit = seenLocal( scope, *name, site );
             return hit.has_value();
         } );
         return hit;
@@ -2721,9 +2742,14 @@ struct ReceiverEvidence
     // is `name` a parameter or local of `from` or of a function enclosing it (any binding the extractor recorded)
     bool isLocalName( NodeId from, std::string_view name ) const
     {
-        return localNames != nullptr && walkScopes( from, [ & ]( NodeId s )
+        if( localNames == nullptr )
         {
-            return localNames->contains( keyOf( s, '#', name ) ) || localType.contains( keyOf( s, '#', name ) );
+            return false;
+        }
+        const std::optional<rw::InternedText> typed = rw::InternedText::ifInterned( name );   // once, not per scope (hoisted)
+        return walkScopes( from, [ & ]( NodeId s )
+        {
+            return localNames->contains( keyOf( s, '#', name ) ) || ( typed.has_value() && localType.contains( s, *typed ) );
         } ) != kNoNode;
     }
     // does `from` or a function enclosing it DECLARE `name` (a parameter or a local, typed or not) — not merely bind it: Java

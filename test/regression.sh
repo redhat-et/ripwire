@@ -396,6 +396,7 @@ for _g in \
     composelangcheck \
     connectcheck \
     connectcorecheck \
+    connectdeclinedjointcheck \
     connectjoincheck \
     connectsourcejointcheck \
     constcheck \
@@ -438,6 +439,7 @@ for _g in \
     demoterefillcheck \
     dependencypincheck \
     deplangscheck \
+    depsnographcheck \
     depsprecisecheck \
     det-gate \
     detailcheck \
@@ -972,6 +974,7 @@ for _g in \
     safedeletecheck \
     sarifcheck \
     savecachecheck \
+    scanoncecheck \
     scipcheck \
     scipjoincheck \
     scorecardcheck \

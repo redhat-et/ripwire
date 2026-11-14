@@ -1305,6 +1305,7 @@ struct PatternSearchOutcome
     std::uint64_t             memberUnmatched    = 0;   // member calls only the bare callee names (kMemberCallShapes; not hits)
     std::uint64_t             memberCapped       = 0;   // member probes the ellipsis bound abandoned: memberUnmatched is a floor
     std::uint64_t             memberArrow        = 0;   // of memberUnmatched, the calls spelled `->`
+    std::uint64_t             memberOptChain     = 0;   // of memberUnmatched, the calls spelled `?.` (JS/TS optional chaining)
 };
 
 // unmatched_qualified= / unmatched_member= (present only when non-zero): their reading rides the answer that carries
@@ -1316,15 +1317,18 @@ inline constexpr std::string_view kPatternQualifiedLegend =
     "- NOT in hits=; next= is the pattern with a receiver metavariable that matches them (C, C++, Go, Rust, "
     "JS/TS, Python, C#; Java, Swift and ObjC member calls are not counted). "
     "unmatched_member_arrow=K: K of them call through a pointer (the arrow); next= spells the arrow only when all do, "
-    "else repeat it with the arrow. unmatched_member_capped=1: a member call too long to probe was skipped (the "
+    "else repeat it with the arrow. unmatched_member_optchain=K: K of them use optional chaining (obj?.f(x)), the same "
+    "way: next= spells ?. only when all do. unmatched_member_capped=1: a member call too long to probe was skipped (the "
     "ellipsis bound), so unmatched_member= is a floor. "
     "A floor when the hit budget stops the walk (hits_capped=1): nodes past the stop are not counted -->";
 
 // unmatched_member='s next=: the same pattern with a receiver metavariable in front of its leading callee name, or ""
-// when the pattern does not start with `name(` (then the count still rides, with no follow-up to offer). The receiver
+// when the pattern does not start with `name(` or the continuation would pass the pattern byte limit (then the count
+// still rides, with no follow-up to offer). The receiver
 // is the first of `$O`, `$RECV`, `$RW_RECEIVER`, `$RW_RECEIVER2`, ... the pattern does not already spell, so it never
-// binds to one of the pattern's own metavariables (CR #624). `arrow` spells `->` (every counted call is a pointer call).
-inline std::string memberPatternNext( std::string_view pattern, bool arrow )
+// binds to one of the pattern's own metavariables (CR #624). `op` is the member operator every counted call shares
+// (`->` or `?.`), else `.`.
+inline std::string memberPatternNext( std::string_view pattern, std::string_view op )
 {
     std::size_t start = 0;
     while( start < pattern.size() && ( pattern[start] == ' ' || pattern[start] == '\t' ) )
@@ -1351,21 +1355,36 @@ inline std::string memberPatternNext( std::string_view pattern, bool arrow )
     {
         receiver = k < std::size( kReceivers ) ? std::string( kReceivers[k] ) : std::string( kReceivers[2] ) + std::to_string( k - 1 );
     }
+    // PATTERN-NEXT-LIMITS (CodeRabbit #633): a pattern already at the metavariable limit takes the anonymous `$_`
+    // receiver (it binds nothing, so it needs no slot), and a continuation past the byte limit is not offered: next=
+    // must compile when pasted.
+    if( rw::pattern::normalizePattern( pattern, "$" ).metaNames.size() >= rw::pattern::kMaxMetavars )
+    {
+        receiver = "$_";
+    }
     std::string next( pattern.substr( 0, start ) );
     next += receiver;
-    next += arrow ? "->" : ".";
+    next += op;
     next += pattern.substr( start );
+    if( next.size() > rw::pattern::kMaxPatternBytes )
+    {
+        return {};
+    }
     return rw::nextFlag( "--pattern=", next );
 }
 
 // The member near-miss attributes, in reading order: the count, its floor and arrow facts, then the pasteable next=.
 inline std::string memberNearMissAttrs( const PatternSearchOutcome& ps, std::string_view pattern )
 {
-    const bool allArrow = ps.memberUnmatched > 0 && ps.memberArrow == ps.memberUnmatched;
+    // the operator next= spells is one the counted calls use (CodeRabbit 4570578110): `.` while any dot call is among them, else
+    // `->`, else `?.` (a fixed priority: C++ `p->f(1)` beside JS `o?.f(1)` with no dot call took `.`, which matched neither)
+    const auto             dots = ps.memberUnmatched - std::min( ps.memberUnmatched, ps.memberArrow + ps.memberOptChain );
+    const std::string_view op   = dots > 0 || ps.memberUnmatched == 0 ? "." : ps.memberArrow > 0 ? "->" : ps.memberOptChain > 0 ? "?." : ".";
     return " unmatched_member=\"" + std::to_string( ps.memberUnmatched ) + "\""
          + ( ps.memberArrow > 0 ? " unmatched_member_arrow=\"" + std::to_string( ps.memberArrow ) + "\"" : std::string() )
+         + ( ps.memberOptChain > 0 ? " unmatched_member_optchain=\"" + std::to_string( ps.memberOptChain ) + "\"" : std::string() )
          + ( ps.memberCapped > 0 ? std::string( " unmatched_member_capped=\"1\"" ) : std::string() )
-         + rw::nextAttrXml( memberPatternNext( pattern, allArrow ) );
+         + rw::nextAttrXml( memberPatternNext( pattern, op ) );
 }
 
 // Compile the pattern for every served grammar, decide refusal-or-proceed, run the walk, and assemble the
@@ -1405,6 +1424,7 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
     out.memberUnmatched    = member.counted.load( std::memory_order_relaxed );
     out.memberCapped       = member.capped.load( std::memory_order_relaxed );
     out.memberArrow        = member.arrow.load( std::memory_order_relaxed );
+    out.memberOptChain     = member.optchain.load( std::memory_order_relaxed );
 
     out.grammarsAttr                 = joinOwned( rw::pattern::resolvedNames( progs ), "," );
     out.shapesAttr                   = joinOwned( rw::pattern::resolvedShapes( progs ), "," );

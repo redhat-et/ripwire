@@ -9,4 +9,4 @@ Two fixes come first. Without them, rows at that size were noise:
 
 `test/qdentryceilingcheck.sh` pins a 250-line function and a ccx-61 function that gate; ccx-59 and 239-line functions, a moved body, a renamed body with a 4-statement edit, a constructor and a test driver that do not; a genuinely new function with a similar name beside a removed body, which still gates; the copy that still gates; `--json`; and all three legends. Each negative arm counts its premise and fails on zero.
 
-Versions: `kQSnapCacheScheme` 26 -> 29 (a cached snapshot is recomputed once). The session legend dictionary moves to `dictv=9310a33a6cc8c16c entries=1108`, and docs/COMMANDS.md and the showcase capture are re-recorded.
+Versions: `kQSnapCacheScheme` 26 -> 29 (a cached snapshot is recomputed once). The session legend dictionary moves to `dictv=dc0fb12e22d5beb8 entries=1110`, and docs/COMMANDS.md and the showcase capture are re-recorded.

@@ -154,6 +154,47 @@ inline bool wholeWordAt( std::string_view hay, std::size_t at, std::size_t len )
     return true;
 }
 
+// Does byte `at` of `hay` sit inside a `/* … */` opened on an earlier line? The last opener before it is newer than the last
+// closer. A `/*` inside a string or a `//` comment reads as an opener too: the scan then claims nothing, the safe direction.
+// One forward pass (LEXDEF-ONEPASS, CodeRabbit #630): the candidate lines firstLineWhere hands over ascend, so each query
+// reads only the bytes since the previous one (plus one byte, for a delimiter straddling the boundary) instead of an rfind
+// over the whole prefix per line — quadratic on a 4 MiB `//`-only header with tens of thousands of mentions. Shared by
+// degradedscan.h lexicalDefHit and subjectanchor.h opensScopeNamed.
+class BlockCommentState
+{
+public:
+    explicit BlockCommentState( std::string_view hay ) noexcept : hay_( hay ) {}
+
+    // `at` must not decrease between calls (firstLineWhere's candidates ascend).
+    bool insideAt( std::size_t at ) noexcept
+    {
+        at = std::min( at, hay_.size() );
+        DASSERT( at >= scanned_ );
+        if( at > scanned_ )
+        {
+            // An occurrence counts once both its bytes lie before `at`: one starting at scanned_ - 1 was not whole before.
+            const std::size_t      from   = scanned_ == 0 ? 0 : scanned_ - 1;
+            const std::string_view window = hay_.substr( from, at - from );
+            if( const std::size_t o = window.rfind( "/*" ); o != std::string_view::npos )
+            {
+                lastOpen_ = from + o;
+            }
+            if( const std::size_t c = window.rfind( "*/" ); c != std::string_view::npos )
+            {
+                lastClose_ = from + c;
+            }
+            scanned_ = at;
+        }
+        return lastOpen_ != std::string_view::npos && ( lastClose_ == std::string_view::npos || lastClose_ < lastOpen_ );
+    }
+
+private:
+    std::string_view hay_;
+    std::size_t      scanned_   = 0;
+    std::size_t      lastOpen_  = std::string_view::npos;
+    std::size_t      lastClose_ = std::string_view::npos;
+};
+
 // An IDENTIFIER-shaped run: a letter or underscore, then identifier bytes only, with a length in
 // [minLen, maxLen]. Lives beside identByte because more than one lane needs the identical test —
 // docdrift's doc-name filter (identOk) and this file's env-name filter, where it is the whole reason

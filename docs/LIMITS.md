@@ -152,6 +152,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kBackHopWidth` | `16` | — | — |
+| `kConnectDeclinedJointCap` | `3` | — | — |
 | `kImpactRingRowCap` | `16` | — | — |
 | `kImpactRingSlotDepth` | `3` | — | a field-only chain's depth; pathgaps.h pins it to kBridgeSlotCrossings |
 
@@ -1340,6 +1341,7 @@ Discloses: `hits_capped`
 | `kGrepLiftRowCap` | `10` | — | a RANKED code+string answer's default window (CLI and MCP alike) |
 | `kGrepMatchedLineMaxBytes` | `512` | — | — |
 | `kGrepTierFileBudget` | `128` | — | hit files classified per call |
+| `kHeldAskedHitsMax` | `65536` | — | 768 KiB of rows |
 | `kMaxAffixSet` | `8` | — | cap on prefix/suffix set sizes |
 | `kMaxExactLen` | `24` | — | beyond this exact-string length, give up exactness (⊤) |
 | `kMaxExactSet` | `8` | — | beyond this many exact strings, give up exactness (⊤) |
