@@ -396,6 +396,7 @@ for _g in \
     composelangcheck \
     connectcheck \
     connectcorecheck \
+    connectdeclinedjointcheck \
     connectjoincheck \
     connectsourcejointcheck \
     constcheck \

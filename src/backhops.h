@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <cstddef>
 #include <cstdint>
@@ -1461,6 +1462,135 @@ inline std::string impactRingLegend( const ImpactRing& ring, bool rowsForm )
         out.append( ring.nameKey ? kNameKeyHopLegend : std::string_view() );   // exactly when reaches_hedged_via= rides, in every form (a d=1 hop has no row)
     }
     return out;
+}
+
+// ── CONNECT-SOURCE-JOINT (b): the declined common caller ─────────────────────────────────────────────────────────────
+// THE GAP. terraform `--connect=Context.Plan,Context.Apply`: the only non-test function that calls both is Local.opApply, through
+// `lr.Core.Plan( … )` / `lr.Core.Apply( … )`, two calls the resolver DECLINED (stored lists of 15 and 12 candidates). The graph
+// has no edge from it, so the minimal joining subgraph went the long way round (restore -> apply -> ApplyAndEval <- Apply),
+// an undirected join through a function that calls neither the way the question means, and the caller itself was never named.
+// THE RULE. When every terminal is source and NO non-test, non-terminal function has a graph edge to every terminal, a non-test
+// function that reaches EVERY terminal by a graph edge or by a declined call that crosses to it (declinedCrossingCands, the
+// width bound kBackHopWidth) is a declined common caller. At most kConnectDeclinedJointCap, in (path, line, name) order; the
+// first such declined call per terminal by line. It is a HEDGE beside the answer: never an edge, a node or a count.
+inline constexpr std::size_t kConnectDeclinedJointCap = 3;
+
+namespace declinedjoint_detail
+{
+// A graph edge from -> to (the out-lists are sorted ascending).
+inline bool edgeTo( const Graph& g, NodeId from, NodeId to )
+{
+    const auto first = g.outTargets.begin() + std::ptrdiff_t( g.outOff[ from ] );
+    const auto last  = g.outTargets.begin() + std::ptrdiff_t( g.outOff[ from + 1 ] );
+    return std::binary_search( first, last, to );
+}
+
+// Whether some non-test, non-terminal function has a graph edge to every terminal: then the graph answers, nothing is hedged.
+inline bool resolvedCommonCallerExists( const IngestResult& ing, const Graph& g, std::span<const NodeId> terms, std::size_t nodeCount )
+{
+    for( NodeId u = 0; u < nodeCount; ++u )
+    {
+        if( std::ranges::all_of( terms, [ & ]( NodeId t ) { return edgeTo( g, u, t ); } ) && !std::ranges::binary_search( terms, u ) && !pathDefInTests( ing, u ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// One function's first crossing declined call to one terminal (by line, then reference) and that call's candidate count.
+struct DeclinedWay
+{
+    NodeId        fn;
+    std::uint32_t line, ref, cands;
+};
+
+// Per terminal, each calling function's first declined call that crosses to it within kBackHopWidth, sorted by function.
+inline std::vector<std::vector<DeclinedWay>> declinedWaysPerTerminal( const IngestResult& ing, const Graph& g, std::span<const NodeId> terms, std::size_t nodeCount )
+{
+    const DeclinedCrossRule                  rule( ing, g );
+    std::vector<std::vector<DeclinedWay>>    ways( terms.size() );
+    for( std::size_t k = 0; k < terms.size(); ++k )
+    {
+        for( const std::uint32_t site : declinedSitesNaming( g, terms.subspan( k, 1 ) ) )
+        {
+            const NodeId        from  = g.declinedSiteCaller[ site ];
+            const std::uint32_t cands = declinedCrossingCands( g, rule, site, terms[ k ] );
+            if( cands > 0 && cands <= kBackHopWidth && from < nodeCount && !std::ranges::binary_search( terms, from ) )
+            {
+                const std::uint32_t ref = g.declinedSiteRef[ site ];
+                ways[ k ].push_back( DeclinedWay{ from, ing.references[ ref ].line, ref, cands } );
+            }
+        }
+        std::ranges::sort( ways[ k ], [ ]( const DeclinedWay& a, const DeclinedWay& b ) { return std::tie( a.fn, a.line, a.ref ) < std::tie( b.fn, b.line, b.ref ); } );
+        ways[ k ].erase( std::ranges::unique( ways[ k ], { }, &DeclinedWay::fn ).begin(), ways[ k ].end() );
+    }
+    return ways;
+}
+
+// fn's link to every terminal (a declined call first, else a graph edge), or nullopt when some terminal has neither.
+inline std::optional<ConnectResult::DeclinedJoint> jointThrough( const Graph& g, std::span<const NodeId> terms, std::span<const std::vector<DeclinedWay>> ways, NodeId fn )
+{
+    ConnectResult::DeclinedJoint j{ fn, {} };
+    for( std::size_t k = 0; k < terms.size(); ++k )
+    {
+        const auto it = std::ranges::lower_bound( ways[ k ], fn, { }, &DeclinedWay::fn );
+        if( it != ways[ k ].end() && it->fn == fn )
+        {
+            j.links.push_back( ConnectResult::DeclinedLink{ terms[ k ], it->ref, it->cands } );
+        }
+        else if( edgeTo( g, fn, terms[ k ] ) )
+        {
+            j.links.push_back( ConnectResult::DeclinedLink{ terms[ k ], UINT32_MAX, 0 } );
+        }
+        else
+        {
+            return std::nullopt;
+        }
+    }
+    return j;
+}
+}   // namespace declinedjoint_detail
+
+// Fills res.declinedJoints / declinedJointTotal and hands res back (the --connect core both surfaces call: CLI --connect, the
+// MCP connect verb, --for's graph_verb through the CLI, each as connectDeclinedJoints( ing, g, connectSourceJoint( … ) )).
+inline ConnectResult connectDeclinedJoints( const IngestResult& ing, const Graph& g, ConnectResult res )
+{
+    using namespace declinedjoint_detail;
+    const std::span<const NodeId> terms( res.terminals );
+    const std::size_t             nodeCount = std::min( ing.symbols.size(), g.outOff.empty() ? std::size_t( 0 ) : g.outOff.size() - 1 );
+    const bool                    anyTest   = std::ranges::any_of( terms, [ & ]( NodeId t ) { return t >= nodeCount || pathDefInTests( ing, t ); } );
+    if( terms.size() < 2 || anyTest || resolvedCommonCallerExists( ing, g, terms, nodeCount ) )
+    {
+        return res;   // a test terminal keeps the plain search (its helpers are its honest joints), as (a); a resolved caller answers
+    }
+    const std::vector<std::vector<DeclinedWay>> ways = declinedWaysPerTerminal( ing, g, terms, nodeCount );
+    // every joint has a declined call to some terminal (no resolved source function calls them all), so these are the candidates
+    std::vector<NodeId> fns;
+    for( const std::vector<DeclinedWay>& v : ways )
+    {
+        std::ranges::transform( v, std::back_inserter( fns ), &DeclinedWay::fn );
+    }
+    std::ranges::sort( fns );
+    fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+    std::vector<ConnectResult::DeclinedJoint> found;
+    for( const NodeId fn : fns )
+    {
+        if( std::optional<ConnectResult::DeclinedJoint> j = jointThrough( g, terms, ways, fn ); j && !pathDefInTests( ing, fn ) )
+        {
+            found.push_back( std::move( *j ) );
+        }
+    }
+    const auto key = [ & ]( const ConnectResult::DeclinedJoint& j )
+    {
+        const Symbol& s = ing.symbols[ j.fn ];
+        return std::tuple<std::string_view, std::uint32_t, std::string_view>( ing.files[ s.fileId ], s.line, s.name );
+    };
+    std::ranges::sort( found, [ & ]( const auto& a, const auto& b ) { return key( a ) < key( b ); } );
+    res.declinedJointTotal = found.size();
+    found.resize( std::min( found.size(), kConnectDeclinedJointCap ) );
+    res.declinedJoints = std::move( found );
+    return res;
 }
 
 }   // namespace rw

@@ -18351,6 +18351,22 @@ struct ConnectResult
     // CONNECT-SOURCE-JOINT (connectSourceJoint below): the test-class intermediary that joins terminals this source-only search
     // left apart (emitter: source_joint="none" test_joint= test_joint_p=); kNoNode when nothing was left apart that a test joins
     NodeId                     testJoint = kNoNode;
+    // CONNECT-SOURCE-JOINT (b) (backhops.h connectDeclinedJoints): source functions that may call EVERY terminal when no
+    // resolved source function does, each through a declined call (a hedge, never an edge or a count); at most
+    // kConnectDeclinedJointCap of them, in (path, line, name) order, and how many there were in all
+    struct DeclinedLink
+    {
+        NodeId        terminal = kNoNode;
+        std::uint32_t ref      = UINT32_MAX;   // the declined call's reference; UINT32_MAX = a resolved edge (the hop record picks its site)
+        std::uint32_t cands    = 0;            // the declined call's stored candidate count; 0 for a resolved edge
+    };
+    struct DeclinedJoint
+    {
+        NodeId                    fn = kNoNode;
+        std::vector<DeclinedLink> links;   // one per terminal, in terminal order
+    };
+    std::vector<DeclinedJoint> declinedJoints;
+    std::size_t                declinedJointTotal = 0;
 };
 
 // `notThrough` (empty = none): nodes the search never walks THROUGH — reached, but never expanded, so never an intermediary

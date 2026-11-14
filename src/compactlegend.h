@@ -1352,6 +1352,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "connect", MapHeaderRead::No, {}, "connect" },
     // CONNECT-SOURCE-JOINT (src/mcpverbs.h kConnectTestJointLegend), present-only: only a test joins source terminals
     { "source_joint", "source_joint=none: all terminals are source and no source function joins the unconnected ones (test/fixture code is not walked); test_joint=/test_joint_p=: a test-class function the undirected search joins them through, test-only evidence, not a source caller", false, "connect", MapHeaderRead::No, {}, "connect" },   // also defines test_joint=, test_joint_p=
+    // CONNECT-SOURCE-JOINT (b) (src/mcpverbs.h kConnectDeclinedJointLegend), present-only: a declined common caller is printed
+    { "declined_joints", "declined_joints=N: no source fn has a call edge to every terminal; N reach every terminal by an edge or a DECLINED call; dj n= t= p= is one (first 3 by path), one e t= site= call= per terminal; e via=declined cands=K: that call is declined, K candidates (the terminal one); a hedge, never an edge, node or count", false, "connect", MapHeaderRead::No, {}, "connect" },   // also defines dj, e via=declined, e cands=
     // grep: src/verbs_grep.h (the enc row's def count)
     { "defs", "enc defs=N: the enclosing name has N defs, the row unions them (only above 1)", true, "enc", MapHeaderRead::No, {}, "grep" },
     // owners: src/verbs_report.h (the of= form)

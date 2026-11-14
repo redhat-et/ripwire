@@ -3327,7 +3327,7 @@ std::optional<int> runConnect( const MainDispatch& d )
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
         // 0.6.6 D1: a many-definition name is searched from the definition that JOINS (graph.h joinTerminalPicks)
         const rw::ConnectPicks cnPicks = rw::joinTerminalPicks( ing, g, specs, terminals, std::uint32_t( cfg.connectRadius ) );
-        rw::packConnect( stdout, ing, g, rw::connectSourceJoint( ing, g, terminals, std::uint32_t( cfg.connectRadius ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnSpell.unprovenDefs, cnPicks, cnSpell.narrowed );
+        rw::packConnect( stdout, ing, g, rw::connectDeclinedJoints( ing, g, rw::connectSourceJoint( ing, g, terminals, std::uint32_t( cfg.connectRadius ) ) ), d.redactPtr, cfg.maxTokens, cnRootArg, cnSpell.unprovenDefs, cnPicks, cnSpell.narrowed );
         return 0;
     }
     return std::nullopt;
