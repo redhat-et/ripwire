@@ -9,9 +9,10 @@
 // and Go `--impact=Packager.Package` answered reaches="0" while the bare `--impact=Package` reached 100 symbols. A confident
 // zero on the one spelling an agent copies from the source.
 //
-// THE RULE. A match is a contract seed when it is a callable with no body (its signature end is its end) whose owner type T
-// (the innermost class-like type whose span holds it, else the type its scope names: same file, same package directory for a
-// package-scoped language, or the only type of that name) owns no bodied method of that name. Its implementors are T's
+// THE RULE. A match is a contract seed when it is a callable with no body (its signature end is its end) DECLARED inside an
+// owner type T (the innermost class-like type whose span holds it; a C prototype outside any type is never one, even when its
+// scope names a type) and T owns no bodied method of that name (a body's owner is its container, else the type its scope
+// names: same file, same package directory for a package-scoped language, or the only type of that name). Its implementors are T's
 // --lego closure (graph.h legoImplementorClosure over the extends/implements map); for a structurally typed language whose
 // map lists none (Go), the types whose bodied methods cover every name T declares (by NAME: arity and signatures unread, so
 // a floor of the set and a hedge on each member). The widened seed list is the matches, then those implementors' bodied
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -57,9 +59,11 @@ inline bool callableKind( SymKind k ) noexcept
     return k == SymKind::Method || k == SymKind::Function;
 }
 
+// a declaration with no body, by the house test (model.h isDefinitionNotDeclaration): Ruby has no declarations, so its empty
+// `def hook; end` is a definition and never a contract
 inline bool bodiless( const Symbol& s ) noexcept
 {
-    return s.endByte <= s.sigEndByte;
+    return !isDefinitionNotDeclaration( s );
 }
 
 inline std::string_view dirOf( const IngestResult& ing, std::uint32_t fileId )
@@ -109,21 +113,40 @@ public:
     // (a package-scoped language) in its package directory, else the only one of that name in its language; kNoNode otherwise
     NodeId ownerOf( NodeId m ) const
     {
-        const Symbol& s    = ing_.symbols[ m ];
-        NodeId        best = kNoNode;
+        if( const NodeId held = containerOf( m ); held != kNoNode )
+        {
+            return held;
+        }
+        return namedByScope( m );
+    }
+
+    // the innermost owner type whose span holds `m` (same file); kNoNode when none does. A contract is DECLARED inside its type
+    // (an interface member, a pure virtual, a Go interface method spec), so this is the contract's owner; the scope route is only
+    // for a body declared outside its type (a Go receiver method, a C++ out-of-line definition)
+    NodeId containerOf( NodeId m ) const
+    {
+        const Symbol&       s    = ing_.symbols[ m ];
+        const std::uint32_t last = std::max( s.endByte, s.sigEndByte );   // a bodiless member ends at its signature
+        NodeId              best = kNoNode;
         for( const NodeId t : inFiles_ )
         {
+            // the type starts BEFORE the member and ends after its whole signature: a type spelled inside the member's own
+            // declaration (C `static enum E f( int );` indexes `enum E` as a type) never holds it
             const Symbol& ty = ing_.symbols[ t ];
-            if( t != m && ty.fileId == s.fileId && ty.sigStartByte <= s.sigStartByte && s.endByte <= ty.endByte
+            if( t != m && ty.fileId == s.fileId && ty.sigStartByte < s.sigStartByte && last <= ty.endByte
                 && ( best == kNoNode || ty.sigStartByte >= ing_.symbols[ best ].sigStartByte ) )
             {
                 best = t;   // a later start inside the same file is the more inner type
             }
         }
-        if( best != kNoNode )
-        {
-            return best;
-        }
+        return best;
+    }
+
+    // the owner type `m`'s scope names: in its file, else (a package-scoped language) in its package directory, else the only
+    // one of that name in its language; kNoNode otherwise
+    NodeId namedByScope( NodeId m ) const
+    {
+        const Symbol&          s  = ing_.symbols[ m ];
         const std::string_view sc = scopeLastSegment( s.scope );
         if( sc.empty() )
         {
@@ -279,10 +302,10 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
     {
         const std::vector<NodeId> named = callablesNamed( ing, ing.symbols[ c ].name );
         const OwnerIndex          owners( ing, named );
-        const NodeId              type = owners.ownerOf( c );
+        const NodeId              type = owners.containerOf( c );
         if( type == kNoNode )
         {
-            continue;   // a free declaration (a C prototype): no contract, the decl→def follow-through owns it
+            continue;   // declared outside any type (a C prototype, even one whose scope names a type): no contract
         }
         const bool ownBody = std::ranges::any_of( named, [ & ]( NodeId n ) { return !bodiless( ing.symbols[ n ] ) && owners.ownerOf( n ) == type; } );
         if( ownBody )

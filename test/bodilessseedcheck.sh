@@ -25,8 +25,30 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 echo "bodilessseedcheck: BIN=$BIN"
 
-TS="$TMP/ts"; GO="$TMP/go"; CPP="$TMP/cpp"; JAVA="$TMP/java"
-mkdir -p "$TS/src" "$GO/pk" "$GO/cmd" "$CPP" "$JAVA"
+TS="$TMP/ts"; GO="$TMP/go"; CPP="$TMP/cpp"; JAVA="$TMP/java"; CC="$TMP/c"; RB="$TMP/rb"
+mkdir -p "$TS/src" "$GO/pk" "$GO/cmd" "$CPP" "$JAVA" "$CC" "$RB"
+# Ruby: an empty hook `def on_event; end` owns no body span but is a definition (Ruby has no declarations): never a contract
+cat > "$RB/tracker.rb" <<'EOF'
+class Tracker
+  def on_event; end
+
+  def run
+    on_event
+  end
+end
+EOF
+# C: a static prototype whose return type names an enum, beside its definition (tmux cmd-split-window.c, fire321 s1.tmux-08): a
+# prototype outside any type is never a contract, so its answers keep main's bytes (no impls=)
+cat > "$CC/cmd.c" <<'EOF'
+enum cmd_retval { CMD_RETURN_NORMAL, CMD_RETURN_ERROR };
+struct cmd_entry { enum cmd_retval ( *exec )( int ); };
+static enum cmd_retval split_exec( int );
+const struct cmd_entry split_entry = { .exec = split_exec };
+static enum cmd_retval split_exec( int n )
+{
+	return n ? CMD_RETURN_ERROR : CMD_RETURN_NORMAL;
+}
+EOF
 # C++ (a pure virtual, one override out of line, one inline) and Java (an interface): the shared helper covers them too
 cat > "$CPP/router.h" <<'EOF'
 #pragma once
@@ -163,9 +185,9 @@ func main() {
 }
 EOF
 
-python3 - "$BIN" "$TS" "$GO" "$CPP" "$JAVA" <<'PY'
+python3 - "$BIN" "$TS" "$GO" "$CPP" "$JAVA" "$CC" "$RB" <<'PY'
 import re, subprocess, sys
-BIN, TS, GO, CPP, JAVA = sys.argv[ 1:6 ]
+BIN, TS, GO, CPP, JAVA, CC, RB = sys.argv[ 1:8 ]
 npass = nfail = 0
 seen = { "pos": 0, "safe": 0, "neg": 0, "zero": 0 }
 
@@ -244,6 +266,18 @@ for lang, root, sel, entry in ( ( "ts", TS, "LinearRouter.match", "serve" ), ( "
     seen[ "neg" ] += 1 if a else 0
     say( a != {} and "to_impls" not in a and "from_impls" not in a and a.get( "to_defs" ) == "1", "[%s] concrete path" % lang,
          "--path to a bodied method: no to_impls=, to_defs=1", "attrs=%s" % a )
+
+# ── negative arm: a C prototype beside its definition is no contract, even when its return type names an enum ────────────────
+for verb, tag in ( ( "--callers=", "callers" ), ( "--impact=", "impact" ), ( "--safe-delete=", "safe-delete" ) ):
+    rc, out = run( CC, verb + "split_exec" ); a = root_attrs( out, tag ) or {}
+    seen[ "neg" ] += 1 if a else 0
+    say( a != {} and "impls" not in a and a.get( "defs" ) == "2", "[c] prototype %s" % tag,
+         "%ssplit_exec: a prototype + definition keeps defs=2 and carries no impls=" % verb, "attrs=%s" % a )
+
+rc, out = run( RB, "--impact=Tracker.on_event" ); a = root_attrs( out, "impact" ) or {}
+seen[ "neg" ] += 1 if a else 0
+say( a != {} and "impls" not in a and a.get( "defs" ) == "1" and num( a, "reaches" ) > 0, "[rb] empty hook impact",
+     "--impact=Tracker.on_event: an empty Ruby def is a definition (no impls=), reached by its caller", "attrs=%s" % a )
 
 # ── negative arms: a contract with NO implementor answers its honest zero, disclosed (impls=0) ─────────────────────────────
 for lang, root, sel in ( ( "ts", TS, "Quiet.hush" ), ( "go", GO, "Quiet.Hush" ) ):
