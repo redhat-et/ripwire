@@ -39,6 +39,7 @@
 // est_tokens, after every byte of the ordinary answer: no auto-served body pays for it. XML only: --json, columnar, --candidates and multi-root answers carry none.
 #include "filetext.h" // FileTextCache — by="init" reads a head's file for the declaration of its name
 #include "filter.h" // isTestSymbol — the test/fixture mark on a row
+#include "infra/Diagnostics.h" // DISCLOSE — by="init"'s window cut (InitWindowCut)
 #include "infra/namesplit.h" // namesplit::isIdentChar — the one identifier-byte test
 #include "infra/sortutil.h" // svLess: the byte order every string_view sort/search here uses
 #include "graph.h" // Graph::outOff / outTargets / outNameOnly / outProv / inEdges, edgeKindByte, kEdgeName
@@ -127,9 +128,11 @@ inline constexpr std::string_view kForFileSymsBindLegendCompact =
 // The by="init" clause, present-only like by="bind".
 inline constexpr std::string_view kForFileSymsInitLegend =
     "; by=\"init\" the definition a module-level declaration of a head row's name calls to make its value (`const X = f(...)`, `X = f(...)`, for one of the first 5 <d> rows "
-    "or the re-export walk's def row, any file): of= that name, at= the declaration's file:line, a resolved call at file scope, one per name";
+    "or the re-export walk's def row, any file): of= that name, at= the declaration's file:line, a resolved call at file scope, one per name, its `(` "
+    "within 200 bytes of the `=` (init_cut= the declarations whose initialiser ran past those 200 bytes unread)";
 inline constexpr std::string_view kForFileSymsInitLegendCompact =
-    "; by=init a module-level declaration of head name of= (at=file:line, `X = f(...)`) calls it to make its value, one per name";
+    "; by=init a module-level declaration of head name of= (at=file:line, `X = f(...)`) calls it to make its value, one per name, `(` within 200 bytes "
+    "of `=` (init_cut= ran past them unread)";
 inline constexpr std::string_view kLegendClose = " -->";
 
 // Every attribute <syms> and its <y> rows can print (blockXml's count() names and its row hedges; p= n= are the core row keys), and the
@@ -137,7 +140,7 @@ inline constexpr std::string_view kLegendClose = " -->";
 inline constexpr std::array<std::string_view, 9> kForFileSymsAttrs { "files", "files_total", "head", "name_total", "callee_total", "by", "via", "prov", "test" };
 inline constexpr std::array<std::string_view, 2> kForFileSymsHeldAttrs { "held", "next" };
 inline constexpr std::array<std::string_view, 3> kForFileSymsBindAttrs { "by", "into", "bind_total" };
-inline constexpr std::array<std::string_view, 3> kForFileSymsInitAttrs { "by", "of", "at" };
+inline constexpr std::array<std::string_view, 4> kForFileSymsInitAttrs { "by", "of", "at", "init_cut" };
 template<std::size_t N>
 consteval bool legendDefinesAll( std::string_view legend, const std::array<std::string_view, N>& attrs )
 {
@@ -165,7 +168,10 @@ static_assert( legendDefinesAll( kForFileSymsHeldLegend, kForFileSymsHeldAttrs )
 static_assert( legendDefinesAll( kForFileSymsBindLegend, kForFileSymsBindAttrs ) && legendDefinesAll( kForFileSymsBindLegendCompact, kForFileSymsBindAttrs ),
                "each bind clause must spell by=, into= and bind_total=" );
 static_assert( legendDefinesAll( kForFileSymsInitLegend, kForFileSymsInitAttrs ) && legendDefinesAll( kForFileSymsInitLegendCompact, kForFileSymsInitAttrs ),
-               "each init clause must spell by=, of= and at=" );
+               "each init clause must spell by=, of=, at= and init_cut=" );
+static_assert( kForFileSymsInitSpan == 200 && kForFileSymsInitLegend.find( "within 200 bytes" ) != std::string_view::npos
+                   && kForFileSymsInitLegendCompact.find( "within 200 bytes" ) != std::string_view::npos,
+               "both init legend clauses say \"within 200 bytes\": move the words with the constant" );
 static_assert( kForFileSymsInitHeadRows == 5 && kForFileSymsInitLegend.find( "the first 5 <d> rows" ) != std::string_view::npos,
                "the full init legend clause says \"the first 5 <d> rows\": move the words with the constant" );
 static_assert( kForFileSymsInitLegend.find( "--" ) == std::string_view::npos && kForFileSymsInitLegendCompact.find( "--" ) == std::string_view::npos
@@ -1123,6 +1129,26 @@ inline std::string_view initCallName( std::string_view t, std::size_t p )
     const std::size_t dot = head.rfind( '.' );
     return dot == std::string_view::npos ? head : head.substr( dot + 1 );
 }
+// FORFILESYMS-INIT-WINDOW-LEGEND (CodeRabbit on #646): may the initialiser at `p` begin with a call whose `(` lies past the
+// kForFileSymsInitSpan window? The window is full, the text goes on, and every byte read could still be a callee head (`new `,
+// identifier and dot bytes, blanks), so initCallName's "" there is the window's cut, not "no call".
+inline bool initRunsPastWindow( std::string_view t, std::size_t p )
+{
+    const bool             goesOn     = p < t.size() && t.size() - p > kForFileSymsInitSpan;
+    const std::string_view seg        = goesOn ? t.substr( p, kForFileSymsInitSpan ) : std::string_view();
+    const bool             pastWindow = goesOn && std::ranges::all_of( seg, []( char c ) { return identByte( c ) || c == '.' || c == ' ' || c == '\t'; } );
+    return pastWindow;
+}
+// by="init"'s disclosure sink: the head names whose declaration ran past the window (init_cut= on <syms>).
+struct InitWindowCut
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        PastWindow,   // a declaration's initialiser ran past kForFileSymsInitSpan before its `(`
+    };
+    std::size_t count = 0;
+    void        disclose( DisclosureWhy ) noexcept { ++count; }
+};
 // One declaration found in a head's file: where its initialiser starts and the callee it begins with.
 struct InitDecl
 {
@@ -1154,15 +1180,11 @@ inline NodeId moduleScopeCallee( const IngestResult& ing, const Graph& g, NodeId
     }
     return found;
 }
-inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads )
+// Every declaration of each head's name in its file that begins its initialiser with a call, in file order (a name commented out or
+// quoted earlier in the file is one too: pickInits takes the first one a file-scope call stands in, FORFILESYMS-COMMENT-DECL).
+inline std::vector<InitDecl> initDecls( const std::vector<InitHead>& heads, FileTextCache& text, InitWindowCut& cut )
 {
-    std::vector<InitRow> out;
-    if( !forFileSymsInitOn() || heads.empty() )
-    {
-        return out;
-    }
-    FileTextCache          text( ing );
-    std::vector<InitDecl>  decls;
+    std::vector<InitDecl> decls;
     for( std::size_t h = 0; h < heads.size(); ++h )
     {
         const std::string* t = text.text( heads[h].file );
@@ -1171,43 +1193,109 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
             continue;
         }
         const std::string_view tv( *t ), name( heads[h].name );
+        bool                   cutHere = false;   // one init_cut per head name
         for( std::size_t at = tv.find( name ); at != std::string_view::npos; at = tv.find( name, at + 1 ) )
         {
-            if( const std::size_t p = declInitAt( tv, at, name ); p != std::string_view::npos )
+            const std::size_t p = declInitAt( tv, at, name );
+            if( p == std::string_view::npos )
             {
-                if( const std::string_view callee = initCallName( tv, p ); !callee.empty() )
-                {
-                    decls.push_back( InitDecl { h, heads[h].file, p, std::min( tv.size(), p + kForFileSymsInitSpan ), callee } );
-                    break;   // the first declaration of the name in its file
-                }
+                continue;
+            }
+            if( const std::string_view callee = initCallName( tv, p ); !callee.empty() )
+            {
+                decls.push_back( InitDecl { h, heads[h].file, p, std::min( tv.size(), p + kForFileSymsInitSpan ), callee } );
+            }
+            else if( !cutHere && initRunsPastWindow( tv, p ) )
+            {
+                cutHere = true;
+                DISCLOSE( cut, InitWindowCut::DisclosureWhy::PastWindow, "for syms: a by=init declaration's initialiser ran past the 200-byte window before its call; init_cut= counts it" );
             }
         }
     }
-    if( decls.empty() )
-    {
-        return out;   // COST: no declaration of a head name: no reference scan
-    }
-    std::vector<NodeId> rowFor( decls.size(), kNoNode );
-    std::vector<std::uint32_t> lineFor( decls.size(), 0 );
+    return decls;
+}
+// A file-scope call reference (its owner is the module scope or a module-level variable): the only calls by="init" reads.
+inline bool fileScopeCall( const IngestResult& ing, const Reference& r ) noexcept
+{
+    return r.role == RefRole::Call && !r.isInherit && !r.isDocLink && !r.isCompose && r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size()
+        && ( ing.symbols[ r.fromSymbol ].kind == SymKind::ModuleScope || ing.symbols[ r.fromSymbol ].kind == SymKind::Var );
+}
+// Two calls written alike (the same qualifier and receiver chain) in one owner resolve alike.
+inline bool sameCallSpelling( const Reference& a, const Reference& b )
+{
+    return a.calleeName == b.calleeName && a.qualifier == b.qualifier && a.memberCall == b.memberCall && a.memberRoot == b.memberRoot
+        && a.memberPath() == b.memberPath();
+}
+// FORFILESYMS-INIT-REF-RESOLVE (CodeRabbit on #646): the index keeps no per-call target, so the owner's one out-edge named like the
+// callee is the SELECTED call's own target only when every call the owner makes by that name is written as it is (angular's many
+// `X = makeDecorator(…)`). One written otherwise (`ext.makeThing()`, external, beside an in-tree `makeThing()`) may own that edge:
+// drop the row (fails closed, never a wrong row).
+inline void dropSharedNameCalls( const IngestResult& ing, const std::vector<const Reference*>& selected, std::vector<NodeId>& rowFor )
+{
     for( const Reference& r : ing.references )
     {
-        if( r.role != RefRole::Call || r.isInherit || r.isDocLink || r.isCompose || r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size()
-            || ( ing.symbols[ r.fromSymbol ].kind != SymKind::ModuleScope && ing.symbols[ r.fromSymbol ].kind != SymKind::Var ) )
+        if( !fileScopeCall( ing, r ) )
+        {
+            continue;
+        }
+        for( std::size_t k = 0; k < selected.size(); ++k )
+        {
+            const Reference* sel = selected[k];
+            if( rowFor[k] != kNoNode && r.fromSymbol == sel->fromSymbol && r.calleeName == sel->calleeName && !sameCallSpelling( r, *sel ) )
+            {
+                rowFor[k] = kNoNode;
+            }
+        }
+    }
+}
+// pickInits' answer: the rows, and the declarations the window cut (init_cut=).
+struct InitPicks
+{
+    std::vector<InitRow> rows;
+    InitWindowCut        cut;
+};
+inline InitPicks pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads )
+{
+    InitPicks             picked;
+    std::vector<InitRow>& out = picked.rows;
+    if( !forFileSymsInitOn() || heads.empty() )
+    {
+        return picked;
+    }
+    FileTextCache               text( ing );
+    const std::vector<InitDecl> decls = initDecls( heads, text, picked.cut );
+    if( decls.empty() )
+    {
+        return picked;   // COST: no declaration of a head name: no reference scan
+    }
+    std::vector<NodeId>        rowFor( decls.size(), kNoNode );
+    std::vector<std::uint32_t> lineFor( decls.size(), 0 );   // nonzero: a file-scope call to the callee starts in the window (the evidence)
+    std::vector<const Reference*> selected( decls.size(), nullptr );   // that call
+    for( const Reference& r : ing.references )
+    {
+        if( !fileScopeCall( ing, r ) )
         {
             continue;
         }
         for( std::size_t k = 0; k < decls.size(); ++k )
         {
             const InitDecl& d = decls[k];
-            if( rowFor[k] == kNoNode && r.fileId == d.file && r.startByte >= d.from && r.startByte < d.to && r.calleeName == d.callee )
+            if( lineFor[k] == 0 && r.fileId == d.file && r.startByte >= d.from && r.startByte < d.to && r.calleeName == d.callee )
             {
                 rowFor[k]  = moduleScopeCallee( ing, g, r.fromSymbol, d.callee );
                 lineFor[k] = r.line;
+                selected[k] = &r;
             }
         }
     }
+    dropSharedNameCalls( ing, selected, rowFor );
+    std::vector<char> headDone( heads.size(), 0 );   // the head's declaration is its first one with a file-scope call in the window
     for( std::size_t k = 0; k < decls.size(); ++k )
     {
+        if( lineFor[k] == 0 || std::exchange( headDone[ decls[k].head ], 1 ) != 0 )
+        {
+            continue;   // a commented-out or quoted twin (no call stands in it), or a later declaration of a name already read
+        }
         const bool shown = rowFor[k] != kNoNode
                         && std::ranges::binary_search( sf.shownAt, ( std::uint64_t( ing.symbols[ rowFor[k] ].fileId ) << 32 ) | ing.symbols[ rowFor[k] ].line );
         if( rowFor[k] != kNoNode && !shown && std::ranges::none_of( out, [&]( const InitRow& o ) { return o.callee == rowFor[k] && o.of == heads[ decls[k].head ].name; } ) )
@@ -1215,7 +1303,7 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
             out.push_back( InitRow { rowFor[k], heads[ decls[k].head ].name, decls[k].file, lineFor[k] } );
         }
     }
-    return out;
+    return picked;
 }
 
 struct Picks
@@ -1224,6 +1312,7 @@ struct Picks
     std::size_t nameTotal = 0, calleeTotal = 0;
     BindPicks   binds; // by="bind" (pickBinds), filled after the two ranked rules
     std::vector<InitRow> inits; // by="init" (pickInits), a fact per head name
+    InitWindowCut        initCut; // by="init" declarations the window cut (init_cut=)
 };
 // The tie-break after a rule's own score: fan-in desc, shown-file order, name (byte order), id: a total order. Field by field, not a tuple:
 // the tuple's string_view member would order through operator< (see rw::sortutil::svLess).
@@ -1484,7 +1573,7 @@ inline std::string symsLegend( bool compactLegend, const BindPicks& binds )
 inline std::string symsLegendOf( bool compactLegend, const Picks& picks )
 {
     std::string out = symsLegend( compactLegend, picks.binds );
-    spliceLegendClause( out, picks.inits.empty() ? std::string_view() : compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
+    spliceLegendClause( out, picks.inits.empty() && picks.initCut.count == 0 ? std::string_view() : compactLegend ? kForFileSymsInitLegendCompact : kForFileSymsInitLegend );
     return out;
 }
 // A <y> row's opening `<y p="file:line" n="Owner.name"` for symbol `s` (the attribute tail is the rule's own).
@@ -1538,6 +1627,7 @@ inline std::string blockXml( const IngestResult& ing, const ShownFiles& sf, cons
     attr( "name_total", picks.nameTotal, picks.nameTotal > picks.byName.size() );
     attr( "callee_total", picks.calleeTotal, picks.calleeTotal > picks.byCallee.size() );
     attr( "bind_total", binds.total, binds.total > binds.rows.size() );
+    attr( "init_cut", picks.initCut.count, picks.initCut.count != 0 );
     out += ">";
     const auto row = [&]( const Cand& c, bool callee )
     {
@@ -1609,8 +1699,10 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     fd::collapseDeclarations( home, cands );
     fd::Picks picks = fd::pickRows( ing, g, cands );
     picks.binds     = fd::pickBinds( ing, sf, head, picks, a.answer );
-    picks.inits     = fd::pickInits( ing, g, sf, fd::initHeads( ing, rows, sf, a.answer ) );
-    if( picks.byName.empty() && picks.byCallee.empty() && picks.binds.rows.empty() && picks.inits.empty() )
+    fd::InitPicks inits = fd::pickInits( ing, g, sf, fd::initHeads( ing, rows, sf, a.answer ) );
+    picks.inits         = std::move( inits.rows );
+    picks.initCut       = inits.cut;
+    if( picks.byName.empty() && picks.byCallee.empty() && picks.binds.rows.empty() && picks.inits.empty() && picks.initCut.count == 0 )
     {
         return {};
     }
