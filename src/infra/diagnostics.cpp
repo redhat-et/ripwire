@@ -137,8 +137,8 @@ RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcep
 // on the cold notice path, and a site past the capacity (or longer than a slot) is not adopted, so it may print twice.
 struct AdoptedSites
 {
-    static constexpr std::size_t kCapacity = 64;
-    static constexpr std::size_t kSlotBytes = 256;
+    static constexpr std::size_t kCapacity  = 64;    // sites a base child's notices adopt; past it a site may print twice (stderr only)
+    static constexpr std::size_t kSlotBytes = 256;   // one site's FILE:LINE; a longer one is not adopted (stderr only)
     std::mutex                   mutex;
     char                         sites[ kCapacity ][ kSlotBytes ] = {};
     std::size_t                  count = 0;
