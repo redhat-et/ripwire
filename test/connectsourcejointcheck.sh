@@ -31,6 +31,8 @@
 #   L  a many-definition terminal is chosen on the source-only view: one::runIt joins planIt in 2 hops through a test,
 #      two::runIt in 4 hops through source; the answer joins planIt to two::runIt through source, with no test_joint=
 #      (CodeRabbit #636)
+#   N  two qualifying tests: test_joint= is the first by content (path, line, name), unchanged by renaming an unrelated
+#      file (CodeRabbit #625 4546683506; green on main too: NodeId order already follows path, line, name)
 #   H  determinism (3 runs) + xmllint
 #   M  mutations: each assertion sees its own regression
 #
@@ -214,6 +216,31 @@ if printf '%s' "$L_DOC" | grep -q '<g terminals="2">' && ! printf '%s' "$L_DOC" 
     ok "(L) planIt and runIt joined through source, no test_joint="
 else
     no "(L) runIt was chosen on the unrestricted view (test-joined definition): $( brief "$L_DOC" )"
+fi
+
+# ── N) of two qualifying tests, test_joint= is the first by content (path, line, name), stable under a rename ──────────
+# CONNECT-TESTJOINT-CONTENT-KEY (CodeRabbit #625 4546683506): the tie-break keys on graph.h symbolContentKey, NodeId only on
+# a full tie. Measured 2026-11-14: NodeId order already follows (sorted path, line, name), so no fixture separates the two
+# keys today and this arm is green on main too; it pins the contract so a future id reorder cannot move the named test.
+TJ="$TMP/twotests";     mksrc "$TJ"
+printf 'void unrelatedIt() {}\n' > "$TJ/src/zz_unrelated.cpp"
+printf 'void planIt(); void applyIt();\nvoid mTest() { planIt(); applyIt(); }\n' > "$TJ/test/m_test.cpp"
+printf 'void planIt(); void applyIt();\nvoid kTest() { planIt(); applyIt(); }\n' > "$TJ/test/k_test.cpp"
+tjOf(){ "$BIN" "$1" --no-cache --connect=planIt,applyIt 2>/dev/null | grep -o '<connect [^>]*test_joint="[^"]*" test_joint_p="[^"]*"' | sed 's/.*test_joint=/test_joint=/'; }
+N_BEFORE="$( tjOf "$TJ" )"
+mv "$TJ/src/zz_unrelated.cpp" "$TJ/src/aa_unrelated.cpp"
+N_AFTER="$( tjOf "$TJ" )"
+rm "$TJ/test/k_test.cpp"
+N_ONE="$( tjOf "$TJ" )"
+if [ "$N_ONE" = 'test_joint="mTest" test_joint_p="test/m_test.cpp:2"' ]; then
+    ok "(N) premise: mTest alone qualifies too (the pair is a real tie between two tests)"
+else
+    no "(N) premise: with kTest removed, expected mTest as test_joint, got [$N_ONE]"
+fi
+if [ "$N_BEFORE" = 'test_joint="kTest" test_joint_p="test/k_test.cpp:2"' ] && [ "$N_AFTER" = "$N_BEFORE" ]; then
+    ok "(N) the first test by content (test/k_test.cpp) is named, before and after renaming an unrelated file"
+else
+    no "(N) expected kTest (test/k_test.cpp:2) before and after the rename, got [$N_BEFORE] then [$N_AFTER]"
 fi
 
 # ── G) legend ────────────────────────────────────────────────────────────────────────────────────────────
