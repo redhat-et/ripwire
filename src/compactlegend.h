@@ -774,6 +774,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // (on each <arm>) and render_failed= (also on the <sigs>/<bodies> element it marks).
     { "disk_walk_failed",  "disk_walk_failed=1: the root could not be listed, so a missing-file row may name an unindexed file that exists" },
     { "refs_dropped",      "refs_dropped=K: K listed branches could not be read, in no count or row" },
+    // CROSSREF-MAXREFS: the git sweeps' ref window (crossref kMaxRefs). Past 512 refs they read the newest and count the rest,
+    // where they used to refuse; present only then, so a sweep under the window is byte-identical. Head terms like refs_dropped=.
+    { "refs_omitted",      "refs_omitted=K: past the 512-ref window the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which are read)" },
+    { "labels_omitted",    "labels_omitted=K: K labelled refs past the sweep's 512-ref window, never scored" },
     { "head_conflicts_ok", "head_conflicts_ok=0: that arm's base or HEAD tree was unavailable, head_conflicts= unknown", true, "arm" },
     { "render_failed",     "render_failed=: sections whose render FAILED (empty, not budget-omitted)", true },
     // notes.h follow-up round (CodeRabbit 4053600616, declined at train-7, landed here): the ONE marker every

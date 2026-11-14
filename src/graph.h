@@ -15130,6 +15130,8 @@ struct WrittenSpec
 {
     std::string_view              file;     // the `file:` half, or empty
     std::vector<std::string_view> prefix;   // every segment before the leaf, Rust path keywords dropped; never empty
+    std::vector<std::string_view> written;  // every segment before the leaf as written: crate/self/super are path keywords only where
+                                            // langFacts().selectorPathKeywords says so (Rust)
     std::string_view              leaf;
 };
 
@@ -15185,6 +15187,7 @@ inline std::optional<WrittenSpec> splitWrittenSpec( std::string_view spec )
     }
     w.leaf = segs.back();
     segs.pop_back();
+    w.written = segs;
     std::size_t keywords = 0;
     while( keywords < segs.size() && ( segs[ keywords ] == "crate" || segs[ keywords ] == "self" || segs[ keywords ] == "super" ) )
     {
@@ -15534,10 +15537,11 @@ inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing,
         }
         return best != nullptr ? std::optional<std::string_view>( best->var ) : std::nullopt;
     };
-    const std::span<const std::string_view> prefix( w->prefix );
     for( const NodeId id : cands )
     {
-        const Symbol&                 s = ing.symbols[ id ];
+        const Symbol& s = ing.symbols[ id ];
+        // SELECTOR-SELF-ANY-LANG: `self::detail::X::f` drops `self` only for a Rust candidate; in C++ or Python it is a segment to place
+        const std::span<const std::string_view> prefix( langFacts( s.lang ).selectorPathKeywords ? w->prefix : w->written );
         std::vector<std::string_view> owner;
         if( !s.scope.empty() )
         {
