@@ -564,7 +564,9 @@ _IN_EXCLUDES = "--exclude=test --exclude=docs --exclude=skills --exclude=changel
 _IN_LIMIT_NARROW = 2   # the page size the last-resort pass tries (see chooseInWindow)
 
 def inCaseCmd( n, limit=_IN_LIMIT ):
-    return f"{BIN} . --rank-by=churn-decay --since=HEAD~{n} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
+    """n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit, see laneMergeSince)."""
+    since = f"HEAD~{n}" if isinstance( n, int ) else n
+    return f"{BIN} . --rank-by=churn-decay --since={since} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
 
 # The probe runs at MODULE INITIALISATION, before the capture loop below and therefore before the per-case
 # timeout that loop applies. A non-terminating run here would hang the generator with nothing on stderr and no
@@ -625,14 +627,30 @@ def marginHeldByMerge( n, repo, inDir ):
     viaMerge = git( "diff", "--name-only", f"HEAD~{n}^1", f"HEAD~{n}", "--", f"{inDir}/" )
     return behind is not None and viaMerge is not None and behind.strip() == "" and viaMerge.strip() != ""
 
+# LANE MERGES (SHOWCASE-LANE-MERGE, 2026-11-14). A lane that merged main has that merge on its first-parent line (#637:
+# HEAD~2). Every HEAD~N past the merge also takes in main's whole second-parent side (#637: 84 commits, a 35-row global
+# block past the display cut), and every N short of it holds no source (the lane's own work sits behind the merge), so no
+# HEAD~N shows and the generator refused: a lane could not regenerate its capture. The last resort walks the first-parent
+# line to the newest merge and anchors the window at that merge's SECOND parent (the main tip it took in): the window is
+# then the lane's own commits plus the merge, and the probe measures it like any other. It is spelled as a commit id, not
+# HEAD~k^2, because the commit that lands the capture moves HEAD~k^2 off the merge (the margin the scan above keeps), while
+# a fixed commit only gains that source-free commit. Train tips never reach it: their scan finds an N first.
+def laneMergeSince( repo, hi ):
+    """The second parent of the newest merge within hi first-parent steps of HEAD, as a 12-hex commit id; else None."""
+    p = subprocess.run( [ "git", "rev-list", "--first-parent", "--parents", "-n", str( hi ), "HEAD" ], cwd=repo,
+                        capture_output=True, text=True, stdin=subprocess.DEVNULL )
+    merge = next( ( row.split() for row in p.stdout.splitlines() if len( row.split() ) >= 3 ), None ) if p.returncode == 0 else None
+    return merge[ 2 ][ :12 ] if merge else None
+
 def firstWindow( lo, hi, ok ):
     """The smallest N in (lo, hi] with ok( N ), else None."""
     return next( ( n for n in range( lo + 1, hi + 1 ) if ok( n ) ), None )
 
-def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None ):
-    """Return ( N, page limit )."""
+def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None ):
+    """Return ( N, page limit ): N is HEAD~N, or the lane-merge pass's commit id (a str)."""
     unshown = unshown or inCaseUnshown
     mergeHolds = mergeHolds or ( lambda n: marginHeldByMerge( n, REPO, _IN_DIR ) )
+    laneSince = laneSince or ( lambda: laneMergeSince( REPO, hi ) )
     both = lambda n, lim: not unshown( n, lim ) and not unshown( n - 1, lim )
     passes = [
         ( _IN_LIMIT, lambda n: both( n, _IN_LIMIT ), lambda n: f"margin HEAD~{n-1} holds" ),
@@ -646,6 +664,11 @@ def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None ):
         if n is not None:
             print( f"showcase_capture: --in= case window derived as HEAD~{n} ({why( n )})", file=sys.stderr )
             return n, lim
+    rev = laneSince()
+    if rev is not None and not unshown( rev, _IN_LIMIT ):
+        print( f"showcase_capture: --in= case window derived as {rev} (no HEAD~N shows: the newest first-parent merge took in "
+               f"main; the window is this branch's own commits since that main tip)", file=sys.stderr )
+        return rev, _IN_LIMIT
     tried = [ f"HEAD~{n}: {'; '.join( unshown( n, _IN_LIMIT ) ) or 'shows everything'} (margin HEAD~{n-1}: {'; '.join( unshown( n - 1, _IN_LIMIT ) ) or 'shows everything'})"
               for n in range( lo + 1, hi + 1 ) ]
     sys.exit( "showcase_capture: refusing to write — no --since=HEAD~N in [%d,%d] shows what the --in=%s case promises:\n  %s"
