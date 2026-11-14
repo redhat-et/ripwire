@@ -706,23 +706,25 @@ fi
 # A train whose only source change is one merge commit (then a pin and the capture, which touch no source) has an
 # empty margin HEAD~1, and every N >= 3 spans the previous train: the generator refused and (I) stayed red. chooseInWindow
 # now falls back to a margin held by the merge behind it (its first-parent diff touches src/, nothing after it does) —
-# only when the ordinary scan finds no N. Pure arms: the REAL chooseInWindow / marginHeldByMerge are pulled out of the live
+# only when the ordinary scan finds no N. SHOWCASE-LANE-MERGE (2026-11-14): a LANE that merged main at HEAD~2 has no HEAD~N
+# that shows (past the merge, main's whole side floods the global block); the last resort walks the first-parent line to
+# that merge and windows at its second parent (main's tip), spelled as a commit id. Pure arms: the REAL chooseInWindow / marginHeldByMerge are pulled out of the live
 # script with `ast` (module level runs the whole capture) and driven with fakes and throwaway git repos.
 cat >"$TMP/j_window.py" <<'PYEOF'
 import ast, subprocess, sys, os, tempfile, shutil
 src = open(sys.argv[1], encoding="utf-8").read()
-want = ("chooseInWindow", "marginHeldByMerge", "firstWindow")
+want = ("chooseInWindow", "marginHeldByMerge", "firstWindow", "laneMergeSince")
 funcs = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in want]
-if len(funcs) != 3:
-    print("EXTRACT_FAIL got %d of 3 functions" % len(funcs)); sys.exit(0)
+if len(funcs) != len(want):
+    print("EXTRACT_FAIL got %d of %d functions" % (len(funcs), len(want))); sys.exit(0)
 ns = {"subprocess": subprocess, "sys": sys, "REPO": ".", "_IN_DIR": "src", "_IN_LIMIT": 3, "_IN_LIMIT_NARROW": 2}
 exec(compile(ast.Module(body=funcs, type_ignores=[]), "<extract>", "exec"), ns)
-choose, held = ns["chooseInWindow"], ns["marginHeldByMerge"]
+choose, held, laneMerge = ns["chooseInWindow"], ns["marginHeldByMerge"], ns["laneMergeSince"]
 res = []
 def chk(name, cond): res.append((name, bool(cond)))
-def pick(unshown, holds):
+def pick(unshown, holds, lane=lambda: None):
     try:
-        return choose(1, 14, unshown, holds)
+        return choose(1, 14, unshown, holds, lane)
     except SystemExit:
         return "refused"
 GONE = ["gone"]
@@ -750,7 +752,11 @@ def mk(steps):
             open(os.path.join(d, path), "a").write("x\n"); g("add", "-A"); g("commit", "-q", "-m", path)
         elif kind == "b": g("checkout", "-q", "-b", path)
         elif kind == "m": g("checkout", "-q", "main"); g("merge", "-q", "--no-ff", "-m", "merge", path)
+        elif kind == "s": g("checkout", "-q", path)                                          # switch branch
+        elif kind == "mm": g("merge", "-q", "--no-ff", "-m", "merge main", "main")            # merge main INTO the current branch
     return d
+def rev(d, r):
+    return subprocess.run(["git", "rev-parse", r], cwd=d, capture_output=True, text=True).stdout.strip()
 base = [("c", "src/a.c"), ("b", "lane")]
 oneMerge = mk(base + [("c", "src/b.c"), ("m", "lane"), ("c", "test/pin.txt")])
 srcAfter = mk(base + [("c", "src/b.c"), ("m", "lane"), ("c", "src/c.c")])
@@ -759,7 +765,32 @@ chk("git: a source merge followed by a source-free pin holds the margin", held(1
 chk("git: HEAD itself / a non-merge commit does not", not held(0, oneMerge, "src") and not held(2, oneMerge, "src"))
 chk("git: a source commit after the merge breaks the hold", not held(1, srcAfter, "src"))
 chk("git: a merge whose first-parent diff has no src/ does not hold", not held(1, docMerge, "src"))
-for d in (oneMerge, srcAfter, docMerge): shutil.rmtree(d, ignore_errors=True)
+# SHOWCASE-LANE-MERGE: a lane (4 source commits) that merged main (12 source commits since the lane's base) at HEAD~2, then
+# two source-free commits. The probe is modelled on the measured #637 shape: a window shows when it changes 4..8 src/ files
+# (the scoped page needs more than --limit=3 to cut; main's side pushes the global block past the display cut).
+laneRepo = mk([("c", "src/base.c"), ("b", "lane")] + [("c", "src/l%d.c" % i) for i in range(4)]
+              + [("s", "main")] + [("c", "src/m%d.c" % i) for i in range(12)]
+              + [("s", "lane"), ("mm", ""), ("c", "docs/a.md"), ("c", "docs/b.md")])
+def modelled(d):
+    def unshown(n, lim=3):
+        since = "HEAD~%d" % n if isinstance(n, int) else n
+        p = subprocess.run(["git", "log", "--name-only", "--format=", "%s..HEAD" % since, "--", "src/"], cwd=d, capture_output=True, text=True)
+        k = len({f for f in p.stdout.split() if f})
+        return [] if p.returncode == 0 and 4 <= k <= 8 else GONE
+    return unshown
+laneUnshown = modelled(laneRepo)
+chk("lane merge: laneMergeSince walks the first-parent line to HEAD~2 and names main's tip it took in",
+    laneMerge(laneRepo, 14) == rev(laneRepo, "HEAD~2^2")[:12] == rev(laneRepo, "main")[:12])
+chk("lane merge: no HEAD~N shows in the fixture (premise; the pass before this card refused here)",
+    pick(laneUnshown, lambda m: held(m, laneRepo, "src")) == "refused")
+chk("lane merge: the chooser derives the window at main's tip, page 3",
+    pick(laneUnshown, lambda m: held(m, laneRepo, "src"), lambda: laneMerge(laneRepo, 14)) == (rev(laneRepo, "main")[:12], 3))
+chk("lane merge: a lane-merge window that does not show is refused, never published",
+    pick(lambda n, lim=3: GONE, lambda m: True, lambda: "0123456789ab") == "refused")
+chk("lane merge: a train tip whose scan finds N keeps that N (the pass is a last resort)",
+    pick(multi, lambda m: True, lambda: "0123456789ab") == (3, 3))
+chk("lane merge: no merge within hi first-parent steps yields no lane window", laneMerge(srcAfter, 1) is None and laneMerge(srcAfter, 2) is not None)
+for d in (oneMerge, srcAfter, docMerge, laneRepo): shutil.rmtree(d, ignore_errors=True)
 for name, ok in res: print(("OK " if ok else "BAD ") + name)
 PYEOF
 jOut="$( python3 "$TMP/j_window.py" "$SCRIPT" 2>&1 )"
@@ -767,10 +798,10 @@ if printf '%s\n' "$jOut" | grep -q '^EXTRACT_FAIL\|Traceback'; then
     no "(J) could not run the window arms: $( printf '%s' "$jOut" | tail -2 | tr '\n' '|' )"
 else
     jBad="$( printf '%s\n' "$jOut" | grep '^BAD ' || true )"; jOk="$( printf '%s\n' "$jOut" | grep -c '^OK ' || true )"
-    if [ -z "$jBad" ] && [ "$jOk" -eq 11 ]; then
-        ok "(J) --in= window: a one-merge train derives N=2 from the merge's first-parent diff; multi-merge N unchanged; fallback off refuses ($jOk arms)"
+    if [ -z "$jBad" ] && [ "$jOk" -eq 17 ]; then
+        ok "(J) --in= window: a one-merge train derives N=2 from the merge's first-parent diff; multi-merge N unchanged; fallback off refuses; a lane with main merged at HEAD~2 windows at main's tip ($jOk arms)"
     else
-        no "(J) --in= window arms: ok=$jOk of 11 $( printf '%s' "$jBad" | tr '\n' '|' )"
+        no "(J) --in= window arms: ok=$jOk of 17 $( printf '%s' "$jBad" | tr '\n' '|' )"
     fi
 fi
 if grep -q 'chooseInWindow()' "$SCRIPT"; then
