@@ -1113,8 +1113,9 @@ inline constexpr const char* kQdMaskReportOnlyLegend =
 inline constexpr const char* kQdFailureDefaultLegend =
     "facet=\"failure-default\" on an error-masking row: the change added a read, parse or spawn failure returned as an empty "
     "success, in a function whose declared result cannot say it failed (a TypeScript catch or .catch returning [], null, {}, "
-    "false, 0 or '' around JSON.parse, an fs read, exec/spawn or fetch). Report-only in every language: a caller reads the "
-    "failure as \"none\". A comment on the handler or a log call refuses it. ";
+    "false, 0 or '' around JSON.parse, an fs read, exec/spawn or fetch; a C++ value_or( empty ) on a file read). Report-only in "
+    "every language: a caller reads the failure as \"none\". A comment on the handler or the value_or line, a log call, or an "
+    "if that tests the read first refuses it. ";
 
 // QD-MONSTER-GROWTH — emitted only when a monster="1" row is in the document.
 inline constexpr const char* kQdMonsterLegend =

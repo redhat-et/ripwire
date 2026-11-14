@@ -16,8 +16,8 @@
 //                   that does nothing. Sole handler, because `catch( Specific e ) { throw e; }` ahead of a
 //                   `catch( Exception e )` sibling is the idiom that routes one type PAST the broad
 //                   handler, and that is not redundant.
-//     failure-default  a read, parse or spawn failure returned as an empty success (TypeScript catch / .catch);
-//                   REPORT-ONLY in every language — see its section below.
+//     failure-default  a read, parse or spawn failure returned as an empty success (TypeScript catch / .catch,
+//                   C++ value_or on a read); REPORT-ONLY in every language — see its section below.
 //   PLACEHOLDER (kind placeholder):
 //     stub          raise NotImplementedError, todo!()/unimplemented!(), Kotlin TODO(), throw new
 //                   NotImplementedException(), and any throw/raise/panic/fatalError/assert whose string
@@ -1103,15 +1103,20 @@ inline const Row* langTypeRow( const Row ( &table )[N], Lang lang, const char* t
 //
 // A read, parse or spawn failure collapsed into a value a success can also return, in a function whose declared
 // result has no room for the failure: the caller cannot tell "no advisories" from "the audit's JSON did not parse".
-// REPORT-ONLY in every language (lintrules.h errorMaskHitGates), so a row it adds is sev="minor":
+// Two spellings, each REPORT-ONLY in every language (lintrules.h errorMaskHitGates), so a row it adds is sev="minor":
 //   TypeScript  a `catch` whose only statement returns an empty value (null, undefined, [], {}, false, 0, ''), or a
 //               promise `.catch( () => <empty> )`, where the try body (the promise chain) calls JSON.parse, an fs
 //               read, readFile*, exec*/spawn*, fetch, or a helper this FILE defines that calls one of them (two hops);
 //               and the enclosing function DECLARES a return type that cannot carry the failure — an array or tuple,
 //               boolean, an object type, Record/Map/Set, or Promise of one of those (never a union, unknown, any or a
-//               named alias, which may hold null).
+//               named alias, which may hold null);
+//   C++         `.value_or( <empty> )` (an empty string or view, {}, "", 0, false) on a file read (readWholeFile,
+//               readRegularFile, readText…), directly or through a local the read initialized, in a function whose
+//               result is not an optional, expected, variant or pointer.
 // Refused, each a miss and never a finding: a handler with a comment or any second statement (a log call); a TS
-// function with no declared return type.
+// function with no declared return type; a C++ local read anywhere between the read and the value_or (the
+// `if( !bytes ) DISCLOSE(…)` house pattern), a value_or result the next statement tests with `.empty()` (the empty
+// text is the handled "unread" answer), or a comment on the value_or's line (the documented floor).
 // Measured on a hand-read sample before it was built (reports/qd-ge-card-verify-1112.md): TS 4 of 9 sites a defect,
 // C++ 0 of 6 with 2 borderline; Python, Go and Rust are not read here (0 of 18).
 
@@ -1315,6 +1320,206 @@ inline bool tsPromiseCatchFailureDefault( TSNode call, std::string_view src )
     return empty && tsReturnCannotCarryFailure( call, src ) && tsCallsReadParseSpawn( field( callee, "object" ), src, kTsHelperHops );
 }
 
+// ── C++ ──
+
+// The empty value a `.value_or( … )` falls back to, compared with whitespace removed.
+inline constexpr std::string_view kCxxEmptyValues[] = { "std::string()", "std::string{}", "std::string_view()", "std::string_view{}", "{}", "\"\"", "0", "0u", "false" };
+
+inline bool isCxxEmptyValue( TSNode e, std::string_view src )
+{
+    const std::string_view text = nodeTextOf( e, src );
+    std::string            squeezed;
+    squeezed.reserve( text.size() );
+    for( char c : text )
+    {
+        if( std::isspace( static_cast<unsigned char>( c ) ) == 0 )
+        {
+            squeezed.push_back( c );
+        }
+    }
+    return std::find( std::begin( kCxxEmptyValues ), std::end( kCxxEmptyValues ), squeezed ) != std::end( kCxxEmptyValues );
+}
+
+// The read helpers whose optional result says "could not read": ripwire's own and the common spellings.
+inline constexpr std::string_view kCxxReadPrefixes[] = { "readWhole", "readRegularFile", "readText", "readFile", "readAll" };
+
+inline bool isCxxReadCall( TSNode n, std::string_view src )
+{
+    if( !typeIs( n, "call_expression" ) )
+    {
+        return false;
+    }
+    std::string_view name = nodeTextOf( field( n, "function" ), src );
+    const std::size_t cut = name.find_last_of( ":.>" );
+    name = cut == std::string_view::npos ? name : name.substr( cut + 1 );
+    return std::any_of( std::begin( kCxxReadPrefixes ), std::end( kCxxReadPrefixes ), [ name ]( std::string_view p ) { return name.starts_with( p ); } );
+}
+
+// `std::move( x )` → x.
+inline TSNode unwrapStdMove( TSNode n, std::string_view src )
+{
+    const TSNode args = field( n, "arguments" );
+    if( typeIs( n, "call_expression" ) && nodeTextOf( field( n, "function" ), src ) == "std::move" && namedCount( args ) == 1 )
+    {
+        return namedChild( args, 0 );
+    }
+    return n;
+}
+
+// The source line that holds byte `at`, without its newline.
+inline std::string_view lineAt( std::string_view src, std::uint32_t at ) noexcept
+{
+    const std::size_t from  = at == 0 ? std::string_view::npos : src.rfind( '\n', at - 1 );
+    const std::size_t begin = from == std::string_view::npos ? 0 : from + 1;
+    const std::size_t to    = src.find( '\n', at );
+    return src.substr( begin, ( to == std::string_view::npos ? src.size() : to ) - begin );
+}
+
+// A comment anywhere on the source line that holds `at` — the line that says the empty value is a floor.
+inline bool lineHasComment( std::string_view src, std::uint32_t at ) noexcept
+{
+    const std::string_view line = lineAt( src, at );
+    char quote = 0;   // the open string or character literal's quote, 0 outside one
+    for( std::size_t i = 0; i + 1 < line.size(); ++i )
+    {
+        if( quote != 0 && line[i] == '\\' )
+        {
+            ++i;
+        }
+        else if( line[i] == '"' || line[i] == '\'' )
+        {
+            quote = quote == 0 ? line[i] : ( quote == line[i] ? 0 : quote );
+        }
+        else if( quote == 0 && line[i] == '/' && ( line[i + 1] == '/' || line[i + 1] == '*' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline constexpr std::string_view kCxxFailureCarriers[] = { "optional", "expected", "variant", "Result" };
+
+// Can this function's result say "it failed"? An optional/expected/variant/Result return type (a trailing one
+// included) or a pointer declarator can.
+inline bool cxxReturnCanCarryFailure( TSNode fn, std::string_view src )
+{
+    const TSNode declarator = field( fn, "declarator" );
+    if( typeIs( declarator, "pointer_declarator" ) )
+    {
+        return true;
+    }
+    const auto carries = [ & ]( TSNode t )
+    {
+        const std::string_view text = nodeTextOf( t, src );
+        return std::any_of( std::begin( kCxxFailureCarriers ), std::end( kCxxFailureCarriers ), [ text ]( std::string_view w ) { return text.find( w ) != std::string_view::npos; } );
+    };
+    return carries( field( fn, "type" ) ) || carries( firstChildOfKind( declarator, true, { "trailing_return_type" } ) );
+}
+
+// Was the local `name` initialized or assigned from a read, and NOT read anywhere else before byte `before` in this
+// function body? Any other use — `if( !bytes )`, `failed = !bytes.has_value()` — is the failure being looked at.
+inline bool cxxLocalFromUntestedRead( TSNode body, std::string_view name, std::uint32_t before, std::string_view src )
+{
+    std::uint32_t reads    = 0;   // initializations and assignments from a read
+    std::uint32_t mentions = 0;   // every identifier spelling the name, those included
+    anyNamedNodeBelow( body, false, [ & ]( TSNode n, int )
+    {
+        if( ts_node_start_byte( n ) >= before )
+        {
+            return false;
+        }
+        if( typeIs( n, "identifier" ) && nodeTextOf( n, src ) == name )
+        {
+            ++mentions;
+        }
+        else if( typeIs( n, "init_declarator" ) && nodeTextOf( field( n, "declarator" ), src ) == name )
+        {
+            reads += isCxxReadCall( field( n, "value" ), src ) ? 1u : 0u;
+        }
+        else if( typeIs( n, "assignment_expression" ) && nodeTextOf( field( n, "left" ), src ) == name )
+        {
+            reads += isCxxReadCall( field( n, "right" ), src ) ? 1u : 0u;
+        }
+        return false;
+    } );
+    return reads > 0 && mentions == reads;
+}
+
+// The statement after the one in a block that holds n (comments skipped); null when there is none.
+inline TSNode nextStatementAfter( TSNode n )
+{
+    const TSNode stmt = ancestorWhere( n, []( TSNode p ) { return typeIs( ts_node_parent( p ), "compound_statement" ); } );
+    TSNode       next = ts_node_is_null( stmt ) ? TSNode{} : ts_node_next_named_sibling( stmt );
+    while( !ts_node_is_null( next ) && isCommentNode( next ) )
+    {
+        next = ts_node_next_named_sibling( next );
+    }
+    return next;
+}
+
+// Does `text` ask `<name>.empty()` (spaces allowed before the dot)?
+inline bool asksEmpty( std::string_view text, std::string_view name ) noexcept
+{
+    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
+    {
+        std::string_view rest = text.substr( at + name.size() );
+        while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) )
+        {
+            rest.remove_prefix( 1 );
+        }
+        if( rest.starts_with( ".empty()" ) || rest.starts_with( ".empty( )" ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The statement after the one that holds `call`, when that statement stores the value_or into a name: true when it
+// asks `<name>.empty()` — the empty text IS the handled "unread" answer there (`if( bytes.empty() ) continue;`).
+inline bool cxxEmptyTestedNext( TSNode call, std::string_view src )
+{
+    const TSNode     holder = ts_node_parent( call );
+    std::string_view stored;
+    if( typeIs( holder, "init_declarator" ) && ts_node_eq( field( holder, "value" ), call ) )
+    {
+        stored = nodeTextOf( field( holder, "declarator" ), src );
+    }
+    else if( typeIs( holder, "assignment_expression" ) && ts_node_eq( field( holder, "right" ), call ) )
+    {
+        stored = nodeTextOf( field( holder, "left" ), src );
+    }
+    return !stored.empty() && asksEmpty( nodeTextOf( nextStatementAfter( holder ), src ), stored );
+}
+
+// `read( … ).value_or( std::string() )`, or `bytes.value_or( {} )` with `bytes` an untested read — and the empty
+// result not tested by the next statement.
+inline bool cxxValueOrFailureDefault( TSNode call, std::string_view src )
+{
+    const TSNode callee = field( call, "function" );
+    if( !typeIs( callee, "field_expression" ) || nodeTextOf( field( callee, "field" ), src ) != "value_or" )
+    {
+        return false;
+    }
+    const TSNode args = field( call, "arguments" );
+    if( namedCount( args ) != 1 || !isCxxEmptyValue( namedChild( args, 0 ), src ) || lineHasComment( src, ts_node_start_byte( args ) ) )
+    {
+        return false;
+    }
+    const TSNode fn = ancestorOfKind( call, { "function_definition" } );   // a lambda is transparent: its value flows into the named function
+    if( ts_node_is_null( fn ) || cxxReturnCanCarryFailure( fn, src ) || cxxEmptyTestedNext( call, src ) )
+    {
+        return false;
+    }
+    const TSNode receiver = unwrapStdMove( field( callee, "argument" ), src );
+    if( isCxxReadCall( receiver, src ) )
+    {
+        return true;
+    }
+    return typeIs( receiver, "identifier" ) && cxxLocalFromUntestedRead( field( fn, "body" ), nodeTextOf( receiver, src ), ts_node_start_byte( call ), src );
+}
+
 // One row per (language, node type), read like kHandlerReaders.
 struct FailureDefaultReader
 {
@@ -1326,6 +1531,7 @@ struct FailureDefaultReader
 inline constexpr FailureDefaultReader kFailureDefaultReaders[] = {
     { Lang::TypeScript, "catch_clause",    tsCatchFailureDefault        },
     { Lang::TypeScript, "call_expression", tsPromiseCatchFailureDefault },
+    { Lang::Cpp,        "call_expression", cxxValueOrFailureDefault     },
 };
 
 // kShapeFailureDefault when this node is one, else empty.
