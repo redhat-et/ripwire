@@ -17,6 +17,7 @@
 //   fold       the <fold> bodies (the top rows' whole bodies, "not the answer")
 //   bodies:N   the last N bodies of the <bodies> section (--detail's, or the auto bundle's: the root's bodies= then counts
 //              what is left, and bodies="0" says reason="budget")
+//   docs:N     the <doc> of the N worst-ranked <sigs> rows that print one (the row stays; docs_dropped= counts it)
 //   rows:N     the N worst-ranked <sigs> rows (r= from the highest; a row with no r= first), down to a floor of
 //              kForBudgetRowFloor: the kept rows are the best-ranked, in U's order — against --token-budget only: a --max-tokens
 //              ceiling never cuts a ranked row (METHODOLOGY §9 #2: exceed it with over_ceiling="1" rather than drop the row
@@ -83,14 +84,14 @@ inline constexpr std::string_view kForHeldBlocks[] = { "syms", "doc_body", "decl
 inline constexpr std::string_view kForBudgetTargetLegend =
     " [budget_tokens=: the token target asked. The answer is the one asked without it; only past the target is it shed, in this"
     " order, shed= naming what went: held (the blocks outside est_tokens, each held=budget with its next=; what they still print comes off the target), attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
-    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), rows:N (the N worst-ranked sigs rows; ranks 1..4 always ship), and a cut block's next= is the"
+    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), docs:N (the doc of the N worst-ranked sigs rows that print one; docs_dropped= counts every shown row printing none), rows:N (the N worst-ranked sigs rows; ranks 1..4 always ship), and a cut block's next= is the"
     " call without it. shown= counts what is left,"
     " the other counts describe the whole answer, est_tokens prices it with this disclosure and may still exceed the target;"
     " shed=unpriced: the price could not be reproduced, so nothing was shed]";
 inline constexpr std::string_view kForBudgetCeilingLegend =
     " [max_tokens=: the token ceiling asked. The answer is the one asked without it; only past the ceiling is it shed, in this"
     " order, shed= naming what went: held (the blocks outside est_tokens, each held=budget with its next=; what they still print comes off the ceiling), attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
-    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), and a cut block's next= is the call without it; a ranked sigs row"
+    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), docs:N (the doc of the N worst-ranked sigs rows that print one; docs_dropped= counts every shown row printing none), and a cut block's next= is the call without it; a ranked sigs row"
     " is never cut against the ceiling (rows:N is the token target's). shown= counts what is left,"
     " the other counts describe the whole answer, est_tokens prices it with this disclosure; over_ceiling=1 when it still exceeds it;"
     " shed=unpriced: the price could not be reproduced, so nothing was shed]";
@@ -297,7 +298,7 @@ std::size_t countRows( const Section& sec, IsRow&& isRow ) noexcept
 struct ShedState
 {
     bool        attrs = false, fold = false;
-    std::size_t tailCut = 0, hopCut = 0, detailCut = 0, rowCut = 0;
+    std::size_t tailCut = 0, hopCut = 0, detailCut = 0, docCut = 0, rowCut = 0;
 };
 
 // The price of the root's kForHeldBlocks children: <doc_body>'s own est_tokens=, the others' bytes at the markup rate.
@@ -349,6 +350,7 @@ public:
         const bool detailShed = detail_.found() && tokensForEmittedBytes( ledger.detailXmlBytes, kBytesPerTokenBody ) == ledger.detailTokens;
         sigRows_    = sigs_.found() ? countRows( sigs_, isSigRow ) : 0;
         rowCutPos_  = rowCutOrder();
+        docCutPos_  = docCutOrder();
         tailRows_   = tail_.found() ? countRows( tail_, []( std::string_view name ) { return name == "t"; } ) : 0;
         hopRows_    = hops_.found() ? countRows( hops_, []( std::string_view name ) { return name == "h"; } ) : 0;
         detailRows_ = detailShed ? countRows( detail_, []( std::string_view name ) { return name == "b"; } ) : 0;
@@ -393,6 +395,7 @@ public:
         step( [ & ] { ++st.hopCut; }, hopRows_ );
         step( [ & ] { st.fold = true; }, foldShed_ ? 1 : 0 );
         step( [ & ] { ++st.detailCut; }, detailRows_ );
+        step( [ & ] { ++st.docCut; }, docRows_ );
         fits = fits || ask_.targetTokens == 0 || rowsPriceOf( st ) <= rowTarget_;   // rows answer to the token target alone
         for( std::size_t k = 0, rowsCuttable = sigRows_ - std::min( sigRows_, kForBudgetRowFloor ); k < rowsCuttable && !fits; ++k )
         {
@@ -457,6 +460,39 @@ private:
         }
         return pos;
     }
+    // Each <sigs> row's place in the docs:N order (the rows that print a <doc>, in the cut order; SIZE_MAX: none to cut).
+    std::vector<std::size_t> docCutOrder()
+    {
+        std::vector<std::size_t> byCut( sigRows_, SIZE_MAX ), pos( sigRows_, SIZE_MAX );
+        std::size_t              seen = 0;
+        for( const Child& c : sigs_.kids )
+        {
+            if( isSigRow( c.name ) )
+            {
+                const bool doc = c.name == "d" && answer_.substr( c.at, c.end - c.at ).find( "<doc>" ) != std::string_view::npos;
+                byCut[rowCutPos_[seen]] = doc ? seen : SIZE_MAX;
+                ++seen;
+            }
+        }
+        for( const std::size_t row : byCut )
+        {
+            if( row != SIZE_MAX )
+            {
+                pos[row] = docRows_++;
+            }
+        }
+        return pos;
+    }
+    // the row's <doc>…</doc> child removed (the row's attributes and its other children kept)
+    static void cutRowDoc( std::string& piece )
+    {
+        const std::size_t at  = piece.find( "<doc>" );
+        const std::size_t end = at == std::string::npos ? std::string::npos : piece.find( "</doc>", at );
+        if( end != std::string::npos )
+        {
+            piece.erase( at, end + 6 - at );
+        }
+    }
 
     std::string withNext( std::string open ) const { return nextVal_.empty() ? open : withAttr( open, "next", nextVal_ ); }
 
@@ -464,9 +500,23 @@ private:
     {
         const std::size_t keep = sigRows_ - st.rowCut;
         std::string       out( answer_.substr( sigs_.at, sigs_.openEnd - sigs_.at ) );
+        // docs_dropped= counts the shown rows that print no <doc>: the docs cut join it, the doc-less rows cut leave it (forrankordercheck (8))
+        std::size_t docless = 0, docsCut = 0, seen = 0;
+        for( const Child& c : sigs_.kids )
+        {
+            if( isSigRow( c.name ) )
+            {
+                const bool cut = rowCutPos_[seen] < st.rowCut;
+                docless += cut && c.name == "d" && answer_.substr( c.at, c.end - c.at ).find( "<doc>" ) == std::string_view::npos ? 1 : 0;   // a pointer prints no doc either way
+                docsCut += !cut && docCutPos_[seen] < st.docCut ? 1 : 0;
+                ++seen;
+            }
+        }
+        const std::size_t docsDropped = attrNumber( out, "docs_dropped" ) + docsCut - std::min( attrNumber( out, "docs_dropped" ) + docsCut, docless );
+        out = docsDropped > 0 ? withAttr( out, "docs_dropped", std::to_string( docsDropped ) ) : withoutAttr( out, "docs_dropped" );
         if( st.rowCut == 0 )
         {
-            return out;
+            return st.docCut > 0 ? withNext( std::move( out ) ) : out;
         }
         out = withAttr( out, "shown", std::to_string( keep ) );
         out = attrOf( out, "total" ).empty() ? withAttr( out, "total", std::to_string( sigRows_ ) ) : out;   // U served every row it ranked
@@ -474,17 +524,6 @@ private:
         const std::size_t past = attrNumber( out, "past_target" );   // the rows past the 7.5 KB target are the last ones: the cut ones leave it
         out = past > st.rowCut ? withAttr( out, "past_target", std::to_string( past - st.rowCut ) ) : withoutAttr( out, "past_target" );
         out = attrNumber( out, "files_first" ) > keep ? withAttr( out, "files_first", std::to_string( keep ) ) : out;
-        // docs_dropped= counts the shown rows that print no <doc>: the cut ones leave the count (forrankordercheck (8))
-        std::size_t docless = 0, seen = 0;
-        for( const Child& c : sigs_.kids )
-        {
-            if( isSigRow( c.name ) && rowCutPos_[seen++] < st.rowCut )
-            {
-                docless += c.name == "d" && answer_.substr( c.at, c.end - c.at ).find( "<doc>" ) == std::string_view::npos ? 1 : 0;   // a pointer prints no doc either way
-            }
-        }
-        const std::size_t docsDropped = attrNumber( out, "docs_dropped" );
-        out = docsDropped == 0 ? out : docsDropped > docless ? withAttr( out, "docs_dropped", std::to_string( docsDropped - docless ) ) : withoutAttr( out, "docs_dropped" );
         return withNext( std::move( out ) );   // the r=1 row keeps its own --expand next=; the block's names the shed rows' call
     }
     std::string sigsXml( const ShedState& st ) const
@@ -495,8 +534,9 @@ private:
         {
             out.append( answer_.substr( at, c.at - at ) );
             at = c.end;
-            const bool row = isSigRow( c.name );
-            if( row && rowCutPos_[seen++] < st.rowCut )
+            const bool        row = isSigRow( c.name );
+            const std::size_t idx = row ? seen++ : 0;
+            if( row && rowCutPos_[idx] < st.rowCut )
             {
                 continue;
             }
@@ -504,6 +544,10 @@ private:
             if( row && st.attrs )
             {
                 shedRowAttrs( piece, kForPageShedRungMetrics );
+            }
+            if( row && docCutPos_[idx] < st.docCut )
+            {
+                cutRowDoc( piece );
             }
             out += piece;
         }
@@ -575,7 +619,7 @@ private:
         const auto     delta  = [ & ]( const Section& sec, const std::string& xml ) { return std::ptrdiff_t( xml.size() ) - std::ptrdiff_t( sec.end - sec.at ); };
         std::ptrdiff_t markup = std::ptrdiff_t( ledger_.markupBytes ) + disclosureMarkup;
         std::size_t    body   = ledger_.bodyTokens;
-        markup += sigs_.found() && ( st.attrs || st.rowCut > 0 ) ? delta( sigs_, sigsXml( st ) ) : 0;
+        markup += sigs_.found() && ( st.attrs || st.docCut > 0 || st.rowCut > 0 ) ? delta( sigs_, sigsXml( st ) ) : 0;
         markup += st.tailCut > 0 ? delta( tail_, tailXml( st ) ) : 0;
         markup += st.hopCut > 0 ? delta( hops_, hopsXml( st ) ) : 0;
         markup -= st.fold ? std::ptrdiff_t( ledger_.foldMarkupBytes ) : 0;
@@ -605,6 +649,7 @@ private:
         note( st.hopCut > 0, "hops", st.hopCut );
         note( st.fold, "fold", 0 );
         note( st.detailCut > 0, "bodies", st.detailCut );
+        note( st.docCut > 0, "docs", st.docCut );
         note( st.rowCut > 0, "rows", st.rowCut );
         return shed;
     }
@@ -692,7 +737,7 @@ private:
                 swaps.push_back( { sec.at, sec.end, xml() } );
             }
         };
-        add( sigs_.found() && ( st.attrs || st.rowCut > 0 ), sigs_, [ & ] { return sigsXml( st ); } );
+        add( sigs_.found() && ( st.attrs || st.docCut > 0 || st.rowCut > 0 ), sigs_, [ & ] { return sigsXml( st ); } );
         add( st.tailCut > 0, tail_, [ & ] { return tailXml( st ); } );
         add( st.hopCut > 0, hops_, [ & ] { return hopsXml( st ); } );
         add( st.fold, fold_, [] { return std::string(); } );
@@ -716,6 +761,8 @@ private:
     bool                   parsed_ = false, trusted_ = false, foldShed_ = false;
     Section                sigs_, tail_, hops_, fold_, detail_;
     std::vector<std::size_t> rowCutPos_;   // per <sigs> row in document order: its place in the cut order (rowCutOrder)
+    std::vector<std::size_t> docCutPos_;   // per <sigs> row in document order: its place in the docs:N order (docCutOrder)
+    std::size_t            docRows_ = 0;   // the <sigs> rows that print a <doc>
     std::size_t            sigRows_ = 0, tailRows_ = 0, hopRows_ = 0, detailRows_ = 0;
     std::size_t            droppedValAt_ = 0, droppedValEnd_ = 0, droppedHad_ = 0;   // U's own dropped_positive= value (0: none)
 };

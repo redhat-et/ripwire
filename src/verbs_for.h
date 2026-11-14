@@ -3109,11 +3109,12 @@ inline void writeAllTo( int fd, const std::string& bytes ) noexcept
 
 // stdout pointed at an anonymous file for the lifetime of the object (the dup2 capture runWithCompactLegend and the graph_verb block use):
 // finish() restores stdout and returns every byte written meanwhile; the destructor restores it on any other exit. Inactive when not wanted.
-// TOKEN-BUDGET-MONOTONE: the same capture of stderr (stream/fd), so a render the budget re-runs does not say its notices twice.
-class StdoutCapture
+// TOKEN-BUDGET-MONOTONE: StreamCapture is that capture for any stream/descriptor pair; stderr's (StderrCapture) keeps a render the
+// budget re-runs from saying its notices twice.
+class StreamCapture
 {
 public:
-    explicit StdoutCapture( bool wanted, std::FILE* stream = stdout, int fd = STDOUT_FILENO ) : wanted_( wanted ), stream_( stream ), fd_( fd )
+    StreamCapture( bool wanted, std::FILE* stream, int fd ) : wanted_( wanted ), stream_( stream ), fd_( fd )
     {
         if( !wanted )
         {
@@ -3128,9 +3129,9 @@ public:
             release();
         }
     }
-    StdoutCapture( const StdoutCapture& ) = delete;
-    StdoutCapture& operator=( const StdoutCapture& ) = delete;
-    ~StdoutCapture() { if( active_ ) { (void)finish(); } }
+    StreamCapture( const StreamCapture& ) = delete;
+    StreamCapture& operator=( const StreamCapture& ) = delete;
+    ~StreamCapture() { if( active_ ) { (void)finish(); } }
     bool wanted() const noexcept { return wanted_; }
     bool active() const noexcept { return active_; }
     // ONE-SIDE-REACH: what the captured answer's root est_tokens= was converged from (null when the root prints none): the demote pass
@@ -3172,6 +3173,16 @@ private:
     int        fd_     = STDOUT_FILENO;
     std::FILE* file_   = nullptr;
     int        saved_  = -1;
+};
+class StdoutCapture : public StreamCapture
+{
+public:
+    explicit StdoutCapture( bool wanted ) : StreamCapture( wanted, stdout, STDOUT_FILENO ) {}
+};
+class StderrCapture : public StreamCapture
+{
+public:
+    explicit StderrCapture( bool wanted ) : StreamCapture( wanted, stderr, STDERR_FILENO ) {}
 };
 
 // Where <syms> goes in the answer's bytes: in front of the --with-graph <graph> block, which stays the last child, else at the end (rfind: a
@@ -5417,12 +5428,15 @@ std::optional<int> runForLensPosture( const MainDispatch& d, rw::ForAnswerLedger
 
 // TOKEN-BUDGET-MONOTONE (forbudgetfit.h): the budgets this answer applies AFTER its posture — --token-budget, and --max-tokens
 // where --for reads it (under --detail=N) — on the XML answer of one root, unpaged. The other dialects and the budgeted page
-// keep their own budget paths (--json, --format=columnar|candidates, --limit/--offset: test/budgetpolicycheck.sh ARM D/E/F).
+// keep their own budget paths (--json, --format=columnar|candidates, --limit/--offset: test/budgetpolicycheck.sh ARM D/E/F),
+// and so does --signatures-only: it is the call shape of a capped <sigs>'s next= (`--signatures-only --token-budget=T`), whose
+// target lifts the default's row-text shrink to serve every row uncut (forrankordercheck (9)) — a ceiling over the default
+// answer could never serve more than it.
 inline bool forBudgetFitsAfterPosture( const MainDispatch& d ) noexcept
 {
     const rw::Config& cfg = d.cfg;
     return ( cfg.tokenBudget > 0 || ( cfg.maxTokens > 0 && cfg.detail > 0 ) ) && !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot
-        && cfg.pageLimit == 0 && cfg.pageOffset == 0;
+        && !cfg.signaturesOnly && cfg.pageLimit == 0 && cfg.pageOffset == 0;
 }
 
 // Why the budgeted answer is the posture's answer unshed, or the old budget path: the sink names it on stderr (an MCP client
@@ -5469,7 +5483,7 @@ struct ForPostureRender
 inline ForPostureRender renderForPostureCaptured( const MainDispatch& pd )
 {
     ForPostureRender r;
-    StdoutCapture    err( true, stderr, STDERR_FILENO );
+    StderrCapture    err( true );
     StdoutCapture    out( true );
     if( !out.active() )
     {
