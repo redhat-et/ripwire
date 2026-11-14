@@ -48,8 +48,11 @@ fd_none(){  # LABEL SYM WHY
     if [ -z "$( qd_row "$2" )" ]; then ok "$1: no row on $2 ($3)"; else no "$1: a row on $2 is a false positive ($3): $( qd_row "$2" )"; fi
 }
 premise(){   # LABEL DIR SYM QUERY → FAIL unless the query hits at least once inside SYM
-    local n; n="$( cd "$WORK/$2" && "$BIN" . --match="$4" --no-cache 2>/dev/null | tr '>' '\n' | grep -c "<m p=[^ ]* in=\"$3\"" )"   # a failed --match prints no <m> row, so n is 0 and the premise FAILs
-    if [ "${n:-0}" -gt 0 ]; then ok "$1: premise — $n site(s) judged in $3"; else no "$1: premise — 0 sites in $3 (the negative arm is vacuous)"; fi
+    local out rc n
+    out="$( cd "$WORK/$2" && "$BIN" . --match="$4" --no-cache 2>/dev/null )"; rc=$?
+    n="$( printf '%s' "$out" | tr '>' '\n' | grep -c "<m p=[^ ]* in=\"$3\"" )"
+    if [ "$rc" -ne 0 ]; then no "$1: premise — --match exited $rc in $2"
+    elif [ "${n:-0}" -gt 0 ]; then ok "$1: premise — $n site(s) judged in $3"; else no "$1: premise — 0 sites in $3 (the negative arm is vacuous)"; fi
 }
 exit0(){ if [ "$QD_RC" = 0 ]; then ok "$1: report-only rows exit 0"; else no "$1: want exit 0, got $QD_RC"; fi; }
 
@@ -255,10 +258,11 @@ exit0   "failure-default (c++)"
 for s in guardedSpec flooredSpec carriedSpec lineCount hasMarker; do premise "failure-default (c++)" fd_cxx "$s" '((field_identifier) @m (#eq? @m "value_or"))'; done
 
 # 3) Determinism and well-formedness of the delta that carries the facet.
-if [ "$QD_OUT" = "$( cd "$WORK/fd_cxx" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )" ]; then
-    ok "failure-default: byte-identical run-to-run"
+AGAIN="$( cd "$WORK/fd_cxx" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; AGAIN_RC=$?
+if [ "$AGAIN_RC" = "$QD_RC" ] && [ "$QD_OUT" = "$AGAIN" ]; then
+    ok "failure-default: byte-identical run-to-run (rc $AGAIN_RC)"
 else
-    no "failure-default: non-deterministic"
+    no "failure-default: non-deterministic (rc $QD_RC then $AGAIN_RC)"
 fi
 if command -v xmllint >/dev/null 2>&1; then
     if printf '%s' "$QD_OUT" | xmllint --noout - 2>/dev/null; then ok "failure-default: xml well-formed"; else no "failure-default: xml malformed"; fi
