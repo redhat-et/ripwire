@@ -2491,16 +2491,12 @@ void collectConstructHits( const LangEntry& le, std::uint32_t fileId, std::strin
 // the --quality-delta=A..B projection counts once (memguard.h FIXED BYTES); a reading that went down records nothing.
 namespace
 {
-std::atomic<std::uint64_t>& constructTablesFootprintSlot() noexcept
-{
-    static std::atomic<std::uint64_t> held{ 0 };
-    return held;
-}
+std::atomic<std::uint64_t> constructTablesHeld{ 0 };   // constant-initialized: no first-use order to get wrong
 }   // namespace
 
 std::uint64_t constructTablesFootprint() noexcept
 {
-    return constructTablesFootprintSlot().load( std::memory_order_relaxed );
+    return constructTablesHeld.load( std::memory_order_relaxed );
 }
 
 void warmConstructTables( const std::array<bool, kLangTable.size()>& rows )
@@ -2536,7 +2532,7 @@ void warmConstructTables( const std::array<bool, kLangTable.size()>& rows )
     const std::uint64_t after = os::mem_footprint();
     if( after > before )
     {
-        constructTablesFootprintSlot().fetch_add( after - before, std::memory_order_relaxed );
+        constructTablesHeld.fetch_add( after - before, std::memory_order_relaxed );
     }
 }
 
