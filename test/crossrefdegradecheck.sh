@@ -412,7 +412,7 @@ if [ -n "$e7" ]; then
 else
     ( cd "$R7" && "$BIN" . --whereis=foo >"$TMP/r7.xml" 2>"$TMP/r7.err" ); rc7=$?
     refs7="$( attr refs_scanned < "$TMP/r7.xml" )"
-    flav7="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+    flav7="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"   # status: a --version probe; an unreadable flavour falls to the dev branch, which still demands the trace
     if [ "$rc7" != 0 ] || [ -z "$refs7" ]; then
         no "7 --whereis over a dateless branch: rc=$rc7 refs=$refs7 $( head -c 300 "$TMP/r7.err" )"
     else

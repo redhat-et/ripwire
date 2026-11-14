@@ -179,14 +179,14 @@ LONGDIR="$( python3 -c "print( '/'.join( 'd%02d_' % i + 'x' * 40 for i in range(
 mkdir -p "$WF/$LONGDIR"
 printf 'def deep_f():\n    return 1\n' >"$WF/$LONGDIR/m.py"
 printf 'def shallow_g():\n    return 2\n' >"$WF/short.py"
-RIPWIRE_CACHE_STATS=1 "$BIN" "$WF" --cache="$CF" --no-stable >"$TMP/f.cold" 2>"$TMP/f.cold.err"
-RIPWIRE_CACHE_STATS=1 "$BIN" "$WF" --cache="$CF" --no-stable >"$TMP/f.warm" 2>"$TMP/f.warm.err"
+RIPWIRE_CACHE_STATS=1 "$BIN" "$WF" --cache="$CF" --no-stable >"$TMP/f.cold" 2>"$TMP/f.cold.err"; frc_cold=$?
+RIPWIRE_CACHE_STATS=1 "$BIN" "$WF" --cache="$CF" --no-stable >"$TMP/f.warm" 2>"$TMP/f.warm.err"; frc_warm=$?
 fkey=$(( ${#LONGDIR} + 5 ))
 freparsed="$( sed -n 's/.*cache-stats reparsed=\([0-9]*\).*/\1/p' "$TMP/f.warm.err" | head -n 1 )"
-if [ "$fkey" -ge 417 ] && [ "$freparsed" = 0 ] && diff -q "$TMP/f.cold" "$TMP/f.warm" >/dev/null 2>&1 && grep -q 'n="deep_f"' "$TMP/f.warm"; then
+if [ "$frc_cold" = 0 ] && [ "$frc_warm" = 0 ] && [ "$fkey" -ge 417 ] && [ "$freparsed" = 0 ] && diff -q "$TMP/f.cold" "$TMP/f.warm" >/dev/null 2>&1 && grep -q 'n="deep_f"' "$TMP/f.warm"; then
     ok "(f) a ${fkey}-byte root-relative key warm-hits (reparsed=0), output unchanged"
 else
-    no "(f) a ${fkey}-byte key: warm reparsed=${freparsed:-?} (want 0): $( grep cache-stats "$TMP/f.warm.err" | head -c 200 )"
+    no "(f) a ${fkey}-byte key: rc cold=$frc_cold warm=$frc_warm, warm reparsed=${freparsed:-?} (want 0): $( grep cache-stats "$TMP/f.warm.err" | head -c 200 )"
 fi
 
 # ── well-formed XML on the representative outputs ─────────────────────────────────────────────────

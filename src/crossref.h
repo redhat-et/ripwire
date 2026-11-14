@@ -827,6 +827,56 @@ struct RefEnumeration
     }
 };
 
+// One for-each-ref line, split from the RIGHT, not left-to-right: '|' is a LEGAL byte in a git ref name (git
+// forbids space, ~ ^ : ? * [ \ and control bytes — not the pipe), so a branch named `feat|x` split
+// into four fields and handed `x` back as the tip sha. That ref then failed merge-base and landed in
+// the degraded path, i.e. a legally-named branch silently became unanalysable. The three TRAILING
+// fields are git-generated and pipe-free by construction (an object name is hex, a short committer
+// date is YYYY-MM-DD, a unix committer date is decimal), so everything before the third-to-last '|' is the name.
+struct RefLineFields
+{
+    std::string_view name;
+    std::string_view tip;
+    std::string_view date;       // %(committerdate:short)
+    std::string_view unixDate;   // %(committerdate:unix)
+};
+
+inline std::optional<RefLineFields> splitRefLine( std::string_view line ) noexcept
+{
+    const std::size_t unixPipe = line.rfind( '|' );
+    if( unixPipe == std::string_view::npos || unixPipe == 0 )
+    {
+        return std::nullopt;
+    }
+    const std::size_t lastPipe = line.rfind( '|', unixPipe - 1 );
+    if( lastPipe == std::string_view::npos || lastPipe == 0 )
+    {
+        return std::nullopt;
+    }
+    const std::size_t firstPipe = line.rfind( '|', lastPipe - 1 );
+    if( firstPipe == std::string_view::npos || firstPipe >= lastPipe )
+    {
+        return std::nullopt;
+    }
+    return RefLineFields{ line.substr( 0, firstPipe ), line.substr( firstPipe + 1, lastPipe - firstPipe - 1 ),
+                          line.substr( lastPipe + 1, unixPipe - lastPipe - 1 ), line.substr( unixPipe + 1 ) };
+}
+
+// A ref's committer time for the ref window. An unreadable %(committerdate:unix) (git prints it empty for a
+// commit whose committer line carries no date) sorts as the oldest: the window may omit it, and the sink counts it.
+inline std::int64_t refCommitTime( std::string_view unixDate, RefEnumeration& sink )
+{
+    std::int64_t                 when    = 0;
+    const char* const            dateEnd = unixDate.data() + unixDate.size();
+    const std::from_chars_result parsed  = std::from_chars( unixDate.data(), dateEnd, when );
+    if( !VALIDATE( parsed.ec == std::errc() && parsed.ptr == dateEnd ) )
+    {
+        DISCLOSE( sink, RefEnumeration::DisclosureWhy::DateUnreadable, "crossref: for-each-ref yielded a ref with no readable committer date — the ref window ranks it as the oldest" );
+        return 0;
+    }
+    return when;
+}
+
 inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_view filter, const std::string& headSha,
                                            std::size_t* filterNameHits = nullptr, RefEnumeration* enumeration = nullptr )
 {
@@ -836,39 +886,14 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
     std::vector<RefInfo> out;
     for( std::string_view line : splitLines( raw ) )
     {
-        // Parse from the RIGHT, not by splitting left-to-right: '|' is a LEGAL byte in a git ref name (git
-        // forbids space, ~ ^ : ? * [ \ and control bytes — not the pipe), so a branch named `feat|x` split
-        // into four fields and handed `x` back as the tip sha. That ref then failed merge-base and landed in
-        // the degraded path, i.e. a legally-named branch silently became unanalysable. The three TRAILING
-        // fields are git-generated and pipe-free by construction (an object name is hex, a short committer
-        // date is YYYY-MM-DD, a unix committer date is decimal), so everything before the third-to-last '|' is the name.
-        const std::size_t unixPipe = line.rfind( '|' );
-        if( unixPipe == std::string_view::npos || unixPipe == 0 )
+        const std::optional<RefLineFields> fields = splitRefLine( line );
+        if( !fields )
         {
             continue;
         }
-        const std::size_t lastPipe = line.rfind( '|', unixPipe - 1 );
-        if( lastPipe == std::string_view::npos || lastPipe == 0 )
-        {
-            continue;
-        }
-        const std::size_t firstPipe = line.rfind( '|', lastPipe - 1 );
-        if( firstPipe == std::string_view::npos || firstPipe >= lastPipe )
-        {
-            continue;
-        }
-
-        const std::string_view name = line.substr( 0, firstPipe );
-        const std::string_view tip  = line.substr( firstPipe + 1, lastPipe - firstPipe - 1 );
-        const std::string_view date = line.substr( lastPipe + 1, unixPipe - lastPipe - 1 );
-        std::int64_t           when = 0;   // an unreadable date sorts as the oldest: the window may omit it, and counts it
-        const char* const      whenEnd = line.data() + line.size();
-        const std::from_chars_result parsed = std::from_chars( line.data() + unixPipe + 1, whenEnd, when );
-        if( !VALIDATE( parsed.ec == std::errc() && parsed.ptr == whenEnd ) )
-        {
-            when = 0;
-            DISCLOSE( dropSink, RefEnumeration::DisclosureWhy::DateUnreadable, "crossref: for-each-ref yielded a ref with no readable committer date — the ref window ranks it as the oldest" );
-        }
+        const std::string_view name = fields->name;
+        const std::string_view tip  = fields->tip;
+        const std::int64_t     when = refCommitTime( fields->unixDate, dropSink );
         if( filterNameHits != nullptr && !name.empty() && ( filter.empty() || name.find( filter ) != std::string_view::npos ) )
         {
             ++*filterNameHits;
@@ -889,7 +914,7 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
         {
             continue;
         }
-        out.push_back( RefInfo{ std::string( name ), std::string( tip ), std::string( date ), when } );
+        out.push_back( RefInfo{ std::string( name ), std::string( tip ), std::string( fields->date ), when } );
     }
     return out;
 }
