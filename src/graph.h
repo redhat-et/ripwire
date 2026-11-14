@@ -10187,7 +10187,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         recvEv.types.jsPinnedClasses = &jsPinnedClasses;   // (L) a TS call result's imported class
         recvEv.types.jsImportModules = &jsImportModules;   // lane L6: a TS import's module, for an interface type it names
         recvEv.build();
-        // h1-annot: a Python `x op= v` that drops x's class (ReceiverEvidence::noteAugAssign) drops Rule 2's constructed type too
+        // h1-annot: a Python `x op= v` that drops x's class (ReceiverEvidence::augDropsClass) drops Rule 2's constructed type too
         std::string augKey;
         for( const Binding* a : recvEv.augDropped )
         {
