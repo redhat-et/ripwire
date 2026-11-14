@@ -14632,12 +14632,55 @@ number:
 without its cost beside it. A rise that stays inside the ceilings and is reported as a trade is a
 PASS, recorded with the trade stated — not a tolerated miss.
 
-### Band 3 — disk
+### Band 3 — disk. A CEILING anchored on the peers' own index sizes (AMENDED 2026-11-14, before any implementation number)
 
-The full section adds a projected **+33.9 MB to envoy's 154.3 MB blob (+22 %)** and **+44.1 MB to
-vscode's 272.5 MB (+16 %)**; the CSR-only variant adds **+2.5 %**. A directly mappable POD layout
-(chosen to remove the 25 % spent in per-record decode) will be larger than that; the registered
-requirement is that the real figure is measured and published, not that it lands under the projection.
+**Amendment, and why.** This band first required only that the real figure be "measured and
+published, not that it lands under the projection" — a band with no failure condition, which this
+project's own first non-negotiable forbids: a metric that cannot fail measures nothing. Band 2 was
+given a ceiling the same day and this one was left without. Corrected here, **before any
+implementation exists and before any measurement of it**, on Band 2's terms: nothing in it may move
+again once a number arrives.
+
+The projection stands: the full section adds **+33.9 MB to envoy's 147.6 MB blob** and **+44.1 MB to
+vscode's 271.3 MB**; the CSR-only variant adds +2.5 %. A directly mappable POD layout — chosen
+precisely to remove the 25 % of warm CPU spent in per-record decode — will be larger than a compact
+encoding, and that is an accepted trade, not a regression.
+
+The ceiling is anchored on what the on-disk claim is FOR. ripwire's index is already the smallest
+measured, by the harness's own `index_on_disk_bytes` on the cold cells:
+
+| repo | ripwire | smallest peer index | margin today |
+|---|---|---|---|
+| cpython | **144.5 MB** | graphify 405.1 MB | 2.8x |
+| envoy | **147.6 MB** | graft 499.9 MB | 3.4x |
+| vscode | **271.3 MB** | graphify 584.2 MB | 2.2x |
+
+codegraph is 507.9 / 765.9 / 2,075.2 MB on the same repos. crg and cbm keep their indexes outside the
+checkout and are excluded from this comparison rather than assumed comparable.
+
+**Registered ceiling: ripwire's blob must remain the smallest on-disk index measured, with at least
+1.5x of margin** — under **270 MB on cpython, 333 MB on envoy, 389 MB on vscode**. The binding
+constraint is vscode at **+118 MB, i.e. +43 %**, about 2.7x the projected section.
+
+*Refuted if* the blob exceeds that ceiling on any repo in the ladder, or if the measured growth is
+published without the figure. Growth inside the ceiling is a **PASS**, recorded with the trade stated:
+the section is permitted to be fat where fat buys CPU.
+
+### Band 3b — the COLD path is deliberately out of scope (owner ruling 2026-11-14)
+
+Registered so that no later reading mistakes silence for an oversight. A cold run is
+**tree-sitter-bound**, and the profile says so: on envoy, `ingest/extractFile: tree-sitter parse` is
+**41.5 %** of cold CPU and `tags query exec+captures` another **34.5 %**, both on pool threads across
+19 threads, while `buildGraph` is **2.0 %**. The owner's ruling is that this is mostly tree-sitter and
+not worth rewriting, and this registration adopts it: **no band here claims a cold improvement, and
+none is sought.**
+
+One consequence worth stating because it would otherwise look like a missed win. Parallelising the
+serial resolve loop would cut cold **wall** time by roughly a fifth (972 ms of a 4.29 s profiled run,
+serial while everything around it is parallel) — but the comparison table's cold column is **user
+CPU**, where the same change moves ~2 % and may even increase the total. A lane that advertised "20 %
+faster cold" from that measurement would be quoting the wall figure against a published column that
+reports CPU. The two are not interchangeable and no claim here mixes them.
 
 ### Band 4 — correctness, which is the ship/no-ship gate
 
