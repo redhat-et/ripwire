@@ -332,6 +332,7 @@ for _g in \
     bm25check \
     bodiesshowncheck \
     bodydialectcheck \
+    budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \
     builtinbindcheck \
