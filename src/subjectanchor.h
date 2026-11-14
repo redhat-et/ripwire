@@ -1239,7 +1239,7 @@ inline void dropOuterUnplaced( const IngestResult& ing, std::vector<NodeId>& def
     std::erase_if( defs, [ & ]( NodeId id )
     {
         bool       unread = false;
-        const bool drop   = !outerQualifiersPlace( ing, ing.symbols[id], outer, &unread );
+        const bool drop   = !subject_detail::outerQualifiersPlace( ing, ing.symbols[id], outer, &unread );
         if( drop && unread && unreadDefs != nullptr )
         {
             ++*unreadDefs;
