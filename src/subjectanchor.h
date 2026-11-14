@@ -461,10 +461,11 @@ inline bool opensScopeNamed( std::string_view bytes, std::string_view seg )
 {
     static constexpr std::string_view kOpeners[] = { "namespace", "mod", "package", "module", "class", "struct", "impl" };
     const auto identAt = [ & ]( std::size_t i ) { return namesplit::isIdentChar( bytes[ i ] ); };
-    const auto wordBefore = [ & ]( std::size_t end )   // the identifier ending at `end` after blanks, as [start, end)
+    // the identifier ending at `end` after whitespace, line breaks included (`namespace\nrw {`, CodeRabbit 4570578087), as [start, end)
+    const auto wordBefore = [ & ]( std::size_t end )
     {
         std::size_t e = end;
-        while( e > 0 && ( bytes[ e - 1 ] == ' ' || bytes[ e - 1 ] == '\t' ) )
+        while( e > 0 && ( bytes[ e - 1 ] == ' ' || bytes[ e - 1 ] == '\t' || bytes[ e - 1 ] == '\n' || bytes[ e - 1 ] == '\r' ) )
         {
             --e;
         }

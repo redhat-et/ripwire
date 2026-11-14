@@ -354,6 +354,18 @@ done
 R="$( route "$( ask "$Q" 'what does rw::detail::ConnPool::drainAll call' )" )"
 case "$R" in *'dropped: call'*) nQ=$(( nQ + 1 )); ok "N8 control: rw:: (namespace rw) still places on the same file";; *) no "N8 control: rw::detail::ConnPool::drainAll route $R";; esac
 if [ "$nQ" -eq 3 ]; then ok "N8 counted $nQ qualifier wordings read as expected"; else no "N8 counted $nQ of 3 qualifier wordings read as expected"; fi
+# N8b (CodeRabbit 4570578087): a scope keyword and its name on two lines (Rust `mod` / `netio`) still open the scope; the keyword
+#   scan stopped at the line break, so netio:: placed nothing (red on 1c920292f: the frame word stayed). Control: zzzio::, which
+#   no scope opens, still places nothing.
+NL="$TMP/rsnl"; mkdir -p "$NL/src"
+printf 'mod\nnetio\n{\n    pub struct Conn;\n    impl Conn\n    {\n        pub fn drain_all(&self) { self.size_now(); }\n        pub fn size_now(&self) -> u32 { 0 }\n    }\n}\n\nfn main() { netio::Conn.drain_all(); }\n' >"$NL/src/lib.rs"
+printf '[package]\nname = "x"\nversion = "0.1.0"\n' >"$NL/Cargo.toml"
+( cd "$NL" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm init ) >/dev/null 2>&1
+if grep -qx 'mod' "$NL/src/lib.rs" && grep -qx 'netio' "$NL/src/lib.rs"; then ok "N8b premise: lib.rs spells mod and netio on two lines"; else no "N8b premise: the fixture lost its split mod"; fi
+R="$( route "$( ask "$NL" 'what does netio::Conn::drain_all call' )" )"
+case "$R" in *'dropped: call'*) ok "N8b netio:: (mod on the line before) places the definition";; *) no "N8b netio:: across a line break placed nothing (route $R)";; esac
+R="$( route "$( ask "$NL" 'what does zzzio::Conn::drain_all call' )" )"
+case "$R" in *'dropped: call'*) no "N8b control: zzzio:: (no scope opens it) placed the definition (route $R)";; *) ok "N8b control: zzzio:: places nothing";; esac
 
 # ═══ N9 a definition file too big to read says so (ANCHOR-READ-DISCLOSE, CodeRabbit #630) ═══
 #   Huge::drainAll lives in a 4.3 MiB file, indexed under --max-file-size=8M but past readWhole's 4 MiB. `Outer::` is in no scope or
