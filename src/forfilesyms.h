@@ -1180,15 +1180,11 @@ inline NodeId moduleScopeCallee( const IngestResult& ing, const Graph& g, NodeId
     }
     return found;
 }
-inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads, InitWindowCut& cut )
+// Every declaration of each head's name in its file that begins its initialiser with a call, in file order (a name commented out or
+// quoted earlier in the file is one too: pickInits takes the first one a file-scope call stands in, FORFILESYMS-COMMENT-DECL).
+inline std::vector<InitDecl> initDecls( const std::vector<InitHead>& heads, FileTextCache& text, InitWindowCut& cut )
 {
-    std::vector<InitRow> out;
-    if( !forFileSymsInitOn() || heads.empty() )
-    {
-        return out;
-    }
-    FileTextCache          text( ing );
-    std::vector<InitDecl>  decls;
+    std::vector<InitDecl> decls;
     for( std::size_t h = 0; h < heads.size(); ++h )
     {
         const std::string* t = text.text( heads[h].file );
@@ -1200,27 +1196,39 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
         bool                   cutHere = false;   // one init_cut per head name
         for( std::size_t at = tv.find( name ); at != std::string_view::npos; at = tv.find( name, at + 1 ) )
         {
-            if( const std::size_t p = declInitAt( tv, at, name ); p != std::string_view::npos )
+            const std::size_t p = declInitAt( tv, at, name );
+            if( p == std::string_view::npos )
             {
-                if( const std::string_view callee = initCallName( tv, p ); !callee.empty() )
-                {
-                    decls.push_back( InitDecl { h, heads[h].file, p, std::min( tv.size(), p + kForFileSymsInitSpan ), callee } );
-                    break;   // the first declaration of the name in its file
-                }
-                if( !cutHere && initRunsPastWindow( tv, p ) )
-                {
-                    cutHere = true;
-                    DISCLOSE( cut, InitWindowCut::DisclosureWhy::PastWindow, "for syms: a by=init declaration's initialiser ran past the 200-byte window before its call; init_cut= counts it" );
-                }
+                continue;
+            }
+            if( const std::string_view callee = initCallName( tv, p ); !callee.empty() )
+            {
+                decls.push_back( InitDecl { h, heads[h].file, p, std::min( tv.size(), p + kForFileSymsInitSpan ), callee } );
+            }
+            else if( !cutHere && initRunsPastWindow( tv, p ) )
+            {
+                cutHere = true;
+                DISCLOSE( cut, InitWindowCut::DisclosureWhy::PastWindow, "for syms: a by=init declaration's initialiser ran past the 200-byte window before its call; init_cut= counts it" );
             }
         }
     }
+    return decls;
+}
+inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, const ShownFiles& sf, const std::vector<InitHead>& heads, InitWindowCut& cut )
+{
+    std::vector<InitRow> out;
+    if( !forFileSymsInitOn() || heads.empty() )
+    {
+        return out;
+    }
+    FileTextCache               text( ing );
+    const std::vector<InitDecl> decls = initDecls( heads, text, cut );
     if( decls.empty() )
     {
         return out;   // COST: no declaration of a head name: no reference scan
     }
-    std::vector<NodeId> rowFor( decls.size(), kNoNode );
-    std::vector<std::uint32_t> lineFor( decls.size(), 0 );
+    std::vector<NodeId>        rowFor( decls.size(), kNoNode );
+    std::vector<std::uint32_t> lineFor( decls.size(), 0 );   // nonzero: a file-scope call to the callee starts in the window (the evidence)
     for( const Reference& r : ing.references )
     {
         if( r.role != RefRole::Call || r.isInherit || r.isDocLink || r.isCompose || r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size()
@@ -1238,8 +1246,13 @@ inline std::vector<InitRow> pickInits( const IngestResult& ing, const Graph& g, 
             }
         }
     }
+    std::vector<char> headDone( heads.size(), 0 );   // the head's declaration is its first one with a file-scope call in the window
     for( std::size_t k = 0; k < decls.size(); ++k )
     {
+        if( lineFor[k] == 0 || std::exchange( headDone[ decls[k].head ], 1 ) != 0 )
+        {
+            continue;   // a commented-out or quoted twin (no call stands in it), or a later declaration of a name already read
+        }
         const bool shown = rowFor[k] != kNoNode
                         && std::ranges::binary_search( sf.shownAt, ( std::uint64_t( ing.symbols[ rowFor[k] ].fileId ) << 32 ) | ing.symbols[ rowFor[k] ].line );
         if( rowFor[k] != kNoNode && !shown && std::ranges::none_of( out, [&]( const InitRow& o ) { return o.callee == rowFor[k] && o.of == heads[ decls[k].head ].name; } ) )

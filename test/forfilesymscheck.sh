@@ -42,6 +42,8 @@
 #        call's callee (of= the name, at= the declaration); a literal initialiser or an already-shown callee is no row; RIPWIRE_NO_INIT_ROWS=1
 #   (i5) FORFILESYMS-INIT-WINDOW-LEGEND (CodeRabbit on #646; RED on main 44f7d3326): an initialiser whose `(` sits past the 200-byte
 #        window is disclosed (<syms init_cut="1">, both legends state the window); (i5n) its short twin is an ordinary row, no init_cut
+#   (i6) FORFILESYMS-COMMENT-DECL (CodeRabbit on #646; RED on main 44f7d3326): a docstring or /* */ twin declaration earlier in the
+#        file is skipped (no file-scope call stands in it): the real declaration's callee prints
 #   (o1) overloads: the shown row's edge reaches one overload, the kept row is another: it says via="name"; twin (o2) one definition, the call is plain
 #   (h2) a held block's next= carries the origin call's ranking flags (--no-route, --anchor under RIPWIRE_DEV, --pack-top-n=N)
 #   (c2) a capture whose buffer fails to flush (RLIMIT_FSIZE, a real short write) is not read as the whole answer: stderr says so, exit 1, the stub says held="uncaptured", no rows; twin: unlimited, rows
@@ -606,6 +608,60 @@ run initshort "--for=big_registry" >"$TMP/i5n.xml"; i5nrc=$?
 if [ "$i5nrc" = 0 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i5n.xml" )" )" = "make_big@big_registry@app.py:5@app.py:1" ] && ! grep -q '<syms[^>]* init_cut=' "$TMP/i5n.xml"; then
     ok "(i5n) the short twin prints its by=\"init\" row and no init_cut"
 else no "(i5n) rc=$i5nrc rows: $( initrows "$TMP/i5n.xml" | tr '\n' '|' ) $( grep -o '<syms.*' "$TMP/i5n.xml" | head -c 300 )"; fi
+
+# (i6) FORFILESYMS-COMMENT-DECL (CodeRabbit on #646): a declaration twin inside a string or a block comment EARLIER in the file is no
+# declaration: the row comes from the real one (no file-scope call stands in the twin). Python: a module docstring; TypeScript: /* */.
+mkdir -p "$TMP/initdoc/conf" "$TMP/initcmt/src"
+cat >"$TMP/initdoc/conf/__init__.py" <<'FIX'
+"""Settings.
+
+registry = old_registry()
+was the shape before the factory moved; see make_registry below.
+"""
+
+
+def old_registry():
+    return []
+
+
+def make_registry():
+    return {}
+
+
+registry = make_registry()
+FIX
+cat >"$TMP/initcmt/src/marks.ts" <<'FIX'
+import { forgeMark } from './forge';
+
+/*
+export const Banner: any = legacyMark(
+  'Banner',
+);
+*/
+
+export interface Banner {
+  title?: string;
+}
+
+export const Banner: any = forgeMark('Banner');
+FIX
+cat >"$TMP/initcmt/src/forge.ts" <<'FIX'
+export function forgeMark(name: string): any {
+  return { name };
+}
+export function legacyMark(name: string): any {
+  return name;
+}
+FIX
+run initdoc "--for=registry" >"$TMP/i6.xml"; i6rc=$?
+run initcmt "--for=Banner" >"$TMP/i6t.xml"; i6trc=$?
+i6seen=0
+grep -q '^registry = old_registry()' "$TMP/initdoc/conf/__init__.py" && i6seen=$(( i6seen + 1 ))
+grep -q '^export const Banner: any = legacyMark(' "$TMP/initcmt/src/marks.ts" && i6seen=$(( i6seen + 1 ))
+if [ "$i6rc$i6trc" = 00 ] && [ "$i6seen" = 2 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i6.xml" )" )" = "make_registry@registry@conf/__init__.py:16@conf/__init__.py:12" ] \
+   && [ "$( sed -n 1p <<<"$( initrows "$TMP/i6t.xml" )" )" = "forgeMark@Banner@src/marks.ts:13@src/forge.ts:1" ]; then
+    ok "(i6) a docstring or block-comment twin earlier in the file is skipped: the real declaration's callee prints (saw $i6seen of 2 twins)"
+else no "(i6) rc=$i6rc/$i6trc twins $i6seen of 2: py $( initrows "$TMP/i6.xml" | head -1 ) ts $( initrows "$TMP/i6t.xml" | head -1 ) $( grep -o '<syms.*' "$TMP/i6.xml" "$TMP/i6t.xml" | head -c 500 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"
