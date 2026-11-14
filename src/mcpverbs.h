@@ -3867,6 +3867,7 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     const bool usUnindexed = usesRolesUnindexed( ing, defs );   // B31: the CLI --uses' unindexed_roles=, same predicate
+    const bool usDeclCapped = memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED: the CLI's decl_scan=, same predicate
 
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
@@ -3886,7 +3887,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
                   ( std::string( usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) ) )
                     + valueRefsDepthLegend( usDepthCut.files > 0 )
                     + declinedLiteralCallsLegend( declinedLiteralCalls > 0 )
-                    + unindexedRolesLegend( usUnindexed ) ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI
+                    + unindexedRolesLegend( usUnindexed )
+                    + memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),
                   graphCountDisclosure( rw::graphGaugeClauses( ix.g ) ).c_str(),
@@ -3898,8 +3900,9 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const bool         usSingleRoot = ing.realPaths.empty();
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}>",
-                  ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), unindexedRolesAttrXml( usUnindexed ), usRootAttr.c_str(), upage,
+    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}>",
+                  ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), unindexedRolesAttrXml( usUnindexed ),
+                  memberDeclScanAttrXml( usDeclCapped ), usRootAttr.c_str(), upage,
                   graphCountFloorAttrXml( ix.g ).c_str(),
                   ( valueRefsDepthAttrXml( ing, usDepthCut, VrRender{ usSingleRoot, usRootPrefix } )
                     + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
@@ -4293,6 +4296,16 @@ inline constexpr std::string_view kConnectTestJointLegend =
     " search joins them through (an undirected join, so not necessarily a caller of both): test-only evidence of how they are"
     " used, not a source caller ";
 
+// CONNECT-SOURCE-JOINT (b) (backhops.h connectDeclinedJoints): the reading of declined_joints= and the <dj> rows, emitted only
+// on the answer that carries them. (G4: no double hyphen.)
+inline constexpr std::string_view kConnectDeclinedJointLegend =
+    "declined_joints=N: no source function has a call edge to every terminal, and N source functions reach every terminal"
+    " by a call edge or by a DECLINED call (at most 16 in-tree candidates, none chosen; a wider declined call is not followed, so N"
+    " is a floor); <dj n= t= p=> is one of them (first 3"
+    " by path), one <e t= site= call=> per terminal, via=\"declined\" cands=K when that call is declined (K candidates its"
+    " list holds, the terminal one of them). A HEDGE for a common caller, not a proven call: no <dj> row is an edge, a node"
+    " or a count of the answer ";
+
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
 // BOUNDED rather than measured — a wide start-tag with every counter at five digits and truncated="paths"
@@ -4318,6 +4331,73 @@ inline std::size_t connectEstTokens( std::size_t payloadBytes, std::size_t extra
     const double wholeDocumentBytes = double( payloadBytes ) + double( sizeof( kConnectHeader ) - 1 )
                                     + double( kConnectRootBytes ) + double( extraBytes );
     return std::size_t( wholeDocumentBytes / kBytesPerTokenDefault + 0.5 );
+}
+
+// CONNECT-SOURCE-JOINT (b): every <dj> row's call as a hop the record reads (pinned to the declined call when it is one).
+inline void appendDeclinedJointHopWants( const ConnectResult& res, std::vector<HopWant>& hopWant )
+{
+    for( const ConnectResult::DeclinedJoint& dj : res.declinedJoints )
+    {
+        for( const ConnectResult::DeclinedLink& l : dj.links )
+        {
+            hopWant.push_back( HopWant{ dj.fn, l.terminal, true, l.ref == UINT32_MAX ? kHopNoRef : l.ref } );
+        }
+    }
+}
+
+// CONNECT-SOURCE-JOINT (b): the root's declined_joints= and its legend clause; both "" (0 bytes) when no <dj> row prints.
+inline std::pair<std::string, std::string> connectDeclinedJointHeader( const ConnectResult& res )
+{
+    if( res.declinedJoints.empty() )
+    {
+        return {};
+    }
+    return { " declined_joints=\"" + std::to_string( res.declinedJointTotal ) + "\"",
+             "<!-- ripwire connect: " + std::string( kConnectDeclinedJointLegend ) + "-->" };
+}
+
+// CONNECT-SOURCE-JOINT (b): the <dj> rows, after every group: the function, then one <e> per terminal with its hop attributes
+// at the pass's shed level (no callee sig=: the terminal's own row is printed). A hedge: never trimmed, never counted.
+struct DeclinedJointRender
+{
+    const HopFacts&    hops;
+    HopShed            shed;
+    bool               singleRoot;
+    std::string_view   rootPrefix;
+    bool&              endpointRows;
+    RedactCounts*      redact;
+    HopTally*          shown;
+    std::vector<char>* shownMark;
+};
+inline std::string connectDeclinedJointsXml( const IngestResult& ing, const ConnectResult& res, const DeclinedJointRender& r )
+{
+    std::string       out;
+    std::vector<char> esc;
+    const auto        ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
+    for( const ConnectResult::DeclinedJoint& dj : res.declinedJoints )
+    {
+        const Symbol&          s  = ing.symbols[ dj.fn ];
+        const std::string_view rp = r.singleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], r.rootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+        out += "<dj n=\"" + ex( s.name ) + "\" t=\"" + std::string( symTag( s.kind ) ) + "\" p=\"" + ex( rp ) + ":" + std::to_string( s.line ) + "\">";
+        // terminals that print the same name (`A.run`, `B.run`) get tp= as group edges do (CodeRabbit 4570578072)
+        std::vector<ConnectEdge> rows;
+        for( const ConnectResult::DeclinedLink& l : dj.links )
+        {
+            rows.push_back( ConnectEdge{ dj.fn, l.terminal } );
+        }
+        const std::vector<std::uint8_t> alike = hopAlikeRows( ing, std::span<const ConnectEdge>( rows ) );
+        for( std::size_t k = 0; k < dj.links.size(); ++k )
+        {
+            const ConnectResult::DeclinedLink& l = dj.links[ k ];
+            out += "<e t=\"" + ex( ing.symbols[ l.terminal ].name ) + "\"";
+            out += l.cands > 0 ? " via=\"declined\" cands=\"" + std::to_string( l.cands ) + "\"" : std::string();
+            std::vector<NodeId> noSig{ l.terminal };
+            out += hopEdgeXml( ing, r.hops, dj.fn, l.terminal, alike[ k ], r.shed, noSig, r.singleRoot, r.rootPrefix, r.endpointRows, r.redact, r.shown, r.shownMark );
+            out += "/>";
+        }
+        out += "</dj>";
+    }
+    return out;
 }
 
 inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g, const ConnectResult& res,
@@ -4387,6 +4467,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
         connectTestJointAttr   = " source_joint=\"none\" test_joint=\"" + ex( tj.name ) + "\" test_joint_p=\"" + ex( pathRel( tj.fileId ) ) + ":" + std::to_string( tj.line ) + "\"";
         connectTestJointLegend = "<!-- ripwire connect: " + std::string( kConnectTestJointLegend ) + "-->";
     }
+    // CONNECT-SOURCE-JOINT (b): the declined common callers' count and reading, charged like the clauses above; absent (0 bytes) otherwise
+    const auto [ connectDeclinedJointAttr, connectDeclinedJointLegend ] = connectDeclinedJointHeader( res );
     // FE-B: the reading of via="name", when some <e> of this answer carries it — charged like the clauses above
     const bool         connectHasVia = std::any_of( res.groups.begin(), res.groups.end(), [ & ]( const ConnectGroup& grp )
     {
@@ -4406,7 +4488,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) )
                                          + connectUnindexedLegend.size() + connectUnprovenAttr.size() + connectUnprovenLegend.size()
                                          + connectAmbiguousAttr.size() + connectViaLegend.size() + connectNarrowedAttr.size() + connectNarrowedLegend.size()
-                                         + connectTestJointAttr.size() + connectTestJointLegend.size();
+                                         + connectTestJointAttr.size() + connectTestJointLegend.size()
+                                         + connectDeclinedJointAttr.size() + connectDeclinedJointLegend.size();
 
     // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
@@ -4427,6 +4510,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             }
         }
     }
+    appendDeclinedJointHopWants( res, hopWant );   // CONNECT-SOURCE-JOINT (b): each <dj> row's call, pinned when declined
     // deferRedactTally: a hop call=/sig= redaction counts only on the pass whose payload is delivered (hopEdgeXml adds it)
     const HopFacts hops = hopFacts( ing, g, std::move( hopWant ), redact, &files, /*deferRedactTally=*/true );
 
@@ -4586,6 +4670,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             if( loneDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( loneDefs ) ).append( "\"" ); }
             payload.append( "/></unconnected>" );
         }
+        // CONNECT-SOURCE-JOINT (b): the declined common callers, after every group (a hedge; never trimmed, never counted)
+        payload.append( connectDeclinedJointsXml( ing, res, DeclinedJointRender{ hops, hopShed, !rootArg.empty(), rootPrefix, hopEndpointRows, redact, &hopShown, &hopShownMark } ) );
 
         // fit check against --max-tokens (0 = no budget) — over the WHOLE document (§P9.3, see kConnectHeader
         // above): the same estimator that produces the printed est_tokens, so the budget the caller sets and
@@ -4633,14 +4719,15 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + hopLegendXml.size() + hopRootXml.size() + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
-                connectNarrowedLegend, connectTestJointLegend, connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
-    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{}{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( out, "{}{}{}{}{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                connectNarrowedLegend, connectTestJointLegend, connectDeclinedJointLegend, connectViaLegend, hopLegendXml, rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{}{}{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
                   connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero
                   connectAmbiguousAttr,          // 0.6.6 D1: absent when no many-definition pick tied
                   connectNarrowedAttr,           // GV-PATH-BIND: absent when no terminal was narrowed
                   connectTestJointAttr,          // CONNECT-SOURCE-JOINT: absent unless only a test joins source terminals
+                  connectDeclinedJointAttr,      // CONNECT-SOURCE-JOINT (b): absent unless a declined common caller is printed
                   estTokens, hubFloor,
                   rw::cstr( connectCeiling ), connectOverAttr, hopRootXml,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
@@ -4674,7 +4761,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     }
 
     const ConnectPicks  picks = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
-    const ConnectResult res = connectSourceJoint( ing, g, terminals, radius );   // CONNECT-SOURCE-JOINT: never a test joint for source terminals
+    const ConnectResult res = connectDeclinedJoints( ing, g, connectSourceJoint( ing, g, terminals, radius ) );   // CONNECT-SOURCE-JOINT (a) + (b), the CLI's core
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
     if( !mem ) { err = "internal error"; return {}; }

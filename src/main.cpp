@@ -3131,6 +3131,19 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
     return prec;
 }
 
+// DEPS-NO-GRAPH: true when the verb that will answer is --deps or --arch (runArchViews reads the ingest only) and nothing
+// that runs between the graph build and dispatch reads the graph: --pin-census writes g.pinCensus; --metrics, --for and
+// --exemplar fold the in-edge CSR into fanIn and computeQMetrics; the signature emitters run computeImpure over it. Any of
+// those keeps the build, so a combination answers exactly as before. Everything else that outranks --deps/--arch is a verb
+// row above them in the precedence table, so it would have been the winner.
+bool graphUnreadByWinner( const rw::Config& c, const char* winner )
+{
+    const bool archWins = winner != nullptr && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 );
+    const bool modifierReadsGraph = !c.pinCensus.empty() || c.metrics || !c.forTask.empty() || !c.exemplar.empty() || c.packSignatures
+                                    || !c.fromTrace.empty() || !c.runTrace.empty() || c.packTaskFlag;
+    return archWins && !modifierReadsGraph;
+}
+
 void warnReportVerbPrecedence( const VerbPrecedence& prec )
 {
     if( prec.ignored.empty() )
@@ -5545,11 +5558,15 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
+    // DEPS-NO-GRAPH: --deps and --arch answer from the ingest alone (runArchViews reads d.ing, never d.g), so when one of
+    // them is the dispatch WINNER (§B11.4's own scan, not cfg.deps: `--deps --callers` still answers --deps, but a graph verb
+    // that outranks it would not) and no modifier reads the graph before dispatch, the build is skipped and `g` stays empty.
+    const bool graphUnread = graphUnreadByWinner( cfg, verbPrec.winner );
     const Graph       g               = [ & ]
     {
         try   // a failed build (fileGraphStop.h) unwinds past a joinable worker, which would std::terminate: join it, then let the stop go on
         {
-            Graph built = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+            Graph built = graphUnread ? Graph{} : buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
             joinGrepScanPrefetch( grepPhaseWorker );
             return built;
         }
@@ -5559,10 +5576,10 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             throw;
         }
     }();
-    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build and the verbs
+    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch, the ingest) and the verbs
     {
-        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build — exit 5, one stderr line" );
-        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build" ) );
+        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (--deps/--arch: after the ingest) — exit 5, one stderr line" );
+        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( graphUnread ? "ingest" : "graph build" ) );
         rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;
     }
