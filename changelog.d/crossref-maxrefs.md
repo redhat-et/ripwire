@@ -4,7 +4,8 @@
 to refuse when a repository had more than 512 local branches, which a long-lived clone with many lane branches does. They now
 read the newest 512 branches by committer date and print `refs_omitted=K` on the answer's root for the K older ones they did not
 read. `--whereis` drops `complete="1"` whenever refs were left out, and `--eval-stray` reads every labelled branch first, so a
-labelled branch is scored, not left out. A ref-name substring (`--stray-content=SUBSTR`, or `kind=` over MCP) chooses which
+labelled branch is scored, not left out, as long as the labels fit the 512-branch window; past 512 labels, `labels_omitted=K`
+counts the labelled branches left out and not scored. A ref-name substring (`--stray-content=SUBSTR`, or `kind=` over MCP) chooses which
 branches fill the 512.
 
 The window stays at 512 because both sweeps cost about the same per branch at any count. `--stray-content` runs about two git

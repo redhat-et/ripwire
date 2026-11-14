@@ -452,11 +452,11 @@ function storyCards(s, { kick, head, stories, footText }){
 
 /* ── S5n5 · quality delta: what gates, and why ───────────────────────────── */
 {
-  // docs/EVALS.md §6 "--quality-delta's twelve kinds" and the binary's own --help text. The 4×-the-bar rule for a NEW function
-  // (PR #640) is open and deliberately absent.
+  // docs/EVALS.md §6 "--quality-delta's twelve kinds" and the binary's own --help text, including the 4×-the-bar ceiling for a
+  // NEW function (PR #640, changelog.d/entry-ceiling.md).
   const s = p.addSlide(); bg(s);
   kicker(s, "// the write-time check: what YOUR change made worse — and only that", CYAN);
-  title(s, "Quality delta: twelve kinds, and a gate that only fires on old code", { size: 28 });
+  title(s, "Quality delta: twelve kinds, and a gate aimed at old code", { size: 28 });
   const kinds = ["complexity", "verbosity", "nesting", "params", "duplication", "dead-code", "api-surface", "error-masking",
                  "short-horizon-churn", "new-clone-of-reused-helper", "placeholder", "defect-shape"];
   const KW = (W - 2*MX - 5*0.1) / 6;
@@ -466,8 +466,8 @@ function storyCards(s, { kick, head, stories, footText }){
   });
   const rules = [
     ["exit 2", "only when code that EXISTED at the baseline got materially worse, and nobody acked it. That is the gate — a regression you introduced into old code.", RED],
-    ["new code", "rows for a symbol that is new are printed, never gated: they are the debt you are adding, to read. Exit 0 means nothing that already existed got worse, not \"clean\".", CYAN],
-    ["one exception", "defect-shape format-arity gates on any origin: a format string whose arguments do not match is a bug, not a taste. Measured: 0 false positives over 1,330 literal-format calls on this tree and 405 in the Python 3.13 standard library.", AMBER],
+    ["new code", "rows for a new symbol are printed: the debt you are adding, to read. They gate only at the ceiling: a new non-test function at 4× the bar (ccx 60, or 240 code lines). A moved body or a test driver never gates. Exit 0 means nothing that already existed got worse, not \"clean\".", CYAN],
+    ["any origin", "defect-shape format-arity gates on new code too: a format string whose arguments do not match is a bug, not a taste. Measured: 0 false positives over 1,330 literal-format calls on this tree and 405 in the Python 3.13 standard library.", AMBER],
     ["never gates", "placeholder — the stubs and TODOs a change adds — is an honesty check on \"done\": listed per symbol, never a failure.", MUTED],
   ];
   let y = 2.86;
@@ -477,17 +477,18 @@ function storyCards(s, { kick, head, stories, footText }){
     s.addText(b,  { x: MX+2.45, y: y+0.04, w: 9.45, h: 0.7, fontFace: SANS, fontSize: 11.5, color: MUTED, valign: "middle", margin: 0 });
     y += 0.86;
   }
-  s.addText("Why only old code gates: the change an agent must not make is the one that quietly degrades what already worked. Its new code is shown to it at \"done\".",
+  s.addText("Why old code gates: the change an agent must not make is the one that quietly degrades what already worked. Its new code is shown to it at \"done\", and gates only past 4× the bar.",
     { x: MX, y: 6.4, w: 12.09, h: 0.4, fontFace: SANS, fontSize: 11, italic: true, color: TEXT, margin: 0 });
   foot(s, "docs/EVALS.md §6, \"--quality-delta's twelve kinds\" (format-arity measured 2026-10-07) · ripwire --help, --quality-delta");
   notes(s, [
     "SOURCES (quality delta). docs/EVALS.md §6 \"--quality-delta's twelve kinds: ten measured failure modes, placeholder and defect-shape\" on main cd04d477e, and `ripwire --help=all`, --quality-delta.",
     "- The twelve kind= strings, from src/quality.h, as EVALS lists them: complexity · verbosity · nesting · params · duplication · dead-code · api-surface · error-masking · short-horizon-churn · new-clone-of-reused-helper · placeholder · defect-shape. The first ten (cyan chips) each target a failure mode measured in the literature; the last two (amber) are honesty and defect checks.",
-    "- The gate: --help, \"EXIT 2 ONLY on a major AND unacked row that is preexisting-worse or defect-shape format-arity (any origin)\"; \"new-symbol rows never gate, except defect-shape format-arity; exit 0 means 'nothing that already existed got worse', not 'clean'\".",
+    "- The gate: --help, \"new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling (4x the bar: ccx 60 or 240 lines, not a moved body, not test code, ceiling= on the row); exit 0 means 'nothing that already existed got worse', not 'clean'\".",
+    "- The ceiling: changelog.d/entry-ceiling.md (PR #640), \"A NEW complexity or verbosity row in non-test code now gates once it reaches 4 times the bar (ccx 60, or 240 code lines)\"; a moved body reads origin=\"moved\" and never gates; test drivers only report.",
     "- format-arity: EVALS §6, \"with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls), on the Python 3.13 standard library (405 calls)\" (measured 2026-10-07); \"only format-arity gates, and on any origin\".",
     "- placeholder: EVALS §6, \"an honesty check on 'done' — a stub or TODO the change added — and never gates\".",
-    "- The closing line is the design reason, stated in the skill: \"exit 2 if old code got worse (new-symbol rows never gate, except defect-shape format-arity)\" (skills/ripwire-quality-bar/SKILL.md).",
-    "- NOT ON THIS SLIDE: the gate for a new function that is already far past the bar (4× the bar, PR #640) — open, not merged; and the seeded catch-rate measurement, which is not pinned in the repo yet. Both are 0.7.0 material.",
+    "- The closing line is the design reason, stated in the skill: \"exit 2 if old code did (new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling)\" (skills/ripwire-quality-bar/SKILL.md).",
+    "- NOT ON THIS SLIDE: the seeded catch-rate measurement, which is not pinned in the repo yet (0.7.0 material).",
   ]);
 }
 
