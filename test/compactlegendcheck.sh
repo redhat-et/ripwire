@@ -382,6 +382,8 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # est_tokens= ("2244" -> "2227"), the tail legend clause (", minus names a sigs row or the syms block shows", serialize.h
 # kForFileTailLegend) and the <tail> rows: each file whose positive-score names the sigs rows already show prints p= only
 # (geometry.h, geometry.cpp, sub/consumer.cpp, notes.md; same four rows, same order). 5762 -> 5718 B. The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-11-14 (lane NO-SKIP-INGEST), grep.xml only: the corpus_oversize= sentence of the grep legend
+# (verbs_grep.h) now names the 1 GiB hard limit, the one size that still drops a file; nothing else moved.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -2267,7 +2269,7 @@ condPair D28 "the flagless map (its always-on header)" "$FIX" "" '!#files' '!#sy
 "$BIN" "$FIX" "$H1" --legend=compact >"$TMP/d.comp" 2>/dev/null </dev/null
 condArm D28 "two roots, the flagless map (roots= on its header)" "$TMP/d.full" "$TMP/d.comp" '!#roots'
 condPair D28 "--map-diff (changed= on its header)" "$REPO" "--map-diff" '!#changed'
-condPair D28 "--max-file-size=1K over a tree with a 5 KB file" "$OVR" "--max-file-size=1K" '!#skipped_oversize'
+condPair D28 "--max-file-size=1K over a tree with a 5 KB file (read lexically, NO-SKIP-INGEST)" "$OVR" "--max-file-size=1K" '!#lexical_files'
 condPair D28 "a tree of seven extensions no grammar reads" "$UNX" "" '!#unindexed' '!#unindexed_exts'
 condPair D28 "a tree whose symlink leads out of the root" "$ESC/inner" "" '!#escaped_root'
 condPair D28 "test/scipfix under --scip (precise= on its header)" "$SCIPF" "--scip=index.scip --exclude=make_index.py --no-cache" '!#precise'

@@ -9,7 +9,7 @@
 #   * a parse past its budget (4 s + 1 s/MiB, RIPWIRE_PARSE_BUDGET scales it) is cancelled and read lexically;
 #   * a .json/.yml past its full-index ceiling yields at most 256 keys (RIPWIRE_DATA_KEYS raises it), keys_cut= the rest;
 # and each such file is disclosed in the answer (lexical_files= / keys_cut= / graph_lexical= / --skipped <h> rows) and
-# WARNED once on stderr — never on stdout. Every arm builds its own fixture at test time (nothing large is committed
+# WARNED once on stderr — never on stdout (a data file warns only when keys were cut: arm 7). Every arm builds its own fixture at test time (nothing large is committed
 # where whole-repo runs would see it). Negative arms count what they saw and FAIL on zero.
 #
 #   bash test/noskipingestcheck.sh [BIN]     # main d624cff5f FAILS arms 1-5 (the files are skipped; arm 2 hits its alarm)
@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "noskipingestcheck: BIN=$BIN"
@@ -64,6 +64,8 @@ for k in range(7):
 w(f"{t}/small/a.c", "int f(void)\n{\n    return g();\n}\nint g(void)\n{\n    return 1;\n}\n")
 w(f"{t}/small/cfg.json", json.dumps({"name": "x", "scripts": {"build": "make"}}, indent=2))
 w(f"{t}/small/c.yaml", "top:\n  inner: 1\n")
+# 6. a .json past its ceiling whose 100 top-level keys all fit under the key cap: nothing is cut, so nothing warns
+w(f"{t}/fit/d.json", json.dumps({f"fit_{j}": "v" * 3000 for j in range(100)}, indent=2))
 EOF
 
 # ── 1. a code file over --max-file-size is read lexically, its symbols and calls reachable ───────────────────────────
@@ -131,6 +133,16 @@ cmp -s "$TMP/4c" "$TMP/4d" && ok "4: warm run at the default ceiling equals the 
 [ "$( warns "$TMP/5.err" )" = 6 ] && grep -q 'and 2 more file(s) met an index limit' "$TMP/5.err" \
     && ok "5: seven events → five lines + 'and 2 more'" || no "5: $( warns "$TMP/5.err" ) warning lines: $( tail -1 "$TMP/5.err" )"
 [ "$( attr "$TMP/5.map" lexical_files )" = 7 ] && ok "5: lexical_files=7 (every file disclosed in the answer)" || no "5: $( hdr "$TMP/5.map" )"
+
+# ── 7. keys-bounded with nothing cut: disclosed in the answer, silent on stderr (the key cap is the limit that loses data) ──
+"$BIN" "$TMP/fit" --no-cache --legend=compact >"$TMP/7.map" 2>"$TMP/7.err"
+fsz="$( wc -c < "$TMP/fit/d.json" | tr -d ' ' )"; sy="$( attr "$TMP/7.map" symbols )"
+if [ "${fsz:-0}" -gt 262144 ] && [ "${sy:-0}" = 100 ]; then
+    [ "$( attr "$TMP/7.map" lexical_files )" = 1 ] && ok "7: a ${fsz} B .json with 100 keys: lexical_files=1, symbols=100" || no "7: $( hdr "$TMP/7.map" )"
+    [ "$( warns "$TMP/7.err" )" = 0 ] && ok "7: no warning when no key was cut" || no "7: warned: $( head -1 "$TMP/7.err" )"
+else
+    no "7: premise: fit/d.json is ${fsz:-?} B (want > 262144) with symbols=${sy:-?} (want 100)"
+fi
 
 # ── 6. negative arm: a small corpus meets no limit — no warning, no attribute (counts what it saw) ─────────────────
 "$BIN" "$TMP/small" --no-cache --legend=compact >"$TMP/6.map" 2>"$TMP/6.err"

@@ -190,7 +190,7 @@ TABLE = {
     ( "src/serialize.h", "fitAttr" ):  ( 1, "safe",       "fitAttr[96]: two %zu plus the literal ' over_ceiling=1'." ),
     ( "src/serialize.h", "attr" ):     ( 2, "safe",       "attr[352] x2: the per-symbol metric attrs. Widest 26 lit + 4x10 digits + 11 role + qbuf(<=95) + ambs(<=35: amb= + lpin=) + kbuf(<=23) = 230 B." ),
     ( "src/serialize.h", "tail" ):     ( 3, "safe",       "tail[192] x3: the <d> row tail. Widest 34 lit+digits + inAttr(<=23) + lens(qbuf, <=79) + pure(9) = 145 B. The third (lane/lean-answers-068, sigRowTail's zero-elision branch) prints cxAttr/ccxAttr/inAttr pre-formatted, each omitted at 0 — never wider than the second." ),
-    ( "src/serialize.h", "hdr" ): ( 14, "safe",       "hdr[64] x2 (packBodies/packOutline) (14: arch-honest — packDeps' <f> row for a no-edge file writes includes= and a language tag, hdr[144], one integer + a label of at most 8 B: far under the buffer; 13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
+    ( "src/serialize.h", "hdr" ): ( 16, "safe",       "hdr[64] x2 (packBodies/packOutline) (16: NO-SKIP-INGEST — the JSON map header gains \"lexical_files\":%zu and \"keys_cut\":%zu, one integer each into the existing hdr; 14: arch-honest — packDeps' <f> row for a no-edge file writes includes= and a language tag, hdr[144], one integer + a label of at most 8 B: far under the buffer; 13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
     ( "src/serialize.h", "db" ):       ( 1, "safe",       "db[64 + kPageDisclosureCap]: <deps files=...> plus pageDisclosure's own capped buffer, sized against that cap by construction." ),
     ( "src/serialize.h", "hb" ): ( 4, "latent",     "hb[176]: <health .../> (4: arch-honest — the same line without ccd/acd/nccd/shape when no measured file is left: two integers, 64 B at most; masked_files= is appended through the writer, outside the buffer); shape= is a fixed vocabulary but acd/nccd are %.1f/%.2f on DOUBLES, formally unbounded. Realistic worst case 66 lit + 60 digits + 24 float + 10 shape = 160 B, ~16 B of margin. Truncation drops the '/>' and orphans the element." ),
     ( "src/serialize.h", "fit" ):      ( 1, "safe",       "fit[160]: the JSON max_tokens/fit_bytes twin; the %s is the literal ',\"over_ceiling\":true'." ),
@@ -224,7 +224,7 @@ NUMERIC_ONLY = {
     ( "src/editcheck.h", "callersOpen" ): 1,
     ( "src/editcheck.h", "cc" ): 1,
     ( "src/editcheck.h", "defsAttr" ): 1,
-    ( "src/graphlegend.h", "buf" ): 7,
+    ( "src/graphlegend.h", "buf" ): 9,   # NO-SKIP-INGEST: +2 graph_lexical= (XML + JSON gauge, one integer each)
     ( "src/handoff.h", "degBuf" ): 1,
     ( "src/handoff.h", "sBuf" ): 1,
     ( "src/htmlexport.h", "rankBuf" ): 1,

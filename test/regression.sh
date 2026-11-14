@@ -707,7 +707,6 @@ for _g in \
     matchcapturecheck \
     matchgrammarcheck \
     maxfilesizecheck \
-    noskipingestcheck \
     mcpattrparitycheck \
     mcpaudit4hardencheck \
     mcpclidiffcheck \
@@ -784,6 +783,7 @@ for _g in \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
+    noskipingestcheck \
     notecanoncheck \
     notescheck \
     notesdegradecheck \

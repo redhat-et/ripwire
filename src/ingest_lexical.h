@@ -364,26 +364,40 @@ inline void extractYamlKeys( std::string_view bytes, DataKeySink& sink )
 inline std::uint32_t extractLexicalDataKeys( std::uint32_t fileId, Lang lang, std::string_view bytes, std::vector<RawDef>& defs )
 {
     DataKeySink sink{ fileId, lang, defs, dataFileKeyCap() };
-    if( lang == Lang::Json )
+    switch( lang )
     {
-        extractJsonKeys( bytes, sink );
-    }
-    else
-    {
-        extractYamlKeys( bytes, sink );
+        case Lang::Json: extractJsonKeys( bytes, sink ); break;
+        default:         extractYamlKeys( bytes, sink ); break;
     }
     return sink.cut;
 }
 
-inline bool isDataKeysLang( Lang lang ) noexcept
-{
-    return lang == Lang::Json || lang == Lang::Yaml;
-}
-
-// The full-index ceiling of a data language (0: none — code is never cut by its kind, only by --max-file-size).
+// The full-index ceiling of a data language (0: none — code is never cut by its kind, only by --max-file-size). A switch,
+// not `==` chains: test/langidentitycheck.sh ratchets the shared-file Lang equality predicates.
 inline std::size_t dataFullIndexCeiling( Lang lang ) noexcept
 {
-    return lang == Lang::Json ? kMaxJsonConfigBytes : lang == Lang::Yaml ? kMaxYamlConfigBytes : 0;
+    switch( lang )
+    {
+        case Lang::Json: return kMaxJsonConfigBytes;
+        case Lang::Yaml: return kMaxYamlConfigBytes;
+        default:         return 0;
+    }
+}
+
+// The warning's spelling of a data language ("" for any other).
+inline std::string_view dataLangWord( Lang lang ) noexcept
+{
+    switch( lang )
+    {
+        case Lang::Json: return "json";
+        case Lang::Yaml: return "yaml";
+        default:         return "";
+    }
+}
+
+inline bool isDataKeysLang( Lang lang ) noexcept
+{
+    return dataFullIndexCeiling( lang ) != 0;
 }
 
 // The mode a file of this size and language is indexed in BEFORE any parse runs: Parsed (then the budget decides), the
@@ -464,10 +478,17 @@ inline std::string limitWarningLine( const std::string& path, const FileHealth& 
                                 path, size, parseBudgetSecondsFor( health.fileBytes ) );
         case FileIndexMode::DataKeysBounded:
         {
+            // The key cap is the limit that loses data; a data file past its full-index ceiling whose top-level keys all fit
+            // is fully listed at that depth, so it warns nothing (lexical_files= and its keys-bounded row still disclose it).
+            // A repo's own big fixtures (this one has 15) would otherwise put a warning on every run of every verb.
+            if( health.keysCut == 0 )
+            {
+                return {};
+            }
             const Lang        lang    = le != nullptr ? le->lang : Lang::Json;
             const std::size_t ceiling = dataFullIndexCeiling( lang );
             return std::format( "ripwire: warning: {} ({}) exceeds the {} full-index ceiling {} KiB; top-level keys indexed lexically, {} cut at {} (raise with RIPWIRE_DATA_KEYS=N)\n",
-                                path, size, lang == Lang::Yaml ? "yaml" : "json", ceiling / 1024, health.keysCut, dataFileKeyCap() );
+                                path, size, dataLangWord( lang ), ceiling / 1024, health.keysCut, dataFileKeyCap() );
         }
         case FileIndexMode::LexicalNestRefused:
         case FileIndexMode::Parsed:
