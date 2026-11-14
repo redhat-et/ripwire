@@ -1438,8 +1438,13 @@ inline bool handlerShapeGates( std::string_view shape, Lang lang ) noexcept
 }
 
 // Is this error-masking hit one of the classic always-gating rows, or a widened shape that gates in `lang`?
+// failure-default gates in no language: its hand-read precision as a defect is under the 0.8 bar everywhere.
 inline bool errorMaskHitGates( std::string_view id, Lang lang ) noexcept
 {
+    if( id == kShapeFailureDefault )
+    {
+        return false;
+    }
     return !( id == kShapeLogOnly || id == kShapeRethrowOnly ) || handlerShapeGates( id, lang );
 }
 

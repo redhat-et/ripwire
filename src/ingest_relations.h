@@ -445,16 +445,6 @@ inline BaseScopeHit findOutward( TSNode site, TSNode self, std::string_view name
     return BaseScopeHit{};
 }
 
-// the tree root above `n` (the global scope a C++ `::Mid` names)
-inline TSNode rootOf( TSNode n ) noexcept
-{
-    for( TSNode p = parentOf( n ); !ts_node_is_null( p ); p = parentOf( p ) )
-    {
-        n = p;
-    }
-    return n;
-}
-
 // Resolve `segs` from the class header at `site` (owned by `self`) and return the binding's encoding for RawRef::baseBind:
 // the FIRST segment through findOutward (only the global scope for an `absolute` `::X`), each further segment inside the
 // body the previous one named.
