@@ -9,8 +9,11 @@
 // doc or web page each figure was read from, quoted. A claim about a change that has not merged yet
 // says "pending merge: #N" in those notes and lives in a commit of its own, so it can be kept or dropped
 // when that PR lands; once it lands the note says "merged: #N (<merge commit>)" instead, and the figure
-// is re-checked against the merged tree. No note on this deck is pending as of main a5229aca (the 2026-09-30 refresh: 25 grammars, nine wrap agents, the
-// since-0.6.1 slide and the field-report slide). A double-braced MEASURE placeholder is a figure that moves with the tree and
+// is re-checked against the merged tree. As of main cd04d477e (the 2026-11-13 refresh: 27 grammars; answers and memory
+// release by release; 0.6.9 and 0.6.10; main since 0.6.10; quality delta; the community; the 0.7.0 axes, with no number;
+// the three August "what was added" slides, the sprint slide and the panel-calibration slide dropped) the only note that may
+// be pending is the consumer slide's (#641), which lives in a commit of its own. The 2026-09-30 refresh was main a5229aca.
+// Machine-specific memory figures are PERCENT changes only: absolute megabytes are published only from the 0.7.0 run. A double-braced MEASURE placeholder is a figure that moves with the tree and
 // is re-measured on the merged binary before the deck is rendered; the deck is never rendered with one left in it.
 const pptxgen = require("pptxgenjs");
 
@@ -137,9 +140,10 @@ function storyCards(s, { kick, head, stories, footText }){
     { x: wireX+0.3, y: 5.3, w: wireW-0.6, h: 0.62, fontFace: SANS, fontSize: 15, color: TEXT, valign: "top", margin: 0 });
   s.addText("Every truncation is disclosed, and every guess says how many it chose from.",
     { x: wireX+0.3, y: 5.98, w: wireW-0.6, h: 0.42, fontFace: SANS, fontSize: 12.5, color: MUTED, valign: "top", margin: 0 });
-  foot(s, "Apache-2.0  ·  single binary  ·  hermetic build (proven with the network off)  ·  25 vendored tree-sitter grammars");
+  foot(s, "Apache-2.0  ·  single binary  ·  hermetic build (proven with the network off)  ·  27 vendored tree-sitter grammars");
   notes(s, [
     "SOURCES (cover)",
+    "- \"27 vendored tree-sitter grammars\" (refreshed 2026-11-13, main cd04d477e): CHANGELOG.md [0.6.8] \"Added — Clojure\" (#349, thanks @tag-und-nacht) made 26; changelog.d/proto-index.md (on main, unreleased) vendors coder3101/tree-sitter-proto v0.6.0 for Protocol Buffers, the 27th. third_party/deps/ holds 26 grammar projects (clojure/ and proto/ among them), tree-sitter-typescript supplying two. README.md on main still says 26: it predates proto. The lines below are the history of the count.",
     "- \"25 vendored tree-sitter grammars\" — CHANGELOG.md [0.6.2], \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\", PR #233 (\"Thanks to @sclyde.\"). README.md on main a5229aca: \"25 vendored grammars\"; third_party/deps/ holds 24 grammar projects, tree-sitter-typescript supplying two (typescript and tsx). Astro (#320) adds no grammar: it rides the TypeScript one.",
     "- Before GDScript: 24 — merged: #126 (merge commit 1ad9184a, 2026-09-11), which vendors the Kotlin grammar (PR #126 body: \"vendored fwcd/tree-sitter-kotlin grammar\"). Before #126 the count was 23. On main 40a1895b: README.md, \"24 vendored grammars\", and third_party/deps/ holds a kotlin/ directory.",
     "- The 23 it builds on: commit 680a0a3d,\"It is 23: 22 upstream projects under third_party/deps/, with tree-sitter-typescript supplying both typescript and tsx\"; PR #106's title, \"Dart: a 23rd grammar …\"; README.md, \"23 vendored grammars\".",
@@ -158,9 +162,9 @@ function storyCards(s, { kick, head, stories, footText }){
   ], { x: MX, y: 1.95, w: 6.1, h: 3.2, fontFace: SANS, fontSize: 16.5, color: TEXT, margin: 0 });
 
   card(s, 7.25, 1.95, 5.35, 2.15);
-  stat(s, "0.108 s", "median answer, warm index — round 4, all arms one machine one day, N = 60", 7.35, 2.2, 5.15, CYAN, {});
+  stat(s, "0.108 s", "median answer, warm index — round 4 (August 2026, historical), all arms one machine one day, N = 60", 7.35, 2.2, 5.15, CYAN, {});
   card(s, 7.25, 4.3, 5.35, 2.15);
-  stat(s, "−39.4%", "token ceiling vs the un-routed baseline — LocBench cost ledger, N = 243", 7.35, 4.55, 5.15, GREEN, {});
+  stat(s, "−39.4%", "token ceiling vs the un-routed baseline — LocBench cost ledger (August 2026), N = 243", 7.35, 4.55, 5.15, GREEN, {});
   s.addText("Speed caveat travels with the number: ripwire answers from a warm, pre-built index, and round 4 measured its index cost too — 0.31 s, tabulated beside the competitors' rather than omitted. Measured 2026-08-08, before 0.6.0's performance work; not re-measured since.",
     { x: MX, y: 5.5, w: 6.1, h: 1.2, fontFace: SANS, fontSize: 11.5, color: MUTED, margin: 0 });
   foot(s, "bench/headtohead/r4-2026-08-06/ · bench/locbench/ — every figure on this deck names its instrument");
@@ -172,13 +176,14 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// one binary, the whole pipeline", CYAN);
   notes(s, [
     "SOURCES (grammar count and language row)",
+    "- 2026-11-13 refresh: 27 grammars — Clojure (CHANGELOG.md [0.6.8], #349, thanks @tag-und-nacht) and Protocol Buffers (changelog.d/proto-index.md on main cd04d477e: messages, enums, services and rpcs are definitions; a schema has no call edges). reST and Sphinx documents: CHANGELOG.md [0.6.10] \"Added — reST and Sphinx documents become real units (#409, thanks @muayyad-alsadi)\" — sections, like markdown headings; no new grammar. The language row wraps to three lines at 12 pt; check it is not clipped in the render.",
     "- \"25 vendored grammars\", GDScript and Astro in the language row — CHANGELOG.md [0.6.2] \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\" (#233, @sclyde); CHANGELOG.md [0.6.4] \"### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)\". The language row wraps to three lines at 12 pt; check it is not clipped in the render.",
     "- Before GDScript: \"24 vendored grammars\" and Kotlin in the language row — merged: #126 (merge commit 1ad9184a, 2026-09-11); PR body, \"Adds Kotlin (.kt) language support: vendored fwcd/tree-sitter-kotlin grammar\". Before #126: 23 (commit 680a0a3d) and no Kotlin. README.md on main 40a1895b says \"24 vendored grammars\".",
   ]);
   title(s, "Crawl → parse → resolve → rank → emit. Deterministic, end to end.");
   const stages = [
     ["crawl",   "the tree, no VCS needed"],
-    ["parse",   "tree-sitter, 25 vendored grammars"],   // CHANGELOG [0.6.2] "the 25th vendored grammar" (GDScript, #233)
+    ["parse",   "tree-sitter, 27 vendored grammars"],   // Clojure: CHANGELOG [0.6.8] (#349); Protocol Buffers: changelog.d/proto-index.md
     ["resolve", "references → call graph"],
     ["rank",    "Personalized PageRank"],
     ["emit",    "minified XML, one line"],
@@ -194,7 +199,7 @@ function storyCards(s, { kick, head, stories, footText }){
   const props = [
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
-    ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Kotlin · Ruby · PHP · Lua · Elixir · Dart · GDScript · Bash · C# · JSON · TOML · YAML · Markdown — 25 vendored grammars, Astro frontmatter on the TypeScript one; markdown headings are real symbols"],   // GDScript: CHANGELOG [0.6.2] (#233); Astro: CHANGELOG [0.6.4] (#320)
+    ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Kotlin · Ruby · PHP · Lua · Elixir · Dart · GDScript · Clojure · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — 27 vendored grammars, Astro on the TypeScript one; markdown and reST headings are real symbols"],   // GDScript: CHANGELOG [0.6.2] (#233); Astro: [0.6.4] (#320); Clojure: [0.6.8] (#349); reST: [0.6.10] (#409); proto: changelog.d/proto-index.md
     ["agent-native", "an MCP server and 194 long flags behind one `--help` that is always the authority"],
   ];
   // Row height carries the LONGEST body (the language line, which wraps to three at this width),
@@ -215,7 +220,7 @@ function storyCards(s, { kick, head, stories, footText }){
   title(s, "Seven families of questions it answers");
   const fams = [
     ["understand cold",  "What is this repo, and what matters in it?",          "--for  --tree  --lego  --exemplar  --recall  --pack-task  --token-budget"],
-    ["navigate",         "Who calls this? Safe to change or delete? Which tests?", "--callers  --callees  --uses  --impact  --path  --connect  --affected  --situ  --test-gate  --from-trace  --pattern  --safe-delete"],
+    ["navigate",         "Who calls this? Safe to change or delete? Which tests?", "--callers  --callees  --uses  --defs  --impact  --path  --connect  --affected  --situ  --test-gate  --from-trace  --pattern  --safe-delete"],
     ["detail ladder",    "Show me more — but only where it pays.",              "--detail  --pack-signatures  --outline  --expand  --compress"],
     ["quality & risk",   "Where is the risk, and did I just add some?",         "--quality-panel  --quality-delta  --dmm  --biggest-first  --ensemble  --context-ratio  --nonlocal-state  --field-affinity  --hotspots  --lint  --clones"],
     ["self-diagnosis",   "Is my setup actually working?",                       "--doctor  --skipped"],
@@ -230,7 +235,7 @@ function storyCards(s, { kick, head, stories, footText }){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 194 long flags; docs/COMMANDS.md carries an entry for every one of them, 172 with a recorded invocation and its output");
+  foot(s, "--help is generated from the binary's own flag table — 194 long flags; docs/COMMANDS.md carries an entry for every one of them, 173 with a recorded invocation and its output");   // docs/docs_commands_build.py on main cd04d477e: "173 sample(s)"
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -260,93 +265,230 @@ function storyCards(s, { kick, head, stories, footText }){
   foot(s, "and --pr-context when you are reviewing someone else's diff — per-file blast radius, tests-to-run, hotspot flags");
 }
 
-/* ── S5b · what shipped since the last deck refresh ─────────────────────── */
+/* ── S5n1 · answers, release by release ─────────────────────────────────── */
 {
+  // README.md's "Measured — Working toward the best code helper for agents" table, as shares of each set (the counts are
+  // the table's; the percentages are arithmetic on them). In-sample questions: progress between releases, never held-out.
   const s = p.addSlide(); bg(s);
-  kicker(s, "// new since 2026-08-15 — each figure re-derived on the binary that ships", CYAN);
-  title(s, "What 2026-08-15 to 2026-08-23 added", { size: 32 });
-  const shipped = [
-    ["--pattern", "search by code SHAPE, not by node kinds",
-     "foo($X, ...) across 13 grammar objects / 11 languages. On this repo VERIFY($X) finds 116 hits over 896 eligible files, each with its enclosing symbol. A pattern no served grammar resolves REFUSES (exit 1) instead of reporting hits=0.", CYAN],
-    ["--safe-delete", "“can I delete this?” in one call",
-     "callers + transitive radius + every read/write/import site + how much of that radius a test reaches. risk= names what was FOUND — never a go/no-go verdict.", CYAN],
-    ["--impact importers=", "the second, weaker reach",
-     "the files that include/require a file defining SYM, with their own cap pair — NEVER summed into reaches=, because files and symbols are different units. IngestResult: reaches=0, importers=70.", CYAN],
-    ["compact --for bundles", "bodies were 52.7% of every conceptual byte",
-     "the subtoken+body route now ships the ranked map plus one-hop edge context, disclosed as bundle=compact bodies=0. 15-query class B: 184,857 B → 95,256 B, −48.5%, all 11 decisive markers still present. --auto-bodies is a permanent opt-out.", GREEN],
-    ["corroborated callers", "shared= on --pack-task rows",
-     "a neighbour reached by four of the bundle's anchors sorts above one reached by a single anchor — omitted at 1, which is what every 1-hop row satisfies anyway.", CYAN],
-    ["per-rule --lint roll-up", "a capped view stops hiding whole rules",
-     "on this repository 16 of the 31 rules that fired contribute ZERO shown rows — 588 findings whose only evidence is their count=. A rule no corpus language registers carries applicable=0, so its zero is inertness, not a measurement.", AMBER],
+  kicker(s, "// same questions, commands and grader each release — in-sample", AMBER);
+  title(s, "More answers complete in one call, release by release", { size: 30 });
+  const rel = ["0.6.5", "0.6.7", "0.6.8", "0.6.9", "0.6.10"];
+  const pct = (xs, n) => xs.map((x) => Math.round(1000 * x / n) / 10);
+  s.addChart("bar", [
+    { name: "everyday (163)",        labels: rel, values: pct([50, 81, 112, 129, 132], 163) },
+    { name: "spans several files (39)", labels: rel, values: pct([4, 4, 5, 12, 19], 39) },
+    { name: "large repositories (56)",  labels: rel, values: pct([2, 5, 14, 23, 30], 56) },
+  ], {
+    x: MX, y: 1.62, w: 7.3, h: 4.75, barDir: "col", barGrouping: "clustered",
+    chartColors: [CYAN, GREEN, AMBER],
+    showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0", dataLabelColor: TEXT, dataLabelFontSize: 9, dataLabelFontFace: SANS,
+    catAxisLabelColor: TEXT, catAxisLabelFontSize: 11, catAxisLabelFontFace: MONO,
+    valAxisLabelColor: MUTED, valAxisLabelFontSize: 9, valAxisMaxVal: 100, valAxisMinVal: 0, valAxisMajorUnit: 25, valAxisLabelFormatCode: '0"%"',
+    valGridLine: { color: "232D3D", size: 0.5 }, catGridLine: { style: "none" },
+    showLegend: true, legendPos: "t", legendColor: MUTED, legendFontSize: 10, legendFontFace: SANS,
+    showTitle: false, plotArea: { fill: { color: BG } }, chartArea: { fill: { color: BG }, border: { color: BG } },
+    barGapWidthPct: 50,
+  });
+  s.addText("% of each set answered completely: every required item in the first answer, nothing wrong", { x: MX, y: 6.42, w: 7.3, h: 0.28, fontFace: SANS, fontSize: 10, italic: true, color: MUTED, margin: 0 });
+  const RX = 8.15, RW = W - MX - RX;
+  const facts = [
+    ["50 → 132", "of 163 everyday questions complete, 0.6.5 to 0.6.10", CYAN],
+    ["3 → 0", "everyday answers that stated something wrong; 0 in every release since 0.6.7", GREEN],
+    ["22.5 → 18.0 KB", "bytes per complete everyday answer; it fell to 15.1 KB in 0.6.9, then 0.6.10's larger answers bought more required items", MUTED],
   ];
-  let y = 1.72;
-  for (const [flag, what, detail, c] of shipped){
-    card(s, MX, y, 12.09, 0.79);
-    s.addText(flag,   { x: MX+0.18, y: y+0.05, w: 2.55, h: 0.34, fontFace: MONO, fontSize: 12, bold: true, color: c, margin: 0 });
-    s.addText(what,   { x: MX+0.18, y: y+0.40, w: 2.55, h: 0.34, fontFace: SANS, fontSize: 9,  italic: true, color: MUTED, margin: 0 });
-    s.addText(detail, { x: MX+2.95, y: y+0.05, w: 9.0,  h: 0.69, fontFace: SANS, fontSize: 10.5, color: TEXT, valign: "middle", margin: 0 });
-    y += 0.87;
+  let y = 1.62;
+  for (const [big, lbl, c] of facts){
+    card(s, RX, y, RW, 1.0);
+    s.addText(big, { x: RX+0.2, y: y+0.08, w: RW-0.4, h: 0.42, fontFace: MONO, fontSize: 18, bold: true, color: c, margin: 0 });
+    s.addText(lbl, { x: RX+0.2, y: y+0.5, w: RW-0.4, h: 0.46, fontFace: SANS, fontSize: 9.5, color: MUTED, valign: "top", margin: 0 });
+    y += 1.08;
   }
-  card(s, MX, 6.95, 12.09, 0.0, CARD2);
+  card(s, RX, y, RW, 6.9 - y, CARD2);
   s.addText([
-    { text: "And two languages: PHP and Lua, ", options: { color: TEXT, bold: true } },
-    { text: "each shipped with its floor stated rather than implied — PHP's run-time dispatch ($fn(), call_user_func, __call) names its callee at run time and is a declared floor; a Lua corpus reports no inheritance edges, because metatable inheritance has no syntax to read.", options: { color: MUTED } },
-  ], { x: MX, y: 6.92, w: 12.09, h: 0.5, fontFace: SANS, fontSize: 10, margin: 0 });
+    { text: "Read it as progress, not as proof. ", options: { color: AMBER, bold: true } },
+    { text: "ripwire was developed against these questions. Large repositories: envoy, nushell, terraform, cpython, vscode, cockroach and zed. A held-out comparison, with other tools, comes with 0.7.0.", options: { color: MUTED } },
+  ], { x: RX+0.2, y: y+0.08, w: RW-0.4, h: 6.9 - y - 0.16, fontFace: SANS, fontSize: 10, valign: "middle", margin: 0 });
+  foot(s, "README.md, \"Measured\": the answers-by-release table; its footnote defines complete / partial / none");
   notes(s, [
-    "SOURCES (the two live-repo figures on this slide — both re-derived 2026-09-11 on main 40a1895b, because they move with the tree)",
-    "- --pattern: `git archive 40a1895b | tar -x -C DIR; ripwire DIR --pattern='VERIFY($X)' --no-cache` → hits=\"116\" eligible_files=\"896\" skipped_files=\"0\" of_files=\"1961\", grammars= naming 13 objects over 11 languages. It read 101 hits over 625 eligible files when the slide was written on 2026-09-06; the tree has grown since.",
-    "- --lint: `ripwire DIR --lint --no-cache` over the same archive → 39 rule rows, 31 with count>0, of which 16 carry shown_rows=\"0\", totalling 588 findings. It read 14 of 31 and 368 findings on 2026-09-06.",
+    "SOURCES (answers by release). README.md on main cd04d477e, section \"Measured\" → \"Working toward the best code helper for agents\": the table and the paragraph under it. CHANGELOG.md [0.6.10] summary carries the same 0.6.9 → 0.6.10 figures.",
+    "- Everyday (163): complete 50 / 81 / 112 / 129 / 132 for 0.6.5 / 0.6.7 / 0.6.8 / 0.6.9 / 0.6.10. Several files (39): 4 / 4 / 5 / 12 / 19. Large repositories (56): 2 / 5 / 14 / 23 / 30. The chart plots each as a share of its set (arithmetic on the table's counts, rounded).",
+    "- Wrong row: \"Everyday answers that stated something wrong | 3 | 0 | 0 | 0 | 0\".",
+    "- Bytes: \"Bytes per complete answer (everyday / large repos) | 22.5 KB / 182 KB | … | 15.1 KB / 60 KB | 18.0 KB / 66 KB\"; footnote: the extra 0.6.10 bytes \"bought 10 more required items on everyday questions, 30 more on multi-file questions and 16 more on large repositories\".",
+    "- Caveat, the README's own words: \"These are in-sample questions: ripwire was developed against them, so the table shows progress between releases, not held-out performance. A held-out comparison comes with 0.7.0.\"",
+    "- The README footnote also states: the 0.6.5 to 0.6.8 columns are the numbers published with those releases (today's scripts read them 2, 1 and 1 partial answers lower); one everyday question complete in 0.6.9 reads none in 0.6.10 (textual-09, a true test edge counted as a wrong name by the mechanical check). The deck quotes the table as published.",
+    "- NOT ON THIS SLIDE: answer counts measured on main after 0.6.10 (they live in orchestration notes, not in the repo), and any comparison with other tools (reserved for 0.7.0).",
   ]);
 }
 
-/* ── S5b · new since 2026-08-23 ─────────────────────────────────────────── */
+/* ── S5n2 · 0.6.9 and 0.6.10 at a glance ────────────────────────────────── */
 {
+  // Same four-quadrant listCard shape as 0.6.0 and 0.6.1. Window: v0.6.9 (2026-10-29) and v0.6.10 (2026-11-08). Every row is
+  // from CHANGELOG.md's release summaries; the performance rows are per-PR percent changes on one machine, as those summaries say.
   const s = p.addSlide(); bg(s);
-  kicker(s, "// new since 2026-08-23 — each figure measured, dated, and re-derivable", CYAN);
-  title(s, "What 2026-08-23 to 2026-08-30 added", { size: 32 });
-  const rows = [
-    ["--slice-flow", "cross-statement data-flow slicing\n(ARISE, arXiv:2605.03117)",
-     "The paper's own slicer — reaching-definition edges, a seed plus a direction, a bounded BFS that stops at function boundaries — implemented and MEASURED on a registered fix-commit protocol: flow rows lift function-level added-line recall 0.163 → 0.198 at 25% of --expand's whole-body bytes (whose recall is 1.0 by construction). 7 commits / 38 instances, cpp only — a thin corpus, reported as thin.", CYAN],
-    ["--slice, first numbers", "the 2026-08-28 registered contract,\nfinally measured",
-     "Per-variable line-recall 0.726, hit-all rate 0.632 — a FLOOR under a noisy relevance oracle: every inspected miss was the protocol's word-regex matching identifiers inside comments and string literals, occurrences the slicer correctly refuses to call variable uses. No inspected instance showed a real occurrence the slice dropped.", CYAN],
-    ["~1350× on --expand", "the secret-redaction sweep was\nquadratic in LINE length",
-     "One selector in a 2.1 MB / 768-line minified yarn bundle NEVER completed — killed at 1,343.9 s of user CPU with an empty output file; 196.7 s is the only clean lower bound — and now answers in 0.46 s warm. The 20 KB single-line fixture: 23.02 s → 0.017 s. A pure memoization, so an output no-op: 120/120 invocations byte-identical; gated on behaviour, the timings a ledger row and never a red-CI threshold.", GREEN],
-  ];
-  let y = 1.72;
-  for (const [flag, what, detail, c] of rows){
-    card(s, MX, y, 12.09, 1.52);
-    s.addText(flag,   { x: MX+0.18, y: y+0.10, w: 2.55, h: 0.40, fontFace: MONO, fontSize: 13, bold: true, color: c, margin: 0 });
-    s.addText(what,   { x: MX+0.18, y: y+0.52, w: 2.55, h: 0.85, fontFace: SANS, fontSize: 9,  italic: true, color: MUTED, margin: 0 });
-    s.addText(detail, { x: MX+2.95, y: y+0.10, w: 9.0,  h: 1.32, fontFace: SANS, fontSize: 11, color: TEXT, valign: "middle", margin: 0 });
-    y += 1.70;
-  }
-  foot(s, "sources: docs/EVALS.md §--slice-flow (registered protocol + per-instance ledger) · bench/PROFILE.md 2026-08-30 — no number travels without its caveat");
+  kicker(s, "// 0.6.9 (2026-10-29) and 0.6.10 (2026-11-08); each row names its source", CYAN);
+  title(s, "0.6.9 and 0.6.10: hedged, not wrong — and much lighter", { size: 30 });
+  const CW = (W - 2*MX - 0.14) / 2, CH = 2.43, X2 = MX + CW + 0.14, Y2 = 1.72 + CH + 0.12;
+  listCard(s, MX, 1.72, CW, CH, "hedged instead of confidently wrong", AMBER, [
+    ["implementors", "a call through an interface-, trait- or abstract-typed receiver names the implementations that can run, with a floor when the list cannot be complete (0.6.9)", AMBER],
+    ["no false coupling", "--arch, --deps, --cochange, --impact and --export=cc.json stop reporting coupling from edges the index never had (0.6.10)", AMBER],
+    ["no namesake", "a Rust prelude call, a macro with no in-tree binding, a Python builtin no longer bind a same-named definition (0.6.10)", AMBER],
+  ], { bigW: 1.75 });
+  listCard(s, X2, 1.72, CW, CH, "answers that carry more", CYAN, [
+    ["--defs", "which definitions a name binds, with the spelling that picks each one alone; member rows print their owner (0.6.9)", CYAN],
+    ["--path bodies", "the middle hop of a short path, the route an unreached path names; hops print call site and signature (0.6.9, 0.6.10)", CYAN],
+    ["--for reach", "registrations and what is registered under a key, a literal's sites, a --flag and its default, an add-a-new-X family, re-export hops (0.6.10)", CYAN],
+  ], { bigW: 1.75 });
+  listCard(s, MX, Y2, CW, CH, "lighter on large trees (percent, per PR)", GREEN, [
+    ["−35 to −67 %", "warm CPU: vscode --deps −67 %, cockroach --for −57 %, envoy --deps −35 % (#542); TypeScript --deps a further −22 % (#554)", GREEN],
+    ["about −48 %", "peak footprint of an index on macOS: envoy −49 %, cockroach −47 %, vscode −48 % (#497)", GREEN],
+    ["−30 to −40 %", "a warm run's peak, now at or under the cold run's (#556); the include closure in an eighth of the memory (#505)", GREEN],
+  ], { bigW: 1.75 });
+  listCard(s, X2, Y2, CW, CH, "languages and reach", CYAN, [
+    ["Rust · Go · C", "functions stored in struct fields join the calls through them; Rust crate::, super:: and mod paths resolve in their own crate", CYAN],
+    ["C / C++", "quote includes resolve at the include roots a build passes; pointers to member functions; using and namespace aliases", CYAN],
+    ["reST · Sphinx", "documents become real sections; --recall serves the best-matching part of an HTML page (#409)", CYAN],
+  ], { bigW: 1.75 });
+  foot(s, "performance rows: each PR's own measurement vs the build before it, one machine, not measured together · caches rebuild once");
+  notes(s, [
+    "SOURCES (0.6.9 and 0.6.10). CHANGELOG.md [0.6.9] and [0.6.10] release summaries on main cd04d477e.",
+    "HEDGED — [0.6.9]: \"a call through an interface-, trait- or abstract-typed receiver names the implementors that can run, with a floor stated when the list cannot be complete; a by-name hedge needs an import; hedged hops are never counted as proven\". [0.6.10]: \"--arch, --deps, --cochange, --impact and --export=cc.json stop reporting coupling from edges the index never had\"; \"a Rust prelude call, a macro with no in-tree binding, and a Python call to a builtin or third-party name no longer bind a same-named definition\".",
+    "ANSWERS — [0.6.9]: \"--defs=NAME[,NAME…] answers which definitions a name binds, with the spelling that picks each one alone; member rows print their owner (n=\\\"Owner.name\\\")\"; \"--path prints the bodies that hold its answer: the middle hop of a short path, the route an unreached path names\". [0.6.10]: \"--path and --connect hops print the call site, the call and the callee's signature\"; the --for reach list.",
+    "LIGHTER — [0.6.10] \"Faster and lighter, as percent changes (each figure is that pull request's own measurement against the build just before it, on one machine; the changes were not measured together, and absolute seconds and megabytes come with the 0.7.0 table, measured on one other machine)\": vscode --deps -67 %, cockroach --for -57 %, envoy --deps -35 % (#542); TypeScript --deps a further 22 % (#554); index peak -49 / -47 / -48 % (#497); warm peak 30 to 40 % lower, at or under cold (#556); include closure an eighth (#505).",
+    "LANGUAGES — [0.6.9] \"functions stored in struct fields joined to the calls through them in Go, Rust and C / C++\"; [0.6.10] \"Rust crate::, super::, self:: and mod x; resolve in the includer's own crate\", \"C / C++ quote includes resolve at the include roots a build passes\", \"C++ pointers to member functions, using and namespace aliases\", \"reST and Sphinx documents become real units and --recall serves the best-matching part of an HTML page\" (#409, @muayyad-alsadi).",
+    "FOOTER — [0.6.10] \"Upgrade: caches rebuild once (kParserVer 301, kCacheVersion 49)\".",
+  ]);
 }
 
-/* ── S5d · new since 2026-08-30 ───────────────────────────────── */
+/* ── S5n3 · since 0.6.10, on main ───────────────────────────────────────── */
 {
+  // changelog.d/ on main cd04d477e: one fragment per change, folded into the next release's CHANGELOG entry. Each row quotes
+  // its fragment's own measurement; the memory row is percent only (the fragment's MB are M2 figures).
   const s = p.addSlide(); bg(s);
-  kicker(s, "// new since 2026-08-30 — the window this deck did not cover until now", CYAN);
-  title(s, "What 2026-08-30 to 2026-09-06 added", { size: 32 });
-  const rows = [
-    [".gitignore, honoured\nby default", "named for ripgrep, whose\ndefining default this is",
-     "The crawl walked ignored files; in a git work tree it now consults git's own rules and skips what the repository already declared uninteresting. This root, three checkouts under an ignored bench/external/: files= 8,674 \u2192 1,522, cold 2.81 s \u2192 0.52 s, warm 0.63 s \u2192 0.10 s \u2014 and --no-ignore restores the previous walk exactly. Nothing drops silently: ignored_files= is exact, ignored_dirs= says the walk STOPPED there so those contents are UNKNOWN rather than zero, and both are ABSENT when the rules dropped nothing \u2014 so a tree with nothing ignored is byte-identical to what it produced before.", GREEN],
-    ["--html --color-by", "the map, rendered \u2014\nno server, no CDN",
-     "One self-contained HTML file: a force-directed call graph you click to recentre. --color-by=lang|community|cx|churn|tested sets the INITIAL colour only \u2014 the page embeds all five and keeps a live selector, so switching lens costs no second run. One five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.", CYAN],
-    ["--eval-retrieval,\nre-sampled", "the sampler was measuring\nthe corpus, not the ranker",
-     "For fourteen months the gold set was the first 150 doc-commented symbols in PATH order \u2014 and bench/ sorts before src/, so adding a docstring to a benchmark harness moved a published number without touching ranking code. One 60-symbol probe, one corpus, only its PATH varied: 0.105 and 0.356 MRR from spelling alone. Now exhaustive \u2014 population=3011 scored=3011 rule=exhaustive \u2014 and EVERY retrieval figure this project publishes was re-derived under it.", AMBER],
-    ["--plan-lanes", "which lanes would collide,\nBEFORE a line is written",
-     "Where --merge-scout says \"these branches already conflict\", this says \"these lanes WOULD conflict if assigned this way\" \u2014 no ref to resolve, no re-ingest. Each lane now also carries an advisory execution profile (model + reasoning effort) that labels its own evidence basis=\"structural-only\" and versions its policy separately from the schema, so a recommendation cannot quietly claim more than the structure it read.", CYAN],
+  kicker(s, "// on main since v0.6.10 — changelog.d/, each with its own measurement", CYAN);
+  title(s, "Since 0.6.10: less memory, cheaper cold starts", { size: 30 });
+  const CW = (W - 2*MX - 0.14) / 2, CH = 2.43, X2 = MX + CW + 0.14, Y2 = 1.72 + CH + 0.12;
+  listCard(s, MX, 1.72, CW, CH, "memory", GREEN, [
+    ["264 → 144 B", "per indexed reference: five fields empty on most rows moved to a side block. Peak −10 to −24 % on envoy, cockroach and vscode; answers byte-identical", GREEN],
+    ["the sum", "this and every memory step since 0.6.9, measured release against release on the same three repositories: the next slide", GREEN],
+  ], { bigW: 1.75 });
+  listCard(s, X2, 1.72, CW, CH, "speed", GREEN, [
+    ["−7 to −15 %", "cold --deps instructions: one cached root path per file instead of a re-descent per parent step (C++ −15 %, Rust −13.5 %, Go and Python −7 %)", GREEN],
+    ["−24 %", "cold --deps instructions on vscode: the JS/TS side captures walk once with one cursor", GREEN],
+    ["−15 %", "warm --for instructions on cockroach: clone keys computed at parse time, so a warm pass opens no file", GREEN],
+  ], { bigW: 1.75 });
+  listCard(s, MX, Y2, CW, CH, "a zero that means \"not indexed\" says so", AMBER, [
+    ["--uses", "on a struct or table in a language whose reads are not captured: unindexed_roles= instead of a bare count=\"0\"", AMBER],
+    ["--exemplar", "an off-task pick carries off_task=\"1\"; --help-task abstains with a next step instead of nothing", AMBER],
+    ["--connect", "never names a test function as the joint of two source symbols", AMBER],
+  ], { bigW: 1.75 });
+  listCard(s, X2, Y2, CW, CH, "new, and from the community", CYAN, [
+    ["Protocol Buffers", "messages, enums, services and rpcs are definitions; a generated name links to its schema by name", CYAN],
+    ["--deadline-ms", "prompt hooks no longer time out on every prompt in a cold directory: reported with measurements by @WingedGuardian (#594)", CYAN],
+    ["Py · Rust · C++", "from pkg import mod draws its file edge (@jflowers, #533); a Rust re-export (@soarkit, #610); C++ bases as captures (@SeddonShen, #538)", CYAN],
+  ], { bigW: 1.75 });
+  foot(s, "caches rebuild once on main (parser 307, cache 50) · the fragments fold into the next release's CHANGELOG entry");
+  notes(s, [
+    "SOURCES (since 0.6.10). changelog.d/ on main cd04d477e; src/ingest_cache.h kParserVer = 307, kCacheVersion = 50.",
+    "- 264 → 144 B, −10 to −24 %: changelog.d/mem-ref-shrink.md, \"A reference row drops from 264 to 144 B\"; \"Peak memory footprint, median of three runs on macOS: envoy 743 to 618 MB cold and 724 to 547 MB warm, cockroach 986 to 887 and 951 to 842, vscode 1,338 to 1,149 and 1,274 to 1,069\" (the slide gives the percent range of those six pairs, −10 % to −24 %); \"Answers do not change\". Heading: \"large repos peak 10-24 % lower\".",
+    "- The other memory changes on main are named, not quantified, on this slide; the memory slide that follows measures v0.6.9 → v0.6.10 → main end to end.",
+    "- −7 to −15 %: changelog.d/parent-carry.md, \"A cold --deps retires 15 % fewer instructions on envoy (C++), 13.5 % on zed (Rust), 7 % on cockroach (Go) and django (Python), and 6.7 % on vscode (TypeScript, after #578)\".",
+    "- −24 %: changelog.d/js-capture-cold.md, \"On vscode a cold --deps retires 24 % fewer instructions (median of three interleaved base/head pairs)\"; answers byte-identical.",
+    "- −15 %: changelog.d/clones-persist.md, \"On cockroach a warm --for retires 15 % fewer instructions (median of three interleaved pairs, 43.9 G to 37.1 G) with the same answer bytes\".",
+    "- Silent zeros: changelog.d/uses-unarmed.md (unindexed_roles=\"read,write,type\"), changelog.d/honesty-xs.md (--exemplar low_confidence=\"1\" off_task=\"1\"; --help-task abstain carries next=), changelog.d/connect-source-joint.md.",
+    "- Protocol Buffers: changelog.d/proto-index.md. --deadline-ms: changelog.d/route-hook-cold.md, \"(#594, thanks @WingedGuardian)\" — issue #594, \"reported it with measurements and three candidate fixes\". Python: changelog.d/478-py-from-import-member-edges.md (PR #533 by @jflowers). Rust: changelog.d/610-rust-reexport-dup.md (issue #610, @soarkit). C++ bases: changelog.d/538-cpp-base-capture.md (PR #538 by @SeddonShen; answers unchanged).",
+  ]);
+}
+
+/* ── S5n4 · memory, release by release ──────────────────────────────────── */
+{
+  // docs/EVALS.md "Memory by release: warm --deps peak, v0.6.9 → v0.6.10 → main" (measured 2026-11-13 for this slide). PERCENT
+  // ONLY: the machine is a shared 16 GB Apple M2 Pro laptop, and the project publishes absolute megabytes only from the 0.7.0 run on
+  // another machine. The values below are the medians' percent change against v0.6.9, filled from that section's table.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// warm --deps peak memory by release — percent change, one machine", GREEN);
+  title(s, "Warm peak memory: about three quarters lower since 0.6.9", { size: 30 });
+  const repos = [
+    // [repo, language, files note, v0.6.10 %, main %]
+    ["envoy", "C++", -57, -79],
+    ["cockroach", "Go", -44, -74],
+    ["vscode", "TypeScript", -51, -75],
   ];
-  let y = 1.70;
-  for (const [flag, what, detail, c] of rows){
-    card(s, MX, y, 12.09, 1.17);
-    s.addText(flag,   { x: MX+0.18, y: y+0.09, w: 2.55, h: 0.50, fontFace: MONO, fontSize: 12, bold: true, color: c, margin: 0 });
-    s.addText(what,   { x: MX+0.18, y: y+0.60, w: 2.55, h: 0.50, fontFace: SANS, fontSize: 9, italic: true, color: MUTED, margin: 0 });
-    s.addText(detail, { x: MX+2.95, y: y+0.08, w: 9.0,  h: 1.01, fontFace: SANS, fontSize: 10, color: TEXT, valign: "middle", margin: 0 });
-    y += 1.25;
+  const BX = MX + 2.6, BMAX = 5.6;
+  s.addText("peak footprint, % of v0.6.9's (shorter is lighter)", { x: MX, y: 1.66, w: 8.4, h: 0.3, fontFace: MONO, fontSize: 10.5, color: MUTED, margin: 0 });
+  let y = 2.06;
+  for (const [repo, lang, d10, dmain] of repos){
+    card(s, MX, y, 8.4, 1.36);
+    s.addText([{ text: repo + "\n", options: { color: TEXT, bold: true, fontSize: 14, fontFace: MONO } }, { text: lang, options: { color: MUTED, fontSize: 10 } }],
+      { x: MX+0.2, y: y+0.12, w: 2.3, h: 1.1, fontFace: SANS, valign: "middle", margin: 0 });
+    const bars = [["v0.6.9", 0, "3A4353"], ["v0.6.10", d10, CYAN], ["main", dmain, GREEN]];
+    bars.forEach(([lbl, d, c], i) => {
+      const by = y + 0.14 + i * 0.38, bw = BMAX * (100 + d) / 100;
+      s.addText(lbl, { x: BX - 0.05, y: by, w: 0.85, h: 0.3, fontFace: MONO, fontSize: 9.5, color: MUTED, valign: "middle", margin: 0 });
+      s.addShape("rect", { x: BX + 0.85, y: by + 0.06, w: bw * 0.68, h: 0.2, fill: { color: c }, line: { color: c, width: 0 } });
+      s.addText(i === 0 ? "baseline" : (d > 0 ? "+" : "−") + Math.abs(d) + " %", { x: BX + 0.92 + bw * 0.68, y: by, w: 1.0, h: 0.3, fontFace: MONO, fontSize: 10.5, bold: i === 2, color: i === 0 ? MUTED : c, valign: "middle", margin: 0 });
+    });
+    y += 1.46;
   }
-  foot(s, "CHANGELOG.md [Unreleased] carries the ignore-default measurement and its ledger in bench/PROFILE.md \u00b7 the sampler negative is docs/EVALS.md \u00a77, published as a counterexample against our own published numbers");
+  const RX = 9.25, RW = W - MX - RX;
+  card(s, RX, 1.66, RW, 2.6, CARD2);
+  s.addText([
+    { text: "Why it is a headline\n\n", options: { color: GREEN, bold: true, fontSize: 13 } },
+    { text: "Every megabyte the tool holds is a megabyte not available to the agents running beside it. On a large repository, memory decides whether a code-graph tool can run on a laptop at all.", options: { color: MUTED, fontSize: 11 } },
+  ], { x: RX+0.2, y: 1.78, w: RW-0.4, h: 2.4, fontFace: SANS, valign: "top", margin: 0 });
+  card(s, RX, 4.38, RW, 2.48);
+  s.addText([
+    { text: "How it was measured\n\n", options: { color: AMBER, bold: true, fontSize: 13 } },
+    { text: "Dev builds of the two release tags and main; one shared 16 GB Apple M2 Pro laptop; peak memory footprint (macOS /usr/bin/time -l), median of three warm runs per cell, binaries interleaved. Percent only: absolute megabytes come with 0.7.0, measured on another machine.", options: { color: MUTED, fontSize: 10.5 } },
+  ], { x: RX+0.2, y: 4.5, w: RW-0.4, h: 2.3, fontFace: SANS, valign: "top", margin: 0 });
+  foot(s, "docs/EVALS.md, \"Memory by release\": method, table and caveats · per-PR steps: CHANGELOG [0.6.10], changelog.d/");
+  notes(s, [
+    "SOURCES (memory by release). docs/EVALS.md section \"Memory by release: warm --deps peak, v0.6.9 → v0.6.10 → main\", added in this refresh (2026-11-13). Binaries: v0.6.9 (bedc0cdcf) and main (cd04d477e) built for it, v0.6.10 (ac869640e) the orchestrator's snapshot build; all plain dev builds, AppleClang.",
+    "- Repos: the table harness's pinned checkouts of envoy (C++), cockroach (Go) and vscode (TypeScript). Argv: ( cd REPO; /usr/bin/time -l BIN REPO --cache=DIR --deps ); one cold run per binary writes its own cache, then three warm rounds with the binaries in rotating order; the figure is the median warm peak memory footprint.",
+    "- PERCENT ONLY, by the owner's rule: absolute numbers for publication come only from the 0.7.0 run on another machine. The machine here is named by class: a shared 16 GB Apple M2 Pro laptop.",
+    "- Per-PR measurements of the same steps: CHANGELOG [0.6.10] (#497 index peak about halved; #556 warm peak 30-40 % lower); changelog.d/mem-ref-shrink.md (reference rows 264 → 144 B).",
+    "- Framing (\"memory not available to the agents\"): the owner's 0.7.0 direction, memory as a headline column; no peer number is on this slide.",
+  ]);
+}
+
+/* ── S5n5 · quality delta: what gates, and why ───────────────────────────── */
+{
+  // docs/EVALS.md §6 "--quality-delta's twelve kinds" and the binary's own --help text. The 4×-the-bar rule for a NEW function
+  // (PR #640) is open and deliberately absent.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// the write-time check: what YOUR change made worse — and only that", CYAN);
+  title(s, "Quality delta: twelve kinds, and a gate that only fires on old code", { size: 28 });
+  const kinds = ["complexity", "verbosity", "nesting", "params", "duplication", "dead-code", "api-surface", "error-masking",
+                 "short-horizon-churn", "new-clone-of-reused-helper", "placeholder", "defect-shape"];
+  const KW = (W - 2*MX - 5*0.1) / 6;
+  kinds.forEach((k, i) => {
+    const x = MX + (i % 6) * (KW + 0.1), y = 1.66 + Math.floor(i / 6) * 0.5;
+    chip(s, k, x, y, KW, i < 10 ? CYAN : AMBER, { size: 9.5, h: 0.42 });
+  });
+  const rules = [
+    ["exit 2", "only when code that EXISTED at the baseline got materially worse, and nobody acked it. That is the gate — a regression you introduced into old code.", RED],
+    ["new code", "rows for a symbol that is new are printed, never gated: they are the debt you are adding, to read. Exit 0 means nothing that already existed got worse, not \"clean\".", CYAN],
+    ["one exception", "defect-shape format-arity gates on any origin: a format string whose arguments do not match is a bug, not a taste. Measured: 0 false positives over 1,330 literal-format calls on this tree and 405 in the Python 3.13 standard library.", AMBER],
+    ["never gates", "placeholder — the stubs and TODOs a change adds — is an honesty check on \"done\": listed per symbol, never a failure.", MUTED],
+  ];
+  let y = 2.86;
+  for (const [h2, b, c] of rules){
+    card(s, MX, y, 12.09, 0.78);
+    s.addText(h2, { x: MX+0.2, y: y+0.04, w: 2.1, h: 0.7, fontFace: MONO, fontSize: 14, bold: true, color: c, valign: "middle", margin: 0 });
+    s.addText(b,  { x: MX+2.45, y: y+0.04, w: 9.45, h: 0.7, fontFace: SANS, fontSize: 11.5, color: MUTED, valign: "middle", margin: 0 });
+    y += 0.86;
+  }
+  s.addText("Why only old code gates: the change an agent must not make is the one that quietly degrades what already worked. Its new code is shown to it at \"done\".",
+    { x: MX, y: 6.4, w: 12.09, h: 0.4, fontFace: SANS, fontSize: 11, italic: true, color: TEXT, margin: 0 });
+  foot(s, "docs/EVALS.md §6, \"--quality-delta's twelve kinds\" (format-arity measured 2026-10-07) · ripwire --help, --quality-delta");
+  notes(s, [
+    "SOURCES (quality delta). docs/EVALS.md §6 \"--quality-delta's twelve kinds: ten measured failure modes, placeholder and defect-shape\" on main cd04d477e, and `ripwire --help=all`, --quality-delta.",
+    "- The twelve kind= strings, from src/quality.h, as EVALS lists them: complexity · verbosity · nesting · params · duplication · dead-code · api-surface · error-masking · short-horizon-churn · new-clone-of-reused-helper · placeholder · defect-shape. The first ten (cyan chips) each target a failure mode measured in the literature; the last two (amber) are honesty and defect checks.",
+    "- The gate: --help, \"EXIT 2 ONLY on a major AND unacked row that is preexisting-worse or defect-shape format-arity (any origin)\"; \"new-symbol rows never gate, except defect-shape format-arity; exit 0 means 'nothing that already existed got worse', not 'clean'\".",
+    "- format-arity: EVALS §6, \"with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls), on the Python 3.13 standard library (405 calls)\" (measured 2026-10-07); \"only format-arity gates, and on any origin\".",
+    "- placeholder: EVALS §6, \"an honesty check on 'done' — a stub or TODO the change added — and never gates\".",
+    "- The closing line is the design reason, stated in the skill: \"exit 2 if old code got worse (new-symbol rows never gate, except defect-shape format-arity)\" (skills/ripwire-quality-bar/SKILL.md).",
+    "- NOT ON THIS SLIDE: the gate for a new function that is already far past the bar (4× the bar, PR #640) — open, not merged; and the seeded catch-rate measurement, which is not pinned in the repo yet. Both are 0.7.0 material.",
+  ]);
 }
 
 /* ── S5e · 0.6.0 at a glance ────────────────────────────────────────────── */
@@ -468,8 +610,8 @@ function storyCards(s, { kick, head, stories, footText }){
   // double-braced MEASURE placeholders until re-measured on the merged binary. Left out on purpose: skill scanning (not a
   // central feature) and any head-to-head figure (none has been re-measured).
   const s = p.addSlide(); bg(s);
-  kicker(s, "// since v0.6.1 (2026-09-14): 0.6.2–0.6.5 and main; each row names its PR", CYAN);
-  title(s, "Since 0.6.1: more places it runs, more code it answers for", { size: 30 });
+  kicker(s, "// 0.6.2–0.6.5, 2026-09-14 to 09-30; each row names its PR", CYAN);
+  title(s, "0.6.2 to 0.6.5: more places it runs, more code it answers for", { size: 30 });
   const CW = (W - 2*MX - 0.14) / 2, CH = 2.43, X2 = MX + CW + 0.14, Y2 = 1.72 + CH + 0.12;
 
   listCard(s, MX, 1.72, CW, CH, "where and how it runs", CYAN, [
@@ -1007,7 +1149,7 @@ function storyCards(s, { kick, head, stories, footText }){
 /* ── S7b · speed, on numbers you can reproduce ──────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
-  kicker(s, "// compiled, not interpreted — and measured on public corpora", CYAN);
+  kicker(s, "// compiled, not interpreted — measured on public corpora, August 2026", CYAN);
   title(s, "Fast enough to call on reflex");
   const cols = [
     ["0.213 s", "cold — nothing to an answer: parse, rank, reply, no cache (r4)", CYAN],
@@ -1036,38 +1178,7 @@ function storyCards(s, { kick, head, stories, footText }){
     { text: "the output stays byte-identical across build flavours", options: { color: CYAN, bold: true } },
     { text: " — the determinism gate runs on both, and CI builds a plain flavour too, because NDEBUG once compiled a whole class of degrade-path checks out of existence.", options: { color: MUTED } },
   ], { x: 6.97, y: 4.3, w: 5.4, h: 1.8, fontFace: SANS, fontSize: 11.5, margin: 0 });
-  foot(s, "every card above comes from a committed harness — bench/headtohead/r4-2026-08-06/ and r9-2026-08-09/ — not from a private corpus");
-}
-
-/* ── S7b2 · the pre-release sprint, labelled historical ─────────────────── */
-{
-  const s = p.addSlide(); bg(s);
-  kicker(s, "// how it got there — the pre-release performance sprint", MUTED);
-  title(s, "Work removed before work optimized");
-  const wins = [
-    ["file ingest",    "FILE* whole-file reads; CSV counting became a byte scan — iostream out of the hot path"],
-    ["capture gating", "value-use capture runs only for the verbs that actually need it, not on every run"],
-    ["AST pass fusion","five whole-AST side-capture passes share ONE pre-order walk instead of five"],
-    ["parallel parse", "query compile overlaps parse scheduling; files schedule by size — ids stay deterministic"],
-    ["radix + S+tree", "numeric keys for edges and scores; a bounded-scratch hot map whose fixed cap reports its own overflow"],
-    ["no std::map",    "unordered_dense, reserve() before ingest — no std::unordered_map on any hot path"],
-  ];
-  const cw = 3.95, ch = 1.4; let i = 0;
-  for (const [h2, b] of wins){
-    const x = MX + (i % 3) * (cw + 0.12), y = 1.9 + Math.floor(i / 3) * (ch + 0.16);
-    card(s, x, y, cw, ch);
-    s.addText(h2, { x: x+0.18, y: y+0.12, w: cw-0.36, h: 0.34, fontFace: MONO, fontSize: 12.5, bold: true, color: CYAN, margin: 0 });
-    s.addText(b,  { x: x+0.18, y: y+0.48, w: cw-0.36, h: 0.95, fontFace: SANS, fontSize: 10.5, color: MUTED, valign: "top", margin: 0 });
-    i++;
-  }
-  card(s, MX, 4.92, 12.09, 1.68, CARD2);
-  s.addText([
-    { text: "Why this slide carries no numbers. ", options: { color: AMBER, bold: true } },
-    { text: "The sprint's own headline pair was measured in June 2026 on a large private C++ corpus that is not publicly reproducible, and the deck does not quote figures a reader cannot re-derive — the previous slide's numbers all come from committed harnesses. What survives the omission is the ", options: { color: MUTED } },
-    { text: "shape", options: { color: TEXT, bold: true, italic: true } },
-    { text: ": the graph math was never the bottleneck, and every win came from doing less work rather than doing the same work faster. Same map contract throughout — byte-identical output before and after each of these changes.", options: { color: MUTED } },
-  ], { x: MX+0.25, y: 5.04, w: 11.6, h: 1.46, fontFace: SANS, fontSize: 11.5, valign: "middle", margin: 0 });
-  foot(s, "the mechanisms are in bench/PROFILE.md and the commit history; the private-corpus figures they produced are deliberately not quoted");
+  foot(s, "every card above comes from a committed harness — bench/headtohead/r4-2026-08-06/ and r9-2026-08-09/ (August 2026, before 0.6.0) — later speed and memory work is on the release slides, in percent");
 }
 
 /* ── S7c · the ten moments ──────────────────────────────────────────────── */
@@ -1163,14 +1274,14 @@ function storyCards(s, { kick, head, stories, footText }){
   card(s, 8.5, 5.25, 4.1, 1.45);
   s.addText([
     { text: "The map grades itself before it answers. ", options: { color: TEXT, bold: true } },
-    { text: "This repository's own src/: files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418.", options: { color: MUTED, fontFace: MONO } },   // re-measured: `ripwire ./src` on main a5229aca
+    { text: "This repository's own src/: files=275 symbols=14424 edges=24953 ambiguous=2290 unresolved=3211 declined=36734.", options: { color: MUTED, fontFace: MONO } },   // re-measured: `ripwire ./src` on main cd04d477e
   ], { x: 8.68, y: 5.36, w: 3.8, h: 1.24, fontFace: SANS, fontSize: 10, margin: 0 });
   foot(s, "docs/EVALS.md §8 lists the numbers this project refuses to publish, each with its reason");
   notes(s, [
     "SOURCES (the tripwire)",
-    "- The src/ census is re-derived, not remembered: `ripwire ./src` on main a5229aca prints files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418 (warm and --no-cache identical). On main 40a1895b (2026-09-11) it read files=166 symbols=5778 edges=17150 ambiguous=7441 unresolved=1658 declined=4803. It read files=153 symbols=5122 edges=14182 ambiguous=5982 unresolved=1598 when the slide was written on 2026-09-06.",
+    "- The src/ census is re-derived, not remembered: `ripwire ./src` on main cd04d477e (2026-11-13) prints files=275 symbols=14424 edges=24953 ambiguous=2290 unresolved=3211 declined=36734 (warm and --no-cache identical). On main a5229aca it printed files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418 (warm and --no-cache identical). On main 40a1895b (2026-09-11) it read files=166 symbols=5778 edges=17150 ambiguous=7441 unresolved=1658 declined=4803. It read files=153 symbols=5122 edges=14182 ambiguous=5982 unresolved=1598 when the slide was written on 2026-09-06.",
     "- declined= is new in 0.6.0 — #136, merge commit d752d953: a call the resolver refused to guess at is now counted instead of vanishing. It belongs on this slide because it is the same contract the other three rules state.",
-    "- The --callers example: `ripwire . --callers=rankGraphTeleport` answered defs=\"1\" count=\"6\" counts_floor=\"1\", with runEval and rankGraph as its first two rows, on main 40a1895b. On main a5229aca: defs=\"1\" count=\"7\" counts_floor=\"1\", with getIndex and rankGraph as its first two rows (a seventh caller, getIndex in src/mcpindex.h, joined since 40a1895b; the slide sample shows the a5229aca answer).",
+    "- The --callers example: `ripwire . --callers=rankGraphTeleport` answered defs=\"1\" count=\"6\" counts_floor=\"1\", with runEval and rankGraph as its first two rows, on main 40a1895b. On main a5229aca: defs=\"1\" count=\"7\" counts_floor=\"1\", with getIndex and rankGraph as its first two rows (a seventh caller, getIndex in src/mcpindex.h, joined since 40a1895b). Re-checked on main cd04d477e: still defs=\"1\" count=\"7\" counts_floor=\"1\", getIndex and rankGraph first.",
   ]);
 }
 
@@ -1324,37 +1435,6 @@ function storyCards(s, { kick, head, stories, footText }){
   foot(s, "--quality-panel[=strict|default|lenient] — and --quality-delta for the narrower question: what did MY change make worse?");
 }
 
-/* ── S11c · what the panel had to pass ──────────────────────────────────── */
-{
-  const s = p.addSlide(); bg(s);
-  kicker(s, "// a new lens does not ship because it sounds plausible", AMBER);
-  title(s, "The calibration that disqualified a family", { size: 32 });
-  card(s, MX, 1.8, 3.86, 2.15);
-  stat(s, "+0.168", "the LARGEST cross-family correlation in the whole 6×6 matrix — widening the panel from four families to six did not raise it",
-    MX+0.15, 1.98, 3.56, GREEN, { bsize: 40, bh: 0.72, lsize: 10.5 });
-  card(s, 4.68, 1.8, 3.86, 2.15);
-  stat(s, "27,889", "eligible functions, five independent trees — two reported separately and never pooled, because one of them is this repository",
-    4.83, 1.98, 3.56, CYAN, { bsize: 40, bh: 0.72, lsize: 10.5 });
-  card(s, 8.76, 1.8, 3.86, 2.15, CARD2);
-  stat(s, "4 of 6", "families the strict preset actually counts — TWO were measured and held back from gating",
-    8.91, 1.98, 3.56, AMBER, { bsize: 40, bh: 0.72, lsize: 10.5 });
-
-  card(s, MX, 4.15, 12.0, 1.35);
-  s.addText([
-    { text: "The uncomfortable result, kept. ", options: { color: AMBER, bold: true } },
-    { text: "The stability pass ran each family across a ladder of commits to ask whether it is steady enough to gate on. ", options: { color: MUTED } },
-    { text: "colocation came out worse than historical on one ladder", options: { color: TEXT, bold: true } },
-    { text: ", so neither gates: strict counts four of the six — a lens its own author wanted, measured, and demoted. The ladder was run precisely because that answer was possible; assuming it would pass is how a plausible axis becomes a permanent one.", options: { color: MUTED } },
-  ], { x: MX+0.25, y: 4.28, w: 11.55, h: 1.15, fontFace: SANS, fontSize: 12, valign: "middle", margin: 0 });
-
-  card(s, MX, 5.68, 12.0, 1.02, CARD2);
-  s.addText([
-    { text: "--field-affinity was NOT made a family either", options: { color: TEXT, bold: true } },
-    { text: " — an exclusion by unit, not a failed measurement: it ranks struct FIELDS by co-access against declared layout, and the panel's unit is a function. Stated in the calibration rather than left for someone to notice.", options: { color: MUTED } },
-  ], { x: MX+0.25, y: 5.79, w: 11.55, h: 0.84, fontFace: SANS, fontSize: 11.5, valign: "middle", margin: 0 });
-  foot(s, "docs/EVALS.md §9.9 — same harness and criteria as the original four families, run BEFORE the two new ones shipped enabled");
-}
-
 /* ── S12 · agent wiring ─────────────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
@@ -1368,7 +1448,7 @@ function storyCards(s, { kick, head, stories, footText }){
     ["33 MCP verbs", "17 read verbs mirroring the CLI, 13 flagship reflexes (impact, uses, affected, edit_check, from_trace, connect …), 3 span-addressed edit verbs with a safety contract"],
     ["lazy-body handles", "read verbs return signatures and a stable handle; the agent fetches a body only when it decides it needs one — names by default, bytes on request"],
     ["18 agent skills", "moment-matched workflows (orient, navigate, change-check, quality-bar …) — wrap prints the recipe, skills/install.sh installs them"],
-    ["12 orchestrator loops", "copy-paste prompts in prompts/: run the same audit, eval and head-to-head machinery that built this tool, on your own repository"],
+    ["13 orchestrator loops", "copy-paste prompts in prompts/: run the same audit, eval and head-to-head machinery that built this tool, on your own repository"],
   ];
   const cw = 5.95, ch = 1.62; let i = 0;
   for (const [h2, b] of cards){
@@ -1381,7 +1461,7 @@ function storyCards(s, { kick, head, stories, footText }){
   card(s, MX, 6.30, 12.09, 0.62, CARD2);
   s.addText([
     { text: "wrap does not just print JSON: ", options: { color: TEXT, bold: true } },
-    { text: "it probes what that agent already has, emits the config in that agent's own shape, and includes a use-when blurb so the agent knows which verb fires at which moment — not just that a server exists.", options: { color: MUTED } },
+    { text: "it emits the config in that agent's own shape with a use-when blurb per verb. Since 0.6.10, wrap claude routes edits the way Claude Code works: take the symbol's line range from ripwire, Read only that range, then the native Edit.", options: { color: MUTED } },
   ], { x: MX+0.25, y: 6.39, w: 11.6, h: 0.46, fontFace: SANS, fontSize: 11, valign: "middle", margin: 0 });
   foot(s, "the MCP server exposes the same deterministic engine — one index, shared with the CLI, staleness-checked");
   notes(s, [
@@ -1389,7 +1469,50 @@ function storyCards(s, { kick, head, stories, footText }){
     "- The nine agents after `wrap`: src/wrap.h's agent table on main a5229aca — claude, codex, cursor, windsurf, gemini, opencode, openclaw, hermes, aider. This line named six until 2026-09-30. On the merged binary, `ripwire wrap --help`: names the same nine (CLI-first: claude, codex, opencode, openclaw, hermes; MCP config: cursor, windsurf, gemini; repo-map: aider).",
     "- “33 MCP verbs … 17 read verbs … 13 flagship reflexes … 3 span-addressed edit verbs” — README.md, lane/t10-mcp-coverage: “One stdio server, 33 verbs — 17 read, 13 flagship-reflex, 3 span-addressed edit” (rank_by and affected joined the MCP surface, matching the CLI --rank-by / --affected twins).",
     "- “18 agent skills” — README.md: “skills/ ships eighteen task-shaped skills”; skills/ holds 18 directories.",
-    "- “12 orchestrator loops” — README.md: “prompts/ holds twelve self-contained orchestrator prompts”, and prompts/ holds 12 .md files besides its own README.md. This card said 11 until 2026-09-11; test/readmedriftcheck.sh arm (I1) gates the README against the directory, and the deck now states the same number.",
+    "- “13 orchestrator loops” — README.md on main cd04d477e: “prompts/ holds thirteen self-contained orchestrator prompts”, and prompts/ holds 13 .md files besides its own README.md. It read 12 until the 2026-11-13 refresh (11 until 2026-09-11); test/readmedriftcheck.sh arm (I1) gates the README against the directory.",
+    "- The edit route (2026-11-13): CHANGELOG.md [0.6.10] “Changed — ripwire wrap claude routes edits through a ranged Read and Claude Code's native Edit”: Claude Code refuses a native Edit on a file it has not Read; “the line now says to take the symbol's line range from ripwire, Read only that range (offset/limit), then use the native Edit”, and the printed MCP command passes --mcp-tools=no-edit. The span-addressed edit verbs stay for every other agent.",
+  ]);
+}
+
+/* ── S12g · the community ───────────────────────────────────────────────── */
+{
+  // Credit by PR, from CHANGELOG.md's [0.6.9] and [0.6.10] Thanks lines, changelog.d/ on main cd04d477e, and
+  // GitHub's merged pull requests since 2026-10-21 (authors other than the maintainer account). The owner's rule:
+  // credit contributors for everything possible.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// merged since 2026-10-21 — each names its PR or issue", GREEN);
+  title(s, "Built with the community", { size: 32 });
+  const people = [
+    ["@llvm-x86",        "#423 #437 #438 #442 #459 #460", "--situ and --test-gate start from changed symbols; Django and unittest hooks are not dead code; Kotlin scope functions; a runnable run= for a TS/JS test in a subpackage; Cargo and package.json entry points on --for"],
+    ["@lennix1337",      "#402 #410 #411 #422 #471",      "Windows: --quality-delta=A..B archives through stdin, clang-cl PGO builds; --uses on JS/TS literal receivers; language-facts slice 6c"],
+    ["@jflowers",        "#478 #530 #533",                "Python import a.b as c and from pkg import mod file edges; C / C++ include roots and the foreign-qualifier veto (#524, #526)"],
+    ["@pt-act",          "#397 #433",                     "the pattern screen refuses overlapping alternation; a committed filename can no longer be read as commit metadata"],
+    ["@mpapis",          "#432",                          "one order for every multi-definition name answer; --lsp says when a name has several definitions"],
+    ["@SeddonShen",      "#538",                          "C++ base clauses read through tags captures, the first language on that port"],
+    ["@LaimaWu",         "#456",                          "Clojure on the shared inert-region walk"],
+    ["@s0undt3ch · @rainhuang0220 · @liziye627-design", "#293 #330 #431", "the installer hardening list; the Vitest runner hint behind #442; a clone gate arm that now checks"],
+  ];
+  let y = 1.62;
+  for (const [who, prs, what] of people){
+    row(s, y, 0.5, [
+      { t: who,  w: 2.55, color: GREEN, bold: true, size: who.length > 20 ? 8.5 : 11.5, mono: true },
+      { t: prs,  w: 2.05, color: MUTED, size: 9.5, mono: true },
+      { t: what, w: 7.0,  color: TEXT,  size: 9.5 },
+    ]);
+    y += 0.56;
+  }
+  card(s, MX, y + 0.04, 12.09, 0.72, CARD2);
+  s.addText([
+    { text: "Reports that led to fixes: ", options: { color: AMBER, bold: true } },
+    { text: "@WingedGuardian (#594, cold prompt hooks, with measurements), @soarkit (#610, a Rust re-export), @muayyad-alsadi (#409, reST and Sphinx), @pguerrerolinares (#466, --for on a file name), @gucliti (#521, the router skill's language list), @hnipps (#228, Django dead code).", options: { color: MUTED } },
+  ], { x: MX+0.25, y: y + 0.09, w: 11.6, h: 0.62, fontFace: SANS, fontSize: 10.5, valign: "middle", margin: 0 });
+  foot(s, "CHANGELOG.md [0.6.9] and [0.6.10] Thanks lines · changelog.d/ · merged pull requests on GitHub · thank you");
+  notes(s, [
+    "SOURCES (community). Window: merged 2026-10-21 to main cd04d477e (2026-11-13).",
+    "- CHANGELOG.md [0.6.10] Thanks: \"@pt-act (#433, #469), @llvm-x86 (#442, #459, #460), @lennix1337 (#436, #447, #471, #472), @jflowers (#478, #524, #526, #530), @s0undt3ch (#293), @muayyad-alsadi (#409), @pguerrerolinares (#466), @gucliti (#521) and @rainhuang0220 (#330)\". [0.6.9] Thanks: \"@lennix1337 (#402, #410, #411, #422), @llvm-x86 (#423, #437, #438), @mpapis (#432), @pt-act (#397) and @liziye627-design (#431); reports that led to fixes: @hnipps (#228) and @s0undt3ch (#305)\".",
+    "- GitHub, merged pull requests since 2026-10-21, authors other than joyful-ii-V-I: #402 #411 (lennix1337), #423 #437 #438 #442 #459 #460 (llvm-x86), #431 (liziye627-design), #433 #397 (pt-act), #471 (lennix1337), #530 #533 (jflowers), #538 (SeddonShen), #456 (LaimaWu). #293 (s0undt3ch) and #330 (rainhuang0220) were closed with their work carried in #482 and #442; #524 and #526 carried @jflowers' #478 work.",
+    "- After 0.6.10, changelog.d/: 478-py-from-import-member-edges.md (thanks @jflowers), 538-cpp-base-capture.md (thanks @SeddonShen), route-hook-cold.md (#594, thanks @WingedGuardian — issue), 610-rust-reexport-dup.md (#610, thanks @soarkit — issue).",
+    "- Earlier contributors are credited on the slides for 0.6.0, 0.6.1 and 0.6.2 to 0.6.5; 0.6.7 and 0.6.8 contributors are in CHANGELOG.md [0.6.7] and [0.6.8] (that window's slide was not merged).",
   ]);
 }
 
@@ -1439,6 +1562,49 @@ function storyCards(s, { kick, head, stories, footText }){
     "- --edit-check card: the same paragraph: a task that 'refactored a widely-shared computation'; --edit-check flagged call sites 'a text search had missed' that 'would otherwise have silently diverged from the canonical path the day the feature was enabled'.",
     "- --quality-delta card: 'all caught by --quality-delta at each agent's \"I think I'm done\" moment' (a duplicated routine, a hand-duplicated cost function, near-identical functions with a flipped sign); and 'The quality gate as a protocol': agents 'none sharing context, all converged on the same \"fix or justify with a written reason\" discipline'.",
     "- The boundary card: 'The honest boundary' — 'The engagement's deepest findings did not come from the tool' but from 'bespoke measurement the agents built'; 'The tool is a floor for honesty and orientation, not a substitute for measurement design'; and the 'Known false-positive mode': the contract checker's arity heuristic 'over-counts on defaulted trailing parameters', and the tool's notes 'say to verify by compiling in exactly this case'.",
+  ]);
+}
+
+/* ── S12f2 · a consumer: fullsend-ai's pre-flight check (in review: #641) ── */
+{
+  // PENDING MERGE: #641 (jflowers, "feat(flags): report Bash environment-variable reads, with --json"), OPEN on 2026-11-13.
+  // This slide is its own commit so it can be kept or dropped when #641 lands; it is worded to be true while #641 is in review.
+  // Every claim is from #641's description; the consumer is named the way that PR names it.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// a consumer, in review: PR #641 by @jflowers — not merged yet", AMBER);
+  title(s, "From a regex to --flags --json: fullsend-ai's pre-flight check", { size: 28 });
+  card(s, MX, 1.72, 5.9, 2.7, CARD2);
+  s.addText([
+    { text: "The check\n", options: { color: CYAN, bold: true, fontSize: 14 } },
+    { text: "fullsend-ai's bash-env-contract pre-flight check lists the environment variables its agent scripts need, and how each is read: required (${X:?}), defaulted (${X:-d}), tested, or plain. It extracted them with its own regular expressions.\n\n", options: { color: MUTED, fontSize: 11.5 } },
+    { text: "#641 ", options: { color: TEXT, bold: true, fontSize: 11.5 } },
+    { text: "gives --flags a Bash lane: every $X or ${X…} read in a shell file, unless the same file assigned X earlier, with its form and default, and --json output, so the check can call ripwire instead.", options: { color: MUTED, fontSize: 11.5 } },
+  ], { x: MX+0.22, y: 1.86, w: 5.46, h: 2.46, fontFace: SANS, valign: "top", margin: 0 });
+  card(s, 6.72, 1.72, 5.99, 2.7);
+  s.addText([
+    { text: "The result on the real trees\n", options: { color: GREEN, bold: true, fontSize: 14 } },
+    { text: "The ported check's findings were byte-identical to the regex version on the real fullsend-ai agent and fullsend trees, with and without the baseline — ", options: { color: MUTED, fontSize: 11.5 } },
+    { text: "except where the regex was wrong.", options: { color: TEXT, bold: true, fontSize: 11.5 } },
+  ], { x: 6.94, y: 1.86, w: 5.55, h: 2.46, fontFace: SANS, valign: "top", margin: 0 });
+  const bugs = [
+    ["echo \"  PR_URL=${PR_URL}\"", "the regex counted this as an assignment, which hid two :? requirements; ripwire does not"],
+    ["jq '… $X …'", "a $X inside a single-quoted jq program was reported as a shell requirement. In Bash, single quotes expand nothing, and ripwire's lexer follows Bash quoting"],
+  ];
+  let y = 4.62;
+  for (const [code, what] of bugs){
+    card(s, MX, y, 12.09, 0.8);
+    s.addText(code, { x: MX+0.2, y: y+0.06, w: 3.6, h: 0.68, fontFace: MONO, fontSize: 11.5, bold: true, color: AMBER, valign: "middle", margin: 0 });
+    s.addText(what, { x: MX+3.95, y: y+0.06, w: 7.95, h: 0.68, fontFace: SANS, fontSize: 11, color: MUTED, valign: "middle", margin: 0 });
+    y += 0.88;
+  }
+  foot(s, "source: PR #641's description (open, 2026-11-13); the port is on an unpushed branch of the consumer");
+  notes(s, [
+    "SOURCES (a consumer). PENDING MERGE: #641, \"feat(flags): report Bash environment-variable reads, with --json\", by @jflowers, OPEN as of 2026-11-13. This slide lives in its own commit; when #641 merges, change the kicker to \"merged: #641 (<merge commit>)\" and re-check the figures on the merged tree; if #641 is closed, drop the commit.",
+    "- \"The aim is to let fullsend-ai's bash-env-contract pre-flight check use ripwire --flags --json in place of its own regex extraction.\"",
+    "- \"Every $X or ${X…} in a .sh, .bash or .zsh file is reported as an env read, unless the same file assigned X earlier. --flags also joins the --json allow-list.\" Forms: required (${X:?}, ${X?}), default (${X:-d}), unset-default, settest, assign, plain.",
+    "- \"bash-env-contract was ported on a branch that has not been pushed. On the real fullsend-ai agents and fullsend trees, its findings are byte-identical to the regex version, with and without the baseline.\"",
+    "- \"Comparing the extracted facts found regex bugs that ripwire avoids: echo \\\"  PR_URL=${PR_URL}\\\" was counted as an assignment. That hid two :? requirements. A $X inside a single-quoted jq program was reported as a shell requirement.\"",
+    "- Lexer: \"'…' spans lines and expands nothing\"; \"\\\"…\\\" expands $X\". Limit: \"Matching is lexical within one file … A name set by eval, printf -v \\\"$1\\\", or a function defined after the read still looks external. --help states this limit.\" (--help text as of #641's branch.)",
   ]);
 }
 
@@ -1514,10 +1680,11 @@ function storyCards(s, { kick, head, stories, footText }){
     ["What-to-Retrieve · arXiv 2503.20589", "retrieval selection beats retrieval volume for coding agents → the selection-over-dumping thesis"],
     ["LocAgent / Loc-Bench (2025)", "the localization metric (strict Acc@k) and the frozen 560-instance dataset every accuracy number here is scored on"],
     ["scip-clang · Serena / clangd", "the compiler-grade oracle round 9 graded both tools against — an outside referee, not a rival"],
-    ["tree-sitter", "the incremental GLR parsing substrate — 25 grammars vendored, one parser per thread"],   // CHANGELOG [0.6.2] GDScript, "the 25th vendored grammar" (#233)
+    ["tree-sitter", "the incremental GLR parsing substrate — 27 grammars vendored, one parser per thread"],   // Clojure CHANGELOG [0.6.8] (#349); Protocol Buffers changelog.d/proto-index.md
   ];
   notes(s, [
     "SOURCES (grammar count only)",
+    "- 2026-11-13: \"27 grammars vendored\" — Clojure, CHANGELOG.md [0.6.8] (#349, @tag-und-nacht), and Protocol Buffers, changelog.d/proto-index.md on main cd04d477e. The lines below are the count's history.",
     "- \"25 grammars vendored\" — CHANGELOG.md [0.6.2], \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\" (#233, @sclyde).",
     "- Before GDScript: 24 — merged: #126, merge commit 1ad9184a (PR body: \"vendored fwcd/tree-sitter-kotlin grammar\"). Before #126 the count was 23 (commit 680a0a3d); README.md on main 40a1895b says \"24 vendored grammars\".",
   ]);
@@ -1531,13 +1698,45 @@ function storyCards(s, { kick, head, stories, footText }){
   foot(s, "counts gated in-repo: readmedriftcheck arm E derives them from LINEAGE.md's own tables — the lineage is the design rationale");
 }
 
+/* ── S12h · 0.7.0: four axes ────────────────────────────────────────────── */
+{
+  // The 0.7.0 direction, as "coming": no number on this slide. Owner 2026-11-12: answers, speed and memory are comparison
+  // columns; quality delta is its own section because it is unique to ripwire.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// coming in 0.7.0 — the plan, not a result: no number on this slide", AMBER);
+  title(s, "0.7.0: four axes, measured in the open", { size: 32 });
+  const axes = [
+    ["answers", "complete, partial or wrong, per question, for ripwire and the tools it is compared with — on held-out questions sealed until the publish run, with the in-sample sets labelled as such", CYAN],
+    ["speed", "cold index and warm answer, per repository, small to large; one tool at a time on one machine, medians of repeated runs", CYAN],
+    ["memory", "peak footprint cold and warm, as a curve against repository size — and a tool that runs out of memory is a result, not a gap", GREEN],
+    ["quality delta", "its own section, not a column: a write-time check judged on its own terms — what it catches on fresh, unseen seeded changes, and its false alarms on real diffs", AMBER],
+  ];
+  let y = 1.72;
+  axes.forEach(([h2, b, c], i) => {
+    card(s, MX, y, 12.09, 1.0, i === 3 ? CARD2 : CARD);
+    s.addText(h2, { x: MX+0.25, y: y+0.08, w: 2.4, h: 0.84, fontFace: MONO, fontSize: 17, bold: true, color: c, valign: "middle", margin: 0 });
+    s.addText(b,  { x: MX+2.8, y: y+0.08, w: 9.1, h: 0.84, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
+    y += 1.1;
+  });
+  card(s, MX, y + 0.02, 12.09, 0.78, CARD2);
+  s.addText([
+    { text: "The same rules as this deck: ", options: { color: TEXT, bold: true } },
+    { text: "the method registered before the runs, a frozen grader applied to every tool alike, losses published beside wins, and a reproduce command for every number.", options: { color: MUTED } },
+  ], { x: MX+0.25, y: y + 0.08, w: 11.6, h: 0.66, fontFace: SANS, fontSize: 12, valign: "middle", margin: 0 });
+  foot(s, "until then: the published rounds r1–r10 (July–August 2026), and ripwire against its own past");
+  notes(s, [
+    "SOURCE (0.7.0 direction). The owner's direction of 2026-11-12: 0.7.0 publishes answers, speed, memory and quality delta; the comparison table has columns for answers, speed and memory, and quality delta gets its own section because it is unique to ripwire. The README's \"Measured\" section already says \"A held-out comparison comes with 0.7.0\"; CHANGELOG [0.6.10] says absolute seconds and megabytes \"come with the 0.7.0 table, measured on one other machine\".",
+    "- No figure, tool name or repository list for 0.7.0 is on this slide: none is published yet.",
+  ]);
+}
+
 /* ── S12c · re-derive this deck ─────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["194 long flags · 36 slides",        "bash test/deckclaimcheck.sh"],
+    ["194 long flags · 39 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["810 gate scripts (counts snapshot 2026-11-13)", "bash test/manifestcheck.sh"], // gatecount
@@ -1545,14 +1744,16 @@ function storyCards(s, { kick, head, stories, footText }){
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
     ["the oracle round",                  "bench/headtohead/r9-2026-08-09/RESULTS.md"],
+    ["answers by release (in-sample)",    "README.md, Measured — table and footnote"],
+    ["memory by release (percent)",       "docs/EVALS.md, Memory by release"],
   ];
-  let y = 1.7;
+  let y = 1.66;
   for (const [claim, cmd] of claims){
-    row(s, y, 0.5, [
-      { t: claim, w: 5.3,  color: TEXT, size: 12 },
-      { t: cmd,   w: 6.2,  color: CYAN, size: 11.5, mono: true },
+    row(s, y, 0.42, [
+      { t: claim, w: 5.3,  color: TEXT, size: 11.5 },
+      { t: cmd,   w: 6.2,  color: CYAN, size: 11, mono: true },
     ]);
-    y += 0.575;
+    y += 0.462;
   }
   card(s, MX, 6.32, 12.09, 0.62, CARD2);
   s.addText([

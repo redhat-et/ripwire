@@ -14511,3 +14511,39 @@ legends and `--help=all` (DEV-5); this registration's text above names no file o
 any A binary ran, because `--anchor` refuses without it (DEV-12); Gate S masks the MCP `_index` stamp (it folds file mtimes, so BASE differs
 from itself there) and the initialize reply's `dictv=` (DEV-9); I2 is read at the emitted 4-dp precision (DEV-10); B does not
 re-pick `--tree`, whose own offset paging a window swap would break (DEV-11).
+
+## Memory by release: warm `--deps` peak, v0.6.9 → v0.6.10 → main (2026-11-13)
+
+**What it measures.** The peak memory footprint of one warm `--deps` run (the index already cached) on three large
+repositories, for the two latest release tags and main. Measured for the showcase deck's memory slide. The question is
+the same command on the same tree; the answers differ between the binaries (each release changed `--deps` output), so
+this is not a byte-identity claim.
+
+**Published as percent change only.** The machine is a shared 16 GB Apple M2 Pro laptop that other work was using
+(load average 10 to 28 during the runs). Absolute megabytes for publication come only from the 0.7.0 run on another
+machine, so the deck and this section quote the percent change against v0.6.9, not the megabytes.
+
+**Method.**
+- Binaries: plain dev builds (no build type, AppleClang) of `v0.6.9` (bedc0cdcf), `v0.6.10` (ac869640e) and main
+  (cd04d477e).
+- Repositories, pinned checkouts: envoy (C++, 744a11b5be), cockroach (Go, d30c905fff), vscode (TypeScript, de1c71b869).
+- Argv, run from the repository root: `/usr/bin/time -l BIN REPO --cache=DIR --deps`. Peak = the `peak memory footprint`
+  line. One cache directory per binary and repository.
+- Per repository: one cold run per binary (it writes that binary's cache), then three warm rounds with the three binaries
+  in a rotating order (v0.6.9, v0.6.10, main; then main, v0.6.9, v0.6.10; then v0.6.10, main, v0.6.9). One ripwire process
+  at a time, each started only with at least 40 % of memory free. The figure is the median of the three warm runs.
+- Each binary printed one stdout md5 per repository on all four runs. Every run exited 0.
+
+| repository | v0.6.10 vs v0.6.9 | main vs v0.6.9 | spread of the three warm runs |
+|---|---|---|---|
+| envoy | −57 % | −79 % | v0.6.9 ±4 %; v0.6.10 and main under 0.3 % |
+| cockroach | −44 % | −74 % | v0.6.9 under 1.5 %; the others under 0.3 % |
+| vscode | −51 % | −75 % | v0.6.9 −7 % to +1 % of its median; the others under 0.2 % |
+
+The cold runs (one per binary, the run that writes the cache) moved the same way: main is −77 %, −76 % and −77 % against
+v0.6.9 on envoy, cockroach and vscode.
+
+**Caveats.** Three warm runs per cell, on a loaded machine; v0.6.9's warm peak varied most between runs, which is why the
+median is quoted. Dev builds, not release builds. One verb (`--deps`); other verbs have other peaks. The per-step
+mechanisms and their own measurements are in CHANGELOG.md [0.6.10] (#497, #505, #556) and, for main since 0.6.10, in
+`changelog.d/mem-ref-shrink.md` and the other `changelog.d/` fragments.
