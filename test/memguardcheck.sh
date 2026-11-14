@@ -1027,9 +1027,9 @@ done
 #       ingest (hard:2) and its graph (hard:3); hard:4 is past them and must change nothing. Every stop is still exit 5,
 #       no stdout, one line. Premise: the unseamed run before the arms wrote exactly one qbase blob, and the arms read it
 #       (a missing blob would make this a miss ladder again — counted, and zero FAILS).
-qr_dropbase; qr_hit ""
+qr_dropbase; qr_hit ""; hitRefRc=$?
 hitblobs="$( find "$TMP/qrtmp" -type f -name 'ripwire-qbase-*' | grep -vc '\.tmp\.' )"
-if [ "$hitblobs" = 1 ] && cmp -s "$TMP/b22.out" "$TMP/b22ref.out"; then
+if [ "$hitblobs" = 1 ] && [ "$hitRefRc" = "$refRc" ] && cmp -s "$TMP/b22.out" "$TMP/b22ref.out"; then
     ok "(B22h) premise: the unseamed run wrote one qbase blob and answers as the miss run did"
     for want in "1|base commit's snapshot, with its index released|0" "2|ingest of the target commit|1" "3|graph of the target commit|1"; do
         n="${want%%|*}"; rest="${want#*|}"; phase="${rest%|*}"; ingests="${rest##*|}"
@@ -1064,7 +1064,7 @@ if [ "$hitblobs" = 1 ] && cmp -s "$TMP/b22.out" "$TMP/b22ref.out"; then
         fi
     done
 else
-    no "(B22h) premise: qbase blobs after the unseamed run=$hitblobs (want 1), or its answer differs from the miss run"
+    no "(B22h) premise: qbase blobs after the unseamed run=$hitblobs (want 1), rc=$hitRefRc (want $refRc), or its answer differs from the miss run"
 fi
 # (B23 twin, rule 4) the refusal still holds when even the changed files are cut: crawl:1 trips every ingest at its first
 #       crawl entry, so the target's changed-file ingest (a/, a/extra.c) is cut too — exit 5, no stdout, ONE line naming
