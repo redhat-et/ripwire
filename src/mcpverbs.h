@@ -4300,7 +4300,8 @@ inline constexpr std::string_view kConnectTestJointLegend =
 // on the answer that carries them. (G4: no double hyphen.)
 inline constexpr std::string_view kConnectDeclinedJointLegend =
     "declined_joints=N: no source function has a call edge to every terminal, and N source functions reach every terminal"
-    " by a call edge or by a DECLINED call (several in-tree candidates, none chosen); <dj n= t= p=> is one of them (first 3"
+    " by a call edge or by a DECLINED call (at most 16 in-tree candidates, none chosen; a wider declined call is not followed, so N"
+    " is a floor); <dj n= t= p=> is one of them (first 3"
     " by path), one <e t= site= call=> per terminal, via=\"declined\" cands=K when that call is declined (K candidates its"
     " list holds, the terminal one of them). A HEDGE for a common caller, not a proven call: no <dj> row is an edge, a node"
     " or a count of the answer ";

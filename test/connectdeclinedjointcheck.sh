@@ -19,6 +19,7 @@
 #   N3 the declined call has 17 candidates (> kBackHopWidth 16): no <dj> (premise: --callers prints cands="17")
 #   N4 the declined caller reaches only one terminal: no <dj> (premise: --callers on Plan sees it, on Apply does not)
 #   G  legend: declined_joints= and <dj> are defined in both dialects when present, absent otherwise
+#   G2 both dialects say N is a floor (declined calls wider than 16 candidates are not followed)               (CodeRabbit 4570578062)
 #   H  determinism (3 runs) + xmllint
 #
 # Usage: test/connectdeclinedjointcheck.sh [BIN]
@@ -184,6 +185,10 @@ run "$ON" --no-cache "$CN"; noDj "N4" "$RUN"
 if printf '%s' "$A_FULL" | grep -q '<!-- ripwire connect: declined_joints=N: '; then ok "(G) full dialect defines declined_joints= and <dj>"; else no "(G) full legend lacks the declined_joints= clause"; fi
 if printf '%s' "$A_CMP" | sed 's/<connect .*//' | grep -q 'declined_joints=N: .*dj n= t= p='; then ok "(G) compact dialect defines declined_joints= and dj"; else no "(G) compact legend lacks declined_joints= / dj"; fi
 if printf '%s' "$N1_DOC" | grep -q 'declined_joints'; then no "(G) the clause rides on an answer without a <dj> row"; else ok "(G) absent from an answer without a <dj> row"; fi
+# (G2) CodeRabbit 4570578062: N counts only callers through declined calls of at most 16 candidates, so both dialects call it a floor
+if printf '%s' "$A_FULL" | grep -q 'declined_joints=N: [^>]*a wider declined call is not followed, so N is a floor'; then ok "(G2) full dialect labels declined_joints=N a floor (declined calls over 16 candidates are not followed)"; else no "(G2) the full clause does not say N is a floor"; fi
+if printf '%s' "$A_CMP" | sed 's/<connect .*//' | grep -q 'declined_joints=N: [^>]*a floor: a declined call over 16 cands is not followed'; then ok "(G2) compact dialect labels declined_joints=N a floor"; else no "(G2) the compact clause does not say N is a floor"; fi
+
 
 # ── H) determinism + well-formedness ─────────────────────────────────────────────────────────────────────
 run "$AD" --no-cache "$CN"; h1="$RUN"; run "$AD" --no-cache "$CN"; h2="$RUN"; run "$AD" --no-cache "$CN"; h3="$RUN"
