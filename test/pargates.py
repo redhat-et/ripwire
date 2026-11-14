@@ -356,6 +356,8 @@ GATE_BUDGET_SEC = {
     # spawns, the HEAD-baseline archive); the first 9-call-per-language draft took 455 s solo and hit the 300 s cap under -j 3.
     # A budget here is a hang tripwire, never a perf bar.
     "qdrenameidentitycheck.sh":   900,
+    # 2026-11-14 (lane qd-git-rename-heal): the same shape, six calls per language (a --clones premise and five --quality-delta).
+    "qdgitrenamehealcheck.sh":    900,
 }
 parallel_gates = [g for g in gates if g not in exclusive]
 exclusive_gates = [g for g in gates if g in exclusive]
