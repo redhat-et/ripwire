@@ -48,8 +48,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <string_view>
 #if defined( __linux__ )
@@ -100,6 +102,7 @@ inline constexpr int kDirwatchBatch = 32;
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <spawn.h>
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -109,6 +112,7 @@ inline constexpr int kDirwatchBatch = 32;
 #include <unistd.h>
 
 #if defined( __APPLE__ )
+  #include <crt_externs.h>          // _NSGetEnviron — spawn_self's inherited environment (a dylib has no `environ` symbol)
   #include <mach-o/dyld.h>          // _NSGetExecutablePath
   #include <mach/mach.h>            // task_info( TASK_VM_INFO ) — mem_footprint's phys_footprint
   #include <sys/sysctl.h>           // sysctlbyname — mem_physical (hw.memsize), mem_pressure (kern.memorystatus_vm_pressure_level)
@@ -117,6 +121,9 @@ inline constexpr int kDirwatchBatch = 32;
 #else
   #include <functional>             // std::hash<std::thread::id> — the last-resort numeric thread id
   #include <thread>
+#endif
+#if !defined( __APPLE__ )
+extern char** environ;              // spawn_self's inherited environment: POSIX defines it, and no header has to declare it
 #endif
 
 // kqueue is a BSD interface: <sys/event.h> does not exist on Linux. The `#ifndef` is a deliberate override seam:
@@ -472,6 +479,76 @@ inline long pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int ti
     }
     return child;
 }
+
+// spawn_self: start THIS executable (exepath) again with `argv` (argv[0] first, NULL-terminated) and the environment
+// plus `extraEnv` ("NAME=value"; an entry already naming NAME is dropped), stdin and stdout on /dev/null and stderr
+// onto `stderrFd` — the write end of a caller's pipe_cloexec pair, whose other end the exec closes. It is the one
+// re-exec of the program, for a phase whose pages must go back to the system when it ends (a process exit returns
+// them all; an allocator keeps them). posix_spawn, not fork: the caller may hold threads and hundreds of MiB, and
+// fork would copy the page tables only to throw them away. Its contract: the child's pid, or -1 with errno set and no
+// child; an exec that fails after the spawn may also show up as the child's exit 127. macOS closes every other
+// descriptor in the child (POSIX_SPAWN_CLOEXEC_DEFAULT); elsewhere the program's descriptors are close-on-exec already.
+// A platform without posix_spawn has no body here: the Windows one fails with ENOSYS, and the caller runs the phase
+// in-process.
+inline pid_t spawn_self( const char* const argv[], const std::string& extraEnv, int stderrFd )
+{
+    char exe[ PATH_MAX ];
+    if( exepath( exe, sizeof( exe ) ) != 0 )
+    {
+        return -1;
+    }
+#if defined( __APPLE__ )
+    char* const* const env = *::_NSGetEnviron();
+#else
+    char* const* const env = ::environ;
+#endif
+    const std::size_t nameCount = extraEnv.find( '=' ) + 1;   // "NAME=" — npos + 1 is 0, and an empty name drops nothing
+    std::size_t       envCount  = 0;
+    while( env != nullptr && env[ envCount ] != nullptr )
+    {
+        ++envCount;
+    }
+    std::unique_ptr<char*[]> childEnv( new char*[ envCount + 2 ] );
+    std::size_t              kept = 0;
+    for( std::size_t envIndex = 0; envIndex < envCount; ++envIndex )
+    {
+        if( nameCount == 0 || std::strncmp( env[ envIndex ], extraEnv.c_str(), nameCount ) != 0 )
+        {
+            childEnv[ kept++ ] = env[ envIndex ];
+        }
+    }
+    childEnv[ kept++ ] = const_cast<char*>( extraEnv.c_str() );
+    childEnv[ kept ]   = nullptr;
+
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t          attr;
+    if( ::posix_spawn_file_actions_init( &actions ) != 0 )
+    {
+        return -1;
+    }
+    if( ::posix_spawnattr_init( &attr ) != 0 )
+    {
+        ::posix_spawn_file_actions_destroy( &actions );
+        return -1;
+    }
+    int rc = ::posix_spawn_file_actions_addopen( &actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0 );
+    rc     = rc != 0 ? rc : ::posix_spawn_file_actions_addopen( &actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0 );
+    rc     = rc != 0 ? rc : ::posix_spawn_file_actions_adddup2( &actions, stderrFd, STDERR_FILENO );
+#if defined( __APPLE__ )
+    rc = rc != 0 ? rc : ::posix_spawnattr_setflags( &attr, POSIX_SPAWN_CLOEXEC_DEFAULT );
+#endif
+    pid_t child = -1;
+    rc          = rc != 0 ? rc : ::posix_spawn( &child, exe, &actions, &attr, const_cast<char* const*>( argv ), childEnv.get() );
+    ::posix_spawnattr_destroy( &attr );
+    ::posix_spawn_file_actions_destroy( &actions );
+    if( rc != 0 )
+    {
+        errno = rc;
+        return -1;
+    }
+    return child;
+}
+[[gnu::always_inline]] inline pid_t getppid() { return ::getppid(); }
 
 // ── threads ────────────────────────────────────────────────────────────────────────────────────────────────
 // gettid: the 64-bit kernel thread id a tracer shows (Darwin's pthread_threadid_np, Linux's SYS_gettid).
@@ -1211,6 +1288,8 @@ inline constexpr long kPipeNothingYet = -2;
 long       pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs );   // the POSIX half's comment
 pid_t      spawn_sh( const std::string& command, const int pipeFds[ 2 ] );
 pid_t      fork_session();   // no fork on Windows: -1 with ENOSYS (the POSIX half's comment)
+pid_t      spawn_self( const char* const argv[], const std::string& extraEnv, int stderrFd );   // no posix_spawn: -1 with ENOSYS, the caller runs in-process
+pid_t      getppid();        // -1 with ENOSYS: nothing here is ever a spawn_self child
 
 // ── threads ────────────────────────────────────────────────────────────────────────────────────────────────
 pthread_t     pthread_self();

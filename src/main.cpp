@@ -5358,7 +5358,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // QD-CONSTRUCTS-AT-INGEST: only a quality-delta run has its ingests find the construct hits (ingest.h WantConstructHits)
     const WantConstructHits wantConstructHits( cfg.qualityDelta || cfg.qualityBaseline );
     // #387: --quality-delta=A..B indexes its two commits itself and never reads the working tree's index.
-    if( std::optional<int> handled = runQualityDeltaRangeBeforeIngest( cfg, verbPrec.winner, root, ws ) )
+    if( std::optional<int> handled = runQualityDeltaRangeBeforeIngest( cfg, verbPrec.winner, root, ws, argv ) )
     {
         return *handled;
     }

@@ -19,7 +19,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <mutex>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace Diagnostics
 {
@@ -131,7 +135,73 @@ RW_COLD void writeNotice( std::format_string<A...> format, A&&... args ) noexcep
     std::fflush( stderr );
 }
 
+// adoptNotices' sites, as "FILE:LINE" — the location a notice prints. Read only on the cold notice path.
+struct AdoptedSites
+{
+    std::mutex               mutex;
+    std::vector<std::string> sites;
+};
+AdoptedSites& adoptedSites() noexcept
+{
+    static AdoptedSites adopted;
+    return adopted;
+}
+
+bool siteAdopted( const char* file, int line ) noexcept
+{
+    AdoptedSites&                     adopted = adoptedSites();
+    const std::lock_guard<std::mutex> lock( adopted.mutex );
+    if( adopted.sites.empty() )
+    {
+        return false;
+    }
+    char              key[ 512 ];
+    const std::size_t keyBytes = rw::formatTo( key, sizeof( key ), "{}:{}", orEmpty( file ), line );
+    const std::string_view site( key, keyBytes < sizeof( key ) ? keyBytes : sizeof( key ) - 1 );
+    for( const std::string& adoptedSite : adopted.sites )
+    {
+        if( adoptedSite == site )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
+
+void ConsoleLog::adoptNotices( const char* stderrText ) noexcept
+{
+    // a notice line: "[math degraded] DESC  (FILE:LINE, FUNCTION — logged once per site)" or "[validate] … (same tail)".
+    // FUNCTION is a pretty-printed signature, which holds no two-space run, so the location starts after the LAST "  (".
+    constexpr std::string_view kTail = " — logged once per site)";
+    std::string_view           text( stderrText == nullptr ? "" : stderrText );
+    AdoptedSites&              adopted = adoptedSites();
+    while( !text.empty() )
+    {
+        const std::size_t      eol  = text.find( '\n' );
+        const std::string_view line = text.substr( 0, eol );
+        text.remove_prefix( eol == std::string_view::npos ? text.size() : eol + 1 );
+        if( !( line.starts_with( "[math degraded] " ) || line.starts_with( "[validate] " ) ) || !line.ends_with( kTail ) )
+        {
+            continue;
+        }
+        const std::size_t open = line.rfind( "  (" );
+        const std::size_t comma = open == std::string_view::npos ? std::string_view::npos : line.find( ", ", open );
+        if( comma == std::string_view::npos )
+        {
+            continue;
+        }
+        try
+        {
+            const std::lock_guard<std::mutex> lock( adopted.mutex );
+            adopted.sites.emplace_back( line.substr( open + 3, comma - open - 3 ) );
+        }
+        catch( ... )   // out of memory on a debug notice: the site may print twice, nothing worse
+        {
+        }
+    }
+}
 
 RW_COLD_NOINLINE
 void ConsoleLog::handleAssert( CheckKind kind, const char* expr, const char* file, int line, const char* function,
@@ -192,6 +262,10 @@ void ConsoleLog::handleValidateFailed( const char* expr, const char* file, int l
     const bool  hasDescription = description != nullptr && description[ 0 ] != '\0';
     const char* separator      = hasDescription ? " — " : "";
     const char* text           = hasDescription ? description : "";
+    if( siteAdopted( file, line ) )
+    {
+        return;   // the child that ran an earlier phase of this run already printed it (adoptNotices)
+    }
     writeNotice( "[validate] {} is false{}{}  ({}:{}, {} — logged once per site)\n",
                  orEmpty( expr ), separator, text, orEmpty( file ), line, orEmpty( function ) );
 }
@@ -202,6 +276,10 @@ void ConsoleLog::handleDegraded( const char* file, int line, const char* functio
     // DISCLOSE's debug trace. One-line notice, no trap — the caller clamps/falls back and continues. The
     // "[math degraded]" prefix and every message are kept byte-identical: 11 gates grep for the prefix
     // (test/*.sh on 3bf884e2) and test/sidecarsymlinkcheck.sh pins message text. Retiring the prefix is its own change.
+    if( siteAdopted( file, line ) )
+    {
+        return;   // the child that ran an earlier phase of this run already printed it (adoptNotices)
+    }
     writeNotice( "[math degraded] {}  ({}:{}, {} — logged once per site)\n", orEmpty( description ), orEmpty( file ), line, orEmpty( function ) );
 }
 

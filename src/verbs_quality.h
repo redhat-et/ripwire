@@ -112,6 +112,13 @@ struct RefPairDelta
     PhaseStop                 stop;                                // the guard's stop in a full tree, when there was one
     std::uint64_t             ingestPeak = 0;                      // this process's peak at the end of the base commit's ingest (the projection's input)
     bool                      baseFromCache = false;               // QD-PAIR-BASE-CACHE: the base side came from its qbase blob (no base ingest to project from)
+    // QD-BASE-CHILD: the base side was built by a child process (baseInChild), which wrote the qbase blob this one read. Its
+    // readings stand in for this process's own in the projection, and its peak for the base phase's in the peak disclosure.
+    bool                      baseFromChild  = false;
+    std::uint64_t             childBefore    = 0;   // the child's footprint before its base phase
+    std::uint64_t             childBasePeak  = 0;   // its peak at the end of the base phase
+    std::uint64_t             childAfter     = 0;   // its footprint once the base tree was released
+    std::uint64_t             childPeak      = 0;   // its peak when it exited (the blob written)
 
     const rw::quality::RefTree& target() const noexcept { return targetTree; }
     const std::vector<std::string>* macroOverride() const noexcept { return degraded && haveBaseMacros ? &baseMacros : nullptr; }
@@ -217,20 +224,33 @@ bool takeCachedBase( const std::string& path, const std::string& sha, RefPairDel
     return true;
 }
 
-std::optional<int> scoreBaseCommit( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& refs )
+// The cache key of the base side (QD-PAIR-BASE-CACHE): the base sha, the excludes, maxFileBytes, the selected kinds and the
+// build. --no-cache neither reads nor writes it, so the flag that asks for a fresh answer gets one: `path` is then empty.
+struct BaseCacheKey
+{
+    std::string repoHex, exclHex, path;
+    bool        use() const noexcept { return !path.empty(); }
+};
+BaseCacheKey baseCacheKey( const std::string& root, const std::string& sha, const rw::Config& cfg, rw::quality::KindMask selected )
 {
     using namespace rw;
-    // QD-PAIR-BASE-CACHE: keyed by the base sha, the excludes, maxFileBytes, the selected kinds and the build; --no-cache
-    // neither reads nor writes it, so the flag that asks for a fresh answer gets one.
-    const bool        useCache = !cfg.noCache;
-    const std::string repoHex  = useCache ? quality::cacheRootKeyHex( root ) : std::string();
-    // the qsnap key (excludes, maxFileBytes, scheme, producer identity) plus the selected kinds: a base Snapshot holds only those
-    const std::string exclHex  = useCache ? quality::qsnapExclHex( cfg.excludes, cfg.maxFileBytes ) + "k" + std::to_string( refs.selected ) : std::string();
-    const std::string path     = useCache ? quality::qbaseCachePath( repoHex, exclHex, sha ) : std::string();
-    if( useCache && takeCachedBase( path, sha, refs ) )
+    if( cfg.noCache )
     {
-        return std::nullopt;
+        return {};
     }
+    BaseCacheKey key;
+    key.repoHex = quality::cacheRootKeyHex( root );
+    // the qsnap key (excludes, maxFileBytes, scheme, producer identity) plus the selected kinds: a base Snapshot holds only those
+    key.exclHex = quality::qsnapExclHex( cfg.excludes, cfg.maxFileBytes ) + "k" + std::to_string( selected );
+    key.path    = quality::qbaseCachePath( key.repoHex, key.exclHex, sha );
+    return key;
+}
+
+// The base commit, scored in this process: archived, ingested, graphed, its snapshot and macro names kept, the tree released
+// on return. Exit code on an environment failure; a memory stop goes to refs.stop. Writes nothing.
+std::optional<int> buildBaseInProcess( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& refs )
+{
+    using namespace rw;
     quality::TmpTreeGuard      baseGuard;
     quality::RefTree           baseTree;
     const quality::RefTreeLoad load = quality::loadRefTree( root, sha, cfg.excludes, cfg.maxFileBytes, "qdpair-base", baseGuard, baseTree );
@@ -247,10 +267,299 @@ std::optional<int> scoreBaseCommit( const std::string& root, const std::string& 
     refs.baseMacros     = quality::cFamilyMacroNames( baseTree.ing );
     refs.haveBaseMacros = true;
     (void)hardLineStops( "snapshot of the base commit", refs.stop );
-    if( useCache && !refs.stop.stopped )   // a stopped side is never persisted: the next call must not read a partial floor as whole
+    return std::nullopt;
+}
+
+// ── QD-BASE-CHILD: the base phase in a child process ─────────────────────────────────────────────────────────────────
+// The base tree is built and released before the target is read (#387), but on macOS the allocator keeps the freed pages
+// (~80 % fragmented, qd-pair-residue): the target then either reuses them or stacks on top of them, and vscode's cold A..B
+// peak was bimodal at 933-1327 MiB. So on a qbase miss the CLI re-runs itself (os::spawn_self, the same argv) as a child
+// that builds the base side and writes the qbase blob, and this process reads the blob as a cache hit: the child's pages
+// go back to the system when it exits. No new format — the cold path becomes "the child fills the cache, then the warm
+// path". The protocol is the child's stderr, one pipe: what it prints before `begin` (this process printed the same lines
+// already) is dropped, what it prints between `begin` and `end` (the base phase's own diagnostics) is passed through on
+// stderr where the in-process run would have printed it, and the `end` line carries the outcome and the readings.
+// Anything else — no posix_spawn (Windows), a spawn that fails, a non-zero exit, a missing end line, a blob that does not
+// validate — runs the base phase in-process instead, the answer this form always gave (its own child output dropped, so
+// the base-phase lines are printed once).
+constexpr const char*      kBaseChildEnv   = "RIPWIRE_QBASE_CHILD";   // "<parent pid>:<temp blob path>"
+constexpr std::string_view kBaseChildBegin = "ripwire-qbase-child: begin\n";
+constexpr std::string_view kBaseChildEnd   = "ripwire-qbase-child: end ";
+
+// The argv of a CLI run that may re-run itself: set by runQualityDeltaRangeBeforeIngest only, so the MCP server, a
+// --quality-ack run and any other route that reaches the range form score the base in-process.
+char**& baseChildArgv() noexcept
+{
+    static char** argv = nullptr;
+    return argv;
+}
+
+// RIPWIRE_TEST_QBASE_CHILD (gates only): `inproc` never spawns; `spawnfail` hands the spawn a bad descriptor so the real
+// spawn fails; `exit` makes the child exit 70 before its base phase; `partial` makes it write half the blob. Each of the
+// last three must fall back to the in-process answer, byte for byte.
+std::string_view baseChildSeam() noexcept
+{
+    const char* const v = std::getenv( "RIPWIRE_TEST_QBASE_CHILD" );
+    return v == nullptr ? std::string_view() : std::string_view( v );
+}
+
+// This process's role: the temp blob path when it is the child its parent spawned (the variable names the parent's pid, so
+// a stray value in a user's environment is ignored), else empty.
+std::string baseChildTempPath()
+{
+    const char* const v = std::getenv( kBaseChildEnv );
+    if( v == nullptr )
     {
-        (void)quality::atomicWriteFile( path, quality::serializeBaseCommitScore( { refs.baseSnapshot, refs.baseMacros }, sha ) );
-        quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + repoHex + "-" + exclHex + "-", path, 2 );
+        return {};
+    }
+    const std::string_view value( v );
+    const std::size_t      colon = value.find( ':' );
+    if( colon == std::string_view::npos || colon + 1 >= value.size() || value.substr( 0, colon ) != std::to_string( rw::os::getppid() ) )
+    {
+        return {};
+    }
+    return std::string( value.substr( colon + 1 ) );
+}
+
+// The child's side: the base phase, the blob (the cache when it can be written, else the parent's temp path), the end line.
+// The process's exit code: 0 once the end line is out, the refusal's own code after an environment failure (said in the line).
+int runBaseChild( const std::string& root, const rw::Config& cfg, RefPairDelta& out, std::uint64_t before, const std::string& tempPath )
+{
+    using namespace rw;
+    if( baseChildSeam() == "exit" )
+    {
+        return 70;
+    }
+    rw::emitRaw( stderr, std::string( kBaseChildBegin ).c_str() );
+    const std::optional<int> failed = buildBaseInProcess( root, out.baseSha, cfg, out );
+    const std::uint64_t      basePeak = os::mem_footprint_peak();
+    const std::uint64_t      after    = memguard::measuredFootprint();
+    std::string_view         status   = failed ? "failed" : out.stop.stopped ? "stopped" : "ok";
+    std::string_view         where    = "none";
+    if( !failed && !out.stop.stopped )   // a stopped side is never persisted: the parent re-runs it in-process
+    {
+        std::string blob = quality::serializeBaseCommitScore( { out.baseSnapshot, out.baseMacros }, out.baseSha );
+        if( baseChildSeam() == "partial" )
+        {
+            blob.resize( blob.size() / 2 );
+        }
+        const BaseCacheKey key = baseCacheKey( root, out.baseSha, cfg, out.selected );
+        if( key.use() && quality::atomicWriteFile( key.path, blob ) )
+        {
+            quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + key.repoHex + "-" + key.exclHex + "-", key.path, 2 );
+            where = "cache";
+        }
+        else if( quality::atomicWriteFile( tempPath, blob ) )
+        {
+            where = "temp";
+        }
+        else
+        {
+            status = "nowrite";
+        }
+    }
+    memguard::answerStops();   // the parent answers for a stop (it re-runs the phase): this process prints no backstop of its own
+    rw::emitTo( stderr, "{}status={} rc={} blob={} before={} ingest_peak={} base_peak={} after={} peak={} type3_runs={} type3_pairs={}\n", kBaseChildEnd, status,
+                failed ? *failed : 0, where, before, out.ingestPeak, basePeak, after, os::mem_footprint_peak(),
+                gType3PassRuns.load( std::memory_order_relaxed ), gType3PassPairs.load( std::memory_order_relaxed ) );
+    return failed ? *failed : 0;
+}
+
+// The parent's reading of the child's end line: `name=` 's unsigned value, or 0.
+std::uint64_t baseChildField( std::string_view line, std::string_view name )
+{
+    const std::size_t at = line.find( " " + std::string( name ) + "=" );
+    if( at == std::string_view::npos )
+    {
+        return 0;
+    }
+    std::uint64_t value = 0;
+    for( std::size_t i = at + name.size() + 2; i < line.size() && line[ i ] >= '0' && line[ i ] <= '9'; ++i )
+    {
+        value = value * 10 + std::uint64_t( line[ i ] - '0' );
+    }
+    return value;
+}
+std::string_view baseChildWord( std::string_view line, std::string_view name )
+{
+    const std::size_t at = line.find( " " + std::string( name ) + "=" );
+    if( at == std::string_view::npos )
+    {
+        return {};
+    }
+    const std::string_view rest = line.substr( at + name.size() + 2 );
+    return rest.substr( 0, rest.find( ' ' ) );
+}
+
+// What baseInChild did: the base side is in `refs` (Answered), the child refused with an exit code (Failed — its line is
+// on stderr), or nothing usable came back (Fallback — the caller scores the base in-process).
+enum class BaseChildOutcome : std::uint8_t
+{
+    Answered,
+    Failed,
+    Fallback,
+};
+struct BaseChildResult
+{
+    BaseChildOutcome outcome = BaseChildOutcome::Fallback;
+    int              rc      = 0;
+    std::string_view why;   // the fallback's cause, for the stats line
+};
+
+// The child run, read to its end: everything it printed on stderr, and its wait status.
+struct BaseChildRun
+{
+    std::string text;
+    int         status = 0;
+    bool        spawned = false;
+};
+BaseChildRun spawnBaseChild( const std::string& tempPath )
+{
+    using namespace rw;
+    BaseChildRun run;
+    int          fds[ 2 ] = { -1, -1 };
+    if( os::pipe_cloexec( fds ) != 0 )
+    {
+        return run;
+    }
+    const std::string env = std::string( kBaseChildEnv ) + "=" + std::to_string( os::getpid() ) + ":" + tempPath;
+    const os::pid_t   pid = os::spawn_self( baseChildArgv(), env, baseChildSeam() == "spawnfail" ? -1 : fds[ 1 ] );
+    os::close( fds[ 1 ] );
+    if( pid < 0 )
+    {
+        os::close( fds[ 0 ] );
+        return run;
+    }
+    run.spawned = true;
+    char buf[ 1 << 14 ];
+    for( ;; )
+    {
+        const os::ssize_t got = os::read( fds[ 0 ], buf, sizeof( buf ) );
+        if( got > 0 )
+        {
+            run.text.append( buf, std::size_t( got ) );
+        }
+        else if( got == 0 || errno != EINTR )
+        {
+            break;
+        }
+    }
+    os::close( fds[ 0 ] );
+    while( os::waitpid( pid, &run.status, 0 ) < 0 && errno == EINTR )
+    {
+    }
+    return run;
+}
+
+// The parent's side. `key` is the cache key (empty under --no-cache).
+BaseChildResult baseInChild( const BaseCacheKey& key, RefPairDelta& refs )
+{
+    using namespace rw;
+    BaseChildResult result;
+    // a temp path of this process's own (pid-suffixed, beside the materialized trees), removed on every path
+    const std::string tempPath = quality::cacheDirLadder() + "/ripwire-qbase-child-" + std::to_string( os::getpid() ) + ".bin";
+    os::remove( tempPath.c_str() );   // a crashed earlier run's leftover
+    struct RemoveOnExit
+    {
+        const std::string& path;
+        ~RemoveOnExit() { rw::os::remove( path.c_str() ); }
+    } removeTemp{ tempPath };
+
+    const BaseChildRun run = spawnBaseChild( tempPath );
+    if( !run.spawned )
+    {
+        result.why = "spawn";
+        return result;
+    }
+    const std::size_t begin   = run.text.find( kBaseChildBegin );
+    const std::size_t endLine = run.text.rfind( kBaseChildEnd );
+    if( begin == std::string::npos || endLine == std::string::npos || endLine < begin || !WIFEXITED( run.status ) )
+    {
+        result.why = WIFEXITED( run.status ) ? "exit" : "signal";
+        return result;
+    }
+    const std::string_view line   = std::string_view( run.text ).substr( endLine, run.text.find( '\n', endLine ) - endLine );
+    const std::string_view status = baseChildWord( line, "status" );
+    const std::string      said   = run.text.substr( begin + kBaseChildBegin.size(), endLine - begin - kBaseChildBegin.size() );
+    const int              exitRc = WEXITSTATUS( run.status );
+    if( status == "failed" && exitRc != 0 && std::uint64_t( exitRc ) == baseChildField( line, "rc" ) )
+    {
+        rw::emitRaw( stderr, said.c_str() );   // the refusal, said once, by the child
+        result.outcome = BaseChildOutcome::Failed;
+        result.rc      = exitRc;
+        return result;
+    }
+    if( status != "ok" || exitRc != 0 )
+    {
+        result.why = status == "stopped" ? "stopped" : "exit";
+        return result;
+    }
+    const std::string_view           where = baseChildWord( line, "blob" );
+    const std::string&               path  = where == "cache" ? key.path : tempPath;
+    quality::BaseCommitScore         score;
+    const std::optional<std::string> blob = where == "cache" || where == "temp" ? quality::readQSnapBlob( path ) : std::nullopt;
+    if( !blob || !quality::deserializeBaseCommitScore( *blob, refs.baseSha, score ) )
+    {
+        os::remove( path.c_str() );   // never left for the next run to refuse: the in-process phase rewrites the cache
+        result.why = "blob";
+        return result;
+    }
+    rw::emitRaw( stderr, said.c_str() );
+    Diagnostics::ConsoleLog::adoptNotices( said.c_str() );   // a site the child's phase already noted stays silent here, as in-process
+    refs.baseSnapshot   = std::move( score.snapshot );
+    refs.baseMacros     = std::move( score.macros );
+    refs.haveBaseMacros = true;
+    refs.baseFromChild  = true;
+    refs.ingestPeak     = baseChildField( line, "ingest_peak" );
+    refs.childBefore    = baseChildField( line, "before" );
+    refs.childBasePeak  = baseChildField( line, "base_peak" );
+    refs.childAfter     = baseChildField( line, "after" );
+    refs.childPeak      = baseChildField( line, "peak" );
+    // the Type-3 cost counters (RIPWIRE_STATS' quality-passes line) count the child's passes too, as they did in-process
+    gType3PassRuns.fetch_add( std::uint32_t( baseChildField( line, "type3_runs" ) ), std::memory_order_relaxed );
+    gType3PassPairs.fetch_add( baseChildField( line, "type3_pairs" ), std::memory_order_relaxed );
+    result.outcome      = BaseChildOutcome::Answered;
+    return result;
+}
+
+std::optional<int> scoreBaseCommit( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& refs )
+{
+    using namespace rw;
+    const BaseCacheKey key = baseCacheKey( root, sha, cfg, refs.selected );
+    if( key.use() && takeCachedBase( key.path, sha, refs ) )
+    {
+        return std::nullopt;
+    }
+    // QD-BASE-CHILD: the CLI's own route only; never under --quality-ack (its ledger lock is this process's) or a memory-guard
+    // test seam (its counters are this process's ordinals)
+    if( baseChildArgv() != nullptr && !cfg.qualityAck && std::getenv( "RIPWIRE_TEST_MEMGUARD" ) == nullptr && baseChildSeam() != "inproc" )
+    {
+        const BaseChildResult child = baseInChild( key, refs );
+        if( std::getenv( "RIPWIRE_STATS" ) )
+        {
+            rw::emitTo( stderr, "ripwire: stats qbase-child outcome={} why={} child_peak_mib={}\n",
+                        child.outcome == BaseChildOutcome::Answered ? "child" : child.outcome == BaseChildOutcome::Failed ? "failed" : "fallback",
+                        child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( 1024 * 1024 ) );
+        }
+        if( child.outcome == BaseChildOutcome::Answered )
+        {
+            return std::nullopt;
+        }
+        if( child.outcome == BaseChildOutcome::Failed )
+        {
+            return child.rc;
+        }
+        DISCLOSE( Diagnostics::answerUnchanged, "the base phase runs in this process instead: the same answer, with the base tree's freed pages kept here",
+                  "quality: --quality-delta=A..B base child unavailable — scoring the base in-process" );
+    }
+    if( const std::optional<int> failed = buildBaseInProcess( root, sha, cfg, refs ) )
+    {
+        return failed;
+    }
+    if( key.use() && !refs.stop.stopped )   // a stopped side is never persisted: the next call must not read a partial floor as whole
+    {
+        (void)quality::atomicWriteFile( key.path, quality::serializeBaseCommitScore( { refs.baseSnapshot, refs.baseMacros }, sha ) );
+        quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + key.repoHex + "-" + key.exclHex + "-", key.path, 2 );
     }
     return std::nullopt;
 }
@@ -408,6 +717,10 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
     if( !out.sameRef )
     {
         const std::uint64_t before = os::mem_footprint();
+        if( const std::string tempPath = baseChildTempPath(); !tempPath.empty() )
+        {
+            return runBaseChild( root, cfg, out, before, tempPath );   // QD-BASE-CHILD: this process is the child, and ends here
+        }
         if( const std::optional<int> failed = scoreBaseCommit( root, out.baseSha, cfg, out ) )
         {
             return failed;
@@ -419,16 +732,18 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
         {
             return out.stop.stopped ? std::nullopt : loadTargetCommit( root, out.targetSha, cfg, out );
         }
-        const std::uint64_t              basePeak = os::mem_footprint_peak();
-        const std::uint64_t              after    = memguard::measuredFootprint();
-        const memguard::TargetProjection proj     = memguard::projectTargetPhase( before, out.ingestPeak, basePeak, after );
+        // QD-BASE-CHILD: a base the child built is projected from the child's own readings — the phase this process never ran
+        const std::uint64_t              baseBefore = out.baseFromChild ? out.childBefore : before;
+        const std::uint64_t              basePeak   = out.baseFromChild ? out.childBasePeak : os::mem_footprint_peak();
+        const std::uint64_t              after      = out.baseFromChild ? out.childAfter : memguard::measuredFootprint();
+        const memguard::TargetProjection proj       = memguard::projectTargetPhase( baseBefore, out.ingestPeak, basePeak, after );
         out.needBytes       = proj.needBytes;
         out.ingestNeedBytes = proj.ingestNeedBytes;
         projectedNoFit = !proj.fits;
         if( std::getenv( "RIPWIRE_STATS" ) )   // the projection's own readings, the calibration's instrument (kProjectionScalePct)
         {
             rw::emitTo( stderr, "ripwire: memory-projection before={} ingest_peak={} base_peak={} after={} need={} measured={} fits={}\n",
-                        memguard::limitSpelling( before ), memguard::limitSpelling( out.ingestPeak ), memguard::limitSpelling( basePeak ),
+                        memguard::limitSpelling( baseBefore ), memguard::limitSpelling( out.ingestPeak ), memguard::limitSpelling( basePeak ),
                         memguard::limitSpelling( after ), memguard::limitSpelling( proj.needBytes ), proj.measured ? 1 : 0, proj.fits ? 1 : 0 );
         }
         if( projectedNoFit )
@@ -1795,6 +2110,11 @@ KindsDisclosure kindsDisclosure( const rw::Config& cfg, const RefPairDelta& refs
         }
     }
     out.peakOver = memguard::peakOverLimit();
+    // QD-BASE-CHILD: the base phase's peak was the child's; in-process it was this process's, so the disclosure reads both
+    if( refs.baseFromChild && memguard::limits().hardBytes != 0 && refs.childPeak > memguard::limits().hardBytes )
+    {
+        out.peakOver = std::max( out.peakOver, refs.childPeak );
+    }
     if( out.peakOver != 0 )
     {
         memguard::stopCounts().peakSaid.store( true, std::memory_order_relaxed );   // main() need not say it again
@@ -2594,12 +2914,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
 // before the working-tree ingest, and the handler reads only the judged tree's index. --pin-census keeps the old path:
 // it writes the working tree's census as a side effect of any run that asks for it.
 std::optional<int> runQualityDeltaRangeBeforeIngest( const rw::Config& cfg, const char* dispatchWinner, const std::string& root,
-                                                      const std::vector<rw::WorkspaceRoot>& ws )
+                                                      const std::vector<rw::WorkspaceRoot>& ws, char** argv )
 {
     if( cfg.qualityDeltaRange.empty() || !cfg.pinCensus.empty() || dispatchWinner == nullptr || std::string_view( dispatchWinner ) != "--quality-delta" )
     {
         return std::nullopt;
     }
+    baseChildArgv() = argv;   // QD-BASE-CHILD: this route may re-run itself for the base phase (scoreBaseCommit)
     const rw::IngestResult           noWorkingTree;
     const rw::Graph                  noGraph;
     const rw::QMetrics               noMetrics;
