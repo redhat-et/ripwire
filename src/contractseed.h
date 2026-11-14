@@ -22,7 +22,8 @@
 //
 // ONE HELPER for --impact, --callers, --safe-delete and --path (and the MCP twins of impact, callers and path), so the four
 // verbs cannot disagree on what a contract seed reaches. A selector with no bodiless callable among its matches returns them
-// untouched (contracts == 0), so every other answer keeps its bytes.
+// untouched (contracts == 0), so every other answer keeps its bytes; so does one whose matches already held every implementor
+// body and some bodied def (a bare name): contracts and impls read 0 there, since the seeds are unchanged.
 
 #include "graph.h"             // Graph::implementors / implementorBound, legoImplementorClosure
 #include "langfacts.h"         // structuralTyping — the method-set rule's language column
@@ -307,7 +308,13 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
         {
             continue;   // declared outside any type (a C prototype, even one whose scope names a type): no contract
         }
-        const bool ownBody = std::ranges::any_of( named, [ & ]( NodeId n ) { return !bodiless( ing.symbols[ n ] ) && owners.ownerOf( n ) == type; } );
+        // its own body: a bodied method the type holds, or one whose scope NAMES the type (a C++ out-of-line definition in
+        // another file, read by name because a forward `class T;` makes the type's name ambiguous to ownerOf)
+        const Symbol& ty      = ing.symbols[ type ];
+        const bool    ownBody = std::ranges::any_of( named, [ & ]( NodeId n ) {
+            const Symbol& b = ing.symbols[ n ];
+            return !bodiless( b ) && ( owners.ownerOf( n ) == type || ( b.lang == ty.lang && scopeLastSegment( b.scope ) == ty.name ) );
+        } );
         if( ownBody )
         {
             continue;   // a declaration beside its own definition (C++ out-of-line, a TS overload signature): not a contract
@@ -326,6 +333,7 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
     std::sort( implBodies.begin(), implBodies.end() );
     implBodies.erase( std::unique( implBodies.begin(), implBodies.end() ), implBodies.end() );
     out.impls = implBodies.size();
+    const std::size_t   matchCount = out.seeds.size();
     std::vector<NodeId> sortedSeeds( out.seeds );
     std::sort( sortedSeeds.begin(), sortedSeeds.end() );
     for( const NodeId b : implBodies )
@@ -334,6 +342,14 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
         {
             out.seeds.push_back( b );
         }
+    }
+    // Disclose only an answer the widening changed or one that stands on contracts alone. A selector that already matched
+    // every implementor body (a bare `match` beside its interface member) walks the same seeds as before: no impls=, so
+    // its bytes stay main's.
+    if( out.seeds.size() == matchCount && out.contracts < matchCount )
+    {
+        out.contracts = 0;
+        out.impls     = 0;
     }
     ENSURES( out.contracts > 0 || out.impls == 0, "only a contract seed adds implementor bodies" );
     return out;

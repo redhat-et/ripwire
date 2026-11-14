@@ -72,6 +72,24 @@ int Linear::match( int path ) { return path + 1; }
 int dispatch( Router& r, int p ) { return r.match( p ); }
 int serve() { Linear l; return dispatch( l, 3 ); }
 EOF
+# C++, the envoy shape (fire321 ld-envoy-03/04/08): a declaration whose out-of-line definition lives in ANOTHER file while a
+# forward `class Server;` makes the type name ambiguous; its own body, so no contract
+cat > "$CPP/server.h" <<'EOF'
+#pragma once
+class Server {
+public:
+    void run();
+};
+EOF
+cat > "$CPP/fwd.h" <<'EOF'
+#pragma once
+class Server;
+EOF
+cat > "$CPP/server.cpp" <<'EOF'
+#include "server.h"
+void Server::run() {}
+int boot() { Server s; s.run(); return 0; }
+EOF
 cat > "$JAVA/Router.java" <<'EOF'
 interface Router { int match(int p); }
 class Linear implements Router { public int match(int p) { return p + 1; } }
@@ -273,6 +291,18 @@ for verb, tag in ( ( "--callers=", "callers" ), ( "--impact=", "impact" ), ( "--
     seen[ "neg" ] += 1 if a else 0
     say( a != {} and "impls" not in a and a.get( "defs" ) == "2", "[c] prototype %s" % tag,
          "%ssplit_exec: a prototype + definition keeps defs=2 and carries no impls=" % verb, "attrs=%s" % a )
+
+rc, out = run( CPP, "--callers=Server::run" ); a = root_attrs( out, "callers" ) or {}
+seen[ "neg" ] += 1 if a else 0
+say( a != {} and "impls" not in a and a.get( "defs" ) == "2", "[cpp] out-of-line in another file",
+     "--callers=Server::run: a declaration whose definition is in another file (a forward class beside) is no contract", "attrs=%s" % a )
+
+# a BARE name already matching every implementor body walks the same seeds: no impls=, main's bytes (fire321 s1 hono/kysely)
+for lang, root, sel in ( ( "ts", TS, "match" ), ( "cpp", CPP, "match" ), ( "go", GO, "Package" ) ):
+    rc, out = run( root, "--impact=" + sel ); a = root_attrs( out, "impact" ) or {}
+    seen[ "neg" ] += 1 if a else 0
+    say( a != {} and "impls" not in a and num( a, "defs" ) > 1, "[%s] bare name" % lang,
+         "--impact=%s: the bare name already seeds every body, so no impls=" % sel, "attrs=%s" % a )
 
 rc, out = run( RB, "--impact=Tracker.on_event" ); a = root_attrs( out, "impact" ) or {}
 seen[ "neg" ] += 1 if a else 0
