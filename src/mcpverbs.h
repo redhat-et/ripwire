@@ -4379,12 +4379,20 @@ inline std::string connectDeclinedJointsXml( const IngestResult& ing, const Conn
         const Symbol&          s  = ing.symbols[ dj.fn ];
         const std::string_view rp = r.singleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], r.rootPrefix ) : std::string_view( ing.files[ s.fileId ] );
         out += "<dj n=\"" + ex( s.name ) + "\" t=\"" + std::string( symTag( s.kind ) ) + "\" p=\"" + ex( rp ) + ":" + std::to_string( s.line ) + "\">";
+        // terminals that print the same name (`A.run`, `B.run`) get tp= as group edges do (CodeRabbit 4570578072)
+        std::vector<ConnectEdge> rows;
         for( const ConnectResult::DeclinedLink& l : dj.links )
         {
+            rows.push_back( ConnectEdge{ dj.fn, l.terminal } );
+        }
+        const std::vector<std::uint8_t> alike = hopAlikeRows( ing, std::span<const ConnectEdge>( rows ) );
+        for( std::size_t k = 0; k < dj.links.size(); ++k )
+        {
+            const ConnectResult::DeclinedLink& l = dj.links[ k ];
             out += "<e t=\"" + ex( ing.symbols[ l.terminal ].name ) + "\"";
             out += l.cands > 0 ? " via=\"declined\" cands=\"" + std::to_string( l.cands ) + "\"" : std::string();
             std::vector<NodeId> noSig{ l.terminal };
-            out += hopEdgeXml( ing, r.hops, dj.fn, l.terminal, 0, r.shed, noSig, r.singleRoot, r.rootPrefix, r.endpointRows, r.redact, r.shown, r.shownMark );
+            out += hopEdgeXml( ing, r.hops, dj.fn, l.terminal, alike[ k ], r.shed, noSig, r.singleRoot, r.rootPrefix, r.endpointRows, r.redact, r.shown, r.shownMark );
             out += "/>";
         }
         out += "</dj>";

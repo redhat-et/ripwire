@@ -20,6 +20,7 @@
 #   N4 the declined caller reaches only one terminal: no <dj> (premise: --callers on Plan sees it, on Apply does not)
 #   G  legend: declined_joints= and <dj> are defined in both dialects when present, absent otherwise
 #   G2 both dialects say N is a floor (declined calls wider than 16 candidates are not followed)               (CodeRabbit 4570578062)
+#   T  same-named terminals (Context.Plan, View.Plan): each <e t="Plan"> row carries tp= for its definition     (CodeRabbit 4570578072)
 #   H  determinism (3 runs) + xmllint
 #
 # Usage: test/connectdeclinedjointcheck.sh [BIN]
@@ -189,6 +190,17 @@ if printf '%s' "$N1_DOC" | grep -q 'declined_joints'; then no "(G) the clause ri
 if printf '%s' "$A_FULL" | grep -q 'declined_joints=N: [^>]*a wider declined call is not followed, so N is a floor'; then ok "(G2) full dialect labels declined_joints=N a floor (declined calls over 16 candidates are not followed)"; else no "(G2) the full clause does not say N is a floor"; fi
 if printf '%s' "$A_CMP" | sed 's/<connect .*//' | grep -q 'declined_joints=N: [^>]*a floor: a declined call over 16 cands is not followed'; then ok "(G2) compact dialect labels declined_joints=N a floor"; else no "(G2) the compact clause does not say N is a floor"; fi
 
+# (T) CodeRabbit 4570578072: two terminals that print one name (Context.Plan, View.Plan) — opApply's one declined call lists both,
+# so its two <e t="Plan"> rows read alike; each carries tp= (the terminal's definition) as alike group edges do.
+T_DOC="$( "$BIN" "$DJ" --no-cache --connect=Context.Plan,View.Plan 2>/dev/null )" || no "(T) ripwire exited $?"
+T_DJ="$( djOf "$T_DOC" )"
+nPlan=$( printf '%s' "$T_DJ" | grep -o '<e t="Plan"' | wc -l | tr -d ' ' )
+if [ "$nPlan" -eq 2 ]; then
+    ok "(T) premise: opApply's <dj> holds two <e t=\"Plan\"> rows"
+    if printf '%s' "$T_DJ" | grep -q '<e t="Plan" [^>]*tp="core/context.go:5"' && printf '%s' "$T_DJ" | grep -q '<e t="Plan" [^>]*tp="view/view.go:5"'; then
+        ok "(T) each same-named terminal row names its definition: tp=core/context.go:5 and tp=view/view.go:5"
+    else no "(T) the two Plan rows do not say which terminal each is: $T_DJ"; fi
+else no "(T) premise: want two <e t=\"Plan\"> rows in opApply's <dj>, got $nPlan: $( brief "$T_DOC" )"; fi
 
 # ── H) determinism + well-formedness ─────────────────────────────────────────────────────────────────────
 run "$AD" --no-cache "$CN"; h1="$RUN"; run "$AD" --no-cache "$CN"; h2="$RUN"; run "$AD" --no-cache "$CN"; h3="$RUN"
