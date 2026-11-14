@@ -158,7 +158,14 @@ for leg in compact full; do
 done
 
 # ── P6 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-run "$F/cpp" --whereis=Fetch >"$TMP/p6"
+# --whereis reads the branches of the repository ENCLOSING its root; asked on $F/cpp that is this checkout, which a long-lived
+# dev clone (and each linked worktree of it) can push past the 512-branch refusal (the red this was: CI green, worktree red).
+# The paste runs on a one-commit repository holding the fixture instead, so the arm reads the fixture and nothing else.
+P6R="$TMP/p6repo"; cp -R "$F/cpp" "$P6R"
+git -C "$P6R" init -q && git -C "$P6R" add -A \
+    && git -C "$P6R" -c user.name=Dev -c user.email=dev@x.com -c commit.gpgsign=false commit -qm fixture >/dev/null 2>&1 \
+    || no "(P6) could not build the one-commit fixture repository"
+run "$P6R" --whereis=Fetch >"$TMP/p6"   # status: both candidate names in the answer are the verdict; a refusal prints neither and FAILs
 if grep -q 'DiskSource::Fetch' "$TMP/p6" && grep -q 'NetSource::Fetch' "$TMP/p6"; then ok "(P6) next= --whereis=Fetch lists every candidate"
 else no "(P6) --whereis=Fetch does not list both candidates"; fi
 

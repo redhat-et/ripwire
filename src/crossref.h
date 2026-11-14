@@ -1604,6 +1604,7 @@ struct WhereResult
 {
     bool                  ok = true;
     bool                  nonGitRoot = false;
+    bool                  tooManyRefs = false;   // more than kMaxRefs local branches: refused, and said so (not "not a git repository")
     std::string           sym;
     std::string           headSha;
     bool                  onHead = false;     // SYM occurs in HEAD's tree
@@ -3698,7 +3699,7 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     RefEnumeration       enumeration;   // a dropped ref is searched nowhere, so it forfeits complete= like an empty tree
     std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha, nullptr, &enumeration );
     refs.insert( refs.begin(), RefInfo{ "HEAD", result.headSha, quality::gitCommitterDateIso( root ) } );
-    if( refs.size() > kMaxRefs ) { result.ok = false; return result; }
+    if( refs.size() > kMaxRefs ) { result.ok = false; result.tooManyRefs = true; return result; }
 
     // The CHECKOUT, not just HEAD's commit: every path that differs from HEAD is read from the working tree, and
     // HEAD's rows for exactly those paths are dropped below — the stale-and-silent answer the comparison table
@@ -3785,6 +3786,7 @@ struct EvalReport
                                                  // refused, never scored (see evalStray below)
     bool                     ok = true;
     bool                     blobsUnread = false;   // K75: the sweep's blob batch was unread — refused, like a non-git root
+    bool                     tooManyRefs = false;   // the sweep refused past kMaxRefs local branches — said so, not "not a git repository"
 };
 
 inline bool parseVerdict( std::string_view s, Verdict& out )
@@ -3814,7 +3816,7 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
     }
 
     const StrayResult res = computeStrayContent( root, {} );
-    if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; return rep; }
+    if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; rep.tooManyRefs = res.tooManyRefs; return rep; }
 
     // Reported refs carry their verdict; every ref NOT reported was scanned and found merged (writeStrayContent
     // omits those), so an absent ref scores as `merged` rather than as a miss.
