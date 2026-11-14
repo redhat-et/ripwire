@@ -135,8 +135,8 @@ struct LexicalDefHit
 
 // Does byte `at` sit inside a C++ raw string literal `R"delim( … )delim"` (also u8R / uR / UR / LR)? A `#define GHOST` line
 // inside one is text, not a macro (LEXDEF-RAWSTRING, CodeRabbit #630). One forward pass like BlockCommentState: `at` must not
-// decrease; each raw string is located once. An `R"(` inside a comment or an ordinary string reads as an opener too: the scan
-// then claims nothing in its span, the safe direction.
+// decrease; each raw string is located once. The forward pass skips `//` and `/* */` comments and ordinary string and character
+// literals, so an `R"(` written inside one never opens a span that could swallow a real raw string's opener (CodeRabbit 4570578017).
 class RawStringState
 {
 public:
@@ -154,34 +154,77 @@ public:
     }
 
 private:
-    // The first raw string opening at or after `from`: [spanStart_, spanEnd_), the end at the hay's end when it never closes.
+    // The first raw string opening at or after `from` (a code position: 0, or the end of the previous raw string): [spanStart_,
+    // spanEnd_), the end at the hay's end when it never closes. One lexical pass over comments and literals, linear in the hay.
     void advance( std::size_t from ) noexcept
     {
-        for( std::size_t o = hay_.find( "R\"", from ); o != std::string_view::npos; o = hay_.find( "R\"", o + 2 ) )
+        const std::size_t n = hay_.size();
+        for( std::size_t i = from; i < n; )
         {
-            std::size_t p = o;   // the prefix: R, or u8R / uR / UR / LR
-            if( p >= 2 && hay_.substr( p - 2, 2 ) == "u8" ) { p -= 2; }
-            else if( p >= 1 && ( hay_[ p - 1 ] == 'u' || hay_[ p - 1 ] == 'U' || hay_[ p - 1 ] == 'L' ) ) { --p; }
-            if( p > 0 && darkflags::identByte( (unsigned char)hay_[ p - 1 ] ) )
+            const char c = hay_[ i ];
+            if( c == '/' && i + 1 < n && ( hay_[ i + 1 ] == '/' || hay_[ i + 1 ] == '*' ) )
             {
-                continue;   // FOO_R"…" is an identifier's tail, not a raw-string prefix
+                const std::size_t e = hay_[ i + 1 ] == '/' ? hay_.find( '\n', i + 2 ) : hay_.find( "*/", i + 2 );
+                i                   = e == std::string_view::npos ? n : e + ( hay_[ i + 1 ] == '/' ? 1 : 2 );
+                continue;
             }
-            const std::size_t paren = hay_.find( '(', o + 2 );
-            if( paren == std::string_view::npos || paren - ( o + 2 ) > 16
-                || hay_.substr( o + 2, paren - ( o + 2 ) ).find_first_of( " \t\n\\)\"" ) != std::string_view::npos )
+            if( c == 'R' && i + 1 < n && hay_[ i + 1 ] == '"' && openAt( i ) )
             {
-                continue;   // not a raw-string delimiter (at most 16 characters, none of space, backslash, parens, quote)
+                return;
             }
-            std::string close = ")";
-            close.append( hay_.substr( o + 2, paren - ( o + 2 ) ) );
-            close.push_back( '"' );
-            const std::size_t end = hay_.find( close, paren + 1 );
-            spanStart_ = o;
-            spanEnd_   = end == std::string_view::npos ? hay_.size() : end + close.size();
-            return;
+            if( c == '"' || ( c == '\'' && !digitSeparatorAt( i ) ) )
+            {
+                std::size_t j = i + 1;   // an ordinary literal ends at its unescaped quote, or at the line's end
+                while( j < n && hay_[ j ] != c && hay_[ j ] != '\n' )
+                {
+                    j += hay_[ j ] == '\\' ? 2 : 1;
+                }
+                i = j + 1;
+                continue;
+            }
+            ++i;
         }
         spanStart_ = std::string_view::npos;
         spanEnd_   = std::string_view::npos;
+    }
+
+    // Is the `'` at `i` a digit separator (`1'000`, `0xFF'FF`)? It is when the identifier-byte run before it starts with a digit;
+    // after a letter it is a character literal's opening quote (`'x'`, `L'x'`, `u8'x'`).
+    bool digitSeparatorAt( std::size_t i ) const noexcept
+    {
+        std::size_t b = i;
+        while( b > 0 && darkflags::identByte( (unsigned char)hay_[ b - 1 ] ) )
+        {
+            --b;
+        }
+        return b < i && hay_[ b ] >= '0' && hay_[ b ] <= '9';
+    }
+
+    // Is the `R"` at `o` (code, not a comment or literal) a raw-string opener? Sets the span when it is.
+    bool openAt( std::size_t o ) noexcept
+    {
+        std::size_t p = o;   // the prefix: R, or u8R / uR / UR / LR
+        if( p >= 2 && hay_.substr( p - 2, 2 ) == "u8" ) { p -= 2; }
+        else if( p >= 1 && ( hay_[ p - 1 ] == 'u' || hay_[ p - 1 ] == 'U' || hay_[ p - 1 ] == 'L' ) ) { --p; }
+        if( p > 0 && darkflags::identByte( (unsigned char)hay_[ p - 1 ] ) )
+        {
+            return false;   // FOO_R"…" is an identifier's tail, not a raw-string prefix
+        }
+        // a delimiter is at most 16 bytes, so its '(' lies within the next 17 (CodeRabbit 4570578024: an unbounded find made a
+        // header of unclosed `R"` candidates quadratic)
+        const std::size_t rel = hay_.substr( o + 2, 17 ).find( '(' );
+        if( rel == std::string_view::npos || hay_.substr( o + 2, rel ).find_first_of( " \t\n\\)\"" ) != std::string_view::npos )
+        {
+            return false;   // not a raw-string delimiter (at most 16 characters, none of space, backslash, parens, quote)
+        }
+        const std::size_t paren = o + 2 + rel;
+        std::string       close = ")";
+        close.append( hay_.substr( o + 2, rel ) );
+        close.push_back( '"' );
+        const std::size_t end = hay_.find( close, paren + 1 );
+        spanStart_            = o;
+        spanEnd_              = end == std::string_view::npos ? hay_.size() : end + close.size();
+        return true;
     }
 
     std::string_view hay_;

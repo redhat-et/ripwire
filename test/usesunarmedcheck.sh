@@ -290,6 +290,30 @@ if [ -z "$mo" ] || printf '%s' "$mo" | grep -q 'object-like macro'; then no "(B9
 out="$( rw "$TMP/raw" --defs=REAL_SOCK )"   # status: --defs exits 1 on a refusal by design; the answer text is the verdict and an empty one FAILs
 if printf '%s' "$out" | grep -q 'object-like macro, #define at .*raw.h:6'; then ok "(B9) control: REAL_SOCK after the raw string closes is named at raw.h:6"
 else no "(B9) control: REAL_SOCK after the raw string: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
+# (B10) CodeRabbit 4570578017: an `R"(` inside a line comment must not open a span that swallows the real `R"doc(` opener (the
+# comment's span closed at the `)"` inside kDoc, and the #define after it read as code). Red on 1c920292f (GHOST_SOCK named).
+mkdir -p "$TMP/rawc"
+printf '#ifndef RAWC_H\n#define RAWC_H\n// R"(\nstatic const char* kDoc = R"doc(\n)"\n#define GHOST_SOCK "/tmp/ghost"\n)doc";\nint rawcproc( int x );\n#endif\n' > "$TMP/rawc/rawc.h"
+printf '#include "rawc.h"\nint rawcproc( int x ) { return x; }\n' > "$TMP/rawc/main.c"
+if grep -q '^// R"($' "$TMP/rawc/rawc.h" && grep -q '^#define GHOST_SOCK ' "$TMP/rawc/rawc.h"; then ok "(B10) premise: rawc.h holds a comment R\"( before the raw string that holds #define GHOST_SOCK"; else no "(B10) premise: fixture lost the comment opener or the #define"; fi
+out="$( rw "$TMP/rawc" --defs=GHOST_SOCK )"   # status: --defs exits 1 on a refusal by design; the answer text is the verdict and an empty one FAILs
+if printf '%s' "$out" | grep -q 'not found' && ! printf '%s' "$out" | grep -q 'object-like macro'; then ok "(B10) CLI --defs=GHOST_SOCK: a comment R\"( does not hide the real raw string"
+else no "(B10) CLI --defs=GHOST_SOCK: $( printf '%s' "$out" | grep 'ripwire:' | head -1 )"; fi
+# (B11) CodeRabbit 4570578024: every `R"` candidate whose delimiter never reaches a '(' searched the rest of the header for one
+# (quadratic in the candidates); the search is bounded to the 17 bytes a delimiter can use, and comments are skipped. 170000
+# `// R"aaaa…` lines against a same-size control without the quote: about 18x slower than the control on 1c920292f, under 3x now.
+# A ratio, not a wall-clock bound, so a slow leg (ASan) does not flake. Generated here, never committed.
+mkdir -p "$TMP/rawq/hot" "$TMP/rawq/cold"
+{ printf 'int zz_ghost_name_use = 0; // zz_ghost_name\n'; awk 'BEGIN { for( i = 0; i < 170000; ++i ) printf "// R\"aaaaaaaaaaaaaaaaa\n" }'; } > "$TMP/rawq/hot/big.hpp"
+{ printf 'int zz_ghost_name_use = 0; // zz_ghost_name\n'; awk 'BEGIN { for( i = 0; i < 170000; ++i ) printf "// Raaaaaaaaaaaaaaaaaa\n" }'; } > "$TMP/rawq/cold/big.hpp"
+nq=$( grep -c 'R"aaaa' "$TMP/rawq/hot/big.hpp" ); bh=$( wc -c < "$TMP/rawq/hot/big.hpp" | tr -d ' ' ); bc=$( wc -c < "$TMP/rawq/cold/big.hpp" | tr -d ' ' )
+if [ "$nq" -eq 170000 ] && [ "$bh" -eq "$bc" ] && [ "$bh" -lt 4194304 ] && ! grep -q '(' "$TMP/rawq/hot/big.hpp"; then ok "(B11) premise: big.hpp is $bh bytes with $nq unclosed R\" candidates and no '(' (control: same size, no quote)"
+else no "(B11) premise: hot $bh / control $bc bytes, $nq candidates — the arm cannot show the quadratic"; fi
+msOf(){ perl -MTime::HiRes=time -e 'open( my $o, ">&", \*STDOUT ) or die; open( STDOUT, ">", "/dev/null" ) or die; my $t = time; system @ARGV; my $rc = $? >> 8; printf $o "%d %d\n", ( time - $t ) * 1000, $rc' "$BIN" "$1" --no-cache --legend=compact --defs=zz_ghost_name; }   # status: printed as "ms rc"; rc 1 (not found) is the expected answer and is checked below
+read -r msHot rcHot <<< "$( msOf "$TMP/rawq/hot" 2>/dev/null | tail -1 )"
+read -r msCold rcCold <<< "$( msOf "$TMP/rawq/cold" 2>/dev/null | tail -1 )"
+if [ "${rcHot:-x}" = 1 ] && [ "${rcCold:-x}" = 1 ] && [ "${msHot:-999999}" -le $(( 3 * ${msCold:-0} + 1000 )) ]; then ok "(B11) 170000 unclosed R\" candidates cost ${msHot} ms against ${msCold} ms for the control (rc=1 both)"
+else no "(B11) unclosed R\" candidates: ${msHot:-?} ms (rc=${rcHot:-?}) against ${msCold:-?} ms (rc=${rcCold:-?}) for the control — quadratic delimiter search"; fi
 # Ruby declares no member lexically (instance variables are @ivars; the attr_* family is indexed, rubyattrscheck): a
 # class-body DSL call `has_many :posts` is a call with a symbol argument, never `name: Type`.
 mkdir -p "$TMP/rb"
