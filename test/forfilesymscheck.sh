@@ -40,6 +40,8 @@
 #   (i1..i4) CONST-INIT-CALLEE by="init" (residual pass 11-12, card 3; i1 i2 i4 RED on main 0b8f0bf8d): a head row's name (one of the
 #        first 5 <d> rows, or the re-export walk's <def> row) whose module-level declaration's value is one file-scope call names that
 #        call's callee (of= the name, at= the declaration); a literal initialiser or an already-shown callee is no row; RIPWIRE_NO_INIT_ROWS=1
+#   (i5) FORFILESYMS-INIT-WINDOW-LEGEND (CodeRabbit on #646; RED on main 44f7d3326): an initialiser whose `(` sits past the 200-byte
+#        window is disclosed (<syms init_cut="1">, both legends state the window); (i5n) its short twin is an ordinary row, no init_cut
 #   (o1) overloads: the shown row's edge reaches one overload, the kept row is another: it says via="name"; twin (o2) one definition, the call is plain
 #   (h2) a held block's next= carries the origin call's ranking flags (--no-route, --anchor under RIPWIRE_DEV, --pack-top-n=N)
 #   (c2) a capture whose buffer fails to flush (RLIMIT_FSIZE, a real short write) is not read as the whole answer: stderr says so, exit 1, the stub says held="uncaptured", no rows; twin: unlimited, rows
@@ -583,6 +585,27 @@ if [ "$( sed -n 2,3p <<<"$i1" | tr '\n' ' ' )" = "clause defs " ] && [ "$( sed -
    && ! grep -q 'by="init"' "$TMP/i4.off.xml" && ! grep -q 'by=init\|by=\\"init' "$TMP/i4.off.xml" && [ "$( sed -n 2p <<<"$( initrows "$TMP/i3p.xml" )" )" = "noclause" ]; then
     ok "(i4) both legends define by=\"init\" of= at= beside a row, a block without one carries no clause; RIPWIRE_NO_INIT_ROWS=1 drops rows and clause"
 else no "(i4) rc=$i4orc/$i4frc compact: $( sed -n 2,3p <<<"$i1" | tr '\n' ' ' ) full: $( sed -n 2,3p <<<"$i4f" | tr '\n' ' ' ) off: $( grep -o '<syms.*' "$TMP/i4.off.xml" | head -c 300 )"; fi
+
+# (i5) FORFILESYMS-INIT-WINDOW-LEGEND (CodeRabbit on #646): the initialiser's `(` sits past the 200-byte window (a dotted callee head
+# generated here, 230 bytes): no row, but <syms init_cut="1"> and the init clause stating the window, in both legends
+mkdir -p "$TMP/initcut"
+LONGHEAD="$( python3 -c 'print( ".".join( [ "segment%02d" % i for i in range( 23 ) ] ) )' )"
+printf 'def make_big():\n    return {}\n\n\nbig_registry = %s.make_big()\n' "$LONGHEAD" >"$TMP/initcut/app.py"
+run initcut "--for=big_registry" >"$TMP/i5.xml"; i5rc=$?
+run initcut "--for=big_registry" --legend=full >"$TMP/i5f.xml"; i5frc=$?
+i5pre="$( python3 -c 'import sys; t=open(sys.argv[1]).read(); a=t.index("= ")+2; print( len( t[a:t.index("(", a)] ) )' "$TMP/initcut/app.py" )"
+if [ "$i5rc$i5frc" = 00 ] && [ "${i5pre:-0}" -gt 200 ] && grep -q '<syms[^>]* init_cut="1"' "$TMP/i5.xml" && grep -q '<syms[^>]* init_cut="1"' "$TMP/i5f.xml" \
+   && grep -q 'within 200 bytes' "$TMP/i5.xml" && grep -q 'within 200 bytes' "$TMP/i5f.xml" \
+   && [ "$( sed -n 3p <<<"$( initrows "$TMP/i5.xml" )" )" = defs ] && [ "$( sed -n 3p <<<"$( initrows "$TMP/i5f.xml" )" )" = defs ]; then
+    ok "(i5) a call head past the 200-byte window ($i5pre bytes before its \`(\`) is disclosed: init_cut=\"1\", both legends state the window"
+else no "(i5) rc=$i5rc/$i5frc head=$i5pre bytes: $( grep -o '<syms.*' "$TMP/i5.xml" | head -c 400 )"; fi
+# (i5n) the window's control: the same declaration with a short head is an ordinary by="init" row and no init_cut
+mkdir -p "$TMP/initshort"
+printf 'def make_big():\n    return {}\n\n\nbig_registry = make_big()\n' >"$TMP/initshort/app.py"
+run initshort "--for=big_registry" >"$TMP/i5n.xml"; i5nrc=$?
+if [ "$i5nrc" = 0 ] && [ "$( sed -n 1p <<<"$( initrows "$TMP/i5n.xml" )" )" = "make_big@big_registry@app.py:5@app.py:1" ] && ! grep -q '<syms[^>]* init_cut=' "$TMP/i5n.xml"; then
+    ok "(i5n) the short twin prints its by=\"init\" row and no init_cut"
+else no "(i5n) rc=$i5nrc rows: $( initrows "$TMP/i5n.xml" | tr '\n' '|' ) $( grep -o '<syms.*' "$TMP/i5n.xml" | head -c 300 )"; fi
 
 [ "$fail" = 0 ] && echo "forfilesymscheck: PASS" || echo "forfilesymscheck: FAIL"
 exit "$fail"
