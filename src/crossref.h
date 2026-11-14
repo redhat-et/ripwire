@@ -4093,7 +4093,7 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
                        "by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. "
                        "at= is the git commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree "
                        "differed from that commit (head= is the same commit, bare sha, kept for compatibility). "
-                       "refs_omitted= (present only when non-zero) is the REF WINDOW: past 512 local branches the newest 512 by committer date are read and this many older ones are not, so they are in none of the counts or rows; a ref name substring (--stray-content=SUBSTR, or kind= over MCP) picks which branches fill the window. "
+                       "refs_omitted= (present only when non-zero) is the REF WINDOW: past 512 local branches the newest 512 by committer date are read and this many older ones are not, so they are in none of the counts or rows; a ref name substring (the stray-content=SUBSTR flag, or kind= over MCP) picks which branches fill the window. "
                        "refs_dropped= (present only when non-zero) is how many local branches git listed that this sweep "
                        "could NOT read (a tip that is not an object name): they are in none of the counts, so refs= and the "
                        "four buckets describe only the branches that were swept. -->" );
@@ -4764,7 +4764,7 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "count of refs that matched — hits= and the rows are the matched set. refs_omitted= (present only when non-zero) is the REF "
                        "WINDOW: past 512 refs (HEAD included) the newest local branches by committer date are read and this many older ones are "
                        "not, so their rows are in no count and complete= is withheld; over MCP kind=SUBSTR picks which branches fill the window "
-                       "(the CLI --whereis has no ref filter). on-head=\"0\" alongside ref hits is the case this verb exists "
+                       "(the CLI whereis verb has no ref filter). on-head=\"0\" alongside ref hits is the case this verb exists "
                        "for: content that lives only on a branch. A TREE scan can only find content some ref still carries, "
                        "so hits=\"0\" on its own does not distinguish a name this repo never had from one it deleted; run "
                        "with the with_history flag and the fate row says which, naming the commit that removed it. "

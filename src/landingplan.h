@@ -240,7 +240,7 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
                        "refs_dropped= (present only when non-zero) counts local branches git listed that the sweep could "
                        "NOT read (a tip that is not an object name): they are in none of the counts and none of the rows. "
                        "refs_omitted= (present only when non-zero) is the sweep's REF WINDOW: past 512 local branches the newest 512 by "
-                       "committer date are read and this many older ones are not (in no count or row); --stray-content=SUBSTR picks "
+                       "committer date are read and this many older ones are not (in no count or row); the stray-content=SUBSTR ref filter picks "
                        "which branches fill it. -->" );
     // r26-stamp Task A: head= (pre-existing, bare 9-char sha, unchanged) and at= (this round's sha[+dirty]
     // anchor) are BOTH kept here rather than converged onto one: head= is an established attribute name this

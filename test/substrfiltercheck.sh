@@ -33,7 +33,7 @@
 #
 # ARM E (MAIN-LOCAL-REDS, 2026-11-13; CROSSREF-MAXREFS) covers the sweep verbs past 512 local branches (crossref kMaxRefs).
 # They refused there ("is not a git repository", then the cap's name); now they read the newest 512 by committer date and the
-# root's refs_omitted= counts the rest. ARM H is the same at 4,096 branches. RED-FIRST (c6802ebdc): E1, E3-E7 and H1-H4 fail;
+# root's refs_omitted= counts the rest. ARM H is the same at 4,096 branches. RED-FIRST (c6802ebdc): E1, E3-E7 and H1-H5 fail;
 # E0, E2 and H0 hold on both binaries.
 #
 # Usage:  bash test/substrfiltercheck.sh [BIN]   |   RIPWIRE_BIN=build_base/ripwire bash test/…
@@ -262,7 +262,7 @@ done
 # ── H: 4,096 branches — the window reads the NEWEST and names how many it left out ─────────────────────────────────────────
 # Eight commits off HEAD, t1 the oldest and t8 the newest, each adding tier.cpp with its own probe name, and 512 branches on
 # each (4,096). Past the window the sweep reads t8's branches only; t1-t7's probes are on no read tree. RED-FIRST (c6802ebdc):
-# H1-H4 fail (refused); H0 holds on both binaries.
+# H1-H5 fail (refused); H0 holds on both binaries.
 HFIX="$EFIX/h4096"
 EGIT -C "$EFIX" init -q h4096
 cp "$EFIX/main/cap.cpp" "$HFIX/cap.cpp"
@@ -316,6 +316,22 @@ if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs="512"' && printf '%
     ok "H4 --stray-content over 4,096 branches answers: refs=512 refs_omitted=3584"
 else
     no "H4 --stray-content over 4,096 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/h4.err" )}"
+fi
+
+# H5 the full-prose legends that define refs_omitted= stay well-formed XML (a `--` inside the legend comment is malformed: the
+# first lane build spelled the widening flags with their dashes there) and carry the definition.
+if command -v xmllint >/dev/null 2>&1; then
+    for hv in --whereis=tierProbe8 --stray-content; do
+        "$BIN" "$HFIX" "$hv" --legend=full --no-cache >"$EFIX/h5.out" 2>/dev/null; RC=$?
+        if [ "$RC" -eq 0 ] && xmllint --noout "$EFIX/h5.out" 2>/dev/null && grep -qF 'refs_omitted= (present only when non-zero) is the' "$EFIX/h5.out" \
+           && grep -qF 'refs_omitted="' "$EFIX/h5.out"; then
+            ok "H5 $hv --legend=full over 4,096 branches: well-formed, and the prose defines the refs_omitted= it carries"
+        else
+            no "H5 $hv --legend=full over 4,096 branches → exit $RC, xmllint: $( xmllint --noout "$EFIX/h5.out" 2>&1 | head -2 | tr '\n' ' ' )"
+        fi
+    done
+else
+    printf '  SKIP  H5: xmllint absent — the full legends'"'"' well-formedness is not checked\n'
 fi
 
 echo

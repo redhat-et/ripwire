@@ -970,7 +970,7 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
                        "commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree differed from "
                        "that commit (head= is the same commit, bare sha, kept for compatibility). refs_omitted= (present only when non-zero) is "
                        "the REF WINDOW: past 512 local branches the newest 512 by committer date are compared and this many older ones are not, "
-                       "so they are in none of the counts or rows; --stray-content=SUBSTR picks which branches fill the window. -->" );
+                       "so they are in none of the counts or rows; the stray-content=SUBSTR ref filter picks which branches fill the window. -->" );
     // M10: head= stays a bare 9-hex sha (gitstampcheck.sh's existing arm pins that spelling); at= is the new
     // attribute, carrying the dirty bit this document never disclosed before.
     const std::string atAttrStr = res.atStamp.empty() ? std::string() : ( " at=\"" + res.atStamp + "\"" );
