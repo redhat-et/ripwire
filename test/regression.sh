@@ -438,6 +438,7 @@ for _g in \
     demoterefillcheck \
     dependencypincheck \
     deplangscheck \
+    depsnographcheck \
     depsprecisecheck \
     det-gate \
     detailcheck \
