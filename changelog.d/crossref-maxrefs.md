@@ -11,3 +11,5 @@ The window stays at 512 because both sweeps cost about the same per branch at an
 processes per branch: 77 s at 511 branches and 278 s at 2,048 on an M2, with peak memory flat at 13-19 MB. `--whereis` holds
 every branch's tree listing at once: 849 MB at 8,192 branches of a 200-file tree, and 0.7-1.0 GB at 524 branches of a 5,239-file
 tree. With the window, `--whereis` over 8,192 branches peaks at 69 MB. Below 512 branches nothing changes.
+
+The two compact readings (`refs_omitted`, `labels_omitted`) move the session legend dictionary to `dictv=7dfad3da38492336 entries=1109` (docs/COMMANDS.md and the showcase capture carry the pair).
