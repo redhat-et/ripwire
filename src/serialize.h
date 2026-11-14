@@ -3437,8 +3437,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // written once the document it describes has been measured (PHASE 2 below) and the legend's own bytes
     // are part of what it describes.
     std::string legend = outProv
-        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|import(ES-named-import;module+export-named)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)|final-segment(last-name-match;namespace-unchecked)(absent=uniquely-resolved-name-based) hdr:unresolved=calls-with-no-edge-and-no-proof-of-an-outside-target(every-same-named-def-lang-incompatible-or-out-of-the-language-lookup) (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree-ON-PROOF(builtin/global/predeclared/C-library-name-without-in-repo-evidence,outside-import/use,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
-        : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=calls-with-no-edge-and-no-proof-of-an-outside-target(every-same-named-def-lang-incompatible-or-out-of-the-language-lookup) (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree-ON-PROOF(builtin/global/predeclared/C-library-name-without-in-repo-evidence,outside-import/use,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
+        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|import(ES-named-import;module+export-named)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)|final-segment(last-name-match;namespace-unchecked)(absent=uniquely-resolved-name-based) hdr:unresolved=calls-with-no-edge-and-no-proof-of-an-outside-target(every-same-named-def-lang-incompatible-or-out-of-the-language-lookup) (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree-ON-PROOF(builtin/global/predeclared/C-library-name-without-in-repo-evidence,outside-import/use,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) r:cache=what-the-parse-cache-did-for-THIS-run(none=no-artifact-consulted|cold=no-crawled-file-came-from-it,so-the-parse-was-redone|part=some-came-from-it,the-rest-re-extracted|warm=every-one-came-from-it):run-provenance,never-the-answer(every-word-is-4-bytes,so-it-moves-no-count;excluded-from-the-warm-equals-cold-comparison,not-folded-into-it) -->"
+        : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=calls-with-no-edge-and-no-proof-of-an-outside-target(every-same-named-def-lang-incompatible-or-out-of-the-language-lookup) (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree-ON-PROOF(builtin/global/predeclared/C-library-name-without-in-repo-evidence,outside-import/use,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) r:cache=what-the-parse-cache-did-for-THIS-run(none=no-artifact-consulted|cold=no-crawled-file-came-from-it,so-the-parse-was-redone|part=some-came-from-it,the-rest-re-extracted|warm=every-one-came-from-it):run-provenance,never-the-answer(every-word-is-4-bytes,so-it-moves-no-count;excluded-from-the-warm-equals-cold-comparison,not-folded-into-it) -->";
     // EXTENT HONESTY (src/extentsuspect.h): how many definitions carry extent_suspect= corpus-wide — the header's
     // extent_suspect_syms= — and the row + header readings, appended ONLY when that is non-zero, so a corpus with
     // nothing flagged keeps every byte of this legend.
@@ -3821,6 +3821,23 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             h += " stem_cut=\"";  h += std::to_string( stemPick.cut );  h += "\"";   // MAP-STEM: absent unless a --max-tokens fit left stem rows out
         }
+        // WHAT THE CACHE DID (model.h CacheOutcome) — TRULY last on the root, past every attribute above, the same
+        // placement rule lens=/notes_degraded=/stem_cut= follow, so no attribute-ADJACENCY assertion in test/ moves.
+        //
+        // UNCONDITIONAL, unlike every present-only attribute beside it, and that is the point: absent would be a
+        // fifth reading the vocabulary does not define, and "it did not say" is the defect this removes. ~15 B.
+        //
+        // IT IS NOT PART OF THE ANSWER, and it is the only attribute here that is not. Warm map output is asserted
+        // byte-identical to cold (docs/ARCHITECTURE.md §2) because a cache that changes the ANSWER is a bug — a
+        // contract this does not touch, since the cache's own provenance is the one fact about a run that cannot
+        // be cache-independent. The comparison therefore excludes this attribute instead of folding it in, exactly
+        // as --doctor's volatile= fields are excluded (test/lib/doctorvolatile.sh): test/cacheidentitycheck.sh arm
+        // (F) asserts cold == warm == warm MODULO this attribute, and arm (J) asserts all four values.
+        //
+        // NOT suppressed under --stable either, on est_tokens='s own reasoning read the other way: --stable buys a
+        // byte-stable PREFIX for KV-cache hits, and an agent whose prefix hid "this run re-parsed 1.66e9
+        // instructions' worth of tree" would be paying for that silence with the number it most needs.
+        h += " cache=\"";  h += cacheOutcomeName( ing.cacheOutcome );  h += "\"";
         h += ">";
         h += renderHistoryUnread( DiscloseAs::LegendComment );   // K51: its own definition, right behind the root it marks
         return h;
@@ -11222,6 +11239,12 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     {
         w.write( ",\"stem_cut\":" + std::to_string( h.stemCut ) );   // the JSON twin of the XML root's stem_cut=
     }
+    // The JSON twin of the XML root's cache= (model.h CacheOutcome), in the same last slot. §B1.2's rule is that the
+    // two dialects' headers carry the SAME KEYSET for one run, and this is the key an MCP client needs most: it is the
+    // surface with no stderr to read the rejection notice off and no second invocation to spend on --doctor.
+    // Unconditional here too — test/mcpattrparitycheck.sh contract 1 reads the CLI root's names against these keys.
+    w.write( ",\"cache\":" );
+    writeJsonStr( w, std::string_view( cacheOutcomeName( h.ing.cacheOutcome ) ), esc );
 
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).

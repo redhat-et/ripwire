@@ -300,6 +300,25 @@ inline MemoryStop mergeMemoryStops( const std::vector<IngestResult>& parts )
     return merged;
 }
 
+// What the cache did across the WHOLE pass (model.h CacheOutcome), re-derived from the pass totals through the same
+// function the single-root path uses rather than by picking one root's word: a pass where one root was warm and
+// another cold is `part`, which is what happened, and neither root's own value says it. A root whose files all came
+// from its blob adds nothing to `reparsedFiles`, so the sum and the file total compose directly.
+//
+// Its own function, not three lines inside mergeWorkspaceIngests: that merge sits at complexity 59 against a bar of
+// 15 (--quality-delta preexisting-worse), so a loop and two conditions added inline there is a measured regression
+// (59 -> 62) on the one symbol in this file least able to absorb one.
+inline CacheOutcome mergedCacheOutcome( const std::vector<IngestResult>& parts, std::size_t reparsedFiles, std::size_t crawledFiles ) noexcept
+{
+    bool anyCachePath = false, anyCachedFiles = false;
+    for( const IngestResult& p : parts )
+    {
+        anyCachePath   = anyCachePath   || p.cacheOutcome != CacheOutcome::None;
+        anyCachedFiles = anyCachedFiles || p.cacheOutcome == CacheOutcome::Warm || p.cacheOutcome == CacheOutcome::Part;
+    }
+    return cacheOutcomeOf( anyCachePath, anyCachedFiles, reparsedFiles, crawledFiles );
+}
+
 inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roots,
                                            std::vector<IngestResult>&        parts )
 {
@@ -326,7 +345,8 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
                                               //   each root stat-gates against its own blob, so the sum is
                                               //   the honest "files re-extracted this pass" across roots.
     }
-    m.memoryStop = mergeMemoryStops( parts );   // #350
+    m.cacheOutcome = mergedCacheOutcome( parts, m.reparsedFiles, totFiles );   // what the cache did across the pass (above)
+    m.memoryStop   = mergeMemoryStops( parts );   // #350
     m.files.reserve( totFiles );          m.realPaths.reserve( totFiles );   m.fileRoot.reserve( totFiles );
     m.symbols.reserve( totSyms );         m.references.reserve( totRefs );
     m.includes.reserve( totIncs );        m.bindings.reserve( totBinds );    m.bindingAliases.reserve( totFfis );

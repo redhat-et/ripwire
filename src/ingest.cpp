@@ -426,7 +426,14 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // A crawl the guard stopped is still parsed, under the parse's own (higher) line: the crawl line — an eighth of the
     // limit — is what leaves the parse that room (memguard.h).
     memWatch.rearmForParse();
+    // Latched BEFORE the pool, which releases the warm plan at its join (CacheRecords::release zeroes `records`), so
+    // "the blob planned records for THIS crawl" is not recoverable afterwards. The outcome itself is derived after the
+    // pool, because the other half of the answer — how many files it actually re-extracted — is the pool's to report.
+    const bool cachedFilesPlanned = !cache.empty();
     RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm, &memWatch );
+    // What the cache DID, as one word the answer can carry (model.h CacheOutcome) — the one thing ~31 root attributes
+    // could not say, and a 10.8x instruction difference on koa that looked identical on stdout.
+    result.cacheOutcome = cacheOutcomeOf( !cacheFile.empty(), cachedFilesPlanned, result.reparsedFiles, result.files.size() );
 
     // The warm plan is only needed by the parse pool, which has already released it (WARM-DIRECT: the blob closes and its
     // per-file table is freed at the pool join); this covers the paths that never reach the pool.

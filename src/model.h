@@ -2314,6 +2314,93 @@ struct MemoryStop
     [[nodiscard]] bool isSet() const noexcept { return phase != Phase::None; }
 };
 
+// ── WHAT THE PARSE CACHE DID, as one word the answer can carry (lane cache-outcome-attr, 2026-11-14).
+//
+// THE DEFECT. The map root carries ~31 attributes and not one of them says whether this run reused a parse.
+// Measured on koa, alternating verb classes against one `--cache=` blob: a warm run is 153.8e6 instructions
+// and a silent reparse is 1.66e9 — 10.8x — and both exit 0 with stdout that looks the same. The rejection
+// notice (ingest_cache.h noteCacheReject) does survive Release, but it goes to stderr, it says nothing at
+// all on the ordinary absent miss and nothing on a hit, so a caller doing cost accounting off stdout cannot
+// tell the 10.8x apart. The 0.7.0 comparison rehearsal had to prove warm-vs-cold with owner-marker files
+// and blob mtimes for exactly this reason.
+//
+// FOUR VALUES, AND WHY NOT THREE. `Part` is not a refinement — it is a case the other three would have to lie
+// about. A blob can be loaded, serve most of the crawl, and still leave files to re-extract (ordinary drift, or
+// a late miss: ingest_parsepool.h parses a record that failed in its worker AFTER the join). That run is
+// neither warm nor cold, and ingest already counts it in `reparsedFiles`.
+//
+// WARM / COLD IS THIS REPO'S OWN VOCABULARY for exactly this axis — the warm-run/cold-run pair runs through
+// ingest_parsepool.h (WARM-DIRECT), docs/ARCHITECTURE.md §2, bench/PROFILE.md and ~105 gates that diff a cold
+// map against a warm one. --doctor says `disabled` for "no artifact consulted", and that row answers a
+// different question (can this binary READ the artifact you handed it) on a surface with its own byte budget;
+// here the state is spelled `none`, for the reason in the next paragraph.
+//
+// EVERY WORD IS FOUR BYTES, AND THAT IS A CORRECTNESS PROPERTY, NOT A STYLE CHOICE. est_tokens= prices the
+// bytes the document actually carries, head included, and serialize() iterates that to a fixpoint — so a
+// value whose LENGTH varied would move est_tokens= (measured: `rebuilt` vs `hit` moved it 514 -> 513 on a
+// one-function fixture) and, through it, which rows a `--max-tokens` fit keeps. est_tokens= and the fit ARE
+// part of the answer, so a cache that moved them would be a cache that changes the answer — the bug
+// docs/ARCHITECTURE.md §2 forbids. Equal-length values make the attribute unable to move any byte count, by
+// construction and provably (the static_assert below), instead of by a correction factor someone has to trust.
+//
+// PROCESS HISTORY, not tree state — the same reading `reparsedFiles` above carries, and the reason the one
+// attribute that renders this is excluded from the warm-equals-cold comparison rather than folded into it
+// (test/cacheidentitycheck.sh arms (F) and (J); docs/EVALS.md card A3, narrowed in place).
+enum class CacheOutcome : std::uint8_t
+{
+    None,    // cache="none" — no artifact was consulted at all (--no-cache, or no cache path in play)
+    Cold,    // cache="cold" — a cache path WAS in play and no crawled file came from it: absent, stale, rejected,
+             //                the wrong family, or a blob holding none of this crawl's files. The parse was redone
+             //                and (unless the memory guard cut it) the blob written.
+    Part,    // cache="part" — PARTIAL: some crawled files came from the blob and the rest were re-extracted
+    Warm,    // cache="warm" — every crawled file came from the blob; nothing was re-extracted
+    Count    // enumerator count, never a value — the static_asserts below bind the table to the enum
+};
+
+// A parallel table rather than a switch, the kCacheRejectNames idiom (ingest_cache.h): the static_assert makes
+// adding an enumerator without its user-facing word a COMPILE error, which a switch's default arm cannot do.
+inline constexpr const char* kCacheOutcomeNames[] = { "none", "cold", "part", "warm" };
+static_assert( std::size( kCacheOutcomeNames ) == static_cast<std::size_t>( CacheOutcome::Count ),
+               "every CacheOutcome enumerator needs its user-facing cache= word" );
+
+// THE EQUAL-LENGTH PROOF. A fifth value of another width would silently make est_tokens= cache-dependent, and
+// the only symptom would be a warm/cold byte diff in one of ~105 gates with nothing naming the cause. Asked of
+// the compiler instead: every word is the width of the first one.
+static_assert( []
+               {
+                   for( const char* name : kCacheOutcomeNames )
+                   {
+                       if( std::string_view( name ).size() != std::string_view( kCacheOutcomeNames[ 0 ] ).size() ) { return false; }
+                   }
+                   return true;
+               }(),
+               "every cache= word must be the SAME length: an unequal one moves est_tokens= and so makes the cache change the answer" );
+
+inline const char* cacheOutcomeName( CacheOutcome o ) noexcept
+{
+    return enumTableAt( kCacheOutcomeNames, o, "cold" );   // infra/enumcount.h: the shared bounded table lookup
+}
+
+// The honest outcome from the four facts the ingest holds: whether a cache path was in play at all, whether the
+// blob opened and planned records for THIS crawl, how many crawled files were re-extracted, and how many there
+// were. One function so the CLI root, the MCP twin and any later surface cannot derive it three ways.
+//
+// `cachedFilesPlanned` is the load's own answer (CacheRecords::records > 0), read BEFORE the parse pool releases
+// the plan. It is deliberately not the whole test: a plan whose every record then failed in its worker leaves
+// `reparsedFiles == files`, and that run rebuilt everything however promising the plan looked.
+inline CacheOutcome cacheOutcomeOf( bool cachePathInPlay, bool cachedFilesPlanned, std::size_t reparsedFiles, std::size_t crawledFiles ) noexcept
+{
+    if( !cachePathInPlay )
+    {
+        return CacheOutcome::None;
+    }
+    if( !cachedFilesPlanned || reparsedFiles >= crawledFiles )
+    {
+        return CacheOutcome::Cold;   // an empty crawl lands here too: no crawled file came from the blob
+    }
+    return reparsedFiles == 0 ? CacheOutcome::Warm : CacheOutcome::Part;
+}
+
 struct RustCrateRoots;   // resolve.h — IngestResult::rustCrateRoots holds one
 
 struct IngestResult
@@ -2420,6 +2507,13 @@ struct IngestResult
     //    that must be byte-identical warm-vs-cold may fold it in. Multi-root: the merge sums the per-root
     //    values, so one number describes the whole pass.
     std::size_t                reparsedFiles = 0;
+
+    // ── What the parse cache DID for this run (CacheOutcome, above): the `cache=` word the map root carries.
+    //    Recorded once by ingest(), from cacheOutcomeOf(). The default is NOT "disabled" — an IngestResult that
+    //    did not come from ingest() (editpreview.h's synthesised preview, a half-built workspace merge) has not
+    //    answered the question, and claiming "no artifact was consulted" there would be a fabricated answer to
+    //    it. Cold is the honest default: every such result's facts were produced without reusing a blob.
+    CacheOutcome               cacheOutcome = CacheOutcome::Cold;
 
     // ── #350 layer 3: the memory guard stopped this ingest before it finished (MemoryStop, above)
     MemoryStop                 memoryStop;

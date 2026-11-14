@@ -404,22 +404,49 @@ else
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
-# (F) THE card-A3 REJECTION STAYS IN FORCE — nothing about cache state may reach stdout's map. Warm
-#     output is asserted byte-identical to cold (docs/ARCHITECTURE.md §2), so an identity attribute on
-#     the map root is illegal however useful it would be on --doctor.
+# (F) THE ANSWER IS STILL CACHE-INDEPENDENT — narrowed, 2026-11-14 (lane cache-outcome-attr). Card A3
+#     rejected a freshness attribute on the map root on TWO grounds: the only truthful CLI value of
+#     `fresh=` is a constant (no information for its bytes, G4), and warm output is asserted
+#     byte-identical to cold (docs/ARCHITECTURE.md §2) so nothing varying with cache state may be
+#     emitted. The first ground is untouched and still holds. The second is narrowed by arm (J)'s
+#     measurement to: the ANSWER is byte-identical cold-vs-warm, and the ONE declared provenance
+#     attribute that says what the cache did is excluded from that comparison the way --doctor's
+#     volatile= fields already are (test/lib/doctorvolatile.sh). So this arm now asserts the identity
+#     MODULO that one attribute, and still forbids every INDEX-IDENTITY attribute card A3 priced
+#     (cache_version/parser_ver/artifact_arch are --doctor's, and re-pinning them here buys nothing).
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
+# Strip the one declared provenance attribute off the ROOT element (first <r …> only) — the map's own
+# twin of stripDoctorVolatile. Values are a fixed lowercase vocabulary, so the pattern cannot eat a path.
+stripCacheAttr(){ python3 -c '
+import re, sys
+doc = open( sys.argv[ 1 ], encoding = "utf-8", errors = "replace" ).read()
+sys.stdout.write( re.sub( r"(<r\b[^>]*?) cache=\"[a-z-]+\"", r"\1", doc, count = 1 ) )
+' "$1"; }
+# The root element's cache= value, or "" when the attribute is not there (never a silent empty match).
+rootCache(){ tr '<' '\n' < "$1" | grep '^r ' | head -1 | grep -o ' cache="[a-z-]*"' | head -1 | sed 's/^ cache="//; s/"$//'; }
+
 "$BIN" "$FIXTURE" --no-cache > "$TMP/m_cold.xml" 2>/dev/null
 "$BIN" "$FIXTURE"            > "$TMP/m_warm1.xml" 2>/dev/null
 "$BIN" "$FIXTURE"            > "$TMP/m_warm2.xml" 2>/dev/null
-if diff -q "$TMP/m_cold.xml" "$TMP/m_warm1.xml" >/dev/null 2>&1 && diff -q "$TMP/m_warm1.xml" "$TMP/m_warm2.xml" >/dev/null 2>&1; then
-    ok "(F) cold == warm == warm byte-identical — the disclosure did not leak cache state into the map"
+stripCacheAttr "$TMP/m_cold.xml"  > "$TMP/m_cold.stripped"
+stripCacheAttr "$TMP/m_warm1.xml" > "$TMP/m_warm1.stripped"
+stripCacheAttr "$TMP/m_warm2.xml" > "$TMP/m_warm2.stripped"
+if diff -q "$TMP/m_cold.stripped" "$TMP/m_warm1.stripped" >/dev/null 2>&1 && diff -q "$TMP/m_warm1.stripped" "$TMP/m_warm2.stripped" >/dev/null 2>&1; then
+    ok "(F) cold == warm == warm byte-identical modulo the declared cache= attribute — the cache still does not change the ANSWER"
 else
-    no "(F) cold/warm map bytes diverged — cache state reached stdout"
+    no "(F) cold/warm map bytes diverged beyond cache= — cache state reached the answer"
+fi
+# The strip must be LIVE: if it ever stops matching, the arm above becomes a plain identity assertion
+# that would go red for the right reason but for the wrong cause, and a reader could not tell which.
+if diff -q "$TMP/m_warm1.xml" "$TMP/m_warm1.stripped" >/dev/null 2>&1; then
+    no "(F) the strip removed nothing from a warm map — the declared attribute is absent, so (F)'s modulo is vacuous"
+else
+    ok "(F) the strip is live: a warm map loses bytes to it, so (F)'s modulo is real"
 fi
 if grep -o '<r [^>]*>' "$TMP/m_warm1.xml" | head -1 | grep -qE 'cache_version|parser_ver|artifact_arch|usable='; then
-    no "(F) the map root grew an identity attribute — docs/EVALS.md card A3 REJECTED exactly that, with a measurement"
+    no "(F) the map root grew an index-IDENTITY attribute — card A3 REJECTED exactly that, with a measurement, and arm (J) does not re-open it"
 else
-    ok "(F) the map root carries no cache/identity attribute (card A3's rejection still holds)"
+    ok "(F) the map root carries no index-identity attribute (card A3's first ground still holds)"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -464,6 +491,142 @@ if command -v xmllint >/dev/null 2>&1; then
     fi
 else
     ok "(I) xmllint unavailable — well-formedness arm skipped"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+# (J) THE RUN SAYS WHAT THE CACHE DID — one root attribute, four values, no fused case.
+#
+#     THE DEFECT. ~31 root attributes and none of them says whether this run reused a parse. Measured on
+#     koa, alternating verb classes against one --cache= blob: a warm run is 153.8e6 instructions and a
+#     silent reparse is 1.66e9 — 10.8x — and both exit 0 with stdout that looks the same. The rejection
+#     notice (noteCacheReject) survives Release but goes to stderr and says nothing at all on the ordinary
+#     absent miss or on a hit, so a caller doing cost accounting off stdout cannot tell the 10.8x apart.
+#     The 0.7.0 comparison rehearsal had to prove warm-vs-cold with owner-marker files and blob mtimes.
+#
+#     THE VOCABULARY is warm/cold, which is what this repo already calls this axis everywhere that matters
+#     (ingest_parsepool.h's WARM-DIRECT, docs/ARCHITECTURE.md §2, and the ~105 gates that diff a cold map
+#     against a warm one), plus `none` for "no artifact was consulted" and `part` for the fourth state.
+#     The fourth value is NOT optional: a blob can be loaded, serve most of the crawl and still leave files
+#     to reparse (ordinary drift, or a late miss), which is neither warm nor cold, and ingest already counts
+#     it (IngestResult::reparsedFiles). Folding it into either neighbour is the defect this arm removes.
+#
+#     EVERY WORD IS FOUR BYTES, and arm (J9) is why. est_tokens= prices the emitted bytes of the whole
+#     document, head included, through a fixpoint — so a value whose LENGTH varied would move est_tokens=
+#     (measured: `rebuilt` vs `hit` moved it 514 -> 513 on a one-function fixture) and through it which rows
+#     a --max-tokens fit keeps. est_tokens= and the fit ARE the answer, so unequal words would make the
+#     cache change the answer, which is the bug docs/ARCHITECTURE.md §2 forbids. model.h carries the
+#     equal-length static_assert; (J9) is the behavioural half of the same claim.
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+j_expect(){                          # $1 = label  $2 = map file  $3 = expected value
+    got="$( rootCache "$2" )"
+    if [ "$got" = "$3" ]; then
+        ok "(J) $1 -> cache=\"$3\""
+    else
+        no "(J) $1 -> cache=\"${got:-<absent>}\", expected \"$3\""
+    fi
+}
+
+# (J1) no artifact consulted at all.
+"$BIN" "$FIXTURE" --no-cache > "$TMP/j_off.xml" 2>/dev/null
+j_expect "--no-cache" "$TMP/j_off.xml" "none"
+
+# (J2) a cache path the user named, with nothing at it: the parse is redone and the blob written.
+J_BLOB="$TMP/j_fresh.bin"
+rm -f "$J_BLOB"
+"$BIN" "$FIXTURE" --cache="$J_BLOB" > "$TMP/j_first.xml" 2>/dev/null
+j_expect "first run on a fresh --cache= path" "$TMP/j_first.xml" "cold"
+if [ -s "$J_BLOB" ]; then
+    ok "(J2) the blob now exists — a cold run re-parsed AND wrote, so the next run has something to reuse"
+else
+    no "(J2) the blob was not written, so the next run cannot be warm and (J3) would pass for the wrong reason"
+fi
+
+# (J3) the immediate second run over an untouched tree: every file served from the blob.
+"$BIN" "$FIXTURE" --cache="$J_BLOB" > "$TMP/j_second.xml" 2>/dev/null
+j_expect "second run on the same --cache= path" "$TMP/j_second.xml" "warm"
+
+# (J4/J5) the honest negatives: a blob that cannot be trusted must read "rebuilt", never "hit".
+head -c 200 "$GOOD" > "$TMP/j_trunc.bin"
+"$BIN" "$FIXTURE" --cache="$TMP/j_trunc.bin" > "$TMP/j_trunc.xml" 2>/dev/null
+j_expect "a truncated blob" "$TMP/j_trunc.xml" "cold"
+cp "$TMP/f_sum.bin" "$TMP/j_sum.bin"
+"$BIN" "$FIXTURE" --cache="$TMP/j_sum.bin" > "$TMP/j_sum.xml" 2>/dev/null
+j_expect "a blob whose header+table checksum is damaged" "$TMP/j_sum.xml" "cold"
+
+# (J6) THE FAMILY SPLIT — the same path honoured by the lean and the rich family. A flagless MAP run is
+#      lean, so the lean artifact arm D built for this fixture is a hit and the rich one is a reparse. The
+#      reason (parser-version) is arm (D)'s; what this asserts is that the OUTCOME says so too.
+cp "$GOOD" "$TMP/j_lean.bin"
+"$BIN" "$FIXTURE" --cache="$TMP/j_lean.bin" > "$TMP/j_lean.xml" 2>/dev/null
+j_expect "a LEAN blob handed to a flagless map run" "$TMP/j_lean.xml" "warm"
+cp "$RICH" "$TMP/j_rich.bin"
+"$BIN" "$FIXTURE" --cache="$TMP/j_rich.bin" > "$TMP/j_rich.xml" 2>/dev/null
+j_expect "a RICH blob handed to a flagless map run" "$TMP/j_rich.xml" "cold"
+
+# (J7) THE FOURTH STATE. Two files, one of them edited between runs: the blob serves one and the other is
+#      reparsed. "hit" would overstate the reuse and "rebuilt" would understate it by a whole file.
+JT="$TMP/treeB"
+mkdir -p "$JT"
+printf 'int gammaaa( int x ) { return x + 3; }\n' > "$JT/g.c"
+printf 'int deltaaa( int x ) { return x + 4; }\n' > "$JT/d.c"
+JB="$TMP/j_part.bin"
+rm -f "$JB"
+"$BIN" "$JT" --cache="$JB" > /dev/null 2>&1
+printf 'int gammaaa( int x ) { return x + 33333; }\n' > "$JT/g.c"
+"$BIN" "$JT" --cache="$JB" > "$TMP/j_part.xml" 2>/dev/null
+j_expect "one of two files edited between runs" "$TMP/j_part.xml" "part"
+
+# (J8) THE ATTRIBUTE IS ON THE ROOT, AND ONLY THERE. A provenance fact on a child row would be read as a
+#      property of that row, and a document carrying it twice has two places to disagree.
+nocc="$( grep -o ' cache="[a-z-]*"' "$TMP/j_second.xml" | wc -l | tr -d ' ' )"
+if [ "$nocc" = "1" ] && tr '<' '\n' < "$TMP/j_second.xml" | grep '^r ' | head -1 | grep -q ' cache="warm"'; then
+    ok "(J8) cache= appears exactly once, on the root element"
+else
+    no "(J8) cache= appears $nocc time(s) and/or not on the root — it must ride the root and nowhere else"
+fi
+
+# (J9) THE ANSWER IS THE SAME ANSWER. hit vs rebuilt over one unchanged tree must differ in the attribute
+#      and in nothing else — the whole point of (F), re-asserted on the explicit --cache= path.
+stripCacheAttr "$TMP/j_first.xml"  > "$TMP/j_first.stripped"
+stripCacheAttr "$TMP/j_second.xml" > "$TMP/j_second.stripped"
+# PRESENCE GUARD (CONTRIBUTING §2 shape 3 — "empty equals agreement"): two maps that never carried the
+# attribute strip to themselves and compare equal, so the assertion below would be green on a binary that
+# emits nothing at all. Assert both strips took bytes BEFORE trusting the comparison.
+if cmp -s "$TMP/j_first.xml" "$TMP/j_first.stripped" || cmp -s "$TMP/j_second.xml" "$TMP/j_second.stripped"; then
+    no "(J9) neither map carried cache=, so the modulo-identity comparison below cannot distinguish warm from cold"
+elif diff -q "$TMP/j_first.stripped" "$TMP/j_second.stripped" >/dev/null 2>&1; then
+    ok "(J9) cold == warm byte-identical modulo cache= — the attribute is the only thing the cache changed"
+else
+    no "(J9) cold != warm beyond cache= — the cache changed the answer"
+    diff "$TMP/j_first.stripped" "$TMP/j_second.stripped" | head -10
+fi
+
+# (J10) G4 WELL-FORMEDNESS on every shape the attribute takes.
+if command -v xmllint >/dev/null 2>&1; then
+    j_xml=0
+    for a in "$TMP/j_off.xml" "$TMP/j_first.xml" "$TMP/j_second.xml" "$TMP/j_trunc.xml" "$TMP/j_rich.xml" "$TMP/j_part.xml"; do
+        xmllint --noout "$a" >/dev/null 2>&1 || { j_xml=1; echo "      (bad: $a)"; }
+    done
+    if [ "$j_xml" -eq 0 ]; then
+        ok "(J10) every shape (none / cold / warm / truncated / cross-family / part) is well-formed XML"
+    else
+        no "(J10) a map carrying cache= is not well-formed XML"
+    fi
+else
+    ok "(J10) xmllint unavailable — well-formedness arm skipped"
+fi
+
+# (J11) MUTATION CONTROL — the same extraction over four runs that differ only in cache state must return
+#       four distinct words. An extraction that returned one constant (or "" everywhere) would pass every
+#       j_expect above only if the expectations were wrong, and would pass NONE of them if it were dead —
+#       so this arm is what proves rootCache discriminates rather than that the values happen to match.
+v_off="$( rootCache "$TMP/j_off.xml" )";  v_reb="$( rootCache "$TMP/j_first.xml" )"
+v_hit="$( rootCache "$TMP/j_second.xml" )"; v_par="$( rootCache "$TMP/j_part.xml" )"
+distinct="$( printf '%s\n%s\n%s\n%s\n' "$v_off" "$v_reb" "$v_hit" "$v_par" | sort -u | grep -c '^[a-z]' )"
+if [ "$distinct" = "4" ]; then
+    ok "(J11) four cache states yield four distinct values ($v_off / $v_reb / $v_hit / $v_par) — the attribute discriminates"
+else
+    no "(J11) four cache states yield $distinct distinct value(s) ('$v_off' / '$v_reb' / '$v_hit' / '$v_par') — at least one case is fused or absent"
 fi
 
 echo

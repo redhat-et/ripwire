@@ -452,6 +452,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // under max-tokens. Same number, same reading, so one row reads both places.
     { "est_tokens",        "est_tokens=: price as emitted (an upper bound under compact)", false, {}, MapHeaderRead::Also },
     { "over_ceiling",      "over_ceiling=1: budget not met", false, {}, MapHeaderRead::Also },
+    // What the parse cache DID for this run (model.h CacheOutcome, emitted by serialize.h buildHead). Unconditional on
+    // the map root, so its reading is unconditional too. It is the one attribute on that root which is RUN PROVENANCE
+    // rather than part of the answer, and the reading has to say so: a reader comparing two maps of one tree needs to
+    // know which single attribute is allowed to differ.
+    { "cache",             "cache=: what the parse cache did for THIS run — none (no artifact consulted) | cold (no crawled file came from it, so the parse was redone) | part (some came from it, the rest re-extracted) | warm (every one came from it); run provenance, never the answer, so a map comparison excludes it", false, {}, MapHeaderRead::No },
     // M1 (terminality round A, 2026-09-05): the ranked head's own floor — how many rank>0 candidates the
     // ceiling ladder cut. It rides the root on --for and (since M1) on --pack-task/explore too, so the
     // compact dialect has to define it wherever it appears, or the default answer names a number with no
