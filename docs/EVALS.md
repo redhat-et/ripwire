@@ -14603,16 +14603,34 @@ mean the shares did not translate into wall time and the phase accounting is wro
 valuable finding than the speedup. A result inside the band is recorded as the band it fell in, not as
 "as projected".
 
-### Band 2 — memory. The direction is registered, not just the magnitude
+### Band 2 — memory. A CEILING, not a no-rise rule (AMENDED 2026-11-14, before any implementation number)
 
-Peak RSS must **not rise**. Registered target: envoy **371.5 -> ~300 MiB**, vscode **596.9 -> ~465 MiB**,
-i.e. the model phase becomes the peak-setter once graph building is gone.
+**Amendment, and why it is legitimate.** This band first read "peak RSS must **not rise**", with any
+rise counted as a refutation. The owner's ruling the same day is that memory may go up a reasonable
+amount for a speed improvement — the memory/speed trade is ordinary engineering, and ripwire's margin
+on this axis is large enough to spend. A band that would refute a result the owner would ship is a
+badly chosen band, so it is replaced with a ceiling that can still fail. **This amendment is made
+before any implementation exists and before any measurement of it**; amending a band after seeing its
+data would void the registration, and nothing here is permitted to move again once a number arrives.
 
-*Refuted if* peak RSS rises above today's warm peak on any repo in the ladder. Owner ruling of
-2026-11-14 permits SPENDING memory for speed — ripwire's largest measured peak is 1,023 MB against
-codegraph's 11,815 MB on vscode, so several hundred MB of headroom exists — but a rise must then be
-reported as the trade it is, with the disk and RSS cost printed beside the CPU win, never as an
-unqualified speedup.
+The expectation is still that peak FALLS, because a third of today's warm peak is transient resolve
+state: envoy 371.5 -> 252.8 MiB resident, vscode 596.9 -> 423.0. Target remains envoy ~300 MiB,
+vscode ~465 MiB, with the model phase becoming the peak-setter.
+
+But a rise is permitted up to a ceiling derived from what the memory claim is FOR, not from today's
+number:
+
+1. **ripwire must remain the lowest-peak tool measured, with at least 1.5x of margin.** On vscode the
+   lowest-peak peer is crg at 3,246 MB, so ripwire's cold peak must stay **under 2,048 MB** (it is
+   1,023 MB today). codegraph is 11,815 MB on the same repo.
+2. **The 8 GB-laptop claim must survive**: cold peak under **half** the smallest box in the goal, so a
+   large repo still leaves an agent and the OS the larger share.
+3. **Every rise is reported as a trade**, with the measured disk and RSS cost printed beside the CPU
+   win, in the same cell — never as an unqualified speedup.
+
+*Refuted if* cold peak exceeds either ceiling on any repo in the ladder, or if a rise is published
+without its cost beside it. A rise that stays inside the ceilings and is reported as a trade is a
+PASS, recorded with the trade stated — not a tolerated miss.
 
 ### Band 3 — disk
 
