@@ -67,22 +67,28 @@ asks="$( count msg literal_asks )"; reads="$( count msg corpus_reads )"
 if [ "${asks:-0}" -ge 3 ]; then ok "P1 the message task asks ${asks} literal scans"; else no "P1 premise: the message task asked '${asks:-none}' scans (want >= 3): $( head -c 300 "$TMP/msg.err" )"; fi
 if [ "${reads:-x}" = 1 ]; then ok "R1 the ${asks:-?} asks read the corpus once"; else no "R1 corpus_reads='${reads:-none}' for ${asks:-?} asks (want 1)"; fi
 if grep -q 's="must be the last filter in a chain" shape="message"' "$TMP/msg.out"; then ok "P1b the batched answer still finds the fragment"; else no "P1b no message <lit> in the batched answer"; fi
+if [ "$( cat "$TMP/msg.rc" )" = 0 ]; then ok "P1c the message task exits 0"; else no "P1c the message task exited $( cat "$TMP/msg.rc" ) (CodeRabbit 4570578120: a failed call must not pass on its rows)"; fi
 
 RIPWIRE_STATS=1 run tbl "$TBL"
 asks="$( count tbl literal_asks )"; reads="$( count tbl corpus_reads )"
 if [ "${asks:-0}" -ge 2 ]; then ok "P2 the table task asks ${asks} literal scans"; else no "P2 premise: the table task asked '${asks:-none}' scans (want >= 2)"; fi
 if [ "${reads:-x}" = 1 ]; then ok "R2 the table task's asks read the corpus once"; else no "R2 corpus_reads='${reads:-none}' for ${asks:-?} asks (want 1)"; fi
 if grep -q 's="abspath" shape="table"' "$TMP/tbl.out"; then ok "P2b the batched table answer still prints the row"; else no "P2b no table <lit> in the batched answer"; fi
+if [ "$( cat "$TMP/tbl.rc" )" = 0 ]; then ok "P2c the table task exits 0"; else no "P2c the table task exited $( cat "$TMP/tbl.rc" )"; fi
 
 # I1: the batch moves no byte — against the unbatched path, where the binary carries fault switches
 RIPWIRE_FAULT_SCAN_UNBATCHED=1 RIPWIRE_STATS=1 run probe "$MSG"
-if [ "$( count probe literal_asks )" = 0 ]; then
+if [ "$( cat "$TMP/probe.rc" )" != 0 ]; then
+    no "I1 the fault-switch probe itself failed (rc=$( cat "$TMP/probe.rc" )): it cannot tell an NDEBUG binary from a broken one"
+elif [ "$( count probe literal_asks )" = 0 ]; then
     compared=0
     for t in msg tbl; do
         task="$MSG"; [ "$t" = tbl ] && task="$TBL"
         run "$t.b" "$task"
         RIPWIRE_FAULT_SCAN_UNBATCHED=1 run "$t.u" "$task"
-        if cmp -s "$TMP/$t.b.out" "$TMP/$t.u.out" && cmp -s "$TMP/$t.b.err" "$TMP/$t.u.err" && cmp -s "$TMP/$t.b.rc" "$TMP/$t.u.rc"; then
+        if [ "$( cat "$TMP/$t.b.rc" )" != 0 ]; then
+            no "I1 $t: the batched call exited $( cat "$TMP/$t.b.rc" ) (equal failures prove nothing)"
+        elif cmp -s "$TMP/$t.b.out" "$TMP/$t.u.out" && cmp -s "$TMP/$t.b.err" "$TMP/$t.u.err" && cmp -s "$TMP/$t.b.rc" "$TMP/$t.u.rc"; then
             compared=$(( compared + 1 ))
         else
             no "I1 $t: the batched answer differs from the unbatched one: $( diff "$TMP/$t.b.out" "$TMP/$t.u.out" | head -5 )"
@@ -97,7 +103,8 @@ RIPWIRE_STATS=1 run grep --grep=filter
 if ! grep -q '^\[scan\]' "$TMP/grep.err" && [ "$( cat "$TMP/grep.rc" )" = 0 ]; then ok "I2 --grep opens no batch"; else no "I2 --grep: rc=$( cat "$TMP/grep.rc" ) $( grep '^\[scan\]' "$TMP/grep.err" )"; fi
 
 run d1 "$MSG"; run d2 "$MSG"
-if cmp -s "$TMP/d1.out" "$TMP/d2.out" && cmp -s "$TMP/d1.err" "$TMP/d2.err"; then ok "D two batched calls are byte-identical"; else no "D the batched answer is not deterministic"; fi
+if [ "$( cat "$TMP/d1.rc" )" != 0 ] || [ "$( cat "$TMP/d2.rc" )" != 0 ]; then no "D a determinism run failed: rc=$( cat "$TMP/d1.rc" )/$( cat "$TMP/d2.rc" )"
+elif cmp -s "$TMP/d1.out" "$TMP/d2.out" && cmp -s "$TMP/d1.err" "$TMP/d2.err"; then ok "D two batched calls exit 0 and are byte-identical"; else no "D the batched answer is not deterministic"; fi
 
 [ "$fail" = 0 ] && echo "scanoncecheck: PASS" || echo "scanoncecheck: FAIL"
 exit "$fail"
