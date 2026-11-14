@@ -331,6 +331,7 @@ for _g in \
     bm25boundcheck \
     bm25check \
     bodiesshowncheck \
+    bodilessseedcheck \
     bodydialectcheck \
     budgetpolicycheck \
     buildtypestampcheck \
