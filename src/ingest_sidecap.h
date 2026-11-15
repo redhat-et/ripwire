@@ -86,17 +86,19 @@ inline std::vector<PreprocDeadRange> preprocDeadRangesFor( const LangEntry& le, 
 // And the question "was this fact captured from dead source" is answerable from the RECORD (its site
 // byte), so it need not be asked at each of the places a record is born. One stable partition, order
 // preserved, no allocation — the same shape foldFieldDefs already uses on the def window.
-template<typename RowT, typename SiteByteOf>
-inline void dropPreprocDead( std::vector<RowT>& rows, std::size_t firstOfFile, const std::vector<PreprocDeadRange>& ppDead, SiteByteOf siteByteOf )
+// Drop every row from `first` on that `dropped` names, keeping the rest in order — one pass, no allocation. Shared by
+// dropPreprocDead and the parse budget's rollback of one file's rows (ingest_parsepool.h rollBackFileFacts).
+template<typename RowT, typename Dropped>
+inline void dropRowsFrom( std::vector<RowT>& rows, std::size_t first, Dropped dropped )
 {
-    if( ppDead.empty() || firstOfFile >= rows.size() )
+    if( first >= rows.size() )
     {
-        return;   // the overwhelming majority of files: one compare, no scan
+        return;
     }
-    std::size_t write = firstOfFile;
-    for( std::size_t read = firstOfFile; read < rows.size(); ++read )
+    std::size_t write = first;
+    for( std::size_t read = first; read < rows.size(); ++read )
     {
-        if( inPreprocDead( ppDead, siteByteOf( rows[ read ] ) ) )
+        if( dropped( rows[ read ] ) )
         {
             continue;
         }
@@ -107,6 +109,16 @@ inline void dropPreprocDead( std::vector<RowT>& rows, std::size_t firstOfFile, c
         ++write;
     }
     rows.resize( write );
+}
+
+template<typename RowT, typename SiteByteOf>
+inline void dropPreprocDead( std::vector<RowT>& rows, std::size_t firstOfFile, const std::vector<PreprocDeadRange>& ppDead, SiteByteOf siteByteOf )
+{
+    if( ppDead.empty() || firstOfFile >= rows.size() )
+    {
+        return;   // the overwhelming majority of files: one compare, no scan
+    }
+    dropRowsFrom( rows, firstOfFile, [ & ]( const RowT& row ) { return inPreprocDead( ppDead, siteByteOf( row ) ); } );
 }
 
 // The four site-byte readers, named once so no call site spells the wrong field. A REFERENCE is sited

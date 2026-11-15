@@ -153,20 +153,7 @@ inline RawFactsMark markFacts( const RawFacts& f ) noexcept
 template<class Row>
 inline void dropFileRowsFrom( std::vector<Row>& rows, std::size_t mark, std::uint32_t fileId )
 {
-    std::size_t keptCount = mark;   // rows below the mark predate this file; past it, the other files' rows slide down in order
-    for( std::size_t rowIndex = mark; rowIndex < rows.size(); ++rowIndex )
-    {
-        if( rows[ rowIndex ].fileId == fileId )
-        {
-            continue;
-        }
-        if( keptCount != rowIndex )
-        {
-            rows[ keptCount ] = std::move( rows[ rowIndex ] );
-        }
-        ++keptCount;
-    }
-    rows.resize( keptCount );
+    dropRowsFrom( rows, mark, [ fileId ]( const Row& row ) { return row.fileId == fileId; } );
 }
 
 inline void rollBackFileFacts( RawFacts& f, const RawFactsMark& m, std::uint32_t fileId )
