@@ -14744,7 +14744,9 @@ of which is measured and was not anticipated when the card was written:
    emitted stdout **byte-identical to a verified `--no-cache` from-scratch build**. Stale input
    produced a slow correct answer, never a fast wrong one.
 
-#### Band 1 — CPU: PASS, and the projection was too conservative
+#### Band 1 — CPU: PASS on the flagless map; NOT ESTABLISHED on the verb the band actually registered
+
+The headline measurement is the **flagless map**, and on it the band passes with a wide margin:
 
 | repo | feature OFF | feature ON | ratio |
 |---|---|---|---|
@@ -14752,11 +14754,45 @@ of which is measured and was not anticipated when the card was written:
 | envoy, user CPU | 1.30 s | **0.18 s** | 7.2x |
 | vscode, user CPU | 3.49 s | **0.35 s** | 10.0x |
 
-Refutation threshold was 0.50 s on envoy and 0.80 s on vscode; measured 0.18 s and 0.35 s. The result
-fell **below the projected band** (0.23-0.29 s on envoy), so it is recorded as what it is — the
-projection under-predicted — and not as "as projected". The reason is accounted for: the projection
-removed only the `buildGraph` and crawl shares, while the implementation also removed stored PageRank
-and most of per-record decode.
+**But the band's own baselines are not flagless-map runs.** "envoy warm 1.46 s" and "vscode 3.38 s"
+are the comparison table's warm cell, which is a **`--for` query**. A band inherits the verb of the
+measurement it was derived from, and this card never restates it, so the verdict has to be taken on
+`--for`. Measured there, steady state, same binary with the feature toggled **(v)**:
+
+| repo | `--for` OFF | `--for` ON | ratio | flagless ratio |
+|---|---|---|---|---|
+| envoy | 29,568,954,095 | 9,457,879,686 | **3.13x** | 8.51x |
+| vscode | 64,214,553,794 | 14,570,312,058 | **4.41x** | 12.89x |
+
+Byte-identical answers in both arms at both sizes. The gap is mechanical: the snapshot removes the
+crawl, the model build and `buildGraph`, which are verb-independent, but its stored PageRank is the
+**uniform-teleport default only** and `--for` personalizes the teleport — so the one phase it cannot
+serve is the one this query needs, on top of ranker work that was never in the removed set.
+
+Against the refutation thresholds, the verdict depends on which baseline the ratio is applied to, and
+the two baselines disagree by more than the margin:
+
+| baseline | envoy projected | vs 0.50 s | vscode projected | vs 0.80 s |
+|---|---|---|---|---|
+| this card's own (1.46 / 3.38 s) | 0.47 s | PASS | 0.77 s | PASS |
+| the OFF arm measured here (1.89 / 4.02 s) | 0.60 s | **REFUTED** | 0.91 s | **REFUTED** |
+
+The OFF arm here runs 15-19 % above the card's baseline — a different blob, a binary carrying #657 and
+#658, and a machine at load 3.48 — so **the verdict on the registered verb is NOT ESTABLISHED**, and
+one quiet-machine re-measurement in the table's exact configuration is owed before either outcome is
+claimed. Recording it this way rather than taking the favourable baseline is the point of having
+written the band down first.
+
+**Nothing in the band has been moved.** The thresholds, 0.50 s and 0.80 s, are untouched; what changed
+is which measurement is admitted as answering them, and the change makes the band *harder* to pass,
+not easier.
+
+**The competitive claim this was expected to support does not survive on the published query.** On the
+flagless map the lane makes ripwire the fastest warm tool at envoy scale. On `--for` it does not, at
+either size: crg stays 2.6x faster on envoy (0.23 s) and 3.5x on vscode (0.26 s). What the lane does
+buy is the break-even — codegraph, graphify and graft all move to **never**, ripwire being cheaper on
+both phases, and crg's break-even moves from **59 to ~174** questions on envoy and **100 to ~477** on
+vscode.
 
 #### Band 2 — memory: PASS, peak FELL, and the one rise is reported as a trade
 

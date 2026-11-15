@@ -92,7 +92,12 @@ inline constexpr int kDirwatchBatch = 32;
 }   // namespace rw::os
 
 #if !defined( _WIN32 )
-extern char** environ;   // POSIX names the process environment and declares it in no header: rw::os::environment() below is its one reader
+// POSIX names the process environment but puts it in no header, so it is declared here; rw::os::environment() below is
+// its one reader. The linkage must be C: glibc DOES declare it, inside unistd.h's extern "C" block, and a C++-linkage
+// declaration of the same name is a hard error there ("conflicting declaration of 'char** environ' with 'C' linkage").
+// Apple's unistd.h declares it nowhere -- it is reached via _NSGetEnviron() -- so the wrong linkage builds clean on
+// macOS and reds every Linux job. Do not drop the extern "C" because it looks redundant on this machine.
+extern "C" char** environ;
 
 #include <arpa/inet.h>
 #include <fcntl.h>
