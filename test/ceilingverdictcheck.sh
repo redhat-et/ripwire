@@ -229,6 +229,9 @@ fi
 #     self-contradicting pair of numbers; forbudget-soft (rule 4): its plain twin must also be shape-identical (FORGE).
 fw_est="$( attr "$( rootOf "$TMP/for.100000.f" )" est_tokens )"
 fw_bud="$( attr "$( rootOf "$TMP/for.100000.f" )" budget_tokens )"
+# TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a budget the answer fits returns the unbudgeted answer byte for byte, so the root
+# names no budget_tokens= at all here (nothing was shed); the pair judged is est_tokens= against the budget asked
+fw_bud="${fw_bud:-100000}"
 if [ -z "$fw_est" ] || [ -z "$fw_bud" ]; then
     no "(2) the wide-budget forged run emitted no est_tokens=/budget_tokens= pair to judge (est='$fw_est' budget='$fw_bud')"
 elif [ "$fw_est" -ge "$fw_bud" ]; then

@@ -404,9 +404,12 @@ done <<ARGV
 --for=$T_RESP|--json
 --for=$T_RESP|--auto-bodies
 --for=$T_RESP|--detail=1
---for=$T_RESP|--token-budget=3000
 --for=SmartRouter
 ARGV
+# F8t — TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the posture (it used to drop the fold); a budget
+# the answer fits returns the flagless answer byte for byte, fold included
+run "$TMP/tb" --for="$T_RESP" --token-budget=3000 || no "(F8t) the budgeted run exited $?"
+if [ -s "$TMP/tb" ] && cmp -s "$TMP/tb" "$TMP/resp"; then ok "(F8t) --token-budget=3000 (the answer fits): the flagless answer byte for byte, fold included"; else no "(F8t) --token-budget=3000 is not the flagless answer"; fi
 # F8m (B1): --max-tokens is not read by this answer, so it changes no byte of it
 run "$TMP/mt" --for="$T_RESP" --max-tokens=3000
 if [ -s "$TMP/mt" ] && cmp -s "$TMP/mt" "$TMP/resp"; then ok "(F8m) --max-tokens=3000 is inert, as its notice says: the flagless answer, fold included"; else no "(F8m) --max-tokens=3000 changed the answer its notice says it does not read"; fi

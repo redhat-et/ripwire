@@ -477,6 +477,7 @@ for f in range( 2 ):
 PY
 docs_arm(){ python3 -c '
 import re, sys
+budgeted = len( sys.argv ) > 1   # a budgeted state may have shed every doc-less row (then no docs_dropped=: zero is the count)
 s = sys.stdin.read()
 m = re.search( r"<sigs([^>]*)>(.*?)</sigs>", s, re.S )
 if not m: print( "FAIL no <sigs>" ); sys.exit( 1 )
@@ -484,12 +485,12 @@ rows = re.findall( r"<d [^>]*\br=\"([0-9]+)\"[^>]*>(.*?)</d>", m.group( 2 ), re.
 nodoc = [ int( r ) for r, inner in rows if "<doc>" not in inner ]
 dd = re.search( r"docs_dropped=\"([0-9]+)\"", m.group( 1 ) )
 got = int( dd.group( 1 ) ) if dd else 0
-if got != len( nodoc ) or got == 0: print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
-if "[docs_dropped=N:" not in s[ : s.find( "<sigs" ) ]: print( "FAIL docs_dropped= rides with no legend clause ahead of <sigs>" ); sys.exit( 1 )
+if got != len( nodoc ) or ( got == 0 and not budgeted ): print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
+if got > 0 and "[docs_dropped=N:" not in s[ : s.find( "<sigs" ) ]: print( "FAIL docs_dropped= rides with no legend clause ahead of <sigs>" ); sys.exit( 1 )
 sh = re.search( r"shown=\"([0-9]+)\"", m.group( 1 ) ); tt = re.search( r"total=\"([0-9]+)\"", m.group( 1 ) )
 shrunk = bool( sh and tt and sh.group( 1 ) == tt.group( 1 ) )
-if shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
-print( "OK docs_dropped=%d rows=%d %s" % ( got, len( rows ), "<sigs%s>" % m.group( 1 ) ) )'; }
+if not budgeted and shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
+print( "OK docs_dropped=%d rows=%d %s" % ( got, len( rows ), "<sigs%s>" % m.group( 1 ) ) )' "$@"; }
 if v="$( cd "$TMP" && "$BIN" fxdocs --for="widget helper" --no-cache 2>/dev/null | docs_arm )"; then
     case "$v" in
         # head round-robin (lane hrr): the tag may also carry files_first= (the reorder's reading; forheadrrcheck)
@@ -504,13 +505,17 @@ if [ "$jd" = "16 16" ]; then ok "(8) JSON twin: docs_dropped=16 = the rows with 
 first_capped=""
 for tb in 3400 3200 3000 2800 2600 2400 2200 2000; do
     out="$( cd "$TMP" && "$BIN" fxdocs --for="widget helper" --no-cache --token-budget=$tb 2>/dev/null )"
-    v="$( printf '%s' "$out" | docs_arm )" || { no "(8) --token-budget=$tb: $v"; continue; }
+    v="$( printf '%s' "$out" | docs_arm budgeted )" || { no "(8) --token-budget=$tb: $v"; continue; }
     if [ -z "$first_capped" ] && printf '%s' "$v" | grep -q 'capped="1"'; then first_capped="$tb $v"; fi
 done
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer runs the ladder's doc shrink; it sheds the unbudgeted answer, the
+# worst-ranked rows last of all — so the first capped state cuts the doc-less r>24 rows first (shown < 40) and docs_dropped=
+# falls by the doc-less rows it cut (the loop above holds the count in every state). The old "shrunk-not-dropped" first state
+# (shown == total, docs shrunk) is the ladder's, which a budget no longer switches to.
 case "$first_capped" in
-    *'shown="40" total="40" capped="1"'*) ok "(8) the ladder's first capped state is shrunk-not-dropped and says so: --token-budget=$first_capped" ;;
-    "") no "(8) no --token-budget in 3400..2000 capped the fixture — the shrunk arm measured nothing" ;;
-    *) no "(8) first capped state is not shrunk-not-dropped: $first_capped" ;;
+    *'shown="'[0-9]*'" total="40" capped="1"'*) ok "(8) the first capped state cuts the worst-ranked rows and keeps docs_dropped= honest: --token-budget=$first_capped" ;;
+    "") no "(8) no --token-budget in 3400..2000 capped the fixture — the capped arm measured nothing" ;;
+    *) no "(8) first capped state carries no shown= total=40 capped=1: $first_capped" ;;
 esac
 
 # ── (9) A CAPPED <sigs> NAMES THE CALL THAT SERVES IT UNCUT (knob-honesty-068; PROCESS rule 5) ───────────────────
@@ -621,10 +626,12 @@ NX3="$( cfield "$C3" next )"
   && [ "$( cfield "$C3" shown )" -lt "$( cfield "$C3" total )" ]; } \
     && ok "(9) --token-budget=1500: the soft target's cut ($( cfield "$C3" shown ) of $( cfield "$C3" total )) carries next= and its clause, no over_ceiling" \
     || no "(9) --token-budget=1500: $C3"
-# the resume index (the #362 candidate page's next_offset): the last printed row's candidate rank, defined by its own clause
-if [ "$( cfield "$C3" next_offset )" = "$( cfield "$C3" max_r )" ] && [ "$( cfield "$C3" next_offset )" = "$( cfield "$C3" shown )" ] \
-   && [ "$( cfield "$C3" offset_clause )" = true ]; then
-    ok "(9) next_offset=\"$( cfield "$C3" next_offset )\" is the resume index: the last printed row's rank (= shown, no pseudo slot here), defined"
+# the resume index (the #362 candidate page's next_offset): the last printed row's candidate rank, defined by its own clause.
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the XML --for budget sheds the unbudgeted answer and keeps ranks 1..shown (the worst ranks
+# go first), so its cut carries no next_offset= (whose clause says "no consumer yet"): next= serves the block uncut (below). The
+# arm asserts that shape: no next_offset= and no clause, the kept rows exactly ranks 1..shown.
+if [ "$( cfield "$C3" next_offset )" = null ] && [ "$( cfield "$C3" offset_clause )" = false ] && [ "$( cfield "$C3" max_r )" = "$( cfield "$C3" shown )" ]; then
+    ok "(9) the budget's cut keeps ranks 1..$( cfield "$C3" shown ) and carries no next_offset= (next= is its continuation)"
 else
     no "(9) next_offset='$( cfield "$C3" next_offset )' vs last printed r=$( cfield "$C3" max_r ), shown=$( cfield "$C3" shown ), clause=$( cfield "$C3" offset_clause )"
 fi
@@ -753,8 +760,9 @@ EOF
 chmod +x "$GSHIM/git"; : > "$GSHIM/calls.log"
 out="$( cd "$TMP" && PATH="$GSHIM:$PATH" "$BIN" fxcutgit --for="gadget assembler" --no-cache --token-budget=500 2>/dev/null )"
 st="$( grep -c 'status --porcelain' "$GSHIM/calls.log" | tr -d ' ' )"
-if ! printf '%s' "$out" | grep -q '<sigs [^>]*next_offset='; then
-    no "(10c) premise: --token-budget=500 on fxcutgit cuts no row (no <sigs next_offset=>): $( printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -c 300 )"
+# TOKEN-BUDGET-MONOTONE: the budget's row cut is named by capped="1" with shown= below total= (no next_offset= on the XML cut)
+if ! printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -1 | python3 -c 'import re,sys; t=sys.stdin.read(); s=re.search(r"shown=\"(\d+)\"",t); n=re.search(r"total=\"(\d+)\"",t); sys.exit(0 if " capped=\"1\"" in t and s and n and int(s.group(1))<int(n.group(1)) else 1)'; then
+    no "(10c) premise: --token-budget=500 on fxcutgit cuts no row (no capped <sigs> with shown < total): $( printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -c 300 )"
 elif [ "$st" = 1 ] && printf '%s' "$out" | grep -q ' at="'; then
     ok "(10c) a budgeted, cut --token-budget run reads the git stamp once (1 status --porcelain child), and at= rides the answer"
 else
@@ -776,7 +784,12 @@ c11check(){   # LABEL BUDGET WANT ROWS TOTAL HANDLE OVER
         no "(11) $label @$bt: shown/total/handle/over = ${*:-<no output>} — want >= $want rows, a continued cut, no over_ceiling="
     fi
 }
-c11check "CLI --for" 2160 16 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the CLI --for budget sheds the UNBUDGETED answer, whose header is its own posture's (2164 B)
+# plus the shed disclosure (shed=, budget_tokens=, the clause defining the steps taken: +664 B), so at 2160 it keeps 12 of U's
+# 195 B rows (est 2119; a 13th does not fit) where the hard ceiling's tighter posture kept 16. The floor moves to 12: fewer rows
+# than that at 2160 would mean the shed cut a row it had room for. (budgetmonotonecheck (b)/(d) hold the contract itself.)
+c11out="$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null )" || no "(11) CLI --for @2160: the run exited $?"
+c11check "CLI --for" 2160 12 $( c11row "$( printf '%s' "$c11out" | cut_arm )" )
 c11check "MCP for" 4340 40 $( c11row "$( mcprel 4340 )" )
 set -- $( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2000 --json --no-cache 2>/dev/null \
           | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["sigs"]), d.get("sigs_total", len(d["sigs"])), "sigs_next" in d, bool(d.get("over_ceiling")))' 2>/dev/null )

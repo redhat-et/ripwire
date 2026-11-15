@@ -132,13 +132,21 @@ except Exception as exc:
     print( '    document does not parse as XML: %s' % ( exc, ) );  sys.exit( 1 )
 
 # ── the two numbers, read as ATTRIBUTES of the root and never as text anywhere in the document ───────────
-if wantMax > 0:
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget that cuts nothing says nothing — the answer under it is the unbudgeted
+# answer byte for byte (test/budgetmonotonecheck.sh (a)/(c)), so a root that names neither number, sheds nothing and
+# prices within every number asked is the honest "it fit" (the old arm wanted max_tokens=/budget_tokens= on it).
+asked     = [ n for n in ( wantMax, wantBudget ) if n > 0 ]
+silentFit = ( asked and 'max_tokens' not in attrs and 'budget_tokens' not in attrs and 'shed' not in attrs
+              and 'est_tokens' in attrs and int( attrs['est_tokens'] ) <= min( asked ) )
+if silentFit:
+    pass
+elif wantMax > 0:
     if attrs.get( 'max_tokens' ) != str( wantMax ):
         bad.append( 'root max_tokens=%r, expected "%d"' % ( attrs.get( 'max_tokens' ), wantMax ) )
 elif 'max_tokens' in attrs:
     bad.append( 'root carries max_tokens=%r on a run that named no --max-tokens' % ( attrs['max_tokens'], ) )
 
-if wantBudget > 0 and attrs.get( 'budget_tokens' ) != str( wantBudget ):
+if wantBudget > 0 and not silentFit and attrs.get( 'budget_tokens' ) != str( wantBudget ):
     bad.append( 'root budget_tokens=%r, expected "%d"' % ( attrs.get( 'budget_tokens' ), wantBudget ) )
 
 if 'est_tokens' not in attrs:

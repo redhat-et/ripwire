@@ -186,7 +186,9 @@ then ok "(n8) \"e.g.\" is prose: --callers=leaf_sink with no tried="
 else no "(n8) verb=[$( attr "$TMP/n8.xml" verb )] tried=[$( attr "$TMP/n8.xml" tried )] unresolved=[$( attr "$TMP/n8.xml" unresolved )]"; fi
 
 # S2: a token budget holds the verb back: the self-closed tag names it, verb= is the call, no verb body
-for arm in "b1a|--token-budget=4100"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (4100 held it
+# at any size; that answer now fits 4100 whole and comes back byte for byte, block and all): 100 forces the hold.
+for arm in "b1a|--token-budget=100"
 do
     id="${arm%%|*}"; fl="${arm#*|}"
     run --for="path from startEntry to leaf_sink" "$fl" >"$TMP/$id.xml"

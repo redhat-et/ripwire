@@ -333,6 +333,7 @@ for _g in \
     bodiesshowncheck \
     bodilessseedcheck \
     bodydialectcheck \
+    budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \
     builtinbindcheck \

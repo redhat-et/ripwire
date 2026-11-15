@@ -439,6 +439,14 @@ Discloses: `capped`, `depth_capped`
 | --- | --- | --- | --- |
 | `kAliasHopSigBytes` | `240` | — | a declaration's text is cut here (cut="1"); a runaway guard |
 
+### `src/forbudgetfit.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForBudgetRowFloor` | `4` | — | the <sigs> rows never shed: kForSoftBudgetNote's "rank 1..4 rows always ship" |
+
 ### `src/forcallerhop.h`
 
 Discloses: `capped`

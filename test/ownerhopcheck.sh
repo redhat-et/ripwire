@@ -472,7 +472,19 @@ fi
 on="$TMP/b2.on.xml"; off="$TMP/b2.off.xml"; run ts "$on" "--for=$QTS" --token-budget=700; runoff ts "$off" "--for=$QTS" --token-budget=700
 if ran_ok "$on" "(B2)" && ran_ok "$off" "(B2) A/B"; then
     grep -q 'reason="budget"' "$off" || no "(B2) premise: --token-budget=700 no longer exhausts the ceiling (no reason=\"budget\") — re-tune"
-    if cmp -s "$on" "$off"; then ok "(B2) exhausted ceiling: byte-identical to the A/B handle (owner rows add nothing)"; else no "(B2) exhausted-ceiling answer changed"; fi
+    # TOKEN-BUDGET-MONOTONE (2026-11-14): the budget sheds the unbudgeted answer, so at 700 the <hops> rows go whole (shed=hops:N,
+    # <hops shown="0" capped="1" next=>) and its total= still counts the owner row (7 vs 6 on the A/B handle; 5007 B vs 5164 B,
+    # the rest is the qword/via legend U carries). What the arm protects — the owner rows add nothing past a spent budget — is
+    # asserted on the answer: no owner row is printed, the hops are shed with a next=, and <sigs>/<tail> equal the A/B handle's.
+    if python3 - "$on" "$off" <<'PY'
+import re, sys
+a, b = ( open( p, encoding = "utf-8" ).read() for p in sys.argv[ 1: ] )
+el = lambda t, n: ( re.search( r'<%s[ >].*?</%s>|<%s [^>]*/>' % ( n, n, n ), t, re.S ) or [ "" ] )[ 0 ]
+h = re.search( r'<hops [^>]*>', a )
+sys.exit( 0 if h and 'shown="0"' in h.group( 0 ) and ' next="' in h.group( 0 ) and "qword=" not in a.split( "-->" )[ -1 ]
+          and el( a, "sigs" ) == el( b, "sigs" ) and el( a, "tail" ) == el( b, "tail" ) else 1 )
+PY
+    then ok "(B2) spent budget: the hops are shed whole (no owner row), <sigs>/<tail> equal the A/B handle's"; else no "(B2) spent-budget answer: an owner row rides, or <sigs>/<tail> changed"; fi
 fi
 # (B3) a budget sweep on the 105-callee owner: no budget may drop callee names silently
 qb3="How does broadcast send an event?"; partial=0; seen=0; bad=""
@@ -493,13 +505,16 @@ else:
     h = d['hops'] or {}
     if h.get('qword_cut', '0') not in ('', '0') and h.get('next') == nx: print('cut')
     elif 'reason="budget"' in x: print('spent')
+    elif re.search( r'<hops [^>]*shown="0"[^>]*capped="1"[^>]*next="', x ) and re.search( r'shed="[^"]*hops:', x ): print('spent')   # TOKEN-BUDGET-MONOTONE: hops shed whole
     else: print('BAD absent with no disclosure hops=%s' % h)
 PY
 )"
     case "$v" in "row "*) seen=$((seen+1)); n="${v#row }"; [ "$n" -gt 0 ] && [ "$n" -lt 100 ] && partial=$((partial+1));; cut|spent) ;; *) bad="$bad [$tb: $v]";; esac
 done
-if [ -z "$bad" ] && [ "$partial" -ge 1 ]; then ok "(B3) every explicit budget discloses the owner row's cut (capped=\"1\" + next=) or its absence; $partial budget(s) fund it only partly"
-else no "(B3) bad=$bad partial=$partial seen=$seen (want no silent drop, and >= 1 partly funded row)"; fi
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget sheds whole hop rows (hops:N), never part of one, so "partly funded" is retired;
+# the arm keeps no-silent-drop and asks that some budget serves the owner row (seen >= 1).
+if [ -z "$bad" ] && [ "$seen" -ge 1 ]; then ok "(B3) every explicit budget discloses the owner row's cut (capped=\"1\" + next=) or its absence; $seen budget(s) serve it ($partial partly)"
+else no "(B3) bad=$bad partial=$partial seen=$seen (want no silent drop, and >= 1 budget serving the row)"; fi
 
 # ── (J) JSON and MCP twins: no hop surface, byte-identical ───────────────────────────────────────────────────────────
 on="$TMP/j.on.json"; off="$TMP/j.off.json"; run ts "$on" "--for=$QTS" --json; runoff ts "$off" "--for=$QTS" --json
