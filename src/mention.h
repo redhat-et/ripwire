@@ -1168,21 +1168,32 @@ inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::strin
     return chosen;
 }
 
+// NOSKIP-BUNDLE-DEMOTE: one identifier's match rows less a bundle's copy of a source definition (model.h kRankFlagBundleCopy)
+// in a file the task does not name (`namedFiles`), into `kept`. Such a copy is neither a target nor one of the files the
+// ambiguity bound counts: it restates the source, so a name defined in two source files and two bundles is as specific as it
+// was before the bundles were indexed.
+inline std::span<const std::pair<std::uint32_t, NodeId>> withoutUnnamedBundleCopies( const IngestResult& ing, std::span<const std::pair<std::uint32_t, NodeId>> rows,
+                                                                                     const std::vector<std::uint32_t>& namedFiles,
+                                                                                     std::vector<std::pair<std::uint32_t, NodeId>>& kept )
+{
+    kept.clear();
+    for( const auto& row : rows )
+    {
+        const Symbol& s = ing.symbols[ row.second ];
+        if( !bundleCopy( s ) || std::ranges::find( namedFiles, s.fileId ) != namedFiles.end() )
+        {
+            kept.push_back( row );
+        }
+    }
+    return kept;
+}
+
 // The files (best definition each) that one named identifier lifts at, from its `matches` rows: the qualifier's files when it
 // places any, else the bare reading, narrowed to ONE file when another task word names it by path (namesakeFileByPathWord).
 // Empty when nothing matched. Longer than kMentionMaxNameFiles means ambiguous — the caller lifts nothing.
-// NOSKIP-BUNDLE-DEMOTE: a bundle's copy of a source definition (model.h kRankFlagBundleCopy) is neither a target nor one of the
-// files the ambiguity bound counts, unless the task names its file (`namedFiles`): the copy restates the source, so a name
-// defined in two source files and two bundles is as specific as it was before the bundles were indexed.
-inline bool isUnnamedBundleCopy( const Symbol& s, const std::vector<std::uint32_t>& namedFiles ) noexcept
-{
-    return bundleCopy( s ) && std::ranges::find( namedFiles, s.fileId ) == namedFiles.end();
-}
-
 inline std::vector<std::pair<std::uint32_t, NodeId>> filesForNamedIdent( const IngestResult& ing, const std::vector<float>& lensRank,
                                                                          const NamedIdent& n, std::string_view task,
-                                                                         std::span<const std::pair<std::uint32_t, NodeId>> rows,
-                                                                         const std::vector<std::uint32_t>& namedFiles )
+                                                                         std::span<const std::pair<std::uint32_t, NodeId>> rows )
 {
     const bool bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
     std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare, every;   // every: the bare reading uncut, for the namesake choice
@@ -1190,10 +1201,6 @@ inline std::vector<std::pair<std::uint32_t, NodeId>> filesForNamedIdent( const I
     {
         const Symbol& s = ing.symbols[ row.second ];
         ASSUME( s.id < lensRank.size() );
-        if( isUnnamedBundleCopy( s, namedFiles ) )
-        {
-            continue;
-        }
         if( !n.qualifier.empty() && qualifierPlaces( ing, s, n.qualifier ) )
         {
             keepBestPerFile( narrowed, s, lensRank );
@@ -1233,6 +1240,7 @@ inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float
     EXPECTS( lensRank.size() == ing.symbols.size() );
     ASSUME_NO_ALIAS( lensRank, out );
     const std::vector<std::pair<std::uint32_t, NodeId>> matches = matchNamedIdents( ing, named );
+    std::vector<std::pair<std::uint32_t, NodeId>>       kept;   // one identifier's rows less its unnamed bundle copies, reused
     for( std::size_t m = 0; m < matches.size(); )
     {
         const std::uint32_t k = matches[m].first;
@@ -1243,7 +1251,7 @@ inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float
             ++end;
         }
         std::vector<std::pair<std::uint32_t, NodeId>> perFile =   // (fileId, best symbol in it) for one identifier
-            filesForNamedIdent( ing, lensRank, named[k], task, std::span( matches ).subspan( m, end - m ), namedFiles );
+            filesForNamedIdent( ing, lensRank, named[k], task, withoutUnnamedBundleCopies( ing, std::span( matches ).subspan( m, end - m ), namedFiles, kept ) );
         m = end;
         if( perFile.empty() || perFile.size() > kMentionMaxNameFiles )
         {
