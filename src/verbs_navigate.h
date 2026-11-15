@@ -7,6 +7,7 @@
 #include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
 #include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
+#include "pathanswer.h" // PATH-ANSWER: the one --path answer writer, shared with MCP path_between
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
 #include "forgraphverb.h" // GV-PATH-BIND: narrowRefusedSpelling — the --for block's M1 rule on the direct --path/--connect/--callers
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
@@ -3015,15 +3016,11 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         // GV-PATH-BIND (bindPathEndpoints): an endpoint refused over several fitting definitions runs as the ONE source definition's
         // own spelling, so the answer is the explicit call's plus narrowed=; while either endpoint binds nothing, every name below is
         // the spelling as typed and the refusal is byte-for-byte as before.
-        const PathEndpointsBound    pthEp           = bindPathEndpoints( ing, srcN, dstN );
-        srcN                                        = pthEp.src;
-        dstN                                        = pthEp.dst;
-        spec                                        = pthEp.spec;
-        const std::vector<NodeId>&  srcDefs         = pthEp.srcDefs;
-        const std::vector<NodeId>&  dstDefs         = pthEp.dstDefs;
-        const bool                  srcGlob         = pthEp.srcGlob;
-        const bool                  dstGlob         = pthEp.dstGlob;
-        const std::size_t           pthUnprovenDefs = pthEp.srcUnproven + pthEp.dstUnproven;
+        const PathEndpointsBound    pthEp   = bindPathEndpoints( ing, srcN, dstN );
+        srcN                                = pthEp.src;
+        dstN                                = pthEp.dst;
+        const std::vector<NodeId>&  srcDefs = pthEp.srcDefs;
+        const std::vector<NodeId>&  dstDefs = pthEp.dstDefs;
         if( srcDefs.empty() || dstDefs.empty() )
         {
             // §M7 (W3FIX): both endpoints resolve through resolveAllByNameQualified, i.e. the shared file:name
@@ -3036,150 +3033,20 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                                              "ripwire: --path endpoint not found: ", missing, "--path=" );
         }
 
-        const std::vector<NodeId> path    = rw::shortestPathAny( g, srcDefs, dstDefs );   // ONE BFS over every def pair
-
-        std::vector<char> esc;
-        const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        const auto        loc = [ & ]( NodeId n ) -> std::string
-        { const Symbol& s = ing.symbols[n];
-          const std::string_view rp = pthSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], pthRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-          return ex( rp ) + ":" + std::to_string( s.line ); };
-
-        // from_p/to_p = the def this run actually bound the name to; from_defs/to_defs = how many it could have
-        // bound it to (>1 ⇒ qualify with file:name if this is not the one you meant).
-        // R-E fix (2026-08-19): --path ships no legend of its own, so the shared root-relative clause IS its
-        // whole first-screen legend here — root= would otherwise be the one attribute on this document with
-        // nothing anywhere saying what it means. Same text, same helper, as every other verb's.
-        // H5 (capture-audit 2026-09-04): reachable="0" hops="0" is a zero read off the name-based graph — the
-        // same question --verify=calls(A,B) answers `not-established` + counts_floor="1" for. Same marker,
-        // same brief sentence, on both transports (mcpverbs.h path_between mirrors this line).
-        // Reference-as-value round: with no directed call path, how often to= is used as a VALUE — a run through such a
-        // slot is not a hop the graph can show, so the count is the clue (the callers verb lists the binding sites).
-        // PATH-GAP (src/pathgaps.h): an unreached to= is "no path" only when the search met no call the graph holds no edge
-        // for; otherwise the answer says the search was incomplete and names where. One ValueRefIndex serves both counts.
+        // PATH-ANSWER (src/pathanswer.h): the ONE writer both transports share; the value-reference index is built on first need
         std::optional<rw::ValueRefIndex> pthValueIdx;
-        if( path.empty() )
-        {
-            pthValueIdx.emplace( ing );
-        }
-        const rw::ToValueRefs pthToValueRefs = path.empty() ? rw::toValueRefs( ing, true, dstDefs, &*pthValueIdx ) : rw::ToValueRefs{};
-        const rw::PathSearchGaps pthGaps = path.empty() ? rw::pathSearchGaps( ing, g, srcDefs, *pthValueIdx ) : rw::PathSearchGaps{};
-        // HOP1 (src/backhops.h): the ONE backward hop provider the bridge's slot crossings and the root next= below read
-        std::optional<rw::BackwardHops> pthBackHops;
-        if( path.empty() )
-        {
-            pthBackHops.emplace( ing, g, *pthValueIdx );
-        }
-        // ix2-slice: the sink-side frontier beside the forward gap rows (src/pathgaps.h pathNearSink), reachable="0" only; its name-key
-        // ways in come from the same provider
-        const rw::PathNearSink   pthNear = path.empty() ? rw::pathNearSink( ing, g, dstDefs, pthGaps.cone, *pthValueIdx, pthBackHops->names() ) : rw::PathNearSink{};
-        // ON-NAME-HANDLERS-V2: a poster from= whose posted message classes name to= handlers (src/pathgaps.h pathHandlerRule)
-        const rw::PathHandlerRule pthHandler = path.empty() ? rw::pathHandlerRule( ing, pthBackHops->names(), srcDefs, dstDefs ) : rw::PathHandlerRule{};
-        // TRACE-EP (src/pathpairs.h): a reached answer whose names have several definitions lists EVERY reaching definition pair
-        // (up to kPathPairChains chains, the rest alt=), never one silently; a glob endpoint keeps its any-of-these meaning
-        const rw::PathPairs pthPairs = path.empty() || srcGlob || dstGlob ? rw::PathPairs{}
-            : rw::pathReachingPairs( ing, g, srcDefs, dstDefs, path, spec, [ & ]( std::span<const NodeId> dstMembers )
-              {
-                  if( !pthValueIdx )
-                  {
-                      pthValueIdx.emplace( ing );
-                  }
-                  if( !pthBackHops )
-                  {
-                      pthBackHops.emplace( ing, g, *pthValueIdx );
-                  }
-                  return rw::pathBridge( ing, g, srcDefs, dstMembers, *pthValueIdx, *pthBackHops );
-              } );
-        // PATH-ROUTE v2 (src/pathroute.h pathRouteChains): the chain the answer prints after the route verdict (refused: none; proven-preferred:
-        // the proven chain), shared with the MCP twin
-        const rw::PathRouteChains   pthChains = rw::pathRouteChains( ing, g, pthPairs, path, srcDefs, dstDefs );
-        const rw::PathRouteVerdict& pthRoute  = pthChains.verdict;
-        const std::vector<NodeId>&  pthRows   = pthChains.rows;    // the rows the answer prints
-        const std::vector<NodeId>&  pthShown  = pthChains.shown;   // the root's hops=
-        const std::vector<NodeId>&  pthBind   = pthChains.bind;    // from_p=/to_p= (a refused chain still bound its endpoints)
-        const NodeId                srcUsed   = pthChains.from;
-        const NodeId                dstUsed   = pthChains.to;
-        // HOP-CONTEXT-1 (src/hoprecord.h): every printed hop's call site, call text and callee signature — ONE reference pass
-        const rw::HopFacts          pthHops   = rw::pathHopFacts( ing, g, pthPairs, pthRows, d.redactPtr, pthRoute.declinedRef );   // a declined last hop: its record's call
-        // ix2-slice (IX-2 P1): the hedged bridge — the fewest-crossings chain over declined / value / closure / namesake / slot hops
-        const rw::PathBridge     pthBridge = path.empty() ? rw::pathBridge( ing, g, srcDefs, dstDefs, *pthValueIdx, *pthBackHops ) : rw::PathBridge{};
-        // HOP1 (#6): to= has a backward hop the provider follows → the root next= is the callers verb on to=, not the gap bodies
-        const std::string        pthSinkCallers = path.empty() && pthGaps.any() && !dstGlob ? rw::pathSinkCallersSelector( ing, *pthBackHops, dstDefs, dstN, pthSingleRoot, pthRootPrefix )
-                                                                                             : std::string();
-        // FE-B: exactly when a printed hop is via="name" (every printed chain when pairs are listed); link, anchor, split, owner alike
-        const rw::PathShownMarks pthMarks = rw::pathShownMarks( ing, g, pthPairs, pthRows, pthRoute.declinedCands > 0 );
-        const bool pthHasVia  = pthMarks.via;
-        const bool pthHasLink = pthMarks.link;
-        const bool pthHasMiss = pthMarks.miss;
-        // attrib-multidef (defattrib.h): from_p=/to_p= only for an endpoint the path bound; prov="split" on a split-arm hop
-        const rw::PathEndpointBinding pthBound = rw::pathEndpointBinding( g, rw::endpointDefinitionCount( ing, srcDefs ), rw::endpointDefinitionCount( ing, dstDefs ), pthBind );
-        const bool                    pthHasSplit = pthMarks.split;
-        // zed-03 (src/pathpairs.h): a bound endpoint that is a test/fixture copy while a source definition exists is disclosed
-        const rw::PathTestTwin        pthTwin = srcGlob || dstGlob ? rw::PathTestTwin{} : rw::pathTestTwins( ing, g, { srcDefs, srcN, pthBound.from }, { dstDefs, dstN, pthBound.to }, pthBind );
-        const std::vector<std::string_view> pthOwners = rw::pathHopOwners( ing, pthRows );   // PATH-OWNERS: n="Owner.name" per hop
-        const bool pthHasOwner = pthMarks.owner;
-        // PATH-HOP-BODY (src/hopbody.h): a reached chain of 2 hops prints its middle hop's body (hedged when that hop is no proven
-        // call); a longer one names the first in next=. BODY-ON-ROUTE (src/pathgaps.h pathRouteBodies): a reachable=0 answer prints
-        // the bodies of the route it names (bridge rows, handler_rule readers), every one a hedge. ONE printer for both.
-        const std::string_view   pthBodyRoot  = pthSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view();
-        const bool               pthBodiesOn  = !pthRows.empty() && rw::hopBodiesOn();
-        const rw::RouteBodiesXml pthHopBodyEl = pthBodiesOn ? rw::pathHopBodiesXml( ing, rw::pathMiddleHops( ing, g, pthShown, served ), pthBodyRoot ) : rw::RouteBodiesXml{};
-        // GAIN GATE (fix1 fire table): never inside a --for graph-verb block — the --for answer serves its own bodies, and the one
-        // in-sample fire there (LARGE-DEV vscode-03, +7.7 KB) named nothing its question asked for
-        const rw::RouteBodiesXml pthRouteEl   = path.empty() && !inForBlock && rw::hopBodiesOn()
-                                                    ? rw::pathRouteBodies( ing, g, pthBridge, pthHandler, pthBodyRoot ) : rw::RouteBodiesXml{};
-        const std::string&       pthHopBodies = pthHopBodyEl.xml;
-        // D2 part 5 (defslookup.h): the other definitions of an endpoint whose pick is not provably unique, inline — after the bodies, so a
-        // definition a <bodies> element printed is not listed again
-        std::vector<rw::NodeId>  pthBodyIds   = pthHopBodyEl.ids;
-        pthBodyIds.insert( pthBodyIds.end(), pthRouteEl.ids.begin(), pthRouteEl.ids.end() );
-        const rw::PathAlts       pthAlts      = rw::pathAltsOf( ing, g, srcN, dstN, srcGlob, dstGlob, pthBound.from ? srcUsed : rw::kNoNode, pthBound.to ? dstUsed : rw::kNoNode, pthPairs, pthBodyIds );
-        std::string              pthRootAttrs = rw::pathTestTwinRootAttrs( ing, rw::pathPairsRootAttrs( ing, pthPairs, pthSingleRoot, pthRootPrefix ).rootAttrs, pthTwin, pthSingleRoot, pthRootPrefix );
-        const std::string        pthHopNext   = pthBodiesOn && pthRootAttrs.find( " next=\"" ) == std::string::npos ? rw::pathMiddleHopNext( ing, pthShown, pthBodyRoot ) : std::string();
-        pthRootAttrs += pthHopNext.empty() ? std::string() : rw::nextAttrXml( pthHopNext );
-        pthRootAttrs += rw::pathRouteRootAttrs( ing, pthRoute, srcUsed, pthRootAttrs.find( " next=\"" ) != std::string::npos, pthSingleRoot, pthRootPrefix );
-        rw::emitTo( stdout, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                     "graph holds none. {}{}{}{}-->{}", ( rw::defAltsLegend( pthAlts ) + rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ) + rw::viaNameLegend( pthHasVia )
-                                                         + rw::viaLinkLegend( pthHasLink ) + rw::anchorMissLegend( pthHasMiss )
-                                                         + rw::splitArmLegend( pthHasSplit ) + rw::pathUnboundLegend( !pthBound.from || !pthBound.to )
-                                                         + rw::memberOwnerLegend( pthHasOwner ) + rw::memberOwnerContainedLegend( pthMarks.ownerContained ) + std::string( rw::pathPairsLegend( pthPairs ) ) + rw::pathOrderLegend( pthPairs, pthTwin )
-                                                         + std::string( rw::pathHopBodiesLegend( !pthHopBodies.empty() ) ) + std::string( rw::pathHopNextLegend( !pthHopNext.empty() ) )
-                                                         + std::string( rw::routeBodyHedgeLegend( pthHopBodyEl.hedged || pthRouteEl.hedged ) ) + std::string( rw::pathRouteLegend( pthRoute ) )
-                                                         + rw::hopLegend( pthHops, "s" ) ).c_str(),
-                     ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
-                     ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + rw::pathBridgeLegend( pthBridge )
-                       + rw::nearSinkLegend( pthNear ) + std::string( rw::pathHandlerRuleLegend( pthHandler ) ) + std::string( rw::pathRouteBodiesLegend( !pthRouteEl.xml.empty() ) )
-                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) + std::string( rw::narrowedVerbLegend( !pthEp.narrowed.empty() ) ) ).c_str(),
-                     rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
-        rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
-                     ex( srcN ).c_str(), ex( dstN ).c_str(), pthBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
-                     pthBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                     srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob )
-                                                       + rw::narrowedAttrXml( pthEp.narrowed ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint; GV-PATH-BIND
-                     pthRows.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
-                     ( pthRootAttrs + rw::hopRootAttrsXml( pthHops ) + pthRootAttr ).c_str(),
-                     rw::graphCountFloorAttrXml( g ).c_str() );
-        // absent at zero: byte-identical otherwise; the depth cut beside it makes the count (or its absence) a floor
-        rw::emitTo( stdout, "{}{}", rw::countAttrXmlOrEmpty( "to_value_refs", pthToValueRefs.count ),
-                     rw::valueRefsDepthAttrXml( ing, pthToValueRefs.depthCut, rw::VrRender{ pthSingleRoot, pthRootPrefix } ).c_str() );
-        // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
-        // undirected and finds the shared-caller join a directed walk can never see.
-        const rw::PathGapsXml pthUnreached = path.empty()
-            ? rw::pathUnreachedXml( ing, pthGaps, pthSingleRoot, pthRootPrefix,
-                                    { "--connect=" + std::string( srcN ) + "," + std::string( dstN ), "--uses/--impact",
-                                      ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "",
-                                      rw::pathDocEndpoints( ing, srcDefs, dstDefs ) },
-                                    pthSinkCallers )
-            : rw::PathGapsXml{};
-        rw::emitTo( stdout, "{}>{}{}{}{}", pthUnreached.rootAttrs, pthUnreached.rows, rw::pathBridgeXml( ing, g, pthBridge, pthSingleRoot, pthRootPrefix ),
-                     rw::pathNearSinkXml( ing, pthNear, pthSingleRoot, pthRootPrefix ),
-                     path.empty() ? rw::pathHandlerRuleXml( ing, pthBackHops->names(), pthHandler, pthSingleRoot, pthRootPrefix ) : std::string() );
-        // FE-B via="name", #409 via="link"/anchor="missing", attrib-multidef prov="split", PATH-OWNERS n="Owner.name": one emitter, shared with MCP path_between
-        rw::emitPathAnswerRows( stdout, ing, g, pthPairs, pthRows, pthOwners, pthSingleRoot, pthRootPrefix, pthHops, pthRoute.declinedCands );   // TRACE-EP: pairs or today's rows, shared with MCP
-        rw::emitRaw( stdout, pthHopBodies.c_str() );    // PATH-HOP-BODY: after the hop rows they explain ("" when none)
-        rw::emitRaw( stdout, pthRouteEl.xml.c_str() );  // BODY-ON-ROUTE: after the route rows they explain (reachable=0 only)
-        rw::emitRaw( stdout, pthAlts.xml.c_str() );   // D2 part 5: empty when both picks are provably unique
-        rw::emitTo( stdout, "</path>" );
+        rw::writePathAnswer( stdout, ing, g, pthEp,
+                             rw::PathAnswerSurface{ .singleRoot = pthSingleRoot, .rootPrefix = pthRootPrefix, .rootAttr = pthRootAttr,
+                                                    .bodyRoot = pthSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view(), .redact = d.redactPtr,
+                                                    .served = served, .inForBlock = inForBlock },
+                             [ & ]() -> const rw::ValueRefIndex&
+                             {
+                                 if( !pthValueIdx )
+                                 {
+                                     pthValueIdx.emplace( ing );
+                                 }
+                                 return *pthValueIdx;
+                             } );
         return 0;
     }
     return std::nullopt;
