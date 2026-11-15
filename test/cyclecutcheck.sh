@@ -174,6 +174,49 @@ else no "cycles (e) rc=$R21: $( printf '%s' "$C21" | grep -oE '<cycles[^>]*>' )"
 if [ "$R20" = 0 ] && printf '%s' "$C20" | grep -q '<cycles>' && [ "$( printf '%s' "$C20" | grep -oE '<cycle size=' | wc -l | tr -d ' ' )" = 20 ]; then
     ok "cycles (e) twin: 20 cycles, all listed, a bare <cycles> (no cut to disclose)"
 else no "cycles (e) twin rc=$R20: $( printf '%s' "$C20" | grep -oE '<cycles[^>]*>' )"; fi
+# (f) #479 item 2: a cycle lists at most 12 member files, and a cut member list says so. A 14-file ring prints size=14 with
+#     12 <f> rows and members_capped="1"; a 12-file ring prints all 12 and no members_capped (no cut to disclose). The
+#     attribute is defined in the answer's own compact legend.
+mkring(){ # $1 dir  $2 files in one include ring r0.h -> r1.h -> ... -> r(N-1).h -> r0.h
+    mkdir -p "$1"; local i=0
+    while [ "$i" -lt "$2" ]; do printf '#include "r%d.h"\nint r%d(void);\n' $(( ( i + 1 ) % $2 )) "$i" > "$1/r$i.h"; i=$(( i + 1 )); done
+}
+mkring "$SH/ring14" 14; mkring "$SH/ring12" 12
+deps "$SH/ring14" --legend=compact; C14="$DOUT"; R14=$DRC
+deps "$SH/ring12" --legend=compact; C12="$DOUT"; R12=$DRC
+CY14="$( printf '%s' "$C14" | grep -oE '<cycle [^>]*>.*</cycle>' )"
+CY12="$( printf '%s' "$C12" | grep -oE '<cycle [^>]*>.*</cycle>' )"
+if [ "$R14" = 0 ] && printf '%s' "$CY14" | grep -qE '^<cycle size="14" [^>]*members_capped="1"' \
+   && [ "$( printf '%s' "$CY14" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ]; then
+    ok "cycles (f): a 14-file cycle lists 12 members under <cycle size=14 … members_capped=1>"
+else no "cycles (f) rc=$R14: $( printf '%s' "$CY14" | grep -oE '^<cycle [^>]*>' ) members=$( printf '%s' "$CY14" | grep -oE '<f p=' | wc -l | tr -d ' ' )"; fi
+if [ "$R12" = 0 ] && printf '%s' "$CY12" | grep -qE '^<cycle size="12" ' && ! printf '%s' "$CY12" | grep -q 'members_capped' \
+   && [ "$( printf '%s' "$CY12" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ]; then
+    ok "cycles (f) twin: a 12-file cycle lists all 12 members, no members_capped"
+else no "cycles (f) twin rc=$R12: $( printf '%s' "$CY12" | grep -oE '^<cycle [^>]*>' )"; fi
+if [ "$R14" = 0 ] && printf '%s' "$C14" | grep -q 'members_capped=1:'; then
+    ok "cycles (f) legend: the compact legend defines members_capped="
+else no "cycles (f) legend: no members_capped= definition in the answer's compact legend"; fi
+if [ "$R14" = 0 ] && printf '%s' "$C14" | grep -q 'members_capped=1:[^.]*first in SCC order, not ranked'; then
+    ok "cycles (f) legend order: the compact legend says which 12 rows are listed"
+else no "cycles (f) legend order: the compact members_capped= reading does not say the rows are first in SCC order, not ranked"; fi
+# (f) boundary + full legend (#541 review): a 13-file ring is the first size the cap cuts; --legend=full defines the
+#     attribute exactly when a shown cycle is cut, and the uncut 12-file twin's full legend does not mention it.
+mkring "$SH/ring13" 13
+deps "$SH/ring13" --legend=compact; C13="$DOUT"; R13=$DRC
+CY13="$( printf '%s' "$C13" | grep -oE '<cycle [^>]*>.*</cycle>' )"
+if [ "$R13" = 0 ] && printf '%s' "$CY13" | grep -qE '^<cycle size="13" [^>]*members_capped="1"' \
+   && [ "$( printf '%s' "$CY13" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ]; then
+    ok "cycles (f) boundary: a 13-file cycle lists 12 members under members_capped=1"
+else no "cycles (f) boundary rc=$R13: $( printf '%s' "$CY13" | grep -oE '^<cycle [^>]*>' )"; fi
+deps "$SH/ring14" --legend=full; F14="$DOUT"; RF14=$DRC
+deps "$SH/ring12" --legend=full; F12="$DOUT"; RF12=$DRC
+if [ "$RF14" = 0 ] && printf '%s' "$F14" | grep -q 'cycle members_capped=1:'; then
+    ok "cycles (f) full legend: --legend=full defines members_capped= when a cycle is cut"
+else no "cycles (f) full legend rc=$RF14: no members_capped= definition in the full --deps legend"; fi
+if [ "$RF12" = 0 ] && ! printf '%s' "$F12" | grep -q 'members_capped'; then
+    ok "cycles (f) full legend twin: an uncut cycle's full legend does not mention members_capped="
+else no "cycles (f) full legend twin rc=$RF12: members_capped appears with no cut"; fi
 
 # ── 10) RUST-MOD-DECL: a `mod x;` parent-to-child pair is containment, not a cycle ──────────────────────────────────
 # Rust: the parent declares `mod x;`, the child `use super::…`/`use crate::…` back: every pair reads as a 2-cycle
