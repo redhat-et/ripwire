@@ -216,6 +216,9 @@ if [ "$samplesOk" = 1 ]; then
     # measured 2.5 MB median (the mutant arm below proves B3 bites); it is 100 in every real run.
     B3_CAP_PCT=6250; B3_FLOOR_MS=20
     b3Within(){ # $1 = ms160, $2 = ms2500 -> 0 when within the cap
+        # A timed-out baseline is not a baseline: with every size at TIMED_OUT_MS the relative cap would scale with the
+        # sentinel itself and pass (CodeRabbit, #670). A timeout on either side is out of the cap.
+        if [ "$1" -ge "$TIMED_OUT_MS" ] || [ "$2" -ge "$TIMED_OUT_MS" ]; then return 1; fi
         local base="$1"; [ "$base" -lt "$B3_FLOOR_MS" ] && base="$B3_FLOOR_MS"
         [ $(( $2 * 100 )) -le $(( base * B3_CAP_PCT )) ]
     }
@@ -237,7 +240,8 @@ if [ "$samplesOk" = 1 ]; then
     b4 "quiet run (160 KB 65 ms, 2.5 MB 1382 ms)" 65 1382 pass
     b4 "quadratic at 2.5 MB (160 KB 65 ms, 2.5 MB 65*244 ms)" 65 15860 fail
     b4 "quadratic that hit the runner cap (timeout)" 1033 "$TIMED_OUT_MS" fail
-    [ "$b4n" = 4 ] || no "B4: expected 4 rule self-tests, ran $b4n"
+    b4 "every size timed out (sentinel baseline)" "$TIMED_OUT_MS" "$TIMED_OUT_MS" fail
+    [ "$b4n" = 5 ] || no "B4: expected 5 rule self-tests, ran $b4n"
 fi
 
 if [ "$fail" = 0 ]; then
