@@ -425,7 +425,7 @@ fn dead_plain() { }
 EOF
 QD9="$( cd "$A9" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 rc_qd9=$?
-[ "$rc_qd9" = 0 ] && ok "arm9: --quality-delta exits 0 (no row on this fixture gates)" || no "arm9: --quality-delta exited $rc_qd9, not 0"
+if [ "$rc_qd9" = 0 ]; then ok "arm9: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm9: --quality-delta exited $rc_qd9, not 0"; fi
 for sym in plain_case flavored_case stacked_case blank_line_case doc_comment_case one_line_case indented_in_test_mod test_is_here attribute_after_code_case; do
     printf '%s' "$QD9" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
         && no "arm9: '$sym' is a #[test] function but was reported as dead-code" \
@@ -478,7 +478,7 @@ fn dead_plain() { }
 EOF
 QD11="$( cd "$A11" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 rc_qd11=$?
-[ "$rc_qd11" = 0 ] && ok "arm11: --quality-delta exits 0 (no row on this fixture gates)" || no "arm11: --quality-delta exited $rc_qd11, not 0"
+if [ "$rc_qd11" = 0 ]; then ok "arm11: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm11: --quality-delta exited $rc_qd11, not 0"; fi
 for sym in trailing_comment_case flavored_trailing_case slashes_in_string_case; do
     printf '%s' "$QD11" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
         && no "arm11: '$sym' is a #[test] function but was reported as dead-code" \
@@ -529,7 +529,7 @@ impl Closer for Conn {
 EOF
 QD12="$( cd "$A12" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 rc_qd12=$?
-[ "$rc_qd12" = 0 ] && ok "arm12: --quality-delta exits 0 (no row on this fixture gates)" || no "arm12: --quality-delta exited $rc_qd12, not 0"
+if [ "$rc_qd12" = 0 ]; then ok "arm12: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm12: --quality-delta exited $rc_qd12, not 0"; fi
 line12(){ [ "$( grep -c -F -- "$1" "$A12/lib.rs" )" = 1 ] && grep -n -F -- "$1" "$A12/lib.rs" | cut -d: -f1; }
 dead12(){ printf '%s' "$QD12" | tr '>' '\n' | grep -F 'kind="dead-code"' | grep -q -F "p=\"lib.rs:$1\""; }
 for m in '// P-test' '// P-drop'; do
