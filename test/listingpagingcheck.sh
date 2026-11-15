@@ -708,10 +708,19 @@ if os.path.exists(bp) and os.path.getsize(bp) > 0:
     def same( w, b ):
         wp, wl, wn = w.split( "\x1f" ); bp_, bl, bn = b.split( "\x1f" )
         return wp == bp_ and wn == bn and ( bl == "*" or wl == bl )
-    if len( rows ) < len( bundle ) or not all( same( w, b ) for w, b in zip( rows, bundle ) ):
-        problems.append("the un-paged bundle's served rows are NOT a prefix of the walk — the page and the bundle answer different orders")
+    # TOKEN-BUDGET-MONOTONE (2026-11-14): a --for budget no longer re-decides the posture, so --token-budget=100000 (above the
+    # answer's price) serves the unbudgeted bundle byte for byte — its head round-robin and code-above-docs reorder included —
+    # while the --limit page walks score order. The bundle's rows are therefore the walk's first rows as a SET (each matched once).
+    left = list( rows[ :len( bundle ) ] )
+    def take( b ):
+        for i, w in enumerate( left ):
+            if same( w, b ):
+                del left[ i ]; return True
+        return False
+    if len( rows ) < len( bundle ) or not all( take( b ) for b in bundle ):
+        problems.append("the un-paged bundle's served rows are NOT the walk's first rows (as a set) — the page and the bundle answer different lists")
     else:
-        print(f"  PASS  (G3) the un-paged bundle's {len(bundle)} rows are a prefix of the walk (same order)")
+        print(f"  PASS  (G3) the un-paged bundle's {len(bundle)} rows are the walk's first {len(bundle)} rows (as a set: the bundle reorders its head)")
 for p_ in problems: print("  FAIL  " + p_)
 print(f"  ..    (G3) walked {pages} pages, {len(rows)} rows, total={total}, tiers: {' -> '.join(tiers)}")
 sys.exit(1 if problems else 0)

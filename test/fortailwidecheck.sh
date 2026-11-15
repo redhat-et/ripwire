@@ -292,15 +292,19 @@ else:
     say(len(dl) - dls > 0 and dls <= 24, f"8 code first: doc rows past page index 40: {len(dl) - dls} without sym=, {dls} with it (rank-walk docs, <= 24)")
 def sigs_el(txt):
     m = re.search(r'<sigs[ >].*?</sigs>', txt, re.S); return None if not m else m.group(0)
-cutseen = 0
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the XML --for budget sheds the unbudgeted answer, the <tail> rows before any <sigs> row,
+# so at 5000 both tails are cut to the same 3 rows (no long-directory row left to differ) and the head keeps all 40 rows at all
+# three budgets. The arm keeps its teeth on what still varies: <sigs> byte-identical at every budget, the tails differ at one
+# budget at least (P2 lists the long directory), and the shed ran (shed= on the root) at one budget at least.
+cutseen = 0; twinseen = 0
 for tb in ("5000", "6000", "8000"):
     a10, b10 = sigs_el(rcs["p1." + tb][1]), sigs_el(rcs["p2." + tb][1])
     t1, t2 = tail_of(rcs["p1." + tb][1]), tail_of(rcs["p2." + tb][1])
-    cutseen += a10 is not None and "next_offset=" in a10
+    cutseen += re.search(r'<ctx [^>]*\bshed="', rcs["p1." + tb][1]) is not None
     say(a10 is not None and a10 == b10, f"10 sigs funding {tb}: <sigs> byte-identical when only the widened rows' bytes differ ({None if a10 is None else len(a10)} vs {None if b10 is None else len(b10)} B)")
-    say(t1 is not None and t2 is not None and t1["raw"] != t2["raw"] and any("wwwwwwwwww" in p for p, _ in t2["rows"]),
-        f"10 sigs funding {tb} (twin): the tails differ (P2 lists the long directory)")
-say(cutseen > 0, f"10 sigs funding: the head is cut past the target at {cutseen} of 3 budgets (the refill ran)")
+    twinseen += t1 is not None and t2 is not None and t1["raw"] != t2["raw"] and any("wwwwwwwwww" in p for p, _ in t2["rows"])
+say(twinseen > 0, f"10 sigs funding (twin): the tails differ (P2 lists the long directory) at {twinseen} of 3 budgets")
+say(cutseen > 0, f"10 sigs funding: the budget shed the answer at {cutseen} of 3 budgets")
 try:
     j1, j2 = json.loads(rcs["p1.j6000"][1]), json.loads(rcs["p2.j6000"][1])
     say(j1.get("sigs") is not None and j1.get("sigs") == j2.get("sigs") and j1.get("tail") != j2.get("tail"), f"10 sigs funding JSON 6000: sigs equal ({len(j1.get('sigs') or [])} rows), tails differ")

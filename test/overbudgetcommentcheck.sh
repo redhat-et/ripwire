@@ -250,12 +250,18 @@ done
 # its whole lines — and is asserted at 300 tokens, where the floor (a quarter of the budget) is below the body and cuts
 # it; the 800 run is kept as a twin below asserting its first body is served whole, byte for byte.
 "$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=300 --legend=full > "$TMP/fmx.xml" 2>/dev/null
-"$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=800 --legend=full > "$TMP/fmx800.xml" 2>/dev/null
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a --for budget now sheds the unbudgeted --detail answer's bodies WHOLE (shed=bodies:N, the
+# last first) and never truncates one, so at 300 (and 800) every body goes (shed="held,attrs,tail:30,bodies:30,docs:24,rows:26",
+# 4064 B vs 17538 B unbudgeted): the arm holds iff no truncated body is a sub-line fragment, which a shed answer satisfies with
+# none at all (premise: bodies:N on the root). The twin moves to 4000, where 10 bodies ride (bodies:20): the first is whole.
+"$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=4000 --legend=full > "$TMP/fmx800.xml" 2>/dev/null
 B6="$( python3 - "$TMP/fmx.xml" "$BIN" "$FMX" <<'PY'
 import re, subprocess, sys, html
 doc = open( sys.argv[1], "rb" ).read()
 cut = [ ( dict( ( k.decode(), html.unescape( v.decode() ) ) for k, v in re.findall( rb'(\w+)="([^"]*)"', a ) ), t.decode() )
         for a, t in re.findall( rb'<b ([^>]*truncated="1"[^>]*)><!\[CDATA\[(.*?)\]\]>', doc, re.S ) ]
+if not cut and re.search( rb'<ctx [^>]*\bshed="[^"]*\bbodies:[0-9]+', doc ):
+    print( "OK no truncated body: the budget shed the bodies whole (shed=bodies:N)" ); sys.exit( 0 )
 if not cut:
     print( "FAIL no truncated body — the arm measures nothing" ); sys.exit( 0 )
 for at, text in cut:
@@ -287,7 +293,7 @@ whole = re.search( rb'<b [^>]*><!\[CDATA\[(.*?)\]\]>(?:<calls|<note|</b>)', out,
 print( "OK %s served whole (%d B)" % ( at["n"], len( whole ) ) if m.group( 2 ) == whole else "FAIL %s differs from its --expand" % at["n"] )
 PY
 )"
-case "$B6W" in OK*) ok "(B6 twin @800) $B6W" ;; *) no "(B6 twin @800) $B6W" ;; esac
+case "$B6W" in OK*) ok "(B6 twin @4000) $B6W" ;; *) no "(B6 twin @4000) $B6W" ;; esac
 if xmllint --noout "$TMP/fmx.xml" 2>/dev/null; then
     ok "(B6) the document is well-formed"
 else

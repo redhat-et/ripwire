@@ -37,9 +37,11 @@
 #        non-blank line is indented no deeper than the def, or EOF). e= sits right after l=.
 #   (U)  unknown extent: Sampler_window and SampleWindow (extent_suspect="head") and every docs/*.md row carry NO
 #        e=; every other <d> row carries one (a present e= is never dropped silently either).
-#   (B)  an explicit --token-budget TIGHTER than the default signature budget (1200 tokens): no e= row and no e= clause,
-#        XML and JSON (the budget's rows and est_tokens promise stay what they were; charging e= there cost rows, exempting
-#        it broke the promise). Twin: --token-budget=8000 (above the default share) carries e= on its rows.
+#   (B)  an explicit --token-budget TIGHTER than the default signature budget (1200 tokens): no e= row and no e= clause on
+#        JSON (the budget's rows and est_tokens promise stay what they were; charging e= there cost rows, exempting it broke
+#        the promise). Twin: --token-budget=8000 (above the default share) carries e= on its rows.
+#        TOKEN-BUDGET-MONOTONE: the XML --for budget no longer picks a tighter posture; it sheds the unbudgeted answer
+#        (src/forbudgetfit.h), so the XML rows it keeps carry U's e= (test/budgetmonotonecheck.sh holds that contract).
 #   (O)  outside --for: --pack-signatures <d> rows and the default map's rows carry no e=.
 #   (H)  hop slots: TS — contextHost (only callee: a name-only `bag.lookup()`) has no <h> row; createContext keeps
 #        one. Python — Downloader.pull (only callee: a name-only `source.fetch_entry()`) has no <h> row; fetch_entry
@@ -64,6 +66,9 @@
 #        MCP est_tokens is the twin's (already above 1200 on base; not this rule's to fix). Near misses: no ceiling and
 #        --token-budget=8000 still reorder and carry docs_after_code= with its reading, XML, JSON and MCP; a question that
 #        names docs keeps score order at 1200 too.
+#        TOKEN-BUDGET-MONOTONE: the XML --token-budget and the --max-tokens --detail answers are now the unbudgeted answer
+#        shed (the reorder and its note included), so their (T) arms are "reorders" arms; the JSON and MCP arms keep (T).
+#        ts at 1200 was 4 rows with no docs_after_code=; it is 4 rows with docs_after_code="6", shed=...docs:2,rows:12.
 #        A BODY ceiling (--max-tokens=N --detail=K, XML only: --json refuses the pair, MCP `for` has no max_tokens) is the third tight
 #        ceiling: the same twin equality, est_tokens <= N, on the TS fixture at 1700 and the Python+docs fixture (pydocs) at 1760
 #        (round C re-anchor: 1600 / 1660 before the tail carried the file page)
@@ -247,12 +252,15 @@ if ran_ok "$JE" "E/JS"; then
     oracle "$JE" "E+U/JS" "$CORPUS/js"
 fi
 
-echo "(B) an explicit token budget: no e= at all (its rows and its est_tokens promise stay what they were)"
+echo "(B) an explicit token budget: no e= at all on JSON (its rows and its est_tokens promise stay what they were); XML keeps U's e="
 for spec in "xml|" "json|--json"; do
     tag="${spec%%|*}"; extra="${spec#*|}"; f="$TMP/ts.budget.$tag"
     if [ -n "$extra" ]; then run ts "$f" "--for=How is a per-request context created?" --token-budget=1200 "$extra"; else run ts "$f" "--for=How is a per-request context created?" --token-budget=1200; fi
     if ran_ok "$f" "B/$tag"; then
         if ! grep -q -e '<d ' -e '"sigs"' "$f"; then no "B/$tag: no rows to check (premise)"
+        elif [ "$tag" = xml ]; then   # TOKEN-BUDGET-MONOTONE: the XML budget sheds the unbudgeted answer, e= included
+            if grep -Eq '<d l="[0-9]+" e="[0-9]+"' "$f" && grep -q 'budget_tokens="1200"' "$f"; then ok "B/xml: --token-budget=1200 sheds the unbudgeted answer: its kept rows carry e="
+            else no "B/xml: --token-budget=1200 lost U's e= (or carries no budget_tokens=)"; fi
         elif grep -Eq ' e="[0-9]+"|,"e":[0-9]+|e= on a d row|d e= its last line' "$f"; then no "B/$tag: a budgeted answer carries e= or its legend clause"
         else ok "B/$tag: --token-budget=1200 answer carries no e= and no e= clause"; fi
     fi
@@ -521,6 +529,9 @@ for b in 700 1200; do
         if ran_ok "$ON" "T/$b/$tag" && ran_ok "$OFF" "T/$b/$tag (twin)"; then
             REF="$( offr ts "r$tag" "$Q1" $extra )"   # the uncut plain-order answer (no budget): the rank order a soft cut is a prefix of
             ran_ok "$REF" "T/$b/$tag (uncut reference)" || continue
+            if [ "$tag" = xml ]; then   # TOKEN-BUDGET-MONOTONE: U shed, so U's reorder stays
+                tcheck "T/xml --token-budget=$b: the unbudgeted answer shed keeps its reorder and note" reorders "$ON" "$OFF"; continue
+            fi
             tcheck "T/$tag --token-budget=$b: byte-equal to the plain-order twin, no docs_after_code=$([ "$b" = 1200 ] && echo ", NOLBL + ST (soft target)")" tight "$ON" "$OFF" "$([ "$b" = 1200 ] && echo 1200 || echo 0)" "$REF" "$TBPT"
         fi
     done
@@ -540,7 +551,9 @@ for spec in "ts|$Q1|1700" "pydocs|$QP|1760"; do
     r="${spec%%|*}"; rest="${spec#*|}"; q="${rest%|*}"; mt="${rest##*|}"
     ON="$( onr "$r" "bc$mt" "$q" "--max-tokens=$mt" --detail=1 )"; OFF="$( offr "$r" "bc$mt" "$q" "--max-tokens=$mt" --detail=1 )"
     if ran_ok "$ON" "T/body/$r" && ran_ok "$OFF" "T/body/$r (twin)"; then
-        tcheck "T/body $r --max-tokens=$mt --detail=1: byte-equal to the plain-order twin, no docs_after_code=, est_tokens <= $mt" tight "$ON" "$OFF" "$mt"
+        # TOKEN-BUDGET-MONOTONE: --max-tokens with --detail sheds the unbudgeted --detail answer (never a ranked row), so the
+        # reorder stays; est_tokens over the ceiling is labelled over_ceiling="1" (formaxtokenscheck, budgetmonotonecheck (c))
+        tcheck "T/body $r --max-tokens=$mt --detail=1: the unbudgeted answer shed keeps its reorder and note" reorders "$ON" "$OFF"
     fi
     # near miss: --detail alone is not a ceiling (no --max-tokens), so the reorder and its note still apply
     ON="$( onr "$r" "bd" "$q" --detail=1 )"; OFF="$( offr "$r" "bd" "$q" --detail=1 )"
@@ -688,7 +701,8 @@ for spec in "xml|" "json|--json"; do
     if ran_ok "$NA" "N/always/$tag" && ran_ok "$NU" "N/unset1200/$tag" && ran_ok "$NX" "N/auto1200/$tag"; then
         if [ "$( rowset "$NU" )" = NOROWS ]; then no "N/always/$tag: the 1200-token answer has no rows (premise)"
         elif ! has_e "$NA"; then no "N/always/$tag: RIPWIRE_FOR_ENDLINES=always carries no e= under --token-budget=1200"
-        elif has_e "$NU"; then no "N/always/$tag: premise — the unset 1200-token answer already carries e= (arm B's rule moved)"
+        # TOKEN-BUDGET-MONOTONE: the XML budget sheds the unbudgeted answer, whose rows carry e= (arm B/xml), so only JSON keeps the premise
+        elif [ "$tag" = json ] && has_e "$NU"; then no "N/always/$tag: premise — the unset 1200-token answer already carries e= (arm B's rule moved)"
         elif [ "$( rowset "$NA" )" != "$( rowset "$NU" )" ]; then no "N/always/$tag: forcing e= changed the shown row set (e= cost or moved a row)"
         else ok "N/always/$tag: e= present under --token-budget=1200, same $( rowset "$NU" | wc -l | tr -d ' ' ) rows as auto (est_tokens $( estof "$NU" ) -> $( estof "$NA" ) vs budget 1200, reported not gated)"; fi
         if cmp -s "$NX" "$NU"; then ok "N/auto/$tag: RIPWIRE_FOR_ENDLINES=auto is byte-identical to unset at --token-budget=1200"

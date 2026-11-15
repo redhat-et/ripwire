@@ -81,20 +81,25 @@ struct ForBudgetAsk
 // Config::forHoldBudget). <doc_body> prices itself (its est_tokens=); the others are priced at the markup rate.
 inline constexpr std::string_view kForHeldBlocks[] = { "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" };
 
-inline constexpr std::string_view kForBudgetTargetLegend =
-    " [budget_tokens=: the token target asked. The answer is the one asked without it; only past the target is it shed, in this"
-    " order, shed= naming what went: held (the blocks outside est_tokens, each held=budget with its next=; what they still print comes off the target), attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
-    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), docs:N (the doc of the N worst-ranked sigs rows that print one; docs_dropped= counts every shown row printing none), rows:N (the N worst-ranked sigs rows; ranks 1..4 always ship), and a cut block's next= is the"
-    " call without it. shown= counts what is left,"
-    " the other counts describe the whole answer, est_tokens prices it with this disclosure and may still exceed the target;"
-    " shed=unpriced: the price could not be reproduced, so nothing was shed]";
-inline constexpr std::string_view kForBudgetCeilingLegend =
-    " [max_tokens=: the token ceiling asked. The answer is the one asked without it; only past the ceiling is it shed, in this"
-    " order, shed= naming what went: held (the blocks outside est_tokens, each held=budget with its next=; what they still print comes off the ceiling), attrs (the sigs rows' cx ccx layer next), tail:N (the last N tail rows), hops:N (the last N hops rows), fold (the fold"
-    " bodies), bodies:N (the last N of the bodies section; a root bodies= counts the rest), docs:N (the doc of the N worst-ranked sigs rows that print one; docs_dropped= counts every shown row printing none), and a cut block's next= is the call without it; a ranked sigs row"
-    " is never cut against the ceiling (rows:N is the token target's). shown= counts what is left,"
-    " the other counts describe the whole answer, est_tokens prices it with this disclosure; over_ceiling=1 when it still exceeds it;"
-    " shed=unpriced: the price could not be reproduced, so nothing was shed]";
+// The budget's legend clauses. The fixed shed order is named once; only the units this answer took are defined (an untouched unit
+// costs no bytes: the whole list was ~940 B of every shed answer's header, six sigs rows at --token-budget=2160 on forrankordercheck's
+// fxcut). The target clause's first sentence is the spelling estchargecheck greps.
+inline constexpr std::string_view kForBudgetTargetLegendHead =
+    " [budget_tokens=: the token target asked. The answer is the one asked without it; only past the target is it shed, in one"
+    " order, shed= naming what went:";
+inline constexpr std::string_view kForBudgetTargetLegendTail =
+    "; a cut block's next= is the call without it, its shown= what is left (other counts are the whole answer's); est_tokens prices"
+    " this answer and may exceed the target]";
+inline constexpr std::string_view kForBudgetCeilingLegendHead =
+    " [max_tokens=: the token ceiling asked. The answer is the one asked without it; only past the ceiling is it shed, in one"
+    " order (never a ranked sigs row), shed= naming what went:";
+inline constexpr std::string_view kForBudgetCeilingLegendTail =
+    "; a cut block's next= is the call without it, its shown= what is left (other counts are the whole answer's); est_tokens prices"
+    " this answer, over_ceiling=1 when it still exceeds the ceiling]";
+// beside a target, whose clause already defines shed=
+inline constexpr std::string_view kForBudgetCeilingBesideTarget =
+    " [max_tokens=: the token ceiling asked; shed past it as budget_tokens= is, but a ranked sigs row is never cut against the"
+    " ceiling; over_ceiling=1 when est_tokens still exceeds it]";
 
 namespace budgetfit_detail
 {
@@ -496,6 +501,12 @@ private:
 
     std::string withNext( std::string open ) const { return nextVal_.empty() ? open : withAttr( open, "next", nextVal_ ); }
 
+    // U's own <sigs next=> when it is the signatures-only re-call (it serves every row unshrunk: the call without the budget would
+    // serve U's head, itself shrunk past its target — forrankordercheck (9)); else the call without the budget
+    std::string sigsWithNext( std::string open ) const
+    {
+        return attrOf( open, "next" ).find( "--signatures-only" ) != std::string_view::npos ? open : withNext( std::move( open ) );
+    }
     std::string sigsOpen( const ShedState& st ) const
     {
         const std::size_t keep = sigRows_ - st.rowCut;
@@ -516,7 +527,7 @@ private:
         out = docsDropped > 0 ? withAttr( out, "docs_dropped", std::to_string( docsDropped ) ) : withoutAttr( out, "docs_dropped" );
         if( st.rowCut == 0 )
         {
-            return st.docCut > 0 ? withNext( std::move( out ) ) : out;
+            return st.docCut > 0 ? sigsWithNext( std::move( out ) ) : out;
         }
         out = withAttr( out, "shown", std::to_string( keep ) );
         out = attrOf( out, "total" ).empty() ? withAttr( out, "total", std::to_string( sigRows_ ) ) : out;   // U served every row it ranked
@@ -524,7 +535,7 @@ private:
         const std::size_t past = attrNumber( out, "past_target" );   // the rows past the 7.5 KB target are the last ones: the cut ones leave it
         out = past > st.rowCut ? withAttr( out, "past_target", std::to_string( past - st.rowCut ) ) : withoutAttr( out, "past_target" );
         out = attrNumber( out, "files_first" ) > keep ? withAttr( out, "files_first", std::to_string( keep ) ) : out;
-        return withNext( std::move( out ) );   // the r=1 row keeps its own --expand next=; the block's names the shed rows' call
+        return sigsWithNext( std::move( out ) );   // the r=1 row keeps its own --expand next=; the block's names the shed rows' call
     }
     std::string sigsXml( const ShedState& st ) const
     {
@@ -653,6 +664,29 @@ private:
         note( st.rowCut > 0, "rows", st.rowCut );
         return shed;
     }
+    // the shed units this answer took, each with its definition, in the shed order (" none" when only the price was disclosed)
+    std::string unitsLegendOf( const ShedState& st, std::string_view against ) const
+    {
+        std::string out;
+        const auto  unit = [ & ]( bool cut, std::string_view text )
+        {
+            if( cut )
+            {
+                out += out.empty() ? " " : ", ";
+                out += text;
+            }
+        };
+        unit( !trusted_, "unpriced (the price could not be reproduced, so nothing was shed)" );
+        unit( ask_.heldPass, "held (the blocks outside est_tokens: a held=budget stub with next=, what they print comes off the " + std::string( against ) + ")" );
+        unit( st.attrs, "attrs (the sigs rows' cx= ccx= layer= next=)" );
+        unit( st.tailCut > 0, "tail:N (the last N tail rows)" );
+        unit( st.hopCut > 0, "hops:N (the last N hops rows)" );
+        unit( st.fold, "fold (the fold bodies)" );
+        unit( st.detailCut > 0, "bodies:N (the last N bodies; root bodies= counts the rest)" );
+        unit( st.docCut > 0, "docs:N (the docs of the N worst-ranked sigs rows with one; docs_dropped= counts shown rows without)" );
+        unit( st.rowCut > 0, "rows:N (the N worst-ranked sigs rows; ranks 1..4 always ship)" );
+        return out.empty() ? std::string( " none" ) : out;
+    }
     // the cut sigs rows that hold a rank are ranked candidates the ceiling removed: dropped_positive= (A2) counts them
     std::size_t cutRankedOf( const ShedState& st ) const
     {
@@ -668,7 +702,7 @@ private:
     {
         return trusted_ && ask_.ceilingTokens > 0 && priceOf( st, false ) > ask_.ceilingTokens && attrOf( rootTag_, "over_ceiling" ).empty();
     }
-    // the auto bundle's body count follows its <bodies>; the honest zero says reason="budget" (forautobodycheck)
+    // the auto bundle's (or the owner body slot's) count follows its <bodies>; the honest zero says reason="budget" (forautobodycheck)
     std::string withBodiesLeft( std::string root, const ShedState& st ) const
     {
         if( st.detailCut == 0 || !ledger_.autoBodies || attrOf( root, "bodies" ).empty() )
@@ -681,6 +715,10 @@ private:
         {
             const auto [ at, end ] = attrSpan( root, "bodies" );
             root.insert( end, " reason=\"budget\"" );
+        }
+        else if( left == 0 && attrOf( root, "reason" ) == "owner" )
+        {
+            root = withAttr( root, "reason", "budget" );   // the compact route's owner body (for-body-slot) went: bodies=0 reason=budget, as its skip says
         }
         return root;
     }
@@ -702,8 +740,11 @@ private:
     {
         const std::size_t cutRanked = cutRankedOf( st );
         std::string clauses = cutRanked > 0 && droppedValAt_ == 0 ? " dropped_positive=\"" + std::to_string( cutRanked ) + "\"" : std::string();
-        clauses += ask_.targetTokens > 0 ? kForBudgetTargetLegend : std::string_view();
-        clauses += ask_.ceilingTokens > 0 ? kForBudgetCeilingLegend : std::string_view();
+        const std::string units = unitsLegendOf( st, ask_.targetTokens > 0 ? "target" : "ceiling" );
+        clauses += ask_.targetTokens > 0 ? std::string( kForBudgetTargetLegendHead ) + units + std::string( kForBudgetTargetLegendTail ) : std::string();
+        clauses += ask_.ceilingTokens == 0  ? std::string()
+                 : ask_.targetTokens > 0    ? std::string( kForBudgetCeilingBesideTarget )
+                                            : std::string( kForBudgetCeilingLegendHead ) + units + std::string( kForBudgetCeilingLegendTail );
         clauses += over ? overCeilingLegendFor( /*namesBudgetTokens=*/false, /*namesMaxTokens=*/true ) : std::string_view();   // the family's one sentence (serialize.h): only max_tokens= is a ceiling here
         return clauses;
     }
@@ -723,7 +764,7 @@ private:
         const bool        both    = ask_.ceilingTokens > 0 && ask_.targetTokens > 0;
         const std::size_t ceiling = !both ? 0
                                   : std::string_view( " max_tokens=\"\"" ).size() + std::to_string( ask_.ceilingTokens ).size()
-                                        + ( legendEnd_ != std::string_view::npos ? kForBudgetCeilingLegend.size() : 0 );
+                                        + ( legendEnd_ != std::string_view::npos ? kForBudgetCeilingBesideTarget.size() : 0 );
         return estOf( st, disclosureBytes( st, false ) - std::ptrdiff_t( ceiling ) );
     }
 

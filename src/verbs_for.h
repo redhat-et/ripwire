@@ -5240,8 +5240,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
         if( mode.ledger != nullptr )   // TOKEN-BUDGET-MONOTONE: the shares a budget may shed, priced as the root priced them
         {
-            *mode.ledger = forAnswerLedgerOf( pricedHeader.inputs, fold, cfg.detail > 0 ? detailSection : autoSection,
-                                              ForLedgerBodies{ .detail = cfg.detail > 0, .autoServed = !enrich.hopsCutMarker } );
+            // the compact route's owner body (for-body-slot) is its one <bodies>: a budget sheds it as it sheds the auto bundle's
+            const bool              slotBodies = cfg.detail == 0 && slot.served;
+            const rw::ChargedSection slotSection{ .xml = slotBodies ? slot.xml : std::string(), .tokens = slot.bodyTokens, .isRendered = slotBodies };
+            *mode.ledger = forAnswerLedgerOf( pricedHeader.inputs, fold, cfg.detail > 0 ? detailSection : slotBodies ? slotSection : autoSection,
+                                              ForLedgerBodies{ .detail = cfg.detail > 0, .autoServed = slotBodies || !enrich.hopsCutMarker } );
         }
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms

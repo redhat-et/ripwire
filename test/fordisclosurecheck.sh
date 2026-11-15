@@ -200,7 +200,9 @@ if ! grep -qE '^<ctx [^>]* over_ceiling=' "$CT" && grep -oE '<sigs [^>]*>' "$CT"
     grep -q '<sigs' "$TMP/c400_nosigs" \
         && no "#2c the intact-block grep still matches with the <sigs> block removed — a legend clause spells the tag" \
         || ok "#2c the intact-block grep FAILS once the <sigs> block is removed (no legend clause spells the tag)"
-    sigsblock "$CT" | grep -q -- '-->' \
+    # TOKEN-BUDGET-MONOTONE: the shed <sigs> keeps U's in-block demote comment (its `-->` is inside the real block), so the
+    # span test asks the precise question — does the span START inside a comment (an unclosed <!-- before it)?
+    python3 -c 'import sys; s=open(sys.argv[1],"rb").read(); a=s.find(b"<sigs"); p=s[:a]; sys.exit(0 if a>=0 and p.rfind(b"<!--")>p.rfind(b"-->") else 1)' "$CT" \
         && no "#2c sigsblock() starts inside the header legend comment, not at the real tag" \
         || ok "#2c sigsblock() starts at the real <sigs> tag"
 else
@@ -209,9 +211,25 @@ fi
 "$BIN" src --for="$NAMETASK" --token-budget=400 --signatures-only --no-cache >"$TMP/n400so" 2>/dev/null
 sigsblock "$T" >"$TMP/s_a"; sigsblock "$TMP/n400so" >"$TMP/s_s"
 [ -s "$TMP/s_a" ] || no "#2 presence: could not extract a <sigs> block from the disclosed run"
-diff -q "$TMP/s_a" "$TMP/s_s" >/dev/null \
-    && ok "#2 ceiling-exhausted: <sigs> byte-identical to --signatures-only (disclosure never eats the signature budget)" \
-    || no "#2 ceiling-exhausted: the disclosure changed the <sigs> bytes"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the --for budget now sheds the unbudgeted answer while --signatures-only keeps its row
+# target, so the two <sigs> blocks are different postures (n400: U's rows with e=, docs shed; n400so: cx=/ccx= rows with docs).
+# What the arm protected — the disclosure never eats a signature row — is asserted on the rows: every <d> of the 400 answer is a
+# row of the unbudgeted answer, in its order, and none of the rank 1..4 rows is missing.
+"$BIN" src --for="$NAMETASK" --no-cache >"$TMP/n0" 2>/dev/null
+python3 - "$T" "$TMP/n0" <<'PY' \
+    && ok "#2 ceiling-exhausted: the <sigs> rows are the unbudgeted answer's, in order, ranks 1..4 kept (disclosure never eats a signature row)" \
+    || no "#2 ceiling-exhausted: the disclosure changed the <sigs> rows"
+import re, sys
+def rows( p ):
+    s = open( p, encoding = "utf-8", errors = "replace" ).read(); a = s.find( "<sigs" ); b = s.find( "</sigs>", a )
+    return [ ( re.search( r'\bn="([^"]*)"', m.group( 1 ) ).group( 1 ), ( re.search( r'\br="(\d+)"', m.group( 1 ) ) or [ 0, "0" ] )[ 1 ] )
+             for m in re.finditer( r'<d ([^>]*)>', s[ a:b ] ) ] if a >= 0 and b >= 0 else []
+A, U = rows( sys.argv[ 1 ] ), rows( sys.argv[ 2 ] )
+it = iter( U )
+sub = all( r in it for r in A )
+top = [ r for r in U if r[ 1 ] in ( "1", "2", "3", "4" ) ]
+sys.exit( 0 if A and sub and all( r in A for r in top ) else 1 )
+PY
 ET_T=$( grep -o 'est_tokens="[0-9]*"' "$T" | head -1 | grep -o '[0-9]*' )
 ET_S=$( grep -o 'est_tokens="[0-9]*"' "$TMP/n400so" | head -1 | grep -o '[0-9]*' )
 # forbudget-soft (rule 4): the old band (0..30 tokens: the attribute's reserved worth) priced a disclosure squeezed under a hard

@@ -626,10 +626,12 @@ NX3="$( cfield "$C3" next )"
   && [ "$( cfield "$C3" shown )" -lt "$( cfield "$C3" total )" ]; } \
     && ok "(9) --token-budget=1500: the soft target's cut ($( cfield "$C3" shown ) of $( cfield "$C3" total )) carries next= and its clause, no over_ceiling" \
     || no "(9) --token-budget=1500: $C3"
-# the resume index (the #362 candidate page's next_offset): the last printed row's candidate rank, defined by its own clause
-if [ "$( cfield "$C3" next_offset )" = "$( cfield "$C3" max_r )" ] && [ "$( cfield "$C3" next_offset )" = "$( cfield "$C3" shown )" ] \
-   && [ "$( cfield "$C3" offset_clause )" = true ]; then
-    ok "(9) next_offset=\"$( cfield "$C3" next_offset )\" is the resume index: the last printed row's rank (= shown, no pseudo slot here), defined"
+# the resume index (the #362 candidate page's next_offset): the last printed row's candidate rank, defined by its own clause.
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the XML --for budget sheds the unbudgeted answer and keeps ranks 1..shown (the worst ranks
+# go first), so its cut carries no next_offset= (whose clause says "no consumer yet"): next= serves the block uncut (below). The
+# arm asserts that shape: no next_offset= and no clause, the kept rows exactly ranks 1..shown.
+if [ "$( cfield "$C3" next_offset )" = null ] && [ "$( cfield "$C3" offset_clause )" = false ] && [ "$( cfield "$C3" max_r )" = "$( cfield "$C3" shown )" ]; then
+    ok "(9) the budget's cut keeps ranks 1..$( cfield "$C3" shown ) and carries no next_offset= (next= is its continuation)"
 else
     no "(9) next_offset='$( cfield "$C3" next_offset )' vs last printed r=$( cfield "$C3" max_r ), shown=$( cfield "$C3" shown ), clause=$( cfield "$C3" offset_clause )"
 fi
@@ -758,8 +760,9 @@ EOF
 chmod +x "$GSHIM/git"; : > "$GSHIM/calls.log"
 out="$( cd "$TMP" && PATH="$GSHIM:$PATH" "$BIN" fxcutgit --for="gadget assembler" --no-cache --token-budget=500 2>/dev/null )"
 st="$( grep -c 'status --porcelain' "$GSHIM/calls.log" | tr -d ' ' )"
-if ! printf '%s' "$out" | grep -q '<sigs [^>]*next_offset='; then
-    no "(10c) premise: --token-budget=500 on fxcutgit cuts no row (no <sigs next_offset=>): $( printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -c 300 )"
+# TOKEN-BUDGET-MONOTONE: the budget's row cut is named by capped="1" with shown= below total= (no next_offset= on the XML cut)
+if ! printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -1 | python3 -c 'import re,sys; t=sys.stdin.read(); s=re.search(r"shown=\"(\d+)\"",t); n=re.search(r"total=\"(\d+)\"",t); sys.exit(0 if " capped=\"1\"" in t and s and n and int(s.group(1))<int(n.group(1)) else 1)'; then
+    no "(10c) premise: --token-budget=500 on fxcutgit cuts no row (no capped <sigs> with shown < total): $( printf '%s' "$out" | grep -o '<sigs [^>]*>' | head -c 300 )"
 elif [ "$st" = 1 ] && printf '%s' "$out" | grep -q ' at="'; then
     ok "(10c) a budgeted, cut --token-budget run reads the git stamp once (1 status --porcelain child), and at= rides the answer"
 else
@@ -781,7 +784,11 @@ c11check(){   # LABEL BUDGET WANT ROWS TOTAL HANDLE OVER
         no "(11) $label @$bt: shown/total/handle/over = ${*:-<no output>} — want >= $want rows, a continued cut, no over_ceiling="
     fi
 }
-c11check "CLI --for" 2160 16 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the CLI --for budget sheds the UNBUDGETED answer, whose header is its own posture's (2164 B)
+# plus the shed disclosure (shed=, budget_tokens=, the clause defining the steps taken: +664 B), so at 2160 it keeps 12 of U's
+# 195 B rows (est 2119; a 13th does not fit) where the hard ceiling's tighter posture kept 16. The floor moves to 12: fewer rows
+# than that at 2160 would mean the shed cut a row it had room for. (budgetmonotonecheck (b)/(d) hold the contract itself.)
+c11check "CLI --for" 2160 12 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
 c11check "MCP for" 4340 40 $( c11row "$( mcprel 4340 )" )
 set -- $( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2000 --json --no-cache 2>/dev/null \
           | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["sigs"]), d.get("sigs_total", len(d["sigs"])), "sigs_next" in d, bool(d.get("over_ceiling")))' 2>/dev/null )

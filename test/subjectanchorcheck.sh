@@ -582,7 +582,10 @@ A="$( mode --json )"
 case "$A" in *'name-exact(SoloThing)'*) no "MF2 --json flipped to a signature row with no body";; *) ok "MF2 --json: no flip";; esac
 case "$A" in *'dropped:'*) no "MF2 --json names dropped words";; *) ok "MF2 --json: nothing dropped";; esac
 A="$( mode --detail=1 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --detail=1: no flip (bodies, no callers hop)"
-A="$( mode --token-budget=2000 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --token-budget: no flip"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a --for budget no longer re-decides the route; the answer is the unbudgeted one (here it fits
+# 2000 whole, byte for byte), shed only past the target — so the budget keeps the default mode's flip, body and callers.
+U0="$( mode )"; A="$( mode --token-budget=2000 )"; has "$( route "$A" )" 'dropped:' "MF2 --token-budget: the default mode's route (flips)"
+if [ "$A" = "$U0" ]; then ok "MF2 --token-budget=2000: the unbudgeted answer byte for byte (it fits)"; else no "MF2 --token-budget=2000: differs from the unbudgeted answer"; fi
 # the file page (--limit/--offset) prints file rows, no body and no callers; an explicit --pack-budget-bytes is a body ceiling the
 # single-anchor allowance never sees (CodeRabbit #502). Each keeps the map; each arm reads a route first, so an empty answer is red.
 for fl in --limit=5 --offset=1 '--limit=5 --offset=0' --pack-budget-bytes=4000; do
