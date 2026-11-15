@@ -10,6 +10,8 @@
 #             `if( !bytes ) { DISCLOSE(…) } … value_or( std::string() )`, a commented value_or line, an optional
 #             result, a value_or whose next statement asks `.empty()`, and a local read by `has_value()` first print none. Each negative arm counts the
 #             handlers or value_or sites it judged (premise) and FAILS on 0, so a parse that saw nothing is not a pass.
+#   gating    (G) a failure-default catch made empty gates though the total count is unchanged; (A) an ack of the
+#             report-only row does not hide that gating row (QD-ACK-GATING-SPLIT, CodeRabbit 4577036262 on #662).
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -78,8 +80,9 @@ export function noRead( xs: number[] ): number[] {
 	return xs.map( ( x ) => x * 2 );
 }
 const loadText = ( p: string ): string => fs.readFileSync( p, "utf-8" );
+const parseFile = ( p: string ): Record<string, string> => JSON.parse( loadText( p ) );
 export function viaHelper( p: string ): Record<string, string> {
-	return JSON.parse( loadText( p ) );
+	return parseFile( p );
 }
 export async function fetchAll( url: string ): Promise<Advisory[]> {
 	return ( await fetch( url ) ).json();
@@ -128,9 +131,10 @@ export function noRead( xs: number[] ): number[] {
 	}
 }
 const loadText = ( p: string ): string => fs.readFileSync( p, "utf-8" );
+const parseFile = ( p: string ): Record<string, string> => JSON.parse( loadText( p ) );
 export function viaHelper( p: string ): Record<string, string> {
 	try {
-		return JSON.parse( loadText( p ) );
+		return parseFile( p );
 	} catch {
 		return {};
 	}
@@ -152,6 +156,49 @@ printf '%s' "$( qd_row logged )" | grep -q 'facet=' && no "failure-default (ts):
 printf '%s' "$QD_OUT" | grep -q 'facet="failure-default" on an error-masking row' \
     && ok "failure-default (ts): the full legend defines facet=" || no "failure-default (ts): the full legend does not define facet="
 for s in parseNullable isLink logged noRead; do premise "failure-default (ts)" fd_ts "$s" '(catch_clause) @m'; done
+
+# 1b) A report-only handler made gating (CodeRabbit 4577036262, #662). The ts fixture's loadAll() returns [] from a
+#     failure-default catch; the edit empties the catch. (G) baseline WITH that catch: the total count stays 1, the gating
+#     count grows 0 -> 1, so a gating row and exit 2 (red before: no row, exit 0). (A) baseline without a handler, the
+#     report-only row ACKED, then the catch emptied: the gating row at the same count is not hidden by that ack (red
+#     before: suppressed, exit 0); a re-run before the edit stays acked (the ack still covers its own report-only row).
+FD_ONE='import * as fs from "fs";
+interface Advisory { id: string }
+export function loadAll( p: string ): Advisory[] {
+	try {
+		return JSON.parse( fs.readFileSync( p, "utf-8" ) ) as Advisory[];
+	} catch {
+		return [];
+	}
+}
+'
+FD_EMPTY='import * as fs from "fs";
+interface Advisory { id: string }
+export function loadAll( p: string ): Advisory[] {
+	try {
+		return JSON.parse( fs.readFileSync( p, "utf-8" ) ) as Advisory[];
+	} catch {
+	}
+	return [];
+}
+'
+FD_NONE='import * as fs from "fs";
+interface Advisory { id: string }
+export function loadAll( p: string ): Advisory[] {
+	return JSON.parse( fs.readFileSync( p, "utf-8" ) ) as Advisory[];
+}
+'
+gating_row(){ local row; row="$( qd_row loadAll )"; [ -n "$row" ] && ! printf '%s' "$row" | grep -q 'sev="minor"' && [ "$QD_RC" = 2 ]; }
+qd_pair fd_gate load.ts "$FD_ONE" "$FD_EMPTY"
+if gating_row; then ok "(G) failure-default -> empty catch: a gating row at the same total, exit 2"; else no "(G) want a gating loadAll row and exit 2, got rc $QD_RC: $( qd_row loadAll )"; fi
+qd_pair fd_ack load.ts "$FD_NONE" "$FD_ONE"
+fd_has "(A) premise" loadAll
+( cd "$WORK/fd_ack" && "$BIN" . --quality-delta --no-cache --quality-ack="report-only failure-default accepted" >/dev/null 2>&1 )
+QD_OUT="$( cd "$WORK/fd_ack" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; QD_RC=$?
+if [ -z "$( qd_row loadAll )" ] && [ "$QD_RC" = 0 ]; then ok "(A) the ack suppresses its own report-only row"; else no "(A) after the ack: rc $QD_RC, row: $( qd_row loadAll )"; fi
+printf '%s' "$FD_EMPTY" > "$WORK/fd_ack/load.ts"
+QD_OUT="$( cd "$WORK/fd_ack" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; QD_RC=$?
+if gating_row; then ok "(A) a report-only ack does not hide the gating row at the same count (exit 2)"; else no "(A) the report-only ack hid the gating row (rc $QD_RC): $( qd_row loadAll )"; fi
 
 # 2) C++: the #614 shape, and ripwire's own refused house pattern.
 CXB='#include <optional>

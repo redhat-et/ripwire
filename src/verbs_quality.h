@@ -321,11 +321,28 @@ char**& baseChildArgv() noexcept
     return argv;
 }
 
+// main()'s offer: its argv without --refetch. The child then reuses the clone of a git-URL root this process just made
+// (resolveRemoteRoot's .git check) instead of deleting it and cloning again under the parent (CodeRabbit 4577036256, #662).
+void offerBaseChildArgv( char** argv )
+{
+    static std::vector<char*> kept;
+    kept.clear();
+    for( char** arg = argv; *arg != nullptr; ++arg )
+    {
+        if( arg == argv || std::string_view( *arg ) != "--refetch" )
+        {
+            kept.push_back( *arg );
+        }
+    }
+    kept.push_back( nullptr );
+    baseChildArgv() = kept.data();
+}
+
 // RIPWIRE_TEST_QBASE_CHILD (gates only): `inproc` never spawns; `force` spawns below the size floor (a fixture is small);
 // `spawnfail` hands the spawn a bad descriptor so the real spawn fails; `exit` makes the child exit 70 before its base phase;
-// `partial` makes it write half the blob; `crash` makes it abort inside its base phase. The last four imply `force`; each
-// falls back to the in-process answer: byte for byte, but for a crash, whose own lines are passed through so it is never
-// silent.
+// `partial` makes it write half the blob; `crash` makes it abort inside its base phase; `badline` makes its end line say
+// peak="12x". The last five imply `force`; each falls back to the in-process answer: byte for byte, but for a crash, whose
+// own lines are passed through so it is never silent.
 std::string_view baseChildSeam() noexcept
 {
     const char* const v = std::getenv( "RIPWIRE_TEST_QBASE_CHILD" );
@@ -471,24 +488,30 @@ int runBaseChild( const std::string& root, const rw::Config& cfg, RefPairDelta& 
     const std::string_view where  = failed || out.stop.stopped ? std::string_view() : writeChildBlob( root, cfg, out, tempPath );
     const std::string_view status = failed ? "failed" : out.stop.stopped ? "stopped" : where.empty() ? "nowrite" : "ok";
     memguard::answerStops();   // the parent answers for a stop (it re-runs the phase): this process prints no backstop of its own
+    const std::string peak = baseChildSeam() == "badline" ? std::string( "12x" ) : std::to_string( os::mem_footprint_peak() );
     rw::emitTo( stderr, "{}status=\"{}\" rc=\"{}\" blob=\"{}\" before=\"{}\" ingest_peak=\"{}\" base_peak=\"{}\" after=\"{}\" fixed=\"{}\" peak=\"{}\" type3_runs=\"{}\" type3_pairs=\"{}\"\n",
                 kBaseChildEnd, status, failed ? *failed : 0, where, before, out.ingestPeak, basePeak, after, constructTablesFootprint() - fixedBefore,
-                os::mem_footprint_peak(),
+                peak,
                 gType3PassRuns.load( std::memory_order_relaxed ), gType3PassPairs.load( std::memory_order_relaxed ) );
     return failed ? *failed : 0;
 }
 
 // The parent's reading of the child's end line, whose fields are spelled as attributes: `name`'s value (metbridge_detail::
-// attrOf, the one attribute reader), and its unsigned value (0 when absent or not a number).
+// attrOf, the one attribute reader), and its unsigned value: nullopt when absent, not a number, cut by trailing text or past
+// 64 bits — never a silent 0 (the line is another process's output; CodeRabbit 4577036263, #662).
 std::string_view baseChildWord( std::string_view line, std::string_view name )
 {
     return rw::metbridge_detail::attrOf( line, name );
 }
-std::uint64_t baseChildField( std::string_view line, std::string_view name )
+std::optional<std::uint64_t> baseChildField( std::string_view line, std::string_view name )
 {
-    std::uint64_t          value = 0;
-    const std::string_view text  = baseChildWord( line, name );
-    (void)std::from_chars( text.data(), text.data() + text.size(), value );
+    std::uint64_t                value = 0;
+    const std::string_view       text  = baseChildWord( line, name );
+    const std::from_chars_result read  = std::from_chars( text.data(), text.data() + text.size(), value );
+    if( !VALIDATE( !text.empty() && read.ec == std::errc() && read.ptr == text.data() + text.size(), "a base child's end-line field is a whole unsigned number" ) )
+    {
+        return std::nullopt;
+    }
     return value;
 }
 
@@ -560,7 +583,7 @@ BaseChildResult takeChildEnd( std::string_view line, int exitRc, const std::stri
     using namespace rw;
     BaseChildResult        result;
     const std::string_view status = baseChildWord( line, "status" );
-    if( status == "failed" && exitRc != 0 && std::uint64_t( exitRc ) == baseChildField( line, "rc" ) )
+    if( status == "failed" && exitRc != 0 && baseChildField( line, "rc" ) == std::optional<std::uint64_t>( std::uint64_t( exitRc ) ) )
     {
         rw::emitRaw( stderr, said.c_str() );   // the refusal, said once, by the child
         return { BaseChildOutcome::Failed, exitRc, {} };
@@ -569,6 +592,19 @@ BaseChildResult takeChildEnd( std::string_view line, int exitRc, const std::stri
     {
         result.why = status == "stopped" ? "stopped" : "exit";
         return result;
+    }
+    // the readings, each required whole before the blob is taken: a malformed one falls back (why=line), never reads as 0
+    constexpr std::string_view   kReadings[] = { "ingest_peak", "before", "base_peak", "after", "peak", "fixed", "type3_runs", "type3_pairs" };
+    std::array<std::uint64_t, 8> reading{};
+    for( std::size_t readingIndex = 0; readingIndex < reading.size(); ++readingIndex )
+    {
+        const std::optional<std::uint64_t> value = baseChildField( line, kReadings[ readingIndex ] );
+        if( !value )
+        {
+            result.why = "line";
+            return result;
+        }
+        reading[ readingIndex ] = *value;
     }
     quality::BaseCommitScore         score;
     const std::optional<std::string> blob = quality::readQSnapBlob( blobPath );
@@ -584,15 +620,15 @@ BaseChildResult takeChildEnd( std::string_view line, int exitRc, const std::stri
     refs.baseMacros     = std::move( score.macros );
     refs.haveBaseMacros = true;
     refs.baseFromChild  = true;
-    refs.ingestPeak     = baseChildField( line, "ingest_peak" );
-    refs.childBefore    = baseChildField( line, "before" );
-    refs.childBasePeak  = baseChildField( line, "base_peak" );
-    refs.childAfter     = baseChildField( line, "after" );
-    refs.childPeak      = baseChildField( line, "peak" );
-    refs.childFixed     = baseChildField( line, "fixed" );
+    refs.ingestPeak     = reading[ 0 ];
+    refs.childBefore    = reading[ 1 ];
+    refs.childBasePeak  = reading[ 2 ];
+    refs.childAfter     = reading[ 3 ];
+    refs.childPeak      = reading[ 4 ];
+    refs.childFixed     = reading[ 5 ];
     // the Type-3 cost counters (RIPWIRE_STATS' quality-passes line) count the child's passes too, as they did in-process
-    gType3PassRuns.fetch_add( std::uint32_t( baseChildField( line, "type3_runs" ) ), std::memory_order_relaxed );
-    gType3PassPairs.fetch_add( baseChildField( line, "type3_pairs" ), std::memory_order_relaxed );
+    gType3PassRuns.fetch_add( std::uint32_t( reading[ 6 ] ), std::memory_order_relaxed );
+    gType3PassPairs.fetch_add( reading[ 7 ], std::memory_order_relaxed );
     return { BaseChildOutcome::Answered, 0, {}, baseChildWord( line, "blob" ) == "cache" ? "cache" : "temp" };
 }
 

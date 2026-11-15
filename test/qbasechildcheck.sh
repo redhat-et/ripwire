@@ -13,6 +13,7 @@
 #   (F)  a spawn that fails (spawnfail), a child that exits non-zero (exit) and a half-written blob (partial) each fall
 #        back (outcome=fallback, why=spawn|exit|blob) to the same answer; the partial blob is not left in the cache; a
 #        child that crashes (crash) falls back too, and its own stderr is passed through (why=signal);
+#   (V)  a malformed end line (badline) falls back (why=line), never read as zero;
 #   (N)  --no-cache: the child hands the blob over in a temp file — same answer, no qbase blob, no temp file left;
 #   (R)  a base tree the child cannot materialize: the child's refusal is said once (outcome=failed) with its exit code,
 #        exactly as in-process;
@@ -27,6 +28,7 @@
 #   (S)  a stray RIPWIRE_QBASE_CHILD naming another parent is ignored: the run answers, and spawns its own child;
 #   (Z)  the size floor: unforced, the fixture (a git index far below 1 MiB) scores its base in-process
 #        (outcome=inproc why=small) with the same answer;
+#   (X)  --refetch on a git-URL root (url.insteadOf to the fixture): one clone; the child reuses it (argv without --refetch);
 #   (L)  no ripwire-qbase-child-* file is left under TMPDIR by any run above.
 # The fixture is small, so every child-path run above sets RIPWIRE_TEST_QBASE_CHILD=force (the seams imply it).
 #
@@ -76,14 +78,15 @@ EOF
 git_ commit -qam target || no "fixture: target commit"
 BASESHA="$( git_ rev-parse HEAD~1 )"
 
-# run <tag> <tmpdir> [VAR=value…] -- <args…>: stdout/stderr/rc in $WORK/<tag>.{out,err,rc}; a fresh HOME per tag
+# run <tag> <tmpdir> [VAR=value…] -- <args…>: stdout/stderr/rc in $WORK/<tag>.{out,err,rc}; a fresh HOME per tag. An inherited
+# RIPWIRE_TEST_QBASE_CHILD is cleared (empty = no seam) before the cell's own settings (CodeRabbit 4577036265, #662).
 run(){
     local tag="$1" tmp="$2"; shift 2
     local envs=()
     while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do envs+=( "$1" ); shift; done
     shift
     mkdir -p "$WORK/home-$tag"
-    ( cd "$FX" && env HOME="$WORK/home-$tag" TMPDIR="$tmp" RIPWIRE_STATS=1 RIPWIRE_CACHE_STATS=1 ${envs[@]+"${envs[@]}"} "$BIN" . "$@" > "$WORK/$tag.out" 2> "$WORK/$tag.err" )
+    ( cd "$FX" && env HOME="$WORK/home-$tag" TMPDIR="$tmp" RIPWIRE_STATS=1 RIPWIRE_CACHE_STATS=1 RIPWIRE_TEST_QBASE_CHILD= ${envs[@]+"${envs[@]}"} "$BIN" . "$@" > "$WORK/$tag.out" 2> "$WORK/$tag.err" )
     echo $? > "$WORK/$tag.rc"
 }
 outcome(){ sed -n 's/^ripwire: stats qbase-child outcome=\([a-z]*\) why=\([a-z-]*\).*/\1 \2/p' "$WORK/$1.err" | tr '\n' ';'; }
@@ -134,6 +137,13 @@ fi
 # the partial blob was removed and the in-process phase rewrote a valid one: the next call hits it
 run partial2 "$WORK/t-partial" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR"
 if [ "$( spawns partial2 )" = 0 ] && [ "$( ingests partial2 )" = 1 ] && same inproc-warm partial2; then ok "(F) after partial, the rewritten blob hits (no spawn, one ingest, same answer)"; else no "(F) after partial: $( spawns partial2 ) spawns, $( ingests partial2 ) ingests"; fi
+
+# (V) a malformed end line (peak="12x") is never read as a zero: the run falls back (why=line) to the in-process answer.
+# Red before CodeRabbit 4577036263 (#662): the child's answer was taken with peak read as 0 (outcome=child).
+mkdir -p "$WORK/t-badline"; run badline "$WORK/t-badline" RIPWIRE_TEST_QBASE_CHILD=badline -- "$PAIR"
+# (the debug build's one [validate] trace line, compiled out of Release, is the VALIDATE that refused the field: not compared)
+same_v(){ cmp -s "$WORK/inproc.out" "$WORK/badline.out" && cmp -s "$WORK/inproc.rc" "$WORK/badline.rc" && [ "$( answer_err inproc )" = "$( answer_err badline | grep -v '^\[validate\] .*end-line field' )" ]; }
+if [ "$( outcome badline )" = "fallback line;" ] && same_v; then ok "(V) a malformed end line falls back (why=line), byte-identical to in-process"; else no "(V) badline: outcome '$( outcome badline )' (want 'fallback line;'), $( same_v && echo same || echo differs )"; diff <( answer_err inproc ) <( answer_err badline ) | head -6 | sed 's/^/    /'; fi
 
 # (N)
 mkdir -p "$WORK/t-nocache"; run nocache "$WORK/t-nocache" RIPWIRE_TEST_QBASE_CHILD=force -- "$PAIR" --no-cache
@@ -199,6 +209,22 @@ if [ "$( outcome stray )" = "child -;" ] && same inproc stray && [ ! -e "$WORK/s
 # (Z)
 mkdir -p "$WORK/t-small"; run small "$WORK/t-small" -- "$PAIR"
 if [ "$( outcome small )" = "inproc small;" ] && [ "$( spawns small )" = 0 ] && same inproc small; then ok "(Z) below the size floor the base is scored in-process (why=small), same answer"; else no "(Z) small: outcome '$( outcome small )', $( spawns small ) spawns"; fi
+
+# (X) a git-URL root with --refetch: the parent clones once and the child reuses that clone (its argv drops --refetch). The
+# URL is rewritten to the fixture by git's own url.insteadOf (no network; a local-path clone keeps both commits), and git's
+# trace counts the clones. Red before CodeRabbit 4577036256 (#662): the child re-cloned (2 clones), deleting the parent's root.
+URL="https://example.invalid/qbase-fx.git"
+mkdir -p "$WORK/t-url" "$WORK/home-url"
+( cd "$WORK" && env HOME="$WORK/home-url" TMPDIR="$WORK/t-url" RIPWIRE_STATS=1 RIPWIRE_TEST_QBASE_CHILD=force GIT_TRACE="$WORK/url.trace" \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$FX.insteadOf" GIT_CONFIG_VALUE_0="$URL" "$BIN" "$URL" --refetch "$PAIR" > "$WORK/url.out" 2> "$WORK/url.err" )
+echo $? > "$WORK/url.rc"
+clones="$( grep -c 'built-in: git clone' "$WORK/url.trace" 2>/dev/null )"
+if [ "$( outcome url )" = "child -;" ] && [ "${clones:-0}" = 1 ] && cmp -s "$WORK/cold.out" "$WORK/url.out" && cmp -s "$WORK/cold.rc" "$WORK/url.rc"; then
+    ok "(X) --refetch on a URL root: one clone, the child answered from it, same stdout and rc as (P)"
+else
+    no "(X) --refetch: ${clones:-0} clone(s) (want 1), outcome '$( outcome url )', stdout $( cmp -s "$WORK/cold.out" "$WORK/url.out" && echo same || echo differs ), rc $( cat "$WORK/url.rc" )"
+    grep -v '^\[mem\]' "$WORK/url.err" | head -8 | sed 's/^/    /'
+fi
 
 # (L)
 if [ "$( leftovers )" = 0 ]; then ok "(L) no ripwire-qbase-child-* file left"; else no "(L) $( leftovers ) ripwire-qbase-child-* files left"; find "$WORK" -name 'ripwire-qbase-child-*' | sed 's/^/    /'; fi

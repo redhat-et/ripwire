@@ -8289,8 +8289,19 @@ inline std::string ackKindToken( const std::string& kind, bool isZeroMagnitude, 
     return kind + ( isNewSymbol ? ":new-symbol" : ":preexisting" );
 }
 
+// QD-ACK-GATING-SPLIT (CodeRabbit 4577036262, #662): an error-masking row whose growth is all report-only shapes (sev="minor")
+// acks as `error-masking:report-only`, so accepting it cannot hide a later GATING row of the same symbol at the same count
+// (a failure-default catch made empty). The bare token stays the gating ack; findSuppressingAck lets it cover the
+// report-only row too (accepted gating debt covers the lesser finding), which also keeps every bare row already committed
+// suppressing what it did. A bare row written against a report-only row before this split still covers a gating one at
+// its count: that ambiguity is not resolvable from the ledger, and the split closes it for every ack written from here on.
+inline constexpr std::string_view kAckReportOnlySuffix = ":report-only";
 inline std::string ackKindToken( const Regression& r )
 {
+    if( r.kind == "error-masking" && r.isMinor )
+    {
+        return r.kind + std::string( kAckReportOnlySuffix );
+    }
     return ackKindToken( r.kind, r.isZeroMagnitude(), r.isNewSymbol );
 }
 
@@ -9522,6 +9533,23 @@ inline AckRemap remapAckIdentity( gtl::btree_map<std::string, AckRecord>& acks, 
     return out;
 }
 
+// Is `r` currently suppressed by an ack in `acks` — same lookup applyAckRatchet uses (ackKindToken, not the
+// bare kind: a ZERO-magnitude finding acks on identity + ORIGIN, so an ack against the never-gating
+// new-symbol row can never suppress the gating contract-change row for the same symbol), factored out so a
+// caller that needs the ANSWER without mutating the vector (partitionByScope's out-of-scope disclosure,
+// F-05 fix below) does not re-derive the map key by hand. Returns the record so a caller can also read its
+// `by=` provenance.
+inline const AckRecord* findSuppressingAck( const Regression& r, const gtl::btree_map<std::string, AckRecord>& acks )
+{
+    const std::string token = ackKindToken( r );
+    auto              it    = acks.find( ackMapKey( token, r.key ) );
+    if( ( it == acks.end() || r.now > it->second.ackNow ) && token.ends_with( kAckReportOnlySuffix ) )
+    {
+        it = acks.find( ackMapKey( r.kind, r.key ) );   // QD-ACK-GATING-SPLIT: a gating ack covers the report-only row
+    }
+    return ( it != acks.end() && r.now <= it->second.ackNow ) ? &it->second : nullptr;
+}
+
 // How many findings a rekeyed ack ACTUALLY suppressed, split by route. Counted BEFORE applyAckRatchet erases
 // them — the honest denominator for the disclosure is the suppression, not the rekey: an ack can be healed
 // forward and still not hide anything (the finding may have worsened past its floor, or stopped firing).
@@ -9535,13 +9563,12 @@ inline void countAckRescues( const std::vector<Regression>& regs, const gtl::btr
     }
     for( const Regression& r : regs )
     {
-        const std::string mapKey = ackMapKey( ackKindToken( r ), r.key );
-        const auto        ack    = acks.find( mapKey );
-        if( ack == acks.end() || r.now > ack->second.ackNow )
+        const AckRecord* ack = findSuppressingAck( r, acks );
+        if( ack == nullptr )
         {
             continue;   // not suppressed — the ratchet still fires on it
         }
-        const auto route = remap.routeOf.find( mapKey );
+        const auto route = remap.routeOf.find( ackMapKey( ack->kind, ack->key ) );
         if( route != remap.routeOf.end() )
         {
             ( route->second == AckRescueRoute::Rename ? byRename : byContent ) += 1;
@@ -9676,18 +9703,6 @@ inline std::pair<std::string, std::string> identityDisclosure( const IdentityHea
     if( h.renames.truncatedPairs )    { add( "renames_truncated", 1 ); }
     if( h.aliases.ambiguousDropped )  { add( "renames_ambiguous", h.aliases.ambiguousDropped ); }
     return { attrs, json };
-}
-
-// Is `r` currently suppressed by an ack in `acks` — same lookup applyAckRatchet uses (ackKindToken, not the
-// bare kind: a ZERO-magnitude finding acks on identity + ORIGIN, so an ack against the never-gating
-// new-symbol row can never suppress the gating contract-change row for the same symbol), factored out so a
-// caller that needs the ANSWER without mutating the vector (partitionByScope's out-of-scope disclosure,
-// F-05 fix below) does not re-derive the map key by hand. Returns the record so a caller can also read its
-// `by=` provenance.
-inline const AckRecord* findSuppressingAck( const Regression& r, const gtl::btree_map<std::string, AckRecord>& acks )
-{
-    const auto it = acks.find( ackMapKey( ackKindToken( r ), r.key ) );
-    return ( it != acks.end() && r.now <= it->second.ackNow ) ? &it->second : nullptr;
 }
 
 // Drop every regression already acked at a magnitude ≥ its current `now`; return how many were suppressed
@@ -9959,12 +9974,12 @@ inline std::vector<StaleAck> computeForeignAcks( const std::vector<Regression>& 
         {
             continue;   // no locator ⇒ nothing to test the recorded scope against
         }
-        const auto it = acks.find( ackMapKey( ackKindToken( r ), r.key ) );
-        if( it == acks.end() || it->second.by.empty() || r.now > it->second.ackNow )
+        const AckRecord* ack = findSuppressingAck( r, acks );
+        if( ack == nullptr || ack->by.empty() )
         {
             continue;
         }
-        const Scope by = parseScope( it->second.by );
+        const Scope by = parseScope( ack->by );
         if( scopeUsesDiffToken( by ) )
         {
             // THIRD FLOOR (P1.2): an AUTO-scope cannot be re-evaluated later. `diff` meant one file set at
@@ -9985,7 +10000,7 @@ inline std::vector<StaleAck> computeForeignAcks( const std::vector<Regression>& 
         {
             // M21(a): a foreign-scope row is BUILT from a live Regression, so it names itself — no index
             // lookup, and no chance of the two disagreeing about the same finding's identity.
-            out.push_back( { it->second.kind, it->second.key, StaleAckWhy::ForeignScope, it->second.by,
+            out.push_back( { ack->kind, ack->key, StaleAckWhy::ForeignScope, ack->by,
                              r.sym, r.path, r.line } );
         }
     }
@@ -11141,11 +11156,13 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             {
                 continue; // nothing here now, or already reported at an earlier overload of this id
             }
-            const std::uint32_t wasMask = countIn( base.maskBySym, key );
-            if( nowMask > wasMask )
+            const std::uint32_t wasMask   = countIn( base.maskBySym, key );
+            const std::uint32_t nowGating = nowMask - std::min( nowMask, countIn( nowCounts.maskReport, key ) );
+            const std::uint32_t wasGating = wasMask - std::min( wasMask, countIn( base.maskReportBySym, key ) );
+            // a report-only handler turned gating (a failure-default catch made empty) grows the gating count, not the total
+            // (CodeRabbit 4577036262, #662): either growth is a row
+            if( nowMask > wasMask || nowGating > wasGating )
             {
-                const std::uint32_t nowGating = nowMask - std::min( nowMask, countIn( nowCounts.maskReport, key ) );
-                const std::uint32_t wasGating = wasMask - std::min( wasMask, countIn( base.maskReportBySym, key ) );
                 // facet="failure-default" when that facet's own count grew: the row's growth includes a site it names
                 const bool failureDefault = countIn( nowCounts.failureDefault, key ) > countIn( base.failureDefaultBySym, key );
                 regs.push_back( { "error-masking", g.canonId[i], wasMask, nowMask, key, nowGating <= wasGating,
