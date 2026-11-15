@@ -549,7 +549,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // because the relation is not a call edge and must not read as one.
     { "implementors",      "implementors=K: <impl via=implementor> rows — members of of='s owner's IMPLEMENTORS sharing its name (what a signature change breaks); NOT callers, in no reaches= and no count=", true, "impact" },
     { "implementors_by_name", "implementors_by_name=1: at least one <impl> row was reached through a base bound by NAME only — a hedge, not a proven extends edge", true, "impact" },
-    { "via",               "impl t= n= p= via=implementor: one implementor's own member of that name; the implements/extends closure is --lego's (proven edges walked, a name-only base hedged)", true, "impl" },
+    { "via",               "impl t= n= p= via=implementor: one implementor's own member of that name; the implements/extends closure is the lego verb's (proven edges walked, a name-only base hedged)", true, "impl" },
     // cut-fix E (2026-09-24): three cut disclosures that ride only a CUT answer, so each is present-only. importers_next= is
     // graph.h sizeImportTier's call for the whole tier; shown_bridges=/bridges= is --zoom's secondaryCutAttrs on <zoom>
     // (kZoomBridgeCap); shown_symbols= is --tree's on <tree> (kTreeSymbolsPerFile). Their *_capped= siblings read in the

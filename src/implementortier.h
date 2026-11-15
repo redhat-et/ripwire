@@ -272,6 +272,10 @@ inline std::string implementorMembersJson( const IngestResult& ing, const Implem
 }
 
 // The legend sentence, carried only by an answer that has a row (absent otherwise: byte-identical).
+// NO DOUBLE HYPHEN IN THIS TEXT. Legend text is emitted inside an XML comment, where `--` is illegal,
+// so a sentence naming a flag as `--lego` makes the whole answer unparseable — G4's xmllint rule, and
+// test/legotransitivecheck.sh caught exactly that here. The house spelling is "the lego verb", which
+// every other row in compactlegend.h uses ("the uses verb", "the callers verb").
 inline constexpr std::string_view kImplementorTierLegend =
     "implementors=K (absent when 0) counts <impl t= n= p= via=\"implementor\"> rows: the members of this owner's "
     "IMPLEMENTORS that share the asked member's name — what a signature change breaks. An implementor is NOT a caller: "
