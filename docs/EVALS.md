@@ -14730,8 +14730,15 @@ registered readout set exists. Each one names what would refute it.
 
 ### The measurement that motivated it, and the two grader defects it survived
 
-0.7.0 practice-run D4 cross-tool answer grading, `--impact` arm, **6 cells in 3 repos** (hono,
-textual, tmux), 81 required gold files. Answers are the recorded `fire321` store (ripwire
+0.7.0 practice-run D4 cross-tool answer grading, `--impact` arm, **5 cells in 3 repos** (hono,
+textual, tmux), 78 required gold files. **Corrected 2026-11-15, with the amendment below and before
+any new number: the published "ripwire --impact" column holds 6 cells, but one of them (textual-20) is
+not an `--impact` answer at all** — its recorded output is `ripwire.affected/v1`, a different verb with
+a different schema, which is also where the 252 `<test>` rows previously attributed to `--impact`'s
+element census came from. Scored over the 5 genuine `--impact` cells the arms read 96.2 % rather than
+96.3 % (75 of 78 gold files rather than 78 of 81); claims, precision and `Wrong` are unchanged,
+because that cell's only claims were test files, which the instrument excludes. The figures in the
+table below are the verb-pure ones. Answers are the recorded `fire321` store (ripwire
 `cd04d477e`, each cell's own recorded argv), spot-verified identical on the run pin `44f7d3326`. Gold
 files are `rg -l -w <symbol>` over non-test files. Grading is the run kit's `peer_grade.py` in its
 uniform deny-list scoping (HTML comments, `<dc>` declined call sites and `<vr>` value references
@@ -14741,9 +14748,9 @@ graded over the **identical** qid set.
 
 | answer shape | file-shaped claims | recall | precision | Wrong |
 |---|---:|---:|---:|---:|
-| ring always inline (today) | 131 | **96.3 %** | 56.5 % | 57 |
-| **ring inline only when the graph declined** | **99** | **96.3 %** | 74.7 % | **25** |
-| ring never inline | 84 | 91.4 % | 83.3 % | 14 |
+| ring always inline (today) | 131 | **96.2 %** | 56.5 % | 57 |
+| **ring inline only when the graph declined** | **99** | **96.2 %** | 74.7 % | **25** |
+| ring never inline | 84 | 91.0 % | 83.3 % | 14 |
 
 Two grader defects were found and fixed *before* these figures, and an earlier published pair of
 numbers for the same three arms ("66.7 % recall, Wrong 51 → 17") is **retracted**: the path extractor
@@ -14766,23 +14773,50 @@ Per cell, which is the structural evidence rather than the aggregate:
 
 The ring adds gold on the one cell with a declined interface and **zero on all five others**. Note
 also, registered here rather than discovered later: **`reaches <= importers` never fires alone** on
-these six cells — it fires only on hono-09, where `declined_iface` fires too. On this evidence the
+these five cells — it fires only on hono-09, where `declined_iface` fires too. On this evidence the
 second clause is carried by reasoning, not by measurement. Band 3 below is what settles it.
 
-### The registered readout set (named before it is run)
+### The registered readout set — AMENDED 2026-11-15, same day, before any number from it exists
 
-Every gold'd cell in the 163-task gold root that the `--impact` arm already answered: **141 cells
-across 15 repos** (fastify 6, flake8 9, fzf 6, hono 12, htop 6, koa 6, kysely 10, mdbook 11, nfpm 9,
-ninja 13, nunjucks 10, rake 11, starlette 6, textual 12, tmux 14). The answers are already recorded,
-so no collection decision can be made after seeing a band; the readout is a re-grade, published with
-the per-cell table above extended to all 141 rows. The 6 motivating cells are a subset and are
-labelled as such in the readout, never averaged in as if independent.
+**The amendment, and the error that forced it.** This section first registered the readout as "every
+gold'd cell in the 163-task gold root that the `--impact` arm already answered: **141 cells across 15
+repos**", with a per-repo breakdown. That population does not exist. The gold root holds 141 gold
+files and the `--impact` arm has an answer for every one of them, but **only 6 of the 141 are
+file-grain golds** — the other 135 are free-text subsystem rubrics (`R1`…`Rn`, "subsystem + at least
+one key file named") written for orient-style questions, and this instrument, which scores the set of
+files an answer NAMES against an `rg -l -w` gold, cannot grade them at all. The 141 came from counting
+files in a directory; the number the instrument itself reports is `cells: 6`, and it is printed for
+every tool in the store this registration was built from.
+
+Nothing below is re-tuned: **no band threshold, no decision rule and no clause moves in this
+amendment.** What changes is the honest statement of what can be measured today.
+
+**What can be graded today: 5 file-grain `--impact` cells in 3 repos** (hono-09, hono-10,
+textual-10, tmux-09, tmux-10; 78 required gold files — textual-20's recorded answer is `--affected`,
+not `--impact`, so it is not an arm of this verb at all) — which is exactly the motivating measurement
+above. A registration whose readout set is identical to the data that motivated it adjudicates
+nothing, so:
+
+**This band is registered as NOT ADJUDICABLE on today's gold population, and no part of this default
+change may ship until it is.** The blocking condition is registered here so it cannot be quietly
+dropped: the readout requires **at least 16 file-grain `--impact` cells across at least 8 repos**, each one verified to be an
+`--impact` answer by its schema attribute rather than by the column it was filed under, built by the
+recipe the existing 6 were built by — required non-test files named by hand with a per-file reason,
+then checked for completeness with `rg -l -w <symbol>` over non-test files — with the languages of
+the gold set stated, since the one cell where the ring carries gold is a TypeScript interface method
+and C, Python and TS are all that the current 3 repos cover.
+
+Until that set exists, the three arms above stand as a 6-cell *motivating* measurement and are
+labelled as such wherever they are quoted. The arms themselves remain reproducible from the recorded
+answers by `harness/impact_ring_arms.py`, and the readout harness that will consume the wider set is
+`harness/impact_ring_readout.py`, which enumerates the claim elements rather than assuming them and
+reports the per-clause firing counts Band 3 asks for.
 
 ### Band 1 — RECALL, and it is the gating band
 
 The claim is "a smaller answer that loses nothing", so the band is on what the withheld rows contain.
 
-**Registered: zero required gold files lost.** The gated arm's aggregate recall over the 141 cells
+**Registered: zero required gold files lost.** The gated arm's aggregate recall over the registered readout set
 must equal today's arm's **exactly**, and no cell may lose a required gold file.
 
 *Decision rule, in order, nothing re-tuned after data:* exact equality → **ACCEPT**. 1–3 gold files
@@ -14795,10 +14829,10 @@ valuable result because it would mean the reach set and the ring are not separab
 ### Band 2 — SIZE, with a vacuity guard in both directions
 
 Registered: the gated arm emits **at least 10 % fewer file-shaped claims** than today's arm in
-aggregate over the 141 cells (the 6-cell motivation shows 24.4 %). Below 10 % the change is a no-op
+aggregate over the registered readout set (the 6-cell motivation shows 24.4 %). Below 10 % the change is a no-op
 dressed as a default change and is recorded as one, not shipped.
 
-*Vacuity guard:* the gate must fire on **more than 0 and fewer than all** of the 141 cells. A gate
+*Vacuity guard:* the gate must fire on **more than 0 and fewer than all** of the readout set's cells. A gate
 that fires everywhere is today's behaviour with extra code; a gate that fires nowhere is the
 ring-never arm, which Band 1 forbids. Either reading refutes the formulation rather than the idea.
 
@@ -14806,7 +14840,7 @@ ring-never arm, which Band 1 forbids. Either reading refutes the formulation rat
 
 The readout must report, per clause, how many cells it fires on **alone**: `declined_iface > 0` only,
 `reaches <= importers` only, and both. Registered in advance: **if `reaches <= importers` fires alone
-on zero cells across 141, the clause is DROPPED** and the gate ships as the single `declined_iface`
+on zero cells across the readout set, the clause is DROPPED** and the gate ships as the single `declined_iface`
 condition. A clause that never changes an answer is not a safety margin, it is decoration that the
 next reader will take for evidence.
 
@@ -14862,6 +14896,6 @@ separate the cells, that is Band 1's REJECT, not an invitation to find a constan
 ### The honest failure mode, registered in advance
 
 `reaches <= importers` is plausible in repos with large include fan-in, where a definition has few
-transitive callers and many importers. If the gate therefore fires on most of the 141 cells, Band 2's
+transitive callers and many importers. If the gate therefore fires on most of the readout set's cells, Band 2's
 vacuity guard fails and the change is a near no-op — to be recorded as a measured no-op with the
 firing distribution printed, not rescued by narrowing the clause until it passes.
