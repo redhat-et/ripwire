@@ -16092,3 +16092,70 @@ header already documents: "a supertrait's method, whose impl block is another tr
 here") — then the join lands near zero on the cells that motivated it, and the honest outcome is to
 record that and reopen it as an EXTRACTION lane rather than a join lane. The simulation's 55.3 % is a
 file-level upper bound, not a promise.
+
+## The implementor tier, MEASURED 2026-11-15 against the band above: **Band 1 PASS at 35 of 44 (79.5 %), Bands 2-4 PASS, and the tier added ZERO non-gold files**
+
+Implemented as a shared primitive (`src/implementortier.h`) rather than inside the verb, on the owner's
+instruction to propagate what this work learns: `--impact` is its first consumer, and the relation
+answers more than one question (see "what this leaves open" below).
+
+| band | registered | measured | verdict |
+|---|---|---|---|
+| **1 — recall** | ≥ 31 of 44 gold files over the 7 cells, no cell regressing | **35 of 44 — 56.8 % → 79.5 %** | **PASS** |
+| **2 — control** | 12 control cells within 1 point of recall and 5 % of claims | recall **86.6 % → 86.6 %**, claims **359 → 359 (+0.0 %)** | **PASS** |
+| **3 — `Wrong` capped and printed** | at most the non-gold implementor files named, and that number stated | **0 new non-gold files across all 7 cells** | **PASS** |
+| **4 — disclosure and parity** | labelled rows, counted, dialect parity, byte-identical where nothing matches | `test/impactimplcheck.sh`, 14 arms; XML/JSON/MCP share one measurement; map byte-identical to `0217049f2` on htop, starlette, kysely | **PASS** |
+
+Per cell, with what the tier found:
+
+| cell | target | before | after | `implementors=` |
+|---|---|---:|---:|---:|
+| **textual-32** | Python method, 9 overrides behind a stored callback | 3 of 12 (25 %) | **11 of 12 (92 %)** | 15 |
+| **ninja-31** | C++ pure virtual | 5 of 7 (71 %) | **7 of 7 (100 %)** | 6 |
+| kysely-31 | TS interface method | 6 of 8 | 6 of 8 | 5 |
+| koa-31 · nunjucks-31 · starlette-31 | duck-typed / abstract | 11 of 11 | 11 of 11 | – / – / 4 |
+| mdbook-31 | Rust trait method | 0 of 6 | 0 of 6 | — |
+
+`mdbook-31` does not move and cannot: `--impact=Preprocessor::run` still answers `found="0"`, so there
+is no seed to find an owner for. That is the extraction gap the registration put out of scope, and it
+is now the largest single remaining item — `--lego=Preprocessor` lists eight implementors for the same
+name on the same index.
+
+### What the implementation had to get right, and what it got wrong first
+
+**The owner rule must apply to BOTH sides of the join.** The first working build found every
+TypeScript interface member's owner and then matched no implementor, because TS/JS store no scope on a
+METHOD: the owner lookup had the containment fallback (graph.h `containedOwnersOf`, memberowner.h's own
+rule — the ONE class whose body holds it, bare when two nest) and the candidate comparison did not.
+kysely's tier went from silent to 5 rows by giving both sides one `memberOwnerNameOf`.
+
+**An overload is not an override, and a decl/def pair is one method.** On the fixture, the first
+version named four rows for `CommandRunner::StartCommand`: `RealCommandRunner::StartCommand` twice (its
+declaration at `runners.cc:5` and its out-of-line definition at `:9`) and
+`DryRunCommandRunner::StartCommand( Edge*, int )`, an arity-mismatched overload that a signature change
+to `StartCommand( Edge* )` does not break. Both are now excluded — by `arityExact`/`params` where both
+arities are call-comparable, and by the house's `isDefinitionNotDeclaration` for the pair — so the
+answer is **2**, which is the number of things a caller would have to change. `test/impactimplcheck.sh`
+arms (C1)–(C4) hold that, and arm (B1) holds the owner scope: `Hollow::hollowRun` is pure virtual with
+no implementor while `Unrelated` and `Unrelated2` define their own `hollowRun`, and a join reading the
+NAME names them.
+
+**The legend had to be registered, not written.** The clause was added to `emitImpactLegend` and never
+appeared: `--impact`'s legend is assembled from the dictionary in `compactlegend.h`, so an attribute
+with no row there is emitted with no explanation. `implementors=`, `implementors_by_name=` and the
+`<impl via="implementor">` element now have rows, element-qualified so the relation cannot read as a
+call edge.
+
+### What this leaves open, and for whom
+
+Three verbs ask the same question and would each need their own band, measured on the same gold set:
+**`--edit-check`**, whose entire job is "the contract changed, who is now incompatible?" — for a
+bodyless member the incompatible parties ARE the implementors; **`--callers`**, which answers
+`count="0"` on a pure virtual today (ninja's `FileReader::ReadFile`, measured) — true and useless; and
+**`--safe-delete`**, where deleting a declaration orphans every override. The primitive is shared so
+those three cannot disagree with `--impact` about who implements what, but none of them is changed
+here and no band above claims anything for them.
+
+The gate-count sites are left alone deliberately: `main` already states 810 against a loop of 820, so
+regenerating them here would fold ten other lanes' increments into this diff. This lane adds the 821st
+gate and the integrator's regeneration is where that count moves.

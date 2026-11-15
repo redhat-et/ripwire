@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "implementortier.h"   // IMPL-TIER: the implementors' own members of a bodyless/virtual member, shared with the CLI --impact
 #include "infra/os.h"   // rw::os::open_memstream — the verb response buffers
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -3473,6 +3474,10 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     declineTargets.insert( declineTargets.end(), seeds.begin(), seeds.end() );
     const std::size_t       declinedCalls  = declinedCallsNaming( g, declineTargets );
     const std::size_t       declinedIface  = declinedIfaceCallsNaming( ing, g, declineTargets );   // the CLI --impact's declined_iface=
+    // IMPL-TIER (implementortier.h): the CLI --impact's implementors= and <impl> rows, by the same call
+    // over the same seeds. Band 4 of its card requires parity, and this emitter is a parallel one — the
+    // only way the two cannot disagree is to share the measurement, not to re-derive it.
+    const ImplementorMembers imImpl = implementorMembersOf( ing, g, std::span<const NodeId>( seeds ) );
     const bool        imSingleRoot = ing.realPaths.empty();   // R-E: root-relative p= + root=, exactly as the CLI --impact emits them
     const std::string imRootPrefix = imSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     // ix2-slice (IX-4): the CLI --impact's <dc> rows, by the same helper over the same set and cut (declinedsites.h)
@@ -3557,7 +3562,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ex( symbol ).c_str(), seeds.size(), reach.size(), impactRingAttrXml( imRing ) + unprovenDefsAttrXml( unprovenDefs ) + implsAttrXml( imContract.contracts, imContract.impls ) + defsListedAttrXml( imAttr.groups, imListing ),   // HOP1, as on the CLI; H1: where the CLI root carries it; attrib-multidef
                   byDepthAttrXml( byDepth ),                                                                        // 0.6.5: the CLI root's by_depth=
                   imports.xmlAttrs.c_str(), radius.tested, radius.untested, ( radiusTestTierFields( radius.tests, /*testsIgnored=*/false, /*json=*/false ) + declinedCallsAttrXml( declinedCalls ) + declinedSiteCutAttrXml( imDc.cut ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
-                  ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } ) ), imRootAttr.c_str(),
+                  ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } )
+                    + implementorsAttrXml( imImpl ) ), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
                   nextAttrXml( impactRootNext( ing, imRing, VrRender{ imSingleRoot, imRootPrefix }, nextFlag( "--safe-delete=", symbol ) ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same rule (mcpclidiffcheck)
@@ -3577,7 +3583,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                        std::span<const char>( imports.lazy ).first( imports.shown ) );
     rw::emitTo( mem, "{}{}</impact>", declinedSitesXml( imDc.views, /*callersForm=*/true ),   // ix2-slice (IX-4), as on the CLI
                   valueRefsXml( ing, imValueRefs, true, VrRender{ imSingleRoot, imRootPrefix }, "--uses=" + symbol )
-                    + impactRingXml( ing, imRing, VrRender{ imSingleRoot, imRootPrefix } ) );   // HOP1: the d=2 slot ring, as on the CLI
+                    + impactRingXml( ing, imRing, VrRender{ imSingleRoot, imRootPrefix } )
+                    + implementorMembersXml( ing, imImpl, imSingleRoot, imRootPrefix ) );   // HOP1: the d=2 slot ring; IMPL-TIER: the <impl> rows, as on the CLI
     return mcpAnswerText( stream );   // nullopt = the buffer lost bytes (dispatch answers -32603), "" stays not-found
 }
 

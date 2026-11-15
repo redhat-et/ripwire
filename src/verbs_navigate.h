@@ -9,6 +9,7 @@
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
 #include "contractseed.h" // BODILESS-SEED: a contract method seeds --impact/--callers/--safe-delete/--path from its implementors' bodies
+#include "implementortier.h"   // IMPL-TIER: the implementors' own members of a bodyless/virtual member — what a signature change breaks
 #include "forgraphverb.h" // GV-PATH-BIND: narrowRefusedSpelling — the --for block's M1 rule on the direct --path/--connect/--callers
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
 #include "infra/sortutil.h"   // svLess: the explicit byte order the alias-name table is sorted and binary-searched by (portablebuildcheck #6)
@@ -3446,6 +3447,7 @@ struct ImpactView
     const rw::ImpactRing*          ring = nullptr;  // HOP1 (backhops.h): the hedged slot ring — reaches_hedged= and its d=2 rows; never in reaches=
     std::size_t                    contractSeeds = 0;   // BODILESS-SEED (contractseed.h): the selector's contract seeds — impls= rides when > 0
     std::size_t                    implBodies    = 0;   // ... and the implementor bodies `seeds` holds for them: impls=
+    const rw::ImplementorMembers*  impl = nullptr;  // IMPL-TIER (implementortier.h): the implementors' own members of SYM's name — what a signature change breaks; never in reaches=
 };
 
 
@@ -3598,6 +3600,7 @@ int emitImpactJson( const ImpactView& v )
         rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( v.imports.next ).c_str() );
     }
     rw::emitRaw( stdout, importTierRollupJson( v.imports ).c_str() );   // IMPACT-ROLLUP: the XML root's, on a cut tier only
+    rw::emitRaw( stdout, ( v.impl != nullptr ? rw::implementorsKeyJson( *v.impl ) : std::string() ).c_str() );   // IMPL-TIER: the XML root's implementors=, absent at zero
     rw::emitTo( stdout, "{}{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ),
                  v.imports.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( v.imports.noFileEdgeLangs ) + "\"" : std::string() );   // arch-honest: likewise
@@ -3622,7 +3625,9 @@ int emitImpactJson( const ImpactView& v )
     rw::emitTo( stdout, "{}{}{}}}", rw::declinedSitesJson( v.dc.views, /*callersForm=*/true, /*mcp=*/false ),   // ix2-slice: the XML <dc> rows
                  rw::valueRefsJson( v.ing, v.valueRefs, true, rw::VrRender{ v.singleRoot, v.rootPrefix }, "vrs",
                                                      "--uses=" + std::string( v.sym ) )
-                   + rw::impactRingJson( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix } ), imLinkNote.c_str() );   // HOP1: the XML <ring>
+                   + rw::impactRingJson( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix } )
+                   + ( v.impl != nullptr ? rw::implementorMembersJson( v.ing, *v.impl, v.singleRoot, v.rootPrefix ) : std::string() ),   // IMPL-TIER: the XML <impl> rows
+                 imLinkNote.c_str() );   // HOP1: the XML <ring>
     return 0;
 }
 
@@ -3643,7 +3648,8 @@ int emitImpactXml( const ImpactView& v )
                  v.imports.xmlAttrs.c_str(), v.radius.tested, v.radius.untested,
                  ( rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/false ) + rw::declinedCallsAttrXml( v.declinedCalls ) + rw::declinedSiteCutAttrXml( v.dc.cut ) + rw::declinedIfaceAttrXml( v.declinedIface ) ).c_str(),   // tier-3 declines into the radius (+ the <dc> cut)
                  ( rw::valueRefsCountAttrXml( v.valueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } )
-                   + rw::patternDispatchAttrXml( v.patternSites.size(), v.valueRefs.patternWideSites.size() ) ),   // value uses + IX-3 template lookups: never in reaches=; absent at zero
+                   + rw::patternDispatchAttrXml( v.patternSites.size(), v.valueRefs.patternWideSites.size() )
+                   + ( v.impl != nullptr ? rw::implementorsAttrXml( *v.impl ) : std::string() ) ),   // value uses + IX-3 template lookups + IMPL-TIER: never in reaches=; absent at zero
                  std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
@@ -3671,7 +3677,8 @@ int emitImpactXml( const ImpactView& v )
                  rw::valueRefsXml( v.ing, v.valueRefs, true, rw::VrRender{ v.singleRoot, v.rootPrefix },
                                    "--uses=" + std::string( v.sym ) )
                    + rw::impactRingXml( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix } )   // HOP1: the d=2 slot ring, after the d=1 <vr> rows
-                   + rw::patternDispatchXml( v.ing, v.patternSites, rw::VrRender{ v.singleRoot, v.rootPrefix } ) );
+                   + rw::patternDispatchXml( v.ing, v.patternSites, rw::VrRender{ v.singleRoot, v.rootPrefix } )
+                   + ( v.impl != nullptr ? rw::implementorMembersXml( v.ing, *v.impl, v.singleRoot, v.rootPrefix ) : std::string() ) );   // IMPL-TIER: a different relation, after the caller rows
     return 0;
 }
 
@@ -3688,7 +3695,8 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                               const std::vector<char>& imProven, std::size_t imUnprovenDefs, std::size_t imDeclinedCalls, std::size_t imDeclinedIface,
                               const rw::ImpactFileRollup& imFiles, const rw::ReachAttribution& imAttr, const rw::DefTableListing& imListing,
                               const rw::ValueRefRows& imValueRefs, const rw::RankDisclosure& prD, const rw::ImpactDeclinedRows& imDc, const rw::ImpactRing& imRing,
-                              const ImpactRootReadings& imRoot )
+                              const ImpactRootReadings& imRoot,
+                              const rw::ImplementorMembers& imImpl )
 {
     if( cfg.json )
     {
@@ -3707,7 +3715,8 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                    + rw::viaNameLegend( std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
-                   + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end ) ).c_str(),
+                   + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
+                   + std::string( rw::implementorTierLegend( !imImpl.rows.empty() ) ) ).c_str(),
                  rw::testedLensLegend( cfg.columnar ), rw::impactTestedPartitionLegend( imRoot.radiusTests, cfg.ignoreTests, !cfg.columnar ),   // IMPACT-TEST-TIER
                  rw::kTestedLensBlindSpotLegend,
                  ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ) + rw::implsLegend( imRoot.contract ) ).c_str(),   // BODILESS-SEED: impls=
@@ -4005,9 +4014,13 @@ std::optional<int> runImpact( const MainDispatch& d )
                                                                     std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ),
                                                                     rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false );
 
+        // IMPL-TIER: computed ONCE here, like every other tier, so the three dialects cannot disagree about
+        // who implements what. Empty for a selector that names no member of a type with implementors, and an
+        // empty tier renders nothing at all (implementortier.h: present-only).
+        const rw::ImplementorMembers imImpl = rw::implementorMembersOf( ing, g, std::span<const rw::NodeId>( seeds ) );
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
                           imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing,
-                          ImpactRootReadings{ .contract = imContract.contracts > 0, .radiusTests = imRadius.tests } );
+                          ImpactRootReadings{ .contract = imContract.contracts > 0, .radiusTests = imRadius.tests }, imImpl );
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact; pageDisclosure emits the ` shown= capped=` bytes this verb used to hand-roll
         // (src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3). LB-G: the same NAMED constant
@@ -4017,7 +4030,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                imports, importPage, importLazyPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
                                imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset,
                                &imTestReach, imRadius, cfg.ignoreTests, imDeclinedCalls, imDeclinedIface, g, imDepth, imByDepth, imValueRefs,
-                               imProven, imFiles, imAttr, imListing, imWalk.typeOnly, seeds, imDc, imPatterns, &imRing, imContract.contracts, imContract.impls };
+                               imProven, imFiles, imAttr, imListing, imWalk.typeOnly, seeds, imDc, imPatterns, &imRing, imContract.contracts, imContract.impls, &imImpl };
 
         if( cfg.columnar ) { return emitImpactColumnar( view ); }
         if( cfg.json     ) { return emitImpactJson( view ); }
