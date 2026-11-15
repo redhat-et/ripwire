@@ -469,9 +469,12 @@ if ran_ok "$f" "(B1b)"; then
 fi
 # forbudget-soft round C (rule 4): sections are funded from the rows at the soft target's cut (reserve first), so 1200 tokens
 # now leaves the hops a share; re-anchored at 700, the widest budget that still exhausts it (measured: 700 budget, 900 not)
-on="$TMP/b2.on.xml"; off="$TMP/b2.off.xml"; run ts "$on" "--for=$QTS" --token-budget=700; runoff ts "$off" "--for=$QTS" --token-budget=700
+# RE-ANCHOR (NEXT-APOS-RAW, 2026-11-15): 700 -> 690. The spent <hops> marker's next= now prints the raw ' (10 B shorter than
+# &apos;), so the exhausted line moved down: measured on the lane binary, 600-695 exhaust (on == off, reason="budget"), 700
+# funds the owner row (qword_cut="1"); on main it was 700 exhaust, 720 funded. A size-derived threshold, not an owner-hop change.
+on="$TMP/b2.on.xml"; off="$TMP/b2.off.xml"; run ts "$on" "--for=$QTS" --token-budget=690; runoff ts "$off" "--for=$QTS" --token-budget=690
 if ran_ok "$on" "(B2)" && ran_ok "$off" "(B2) A/B"; then
-    grep -q 'reason="budget"' "$off" || no "(B2) premise: --token-budget=700 no longer exhausts the ceiling (no reason=\"budget\") — re-tune"
+    grep -q 'reason="budget"' "$off" || no "(B2) premise: --token-budget=690 no longer exhausts the ceiling (no reason=\"budget\") — re-tune"
     if cmp -s "$on" "$off"; then ok "(B2) exhausted ceiling: byte-identical to the A/B handle (owner rows add nothing)"; else no "(B2) exhausted-ceiling answer changed"; fi
 fi
 # (B3) a budget sweep on the 105-callee owner: no budget may drop callee names silently

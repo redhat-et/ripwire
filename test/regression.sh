@@ -779,8 +779,8 @@ for _g in \
     nestedimportcheck \
     nestedqualcheck \
     nestprofilecheck \
-    nextverbcheck \
     nextaposcheck \
+    nextverbcheck \
     noaliascheck \
     nodekindcheck \
     nongitqmetricscheck \
