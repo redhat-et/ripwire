@@ -15992,3 +15992,93 @@ change with its own band and is deliberately out of scope here; it is recorded w
 the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
 question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
 remaining growth term is a schema that spells every ancestor directory once per row.
+
+## `rw::Spinlock` — the owner's lock, its constants measured rather than guessed, and an honest wash on this workload (2026-11-15)
+
+**What landed.** `src/infra/spinlock.h`: a test-and-test-and-set lock with a hint-spin then a capped
+doubling sleep ladder, and `infra/internedtext.h`'s 64 shard locks converted to it. The design is the
+owner's (after Pikus ch. 6, with the doubling added); every constant in it was measured here, and two
+of the three guesses — theirs and mine — were wrong.
+
+### The optimization, confirmed out of the disassembly rather than the source
+
+The extra relaxed LOAD before the exchange is the point: an exchange WRITES the flag's line, so every
+waiter needs it exclusive and invalidates it in every other core's cache, including the holder's. The
+load leaves the line shared. `test/spinlockcheck.sh` arm (C) reads that out of the compiled object —
+on arm64, `ldr w8` then `cbnz` then `swpa`, so a waiter that cannot enter branches away **before any
+write**. The gate asserts the branch as well as the order, because the branch is what makes the load
+worth having.
+
+### Three measurements, two of which overturned a guess
+
+**1. `nanosleep` has a floor, so the low rungs of any ladder are inert.** 200 calls per rung, median:
+
+| requested ns | 1 | 2 | 4 | 64 | 256 | 1024 | 2048 | 4096 | 16384 | 65536 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| actual ns | 4000 | 5375 | 3083 | 2667 | 2667 | 2667 | 4291 | 6666 | 23916 | 85875 |
+
+Everything from 1 ns to 1024 ns sleeps the same **~2,667 ns**. The published example's 1 ns first rung
+and a 1→64 ns ladder are therefore seven identical sleeps: real in the source, absent in the machine.
+The ladder here starts at **2048** — the first rung above the floor — and caps at **65536** (~86 µs).
+
+**2. One sleep costs ~10,000 spins, which is what sets the hot phase.** A relaxed load is **0.26 ns**
+and an exchange on an owned line **2.77 ns**, so the 2,667 ns floor buys about 10,000 loads. Sleeping
+after 8 attempts pays 2.7 µs to avoid 2 ns of spinning; `kSpinHotRounds` is **1024** (~266 ns), which
+covers a whole probe-length hold and still costs a tenth of one syscall.
+
+**3. No `sched_yield` rung — the owner called it and the measurement agreed.** A yield does not block:
+it hands the core back and is immediately runnable, so with more waiters than cores it burns CPU
+handing off to threads that also cannot enter. 20,000 lock/unlock per thread, ~200 ns hold, identical
+hint-spin:
+
+| threads | pause only | + `sched_yield` | + `nanosleep` |
+|---|---:|---:|---:|
+| 4 | 20.5 ms | 19.3 ms | **17.1 ms** |
+| 8 | 45.6 ms | 43.6 ms | **35.5 ms** |
+| 24 | 189.1 ms | 145.5 ms | **128.3 ms** |
+
+The sleep wins at every width by 11–19 %, and by most at 24 threads on 18 cores — this tool's own
+pool, oversubscribed. The `rw::os::sched_yield` seam added for that rung was removed again rather than
+left unused.
+
+### On ripwire's own workload it is a WASH, and that is the result
+
+A cold index is what drives interning. Median of 3 per arm, fresh `--cache=` per run:
+
+| repo | instructions | CPU |
+|---|---:|---:|
+| cpython | **−0.02 %** | −0.85 % |
+| envoy | **+0.04 %** | −0.46 % |
+
+Instructions do not move; the CPU deltas are inside the 3–4 % run-to-run spread these cells show. **No
+throughput claim is made for this change.** 64 shards against 21 threads is simply not contended: the
+collision probability is low and the hold is a probe, so the lock was never the cost. The microbenchmark
+above shows the design is sound *where* contention exists, which is a statement about the primitive,
+not about this consumer.
+
+### What IS claimed, because it is deterministic
+
+`sizeof( std::mutex )` is 40 B on libstdc++ and 64 on libc++; `sizeof( rw::Spinlock )` is **4**. An
+InternedText shard is `alignas( destructive-interference )`, and at 40–64 B of lock plus a vector and a
+size it needed **two** 64 B lines on x86 (the header's own #608 note). At 4 B it is 36 B and fits
+**one**, halving the shard array's line count. That is asserted by `static_assert`, not timed.
+
+### Two correctness obligations, both discharged
+
+**Re-entrancy.** The lock is not recursive, and re-entering it is a hang with no message, so a dev
+build records the owning thread and `DASSERT`s on re-entry. The record is a `std::uint64_t` hash and
+not a `std::thread::id`, because `std::atomic<std::thread::id>` has no constexpr constructor and a
+member of one made every constant-initialized object holding a Spinlock fail to compile
+("`variable does not have a constant initializer`", `src/refnames.h:43`) — found by building, not by
+reasoning.
+
+**What a hold may call.** Audited for the one consumer before converting it, since a cycle with
+spinlocks burns cores where a mutex would merely block. A shard hold calls `locate()` (arithmetic),
+`text()` (an atomic load and a string compare, lock-free), `next_.fetch_add` (atomic), and two that
+allocate — `growShard()`'s vector and `makeSlot()`'s `::operator new`. The allocator takes its own
+lock, so the order is shard → allocator; nothing in an allocation path calls back into interning, so
+the reverse order does not exist and there is no cycle. And each call locks exactly **one** shard,
+chosen by hash, with no path holding two — so this component has no internal order to check. A
+lock-order checker across different locks is separate work and is not here.
+
+Output is byte-identical to `0217049f2` on htop, starlette, kysely and nushell.

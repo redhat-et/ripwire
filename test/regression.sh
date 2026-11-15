@@ -1035,6 +1035,7 @@ for _g in \
     sliceflowsenscheck \
     slotjoincheck \
     spectimingcheck \
+    spinlockcheck \
     staleackcheck \
     statgatecheck \
     stdmembergatecheck \
