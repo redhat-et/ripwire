@@ -111,29 +111,10 @@ DETAIL_ROWS=3   # (c) runs on the first DETAIL_ROWS questions (the fixtures plus
 # E = the answer's whole price: the root's est_tokens plus the blocks outside it a budget holds (src/forbudgetfit.h
 # kForHeldBlocks, heldBlocksPrice: <doc_body> by its own est_tokens=, the others' bytes at the 2.50 markup rate). A budget at or
 # above E cuts nothing; under it the answer is rendered with those blocks held, then shed.
+export RIPWIRE_TESTLIB="$ROOT/test/lib"   # softbudget.py whole_price: est_tokens plus the held blocks and their legends
 cat >"$TMP/price_of.py" <<'PYEOF'
-import re, sys
-def price( path ):
-  s = open( path, 'rb' ).read().decode( 'latin-1' )   # byte offsets, as the binary counts them
-  m = re.search( r'<ctx [^>]*?\best_tokens="(\d+)"', s )
-  if not m: return None
-  held = ( "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" )
-  masked = re.sub( r'<!\[CDATA\[.*?\]\]>|<!--.*?-->', lambda x: ' ' * len( x.group( 0 ) ), s, flags = re.S )
-  depth, heldp, open_at, open_tag = 0, 0, None, None
-  for t in re.finditer( r'<(/?)([A-Za-z_][\w-]*)([^>]*?)(/?)>', masked ):
-      close, name, attrs, selfc = t.groups()
-      if close:
-          depth -= 1
-          if depth == 1 and open_at is not None:
-              e = re.search( r'\best_tokens="(\d+)"', open_tag ) if name == "doc_body" else None
-              heldp += int( e.group( 1 ) ) if e and int( e.group( 1 ) ) > 0 else int( ( t.end() - open_at ) / 2.5 + 0.5 )
-              open_at = None
-          continue
-      if depth == 1 and name in held:
-          if selfc: heldp += int( ( t.end() - t.start() ) / 2.5 + 0.5 )
-          else: open_at, open_tag = t.start(), t.group( 0 )
-      if not selfc: depth += 1
-  return int( m.group( 1 ) ) + heldp
+import os, sys
+sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import whole_price as price   # one copy: test/lib/softbudget.py
 PYEOF
 est_of(){ python3 -c 'import sys; sys.path.insert( 0, sys.argv[ 1 ] ); import price_of; p = price_of.price( sys.argv[ 2 ] ); print( "" if p is None else p )' "$TMP" "$1"; }
 i=0
@@ -154,9 +135,17 @@ while IFS='	' read -r corpus q; do
         ED="$( est_of "$d/D" )"
         if [ -n "$ED" ]; then
             echo "$ED" >"$d/ED"
-            for M in $(( ED / 2 )) "$ED" $(( ED * 2 )); do
+            for M in $(( ED / 2 )) "$ED" $(( ED * 2 )) 1; do
                 ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --max-tokens="$M" ) >"$d/mt.$M" 2>"$d/mt.$M.err"; echo "$?" >"$d/mt.$M.rc"   # status: rc kept in the .rc file; arm (c) compares stdout, stderr and rc with the unbudgeted run byte for byte
             done
+            # (c) the held window: one token under the floor's own est_tokens (the floor answer at --max-tokens=1, its over_ceiling=
+            # label included) sits between the floor's est_tokens and its whole price when the held stub outweighs that label, where a
+            # verdict that leaves the held blocks out said the floor fits (CodeRabbit #665)
+            EF="$( sed -n 's/.*<ctx [^>]*est_tokens="\([0-9]*\)".*/\1/p' "$d/mt.1" | head -1 )"
+            if [ -n "$EF" ] && [ "$EF" -gt 1 ]; then
+                MW=$(( EF - 1 )); echo "$MW" >"$d/MW"
+                ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --max-tokens="$MW" ) >"$d/mw.$MW" 2>"$d/mw.$MW.err"   # status: judged below (judge_fit, hard)
+            fi
         fi
     fi
 done <"$TMP/questions.tsv"
@@ -216,14 +205,21 @@ def judge_fit( label, U, A, budget, hard, pu, pa ):
     if len( sa ) < len( su ) and ( ta or has_fold( A ) ):
         no( f"{label}: a <sigs> row was cut while {len( ta )} tail rows / a fold were still served (rows are shed last)" ); good = False
     floor = min( 4, len( su ) )
+    if not hard and len( sa ) < floor:   # ranks 1..4 always ship, whatever the price (CodeRabbit #665: an empty <sigs> that fits passed)
+        no( f"{label}: {len( sa )} <sigs> rows kept, under the floor of {floor} (ranks 1..4 always ship)" ); good = False
     if hard and len( sa ) != len( su ):   # a --max-tokens ceiling never cuts a ranked row (METHODOLOGY §9 #2: over_ceiling="1" instead)
         no( f"{label}: the ceiling cut a <sigs> row ({len( sa )} of {len( su )} kept)" ); good = False
-    if est( A ) > budget:
-        at_floor = ( hard or len( sa ) <= floor ) and not ta and not has_fold( A )
+    # the WHOLE price is what must fit (est_tokens plus the held blocks and their legends, price_of): CodeRabbit #665 — a budget
+    # equal to est(U) + the held blocks returned U whole while <syms>' legend put it over, and a ceiling verdict left the held
+    # blocks out
+    if price_of.price( pa ) > budget:
+        # over the budget only at the floor: every tier below the ranked rows shed, the --detail bodies included (CodeRabbit #665:
+        # a --max-tokens answer that kept every body passed as unavoidable overflow)
+        at_floor = ( hard or len( sa ) <= floor ) and not ta and not has_fold( A ) and not detail_bodies( A )
         if not at_floor:
-            no( f"{label}: est_tokens={est( A )} > {budget} while optional tiers remain (rows {len( sa )}, tail {len( ta )}, fold {has_fold( A )})" ); good = False
+            no( f"{label}: price={price_of.price( pa )} (est_tokens={est( A )}) > {budget} while optional tiers remain (rows {len( sa )}, tail {len( ta )}, fold {has_fold( A )}, bodies {len( detail_bodies( A ) )})" ); good = False
         if hard and A.get( "over_ceiling" ) != "1":
-            no( f"{label}: est_tokens={est( A )} > max_tokens={budget} and no over_ceiling=\"1\"" ); good = False
+            no( f"{label}: price={price_of.price( pa )} (est_tokens={est( A )}) > max_tokens={budget} and no over_ceiling=\"1\"" ); good = False
     # a budget never grows the answer — except by the over_ceiling= disclosure a --max-tokens ceiling owes when nothing below the
     # ranked rows was left to shed (rows are never cut against a ceiling): that label and its clause are priced markup too
     # the whole price (est_tokens plus the held blocks, price_of): a held answer's est_tokens grows by its own disclosure
@@ -293,6 +289,9 @@ for d in sorted( glob.glob( os.path.join( tmp, "q*" ) ) ):
             good = judge_fit( f"(c) {tag} M={ED // 2}", D, A, ED // 2, True, os.path.join( d, "D" ), p ) and good
             if not is_prefix( detail_bodies( A ), detail_bodies( D ) ):
                 no( f"(c) {tag} M={ED // 2}: the --detail bodies are not a prefix of the unbudgeted ones" ); good = False
+        if os.path.exists( os.path.join( d, "MW" ) ) and D is not None:
+            MW = int( raw( os.path.join( d, "MW" ) ) ); pw = os.path.join( d, f"mw.{MW}" ); AW = parse( pw ) if os.path.exists( pw ) else None
+            good = AW is not None and judge_fit( f"(c) {tag} held window M={MW}", D, AW, MW, True, os.path.join( d, "D" ), pw ) and good
         counts[ "c" ] += 1
         if good: ok( f"(c) {tag}: --detail=2 --max-tokens at/above E={ED} is the unbudgeted answer; under it, a shed of it" )
 

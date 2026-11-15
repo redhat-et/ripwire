@@ -307,7 +307,21 @@ struct ShedState
     std::size_t tailCut = 0, hopCut = 0, detailCut = 0, docCut = 0, rowCut = 0;
 };
 
-// The price of the root's kForHeldBlocks children: <doc_body>'s own est_tokens=, the others' bytes at the markup rate.
+// Where held block `c` starts with its own legend: the XML comment right before it that names it (`<!-- syms: …-->`,
+// `<!-- reexports held="budget": …-->`), printed with the block and outside est_tokens like it; c.at when there is none.
+// childrenOf skips comments, so the block alone was charged (CodeRabbit #665: <syms>' 265 B legend rode free).
+inline std::size_t heldLegendAt( std::string_view answer, const Child& c )
+{
+    const std::size_t open = answer.substr( 0, c.at ).ends_with( "-->" ) ? answer.rfind( "<!-- ", c.at ) : std::string_view::npos;
+    if( open == std::string_view::npos || !answer.substr( open + 5 ).starts_with( c.name ) )
+    {
+        return c.at;
+    }
+    const char after = answer[ open + 5 + c.name.size() ];
+    return after == ':' || after == ' ' ? open : c.at;
+}
+
+// The price of the root's kForHeldBlocks children and their legends: <doc_body>'s own est_tokens=, the rest at the markup rate.
 inline std::size_t heldBlocksPrice( std::string_view answer, std::span<const Child> top )
 {
     std::size_t tokens = 0;
@@ -318,8 +332,10 @@ inline std::size_t heldBlocksPrice( std::string_view answer, std::span<const Chi
             continue;
         }
         const TagSpan     open   = tagSpan( answer, c.at );
+        const std::size_t legend = c.at - heldLegendAt( answer, c );
         const std::size_t priced = c.name == "doc_body" ? attrNumber( answer.substr( c.at, open.end - c.at ), "est_tokens" ) : 0;
-        tokens += priced > 0 ? priced : tokensForEmittedBytes( c.end - c.at, kBytesPerTokenDefault );
+        tokens += priced > 0 ? priced + ( legend > 0 ? tokensForEmittedBytes( legend, kBytesPerTokenDefault ) : 0 )
+                             : tokensForEmittedBytes( c.end - c.at + legend, kBytesPerTokenDefault );
     }
     return tokens;
 }
@@ -711,7 +727,10 @@ private:
     }
     bool overCeiling( const ShedState& st ) const
     {
-        return trusted_ && ask_.ceilingTokens > 0 && priceOf( st, false ) > ask_.ceilingTokens && attrOf( rootTag_, "over_ceiling" ).empty();
+        // the whole charge: what the held re-render's blocks still print rides on top of the answer's price, as walk()'s target
+        // subtracts it (CodeRabbit #665: the verdict compared the answer alone, so an answer the held blocks put over said fits)
+        const std::size_t heldOff = ask_.heldPass ? heldTokens_ : 0;
+        return trusted_ && ask_.ceilingTokens > 0 && priceOf( st, false ) + heldOff > ask_.ceilingTokens && attrOf( rootTag_, "over_ceiling" ).empty();
     }
     // the auto bundle's (or the owner body slot's) count follows its <bodies>; the honest zero says reason="budget" (forautobodycheck)
     std::string withBodiesLeft( std::string root, const ShedState& st ) const
