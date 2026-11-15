@@ -563,11 +563,6 @@ inline std::string impactTestedPartitionLegend( std::size_t radiusTests, bool te
     return s;
 }
 
-// --safe-delete's: it lists callers, not the reach, so no row label; the same two clauses, present-only.
-inline std::string safeDeleteTestTierLegend( std::size_t radiusTests, bool testsIgnored )
-{
-    return std::string( radiusTests > 0 ? kRadiusTestTierLegend : "" ) + ( testsIgnored ? kTestsIgnoredLegend : "" );
-}
 
 // F-02 (round-4 audit): THE LENS'S OWN BLIND SPOT, said where the partition is read.
 //
@@ -1162,6 +1157,12 @@ inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
 {
     return std::string( countA > 0 ? clauseA : "" ) + ( countB > 0 ? clauseB : "" );
+}
+// IMPACT-TEST-TIER: --safe-delete's test-tier clauses. It lists callers, not the reach, so no row label; the same two
+// clauses as --impact (kRadiusTestTierLegend, kTestsIgnoredLegend above), each exactly when its attribute rides the root.
+inline std::string safeDeleteTestTierLegend( std::size_t radiusTests, bool testsIgnored )
+{
+    return clausesForCounts( radiusTests, kRadiusTestTierLegend, testsIgnored ? 1u : 0u, kTestsIgnoredLegend );
 }
 inline std::string depsTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
