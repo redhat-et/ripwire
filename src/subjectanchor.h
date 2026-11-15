@@ -265,10 +265,9 @@ inline bool sourceClassDef( const IngestResult& ing, NodeId id )
 {
     const Symbol& s = ing.symbols[id];
     // NOSKIP-BUNDLE-DEMOTE: a definition in a bundle-shaped file (model.h isBundleShapedFile: a build output, an amalgamation,
-    // a file read lexically) is no source class: it still ranks, but it neither backs a name-exact anchor nor is the answer's
-    // source anchor. Its copy of a source definition (kRankFlagBundleCopy) is covered by the same file test.
-    const bool bundleFile = s.fileId < ing.fileHealth.size() && isBundleShapedFile( ing.fileHealth[ s.fileId ] );
-    return s.kind != SymKind::Section && s.fileId < ing.files.size() && !langFacts( s.lang ).notCode && !bundleFile
+    // a file read lexically; model.h kRankFlagInBundle) is no source class: it still ranks, but it neither backs a name-exact
+    // anchor nor is the answer's source anchor.
+    return s.kind != SymKind::Section && s.fileId < ing.files.size() && !langFacts( s.lang ).notCode && !inBundleFile( s )
         && pathTierOf( rootRelPath( ing, s.fileId ) ) == PathTier::Source && !isToolOrVendoredPath( rootRelPath( ing, s.fileId ) ) && !isTestSymbol( ing, id );
 }
 

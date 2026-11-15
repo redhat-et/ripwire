@@ -511,7 +511,7 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
 
 // NOSKIP-BUNDLE-DEMOTE: a code definition in a bundle-shaped file (model.h isBundleShapedFile) whose name a code definition in
 // a NON-bundle file also has is a copy of that source, and takes kRankFlagBundleCopy (model.h): the rankers put it below the
-// source copy. Demote, never drop: the def stays in every listing, and a name defined only in bundles is no copy and keeps
+// source copy; every definition in such a file takes kRankFlagInBundle. Demote, never drop: the def stays in every listing, and a name defined only in bundles is no copy and keeps
 // its rank. Runs on every load after assignSymbols (rankFlags are never cached); without a bundle-shaped file it reads one
 // FileHealth word per file and returns, so such an index is unchanged.
 inline bool isBundleCopyCandidate( const Symbol& s ) noexcept
@@ -548,7 +548,12 @@ inline void markBundleCopies( IngestResult& result )
     sourceNames.erase( std::ranges::unique( sourceNames ).begin(), sourceNames.end() );
     for( Symbol& s : result.symbols )
     {
-        if( inBundle( s ) && isBundleCopyCandidate( s ) && std::ranges::binary_search( sourceNames, std::string_view( s.name ) ) )
+        if( !inBundle( s ) )
+        {
+            continue;
+        }
+        s.rankFlags |= kRankFlagInBundle;
+        if( isBundleCopyCandidate( s ) && std::ranges::binary_search( sourceNames, std::string_view( s.name ) ) )
         {
             s.rankFlags |= kRankFlagBundleCopy;
         }

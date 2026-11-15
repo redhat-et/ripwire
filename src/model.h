@@ -1025,7 +1025,7 @@ struct Symbol
 static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
-// Symbol::rankFlags bits (a 4-bit field: two bits left). An HTML section unit (ingest_docpass.h pushHtmlUnitDefs) carries both: --recall
+// Symbol::rankFlags bits (a 4-bit field: all four in use). An HTML section unit (ingest_docpass.h pushHtmlUnitDefs) carries both: --recall
 // reads it, nothing else ranks or names it. A .proto definition (langfacts.h generatedSchema) carries kRankFlagNotLexRanked alone: out of
 // --for's statistics but still a definition --defs lists (RANK-PROTO; ingest_model.h assignSymbols sets it from the lang on every load).
 //   kRankFlagNotLexRanked: out of every lexical ranking lens (--for, MCP `for`, --query, pack-task): no corpus statistics (document
@@ -1033,13 +1033,17 @@ static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
 //   kRankFlagNotNamed: no name binds it: no call edge (graph.h byName), no bare-name resolution (resolveAllByName/Qualified: --callers,
 //     --defs, the --for caller hop; a file-qualified selector still reaches it), no markdown-link heading target, no PageRank prior,
 //     and the map's symbols= does not count it.
-//   kRankFlagBundleCopy (NOSKIP-BUNDLE-DEMOTE; ingest_model.h markBundleCopies, every load): a definition in a bundle-shaped
-//     file (isBundleShapedFile) whose name a code definition in a non-bundle file also has. It ranks below that source copy:
-//     the lexical tier factor (filter.h), no mention lift and no place in the mention ambiguity count (mention.h), no
-//     source-class anchor (subjectanchor.h). Still a definition every verb lists. A name defined ONLY in bundles is no copy.
+//   kRankFlagInBundle (NOSKIP-BUNDLE-DEMOTE; ingest_model.h markBundleCopies, every load): a definition in a bundle-shaped file
+//     (isBundleShapedFile: a build output, an amalgamation, a file read lexically). Ranked as any definition, but no carrier
+//     in the route's name index and outside its carrier cap (lexical.h): its names restate sources. No source-class anchor
+//     (subjectanchor.h).
+//   kRankFlagBundleCopy: an InBundle definition whose name a code definition in a non-bundle file also has. It ranks below that
+//     source copy: the lexical tier factor (filter.h), no mention lift and no place in the mention ambiguity count (mention.h),
+//     no route-name definition (lexical.h). Still a definition every verb lists. A name defined ONLY in bundles is no copy.
 inline constexpr std::uint8_t kRankFlagNotLexRanked = 1u << 0;
 inline constexpr std::uint8_t kRankFlagNotNamed     = 1u << 1;
 inline constexpr std::uint8_t kRankFlagBundleCopy   = 1u << 2;
+inline constexpr std::uint8_t kRankFlagInBundle     = 1u << 3;
 inline constexpr std::uint8_t kRankFlagRecallOnly   = kRankFlagNotLexRanked | kRankFlagNotNamed;
 inline bool notLexRanked( const Symbol& s ) noexcept
 {
@@ -1052,6 +1056,10 @@ inline bool notNamed( const Symbol& s ) noexcept
 inline bool bundleCopy( const Symbol& s ) noexcept
 {
     return ( s.rankFlags & kRankFlagBundleCopy ) != 0;
+}
+inline bool inBundleFile( const Symbol& s ) noexcept
+{
+    return ( s.rankFlags & kRankFlagInBundle ) != 0;
 }
 
 // INDEX-ALIAS-CONST (src/aliasdef.h): where an alias definition's WRITTEN TARGET starts, when the target ends the declaration —

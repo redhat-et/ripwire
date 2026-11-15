@@ -2243,6 +2243,10 @@ inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult&
                         // source definition (kRankFlagBundleCopy) is no extra definition, no carrier and never the anchor's file
         }
         noteWholeNameDef( names, s );
+        if( inBundleFile( s ) )
+        {
+            continue;   // a bundle's own definition names itself, but its subtokens restate sources: no carrier (kRankFlagInBundle)
+        }
         parts.clear();
         subtokens( s.name, parts );
         countNameCarriers( names, parts );
@@ -2273,8 +2277,9 @@ inline constexpr std::uint32_t kMaxAnchorDefs = 3;
 // "common" name — test/routecheck.sh (g) covers the floored regime, the r7 webpack corpus the scaled one.
 inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept
 {
-    // the ranked corpus: a kRankFlagNotLexRanked unit (model.h) is no carrier and does not widen the cap
-    const std::size_t   ranked   = ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
+    // the ranked corpus: a kRankFlagNotLexRanked unit (model.h) is no carrier and does not widen the cap, nor is a definition
+    // in a bundle-shaped file (kRankFlagInBundle: buildLowerNameIndex counts no carrier there either)
+    const std::size_t   ranked   = ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotLexRanked | kRankFlagInBundle );
     const std::uint32_t sOver128 = std::uint32_t( ranked / 128 );
     return sOver128 > 8u ? sOver128 : 8u;
 }
