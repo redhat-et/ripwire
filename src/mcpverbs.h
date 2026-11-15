@@ -3973,7 +3973,7 @@ inline McpAffectedResult affectedText( const std::string& root, std::string_view
 // resolveFocus + shortestPath, exactly as the CLI --path=A,B. Returns the <path>…</path> XML fragment (with
 // reachable="0" hops="0" and no <s> children when B is NOT reachable from A — a valid answer, not an error),
 // or "" (caller → not-found error) when EITHER endpoint fails to resolve.
-inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, RedactCounts* redact, bool inForBlock )
+inline std::optional<std::string> pathText( const std::string& root, const std::string& fromTyped, const std::string& toTyped, RedactCounts* redact, bool inForBlock )
 {
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
@@ -3983,13 +3983,17 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     // exactly as the CLI --path now does. Binding `from` to the lowest-NodeId def reported reachable="0" for
     // paths that plainly exist, and the answer never said which def it had picked.
     // H1: each endpoint's decl→def residue, summed onto the root exactly as the CLI --path sums it.
-    std::size_t               srcUnprovenDefs = 0;
-    std::size_t               dstUnprovenDefs = 0;
-    bool                      srcGlob         = false;   // ix2-slice (IX-2 P4): a `*` endpoint, as on the CLI
-    bool                      dstGlob         = false;
-    const std::vector<NodeId> srcDefs         = resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob );
-    const std::vector<NodeId> dstDefs         = resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob );
-    const std::size_t         unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
+    // ix2-slice (IX-2 P4): a `*` endpoint, as on the CLI. GV-PATH-BIND + PATH-AMBIG-VC: the CLI's endpoint binder (forgraphverb.h
+    // bindPathEndpoints): a spelling refused over several fitting definitions narrows to its ONE source definition (narrowed=), else
+    // binds the fitting Owner.method definitions; from/to are the spellings the answer runs with (as typed while either is refused).
+    const PathEndpointsBound   ptEp         = bindPathEndpoints( ing, fromTyped, toTyped );
+    const std::string&         from         = ptEp.src;
+    const std::string&         to           = ptEp.dst;
+    const bool                 srcGlob      = ptEp.srcGlob;
+    const bool                 dstGlob      = ptEp.dstGlob;
+    const std::vector<NodeId>& srcDefs      = ptEp.srcDefs;
+    const std::vector<NodeId>& dstDefs      = ptEp.dstDefs;
+    const std::size_t          unprovenDefs = ptEp.srcUnproven + ptEp.dstUnproven;
     if( srcDefs.empty() || dstDefs.empty() )
     {
         return std::string{}; // an endpoint not found → caller reports not-found
@@ -4081,12 +4085,12 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
                   ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
                     + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
-                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
+                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) + std::string( narrowedVerbLegend( !ptEp.narrowed.empty() ) ) ).c_str(),
                   graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
     rw::emitTo( mem, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                   ex( from ).c_str(), ex( to ).c_str(), ptBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                   ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
+                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) + narrowedAttrXml( ptEp.narrowed ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint; GV-PATH-BIND
                   ptRows.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
                   ( ptRootAttrs + hopRootAttrsXml( ptHops ) + ptRootAttr ).c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
@@ -4419,7 +4423,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                                            // Shared by CLI --connect and the MCP connect verb.
                          std::size_t unprovenDefs = 0,     // H1: the terminals' decl→def residue, SUMMED by the caller
                          const ConnectPicks& picks = ConnectPicks{},   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
-                         std::span<const std::string> narrowed = {} )  // GV-PATH-BIND: the terminals as typed that M1 narrowed (CLI only)
+                         std::span<const std::string> narrowed = {} )  // GV-PATH-BIND: the terminals as typed that M1 narrowed (CLI and MCP)
 {
     const std::string_view ambiguousTerminals = picks.ambiguous;
     // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
@@ -4760,25 +4764,26 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     if( symbolSpecs.size() < 2 || symbolSpecs.size() > connectcfg::kMaxTerminals )
     { err = "connect needs 2..16 symbols (got " + std::to_string( symbolSpecs.size() ) + ")"; return {}; }
 
-    std::vector<NodeId> terminals;
-    std::size_t         unprovenDefs = 0;   // H1: summed over the terminals, exactly as the CLI --connect sums them
-    for( const std::string& spec : symbolSpecs )
+    std::vector<NodeId>           terminals;
+    // H1: unprovenDefs summed over the terminals, exactly as the CLI --connect sums them. GV-PATH-BIND + PATH-AMBIG-VC: the CLI's
+    // terminal binder (forgraphverb.h ConnectTerminalSpellings): the M1 narrowing (narrowed=), then a fitted Owner.method's definitions
+    ConnectTerminalSpellings      cnSpell;
+    std::vector<std::string_view> specs( symbolSpecs.begin(), symbolSpecs.end() );
+    for( std::string_view& spec : specs )
     {
-        std::size_t  termUnprovenDefs = 0;
-        const NodeId id               = resolveFocus( ing, spec, &termUnprovenDefs );
-        if( id == kNoNode ) { err = "symbol not found: " + spec + mcprefuse::atSeedClause( ing, spec ); return {}; }   // the @-clause is "" for a plain name
+        const NodeId id = cnSpell.resolve( ing, spec );
+        if( id == kNoNode ) { err = "symbol not found: " + std::string( spec ) + mcprefuse::atSeedClause( ing, spec ); return {}; }   // the @-clause is "" for a plain name
         terminals.push_back( id );
-        unprovenDefs += termUnprovenDefs;
     }
 
-    const ConnectPicks  picks = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
+    const ConnectPicks  picks = joinTerminalPicks( ing, g, specs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
     const ConnectResult res = connectDeclinedJoints( ing, g, connectSourceJoint( ing, g, terminals, radius ) );   // CONNECT-SOURCE-JOINT (a) + (b), the CLI's core
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
     if( !mem ) { err = "internal error"; return {}; }
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),
-                 unprovenDefs, picks );
+                 cnSpell.unprovenDefs, picks, cnSpell.narrowed );
     std::optional<std::string> answer = mcpAnswerText( stream );
     if( !answer )
     {

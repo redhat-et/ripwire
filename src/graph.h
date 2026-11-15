@@ -16383,6 +16383,44 @@ inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std:
     return focusOfOrderedMatches( ing, resolveAllByNameQualified( ing, spec, unprovenDefCountOut ) );
 }
 
+// PATH-AMBIG-VERDICT (b), lifted here by PATH-AMBIG-VC so every verb that picks no single reading binds through it (--path and MCP
+// path_between via forgraphverb.h bindPathEndpoints, --connect and MCP connect via ConnectTerminalSpellings + joinTerminalPicks,
+// --verify=calls(A,B) via resolveAllOrOwnerFitted). vscode bare `_createInstance` (2 definitions) was searched, while the MORE
+// specific `InstantiationService._createInstance` answered rc=1 "2 definitions fit ... none is chosen": TS records no Symbol::scope,
+// so only the written-spelling tier reads the owner, and it refuses two same-chain classes in two files (a vendored copy) because a
+// single-pick verb could not say which. These verbs pick none: --path and --verify search every definition at once and --connect
+// searches from the one that joins (ambiguous_terminal= on a tie), so a refusal there is no safety, only a lost answer; qualifying
+// must narrow, never refuse. When every tier came back empty and the spelling was refused over K >= 2 fitting definitions, all of
+// them placed (an unplaced candidate keeps the refusal: it would be dropped silently) and all named the spelling's last segment (the
+// dot ACTED as the separator — #657's rule for --uses, usesScopeSpellingNarrows), the spelling binds those K, in the name tower's
+// order. Empty = still refused. A wrong owner (`Nope.f`) fits nothing and still refuses; callers run the one-source narrowing
+// (forgraphverb.h narrowRefusedSpelling) first where the verb has one.
+inline std::vector<NodeId> ownerSpellingFittedDefs( const IngestResult& ing, std::string_view spec )
+{
+    std::size_t         fitted = 0;
+    std::vector<NodeId> fits;
+    (void)resolveAllByWrittenSpelling( ing, spec, {}, &fitted, &fits );
+    const std::size_t cut = spec.find_last_of( ".#:" );
+    if( fitted < 2 || fits.size() != fitted || cut == std::string_view::npos || cut == 0 || cut + 1 >= spec.size() )
+    {
+        return {};
+    }
+    const std::string_view leaf = spec.substr( cut + 1 );
+    if( !std::all_of( fits.begin(), fits.end(), [ & ]( NodeId id ) { return id < ing.symbols.size() && ing.symbols[ id ].name == leaf; } ) )
+    {
+        return {};
+    }
+    return dropDocUnitsBesideCode( ing, applyNameTower( ing, std::move( fits ) ) );
+}
+
+// PATH-AMBIG-VC: every definition a verb that picks none binds for `spec`: resolveAllByNameQualified (every tier), else the
+// owner-spelling fit above. --verify=calls(A,B) resolves its two ends by it, joinTerminalPicks every --connect terminal's set.
+inline std::vector<NodeId> resolveAllOrOwnerFitted( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefCountOut = nullptr )
+{
+    std::vector<NodeId> got = resolveAllByNameQualified( ing, spec, unprovenDefCountOut );
+    return got.empty() ? ownerSpellingFittedDefs( ing, spec ) : got;
+}
+
 // clearly side-effecting C/C++ intrinsics (I/O, allocation, nondeterminism, process control). A
 // function referencing one of these is impure at the source. Conservative-but-focused (clear cases
 // only) so we DEMOTE, not over-demote — the goal is to strip false "pure" flags off const methods.
@@ -18952,8 +18990,9 @@ inline void chooseJoiningTerminals( const Graph& g, const std::vector<std::vecto
     ENSURES( picks.size() == T && tiedOut.size() == T );
 }
 
-// The CLI --connect and the MCP connect verb both resolve their specs with resolveFocus, then hand the picks here: one
-// call re-reads every spec's full definition set (the same resolver, so `file:name` narrows it exactly as before),
+// The CLI --connect and the MCP connect verb both resolve their specs with resolveFocus (forgraphverb.h ConnectTerminalSpellings),
+// then hand the picks here: one call re-reads every spec's full definition set (the same resolver, so `file:name` narrows it
+// exactly as before, and a refused Owner.method's fitted K are its set: resolveAllOrOwnerFitted),
 // lets chooseJoiningTerminals move a many-definition pick onto the definition that joins, and returns the names whose
 // pick tied with another equally-joining definition, comma-joined in spec order ("" when none) — the root's
 // ambiguous_terminal= attribute (ConnectPicks::ambiguous), with each non-bare spec's searched count (ConnectPicks::qualifiedDefs).
@@ -19014,7 +19053,7 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
     defsPerTerminal.reserve( specs.size() );
     for( const auto& spec : specs )
     {
-        defsPerTerminal.push_back( resolveAllByNameQualified( ing, std::string_view( spec ), nullptr ) );
+        defsPerTerminal.push_back( resolveAllOrOwnerFitted( ing, std::string_view( spec ) ) );   // PATH-AMBIG-VC: a fitted Owner.method's K too
     }
     std::vector<std::uint32_t> tied;
     // CONNECT-SOURCE-JOINT: when no terminal is test code, connectSourceJoint never walks through a test, so the choice of

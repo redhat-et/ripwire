@@ -7,15 +7,17 @@
 #        chain holds tickImpl, and the block equals the bare --path call with that spelling
 #   (e2) `callers of ApplicationRef.tick`: the same narrowing on the callers form (verb=--callers=src/app/application_ref.ts:tick)
 #   (e3) NEGATIVE: two bodied source definitions left (a second src/ copy) → no M1 bind: no graph block, no narrowed=; the bare
-#       --path binds all four fitting definitions instead of refusing (PATH-AMBIG-VERDICT (b), src/pathgaps.h pathEndpointFittedDefs)
+#       --path binds all four fitting definitions instead of refusing (PATH-AMBIG-VERDICT (b), src/graph.h ownerSpellingFittedDefs)
 #   GV-PATH-BIND: the same frozen rule on the DIRECT verbs (src/forgraphverb.h narrowRefusedSpelling, src/verbs_navigate.h):
 #   (d1) `--path=ApplicationRef.tick,refreshView` binds the one source definition: rc 0, from="src/app/application_ref.ts:tick",
 #        narrowed="ApplicationRef.tick" on <path>, its reading in the legend (compact and full), and the answer == the explicit
 #        `--path=src/app/application_ref.ts:tick,refreshView` answer apart from that disclosure
 #   (d2) `--connect=ApplicationRef.tick,refreshView`: the same on <connect> (est_tokens= masked: it charges the disclosure)
 #   (d3) the callers form `--callers=ApplicationRef.tick`: the same on <callers>, bootApp listed
-#   (d4) NEGATIVE: two bodied source definitions left → no narrowed= anywhere; --connect and --callers still refuse (rc 1), --path
-#       binds the four fitting definitions (rc 0, from_defs=4: it lists pairs and picks none, so qualifying never refuses there)
+#   (d4) NEGATIVE: two bodied source definitions left → no narrowed= anywhere; --callers still refuses (rc 1), --path binds the four
+#       fitting definitions (rc 0, from_defs=4: it lists pairs and picks none, so qualifying never refuses there), and --connect binds
+#       them too (PATH-AMBIG-VC, the same src/graph.h ownerSpellingFittedDefs: rc 0, the tick terminal searched defs="4" and moved onto
+#       the definition that joins, as for any many-definition name)
 #   M3 MET-BRIDGE: an unreached path whose search reached a caller of to= prints the proven prefix and the one crossing.
 #   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): <met_bridge reachable="0"
 #        in="onContinueReading" via="declined"> holding the path verb's reachable="1" answer onFileEvent -> onContinueReading (its
@@ -215,14 +217,14 @@ if [ "$( rc d3 )" = 0 ] && [ "$( rc d3v )" = 0 ] && [ "$d3eq" = "eq=1 attrs=1 re
     ok "(d3) direct --callers narrowed: of=$d3of narrowed=$d3nar, bootApp listed, == the explicit call ($d3eq)"
 else no "(d3) rc=$( rc d3 )/$( rc d3v ) narrowed='$d3nar' of='$d3of' $d3eq"; fi
 
-# (d4) negative: two bodied source definitions left → every direct verb refuses as before
+# (d4) negative: two bodied source definitions left → no M1 narrowing; --callers refuses, --path and --connect bind the four fitting
 run "$F1N" d4p --path=ApplicationRef.tick,refreshView
 run "$F1N" d4c --connect=ApplicationRef.tick,refreshView
 run "$F1N" d4k --callers=ApplicationRef.tick
 d4n=$(( $( count d4p 'narrowed' ) + $( count d4c 'narrowed' ) + $( count d4k 'narrowed' ) ))
-if [ "$( rc d4p )" = 0 ] && [ "$( rc d4c )" = 1 ] && [ "$( rc d4k )" = 1 ] && [ "$d4n" = 0 ] && grep -q 'from_defs="4"' "$TMP/d4p.xml" \
-   && grep -q 'found="0" refused="4"' "$TMP/d4k.xml" && [ ! -s "$TMP/d4c.xml" ]; then
-    ok "(d4) two source definitions left: --connect/--callers still refuse (rc 1, refused=4), --path binds the 4 (from_defs=4), no narrowed="
+if [ "$( rc d4p )" = 0 ] && [ "$( rc d4c )" = 0 ] && [ "$( rc d4k )" = 1 ] && [ "$d4n" = 0 ] && grep -q 'from_defs="4"' "$TMP/d4p.xml" \
+   && grep -q 'found="0" refused="4"' "$TMP/d4k.xml" && grep -qE '<t n="tick"[^>]* defs="4"' "$TMP/d4c.xml"; then
+    ok "(d4) two source definitions left: --callers still refuses (rc 1, refused=4), --path (from_defs=4) and --connect (t defs=4) bind the 4, no narrowed="
 else no "(d4) rc=$( rc d4p )/$( rc d4c )/$( rc d4k ) narrowed=$d4n"; fi
 
 # (b1) met bridge across a declined virtual call

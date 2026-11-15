@@ -11,7 +11,6 @@
 #include "forgraphverb.h" // GV-PATH-BIND: narrowRefusedSpelling — the --for block's M1 rule on the direct --path/--connect/--callers
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
 #include "infra/sortutil.h"   // svLess: the explicit byte order the alias-name table is sorted and binary-searched by (portablebuildcheck #6)
-#include <deque>             // ConnectTerminalSpellings: bound spellings the terminal views point into
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_navigate.h — the navigate family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -2377,8 +2376,10 @@ std::optional<int> runVerify( const MainDispatch& d )
         // H1: each symbol's decl→def residue, summed onto the root exactly as --path sums its two endpoints.
         std::size_t               srcUnprovenDefs = 0;
         std::size_t               dstUnprovenDefs = 0;
-        const std::vector<NodeId> srcDefs         = resolveAllByNameQualified( ing, claim.arg1, &srcUnprovenDefs );
-        const std::vector<NodeId> dstDefs         = resolveAllByNameQualified( ing, claim.arg2, &dstUnprovenDefs );
+        // PATH-AMBIG-VC (graph.h resolveAllOrOwnerFitted): a refused Owner.method binds its fitting definitions, as --path does; the
+        // claim searches every definition at once, so qualifying narrows and never refuses (a wrong owner still refuses)
+        const std::vector<NodeId> srcDefs         = resolveAllOrOwnerFitted( ing, claim.arg1, &srcUnprovenDefs );
+        const std::vector<NodeId> dstDefs         = resolveAllOrOwnerFitted( ing, claim.arg2, &dstUnprovenDefs );
         vfUnprovenDefs                            = srcUnprovenDefs + dstUnprovenDefs;
         if( srcDefs.empty() || dstDefs.empty() )
         {
@@ -2963,85 +2964,6 @@ std::optional<int> runDefs( const MainDispatch& d )
     return 0;
 }
 
-// GV-PATH-BIND: the --path endpoints, resolved, after the M1 rule (src/forgraphverb.h narrowRefusedSpelling). When an endpoint binds
-// nothing as typed and EVERY such endpoint narrows to its one source definition, src/dst/spec are the spellings the verb runs with (the
-// explicit call's) and `narrowed` names the spellings as typed, from= first; otherwise everything is as typed, defs as resolved (the
-// verb then refuses exactly as before). H1: each *Unproven is that endpoint's decl→def residue (graph.h declToDefFollowThrough).
-struct PathEndpointsBound
-{
-    std::string              src;
-    std::string              dst;
-    std::string              spec;   // "src,dst": the --path= value of the call that runs
-    std::vector<rw::NodeId>  srcDefs;
-    std::vector<rw::NodeId>  dstDefs;
-    std::size_t              srcUnproven = 0;
-    std::size_t              dstUnproven = 0;
-    bool                     srcGlob     = false;
-    bool                     dstGlob     = false;
-    std::vector<std::string> narrowed;
-};
-
-// The narrowed spellings of the endpoints that bound nothing, slot order; nullopt when one of them is still refused.
-inline std::optional<std::vector<std::string>> narrowedPathSpellings( const rw::IngestResult& ing, PathEndpointsBound& ep )
-{
-    std::vector<std::string> narrowed;
-    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
-    {
-        if( !defs->empty() )
-        {
-            continue;
-        }
-        std::optional<std::string> pick = rw::narrowRefusedSpelling( ing, *slot, rw::GraphSubjectForm::Path );
-        if( !pick )
-        {
-            if( !rw::pathEndpointFittedDefs( ing, *slot ).empty() )
-            {
-                continue;   // PATH-AMBIG-VERDICT (b): this endpoint binds its fitting definitions below; the other may still narrow
-            }
-            return std::nullopt;
-        }
-        narrowed.push_back( std::exchange( *slot, std::move( *pick ) ) );
-    }
-    return narrowed;
-}
-
-inline PathEndpointsBound bindPathEndpoints( const rw::IngestResult& ing, std::string_view srcN, std::string_view dstN )
-{
-    PathEndpointsBound ep;
-    ep.src = srcN;
-    ep.dst = dstN;
-    const auto resolve = [ & ]
-    {
-        ep.srcDefs = rw::resolvePathEndpoint( ing, ep.src, &ep.srcUnproven, &ep.srcGlob );
-        ep.dstDefs = rw::resolvePathEndpoint( ing, ep.dst, &ep.dstUnproven, &ep.dstGlob );
-    };
-    resolve();
-    if( ep.srcDefs.empty() || ep.dstDefs.empty() )
-    {
-        PathEndpointsBound typed = ep;
-        if( std::optional<std::vector<std::string>> narrowed = narrowedPathSpellings( ing, ep ) )
-        {
-            ep.narrowed = std::move( *narrowed );
-            resolve();
-        }
-        else
-        {
-            ep = std::move( typed );   // still refused: the spellings as typed
-        }
-    }
-    // PATH-AMBIG-VERDICT (b): an endpoint still refused because several placed definitions fit its scope-qualified spelling binds
-    // them all (src/pathgaps.h pathEndpointFittedDefs): --path lists the reaching pairs, so qualifying narrows and never refuses
-    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
-    {
-        if( defs->empty() )
-        {
-            *defs = rw::pathEndpointFittedDefs( ing, *slot );
-        }
-    }
-    ep.spec = ep.src + "," + ep.dst;
-    return ep;
-}
-
 // served: bodies the enclosing answer already carries (the --for graph-verb block passes its fold's and slot's); a middle hop among them
 // prints no second copy (hopbody.h). The bare --path passes none.
 std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::NodeId> served, bool inForBlock )
@@ -3269,32 +3191,6 @@ std::optional<int> runPath( const MainDispatch& d )
 }
 
 
-// The --connect terminals as resolved. resolve() is a terminal's node as --around/--lego resolve it (resolveFocus), its decl→def residue
-// summed into `unprovenDefs` (H1). GV-PATH-BIND: a spelling that binds nothing and that the M1 rule narrows to one source definition
-// (src/forgraphverb.h narrowRefusedSpelling) resolves as that definition's own spelling: `bound` holds it (a deque, so `spec` may view
-// it), `spec` is moved onto it and `narrowed` gains the spelling as typed. kNoNode = refused as before, `spec` as typed.
-struct ConnectTerminalSpellings
-{
-    std::size_t              unprovenDefs = 0;
-    std::deque<std::string>  bound;
-    std::vector<std::string> narrowed;
-
-    rw::NodeId resolve( const rw::IngestResult& ing, std::string_view& spec )
-    {
-        std::size_t                termUnprovenDefs = 0;
-        rw::NodeId                 id   = rw::resolveFocus( ing, spec, &termUnprovenDefs );
-        std::optional<std::string> pick = id == rw::kNoNode ? rw::narrowRefusedSpelling( ing, spec, rw::GraphSubjectForm::Common ) : std::nullopt;
-        if( pick )
-        {
-            narrowed.emplace_back( spec );
-            spec = bound.emplace_back( std::move( *pick ) );
-            id   = rw::resolveFocus( ing, spec, &termUnprovenDefs );
-        }
-        unprovenDefs += termUnprovenDefs;
-        return id;
-    }
-};
-
 std::optional<int> runConnect( const MainDispatch& d )
 {
     using namespace rw;
@@ -3345,7 +3241,7 @@ std::optional<int> runConnect( const MainDispatch& d )
         // H1: each terminal's decl→def residue, SUMMED onto the root as --path sums its endpoints: the remedy is the same for
         // any terminal (widen its file:name spelling), and a bare-name terminal always adds 0. Unreported, a drop reached the
         // reader as edges="0" groups="0" between a declaration and the caller of the definition it could not be tied to.
-        ConnectTerminalSpellings cnSpell;   // + GV-PATH-BIND: a terminal refused over several fitting definitions runs as its ONE source definition
+        ConnectTerminalSpellings cnSpell;   // + GV-PATH-BIND / PATH-AMBIG-VC (forgraphverb.h): the M1 narrowing, then a fitted Owner.method's definitions
         for( std::string_view& spec : specs )
         {
             const NodeId id = cnSpell.resolve( ing, spec );   // "name" or "file:name" — exactly --around/--lego
