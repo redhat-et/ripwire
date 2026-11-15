@@ -40,8 +40,9 @@
 #   O2 negative: the same owner with every member in its own file — the order the clause derives is the line order, and the
 #          printed order is it. [G] full (its "then line" already decided a one-file list); [P] compact, whose old clause named
 #          no tie-break at all ("question words first, names only"). Premise: >= 2 names listed, all in the owner's file.
-#   O3 [optional, RIPWIRE_BASE_BIN=<pre-#595 binary>] O1/O2's answers equal the base binary's once the mem= clause and
-#          est_tokens (which prices the clause) are masked: only the legend moved.
+#   O3 [optional, RIPWIRE_PRE595_BIN=<pre-#595 binary, e.g. f45e418f1>] O1/O2's answers equal that binary's once the mem=
+#          clause and est_tokens (which prices the clause) are masked: only the legend moved. Its own variable: I1's
+#          RIPWIRE_BASE_BIN is the pre-member-names binary, against which a names-on answer differs by design.
 #   I1 [optional, RIPWIRE_BASE_BIN=<pre-change binary>] RIPWIRE_NO_MEMBER_NAMES=1 equals the base binary on every probe
 #
 # Usage:  bash test/formembernamescheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/formembernamescheck.sh
@@ -299,11 +300,14 @@ arm "O1 two files, compact clause derives the printed order" order "$TMP/o_split
 arm "O1 two files, full clause derives the printed order"    order "$TMP/o_split_f.xml"  Widget src/owner.rs split  "$Q_O" "${O_SPLIT[@]}"
 arm "O2 one file (negative), compact: line order"            order "$TMP/o_single_c.xml" Widget src/owner.rs single "$Q_O" "${O_SINGLE[@]}"
 arm "O2 one file (negative), full: line order"               order "$TMP/o_single_f.xml" Widget src/owner.rs single "$Q_O" "${O_SINGLE[@]}"
-if [ -n "${RIPWIRE_BASE_BIN:-}" ]; then
+if [ -n "${RIPWIRE_PRE595_BIN:-}" ]; then
     for v in split_c split_f single_c single_f; do
         d="${v%_*}"; lg=(); [ "${v##*_}" = f ] && lg=( --legend=full )
-        ( cd "$TMP/o_$d" || exit 1; RIPWIRE_NO_BODY_FOLD=1 "$RIPWIRE_BASE_BIN" "$TMP/o_$d" --for="$Q_O" ${lg[@]+"${lg[@]}"} --cache="$TMP/o3b.$v" >"$TMP/o3b.$v.xml" 2>/dev/null )
-        arm "O3 $v: only the legend moved vs the base binary" legendonly "$TMP/o_$v.xml" "$TMP/o3b.$v.xml"
+        if ( cd "$TMP/o_$d" || exit 1; RIPWIRE_NO_BODY_FOLD=1 "$RIPWIRE_PRE595_BIN" "$TMP/o_$d" --for="$Q_O" ${lg[@]+"${lg[@]}"} --cache="$TMP/o3b.$v" >"$TMP/o3b.$v.xml" 2>/dev/null ); then
+            arm "O3 $v: only the legend moved vs the pre-#595 binary" legendonly "$TMP/o_$v.xml" "$TMP/o3b.$v.xml"
+        else
+            no "O3 $v: the pre-#595 binary exited non-zero"
+        fi
     done
 fi
 
