@@ -1055,6 +1055,7 @@ for _g in \
     testscopecheck \
     textdocscheck \
     textpoolcheck \
+    tiercallerscheck \
     timsortcheck \
     tokenbudgetcheck \
     tomllangcheck \
