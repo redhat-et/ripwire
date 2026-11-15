@@ -1394,9 +1394,11 @@ inline bool fileTailTermNamesShown( const FileTail& t, std::size_t shown ) noexc
 
 // TAIL-SYM-TERMS' tie-break: the graph's plain PageRank (the default map's and --graph-query's order), computed once per answer and
 // only when a tail row can gain a name (the switch on and a task word to match); empty otherwise, and then no row gains one.
-inline std::vector<float> tailTermTieRank( const Graph& g, std::string_view task )
+// `tokenBudget` (--token-budget / MCP budget_tokens) > 0: empty too. The target's tail reserve prices the pre-card walk
+// (fileTailOldWalk), so a name there would spend bytes the target never granted (forsoftbudgetcheck (ST) upper bound).
+inline std::vector<float> tailTermTieRank( const Graph& g, std::string_view task, std::size_t tokenBudget )
 {
-    if( !tailSymTermsOn() || tailTaskTerms( task ).empty() )
+    if( tokenBudget > 0 || !tailSymTermsOn() || tailTaskTerms( task ).empty() )
     {
         return {};
     }

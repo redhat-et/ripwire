@@ -914,6 +914,15 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
 }
 inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed)";
+// TAIL-SYM-TERMS: the clause defining tsym=, right after the tail clause that defines sym=, only when a shown row carries one.
+inline void spliceTailTermsClause( std::string& header, bool compact, bool present )
+{
+    if( present )
+    {
+        rw::spliceClauseAfter( header, compact ? kForCompactLegendTail : rw::kForFileTailLegend,
+                               compact ? rw::kForCompactFileTailTermsLegend : rw::kForFileTailTermsLegend );
+    }
+}
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
     "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
@@ -4005,10 +4014,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // DEEP-TAIL d2, FOLD C (forbudget-soft round C): the file-grain tail is page 0 of the --for file page — one shared
         // model (forpage.h computeFileTail) for both dialects and the MCP twin, from the SAME ranking and term evidence the
         // `--limit=40` page uses, so the tail, its next= page and the page itself cannot disagree.
-        // TAIL-SYM-TERMS: the tie-break order of the names a tail row adds (forpage.h tailTermTieRank), once for every tail below.
-        // Under --token-budget none is added (empty): the target's tail reserve prices the pre-card walk (fileTailOldWalk), so a
-        // name there would spend bytes the target never granted (forsoftbudgetcheck (ST) upper bound) — the MCP twin's rule too.
-        const std::vector<float> termTieRank = cfg.tokenBudget == 0 ? rw::tailTermTieRank( g, cfg.forTask ) : std::vector<float>{};
+        // TAIL-SYM-TERMS: the tie-break order of the names a tail row adds (forpage.h tailTermTieRank), once for every tail below;
+        // empty under --token-budget (none is added there — the MCP twin's rule too).
+        const std::vector<float> termTieRank = rw::tailTermTieRank( g, cfg.forTask, cfg.tokenBudget );
         const FileTail forFileTail = computeFileTail( ing, lensRank, lr.evidence, lensSurfaceIds, flRootArg, cfg.forTask, false, &termTieRank );   // the DEGRADE paths' tail
         // H2H-Graft lane 2 (2026-09-07): the tail's rank rows exclude only the files of the sigs rows actually EMITTED (a row the
         // ladder trimmed must land in the tail, never nowhere).
@@ -5137,11 +5145,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTailWide : rw::kForFileTailWideLegend,
                                    headerParts.compactLegend ? rw::kForCompactFileTailFoldedLegend : rw::kForFileTailFoldedLegend );
         }
-        if( tailTermNames )   // TAIL-SYM-TERMS: right after the tail clause that defines sym=
-        {
-            rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTail : rw::kForFileTailLegend,
-                                   headerParts.compactLegend ? rw::kForCompactFileTailTermsLegend : rw::kForFileTailTermsLegend );
-        }
+        spliceTailTermsClause( headerStr, headerParts.compactLegend, tailTermNames );
         if( sigsPreRendered && sigsStr.contains( " same_as=\"" ) )
         {
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendFacts : std::string_view(),
