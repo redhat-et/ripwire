@@ -14712,3 +14712,119 @@ If the resolve loop's output cannot be serialized without also serializing the r
 (`varType`, `localNameSet`, `localShadowSpans`, `acc`), the section grows past Band 3 and the lane
 reduces to the CSR-only variant. That is a legitimate outcome, to be recorded as a narrowing with the
 measured reason, not retried until it passes.
+
+## Cold CPU is not all tree-sitter: two of our own per-node passes — PRE-REGISTERED 2026-11-15 (before any `src/` change, after the profile below and before any number from the readout set)
+
+**What this registers.** Two structural changes inside the hottest NON-vendored cold scope, and
+nothing else:
+
+1. **No per-node heap allocation in the complexity walk.** `cc_walk` (`src/ingest_metrics.h:1045`)
+   constructs three `std::vector`s per call (`stack`, `kids`, `elifKids`, each `reserve( 64 )`) and
+   `complexityOf` a fourth; `complexityOf` runs **121,121 times** on one envoy index. Replace them
+   with buffers reused for the lifetime of a worker thread.
+2. **No per-node string comparison for node kind.** The walk reads `ts_node_type( n )` and then
+   compares that `const char*` with `kindIs( t, "..." )` once per node per predicate. Replace with
+   the grammar's numeric `ts_node_symbol()` and a per-language id table built once per process. This
+   repo has already measured this exact class once: the 2026-09-10 OPTREMARKS F3 round took
+   per-AST-node `strcmp` from **10.6 % of busy CPU to 0.23 %** at a different site.
+
+**The vendored parse is explicitly out of scope.** The owner's ruling of 2026-11-14 (recorded as
+Band 3b of the graph-section-cache registration) is that cold is mostly tree-sitter and not worth
+rewriting. This lane does not touch `ts_parser_parse`, any vendored grammar, or the query engine. It
+touches two passes that are ours, and it is registered precisely because a profile distinguishes
+them from the parse.
+
+### The measurement that motivated it, and the nesting proof it needed
+
+Profiled build at `0217049f2` (`cmake -DRIPWIRE_NATIVE=ON -DRIPWIRE_PROFILE=ON`), cold run on envoy
+with a fresh cache path, 20 threads. The profiled binary carries overhead, so **shares, not
+milliseconds, are the result**; `/usr/bin/time -l` on the same run reads 21.35 s user + 1.36 s sys
+and 315,552,940,128 instructions retired, against the comparison table's 22.89 s for this cell.
+
+| scope | share of total top-level CPU | whose code |
+|---|---:|---|
+| `ingest/extractFile: tree-sitter parse` | **31.5 %** | vendored (out of scope) |
+| `ingest/extractFile: tags query exec+captures` | 29.7 % | tree-sitter's query engine running **our** `queries/*/tags.scm` |
+| …of which `ingest/metrics: complexityOf one function (fused DFS)` | **10.8 %** (121,121 calls) | **ours** |
+| `ingest/extractFile: side captures` | 18.6 % | mixed |
+| …of which `ingest/extractFile: value references` | **8.9 %** (7,608 calls) | **ours** |
+| `ingest/readFile: fopen+read whole file` | 6.9 % | I/O |
+| `buildGraph: resolve refs + build CSR` | 3.6 % | ours (small when cold) |
+| `ingest: saveCache (serialize + write)` | 1.5 % | ours |
+
+**The nesting was checked, not assumed**, because the two "ours" rows would otherwise be double
+counted against their parents. `ripwire . --callers=complexityOf` reports its only caller as
+`captureTagsFacts` (`src/ingest_sidecap.h:1899`), whose profile scope opens at line 1939 — so the
+10.8 % sits INSIDE the 29.7 %. `--callers=captureValueRefs` reports `captureSideFacts`
+(`src/ingest_sidecap.h:1639`), scope at 1650 — the 8.9 % sits inside the 18.6 %.
+
+So **the two passes this lane targets are 19.7 % of cold CPU on envoy**, and the share is
+language-dependent rather than universal: on nushell (Rust) `tags query exec+captures` is **34.6 %**
+against the parse's 26.4 %, so the capture side is the larger half there.
+
+### What this is, and is not, trying to move
+
+The weak-or-close ledger's W2 row is phrased as an IPC gap — we retire 1.4e10 instructions per CPU
+second against graft's 2.2–2.4e10 on every repo, which turns a 1.3–3.4x instruction-count lead into a
+cold-CPU margin of 1.03x on vscode and an outright loss on cpython (22.71 s against 18.53 s).
+**Instructions per CPU second was the diagnostic, not the objective.** Removing allocations and byte
+compares removes instructions as well as stalls, so that ratio may move either way, and a run with
+LOWER CPU and lower instructions per second is a PASS. The objective is CPU seconds; the ratio is
+reported beside it as a reading. Registering it the other way round would let the lane fail by
+succeeding.
+
+### The readout set, named before it is run
+
+Cold runs on the six repos the comparison table measures — koa (11 kLOC), terraform, nushell, cpython,
+envoy, vscode (3,848 kLOC) — **plus `llvm-project` as the super-linear rung**, per the standing rule
+that one oversized run per performance round is what makes a super-linear defect visible. Each run
+uses a FRESH `--cache=` path, which is what makes a cold run repeatable: verified before registering
+(nushell with a new cache path reads 3.76 s user + 0.26 s sys against the table's 4.01 s, with a
+parse-and-query-heavy profile shape). Median of 5 per cell, on a **non-profiled** build, measured by
+`/usr/bin/time -l` for CPU and instructions retired, with a profiled control run per repo to confirm
+the two target scopes' shares actually fell.
+
+### Band 1 — CPU, and it gates
+
+**Cold user+sys CPU falls by at least 8 % on envoy and on cpython** against `0217049f2`, with **no
+repo on the ladder regressing by more than 2 %**.
+
+The 8 % is derived, not chosen: the two passes are 19.7 % of envoy's cold CPU, so a floor of 8 %
+asserts that at least two fifths of that is overhead rather than necessary work. *Refuted if* either
+repo comes in under 8 %, or any repo regresses past 2 % — and a refutation here is worth having,
+because it would mean per-node allocation and byte comparison are already cheap and the IPC gap lives
+somewhere this profile cannot see.
+
+### Band 2 — the two scopes must be where the win came from
+
+In the profiled control run, `complexityOf`'s share of total top-level CPU falls from 10.8 % and the
+combined share of the two target scopes falls by at least a third of itself. *Refuted if* total CPU
+improves while these shares do not: that would mean something else moved, the attribution above is
+wrong, and the result may not be published as this lane's.
+
+### Band 3 — byte-identity, the ship/no-ship gate
+
+Every metric this walk computes (`cx`, `ccx`, `maxNest`, `locals`, `ppAlt`, `humps`, `deepLoc`, `ev`,
+`evWhy`) is an EMITTED value, so this refactor has no licence to change any of them. **stdout must be
+byte-identical to `0217049f2` on every repo in the readout set and on the language fixtures, cold and
+warm**, and the existing metrics gates must pass unchanged. A single differing byte fails the lane
+outright rather than being normalised away. The `ts_node_symbol()` table additionally needs a
+negative check: a grammar whose id table is missing or stale must refuse loudly, never silently
+classify every node as "not a control node" — which would show up as complexity collapsing to 1 and
+is exactly the failure a byte-identity gate on a mixed-language corpus catches.
+
+### What this registration does NOT claim
+
+Nothing about cold WALL time (the published column is CPU, and these are pool threads). Nothing about
+the warm path, which is PR #661's lane. Nothing about the vendored parse or the query engine. No claim
+that the IPC gap against graft closes — graft is a JIT'd Node tool whose instruction mix is not ours,
+and scope fact: this run never ran its `init`, so it is measured in a reduced posture.
+
+### The honest failure mode, registered in advance
+
+The system allocator may already make a 64-element `reserve` nearly free, and `kindIs` may already
+compile to a length-first compare that the branch predictor handles. If so, both changes land near
+zero and the lane is recorded as a **measured near-no-op with the profile shares beside it** — not
+retried with a third variant until something passes. In that case the remaining cold CPU is parse and
+query-engine time, the owner's Band 3b ruling stands unamended, and the ledger's W2 row should be
+rewritten to say the gap is not reachable from our side.
