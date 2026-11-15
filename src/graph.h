@@ -16491,20 +16491,6 @@ inline bool isTestedByReach( const IngestResult& ing, const std::vector<char>& t
     return n < testReach.size() && testReach[n] != 0 && !isTestSymbol( ing, n );
 }
 
-// |nodes ∩ tested|, over isTestedByReach — the tested/untested root-count pair every partitioning verb
-// (--safe-delete/--impact/--callers/--callees) derives the same way, factored so none of them re-writes the
-// loop inline (a second copy of a three-line loop in two verb handlers is exactly what --quality-delta's
-// duplication kind flags, and the loop itself adds nothing to either handler's own logic).
-inline std::size_t countTestedIn( const IngestResult& ing, const std::vector<char>& testReach, const std::vector<NodeId>& nodes )
-{
-    std::size_t n = 0;
-    for( NodeId x : nodes )
-    {
-        if( isTestedByReach( ing, testReach, x ) ) { ++n; }
-    }
-    return n;
-}
-
 // IMPACT-TEST-TIER: the transitive radius in THREE tiers, not two. isTestedByReach never counts a test symbol (a test is a
 // seed, never a covered row), so `untested = reach - tested` used to put every TEST that calls the target into the untested
 // production count: textual --impact=Widget.arrange read radius_untested="190" of reaches="221" with 172 test definitions
