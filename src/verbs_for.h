@@ -2909,6 +2909,35 @@ inline rw::ForAnswerLedger forAnswerLedgerOf( const std::optional<rw::PricedRoot
                                 .detailTokens    = served ? bodies.tokens : 0u,
                                 .autoBodies      = served && !which.detail };
 }
+// The <bodies> section a budget may shed, as the pass rendered it: --detail's, else the compact route's owner body (for-body-slot,
+// its one <bodies>), else the auto bundle's (emitted unless the hops-cut marker path ran).
+struct ForLedgerSections
+{
+    const rw::ChargedSection& detail;
+    const rw::ChargedSection& autoBundle;
+    const rw::BodySlotRender& slot;
+    bool                      hopsCutMarker = false;
+};
+inline void fillForAnswerLedger( rw::ForAnswerLedger* ledger, const rw::Config& cfg, const std::optional<rw::PricedRootInputs>& inputs,
+                                 const rw::BodyFoldRender& fold, const ForLedgerSections& s )
+{
+    if( ledger == nullptr )
+    {
+        return;
+    }
+    if( cfg.detail > 0 )
+    {
+        *ledger = forAnswerLedgerOf( inputs, fold, s.detail, ForLedgerBodies{ .detail = true } );
+        return;
+    }
+    if( s.slot.served )
+    {
+        const rw::ChargedSection slotSection{ .xml = s.slot.xml, .tokens = s.slot.bodyTokens, .isRendered = true };
+        *ledger = forAnswerLedgerOf( inputs, fold, slotSection, ForLedgerBodies{ .autoServed = true } );
+        return;
+    }
+    *ledger = forAnswerLedgerOf( inputs, fold, s.autoBundle, ForLedgerBodies{ .autoServed = !s.hopsCutMarker } );
+}
 
 struct ForLensPassMode
 {
@@ -5238,14 +5267,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         ForLensPricedHeader pricedHeader     = finishForLensHeaderPriced( std::move( headerStr ), rootFinish );
         headerStr                            = std::move( pricedHeader.header );
         const std::size_t forAnswerEstTokens = pricedHeader.estTokens;   // the answer's est_tokens: FOR-DOC-BODY serves into the budget left after it
-        if( mode.ledger != nullptr )   // TOKEN-BUDGET-MONOTONE: the shares a budget may shed, priced as the root priced them
-        {
-            // the compact route's owner body (for-body-slot) is its one <bodies>: a budget sheds it as it sheds the auto bundle's
-            const bool              slotBodies = cfg.detail == 0 && slot.served;
-            const rw::ChargedSection slotSection{ .xml = slotBodies ? slot.xml : std::string(), .tokens = slot.bodyTokens, .isRendered = slotBodies };
-            *mode.ledger = forAnswerLedgerOf( pricedHeader.inputs, fold, cfg.detail > 0 ? detailSection : slotBodies ? slotSection : autoSection,
-                                              ForLedgerBodies{ .detail = cfg.detail > 0, .autoServed = slotBodies || !enrich.hopsCutMarker } );
-        }
+        // TOKEN-BUDGET-MONOTONE: the shares a budget may shed, priced as the root priced them
+        fillForAnswerLedger( mode.ledger, cfg, pricedHeader.inputs, fold,
+                             ForLedgerSections{ .detail = detailSection, .autoBundle = autoSection, .slot = slot, .hopsCutMarker = enrich.hopsCutMarker } );
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );

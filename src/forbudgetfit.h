@@ -489,13 +489,17 @@ private:
         return pos;
     }
     // the row's <doc>…</doc> child removed (the row's attributes and its other children kept)
+    // the row's own <doc> child element (its body text is plain text, so the child walk never meets a "<doc>" inside it)
     static void cutRowDoc( std::string& piece )
     {
-        const std::size_t at  = piece.find( "<doc>" );
-        const std::size_t end = at == std::string::npos ? std::string::npos : piece.find( "</doc>", at );
-        if( end != std::string::npos )
+        std::size_t closeEnd = 0;
+        for( const Child& c : childrenOf( piece, 0, closeEnd ) )
         {
-            piece.erase( at, end + 6 - at );
+            if( c.name == "doc" )
+            {
+                piece.erase( c.at, c.end - c.at );
+                return;
+            }
         }
     }
 
