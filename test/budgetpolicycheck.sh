@@ -315,7 +315,7 @@ label_probe() {   # label_probe LABEL ARGS...   (LABEL starting "soft:" = a soft
         # vacuously there; what is checked is that identity, and that no over_ceiling= rides it
         local a; local unb=()
         for a in "$@"; do case "$a" in --token-budget=*) ;; *) unb+=( "$a" );; esac; done
-        "$BIN" . "${unb[@]}" >"$TMP/lab.unb" 2>/dev/null
+        "$BIN" . "${unb[@]}" >"$TMP/lab.unb" 2>/dev/null || no "(D) $label: the unbudgeted run exited $?"
         if cmp -s "$TMP/lab.out" "$TMP/lab.unb" && ! grep -q 'over_ceiling="1"' <( head -c 4096 "$TMP/lab.out" ); then
             ok "(D) $label: the answer fits — the unbudgeted answer byte for byte, no ceiling named, no over_ceiling"
         else

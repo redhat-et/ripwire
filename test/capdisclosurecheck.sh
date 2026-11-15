@@ -328,7 +328,7 @@ esac
 # C8 (TOKEN-BUDGET-MONOTONE, 2026-11-14): an explicit --token-budget is applied AFTER the default answer is built, so both ceilings
 # really applied — the default's budget_bytes= target shaped <sigs>, budget_tokens= shed the result — and the root names both
 # exactly when the default answer it sheds names budget_bytes= (it used to name budget_tokens= alone, the pre-fix regime switch).
-run "$BIG" --for="$FORQ" > "$TMP/c_unbudgeted.xml"
+run "$BIG" --for="$FORQ" > "$TMP/c_unbudgeted.xml" || no "C8: the unbudgeted run exited $?"
 UCTX="$( grep -o '<ctx[^>]*>' "$TMP/c_unbudgeted.xml" | head -1 )"
 U_NAMES=0; E_NAMES=0
 case "$UCTX" in *budget_bytes*) U_NAMES=1 ;; esac

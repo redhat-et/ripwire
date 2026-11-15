@@ -1373,10 +1373,10 @@ spfield(){ local re=" $2=([^ ]*)"; [[ " $1 " =~ $re ]] && printf '%s' "${BASH_RE
 spRef(){
     local d; for d in compact full; do
         rm -f "$TMP/sp.ref.$1.$d.rows"
-        ( cd "$2" && "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null
+        ( cd "$2" && "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null || no "spRef $1 $d: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d" 0 "$4" "$TMP/sp.ref.$1.$d.rows" >/dev/null
         rm -f "$TMP/sp.ref.$1.$d.so.rows"   # lane hrr: the RIPWIRE_NO_HEAD_RR=1 twin reference
-        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null
+        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null || no "spRef $1 $d [RIPWIRE_NO_HEAD_RR=1 twin]: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d.so" 0 "$4" "$TMP/sp.ref.$1.$d.so.rows" >/dev/null
     done
 }

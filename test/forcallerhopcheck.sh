@@ -184,7 +184,7 @@ for extra in --json --signatures-only --detail=1; do
 done
 # (N2t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the posture (it used to drop the hop with it); a
 # budget the answer fits returns the unbudgeted answer byte for byte, the hop as it is there
-run "$FC" --for=start_server --token-budget=3000 >"$TMP/n2t.on"; run "$FC" --for=start_server >"$TMP/n2t.off"
+run "$FC" --for=start_server --token-budget=3000 >"$TMP/n2t.on" || no "(N2t) the budgeted run exited $?"; run "$FC" --for=start_server >"$TMP/n2t.off" || no "(N2t) the unbudgeted run exited $?"
 if [ -s "$TMP/n2t.on" ] && cmp -s "$TMP/n2t.on" "$TMP/n2t.off"; then ok "(N2t) --token-budget=3000: the unbudgeted answer byte for byte"; else no "(N2t) --token-budget=3000 is not the unbudgeted answer"; fi
 
 # ── FIX ROUND 1 (rv-mf1-nx B1-B3): exact or no row — the block fires only when the callers verb's own resolution of the name is
@@ -395,7 +395,7 @@ for extra in --json --signatures-only; do
     if [ -s "$TMP/r9.on" ] && cmp -s "$TMP/r9.on" "$TMP/r9.off"; then ok "(R9) [G] $extra: no ranked hop, byte-identical to the hop-off answer"; else no "(R9) $extra: the ranked hop changed the answer"; fi
 done
 # (R9t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a budget the answer fits returns the unbudgeted answer (ranked hop included) byte for byte
-run "$FR" --for="dependency cycle error" --token-budget=3000 >"$TMP/r9t.on"; run "$FR" --for="dependency cycle error" >"$TMP/r9t.off"
+run "$FR" --for="dependency cycle error" --token-budget=3000 >"$TMP/r9t.on" || no "(R9t) the budgeted run exited $?"; run "$FR" --for="dependency cycle error" >"$TMP/r9t.off" || no "(R9t) the unbudgeted run exited $?"
 if [ -s "$TMP/r9t.on" ] && cmp -s "$TMP/r9t.on" "$TMP/r9t.off"; then ok "(R9t) [G] --token-budget=3000: the unbudgeted answer byte for byte"; else no "(R9t) --token-budget=3000 is not the unbudgeted answer"; fi
 run "$FR" --callers=verify_dag >"$TMP/r10"
 python3 - "$TMP/r1" "$TMP/r10" <<'PY'

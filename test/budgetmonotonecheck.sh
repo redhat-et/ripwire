@@ -141,21 +141,21 @@ while IFS='	' read -r corpus q; do
     [ -z "$corpus" ] && continue
     i=$(( i + 1 ))
     d="$TMP/q$i"; mkdir -p "$d"; printf '%s\n%s\n' "$corpus" "$q" >"$d/what"
-    ( cd "$corpus" && "$BIN" . --for="$q" ) >"$d/U" 2>"$d/U.err"; echo "$?" >"$d/U.rc"
+    ( cd "$corpus" && "$BIN" . --for="$q" ) >"$d/U" 2>"$d/U.err"; echo "$?" >"$d/U.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
     E="$( est_of "$d/U" )"
     [ -n "$E" ] || { echo "  INFO  q$i: the unbudgeted answer carries no est_tokens — skipped (counted as not judged)"; continue; }
     echo "$E" >"$d/E"
     for B in $(( E / 4 )) $(( E / 2 )) $(( E - 1 )) "$E" $(( E + 1 )) $(( E * 2 )); do
         [ "$B" -ge 1 ] || continue
-        ( cd "$corpus" && "$BIN" . --for="$q" --token-budget="$B" ) >"$d/tb.$B" 2>"$d/tb.$B.err"; echo "$?" >"$d/tb.$B.rc"
+        ( cd "$corpus" && "$BIN" . --for="$q" --token-budget="$B" ) >"$d/tb.$B" 2>"$d/tb.$B.err"; echo "$?" >"$d/tb.$B.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
     done
     if [ "$i" -le "$DETAIL_ROWS" ]; then
-        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 ) >"$d/D" 2>"$d/D.err"; echo "$?" >"$d/D.rc"
+        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 ) >"$d/D" 2>"$d/D.err"; echo "$?" >"$d/D.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
         ED="$( est_of "$d/D" )"
         if [ -n "$ED" ]; then
             echo "$ED" >"$d/ED"
             for M in $(( ED / 2 )) "$ED" $(( ED * 2 )); do
-                ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --max-tokens="$M" ) >"$d/mt.$M" 2>"$d/mt.$M.err"; echo "$?" >"$d/mt.$M.rc"
+                ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --max-tokens="$M" ) >"$d/mt.$M" 2>"$d/mt.$M.err"; echo "$?" >"$d/mt.$M.rc"   # status: rc kept in the .rc file; arm (c) compares stdout, stderr and rc with the unbudgeted run byte for byte
             done
         fi
     fi

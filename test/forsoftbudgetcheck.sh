@@ -876,7 +876,7 @@ for spec in "legotransitivefix|$QNODE|600|lego|9" "legotransitivefix|$QNODE|1000
             "forcompletefix|$QNODE|3000|tail|1" "forcompletefix|$QHAND|3000|tail|1"; do
     IFS='|' read -r fx q n sec want <<< "$spec"
     "$BIN" "test/$fx" --no-cache --for="$q" --token-budget="$n" > "$TMP/rf.xml" 2>/dev/null; rrc=$?
-    "$BIN" "test/$fx" --no-cache --for="$q" > "$TMP/rf0.xml" 2>/dev/null
+    "$BIN" "test/$fx" --no-cache --for="$q" > "$TMP/rf0.xml" 2>/dev/null || no "(RF1) $fx '$q': the unbudgeted run exited $?"
     got="$( python3 "$TMP/sec.py" "$sec" < "$TMP/rf.xml" )"; full="$( python3 "$TMP/sec.py" "$sec" < "$TMP/rf0.xml" )"
     # TOKEN-BUDGET-MONOTONE: an upper bound now (the unbudgeted answer's rows); $want, the retired ceiling's count, is reported
     if [ "$rrc" -eq 0 ] && isnum "$got" && isnum "$full" && [ "$got" -le "$full" ]; then ok "(RF1) $fx '$q' N=$n: <$sec> serves $got rows <= the unbudgeted answer's $full (the retired ceiling served $want)"

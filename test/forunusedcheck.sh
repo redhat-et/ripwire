@@ -993,7 +993,7 @@ if [ "$rc" != 0 ] || [ -z "$out" ]; then fail "T4: --json run failed (rc=$rc)"; 
 # T5 TOKEN-BUDGET-MONOTONE (2026-11-14): --token-budget no longer switches the table off; the XML answer under a budget is the
 # unbudgeted answer trimmed, so a budget that fits returns it byte for byte, table included (it was "carries none").
 out=$( cd "$P" && "$RIPWIRE" . --no-cache --token-budget=100000 --for="unused functions in pkg/util.py" 2>/dev/null ); rc=$?
-ref=$( cd "$P" && "$RIPWIRE" . --no-cache --for="unused functions in pkg/util.py" 2>/dev/null )
+ref=$( cd "$P" && "$RIPWIRE" . --no-cache --for="unused functions in pkg/util.py" 2>/dev/null ) || fail "T5: the unbudgeted run failed (rc=$?)"
 if [ "$rc" != 0 ]; then fail "T5: --token-budget run failed (rc=$rc)"; else case "$out" in *'<unused_in_file '*) [ "$out" = "$ref" ] && pass "T5: --token-budget=100000 is the unbudgeted answer, table included" || fail "T5: --token-budget=100000 differs from the unbudgeted answer" ;; *) fail "T5: --token-budget=100000 lost the table" ;; esac; fi
 # the legend names every word it prints, and the answer is well-formed
 if command -v xmllint >/dev/null; then xmllint --noout "$T/py.out" 2>/dev/null && pass "T6: well-formed" || fail "T6: not well-formed"; fi

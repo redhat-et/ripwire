@@ -788,7 +788,8 @@ c11check(){   # LABEL BUDGET WANT ROWS TOTAL HANDLE OVER
 # plus the shed disclosure (shed=, budget_tokens=, the clause defining the steps taken: +664 B), so at 2160 it keeps 12 of U's
 # 195 B rows (est 2119; a 13th does not fit) where the hard ceiling's tighter posture kept 16. The floor moves to 12: fewer rows
 # than that at 2160 would mean the shed cut a row it had room for. (budgetmonotonecheck (b)/(d) hold the contract itself.)
-c11check "CLI --for" 2160 12 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
+c11out="$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null )" || no "(11) CLI --for @2160: the run exited $?"
+c11check "CLI --for" 2160 12 $( c11row "$( printf '%s' "$c11out" | cut_arm )" )
 c11check "MCP for" 4340 40 $( c11row "$( mcprel 4340 )" )
 set -- $( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2000 --json --no-cache 2>/dev/null \
           | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["sigs"]), d.get("sigs_total", len(d["sigs"])), "sigs_next" in d, bool(d.get("over_ceiling")))' 2>/dev/null )

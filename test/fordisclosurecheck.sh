@@ -215,7 +215,7 @@ sigsblock "$T" >"$TMP/s_a"; sigsblock "$TMP/n400so" >"$TMP/s_s"
 # target, so the two <sigs> blocks are different postures (n400: U's rows with e=, docs shed; n400so: cx=/ccx= rows with docs).
 # What the arm protected — the disclosure never eats a signature row — is asserted on the rows: every <d> of the 400 answer is a
 # row of the unbudgeted answer, in its order, and none of the rank 1..4 rows is missing.
-"$BIN" src --for="$NAMETASK" --no-cache >"$TMP/n0" 2>/dev/null
+"$BIN" src --for="$NAMETASK" --no-cache >"$TMP/n0" 2>/dev/null || no "#2: the unbudgeted run exited $?"
 python3 - "$T" "$TMP/n0" <<'PY' \
     && ok "#2 ceiling-exhausted: the <sigs> rows are the unbudgeted answer's, in order, ranks 1..4 kept (disclosure never eats a signature row)" \
     || no "#2 ceiling-exhausted: the disclosure changed the <sigs> rows"

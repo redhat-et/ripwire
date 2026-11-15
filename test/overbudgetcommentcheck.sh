@@ -254,7 +254,7 @@ done
 # last first) and never truncates one, so at 300 (and 800) every body goes (shed="held,attrs,tail:30,bodies:30,docs:24,rows:26",
 # 4064 B vs 17538 B unbudgeted): the arm holds iff no truncated body is a sub-line fragment, which a shed answer satisfies with
 # none at all (premise: bodies:N on the root). The twin moves to 4000, where 10 bodies ride (bodies:20): the first is whole.
-"$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=4000 --legend=full > "$TMP/fmx800.xml" 2>/dev/null
+"$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=4000 --legend=full > "$TMP/fmx800.xml" 2>/dev/null || no "(B6 twin @4000) the run exited $?"
 B6="$( python3 - "$TMP/fmx.xml" "$BIN" "$FMX" <<'PY'
 import re, subprocess, sys, html
 doc = open( sys.argv[1], "rb" ).read()

@@ -236,7 +236,7 @@ for flag in --json --signatures-only; do
     else no "(N2) $flag differs from the hop-off answer"; fi
 done
 # (N2t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a budget the answer fits returns the unbudgeted answer (hop included) byte for byte
-run "$F/cpp" "--for=Loader::Load src_->Fetch" --token-budget=3000 >"$TMP/n2ta"; run "$F/cpp" "--for=Loader::Load src_->Fetch" >"$TMP/n2tb"
+run "$F/cpp" "--for=Loader::Load src_->Fetch" --token-budget=3000 >"$TMP/n2ta" || no "(N2t) the budgeted run exited $?"; run "$F/cpp" "--for=Loader::Load src_->Fetch" >"$TMP/n2tb" || no "(N2t) the unbudgeted run exited $?"
 if [ -s "$TMP/n2ta" ] && cmp -s "$TMP/n2ta" "$TMP/n2tb"; then ok "(N2t) --token-budget=3000: the unbudgeted answer byte for byte"
 else no "(N2t) --token-budget=3000 is not the unbudgeted answer"; fi
 

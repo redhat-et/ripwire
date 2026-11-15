@@ -208,8 +208,8 @@ ident d2 'What does alpha_start do?'
 # (t) TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer switches the demote off — it was posture under a budget (the
 # old arm wanted "no pointer, no legend" at --token-budget=4000). The budget now trims the answer asked without it, so an
 # answer that fits comes back byte for byte, the pointer and its legend included (test/budgetmonotonecheck.sh (a)).
-run "--for=sink_left_value + sink_right_value" >"$TMP/t.off"
-run "--for=sink_left_value + sink_right_value" --token-budget=100000 >"$TMP/t.on"
+run "--for=sink_left_value + sink_right_value" >"$TMP/t.off" || no "(t) the unbudgeted run exited $?"
+run "--for=sink_left_value + sink_right_value" --token-budget=100000 >"$TMP/t.on" || no "(t) the budgeted run exited $?"
 if [ -s "$TMP/t.on" ] && grep -q '<!-- one-side:' "$TMP/t.off" && cmp -s "$TMP/t.on" "$TMP/t.off"; then ok "(t) --token-budget=100000: the demoted answer byte for byte ($( wc -c <"$TMP/t.on" | tr -d ' ' ) B)"; else no "(t) the budgeted answer is not the demoted unbudgeted one (or the unbudgeted one has no pointer: vacuous)"; fi
 
 mcp(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$TMP/ts" "$1" \
