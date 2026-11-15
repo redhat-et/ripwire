@@ -117,7 +117,7 @@
 #include <format>       // blobsUnreadCause — the one refusal sentence
 #include <type_traits>  // streamBlobs: a stream with no piece reader keeps the whole-or-skip rule
 #include "infra/pieceread.h"   // LARGE-PARTIAL-1: a lexical reader reads a blob of any size, in line-aligned pieces
-#include "infra/limitwarn.h"   // LARGE-PARTIAL-1: a ref window or parse guard that cuts says so on stderr too
+#include "limitwarn.h"         // LARGE-PARTIAL-1: a ref window or parse guard that cuts says so on stderr too
 #include <functional>
 #include <limits>       // parseCatFileHeader: the size field never overflows
 #include <mutex>        // labelBranchRowsByParse holds quality::headSnapshotIngestMutex around the blob parse
