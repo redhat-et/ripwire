@@ -689,8 +689,19 @@ inline DoctorCacheStats doctorCacheStats( const std::string& dir )
         if( name.rfind( "ripwire-", 0 ) != 0 ) { return; }
         std::error_code ec;
         if( !entry.is_regular_file( ec ) ) { if( ec ) { out.truncated = true; } return; }
-        if( out.blobCount >= rw::quality::kMaxCacheBlobCount ) { out.truncated = true; out.capHit = true; return; }
-        ++out.blobCount;
+        // A warm snapshot is `<blob>.snap` (src/ingest.cpp): a derived sidecar OF a blob, not a blob. It shares
+        // the blob's `ripwire-` prefix, so counting it as one DOUBLES the apparent blob count. That misreports
+        // cache-dir to every reader, and it read as a behavioural regression in the windows-package release gate,
+        // which saw a warm run take the count 4 -> 5 and called it "wrote a new blob instead of reusing one" while
+        // that same run's cache-stats line said `reparsed=0 reused=6 files=6`. Its BYTES stay accounted, because
+        // they are genuinely on disk and this row is what a reader sizes a cache directory by; only the COUNT,
+        // which means "how many cache blobs are retained here", excludes it.
+        const bool isSnapSidecar = name.size() > 5 && name.compare( name.size() - 5, 5, ".snap" ) == 0;
+        if( !isSnapSidecar )
+        {
+            if( out.blobCount >= rw::quality::kMaxCacheBlobCount ) { out.truncated = true; out.capHit = true; return; }
+            ++out.blobCount;
+        }
         const auto byteSize = entry.file_size( ec );
         if( ec ) { out.truncated = true; return; }
         out.totalBytes += byteSize;
