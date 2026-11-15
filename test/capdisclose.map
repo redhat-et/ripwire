@@ -25,6 +25,7 @@ kForBareFlagMaxSites	none:a shape test, not a cut: a bare kebab token with more 
 kForBodyFoldBudgetBytes	sink:cut,firstCutNext
 kForBodyFoldRows	none:the scope of an additive fold: rows past it are printed unfolded, none dropped (Stage 0 audit)
 kForBodySlotMaxBytes	legend
+kForBudgetRowFloor	none:a keep floor, not a cut: the best-ranked <sigs> rows it keeps are never shed; an answer still over --token-budget at the floor prices more than the budget names (est_tokens= above it), and --max-tokens says over_ceiling= (TOKEN-BUDGET-MONOTONE; read by hand at train 1111i)
 kForCallerHopDepth2Rows	sink:firstShown,secondShown
 kForCallerHopRows	sink:firstShown,secondShown
 kForDeclRowsCap	sink:shown
