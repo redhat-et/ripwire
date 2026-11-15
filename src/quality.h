@@ -950,9 +950,9 @@ inline bool testRunnerInvokedSymbol( const Symbol& s, std::string_view p ) noexc
 // fuller --dead-code verb. `topLevelCallees` is the sorted set topLevelCalleeNameHashes builds and
 // `registeredMacroIds` the sorted set registeredMacroSymbolIds builds (below, past forEachSymbolBody), and `dropImplIds` the
 // sorted set rustDropImplMethodIds builds. Every call site builds all three ONCE outside its symbol loop. `exemptedByRegisterMacro`,
-// when non-null, is set true iff this symbol satisfied every OTHER test here and was excluded SOLELY by the macro check — the
-// signal a caller needs to disclose an honest "N excluded" count instead of just applying the rule silently (P2.2's honesty
-// requirement).
+// when non-null, is set true iff this symbol satisfied every OTHER test here and was excluded SOLELY by the macro check, or is a
+// Rust test that the test-runner rule exempts first and registersItself also holds — the signal a caller needs to disclose an
+// honest "N excluded" count instead of just applying the rule silently (P2.2's honesty requirement).
 inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
                              const std::vector<std::uint64_t>& topLevelCallees,
                              const std::vector<NodeId>& registeredMacroIds,
@@ -997,6 +997,12 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
     const std::string_view p = rootRelPath( ing, s.fileId );   // #228: a directory above the root never decides this
     if( pythonFrameworkInvokedSymbol( s, p ) || testRunnerInvokedSymbol( s, p ) )
     {
+        // #499 lands over QD-TEST-DEAD: a Rust #[test] fn is exempt here first (the ingest's testScope bit), and is ALSO in
+        // registeredMacroIds (registersItself). register-macro-excluded= names Rust #[test] functions, so it counts it here.
+        if( exemptedByRegisterMacro && std::binary_search( registeredMacroIds.begin(), registeredMacroIds.end(), i ) )
+        {
+            *exemptedByRegisterMacro = true;
+        }
         return false; // #228 unittest/Django/pytest, QD-TEST-DEAD `go test` / the Rust harness: the test runner calls this
     }
     if( isFixturePath( p ) )

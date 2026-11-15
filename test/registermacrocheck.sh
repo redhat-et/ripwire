@@ -362,10 +362,13 @@ printf '%s' "$DC8B_TAG" | grep -q 'config-warnings=' \
 # A #[test] (or #[tokio::test…]) function is called by the test harness, and no line in the tree names it, so the
 # name-based call graph sees zero callers. The attribute sits ABOVE the item, outside the signature text the macro
 # check reads, so it needed its own rule (quality.h rustTestAttributed). Positive shapes must be exempt; each
-# negative lookalike must still be flagged: an attribute inside a comment, '#[testing]', '#[tested]', a test attribute
-# written after code on the same line (`const A: u32 = 1; #[test]`), a `#[test]` that only sits in a trailing // comment
-# (`static X: u32 = 1; // used to be #[test]`), a dead fn placed directly after a #[test] item, and an ordinary dead fn.
-# A one-line `#[test] fn ...` and a #[test] indented inside `#[cfg(test)] mod tests { }` are positives.
+# negative lookalike must still be flagged: an attribute inside a comment, '#[testing]', '#[tested]', a `#[test]` that only
+# sits in a trailing // comment (`static X: u32 = 1; // used to be #[test]`), a dead fn placed directly after a #[test] item,
+# and an ordinary dead fn. A one-line `#[test] fn ...` and a #[test] indented inside `#[cfg(test)] mod tests { }` are positives.
+# A test attribute written after code on the same line (`const A: u32 = 1; #[test]`) is a positive too (lane land-499-500):
+# Rust's grammar attaches an outer attribute to the next item whatever precedes it on the line, so that fn IS a harness
+# test. The ingest's syntactic testScope bit (quality.h testRunnerInvokedSymbol, QD-TEST-DEAD) exempts it; the text scan
+# (rustTestAttributed) does not read it, so it is not in register-macro-excluded= (the count stays the eight it reads).
 A9="$WORK/a9"; newrepo "$A9"
 cat > "$A9/lib.rs" <<'EOF'
 fn live_helper() -> u32 { 1 }
@@ -409,7 +412,7 @@ fn commented_attribute_is_not_a_test() { }
 fn tested_attribute_is_not_a_test() { }
 
 const A: u32 = 1; #[test]
-fn not_a_test_after_code() { }
+fn attribute_after_code_case() { }
 
 static X: u32 = 1; // used to be #[test]
 fn really_dead() { }
@@ -421,12 +424,12 @@ fn dead_after_test_attribute() { }
 fn dead_plain() { }
 EOF
 QD9="$( cd "$A9" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
-for sym in plain_case flavored_case stacked_case blank_line_case doc_comment_case one_line_case indented_in_test_mod test_is_here; do
+for sym in plain_case flavored_case stacked_case blank_line_case doc_comment_case one_line_case indented_in_test_mod test_is_here attribute_after_code_case; do
     printf '%s' "$QD9" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
         && no "arm9: '$sym' is a #[test] function but was reported as dead-code" \
         || ok "arm9: '$sym' (#[test] shape) excluded from dead-code"
 done
-for sym in testing_attribute_is_not_a_test commented_attribute_is_not_a_test tested_attribute_is_not_a_test not_a_test_after_code really_dead dead_after_test_attribute dead_plain; do
+for sym in testing_attribute_is_not_a_test commented_attribute_is_not_a_test tested_attribute_is_not_a_test really_dead dead_after_test_attribute dead_plain; do
     printf '%s' "$QD9" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
         && ok "arm9: '$sym' (negative lookalike) still flagged" \
         || { no "arm9: '$sym' should still be flagged — the test-attribute exemption leaked"; printf '%s\n' "$QD9" | grep -oE 'sym="[^"]*"' | head -12; }
@@ -435,7 +438,7 @@ printf '%s' "$QD9" | grep -q 'kind="dead-code" sym="live_helper"' \
     && no "arm9: live_helper (called from tests) wrongly reported" \
     || ok "arm9: live_helper (called from the tests) not reported"
 printf '%s' "$QD9" | grep -q 'register-macro-excluded="8"' \
-    && ok "arm9: register-macro-excluded=\"8\" (the eight #[test] functions)" \
+    && ok "arm9: register-macro-excluded=\"8\" (the eight #[test] functions the text scan reads)" \
     || { no "arm9: register-macro-excluded count wrong"; printf '%s\n' "$QD9" | grep -oE 'register-macro-excluded="[0-9]*"'; }
 
 # ── ARM 10: a test attribute with no item after it must not break the scan ─────────────────────────────
@@ -482,6 +485,60 @@ for sym in testing_attr_with_comment dead_plain; do
         && ok "arm11: '$sym' (negative lookalike) still flagged" \
         || no "arm11: '$sym' should still be flagged — the trailing comment leaked into the exemption"
 done
+
+# ── ARM 12: a name alone exempts nothing (lane land-499-500, landing #499 + #500) ─────────────────────────────────
+# The two Rust exemptions read an ATTRIBUTE (#[test], #[tokio::test]) and an IMPL BLOCK (impl Drop for T), never a name.
+# A truly unused fn named like a test with no attribute (`test_parse_input`, a bare `test`) and a method named drop outside
+# any impl Drop (an inherent impl, another trait's impl) must stay dead-code rows. Each case is judged on its own line by
+# the row's p= attribute (two `drop` rows cannot be told apart by sym=). PREMISE: the same file holds one real #[test] fn
+# and one real Drop::drop, and both must be exempt, so both rules ran on this file; and the arm counts the negatives it
+# found reported and FAILS when that count is not the four it planted (zero included).
+A12="$WORK/a12"; newrepo "$A12"
+printf 'pub fn api() -> u32 { 1 }\n' > "$A12/lib.rs"
+commit "$A12" "baseline for the name-only negatives"
+cat > "$A12/lib.rs" <<'EOF'
+pub fn api() -> u32 { 1 }
+
+#[test]
+fn real_harness_case() { assert_eq!(api(), 1); } // P-test
+
+struct Guard;
+impl Drop for Guard {
+    fn drop(&mut self) { } // P-drop
+}
+
+fn test_parse_input() { } // N-test-name
+
+fn test() { } // N-bare-test
+
+struct Cache;
+impl Cache {
+    fn drop(&mut self) { } // N-inherent-drop
+}
+
+trait Closer { fn close(&mut self); }
+struct Conn;
+impl Closer for Conn {
+    fn close(&mut self) { }
+    fn drop(&mut self) { } // N-other-trait-drop
+}
+EOF
+QD12="$( cd "$A12" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+line12(){ [ "$( grep -c -F -- "$1" "$A12/lib.rs" )" = 1 ] && grep -n -F -- "$1" "$A12/lib.rs" | cut -d: -f1; }
+dead12(){ printf '%s' "$QD12" | tr '>' '\n' | grep -F 'kind="dead-code"' | grep -q -F "p=\"lib.rs:$1\""; }
+for m in '// P-test' '// P-drop'; do
+    l="$( line12 "$m" )" || { no "arm12 premise: marker '$m' is not on exactly one line"; continue; }
+    dead12 "$l" && no "arm12 premise: '$m' (lib.rs:$l) was reported, so its exemption did not run on this file" \
+                || ok "arm12 premise: '$m' (lib.rs:$l) is exempt"
+done
+seen12=0
+for m in '// N-test-name' '// N-bare-test' '// N-inherent-drop' '// N-other-trait-drop'; do
+    l="$( line12 "$m" )" || { no "arm12: marker '$m' is not on exactly one line"; continue; }
+    if dead12 "$l"; then seen12=$(( seen12 + 1 )); ok "arm12: '$m' (lib.rs:$l) is still reported (a name, no attribute or Drop impl)"
+    else no "arm12: '$m' (lib.rs:$l) was exempt by its name alone"; fi
+done
+[ "$seen12" = 4 ] && ok "arm12: all 4 planted name-only negatives reported" \
+                  || no "arm12: $seen12 of the 4 planted name-only negatives reported (0 means the arm judged nothing)"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
