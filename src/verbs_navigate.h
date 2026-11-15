@@ -3012,6 +3012,10 @@ inline std::optional<std::vector<std::string>> narrowedPathSpellings( const rw::
         std::optional<std::string> pick = rw::narrowRefusedSpelling( ing, *slot, rw::GraphSubjectForm::Path );
         if( !pick )
         {
+            if( !rw::pathEndpointFittedDefs( ing, *slot ).empty() )
+            {
+                continue;   // PATH-AMBIG-VERDICT (b): this endpoint binds its fitting definitions below; the other may still narrow
+            }
             return std::nullopt;
         }
         narrowed.push_back( std::exchange( *slot, std::move( *pick ) ) );
@@ -3041,6 +3045,15 @@ inline PathEndpointsBound bindPathEndpoints( const rw::IngestResult& ing, std::s
         else
         {
             ep = std::move( typed );   // still refused: the spellings as typed
+        }
+    }
+    // PATH-AMBIG-VERDICT (b): an endpoint still refused because several placed definitions fit its scope-qualified spelling binds
+    // them all (src/pathgaps.h pathEndpointFittedDefs): --path lists the reaching pairs, so qualifying narrows and never refuses
+    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
+    {
+        if( defs->empty() )
+        {
+            *defs = rw::pathEndpointFittedDefs( ing, *slot );
         }
     }
     ep.spec = ep.src + "," + ep.dst;
