@@ -363,7 +363,7 @@ inline void aliasTargetAttrsXml( std::string& out, const AliasTargetText& a )
     }
     if( !a.next.empty() )
     {
-        out += " to_next=\"" + std::string( escapeXml( a.next, esc ) ) + "\"";
+        out += " to_next=\"" + nextValueXml( a.next ) + "\"";   // the one next= escaper (nextverb.h)
     }
 }
 inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )

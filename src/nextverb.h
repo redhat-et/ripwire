@@ -40,21 +40,19 @@ inline constexpr const char* kNextLegendClause =
     "next= is ONE pasteable follow-up — this tool's flags, or a shell line copied from a run= row — the call that "
     "ends this search; paste it as-is. ";
 
-// attribute-escaped ` next="…"`; empty invocation ⇒ empty string (a root with nothing honest to suggest says nothing).
-// `attr` names a SECONDARY listing's own follow-up (cut-fix E: --impact's importers_next=, beside the root's next=),
-// escaped by the same policy; the default is the root's one next=.
-inline std::string nextAttrXml( std::string_view invocation, std::string_view attr = "next" )
+// THE ONE next= VALUE ESCAPER (NEXT-APOS-FINISH, 2026-11-15): appends `invocation` escaped for a "-DELIMITED attribute.
+// Every next-family value goes through here — nextAttrXml below, and the emitters that build their own ` next="` (the
+// dead-code filter hint, the file page, value refs, the body cut, the owner-callees list, declined sites' dc_next=,
+// defs' to_next=, the fold and owner <skip>/<bodies> rows, grep's zero-hit <suggest>) — so no hint is pasteable on one
+// verb and entity-corrupted on the next. serialize.h escapeXml (every other attribute and text) still writes &apos;, and
+// differs on one more byte class: it writes a stray C0 byte as a space and passes DEL, where this writes '?' for both.
+// The re-routed values are flags, paths and names that carry neither (fire321: no row moved but by the apostrophe).
+inline void appendNextValueXml( std::string& a, std::string_view invocation )
 {
-    if( invocation.empty() ) { return {}; }
-    std::string a;
-    a.reserve( invocation.size() + attr.size() + 8 );
-    a += ' ';
-    a += attr;
-    a += "=\"";
     // serialize.h escapeXml's policy, byte for byte, BUT ONE (w3fixbudgetcheck: a --grep pattern with a raw newline /
     // C0 / invalid UTF-8 byte is echoed by grep's next= and MUST NOT reach markup — G4): four XML escapes, the three
     // legal control bytes as character references, every other C0 byte (and DEL) as '?', invalid UTF-8 as '?'.
-    // The one: `'` stays RAW. This attribute is always written double-quoted (`attr="…"` above and below), and a raw
+    // The one: `'` stays RAW. Every caller writes this value double-quoted (`attr="…"`, nextAttrXml below), and a raw
     // apostrophe is legal XML there (XML 1.0 [10] AttValue excludes only the delimiter, `<` and `&`), so an XML parser
     // reads the same value either way. A reader pasting next= out of a raw document — a captured answer, a doc, a
     // terminal — is the other consumer, and nextFlag's shell quoting is all apostrophes: `--for=&apos;x y&apos;` is a
@@ -85,6 +83,29 @@ inline std::string nextAttrXml( std::string_view invocation, std::string_view at
                 break;
         }
     }
+}
+
+// the escaped VALUE alone, for an emitter that writes its own ` attr="` … `"` around it
+inline std::string nextValueXml( std::string_view invocation )
+{
+    std::string a;
+    a.reserve( invocation.size() + 8 );
+    appendNextValueXml( a, invocation );
+    return a;
+}
+
+// attribute-escaped ` next="…"`; empty invocation ⇒ empty string (a root with nothing honest to suggest says nothing).
+// `attr` names a SECONDARY listing's own follow-up (cut-fix E: --impact's importers_next=, beside the root's next=),
+// escaped by the same policy; the default is the root's one next=.
+inline std::string nextAttrXml( std::string_view invocation, std::string_view attr = "next" )
+{
+    if( invocation.empty() ) { return {}; }
+    std::string a;
+    a.reserve( invocation.size() + attr.size() + 8 );
+    a += ' ';
+    a += attr;
+    a += "=\"";
+    appendNextValueXml( a, invocation );
     a += "\"";
     return a;
 }

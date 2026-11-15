@@ -3418,7 +3418,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             // UNUSED-IN-FILE (forunused.h): this verb answers for internal linkage; a filter that names a path is often asking about public defs, so it names the verb that does
             if( rw::forUnusedOn() && cfg.deadCodeDir.find_first_of( "./" ) != std::string_view::npos )
             {
-                dcFilterAttr += " next=\"" + std::string( escapeXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ), dcFiltEsc ) ) + "\"";
+                dcFilterAttr += rw::nextAttrXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ) );
             }
         }
         // 0.6.6 D4: runner-root-excluded= is absent at 0, so a tree with no Python test/decorated root is byte-identical

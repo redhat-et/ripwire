@@ -366,8 +366,7 @@ inline std::string declinedSiteCutAttrXml( const DeclinedSiteCut& cut )
     {
         return {};
     }
-    std::vector<char> esc;
-    return " dc_shown=\"" + std::to_string( cut.shown ) + "\" dc_next=\"" + std::string( escapeXml( cut.next, esc ) ) + "\"";
+    return " dc_shown=\"" + std::to_string( cut.shown ) + "\" dc_next=\"" + nextValueXml( cut.next ) + "\"";   // the one next= escaper
 }
 // The JSON twin of the two root attributes, the same names on the CLI --json and the MCP twins (the attribute-parity rule).
 // A cut prints at least one row (the cap and --limit are >= 1), so dc_shown is never the 0 countFieldOrEmpty leaves out.

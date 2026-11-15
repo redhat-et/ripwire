@@ -378,8 +378,12 @@ void emitGrepSuggest( const rw::IngestResult& ing, const std::string& pat, bool 
     }
     if( sug.offerFor )
     {
-        const auto fp = rw::escapeXml( pat, esc );
-        rw::emitTo( stdout, " next=\"--for=&quot;{}&quot;\"", std::string_view( fp.data(), fp.size() ) );
+        // NEXT-APOS-FINISH: the shell quoting is nextFlag's apostrophes, not `"`. Inside this "-delimited attribute a `"`
+        // can only be &quot;, which a reader pasting the raw answer hands the shell as a literal entity (and an `&` that
+        // backgrounds the command); a raw `'` is legal XML here, so `--for='total area'` is both well-formed and the call
+        // a shell runs, and a one-word pattern needs no quotes at all (`--for=perimeterr`). As before, the value is a shell
+        // line (it needs a shell or shlex to split), like every other next=. One next= escaper: nextverb.h.
+        rw::emitTo( stdout, "{}", rw::nextAttrXml( rw::nextFlag( "--for=", pat ) ) );
     }
     rw::emitTo( stdout, "/>" );
 }

@@ -14,13 +14,22 @@
 #   (c) every next-family hint that starts with `--`, pasted RAW into bash, runs with rc=0 and a non-empty answer
 #   (d) calls whose hints carry no quote: no ' and no &apos; in any hint; with RIPWIRE_BASE_BIN, stdout, stderr and
 #       rc are byte-identical to it, and the quote-carrying calls differ from it ONLY by &apos; -> ' inside
-#       next-family attributes, plus an est_tokens= that may fall (it prices the emitted bytes) and never rises
+#       next-family attributes (and grep's <suggest> --for=&quot;PAT&quot; -> nextFlag's --for='PAT'), plus an
+#       est_tokens= that may fall (it prices the emitted bytes) and never rises
+#   (e) EVERY next= EMITTER (NEXT-APOS-FINISH: one escaper, nextverb.h appendNextValueXml): one call per emitter that
+#       used to write its value through serialize.h escapeXml — the dead-code filter hint, the file page, value refs
+#       (<vrs> and a slot <vs>), the body cut (<b truncated>), a cut <calls> listing, the owner hop cut (<hops>),
+#       declined sites (dc_next=), defs (to_next=), the fold <skip>, the skipped body slot (<bodies>), grep's zero-hit
+#       <suggest> — each must print its hint, with no &apos; in it, and the hint must RUN: rc=0 and a non-empty answer.
+#       Pasted RAW into bash when the value carries no entity; the hints that must carry one (a `"` the attribute
+#       cannot hold raw — the file page's --graph-query literals — or a `>` in a slot's `->` regex) run as an XML
+#       reader decodes them, counted apart and named. Quote-carrying fixtures (a path with a space, a phrase) make the
+#       dead-code, declined-site, body-slot and suggest hints print a raw '; with RIPWIRE_BASE_BIN those same calls
+#       must spell the quote as an entity there (&apos;, or grep's &quot;: the red side).
 # Every arm counts its premise and FAILS on zero.
 #
-# Out of scope (not nextAttrXml, listed so a reader does not mistake them for misses): --grep's zero-hit
-# <suggest next="--for=&quot;PAT&quot;"> (verbs_grep.h emitGrepSuggest) and the next= values written through
-# serialize.h escapeXml (--dead-code's filter next=, forfilepage, valuerefs, declinedsites dc_next=, defslookup to_next=).
-# Arms (b) and (c) skip the <suggest> element by name.
+# grep's <suggest> used to spell its shell quoting with `"`, which this "-delimited attribute can only hold as &quot;:
+# it is now nextFlag's apostrophes (`--for='total area computation'`; a one-word pattern bare), so it pastes too.
 #
 # Usage:  bash test/nextaposcheck.sh [BIN]      (or RIPWIRE_BIN=…; optional RIPWIRE_BASE_BIN=<main binary>)
 
@@ -36,7 +45,7 @@ if [ -n "$BASE" ]; then [ -x "$BASE" ] || { echo "RIPWIRE_BASE_BIN=$BASE is not 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/repo" "$TMP/home"; cp -R "$ROOT/test/fixture"/. "$TMP/repo"/
 
-python3 - "$BIN" "$BASE" "$TMP/repo" "$TMP/home" <<'PY'
+RW_TEST_DIR="$ROOT/test" python3 - "$BIN" "$BASE" "$TMP/repo" "$TMP/home" <<'PY'
 import os, re, subprocess, sys
 import xml.parsers.expat
 binp, base, repo, home = sys.argv[1:5]
@@ -87,7 +96,6 @@ for a, ( o, e, rc ) in lane.items():
 na = 0
 for a in map( tuple, Q ):
     for tag, k, v, raw in parsed.get( a, [] ):
-        if tag == "suggest": continue
         if raw is None: no( f"(a) {list( a )} <{tag} {k}=> has no raw text" ); continue
         if "&apos;" in raw: no( f"(a) {list( a )} <{tag} {k}=\"{raw}\"> still escapes the apostrophe" )
         elif "'" in raw: na += 1
@@ -102,7 +110,6 @@ else:
 nb = nq = 0
 for a, rows in parsed.items():
     for tag, k, v, raw in rows:
-        if tag == "suggest": continue
         nb += 1; nq += "'" in v
         if raw is None or unesc( raw ) != v: no( f"(b) {list( a )} <{tag} {k}=>: parsed {v!r} != raw {raw!r}" )
 verdict( ( nb and nq ), f"(b) {nb} next-family values parse to their raw text ({nq} carry a ')", f"(b) premise: {nb} values, {nq} with a quote" )
@@ -111,7 +118,7 @@ verdict( ( nb and nq ), f"(b) {nb} next-family values parse to their raw text ({
 seen = set(); nc = ncq = 0
 for a, rows in parsed.items():
     for tag, k, v, raw in rows:
-        if tag == "suggest" or raw is None or not raw.startswith( "--" ) or raw in seen: continue
+        if raw is None or not raw.startswith( "--" ) or raw in seen: continue
         seen.add( raw )
         if "&" in raw: no( f"(c) <{tag} {k}=\"{raw}\"> carries an entity: a shell cannot paste it" ); continue
         p = subprocess.run( [ "bash", "-c", f'"$RWBIN" . --no-cache {raw}' ], cwd = repo, env = dict( env, RWBIN = binp ),
@@ -134,19 +141,93 @@ if base:
         else: no( f"(d) {list( a )} differs from the base binary (stdout, stderr or rc)" )
     verdict( same, f"(d) {same}/{len( N )} no-quote calls byte-identical to the base binary (stdout+stderr+rc)", "(d) premise: 0 no-quote calls compared" )
     attr = re.compile( rb'( [a-z_]*next=")([^"]*)(")' ); est = re.compile( rb' est_tokens="(\d+)"' )
+    sugg = re.compile( rb' next="--for=&quot;([^"&]*)&quot;"' )
     nq = 0
     for a in map( tuple, Q ):
         bo, be, brc = run( base, list( a ) ); lo, le, lrc = lane[ a ]
         fixed = attr.sub( lambda m: m.group( 1 ) + m.group( 2 ).replace( b"&apos;", b"'" ) + m.group( 3 ), bo )
+        # grep's zero-hit <suggest>: --for=&quot;PAT&quot; became nextFlag's spelling (a word-like PAT: quoted only with a space)
+        fixed = sugg.sub( lambda m: b' next="--for=' + ( b"'" + m.group( 1 ) + b"'" if b" " in m.group( 1 ) else m.group( 1 ) ) + b'"', fixed )
         # est_tokens= prices the emitted bytes, so 5 fewer bytes an entity may lower it: masked here, and it must not RISE
         bt, lt = [ [ int( x ) for x in est.findall( o ) ] for o in ( bo, lo ) ]
         if est.sub( b"", fixed ) == est.sub( b"", lo ) and ( be, brc ) == ( le, lrc ) and bo != lo and len( bt ) == len( lt ) and all( y <= x for x, y in zip( bt, lt ) ):
             nq += 1
         else: no( f"(d) {list( a )}: the base answer with &apos; -> ' in next-family values (est_tokens= masked, lane <= base) is not the lane answer" )
-    verdict( nq, f"(d) {nq}/{len( Q )} quote-carrying calls differ from base ONLY by &apos; -> ' inside next-family values (and an est_tokens= that fell)",
+    verdict( nq, f"(d) {nq}/{len( Q )} quote-carrying calls differ from base ONLY by &apos; -> ' inside next-family values (grep's <suggest> &quot; -> nextFlag's quoting; an est_tokens= that fell)",
              "(d) premise: 0 quote-carrying calls compared" )
 else:
     print( "  SKIP  (d) base byte-identity: RIPWIRE_BASE_BIN unset" )
+# (e) every next= emitter: its hint prints (no &apos;), and runs — raw when it carries no entity, else as an XML reader decodes it
+fx = os.path.join( os.path.dirname( repo ), "fx" ); T = os.environ[ "RW_TEST_DIR" ]
+def w( rel, text ):
+    os.makedirs( os.path.dirname( os.path.join( fx, rel ) ), exist_ok = True ); open( os.path.join( fx, rel ), "w" ).write( text )
+w( "dead/pkg/util.py", "def really_dead():\n    return 1\ndef live_fn():\n    return 2\n" )
+w( "dead/main.py", "from pkg.util import live_fn\ndef main():\n    live_fn()\n" )
+w( "vr/big.c", "\n".join( [ "static int hot(int x) { return x; }", "static int (*many[])(int) = {" ] + [ "    hot," ] * 300
+                          + [ "};", "int use_many(int i) { return many[i](i); }" ] ) + "\n" )
+w( "slot/s.c", "\n".join( [ "struct ops { int (*run)(int); };" ] + [ "static int h%d(int x) { return x + %d; }" % ( k, k ) for k in range( 20 ) ]
+                          + [ "static struct ops o%d = { h%d };" % ( k, k ) for k in range( 20 ) ] + [ "int drive(struct ops *p, int x) { return p->run(x); }" ] ) + "\n" )
+w( "slotd/s.c", "\n".join( [ "struct ops { int (*run)(int); };" ] + [ "static int h%d(int x) { return x + %d; }" % ( k, k ) for k in range( 20 ) ]
+                           + [ "static struct ops o%d = { .run = h%d };" % ( k, k ) for k in range( 20 ) ] + [ "int drive(struct ops *p, int x) { return p->run(x); }" ] ) + "\n" )
+w( "dc/alpha dir/a.py", "class A:\n    def poll(self):\n        return 1\n" )
+w( "dc/beta/b.py", "class B:\n    def poll(self):\n        return 2\n" )
+for f in range( 3 ):
+    w( "dc/callers/f%d.py" % f, "".join( "def use_%d_%d(x):\n    return x.poll()\n\n\n" % ( f, k ) for k in range( 12 ) ) )
+w( "dc/big/big.py", "def big(x):\n" + "".join( "    x.poll()\n" for _ in range( 40 ) ) + "    return x\n" )
+w( "alias/alias.h", "namespace lib { struct Real { void run(); }; }\nusing RealAlias = lib::Real;\n" )
+import shutil
+shutil.copytree( os.path.join( T, "forbodyslotfix" ), os.path.join( fx, "slotspc" ) )
+os.rename( os.path.join( fx, "slotspc/src/middleware/jwt" ), os.path.join( fx, "slotspc/src/middleware/j wt" ) )
+# (emitter, root, argv, element, attr, a ' must print raw)
+E = [ ( "dead-code filter",   fx + "/dead",   [ "--dead-code=pkg/util.py" ],                                   "dead-code",  "next",    True ),
+      ( "file page",          fx + "/dead",   [ "--for=pkg/util.py" ],                                         "named-file", "next",    True ),
+      ( "value refs <vrs>",   fx + "/vr",     [ "--callers=hot" ],                                             "vrs",        "next",    False ),
+      ( "slot <vs> (uses)",   fx + "/slot",   [ "--callees=drive" ],                                           "vs",         "next",    False ),
+      ( "slot <vs> (regex)",  fx + "/slotd",  [ "--callees=drive" ],                                           "vs",         "next",    True ),
+      ( "body cut <b>",       T + "/forbodyslotfix", [ "--for=How does render_screen draw the screen?" ],      "b",          "next",    False ),
+      ( "cut <calls>",        T + "/forbodyfoldfix/web", [ "--for=How is a request dispatched?" ],             "calls",      "next",    False ),
+      ( "owner hop cut",      T + "/ownerhopfix/py", [ "--for=How do invoke_watcher, schedule_refresh, record_signal and notify work?" ], "hops", "next", False ),
+      ( "declined dc_next",   fx + "/dc",     [ "--callers=alpha dir/a.py:poll" ],                             "callers",    "dc_next", True ),
+      ( "defs to_next",       fx + "/alias",  [ "--defs=RealAlias" ],                                          "d",          "to_next", False ),
+      ( "fold <skip>",        T + "/forbodyfoldfix/web", [ "--for=How does the application send the response body to the client?" ], "skip", "next", False ),
+      ( "body slot <bodies>", fx + "/slotspc", [ "--for=How does the JWT middleware verify a token?", "--token-budget=400" ], "bodies", "next", True ),
+      ( "grep <suggest>",     repo,           [ "--grep=total area computation" ],                             "suggest",    "next",    True ) ]
+def runat( b, root, argv ):
+    p = subprocess.run( [ b, ".", "--no-cache" ] + argv, cwd = root, env = env, capture_output = True, stdin = subprocess.DEVNULL )
+    return p.stdout, p.returncode
+ne = nraw = ndec = nquote = nred = 0; dec = []
+for name, root, argv, tag, attr, quoted in E:
+    o, rc = runat( binp, root, argv )
+    try: rows = [ r for r in hints( o ) if r[ 0 ] == tag and r[ 1 ] == attr ] if rc == 0 else []
+    except Exception as ex: no( f"(e) {name}: output is not well-formed XML: {ex}" ); continue
+    if not rows: no( f"(e) premise: {name}: rc={rc}, no <{tag} {attr}=> in {argv}" ); continue
+    _, _, v, raw = rows[ 0 ]
+    if raw is None or "&apos;" in raw: no( f"(e) {name}: {attr}=\"{raw}\" escapes the apostrophe" ); continue
+    if unesc( raw ) != v: no( f"(e) {name}: parsed {v!r} != raw {raw!r}" ); continue
+    ne += 1
+    if quoted:
+        if "'" not in raw: no( f"(e) premise: {name}: the fixture's hint carries no quote: {raw}" )
+        else: nquote += 1
+        if base:
+            bo, _ = runat( base, root, argv )   # the same emitter's hint on the base binary spells the quote as an entity
+            braw = [ r[ 3 ] or "" for r in hints( bo ) if r[ 0 ] == tag and r[ 1 ] == attr ]
+            nred += bool( braw ) and ( "&apos;" in braw[ 0 ] or "&quot;" in braw[ 0 ] ) and "'" not in braw[ 0 ]
+    ent = "&" in raw
+    cmd = v if ent else raw
+    p = subprocess.run( [ "bash", "-c", f'"$RWBIN" . --no-cache {cmd}' ], cwd = root, env = dict( env, RWBIN = binp ), capture_output = True, stdin = subprocess.DEVNULL )
+    if p.returncode != 0 or not p.stdout.strip(): no( f"(e) {name}: `{cmd}` rc={p.returncode} bytes={len( p.stdout )} {p.stderr[:200]!r}" ); continue
+    if ent: ndec += 1; dec.append( name )
+    else: nraw += 1
+    print( f"        {name:20} {'decoded' if ent else 'raw    '} {attr}=\"{raw[:110]}\"" )
+verdict( ne == len( E ), f"(e) {ne}/{len( E )} emitters print a next-family hint with no &apos;", f"(e) premise: {ne}/{len( E )} emitters printed their hint" )
+verdict( nraw + ndec == len( E ) and nraw, f"(e) {nraw + ndec}/{len( E )} hints ran rc=0 with an answer: {nraw} pasted raw, {ndec} XML-decoded (an entity they must carry: {', '.join( dec ) or 'none'})",
+         f"(e) {nraw} raw + {ndec} decoded of {len( E )} ran" )
+nq_want = sum( 1 for e in E if e[ 5 ] )
+verdict( nquote == nq_want, f"(e) {nquote}/{nq_want} quote-carrying hints print a raw '", f"(e) premise: {nquote}/{nq_want} quote-carrying hints" )
+if base:
+    verdict( nred == nq_want, f"(e) base binary spells the quote as an entity on {nred}/{nq_want} of those hints (the red side)", f"(e) red side: base used an entity on {nred}/{nq_want}" )
+else:
+    print( "  SKIP  (e) base side: RIPWIRE_BASE_BIN unset" )
 sys.exit( fail )
 PY
 rc=$?

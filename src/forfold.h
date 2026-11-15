@@ -193,7 +193,7 @@ inline std::string skipRow( const BodyFoldInputs& in, NodeId id, std::string& es
     const std::string path       = in.rootArg.empty() ? std::string( in.ing.files[s.fileId] )
                                                       : std::string( rw::sarif::rootRelativeUri( in.ing.files[s.fileId], rootPrefix ) );
     std::vector<char> esc;
-    escapedNext = std::string( escapeXml( nextFlag( "--expand=", path + ":" + std::to_string( s.line ) + ":" + s.name ), esc ) );
+    escapedNext = nextValueXml( nextFlag( "--expand=", path + ":" + std::to_string( s.line ) + ":" + s.name ) );   // the one next= escaper
     std::string x = "<skip p=\"";
     x += escapeXml( path, esc );
     x += "\" n=\"";
