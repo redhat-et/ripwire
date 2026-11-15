@@ -16505,6 +16505,49 @@ inline std::size_t countTestedIn( const IngestResult& ing, const std::vector<cha
     return n;
 }
 
+// IMPACT-TEST-TIER: the transitive radius in THREE tiers, not two. isTestedByReach never counts a test symbol (a test is a
+// seed, never a covered row), so `untested = reach - tested` used to put every TEST that calls the target into the untested
+// production count: textual --impact=Widget.arrange read radius_untested="190" of reaches="221" with 172 test definitions
+// among them, and better coverage made a symbol look MORE dangerous to change. Tests are dependents too (a gold may require
+// the test file), so they stay in the reach and in the listing; they are COUNTED apart, by the same isTestSymbol predicate
+// --ignore-tests drops (filter.h applyIgnoreTests). tested + untested + tests == nodes.size().
+struct RadiusTiers
+{
+    std::size_t tested   = 0;   // production rows an indexed test transitively reaches (isTestedByReach)
+    std::size_t untested = 0;   // production rows no indexed test reaches
+    std::size_t tests    = 0;   // test definitions (isTestSymbol) in the set: their own tier, never untested production
+};
+
+inline RadiusTiers radiusTiers( const IngestResult& ing, const std::vector<char>& testReach, const std::vector<NodeId>& nodes )
+{
+    RadiusTiers t;
+    for( const NodeId x : nodes )
+    {
+        if( isTestSymbol( ing, x ) )
+        {
+            ++t.tests;
+        }
+        else if( x < testReach.size() && testReach[ x ] != 0 )
+        {
+            ++t.tested;
+        }
+    }
+    t.untested = nodes.size() - t.tested - t.tests;
+    return t;
+}
+
+// The per-row half of the same three tiers on an --impact XML row (CLI and MCP twin): tested="1" on a covered production row,
+// test="1" on a test definition (radius_tests= counts them), nothing on an untested production row. The two never co-occur:
+// isTestedByReach excludes a test symbol.
+inline const char* radiusTierRowAttrXml( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
+{
+    if( isTestSymbol( ing, n ) )
+    {
+        return " test=\"1\"";
+    }
+    return isTestedByReach( ing, testReach, n ) ? " tested=\"1\"" : "";
+}
+
 // cut-fix C (2026-09-23): the RELEVANCE WEIGHT the navigation lists rank by before a cap (filter.h rankBeforeCap) — a
 // symbol's resolved in-degree, the --metrics fan-in: how much else already depends on this row. Integer-exact,
 // free (one CSR row length) and identical on every surface that holds the graph, so the CLI and MCP twins cannot

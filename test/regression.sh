@@ -638,6 +638,7 @@ for _g in \
     impactdepthcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impacttesttiercheck \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \

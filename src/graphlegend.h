@@ -532,6 +532,38 @@ inline constexpr const char* kImpactImportTierColumnarLegend =
 inline constexpr const char* kImpactTestedPartitionLegend =
     "radius_tested=/radius_untested= partition reaches= by that same lens (transitive, unlike callers/callees). ";
 
+// IMPACT-TEST-TIER (graph.h radiusTiers): said exactly when radius_tests= rides, i.e. when the reach holds a test definition.
+// Absent otherwise, so an answer with no test in its reach is byte-identical to the two-tier one (0 bytes when inert).
+// G4: no double hyphen (ignore-tests is spelled without its dashes, as kImpactImportTierColumnarLegend explains).
+inline constexpr const char* kRadiusTestTierLegend =
+    "radius_tests= (absent at 0) counts the TEST definitions in that reach: dependents too, still in it, but counted apart, "
+    "so radius_tested=/radius_untested= cover production rows only and the three sum to the reach. ";
+inline constexpr const char* kTestRowLegend = "test=\"1\" on a row marks one of those test definitions (never 0, omitted otherwise). ";
+inline constexpr const char* kTestsIgnoredLegend =
+    "tests_ignored=\"1\": ignore-tests dropped every test definition before the walk, so no test can mark a row tested here: "
+    "radius_tested= is 0 by construction (not measured, not a finding) and radius_untested= is every production row reached; "
+    "importers_tests= still counts test files. ";
+
+// --impact's partition reading for this answer: the two-tier sentence always (so an answer with no test in its reach is
+// byte-identical to before), then the test tier and its row label when radius_tests= rides, and the ignore-tests disclosure.
+// One function for the CLI and the MCP twin, so the two cannot drift. The columnar form has no per-row attribute (its
+// <tested> column reads 0 on a test row), so it takes no row clause.
+inline std::string impactTestedPartitionLegend( std::size_t radiusTests, bool testsIgnored, bool rowLabel = true )
+{
+    std::string s( kImpactTestedPartitionLegend );
+    if( radiusTests > 0 )
+    {
+        s += kRadiusTestTierLegend;
+        s += rowLabel ? kTestRowLegend : "";
+    }
+    if( testsIgnored )
+    {
+        s += kTestsIgnoredLegend;
+    }
+    return s;
+}
+
+
 // F-02 (round-4 audit): THE LENS'S OWN BLIND SPOT, said where the partition is read.
 //
 // testSymbolForwardReach walks CALL EDGES out of the symbols isTestSymbol recognises — a doctest TEST_CASE, a
@@ -833,6 +865,12 @@ inline std::string countFieldOrEmpty( std::string_view name, std::size_t count, 
 inline std::string countAttrXmlOrEmpty( std::string_view name, std::size_t count )
 {
     return countFieldOrEmpty( name, count, /*json=*/false );
+}
+// IMPACT-TEST-TIER: the radius's test tier (graph.h radiusTiers) and the ignore-tests disclosure, one spelling for --impact's
+// three dialects, its MCP twin and --safe-delete. Both absent when inert: no test in the reach, no ignore-tests.
+inline std::string radiusTestTierFields( std::size_t radiusTests, bool testsIgnored, bool json )
+{
+    return countFieldOrEmpty( "radius_tests", radiusTests, json ) + ( testsIgnored ? std::string( json ? ",\"tests_ignored\":true" : " tests_ignored=\"1\"" ) : std::string() );
 }
 // The same absent-when-empty shape for a TEXT value the caller already escaped for its dialect: ` name="v"` or `,"name":"v"`
 // (grep's pattern_meta= and its MCP twin spell through it).
@@ -1144,6 +1182,12 @@ inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
 {
     return std::string( countA > 0 ? clauseA : "" ) + ( countB > 0 ? clauseB : "" );
+}
+// IMPACT-TEST-TIER: --safe-delete's test-tier clauses. It lists callers, not the reach, so no row label; the same two
+// clauses as --impact (kRadiusTestTierLegend, kTestsIgnoredLegend above), each exactly when its attribute rides the root.
+inline std::string safeDeleteTestTierLegend( std::size_t radiusTests, bool testsIgnored )
+{
+    return clausesForCounts( radiusTests, kRadiusTestTierLegend, testsIgnored ? 1u : 0u, kTestsIgnoredLegend );
 }
 inline std::string depsTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
