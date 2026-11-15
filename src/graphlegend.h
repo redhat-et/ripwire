@@ -870,8 +870,7 @@ inline std::string countAttrXmlOrEmpty( std::string_view name, std::size_t count
 // three dialects, its MCP twin and --safe-delete. Both absent when inert: no test in the reach, no ignore-tests.
 inline std::string radiusTestTierFields( std::size_t radiusTests, bool testsIgnored, bool json )
 {
-    return countFieldOrEmpty( "radius_tests", radiusTests, json )
-           + ( testsIgnored ? std::string( json ? ",\"tests_ignored\":true" : " tests_ignored=\"1\"" ) : std::string() );
+    return countFieldOrEmpty( "radius_tests", radiusTests, json ) + ( testsIgnored ? std::string( json ? ",\"tests_ignored\":true" : " tests_ignored=\"1\"" ) : std::string() );
 }
 // The same absent-when-empty shape for a TEXT value the caller already escaped for its dialect: ` name="v"` or `,"name":"v"`
 // (grep's pattern_meta= and its MCP twin spell through it).
