@@ -703,6 +703,9 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
     std::vector<std::vector<NodeId>> placed = placeCandidates( ing, spelled );
     for( std::size_t k = 0; k < placed.size(); ++k )
     {
+        // every qualifier, not only the last: `Missing.setup.prepare_setup_platform` places nothing (as sentenceCodeNames)
+        const std::string_view outer = outerQualifiers( named[k], spelled[k] );
+        std::erase_if( placed[k], [ & ]( NodeId id ) { return !outerQualifiersPlace( ing, ing.symbols[id], outer ); } );
         if( placed[k].empty() || placed[k].size() > kSubjectMaxDefs )
         {
             continue;

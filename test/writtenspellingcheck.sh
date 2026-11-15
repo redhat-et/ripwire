@@ -146,6 +146,14 @@ refuse cpp 'Anon::Box::put'                     # plain.cc's Anon::Box::put besi
 bind   cpp 'Plain::Pad::put' cppSoloHelper      # KEEP: no anonymous namesake of Plain::Pad, the chain tail still binds
 refuse cpp 'Solo::Pad::put'                     # the only Solo::Pad is in an unnamed namespace: refused, as an unreadable chain is
 
+echo "-- SELECTOR-SELF-ANY-LANG: crate/self/super are path keywords only in Rust (each refuse RED on main 44f7d3326: it bound)"
+bind   rs 'crate::buf::grow' rs_free_grow_helper  # KEEP: a Rust path keyword is dropped
+bind   rs 'self::buf::grow' rs_free_grow_helper
+refuse cpp 'self::Conn::Pool::drain'            # C++ has no `self` namespace keyword: the segment must place the definition
+refuse cpp 'super::Conn::Pool::drain'
+refuse py 'self.asyncio.run'                    # a Python `self` is a receiver, never a module segment
+refuse py 'super.json.dump'
+
 echo "-- round trip: every member row --callees prints binds back to the same definition"
 # cr-harvest-444 (CR 4383991762): a failed enumeration or --callers run, or a sub with no seeds, is a FAIL, never a silent PASS
 for sub in ts py go rs cpp rb; do

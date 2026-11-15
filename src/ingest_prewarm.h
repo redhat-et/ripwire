@@ -15,6 +15,9 @@
 
 namespace rw
 {
+// The construct tables (ingest_astquery.h, below in the TU): compiles the tables of the flagged kLangTable rows now, before
+// any parse worker runs, and records the footprint they added (constructTablesFootprint).
+void warmConstructTables( const std::array<bool, kLangTable.size()>& rows );
 
 namespace
 {
@@ -33,6 +36,12 @@ struct IngestFileScan
     std::vector<std::uint32_t>    nestRefusedBytes;   // the Kotlin nesting guard: the refused file's size, 0 = not refused (one writer per slot)
     std::vector<std::uint8_t>     extractPartial;     // 1 = the file's facts are PARTIAL (an ExtractShortfall, or a throw mid-file) (one writer per slot)
     std::vector<std::uint32_t>    extractPartialBytes;   // its size as observed at hash time, 0 = not captured (the row's bytes=)
+    // QD-CONSTRUCTS-AT-INGEST (lazy): does this ingest find construct hits (ingest.h tlIngestWantsConstructHits, read once
+    // by runParsePool), and per fileId, are its hits KNOWN — found by this parse, or carried by a record that had them.
+    // 0 only for a code file parsed without the pass or carried from a record that lacked it; saveCache writes the
+    // record "constructs absent" then. One writer per slot.
+    bool                          wantConstructHits = false;
+    std::vector<std::uint8_t>     constructsKnown;
 
     // `knownBytes` is the file's size where the caller holds its bytes; otherwise the stat taken at hash time, which is
     // read HERE, before the save path may forget it for the cache. 0 = neither was captured.
@@ -57,6 +66,12 @@ struct FileExtractThrew
     void disclose( DisclosureWhy ) noexcept
     {
         scan.markExtractPartial( fileId );
+        // QD-CONSTRUCTS-AT-INGEST: a throw may have cut the file's construct pass, so its hits are not KNOWN: the ingest claims
+        // no carried hits, and --quality-delta re-parses (CodeRabbit 4572576449 on #655). Every slot starts at 1 (known-empty).
+        if( fileId < scan.constructsKnown.size() )
+        {
+            scan.constructsKnown[ fileId ] = 0;
+        }
     }
 };
 
@@ -83,6 +98,7 @@ inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
     scan.nestRefusedBytes.assign( nfilesEarly, 0u );
     scan.extractPartial.assign( nfilesEarly, 0u );
     scan.extractPartialBytes.assign( nfilesEarly, 0u );
+    scan.constructsKnown.assign( nfilesEarly, 1u );   // known-empty until a parse without the pass says otherwise
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: classify file languages" );
         for( std::size_t fileId = 0; fileId < nfilesEarly; ++fileId )
@@ -269,6 +285,36 @@ struct QueryPrewarm
     std::mutex                    mutex;
     std::condition_variable       cv;
 };
+
+// The rows whose construct tables this ingest's parse will use: each parsed file's row (no cache, a miss, or the ObjC row of
+// a missed .h that sniffs ObjC), and a hit whose record lacks its hits (the pool parses it for them alone). A .h hit that
+// sniffs ObjC there, or a hit whose record fails late, compiles its table in the worker as before, unmeasured: the
+// projection then counts those bytes as growth, the cautious side.
+inline std::array<bool, kLangTable.size()> constructRowsNeeded( const CacheRecords& cache, const IngestFileScan& scan,
+                                                                const std::vector<char>& isMiss, const std::vector<char>& isObjCHeaderMiss )
+{
+    std::array<bool, kLangTable.size()> rows {};
+    const LangEntry* objcLe = lookupLang( ".m" );
+    for( std::size_t fi = 0; fi < scan.lang.size(); ++fi )
+    {
+        const LangEntry* le = scan.lang[ fi ];
+        if( le == nullptr || le->grammar == nullptr )
+        {
+            continue;
+        }
+        const CachedRecordHead* head = cache.empty() ? nullptr : cache.headOf( fi );
+        if( !cache.empty() && !isMiss[ fi ] && ( head == nullptr || !head->constructsAbsent ) )
+        {
+            continue;   // a hit that carries its hits (or a file no worker parses): no table
+        }
+        if( isObjCHeaderMiss[ fi ] && objcLe != nullptr )
+        {
+            le = objcLe;
+        }
+        rows[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
+    }
+    return rows;
+}
 
 // pre-warm the per-language tags.scm cache single-threaded; workers then only READ it.
 // LAZY: compile ONLY grammars needed by changed/uncached files (the miss set).
@@ -561,6 +607,13 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Cac
                 prewarm.toCompile.push_back( &e );
             }
         }
+    }
+
+    // QD-PROJECTION-FIXED: the construct tables, before the tags compiles launch — no other thread of this ingest runs here
+    // (the hash pool has joined), so the footprint they add is theirs alone.
+    if( scan.wantConstructHits )
+    {
+        warmConstructTables( constructRowsNeeded( cache, scan, isMiss, isObjCHeaderMiss ) );
     }
 
     // Compile distinct grammars IN PARALLEL (ts_query_new is compute-bound — PMC IPC 4.0) and install

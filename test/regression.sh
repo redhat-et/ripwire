@@ -670,6 +670,7 @@ for _g in \
     layerquerycheck \
     layoutcheck \
     lb3namecheck \
+    lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
     legenddriftcheck \
@@ -855,10 +856,12 @@ for _g in \
     pyshapecheck \
     qackconcurrencycheck \
     qackorigincheck \
+    qbasecachecheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
     qdclonepaircheck \
+    qdconstructscheck \
     qddegradecheck \
     qddialscheck \
     qdentryceilingcheck \

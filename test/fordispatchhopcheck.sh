@@ -57,6 +57,8 @@
 #   H1 [P] a candidate type no constructor CALL makes (fixture heldas: RealReader, held by value in App and in App::Run): <s held="member"
 #          of="RealReader" n="App::reader_" p="src/app.cc:4">RealReader reader_;</s> and <s held="local" … n="App::Run" p="src/app.cc:10">,
 #          two rows, capped="1" for the third (extra); a pointer or reference member/local, a by-value PARAMETER and a test file's local are no row
+#   H1u [P] the same excluded shapes UNCAPPED (fixture heldone: one eligible member): exactly one held row, capped="0" (#646 CodeRabbit
+#          nitpick: under H1's cap a misclassified exclusion sorting after the two shown rows would hide)
 #   H2 [G] a candidate whose type a production call constructs (fixture rs: pick_renderers ctor="Cmd::new") carries no held= row
 #   H3 [P] both legends define held= and of= beside the element
 #
@@ -158,7 +160,14 @@ for leg in compact full; do
 done
 
 # ── P6 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-run "$F/cpp" --whereis=Fetch >"$TMP/p6"
+# --whereis reads the branches of the repository ENCLOSING its root; asked on $F/cpp that is this checkout, which a long-lived
+# dev clone (and each linked worktree of it) can push past the 512-branch refusal (the red this was: CI green, worktree red).
+# The paste runs on a one-commit repository holding the fixture instead, so the arm reads the fixture and nothing else.
+P6R="$TMP/p6repo"; cp -R "$F/cpp" "$P6R"
+git -C "$P6R" init -q && git -C "$P6R" add -A \
+    && git -C "$P6R" -c user.name=Dev -c user.email=dev@x.com -c commit.gpgsign=false commit -qm fixture >/dev/null 2>&1 \
+    || no "(P6) could not build the one-commit fixture repository"
+run "$P6R" --whereis=Fetch >"$TMP/p6"   # status: both candidate names in the answer are the verdict; a refusal prints neither and FAILs
 if grep -q 'DiskSource::Fetch' "$TMP/p6" && grep -q 'NetSource::Fetch' "$TMP/p6"; then ok "(P6) next= --whereis=Fetch lists every candidate"
 else no "(P6) --whereis=Fetch does not list both candidates"; fi
 
@@ -178,6 +187,19 @@ done
 if [ "$seen" = 6 ] && ! has "$HH" 'borrowed_' && ! has "$HH" 'ptr' && ! has "$HH" 'ref' && ! has "$HH" 'UseByParam' && ! has "$HH" 'inTest' && ! has "$HH" 'extra'; then
     ok "(H1n) a pointer/reference member or local, a by-value parameter, a test local and the capped third are no row (saw $seen of 6 shapes)"
 else no "(H1n) saw $seen of 6 excluded shapes, or one printed: [$HH]"; fi
+# H1u: the same negative shapes UNCAPPED — heldone has one eligible declaration (App::reader_), so a misclassified exclusion
+# would print as a second row instead of hiding behind the kForDispatchHeldRows cap
+run "$F/heldone" "--for=Parser::Load file_reader_->ReadFile" >"$TMP/h1u"; h1urc=$?
+HU="$( hop "$TMP/h1u" )"
+nu="$( printf '%s' "$HU" | grep -o '<s held=' | wc -l | tr -d ' ' )"
+useen=0
+for shape in 'RealReader\* borrowed_;' 'RealReader\* ptr' 'RealReader& ref' 'UseByParam( RealReader r )' 'RealReader inTest;'; do
+    grep -rq -- "$shape" "$F/heldone" && useen=$(( useen + 1 ))
+done
+if [ "$h1urc" = 0 ] && [ "$useen" = 5 ] && [ "$nu" = 1 ] && has "$HU" '<s held="member" of="RealReader" n="App::reader_" p="src/app.cc:4">RealReader reader_;</s>' \
+   && has "$HU" 'capped="0"'; then
+    ok "(H1u) uncapped: the one by-value member is the only held row, capped=0 (saw $useen of 5 excluded shapes, none a row)"
+else no "(H1u) rc=$h1urc, saw $useen of 5 excluded shapes, expected exactly 1 held row (App::reader_) and capped=0, got $nu: [$HU]"; fi
 nctor="$( printf '%s' "$H3" | grep -o ' ctor="' | wc -l | tr -d ' ' )"
 if [ "$nctor" -ge 1 ] && ! has "$H3" ' held="'; then ok "(H2) a candidate made by a production constructor call (saw $nctor ctor= rows) carries no held= row"
 else no "(H2) ctor rows $nctor (premise: at least 1) or a held= row on the rs fixture: [$H3]"; fi
