@@ -815,6 +815,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kFieldIdCapacity` | `64` | — | — |
 
+### `src/infra/limitwarn.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kLimitWarnLines` | `5` | — | — |
+
 ### `src/infra/os_win32_logic.h`
 
 Discloses: **none**
@@ -957,6 +965,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxPlanScout` | `12` | OUTPUT | — |
+| `kPlanScoutFileBudget` | `8192` | — | — |
 
 ### `src/lanes.h`
 
