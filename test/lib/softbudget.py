@@ -18,12 +18,32 @@ def strip_appended_bytes( b ):
     return strip_appended( b.decode( 'utf-8', 'surrogateescape' ) ).encode( 'utf-8', 'surrogateescape' )
 
 
+_TSYM_XML = re.compile( r' tsym="[^"]*"' )
+
+
+def _priced_tail( t ):
+    """TAIL-SYM-TERMS (2026-11-14): the tail as the soft refill PRICES it. A no-budget (reference) answer's rows may carry tsym=
+    (task-word names after sym=); a budgeted answer never does (src/verbs_for.h: no tsym= under --token-budget) and the reserve
+    is the pre-card walk (fileTailOldWalk), so the readers below measure a tail without tsym= ("tsym"/"tsym_why" in JSON)."""
+    if t.lstrip().startswith( "{" ):
+        try: d = json.loads( t )
+        except ValueError: return t
+        tl = d.get( "tail" )
+        if isinstance( tl, dict ) and "tsym" in tl:
+            tl.pop( "tsym", None ); tl.pop( "tsym_why", None )
+            return json.dumps( d, separators=( ",", ":" ), ensure_ascii=False )
+        return t
+    return _TSYM_XML.sub( "", t ) if " tsym=" in t else t
+
+
 def tail_size( t ):
-    """Bytes of the answer's tail: XML, the whole <tail>…</tail> element; JSON, the compact "tail" object.
+    """Bytes of the answer's tail: XML, the whole <tail>…</tail> element; JSON, the compact "tail" object (tsym= not counted:
+    _priced_tail).
 
     FIX1 R1: the refill reserves the tail at its HEAD-scoped size (the tail of the no-budget answer) when that is what binds,
     so maximality counts the tail at no less than the reference tail (an upper bound on the reserve: the check stays a bound).
     """
+    t = _priced_tail( t )
     if t.lstrip().startswith( "{" ):
         try: return len( json.dumps( json.loads( t ).get( "tail", {} ), separators=( ",", ":" ), ensure_ascii=False ).encode() )
         except ValueError: return 0
@@ -36,6 +56,7 @@ def old_walk_tail_size( t ):
     trailing p_only= rows (the widened, path-only rows come last) and the p_only attribute / keys. The soft refill reserves the
     tail at THIS size of the head-scoped tail (src/verbs_for.h, fileTailOldWalk), never at the widened rows. Its next= offset can
     differ from the old walk's by a digit or two (inside the readers' row slack)."""
+    t = _priced_tail( t )
     if t.lstrip().startswith( "{" ):
         try: tl = dict( json.loads( t ).get( "tail", {} ) )
         except ValueError: return 0
