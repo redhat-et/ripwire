@@ -594,6 +594,55 @@ inline void collectWantedConstructHits( IngestFileScan& scan, const LangEntry& l
     }
 }
 
+// The file's cache record when its bytes are unchanged: the prewarm's hash-verified hit, else the blob's record head for the
+// file when its hash is the one just computed (`h`); null on a miss.
+inline const CachedRecordHead* cachedRecordMatching( const ParsePoolShared& sh, std::size_t fileId, std::uint64_t h ) noexcept
+{
+    if( const CachedRecordHead* hit = sh.cacheHitFacts[ fileId ]; hit != nullptr )
+    {
+        return hit;
+    }
+    const CachedRecordHead* candidate = sh.cacheCandidateFacts[ fileId ];
+    return candidate != nullptr && candidate->hash == h ? candidate : nullptr;
+}
+
+// One queued file's tags pass, run at the flush once the query prewarm is ready (runParseWorker's flushPendingParsed), then its
+// tree freed. PARSE-BUDGET-DETERMINISTIC: it resumes the deadline the file's parse started, so the file gets the budget the inline
+// pass would have given it; past it, the file's rows go (rollBackFileFacts keeps the rows later files appended meanwhile) and it
+// is read lexically, as the inline pass does. `finishNewDefs` / `readLexically` are the worker's per-file finishers.
+template <class FinishNewDefs, class ReadLexically>
+inline void runQueuedTagsPass( ParsePoolShared& sh, TSQueryCursor* cursor, RawFacts& out, PendingParsedFile& pending, FinishNewDefs& finishNewDefs,
+                               ReadLexically& readLexically )
+{
+    if( pending.le == nullptr || pending.tree == nullptr )
+    {
+        return;
+    }
+    const TSNode         root             = ts_tree_root_node( pending.tree );
+    const std::size_t    firstNewDefIndex = out.defs.size();
+    ExtractShortfall     tagsShortfall;
+    ExtractDeadlineScope resumed( pending.deadline );   // the parse's steps so far: the same budget as inline
+    underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
+    {
+        captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
+                          TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
+    } );
+    noteParseSteps( sh.files[ pending.fileId ], pending.bytes.size(), resumed.deadline );
+    if( resumed.hit() )
+    {
+        rollBackFileFacts( out, pending.factsMark, pending.fileId );
+        sh.scan.extractPartial[ pending.fileId ] = 0;   // the lexical read is the whole of this file's facts, disclosed as such
+        readLexically( pending.fileId, *pending.le, pending.bytes, indexModeForCut( resumed.cut() ) );
+    }
+    else
+    {
+        notePartialExtract( sh.scan, pending.fileId, tagsShortfall, pending.bytes.size() );
+        finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
+    }
+    ts_tree_delete( pending.tree );
+    pending.tree = nullptr;
+}
+
 // QD-CONSTRUCTS-AT-INGEST: the construct pass's own query cursor, released on every exit of the worker (ParserGuard's shape).
 struct ConstructCursorGuard
 {
@@ -666,14 +715,6 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         indexFileLexically( fileId, le, fileBytes, mode, out.defs, out.refs, scan.health[ fileId ] );
         finishNewDefs( out.defs, firstNewDefIndex, fileBytes );
     };
-    // PARSE-BUDGET-DETERMINISTIC: a queued file whose resumed tags pass ran past its budget gets the inline pass's rollback
-    // and lexical read, keeping the rows later files appended meanwhile.
-    const auto indexQueuedFileLexically = [ & ]( const PendingParsedFile& pending, FileIndexMode mode )
-    {
-        rollBackFileFacts( out, pending.factsMark, pending.fileId );
-        scan.extractPartial[ pending.fileId ] = 0;   // the lexical read is the whole of this file's facts, disclosed as such
-        readLexically( pending.fileId, *pending.le, pending.bytes, mode );
-    };
 
     std::vector<PendingParsedFile> pendingParsed;
     pendingParsed.reserve( kMaxPendingParsedFiles );
@@ -690,31 +731,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             waitForQueryPrewarm( &sh.gate );
             for( PendingParsedFile& pending : pendingParsed )
             {
-                if( pending.le == nullptr || pending.tree == nullptr )
-                {
-                    continue;
-                }
-                const TSNode root = ts_tree_root_node( pending.tree );
-                const std::size_t firstNewDefIndex = out.defs.size();
-                ExtractShortfall  tagsShortfall;
-                ExtractDeadlineScope resumed( pending.deadline );   // the parse's steps so far: the same budget as inline
-                underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
-                {
-                    captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
-                                      TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
-                } );
-                noteParseSteps( sh.files[ pending.fileId ], pending.bytes.size(), resumed.deadline );
-                if( resumed.hit() )
-                {
-                    indexQueuedFileLexically( pending, indexModeForCut( resumed.cut() ) );
-                }
-                else
-                {
-                    notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
-                    finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
-                }
-                ts_tree_delete( pending.tree );
-                pending.tree = nullptr;
+                runQueuedTagsPass( sh, cursor, out, pending, finishNewDefs, readLexically );
             }
         }
         pendingParsed.clear();
@@ -811,15 +828,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 
             if( !sh.cache.empty() )
             {
-                const CachedRecordHead* hit = sh.cacheHitFacts[ fileId ];
-                if( hit == nullptr )
-                {
-                    const CachedRecordHead* candidate = sh.cacheCandidateFacts[ fileId ];
-                    if( candidate != nullptr && candidate->hash == h )
-                    {
-                        hit = candidate;
-                    }
-                }
+                const CachedRecordHead* hit = cachedRecordMatching( sh, fileId, h );
                 if( cachedIndexModeStale( hit, *le, sh.maxFileBytes ) )
                 {
                     sh.lateMiss[ fileId ] = 1;   // re-extracted after the join, in the mode this run chooses
