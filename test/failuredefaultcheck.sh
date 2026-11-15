@@ -193,7 +193,8 @@ qd_pair fd_gate load.ts "$FD_ONE" "$FD_EMPTY"
 if gating_row; then ok "(G) failure-default -> empty catch: a gating row at the same total, exit 2"; else no "(G) want a gating loadAll row and exit 2, got rc $QD_RC: $( qd_row loadAll )"; fi
 qd_pair fd_ack load.ts "$FD_NONE" "$FD_ONE"
 fd_has "(A) premise" loadAll
-( cd "$WORK/fd_ack" && "$BIN" . --quality-delta --no-cache --quality-ack="report-only failure-default accepted" >/dev/null 2>&1 )
+( cd "$WORK/fd_ack" && "$BIN" . --quality-delta --no-cache --quality-ack="report-only failure-default accepted" >/dev/null 2>&1 ) || no "(A) --quality-ack exited $?"
+if grep -q '^ack error-masking:report-only ' "$WORK/fd_ack/.ripwire_quality_acks" 2>/dev/null; then ok "(A) the report-only row was acked as error-masking:report-only"; else no "(A) no error-masking:report-only row in the ledger: $( grep error-masking "$WORK/fd_ack/.ripwire_quality_acks" 2>/dev/null | cut -c1-60 )"; fi
 QD_OUT="$( cd "$WORK/fd_ack" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; QD_RC=$?
 if [ -z "$( qd_row loadAll )" ] && [ "$QD_RC" = 0 ]; then ok "(A) the ack suppresses its own report-only row"; else no "(A) after the ack: rc $QD_RC, row: $( qd_row loadAll )"; fi
 printf '%s' "$FD_EMPTY" > "$WORK/fd_ack/load.ts"
