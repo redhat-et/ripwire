@@ -828,7 +828,7 @@ _What SYM calls (1-hop out-edges)._
 $ ./build/ripwire . --callees=rankGraphTeleport
 <!-- ripwire callees schema=ripwire.callees/v1: 1-hop CALLEES of of= (defs= matched, count= distinct symbols): <s t= n= p= role= tested=>. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. stdm n= calls=: of declined_calls=, calls named like a standard-type member of their language (C++ container/string/optional/smart pointer, Rust collection/string/Option/Result; n=) on a receiver no rule tied to an in-tree class (Rust: one of an in-tree type no rule typed too: a generic bound, dyn or impl Trait, a type alias, a glob of a glob, a tuple-struct field, a non-plain pattern, behind Option / Result / Rc / Arc / RefCell / Cell / Mutex / RwLock); no edge or row (may be the std member). root=: p= relative to it. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. <s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0). declined_calls=K: K call sites left unbound, in no count; <dc n= l=|in= p= cands=K via=declined>: one such call SITE (callees: called name, line; callers: calling def, file:line); NOT an edge or a caller/callee claim; cands=K: K in-tree defs it could have meant (K may be 1), the resolver proved none; not a claim this call reaches any of them. dc gate=: builtin or std, a name gate declined it; side, a Ruby call whose in-reach defs answer on the other side of self. next=: the one pasteable follow-up. hop_tested=/hop_untested=: count= split by whether an indexed test reaches the row (in-process calls only). -->
 <callees schema="ripwire.callees/v1" of="rankGraphTeleport" defs="1" count="4" root="." hop_tested="3" hop_untested="1" declined_calls="6" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" next="--expand=rankGraphTeleport">
-<s t="fn" n="biasPrior" p="src/graph.h:13663"/>
+<s t="fn" n="biasPrior" p="src/graph.h:13671"/>
 <s t="macro" n="PROFILE_SCOPE_DESCRIBE" p="src/infra/profileScope.h:1282" role="macro" tested="1" prov="split"/>
 <s t="macro" n="PROFILE_SCOPE_DESCRIBE" p="src/infra/profileScope.h:1296" role="macro" tested="1" prov="split"/>
 <s t="fn" n="pageRankDouble" p="src/pagerank.cpp:99" tested="1"/>
@@ -864,8 +864,8 @@ $ ./build/ripwire . --uses=rankGraphTeleport
 <!-- ripwire uses schema=ripwire.uses/v1: resolvable use-sites of of=: <u role=call|macro|read|write|import|extends|type p=file:line in_id=>. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. defs=N: definitions the selector matched; qualify file:name to narrow the call sites. external=1: of= has no definition in the indexed tree under any spelling (stdlib/third-party). count=N: unhedged use-site rows (a floor). -->
 <uses schema="ripwire.uses/v1" of="rankGraphTeleport" defs="1" external="0" count="9" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1">
 <u role="call" p="src/mcpindex.h:1342" in_id="src/mcpindex.h::rw::getIndex"/>
-<u role="call" p="src/graph.h:13751" in_id="src/graph.h::rw::rankGraph"/>
-<u role="call" p="src/graph.h:14445" in_id="src/graph.h::rw::anchoredLexicalRank"/>
+<u role="call" p="src/graph.h:13759" in_id="src/graph.h::rw::rankGraph"/>
+<u role="call" p="src/graph.h:14453" in_id="src/graph.h::rw::anchoredLexicalRank"/>
 <u role="call" p="src/eval.h:328" in_id="src/eval.h::rw::runEval"/>
 <u role="call" p="src/main.cpp:1447" in_id="churnDecayRanking"/>
 <u role="call" p="src/main.cpp:1486" in_id="churnRankedGraph"/>
@@ -898,11 +898,11 @@ $ ./build/ripwire . --graph-query='and(callers(name("rankGraphTeleport"),2),kind
 <!-- ripwire graph-query schema=ripwire.graph-query/v1: graph-query expression over the symbol graph: <s t= n= p=> matching rows. window: shown= capped= (capped=1 cut). counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. pr_iters=N: PageRank iterations. expr=: the expression as given; count=: symbols it matched (rows page by shown=/total=). -->
 <query schema="ripwire.graph-query/v1" expr="and(callers(name(&quot;rankGraphTeleport&quot;),2),kind(all,fn))" count="55" shown="55" capped="0" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" root="." pr_iters="39">
 <s t="fn" n="getIndex" p="src/mcpindex.h:1226"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:14394"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:14402"/>
 <s t="fn" n="emitCommunitiesReport" p="src/verbs_report.h:2695"/>
 <s t="fn" n="emitCommunityDrill" p="src/verbs_report.h:2856"/>
 <s t="fn" n="dispatchMainBody" p="src/main.cpp:4438"/>
-<s t="fn" n="rankGraph" p="src/graph.h:13747"/>
+<s t="fn" n="rankGraph" p="src/graph.h:13755"/>
 <s t="fn" n="computeLensRanking" p="src/verbs_for.h:110"/>
 <s t="fn" n="postCheckJsonBuilt" p="src/mcpedit.h:1118"/>
 <s t="fn" n="fetchBody" p="src/mcpverbs.h:5812"/>
@@ -968,7 +968,7 @@ _Shortest directed call-path SRC -> DST. CHANGED: now reports from_p/to_p/from_d
 ```
 $ ./build/ripwire . --path=main,rankGraphTeleport
 <!-- ripwire path schema=ripwire.path/v1: one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none shown. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. next=: the one pasteable follow-up. s site=: a call of this row's name in the row above (arity fit, then owner, first); by name, not proof. s sites=N: N such lines. s call=: its text, <=3 lines/120 B, U+2026=cut; pair 1 only. s sig=: this row's signature, <=160 B; pair 1 only. alts side=from|to of=: further definitions that endpoint's name binds, not printed above (the pick is not provably unique): <d p= sel= class=>, sel= pastes as that endpoint. alts alts_shown=K defs=N: K of the other rows shown; next= pages the rest. from_p=/to_p=: the definitions from= and to= were bound to. from_defs=/to_defs=: definitions of each name, all searched; above 1, qualify file:name. -->
-<path schema="ripwire.path/v1" from="main" to="rankGraphTeleport" from_p="src/main.cpp:4268" to_p="src/graph.h:13704" from_defs="180" to_defs="1" reachable="1" hops="6" next="--expand=src/main.cpp:4349:finishMainRun" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" coun … [line truncated: 13 more bytes on this line]
+<path schema="ripwire.path/v1" from="main" to="rankGraphTeleport" from_p="src/main.cpp:4268" to_p="src/graph.h:13712" from_defs="180" to_defs="1" reachable="1" hops="6" next="--expand=src/main.cpp:4349:finishMainRun" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" coun … [line truncated: 13 more bytes on this line]
 <s t="fn" n="main" p="src/main.cpp:4268"/>
 <s t="fn" n="finishMainRun" p="src/main.cpp:4349" site="src/main.cpp:4343" call="const int rc = finishMainRun( cfg, argv );" sig="static int finishMainRun( const rw::Config&amp; cfg, char** argv )"/>
 <s t="fn" n="runWithCompactLegend" p="src/main.cpp:4202" site="src/main.cpp:4352" call="const int rc = runWithCompactLegend( cfg, argv );" sig="static int runWithCompactLegend( const rw::Config&amp; cfg, char** argv )"/>
@@ -1023,7 +1023,7 @@ $ ./build/ripwire . --connect=rankGraphTeleport,runEval,getIndex
 <connect schema="ripwire.connect/v1" terminals="3" nodes="3" edges="2" radius="6" groups="1" est_tokens="754" hub_floor="281" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1">
 <g terminals="3">
 <t n="runEval" t="fn" p="src/eval.h:171"/>
-<t n="rankGraphTeleport" t="fn" p="src/graph.h:13704"/>
+<t n="rankGraphTeleport" t="fn" p="src/graph.h:13712"/>
 <t n="getIndex" t="fn" p="src/mcpindex.h:1226"/>
 <e f="runEval" t="rankGraphTeleport" site="src/eval.h:328" call="const std::vector&lt;float&gt; r = rankGraphTeleport( g, diffTeleport( ing, seedMask ) ).rank;" sig="inline RankedGraph rankGraphTeleport( const Graph&amp; g, const std::vector&lt;float&gt;&amp; p, float alpha = 0.85f )"/>
 <e f="getIndex" t="rankGraphTeleport" site="src/mcpindex.h:1342" call="const auto [ wsRank, wsIters, wsConverged ] = rankGraphTeleport( ix.g, diffTeleport( ix.ing, changed ) );"/>
@@ -3160,10 +3160,10 @@ _Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree
 ```
 $ ./build/ripwire . --edit-check=rankGraphTeleport
 <!-- ripwire edit-check schema=ripwire.edit-check/v1: sym='s contract NOW vs HEAD: status=unchanged|new-symbol|contract-change; <c n= p= incompatible=1 sites_l=> callers. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. est_tokens=: price as emitted (an upper bound under compact). at=: commit+dirty+shallow. root=: p= relative to it. next=: the one pasteable follow-up. defs=N: overloads at this site (same file, scope, name) folded into one contract; params compared by MAX. callers=N: callers of sym= (the c rows' total; a floor). t=: sym='s kind (fn|cls|...). -->
-<edit-check schema="ripwire.edit-check/v1" sym="rankGraphTeleport" t="fn" p="src/graph.h:13704" status="unchanged" defs="1" callers="7" incompatible="0" at="daff79c9a" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" root="." next="--test-gate=src/graph.h" est_t … [line truncated: 12 more bytes on this line]
+<edit-check schema="ripwire.edit-check/v1" sym="rankGraphTeleport" t="fn" p="src/graph.h:13712" status="unchanged" defs="1" callers="7" incompatible="0" at="daff79c9a" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" root="." next="--test-gate=src/graph.h" est_t … [line truncated: 12 more bytes on this line]
 <c n="runEval" p="src/eval.h:171"/>
-<c n="rankGraph" p="src/graph.h:13747"/>
-<c n="anchoredLexicalRank" p="src/graph.h:14394"/>
+<c n="rankGraph" p="src/graph.h:13755"/>
+<c n="anchoredLexicalRank" p="src/graph.h:14402"/>
 <c n="churnDecayRanking" p="src/main.cpp:1433"/>
 <c n="churnRankedGraph" p="src/main.cpp:1472"/>
 <c n="runDefaultMap" p="src/main.cpp:1759"/>
@@ -3403,7 +3403,7 @@ _Bare --slice=SYM: the INVENTORY of sliceable locals (<v n= l= t=/>), so a calle
 ```
 $ ./build/ripwire . --slice=rankGraphTeleport
 <!-- ripwire slice schema=ripwire.slice/v1: name-based def-use rows of one variable in one definition: <s l= k=def|use|both|scope t= [b= pp= rd=]> (rd= reaching-def lines per reach=cfg|linear), <v n= l= t=> inventory; steps=/depth= flow. at=: commit+dirty+shallow. root=: p= relative to it. sym=/lang=: the sliced definition's name and language; p= is its file:line. vars=N: sliceable local bindings in the definition, one v row each; name one to slice it. counts=as-classified: defs=/uses=/vars=/steps= count what the name classifier rowed; neither floors nor totals. -->
-<slice sym="rankGraphTeleport" p="src/graph.h:13704" t="fn" lang="cpp" schema="ripwire.slice/v1" vars="14" at="daff79c9a" root="." counts="as-classified">
+<slice sym="rankGraphTeleport" p="src/graph.h:13712" t="fn" lang="cpp" schema="ripwire.slice/v1" vars="14" at="daff79c9a" root="." counts="as-classified">
 <v n="alpha" l="13704" t="param"/>
 <v n="g" l="13704" t="param"/>
 <v n="p" l="13704" t="param"/>
@@ -3440,7 +3440,7 @@ _Forward flow: which statements the seed's value reaches, at the default depth b
 ```
 $ ./build/ripwire . --slice=rankGraphTeleport:teleport --slice-flow=fwd
 <!-- ripwire slice schema=ripwire.slice/v1: name-based def-use rows of one variable in one definition: <s l= k=def|use|both|scope t= [b= pp= rd=]> (rd= reaching-def lines per reach=cfg|linear), <v n= l= t=> inventory; steps=/depth= flow. at=: commit+dirty+shallow. root=: p= relative to it. sym=/lang=: the sliced definition's name and language; p= is its file:line. order=defuse: seed s rows (no v=) ranked among these rows by def-use coverage (distinct local names on the line) desc, then line; not source order, not a whole-function ranking (measured at chance — docs/EVALS.md) — flow s rows (v=) keep their (d=,l=,v=) order. counts=as-classified: defs=/uses=/vars=/steps= count what the name classifier rowed; neither floors nor totals. -->
-<slice sym="rankGraphTeleport" p="src/graph.h:13704" t="fn" lang="cpp" schema="ripwire.slice/v1" var="teleport" defs="1" uses="3" reach="cfg" flow="fwd" depth="8" steps="7" order="defuse" at="daff79c9a" root="." counts="as-classified">
+<slice sym="rankGraphTeleport" p="src/graph.h:13712" t="fn" lang="cpp" schema="ripwire.slice/v1" var="teleport" defs="1" uses="3" reach="cfg" flow="fwd" depth="8" steps="7" order="defuse" at="daff79c9a" root="." counts="as-classified">
 <s l="13727" k="use" t="call-arg" rd="13709">
 <![CDATA[run = pageRankDouble( g.inEdges, g.wOutDeg, teleport, rankDouble, PageRankConfig{ .alpha = double( alpha ) } );]]>
 </s>
@@ -3494,10 +3494,10 @@ $ ./build/ripwire . --slice-depth=3
 _Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost._
 
 ```
-$ ./build/ripwire . --at=src/graph.h:13706
+$ ./build/ripwire . --at=src/graph.h:13714
 <!-- ripwire at schema=ripwire.at/v1: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans. root=: p= relative to it. -->
-<at schema="ripwire.at/v1" p="src/graph.h" l="13706" sym="rankGraphTeleport" chain="1" root=".">
-<s n="rankGraphTeleport" t="fn" l="13704" el="13732"/>
+<at schema="ripwire.at/v1" p="src/graph.h" l="13714" sym="rankGraphTeleport" chain="1" root=".">
+<s n="rankGraphTeleport" t="fn" l="13712" el="13740"/>
 </at>
 ```
 
@@ -4063,8 +4063,8 @@ $ ./build/ripwire . --from-trace=-
 AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:13706
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:13749
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:13714
+    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:13757
     #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1761
     #3 0x102e01a44 in main src/main.cpp:4270
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
@@ -4625,7 +4625,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=dc0fb12e22d5beb8 entries=1110
+ripwire legend dictionary ripwire.dict/v1 dictv=873169cdb29a4bc6 entries=1115
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
