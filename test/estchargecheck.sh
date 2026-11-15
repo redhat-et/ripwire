@@ -189,7 +189,7 @@ PYX
 # posture — 21/21 rehearsal questions under 16,000 est_tokens came back smaller and different; test/budgetmonotonecheck.sh
 # holds the new contract on its own fixtures.) These helpers judge it here:
 #   soft_rows FILE        the served <sigs> rows as p:n in DOCUMENT order, one per line; exit 3 when there is no <sigs>
-#   soft_st FILE N [REF]  ST: est_tokens <= N, or the answer is at its floor (<= 4 rows, no tail row, no fold, no body); with
+#   soft_st FILE N [REF]  ST: est_tokens <= N, or the answer is at its floor (<= 4 rows, no tail or hop row, no fold, body or doc); with
 #                         REF (the same call without the budget) a REF that fits (est <= N) comes back byte for byte, and
 #                         otherwise the rows and tail rows are document-order prefixes of REF's and a <sigs> row is cut only
 #                         once the tail, fold and bodies are gone (rows last). Prints "OK|BAD ...", exit 0|1.
@@ -223,16 +223,21 @@ def parts( p ):
     sigs = _sec( s, 'sigs' )
     return { 'text': s, 'est': int( est.group( 1 ) ) if est else None, 'rows': _rows( sigs, 'd|t' ),
              'tail': _rows( _sec( s, 'tail' ), 't' ), 'fold': '<fold' in s, 'bodies': len( re.findall( r'<b [^>]*><!\[CDATA\[', s ) ),
+             'hops': len( re.findall( r'<h ', _sec( s, 'hops' ) ) ), 'docs': sigs.count( '<doc>' ),
              'hasSigs': '<sigs' in s }
+def _shed_below_rows( a ):
+    # every unit the sequence sheds before a ranked row is gone: tail, hops, fold, bodies, docs (CodeRabbit #665: hops and docs
+    # were not read, so a candidate that kept them could pass as the floor)
+    return not a[ 'tail' ] and not a[ 'fold' ] and a[ 'bodies' ] == 0 and a[ 'hops' ] == 0 and a[ 'docs' ] == 0
 def row_ids( p ):
     return parts( p )[ 'rows' ]
 def verdict( path, n, refpath=None ):
     n = int( n ); a = parts( path )
     if not a[ 'hasSigs' ] or a[ 'est' ] is None: return False, "BAD no <sigs> or no est_tokens"
     k = len( a[ 'rows' ] )
-    floor = k <= 4 and not a[ 'tail' ] and not a[ 'fold' ] and a[ 'bodies' ] == 0
+    floor = k <= 4 and _shed_below_rows( a )
     fits = a[ 'est' ] <= n or floor
-    msg = "fits=%d rows=%d est=%d N=%d tail=%d fold=%d bodies=%d" % ( fits, k, a[ 'est' ], n, len( a[ 'tail' ] ), a[ 'fold' ], a[ 'bodies' ] )
+    msg = "fits=%d rows=%d est=%d N=%d tail=%d fold=%d bodies=%d hops=%d docs=%d" % ( fits, k, a[ 'est' ], n, len( a[ 'tail' ] ), a[ 'fold' ], a[ 'bodies' ], a[ 'hops' ], a[ 'docs' ] )
     if refpath is None:
         return fits, ( "OK " if fits else "BAD " ) + msg
     r = parts( refpath )
@@ -242,9 +247,10 @@ def verdict( path, n, refpath=None ):
         return same, "%s whole=%d (the reference fits: est %d <= %d) %s" % ( "OK" if same else "BAD", same, r[ 'est' ], n, msg )
     prefix = k > 0 and a[ 'rows' ] == r[ 'rows' ][ :k ]
     tailp  = a[ 'tail' ] == r[ 'tail' ][ :len( a[ 'tail' ] ) ]
-    last   = k == len( r[ 'rows' ] ) or ( not a[ 'tail' ] and not a[ 'fold' ] and a[ 'bodies' ] == 0 )
-    good   = fits and prefix and tailp and last
-    return good, "%s prefix=%d tailprefix=%d rowslast=%d rows=%d/%d %s" % ( "OK" if good else "BAD", prefix, tailp, last, k, len( r[ 'rows' ] ), msg )
+    last   = k == len( r[ 'rows' ] ) or _shed_below_rows( a )
+    rfloor = k >= min( 4, len( r[ 'rows' ] ) )   # ranks 1..4 always ship (CodeRabbit #665: a one-row cut of an eight-row answer passed)
+    good   = fits and prefix and tailp and last and rfloor
+    return good, "%s prefix=%d tailprefix=%d rowslast=%d rowfloor=%d rows=%d/%d %s" % ( "OK" if good else "BAD", prefix, tailp, last, rfloor, k, len( r[ 'rows' ] ), msg )
 def bodies_verdict( path, refpath ):
     # the <bodies> bodies are a prefix of the unbudgeted answer's; fewer, and the <bodies> tag is cut (capped="1") with the next=
     # that serves them (the call without the budget)

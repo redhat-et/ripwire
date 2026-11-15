@@ -512,8 +512,12 @@ done
 # worst-ranked rows last of all — so the first capped state cuts the doc-less r>24 rows first (shown < 40) and docs_dropped=
 # falls by the doc-less rows it cut (the loop above holds the count in every state). The old "shrunk-not-dropped" first state
 # (shown == total, docs shrunk) is the ladder's, which a budget no longer switches to.
+# shown= is parsed and must be under 40 (CodeRabbit #665: the pattern [0-9]* also matched shown="40", a shrink with no row cut)
+fc_shown="$( printf '%s' "$first_capped" | sed -n 's/.*shown="\([0-9]*\)" total="40" capped="1".*/\1/p' )"
 case "$first_capped" in
-    *'shown="'[0-9]*'" total="40" capped="1"'*) ok "(8) the first capped state cuts the worst-ranked rows and keeps docs_dropped= honest: --token-budget=$first_capped" ;;
+    *'shown="'[0-9]*'" total="40" capped="1"'*) if [ -n "$fc_shown" ] && [ "$fc_shown" -lt 40 ]; then
+            ok "(8) the first capped state cuts the worst-ranked rows (shown=$fc_shown < 40) and keeps docs_dropped= honest: --token-budget=$first_capped"
+        else no "(8) the first capped state cut no row (shown=${fc_shown:-?} of 40): $first_capped"; fi ;;
     "") no "(8) no --token-budget in 3400..2000 capped the fixture — the capped arm measured nothing" ;;
     *) no "(8) first capped state carries no shown= total=40 capped=1: $first_capped" ;;
 esac

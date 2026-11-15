@@ -313,13 +313,17 @@ label_probe() {   # label_probe LABEL ARGS...   (LABEL starting "soft:" = a soft
         # TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a --for budget the answer fits returns the unbudgeted answer byte for byte,
         # naming no budget_tokens= (nothing was shed, so there is no target to name and nothing to label) — the family law holds
         # vacuously there; what is checked is that identity, and that no over_ceiling= rides it
-        local a; local unb=()
-        for a in "$@"; do case "$a" in --token-budget=*) ;; *) unb+=( "$a" );; esac; done
+        local a; local unb=(); local want=""
+        for a in "$@"; do case "$a" in --token-budget=*) want="${a#--token-budget=}";; *) unb+=( "$a" );; esac; done
         "$BIN" . "${unb[@]}" >"$TMP/lab.unb" 2>/dev/null || no "(D) $label: the unbudgeted run exited $?"
-        if cmp -s "$TMP/lab.out" "$TMP/lab.unb" && ! grep -q 'over_ceiling="1"' <( head -c 4096 "$TMP/lab.out" ); then
-            ok "(D) $label: the answer fits — the unbudgeted answer byte for byte, no ceiling named, no over_ceiling"
+        # byte identity alone is no proof nothing had to be shed (CodeRabbit #665: a run that ignored the budget passed): the
+        # unbudgeted answer's whole price (est_tokens plus the held blocks and their legends) must fit the budget asked for
+        local whole; whole="$( python3 -c 'import sys; sys.path.insert( 0, sys.argv[ 1 ] ); from softbudget import whole_price; p = whole_price( sys.argv[ 2 ] ); print( "" if p is None else p )' "$ROOT/test/lib" "$TMP/lab.unb" )"
+        if cmp -s "$TMP/lab.out" "$TMP/lab.unb" && ! grep -q 'over_ceiling="1"' <( head -c 4096 "$TMP/lab.out" ) \
+           && [ -n "$whole" ] && [ -n "$want" ] && [ "$whole" -le "$want" ]; then
+            ok "(D) $label: the answer fits (whole price $whole <= $want) — the unbudgeted answer byte for byte, no ceiling named, no over_ceiling"
         else
-            no "(D) $label: no budget_tokens= on the root, yet the answer is not the unbudgeted one (or carries over_ceiling)"
+            no "(D) $label: no budget_tokens= on the root, yet the answer is not the unbudgeted one, carries over_ceiling, or prices ${whole:-?} over ${want:-?}"
         fi
         return
     fi

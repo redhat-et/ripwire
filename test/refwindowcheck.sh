@@ -95,9 +95,10 @@ if grep -l 'ripwire: warning' "$FIX"/*.out >/dev/null 2>&1; then no "W6 a warnin
 bases=$( grep -o '<ref [^>]*base="[0-9a-f]*"' "$FIX/stray.out" | grep -o 'base="[0-9a-f]*"' | sort -u )
 main9=$( git -C "$R" rev-parse --short=9 main )
 um=$( grep -o '<ref [^>]* v="unmerged"' "$FIX/stray.out" | wc -l | tr -d ' ' )
-[ "$bases" = "base=\"$main9\"" ] && [ "$um" -gt 0 ] \
-    && ok "E every base= is main ($main9), $um rows unmerged" \
-    || no "E bases: $bases unmerged=$um"
+nref=$( grep -o '<ref name="' "$FIX/stray.out" | wc -l | tr -d ' ' )   # every checked ref row (the legend's `<ref ok= v=` is not one): each unmerged (CodeRabbit #665)
+[ "$bases" = "base=\"$main9\"" ] && [ "$um" -gt 0 ] && [ "$um" = "$nref" ] \
+    && ok "E every base= is main ($main9), all $um ref rows unmerged" \
+    || no "E bases: $bases unmerged=$um of $nref ref rows"
 
 req='{"jsonrpc":"2.0","id":ID,"method":"tools/call","params":{"name":"stray_content","arguments":{"path":"'"$R"'"}}}'
 { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}'; for i in 2 3 4 5 6 7 8; do printf '%s\n' "${req/ID/$i}"; done; } \
