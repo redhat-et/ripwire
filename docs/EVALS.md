@@ -14947,7 +14947,7 @@ The blob grows by **exactly** the section's length, because the records and the 
 byte-identical to the no-section blob's — verified above by reconstructing the OFF blob's size from the
 record region and the table.
 
-**Against the card's derived MB figures, which is what was asked.** The ceilings are "under 270 MB on
+**Against the card's derived MB figures, one repo at a time.** The ceilings are "under 270 MB on
 cpython, 333 MB on envoy, 389 MB on vscode":
 
 * **envoy 217,420,007 B — PASSES under either unit reading** (217.4 decimal MB, 207.3 MiB), with 116 MB
@@ -15002,7 +15002,7 @@ envoy's and cpython's runs each emit a degrade disclosure on **stderr** (a `.jso
 value-reference depth cap). Those are identical across every arm and touch no stdout byte, which is the
 contract: a refusal changes cost, never content.
 
-**Refusal, which is the half that matters more.** `test/warmsnapcheck.sh` is **143 PASS / 0 FAIL**,
+**Refusal, which is the half that matters more.** `test/warmsnapcheck.sh` is **144 PASS / 0 FAIL**,
 rewritten for the in-blob layout, and its damage arms are *stronger* than the sidecar's were. A sidecar
 could be damaged by writing to a file; a section sits inside a checksummed blob, so each arm now proves
 the refusal is **warmsnap.h's own guard and not the blob reader's** by asserting `reparsed=0` on the
@@ -15035,6 +15035,13 @@ very run that refused — the records were still served out of the blob the dama
 compares, and requires a `RIPWIRE_SNAPSHOT_STATS=1` line on that run, so a build without the feature
 cannot pass by printing equal output. `test/cacheidentitycheck.sh` — the gate whose arm (D3) the sidecar
 failed — is **ALL PASS with that arm byte-untouched**; it does not appear in this lane's diff at all.
+
+**G1, on the build that can see it.** The in-blob publisher copies the record region by `pread` into a
+reused 4 MiB buffer and writes it out with `fwrite` — raw-byte work of exactly the kind the sanitizer
+guardrail exists for. `warmsnapcheck` is **144 PASS / 0 FAIL on the ASan/UBSan build**
+(`-fno-sanitize-recover=all`, LeakSanitizer against the committed `lsan_suppressions.txt`), with no
+sanitizer report, as well as on the plain dev build. The plain build is the one that proves the degrade
+paths, since Release compiles `DISCLOSE` out.
 
 #### The registered honest failure mode did NOT occur
 
