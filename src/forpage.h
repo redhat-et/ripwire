@@ -1302,8 +1302,14 @@ struct TailTermCands
     std::vector<char>         docFile;   // per row: its file holds a doc unit, so it adds no name
 };
 inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds,
-                                    std::size_t namedRows, const std::vector<std::string>& terms )
+                                    std::size_t namedRows )
 {
+    TailTermCands                  out;
+    const std::vector<std::string> terms = tailTaskTerms( t.task );
+    if( terms.empty() || namedRows == 0 )
+    {
+        return out;
+    }
     constexpr std::uint32_t    kNoRow = UINT32_MAX;
     std::vector<std::uint32_t> rowOfFile( ing.files.size(), kNoRow );
     for( std::size_t i = 0; i < namedRows; ++i )
@@ -1322,7 +1328,6 @@ inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, 
         }
     }
     std::ranges::sort( headNames, rw::sortutil::svLess );
-    TailTermCands out;
     out.docFile.assign( namedRows, 0 );
     for( NodeId id = 0; id < ing.symbols.size(); ++id )
     {
@@ -1354,12 +1359,7 @@ inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, 
 inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds,
                                   std::size_t namedRows )
 {
-    const std::vector<std::string> terms = tailTaskTerms( t.task );
-    if( terms.empty() || namedRows == 0 )
-    {
-        return;
-    }
-    const TailTermCands       tc = tailTermCands( t, ing, rank, headIds, namedRows, terms );
+    const TailTermCands       tc = tailTermCands( t, ing, rank, headIds, namedRows );
     std::vector<std::string>  added( t.paths.size() );
     std::vector<std::uint8_t> count( namedRows, 0 );
     bool                      any = false;

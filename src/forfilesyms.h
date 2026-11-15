@@ -195,11 +195,7 @@ inline constexpr std::array<std::string_view, 60> kStop {
 };
 
 // A light suffix stem (ing, ies→y, es, ed, s) so `failed` meets `fail` and `integrations` meets `integration`.
-inline std::string lightStem( std::string w )
-{
-    static constexpr std::array<std::string_view, 5> kSuf { "ing", "ies", "es", "ed", "s" };
-    return suffixStem( std::move( w ), kSuf );
-}
+inline constexpr std::array<std::string_view, 5> kLightStemSuffixes { "ing", "ies", "es", "ed", "s" };
 
 // The words of `text` that can match a name: identifier subtokens of 3+ bytes, stopwords out, stemmed; sorted unique.
 inline std::vector<std::string> matchWords( std::string_view text )
@@ -211,7 +207,7 @@ inline std::vector<std::string> matchWords( std::string_view text )
     {
         if( w.size() >= 3 && !std::ranges::contains( kStop, std::string_view( w ) ) )
         {
-            out.push_back( lightStem( std::move( w ) ) );
+            out.push_back( suffixStem( std::move( w ), kLightStemSuffixes ) );
         }
     }
     std::ranges::sort( out );

@@ -4,7 +4,7 @@
 //
 // THE RULE (the lab's frozen emulation, tmp/depth-gc-lab/emul.py task_terms/sym_score, ported as is):
 //   task words: the task's identifier subtokens (lexical.h subtokens: camelCase, snake_case and acronym seams, lowercased) of
-//               3+ bytes, not all digits and not on kTailTermStop, each light-stemmed (tailTermStem), unique in task order;
+//               3+ bytes, not all digits and not on kTailTermStop, each light-stemmed (kTailTermSuffixes), unique in task order;
 //   a name's score: how many distinct task words are among the stems of the name's own subtokens (2+ bytes). The NAME only:
 //               a body or doc hit does not count (the lab scored names; lexical.h anyMask counts every field).
 // HOW IT DIFFERS FROM THE --for RANKER'S TERMS (lexical.h LexTermEvidence): the ranker keeps every 2+ byte subtoken of the task
@@ -72,11 +72,7 @@ inline constexpr std::array<std::string_view, 177> kTailTermStop {
 static_assert( std::ranges::is_sorted( kTailTermStop ), "kTailTermStop is binary-searched: keep it sorted" );
 
 // The lab's suffix stem (emul.py stem): the first suffix that leaves 3+ bytes is cut; -ies becomes -y.
-inline std::string tailTermStem( std::string w )
-{
-    static constexpr std::array<std::string_view, 10> kSuf { "ations", "ation", "ings", "ing", "ers", "er", "ies", "es", "ed", "s" };
-    return suffixStem( std::move( w ), kSuf );
-}
+inline constexpr std::array<std::string_view, 10> kTailTermSuffixes { "ations", "ation", "ings", "ing", "ers", "er", "ies", "es", "ed", "s" };
 }   // namespace tailterms_detail
 
 // The task's words a tail name can share, in task order, unique (empty: no row gains a name).
@@ -92,7 +88,7 @@ inline std::vector<std::string> tailTaskTerms( std::string_view task )
         {
             continue;
         }
-        std::string st = tailTermStem( std::move( w ) );
+        std::string st = suffixStem( std::move( w ), kTailTermSuffixes );
         if( std::ranges::find( out, st ) == out.end() )
         {
             out.push_back( std::move( st ) );
@@ -105,7 +101,7 @@ inline std::vector<std::string> tailTaskTerms( std::string_view task )
 // the count of distinct stemmed name subtokens among them.
 inline std::size_t tailTermScore( std::string_view name, const std::vector<std::string>& terms )
 {
-    return std::size_t( subtokenOverlap( name, terms, tailterms_detail::tailTermStem ) );
+    return std::size_t( subtokenOverlap( name, terms, tailterms_detail::kTailTermSuffixes ) );
 }
 
 }   // namespace rw

@@ -81,19 +81,18 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
     } );
 }
 
-// How many DISTINCT subtokens of `name` — each passed through `norm` first when given (a stemmer) — are among `words`. `words` is a
-// handful, read by linear find. Shared by the member-name slice (formembers.h wordOverlap) and the tail's tsym= score
+inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes );
+
+// How many DISTINCT subtokens of `name` — each suffix-stemmed first by `stemSuffixes` when given (suffixStem) — are among `words`.
+// `words` is a handful, read by linear find. Shared by the member-name slice (formembers.h wordOverlap) and the tail's tsym= score
 // (fortailterms.h tailTermScore).
-inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<std::string>& words, std::string ( *norm )( std::string ) = nullptr )
+inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<std::string>& words, std::span<const std::string_view> stemSuffixes = {} )
 {
     std::vector<std::string> toks;
     subtokens( name, toks );
-    if( norm != nullptr )
+    for( std::string& t : toks )
     {
-        for( std::string& t : toks )
-        {
-            t = norm( std::move( t ) );
-        }
+        t = suffixStem( std::move( t ), stemSuffixes );
     }
     std::ranges::sort( toks );
     toks.erase( std::unique( toks.begin(), toks.end() ), toks.end() );
@@ -101,7 +100,8 @@ inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<
 }
 
 // A light suffix stem: the FIRST of `suffixes` (in order) that `w` ends with and that leaves 3+ bytes is cut; "ies" becomes "y".
-// The suffix list is the caller's measured rule (forfilesyms.h lightStem for <syms>, fortailterms.h tailTermStem for tsym=).
+// The suffix list is the caller's measured rule (forfilesyms.h kLightStemSuffixes for <syms>, fortailterms.h kTailTermSuffixes
+// for tsym=); an empty list leaves `w` as is.
 inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes )
 {
     for( const std::string_view suf : suffixes )
