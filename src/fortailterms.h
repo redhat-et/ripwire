@@ -75,19 +75,7 @@ static_assert( std::ranges::is_sorted( kTailTermStop ), "kTailTermStop is binary
 inline std::string tailTermStem( std::string w )
 {
     static constexpr std::array<std::string_view, 10> kSuf { "ations", "ation", "ings", "ing", "ers", "er", "ies", "es", "ed", "s" };
-    for( const std::string_view suf : kSuf )
-    {
-        if( w.size() > suf.size() + 2 && std::string_view( w ).ends_with( suf ) )
-        {
-            w.resize( w.size() - suf.size() );
-            if( suf == "ies" )
-            {
-                w += 'y';
-            }
-            return w;
-        }
-    }
-    return w;
+    return suffixStem( std::move( w ), kSuf );
 }
 }   // namespace tailterms_detail
 
@@ -113,16 +101,11 @@ inline std::vector<std::string> tailTaskTerms( std::string_view task )
     return out;
 }
 
-// How many distinct task words `name`'s own subtokens carry (0: the name shares none).
+// How many distinct task words `name`'s own subtokens carry, each stemmed (0: the name shares none). `terms` is unique, so this is
+// the count of distinct stemmed name subtokens among them.
 inline std::size_t tailTermScore( std::string_view name, const std::vector<std::string>& terms )
 {
-    std::vector<std::string> toks;
-    subtokens( name, toks );
-    for( std::string& t : toks )
-    {
-        t = tailterms_detail::tailTermStem( std::move( t ) );
-    }
-    return std::size_t( std::ranges::count_if( terms, [ & ]( const std::string& term ) { return std::ranges::find( toks, term ) != toks.end(); } ) );
+    return std::size_t( subtokenOverlap( name, terms, tailterms_detail::tailTermStem ) );
 }
 
 }   // namespace rw

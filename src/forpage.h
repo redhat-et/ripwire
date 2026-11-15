@@ -795,26 +795,17 @@ struct FileTail
     std::array<std::uint32_t, 5> folded{};
 };
 
-// Does the comma-joined sym= list `sym` hold `name` as one whole entry?
-inline bool tailSymListHolds( std::string_view sym, std::string_view name ) noexcept
-{
-    for( std::size_t at = sym.find( name ); at != std::string_view::npos; at = sym.find( name, at + 1 ) )
-    {
-        const std::size_t end = at + name.size();
-        if( ( at == 0 || sym[at - 1] == ',' ) && ( end == sym.size() || sym[end] == ',' ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
 // SIZE-3b (size-trim): the ONE rule every tail sym= list follows — a name the list already holds (an overload, a same-named member)
 // is not repeated; the first, by rank, stays. True when `name` was appended.
 inline bool appendTailSymName( std::string& sym, std::string_view name )
 {
-    if( tailSymListHolds( sym, name ) )
+    for( std::size_t at = sym.find( name ); at != std::string::npos; at = sym.find( name, at + 1 ) )
     {
-        return false;
+        const std::size_t end = at + name.size();
+        if( ( at == 0 || sym[at - 1] == ',' ) && ( end == sym.size() || sym[end] == ',' ) )
+        {
+            return false;
+        }
     }
     sym += sym.empty() ? "" : ",";
     sym += name;
@@ -1298,14 +1289,21 @@ inline void appendFileTailRows( FileTail& out, FileTail& from )
 // a doc unit (.md, .rst, a Sphinx or HTML page) adds none: its section titles may hold commas, and the question is about code
 // names. Fills t.termSyms only when some row gains a name, so a task no name matches leaves the tail byte-identical.
 // Cost: one pass over the symbols (the files are a flat row index), the name split only for symbols of a listed file.
-inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds,
-                                  std::size_t namedRows )
+struct TailTermCand
 {
-    const std::vector<std::string> terms = tailTaskTerms( t.task );
-    if( terms.empty() || namedRows == 0 )
-    {
-        return;
-    }
+    std::uint32_t row;     // the tail row (its file's)
+    std::uint32_t score;   // tailTermScore
+    float         lens;    // the lens score (the tie-break after the score)
+    NodeId        id;
+};
+struct TailTermCands
+{
+    std::vector<TailTermCand> cands;     // (row, score desc, lens desc, id asc)
+    std::vector<char>         docFile;   // per row: its file holds a doc unit, so it adds no name
+};
+inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds,
+                                    std::size_t namedRows, const std::vector<std::string>& terms )
+{
     constexpr std::uint32_t    kNoRow = UINT32_MAX;
     std::vector<std::uint32_t> rowOfFile( ing.files.size(), kNoRow );
     for( std::size_t i = 0; i < namedRows; ++i )
@@ -1324,15 +1322,8 @@ inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const st
         }
     }
     std::ranges::sort( headNames, rw::sortutil::svLess );
-    struct TermCand
-    {
-        std::uint32_t row;
-        std::uint32_t score;
-        float         lens;
-        NodeId        id;
-    };
-    std::vector<TermCand> cands;
-    std::vector<char>     docFile( namedRows, 0 );
+    TailTermCands out;
+    out.docFile.assign( namedRows, 0 );
     for( NodeId id = 0; id < ing.symbols.size(); ++id )
     {
         const Symbol&       s   = ing.symbols[id];
@@ -1343,7 +1334,7 @@ inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const st
         }
         if( isDocLang( s.lang ) )
         {
-            docFile[row] = 1;
+            out.docFile[row] = 1;
             continue;
         }
         if( s.kind == SymKind::ModuleScope || s.name.empty() || s.name.front() == '<' || isRestLabelUnit( ing, s )
@@ -1353,18 +1344,30 @@ inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const st
         }
         if( const std::size_t score = tailTermScore( s.name, terms ); score > 0 )
         {
-            cands.push_back( { row, std::uint32_t( score ), id < rank.size() ? rank[id] : 0.0f, id } );
+            out.cands.push_back( { row, std::uint32_t( score ), id < rank.size() ? rank[id] : 0.0f, id } );
         }
     }
-    std::ranges::sort( cands, []( const TermCand& a, const TermCand& b )
+    std::ranges::sort( out.cands, []( const TailTermCand& a, const TailTermCand& b )
                        { return a.row != b.row ? a.row < b.row : a.score != b.score ? a.score > b.score : a.lens != b.lens ? a.lens > b.lens : a.id < b.id; } );
+    return out;
+}
+inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds,
+                                  std::size_t namedRows )
+{
+    const std::vector<std::string> terms = tailTaskTerms( t.task );
+    if( terms.empty() || namedRows == 0 )
+    {
+        return;
+    }
+    const TailTermCands       tc = tailTermCands( t, ing, rank, headIds, namedRows, terms );
     std::vector<std::string>  added( t.paths.size() );
     std::vector<std::uint8_t> count( namedRows, 0 );
     bool                      any = false;
-    for( const TermCand& c : cands )
+    for( const TailTermCand& c : tc.cands )
     {
         const std::string_view name = ing.symbols[c.id].name;
-        if( docFile[c.row] || count[c.row] >= kTailSymTermNames || tailSymListHolds( t.syms[c.row], name ) )
+        std::string            own  = t.syms[c.row];   // the row's own names: a name already there is not repeated
+        if( tc.docFile[c.row] || count[c.row] >= kTailSymTermNames || !appendTailSymName( own, name ) )
         {
             continue;
         }

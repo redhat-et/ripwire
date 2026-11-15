@@ -198,19 +198,7 @@ inline constexpr std::array<std::string_view, 60> kStop {
 inline std::string lightStem( std::string w )
 {
     static constexpr std::array<std::string_view, 5> kSuf { "ing", "ies", "es", "ed", "s" };
-    for( const std::string_view suf : kSuf )
-    {
-        if( w.size() > suf.size() + 2 && std::string_view( w ).ends_with( suf ) )
-        {
-            w.resize( w.size() - suf.size() );
-            if( suf == "ies" )
-            {
-                w += 'y';
-            }
-            return w;
-        }
-    }
-    return w;
+    return suffixStem( std::move( w ), kSuf );
 }
 
 // The words of `text` that can match a name: identifier subtokens of 3+ bytes, stopwords out, stemmed; sorted unique.
@@ -1447,46 +1435,57 @@ struct TailNamesSpan
 {
     std::size_t at = 0, len = 0, open = 0;
 };
-// The answer with every name the block prints cut from the head files' tail rows' sym= and from every row's tsym= (a value left with
-// none drops its whole attribute: a row left with neither prints p= only); "" when none is cut. A tsym= cut to nothing takes the
-// last tsym= with it, and then its legend clause too (present-only).
-inline std::string tailRowsWithoutPicks( const IngestResult& ing, std::string_view answer, const std::vector<ShownRow>& rows,
-                                         const std::vector<std::size_t>& headTail, const Picks& picks )
+inline constexpr std::size_t kTailSymOpen = std::string_view( " sym=\"" ).size(), kTailTsymOpen = std::string_view( " tsym=\"" ).size();
+// The values the cut reads, in answer order (a row's sym= before its tsym=): the head files' tail rows' sym= and every row's tsym=.
+inline std::vector<TailNamesSpan> tailNamesSpans( const std::vector<ShownRow>& rows, const std::vector<std::size_t>& headTail )
 {
-    constexpr std::size_t kSymOpen = std::string_view( " sym=\"" ).size(), kTsymOpen = std::string_view( " tsym=\"" ).size();
-    std::vector<TailNamesSpan> spans; // answer order: a row's sym= before its tsym=, rows in order
+    std::vector<TailNamesSpan> spans;
     for( std::size_t i = 0; i < rows.size(); ++i )
     {
         if( std::ranges::contains( headTail, i ) )
         {
-            spans.push_back( { rows[i].symAt, rows[i].symLen, kSymOpen } );
+            spans.push_back( { rows[i].symAt, rows[i].symLen, kTailSymOpen } );
         }
         if( rows[i].tsymLen > 0 )
         {
-            spans.push_back( { rows[i].tsymAt, rows[i].tsymLen, kTsymOpen } );
+            spans.push_back( { rows[i].tsymAt, rows[i].tsymLen, kTailTsymOpen } );
         }
     }
+    return spans;
+}
+// One comma-joined value without the names the block prints (raw, still escaped); `cut` says whether any went.
+inline std::string valueWithoutPicks( const IngestResult& ing, std::string_view value, const Picks& picks, bool& cut )
+{
+    std::string kept;
+    for( const auto part : std::views::split( value, ',' ) )
+    {
+        const std::string_view raw( part.begin(), part.end() );
+        const auto printed = [&]( const Cand* c )
+        { return unescapeXmlAttr( raw ) == ing.symbols[c->id].name; };
+        if( std::ranges::any_of( picks.byName, printed ) || std::ranges::any_of( picks.byCallee, printed ) )
+        {
+            cut = true;
+            continue;
+        }
+        kept += kept.empty() ? "" : ",";
+        kept += raw;
+    }
+    return kept;
+}
+// The answer with every name the block prints cut from the head files' tail rows' sym= and from every row's tsym= (a value left with
+// none drops its whole attribute: a row left with neither prints p= only); "" when none is cut. When no tsym= is left, its legend
+// clause goes too (present-only).
+inline std::string tailRowsWithoutPicks( const IngestResult& ing, std::string_view answer, const std::vector<ShownRow>& rows,
+                                         const std::vector<std::size_t>& headTail, const Picks& picks )
+{
     std::string out;
     std::size_t from = 0;
     bool tsymLeft = false;
-    for( const TailNamesSpan& r : spans )
+    for( const TailNamesSpan& r : tailNamesSpans( rows, headTail ) )
     {
-        std::string kept;
         bool cut = false;
-        for( const auto part : std::views::split( answer.substr( r.at, r.len ), ',' ) )
-        {
-            const std::string_view raw( part.begin(), part.end() );
-            const auto printed = [&]( const Cand* c )
-            { return unescapeXmlAttr( raw ) == ing.symbols[c->id].name; };
-            if( std::ranges::any_of( picks.byName, printed ) || std::ranges::any_of( picks.byCallee, printed ) )
-            {
-                cut = true;
-                continue;
-            }
-            kept += kept.empty() ? "" : ",";
-            kept += raw;
-        }
-        tsymLeft = tsymLeft || ( r.open == kTsymOpen && !kept.empty() );
+        const std::string kept = valueWithoutPicks( ing, answer.substr( r.at, r.len ), picks, cut );
+        tsymLeft = tsymLeft || ( r.open == kTailTsymOpen && !kept.empty() );
         if( !cut )
         {
             continue;
