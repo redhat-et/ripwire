@@ -555,10 +555,10 @@ inline const char* testColumnLegend( bool present ) noexcept
 
 // TIER-FOLLOWUP (callhierarchy.h computeHopTestedPartition): the callers/callees answer's test tier, said exactly when hop_tests=
 // rides; then the row's test="1" (XML) or the test column (columnar, only when a shown row carries it). 0 bytes when inert.
+// hopTestTierLegend, which composes them, sits below clausesForCounts (which it reuses).
 inline constexpr const char* kHopTestTierLegend =
     "hop_tests= (absent at 0) counts the TEST definitions among these rows: listed, but counted apart, so hop_tested=/hop_untested= "
     "cover production rows only and the three sum to count=. ";
-inline std::string hopTestTierLegend( std::size_t hopTests, bool columnar, bool testColumn );   // below clausesForCounts, which it reuses
 
 // --impact's partition reading for this answer: the two-tier sentence always (so an answer with no test in its reach is
 // byte-identical to before), then the test tier and its row label when radius_tests= rides, and the ignore-tests disclosure.
@@ -1173,7 +1173,7 @@ inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, 
 {
     return std::string( countA > 0 ? clauseA : "" ) + ( countB > 0 ? clauseB : "" );
 }
-// TIER-FOLLOWUP: the callers/callees test-tier clause and its row reading (declared above, beside its constants), both exactly when
+// TIER-FOLLOWUP: the callers/callees test-tier clause and its row reading (constants above), both exactly when
 // hop_tests= rides: the row's test="1" in XML, the test column in the columnar form only when a shown row carries it.
 inline std::string hopTestTierLegend( std::size_t hopTests, bool columnar, bool testColumn )
 {
