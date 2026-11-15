@@ -1038,6 +1038,46 @@ inline void ev_finalize( EvCtx& ctx, std::uint32_t& evOut, std::array<std::uint8
     }
 }
 
+// ── per-thread walk scratch (cold-CPU pass, registered in docs/EVALS.md 2026-11-15) ───────────────
+// `complexityOf` runs 121,121 times on one envoy index and `cc_walk` once per top-level child of each
+// def. Constructing the frame stack and the two child buffers per call put four heap allocations on
+// that path for buffers whose contents never outlive the call; the walk is 10.8% of cold CPU. One set
+// per worker thread, reused for the thread's lifetime, keeps the capacity warm after the first def.
+//
+// THE ALIASING RULE THAT MAKES THIS SAFE, and why each buffer is named rather than pooled: `kids` is
+// iterated while the else-if descent fills `elifKids` (see the note at that site), and `topKids` is
+// iterated across the cc_walk calls it drives — so these three may never be the same buffer. cc_walk
+// is not re-entrant: its only caller is `complexityOf`, which the tool's own call graph confirms, and
+// it recurses through the explicit frame stack rather than the call stack. A future second caller
+// INSIDE a walk would alias this scratch; the invariant is asserted below rather than assumed.
+struct CcFrame { TSNode node; std::uint32_t nesting; std::uint32_t ctrl; std::uint16_t depth; };   // ctrl: innermost enclosing ev arena index (kNoCtrl at root)
+
+struct CcScratch
+{
+    std::vector<CcFrame> stack;
+    std::vector<TSNode>  kids;
+    std::vector<TSNode>  elifKids;
+    std::vector<TSNode>  topKids;
+    bool                 walking = false;   // re-entrancy tripwire, checked in cc_walk
+};
+
+inline CcScratch& ccScratch()
+{
+    static thread_local CcScratch scratch;
+    return scratch;
+}
+
+// RAII rather than a plain pair of stores: a bad_alloc inside the walk must not leave the tripwire
+// armed, or one recoverable per-file degrade would abort every later def in a debug build.
+struct CcWalkMark
+{
+    CcScratch& sc;
+    explicit CcWalkMark( CcScratch& scratch ) noexcept : sc( scratch ) { sc.walking = true; }
+    ~CcWalkMark() noexcept { sc.walking = false; }
+    CcWalkMark( const CcWalkMark& ) = delete;
+    CcWalkMark& operator=( const CcWalkMark& ) = delete;
+};
+
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
 /// Accumulate syntactic complexity and nesting in one iterative walk from start.
@@ -1049,13 +1089,22 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
     // iterative pre-order DFS — an EXPLICIT frame stack, not recursion: worker threads get 512 KB stacks on
     // macOS, so a deep AST overflows the call stack well inside the depth guard. Children are pushed in
     // reverse so pops preserve the original left-to-right visit order; the guard bounds the heap stack.
-    struct CcFrame { TSNode node; std::uint32_t nesting; std::uint32_t ctrl; std::uint16_t depth; };   // ctrl: innermost enclosing ev arena index (kNoCtrl at root)
-    std::vector<CcFrame> stack;
+    // The three buffers come from this thread's CcScratch (see its note): same contents, no per-call
+    // allocation. DASSERT guards the one invariant that makes sharing them sound.
+    CcScratch& sc = ccScratch();
+    DASSERT( !sc.walking, "cc_walk re-entered: the shared walk scratch would alias" );
+    const CcWalkMark      mark( sc );
+    std::vector<CcFrame>& stack    = sc.stack;
+    std::vector<TSNode>&  kids     = sc.kids;
+    std::vector<TSNode>&  elifKids = sc.elifKids;
+    stack.clear();
+    kids.clear();
+    elifKids.clear();
     stack.reserve( 64 );
+    kids.reserve( 64 );
+    elifKids.reserve( 64 );   // the else-if grandchild descent below nests inside a kids iteration
     stack.push_back( { start, startNesting, kNoCtrl, static_cast<std::uint16_t>( startDepth ) } );
-    ChildCursor         cursor( start );
-    std::vector<TSNode> kids;       kids.reserve( 64 );
-    std::vector<TSNode> elifKids;   elifKids.reserve( 64 );   // the else-if grandchild descent below nests inside a kids iteration
+    ChildCursor cursor( start );
 
     while( !stack.empty() )
     {
@@ -1223,10 +1272,10 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )  
     // branch-not-taken per node and gets ev=0, which serialize.h never emits (model.h evCountedLang).
     EvCtx        evCtx;
     EvCtx* const evPtr = evCountedLang( lang ) ? &evCtx : nullptr;
-    ChildCursor         cursor( root );
-    std::vector<TSNode> kids;
+    ChildCursor          cursor( root );
+    std::vector<TSNode>& kids = ccScratch().topKids;        // NOT cc_walk's `kids`: this one is iterated ACROSS the cc_walk calls below
     kids.reserve( 64 );
-    collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision)
+    collectChildren( root, cursor.cur, kids );              // start INSIDE the def (the def node is neither control nor decision); clears `kids` itself
     // ONE accumulator across all top-level children: the deepEnd clamp has to see the whole def in document
     // order, and humps in sibling statements are humps of the same function.
     for( const TSNode c : kids )
