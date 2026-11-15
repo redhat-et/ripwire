@@ -324,6 +324,7 @@ for _g in \
     baselinecheck \
     baselinedirtycheck \
     baselineportcheck \
+    bashenvcheck \
     bashsourcecheck \
     batchcheck \
     binoverridecheck \
