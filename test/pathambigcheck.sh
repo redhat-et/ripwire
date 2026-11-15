@@ -130,7 +130,8 @@ run "$BIN" own _make,sink > "$TMP/B0.out" 2> "$TMP/B0.err"; rb0=$?
 RB0="$( root "$TMP/B0.out" )"
 premB=0
 [ "$rb0" = 0 ] && [ "$( attr "$RB0" from_defs )" = "3" ] && premB=1
-[ "$premB" = 1 ] && ok "(b) premise: bare _make resolves (from_defs=3: two Svc copies + Other)" || no "(b) premise: bare _make resolves with 3 definitions (rc=$rb0): $RB0"
+if [ "$premB" = 1 ]; then ok "(b) premise: bare _make resolves (from_defs=3: two Svc copies + Other)"
+else no "(b) premise: bare _make resolves with 3 definitions (rc=$rb0): $RB0"; fi
 run "$BIN" own Svc._make,sink > "$TMP/B1.out" 2> "$TMP/B1.err"; rb1=$?
 RB1="$( root "$TMP/B1.out" )"
 if [ "$premB" = 1 ] && [ "$rb1" = 0 ] && [ "$( attr "$RB1" from_defs )" = "2" ] && [ "$( attr "$RB1" reachable )" = "1" ] && ! grep -q 'other.ts' "$TMP/B1.out"; then
@@ -175,7 +176,7 @@ else no "(c) premise: unique ends reach with one definition each: $RU"; fi
 if command -v xmllint >/dev/null 2>&1; then
     bad=0; n=0
     for f in A AF A1 W B0 B1 B2 B4 B5; do n=$(( n + 1 )); xmllint --noout "$TMP/$f.out" 2>/dev/null || { bad=1; no "(x) $f.out is not well-formed XML"; }; done
-    [ "$bad" = 0 ] && [ "$n" -gt 0 ] && ok "(x) $n answers parse as XML"
+    if [ "$bad" = 0 ] && [ "$n" -gt 0 ]; then ok "(x) $n answers parse as XML"; fi
 fi
 
 [ "$fail" = 0 ] && echo "pathambigcheck: PASS" || echo "pathambigcheck: FAIL"
