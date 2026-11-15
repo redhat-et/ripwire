@@ -14899,3 +14899,70 @@ separate the cells, that is Band 1's REJECT, not an invitation to find a constan
 transitive callers and many importers. If the gate therefore fires on most of the readout set's cells, Band 2's
 vacuity guard fails and the change is a near no-op — to be recorded as a measured no-op with the
 firing distribution printed, not rescued by narrowing the clause until it passes.
+
+## `--impact`'s importer ring, MEASURED 2026-11-15 against the band above: **REJECTED by Band 1 — the withheld ring does carry gold files, on a population wide enough to see it**
+
+The band's blocking condition was met the same day it was registered: an 18-cell file-grain gold set
+was built (15 repos, 8 languages, 266 required rows, every cell verified gradable through the
+grader's own `gold_for`), `--impact` was collected for each on the run pin `44f7d3326`, and the arms
+were re-derived by `harness/impact_ring_readout.py`. **19 cells in 11 repos scored**, against the 5
+the hypothesis was built on.
+
+| arm | file-shaped claims | recall | precision | Wrong |
+|---|---:|---:|---:|---:|
+| ring always inline (today) | 483 | **88.4 %** | 58.0 % | 203 |
+| ring inline only when the graph declined | 376 | **86.2 %** | 72.6 % | 103 |
+| ring never inline | 289 | 79.6 % | 87.2 % | 37 |
+
+### Band 1 — FAIL, and the decision rule says REJECT
+
+Registered: zero required gold files lost. Measured: **7 lost across 4 cells**, three of them losing
+two each — past both halves of the registered REJECT threshold ("more than 3 lost, or any single cell
+losing 2 or more").
+
+| cell | lost | `reaches` | `importers` | `declined_iface` | the gold files the ring was carrying |
+|---|---:|---:|---:|---:|---|
+| flake8-31 | 2 | 57 | 8 | 0 | `formatting/default.py`, `style_guide.py` |
+| textual-31 | 2 | 3,087 | 25 | 0 | `canvas.py`, `renderables/blank.py` |
+| textual-32 | 2 | 130 | 123 | 0 | `_styles_cache.py`, `widgets/_data_table.py` |
+| hono-32 | 1 | 137 | 62 | 0 | `src/index.ts` |
+
+Every one has `declined_iface="0"` and `reaches > importers`, so **the two header fields cannot see
+these cases**: on each, call-graph resolution did not report declining, and the reach set was larger
+than the importer ring, yet the ring still held files the reach set missed. The 5-cell motivation
+said recall was unchanged; 19 cells say it falls 88.4 % → 86.2 %. The hypothesis was wrong in the
+direction the band was built to catch, and the ring stays inline as it ships today.
+
+### Band 2 — would have passed, which is exactly why Band 1 gates
+
+22.2 % fewer claims (483 → 376), the gate firing on 5 of 19 cells — inside the vacuity guard in both
+directions. A size band alone would have shipped this.
+
+### Band 3 — the clause that had no evidence now has some, and it is retained
+
+Registered: drop `reaches <= importers` if it never fires alone. On 19 cells it fires **alone on 3**
+(and with `declined_iface` on 2 more), so it is not decoration and the registration's own rule keeps
+it. That is recorded for the next formulation; it does not rescue this one.
+
+### What the wider gold set found on the way, which no band asked for
+
+Collecting 18 cells on the pin exposed `--impact`'s coverage on target kinds the old 5-cell population
+could not reach. **Three cells are refused outright** — `kRouteContext` (a JavaScript `Symbol()`
+module const), `updateValues` (a C function-pointer slot in a class-descriptor struct), and
+`Preprocessor::run` (a Rust trait method) — each with `found="0"` and the legend's own "zero = none
+found, not none exists". One of those refusals carried `near="Meter_updateValues"`, the indexed
+spelling, and the retry answered: the gold's own header had capitalised the name. **Two Go cells
+answer empty and say why**: `reaches="0" importers="0" no_file_edges="go"`, so a Go interface method
+gets no blast radius at all and the attribute discloses it. 13 of 18 answered with content.
+
+None of that is a defect of this band; it is the coverage picture a 5-cell population could not show,
+and it belongs to whichever lane next touches Go file edges, JS consts (`lane/ts-const-defs`, open) or
+Rust trait methods.
+
+### What this result does NOT say
+
+It does not say the ring is valuable everywhere — it is still 34 % precise where it was measured, and
+`Wrong` falls by half when it is withheld. It says the **gate cannot be built from `declined_iface`
+and `reaches <= importers`**, because the cells where the ring carries gold are invisible to both. A
+formulation that reads something else is a new registration with a new band and a fresh readout; per
+the registration's forbidden-alternative clause, a share-of-repo threshold is not it.
