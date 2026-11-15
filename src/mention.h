@@ -1174,6 +1174,11 @@ inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::strin
 // NOSKIP-BUNDLE-DEMOTE: a bundle's copy of a source definition (model.h kRankFlagBundleCopy) is neither a target nor one of the
 // files the ambiguity bound counts, unless the task names its file (`namedFiles`): the copy restates the source, so a name
 // defined in two source files and two bundles is as specific as it was before the bundles were indexed.
+inline bool isUnnamedBundleCopy( const Symbol& s, const std::vector<std::uint32_t>& namedFiles ) noexcept
+{
+    return bundleCopy( s ) && std::ranges::find( namedFiles, s.fileId ) == namedFiles.end();
+}
+
 inline std::vector<std::pair<std::uint32_t, NodeId>> filesForNamedIdent( const IngestResult& ing, const std::vector<float>& lensRank,
                                                                          const NamedIdent& n, std::string_view task,
                                                                          std::span<const std::pair<std::uint32_t, NodeId>> rows,
@@ -1185,7 +1190,7 @@ inline std::vector<std::pair<std::uint32_t, NodeId>> filesForNamedIdent( const I
     {
         const Symbol& s = ing.symbols[ row.second ];
         ASSUME( s.id < lensRank.size() );
-        if( bundleCopy( s ) && std::ranges::find( namedFiles, s.fileId ) == namedFiles.end() )
+        if( isUnnamedBundleCopy( s, namedFiles ) )
         {
             continue;
         }

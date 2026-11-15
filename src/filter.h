@@ -644,6 +644,18 @@ inline const char* shapeDocTierTag( const queryshape::Verdict& shape ) noexcept
     return kDocTierTags[ ( shape.trace ? 1u : 0u ) | ( shape.bugReport ? 2u : 0u ) ];
 }
 
+// The tiers a symbol carries itself, on top of its file's factor `fileMul`; min() each, never a lift.
+//   L8: an in-file test symbol earns the SAME tier factor its path-classified twin already gets — the file it lives in is
+//   production, so its file factor is 1.0; a file ALREADY down-weighted (a fixture, a deck) is never lifted back up.
+//   NOSKIP-BUNDLE-DEMOTE: a bundle's copy of a source definition (model.h kRankFlagBundleCopy) takes the generated tier, so the
+//   source copy outranks it. One flag bit per symbol, set at load: no path test in this loop.
+inline float symbolOwnTierMultiplier( const Symbol& s, float fileMul ) noexcept
+{
+    const float testMul   = s.testScope != 0 ? kRankTierTestMul : 1.f;
+    const float bundleMul = bundleCopy( s ) ? kRankTierDemoMul : 1.f;
+    return std::min( { fileMul, testMul, bundleMul } );
+}
+
 // tier factors fanned out per def, via each def's file (every entry in (0,1] — shrink-only keeps the
 // MaxScore bound in lexical.h safe, same argument as its Section down-weight).
 // demoteDocTier: the shape-conditional document factor above, folded into the SAME per-file pass rather
@@ -689,19 +701,7 @@ inline std::vector<float> rankTierSymbolMultipliersShaped( const IngestResult& i
         {
             mul[i] = fileMul[ing.symbols[i].fileId];
         }
-        // L8: an in-file test symbol earns the SAME tier factor its path-classified twin already gets —
-        // the file it lives in is production, so fileMul above left it at 1.0. min(), not assignment, so a
-        // file that is ALREADY down-weighted (a fixture, a deck) can never be lifted back up by this line.
-        if( ing.symbols[i].testScope != 0 )
-        {
-            mul[i] = std::min( mul[i], kRankTierTestMul );
-        }
-        // NOSKIP-BUNDLE-DEMOTE: a bundle's copy of a source definition (model.h kRankFlagBundleCopy) takes the generated tier,
-        // so the source copy outranks it; min(), never a lift. One flag bit per symbol, set at load: no path test here.
-        if( bundleCopy( ing.symbols[i] ) )
-        {
-            mul[i] = std::min( mul[i], kRankTierDemoMul );
-        }
+        mul[i] = symbolOwnTierMultiplier( ing.symbols[i], mul[i] );
     }
     return mul;
 }
