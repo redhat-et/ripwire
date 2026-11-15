@@ -588,29 +588,10 @@ inline bool readAllFromFd( int fd, std::string& out )
     }
 }
 
-// The whole of `path` when it is a regular file, read through ONE non-blocking, no-follow descriptor; nullopt when it
-// is absent, a symlink at the final component, anything that is not a regular file (a FIFO never blocks the open:
-// O_NONBLOCK, then fstat), or unreadable. For small metadata a caller only inspects — never a file whose absence
-// or refusal it has to word to the user.
-inline std::optional<std::string> readRegularFileNoFollow( const std::string& path )
-{
-    const OwnedFd fd( os::open( path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC ) );
-    os::stat_t    openedSt{};
-    if( !fd.valid() || os::fstat( fd.get(), &openedSt ) != 0 || !S_ISREG( openedSt.st_mode ) )
-    {
-        return std::nullopt;
-    }
-    std::string bytes;
-    if( !readAllFromFd( fd.get(), bytes ) )
-    {
-        return std::nullopt;
-    }
-    return bytes;
-}
-
-// A regular file opened for STREAMING through readRegularFileNoFollow's one no-follow, non-blocking descriptor, its size read
-// from that descriptor (fstat). A link swapped in after a caller's own size probe is refused, never followed, and the size is
-// the opened file's, not the one a crawl recorded earlier. LARGE-PARTIAL-1's piece readers (CodeRabbit #665).
+// A regular file opened for STREAMING through ONE no-follow, non-blocking descriptor (a FIFO never blocks the open: O_NONBLOCK,
+// then fstat), its size read from that descriptor. A link swapped in after a caller's own size probe is refused, never followed,
+// and the size is the opened file's, not the one a crawl recorded earlier. LARGE-PARTIAL-1's piece readers (CodeRabbit #665) and
+// readRegularFileNoFollow below.
 struct RegularFileStream
 {
     OwnedFd       fd;
@@ -648,6 +629,20 @@ inline std::optional<RegularFileStream> openRegularFileNoFollow( const std::stri
         return std::nullopt;
     }
     return RegularFileStream{ std::move( fd ), std::uint64_t( openedSt.st_size ) };
+}
+
+// The whole of `path` when it is a regular file, read through openRegularFileNoFollow's descriptor; nullopt when it
+// is absent, a symlink at the final component, anything that is not a regular file, or unreadable. For small metadata a
+// caller only inspects — never a file whose absence or refusal it has to word to the user.
+inline std::optional<std::string> readRegularFileNoFollow( const std::string& path )
+{
+    const std::optional<RegularFileStream> file = openRegularFileNoFollow( path );
+    std::string                            bytes;
+    if( !file || !readAllFromFd( file->fd.get(), bytes ) )
+    {
+        return std::nullopt;
+    }
+    return bytes;
 }
 
 // The part of `path` below `dir`, or false when `path` is not strictly beneath it — including a sibling whose name
