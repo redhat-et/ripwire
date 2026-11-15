@@ -100,6 +100,12 @@ inline std::vector<NodeId> forCallerHopTargets( const IngestResult& ing, const G
     // the selector the element names (of=, next=) — what `--callers=SELECTOR` resolves: scope::name, the bare name when unscoped
     const std::string   sel      = first.scope.empty() ? first.name : first.scope + "::" + first.name;
     std::vector<NodeId> matches  = resolveAllByNameQualified( ing, sel, &unproven );
+    // NOSKIP-BUNDLE-DEMOTE: a bundle's copy of a source function (model.h kRankFlagBundleCopy: the same name defined in a source
+    // file) is not a second function: the hop serves the source definition's callers. A name whose matches are ALL copies keeps them.
+    if( !std::ranges::all_of( matches, [ & ]( NodeId id ) { return bundleCopy( ing.symbols[id] ); } ) )
+    {
+        std::erase_if( matches, [ & ]( NodeId id ) { return bundleCopy( ing.symbols[id] ); } );
+    }
     if( matches.empty() || unproven != 0 || !crossKindValue( ing, matches ).empty() )
     {
         return {};
