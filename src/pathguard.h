@@ -608,6 +608,48 @@ inline std::optional<std::string> readRegularFileNoFollow( const std::string& pa
     return bytes;
 }
 
+// A regular file opened for STREAMING through readRegularFileNoFollow's one no-follow, non-blocking descriptor, its size read
+// from that descriptor (fstat). A link swapped in after a caller's own size probe is refused, never followed, and the size is
+// the opened file's, not the one a crawl recorded earlier. LARGE-PARTIAL-1's piece readers (CodeRabbit #665).
+struct RegularFileStream
+{
+    OwnedFd       fd;
+    std::uint64_t size = 0;   // st_size at the open
+
+    // Up to n bytes, EINTR retried; 0 at the end of the file or on a read error.
+    std::size_t read( char* dst, std::size_t n ) const noexcept
+    {
+        for( ;; )
+        {
+            const os::ssize_t got = os::read( fd.get(), dst, n );
+            if( got >= 0 )
+            {
+                return std::size_t( got );
+            }
+            if( errno != EINTR )
+            {
+                return 0;
+            }
+        }
+    }
+    // Bytes past `size`: the file grew after the open, so a reader that stopped at `size` did not read all of it.
+    bool grewPastSize() const noexcept
+    {
+        char probe = 0;
+        return read( &probe, 1 ) != 0;
+    }
+};
+inline std::optional<RegularFileStream> openRegularFileNoFollow( const std::string& path )
+{
+    OwnedFd    fd( os::open( path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC ) );
+    os::stat_t openedSt{};
+    if( !fd.valid() || os::fstat( fd.get(), &openedSt ) != 0 || !S_ISREG( openedSt.st_mode ) )
+    {
+        return std::nullopt;
+    }
+    return RegularFileStream{ std::move( fd ), std::uint64_t( openedSt.st_size ) };
+}
+
 // The part of `path` below `dir`, or false when `path` is not strictly beneath it — including a sibling whose name
 // merely starts with dir's ("/x/plans-other/…" is not beneath "/x/plans").
 inline bool relativeBeneath( const std::string& dir, const std::string& path, std::string_view& rel ) noexcept

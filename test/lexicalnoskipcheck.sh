@@ -17,9 +17,20 @@
 #   E  grep: a word in an oversize (crawl-dropped) file is an unindexed hit on its true line
 #   F  grep: three occurrences in one 3 MB line fold to one row with occ="3" (no double count across the cut's overlap)
 #   G  stray-content: a branch's added line in the 5.8 MB file is counted (stray="1"), never diffable="0"
+#   H  grep: the unindexed scan keeps at most its one collection budget (4,000,000 sites) across ALL pieces and files, and says
+#      the count is a floor (CodeRabbit #665: the budget was per 2 MiB piece, so a 12.6 MB file of 4.2 M matching lines kept
+#      every one, and a 100 MiB one would have kept 52 M rows)
+#   S  source: both piece readers (crossref.h scanWorktreeLarge, search.h scanAuxFileInPieces) open through
+#      pathguard::openRegularFileNoFollow (O_NOFOLLOW, fstat on the descriptor, its size) and never fopen by name: a path
+#      swapped for a symlink after its size probe is refused, not followed out of the checkout (CodeRabbit #665). A race arm
+#      would pass by luck on the old code, so the open is pinned at the source. So is the size: each reads the OPENED file's
+#      size and treats bytes past it as not read whole (grewPastSize), where the crawl's recorded size read a file that grew
+#      between the crawl and the scan short and still counted it scanned (CodeRabbit #665; a warm run re-crawls a changed
+#      file, so only a race inside one run reaches it).
 # Premise arms (P*) count what the fixture holds and FAIL on zero, so no arm passes vacuously.
 #
 # RED-FIRST (fade32332): A2, B, C, D1, D2, E, F and G fail; the P arms and A1 (caller.c names it) hold on both binaries.
+# H is red on 1e3b55a75 (unindexed_hits="4200000", no counts_floor=); S is red on 1e3b55a75's source (fopen in both).
 #
 # Usage:  bash test/lexicalnoskipcheck.sh [BIN]
 set -u
@@ -114,6 +125,27 @@ row=$( printf '%s' "$out" | grep -o '<file p="huge.c"[^>]*>' | head -1 )
 printf '%s' "$row" | grep -q 'stray="1"' && ! printf '%s' "$row" | grep -q 'diffable="0"' \
     && ok "G the branch's line added to the 5.8 MB file is counted: $row" \
     || no "G huge.c row not counted: ${row:-<none>}"
+
+# ── the unindexed scan's one budget, across pieces ────────────────────────────────────────────────────────
+python3 -c 'import sys; open( sys.argv[ 1 ], "w" ).write( "QQ\n" * 4200000 )' "$R/cap.ts"   # 12.6 MB: past the crawl ceiling, six pieces
+out=$( run --grep=QQ )   # status: the arm below asserts the answer's bytes; a failed run prints no root, so it FAILs
+r=$( printf '%s' "$out" | root grep )
+uh=$( printf '%s' "$r" | sed -n 's/.* unindexed_hits="\([0-9]*\)".*/\1/p' )
+[ -n "$uh" ] && [ "$uh" -gt 0 ] && [ "$uh" -le 4000000 ] && printf '%s' "$r" | grep -q 'counts_floor="1"' \
+    && ok "H 4.2 M matching lines in one oversize file: $uh kept (the one 4,000,000 budget), counts_floor=1" \
+    || no "H want unindexed_hits <= 4000000 with counts_floor=1: unindexed_hits=${uh:-?} $( printf '%s' "$r" | grep -o 'counts_floor="[0-9]*"\|scan_degraded="[0-9]*"' | tr '\n' ' ' )"
+rm -f "$R/cap.ts"
+
+# ── source: the piece readers open no-follow ─────────────────────────────────────────────────────────────
+body(){ awk -v f="$2" '$0 ~ "^inline bool " f "\\(" { on = 1 } on { print } on && /^}/ { exit }' "$ROOT/src/$1"; }
+for spec in crossref.h:scanWorktreeLarge search.h:scanAuxFileInPieces; do
+    b=$( body "${spec%%:*}" "${spec#*:}" )
+    if [ -z "$b" ]; then no "S ${spec#*:} not found in src/${spec%%:*} — re-point this arm"
+    elif printf '%s' "$b" | grep -q 'pathguard::openRegularFileNoFollow' && ! printf '%s' "$b" | grep -q 'fopen' \
+         && printf '%s' "$b" | grep -q 'readInPieces( std::size_t( file->size )' && printf '%s' "$b" | grep -q 'grewPastSize()'; then
+        ok "S ${spec#*:} opens through pathguard::openRegularFileNoFollow (no fopen), reads the opened file's size and refuses a file that grew"
+    else no "S ${spec#*:} opens by name (fopen), not through openRegularFileNoFollow, or reads a recorded size without the growth check"; fi
+done
 
 [ "$fail" = 0 ] && echo "lexicalnoskipcheck: PASS" || echo "lexicalnoskipcheck: FAILURES ABOVE"
 exit $fail

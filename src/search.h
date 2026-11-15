@@ -24,6 +24,7 @@
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "infra/pieceread.h"    // LARGE-PARTIAL-1: a file over the crawl ceiling is grepped in line-aligned pieces, never skipped
+#include "pathguard.h"           // openRegularFileNoFollow — a piece-read file is opened no-follow, its size read from the descriptor
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "ingest.h"             // §R-J: rw::looksBinary / rw::kBinarySniffCap — the shared NUL-sniff, reused by grepCollectAux
 #include "model.h"
@@ -1819,14 +1820,31 @@ struct GrepAuxCollection
 
     // The DISCLOSE sink for the unindexed scan's own degrade: the scan threw part-way, so `degraded` (which the CLI
     // prints as scan_degraded="1" with counts_floor="1") is set and the hits so far are kept.
+    std::size_t             hitBudgetLeft        = kGrepCollectionBudget;   // match sites the scan may still keep, across every file and piece
+
     enum class DisclosureWhy : std::uint8_t
     {
         ScanThrew,
+        HitBudget,   // the shared collection budget ran out: the files and pieces after it were not scanned, counts are floors
     };
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
     {
         degraded = true;
     }
+
+    // Charge one scan's kept sites to the shared budget. `capped`: the scan stopped at the budget it was handed, so the rest
+    // of the stream (and every file after it) goes unread — disclosed, as the indexed scan's hits_capped is (CodeRabbit #665:
+    // the budget was per piece, so one 100 MiB file of `x` lines kept 52 M rows).
+    void chargeHits( std::size_t kept, bool capped ) noexcept
+    {
+        hitBudgetLeft -= std::min( hitBudgetLeft, kept );
+        if( capped )
+        {
+            hitBudgetLeft = 0;
+            DISCLOSE( *this, DisclosureWhy::HitBudget, "grep: the unindexed scan reached its collection budget — the rest is unscanned, counts are floors" );
+        }
+    }
+    bool hitBudgetSpent() const noexcept { return hitBudgetLeft == 0; }
 
     // One stopped --regex candidate: the stopped count, plus the first stopped file's path (what the refusal names).
     // The whole per-file decision lives here, so the scan loop that calls it keeps no branch of its own.
@@ -1874,11 +1892,13 @@ inline void appendAuxFileHits( const std::string& text, const std::string& path,
 // LARGE-PARTIAL-1: one file over the whole-read ceiling, grepped in line-aligned pieces (readInPieces) in bounded memory.
 // A match lying wholly inside a piece's carried prefix (a cut inside one long line re-serves its tail) was found in the
 // previous piece and is skipped. False when the file could not be read whole (what was found stands).
-inline bool scanAuxFileInPieces( const std::string& path, std::uint64_t sizeBytes, const std::string& pat, const GuardedRegex* re,
-                                 RegexLinePolicy linePolicy, GrepAuxCollection& out )
+// The file is opened no-follow and regular-only, its size read from the descriptor rather than the crawl's record, and a file
+// that grew while it was read is not read whole (CodeRabbit #665). The sites kept are charged to the shared budget; a piece
+// that reaches it stops the read, and the file counts as not read whole.
+inline bool scanAuxFileInPieces( const std::string& path, const std::string& pat, const GuardedRegex* re, RegexLinePolicy linePolicy, GrepAuxCollection& out )
 {
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
-    if( fp == nullptr )
+    const std::optional<pathguard::RegularFileStream> file = pathguard::openRegularFileNoFollow( path );
+    if( !file )
     {
         ++out.filesUnreadable;
         return false;
@@ -1887,28 +1907,30 @@ inline bool scanAuxFileInPieces( const std::string& path, std::uint64_t sizeByte
     std::string                text;
     std::vector<GrepMatchSite> sites;
     std::vector<std::size_t>   lineStarts;
-    const PieceRead            read = readInPieces( std::size_t( sizeBytes ), [ & ]( char* dst, std::size_t n ) { return std::fread( dst, 1, n, fp ); }, window,
+    const PieceRead            read = readInPieces( std::size_t( file->size ), [ & ]( char* dst, std::size_t n ) { return out.hitBudgetSpent() ? 0 : file->read( dst, n ); }, window,
                                                     [ & ]( const BlobPiece& piece )
     {
         text.assign( piece.bytes );
         sites.clear();
-        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, kGrepCollectionBudget, sites, linePolicy );
+        const std::size_t budget = out.hitBudgetLeft;
+        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, budget, sites, linePolicy );
         out.noteRegexScanOutcome( isAbandoned, path );
         out.regexLinesSkipped += linesSkipped;
+        const bool        capped     = sites.size() >= budget;
         const std::size_t matchBytes = re == nullptr ? pat.size() : 1;
         std::erase_if( sites, [ & ]( const GrepMatchSite& site ) { return std::size_t( site.byteOffset ) + matchBytes <= piece.carried; } );
+        out.chargeHits( sites.size(), capped );
         if( !sites.empty() )
         {
             appendAuxFileHits( text, path, sites, lineStarts, out, piece.firstLine - 1 );
         }
     } );
-    std::fclose( fp );
     if( read == PieceRead::Binary )
     {
         ++out.filesSkippedBinary;
         return true;
     }
-    if( read == PieceRead::Short )
+    if( read == PieceRead::Short || ( read == PieceRead::Text && file->grewPastSize() ) )
     {
         ++out.filesUnreadable;
         return false;
@@ -1925,9 +1947,13 @@ inline void scanUnsupportedFiles( const CrawlSkips& skips, const std::string& pa
     std::vector<std::size_t>  lineStarts;
     for( const SkippedFile& row : skips.unsupported )
     {
+        if( out.hitBudgetSpent() )
+        {
+            return;   // the shared budget ran out (disclosed where it did): the rest stay unscanned
+        }
         if( row.sizeBytes > maxAuxFileBytes )
         {
-            (void)scanAuxFileInPieces( row.path, row.sizeBytes, pat, re, linePolicy, out );   // LARGE-PARTIAL-1: read, never skipped
+            (void)scanAuxFileInPieces( row.path, pat, re, linePolicy, out );   // LARGE-PARTIAL-1: read, never skipped
             continue;
         }
         const std::optional<std::string> fileBytes = docparse::detail::readWholeFile( row.path );
@@ -1945,9 +1971,11 @@ inline void scanUnsupportedFiles( const CrawlSkips& skips, const std::string& pa
         ++out.filesScanned;
 
         sites.clear();
-        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, kGrepCollectionBudget, sites, linePolicy );
+        const std::size_t budget = out.hitBudgetLeft;
+        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, budget, sites, linePolicy );
         out.noteRegexScanOutcome( isAbandoned, row.path );
         out.regexLinesSkipped += linesSkipped;
+        out.chargeHits( sites.size(), sites.size() >= budget );
         if( sites.empty() )
         {
             continue;
@@ -1975,7 +2003,12 @@ inline void scanOversizeFiles( std::span<const SkippedOversize> oversize, const 
 {
     for( const SkippedOversize& row : oversize )
     {
-        if( scanAuxFileInPieces( row.path, row.sizeBytes, pat, re, linePolicy, out ) )
+        if( out.hitBudgetSpent() )
+        {
+            out.oversizeUnread += 1;   // the shared budget ran out (disclosed where it did): not read
+            continue;
+        }
+        if( scanAuxFileInPieces( row.path, pat, re, linePolicy, out ) )
         {
             ++out.oversizeScanned;
         }

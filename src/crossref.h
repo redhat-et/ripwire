@@ -3653,23 +3653,22 @@ struct WorktreeScan
 };
 
 // A changed working copy over kMaxBlobBytes, scanned in pieces (LARGE-PARTIAL-1: it used to be left unread, its HEAD rows
-// standing). False when it could not be read whole; a binary one holds no row and is still replaced.
+// standing). False when it could not be read whole; a binary one holds no row and is still replaced. The open is
+// readWorktreeCopy's own no-follow, regular-file-only one (pathguard::openRegularFileNoFollow), so a path swapped for a
+// symlink after readWorktreeCopy classified it is refused, never followed out of the checkout; the size is the opened
+// file's, and a file that grew past it while it was read is not read whole (CodeRabbit #665).
 inline bool scanWorktreeLarge( const std::string& root, const std::string& relPath, std::string_view sym, const RefInfo& ref, WorktreeScan& scan )
 {
-    const std::string full = ( std::filesystem::path( root ) / relPath ).string();
-    std::error_code   ec;
-    const std::uintmax_t size = std::filesystem::file_size( full, ec );
-    std::FILE*        fp   = ec ? nullptr : std::fopen( full.c_str(), "rb" );
-    if( fp == nullptr )
+    const std::optional<pathguard::RegularFileStream> file = pathguard::openRegularFileNoFollow( ( std::filesystem::path( root ) / relPath ).string() );
+    if( !file )
     {
         return false;
     }
     std::string           window;
     std::vector<WhereHit> rows;
-    const PieceRead   read  = readInPieces( std::size_t( size ), [ & ]( char* dst, std::size_t n ) { return std::fread( dst, 1, n, fp ); }, window,
+    const PieceRead   read  = readInPieces( std::size_t( file->size ), [ & ]( char* dst, std::size_t n ) { return file->read( dst, n ); }, window,
                                             [ & ]( const BlobPiece& piece ) { scan.mentions = scanPieceForSymbol( piece, sym, ref, relPath, rows ) || scan.mentions; } );
-    std::fclose( fp );
-    if( read == PieceRead::Short )
+    if( read == PieceRead::Short || ( read == PieceRead::Text && file->grewPastSize() ) )
     {
         return false;
     }
