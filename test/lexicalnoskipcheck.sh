@@ -62,13 +62,13 @@ hb=$( wc -c < "$R/huge.c" ); db=$( wc -c < "$R/data.ts" )
 [ "$db" -gt 4194304 ] \
     && ok "P2 data.ts is $db bytes" \
     || no "P2 data.ts is only $db bytes"
-ov=$( run --grep=NodeLinksMarker | root grep | grep -o 'corpus_oversize="[0-9]*"' )
+ov=$( run --grep=NodeLinksMarker | root grep | grep -o 'corpus_oversize="[0-9]*"' )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 [ -n "$ov" ] \
     && ok "P3 the crawl dropped the large files ($ov), so E/F test the oversize path" \
     || no "P3 no corpus_oversize= — the grep arms would prove nothing"
 
 # ── whereis ──────────────────────────────────────────────────────────────────────────────────────────────
-out=$( run --whereis=deep_target_fn --whereis-listing=all )
+out=$( run --whereis=deep_target_fn --whereis-listing=all )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 r=$( printf '%s' "$out" | root whereis )
 printf '%s' "$r" | grep -q 'on-head="1"' \
     && ok "A1 on-head=1" \
@@ -77,18 +77,18 @@ printf '%s' "$out" | grep -q '<hit ref="HEAD" p="huge.c" l="60001"' \
     && ok "A2 HEAD row in huge.c at l=60001" \
     || no "A2 no HEAD row for huge.c:60001"
 
-out=$( run --whereis=LongLineNeedle --whereis-listing=all )
+out=$( run --whereis=LongLineNeedle --whereis-listing=all )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 n=$( printf '%s' "$out" | grep -o '<hit ref="HEAD" p="huge.c" l="60002"' | wc -l | tr -d ' ' )
 [ "$n" = "1" ] \
     && ok "B one HEAD row for the needle inside a 3 MB line (l=60002)" \
     || no "B $n HEAD rows for the 3 MB line's needle (want 1)"
 
-out=$( run --whereis=branch_only_fn --whereis-listing=all )
+out=$( run --whereis=branch_only_fn --whereis-listing=all )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 printf '%s' "$out" | grep -q '<hit ref="feat/big"[^>]*p="huge.c" l="60004"' && ok "C the branch's large blob holds branch_only_fn at l=60004" \
     || no "C no feat/big row for branch_only_fn: $( printf '%s' "$out" | root whereis )"
 
 echo "int dirty_only_fn( void ) { return 0; }" >> "$R/huge.c"
-out=$( run --whereis=dirty_only_fn --whereis-listing=all )
+out=$( run --whereis=dirty_only_fn --whereis-listing=all )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 r=$( printf '%s' "$out" | root whereis )
 printf '%s' "$r" | grep -q 'worktree="read"' \
     && ok "D1 worktree=read over a 5.8 MB dirty copy" \
@@ -99,17 +99,17 @@ printf '%s' "$out" | grep -q '<hit ref="worktree"[^>]*p="huge.c" l="60004"' \
 g checkout -q -- huge.c
 
 # ── grep ─────────────────────────────────────────────────────────────────────────────────────────────────
-out=$( run --grep=NodeLinksMarker )
+out=$( run --grep=NodeLinksMarker )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 printf '%s' "$out" | grep -q 'unindexed_hits="1"' && printf '%s' "$out" | grep -q '<hit l="11"' \
     && ok "E the oversize data.ts holds NodeLinksMarker at l=11 (unindexed)" \
     || no "E no unindexed hit at data.ts:11: $( printf '%s' "$out" | root grep )"
 
-out=$( run --grep=TrioWord )
+out=$( run --grep=TrioWord )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 printf '%s' "$out" | grep -q '<hit l="60003" [^>]*occ="3"' && ok "F three occurrences on one 3 MB line: one row, occ=3" \
     || no "F want one row l=60003 occ=3: $( printf '%s' "$out" | grep -o '<hit l="60003"[^>]*>' | head -3 | tr '\n' ' ' )"
 
 # ── stray-content ────────────────────────────────────────────────────────────────────────────────────────
-out=$( run --stray-content )
+out=$( run --stray-content )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 row=$( printf '%s' "$out" | grep -o '<file p="huge.c"[^>]*>' | head -1 )
 printf '%s' "$row" | grep -q 'stray="1"' && ! printf '%s' "$row" | grep -q 'diffable="0"' \
     && ok "G the branch's line added to the 5.8 MB file is counted: $row" \

@@ -57,7 +57,7 @@ n=$( git -C "$R" for-each-ref refs/heads | wc -l | tr -d ' ' )
 call(){ # call NAME ARGS... → $FIX/NAME.out / .err / .sec
     local name=$1; shift
     local t0; t0=$( date +%s )
-    ( cd "$R" && "$BIN" . --no-cache "$@" >"$FIX/$name.out" 2>"$FIX/$name.err" )
+    ( cd "$R" && "$BIN" . --no-cache "$@" >"$FIX/$name.out" 2>"$FIX/$name.err" )   # status: the caller's arms read NAME.out/.err; a failed run leaves no refs_omitted= root or warning line, so they FAIL
     echo $(( $( date +%s ) - t0 )) >"$FIX/$name.sec"
 }
 warns(){ grep -c '^ripwire: warning:' "$FIX/$1.err"; }
@@ -101,7 +101,7 @@ um=$( grep -o '<ref [^>]* v="unmerged"' "$FIX/stray.out" | wc -l | tr -d ' ' )
 
 req='{"jsonrpc":"2.0","id":ID,"method":"tools/call","params":{"name":"stray_content","arguments":{"path":"'"$R"'"}}}'
 { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}'; for i in 2 3 4 5 6 7 8; do printf '%s\n' "${req/ID/$i}"; done; } \
-    | "$BIN" --mcp >"$FIX/mcp.out" 2>"$FIX/mcp.err"
+    | "$BIN" --mcp >"$FIX/mcp.out" 2>"$FIX/mcp.err"   # status: each of the 7 answers must carry refs_omitted= (answers= below); a failed server prints none and the arm FAILs
 w=$( grep -c '^ripwire: warning: --stray-content' "$FIX/mcp.err" ); c=$( grep -c '^ripwire: warning: more limits were reached' "$FIX/mcp.err" )
 answers=$( grep -c 'refs_omitted' "$FIX/mcp.out" )
 [ "$answers" -ge 7 ] && [ "$w" = 5 ] && [ "$c" = 1 ] && ok "W7 MCP: 7 cut answers, 5 warnings then one collapse line" \

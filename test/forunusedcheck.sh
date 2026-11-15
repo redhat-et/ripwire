@@ -1016,7 +1016,7 @@ cmp -s "$T/a1" "$T/a2" && pass "T10: deterministic" || fail "T10: two runs diffe
 U="$T/dirunion"; mkdir -p "$U/pkg/alpha" "$U/pkg/beta"
 for d in alpha beta; do for i in 1 2 3 4 5; do printf 'def %s_used_%d():\n    return 1\n' "$d" "$i" > "$U/pkg/$d/m$i.py"; done; done
 ( cd "$U" && git init -q && git -c user.name=t -c user.email=t@t add -A && git -c user.name=t -c user.email=t@t commit -qm i ) >/dev/null 2>&1
-ask "$U" "unused functions in pkg/alpha/ and pkg/beta/" > "$T/dirunion.out"
+ask "$U" "unused functions in pkg/alpha/ and pkg/beta/" > "$T/dirunion.out"   # status: T14 reads the tables; a failed run prints none and the premise arm FAILs
 tables=$( grep -o '<unused_in_file ' "$T/dirunion.out" | wc -l | tr -d ' ' )
 if [ "$tables" = 0 ]; then fail "T14: premise: no <unused_in_file> table for two named directories"
 elif grep -q '<unused_cut total="10" shown="'"$tables"'"/>' "$T/dirunion.out"; then pass "T14: $tables of the two directories' 10 files shown, <unused_cut total=10> says so"
