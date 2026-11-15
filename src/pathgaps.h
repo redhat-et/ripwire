@@ -1126,7 +1126,7 @@ inline std::string pathNearSinkXml( const IngestResult& ing, const PathNearSink&
 inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefs, bool* glob )
 {
     *glob                   = false;
-    std::vector<NodeId> out = dropBundleCopiesBesideSource( ing, dropDocUnitsBesideCode( ing, resolveAllByNameQualified( ing, spec, unprovenDefs ) ) );
+    std::vector<NodeId> out = dropSymbolsBesideOthers( ing, dropDocUnitsBesideCode( ing, resolveAllByNameQualified( ing, spec, unprovenDefs ) ), bundleCopy );
     if( !out.empty() || spec.find( '*' ) == std::string_view::npos || spec.find( ':' ) != std::string_view::npos )
     {
         return out;

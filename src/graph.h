@@ -15758,33 +15758,29 @@ inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std:
     return code.empty() ? found : code;
 }
 
-// A --path endpoint's matches, code first (docs-rest CI fix; gates restdocscheck (I5, I6), mdsectioncheck): when a name matches code
-// AND doc units, the doc units go, since a `.. method:: save` directive or a `## run` heading is no second place a call path can
-// start or end, and from_defs=/to_defs= count code only. An all-doc or all-code list is returned as it is.
-// The shared shape of the two drops below: the matches `lesser` names go when a match it does not name remains; a list that is all
-// `lesser` (or none of it) is returned as it is.
-template< typename Lesser >
-inline std::vector<NodeId> dropLesserBesideOthers( std::vector<NodeId> found, const Lesser& lesser )
+// A match list's lesser symbols (`lesser`) go when a match that is not lesser remains; a list that is all lesser, or has none, is
+// returned as it is. Two callers:
+// - dropDocUnitsBesideCode (isDocUnit), below.
+// - NOSKIP-BUNDLE-DEMOTE (model.h bundleCopy): a bundle's copies (kRankFlagBundleCopy: a build output's, an amalgamation's or a
+//   lexically read file's copy of a function a source file defines) leave a path endpoint, a caller hop, a --for graph endpoint
+//   and the callers verb's bare-name selector, which all ask about the source function; its copy is no second one. --defs and a
+//   file-qualified selector still reach the copies (demoted, never dropped from the index).
+inline std::vector<NodeId> dropSymbolsBesideOthers( const IngestResult& ing, std::vector<NodeId> found, bool ( *lesser )( const Symbol& ) noexcept )
 {
-    if( !std::all_of( found.begin(), found.end(), lesser ) )
+    const auto isLesser = [ &ing, lesser ]( NodeId id ) noexcept { return lesser( ing.symbols[ id ] ); };
+    if( !std::all_of( found.begin(), found.end(), isLesser ) )
     {
-        std::erase_if( found, lesser );
+        std::erase_if( found, isLesser );
     }
     return found;
 }
 
+// A --path endpoint's matches, code first (docs-rest CI fix; gates restdocscheck (I5, I6), mdsectioncheck): when a name matches code
+// AND doc units, the doc units go, since a `.. method:: save` directive or a `## run` heading is no second place a call path can
+// start or end, and from_defs=/to_defs= count code only. An all-doc or all-code list is returned as it is.
 inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std::vector<NodeId> found )
 {
-    return dropLesserBesideOthers( std::move( found ), [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); } );
-}
-
-// NOSKIP-BUNDLE-DEMOTE: a match list's bundle copies (model.h kRankFlagBundleCopy: a build output's, an amalgamation's or a lexically
-// read file's copy of a function a source file defines) go when a match that is no copy remains. A path endpoint, a caller hop and a
-// --for graph endpoint and the callers verb's bare-name selector ask about the source function; its copy is no second one. An all-copy
-// list is returned as it is; --defs and a file-qualified selector still reach the copies (demoted, never dropped from the index).
-inline std::vector<NodeId> dropBundleCopiesBesideSource( const IngestResult& ing, std::vector<NodeId> found )
-{
-    return dropLesserBesideOthers( std::move( found ), [ &ing ]( NodeId id ) noexcept { return bundleCopy( ing.symbols[ id ] ); } );
+    return dropSymbolsBesideOthers( ing, std::move( found ), isDocUnit );
 }
 
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero

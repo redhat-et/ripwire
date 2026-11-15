@@ -118,7 +118,7 @@ inline std::optional<std::string> sourceOnlyPickSpelling( const IngestResult& in
 inline std::optional<std::string> withoutBundleCopiesSpelling( const IngestResult& ing, std::string_view spec )
 {
     const std::vector<NodeId> all  = resolveAllByNameQualified( ing, spec );
-    std::vector<NodeId>       kept = dropBundleCopiesBesideSource( ing, all );
+    std::vector<NodeId>       kept = dropSymbolsBesideOthers( ing, all, bundleCopy );
     if( kept.size() == all.size() )
     {
         return std::nullopt;
