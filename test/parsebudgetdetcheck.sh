@@ -55,7 +55,11 @@ run(){
     echo $? >"$TMP/$tag.rc"
     echo "$( now ) $t0" | awk '{ printf "%.2f\n", $1 - $2 }' >"$TMP/$tag.secs"
 }
-same(){ cmp -s "$TMP/$1.out" "$TMP/$2.out" && cmp -s "$TMP/$1.err" "$TMP/$2.err" && cmp -s "$TMP/$1.rc" "$TMP/$2.rc"; }
+same(){
+    local rcA rcB
+    rcA="$( cat "$TMP/$1.rc" )"; rcB="$( cat "$TMP/$2.rc" )"
+    [ "$rcA" = "$rcB" ] && cmp -s "$TMP/$1.out" "$TMP/$2.out" && cmp -s "$TMP/$1.err" "$TMP/$2.err"
+}
 slower(){ awk -v a="$( cat "$TMP/$1.secs" )" -v b="$( cat "$TMP/$2.secs" )" -v k="$3" 'BEGIN { exit !( a >= k * b ) }'; }
 
 # ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────────────

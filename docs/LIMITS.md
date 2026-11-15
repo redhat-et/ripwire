@@ -857,8 +857,6 @@ Discloses: `ellipsis_capped`, `hits_capped`, `unmatched_member_capped`
 | `kDataFileKeyCap` | `256` | — | — |
 | `kMaxAstQueryNesting` | `256` | BOUNDARY | — |
 | `kMaxSkipRowsPerClass` | `500` | OUTPUT | — |
-| `kParseBudgetFloorSeconds` | `4.0` | — | — |
-| `kParseBudgetSecondsPerMiB` | `1.0` | — | — |
 | `kUnreachableMaxHits` | `5000` | — | — |
 
 ### `src/ingest_astquery.h`
