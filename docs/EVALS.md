@@ -14744,55 +14744,61 @@ of which is measured and was not anticipated when the card was written:
    emitted stdout **byte-identical to a verified `--no-cache` from-scratch build**. Stale input
    produced a slow correct answer, never a fast wrong one.
 
-#### Band 1 — CPU: PASS on the flagless map; NOT ESTABLISHED on the verb the band actually registered
+#### Band 1 — CPU: PASS, re-measured median-of-5 with the published baseline as a control
 
-The headline measurement is the **flagless map**, and on it the band passes with a wide margin:
+**Corrected 2026-11-14, later the same evening. An intermediate version of this section recorded this
+band as NOT ESTABLISHED; that verdict was wrong and is withdrawn here.** The reasoning was that the
+band's baselines belong to a `--for` query, taken from the comparison table's prose line ("warm query,
+identical for every tool: ..."). The harness's own recorded `cmd` field settles it and says otherwise:
 
-| repo | feature OFF | feature ON | ratio |
-|---|---|---|---|
-| envoy, instructions **(v)** | 20,340,025,905 | **2,389,840,225** | **8.51x** |
-| envoy, user CPU | 1.30 s | **0.18 s** | 7.2x |
-| vscode, user CPU | 3.49 s | **0.35 s** | 10.0x |
+    ripwire . --cache=<...>/lean.ripwirecache
 
-**But the band's own baselines are not flagless-map runs.** "envoy warm 1.46 s" and "vscode 3.38 s"
-are the comparison table's warm cell, which is a **`--for` query**. A band inherits the verb of the
-measurement it was derived from, and this card never restates it, so the verdict has to be taken on
-`--for`. Measured there, steady state, same binary with the feature toggled **(v)**:
+ripwire's warm cell is the **flagless map against the lean blob**, with `cwd` at the repo and the root
+spelled `.`. No ripwire warm row in the curve uses `--for` anywhere. The prose line describes the
+question handed to the **peers**, each of which takes a natural-language query; ripwire is never given
+it. So the band's registered verb is the flagless map, and the flagless-map figures do answer it.
+The lesson is kept as a fix item: read the argv from the recorded `cmd`, never from the prose
+describing the run.
 
-| repo | `--for` OFF | `--for` ON | ratio | flagless ratio |
-|---|---|---|---|---|
-| envoy | 29,568,954,095 | 9,457,879,686 | **3.13x** | 8.51x |
-| vscode | 64,214,553,794 | 14,570,312,058 | **4.41x** | 12.89x |
+Re-measured on that configuration, median of 5 per cell, three arms — the lane with the snapshot
+served, the **same binary** with `RIPWIRE_NO_WARMSNAP=1`, and `d624cff5f`, the binary that produced
+the published curve, each on its own blob copy because parser mirrors 307 and 309 mutually invalidate:
 
-Byte-identical answers in both arms at both sizes. The gap is mechanical: the snapshot removes the
-crawl, the model build and `buildGraph`, which are verb-independent, but its stored PageRank is the
-**uniform-teleport default only** and `--for` personalizes the teleport — so the one phase it cannot
-serve is the one this query needs, on top of ranker work that was never in the removed set.
+| repo | BASE `d624cff5f` | OFF (lane, disabled) | ON (lane) | user ratio | instruction ratio |
+|---|---|---|---|---|---|
+| envoy | 1.34 s / 20,325,625,367 | 1.32 s / 20,253,320,645 | **0.18 s / 2,369,886,135** | 7.3x | **8.55x** |
+| vscode | 3.45 s / 53,670,869,501 | 3.45 s / 53,642,504,763 | **0.35 s / 4,110,758,623** | 9.9x | **13.05x** |
 
-Against the refutation thresholds, the verdict depends on which baseline the ratio is applied to, and
-the two baselines disagree by more than the margin:
+**Verdict: PASS.** The thresholds are 0.50 s on envoy and 0.80 s on vscode; measured 0.18 s (all five
+runs identical, instruction spread 0.09 %) and 0.35 s — **2.8x and 2.3x under**. Peak also falls:
+351,371,936 -> 271,483,456 B on envoy and 620,348,256 -> 481,411,864 B on vscode, both -22 %. The OFF
+arm matches BASE to within 1.5 %, so the lane's disabled path does not regress.
 
-| baseline | envoy projected | vs 0.50 s | vscode projected | vs 0.80 s |
-|---|---|---|---|---|
-| this card's own (1.46 / 3.38 s) | 0.47 s | PASS | 0.77 s | PASS |
-| the OFF arm measured here (1.89 / 4.02 s) | 0.60 s | **REFUTED** | 0.91 s | **REFUTED** |
+**The control is what licenses this result, because the machine was not quiet.** Load per core ran
+0.160-0.227 against a gate that wants < 0.120 — driven by this measurement's own cold fills, which is
+the effect `results/WP3/GATE_DECISION.md` documented ("each cold cell's own cost poisons the gate for
+the next"). Rather than claim quiet, the BASE arm was measured alongside the others: it reproduces the
+published envoy cell to **0.0 %** (1.34 s against 1.34 s) and vscode to 2.1 %, on user CPU, and its
+instruction count sits within 0.7 % of the independent WP3 ladder row for the same binary
+(20,325,625,367 against 20,465,591,070). A contended machine that still reproduces the published
+baseline on both instruments cannot be inflating the ON arm by the 2.3-2.8x the verdict has in hand.
 
-The OFF arm here runs 15-19 % above the card's baseline — a different blob, a binary carrying #657 and
-#658, and a machine at load 3.48 — so **the verdict on the registered verb is NOT ESTABLISHED**, and
-one quiet-machine re-measurement in the table's exact configuration is owed before either outcome is
-claimed. Recording it this way rather than taking the favourable baseline is the point of having
-written the band down first.
+**What it does and does not buy competitively.** On this verb the lane makes ripwire the fastest warm
+tool at envoy scale — 0.18 s against crg's 0.23 s — and it does **not** at vscode scale, where crg
+stays ahead at 0.26 s against 0.35 s. The durable gain is the break-even. On **envoy every peer
+measured now moves to "never"**: ripwire is cheaper on both the index and the query, crg included, so
+no number of questions repays a peer's index. On **vscode** codegraph, graphify and graft move to
+"never" as well, and crg — the one tool still cheaper per query — goes from breaking even at **100
+questions to ~3,457**, which is past any plausible session against an unchanged tree.
 
-**Nothing in the band has been moved.** The thresholds, 0.50 s and 0.80 s, are untouched; what changed
-is which measurement is admitted as answering them, and the change makes the band *harder* to pass,
-not easier.
-
-**The competitive claim this was expected to support does not survive on the published query.** On the
-flagless map the lane makes ripwire the fastest warm tool at envoy scale. On `--for` it does not, at
-either size: crg stays 2.6x faster on envoy (0.23 s) and 3.5x on vscode (0.26 s). What the lane does
-buy is the break-even — codegraph, graphify and graft all move to **never**, ripwire being cheaper on
-both phases, and crg's break-even moves from **59 to ~174** questions on envoy and **100 to ~477** on
-vscode.
+**One measurement is discarded and recorded as discarded.** An earlier `--for` A/B reported 3.13x and
+4.41x. It was run against the **lean** blob, and `--for` reads the **rich** artifact
+(`harness/wp3_ladder.py:224`); the harness asserts against exactly this mismatch
+(`assert_warm_owner`: "the {verb} run would parse cold") and the run was hand-rolled around that
+guard. Those ratios therefore measure a partly-cold path, not a warm `--for`, and no claim rests on
+them. What a true warm `--for` costs after this lane is **not measured** — stored PageRank is the
+uniform-teleport default only and `--for` personalizes the teleport, so some of the saving provably
+does not transfer, and the honest statement is that the size of that gap is unknown.
 
 #### Band 2 — memory: PASS, peak FELL, and the one rise is reported as a trade
 
