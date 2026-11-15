@@ -678,6 +678,7 @@ for _g in \
     legobundlecheck \
     legocheck \
     legotransitivecheck \
+    lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \
     lintbudgetcheck \
@@ -923,6 +924,7 @@ for _g in \
     redactfixcheck \
     reexportcheck \
     refusaltailcheck \
+    refwindowcheck \
     regexbombcheck \
     regexcheck \
     regexguardcheck \

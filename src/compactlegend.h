@@ -776,7 +776,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "refs_dropped",      "refs_dropped=K: K listed branches could not be read, in no count or row" },
     // CROSSREF-MAXREFS: the git sweeps' ref window (crossref kMaxRefs). Past 512 refs they read the newest and count the rest,
     // where they used to refuse; present only then, so a sweep under the window is byte-identical. Head terms like refs_dropped=.
-    { "refs_omitted",      "refs_omitted=K: past the 512-ref window the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which are read)" },
+    { "refs_omitted",      "refs_omitted=K: past the ref window (512 refs; whereis: 2097152 tree entries) the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which; detail=1 reads all)" },
     { "labels_omitted",    "labels_omitted=K: K labelled refs past the sweep's 512-ref window, never scored" },
     { "head_conflicts_ok", "head_conflicts_ok=0: that arm's base or HEAD tree was unavailable, head_conflicts= unknown", true, "arm" },
     { "render_failed",     "render_failed=: sections whose render FAILED (empty, not budget-omitted)", true },
@@ -1748,9 +1748,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "unknown", "unknown=N: refs that could not be analysed (v=unknown, e.g. no merge base); never counted merged", false, "stray-content", MapHeaderRead::No, {}, "stray-content" },
     // grep: src/verbs_grep.h grepCorpusAttrs / grepUnindexedAttrs (each absent at 0)
     { "corpus_excluded", "corpus_excluded=N: files an exclude filter kept out of the index, never searched; skipped verb lists them", false, "grep", MapHeaderRead::No, {}, "grep" },
-    { "corpus_oversize", "corpus_oversize=N: files the crawl saw but dropped over the size ceiling, never searched; skipped verb lists", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "corpus_oversize", "corpus_oversize=N: files the crawl did not index over the size ceiling; grep still reads them (unindexed list); skipped verb lists", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "corpus_pruned_dirs", "corpus_pruned_dirs=N: DIRECTORIES the built-in crawl denylist pruned whole (vendor, build etc), unsearched", false, "grep", MapHeaderRead::No, {}, "grep" },
-    { "unindexed_files_skipped", "unindexed_files_skipped=N: off-index candidates not read: over max-file-size, binary, or unreadable", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "unindexed_files_skipped", "unindexed_files_skipped=N: off-index candidates not read: binary or unreadable (no size ceiling)", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "count", "unindexed count=N: off-index hits, equal to unindexed_hits=; paged by the same window as the f rows", true, "unindexed", MapHeaderRead::No, {}, "grep" },
     { "unindexed_candidates_capped", "unindexed_candidates_capped=1: off-index candidates cut at 500 a class, a floor; skipped verb has all", false, "grep", MapHeaderRead::No, {}, "grep" },
     // doc-drift unchecked= and stray-content unknown= pass the checker only by regex accident (checked + unchecked = anchors,

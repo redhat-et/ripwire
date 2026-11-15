@@ -1358,7 +1358,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // §R-J: the CLI's unindexed_files_scanned=/unindexed block twin (search.h grepCollectAux) — literal-only,
     // matching this verb. No --max-file-size equivalent on the MCP surface, so this uses the same
     // kDefaultMaxFileBytes ceiling the CLI falls back to when --max-file-size was never passed.
-    const GrepAuxCollection aux = grepCollectAux( ing.crawlSkips, pattern, /*regex=*/false, kDefaultMaxFileBytes );
+    const GrepAuxCollection aux = grepCollectAux( ing.crawlSkips, pattern, /*regex=*/false, kDefaultMaxFileBytes, kGrepScanStackBytes, ing.skippedOversize );
 
     // §B6 M12: the two disclosures the CLI legend carries and this payload did not. `files` is the
     // DENOMINATOR (how many distinct files the hits come from — hits sorted by file, so one pass counts
@@ -1396,7 +1396,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // R-H adds the tier arm the CLI emitter also adds: a listing that held comment/string rows back did not
     // print every hit it found, so it may not claim to be exhaustive. notfound-on-cut: nor may an index the memory
     // guard cut (the files it never read may hold a hit) — the claim line below carries that fifth term.
-    const bool scanExhaustive  = collected.cleanScan();
+    const bool scanExhaustive  = collected.cleanScan() && aux.oversizeUnread == 0;   // LARGE-PARTIAL-1: the CLI's oversize term
     const bool windowWhole     = grepPage.begin == 0 && grepPage.end == collected.raw.size();
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
 

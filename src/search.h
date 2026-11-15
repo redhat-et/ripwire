@@ -23,6 +23,7 @@
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade when regex matching throws mid-scan (never terminate)
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
+#include "infra/pieceread.h"    // LARGE-PARTIAL-1: a file over the crawl ceiling is grepped in line-aligned pieces, never skipped
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "ingest.h"             // §R-J: rw::looksBinary / rw::kBinarySniffCap — the shared NUL-sniff, reused by grepCollectAux
 #include "model.h"
@@ -1804,7 +1805,9 @@ struct GrepAuxCollection
     std::vector<GrepAuxHit> hits;                    // path-then-line order (CrawlSkips::unsupported is already path-sorted)
     std::uint32_t           filesScanned         = 0;   // opened, read, pattern-tested
     std::uint32_t           filesSkippedBinary   = 0;   // opened, NUL-sniffed, excluded from scanning
-    std::uint32_t           filesSkippedOversize = 0;   // NOT opened — the row's own recorded size exceeded maxAuxFileBytes
+    std::uint32_t           filesSkippedOversize = 0;   // retired (LARGE-PARTIAL-1): a file over maxAuxFileBytes is now read in pieces; stays 0
+    std::uint32_t           oversizeScanned      = 0;   // files the crawl dropped over its size ceiling (corpus_oversize=), read here in pieces
+    std::uint32_t           oversizeUnread       = 0;   // …of those, files that could not be read whole (unreadable, or cut short)
     std::uint32_t           filesUnreadable      = 0;   // open/read failed after the crawl saw it (deleted/permission mid-run)
     bool                    candidatesCapped     = false;
     bool                    degraded             = false;   // regex failed to COMPILE — nothing was scanned, mirrors GrepCollection's construction-failure case
@@ -1845,8 +1848,9 @@ struct GrepAuxCollection
 // row's occ=, honest-lex — the indexed list's rule, grepFoldLines), each carrying its matched line's text. `lineStarts` is
 // the caller's scratch, refilled here for `text`. Split out of scanUnsupportedFiles (train 34) so the scan loop keeps only
 // the per-file skip / scan decisions.
+// `lineBase`: the lines before `text` in its file (a piece of a file read in pieces; 0 for a whole file).
 inline void appendAuxFileHits( const std::string& text, const std::string& path, const std::vector<GrepMatchSite>& sites,
-                               std::vector<std::size_t>& lineStarts, GrepAuxCollection& out )
+                               std::vector<std::size_t>& lineStarts, GrepAuxCollection& out, std::uint32_t lineBase = 0 )
 {
     lineStarts.clear();
     lineStarts.push_back( 0 );
@@ -1856,15 +1860,61 @@ inline void appendAuxFileHits( const std::string& text, const std::string& path,
     }
     for( const GrepMatchSite& s : sites )
     {
-        if( !out.hits.empty() && out.hits.back().line == s.line && out.hits.back().path == path )
+        if( !out.hits.empty() && out.hits.back().line == s.line + lineBase && out.hits.back().path == path )
         {
             ++out.hits.back().occ;   // honest-lex: one row per line, the indexed list's rule (grepFoldLines)
             continue;
         }
         std::uint32_t auxLineBytes = 0;
         std::string   auxText        = grepMatchedLine( text, lineStarts, s.line, &auxLineBytes );
-        out.hits.push_back( GrepAuxHit{ path, s.line, std::move( auxText ), auxLineBytes } );
+        out.hits.push_back( GrepAuxHit{ path, s.line + lineBase, std::move( auxText ), auxLineBytes } );
     }
+}
+
+// LARGE-PARTIAL-1: one file over the whole-read ceiling, grepped in line-aligned pieces (readInPieces) in bounded memory.
+// A match lying wholly inside a piece's carried prefix (a cut inside one long line re-serves its tail) was found in the
+// previous piece and is skipped. False when the file could not be read whole (what was found stands).
+inline bool scanAuxFileInPieces( const std::string& path, std::uint64_t sizeBytes, const std::string& pat, const GuardedRegex* re,
+                                 RegexLinePolicy linePolicy, GrepAuxCollection& out )
+{
+    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    if( fp == nullptr )
+    {
+        ++out.filesUnreadable;
+        return false;
+    }
+    std::string                window;
+    std::string                text;
+    std::vector<GrepMatchSite> sites;
+    std::vector<std::size_t>   lineStarts;
+    const PieceRead            read = readInPieces( std::size_t( sizeBytes ), [ & ]( char* dst, std::size_t n ) { return std::fread( dst, 1, n, fp ); }, window,
+                                                    [ & ]( const BlobPiece& piece )
+    {
+        text.assign( piece.bytes );
+        sites.clear();
+        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, kGrepCollectionBudget, sites, linePolicy );
+        out.noteRegexScanOutcome( isAbandoned, path );
+        out.regexLinesSkipped += linesSkipped;
+        const std::size_t matchBytes = re == nullptr ? pat.size() : 1;
+        std::erase_if( sites, [ & ]( const GrepMatchSite& site ) { return std::size_t( site.byteOffset ) + matchBytes <= piece.carried; } );
+        if( !sites.empty() )
+        {
+            appendAuxFileHits( text, path, sites, lineStarts, out, piece.firstLine - 1 );
+        }
+    } );
+    std::fclose( fp );
+    if( read == PieceRead::Binary )
+    {
+        ++out.filesSkippedBinary;
+        return true;
+    }
+    if( read == PieceRead::Short )
+    {
+        ++out.filesUnreadable;
+        return false;
+    }
+    ++out.filesScanned;
+    return true;
 }
 
 // The per-file loop grepCollectAux runs, on whichever thread it chose (below). `re` is null for a literal scan.
@@ -1877,7 +1927,7 @@ inline void scanUnsupportedFiles( const CrawlSkips& skips, const std::string& pa
     {
         if( row.sizeBytes > maxAuxFileBytes )
         {
-            ++out.filesSkippedOversize;
+            (void)scanAuxFileInPieces( row.path, row.sizeBytes, pat, re, linePolicy, out );   // LARGE-PARTIAL-1: read, never skipped
             continue;
         }
         const std::optional<std::string> fileBytes = docparse::detail::readWholeFile( row.path );
@@ -1917,8 +1967,35 @@ inline void scanUnsupportedFiles( const CrawlSkips& skips, const std::string& pa
 // fan-out would pay for itself.
 // `stackBytes`: what the scan thread asks for — collectGrepScanPhases passes the size grepCollect's threads settled on, so
 // the unindexed scan never runs on MORE stack than the indexed one did.
+// `oversize` (LARGE-PARTIAL-1): the files the crawl dropped over its size ceiling (IngestResult::skippedOversize, the root's
+// corpus_oversize=). grep is a text search, so the parse ceiling does not apply to it: each is read in pieces after the
+// unsupported-ext population, its hits joining the same unindexed list, never skipped.
+inline void scanOversizeFiles( std::span<const SkippedOversize> oversize, const std::string& pat, const GuardedRegex* re, RegexLinePolicy linePolicy,
+                               GrepAuxCollection& out )
+{
+    for( const SkippedOversize& row : oversize )
+    {
+        if( scanAuxFileInPieces( row.path, row.sizeBytes, pat, re, linePolicy, out ) )
+        {
+            ++out.oversizeScanned;
+        }
+        else
+        {
+            ++out.oversizeUnread;
+        }
+    }
+}
+
+// Both unindexed populations, in order: the unsupported-ext files, then the files the crawl dropped over its size ceiling.
+inline void scanUnindexedFiles( const CrawlSkips& skips, std::span<const SkippedOversize> oversize, const std::string& pat, const GuardedRegex* re,
+                                std::size_t maxAuxFileBytes, RegexLinePolicy linePolicy, GrepAuxCollection& out )
+{
+    scanUnsupportedFiles( skips, pat, re, maxAuxFileBytes, linePolicy, out );
+    scanOversizeFiles( oversize, pat, re, linePolicy, out );
+}
+
 inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::string& pat, bool regex, std::size_t maxAuxFileBytes,
-                                         std::size_t stackBytes = kGrepScanStackBytes )
+                                         std::size_t stackBytes = kGrepScanStackBytes, std::span<const SkippedOversize> oversize = {} )
 {
     GrepAuxCollection out;
     out.candidatesCapped = skips.unsupported.size() < skips.unsupportedFiles;
@@ -1938,7 +2015,7 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
         try
         {
             out.regexLineBytesMax = regex ? re.regex.maxEngineSubjectBytes( settledBytes ) : 0;
-            scanUnsupportedFiles( skips, pat, regex ? &re.regex : nullptr, maxAuxFileBytes, RegexLinePolicy{ regex ? out.regexLineBytesMax : SIZE_MAX, true }, out );
+            scanUnindexedFiles( skips, oversize, pat, regex ? &re.regex : nullptr, maxAuxFileBytes, RegexLinePolicy{ regex ? out.regexLineBytesMax : SIZE_MAX, true }, out );
         }
         catch( ... )
         {
@@ -1951,7 +2028,7 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
     }
     else
     {
-        scanUnsupportedFiles( skips, pat, nullptr, maxAuxFileBytes, RegexLinePolicy{}, out );
+        scanUnindexedFiles( skips, oversize, pat, nullptr, maxAuxFileBytes, RegexLinePolicy{}, out );
     }
     return out;
 }
