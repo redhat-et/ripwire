@@ -168,11 +168,29 @@ public:
         return count == 1 ? only : kNoNode;
     }
 
+    // another DEFINED owner type (not a forward declaration) of `type`'s name and language, among the types named like a member's
+    // scope: an out-of-line body scoped by that name may be the namesake's
+    bool definedNamesakeOf( NodeId type ) const
+    {
+        const Symbol& ty = ing_.symbols[ type ];
+        return std::ranges::any_of( named_, [ & ]( NodeId t ) {
+            const Symbol& o = ing_.symbols[ t ];
+            return t != type && o.name == ty.name && o.lang == ty.lang && !bodiless( o );
+        } );
+    }
+
 private:
     const IngestResult& ing_;
     std::vector<NodeId> inFiles_;   // owner types of the members' files
     std::vector<NodeId> named_;     // owner types named like a member's scope
 };
+
+// Can body `b` be declaration `decl`'s own definition? Not when both carry a fixed, call-comparable arity and the two differ
+// (`virtual void send( int ) = 0` beside a concrete `void send()`: another overload, CodeRabbit #665); by name otherwise.
+inline bool sameOverload( const Symbol& decl, const Symbol& b ) noexcept
+{
+    return !( decl.arityExact != 0 && b.arityExact != 0 && decl.params != b.params );
+}
 
 // The structural rule (a language whose types implement an interface by having its methods, and whose extends/implements map
 // lists no implementor of T): the owner types whose BODIED methods cover every method name T declares. By name only.
@@ -278,11 +296,14 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
             continue;   // declared outside any type (a C prototype, even one whose scope names a type): no contract
         }
         // its own body: a bodied method the type holds, or one whose scope NAMES the type (a C++ out-of-line definition in
-        // another file, read by name because a forward `class T;` makes the type's name ambiguous to ownerOf)
+        // another file, read by name because a forward `class T;` makes the type's name ambiguous to ownerOf) while no other
+        // DEFINED type carries that name: the index keeps a C++ scope's last segment only (`other::Port::send` is sc="Port"),
+        // so beside a defined namesake the name is no evidence the body is this type's (CodeRabbit #665)
         const Symbol& ty      = ing.symbols[ type ];
         const bool    ownBody = std::ranges::any_of( named, [ & ]( NodeId n ) {
             const Symbol& b = ing.symbols[ n ];
-            return !bodiless( b ) && ( owners.ownerOf( n ) == type || ( b.lang == ty.lang && scopeLastSegment( b.scope ) == ty.name ) );
+            return !bodiless( b ) && sameOverload( ing.symbols[ c ], b )
+                   && ( owners.ownerOf( n ) == type || ( b.lang == ty.lang && scopeLastSegment( b.scope ) == ty.name && !owners.definedNamesakeOf( type ) ) );
         } );
         if( ownBody )
         {

@@ -25,8 +25,56 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 echo "bodilessseedcheck: BIN=$BIN"
 
-TS="$TMP/ts"; GO="$TMP/go"; CPP="$TMP/cpp"; JAVA="$TMP/java"; CC="$TMP/c"; RB="$TMP/rb"
-mkdir -p "$TS/src" "$GO/pk" "$GO/cmd" "$CPP" "$JAVA" "$CC" "$RB"
+TS="$TMP/ts"; GO="$TMP/go"; CPP="$TMP/cpp"; JAVA="$TMP/java"; CC="$TMP/c"; RB="$TMP/rb"; OV="$TMP/ov"; NS="$TMP/ns"
+mkdir -p "$TS/src" "$GO/pk" "$GO/cmd" "$CPP" "$JAVA" "$CC" "$RB" "$OV" "$NS"
+# C++ (CodeRabbit #665): a pure virtual beside a concrete overload of its name (another arity), and a pure virtual beside a DEFINED
+# namesake type's out-of-line body (`other::Port::send`; the index keeps a C++ scope's last segment only). Neither body is the
+# contract's own, so each is still a contract and seeds its one implementor (Impl::send).
+cat > "$OV/port.h" <<'EOF'
+#pragma once
+class Port {
+public:
+    virtual ~Port() = default;
+    virtual void send( int x ) = 0;
+    void send() { flush(); }
+    void flush() {}
+};
+class Impl : public Port {
+public:
+    void send( int x ) override { record( x ); }
+    void record( int ) {}
+};
+EOF
+cat > "$OV/main.cpp" <<'EOF'
+#include "port.h"
+void drive( Impl& i ) { i.send( 1 ); }
+EOF
+cat > "$NS/port.h" <<'EOF'
+#pragma once
+namespace api {
+class Port {
+public:
+    virtual ~Port() = default;
+    virtual void send() = 0;
+};
+class Impl : public Port {
+public:
+    void send() override;
+};
+}
+namespace other {
+class Port {
+public:
+    void send();
+};
+}
+EOF
+cat > "$NS/port.cpp" <<'EOF'
+#include "port.h"
+void other::Port::send() {}
+void api::Impl::send() { }
+void drive( api::Impl& i ) { i.send(); }
+EOF
 # Ruby: an empty hook `def on_event; end` owns no body span but is a definition (Ruby has no declarations): never a contract
 cat > "$RB/tracker.rb" <<'EOF'
 class Tracker
@@ -203,11 +251,11 @@ func main() {
 }
 EOF
 
-python3 - "$BIN" "$TS" "$GO" "$CPP" "$JAVA" "$CC" "$RB" <<'PY'
+python3 - "$BIN" "$TS" "$GO" "$CPP" "$JAVA" "$CC" "$RB" "$OV" "$NS" <<'PY'
 import re, subprocess, sys
-BIN, TS, GO, CPP, JAVA, CC, RB = sys.argv[ 1:8 ]
+BIN, TS, GO, CPP, JAVA, CC, RB, OV, NS = sys.argv[ 1:10 ]
 npass = nfail = 0
-seen = { "pos": 0, "safe": 0, "neg": 0, "zero": 0 }
+seen = { "pos": 0, "safe": 0, "neg": 0, "zero": 0, "own": 0 }
 
 def say( good, tag, msg, why = "" ):
     global npass, nfail
@@ -319,6 +367,13 @@ for lang, root, sel in ( ( "ts", TS, "Quiet.hush" ), ( "go", GO, "Quiet.Hush" ) 
     seen[ "zero" ] += 1 if a else 0; seen[ "safe" ] += 1 if a else 0
     say( a.get( "impls" ) == "0" and a.get( "risk" ) == "contract", "[%s] zero safe-delete" % lang,
          "--safe-delete=%s: risk=contract, never none-found, beside impls=0" % sel, "attrs=%s" % a )
+
+# ── a body is the contract's own only when it is: not another overload, not a defined namesake's (CodeRabbit #665) ──────────
+for lbl, root, sel in ( ( "cpp overload", OV, "Port.send" ), ( "cpp namesake", NS, "api::Port::send" ) ):
+    rc, out = run( root, "--callers=" + sel ); a = root_attrs( out, "callers" ) or {}
+    seen[ "own" ] += 1 if a else 0
+    say( a.get( "impls" ) == "1" and num( a, "count" ) == 1 and "drive" in out, "[%s] callers" % lbl,
+         "--callers=%s: still a contract, seeds Impl::send (impls=1) and finds drive" % sel, "attrs=%s" % a )
 
 # ── premise: every arm read an answer ───────────────────────────────────────────────────────────────────────────────────
 for k, n in seen.items():
