@@ -153,8 +153,20 @@ inline RawFactsMark markFacts( const RawFacts& f ) noexcept
 template<class Row>
 inline void dropFileRowsFrom( std::vector<Row>& rows, std::size_t mark, std::uint32_t fileId )
 {
-    const auto tail = std::remove_if( rows.begin() + std::ptrdiff_t( mark ), rows.end(), [ fileId ]( const Row& row ) { return row.fileId == fileId; } );
-    rows.erase( tail, rows.end() );
+    std::size_t keptCount = mark;   // rows below the mark predate this file; past it, the other files' rows slide down in order
+    for( std::size_t rowIndex = mark; rowIndex < rows.size(); ++rowIndex )
+    {
+        if( rows[ rowIndex ].fileId == fileId )
+        {
+            continue;
+        }
+        if( keptCount != rowIndex )
+        {
+            rows[ keptCount ] = std::move( rows[ rowIndex ] );
+        }
+        ++keptCount;
+    }
+    rows.resize( keptCount );
 }
 
 inline void rollBackFileFacts( RawFacts& f, const RawFactsMark& m, std::uint32_t fileId )
@@ -187,10 +199,8 @@ struct PendingParsedFile
     RawFactsMark    factsMark{};   // PARSE-BUDGET-DETERMINISTIC: where this file's rows start, and the steps its parse
     ParseDeadline   deadline{};    // spent: the tags pass at the flush resumes the same budget the inline pass would have
 
-    PendingParsedFile( std::uint32_t fileIdIn, const LangEntry* leIn, std::string&& bytesIn, TSTree* treeIn, std::vector<PreprocDeadRange>&& ppDeadIn,
-                       const RawFactsMark& factsMarkIn, const ParseDeadline& deadlineIn )
-        : fileId( fileIdIn ), le( leIn ), bytes( std::move( bytesIn ) ), tree( treeIn ), ppDead( std::move( ppDeadIn ) ), factsMark( factsMarkIn ),
-          deadline( deadlineIn )
+    PendingParsedFile( std::uint32_t fileIdIn, const LangEntry* leIn, std::string&& bytesIn, TSTree* treeIn, std::vector<PreprocDeadRange>&& ppDeadIn )
+        : fileId( fileIdIn ), le( leIn ), bytes( std::move( bytesIn ) ), tree( treeIn ), ppDead( std::move( ppDeadIn ) )
     {
     }
     PendingParsedFile( const PendingParsedFile& ) = delete;
@@ -992,8 +1002,10 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 if( canQueueParsed )
                 {
                     pendingParsedBytes += bytes.size();
-                    pendingParsed.emplace_back( static_cast<std::uint32_t>( fileId ), le, std::move( bytes ), tree.release(), std::move( ppDead ), factsMark,
-                                                extractDeadline.deadline );
+                    PendingParsedFile& queued = pendingParsed.emplace_back( static_cast<std::uint32_t>( fileId ), le, std::move( bytes ), tree.release(),
+                                                                            std::move( ppDead ) );
+                    queued.factsMark = factsMark;
+                    queued.deadline  = extractDeadline.deadline;
                     bytes.clear();   // moved-from is "valid but unspecified": make it empty. Every path refills it (readFile) before a read
                     continue;
                 }

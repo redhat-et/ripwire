@@ -2336,8 +2336,10 @@ inline bool isBundleShapedFile( const FileHealth& health ) noexcept
 // (the graph's graph_lexical= gauge); the data and nest modes are bounded key reads, not code.
 inline bool isLexicalCodeMode( FileIndexMode mode ) noexcept
 {
-    return mode == FileIndexMode::LexicalOverSize || mode == FileIndexMode::LexicalOverBudget || mode == FileIndexMode::LexicalWallBackstop
-        || mode == FileIndexMode::LexicalMemoryBackstop;
+    constexpr std::uint32_t kLexicalCodeModeBits = ( 1u << std::uint32_t( FileIndexMode::LexicalOverSize ) ) | ( 1u << std::uint32_t( FileIndexMode::LexicalOverBudget ) )
+                                                 | ( 1u << std::uint32_t( FileIndexMode::LexicalWallBackstop ) )
+                                                 | ( 1u << std::uint32_t( FileIndexMode::LexicalMemoryBackstop ) );
+    return ( ( kLexicalCodeModeBits >> std::uint32_t( mode ) ) & 1u ) != 0;
 }
 
 // The --skipped / warning word for a mode: lexical-size, lexical-budget, keys-bounded, lexical-nest, lexical-wall,
