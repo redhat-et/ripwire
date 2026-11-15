@@ -100,7 +100,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // root (the CLI XML and columnar forms and the MCP twin all write them) and were defined only by the full legend, so they read
     // here beside the rows this line already named, present exactly when the root is. Checked against the emitters: reaches= is
     // transitiveCallers( defs ), the defs themselves excluded; radius_tested= counts isTestedByReach, which never counts a test
-    // symbol (a seed), so a test in the reach set lands in radius_untested=; importers= is impactImportTier's one-hop set of
+    // symbol (a seed), and a test in the reach set is counted apart in radius_tests= (IMPACT-TEST-TIER); importers= is impactImportTier's one-hop set of
     // files whose include/import resolves to a def's file. shown_importers= is a present-only term: the columnar form omits it.
     { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
     { "defs",        "defs",        "per <name q= defs=> the parsed definitions the name binds (defs= groups; a prototype with its definition is one): <d n= t= p= sel= lang= class=source|test in=>, sel= binds that one alone in any SYM verb, in= distinct callers (a floor); source first, then in=, then path" },
@@ -547,6 +547,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "importers_next",    "importers_next=: the call listing every importer", true, "impact" },
     // IMPACT-ROLLUP (graph.h importTierRollup): present-only, beside importers_capped=1
     { "importers_tests",   "importers_tests=/importers_dirs=: over EVERY importer of a cut tier: test/bench/fixture files / the 3 dirs (2 path segments) holding most, dir:count", true, "impact" },   // also defines importers_dirs=
+    // IMPACT-TEST-TIER (graph.h radiusTiers): present-only, when the reach holds a test definition / ignore-tests dropped them
+    { "radius_tests",      "radius_tests=: TEST definitions in the reach, listed but counted apart; radius_tested=/radius_untested= are production rows only", true, "impact" },
+    { "radius_tests",      "radius_tests=: TEST definitions in impact_reaches=, counted apart; radius_tested=/radius_untested= are production rows only", true, "safe-delete" },
+    { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "impact" },
+    { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "safe-delete" },
     // IMPACT-PATH (verbs_navigate.h emitImpactPathAnswer): present-only, on a path selector's answer
     { "unresolved_naming", "unresolved_naming=: files whose include/import target is a suffix of this path and resolved to no indexed file; each may import it, so importers= may be a floor", true, "impact" },
     { "selector",          "selector=file: of= names an indexed file, not a symbol; the answer is its importers only, no call reach (of=FILE:SYM for a symbol); file= is the file answered for", true, "impact" },
@@ -625,6 +630,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // root's attribute; a <d> signature row's tested= is the next row's. No earlier sweep saw it because the gate fixture holds
     // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
     { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "s" },
+    // IMPACT-TEST-TIER: an impact row that is itself a test definition (radius_tests= counts them); never beside tested=1
+    { "test",              "<s test=1>: a test or fixture definition (absent otherwise, never 0)", true, "s" },
     // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-
     // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f via="import"> importer rows never pull it in; the
     // columnar form names it in fields= like the tested column.

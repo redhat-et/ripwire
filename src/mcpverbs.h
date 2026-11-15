@@ -3464,8 +3464,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // — mcpclidiffcheck compares root-attribute SETS between the two surfaces, so radius_tested=/
     // radius_untested= have to ride here too, over the same un-windowed reach set.
     const std::vector<char> impTestReach   = testSymbolForwardReach( ing, g );
-    const std::size_t       radiusTested   = countTestedIn( ing, impTestReach, reach );
-    const std::size_t       radiusUntested = reach.size() - radiusTested;
+    const RadiusTiers       radius         = radiusTiers( ing, impTestReach, reach );   // IMPACT-TEST-TIER: + the test tier, as on the CLI
     // The CLI --impact's declined_calls=, by the same call over the same set (graph.h declinedCallsNaming).
     std::vector<NodeId>     declineTargets( reach );
     declineTargets.insert( declineTargets.end(), seeds.begin(), seeds.end() );
@@ -3525,7 +3524,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )   // #220: exactly when the root carries them, as on the CLI
                     + viaNameLegend( imHasVia, true )
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
-                  kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
+                  kTestedRowLegend, impactTestedPartitionLegend( radius.tests, /*testsIgnored=*/false ),   // A6; IMPACT-TEST-TIER, as on the CLI (the server never drops tests)
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
                   unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
                   declinedCallsLegendForRows( declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
@@ -3554,7 +3553,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     rw::emitTo( mem, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}{}>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(), impactRingAttrXml( imRing ) + unprovenDefsAttrXml( unprovenDefs ) + defsListedAttrXml( imAttr.groups, imListing ),   // HOP1, as on the CLI; H1: where the CLI root carries it; attrib-multidef
                   byDepthAttrXml( byDepth ),                                                                        // 0.6.5: the CLI root's by_depth=
-                  imports.xmlAttrs.c_str(), radiusTested, radiusUntested, ( declinedCallsAttrXml( declinedCalls ) + declinedSiteCutAttrXml( imDc.cut ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
+                  imports.xmlAttrs.c_str(), radius.tested, radius.untested, ( radiusTestTierFields( radius.tests, /*testsIgnored=*/false, /*json=*/false ) + declinedCallsAttrXml( declinedCalls ) + declinedSiteCutAttrXml( imDc.cut ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
                   ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } ) ), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
@@ -3567,7 +3566,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
       // A6: tested="1" only (never a literal 0) — see kTestedRowLegend. 0.6.5: d= as on the CLI row.
       rw::emitTo( mem, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), ex( qualifiedMemberName( imOwners, s ) ).c_str(), ex( rp ).c_str(), s.line,
-                    depthRunAttrXml( show, depth, i, ipw.begin ), isTestedByReach( ing, impTestReach, show[i] ) ? " tested=\"1\"" : "",
+                    depthRunAttrXml( show, depth, i, ipw.begin ), radiusTierRowAttrXml( ing, impTestReach, show[i] ),   // IMPACT-TEST-TIER
                     impactLinkAttrs( g, proven, seeds, depth, show[ i ] ), imAttr.ofDefXml( show[i] ) ); }
     // the import tier's rows, after the symbol rows and under their own tag — a different unit, so a
     // different element (see the CLI arm and kImpactImportTierLegend for why they are never one number).

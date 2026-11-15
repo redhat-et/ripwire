@@ -1379,6 +1379,8 @@ struct SafeDeleteLegendFlags
     bool        linkRows      = false;   // a <c via="link"> row is on this page
     bool        anchorRows    = false;   // a <c anchor="missing"> row is on this page
     rw::DeclinedSitesLegendFlags declinedSites{};   // lane declined-sites: what the <dc> rows on this answer carry (declinedsites.h)
+    std::size_t radiusTests   = 0;       // IMPACT-TEST-TIER: radius_tests= on the root (graph.h radiusTiers)
+    bool        testsIgnored  = false;   // IMPACT-TEST-TIER: tests_ignored= on the root (ignore-tests dropped them before the walk)
 };
 
 // count-floor (countfloor.h) + CALLSITE-AT: the safe-delete legend's clauses for callers_floor=, uses_floor=, next= and
@@ -1485,6 +1487,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
     declinedClause += rw::slotJoinLegend( flags.slotJoin, true, flags.slotCands );   // IX-1: exactly when a <vr> row carries via=
     declinedClause += rw::valueRefsDepthLegend( flags.valueRefDepthCut );      // exactly when it carries the depth disclosure
     declinedClause += safeDeleteFloorLegend( flags, risk );   // count-floor + CALLSITE-AT: present-only clauses
+    declinedClause += rw::safeDeleteTestTierLegend( flags.radiusTests, flags.testsIgnored );   // IMPACT-TEST-TIER: exactly when radius_tests=/tests_ignored= ride
     rw::emitTo( stdout, "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
                 "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
                 "verbs already disclose it. callers= is the 1-hop caller count (the callers verb's own walk over defs' "
@@ -1640,12 +1643,10 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     {
         if( isTested( def ) ) { testedSelf = true; break; }
     }
-    std::size_t radiusTested = 0;
-    for( NodeId n : reach )
-    {
-        if( isTested( n ) ) { ++radiusTested; }
-    }
-    const std::size_t radiusUntested = reach.size() - radiusTested;
+    // IMPACT-TEST-TIER: the radius in three tiers (graph.h radiusTiers) — a test definition in impact_reaches= is its own
+    // count (radius_tests=), never untested production. risk= reads the tested count, which the tiering does not move.
+    const rw::RadiusTiers radius       = rw::radiusTiers( ing, testReach, reach );
+    const std::size_t     radiusTested = radius.tested;
 
     // dead-code candidacy: --dead-code's own high-confidence shape, asked about ONE already-resolved
     // definition. Only meaningful at defs=1 — a contract is per definition site (same reasoning
@@ -1765,7 +1766,8 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                                                  .hasSitesAt = sdSites.any, .sitesCut = sdSites.anyCut, .valueRefDepthCut = sdValueRefs.depthCut.files > 0,
                                                  .defTable = sdAttr.groups.multi(), .defTableCut = sdListing.cut, .splitArms = sdHasSplit,
                                                  .linkRows = sdHasLink, .anchorRows = sdHasMiss,
-                                                 .declinedSites = rw::declinedSitesLegendFlags( sdDc, /*callersForm=*/true, sdDcCut ) } );
+                                                 .declinedSites = rw::declinedSitesLegendFlags( sdDc, /*callersForm=*/true, sdDcCut ),
+                                                 .radiusTests = radius.tests, .testsIgnored = cfg.ignoreTests } );
 
     if( sdDeclinedLiteralCalls > 0 )
     {
@@ -1787,11 +1789,13 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     const std::string sdNextAttr = rw::nextAttrXml( !sdFloor.next.empty() || !sdSites.anyCut ? sdFloor.next
                                                                                              : rw::nextFlag( "--uses=", cfg.safeDeleteSym ) );
     rw::emitTo( stdout, "<safe-delete sym=\"{}\" t=\"{}\" p=\"{}:{}\" defs=\"{}\" callers=\"{}\"{} ambiguous_callers=\"{}\" "
-                "impact_reaches=\"{}\" uses=\"{}\"{} tested_self=\"{}\" radius_tested=\"{}\" radius_untested=\"{}\" "
+                "impact_reaches=\"{}\" uses=\"{}\"{} tested_self=\"{}\" radius_tested=\"{}\" radius_untested=\"{}\"{} "
                 "dead_code_candidate=\"{}\" risk=\"{}\"{}{}{}{}{}{}{}{}>",
                 ex( cfg.safeDeleteSym ).c_str(), symTag( lead.kind ), ex( sdPathRel( lead.fileId ) ).c_str(), lead.line,
                 defs.size(), callerIds.size(), sdCallersFloorAttr, ambiguousCallers, reach.size(), sites.size(), sdUsesFloorAttr,
-                testedSelf ? 1 : 0, radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
+                testedSelf ? 1 : 0, radiusTested, radius.untested,
+                rw::radiusTestTierFields( radius.tests, cfg.ignoreTests, /*json=*/false ),   // IMPACT-TEST-TIER: absent when inert
+                deadCodeCandidate ? 1 : 0, risk,
                 rw::unprovenDefsAttrXml( sdUnprovenDefs ).c_str(),   // H1: beside the verdict it qualifies; absent at zero
                 ( rw::declinedCallsAttrXml( sdDeclinedCalls ) + rw::declinedSiteCutAttrXml( sdDcCut ) + rw::declinedLiteralCallsAttrXml( sdDeclinedLiteralCalls ) ).c_str(), // beside risk= too: declined calls that may reach it (+ the <dc> cut); absent at zero
                 ( rw::valueRefsCountAttrXml( sdValueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( ing, sdValueRefs.depthCut, sdVr )
@@ -3392,8 +3396,8 @@ struct ImpactView
     int                            pageLimit;
     int                            pageOffset;
     const std::vector<char>*       testReach;      // A6: testSymbolForwardReach — never null (runImpact always computes it)
-    std::size_t                    radiusTested;    // A6: |reach ∩ tested|, over the FULL (un-windowed) reach set
-    std::size_t                    radiusUntested;  // A6: reaches - radiusTested
+    rw::RadiusTiers                radius;          // A6 + IMPACT-TEST-TIER: tested / untested production + the test tier, over the FULL (un-windowed) reach set
+    bool                           testsIgnored;    // IMPACT-TEST-TIER: --ignore-tests dropped the tests before the walk (tests_ignored=)
     std::size_t                    declinedCalls;   // tier-3 declines naming SYM or a radius symbol (graph.h declinedCallsNaming)
     std::size_t                    declinedIface;   // declines sharing a name with a TS interface signature, by name only, not a subset (callhierarchy.h)
     const rw::Graph&               g;               // M15: the gauge pair (graphCountFloorAttrXml) reads ambOut/unresolvedOut
@@ -3426,6 +3430,10 @@ inline std::vector<std::string> impactOfDefKeys( const ImpactView& v )
             && rw::oneHopRowIsLink( v.g, v.seeds, v.show[ i ], true, &v.g.outAnchorMiss ) )
         {
             keys[ i ] += ",\"anchor\":\"missing\"";
+        }
+        if( rw::isTestSymbol( v.ing, v.show[ i ] ) )
+        {
+            keys[ i ] += ",\"test\":true";   // IMPACT-TEST-TIER: the XML row's test="1" (radius_tests= counts these rows)
         }
     }
     return keys;
@@ -3475,8 +3483,9 @@ int emitImpactColumnar( const ImpactView& v )
                                  + rw::importsUnresolvedAttrXml( v.imports.importsUnresolved )   // #220: the XML root's, absent at 0
                                  + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ) )
                                  + rw::noFileEdgesAttrXml( v.imports.noFileEdgeLangs )           // arch-honest: the XML root's, absent when every def's language draws edges
-                                 + " radius_tested=\"" + std::to_string( v.radiusTested )       // A6
-                                 + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
+                                 + " radius_tested=\"" + std::to_string( v.radius.tested )       // A6
+                                 + "\" radius_untested=\"" + std::to_string( v.radius.untested ) + "\""
+                                 + rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/false )   // IMPACT-TEST-TIER
                                  + rw::declinedCallsAttrXml( v.declinedCalls )                    // tier-3 declines into the radius
                                  + rw::declinedSiteCutAttrXml( v.dc.cut )                         // ix2-slice: + the <dc> cut, as the XML root
                                  + rw::declinedIfaceAttrXml( v.declinedIface )
@@ -3559,8 +3568,8 @@ int emitImpactJson( const ImpactView& v )
     rw::emitTo( stdout, "{}{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ),
                  v.imports.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( v.imports.noFileEdgeLangs ) + "\"" : std::string() );   // arch-honest: likewise
-    rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radiusTested, v.radiusUntested,
-                 rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedSiteCutKeyJson( v.dc.cut ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/dc_shown=/dc_next=/declined_iface=
+    rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radius.tested, v.radius.untested,
+                 rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/true ) + rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedSiteCutKeyJson( v.dc.cut ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/dc_shown=/dc_next=/declined_iface=
                  ( rw::valueRefsCountKeyJson( v.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } )
                    + rw::patternDispatchKeyJson( v.patternSites.size(), v.valueRefs.patternWideSites.size() ) ) );   // IX-3: the XML root's pattern counts
     if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
@@ -3598,8 +3607,8 @@ int emitImpactXml( const ImpactView& v )
     rw::emitTo( stdout, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}{}>",
                  ex( v.sym ).c_str(), v.defs, v.reaches, rw::impactRingAttrXml( *v.ring ) + rw::unprovenDefsAttrXml( v.unprovenDefs ) + rw::defsListedAttrXml( v.attrib.groups, v.defListing ),   // HOP1: the hedged ring beside reaches=; H1; attrib-multidef
                  rw::byDepthAttrXml( v.byDepth ),                                                              // 0.6.5: partitions reaches= by hop depth
-                 v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
-                 ( rw::declinedCallsAttrXml( v.declinedCalls ) + rw::declinedSiteCutAttrXml( v.dc.cut ) + rw::declinedIfaceAttrXml( v.declinedIface ) ).c_str(),   // tier-3 declines into the radius (+ the <dc> cut)
+                 v.imports.xmlAttrs.c_str(), v.radius.tested, v.radius.untested,
+                 ( rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/false ) + rw::declinedCallsAttrXml( v.declinedCalls ) + rw::declinedSiteCutAttrXml( v.dc.cut ) + rw::declinedIfaceAttrXml( v.declinedIface ) ).c_str(),   // tier-3 declines into the radius (+ the <dc> cut)
                  ( rw::valueRefsCountAttrXml( v.valueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } )
                    + rw::patternDispatchAttrXml( v.patternSites.size(), v.valueRefs.patternWideSites.size() ) ),   // value uses + IX-3 template lookups: never in reaches=; absent at zero
                  std::string( v.rootAttr ).c_str(),
@@ -3619,7 +3628,7 @@ int emitImpactXml( const ImpactView& v )
         const bool imLink = rw::impactDirectLink( v.g, v.seeds, v.depth, v.show[ i ] );
         rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), ex( rw::qualifiedMemberName( imOwners, s ) ).c_str(), ex( rp ).c_str(), s.line,
                      rw::depthRunAttrXml( v.show, v.depth, i, v.page.begin ),
-                     rw::isTestedByReach( v.ing, *v.testReach, v.show[i] ) ? " tested=\"1\"" : "",
+                     rw::radiusTierRowAttrXml( v.ing, *v.testReach, v.show[i] ),   // IMPACT-TEST-TIER: tested="1" | test="1" | nothing
                      std::string( viaEdgeAttr( rw::impactRowNameOnly( v.provenReach, v.show[i] ), imLink ) )
                        + anchorMissAttr( imLink && rw::oneHopRowIsLink( v.g, v.seeds, v.show[ i ], true, &v.g.outAnchorMiss ) ),
                      v.attrib.ofDefXml( v.show[i] ) );                                     // attrib-multidef
@@ -3638,7 +3647,8 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                               const rw::ImportTier& imports, const std::vector<rw::NodeId>& seeds, const std::vector<std::uint32_t>& imDepth,
                               const std::vector<char>& imProven, std::size_t imUnprovenDefs, std::size_t imDeclinedCalls, std::size_t imDeclinedIface,
                               const rw::ImpactFileRollup& imFiles, const rw::ReachAttribution& imAttr, const rw::DefTableListing& imListing,
-                              const rw::ValueRefRows& imValueRefs, const rw::RankDisclosure& prD, const rw::ImpactDeclinedRows& imDc, const rw::ImpactRing& imRing )
+                              const rw::ValueRefRows& imValueRefs, const rw::RankDisclosure& prD, const rw::ImpactDeclinedRows& imDc, const rw::ImpactRing& imRing,
+                              std::size_t imRadiusTests )
 {
     if( cfg.json )
     {
@@ -3658,7 +3668,7 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
                    + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end ) ).c_str(),
-                 rw::testedLensLegend( cfg.columnar ), rw::kImpactTestedPartitionLegend,
+                 rw::testedLensLegend( cfg.columnar ), rw::impactTestedPartitionLegend( imRadiusTests, cfg.ignoreTests, !cfg.columnar ),   // IMPACT-TEST-TIER
                  rw::kTestedLensBlindSpotLegend,
                  rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ).c_str(),
                  rw::declinedCallsLegendForRows( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
@@ -3900,8 +3910,8 @@ std::optional<int> runImpact( const MainDispatch& d )
         // un-windowed reach set (not just the shown page) — the same isTestSymbol-seeded lens --safe-delete's
         // radius_tested=/radius_untested= already name (README:1025), never re-derived.
         const std::vector<char> imTestReach     = rw::testSymbolForwardReach( ing, g );
-        const std::size_t       imRadiusTested   = rw::countTestedIn( ing, imTestReach, reach );
-        const std::size_t       imRadiusUntested = reach.size() - imRadiusTested;
+        // IMPACT-TEST-TIER: the test definitions in the reach are their own tier (graph.h radiusTiers), never untested production.
+        const rw::RadiusTiers   imRadius         = rw::radiusTiers( ing, imTestReach, reach );
         // The tier-3 declines that could have reached SYM or a symbol already in the radius: each is a branch
         // reaches= may be missing. One count per call (graph.h declinedCallsNaming), shared with the MCP twin.
         std::vector<NodeId>     imDeclineTargets( reach );
@@ -3953,7 +3963,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                                                     rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false );
 
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
-                          imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing );
+                          imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing, imRadius.tests );
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact; pageDisclosure emits the ` shown= capped=` bytes this verb used to hand-roll
         // (src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3). LB-G: the same NAMED constant
@@ -3962,7 +3972,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                imPage,   // the same window the legend predicate above reads — one expression, not two
                                imports, importPage, importLazyPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
                                imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset,
-                               &imTestReach, imRadiusTested, imRadiusUntested, imDeclinedCalls, imDeclinedIface, g, imDepth, imByDepth, imValueRefs,
+                               &imTestReach, imRadius, cfg.ignoreTests, imDeclinedCalls, imDeclinedIface, g, imDepth, imByDepth, imValueRefs,
                                imProven, imFiles, imAttr, imListing, imWalk.typeOnly, seeds, imDc, imPatterns, &imRing };
 
         if( cfg.columnar ) { return emitImpactColumnar( view ); }

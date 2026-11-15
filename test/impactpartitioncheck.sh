@@ -268,15 +268,18 @@ for seed_i, name in enumerate(seed_names):
     # reached, never whether it is one, so the row count this invariance reads must take it like d= above.
     # attrib-multidef: a row of a multi-definition selector carries of_def= (which definition it is a dependant of) last — it
     # attributes the row, never adds or removes one, so the count this invariance reads takes it like via= above.
-    rows = re.findall(r'<s t="(\w+)" n="([^"]+)" p="([^"]+)"(?: d="\d+")?( tested="1")?(?: via="name")?(?: of_def="[^"]*")?/>', doc)
+    # IMPACT-TEST-TIER: a test definition's row carries test="1" in tested='s slot (the two never co-occur) and is counted
+    # in radius_tests=, so the invariance below is tested + untested + tests == reaches=.
+    rows = re.findall(r'<s t="(\w+)" n="([^"]+)" p="([^"]+)"(?: d="\d+")?( tested="1")?(?: test="1")?(?: via="name")?(?: of_def="[^"]*")?/>', doc)
     reaches = int(attrs.get("reaches", "-1"))
     if len(rows) != reaches:
         row_count_ok = False
         no("--impact=%s:%s: printed %d rows but reaches=%s (row-count invariance broken)" % (SAMPLE_FILE, name, len(rows), attrs.get("reaches")))
     rt, ru = int(attrs.get("radius_tested", "-1")), int(attrs.get("radius_untested", "-1"))
-    if rt + ru != reaches:
+    rx = int(attrs.get("radius_tests", "0"))       # IMPACT-TEST-TIER: absent at 0
+    if rt + ru + rx != reaches:
         radius_sum_ok = False
-        no("--impact=%s:%s: radius_tested(%d) + radius_untested(%d) != reaches(%d)" % (SAMPLE_FILE, name, rt, ru, reaches))
+        no("--impact=%s:%s: radius_tested(%d) + radius_untested(%d) + radius_tests(%d) != reaches(%d)" % (SAMPLE_FILE, name, rt, ru, rx, reaches))
     if attrs.get("capped") not in ("0", None):
         no("--impact=%s:%s: capped=%s at --limit=5000 — raise the limit in this script" % (SAMPLE_FILE, name, attrs.get("capped")))
     files_hdr = re.search(r'<files ([^>]*)>', doc)
@@ -366,7 +369,7 @@ else:
 if row_count_ok:
     ok("row-count invariance: every --impact call's printed row count equals its own reaches=")
 if radius_sum_ok:
-    ok("row-count invariance: radius_tested= + radius_untested= == reaches= on every call")
+    ok("row-count invariance: radius_tested= + radius_untested= + radius_tests= == reaches= on every call")
 
 # the (name, file) projection --test-gate's <u> can be compared with (see the keying note above the loop)
 def project(rows):
