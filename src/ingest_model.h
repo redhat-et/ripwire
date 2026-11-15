@@ -557,9 +557,9 @@ inline void markBundleCopies( IngestResult& result )
             sourceNames.push_back( s.name );
         }
     }
-    std::ranges::sort( sourceNames );
+    std::ranges::sort( sourceNames, sortutil::svLess );   // a byte order: the default string_view comparator aborts the Linux G1 leg
     sourceNames.erase( std::ranges::unique( sourceNames ).begin(), sourceNames.end() );
-    const auto fromSource = [ &sourceNames ]( std::string_view n ) { return !n.empty() && std::ranges::binary_search( sourceNames, n ); };
+    const auto fromSource = [ &sourceNames ]( std::string_view n ) { return !n.empty() && std::ranges::binary_search( sourceNames, n, sortutil::svLess ); };
     for( Symbol& s : result.symbols )
     {
         if( !inBundle( s ) )
