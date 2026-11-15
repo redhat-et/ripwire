@@ -92,8 +92,8 @@ QN="widget frobnicate helper"
 
 run() {   # run OUTFILE ARGS... -> rc file beside the output; HOME/TMPDIR private, cwd = the fixture
     local o="$1"; shift
-    ( cd "$F" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" "$F" "$@" ) > "$o" 2> "$o.err"
-    echo $? > "$o.rc"
+    ( cd "$F" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" "$F" "$@" ) > "$o" 2> "$o.err"   # status: recorded on the next line
+    echo $? > "$o.rc"                                                                              # and read by ok() (a non-0 run fails)
 }
 run "$TMP/d.xml"   --no-cache "--for=$Q"
 run "$TMP/d.full"  --no-cache "--for=$Q" --legend=full
@@ -106,7 +106,7 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"task\":\"$Q\"}}}" > "$TMP/mcp.in"
-( cd "$F" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" "$F" --mcp --no-cache < "$TMP/mcp.in" ) > "$TMP/d.mcp" 2> "$TMP/d.mcp.err"
+( cd "$F" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" "$F" --mcp --no-cache < "$TMP/mcp.in" ) > "$TMP/d.mcp" 2> "$TMP/d.mcp.err"   # status: the server's rc is not the verdict; arm (g MCP) reads the tools/call reply
 RIPWIRE_NO_FILE_SYMS=1 run "$TMP/ns.xml" --no-cache "--for=$Q"   # arm i's premise: with no <syms> block, nothing is cut from tsym=
 export RIPWIRE_NO_TAIL_SYM_TERMS=1
 run "$TMP/a.xml"   --no-cache "--for=$Q"
