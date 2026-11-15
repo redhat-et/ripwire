@@ -2,23 +2,23 @@
 # docs/LIMITS.md, docs/TUNING.md, the deck). Generated, do not edit: `python3 docs/counts_snapshot.py refresh`
 # re-takes it from the tree; `check` compares it with the tree. A feature PR leaves it alone, which is what keeps
 # two open PRs that each add a gate or a cap from conflicting on a total.
-taken	2026-11-13
-gates.scripts	810
+taken	2026-11-15
+gates.scripts	826
 limits.boundary	46
-limits.caps	423
-limits.constants	433
-limits.disclosing	277
-limits.files	144
+limits.caps	430
+limits.constants	440
+limits.disclosing	278
+limits.files	146
 limits.indexing	50
 limits.output	46
 limits.parameters	10
-limits.silent	146
+limits.silent	152
 tuning.constexpr_live	12
-tuning.declarations	307
+tuning.declarations	309
 tuning.duplicated	`kRowCap`
 tuning.gone	1
 tuning.gone_shown	`kSituTestRowsShown`
-tuning.names	306
+tuning.names	308
 tuning.tunable_live	111
-tuning.unswept	183
-tuning.unswept_shown	`kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, `kBridgeMaxHops`, +177 more
+tuning.unswept	185
+tuning.unswept_shown	`kAliasHopDepth`, `kAliasPeelDepth`, `kAliasTargetCap`, `kBackHopWidth`, `kBaseScopeScanCap`, `kBridgeMaxHops`, +179 more
