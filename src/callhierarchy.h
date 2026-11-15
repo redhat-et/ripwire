@@ -51,21 +51,39 @@ namespace rw
 // separately naming testReach / tested / untested / attr. The counting loop itself lives in
 // graph.h::countTestedIn, shared with --impact. (Hoisted here from verbs_navigate.h, unchanged, so the MCP
 // twins can serve the same partition instead of omitting the lens.)
+// TIER-FOLLOWUP: three tiers, not two, by IMPACT-TEST-TIER's graph.h radiusTiers. isTestedByReach never counts a test symbol,
+// so `untested = rows - tested` put every TEST caller into hop_untested=; the test rows are now their own count, hop_tests=
+// (absent at 0), and hop_tested + hop_untested + hop_tests == rows.size().
 struct HopTestedPartition
 {
     std::vector<char> testReach;
     std::size_t       tested;
     std::size_t       untested;
-    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\""
+    std::size_t       tests;     // test definitions among the rows (isTestSymbol): their own tier, never untested production
+    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\"" + " hop_tests=\"K\"" when K > 0
 };
 
 inline HopTestedPartition computeHopTestedPartition( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& rows )
 {
     std::vector<char> testReach = testSymbolForwardReach( ing, g );
-    const std::size_t tested    = countTestedIn( ing, testReach, rows );
-    const std::size_t untested  = rows.size() - tested;
-    std::string       attr      = " hop_tested=\"" + std::to_string( tested ) + "\" hop_untested=\"" + std::to_string( untested ) + "\"";
-    return { std::move( testReach ), tested, untested, std::move( attr ) };
+    const RadiusTiers tiers     = radiusTiers( ing, testReach, rows );
+    std::string       attr      = " hop_tested=\"" + std::to_string( tiers.tested ) + "\" hop_untested=\"" + std::to_string( tiers.untested ) + "\""
+                                + ( tiers.tests > 0 ? " hop_tests=\"" + std::to_string( tiers.tests ) + "\"" : std::string() );
+    return { std::move( testReach ), tiers.tested, tiers.untested, tiers.tests, std::move( attr ) };
+}
+
+// TIER-FOLLOWUP: whether a test definition is among rows[begin, end) — the columnar <test> column and its legend clause ride
+// exactly then (a page with none is byte-identical to the two-tier answer).
+inline bool anyTestRowIn( const IngestResult& ing, const std::vector<NodeId>& rows, std::size_t begin, std::size_t end )
+{
+    for( std::size_t i = begin; i < end && i < rows.size(); ++i )
+    {
+        if( isTestSymbol( ing, rows[ i ] ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // The rows one 1-hop question yields, with the two counts that qualify them.
