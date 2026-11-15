@@ -361,10 +361,7 @@ inline void aliasTargetAttrsXml( std::string& out, const AliasTargetText& a )
     {
         out += " to_capped=\"1\" to_bytes=\"" + std::to_string( a.fullBytes ) + "\"";
     }
-    if( !a.next.empty() )
-    {
-        out += " to_next=\"" + nextValueXml( a.next ) + "\"";   // the one next= escaper (nextverb.h)
-    }
+    out += nextAttrXml( a.next, "to_next" );   // nothing when a.next is empty; the one next= escaper (nextverb.h)
 }
 inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
 {

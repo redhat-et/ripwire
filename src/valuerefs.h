@@ -122,7 +122,7 @@ inline std::string valueRefsXml( const IngestResult& ing, const ValueRefRows& ro
     std::string out = "<vrs total=\"" + std::to_string( total ) + "\" shown=\"" + std::to_string( shown ) + "\" capped=\"" + ( shown < total ? "1" : "0" ) + "\"";
     if( shown < total && !nextVerb.empty() )
     {
-        out += " next=\"" + nextValueXml( nextVerb ) + "\"";   // the one next= escaper (nextverb.h)
+        out += nextAttrXml( nextVerb );   // the one next= writer (nextverb.h); nextVerb is non-empty here
     }
     out += ">";
     for( std::size_t i = 0; i < shown; ++i )
@@ -269,7 +269,7 @@ inline std::string vrTargetWindowXml( const IngestResult& ing, std::span<const N
     std::string out = " " + std::string( countName ) + "=\"" + std::to_string( targets.size() ) + "\" shown=\"" + std::to_string( shown ) + "\"";
     if( shown < targets.size() )
     {
-        out += " next=\"" + nextValueXml( nextIfCut ) + "\"";
+        out += nextAttrXml( nextIfCut );   // the one next= writer; a cut window's continuation is never empty (slotSiteNext, nextFlag)
     }
     out += ">";
     for( const NodeId id : targets.first( shown ) )

@@ -41,7 +41,7 @@ inline constexpr const char* kNextLegendClause =
     "ends this search; paste it as-is. ";
 
 // THE ONE next= VALUE ESCAPER (NEXT-APOS-FINISH, 2026-11-15): appends `invocation` escaped for a "-DELIMITED attribute.
-// Every next-family value goes through here — nextAttrXml below, and the emitters that build their own ` next="` (the
+// Every next-family value goes through here — nextAttrXml below (the whole ` attr="…"`), and the emitters that build their own ` next="` (the
 // dead-code filter hint, the file page, value refs, the body cut, the owner-callees list, declined sites' dc_next=,
 // defs' to_next=, the fold and owner <skip>/<bodies> rows, grep's zero-hit <suggest>) — so no hint is pasteable on one
 // verb and entity-corrupted on the next. serialize.h escapeXml (every other attribute and text) still writes &apos;, and
@@ -83,15 +83,6 @@ inline void appendNextValueXml( std::string& a, std::string_view invocation )
                 break;
         }
     }
-}
-
-// the escaped VALUE alone, for an emitter that writes its own ` attr="` … `"` around it
-inline std::string nextValueXml( std::string_view invocation )
-{
-    std::string a;
-    a.reserve( invocation.size() + 8 );
-    appendNextValueXml( a, invocation );
-    return a;
 }
 
 // attribute-escaped ` next="…"`; empty invocation ⇒ empty string (a root with nothing honest to suggest says nothing).

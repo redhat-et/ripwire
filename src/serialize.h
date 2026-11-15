@@ -8437,7 +8437,9 @@ struct HopOwners
 inline std::string ownerCalleesNext( const IngestResult& ing, const Symbol& s, std::string_view pathRel, std::string_view rootArg )
 {
     std::string target = s.scope.empty() ? std::string( pathRel ) + ":" + std::string( s.name ) : canonicalIdForEmit( ing, s, rootArg );
-    return nextValueXml( nextFlag( "--callees=", target ) );   // quoted only where a shell would split it (checklist 34); the one next= escaper
+    std::string next;
+    appendNextValueXml( next, nextFlag( "--callees=", target ) );   // quoted only where a shell would split it (checklist 34); the one next= escaper
+    return next;
 }
 
 // What the owner walk hands back to packHops: the rows, how many nodes they consumed, and the budget and via-legend charge
