@@ -382,6 +382,9 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # est_tokens= ("2244" -> "2227"), the tail legend clause (", minus names a sigs row or the syms block shows", serialize.h
 # kForFileTailLegend) and the <tail> rows: each file whose positive-score names the sigs rows already show prints p= only
 # (geometry.h, geometry.cpp, sub/consumer.cpp, notes.md; same four rows, same order). 5762 -> 5718 B. The six other pins are unchanged.
+# RE-PIN 2026-11-15 (NEXT-APOS-RAW), for.xml only: the one next= value with a quote reads --for='…' (was &apos;…&apos;; nextverb.h
+# appendNextValueXml leaves ' raw in a "-delimited attribute) and est_tokens= falls 2227 -> 2223 with the 10 bytes it saves. Checked
+# mechanically: the old pin with &apos; -> ' inside next= and that est_tokens equals the lane's --legend=full output (at= masked).
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
