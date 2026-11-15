@@ -15761,28 +15761,30 @@ inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std:
 // A --path endpoint's matches, code first (docs-rest CI fix; gates restdocscheck (I5, I6), mdsectioncheck): when a name matches code
 // AND doc units, the doc units go, since a `.. method:: save` directive or a `## run` heading is no second place a call path can
 // start or end, and from_defs=/to_defs= count code only. An all-doc or all-code list is returned as it is.
-inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std::vector<NodeId> found )
+// The shared shape of the two drops below: the matches `lesser` names go when a match it does not name remains; a list that is all
+// `lesser` (or none of it) is returned as it is.
+template< typename Lesser >
+inline std::vector<NodeId> dropLesserBesideOthers( std::vector<NodeId> found, const Lesser& lesser )
 {
-    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
-    if( !std::all_of( found.begin(), found.end(), doc ) )
+    if( !std::all_of( found.begin(), found.end(), lesser ) )
     {
-        std::erase_if( found, doc );
+        std::erase_if( found, lesser );
     }
     return found;
 }
 
+inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std::vector<NodeId> found )
+{
+    return dropLesserBesideOthers( std::move( found ), [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); } );
+}
+
 // NOSKIP-BUNDLE-DEMOTE: a match list's bundle copies (model.h kRankFlagBundleCopy: a build output's, an amalgamation's or a lexically
 // read file's copy of a function a source file defines) go when a match that is no copy remains. A path endpoint, a caller hop and a
-// --for graph endpoint ask about the source function; its copy is no second one. An all-copy list is returned as it is; --defs and
-// the callers verb still list the copies (demoted, never dropped from the index).
+// --for graph endpoint and the callers verb's bare-name selector ask about the source function; its copy is no second one. An all-copy
+// list is returned as it is; --defs and a file-qualified selector still reach the copies (demoted, never dropped from the index).
 inline std::vector<NodeId> dropBundleCopiesBesideSource( const IngestResult& ing, std::vector<NodeId> found )
 {
-    const auto copy = [ &ing ]( NodeId id ) noexcept { return bundleCopy( ing.symbols[ id ] ); };
-    if( !std::all_of( found.begin(), found.end(), copy ) )
-    {
-        std::erase_if( found, copy );
-    }
-    return found;
+    return dropLesserBesideOthers( std::move( found ), [ &ing ]( NodeId id ) noexcept { return bundleCopy( ing.symbols[ id ] ); } );
 }
 
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
