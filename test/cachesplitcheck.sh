@@ -78,10 +78,24 @@ RI2="$( [ -n "$RF" ] && inode_of "$RF" )"
 [ -n "$RI1" ] && [ "$RI1" = "$RI2" ] && ok "lean run leaves the rich cache file untouched (inode stable)" \
     || no "lean run rewrote the rich cache (inode $RI1 -> $RI2) — cross-class thrash"
 
-run --for="distance between two points" >/dev/null 2>/dev/null   # rich AGAIN — must be a warm hit, no reparse
-RI3="$( [ -n "$RF" ] && inode_of "$RF" )"
-[ -n "$RI1" ] && [ "$RI1" = "$RI3" ] && ok "third run (rich-after-lean) is a warm hit — no reparse/rewrite (inode stable)" \
-    || no "rich-after-lean reparsed+rewrote the cache (inode $RI1 -> $RI3) — the A4-P4 thrash"
+# rich AGAIN — must be a warm hit, no reparse.
+#
+# Asked with the observable that answers it, not through the inode. The inode USED to be a sound proxy:
+# the dirty flag skips saveCache when nothing changed, so a stable inode meant nothing was rewritten and
+# therefore nothing was re-parsed. v53 broke the second half of that implication — a clean warm run now
+# republishes the blob (tmp, then rename, so a NEW inode) purely to store the warm-snapshot section
+# (src/warmsnap.h), with reparsed=0. Measured on this very fixture: `reparsed=0 reused=3` with
+# `saved=1`. So the inode moves on a run that is the opposite of a thrash, and reading that as the
+# A4-P4 thrash would be a confident wrong answer about the thing this gate exists to catch.
+RIPWIRE_CACHE_STATS=1 run --for="distance between two points" >/dev/null 2>"$TMP/r3.err"
+R3_STATS="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' "$TMP/r3.err" | head -1 )"
+if [ -z "$R3_STATS" ]; then
+    no "rich-after-lean printed no cache-stats line — the thrash question cannot be answered, and an absent line must never read as a hit"
+elif [ "${R3_STATS#cache-stats reparsed=0 }" != "$R3_STATS" ] && [ "${R3_STATS%%reused=0 *}" = "$R3_STATS" ]; then
+    ok "third run (rich-after-lean) is a warm hit — nothing re-parsed ($R3_STATS)"
+else
+    no "rich-after-lean reparsed ($R3_STATS) — the A4-P4 thrash"
+fi
 
 # ── (b) byte-identity after alternation: warm == --no-cache, for BOTH classes ─────────────────────
 # hammer the alternation once more so the caches are as warm/mixed as possible, then compare.

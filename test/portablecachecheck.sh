@@ -78,7 +78,7 @@ cp "$CACHE_FILE" "$TMP/repo.ripwirecache.committed"
 
 BEFORE_SUM="$( md5 -q "$TMP/repo.ripwirecache.committed" 2>/dev/null || md5sum "$TMP/repo.ripwirecache.committed" | cut -d' ' -f1 )"
 
-"$BIN" "$PATH_B" --cache="$TMP/repo.ripwirecache.committed" --no-stable >"$TMP/b_warm.xml" 2>"$TMP/b_warm.err"
+RIPWIRE_CACHE_STATS=1 "$BIN" "$PATH_B" --cache="$TMP/repo.ripwirecache.committed" --no-stable >"$TMP/b_warm.xml" 2>"$TMP/b_warm.err"
 rc_b=$?
 if [ "$rc_b" -eq 0 ]; then
     ok "(a) consuming A's committed cache under path B exits 0"
@@ -88,14 +88,26 @@ fi
 
 # THE HEADLINE ASSERTION: did B actually WARM-HIT against A's cache, or did every lookup silently miss
 # (falling back to a full reparse that happens to still produce correct output, defeating the entire
-# "skip the cold parse" point while masquerading as success)? Win-2's dirty-flag means saveCache is
-# skipped entirely when nothing changed — so an unchanged cache file (same bytes before/after) is
-# PROOF every file hash-matched via the re-absolutized key, i.e. a genuine warm hit, not a disguised miss.
+# "skip the cold parse" point while masquerading as success)?
+#
+# This used to be asserted through a PROXY: Win-2's dirty-flag skips saveCache when nothing changed, so
+# unchanged cache BYTES were taken as proof that every file hash-matched. That proxy died with v53. A
+# clean warm run now republishes the blob to add the warm-snapshot section (src/warmsnap.h), so the bytes
+# change for a reason that has nothing to do with whether a lookup hit — and the proxy then reports the
+# exact opposite of the truth, calling a measured `reparsed=0 reused=N` run a "disguised miss".
+#
+# So ask the question directly, with the observable that answers it: RIPWIRE_CACHE_STATS=1's reparsed=
+# count. reparsed=0 with reused=N IS the warm hit, under any blob-rewriting policy. Strictly stronger
+# than the byte proxy ever was: it distinguishes "nothing was rewritten" from "nothing was re-parsed",
+# which are different claims that the old assertion conflated.
 AFTER_SUM="$( md5 -q "$TMP/repo.ripwirecache.committed" 2>/dev/null || md5sum "$TMP/repo.ripwirecache.committed" | cut -d' ' -f1 )"
-if [ "$BEFORE_SUM" = "$AFTER_SUM" ]; then
-    ok "(a) GENUINE WARM HIT: consuming A's cache at path B left the cache bytes UNCHANGED (every file hash-matched — not a disguised full reparse)"
+B_STATS="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' "$TMP/b_warm.err" | head -1 )"
+if [ -z "$B_STATS" ]; then
+    no "(a) no cache-stats line from the path-B run — the warm-hit question cannot be answered, and an absent line must never read as a hit"
+elif [ "${B_STATS#cache-stats reparsed=0 }" != "$B_STATS" ] && [ "${B_STATS%%reused=0 *}" = "$B_STATS" ]; then
+    ok "(a) GENUINE WARM HIT: consuming A's cache at path B re-parsed nothing ($B_STATS) — every file hash-matched via the re-absolutized key"
 else
-    no "(a) DISGUISED MISS: path B rewrote the committed cache (bytes changed) — every lookup missed and silently fell back to a full reparse; the cache is NOT actually being reused across checkout paths, even though output may still look correct"
+    no "(a) DISGUISED MISS: path B did not reuse A's committed cache ($B_STATS) — lookups missed and fell back to a reparse; the cache is NOT being reused across checkout paths, even though output may still look correct"
 fi
 
 # ground truth: a COLD run at path B (fresh cache file, never touched by A's build)
@@ -199,12 +211,18 @@ BEFORE_SIZE="$( size_of "$DIRTY_PROBE" )"
 # skips saveCache entirely), which only happens if every file HASH-MATCHED against a re-absolutized key.
 BEFORE_MTIME="$( mtime_of "$DIRTY_PROBE" )"
 sleep 1
-"$BIN" "$PATH_A" --cache="$DIRTY_PROBE" --no-stable >/dev/null 2>&1
+RIPWIRE_CACHE_STATS=1 "$BIN" "$PATH_A" --cache="$DIRTY_PROBE" --no-stable >/dev/null 2>"$TMP/d_warm.err"
 AFTER_MTIME="$( mtime_of "$DIRTY_PROBE" )"
-if [ "$BEFORE_MTIME" = "$AFTER_MTIME" ]; then
-    ok "(d) same-path warm run skips saveCache entirely (dirty flag stayed clear -> every key actually hash-matched via re-absolutize)"
+D_STATS="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' "$TMP/d_warm.err" | head -1 )"
+# Same repair as (a): the question is whether every key round-tripped, and reparsed= answers it outright.
+# The mtime is no longer a proxy for it — v53's warm-snapshot section means a clean run may legitimately
+# republish the blob, so an mtime that moved says nothing about whether a lookup hit.
+if [ -z "$D_STATS" ]; then
+    no "(d) no cache-stats line from the same-path warm run — an absent line must never read as a hit"
+elif [ "${D_STATS#cache-stats reparsed=0 }" != "$D_STATS" ] && [ "${D_STATS%%reused=0 *}" = "$D_STATS" ]; then
+    ok "(d) same-path warm run re-parsed nothing ($D_STATS) -> every key round-tripped and hash-matched via re-absolutize"
 else
-    no "(d) same-path warm run rewrote the cache — keys are not round-tripping/matching as expected"
+    no "(d) same-path warm run re-parsed files ($D_STATS) — keys are not round-tripping/matching as expected"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
