@@ -214,9 +214,27 @@ deps "$SH/ring12" --legend=full; F12="$DOUT"; RF12=$DRC
 if [ "$RF14" = 0 ] && printf '%s' "$F14" | grep -q 'cycle members_capped=1:'; then
     ok "cycles (f) full legend: --legend=full defines members_capped= when a cycle is cut"
 else no "cycles (f) full legend rc=$RF14: no members_capped= definition in the full --deps legend"; fi
-if [ "$RF12" = 0 ] && ! printf '%s' "$F12" | grep -q 'members_capped'; then
-    ok "cycles (f) full legend twin: an uncut cycle's full legend does not mention members_capped="
-else no "cycles (f) full legend twin rc=$RF12: members_capped appears with no cut"; fi
+FY12="$( printf '%s' "$F12" | grep -oE '<cycle [^>]*>.*</cycle>' )"
+if [ "$RF12" = 0 ] && printf '%s' "$FY12" | grep -qE '^<cycle size="12" ' \
+   && [ "$( printf '%s' "$FY12" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ] && ! printf '%s' "$F12" | grep -q 'members_capped'; then
+    ok "cycles (f) full legend twin: an uncut 12-file cycle (12 rows) prints no members_capped, row or full legend"
+else no "cycles (f) full legend twin rc=$RF12: $( printf '%s' "$FY12" | grep -oE '^<cycle [^>]*>' ) (no size=12 cycle, or members_capped with no cut)"; fi
+# (f) the cap boundary under BOTH legends (LAND-541): 12 files is not cut and says nothing anywhere in the answer, 13 files
+#     is cut and both legends define the marker. Each arm first finds its cycle (size= and 12 <f> rows), so an answer with no
+#     cycle at all FAILS rather than passing an absence check.
+if [ "$R12" = 0 ] && printf '%s' "$CY12" | grep -qE '^<cycle size="12" ' \
+   && [ "$( printf '%s' "$CY12" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ] && ! printf '%s' "$C12" | grep -q 'members_capped'; then
+    ok "cycles (f) compact twin: an uncut 12-file cycle's whole compact answer (rows and legend) never says members_capped"
+else no "cycles (f) compact twin rc=$R12: $( printf '%s' "$CY12" | grep -oE '^<cycle [^>]*>' ) (no size=12 cycle, or members_capped with no cut)"; fi
+if [ "$R13" = 0 ] && printf '%s' "$C13" | grep -q 'members_capped=1:[^.]*first in SCC order, not ranked'; then
+    ok "cycles (f) boundary compact legend: the 13-file answer's compact legend defines members_capped="
+else no "cycles (f) boundary compact legend rc=$R13: the 13-file answer's compact legend has no members_capped= reading"; fi
+deps "$SH/ring13" --legend=full; F13="$DOUT"; RF13=$DRC
+FY13="$( printf '%s' "$F13" | grep -oE '<cycle [^>]*>.*</cycle>' )"
+if [ "$RF13" = 0 ] && printf '%s' "$FY13" | grep -qE '^<cycle size="13" [^>]*members_capped="1"' \
+   && [ "$( printf '%s' "$FY13" | grep -oE '<f p=' | wc -l | tr -d ' ' )" = 12 ] && printf '%s' "$F13" | grep -q 'cycle members_capped=1:'; then
+    ok "cycles (f) boundary full legend: a 13-file cycle lists 12 members under members_capped=1, and --legend=full defines it"
+else no "cycles (f) boundary full legend rc=$RF13: $( printf '%s' "$FY13" | grep -oE '^<cycle [^>]*>' ) members=$( printf '%s' "$FY13" | grep -oE '<f p=' | wc -l | tr -d ' ' )"; fi
 
 # ── 10) RUST-MOD-DECL: a `mod x;` parent-to-child pair is containment, not a cycle ──────────────────────────────────
 # Rust: the parent declares `mod x;`, the child `use super::…`/`use crate::…` back: every pair reads as a 2-cycle
