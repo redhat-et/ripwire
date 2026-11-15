@@ -14,7 +14,8 @@
 #
 # Arms (each counts its premise and FAILS on 0; an empty or crashed answer fails every arm):
 #   a  named:        on the ablated tail restorer_scheduling is absent from the whole answer and zz_store.py's row is listed; on the
-#                    default tail that row carries tsym="restorer_scheduling,config_restorer" (score 2 first, then lens rank, then index)
+#                    default tail that row carries tsym="restorer_scheduling,restorer_cache": score 2 first, then the graph's PageRank
+#                    (c050..c059 call restorer_cache; by index or by lens config_restorer, defined first, would take the slot)
 #   b  no-displace:  every default tail row is its ablated twin's tag byte for byte, or that tag with one tsym= added before "/>"
 #                    (same rows, same order, sym= untouched); counts the rows compared and the rows that gained tsym= (both > 0)
 #   c  negative:     a task whose words no unprinted symbol of a tail file carries ("widget frobnicate helper") is byte-identical
@@ -45,7 +46,11 @@ F="$TMP/fx"; mkdir -p "$F/docs" "$TMP/home"
 i=0
 while [ $i -lt 60 ]; do
     n=$( printf '%03d' $i )
-    printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return 1\n' "$n" > "$F/c$n.py"
+    if [ $i -ge 50 ]; then   # arm a's tie-break: ten callers lift restorer_cache's PageRank over the other one-word names
+        printf 'from zz_store import restorer_cache\n\n\ndef widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return restorer_cache()\n' "$n" > "$F/c$n.py"
+    else
+        printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return 1\n' "$n" > "$F/c$n.py"
+    fi
     i=$(( i + 1 ))
 done
 cat > "$F/zz_store.py" <<'EOF'
@@ -139,7 +144,7 @@ az = [(s, ts) for p, s, ts in A if p.endswith("zz_store.py")]
 # a — named
 arm("a premise", len(az) == 1 and "restorer_scheduling" not in rd("a.xml"),
     f"ablated: zz_store.py rows={len(az)}, restorer_scheduling in answer={'restorer_scheduling' in rd('a.xml')}")
-arm("a named", len(dz) == 1 and len(az) == 1 and dz[0] == (az[0][0], ["restorer_scheduling", "config_restorer"]) and az[0][1] == [],
+arm("a named", len(dz) == 1 and len(az) == 1 and dz[0] == (az[0][0], ["restorer_scheduling", "restorer_cache"]) and az[0][1] == [],
     f"default zz_store.py (sym, tsym)={dz} ablated={az}")
 # b — no displacement: each default tag is the ablated tag, or it with one tsym= inserted before "/>"
 DT, AT = tail_tags(rd("d.xml")), tail_tags(rd("a.xml"))

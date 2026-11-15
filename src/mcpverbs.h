@@ -2502,8 +2502,9 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
         std::vector<char> tailEsc;
         // FOR-TAIL-WIDE (review F8): this twin has no tail fill, so under budget_tokens it serves the old 40-row walk's tail (its
         // pre-widening size, byte for byte; a cut tail's next= continues the page) and the widened rows only without a budget
+        const std::vector<float> termTieRank = in.budgetTokens > 0 ? std::vector<float>{} : tailTermTieRank( in.g, task );   // TAIL-SYM-TERMS
         const FileTail    mcpTail = in.budgetTokens > 0 ? fileTailOldWalk( computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task ) )
-                                                        : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
+                                                        : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, false, &termTieRank );
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
         mcpTailFolded = tailStr.contains( " folded=\"" );

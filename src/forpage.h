@@ -45,6 +45,7 @@
 #include "fortailterms.h" // tailTaskTerms / tailTermScore — TAIL-SYM-TERMS' task words and name score
 #include "forliteral.h"   // taskQuotesLiteral — a quoted message keeps a tail's config and docs listed
 #include "langfacts.h"   // langFacts — tailFoldClass reads a file's script/config role off the table
+#include "graph.h"       // rankGraph — TAIL-SYM-TERMS' tie-break order
 #include "filter.h"      // taskAsksAboutDocs — the code-first tail asks the docs reorder's own question
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
 #include "model.h"
@@ -1281,7 +1282,9 @@ inline void appendFileTailRows( FileTail& out, FileTail& from )
 
 // TAIL-SYM-TERMS (depth lab G2, reports/depth-gc-lab-1114.md): each of the first `namedRows` rows (the rows that print sym=; the
 // p= only suffix stays p= only) ADDS up to kTailSymTermNames more of its file's symbols whose NAMES share a task word
-// (fortailterms.h), best score first, then lens rank, then index order — in its own tsym= after sym=, never in place of a name (G1,
+// (fortailterms.h), best score first, then the graph's own PageRank (tailTermTieRank: the lab's order, which its --graph-query index
+// listed by; the lens order instead traded htop-11's ✓ for two ◐ items on the lane's fire321), then index order — in its own tsym=
+// after sym=, never in place of a name (G1,
 // the re-pick, lost 12 credited names on the lab's 217 cells; this append lost none). Its own attribute keeps sym= byte for byte and
 // lets <syms> read the answer as if tsym= were not there (forfilesyms.h termsMasked: <syms> keeps priority, and a name it prints is
 // cut from tsym=). A candidate is any indexed symbol of the file
@@ -1293,15 +1296,15 @@ struct TailTermCand
 {
     std::uint32_t row;     // the tail row (its file's)
     std::uint32_t score;   // tailTermScore
-    float         lens;    // the lens score (the tie-break after the score)
+    float         pr;      // the graph's PageRank (the tie-break after the score)
     NodeId        id;
 };
 struct TailTermCands
 {
-    std::vector<TailTermCand> cands;     // (row, score desc, lens desc, id asc)
+    std::vector<TailTermCand> cands;     // (row, score desc, pr desc, id asc)
     std::vector<char>         docFile;   // per row: its file holds a doc unit, so it adds no name
 };
-inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds,
+inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, const std::vector<float>& tieRank, const std::vector<NodeId>& headIds,
                                     std::size_t namedRows )
 {
     TailTermCands                  out;
@@ -1349,17 +1352,17 @@ inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, 
         }
         if( const std::size_t score = tailTermScore( s.name, terms ); score > 0 )
         {
-            out.cands.push_back( { row, std::uint32_t( score ), id < rank.size() ? rank[id] : 0.0f, id } );
+            out.cands.push_back( { row, std::uint32_t( score ), id < tieRank.size() ? tieRank[id] : 0.0f, id } );
         }
     }
     std::ranges::sort( out.cands, []( const TailTermCand& a, const TailTermCand& b )
-                       { return a.row != b.row ? a.row < b.row : a.score != b.score ? a.score > b.score : a.lens != b.lens ? a.lens > b.lens : a.id < b.id; } );
+                       { return a.row != b.row ? a.row < b.row : a.score != b.score ? a.score > b.score : a.pr != b.pr ? a.pr > b.pr : a.id < b.id; } );
     return out;
 }
-inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds,
+inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& tieRank, const std::vector<NodeId>& headIds,
                                   std::size_t namedRows )
 {
-    const TailTermCands       tc = tailTermCands( t, ing, rank, headIds, namedRows );
+    const TailTermCands       tc = tailTermCands( t, ing, tieRank, headIds, namedRows );
     std::vector<std::string>  added( t.paths.size() );
     std::vector<std::uint8_t> count( namedRows, 0 );
     bool                      any = false;
@@ -1389,9 +1392,22 @@ inline bool fileTailTermNamesShown( const FileTail& t, std::size_t shown ) noexc
     return std::any_of( t.termSyms.begin(), t.termSyms.begin() + std::ptrdiff_t( n ), []( const std::string& s ) { return !s.empty(); } );
 }
 
+// TAIL-SYM-TERMS' tie-break: the graph's plain PageRank (the default map's and --graph-query's order), computed once per answer and
+// only when a tail row can gain a name (the switch on and a task word to match); empty otherwise, and then no row gains one.
+inline std::vector<float> tailTermTieRank( const Graph& g, std::string_view task )
+{
+    if( !tailSymTermsOn() || tailTaskTerms( task ).empty() )
+    {
+        return {};
+    }
+    return std::move( rankGraph( g ).rank );
+}
+
 // `rankOrder`: the plain interleaved walk whatever the task (FOR-DOC-BODY's trigger reads the files in rank order: fordocbody.h).
+// `termTieRank`: tailTermTieRank's vector; null or empty adds no TAIL-SYM-TERMS name (the old-walk reserve and rank-order callers).
 inline FileTail computeFileTail( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& ev,
-                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task, bool rankOrder = false )
+                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task, bool rankOrder = false,
+                                 const std::vector<float>* termTieRank = nullptr )
 {
     FileTail          out;
     std::vector<char> listed( ing.files.size(), 0 );
@@ -1413,9 +1429,9 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     out.oldRows     = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
     out.wideSymRows = std::min( wideRows.paths.size(), wideSym );
     appendFileTailRows( out, wideRows );
-    if( !rankOrder && tailSymTermsOn() )   // the rank-order walk feeds FOR-DOC-BODY's file pick, which reads paths only
+    if( !rankOrder && termTieRank != nullptr && !termTieRank->empty() )   // the rank-order walk feeds FOR-DOC-BODY's file pick (paths only)
     {
-        fileTailAddTermNames( out, ing, rank, headIds, std::min( out.paths.size(), out.oldRows + out.wideSymRows ) );
+        fileTailAddTermNames( out, ing, *termTieRank, headIds, std::min( out.paths.size(), out.oldRows + out.wideSymRows ) );
     }
     ENSURES( out.paths.size() == out.syms.size() && out.paths.size() == out.pageNext.size() && out.paths.size() == out.fileIds.size()
                  && out.paths.size() <= out.total,
