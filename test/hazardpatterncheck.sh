@@ -446,7 +446,7 @@ tsv("c.tsv", [(f, fn, k, n) for (f, fn, k), n in sorted(armC.items())])
 OS_SEAM_HEADER = "infra/os.h"
 ACQ = ("^(::|std::|os::|rw::os::)?(socket|pipe|pipe2|dup|kqueue|dirwatch_open|epoll_create|epoll_create1|inotify_init1|eventfd|mkstemp|mkdtemp|malloc|calloc|realloc|"
        "strdup|strndup|posix_memalign|aligned_alloc|ts_parser_new|ts_query_new|ts_query_cursor_new|ts_tree_copy|ts_parser_parse|"
-       "ts_parser_parse_string|ts_parser_parse_string_encoding|ts_tree_cursor_new|ts_tree_cursor_copy)$|^(::|os::|rw::os::)accept4?$")
+       "ts_parser_parse_string|ts_parser_parse_string_encoding|ts_parser_parse_with_options|ts_tree_cursor_new|ts_tree_cursor_copy)$|^(::|os::|rw::os::)accept4?$")
 destructorOf = {}
 
 
@@ -550,7 +550,7 @@ ingest_astquery.h	definitionLinesWorker	ts_query_cursor_new	1	deleted on both ex
 ingest_astquery.h	spanTiersOfFiles	ts_parser_parse_string	1	the tree is deleted right after the walk
 ingest_crawl.h	compileQueryStandalone	ts_query_new	1	returned into the process-lifetime CompiledQueryCache, whose destructor deletes every query
 ingest_parsepool.h	runParseWorker	ts_query_cursor_new	1	deleted at the end of the worker; the returns in between belong to lambdas
-ingest_sidecap.h	parseTree	ts_parser_parse_string	1	returned to the caller, which adopts it into TreeGuard
+ingest_sidecap.h	parseTree	ts_parser_parse_with_options	1	returned to the caller, which adopts it into TreeGuard; a cut (deadline-hit) tree is deleted in place
 jsrunner.h	scanModule	ts_parser_new	1	deleted right after the parse, before the null-tree return
 jsrunner.h	scanModule	ts_parser_parse_string	1	the tree is deleted by hand after the whole-tree walk, before the return
 mcpindex.h	arm	dirwatch_open	1	owned	held by the FS watcher, closed by its reset and its destructor
