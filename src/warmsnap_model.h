@@ -188,9 +188,9 @@ inline std::string_view textAt( const std::vector<std::uint32_t>& ends, std::str
 // What the recording run's parse cache line said, replayed on a load so RIPWIRE_CACHE_STATS still describes the run.
 struct BlobFacts
 {
-    // No stat signature of the blob. The section lives INSIDE the blob it was assembled from, so "is this still the
-    // same blob" is not a question a stored field can be wrong about: replace the blob and the section goes with it,
-    // and saveCache writes no section, so any run that re-parsed leaves none behind (warmsnap.h, kVersion 2).
+    // No stat signature of the blob. The snapshot's FILENAME carries the identity of the blob this model was assembled
+    // from (warmsnap.h snapshotPath, ingest_cache.h cacheBlobIdentity), so "is this still the same blob" is not a
+    // question a stored field can be wrong about: a rewritten or replaced blob resolves to a different name, or none.
     std::uint64_t cachedRecords = 0;
     std::uint64_t blobEntries   = 0;
     // One path per bridge-format document (pdf, docx, ...) in the tree: where the doc pass would find a cached extraction

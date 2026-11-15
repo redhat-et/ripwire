@@ -689,12 +689,16 @@ inline DoctorCacheStats doctorCacheStats( const std::string& dir )
         if( name.rfind( "ripwire-", 0 ) != 0 ) { return; }
         std::error_code ec;
         if( !entry.is_regular_file( ec ) ) { if( ec ) { out.truncated = true; } return; }
-        // Every `ripwire-` file here IS a blob: there is no derived sidecar to exclude. The warm snapshot used to be
-        // `<blob>.snap` and had to be subtracted, because counting it DOUBLED the apparent blob count — the
-        // windows-package release gate read a warm run taking the count 4 -> 5 as "wrote a new blob instead of
-        // reusing one" while that same run's cache-stats line said `reparsed=0 reused=6 files=6`. It is now a section
-        // inside the blob (src/warmsnap.h, kCacheVersion 53), so one artifact is one blob again and the distinction
-        // is gone rather than maintained.
+        // Every `ripwire-` file in this directory is accounted here, the warm snapshot (`ripwire-warmsnap-<options>-
+        // <blob>.bin`, src/warmsnap.h) included: it is a cache artifact of its own family in ripwire's own cache
+        // directory, exactly like ripwire-qsnap-/ripwire-qheadsnap-/ripwire-docmd-, and it is swept by the same passes.
+        // There is no exclusion rule here any more. One was briefly needed when the snapshot was written as
+        // `<blob>.snap` BESIDE the user's named blob: it inherited the `ripwire-` prefix, DOUBLED the apparent blob
+        // count for every root that had one, and the windows-package release gate read a warm run taking the count
+        // 4 -> 5 as "wrote a new blob instead of reusing one" while that same run's cache-stats line said
+        // `reparsed=0 reused=6 files=6`. A snapshot of its own is created by the run that first writes the blob and
+        // then REWRITTEN IN PLACE (one per configuration, kept by evictOldCacheFamily), so a warm run does not move
+        // this count and that reading cannot come back.
         if( out.blobCount >= rw::quality::kMaxCacheBlobCount ) { out.truncated = true; out.capHit = true; return; }
         ++out.blobCount;
         const auto byteSize = entry.file_size( ec );

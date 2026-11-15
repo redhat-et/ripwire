@@ -350,10 +350,11 @@ static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
     {
         return refuse( warmsnap::Why::NoSection );
     }
-    // The blob this model was built from IS the blob the section came out of — the section lives inside it (warmsnap.h,
-    // kVersion 2). Deleted, rewritten by another configuration, or replaced by a run that re-parsed: in every case the
-    // section went with it and there is nothing here to serve. That used to be a stored stat signature of the blob,
-    // compared here; a sidecar had to assert the binding, a section does not have one to get wrong.
+    // The blob this model was built from IS the blob that named the file this section came out of (warmsnap.h kVersion 2:
+    // the name carries the blob's identity, ingest_cache.h cacheBlobIdentity). Deleted, rewritten by another
+    // configuration, or replaced by a run that re-parsed: in every case this run resolves a different name, or none, and
+    // there is nothing here to serve. That used to be a stat signature of the blob stored in the section and compared
+    // here — a field that could be wrong about the binding, where the name cannot be.
     warmsnap::BlobFacts blob;
     if( !warmsnap::readModel( snap.modelSection, result, blob ) )
     {
@@ -440,15 +441,22 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // under --no-cache: the probe then runs inside the crawl, as it always did.
     IgnoreProbeSpeculation ignoreSpeculation( !cacheFile.empty() );
 
-    // The warm snapshot (warmsnap.h), when main() armed one for this call and a cache file names where it lives.
+    // The warm snapshot (warmsnap.h), when main() armed one for this call and a cache file names the blob it is derived
+    // from. Which snapshot that is depends on the blob's identity, so a run with no readable blob has none to read —
+    // it still records at the end, under the identity of the blob it leaves behind.
     warmsnap::Session* const snap = cacheFile.empty() ? nullptr : warmsnap::tlSession;
     if( snap != nullptr )
     {
         snap->blobPath   = std::string( cacheFile );
         snap->startNs    = wallClockNs();
+        snap->rootKey    = quality::cacheRootKeyHex( rootDir );   // the field the cache-dir sweep pins a root's whole family by
         snap->optionsKey = warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
                                                    kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits );
-        warmsnap::openSnapshot( *snap, readWarmSection( snap->blobPath, captureValueUses ) );
+        if( const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses ) )
+        {
+            snap->path = warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId );
+        }
+        warmsnap::openSnapshot( *snap );
     }
 
     // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space). A lambda because a lost
@@ -686,9 +694,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     if( snap != nullptr )
     {
-        // What this run re-extracted decides whether it records at all: saveCache has already republished the blob for
-        // a dirty run, with no section in it, so a second republish would charge one run two blob-sized writes.
-        snap->reparsed = result.reparsedFiles != 0;
+        // The snapshot is named after the blob, and the parse pool above has published the blob this run leaves behind
+        // (saveCache, for a run that re-parsed or grew a record). Re-read its identity so what this run records is found
+        // by the NEXT run rather than filed under the blob this one opened. No readable blob: nothing is recorded.
+        const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses );
+        snap->path = blobId ? warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId ) : std::string{};
         recordWarmModel( *snap, result, cacheStats );
     }
     memstats::mark( "model" );   // M0 MEM-STATS: the model at rest, what buildGraph's side tables stack on (src/memstats.h)
@@ -697,13 +707,6 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         memguard::recordStop();   // #350: the caller must answer for this partial ingest (memguard.h, the backstop)
     }
     return result;
-}
-
-// The one seam main() reaches the blob's format through: warmsnap::saveSnapshot's bytes go into the blob at
-// `blobPath` (see the note in ingest.h). The blob format lives in this translation unit alone.
-bool publishWarmSection( const std::string& blobPath, std::string_view section, bool captureValueUses )
-{
-    return publishBlobWithWarmSection( blobPath, section, captureValueUses );
 }
 }   // namespace rw
 

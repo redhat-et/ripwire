@@ -3151,19 +3151,14 @@ static rw::Graph graphFromWarmSnapshot( rw::warmsnap::Session& snap, const rw::I
 
 // Write what this run learned, and — under RIPWIRE_SNAPSHOT_STATS — say which stages it did not repeat. stderr only,
 // env-gated, and its own variable: RIPWIRE_CACHE_STATS consumers compare that stream between cached and uncached runs.
-static void finishWarmSnapshot( rw::warmsnap::Session& snap, bool captureValueUses )
+static void finishWarmSnapshot( rw::warmsnap::Session& snap )
 {
     if( !snap.on() )
     {
         return;
     }
-    // The section goes INSIDE the parse cache blob, which is republished to carry it (ingest.h publishWarmSection).
-    // Empty bytes mean the blob already says everything this run knows, or this run re-parsed and records nothing.
-    if( const std::string section = rw::warmsnap::saveSnapshot( snap ); !section.empty() )
-    {
-        snap.saved = rw::publishWarmSection( snap.blobPath, section, captureValueUses );
-    }
-    snap.treeSection = snap.modelSection = snap.graphSection = {};   // the section's bytes and this run's own are not read again: give them back
+    rw::warmsnap::saveSnapshot( snap );
+    snap.treeSection = snap.modelSection = snap.graphSection = {};   // the file's bytes and this run's sections are not read again: give them back
     std::string().swap( snap.file );
     std::string().swap( snap.treeOut );
     std::string().swap( snap.modelOut );
@@ -5628,7 +5623,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             throw;
         }
     }();
-    finishWarmSnapshot( warmSnap, needsValueUses );
+    finishWarmSnapshot( warmSnap );
     if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch, the ingest) and the verbs
     {
         DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (--deps/--arch: after the ingest) — exit 5, one stderr line" );

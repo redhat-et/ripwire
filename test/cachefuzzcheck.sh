@@ -13,21 +13,17 @@
 #
 # ── Part 1: v15 ingest-cache blob (loadCache) — DETERMINISTIC structured mutation table ────────────
 # Blob layout (native-endian, no padding — mirrors ingest_cache.h saveCache/openCacheFrame/loadCache):
-#   HEADER, 41 B (v53 grew it from 25; every constant below moved with it, see the note under HDR):
+#   HEADER, 25 B (ONE number, in three python scopes below — see the note under HDR):
 #     [0:4)   u32 magic "CTPK"        [4:8)   u32 version (kCacheVersion)
 #     [8:12)  u32 parserVer           [12]    u8  kArtifactArch (endian|pointerWidth<<1)
 #     [13:21) u64 blobWriteNs         [21:25) u32 entryCount
-#     [25:33) u64 snapOffset          [33:41) u64 snapLength   (the warm-snapshot section, src/warmsnap.h)
-#   RECORDS, [41, snapLength ? snapOffset : tableOffset), ascending pathHash:
+#   RECORDS, [25, tableOffset), ascending pathHash:
 #     u32 pathLen, pathBytes, u64 contentHash, u64 sizeBytes, u64 mtimeNs, u64 ctimeNs,
 #     6x u32 FileHealth (v20 macroBlanked, v44 useBoundsBlanked), [rich: u32 dictCount + dict], u32 defCount, [def records], ...
 #   OFFSET TABLE, entryCount x 32 B at tableOffset:
 #     u64 pathHash, u64 recOffset, u64 contentHash, u32 recLength, u32 recSum
-#   WARM-SNAPSHOT SECTION, [snapOffset, snapOffset + snapLength) when snapLength != 0: between the records
-#     and the table. Opaque here; src/warmsnap.h owns its format and test/warmsnapcheck.sh fuzzes it.
 #   TRAILER, last 24 B: u64 tableOffset, u32 entryCount, u32 reserved, u64 tableSum
-#   tableSum covers HEADER || TABLE; each recSum covers exactly its own record. So the header's snapOffset
-#   and snapLength are checksummed by the trailer, and a mutation of either is a whole-blob refusal.
+#   tableSum covers HEADER || TABLE; each recSum covers exactly its own record.
 # A python helper (mirroring that byte-exact layout) generates ~26 named byte-level mutations from one
 # good baseline blob; bash then layers 5 more filesystem-shape mutations (dir/perm/symlink//dev/null)
 # on top. Each mutation is applied via a FIXED table, not a random seed (determinism rule): re-running
@@ -176,12 +172,14 @@ def blob_checksum(data: bytes) -> int:
         h = ((h ^ lane[k]) * P) & M
     return h
 
-# v53: the header grew 25 -> 41 (u64 snapOffset + u64 snapLength). It is ONE number living in three places in
-# this file — here, the tableSum slice in the famcnt arm, and the HDR/TRAILER/ENTRY triple further down — and
-# getting it wrong does not make an arm fail loudly: the recomputed tableSum is then taken over the wrong
-# bytes, the WHOLE blob is refused, and a per-record arm reads `cached_records=0` as "the guard did not fire"
-# when the guard it was aiming at was never reached. All three are derived from this one now.
-HDR      = 41   # header bytes: magic4 + ver4 + parserVer4 + arch1 + blobWriteNs8 + entryCount4 + snapOffset8 + snapLength8
+# THE HEADER SIZE IS ONE NUMBER IN THREE PLACES in this file — here, the tableSum slice in the famcnt arm below,
+# and the HDR/TRAILER/ENTRY triple further down (separate python heredocs, so separate scopes; each now names it
+# instead of spelling 25 inline). Getting it wrong does not make an arm fail loudly: the recomputed tableSum is
+# then taken over the wrong bytes, the WHOLE blob is refused, and a per-record arm reads `cached_records=0` as
+# "the guard did not fire" when the guard it was aiming at was never reached. Measured on a lane that moved the
+# header to 41 bytes: six arms went red and two more passed for the wrong reason. If kCacheHeaderBytes moves,
+# change all three.
+HDR      = 25   # header bytes: magic4 + ver4 + parserVer4 + arch1 + blobWriteNs8 + entryCount4
 TRAILER  = 24   # trailer bytes: tableOffset8 + entryCount4 + reserved4 + tableSum8
 ENTRY    = 32   # offset-table row: pathHash8 + recOffset8 + contentHash8 + recLength4 + recSum4
 
@@ -585,7 +583,7 @@ python3 - "$GOOD" "$DISCDIR" <<'PYWRAP'
 import struct, sys
 good, outdir = sys.argv[1], sys.argv[2]
 b = open(good, "rb").read()
-HDR = 41   # v53 blob header; its own copy, because this heredoc is a separate python scope from the table above
+HDR = 25   # the blob header; its own copy, because this heredoc is a separate python scope from the table above
 TABLE_OFF, N = struct.unpack_from("<QI", b, len(b) - 24)[0:2]
 def blob_checksum(data):
     P, M = 1099511628211, (1 << 64) - 1
@@ -1004,7 +1002,7 @@ ENUM_OF = { "def.kind": "SymKind", "def.lang": "Lang", "ref.lang": "Lang", "ref.
 count = { e: enumerator_count(e) for e in set(ENUM_OF.values()) }
 
 blob = bytearray(open(good_path, "rb").read())
-HDR, TRAILER, ENTRY = 41, 24, 32   # v53 header (see the note on the first HDR above); trailer and entry row unchanged
+HDR, TRAILER, ENTRY = 25, 24, 32   # the header (see the note on the first HDR above), the trailer, and one table row
 table_off, n = struct.unpack_from("<QI", blob, len(blob) - TRAILER)[0:2]
 sites = {}
 pmin = {}
