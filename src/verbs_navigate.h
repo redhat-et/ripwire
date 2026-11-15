@@ -3675,13 +3675,20 @@ int emitImpactXml( const ImpactView& v )
     return 0;
 }
 
+// The root counts two lanes added to --impact, as the legend reads them (train 1111i: one argument for both)
+struct ImpactRootReadings
+{
+    bool        contract    = false;   // BODILESS-SEED: impls= on the root (contractseed.h)
+    std::size_t radiusTests = 0;       // IMPACT-TEST-TIER: radius_tests= on the root (graph.h radiusTiers)
+};
+
 inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g, const std::vector<rw::NodeId>& reach,
                               const std::vector<rw::NodeId>& show, const rw::PageWindow& imPage, const rw::ImpactReach& imWalk,
                               const rw::ImportTier& imports, const std::vector<rw::NodeId>& seeds, const std::vector<std::uint32_t>& imDepth,
                               const std::vector<char>& imProven, std::size_t imUnprovenDefs, std::size_t imDeclinedCalls, std::size_t imDeclinedIface,
                               const rw::ImpactFileRollup& imFiles, const rw::ReachAttribution& imAttr, const rw::DefTableListing& imListing,
                               const rw::ValueRefRows& imValueRefs, const rw::RankDisclosure& prD, const rw::ImpactDeclinedRows& imDc, const rw::ImpactRing& imRing,
-                              bool imContract, std::size_t imRadiusTests )
+                              const ImpactRootReadings& imRoot )
 {
     if( cfg.json )
     {
@@ -3701,9 +3708,9 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
                    + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end ) ).c_str(),
-                 rw::testedLensLegend( cfg.columnar ), rw::impactTestedPartitionLegend( imRadiusTests, cfg.ignoreTests, !cfg.columnar ),   // IMPACT-TEST-TIER
+                 rw::testedLensLegend( cfg.columnar ), rw::impactTestedPartitionLegend( imRoot.radiusTests, cfg.ignoreTests, !cfg.columnar ),   // IMPACT-TEST-TIER
                  rw::kTestedLensBlindSpotLegend,
-                 ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ) + rw::implsLegend( imContract ) ).c_str(),   // BODILESS-SEED: impls=
+                 ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ) + rw::implsLegend( imRoot.contract ) ).c_str(),   // BODILESS-SEED: impls=
                  rw::declinedCallsLegendForRows( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
                    + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( imDc.views, /*callersForm=*/true, imDc.cut ) ),   // ix2-slice: + the <dc> rows, one per counted call
                  rw::declinedIfaceLegend( imDeclinedIface > 0 ),
@@ -3999,7 +4006,8 @@ std::optional<int> runImpact( const MainDispatch& d )
                                                                     rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false );
 
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
-                          imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing, imContract.contracts > 0, imRadius.tests );
+                          imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing,
+                          ImpactRootReadings{ .contract = imContract.contracts > 0, .radiusTests = imRadius.tests } );
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact; pageDisclosure emits the ` shown= capped=` bytes this verb used to hand-roll
         // (src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3). LB-G: the same NAMED constant
