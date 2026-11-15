@@ -507,6 +507,7 @@ for _g in \
     expandtopk0check \
     extentcheck \
     externalvetocheck \
+    failuredefaultcheck \
     falseedgecheck \
     fcallforwardcheck \
     fficheck \
@@ -861,6 +862,7 @@ for _g in \
     qackconcurrencycheck \
     qackorigincheck \
     qbasecachecheck \
+    qbasechildcheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
@@ -869,8 +871,10 @@ for _g in \
     qddegradecheck \
     qddialscheck \
     qdentryceilingcheck \
+    qdgitrenamehealcheck \
     qdmonstercheck \
     qdrefpaircheck \
+    qdrenameidentitycheck \
     qdtestdeadcheck \
     qdtype3oncecheck \
     qextractionkeycheck \

@@ -206,6 +206,12 @@ public:
     // gates grep for; it stays byte-identical, as do the messages.
     RW_COLD_NOINLINE
     static void handleDegraded( const char* file, int line, const char* function, const char* description ) noexcept;
+
+    // The once-per-site notices ("[math degraded]", "[validate]") ANOTHER process already printed for this run — a child
+    // that ran one phase of it and whose stderr the caller passed through. Their sites stay silent in this process too, so
+    // a site that fires in the child's phase and again in this one prints once, as it would have had both phases run here.
+    // `stderrText` is the child's stderr as passed through; lines that are not such notices are ignored.
+    static void adoptNotices( const char* stderrText ) noexcept;
 };
 
 // Opaque, stable, NON-ZERO id for the calling thread (lives for the thread's lifetime). Implemented with a

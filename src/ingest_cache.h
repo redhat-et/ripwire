@@ -155,7 +155,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 51;           // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
+constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
+                                                      //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
+                                                      // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
                                                       //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
                                                       // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
                                                       // 49: lane warm-direct — the FILE record's head gains the eight family counts
