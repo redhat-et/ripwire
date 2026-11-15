@@ -404,12 +404,26 @@ skhas   "$TMP/d1b.xml" "D1 sentence, a backquoted :: qualifier"     '<shortkey o
 run "$S" "$TMP/d3.xml" "--for=where does ExprKind come from? --defs finds nothing" && skhas "$TMP/d3.xml" "D3 sentence literal import-as row" '<ld p="rs/src/lib.rs" l="2" shape="import-as">'
 run "$S" "$TMP/d4.xml" "--for=why is the lookup of MAX_WIDGET_COUNT empty" && skhas "$TMP/d4.xml" "D4 sentence CONST key: held=lit" '<rung n="literal" key="MAX_WIDGET_COUNT" held="lit" exact="0"/>'
 run "$S" "$TMP/d5.xml" "--for=where is formatDate defined, it is used as Wrong.formatDate" && skhas "$TMP/d5.xml" "D5 a bare leaf beside its qualified spelling is one name" '<shortkey of="Wrong.formatDate" from="sentence"'
-run "$S" "$TMP/d6.xml" "--for=definition of WidgetPtr, the name lookup is empty" --token-budget=2000 && {
+# D6 on both sides of U's whole price (test/lib/softbudget.py whole_price: est_tokens plus the held <shortkey> WITH its own legend
+# comment, as src/forbudgetfit.h charges it). At that price U fits whole: the unbudgeted block byte for byte. Below it the block is
+# held: the held="budget" stub with next=, no rungs. (CodeRabbit #665: the 848 B shortkey legend rode free, so 2000 "fit" a
+# 2369-token answer and the unheld block went out over the budget; red on 1e3b55a75 at B=2000, which printed the rungs.)
 run "$S" "$TMP/d6u.xml" "--for=definition of WidgetPtr, the name lookup is empty" && {
-if [ -n "$( skblock "$TMP/d6u.xml" )" ] && [ "$( skblock "$TMP/d6.xml" )" = "$( skblock "$TMP/d6u.xml" )" ]; then ok "D6 sentence under a token budget: the unbudgeted <shortkey from=\"sentence\"> block"
-else no "D6 sentence under a token budget: the <shortkey> block is not the unbudgeted answer's"; fi
-}
+d6w=$( python3 -c 'import sys; sys.path.insert( 0, sys.argv[1] ); import softbudget; print( softbudget.whole_price( sys.argv[2] ) or 0 )' "$ROOT/test/lib" "$TMP/d6u.xml" )
+if [ "${d6w:-0}" -le 1 ]; then no "D6 whole price of the unbudgeted answer: none read ($d6w)"
+else
+run "$S" "$TMP/d6.xml" "--for=definition of WidgetPtr, the name lookup is empty" "--token-budget=$d6w" && {
+if [ -n "$( skblock "$TMP/d6u.xml" )" ] && [ "$( skblock "$TMP/d6.xml" )" = "$( skblock "$TMP/d6u.xml" )" ]; then ok "D6 sentence at its whole price $d6w: the unbudgeted <shortkey from=\"sentence\"> block"
+else no "D6 sentence at its whole price $d6w: the <shortkey> block is not the unbudgeted answer's"; fi
 if grep -q 'from=sentence: the route read the task as words' "$TMP/d6.xml"; then ok "D6 the budgeted answer's legend defines from="; else no "D6 the budgeted answer's legend defines from="; fi
+}
+run "$S" "$TMP/d6h.xml" "--for=definition of WidgetPtr, the name lookup is empty" "--token-budget=$(( d6w - 1 ))" && {
+if [ "$( skblock "$TMP/d6h.xml" )" = '<shortkey held="budget" of="WidgetPtr" from="sentence" next="--for=WidgetPtr"/>' ] && ! grep -q '<rung ' "$TMP/d6h.xml"; then
+    ok "D6 one token under the whole price ($(( d6w - 1 ))): the held marker with next=, no rungs"
+else no "D6 one token under the whole price ($(( d6w - 1 ))): want the held marker, got $( skblock "$TMP/d6h.xml" | head -c 160 )"; fi
+if grep -q 'from=sentence: the route read the task as words' "$TMP/d6h.xml"; then ok "D6 the held answer's legend defines from="; else no "D6 the held answer's legend defines from="; fi
+}
+fi
 }
 ( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=definition of WidgetPtr, the name lookup is empty" </dev/null 2>/dev/null ) >"$TMP/d7.xml"; d7rc=$?
 if [ "$d7rc" -eq 0 ] && grep -q '<ctx ' "$TMP/d7.xml" && ! grep -q '<shortkey' "$TMP/d7.xml"; then ok "D7 the off switch removes the sentence ladder"; else no "D7 the off switch removes the sentence ladder (rc=$d7rc)"; fi
