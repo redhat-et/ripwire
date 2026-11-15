@@ -19,4 +19,4 @@ answer itself still carries `refs_omitted=` for agents and never contains the wa
 `--for` "unused functions in A/ and B/" now prints `<unused_cut>` when the table shows fewer files than the named directories
 hold together.
 
-The changed compact readings (`corpus_oversize`, `unindexed_files_skipped`, `refs_omitted`) move the session legend dictionary to `dictv=6b9ee76064d6e25f entries=1121` (docs/COMMANDS.md and the showcase capture carry the pair).
+The changed compact readings (`corpus_oversize`, `unindexed_files_skipped`, `refs_omitted`) move the session legend dictionary to `dictv=ca3cbc06ccdaf728 entries=1122` (docs/COMMANDS.md and the showcase capture carry the pair).
