@@ -780,6 +780,7 @@ for _g in \
     nestedqualcheck \
     nestprofilecheck \
     nextverbcheck \
+    nextaposcheck \
     noaliascheck \
     nodekindcheck \
     nongitqmetricscheck \
