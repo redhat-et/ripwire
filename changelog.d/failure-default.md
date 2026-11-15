@@ -1,0 +1,13 @@
+### Added — `--quality-delta`: error-masking's `facet="failure-default"`, a read, parse or spawn failure returned as an empty success
+
+A new error-masking facet. The change added a handler that turns a failed read, parse or spawn into a value a success can also return, in a function whose declared result cannot say it failed. The row carries `facet="failure-default"` and is report-only in every language, so it is `sev="minor"` unless the same symbol also gained a gating construct.
+
+- **TypeScript:** a `catch` whose only statement returns `null`, `undefined`, `[]`, `{}`, `false`, `0` or `''`, or a promise `.catch( () => <empty> )`. The try body (or the promise chain) must call `JSON.parse`, an fs read, `readFile*`, `exec*`/`spawn*`, `fetch`, or a helper the same file defines that calls one of them. The enclosing function must declare an array, tuple, boolean, object, `Record`/`Map`/`Set` return type, or a `Promise` of one. A union with `null`/`undefined`, `unknown`, `any` or a named alias is refused.
+- **C++:** `.value_or( <empty> )` on a file read (`readWholeFile`, `readRegularFile`, `readText…`), directly or through a local the read initialized, in a function that does not return an optional, expected, variant or pointer.
+- **Refused:** a handler with a comment or a second statement (a log call). Also refused: a C++ local that is tested between the read and the `value_or` (the `if( !bytes ) DISCLOSE(…)` house pattern), a result the next statement tests with `.empty()`, and a comment on the `value_or` line.
+
+This is the shape of CodeRabbit's #614 finding: `readWholeFile( … ).value_or( std::string() )` let an unreadable package.json read as `external="1"`. A replay of that pre-fix window (`--quality-delta=8808c6290..8808c6290^ --quality-kinds=error-masking`) prints one row on `resolveWebSpec`.
+
+`test/failuredefaultcheck.sh` pins the aislop `audit-js-parser.ts` shape, a same-file parse helper, the promise form and the #614 C++ shape, each red before and green after. The negative arms are a `T[] | null` result, a commented `catch { return false; }` around `fs.lstatSync`, a try with no read, a log call, the house pattern, a commented floor line, an optional result, an `.empty()` test and a `has_value()` read; each counts the handlers or `value_or` sites it judged and fails on zero.
+
+Versions: `kQSnapCacheScheme` 29 -> 30 (the Snapshot gained `failureDefaultBySym`; a cached snapshot is recomputed once), and the ingest cache `kCacheVersion` 51 -> 52 (the carried construct hits gain the failure-default tag; each file is re-parsed once). The session legend dictionary moves to `dictv=fe95b9c62e11f7b5 entries=1113`, and docs/COMMANDS.md and the showcase capture are re-recorded.

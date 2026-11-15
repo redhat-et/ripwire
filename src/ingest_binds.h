@@ -4252,21 +4252,6 @@ inline std::string_view declaredOrConstructed( const BindCtx& cx, TSNode type, T
 // receiverevidence.h visibleLocal can tell which binding of a name a call site sees. A binding whose class is unknown is
 // still recorded (a TOMBSTONE): it hides the field or the outer local of its name over its span and proves nothing.
 
-// the nearest proper ancestor of `n` whose kind is one of `kinds`; null when none within 64 levels
-inline TSNode ancestorOfKind( TSNode n, std::initializer_list<std::string_view> kinds )
-{
-    TSNode p = ts_node_is_null( n ) ? TSNode{} : parentOf( n );
-    for( int guard = 0; guard < 64 && !ts_node_is_null( p ); ++guard )
-    {
-        if( std::ranges::find( kinds, std::string_view( ts_node_type( p ) ) ) != kinds.end() )
-        {
-            return p;
-        }
-        p = parentOf( p );
-    }
-    return TSNode{};
-}
-
 // a name recorded at `at` and visible over `scope` ({0,0} when there is none: the whole definition) — the whole of it, or
 // (`fromHere`, a block's declaration) from `at` to its end
 inline BindSite siteOver( std::uint32_t at, TSNode scope, bool fromHere ) noexcept
