@@ -35,10 +35,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 430 | 146 | 278 | **152** |
+| 431 | 146 | 279 | **152** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 430 + 10 is the 440 constants this generator parses out of `src/`.
+are not counted as caps, and 431 + 10 is the 441 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 430 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 288 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 431 caps are classified
+(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 288 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -244,12 +244,13 @@ Discloses: **none**
 
 ### `src/darkflags.h`
 
-Discloses: `capped`, `reads_capped`
+Discloses: `capped`, `reads_capped`, `writes_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxAliasDepth` | `8` | INDEXING | — |
 | `kMaxEnvNameLen` | `128` | BOUNDARY | longest plausible environment-variable name |
+| `kMaxShellNesting` | `32` | INDEXING | — |
 | `kMaxSitesShown` | `8` | OUTPUT | <read> sites per gate; a DEFAULT, raisable by --limit=N (effectiveRowCap), lifted by --detail |
 
 ### `src/declinedsites.h`

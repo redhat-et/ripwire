@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 826 gate scripts (counts snapshot 2026-11-15) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 827 gate scripts (counts snapshot 2026-11-15) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5888,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**826 gate scripts** at the counts snapshot 2026-11-15; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**827 gate scripts** at the counts snapshot 2026-11-15; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -7008,7 +7008,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 826 at the counts snapshot 2026-11-15. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 827 at the counts snapshot 2026-11-15. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites
@@ -14712,3 +14712,274 @@ If the resolve loop's output cannot be serialized without also serializing the r
 (`varType`, `localNameSet`, `localShadowSpans`, `acc`), the section grows past Band 3 and the lane
 reduces to the CSR-only variant. That is a legitimate outcome, to be recorded as a narrowing with the
 measured reason, not retried until it passes.
+
+## `--impact`'s inline importer ring, gated on two fields the header already prints — PRE-REGISTERED 2026-11-15 (before any `src/` change and before the readout below exists)
+
+**What this registers.** `--impact` prints the `<f>` importer ring — "files that `#include`/`import`
+the definition's file", a deliberately weaker relation than the reach set, which the legend already
+distinguishes — inline and unconditionally, except behind one C umbrella-header heuristic. This
+registers a DEFAULT change: show the ring inline only when **`declined_iface > 0`** (reference
+resolution declined on an interface naming the target) or when **`reaches <= importers`** (the graph
+found no more transitive callers than there are importers, so the ring carries information the graph
+lacks), and otherwise withhold it to the count plus the `importers_next=` paging handle — a
+presentation that **already exists** and already ships on the cells where the umbrella heuristic
+fires. No new constant and no new header field: both gate fields are printed today.
+
+The bands below are written before a line of the implementation exists and before any number from the
+registered readout set exists. Each one names what would refute it.
+
+### The measurement that motivated it, and the two grader defects it survived
+
+0.7.0 practice-run D4 cross-tool answer grading, `--impact` arm, **5 cells in 3 repos** (hono,
+textual, tmux), 78 required gold files. **Corrected 2026-11-15, with the amendment below and before
+any new number: the published "ripwire --impact" column holds 6 cells, but one of them (textual-20) is
+not an `--impact` answer at all** — its recorded output is `ripwire.affected/v1`, a different verb with
+a different schema, which is also where the 252 `<test>` rows previously attributed to `--impact`'s
+element census came from. Scored over the 5 genuine `--impact` cells the arms read 96.2 % rather than
+96.3 % (75 of 78 gold files rather than 78 of 81); claims, precision and `Wrong` are unchanged,
+because that cell's only claims were test files, which the instrument excludes. The figures in the
+table below are the verb-pure ones. Answers are the recorded `fire321` store (ripwire
+`cd04d477e`, each cell's own recorded argv), spot-verified identical on the run pin `44f7d3326`. Gold
+files are `rg -l -w <symbol>` over non-test files. Grading is the run kit's `peer_grade.py` in its
+uniform deny-list scoping (HTML comments, `<dc>` declined call sites and `<vr>` value references
+dropped, because the schema disclaims them); the three arms are computed from the recorded answers by
+`harness/impact_ring_arms.py` in the run kit, which withholds exactly the `<f>` rows. Both arms are
+graded over the **identical** qid set.
+
+| answer shape | file-shaped claims | recall | precision | Wrong |
+|---|---:|---:|---:|---:|
+| ring always inline (today) | 131 | **96.2 %** | 56.5 % | 57 |
+| **ring inline only when the graph declined** | **99** | **96.2 %** | 74.7 % | **25** |
+| ring never inline | 84 | 91.0 % | 83.3 % | 14 |
+
+Two grader defects were found and fixed *before* these figures, and an earlier published pair of
+numbers for the same three arms ("66.7 % recall, Wrong 51 → 17") is **retracted**: the path extractor
+required a `/` and so could not see a flat repo's `grid.c` at all, and the first replacement scoping
+was an allow-list missing three claim sections (`<rf>`, `<new>`, `<test>`). The arms' *structure* was
+unchanged by both corrections while every magnitude moved. That is the standing of the hypothesis
+being registered — a shape that survived a re-measurement which moved all of its numbers — and it is
+still 6 cells, which is why nothing below is decided on them.
+
+Per cell, which is the structural evidence rather than the aggregate:
+
+| cell | `reaches` | `importers` | `declined_iface` | gate | gold files from the reach set | gold files the ring ADDS |
+|---|---:|---:|---:|---|---:|---:|
+| hono-09 (`Router.match`, a TS interface method) | 6 | 29 | **229** | **SHOW** | 7 | **4** |
+| hono-10 | 51 | 20 | 0 | hold | 13 | 0 |
+| textual-10 (`Region.intersection`, a hub type) | 2,568 | 85 | 0 | hold | 5 | 0 |
+| textual-20 | 0 | 0 | 0 | hold | 3 | 0 |
+| tmux-09 | 687 | 157 | 0 | hold | 14 | 0 |
+| tmux-10 | 1,073 | 157 | 0 | hold | 32 | 0 |
+
+The ring adds gold on the one cell with a declined interface and **zero on all five others**. Note
+also, registered here rather than discovered later: **`reaches <= importers` never fires alone** on
+these five cells — it fires only on hono-09, where `declined_iface` fires too. On this evidence the
+second clause is carried by reasoning, not by measurement. Band 3 below is what settles it.
+
+### The registered readout set — AMENDED 2026-11-15, same day, before any number from it exists
+
+**The amendment, and the error that forced it.** This section first registered the readout as "every
+gold'd cell in the 163-task gold root that the `--impact` arm already answered: **141 cells across 15
+repos**", with a per-repo breakdown. That population does not exist. The gold root holds 141 gold
+files and the `--impact` arm has an answer for every one of them, but **only 6 of the 141 are
+file-grain golds** — the other 135 are free-text subsystem rubrics (`R1`…`Rn`, "subsystem + at least
+one key file named") written for orient-style questions, and this instrument, which scores the set of
+files an answer NAMES against an `rg -l -w` gold, cannot grade them at all. The 141 came from counting
+files in a directory; the number the instrument itself reports is `cells: 6`, and it is printed for
+every tool in the store this registration was built from.
+
+Nothing below is re-tuned: **no band threshold, no decision rule and no clause moves in this
+amendment.** What changes is the honest statement of what can be measured today.
+
+**What can be graded today: 5 file-grain `--impact` cells in 3 repos** (hono-09, hono-10,
+textual-10, tmux-09, tmux-10; 78 required gold files — textual-20's recorded answer is `--affected`,
+not `--impact`, so it is not an arm of this verb at all) — which is exactly the motivating measurement
+above. A registration whose readout set is identical to the data that motivated it adjudicates
+nothing, so:
+
+**This band is registered as NOT ADJUDICABLE on today's gold population, and no part of this default
+change may ship until it is.** The blocking condition is registered here so it cannot be quietly
+dropped: the readout requires **at least 16 file-grain `--impact` cells across at least 8 repos**, each one verified to be an
+`--impact` answer by its schema attribute rather than by the column it was filed under, built by the
+recipe the existing 6 were built by — required non-test files named by hand with a per-file reason,
+then checked for completeness with `rg -l -w <symbol>` over non-test files — with the languages of
+the gold set stated, since the one cell where the ring carries gold is a TypeScript interface method
+and C, Python and TS are all that the current 3 repos cover.
+
+Until that set exists, the three arms above stand as a 6-cell *motivating* measurement and are
+labelled as such wherever they are quoted. The arms themselves remain reproducible from the recorded
+answers by `harness/impact_ring_arms.py`, and the readout harness that will consume the wider set is
+`harness/impact_ring_readout.py`, which enumerates the claim elements rather than assuming them and
+reports the per-clause firing counts Band 3 asks for.
+
+### Band 1 — RECALL, and it is the gating band
+
+The claim is "a smaller answer that loses nothing", so the band is on what the withheld rows contain.
+
+**Registered: zero required gold files lost.** The gated arm's aggregate recall over the registered readout set
+must equal today's arm's **exactly**, and no cell may lose a required gold file.
+
+*Decision rule, in order, nothing re-tuned after data:* exact equality → **ACCEPT**. 1–3 gold files
+lost, in at most 3 cells → **REWORD**: one widening of the trigger, drawn only from fields the header
+already prints, then a **fresh registration with a fresh band and a fresh readout** — not a second
+reading of this one. More than 3 lost, or any single cell losing 2 or more → **REJECT**; the ring
+stays inline as it ships today and the finding is recorded as a refutation, which is the more
+valuable result because it would mean the reach set and the ring are not separable by these fields.
+
+### Band 2 — SIZE, with a vacuity guard in both directions
+
+Registered: the gated arm emits **at least 10 % fewer file-shaped claims** than today's arm in
+aggregate over the registered readout set (the 6-cell motivation shows 24.4 %). Below 10 % the change is a no-op
+dressed as a default change and is recorded as one, not shipped.
+
+*Vacuity guard:* the gate must fire on **more than 0 and fewer than all** of the readout set's cells. A gate
+that fires everywhere is today's behaviour with extra code; a gate that fires nowhere is the
+ring-never arm, which Band 1 forbids. Either reading refutes the formulation rather than the idea.
+
+### Band 3 — the clause that has no independent evidence yet
+
+The readout must report, per clause, how many cells it fires on **alone**: `declined_iface > 0` only,
+`reaches <= importers` only, and both. Registered in advance: **if `reaches <= importers` fires alone
+on zero cells across the readout set, the clause is DROPPED** and the gate ships as the single `declined_iface`
+condition. A clause that never changes an answer is not a safety margin, it is decoration that the
+next reader will take for evidence.
+
+### Band 4 — precision is deliberately NOT a band
+
+No band here is set on precision, `Wrong`, or any figure derived from them, and the readout prints
+them as context only. The reason is measured, not asserted: on this same instrument the same
+`--impact` answer on tmux scores **100.0 % precision at the default limit and 21.5 % at
+`--limit=121`** — the same tool, the same gold, the cut doing the grading — and ripwire *declares*
+that cut (`files_capped="1" shown_files="32" files="121" files_next=`) while no peer declares one on
+any cell. Under an `rg -l -w` gold an importer that never names the symbol **cannot** be a gold file
+by construction, so withholding the ring lowers `Wrong` definitionally. A band on precision here
+would reward concealment and would pass whatever the code did.
+
+### Band 5 — disclosure and dialect parity, the ship/no-ship gate
+
+Failing any of these means the lane does not land in any form:
+
+1. **A withheld ring is disclosed, never silent** — the count, `shown_importers="0"`, the
+   `importers_capped=`/`importers_next=` handle, and a legend clause saying on what condition the
+   ring was withheld. Non-negotiable 3 of `CONTRIBUTING.md` and §9 principle 3 both apply: a cut that
+   states itself and hands over the one call that fetches it is still terminal.
+2. **One documented call still fetches the full ring**, and the readout names it.
+3. **Parity across every dialect** — XML, `--json`, the MCP answer, and the `--impact` section inside
+   `--safe-delete` — gated, not inspected by hand. This lane adopts the tiering pattern of
+   `lane/impact-test-tier` (disclosed header count, labelled rows, legend clause, parity gate) rather
+   than inventing a second shape for the same kind of disclosure.
+4. **The gate is written before the code and must be red first**, with a vacuity guard that refuses
+   to count "no `<f>` rows present, therefore trivially correct" as a pass.
+
+### Baseline pinning, because this verb has a lane in flight
+
+Both arms must be measured on **one binary**. `lane/impact-test-tier` changes how `--impact` counts
+test definitions, and `<test>` rows are the single largest element family in these answers (252 rows
+across the 6 motivating cells, against `<s>` 166, `<rf>` 92, `<f>` 89, `<dc>` 32, `<def>` 9,
+`<new>` 8). If that lane lands before this readout, **both arms are re-baselined on the post-lane
+binary and the claim counts in Band 2 are restated from it**; a band whose two arms sit on different
+baselines of the same verb is void, however clean the arithmetic looks.
+
+### What this registration does NOT claim, and what it forbids
+
+No claim about any peer tool: this is one tool's two arms on the same cells. No claim that the ring is
+low-value in general — it supplies 4 of hono-09's 12 gold files, and Band 1 exists to stop the gate
+being widened into the ring-never arm, which is the simpler and more tempting change and loses 4.9
+points of recall. No claim about the cold or warm cost of the gate; it is two integer comparisons on
+fields already computed.
+
+**Forbidden alternative, registered so it cannot be reached for after a disappointing readout:** no
+share-of-repo threshold. The rings are 95 % of tmux's root files, 22 % of textual's `src`, and 10 % of
+hono's `src`, so any cut between 22 and 10 is fitted to two cells. If the two header fields do not
+separate the cells, that is Band 1's REJECT, not an invitation to find a constant that does.
+
+### The honest failure mode, registered in advance
+
+`reaches <= importers` is plausible in repos with large include fan-in, where a definition has few
+transitive callers and many importers. If the gate therefore fires on most of the readout set's cells, Band 2's
+vacuity guard fails and the change is a near no-op — to be recorded as a measured no-op with the
+firing distribution printed, not rescued by narrowing the clause until it passes.
+
+## `--impact`'s importer ring, MEASURED 2026-11-15 against the band above: **REJECTED by Band 1 — the withheld ring does carry gold files, on a population wide enough to see it**
+
+The band's blocking condition was met the same day it was registered: an 18-cell file-grain gold set
+was built (15 repos, 8 languages, 266 required rows, every cell verified gradable through the
+grader's own `gold_for`), `--impact` was collected for each on the run pin `44f7d3326`, and the arms
+were re-derived by `harness/impact_ring_readout.py`. **19 cells in 11 repos scored**, against the 5
+the hypothesis was built on.
+
+| arm | file-shaped claims | recall | precision | Wrong |
+|---|---:|---:|---:|---:|
+| ring always inline (today) | 483 | **88.4 %** | 58.0 % | 203 |
+| ring inline only when the graph declined | 376 | **86.2 %** | 72.6 % | 103 |
+| ring never inline | 289 | 79.6 % | 87.2 % | 37 |
+
+### Band 1 — FAIL, and the decision rule says REJECT
+
+Registered: zero required gold files lost. Measured: **7 lost across 4 cells**, three of them losing
+two each — past both halves of the registered REJECT threshold ("more than 3 lost, or any single cell
+losing 2 or more").
+
+| cell | lost | `reaches` | `importers` | `declined_iface` | the gold files the ring was carrying |
+|---|---:|---:|---:|---:|---|
+| flake8-31 | 2 | 57 | 8 | 0 | `formatting/default.py`, `style_guide.py` |
+| textual-31 | 2 | 3,087 | 25 | 0 | `canvas.py`, `renderables/blank.py` |
+| textual-32 | 2 | 130 | 123 | 0 | `_styles_cache.py`, `widgets/_data_table.py` |
+| hono-32 | 1 | 137 | 62 | 0 | `src/index.ts` |
+
+Every one has `declined_iface="0"` and `reaches > importers`, so **the two header fields cannot see
+these cases**: on each, call-graph resolution did not report declining, and the reach set was larger
+than the importer ring, yet the ring still held files the reach set missed. The 5-cell motivation
+said recall was unchanged; 19 cells say it falls 88.4 % → 86.2 %. The hypothesis was wrong in the
+direction the band was built to catch, and the ring stays inline as it ships today.
+
+### Band 2 — would have passed, which is exactly why Band 1 gates
+
+22.2 % fewer claims (483 → 376), the gate firing on 5 of 19 cells — inside the vacuity guard in both
+directions. A size band alone would have shipped this.
+
+### Band 3 — the clause that had no evidence now has some, and it is retained
+
+Registered: drop `reaches <= importers` if it never fires alone. On 19 cells it fires **alone on 3**
+(and with `declined_iface` on 2 more), so it is not decoration and the registration's own rule keeps
+it. That is recorded for the next formulation; it does not rescue this one.
+
+### What the wider gold set found on the way, which no band asked for
+
+Collecting 18 cells on the pin exposed `--impact`'s coverage on target kinds the old 5-cell population
+could not reach. **Three cells are refused outright** — `kRouteContext` (a JavaScript `Symbol()`
+module const), `updateValues` (a C function-pointer slot in a class-descriptor struct), and
+`Preprocessor::run` (a Rust trait method) — each with `found="0"` and the legend's own "zero = none
+found, not none exists". One of those refusals carried `near="Meter_updateValues"`, the indexed
+spelling, and the retry answered: the gold's own header had capitalised the name. **Two Go cells
+answer empty and say why**: `reaches="0" importers="0" no_file_edges="go"`, so a Go interface method
+gets no blast radius at all and the attribute discloses it. 13 of 18 answered with content.
+
+None of that is a defect of this band; it is the coverage picture a 5-cell population could not show,
+and it belongs to whichever lane next touches Go file edges, JS consts (`lane/ts-const-defs`, open) or
+Rust trait methods.
+
+### A correction to this card's own account of `textual-20` (same day, after reading its gold)
+
+This card and the amendment above both say `textual-20` "is not an `--impact` answer at all", and use
+that to explain why the verb-pure population is 5 rather than 6. The first half is true and the
+inference drawn from it was wrong. `textual-20`'s gold asks **which test files must run when
+`src/textual/timer.py` changes**, and its recorded argv is `--affected=src/textual/timer.py` — the
+RIGHT verb for that question. The cross-tool arm was always "the targeted verb each question calls
+for"; `--impact=SYM` was the common case, not the invariant. So the answer is correct, the published
+cross-tool figures (n=6, recall 96.3 %, precision 56.5 %, `Wrong` 57, headline 2.60x at matched n=6)
+were never wrong, and the defect was a column heading that implied a single verb.
+
+What this changes here: nothing in the band or its verdict. A readout that reads `<impact>` header
+fields cannot use an `--affected` answer, so **19 cells is still the right population for the ring
+arms** — but the cell is excluded by selecting on the answer's own schema attribute, not because the
+answer was wrong. The harness now prints which schema answered every cell in that arm, so the verb can
+never be inferred from a heading again.
+
+### What this result does NOT say
+
+It does not say the ring is valuable everywhere — it is still 34 % precise where it was measured, and
+`Wrong` falls by half when it is withheld. It says the **gate cannot be built from `declined_iface`
+and `reaches <= importers`**, because the cells where the ring carries gold are invisible to both. A
+formulation that reads something else is a new registration with a new band and a fresh readout; per
+the registration's forbidden-alternative clause, a share-of-repo threshold is not it.
