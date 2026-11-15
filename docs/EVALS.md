@@ -14828,3 +14828,69 @@ zero and the lane is recorded as a **measured near-no-op with the profile shares
 retried with a third variant until something passes. In that case the remaining cold CPU is parse and
 query-engine time, the owner's Band 3b ruling stands unamended, and the ledger's W2 row should be
 rewritten to say the gap is not reachable from our side.
+
+## The cold-CPU pass, MEASURED 2026-11-15 against the band above: **Band 1 FAIL — −2.5 % against an 8 % floor, and the gap is not reachable from these two passes**
+
+Both registered changes are implemented and byte-identical; neither comes near the band.
+
+**Arms.** `0217049f2` against the same tree plus (1) the per-thread walk scratch and (2) the node-kind
+flag table built from the three classifiers themselves. Both built `-DCMAKE_BUILD_TYPE=Release`,
+median of 5 cold runs per cell, a **fresh `--cache=` path per run**, `/usr/bin/time -l` for CPU and
+instructions retired.
+
+| repo | instructions | CPU | verdict |
+|---|---:|---:|---|
+| koa | −0.69 % | +0.00 % | — |
+| terraform | −2.65 % | −3.56 % | — |
+| nushell | −2.81 % | +1.58 % | — |
+| cpython | −1.58 % | **−2.54 %** | Band 1 needs ≤ −8 % |
+| envoy | −1.72 % | **−2.52 %** | Band 1 needs ≤ −8 % |
+| vscode | −1.02 % | −0.09 % | — |
+| **llvm-project** (the super-linear rung) | **−1.14 %** | +0.71 % | inside the ladder's own −3.6 %…+1.6 % spread |
+
+**Band 1 — FAIL.** Instructions fall everywhere, so the changes do remove real work; CPU falls 2.5 %
+on both gating repos against a registered floor of 8 %. Per the registration's honest-failure-mode
+clause this is recorded as a **measured near-no-op** and is not retried with a third variant.
+
+**Band 2 — not reached.** With Band 1 failed there is no win to attribute, and the profiled control
+was not run.
+
+**Band 3 — PASS, and it is the only band that passed.** stdout is byte-identical to the base binary on
+**16 repos across 8 languages** (koa, nushell, htop, starlette, fzf, rake, kysely, mdbook, ninja,
+nfpm, flake8, fastify, nunjucks, hono, textual, tmux) plus this C++ tree, and the dev build's
+per-node `DASSERT` — which re-derives all three classifications from the oracle at every visited node
+— never fired on any of them.
+
+### Why the estimate was 4–8 % and the measurement is 2.5 %
+
+The arithmetic was: the walk is 10.8 % of cold CPU, it pays ~79 failed byte comparisons per node (32
+literals in `cc_isNestingControl`, 44 in `isDecisionType`, 3 in `cc_isNestingOnly`), so removing them
+should take a large bite out of it. The measurement says the comparisons were not the cost. `kindIs`
+is an inlined, length-known, first-byte-exit compare — the 2026-09-10 OPTREMARKS F3 round had already
+removed the `strcmp` this class is usually about — so 79 of them cost far less than the tree-cursor
+traversal and the per-node `ts_node_type` / `ts_node_is_named` / `collectChildren` calls around them.
+**The cited precedent had already been applied here**, which is the part the registration got wrong,
+and the way to have known that before writing the code was to read the F3 round's own site rather than
+its headline number.
+
+### The instrument error that cost the first readout, recorded so it is not repeated
+
+The first readout compared the two arms as **dev builds**, where `DASSERT` is live. The new arm
+therefore did the table lookup *and* re-derived all three oracles per node *and* compared them — and
+read as a **1–3 % regression**, the opposite sign of the truth. A per-node correctness assert and a
+performance arm cannot share a binary. The band's own text says the readout runs on a non-profiled
+build; it should also have said non-debug, and it does now.
+
+### What this leaves
+
+Cold CPU remains **parse and query-engine bound** on the shares this card measured (tree-sitter parse
+31.5 %, the query engine ~19 % after the complexity walk is subtracted from its 29.7 %), and the
+owner's Band 3b ruling — cold is mostly tree-sitter and not worth rewriting — stands unamended. The
+weak-or-close ledger's W2 row, which read this as a reachable 1.5–1.7x efficiency gap against graft,
+is corrected to say the gap is not available from our side at that size.
+
+**One number worth carrying out of the llvm rung, unrelated to the band:** a cold llvm index peaks at
+**34.5 GB** of resident memory on this box (base arm, median of 3; the three base runs read 25.7,
+34.5 and 36.3 GB). That is within a hair of the 36 GB per-process cap this run enforces and it is a
+fact about the tool, not about the change, which moved it 2.0 %. Nothing in the memory claims covers a
+corpus that size, and the published memory column stops at vscode.
