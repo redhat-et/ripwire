@@ -2247,6 +2247,17 @@ inline std::vector<NodeId> rustDropImplMethodIds( const IngestResult& ing )
         if( s.kind != SymKind::Method || ( s.name != "drop" && s.name != "r#drop" ) || !langFacts( s.lang ).dropRunsAtScopeExit )
         {
             continue;
+// issue #499 — whether the --quality-delta legend owes its Rust sentence (verbs_quality.h kQdRustTestLegend): some def sits in a
+// Rust in-file test scope (`#[test] fn`, `#[cfg(test)] mod`; model.h testScope) of a language whose test attribute registers it.
+// Read with register-macro-excluded= > 0, that is the run whose excluded set holds the harness's functions. No exemption reads it.
+inline bool anyRustTestScopeDef( const IngestResult& ing ) noexcept
+{
+    return std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s )
+    {
+        return s.testScope != 0 && langFacts( s.lang ).attributeRegistersTests;
+    } );
+}
+
         }
         for( const Binding* block : dropBlocks )
         {
