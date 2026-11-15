@@ -4005,8 +4005,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // DEEP-TAIL d2, FOLD C (forbudget-soft round C): the file-grain tail is page 0 of the --for file page — one shared
         // model (forpage.h computeFileTail) for both dialects and the MCP twin, from the SAME ranking and term evidence the
         // `--limit=40` page uses, so the tail, its next= page and the page itself cannot disagree.
-        // TAIL-SYM-TERMS: the tie-break order of the names a tail row adds (forpage.h tailTermTieRank), once for every tail below
-        const std::vector<float> termTieRank = rw::tailTermTieRank( g, cfg.forTask );
+        // TAIL-SYM-TERMS: the tie-break order of the names a tail row adds (forpage.h tailTermTieRank), once for every tail below.
+        // Under --token-budget none is added (empty): the target's tail reserve prices the pre-card walk (fileTailOldWalk), so a
+        // name there would spend bytes the target never granted (forsoftbudgetcheck (ST) upper bound) — the MCP twin's rule too.
+        const std::vector<float> termTieRank = cfg.tokenBudget == 0 ? rw::tailTermTieRank( g, cfg.forTask ) : std::vector<float>{};
         const FileTail forFileTail = computeFileTail( ing, lensRank, lr.evidence, lensSurfaceIds, flRootArg, cfg.forTask, false, &termTieRank );   // the DEGRADE paths' tail
         // H2H-Graft lane 2 (2026-09-07): the tail's rank rows exclude only the files of the sigs rows actually EMITTED (a row the
         // ladder trimmed must land in the tail, never nowhere).
