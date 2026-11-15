@@ -14959,6 +14959,23 @@ None of that is a defect of this band; it is the coverage picture a 5-cell popul
 and it belongs to whichever lane next touches Go file edges, JS consts (`lane/ts-const-defs`, open) or
 Rust trait methods.
 
+### A correction to this card's own account of `textual-20` (same day, after reading its gold)
+
+This card and the amendment above both say `textual-20` "is not an `--impact` answer at all", and use
+that to explain why the verb-pure population is 5 rather than 6. The first half is true and the
+inference drawn from it was wrong. `textual-20`'s gold asks **which test files must run when
+`src/textual/timer.py` changes**, and its recorded argv is `--affected=src/textual/timer.py` — the
+RIGHT verb for that question. The cross-tool arm was always "the targeted verb each question calls
+for"; `--impact=SYM` was the common case, not the invariant. So the answer is correct, the published
+cross-tool figures (n=6, recall 96.3 %, precision 56.5 %, `Wrong` 57, headline 2.60x at matched n=6)
+were never wrong, and the defect was a column heading that implied a single verb.
+
+What this changes here: nothing in the band or its verdict. A readout that reads `<impact>` header
+fields cannot use an `--affected` answer, so **19 cells is still the right population for the ring
+arms** — but the cell is excluded by selecting on the answer's own schema attribute, not because the
+answer was wrong. The harness now prints which schema answered every cell in that arm, so the verb can
+never be inferred from a heading again.
+
 ### What this result does NOT say
 
 It does not say the ring is valuable everywhere — it is still 34 % precise where it was measured, and
