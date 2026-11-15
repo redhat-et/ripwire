@@ -1084,6 +1084,7 @@ for _g in \
     vendorpatchcheck \
     verifycheck \
     versioncheck \
+    versionlabelcheck \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \

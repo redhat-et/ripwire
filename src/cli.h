@@ -5514,7 +5514,9 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // emit= names the formatted-output path this binary compiled in (infra/emit.h; test/versioncheck.sh
             // #6, and asserted per CI leg). It precedes built_from= on purpose: test/doctorcheck.sh arm (H)
             // reads built_from= as everything up to the closing paren, so the sha stays the LAST token.
-            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersion, kRipwireBuildType,
+            // The version token is the LABEL (cmake/version_stamp.cmake): a build off the tag says -dev, so a build of main is
+            // never mistaken for the release it follows; MCP/LSP serverInfo, --html and --doctor print the same one.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
                         kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, kRipwireGitStamp );
             std::exit( 0 );
         }

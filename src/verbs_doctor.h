@@ -343,7 +343,7 @@ inline std::string doctorBinaryPathVerdictAttr( const std::string& selfPath, con
                       " compare " + whichPath + " with " + selfPath + " by hand (cmp on POSIX, Get-FileHash in PowerShell)" ), esc ) ) + "\"";
     }
     const bool        selfIsOlder = order != 0 ? order > 0 : selfSt.st_mtime < whichSt.st_mtime;
-    const std::string selfName    = order != 0 ? selfPath + " (ripwire " + rw::kRipwireVersion + ")" : selfPath;
+    const std::string selfName    = order != 0 ? selfPath + " (ripwire " + rw::kRipwireVersionLabel + ")" : selfPath;
     const std::string whichName   = order != 0 ? whichPath + " (" + whichVersion + ")" : whichPath;
     const std::string& olderName  = selfIsOlder ? selfName : whichName;
     const std::string& newerName  = selfIsOlder ? whichName : selfName;

@@ -2261,7 +2261,7 @@ int runDefaultMap( const MainDispatch& d )
         const HtmlProvenance  htmlProv = htmlProvenanceFor( root, multiRoot );
         htmlColor.atStamp  = htmlProv.atStamp;
         htmlColor.rootName = htmlProv.rootName;
-        htmlColor.version  = kRipwireVersion;
+        htmlColor.version  = kRipwireVersionLabel;
         writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg, /*codeFirstRows=*/isDefaultMapScope );   // R-R
         if( htmlOut != stdout )
         {
