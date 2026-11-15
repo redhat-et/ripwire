@@ -7,7 +7,9 @@
 # src/. The rule (model.h kRankFlagBundleCopy, set at load by ingest_model.h markBundleCopies): a code definition in a
 # bundle-shaped file (read lexically, or parsed at 4 MiB or more) whose name a non-bundle file also defines is a COPY.
 # It takes the generated tier factor (filter.h), is no mention lift or ambiguity vote (mention.h) and no source-class
-# anchor (subjectanchor.h). Demoted, never dropped: --defs still lists it, and a name defined only in a bundle is no copy.
+# anchor (subjectanchor.h), no second path endpoint (pathgaps.h, forgraphverb.h) and no second function to the callers verb or its hop
+# (callhierarchy.h, forcallerhop.h).
+# Demoted, never dropped: --defs still lists it, and a name defined only in a bundle is no copy.
 # Every fixture is generated here (nothing large is committed where whole-repo runs would see it); each arm counts its
 # premise and FAILS on zero.
 #
@@ -98,6 +100,36 @@ fi
 "$BIN" "$TMP/big" --no-cache "$FOR_G" --legend=compact >"$TMP/b.out" 2>/dev/null   # status: as above
 gat="$( drows "$TMP/b.out" | grep -n "^lib/bundle.js n=$G\$" | head -1 | cut -d: -f1 )"
 if [ "${gat:-0}" = 1 ]; then ok "(b) the sole definition of $G (bundle only) is still the head row"; else no "(b) $G at row ${gat:-absent}, want 1: $( drows "$TMP/b.out" | head -3 | paste -sd'|' - )"; fi
+
+# ── (d) a path question binds the SOURCE endpoint: the bundle's copy is no second endpoint (forgraphverb.h) ─────────
+FOR_P="--for=what is the path from emitWidgets to $F?"
+"$BIN" "$TMP/big" --no-cache "$FOR_P" --legend=compact >"$TMP/d.out" 2>/dev/null   # status: as above
+gv="$( grep -oE '<!-- [^>]*--><graph_verb [^>]*>|<graph_verb [^>]*>' "$TMP/d.out" | grep -oE '<graph_verb [^>]*>' | head -1 )"
+dverb="$( printf '%s' "$gv" | grep -oE ' verb="[^"]*"' | head -1 )"
+dbun="$( tr '\n' ' ' <"$TMP/d.out" | grep -oE '<graph_verb .*</graph_verb>' | grep -o 'lib/bundle.js' | grep -c . )"
+if [ -n "$gv" ] && printf '%s' "$gv" | grep -q " narrowed=\"$F\"" && printf '%s' "$dverb" | grep -q "src/compiler/transformer.ts:$F" && [ "${dbun:-0}" = 0 ]; then
+    ok "(d) the path block binds the source endpoint ($dverb), narrowed=\"$F\", no bundle row in the block"
+else
+    no "(d) path block: ${gv:-no <graph_verb>} | bundle lines in block: ${dbun:-?}"
+fi
+# ── (e) the caller hop of a name-exact answer serves the source function's callers (forcallerhop.h) ─────────────────
+"$BIN" "$TMP/big" --no-cache "--for=$F" --legend=compact >"$TMP/e.out" 2>/dev/null   # status: as above
+ehop="$( grep -oE '<callers [^>]*>' "$TMP/e.out" | grep " of=\"$F\"" | head -1 )"
+erow="$( grep -oE "<callers [^>]*of=\"$F\"[^>]*>(<s [^>]*>)*" "$TMP/e.out" | grep -o 'n="emitWidgets"' | grep -c . )"
+if [ -n "$ehop" ] && [ "${erow:-0}" -ge 1 ]; then ok "(e) --for=$F carries the caller hop with the source caller emitWidgets"; else no "(e) caller hop: ${ehop:-absent}, emitWidgets rows ${erow:-0}"; fi
+
+# ── (f) --callers unions the source function only; the copy's own file still selects the copy (callhierarchy.h) ────────
+"$BIN" "$TMP/big" --no-cache "--callers=$F" --legend=compact >"$TMP/f.out" 2>/dev/null   # status: as above
+"$BIN" "$TMP/big" --no-cache "--callers=lib/bundle.js:$F" --legend=compact >"$TMP/f2.out" 2>/dev/null   # status: as above
+fdefs="$( grep -oE '<callers [^>]*>' "$TMP/f.out" | grep -oE ' defs="[0-9]+"' | head -1 )"
+fbun="$( grep -oE '<s [^>]*>' "$TMP/f.out" | grep -c 'lib/bundle.js' )"
+femit="$( grep -oE '<s [^>]*>' "$TMP/f.out" | grep -c 'n="emitWidgets"' )"
+f2bun="$( grep -oE '<s [^>]*>' "$TMP/f2.out" | grep -c 'lib/bundle.js' )"
+if [ "$fdefs" = ' defs="1"' ] && [ "${fbun:-0}" = 0 ] && [ "${femit:-0}" -ge 1 ] && [ "${f2bun:-0}" -ge 1 ]; then
+    ok "(f) --callers=$F unions the source only (emitWidgets, no bundle row); --callers=lib/bundle.js:$F still lists the bundle's $f2bun"
+else
+    no "(f) --callers=$F:${fdefs:- no defs=} bundle rows ${fbun:-?} emitWidgets ${femit:-?}; file-qualified bundle rows ${f2bun:-?}"
+fi
 
 # ── (c) negative: a 3 MiB copy is no bundle — nothing is demoted, the file-order lift stands ─────────────────────────
 "$BIN" "$TMP/under" --no-cache "$FOR_F" --legend=compact >"$TMP/c.out" 2>"$TMP/c.err"; crc=$?   # status: rc kept for (c2)

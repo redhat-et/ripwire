@@ -15771,6 +15771,20 @@ inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std:
     return found;
 }
 
+// NOSKIP-BUNDLE-DEMOTE: a match list's bundle copies (model.h kRankFlagBundleCopy: a build output's, an amalgamation's or a lexically
+// read file's copy of a function a source file defines) go when a match that is no copy remains. A path endpoint, a caller hop and a
+// --for graph endpoint ask about the source function; its copy is no second one. An all-copy list is returned as it is; --defs and
+// the callers verb still list the copies (demoted, never dropped from the index).
+inline std::vector<NodeId> dropBundleCopiesBesideSource( const IngestResult& ing, std::vector<NodeId> found )
+{
+    const auto copy = [ &ing ]( NodeId id ) noexcept { return bundleCopy( ing.symbols[ id ] ); };
+    if( !std::all_of( found.begin(), found.end(), copy ) )
+    {
+        std::erase_if( found, copy );
+    }
+    return found;
+}
+
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
 // on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
 // bare name), so a reader never has to ask whether the number is stale.

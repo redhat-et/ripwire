@@ -1120,12 +1120,13 @@ inline std::string pathNearSinkXml( const IngestResult& ing, const PathNearSink&
 // qualifier) now stands for every function or method DEFINITION whose name fits it (`*` = any run of characters, possibly
 // empty), so the one multi-target search answers it; from_glob="1"/to_glob="1" on the root says which endpoint was a
 // pattern, and from_defs=/to_defs= count its matches. A name that does resolve is never read as a pattern.
-// The definitions a path endpoint names: resolveAllByNameQualified, else — for a bare `*` pattern — every function or method
+// The definitions a path endpoint names: resolveAllByNameQualified (code before doc units, a source definition before its bundle copies),
+// else — for a bare `*` pattern — every function or method
 // definition whose name fits it, in id order. `*glob` says which happened.
 inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefs, bool* glob )
 {
     *glob                   = false;
-    std::vector<NodeId> out = dropDocUnitsBesideCode( ing, resolveAllByNameQualified( ing, spec, unprovenDefs ) );
+    std::vector<NodeId> out = dropBundleCopiesBesideSource( ing, dropDocUnitsBesideCode( ing, resolveAllByNameQualified( ing, spec, unprovenDefs ) ) );
     if( !out.empty() || spec.find( '*' ) == std::string_view::npos || spec.find( ':' ) != std::string_view::npos )
     {
         return out;

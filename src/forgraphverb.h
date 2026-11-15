@@ -111,6 +111,26 @@ inline std::optional<std::string> sourceOnlyPickSpelling( const IngestResult& in
     return soleDefinitionSpelling( ing, kept.front() );
 }
 
+// NOSKIP-BUNDLE-DEMOTE: a spelling the verb binds to a source definition AND a bundle's copies of it (model.h kRankFlagBundleCopy: the same
+// name in a build output, an amalgamation, a file read lexically) asks about the source function; the copies are not more endpoints.
+// When dropping the copies leaves ONE definition, the answer is the spelling that binds it alone (soleDefinitionSpelling); nullopt
+// (no copy among the matches, or two or more left) keeps the task's spelling. The block discloses it as M1 does (narrowed=).
+inline std::optional<std::string> withoutBundleCopiesSpelling( const IngestResult& ing, std::string_view spec )
+{
+    const std::vector<NodeId> all  = resolveAllByNameQualified( ing, spec );
+    std::vector<NodeId>       kept = dropBundleCopiesBesideSource( ing, all );
+    if( kept.size() == all.size() )
+    {
+        return std::nullopt;
+    }
+    std::erase_if( kept, [ & ]( NodeId id ) { return !isDefinitionNotDeclaration( ing.symbols[id] ); } );
+    if( kept.size() != 1 )
+    {
+        return std::nullopt;
+    }
+    return soleDefinitionSpelling( ing, kept.front() );
+}
+
 // Does the graph verb of `form` bind `spec` as written: the --path resolver (a glob included), the --callers one, the --connect one.
 inline bool graphFormResolves( const IngestResult& ing, GraphSubjectForm form, std::string_view spec )
 {
@@ -228,7 +248,8 @@ private:
     {
         if( graphFormResolves( m_ing, m_form, spec ) )
         {
-            return spec;
+            const std::optional<std::string> source = withoutBundleCopiesSpelling( m_ing, spec );
+            return source && graphFormResolves( m_ing, m_form, *source ) ? *source : spec;
         }
         return narrowRefusedSpelling( m_ing, spec, m_form ).value_or( std::string() );
     }
@@ -349,8 +370,9 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     out += a.tried > 1 ? "; tried= combinations of the words were tried, the first that resolves ran; unresolved= names the spellings that did not resolve" : "";
     out += o.jsonDialect ? "; dialect=\"json\": this surface answers the verb as JSON, carried as CDATA text, not as XML rows" : "";
     out += o.nameTestHops > 0 ? "; name_test_hops=N: N path hops were matched by name alone to a definition in a test or fixture path, so they may not be the call the source makes" : "";
-    out += a.narrowed.empty() ? "" : "; narrowed= names the task spellings several definitions fit (refused as written): the ones in a test or fixture path "
-                                     "and the bodyless ones were dropped, and verb= names the ONE source definition left by its own spelling";
+    out += a.narrowed.empty() ? "" : "; narrowed= names the task spellings several definitions fit (refused as written, or bound together with a bundle's copies "
+                                     "of the function): the ones in a test or fixture path, the bodyless ones and the bundle copies (a build output or a file "
+                                     "read lexically) were dropped, and verb= names the ONE source definition left by its own spelling";
     out += o.held ? "; held=\"budget\": a token budget is set, so the verb did NOT run here: verb= is the one call to run; the answer above is unchanged --><graph_verb endpoints=\"subject\""
                   : "; the verb's own legend follows; the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\"";
     const auto [ flag, value ] = graphSubjectVerbFlag( a );

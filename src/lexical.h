@@ -479,14 +479,14 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
     return &scratch;
 }
 
-// The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
-// without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
-inline std::vector<char> notLexRankedMask( const IngestResult& ing )
+// The units carrying any of `flags` (model.h Symbol::rankFlags) as a per-symbol mask, 1 = carries one; EMPTY when the index holds
+// none, so a corpus without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
+inline std::vector<char> rankFlagMask( const IngestResult& ing, std::uint8_t flags )
 {
     std::vector<char> mask;
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
     {
-        if( notLexRanked( ing.symbols[i] ) )
+        if( ( ing.symbols[i].rankFlags & flags ) != 0 )
         {
             if( mask.empty() )
             {
@@ -496,6 +496,34 @@ inline std::vector<char> notLexRankedMask( const IngestResult& ing )
         }
     }
     return mask;
+}
+
+// The kRankFlagNotLexRanked units (model.h), 1 = left out of the ranking.
+inline std::vector<char> notLexRankedMask( const IngestResult& ing )
+{
+    return rankFlagMask( ing, kRankFlagNotLexRanked );
+}
+
+// The units a BM25 pass keeps out of its corpus statistics: the caller's `statsOut` (may be null), every unranked unit, and every
+// bundle copy (NOSKIP-BUNDLE-DEMOTE, model.h kRankFlagBundleCopy: a build output's copy of a function a source file defines is
+// scored, but it is no second document; three copies of every compiler function would otherwise cut each name term's idf).
+// Written into `storage` and returned when any unit is out; else `statsOut` as given, so a corpus with neither runs the historical pass.
+inline const std::vector<char>* mergedStatsOut( const IngestResult& ing, const std::vector<char>* statsOut, const std::vector<char>& unranked,
+                                                std::vector<char>& storage )
+{
+    const std::vector<char> copies = rankFlagMask( ing, kRankFlagBundleCopy );
+    if( unranked.empty() && copies.empty() )
+    {
+        return statsOut;
+    }
+    const std::size_t S = ing.symbols.size();
+    storage.assign( S, 0 );
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        const bool callerOut = statsOut != nullptr && i < statsOut->size() && ( *statsOut )[i] != 0;
+        storage[i]           = char( ( !unranked.empty() && unranked[i] != 0 ) || ( !copies.empty() && copies[i] != 0 ) || callerOut );
+    }
+    return &storage;
 }
 
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
@@ -509,17 +537,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
     // kRankFlagNotLexRanked units (model.h): out of the statistics like a statsOut unit, and never scored (0 below)
+    // ... and a bundle copy is scored but out of the statistics (mergedStatsOut)
     const std::vector<char> unranked = notLexRankedMask( ing );
     std::vector<char>       statsOutMerged;
-    if( !unranked.empty() )
-    {
-        statsOutMerged = unranked;
-        for( std::size_t i = 0; statsOut != nullptr && i < statsOut->size() && i < S; ++i )
-        {
-            statsOutMerged[i] = char( statsOutMerged[i] | ( *statsOut )[i] );
-        }
-        statsOut = &statsOutMerged;
-    }
+    statsOut = mergedStatsOut( ing, statsOut, unranked, statsOutMerged );
     const auto isUnranked = [ &unranked ]( std::size_t i ) noexcept { return !unranked.empty() && unranked[i] != 0; };
     // the WHOLE corpus an OUT unit scores against (avgdlAll, allS, dfOut below) is the ranked one: a kRankFlagNotLexRanked
     // unit is no document there either, so a Sphinx .txt section scores as it did before HTML units existed
