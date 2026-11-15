@@ -9,11 +9,12 @@
 # It takes the generated tier factor (filter.h), is no mention lift or ambiguity vote (mention.h) and no source-class
 # anchor (subjectanchor.h), no second path endpoint (pathgaps.h, forgraphverb.h) and no second function to the callers verb or its hop
 # (callhierarchy.h, forcallerhop.h).
-# Demoted, never dropped: --defs still lists it, and a name defined only in a bundle is no copy.
+# Demoted, never dropped: --defs still lists it, and a name defined only in a bundle is no copy. A source is a definition with a
+# body: a prototype in a normal file makes no copy of the bundle's only body (arm (h); ingest_model.h isBundleCopySource).
 # Every fixture is generated here (nothing large is committed where whole-repo runs would see it); each arm counts its
 # premise and FAILS on zero.
 #
-#   bash test/bundledemotecheck.sh [BIN]          # lane no-skip-ingest ff0664260 FAILS arm (a)
+#   bash test/bundledemotecheck.sh [BIN]          # lane no-skip-ingest ff0664260 FAILS arm (a); 506afce6f FAILS (h1) (h2)
 #   BASE_BIN=<binary before the rule> bash test/bundledemotecheck.sh BIN   # adds arm (c2): no bundle, byte-identical output
 
 set -u
@@ -142,6 +143,38 @@ if [ -n "$gren" ] && [ -n "$gcopy" ] && [ "$gren" = "$gcopy" ] && [ "$gren" != 1
 else
     no "(g) tier factor: renamed ${F}2 ${gren:-absent}, exact copy ${gcopy:-absent} (want equal and below 1)"
 fi
+
+# ── (h) a PROTOTYPE is no source: the bundle's body of a name a normal file only declares is kept (ingest_model.h isBundleCopySource) ─
+# NOSKIP-FIX: api.c declares `int widget_step(int x);` and calls it; the only BODY is in the bundle-shaped amalg.c. The prototype made
+# that body a "copy", --callees dropped it beside the bodyless prototype and answered count="0" (noskipingestcheck arm 1, red on
+# no-skip-ingest 506afce6f). Both bundle shapes: (h1) read lexically (over --max-file-size), (h2) parsed at 4 MiB or more.
+python3 - "$TMP" <<'EOF'
+import os, sys
+t = sys.argv[1]
+def w(p, s):
+    os.makedirs(os.path.dirname(p), exist_ok=True); open(p, "w").write(s)
+head = "int widget_step(int x)\n{\n    return leaf_work(x) + 1;\n}\n\nint leaf_work(int x)\n{\n    return x * 2;\n}\n\n"
+for tree, limit in (("protolex", 64 * 1024), ("protobig", 4 * 1024 * 1024 + 4096)):
+    parts, n, i = [head], len(head), 0
+    while n < limit:
+        f = f"int amalg_{i}(int x)\n{{\n    return x + {i};\n}}\n\n"
+        parts.append(f); n += len(f); i += 1
+    w(f"{t}/{tree}/amalg.c", "".join(parts))
+    w(f"{t}/{tree}/api.c", "int widget_step(int x);\nint main(void)\n{\n    return widget_step(3);\n}\n")
+EOF
+for h in "h1 protolex --max-file-size=16K" "h2 protobig"; do
+    set -- $h; arm="$1"; tree="$2"; shift 2
+    "$BIN" "$TMP/$tree" --no-cache "$@" --callees=widget_step --legend=compact >"$TMP/$arm.out" 2>/dev/null   # status: --callees exits 0 on any corpus; the rows read below are the verdict
+    "$BIN" "$TMP/$tree" --no-cache "$@" --defs=widget_step --legend=compact >"$TMP/$arm.defs" 2>/dev/null   # status: as above
+    hdefs="$( defsfiles "$TMP/$arm.defs" widget_step | paste -sd' ' - )"
+    hroot="$( grep -oE '<callees [^>]*>' "$TMP/$arm.out" | head -1 )"
+    hleaf="$( grep -oE '<s [^>]*>' "$TMP/$arm.out" | grep -c 'n="leaf_work"' )"
+    if [ "$hdefs" = "amalg.c api.c" ] && printf '%s' "$hroot" | grep -q ' defs="2"' && [ "${hleaf:-0}" -ge 1 ]; then
+        ok "($arm) prototype in api.c, body in the bundle-shaped amalg.c (${*:-parsed at 4 MiB}): --callees=widget_step keeps the body (defs=2) and finds leaf_work"
+    else
+        no "($arm) --defs=widget_step [$hdefs]; ${hroot:-no <callees>}; leaf_work rows ${hleaf:-0}"
+    fi
+done
 
 # ── (c) negative: a 3 MiB copy is no bundle — nothing is demoted, the file-order lift stands ─────────────────────────
 "$BIN" "$TMP/under" --no-cache "$FOR_F" --legend=compact >"$TMP/c.out" 2>"$TMP/c.err"; crc=$?   # status: rc kept for (c2)

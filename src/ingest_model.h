@@ -510,13 +510,25 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
 }
 
 // NOSKIP-BUNDLE-DEMOTE: a code definition in a bundle-shaped file (model.h isBundleShapedFile) whose name a code definition in
-// a NON-bundle file also has is a copy of that source, and takes kRankFlagBundleCopy (model.h): the rankers put it below the
-// source copy (also under a bundler's numeric rename, bundleRenameBase); every definition in such a file takes kRankFlagInBundle. Demote, never drop: the def stays in every listing, and a name defined only in bundles is no copy and keeps
-// its rank. Runs on every load after assignSymbols (rankFlags are never cached); without a bundle-shaped file it reads one
-// FileHealth word per file and returns, so such an index is unchanged.
+// a NON-bundle file also has (with a body when its kind can be declared: isBundleCopySource) is a copy of that source, and takes
+// kRankFlagBundleCopy (model.h): the rankers put it below the source copy (also under a bundler's numeric rename,
+// bundleRenameBase); every definition in such a file takes kRankFlagInBundle. Demote, never drop: the def stays in every
+// listing, and a name defined only in bundles is no copy and keeps its rank. Runs on every load after assignSymbols (rankFlags
+// are never cached); without a bundle-shaped file it reads one FileHealth word per file and returns, so such an index is unchanged.
 inline bool isBundleCopyCandidate( const Symbol& s ) noexcept
 {
     return s.kind != SymKind::Section && s.kind != SymKind::ModuleScope && !langFacts( s.lang ).notCode && !notNamed( s );
+}
+
+// The SOURCE side of a copy (NOSKIP-FIX): a non-bundle candidate whose kind has a declaration form (a function, method, class,
+// interface or struct) counts only as a definition with a body (model.h isDefinitionNotDeclaration). A prototype `int f(int x);`
+// beside the only body of f in an amalgamation declares that body; it is no source the body copies. Counted as one, the body
+// was demoted and --callees=f kept the bodyless prototype alone (count="0"; gates noskipingestcheck arm 1, bundledemotecheck (h)).
+inline bool isBundleCopySource( const Symbol& s ) noexcept
+{
+    const bool declarable = s.kind == SymKind::Function || s.kind == SymKind::Method || s.kind == SymKind::Class || s.kind == SymKind::Interface
+                         || isStructOrNamedType( s.kind );
+    return isBundleCopyCandidate( s ) && ( !declarable || isDefinitionNotDeclaration( s ) );
 }
 
 // A bundler renames the second definition of a name it concatenates by a numeric suffix (esbuild: `doChange` -> `doChange27`), so
@@ -552,7 +564,7 @@ inline void markBundleCopies( IngestResult& result )
     std::vector<std::string_view> sourceNames;   // sorted: the names a non-bundle file defines (views into result.symbols)
     for( const Symbol& s : result.symbols )
     {
-        if( !inBundle( s ) && isBundleCopyCandidate( s ) )
+        if( !inBundle( s ) && isBundleCopySource( s ) )
         {
             sourceNames.push_back( s.name );
         }
