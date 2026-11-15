@@ -189,6 +189,8 @@ judgeLine(){
     return 0
 }
 RDQ="$( cd "$RD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+rc_rdq=$?
+[ "$rc_rdq" = 0 ] && ok "rust-drop: --quality-delta exits 0 (no row on this fixture gates)" || no "rust-drop: --quality-delta exited $rc_rdq, not 0"
 judgeLine "$RD" "$RDQ" src/lib.rs '// P-guard' exempt "rust-drop: Drop::drop of 'impl Drop for Guard' is not reported (the compiler runs it at scope exit)"
 judgeLine "$RD" "$RDQ" src/lib.rs '// P-gen' exempt "rust-drop: Drop::drop of 'impl<T> Drop for Gen<T>' is not reported (generic implementor)"
 judgeLine "$RD" "$RDQ" src/lib.rs '// P-path' exempt "rust-drop: Drop::drop of 'impl std::ops::Drop for Q' is not reported (path-qualified trait)"
@@ -252,6 +254,8 @@ impl Drop for Nest {
 fn orphan_raw_helper() -> u32 { 7 } // N-orphan-raw
 RS
 RRQ="$( cd "$RR" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+rc_rrq=$?
+[ "$rc_rrq" = 0 ] && ok "rust-raw-drop: --quality-delta exits 0 (no row on this fixture gates)" || no "rust-raw-drop: --quality-delta exited $rc_rrq, not 0"
 judgeLine "$RR" "$RRQ" src/lib.rs '// P-raw' exempt "rust-raw-drop: r#drop of 'impl Drop for Raw' is not reported (same Drop::drop, raw spelling)"
 judgeLine "$RR" "$RRQ" src/lib.rs '// P-nest' exempt "rust-raw-drop: Drop::drop of 'impl Drop for Nest' is not reported (a Drop body holding nested items)"
 judgeLine "$RR" "$RRQ" src/lib.rs '// N-mod' reported "rust-raw-drop: a free fn named drop inside mod m is still reported (not a method of any impl)"

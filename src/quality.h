@@ -943,6 +943,34 @@ inline bool testRunnerInvokedSymbol( const Symbol& s, std::string_view p ) noexc
     return false;
 }
 
+// The structural half of isDeadCandidate: a symbol with a body of its own that no indexed edge, file-scope statement or Python
+// self/cls dispatch reaches. Whether something the graph cannot see calls it is the other half (isDeadCandidate, below).
+inline bool uncalledBody( const IngestResult& ing, const Graph& g, NodeId i,
+                          const std::vector<std::uint64_t>& topLevelCallees,
+                          const std::vector<NodeId>& pythonDispatchIds ) noexcept
+{
+    const Symbol& s = ing.symbols[i];
+    if( s.kind == SymKind::Section || s.kind == SymKind::ModuleScope )
+    {
+        return false; // markdown heading / a file's module scope (no body of its own)
+    }
+    if( s.sigEndByte >= s.endByte )
+    {
+        return false; // no body (decl / prototype)
+    }
+    const auto* ro = g.inEdges.rowOffsets();
+    if( ro[i + 1] - ro[i] != 0 )
+    {
+        return false; // has at least one caller
+    }
+    if( std::binary_search( topLevelCallees.begin(), topLevelCallees.end(), fnv1a64( s.name ) ) )
+    {
+        return false; // W1-S2: invoked from file scope (a top-level script statement) — a use the CSR drops
+    }
+    // a Python self/cls call can dispatch to this override through an indexed base
+    return !std::binary_search( pythonDispatchIds.begin(), pythonDispatchIds.end(), i );
+}
+
 // A "dead deletion-candidate": has a body, no caller in the indexed tree, not invoked from file scope, not
 // invoked by the LANGUAGE itself (languageInvokedSymbol, above), not a test fixture, not produced by a
 // registered self-registering macro. A SIMPLE,
@@ -964,64 +992,37 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
     {
         *exemptedByRegisterMacro = false;
     }
+    if( !uncalledBody( ing, g, i, topLevelCallees, pythonDispatchIds ) )
+    {
+        return false;
+    }
     const Symbol& s = ing.symbols[i];
-    if( s.kind == SymKind::Section || s.kind == SymKind::ModuleScope )
+    // Q-DIAL-2: the LANGUAGE calls it (languageInvokedSymbol replaced a blanket header exclusion); issue #494: Drop::drop, run by
+    // the compiler at scope exit (rustDropImplMethodIds)
+    if( languageInvokedSymbol( s ) || std::binary_search( dropImplIds.begin(), dropImplIds.end(), i ) )
     {
-        return false; // markdown heading / a file's module scope (no body of its own)
-    }
-    if( s.sigEndByte >= s.endByte )
-    {
-        return false; // no body (decl / prototype)
-    }
-    const auto* ro = g.inEdges.rowOffsets();
-    if( ro[i + 1] - ro[i] != 0 )
-    {
-        return false; // has at least one caller
-    }
-    if( std::binary_search( topLevelCallees.begin(), topLevelCallees.end(), fnv1a64( s.name ) ) )
-    {
-        return false; // W1-S2: invoked from file scope (a top-level script statement) — a use the CSR drops
-    }
-    if( std::binary_search( pythonDispatchIds.begin(), pythonDispatchIds.end(), i ) )
-    {
-        return false; // a Python self/cls call can dispatch to this override through an indexed base
-    }
-    if( languageInvokedSymbol( s ) )
-    {
-        return false; // Q-DIAL-2: the LANGUAGE calls it — see languageInvokedSymbol (this replaced a blanket header exclusion)
-    }
-    if( std::binary_search( dropImplIds.begin(), dropImplIds.end(), i ) )
-    {
-        return false; // issue #494: Drop::drop, run by the compiler at scope exit (rustDropImplMethodIds)
+        return false;
     }
     const std::string_view p = rootRelPath( ing, s.fileId );   // #228: a directory above the root never decides this
-    if( pythonFrameworkInvokedSymbol( s, p ) || testRunnerInvokedSymbol( s, p ) )
+    // #228 unittest/Django/pytest, QD-TEST-DEAD `go test` / the Rust harness: the test runner calls this
+    const bool runnerCalls = pythonFrameworkInvokedSymbol( s, p ) || testRunnerInvokedSymbol( s, p );
+    // fixtures are dead by design (noise rules); B10.1a: shell test-runner helpers — $(...) calls invisible to the parser
+    if( !runnerCalls && ( isFixturePath( p ) || isTestScriptPath( p ) ) )
     {
-        // #499 lands over QD-TEST-DEAD: a Rust #[test] fn is exempt here first (the ingest's testScope bit), and is ALSO in
-        // registeredMacroIds (registersItself). register-macro-excluded= names Rust #[test] functions, so it counts it here.
-        if( exemptedByRegisterMacro && std::binary_search( registeredMacroIds.begin(), registeredMacroIds.end(), i ) )
-        {
-            *exemptedByRegisterMacro = true;
-        }
-        return false; // #228 unittest/Django/pytest, QD-TEST-DEAD `go test` / the Rust harness: the test runner calls this
+        return false;
     }
-    if( isFixturePath( p ) )
+    // P2.2: self-registers via a static initializer the call graph cannot see. A Rust #[test] fn is exempt by the runner rule
+    // first (QD-TEST-DEAD's testScope bit) and is ALSO registered (#499's registersItself), so it is counted either way.
+    const bool registered = std::binary_search( registeredMacroIds.begin(), registeredMacroIds.end(), i );
+    if( !runnerCalls && !registered )
     {
-        return false; // fixtures are dead by design (noise rules)
+        return true;
     }
-    if( isTestScriptPath( p ) )
+    if( exemptedByRegisterMacro )
     {
-        return false; // B10.1a: shell test-runner helpers — $(...) calls invisible to the parser
+        *exemptedByRegisterMacro = registered;
     }
-    if( std::binary_search( registeredMacroIds.begin(), registeredMacroIds.end(), i ) )
-    {
-        if( exemptedByRegisterMacro )
-        {
-            *exemptedByRegisterMacro = true;
-        }
-        return false; // P2.2: self-registers via a static initializer the call graph cannot see
-    }
-    return true;
+    return false;
 }
 
 // The dead-code kind's one exemption beyond isDeadCandidate: a call the builtin-method name gate DECLINED could have
@@ -1393,10 +1394,10 @@ struct DefectSiteAt
 // three call sites — which is precisely the finding that kind exists to catch, on the run that was adding
 // it. Two copies of "read each file once and hand me each body" is two places for the degrade rules to
 // drift, and those rules are the honesty contract here, not an implementation detail.
-// visit( NodeId, const Symbol&, body, fileBytes ): the body slice plus the whole file, for a rule that reads text OUTSIDE
-// the slice (forEachSymbolBody below is the three-argument spelling every other caller uses).
+// visit( NodeId, const Symbol&, body ), or visit( NodeId, const Symbol&, body, fileBytes ) for a rule that reads text OUTSIDE
+// the slice (#499's Rust test attribute stacks above the item): the walk passes the whole file only to a four-argument visitor.
 template<class Fn>
-inline void forEachSymbolFile( const IngestResult& ing, Fn&& visit )
+inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
 {
     // per-file def ids with a real body (see constructCountsBySym above on `symbols[i].id == i`).
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
@@ -1418,18 +1419,17 @@ inline void forEachSymbolFile( const IngestResult& ing, Fn&& visit )
             {
                 continue;
             }
-            visit( i, s, std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ), std::string_view( bytes ) );
+            const std::string_view body( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte );
+            if constexpr( std::is_invocable_v<Fn&, NodeId, const Symbol&, std::string_view, std::string_view> )
+            {
+                visit( i, s, body, std::string_view( bytes ) );
+            }
+            else
+            {
+                visit( i, s, body );
+            }
         }
     }
-}
-
-template<class Fn>
-inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
-{
-    forEachSymbolFile( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view )
-    {
-        visit( i, s, body );
-    } );
 }
 
 // Direct Python class members get an owner: the enclosing class. A def nested inside a method gets a host: the
@@ -2203,7 +2203,7 @@ inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, co
     {
         return ids;
     }
-    forEachSymbolFile( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view file )
+    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view file )
     {
         if( registersItself( s, file, body, names ) )
         {
@@ -4272,6 +4272,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   pythonDispatchClasses     (quality.h) — downward-only inheritance reachability
 //   pythonDispatchedMethodIds  (quality.h) — Python inherited receiver-call evidence for the dead set
 //   isDeadCandidate            (quality.h) — the dead-set predicate itself
+//   uncalledBody               (quality.h) — isDeadCandidate's structural half: a body that no edge, file-scope call or Python dispatch reaches
 //   codeLocByNode              (quality.h) — the locBySym VALUES (code lines per body)
 //   measureCallableNotItsContainer (quality.h) — EXTENT-CTOR: a container sharing a callable's id lends it no extent
 //   moveCidOf                  (quality.h) — MOVED-BODY: the move identity moveCidBySym stores
