@@ -111,6 +111,11 @@ else no "(a) the legend defines nearest_of= where it prints"; fi
 run "$BIN" wide start,target --legend=full > "$TMP/AF.out" 2>/dev/null
 if [ "$premA" = 1 ] && grep -q 'nearest_of=K' "$TMP/AF.out"; then ok "(a) the full legend defines nearest_of= too"
 else no "(a) the full legend defines nearest_of= too"; fi
+# the reading must not promise the ORIGINAL nearest route: pathRouteVerdict can print a proven route (route_hedged=) in its place
+# (CodeRabbit #665); both legends say so
+if [ "$premA" = 1 ] && sed -n '1,/-->/p' "$TMP/A.out" | grep -o 'nearest_of=K[^;]*;[^;]*' | grep -q 'route_hedged=' \
+   && grep -o 'nearest_of=K[^;]*;[^;]*' "$TMP/AF.out" | grep -q 'route_hedged='; then ok "(a) both nearest_of= readings allow for a route_hedged= replacement route"
+else no "(a) the nearest_of= reading promises the nearest route although route_hedged= can replace it"; fi
 # one from= definition: K = 1 x 17
 run "$BIN" wide k.py:start,target > "$TMP/A1.out" 2>/dev/null
 RA1="$( root "$TMP/A1.out" )"

@@ -471,8 +471,9 @@ inline constexpr std::string_view kPathPairBridgeCapLegend =
 inline constexpr std::string_view kPathPairUnlistedLegend =
     "pairs_unlisted=G: to= names G definition groups, more than the 16 this answer walks, so only the one chain found is printed and "
     "other reaching pairs are NOT listed; next= runs the same from= to another to= definition, or qualify to= as file:name. "
-    "nearest_of=K: so reachable=/hops=/from_p=/to_p= describe ONE of K from=/to= definition pairs, the nearest one a single search over all "
-    "of them found, not a chosen one: whether the pair you mean reaches is NOT answered; qualify both ends as file:name. ";
+    "nearest_of=K: so reachable=/hops=/from_p=/to_p= describe ONE of K from=/to= definition pairs, not a chosen one: the nearest one a single "
+    "search over all of them found, or the route a route_hedged= verdict prints in its place; whether the pair you mean reaches is NOT "
+    "answered; qualify both ends as file:name. ";
 // P1 PATH-ORDER: present only when a listed pair carries qword= (the ordering departed from the reach rank above)
 inline constexpr std::string_view kPathPairQwordLegend =
     "qword=WORD: that pair's from= owner equals a word of the path argument (FROM,TO as typed), else its to= owner when no pair's from= owner "
