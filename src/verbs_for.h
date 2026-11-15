@@ -915,13 +915,11 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
 inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed)";
 // TAIL-SYM-TERMS: the clause defining tsym=, right after the tail clause that defines sym=, only when a shown row carries one.
+// Absent, the clause is empty and the splice inserts nothing.
 inline void spliceTailTermsClause( std::string& header, bool compact, bool present )
 {
-    if( present )
-    {
-        rw::spliceClauseAfter( header, compact ? kForCompactLegendTail : rw::kForFileTailLegend,
-                               compact ? rw::kForCompactFileTailTermsLegend : rw::kForFileTailTermsLegend );
-    }
+    const std::string_view tailClause = compact ? kForCompactLegendTail : rw::kForFileTailLegend;
+    rw::spliceClauseAfter( header, tailClause, presentOnlyClause( present, compact, rw::kForCompactFileTailTermsLegend, rw::kForFileTailTermsLegend ) );
 }
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
