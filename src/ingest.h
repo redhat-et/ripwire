@@ -960,4 +960,12 @@ struct BlobDefinitions
 // long-lived server must call this under quality::headSnapshotIngestMutex, like every other ingest call site.
 std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> blobs, std::string_view name );
 
+// The warm-snapshot section (src/warmsnap.h) lives inside the parse cache blob, whose format is ingest.cpp's alone
+// (src/ingest_cache.h is included into that one translation unit). ingest() reads the section itself; the section is
+// only SERIALISED at the end of a run, after buildGraph, so main() publishes it through this one seam.
+//   `blobPath` is the --cache / auto blob this run used; `section` is warmsnap::saveSnapshot's bytes, never empty.
+// True only when the blob at `blobPath` now carries the section. False changes cost, never the answer: the blob that
+// was there is left exactly as it was and the next run records again.
+bool publishWarmSection( const std::string& blobPath, std::string_view section, bool captureValueUses );
+
 }   // namespace rw

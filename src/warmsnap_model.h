@@ -188,7 +188,9 @@ inline std::string_view textAt( const std::vector<std::uint32_t>& ends, std::str
 // What the recording run's parse cache line said, replayed on a load so RIPWIRE_CACHE_STATS still describes the run.
 struct BlobFacts
 {
-    StatSig       sig;
+    // No stat signature of the blob. The section lives INSIDE the blob it was assembled from, so "is this still the
+    // same blob" is not a question a stored field can be wrong about: replace the blob and the section goes with it,
+    // and saveCache writes no section, so any run that re-parsed leaves none behind (warmsnap.h, kVersion 2).
     std::uint64_t cachedRecords = 0;
     std::uint64_t blobEntries   = 0;
     // One path per bridge-format document (pdf, docx, ...) in the tree: where the doc pass would find a cached extraction
@@ -406,7 +408,6 @@ inline std::string writeModel( const IngestResult& ing, const BlobFacts& blob )
     PROFILE_SCOPE_DESCRIBE( "warmsnap: serialize the model section" );
     Out o;
     o.bytes.reserve( ing.references.size() * 14 + ing.bindings.size() * 16 + ing.symbols.size() * ( sizeof( SymRow ) + 48 ) + ( 1u << 20 ) );
-    o.pod( blob.sig );
     o.u64( blob.cachedRecords );
     o.u64( blob.blobEntries );
     o.strs( blob.bridgeBlobs );
@@ -700,7 +701,6 @@ inline bool readModel( std::string_view section, IngestResult& ing, BlobFacts& b
 {
     PROFILE_SCOPE_DESCRIBE( "warmsnap: load the model section" );
     In in{ section };
-    blob.sig           = in.pod<StatSig>();
     blob.cachedRecords = in.u64();
     blob.blobEntries   = in.u64();
     in.strs( blob.bridgeBlobs );

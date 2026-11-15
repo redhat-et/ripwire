@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # warmsnapcheck.sh — the warm snapshot (src/warmsnap.h): a run that LOADS the tree, the model and the resolved graph
-# from `<cache>.snap` must print the bytes a run that walks, decodes and resolves prints. No modulo, no normalisation.
+# from the SECTION INSIDE the parse cache blob must print the bytes a run that walks, decodes and resolves prints.
+# No modulo, no normalisation.
+#
+# WHERE THE SECTION LIVES, because every damage arm below has to find it. The blob's header (ingest_cache.h,
+# kCacheVersion 53) carries a u64 snapOffset at byte 25 and a u64 snapLength at byte 33; the section is those bytes.
+# It sits between the file records and the offset table, so a byte flipped INSIDE it leaves the blob's own guards
+# (the header+table checksum, each record's recSum, the exact-fit invariant) all still satisfied — which is what
+# makes these arms test warmsnap.h's refusals rather than the blob reader's. `snap` below is the helper that reads
+# the span, patches a byte in it, or republishes the blob carrying a SHORTER section (a valid blob, a torn section).
 #
 # The corpus is every test/*fix directory copied into one tree (C, C++, C#, Dart, Elixir, Go, Java, JS, Kotlin, PHP,
 # Python, Ruby, Rust, TS, ...), so one run crosses every language's resolve rules.
@@ -13,10 +21,12 @@
 #       the snapshot prints no such line, so "nothing was loaded, the two outputs are trivially equal" is a FAIL here,
 #       never a pass. Every identity arm below re-asserts the load on the very run whose bytes it compares.
 #   I   identity: per verb, stdout of the loading run == stdout of a --no-cache run (which builds everything).
-#   S   a stale snapshot is REFUSED and the answer is the full build's: (S6) the parse cache blob is gone; (S7) other
-#       options; (S1) one file's content changed; (S2) the
-#       snapshot's version field differs; (S3) a flipped byte in the body; (S4) a truncated file; (S5) a file the
-#       resolver read outside the crawl (go.mod) changed.
+#   S   a stale snapshot is REFUSED and the answer is the full build's: (S6) the parse cache blob is gone, and the
+#       section went with it; (S7) other options; (S1) one file's content changed; (S2) the section's version field
+#       differs; (S3) a flipped byte in its body; (S4) a section truncated inside a field, in a blob that is still
+#       wholly valid; (S5) a file the resolver read outside the crawl (go.mod) changed; (S8) the STRUCTURAL
+#       invalidation the design rests on — a run that re-parsed anything leaves the blob carrying no section at all,
+#       and nothing is written beside the blob on any run.
 #   L   the crawl replay is REFUSED, and the answer is the full crawl's, when the tree moved: (a) a file added, with no
 #       pause after the recording run; (b) a file deleted; (c) a file modified in place at the SAME size — once
 #       plainly and once with its mtime put back; (d) a file added inside a new subdirectory; (e) a .gitignore changed;
@@ -68,6 +78,66 @@ refused()
     if has "$2" "$3"; then no "$1 — $3 on a tree that moved: $( cat "$2.stats" )"; else ok "$1 ($( sed 's/^ripwire: snapshot-stats //' "$2.stats" ))"; fi
 }
 
+# ── snap: the blob's warm-snapshot span, and two ways to damage only it ────────────────────────────
+# snap span BLOB            -> "<snapOffset> <snapLength>", or "0 0" when the blob carries no section
+# snap patch BLOB FRACTION  -> flip one byte at FRACTION/10 of the way into the section (in place; every blob-level
+#                              checksum still holds, because none of them covers the section's bytes)
+# snap cut   BLOB FRACTION  -> republish the blob carrying only the first FRACTION/10 of its section: a VALID blob
+#                              (header span, table offsets and the trailer's checksum all rewritten) whose section
+#                              ends inside a field. Truncating the FILE could not test this — it would break the
+#                              blob's exact-fit invariant and be refused before warmsnap.h ever saw a byte.
+command -v python3 >/dev/null 2>&1 || { echo "python3 required (the blob's section span)"; exit 2; }
+snap()
+{
+    python3 - "$@" <<'PY'
+import struct, sys
+op, path = sys.argv[1], sys.argv[2]
+b = bytearray( open( path, 'rb' ).read() )
+HDR, TRL, ENT = 41, 24, 32
+snapOff, snapLen = struct.unpack_from( '<Q', b, 25 )[ 0 ], struct.unpack_from( '<Q', b, 33 )[ 0 ]
+if op == 'span':
+    print( snapOff, snapLen ); raise SystemExit( 0 )
+if snapLen == 0:
+    print( 'the blob carries no warm-snapshot section', file = sys.stderr ); raise SystemExit( 1 )
+frac = int( sys.argv[ 3 ] )
+if op == 'patch':
+    at = snapOff + snapLen * frac // 10
+    b[ at ] = ( b[ at ] + 1 ) % 256
+    open( path, 'wb' ).write( b ); raise SystemExit( 0 )
+if op == 'cut':
+    tableOffset, entryCount = struct.unpack_from( '<Q', b, len( b ) - TRL )[ 0 ], struct.unpack_from( '<I', b, len( b ) - TRL + 8 )[ 0 ]
+    table = bytes( b[ tableOffset : tableOffset + entryCount * ENT ] )
+    kept  = bytes( b[ snapOff : snapOff + max( 1, snapLen * frac // 10 ) ] )
+    head  = bytearray( b[ : HDR ] )
+    struct.pack_into( '<Q', head, 25, snapOff )
+    struct.pack_into( '<Q', head, 33, len( kept ) )
+    # The trailer's digest: ingest_cache.h blobChecksum, the 8-lane FNV-1a over header||table. This is a SECOND COPY
+    # of that function and could drift from it; the `cut BLOB 10` control below keeps a whole section and asserts the
+    # rebuilt blob is byte-identical to the original, so a wrong digest here fails loudly instead of quietly turning
+    # every arm that uses `cut` into "the blob was refused, which looks like a refusal".
+    def blobChecksum( s ):
+        M = 0xFFFFFFFFFFFFFFFF
+        lanes = [ 1469598103934665603, 1099511628211, 0x100000001b3, 0x9e3779b97f4a7c15,
+                  0xc2b2ae3d27d4eb4f, 0x165667b19e3779f9, 0xff51afd7ed558ccd, 0xc4ceb9fe1a85ec53 ]
+        for i, ch in enumerate( s ):
+            j = i % 8
+            lanes[ j ] = ( ( lanes[ j ] ^ ch ) * 0x100000001b3 ) & M
+        h = 1469598103934665603
+        for v in lanes:
+            h = ( ( h ^ v ) * 0x100000001b3 ) & M
+        return h
+    out = bytes( head ) + bytes( b[ HDR : snapOff ] ) + kept + table
+    newTableOffset = snapOff + len( kept )
+    out += struct.pack( '<QIIQ', newTableOffset, entryCount, 0, blobChecksum( bytes( head ) + table ) )
+    open( path, 'wb' ).write( out ); raise SystemExit( 0 )
+print( 'unknown op ' + op, file = sys.stderr ); raise SystemExit( 2 )
+PY
+}
+# hasSection BLOB — the blob names a non-empty section
+hasSection(){ set -- $( snap span "$1" ); [ "${2:-0}" -gt 0 ]; }
+# alone BLOB — nothing whose name starts with the blob's was written beside it (test/cacheidentitycheck.sh arm (D3))
+alone(){ [ -z "$( find "$( dirname "$1" )" -maxdepth 1 -name "$( basename "$1" )?*" 2>/dev/null )" ]; }
+
 # ── the corpus ────────────────────────────────────────────────────────────────────────────────────
 mkcorpus()
 {
@@ -94,7 +164,10 @@ if has "$TMP/v.warm" 'tree=replayed'; then ok "V  the unchanged tree's second ru
 else no "V  VACUOUS: no run replayed the crawl ($( cat "$TMP/v.warm.stats" 2>/dev/null || echo 'no snapshot-stats line' ))"; fi
 if has "$TMP/v.warm" 'model=loaded'; then ok "V  the unchanged tree's second run LOADED the model section"
 else no "V  VACUOUS: no run loaded a model section ($( cat "$TMP/v.warm.stats" 2>/dev/null || echo 'no snapshot-stats line' ))"; fi
-if [ -s "$C.snap" ]; then ok "V  $( basename "$C" ).snap exists ($( wc -c <"$C.snap" | tr -d ' ' ) B)"; else no "V  no snapshot file was written beside the cache"; fi
+if hasSection "$C"; then ok "V  the blob carries the section ($( snap span "$C" | awk '{print "offset "$1", "$2" B"}' ), blob $( wc -c <"$C" | tr -d ' ' ) B)"
+else no "V  the blob names no warm-snapshot section ($( snap span "$C" ))"; fi
+if alone "$C"; then ok "V  and nothing was written beside the blob — one artifact, the one the user named"
+else no "V  a file was written beside the blob: $( find "$( dirname "$C" )" -maxdepth 1 -name "$( basename "$C" )?*" | tr '\n' ' ' )"; fi
 
 # V2: the options key is of the SET of environment variables, not of the order the parent shell exports them in (zsh and
 #     bash differ, measured: every run launched from the other shell refused the snapshot as why=options)
@@ -169,34 +242,44 @@ patch(){ printf "$( printf '\\%03o' "$2" )" | dd of="$3" bs=1 seek="$1" conv=not
 
 S2="$TMP/s2"; snapof "$S2" "$TMP/s2.bin"
 has "$TMP/s.prime3" 'graph=loaded' || no "S2 VACUOUS: the tree was never served from the snapshot before the patch"
-patch 8 255 "$TMP/s2.bin.snap"            # byte 8: the low byte of the snapshot's format version
+hasSection "$TMP/s2.bin" || no "S2 VACUOUS: the blob carries no section to patch"
+# byte 8 OF THE SECTION: the low byte of its format version. The blob around it stays wholly valid.
+patch $(( $( snap span "$TMP/s2.bin" | cut -d' ' -f1 ) + 8 )) 255 "$TMP/s2.bin"
 run "$TMP/s2.bin" "$S2" "$TMP/s2.out"; full "$S2" "$TMP/s2.full"
-refused "S2 a version-mismatched snapshot refuses the graph" "$TMP/s2.out" 'graph=loaded'
-refused "S2 a version-mismatched snapshot refuses the crawl replay" "$TMP/s2.out" 'tree=replayed'
+refused "S2 a version-mismatched section refuses the graph" "$TMP/s2.out" 'graph=loaded'
+refused "S2 a version-mismatched section refuses the crawl replay" "$TMP/s2.out" 'tree=replayed'
+if grep -q 'reparsed=0' "$TMP/s2.out.err"; then ok "S2 ...and the blob's RECORDS were still served: only the section was refused"
+else no "S2 the patch refused the whole blob, not just the section: $( grep -o 'cache-stats.*' "$TMP/s2.out.err" )"; fi
 if has "$TMP/s2.out" 'why=version'; then ok "S2 the refusal names the version"; else no "S2 the refusal does not say why=version: $( cat "$TMP/s2.out.stats" )"; fi
 same    "S2 the answer == built" "$TMP/s2.out" "$TMP/s2.full"
 run "$TMP/s2.bin" "$S2" "$TMP/s2.again"; run "$TMP/s2.bin" "$S2" "$TMP/s2.again"
-if has "$TMP/s2.again" 'graph=loaded'; then ok "S2 the refused snapshot was rebuilt: the next run loads"; else no "S2 the snapshot did not heal: $( cat "$TMP/s2.again.stats" )"; fi
+if has "$TMP/s2.again" 'graph=loaded'; then ok "S2 the refused section was rebuilt into the blob: the next run loads"; else no "S2 the section did not heal: $( cat "$TMP/s2.again.stats" )"; fi
 
 S3="$TMP/s3"; snapof "$S3" "$TMP/s3.bin"
-sz=$( wc -c <"$TMP/s3.bin.snap" | tr -d ' ' )
+hasSection "$TMP/s3.bin" || no "S3 VACUOUS: the blob carries no section to flip a byte in"
 for frac in 3 5 7 9; do
-    cp "$TMP/s3.bin.snap" "$TMP/s3.keep"
-    off=$(( sz * frac / 10 ))
-    was=$( dd if="$TMP/s3.bin.snap" bs=1 skip="$off" count=1 2>/dev/null | od -An -tu1 | tr -d ' ' )
-    patch "$off" $(( ( was + 1 ) % 256 )) "$TMP/s3.bin.snap"
+    cp "$TMP/s3.bin" "$TMP/s3.keep"
+    snap patch "$TMP/s3.bin" "$frac"
     run "$TMP/s3.bin" "$S3" "$TMP/s3.out"; full "$S3" "$TMP/s3.full"
-    same "S3 a flipped byte at ${frac}0% of the snapshot: the answer == built ($( sed 's/^ripwire: snapshot-stats //' "$TMP/s3.out.stats" ))" "$TMP/s3.out" "$TMP/s3.full"
+    same "S3 a flipped byte at ${frac}0% of the section: the answer == built ($( sed 's/^ripwire: snapshot-stats //' "$TMP/s3.out.stats" ))" "$TMP/s3.out" "$TMP/s3.full"
     if has "$TMP/s3.out" 'why=checksum'; then ok "S3 ...and the refusal says why=checksum"; else no "S3 a flipped byte at ${frac}0% was not refused as a checksum failure: $( cat "$TMP/s3.out.stats" )"; fi
-    cp "$TMP/s3.keep" "$TMP/s3.bin.snap"
+    cp "$TMP/s3.keep" "$TMP/s3.bin"
 done
 
 S4="$TMP/s4"; snapof "$S4" "$TMP/s4.bin"
-sz=$( wc -c <"$TMP/s4.bin.snap" | tr -d ' ' )
-dd if="$TMP/s4.bin.snap" of="$TMP/s4.cut" bs=1 count=$(( sz / 2 )) 2>/dev/null && mv "$TMP/s4.cut" "$TMP/s4.bin.snap"
+hasSection "$TMP/s4.bin" || no "S4 VACUOUS: the blob carries no section to cut"
+# the control on `snap cut` itself: keeping the WHOLE section must reproduce the blob byte for byte, which is what
+# proves the helper's copy of ingest_cache.h blobChecksum has not drifted from it (see the note in the helper).
+cp "$TMP/s4.bin" "$TMP/s4.orig"; snap cut "$TMP/s4.bin" 10
+if cmp -s "$TMP/s4.bin" "$TMP/s4.orig"; then ok "S4 control: rebuilding the blob around its whole section reproduces it byte for byte"
+else no "S4 control: the helper's rebuild differs from the blob it rebuilt — its blobChecksum copy has drifted, and every cut arm is untrustworthy ($( cmp "$TMP/s4.bin" "$TMP/s4.orig" 2>&1 | head -1 ))"; fi
+cp "$TMP/s4.orig" "$TMP/s4.bin"
+snap cut "$TMP/s4.bin" 5
 run "$TMP/s4.bin" "$S4" "$TMP/s4.out"; full "$S4" "$TMP/s4.full"
-refused "S4 a truncated snapshot refuses the graph" "$TMP/s4.out" 'graph=loaded'
+refused "S4 a section cut in half, in a blob that is still wholly valid, refuses the graph" "$TMP/s4.out" 'graph=loaded'
 same    "S4 the answer == built" "$TMP/s4.out" "$TMP/s4.full"
+if grep -q 'reparsed=0' "$TMP/s4.out.err"; then ok "S4 ...and the blob's RECORDS were still served: the cut refused the section alone"
+else no "S4 the cut refused the whole blob, not just the section: $( grep -o 'cache-stats.*' "$TMP/s4.out.err" )"; fi
 
 S5="$TMP/s5"; snapof "$S5" "$TMP/s5.bin"
 has "$TMP/s.prime3" 'graph=loaded' || no "S5 VACUOUS: the tree was never served from the snapshot before the edit"
@@ -206,12 +289,17 @@ refused "S5 a changed go.mod (read by the resolver, outside the parse cache) ref
 same    "S5 the answer == built" "$TMP/s5.out" "$TMP/s5.full"
 if has "$TMP/s5.out" 'graph_why=dep'; then ok "S5 the refusal is the dependency log's (graph_why=dep): the tree key alone did not move"; else no "S5 the graph was not refused by its dependency log: $( cat "$TMP/s5.out.stats" )"; fi
 
-# S6: the parse cache blob is gone (or another configuration rewrote it): the model built from it is not served
+# S6: the parse cache blob is gone — and the section went with it, because it lived inside it. The binding between a
+#     stored model and the records it was assembled from is STRUCTURAL now; this arm is what proves that, and it is
+#     why warmsnap_model.h no longer stores the blob's stat signature to compare (warmsnap::kVersion 2).
 S6="$TMP/s6"; snapof "$S6" "$TMP/s6.bin"
 has "$TMP/s.prime3" 'model=loaded' || no "S6 VACUOUS: the model was never served before the blob was removed"
 rm -f "$TMP/s6.bin"
 run "$TMP/s6.bin" "$S6" "$TMP/s6.out"; full "$S6" "$TMP/s6.full"
 refused "S6 a removed parse cache blob refuses the model" "$TMP/s6.out" 'model=loaded'
+refused "S6 ...and the graph, and the crawl replay: the whole section went with the blob" "$TMP/s6.out" 'graph=loaded'
+if has "$TMP/s6.out" 'why=absent'; then ok "S6 the refusal is why=absent — there is no section anywhere to be stale"
+else no "S6 the refusal is not why=absent: $( cat "$TMP/s6.out.stats" )"; fi
 same    "S6 the answer == built" "$TMP/s6.out" "$TMP/s6.full"
 if grep -q 'cache-stats reparsed=[1-9]' "$TMP/s6.out.err"; then ok "S6 ...and the run re-parsed, as a run with no blob always did"; else no "S6 the run did not re-parse: $( grep cache-stats "$TMP/s6.out.err" )"; fi
 
@@ -221,6 +309,33 @@ run "$TMP/s7.bin" "$W" "$TMP/s7.b" --exclude=gomod; full "$W" "$TMP/s7.bfull" --
 refused "S7 another --exclude set refuses the whole snapshot" "$TMP/s7.b" 'graph=loaded'
 if has "$TMP/s7.b" 'why=options'; then ok "S7 ...as recorded under other options (why=options)"; else no "S7 the refusal is not why=options: $( cat "$TMP/s7.b.stats" )"; fi
 same    "S7 the answer == built" "$TMP/s7.b" "$TMP/s7.bfull"
+
+# S8: THE STRUCTURAL INVALIDATION the whole design rests on. saveCache writes no section, and a run that re-parsed
+#     anything records none — so after an edit the blob carries NO section at all. Nothing has to notice that a
+#     stored outcome went stale, because there is no stored outcome left to notice. Asserted on the blob's own
+#     header, not on behaviour, so a guard that happened to refuse for another reason cannot stand in for it.
+S8="$TMP/s8"; snapof "$S8" "$TMP/s8.bin"
+hasSection "$TMP/s8.bin" || no "S8 VACUOUS: the blob carried no section before the edit"
+alone "$TMP/s8.bin" || no "S8 a file was written beside the blob before the edit"
+printf 'package lib\n\nfunc Zello() int {\n\treturn 3\n}\n' >"$S8/gomod/lib/lib.go"
+run "$TMP/s8.bin" "$S8" "$TMP/s8.out"
+if grep -q 'cache-stats reparsed=[1-9]' "$TMP/s8.out.err"; then ok "S8 the run after the edit re-parsed ($( grep -o 'cache-stats reparsed=[0-9]*' "$TMP/s8.out.err" ))"
+else no "S8 the run after the edit did not re-parse: $( grep -o 'cache-stats.*' "$TMP/s8.out.err" )"; fi
+if hasSection "$TMP/s8.bin"; then no "S8 the blob a re-parsing run republished still names a section ($( snap span "$TMP/s8.bin" )) — an edit must drop it outright"
+else ok "S8 the blob a re-parsing run republished names NO section: the stored outcome is gone by construction"; fi
+if [ "$( grep -c 'saved=1' "$TMP/s8.out.stats" )" -eq 0 ]; then ok "S8 ...and that run recorded nothing, so it was charged one blob write, not two"
+else no "S8 a re-parsing run recorded a section: $( cat "$TMP/s8.out.stats" )"; fi
+alone "$TMP/s8.bin" || no "S8 a file was written beside the blob by the run after the edit"
+sleep 2
+run "$TMP/s8.bin" "$S8" "$TMP/s8.next"
+if hasSection "$TMP/s8.bin" && has "$TMP/s8.next" 'saved=1'; then ok "S8 the next run, which re-parsed nothing, recorded the section again"
+else no "S8 the section did not come back on the clean run after the edit: $( cat "$TMP/s8.next.stats" ) span=$( snap span "$TMP/s8.bin" )"; fi
+sleep 2
+run "$TMP/s8.bin" "$S8" "$TMP/s8.third"; full "$S8" "$TMP/s8.full"
+if has "$TMP/s8.third" 'graph=loaded'; then ok "S8 ...and the run after THAT loads it"; else no "S8 the re-recorded section is not served: $( cat "$TMP/s8.third.stats" )"; fi
+same "S8 the answer after the whole edit-and-re-record cycle == built" "$TMP/s8.third" "$TMP/s8.full"
+if has "$TMP/s8.third" 'saved=0'; then ok "S8 ...and a steady warm run republishes nothing: the blob already says it all"
+else no "S8 a steady warm run rewrote the blob: $( cat "$TMP/s8.third.stats" )"; fi
 
 # ── L: the crawl replay is refused when the tree moved ────────────────────────────────────────────
 # prime DIR CACHE — record, leave the racy window, and prove the replay engaged (else the arm is vacuous)

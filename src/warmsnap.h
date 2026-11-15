@@ -1,5 +1,8 @@
 #pragma once
-// warmsnap.h — the warm snapshot: `<cache>.snap`, beside the parse cache blob.
+// warmsnap.h — the warm snapshot: a SECTION INSIDE the parse cache blob (ingest_cache.h, kCacheVersion 53).
+//
+// This header owns the section's FORMAT and nothing about where it lives: the bytes are handed in by openSnapshot and
+// handed back by saveSnapshot, and ingest_cache.h's readWarmSection / publishBlobWithWarmSection carry them.
 //
 // WHAT IT HOLDS. Three sections, each the stored OUTCOME of a deterministic stage a warm run otherwise repeats:
 //   TREE   the crawl's answer (files, the oversize drops, the skip taxonomy) and the stat signature of every directory
@@ -8,17 +11,24 @@
 //   MODEL  the assembled IngestResult for the flagless map (warmsnap_model.h).
 //   GRAPH  the resolved Graph (warmsnap_graph.h): every field buildGraph computes, and the files it read to do so.
 //
-// WHY A FILE BESIDE THE BLOB, NOT A SECTION INSIDE IT. The blob is published by saveCache from inside the parse pool,
-// before the model exists; the graph exists only after buildGraph. Putting the graph in the blob would mean a second
-// whole-blob rewrite (161 MB on envoy) on every run that changes one file. The snapshot is written once, at the end,
-// tmp-then-rename like the blob, and a missing or refused snapshot is exactly today's run.
+// A SECTION INSIDE THE BLOB, NOT A FILE BESIDE IT (owner ruling 2026-11-15; what the card registered). The blob is
+// published by saveCache from inside the parse pool, before the model exists, and the graph exists only after
+// buildGraph — so the section is added by republishing the blob at the END of the run: the records are copied forward
+// by fd at the offsets they already hold, the section goes after them, and the table and trailer are written fresh,
+// tmp-then-rename. Two things fall out of living inside the blob, and they are the reason it is the cheaper design:
+//   * saveCache writes NO section, so a run that re-parsed anything leaves the blob carrying none. An edit drops the
+//     stored outcome by construction; nothing has to notice that it went stale.
+//   * the model's binding to the records it was assembled from is structural, not asserted. If the blob is replaced,
+//     the section goes with it.
+// Only a run that re-parsed nothing records, so a run is never charged both saveCache's write and this republish. A
+// missing or refused section is exactly today's run.
 //
 // WHEN IT IS SERVED — the whole contract. A stale parse cache costs time; a stale snapshot is a wrong answer at exit 0.
 // So invalidation is strictly coarser than the blob's:
-//   * the header carries this build's SOURCE IDENTITY (quality::producerIdentity: the SHA-256 of src/ and queries/), the
+//   * the section header carries this build's SOURCE IDENTITY (quality::producerIdentity: the SHA-256 of src/ and queries/), the
 //     format version, the ABI, and a digest of every option, path spelling and environment variable the crawl, the
 //     ingest or the resolver reads. Any difference refuses the whole file.
-//   * one checksum covers every byte. A flipped bit anywhere refuses the whole file.
+//   * one checksum covers every byte of the section. A flipped bit anywhere refuses the whole section.
 //   * GRAPH and MODEL are keyed on the TREE KEY: a digest of every crawled file's root-relative path and content hash,
 //     in crawl order. One changed, added or removed file moves it and refuses both.
 //   * GRAPH also lists every file the resolver read outside the parse cache (infra/depwatch.h); each read is repeated
@@ -27,7 +37,7 @@
 //     is never recorded while any of them is younger than two seconds before the recording crawl began (the racy rule:
 //     a change inside the timestamp granule of the recording could otherwise hide behind an equal signature).
 //
-// A refusal changes cost, never content: the run walks, decodes and resolves as it always did, then rewrites the file.
+// A refusal changes cost, never content: the run walks, decodes and resolves as it always did, then records again.
 #include "model.h"
 #include "infra/depwatch.h"
 #include "infra/os.h"
@@ -35,7 +45,7 @@
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"
 #include "pathguard.h"
-#include "quality.h"   // producerIdentity, atomicWriteFile
+#include "quality.h"   // producerIdentity
 #include "infra/jsonesc.h"   // rw::shSingleQuote
 #include "infra/sortutil.h"  // svLess: string_view order without libstdc++'s length subtraction
 #include "gitcmd.h"    // rw::gitCmd — the hardened git prefix, for the one config listing a recording run asks for
@@ -55,7 +65,10 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 1;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 2;                        // bump on ANY layout change in the three sections
+                                                                    // 2: the MODEL section dropped the blob's stat signature — living inside
+                                                                    //    the blob makes that binding structural (see the note above).
+                                                                    // 1: the sidecar's layout.
 inline constexpr std::size_t   kHeaderBytes = 112;
 inline constexpr long long     kRacySlackNs = 2'000'000'000ll;      // FAT keeps 2 s timestamps; nothing coarser is in use
 
@@ -571,11 +584,12 @@ inline constexpr std::size_t kIgnoredSubtreeCap = 50'000;
 struct Session
 {
     // identity of this run
-    std::string   path;                 // "<cache>.snap"; empty: the snapshot is off for this run
+    std::string   blobPath;             // the parse cache blob the section lives in; empty: the snapshot is off for this run
     std::uint64_t optionsKey = 0;
     long long     startNs    = 0;       // wall clock before the crawl: the racy rule's reference
+    bool          reparsed   = false;   // this run re-extracted at least one file: it records nothing (see saveSnapshot)
 
-    // the file as read
+    // the section as read out of the blob
     std::string      file;
     bool             fileOk = false;
     std::uint64_t    fileTreeKey = 0;
@@ -597,7 +611,7 @@ struct Session
     std::uint64_t treeKey      = 0;
     bool          treeKeyValid = false;       // false: some file's content is not pinned by a hash, so nothing keyed on it is stored or served
 
-    bool on() const noexcept { return !path.empty(); }
+    bool on() const noexcept { return !blobPath.empty(); }
     void refuse( Why w ) noexcept
     {
         if( why == Why::Ok ) { why = w; }
@@ -663,26 +677,26 @@ inline std::uint64_t optionsKeyOf( std::string_view rootDir, const std::vector<s
     return depwatch::digest64( o.bytes );
 }
 
-// The checksum's subject: the header up to the checksum field, then everything after the header.
-inline std::uint64_t fileSum( std::string_view file ) noexcept
+// The checksum's subject: the section header up to the checksum field, then everything after the header.
+inline std::uint64_t sectionSum( std::string_view payload ) noexcept
 {
-    const std::uint64_t head = depwatch::digest64( file.substr( 0, kHeaderBytes - 8 ) );
-    const std::uint64_t body = depwatch::digest64( file.substr( kHeaderBytes ) );
+    const std::uint64_t head = depwatch::digest64( payload.substr( 0, kHeaderBytes - 8 ) );
+    const std::uint64_t body = depwatch::digest64( payload.substr( kHeaderBytes ) );
     return head ^ hashutil::multiplyModulo64( body, 0x9e37'79b9'7f4a'7c15ull );
 }
 
-// Read and validate `<cache>.snap`. After this, `fileOk` says whether ANY section may be considered.
-inline void openSnapshot( Session& s )
+// Validate the warm-snapshot section the blob carried (ingest_cache.h readWarmSection; empty: the blob carries none).
+// After this, `fileOk` says whether ANY sub-section may be considered.
+inline void openSnapshot( Session& s, std::string&& payload )
 {
-    PROFILE_SCOPE_DESCRIBE( "warmsnap: read + validate the snapshot file" );
+    PROFILE_SCOPE_DESCRIBE( "warmsnap: validate the warm-snapshot section the blob carried" );
     s.why = Why::Ok;
-    std::optional<std::string> bytes = pathguard::readRegularFileNoFollow( s.path );
-    if( !bytes )
+    if( payload.empty() )
     {
         s.refuse( Why::Absent );
         return;
     }
-    s.file = std::move( *bytes );
+    s.file = std::move( payload );
     In in{ std::string_view( s.file ) };
     const std::uint64_t magic    = in.u64();
     const std::uint32_t version  = in.u32();
@@ -695,26 +709,26 @@ inline void openSnapshot( Session& s )
     std::uint64_t span[ 6 ];
     for( std::uint64_t& v : span ) { v = in.u64(); }
     const std::uint64_t sum      = in.u64();
-    if( !VALIDATE( in.ok && magic == kMagic, "warmsnap: not a snapshot file" ) )
+    if( !VALIDATE( in.ok && magic == kMagic, "warmsnap: not a warm-snapshot section" ) )
     {
         s.refuse( Why::Checksum );
         return;
     }
     if( !VALIDATE( version == kVersion, "warmsnap: another format version" ) )
     {
-        DISCLOSE( Diagnostics::answerUnchanged, "a snapshot of another format version is not read; the run walks, decodes and resolves as without one" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a section of another format version is not read; the run walks, decodes and resolves as without one" );
         s.refuse( Why::Version );
         return;
     }
-    if( !VALIDATE( sum == fileSum( s.file ), "warmsnap: checksum mismatch" ) )
+    if( !VALIDATE( sum == sectionSum( s.file ), "warmsnap: checksum mismatch" ) )
     {
-        DISCLOSE( Diagnostics::answerUnchanged, "a snapshot whose checksum fails is not read; the run walks, decodes and resolves as without one" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a section whose checksum fails is not read; the run walks, decodes and resolves as without one" );
         s.refuse( Why::Checksum );
         return;
     }
     if( !VALIDATE( producer == quality::producerIdentityHash() && layout == layoutKey(), "warmsnap: written by another build" ) )
     {
-        DISCLOSE( Diagnostics::answerUnchanged, "a snapshot another build wrote is not read; the run walks, decodes and resolves as without one" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a section another build wrote is not read; the run walks, decodes and resolves as without one" );
         s.refuse( Why::Producer );
         return;
     }
@@ -727,7 +741,7 @@ inline void openSnapshot( Session& s )
     for( int i = 0; i < 3; ++i )
     {
         const std::uint64_t off = span[ 2 * i ], len = span[ 2 * i + 1 ];
-        if( !VALIDATE( off <= s.file.size() && len <= s.file.size() - off, "warmsnap: a section lies outside the file" ) )
+        if( !VALIDATE( off <= s.file.size() && len <= s.file.size() - off, "warmsnap: a sub-section lies outside the section" ) )
         {
             s.refuse( Why::Checksum );
             return;
@@ -908,14 +922,20 @@ inline void setTreeKey( Session& s, const std::vector<std::string>& files, std::
     s.treeKeyValid = everyFilePinned;
 }
 
-// ── write ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-// Sections this run did not produce are carried over from the file it read, when that file is still the same tree's.
-inline void saveSnapshot( Session& s )
+// ── serialize ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// The section this run would have the blob carry, or EMPTY when the blob should be left exactly as it is. Sub-sections
+// this run did not produce are carried over from the section it read, when that section is still the same tree's.
+//
+// A run that RE-PARSED anything records nothing at all. Not an optimisation: saveCache has already republished the
+// blob for that run, with no section in it, and a second republish would charge one run two blob-sized writes. The
+// next run re-parses nothing and records all three sub-sections then — so the stored outcome always describes a tree
+// that was served entirely from the blob's records.
+inline std::string saveSnapshot( Session& s )
 {
-    PROFILE_SCOPE_DESCRIBE( "warmsnap: write the snapshot file (tmp, then rename)" );
-    if( !s.on() )
+    PROFILE_SCOPE_DESCRIBE( "warmsnap: serialize the warm-snapshot section" );
+    if( !s.on() || s.reparsed )
     {
-        return;
+        return {};
     }
     const bool sameTree = s.fileOk && s.treeKeyValid && s.fileTreeKey == s.treeKey;
     const std::string_view tree  = s.treeSectionFresh ? std::string_view( s.treeOut ) : s.treeReplayed ? s.treeSection : std::string_view{};
@@ -924,7 +944,7 @@ inline void saveSnapshot( Session& s )
     const bool unchanged = s.fileOk && sameTree && !s.treeSectionFresh && s.modelOut.empty() && s.graphOut.empty() && tree.size() == s.treeSection.size();
     if( unchanged || ( tree.empty() && model.empty() && graph.empty() ) )
     {
-        return;   // the file on disk already says everything this run knows, or this run knows nothing worth a file
+        return {};   // the blob already carries everything this run knows, or this run knows nothing worth storing
     }
     Out o;
     o.bytes.reserve( kHeaderBytes + tree.size() + model.size() + graph.size() + 24 );
@@ -950,14 +970,9 @@ inline void saveSnapshot( Session& s )
         o.bytes.append( sec );
         o.bytes.append( ( 8 - sec.size() % 8 ) % 8, '\0' );
     }
-    const std::uint64_t sum = fileSum( o.bytes );
+    const std::uint64_t sum = sectionSum( o.bytes );
     std::memcpy( o.bytes.data() + kHeaderBytes - 8, &sum, 8 );
-    if( !quality::atomicWriteFile( s.path, o.bytes ) )
-    {
-        DISCLOSE( Diagnostics::answerUnchanged, "this run's answer is already computed; only the next run's snapshot is not there, and it walks and resolves as before" );
-        return;
-    }
-    s.saved = true;
+    return std::move( o.bytes );
 }
 
 }   // namespace rw::warmsnap
