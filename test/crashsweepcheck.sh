@@ -295,7 +295,10 @@ ccjson.h	ccCountLoc	fopen	1	closes	the only early exit is the failed open; nothi
 clones.h	readCloneSourceFile	fopen	1	closes	the one read both clone passes share: false on a failed open; fclose right after the sized read
 crossref.h	catFileBatch	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	catFileBatch	popen	1	closes	the read loop leaves by break or its own condition only; pclose then unlink
+crossref.h	diffTreeSlice	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	evalStray	fopen	1	closes	returns only on a failed open; fclose after the read loop
+crossref.h	mergeBasesByOneWalk	fopen	1	closes	returns only on a failed open; fclose after the list is written
+crossref.h	scanWorktreeLarge	fopen	1	closes	returns only on a failed open (or a failed size probe); fclose right after readInPieces, before every later return
 crossref.h	streamBlobs	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	popen	1	closes	the read loop leaves by break/continue only; pclose then unlink
 darkflags.h	readWhole	fopen	1	closes	fclose before the size-cap return and before the final return
@@ -346,6 +349,7 @@ quality.h	sweepStaleEditLocks	open	1	closes	skips only a failed open; close afte
 resolve.h	readConfigBytes	fopen	1	closes	returns only on a failed open; fclose before the return
 scip.h	scipReadFile	fdopen	1	closes	fclose before each of the three returns
 scip.h	scipReadFile	open	1	closes	::close when fstat, fcntl or fdopen fails; otherwise the stream owns it
+search.h	scanAuxFileInPieces	fopen	1	closes	returns only on a failed open; fclose right after readInPieces, before every later return
 serialize.h	collectJsonSigEntries	fopen	1	closes	skips only a failed open; fclose after the read loop
 serialize.h	estimateExpandBodyTokens	fopen	1	closes	if-scoped; fclose after the read loop
 serialize.h	openChargeBuffer	open_memstream	1	transferred	its only caller is openChargeStream, which hands it to rw::MemoryStream::openWith; the MemoryStream owns it from there
