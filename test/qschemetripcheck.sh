@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
+#   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
+#   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds
+#   takes a RegisterRule so inertRegisterMacroNames asks the macro-call half alone (a config warning, not a dead-set input).
 # 2026-11-15, lane land-499-500 (qd fix): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme stays 33: isDeadCandidate is split
 #   into uncalledBody (the structural half, now on the manifest) and the invoked half, with the same answers and the same
 #   exemptedByRegisterMacro; forEachSymbolBody passes the whole file to a four-argument visitor (forEachSymbolFile folded in).

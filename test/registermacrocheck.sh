@@ -546,5 +546,76 @@ done
 [ "$seen12" = 4 ] && ok "arm12: all 4 planted name-only negatives reported" \
                   || no "arm12: $seen12 of the 4 planted name-only negatives reported (0 means the arm judged nothing)"
 
+# ── ARM 13: every attribute on a line is read, and a `#[` inside a string is text (CodeRabbit on #668) ─────────────────
+# rustTestAttributed used to test only the LAST `#[` on an attribute line, found by rfind. Two shapes broke it:
+#   * `#[tokio::test(flavor = "current_thread")] #[allow(unused)]`: the test attribute is not the last one, so the harness's
+#     function was reported (the ingest's testScope rule does not read tokio::test with an argument list either);
+#   * `#[doc = "#[tokio::test(x)]"]`: the last `#[` sits inside the doc string, so an unused function was exempt.
+# Positives must be exempt, the doc-string lookalikes must be reported, and the controls hold: `#[inline] #[test]` (the test
+# attribute last) and `#[tokio::test(flavor = "x")]` alone stay exempt. The full legend carries the Rust sentence here
+# (a Rust test was excluded); donelegendcheck (c) holds it absent on a tree with no Rust test.
+A13="$WORK/a13"; newrepo "$A13"
+printf 'fn live_helper() -> u32 { 1 }\n' > "$A13/lib.rs"
+commit "$A13" "baseline for the per-attribute arms"
+cat >> "$A13/lib.rs" <<'EOF'
+
+#[tokio::test(flavor = "current_thread")] #[allow(unused)]
+fn stacked_first_case() { assert_eq!(live_helper(), 1); }
+
+#[inline] #[test]
+fn stacked_last_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "x")]
+fn flavored_control_case() { assert_eq!(live_helper(), 1); }
+
+#[doc = "#[tokio::test(x)]"]
+fn doc_string_lookalike() { }
+
+#[doc = "a ] then #[tokio::test]"] #[inline]
+fn doc_bracket_lookalike() { }
+EOF
+QD13="$( cd "$A13" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
+rc_qd13=$?
+if [ "$rc_qd13" = 0 ]; then ok "arm13: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm13: --quality-delta exited $rc_qd13, not 0"; fi
+for sym in stacked_first_case stacked_last_case flavored_control_case; do
+    printf '%s' "$QD13" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && no "arm13: '$sym' carries a test attribute on its line but was reported as dead-code" \
+        || ok "arm13: '$sym' (a test attribute among others on one line) excluded from dead-code"
+done
+seen13=0
+for sym in doc_string_lookalike doc_bracket_lookalike; do
+    if printf '%s' "$QD13" | grep -q "kind=\"dead-code\" sym=\"$sym\""; then seen13=$(( seen13 + 1 )); ok "arm13: '$sym' (a test attribute only inside a doc string) still flagged"
+    else no "arm13: '$sym' was exempt by a #[ inside a string"; fi
+done
+[ "$seen13" = 2 ] && ok "arm13: both planted doc-string lookalikes reported" \
+                  || no "arm13: $seen13 of the 2 planted doc-string lookalikes reported (0 means the arm judged nothing)"
+case "$QD13" in *'Rust #[test] and #[tokio::test] functions count too'*) ok "arm13: the full legend states the Rust sentence (a Rust test was excluded)";;
+                 *) no "arm13: the full legend is missing the Rust sentence on a tree whose excluded set holds Rust tests";; esac
+
+# ── ARM 14: a configured name is inert unless a MACRO CALL matches it, Rust tests or not (CodeRabbit on #668) ─────────
+# inertRegisterMacroNames asked registeredMacroSymbolIds, which also holds every Rust #[test] fn, so in a tree with one Rust
+# test a typo'd register_macros= name looked live and drew no warning. PREMISE: the Rust test is exempt (register-macro-
+# excluded= is non-zero), so the Rust half really ran on this tree.
+A14="$WORK/a14"; newrepo "$A14"
+cat > "$A14/lib.rs" <<'EOF'
+pub fn api() -> u32 { 1 }
+
+#[test]
+fn real_harness_case() { assert_eq!(api(), 1); }
+EOF
+printf 'register_macros = TYPO_NEVER_USED\n' > "$A14/.ripwire_config"
+commit "$A14" "a Rust test and a typo'd register_macros= name"
+QD14_ERR="$( cd "$A14" && "$BIN" . --quality-delta --no-cache 2>&1 >/dev/null )"
+QD14_TAG="$( cd "$A14" && "$BIN" . --quality-delta --no-cache 2>/dev/null | grep -oE '<quality-delta[^>]*>' )"
+printf '%s' "$QD14_TAG" | grep -qE 'register-macro-excluded="[1-9]' \
+    && ok "arm14 premise: the Rust test is counted in register-macro-excluded=" \
+    || { no "arm14 premise: register-macro-excluded= is zero, so the Rust half did not run"; printf '%s\n' "$QD14_TAG"; }
+printf '%s' "$QD14_ERR" | grep -q 'TYPO_NEVER_USED' \
+    && ok "arm14: the inert name is named on stderr beside a Rust test" \
+    || { no "arm14: no stderr warning for the inert name 'TYPO_NEVER_USED' (a Rust test made it look live)"; printf '%s\n' "$QD14_ERR"; }
+printf '%s' "$QD14_TAG" | grep -q 'config-warnings="1"' \
+    && ok "arm14: --quality-delta root carries config-warnings=\"1\"" \
+    || { no "arm14: no config-warnings= disclosure for the inert name"; printf '%s\n' "$QD14_TAG"; }
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

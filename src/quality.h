@@ -2125,11 +2125,73 @@ inline std::string_view rustCodeOfAttributeLine( std::string_view line ) noexcep
     return line;
 }
 
+// rustAttributeClose returns the index of the `]` that closes the attribute whose text starts at `from` (just past its `#[`),
+// or npos when the line ends first. Brackets nest, and a double-quoted string is opaque: the `]` in
+// `#[doc = "a ]"]` and the `#[` in `#[doc = "#[test]"]` are text (CodeRabbit on #668).
+inline std::size_t rustAttributeClose( std::string_view line, std::size_t from ) noexcept
+{
+    std::size_t depth    = 1;
+    bool        inString = false;
+    for( std::size_t i = from; i < line.size(); ++i )
+    {
+        const char c = line[ i ];
+        if( inString )
+        {
+            i += c == '\\' ? 1 : 0;
+            inString = c != '"';
+        }
+        else if( c == '"' )
+        {
+            inString = true;
+        }
+        else if( c == '[' || c == ']' )
+        {
+            depth = c == '[' ? depth + 1 : depth - 1;
+            if( depth == 0 )
+            {
+                return i;
+            }
+        }
+    }
+    return std::string_view::npos;
+}
+
+// How one line above an item reads, once its leading whitespace and trailing `//` comment are gone.
+enum class RustAttributeLine : std::uint8_t
+{
+    Code,        // anything but a run of whole `#[...]` attributes: the attribute block above the item ends here
+    Test,        // a run of attributes, one of them a test attribute
+    Other,       // a run of attributes, none of them a test attribute: keep reading upward
+};
+
+// Splits the line into its top-level `#[...]` attributes and tests EACH one, so `#[tokio::test(flavor = "x")] #[allow(unused)]`
+// is a test line though its last attribute is not (CodeRabbit on #668).
+inline RustAttributeLine classifyRustAttributeLine( std::string_view line ) noexcept
+{
+    bool test = false;
+    for( std::size_t i = 0; i < line.size(); )
+    {
+        if( std::isspace( static_cast<unsigned char>( line[ i ] ) ) )
+        {
+            ++i;
+            continue;
+        }
+        const std::size_t close = line.substr( i, 2 ) == "#[" ? rustAttributeClose( line, i + 2 ) : std::string_view::npos;
+        if( close == std::string_view::npos )
+        {
+            return RustAttributeLine::Code;
+        }
+        test = test || isRustTestAttribute( line.substr( i + 2, close - i - 2 ) );
+        i    = close + 1;
+    }
+    return test ? RustAttributeLine::Test : RustAttributeLine::Other;
+}
+
 // rustTestAttributed reads backwards from the item's signature start over blank lines, `//` comments and other
 // attribute lines (`#[inline]`, `#[allow(...)]`), and answers true when one of them is a test attribute. Whole-token
-// compare: `#[testing]` and a `#[test]` inside a comment do not count. An attribute line STARTS with `#[` once its leading
-// whitespace is gone: a `#[test]` written after code on the same line (`const A: u32 = 1; #[test]`) is not an attribute
-// of the item below it, so it ends the scan like any other code (issue #499 review).
+// compare: `#[testing]` and a `#[test]` inside a comment do not count. An attribute line is a run of whole `#[...]`
+// attributes once its leading whitespace is gone: a `#[test]` written after code on the same line (`const A: u32 = 1; #[test]`)
+// is not read as an attribute of the item below it, so it ends the scan like any other code (issue #499 review).
 // FLOOR, stated: a multi-line attribute, or a block comment between attribute and item, ends the scan and the item
 // stays a dead-code candidate. That is a miss in the reporting direction, never a false exemption.
 inline bool rustTestAttributed( std::string_view file, std::size_t sigStart ) noexcept
@@ -2163,14 +2225,10 @@ inline bool rustTestAttributed( std::string_view file, std::size_t sigStart ) no
             end = from;
             continue;
         }
-        if( line.substr( 0, 2 ) != "#[" || line.back() != ']' )
+        const RustAttributeLine kind = classifyRustAttributeLine( line );
+        if( kind != RustAttributeLine::Other )
         {
-            return false; // any other code ends the attribute block
-        }
-        const std::size_t open = line.rfind( "#[" );
-        if( isRustTestAttribute( line.substr( open + 2, line.size() - open - 3 ) ) )
-        {
-            return true;
+            return kind == RustAttributeLine::Test;   // a test attribute, or code that ends the attribute block
         }
         end = from;       // another attribute on the way up: keep reading
     }
@@ -2189,6 +2247,17 @@ inline bool registersItself( const Symbol& s, std::string_view file, std::string
     return langFacts( s.lang ).attributeRegistersTests && rustTestAttributed( file, s.sigStartByte );
 }
 
+// issue #499 — whether the --quality-delta legend owes its Rust sentence (verbs_quality.h kQdRustTestLegend): some def sits in a
+// Rust in-file test scope (`#[test] fn`, `#[cfg(test)] mod`; model.h testScope) of a language whose test attribute registers it.
+// Read with register-macro-excluded= > 0, that is the run whose excluded set holds the harness's functions. No exemption reads it.
+inline bool anyRustTestScopeDef( const IngestResult& ing ) noexcept
+{
+    return std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s )
+    {
+        return s.testScope != 0 && langFacts( s.lang ).attributeRegistersTests;
+    } );
+}
+
 // P2.2 — every symbol in THIS tree whose own signature text is a registered-macro call (built ONCE per
 // computeSnapshot/computeDelta run, exactly like topLevelCallees above), reading each file's bytes once via
 // forEachSymbolBody — whose per-symbol `body` view already starts at sigStartByte, which is precisely where
@@ -2196,7 +2265,15 @@ inline bool registersItself( const Symbol& s, std::string_view file, std::string
 // Sorted for isDeadCandidate's binary_search. Short-circuits to empty when `names` is empty (never true for
 // the built-in call sites — kBuiltinRegisterMacros is never empty — but keeps the function honest for any
 // future caller that passes an empty override).
-inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, const std::vector<std::string>& names )
+// `rule` MacroCallOnly reads the macro-call half alone: inertRegisterMacroNames asks whether a configured NAME matched, and a
+// Rust #[test] fn matches no name (CodeRabbit on #668: with it counted, a typo'd name looked live in any tree with a Rust test).
+enum class RegisterRule : std::uint8_t
+{
+    AnyRegistration,   // registersItself: a registered macro call, or a Rust test attribute
+    MacroCallOnly,     // startsWithRegisteredMacro: the signature is a call of one of `names`
+};
+inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, const std::vector<std::string>& names,
+                                                     RegisterRule rule = RegisterRule::AnyRegistration )
 {
     std::vector<NodeId> ids;
     if( names.empty() )
@@ -2205,7 +2282,7 @@ inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, co
     }
     forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view file )
     {
-        if( registersItself( s, file, body, names ) )
+        if( rule == RegisterRule::MacroCallOnly ? startsWithRegisteredMacro( body, names ) : registersItself( s, file, body, names ) )
         {
             ids.push_back( i );
         }
@@ -2247,17 +2324,6 @@ inline std::vector<NodeId> rustDropImplMethodIds( const IngestResult& ing )
         if( s.kind != SymKind::Method || ( s.name != "drop" && s.name != "r#drop" ) || !langFacts( s.lang ).dropRunsAtScopeExit )
         {
             continue;
-// issue #499 — whether the --quality-delta legend owes its Rust sentence (verbs_quality.h kQdRustTestLegend): some def sits in a
-// Rust in-file test scope (`#[test] fn`, `#[cfg(test)] mod`; model.h testScope) of a language whose test attribute registers it.
-// Read with register-macro-excluded= > 0, that is the run whose excluded set holds the harness's functions. No exemption reads it.
-inline bool anyRustTestScopeDef( const IngestResult& ing ) noexcept
-{
-    return std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s )
-    {
-        return s.testScope != 0 && langFacts( s.lang ).attributeRegistersTests;
-    } );
-}
-
         }
         for( const Binding* block : dropBlocks )
         {
@@ -2296,7 +2362,7 @@ inline std::vector<std::string> inertRegisterMacroNames( const IngestResult& ing
     std::vector<std::string> inert;
     for( const std::string& name : configNames )
     {
-        if( registeredMacroSymbolIds( ing, { name } ).empty() )
+        if( registeredMacroSymbolIds( ing, { name }, RegisterRule::MacroCallOnly ).empty() )
         {
             inert.push_back( name );
         }
@@ -4317,6 +4383,8 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   registersItself            (quality.h) — the self-registration exemption --dead-code and --quality-delta share (a registered macro call, or a Rust test attribute above)
 //   rustTestAttributed         (quality.h) — the backward scan over blank, comment and attribute lines that finds a #[test] or #[tokio::test] above a Rust definition
 //   isRustTestAttribute        (quality.h) — whole-token check that an attribute's text is `test` or `tokio::test`, with or without an argument list
+//   classifyRustAttributeLine  (quality.h) — splits a line into its top-level #[...] attributes and tests each one (CodeRabbit on #668)
+//   rustAttributeClose         (quality.h) — the `]` that closes one attribute: brackets nest, a double-quoted string is opaque
 //   rustCodeOfAttributeLine    (quality.h) — an attribute line without its trailing // comment (a // inside a double-quoted string does not start one)
 //   defectSitesOf              (quality.h) — the defect-shape site identity (anchor + facet + normalized text)
 //                                             the baseline stores. NOTE (disclosed limitation): the scanners it
@@ -4468,7 +4536,11 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // exempt only as a DIRECT member of a Drop impl block (rustDropImplMethodIds: an ImplBlock whose trait is Drop). A v32 blob reports
 // every Drop::drop as dead, and this scheme changes that dead set, so a v32 blob is rejected. Bumped 32 -> 33. kParserVer stays:
 // no extraction change.
-constexpr std::uint32_t kQSnapCacheScheme = 33;
+// v34 (2026-11-15, lane land-499-500 fix 1, CodeRabbit on #668) — no blob shape change; the dead SET's inputs moved for Rust.
+// rustTestAttributed tests EVERY top-level attribute on a line (classifyRustAttributeLine), so `#[tokio::test(x)] #[allow(unused)]`
+// now exempts the fn below it, and a `#[` inside a string is text, so `#[doc = "#[tokio::test(x)]"]` no longer does. A v33 blob
+// holds the old set, so it is rejected. Bumped 33 -> 34. kParserVer stays: no extraction change.
+constexpr std::uint32_t kQSnapCacheScheme = 34;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
