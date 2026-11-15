@@ -1295,13 +1295,15 @@ est_11_a7d(){
 # answer) serves every one of the same total= hop rows.
 # round C (reserve first; rule 4): the hops are funded from the rows at the cut, so 1500 now serves the whole set — re-anchored
 # to 600 (the marker) and 800 (the partial cut), measured on the round C build: 600 shown=0, 800 shown=3 of 6, 900+ whole
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= pins --for='Q' — it was --for=&apos;Q&apos;; a raw ' is legal in this
+# "-delimited attribute, and the entity did not paste into a shell (nextverb.h appendNextValueXml). Here and A7D-2 below.
 a7r_out --token-budget=600 >"$A7R/h.xml"
 h_tag="$( grep -aoE '<hops [^>]*>' "$A7R/h.xml" | head -1 )"
 h_root="$( ctx_root "$A7R/h.xml" )"
 h_tot="$( printf '%s' "$h_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 hd_tag="$( grep -aoE '<hops [^>]*>' "$A7R/n0.xml" | head -1 )"
 hd_shown="$( printf '%s' "$hd_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hd_tot="$( printf '%s' "$hd_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
-{ [ "$h_tag" = "<hops shown=\"0\" total=\"$h_tot\" capped=\"1\" next=\"--for=&apos;$A7R_Q&apos;\"/>" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
+{ [ "$h_tag" = "<hops shown=\"0\" total=\"$h_tot\" capped=\"1\" next=\"--for='$A7R_Q'\"/>" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
   && grep -aqF '; hops: this budget left out the call-hop rows (one hop of callees for each of total= top rows)' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
   && [ -n "$h_root" ] && [ -n "$hd_shown" ] && [ "$hd_shown" = "$h_tot" ] && [ "$hd_tot" = "$h_tot" ]; } \
     && ok "#11 A7D hops: the spent-target <hops> at 600 is the counted marker ($h_tag), defined, unlabelled; its next= serves all $hd_shown of $hd_tot rows" \
@@ -1321,7 +1323,7 @@ a7r_out --token-budget=800 >"$A7R/hp.xml"
 hp_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hp.xml" | head -1 )"
 hp_sh="$( printf '%s' "$hp_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hp_tot="$( printf '%s' "$hp_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 { [ -n "$hp_sh" ] && [ -n "$hp_tot" ] && [ "$hp_sh" -ge 1 ] && [ "$hp_sh" -lt "$hp_tot" ] && [ "${hp_tag#* capped=\"1\"}" != "$hp_tag" ] \
-  && [ "${hp_tag#* next=\"--for=&apos;$A7R_Q&apos;\"}" != "$hp_tag" ]; } 2>/dev/null \
+  && printf '%s' "$hp_tag" | grep -qF " next=\"--for='$A7R_Q'\""; } 2>/dev/null \
     && ok "#11 A7D partial hops cut at 800 tokens carries next= ($hp_tag)" \
     || no "#11 A7D partial hops cut at 800 tokens: not a partial cut with next= (got '${hp_tag:-none}')"
 # A7D-W (forbudget-soft, replaces the old 5000-token partial cut): a target wide enough for the rows AND the hop rows serves the
