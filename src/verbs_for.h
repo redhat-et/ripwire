@@ -4900,6 +4900,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::size_t       tailShownRows  = 0;
         std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
         std::vector<std::string> tailPrinted = rw::emittedTailPaths( forFileTailShown, tailShownRows );   // FOR-DOC-BODY: the <t> rows this answer prints
+        bool tailTermNames = rw::fileTailTermNamesShown( forFileTailShown, tailShownRows );   // TAIL-SYM-TERMS: its clause rides only then
 
         // ── round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST): the rows past the soft target's cut fill what the
         // trailing sections left of T. The sections above were funded as if the rows stopped at the cut (sigsFundedBytes), so
@@ -4939,6 +4940,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                 const FileTail refilledTail = computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask );
                 tailStr     = renderForFileTailXml( refilledTail, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
                 tailPrinted = rw::emittedTailPaths( refilledTail, tailShownRows );
+                tailTermNames = rw::fileTailTermNamesShown( refilledTail, tailShownRows );
                 return true;
             }
             forSigsCut         = firstCut;
@@ -5129,6 +5131,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTailWide : rw::kForFileTailWideLegend,
                                    headerParts.compactLegend ? rw::kForCompactFileTailFoldedLegend : rw::kForFileTailFoldedLegend );
+        }
+        if( tailTermNames )   // TAIL-SYM-TERMS: right after the tail clause that defines sym=
+        {
+            rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTail : rw::kForFileTailLegend,
+                                   headerParts.compactLegend ? rw::kForCompactFileTailTermsLegend : rw::kForFileTailTermsLegend );
         }
         if( sigsPreRendered && sigsStr.contains( " same_as=\"" ) )
         {

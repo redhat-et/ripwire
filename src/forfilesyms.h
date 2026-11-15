@@ -39,6 +39,7 @@
 // est_tokens, after every byte of the ordinary answer: no auto-served body pays for it. XML only: --json, columnar, --candidates and multi-root answers carry none.
 #include "filetext.h" // FileTextCache — by="init" reads a head's file for the declaration of its name
 #include "filter.h" // isTestSymbol — the test/fixture mark on a row
+#include "fortailterms.h" // kForFileTailTermsLegend — the tail's tsym= clause, masked with the attribute it defines
 #include "infra/Diagnostics.h" // DISCLOSE — by="init"'s window cut (InitWindowCut)
 #include "infra/namesplit.h" // namesplit::isIdentChar — the one identifier-byte test
 #include "infra/sortutil.h" // svLess: the byte order every string_view sort/search here uses
@@ -378,6 +379,7 @@ struct ShownRow
     std::string name;
     std::uint32_t line = 0;
     std::size_t symAt = 0, symLen = 0; // a <t> row: its sym= value's bytes in the answer (symLen 0: none)
+    std::size_t tsymAt = 0, tsymLen = 0; // a <t> row: its tsym= value's bytes (TAIL-SYM-TERMS; tsymLen 0: none)
 };
 
 // The <d>, <b> and <t> row tags of the answer in order, outside comments and CDATA (a served body's own `<b>` is code, not a row).
@@ -417,6 +419,11 @@ inline std::vector<ShownRow> shownRows( std::string_view text )
         {
             r.symAt = std::size_t( sym.data() - text.data() );
             r.symLen = sym.size();
+        }
+        if( const std::string_view tsym = attrOf( tag, "tsym" ); k == 't' && !tsym.empty() )
+        {
+            r.tsymAt = std::size_t( tsym.data() - text.data() );
+            r.tsymLen = tsym.size();
         }
         if( const std::size_t colon = r.path.rfind( ':' ); r.line == 0 && colon != std::string::npos ) // a p="file:line" row
         {
@@ -1407,19 +1414,66 @@ inline std::string headTailMasked( std::string_view answer, const std::vector<Sh
     }
     return out;
 }
-// The answer with every name the block prints cut from the head files' tail rows (a row left with none prints p= only); "" when none is cut.
+// TAIL-SYM-TERMS (fortailterms.h): the answer as the block reads it — every <t> row's tsym= value and the clause defining it blanked
+// (same length, so row offsets hold) — so <syms> picks exactly what it picked before tsym= existed and keeps its priority over it
+// (the lane's first fire: tsym= names in sym= hid 21 of 206 answers' picks as "already in the answer"). "" when there is none.
+inline std::string termsMasked( std::string_view answer, const std::vector<ShownRow>& rows )
+{
+    std::string out;
+    const auto blank = [ & ]( std::size_t at, std::size_t len )
+    {
+        out = out.empty() ? std::string( answer ) : std::move( out );
+        out.replace( at, len, len, ' ' );
+    };
+    for( const ShownRow& r : rows )
+    {
+        if( r.tsymLen > 0 )
+        {
+            blank( r.tsymAt, r.tsymLen );
+        }
+    }
+    for( const std::string_view clause : { kForFileTailTermsLegend, kForCompactFileTailTermsLegend } )
+    {
+        if( const std::size_t at = answer.find( clause ); at != std::string_view::npos )
+        {
+            blank( at, clause.size() );
+        }
+    }
+    return out;
+}
+
+// One attribute value the cut below edits: its bytes in the answer and the length of its ` name="` opener.
+struct TailNamesSpan
+{
+    std::size_t at = 0, len = 0, open = 0;
+};
+// The answer with every name the block prints cut from the head files' tail rows' sym= and from every row's tsym= (a value left with
+// none drops its whole attribute: a row left with neither prints p= only); "" when none is cut. A tsym= cut to nothing takes the
+// last tsym= with it, and then its legend clause too (present-only).
 inline std::string tailRowsWithoutPicks( const IngestResult& ing, std::string_view answer, const std::vector<ShownRow>& rows,
                                          const std::vector<std::size_t>& headTail, const Picks& picks )
 {
-    constexpr std::size_t kSymOpen = std::string_view( " sym=\"" ).size();
+    constexpr std::size_t kSymOpen = std::string_view( " sym=\"" ).size(), kTsymOpen = std::string_view( " tsym=\"" ).size();
+    std::vector<TailNamesSpan> spans; // answer order: a row's sym= before its tsym=, rows in order
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( std::ranges::contains( headTail, i ) )
+        {
+            spans.push_back( { rows[i].symAt, rows[i].symLen, kSymOpen } );
+        }
+        if( rows[i].tsymLen > 0 )
+        {
+            spans.push_back( { rows[i].tsymAt, rows[i].tsymLen, kTsymOpen } );
+        }
+    }
     std::string out;
     std::size_t from = 0;
-    for( const std::size_t i : headTail )
+    bool tsymLeft = false;
+    for( const TailNamesSpan& r : spans )
     {
-        const ShownRow& r = rows[i];
         std::string kept;
         bool cut = false;
-        for( const auto part : std::views::split( answer.substr( r.symAt, r.symLen ), ',' ) )
+        for( const auto part : std::views::split( answer.substr( r.at, r.len ), ',' ) )
         {
             const std::string_view raw( part.begin(), part.end() );
             const auto printed = [&]( const Cand* c )
@@ -1432,16 +1486,26 @@ inline std::string tailRowsWithoutPicks( const IngestResult& ing, std::string_vi
             kept += kept.empty() ? "" : ",";
             kept += raw;
         }
+        tsymLeft = tsymLeft || ( r.open == kTsymOpen && !kept.empty() );
         if( !cut )
         {
             continue;
         }
-        const std::size_t at = kept.empty() ? r.symAt - kSymOpen : r.symAt; // none left: the whole ` sym="…"` goes
+        const std::size_t at = kept.empty() ? r.at - r.open : r.at; // none left: the whole ` sym="…"` (or ` tsym="…"`) goes
         out.append( answer.substr( from, at - from ) );
         out += kept;
-        from = r.symAt + r.symLen + ( kept.empty() ? 1 : 0 );
+        from = r.at + r.len + ( kept.empty() ? 1 : 0 );
     }
-    return from == 0 ? std::string() : out.append( answer.substr( from ) );
+    if( from == 0 )
+    {
+        return {};
+    }
+    out.append( answer.substr( from ) );
+    for( const std::string_view clause : { kForFileTailTermsLegend, kForCompactFileTailTermsLegend } )
+    {
+        eraseAbsentClause( out, clause, tsymLeft );
+    }
+    return out;
 }
 
 // ── by="bind" (VR-BINDER-ROW): the picks ──
@@ -1692,15 +1756,17 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     }
     const fd::Head head = fd::headOf( ing, rows, sf.rowFile );
     const std::vector<std::size_t> headTail = fd::headTailRows( rows );
-    const std::string masked = headTail.empty() ? std::string() : fd::headTailMasked( a.answer, rows, headTail );
-    std::vector<fd::Cand> cands = fd::collectCands( ing, sf, headTail.empty() ? a.answer : std::string_view( masked ), a.task );
+    const std::string termMask = fd::termsMasked( a.answer, rows ); // TAIL-SYM-TERMS: the block reads the answer as if tsym= were not there
+    const std::string_view seen = termMask.empty() ? a.answer : std::string_view( termMask );
+    const std::string masked = headTail.empty() ? std::string() : fd::headTailMasked( seen, rows, headTail );
+    std::vector<fd::Cand> cands = fd::collectCands( ing, sf, headTail.empty() ? seen : std::string_view( masked ), a.task );
     fd::creditCallees( ing, g, head, cands );
     fd::dedupeCands( ing, cands );
     fd::DeclHome home( ing, g );
     fd::collapseDeclarations( home, cands );
     fd::Picks picks = fd::pickRows( ing, g, cands );
-    picks.binds     = fd::pickBinds( ing, sf, head, picks, a.answer );
-    fd::InitPicks inits = fd::pickInits( ing, g, sf, fd::initHeads( ing, rows, sf, a.answer ) );
+    picks.binds     = fd::pickBinds( ing, sf, head, picks, seen );
+    fd::InitPicks inits = fd::pickInits( ing, g, sf, fd::initHeads( ing, rows, sf, seen ) );
     picks.inits         = std::move( inits.rows );
     picks.initCut       = inits.cut;
     if( picks.byName.empty() && picks.byCallee.empty() && picks.binds.rows.empty() && picks.inits.empty() && picks.initCut.count == 0 )
@@ -1711,7 +1777,7 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     {
         return std::string( kForFileSymsHeldLegend ) + "<syms held=\"budget\"" + nextAttrXml( nextFlag( "--for=", a.task ) + std::string( a.heldFlags ) ) + "/>";
     }
-    if( a.answerOut != nullptr && !headTail.empty() )
+    if( a.answerOut != nullptr && ( !headTail.empty() || !termMask.empty() ) )
     {
         *a.answerOut = fd::tailRowsWithoutPicks( ing, a.answer, rows, headTail, picks );
     }
