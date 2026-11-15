@@ -150,6 +150,76 @@ inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scor
            || kindIs( t, "closure_expression" );
 }
 
+// ── per-grammar node-kind flags (the cold-CPU pass registered in docs/EVALS.md, 2026-11-15) ────────
+// The three classifiers above answer "control / decision / nesting-only" by comparing the node's kind
+// STRING against 44 + 32 + 3 literals. For the common node — a non-control one — every comparison runs
+// and every one fails, so the walk pays ~79 failed byte compares per node of every indexed function,
+// and it is 10.8 % of a cold run (measured, envoy, the card's table).
+//
+// But "which kinds are control" is a property of the (grammar, language) PAIR, not of the node. So it
+// is answered once per language and read by `ts_node_symbol()` afterwards: one load and one bit test.
+//
+// THE TABLE IS BUILT FROM THE ORACLE, which is the whole of why it is safe. Each entry is filled by
+// asking the three functions above about the grammar's OWN vocabulary (`ts_language_symbol_count` /
+// `ts_language_symbol_name`), so there is no second spelling of these rules to keep in sync, a grammar
+// bump cannot strand a hand-written name list, and a kind this file has never heard of simply gets no
+// flags — the same answer the string path gives. In a dev build DASSERT re-derives the flags from the
+// oracle at every visited node; in a release build the construction is the proof. `src/pattern.h:468`
+// is the house precedent for keying on the numeric kind id.
+enum : std::uint8_t { kKfDecision = 1u, kKfNestingControl = 2u, kKfNestingOnly = 4u };
+
+struct CcKindTable
+{
+    const TSLanguage*         grammar = nullptr;   // the grammar these flags were derived from
+    std::vector<std::uint8_t> flags;               // indexed by TSSymbol; empty until first use
+};
+
+// One table per language per worker thread. Thread-local rather than shared-with-a-lock because the
+// parse pool runs ~19 threads through this walk and a few hundred bytes per language per thread is the
+// cheaper side of the owner's memory-for-speed ruling; nothing here is mutated after it is built.
+inline const CcKindTable& ccKindTableFor( const TSLanguage* grammar, Lang lang )
+{
+    static thread_local std::array<CcKindTable, kLangCount> cache;
+    CcKindTable&         slot = cache[ static_cast<std::size_t>( lang ) ];
+    if( slot.grammar != grammar )   // first use on this thread, or (defensively) a different grammar for the same Lang
+    {
+        const std::uint32_t symCount = ts_language_symbol_count( grammar );
+        slot.flags.assign( symCount, std::uint8_t( 0 ) );
+        for( std::uint32_t sym = 0; sym < symCount; ++sym )
+        {
+            const char* name = ts_language_symbol_name( grammar, static_cast<TSSymbol>( sym ) );
+            if( name == nullptr )
+            {
+                continue;   // a grammar may leave a slot unnamed; no name, no flags, same as the string path
+            }
+            std::uint8_t f = 0;
+            if( isDecisionType( name, lang ) )
+            {
+                f |= kKfDecision;
+            }
+            if( cc_isNestingControl( name, lang ) )
+            {
+                f |= kKfNestingControl;
+            }
+            if( cc_isNestingOnly( name ) )
+            {
+                f |= kKfNestingOnly;
+            }
+            slot.flags[ sym ] = f;
+        }
+        slot.grammar = grammar;
+    }
+    return slot;
+}
+
+// The flags for one node, or 0 when the symbol lies outside the table (which no node of this grammar
+// can do — the bound is kept because a 0 here means exactly what the string path would answer).
+inline std::uint8_t ccKindFlags( const CcKindTable& tab, TSNode n ) noexcept
+{
+    const std::uint32_t sym = ts_node_symbol( n );
+    return sym < tab.flags.size() ? tab.flags[ sym ] : std::uint8_t( 0 );
+}
+
 // A node's source text, or "" when the node is null or its byte range does not lie inside `src`. The
 // null+range guard is the same three lines every extraction helper in this file would otherwise repeat (it
 // is what --quality-delta flagged as a clone when the Rust helpers open-coded it, and again when the
@@ -719,12 +789,13 @@ inline std::uint32_t ev_appendCtrl( EvCtx& ctx, TSNode n, CtrlKind kind, std::ui
 // note one visited node for ev: either it opens a control construct (-> new arena node, returned as the
 // children's ctrl) or it is a jump (-> resolve or defer). Anything else returns parentIdx unchanged.
 // Caller guarantees isNamed (anonymous keyword tokens must never look like Ruby's bare-word nodes).
-inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint32_t parentIdx, Lang lang, std::string_view src )
+inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint32_t parentIdx, Lang lang, std::string_view src,
+                                  bool isDecision )   // the caller already has it from the node-kind table; re-deriving it here cost 44 compares per named node
 {
     CtrlKind kind;
     if( ev_ctrlKindFor( t, lang, kind ) )
     {
-        return ev_appendCtrl( ctx, n, kind, std::uint16_t( isDecisionType( t, lang ) ? 1 : 0 ), parentIdx, lang, src );
+        return ev_appendCtrl( ctx, n, kind, std::uint16_t( isDecision ? 1 : 0 ), parentIdx, lang, src );
     }
 
     // ── jumps. Every rule below: resolve the target (ancestors only — the arena already holds them in a
@@ -1094,6 +1165,8 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
     CcScratch& sc = ccScratch();
     DASSERT( !sc.walking, "cc_walk re-entered: the shared walk scratch would alias" );
     const CcWalkMark      mark( sc );
+    // One table lookup per WALK replaces ~79 string comparisons per NODE (see CcKindTable).
+    const CcKindTable&    kindTab  = ccKindTableFor( ts_tree_language( start.tree ), lang );
     std::vector<CcFrame>& stack    = sc.stack;
     std::vector<TSNode>&  kids     = sc.kids;
     std::vector<TSNode>&  elifKids = sc.elifKids;
@@ -1121,6 +1194,11 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         const std::uint32_t nesting    = frame.nesting;
         const std::uint16_t childDepth = static_cast<std::uint16_t>( frame.depth + 1 );
         const char*         t          = ts_node_type( n );
+        const std::uint8_t  kf         = ccKindFlags( kindTab, n );
+        DASSERT( ( ( kf & kKfDecision ) != 0 ) == isDecisionType( t, lang )
+                     && ( ( kf & kKfNestingControl ) != 0 ) == cc_isNestingControl( t, lang )
+                     && ( ( kf & kKfNestingOnly ) != 0 ) == cc_isNestingOnly( t ),
+                 "node-kind flags disagree with the classifiers they were derived from" );
         // NAMED-only gate for the control/decision predicates: Ruby's tree-sitter node kinds are bare words
         // (`if`, `for`, `while`, `case`, `when`, ...) that ALSO collide with the ANONYMOUS keyword TOKENS
         // several grammars (JS/TS) emit under those exact type strings. Anonymous keyword tokens are never a
@@ -1132,7 +1210,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         // essential complexity: one arena/jump note per named node, and the ctrl index the children
         // inherit. All jump nodes are named in every supported grammar, and the isNamed gate is what
         // keeps Ruby's bare-word kinds from colliding with anonymous keyword tokens (see the note above).
-        const std::uint32_t ctrl = ( evCtx != nullptr && isNamed ) ? ev_noteNode( *evCtx, n, t, frame.ctrl, lang, src ) : frame.ctrl;
+        const std::uint32_t ctrl = ( evCtx != nullptr && isNamed ) ? ev_noteNode( *evCtx, n, t, frame.ctrl, lang, src, ( kf & kKfDecision ) != 0 ) : frame.ctrl;
 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
         // Elixir controls are ordinary calls whose target text supplies the keyword.
@@ -1143,7 +1221,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
         const bool elixirDecision = elixirKeyword == "if" || elixirKeyword == "unless" || elixirKeyword == "for" || elixirKeyword == "with";
         const bool elixirControl = elixirDecision || elixirKeyword == "case" || elixirKeyword == "cond" || elixirKeyword == "receive" || elixirKeyword == "try";
-        if( isNamed && ( isDecisionType( t, lang ) || elixirDecision || ( lang == Lang::Elixir && kindIs( t, "stab_clause" ) ) ) )
+        if( isNamed && ( ( kf & kKfDecision ) != 0 || elixirDecision || ( lang == Lang::Elixir && kindIs( t, "stab_clause" ) ) ) )
         {
             ++acc.cyclo;
         }
@@ -1170,7 +1248,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             ++acc.cyclo;   // Myers' &&/|| extension — see cc_isBooleanJoin for the two spelling families
         }
 
-        if( isNamed && ( cc_isNestingControl( t, lang ) || elixirControl ) )
+        if( isNamed && ( ( kf & kKfNestingControl ) != 0 || elixirControl ) )
         {
             const bool   isIf = ( kindIs( t, "if_statement" ) || kindIs( t, "if_expression" ) );
             const TSNode p    = parentOf( n );
@@ -1229,7 +1307,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             }
             continue;
         }
-        if( cc_isNestingOnly( t ) )
+        if( ( kf & kKfNestingOnly ) != 0 )
         {
             if( nesting + 1 > acc.maxNest )
             {
