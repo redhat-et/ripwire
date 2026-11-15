@@ -14713,159 +14713,336 @@ If the resolve loop's output cannot be serialized without also serializing the r
 reduces to the CSR-only variant. That is a legitimate outcome, to be recorded as a narrowing with the
 measured reason, not retried until it passes.
 
-### RESULT — the warm snapshot, measured 2026-11-14 against the bands above
+### RESULT — the warm snapshot, measured 2026-11-14 and RE-MEASURED 2026-11-15 against the bands above
 
-Implementation `a23dc3982` on `67b08d46b`. Every figure below is in **bytes** or in **instructions
-retired**; the unit defect disclosed under Band 3 is the reason this section refuses round "MB".
-Instrument for CPU is `instructions retired` from `/usr/bin/time -l`, which is contention-invariant —
-the machine was not quiet (load 3.48) and wall time could not have carried this verdict.
+First measured at implementation `a23dc3982` on `67b08d46b`, when the state lived in a sidecar beside
+the blob. **Re-measured at `6c2d9854b` on `0217049f2`, with the state moved INSIDE the blob as a
+section on the owner's ruling** — the design the card registered. The re-measured figures supersede the
+first set in place; the sidecar's are kept only where they are the comparison that prices the move.
 
-Numbers marked **(v)** were re-measured independently of the implementing agent, on the restored
-corpus, with the A/B taken on **one binary** (`RIPWIRE_NO_WARMSNAP=1` versus the feature on), which
-removes the binary-provenance confound from the comparison entirely.
+Every figure below is in **bytes** or in **instructions retired**; the unit defect disclosed under
+Band 3 is the reason this section refuses round "MB". Instrument for CPU is `instructions retired` from
+`/usr/bin/time -l`, which is contention-invariant, plus user CPU, which is what the bands' thresholds
+are stated in. Where a run's machine was not quiet, the load is given beside the number.
 
-#### Deviation from the registered design, and why it is accepted
+Numbers marked **(v)** in the superseded 2026-11-14 text were re-measured independently of the
+implementing agent. Every figure in the 2026-11-15 re-measurement below takes its A/B on **one binary**
+(`RIPWIRE_NO_WARMSNAP=1` versus the section served), which removes the binary-provenance confound from
+the comparison entirely, and each cell is a median of 5 warm runs (3 for the cold-peak arms).
 
-The registration says "section", meaning a section inside the cache blob. The implementation puts the
-state in a **sidecar file beside the blob** (`<cache>.snap`). Accepted, for three reasons, the second
-of which is measured and was not anticipated when the card was written:
+#### SUPERSEDED 2026-11-15 — the sidecar deviation is withdrawn; the design is back to what this card registered
 
-1. **Structural.** `saveCache` publishes the blob from inside the parse pool, before the model exists;
-   the graph exists only after `buildGraph`. An in-blob section would require a second whole-blob
-   rewrite — 154,596,199 B on envoy, 284,593,343 B on vscode — charged to the recording run.
-2. **The sidecar adds no cache invalidation at all.** `kCacheVersion` stays **51** and
-   `kIngestParserVerMirror` stays **309**, both identical to the lane's parent **(v)**. Every blob in
-   the field therefore stays valid, and an absent or refused sidecar degrades to exactly today's warm
-   run. An in-blob section would have had to bump `kCacheVersion`, invalidating every existing blob —
-   a strictly worse migration than the one the card imagined it was choosing.
-3. **The refusal direction holds under an adversarial case no gate arm covers (v).** A *foreign*
-   ripwire build (parser mirror 307) was made to rewrite the blob underneath a live sidecar. The lane
-   then reported `why=stale model_why=stale graph_why=stale`, refused all three sections, rebuilt, and
-   emitted stdout **byte-identical to a verified `--no-cache` from-scratch build**. Stale input
-   produced a slow correct answer, never a fast wrong one.
+The text this replaces accepted a **sidecar file beside the blob** (`<cache>.snap`) as a deviation from
+the registered "section", on three grounds. It is kept here as the record of what was argued, because
+one of its three grounds was simply **wrong**, and the way it was wrong is the lesson:
 
-#### Band 1 — CPU: PASS, re-measured median-of-5 with the published baseline as a control
+> 1. **Structural.** `saveCache` publishes the blob from inside the parse pool, before the model exists;
+>    the graph exists only after `buildGraph`. An in-blob section would require a second whole-blob
+>    rewrite — 154,596,199 B on envoy, 284,593,343 B on vscode — charged to the recording run.
+> 2. **The sidecar adds no cache invalidation at all.** `kCacheVersion` stays **51** and
+>    `kIngestParserVerMirror` stays **309** [...] An in-blob section would have had to bump
+>    `kCacheVersion`, invalidating every existing blob — a strictly worse migration than the one the
+>    card imagined it was choosing.
+> 3. **The refusal direction holds under an adversarial case no gate arm covers (v).**
 
-**Corrected 2026-11-14, later the same evening. An intermediate version of this section recorded this
-band as NOT ESTABLISHED; that verdict was wrong and is withdrawn here.** The reasoning was that the
-band's baselines belong to a `--for` query, taken from the comparison table's prose line ("warm query,
-identical for every tool: ..."). The harness's own recorded `cmd` field settles it and says otherwise:
+**What the deviation cost, and what forced the correction.** The sidecar failed the lane's own sibling
+gate. `test/cacheidentitycheck.sh` arm (D3) asserts that `--cache=PATH` writes exactly the file the user
+named **and nothing whose name starts with it** — the #334 contract that an explicit path never gets a
+build tag appended. `<cache>.snap` is exactly such a file. The arm went red on four of the PR's five
+checks (macOS Release, macOS plain, Ubuntu plain gcc, Ubuntu plain clang). A deviation that breaks a
+committed contract is not a deviation; it is a defect with a rationale attached.
+
+**The owner's ruling, 2026-11-15, after being shown three options with their costs:** put the snapshot
+inside the blob as a section. The deciding facts were that `loadCache`'s guard already rejects a blob
+unless magic, `kCacheVersion` and `parserVer` all match — there is no unknown-section skipping, so a
+format change invalidates every existing blob exactly **once** — that this project has bumped
+`kCacheVersion` 52 times and treats that cost as routine, and that the third option, restricting the
+sidecar to the automatic path, would have killed the warm win for `--cache=BASE.lean.ripwirecache` in a
+PR job, which is ripwire's own documented CI workflow.
+
+**Ground 2 was wrong, and that is the finding worth keeping.** It read a `kCacheVersion` bump as the
+expensive side of the trade. It is the *cheap* side: one re-index, once, on a tool that has charged that
+same cost 52 times before. What the sidecar bought with it was a second artifact — and a second artifact
+is not free, because the blob's contract then has to be restated for it everywhere the blob has one.
+Three places had already paid: arm (D3) went red, `--doctor` had to learn to subtract `.snap` from the
+retained-blob count (the windows-package release gate read a warm run taking that count 4 -> 5 as "wrote
+a new blob instead of reusing one"), and the model section had to **assert** its binding to the records
+it was assembled from by storing the blob's stat signature and comparing it. The in-blob design deletes
+all three. **The general form: when a cheap-looking option needs the invariants of an existing artifact
+restated for a new one, count the restatements before calling it cheap.**
+
+**Ground 1 was true, measured, and is now priced rather than avoided** — see Band 2's trade below. The
+recording run does rewrite the blob. It does not re-serialise the records: they are copied forward by fd
+at the offsets they already hold, so the entry table is reused verbatim, the publish is tmp-then-rename
+like every other, and no published blob is ever modified in place. One further consequence removes the
+double-write ground 1 feared: **a run that re-parsed anything records nothing**, because `saveCache` has
+already republished the blob for that run. No run is charged both writes.
+
+**Ground 3 no longer has a case to answer.** It described a foreign build rewriting the blob underneath a
+live sidecar, and the sidecar correctly refusing. That adversary cannot be constructed any more: the
+section lives in the blob, so a foreign build's rewrite takes the section with it, and `saveCache` writes
+no section at all. The binding became structural rather than asserted, which is why
+`warmsnap_model.h` drops `BlobFacts::sig` (section `kVersion` 1 -> 2) and `test/warmsnapcheck.sh` arm
+(S6) now gates that directly.
+
+**What moved in the format.** `kCacheVersion` **52 -> 53**, with the reason stated as the mechanism
+rather than as "a format change": the blob HEADER grows from 25 to 41 bytes to carry a u64 `snapOffset`
+and a u64 `snapLength`. Every record offset therefore moves by 16 bytes, so this build reading a v52 blob
+would decode the header's own bytes as a record — older blobs **must** be rejected, which the version
+guard does. The section sits between the records and the offset table and its span lives in the header, so
+the trailer's `tableSum` checksums **where** it lies, not only the table.
+
+**No band moved, and none is re-opened.** All four thresholds below are the ones registered on
+2026-11-14, before any implementation existed. The numbers under them are re-measured on the in-blob tree
+and **supersede** the 2026-11-14 figures in place; where a verdict's *reasoning* changed, that is said.
+
+#### Band 1 — CPU: PASS, re-measured median-of-5 on the in-blob tree, with the published baseline as a control
+
+**The band's registered verb, settled 2026-11-14 and unchanged.** An intermediate version of this
+section recorded the band as NOT ESTABLISHED, reading the baselines as belonging to a `--for` query,
+taken from the comparison table's prose line ("warm query, identical for every tool: ..."). The
+harness's own recorded `cmd` field settles it and says otherwise:
 
     ripwire . --cache=<...>/lean.ripwirecache
 
 ripwire's warm cell is the **flagless map against the lean blob**, with `cwd` at the repo and the root
-spelled `.`. No ripwire warm row in the curve uses `--for` anywhere. The prose line describes the
-question handed to the **peers**, each of which takes a natural-language query; ripwire is never given
-it. So the band's registered verb is the flagless map, and the flagless-map figures do answer it.
-The lesson is kept as a fix item: read the argv from the recorded `cmd`, never from the prose
+spelled `.`. No ripwire warm row in the curve uses `--for` anywhere; the prose line describes the
+question handed to the **peers**, each of which takes a natural-language query, and ripwire is never
+given it. The lesson is kept as a fix item: read the argv from the recorded `cmd`, never from the prose
 describing the run.
 
-Re-measured on that configuration, median of 5 per cell, three arms — the lane with the snapshot
-served, the **same binary** with `RIPWIRE_NO_WARMSNAP=1`, and `d624cff5f`, the binary that produced
-the published curve, each on its own blob copy because parser mirrors 307 and 309 mutually invalidate:
+Re-measured on the in-blob tree at `6c2d9854b`, median of 5 per cell, two arms on **one binary** — the
+lane with the section served, and the same binary under `RIPWIRE_NO_WARMSNAP=1` — which removes the
+binary-provenance confound from the comparison entirely:
 
-| repo | BASE `d624cff5f` | OFF (lane, disabled) | ON (lane) | user ratio | instruction ratio |
-|---|---|---|---|---|---|
-| envoy | 1.34 s / 20,325,625,367 | 1.32 s / 20,253,320,645 | **0.18 s / 2,369,886,135** | 7.3x | **8.55x** |
-| vscode | 3.45 s / 53,670,869,501 | 3.45 s / 53,642,504,763 | **0.35 s / 4,110,758,623** | 9.9x | **13.05x** |
+| repo | OFF (lane, disabled) | ON (lane, section served) | user ratio | instruction ratio |
+|---|---|---|---|---|
+| envoy | 1.32 s / 20,260,165,544 | **0.17 s / 2,283,115,909** | 7.8x | **8.87x** |
+| vscode | 3.57 s / 53,664,139,968 | **0.34 s / 3,941,402,817** | 10.5x | **13.62x** |
+| cpython | 1.47 s / 21,822,803,148 | **0.25 s / 2,509,954,558** | 5.9x | **8.69x** |
 
-**Verdict: PASS.** The thresholds are 0.50 s on envoy and 0.80 s on vscode; measured 0.18 s (all five
-runs identical, instruction spread 0.09 %) and 0.35 s — **2.8x and 2.3x under**. Peak also falls:
-351,371,936 -> 271,483,456 B on envoy and 620,348,256 -> 481,411,864 B on vscode, both -22 %. The OFF
-arm matches BASE to within 1.5 %, so the lane's disabled path does not regress.
+**Verdict: PASS.** The registered thresholds are 0.50 s on envoy and 0.80 s on vscode; measured 0.17 s
+and 0.34 s — **2.9x and 2.4x under**. The five ON runs of a cell spread 0.120 % (envoy), 0.150 %
+(vscode) and 0.154 % (cpython) in instructions, so the medians are not carrying a single lucky run.
+cpython is measured but is **not a registered Band 1 cell** and no threshold is claimed for it; it is
+here because Band 3's ladder needs its blob and the CPU came free with it.
 
-**The control is what licenses this result, because the machine was not quiet.** Load per core ran
-0.160-0.227 against a gate that wants < 0.120 — driven by this measurement's own cold fills, which is
-the effect `results/WP3/GATE_DECISION.md` documented ("each cold cell's own cost poisons the gate for
-the next"). Rather than claim quiet, the BASE arm was measured alongside the others: it reproduces the
-published envoy cell to **0.0 %** (1.34 s against 1.34 s) and vscode to 2.1 %, on user CPU, and its
-instruction count sits within 0.7 % of the independent WP3 ladder row for the same binary
-(20,325,625,367 against 20,465,591,070). A contended machine that still reproduces the published
-baseline on both instruments cannot be inflating the ON arm by the 2.3-2.8x the verdict has in hand.
+**The control, which is what licenses the result.** The published curve's baseline binary is
+`d624cff5f`, and its two cells are 1.34 s / 20,325,625,367 (envoy) and 3.45 s / 53,670,869,501
+(vscode). This tree's OFF arm — a different binary, a different day, after a format change — reproduces
+them on the contention-invariant instrument to **−0.32 %** and **−0.013 %**. User CPU agrees to −1.5 %
+on envoy and +3.5 % on vscode; the vscode disagreement runs *against* the lane (OFF measured slower
+than the published baseline), so it cannot be inflating the ON arm by the 2.4x the verdict has in hand.
+Load was 3.19 and decaying at the start of the run, which is why the verdict rests on instructions
+retired and the user-CPU figures are reported beside them rather than under them.
 
-**What it does and does not buy competitively.** On this verb the lane makes ripwire the fastest warm
-tool at envoy scale — 0.18 s against crg's 0.23 s — and it does **not** at vscode scale, where crg
-stays ahead at 0.26 s against 0.35 s. The durable gain is the break-even. On **envoy every peer
-measured now moves to "never"**: ripwire is cheaper on both the index and the query, crg included, so
-no number of questions repays a peer's index. On **vscode** codegraph, graphify and graft move to
-"never" as well, and crg — the one tool still cheaper per query — goes from breaking even at **100
-questions to ~3,457**, which is past any plausible session against an unchanged tree.
+**The move into the blob made this band slightly BETTER, and the cause is not isolated.** The sidecar
+implementation measured 0.18 s / 2,369,886,135 on envoy (8.55x) and 0.35 s / 4,110,758,623 on vscode
+(13.05x). In-blob is **3.7 %** and **4.1 %** fewer instructions on the same cells. Both designs read
+the same number of payload bytes, so the difference is in how they are reached — a `pread` out of a
+blob already being opened and validated, against opening a second file through
+`readRegularFileNoFollow`'s own shape and link checks. That is the plausible mechanism and it is the
+right order of magnitude (~85e6 instructions), but it was **not isolated by experiment**, so it is
+stated as a measured difference with an unproven cause, not as a finding.
+
+**What it does and does not buy competitively.** Unchanged in direction from the 2026-11-14 reading, and
+the margins move slightly in ripwire's favour. On this verb the lane makes ripwire the fastest warm tool
+at envoy scale — 0.17 s against crg's 0.23 s — and it does **not** at vscode scale, where crg stays
+ahead at 0.26 s against 0.34 s. The durable gain is the break-even: on **envoy every peer measured moves
+to "never"**, crg included, because ripwire is cheaper on both the index and the query, so no number of
+questions repays a peer's index; on **vscode** codegraph, graphify and graft move to "never" as well,
+and crg — the one tool still cheaper per query — goes from breaking even at **100 questions to past
+3,400**, which is beyond any plausible session against an unchanged tree.
 
 **One measurement is discarded and recorded as discarded.** An earlier `--for` A/B reported 3.13x and
 4.41x. It was run against the **lean** blob, and `--for` reads the **rich** artifact
-(`harness/wp3_ladder.py:224`); the harness asserts against exactly this mismatch
-(`assert_warm_owner`: "the {verb} run would parse cold") and the run was hand-rolled around that
-guard. Those ratios therefore measure a partly-cold path, not a warm `--for`, and no claim rests on
-them. What a true warm `--for` costs after this lane is **not measured** — stored PageRank is the
-uniform-teleport default only and `--for` personalizes the teleport, so some of the saving provably
-does not transfer, and the honest statement is that the size of that gap is unknown.
+(`harness/wp3_ladder.py:224`); the harness asserts against exactly this mismatch (`assert_warm_owner`:
+"the {verb} run would parse cold") and the run was hand-rolled around that guard. Those ratios therefore
+measure a partly-cold path, not a warm `--for`, and no claim rests on them. What a true warm `--for`
+costs after this lane is **not measured** — stored PageRank is the uniform-teleport default only and
+`--for` personalizes the teleport, so some of the saving provably does not transfer, and the honest
+statement is that the size of that gap is unknown.
 
-#### Band 2 — memory: PASS, peak FELL, and the one rise is reported as a trade
+#### Band 2 — memory: PASS — warm peak FELL ~22 %, and a COLD rise the previous reading wrongly said did not exist
 
-Warm peak footprint, envoy: **357,647,032 B -> 277,971,544 B (v)** — a fall of 79,675,488 B. On
-vscode the implementing agent reports 601.0 -> 469.3 MiB; that pair is carried in its own rounded unit
-rather than converted, because an exact-looking byte count derived from a rounded MiB figure would be
-fabricated precision. Peak fell on every repo, as the band expected, and no ceiling is approached: both ceilings govern the
-**cold** peak, which this lane does not touch.
+**Warm peak footprint, median of 5, one binary, `RIPWIRE_NO_WARMSNAP=1` against the section served:**
 
-**The trade, stated per the band's own clause 3:** the single run that *writes* the snapshot is more
-expensive — envoy 22,577,115,139 instructions and 409,731,816 B peak **(v)**, against 20.34e9 and
-357.6e6 for a plain warm run. A run that re-parsed anything writes no model or graph section, and five
-edit-then-run cycles on a private nushell copy cost +2.9 % instructions and +9 MB.
+| repo | OFF | ON | change |
+|---|---|---|---|
+| envoy | 350,978,720 | **271,319,616** | −79,659,104 B (−22.7 %) |
+| vscode | 620,266,360 | **481,133,264** | −139,133,096 B (−22.4 %) |
+| cpython | 401,064,608 | **312,345,224** | −88,719,384 B (−22.1 %) |
 
-#### Band 3 — disk: PASS on the registered constraint, with a unit defect in the card disclosed
+Warm peak fell on every repo, as the band expected, and by the same ~22 % the sidecar measured.
 
-The ceiling applies to **blob + sidecar**, not to the blob alone. Applied literally to "the blob" it
-would pass vacuously, because a sidecar leaves blob growth at exactly zero — the registration's own
-first non-negotiable forbids a metric that cannot fail, so the stricter reading is the one used here.
+**CORRECTION — the band's ceilings govern the COLD peak, and this lane DOES raise it.** The
+2026-11-14 reading of this band said "both ceilings govern the **cold** peak, which this lane does not
+touch." That sentence was never measured; it was inferred from the fact that the fast path is a warm-run
+fast path. It is **false**, and the measurement is this, median of 3 cold fills per arm on one binary:
 
-| repo | blob B | sidecar B | total B | smallest peer index B | ratio | required |
-|---|---|---|---|---|---|---|
-| envoy | 154,596,199 | 62,892,120 | 217,488,319 | graft 524,177,408 | **2.410x** | 1.5x |
-| cpython | 151,559,415 | 76,873,824 | 228,433,239 | graphify 424,792,064 | **1.860x** | 1.5x |
-| vscode | 284,593,343 | 112,642,120 | **397,235,463** | graphify 612,589,568 | **1.542x** | 1.5x |
+| repo | COLD peak OFF | COLD peak ON | change | COLD instructions OFF -> ON |
+|---|---|---|---|---|
+| envoy | 350,520,136 | **482,427,720** | **+131,907,584 B (+37.6 %)** | 316,525,842,711 -> 316,841,516,163 (+0.10 %) |
+| cpython | 529,564,608 | **558,679,000** | +29,114,392 B (+5.5 %) | 325,085,880,703 -> 325,091,091,364 (+0.002 %) |
 
-**PASS on all three**, binding at vscode with **2.8 % of margin** on the ratio.
+Cold **CPU** is untouched, to a tenth of a percent — it is peak memory alone that moves. The envoy ON
+arm is **bimodal**: 482,427,720 / 352,158,536 / 485,491,528, so two runs of three sit ~130 MB above OFF
+and one sits level with it. That shape says the crawl capture's high-water mark sometimes coincides with
+the parse pool's and sometimes does not, rather than that ~130 MB is held throughout. **The cause is not
+isolated and I am not going to guess at it in a results section**: the capture holds one record per
+directory entry the walk looks at, which is far more than the 11,036 files envoy indexes, but I did not
+measure that term and it does not obviously account for 130 MB.
 
-**The defect, disclosed because it decides the verdict.** The card's derived figures — "under 270 MB
-on cpython, 333 MB on envoy, 389 MB on vscode", and the index table they came from — are labelled MB
-but every value in them is **MiB** (verified against the harness's own `index_on_disk_bytes`:
-284,452,991 B is the 271.3 the card prints, which is MiB, not the 284.5 that decimal MB would give).
-Read as MiB, vscode measures 378.8 against 389 and PASSES. Read as decimal MB, the same bytes measure
-397.2 against 389 and **FAIL**. The unit ambiguity is 4.9 %; the margin is 2.8 %; so the reading
-decides the outcome.
+**This rise is not introduced by the move into the blob, and that is a code argument, not a
+measurement.** The crawl capture and `recordTree` are byte-for-byte unchanged by this rework; the only
+thing the move changed about a cold run is that it no longer writes a sidecar, which is strictly less
+work. So the rise was present in the sidecar implementation too and the previous reading simply did not
+look. I did not re-measure the sidecar binary to confirm that, so it is reasoning from the diff.
 
-The verdict is taken on the band's **primary registered sentence** — "the smallest on-disk index
-measured, with at least 1.5x of margin" — because it is unit-invariant, it is the constraint the MB
-figures were derived *from*, and both sides of the ratio come from the same harness field. That is a
-disambiguation of the band's derived form, not a move of its threshold; the threshold, 1.5x, is
-untouched. Nothing else in the card has moved, and this is recorded rather than quietly fixed
-precisely because it is not verdict-neutral.
+**Verdict: PASS, with the rise reported as the band's clause 3 requires.** Both registered ceilings are
+on cold peak: ripwire must stay under **2,048 MB** to keep 1.5x of margin on the lowest-peak peer, and
+under **half of the 8 GB box**. The worst cold peak measured anywhere in this run is 804,668,592 B
+(vscode) and 485,491,528 B (envoy) — **2.5x and 4.2x under** the binding ceiling. A rise inside the
+ceilings, reported as a trade, is what the band defines as a pass.
+
+**What it is a trade against, stated per clause 3.** The one run that *records* republishes the blob:
+
+| repo | recording run | plain warm OFF run | delta |
+|---|---|---|---|
+| envoy | 22,243,509,001 instr / 401,081,064 B / 1.43 s | 20,260,165,544 / 350,978,720 / 1.32 s | +9.8 % instr, +14.3 % peak |
+| vscode | 57,482,430,433 / 707,609,464 / 3.77 s | 53,664,139,968 / 620,266,360 / 3.57 s | +7.1 % instr, +14.1 % peak |
+| cpython | 23,875,616,478 / 453,772,032 / 1.59 s | 21,822,803,148 / 401,064,608 / 1.47 s | +9.4 % instr, +13.1 % peak |
+
+**The recording run is CHEAPER in CPU and peak than the sidecar's was, and more expensive in BYTES
+WRITTEN — both halves have to be said or the trade is misreported.** Against the sidecar's envoy
+recording run (22,577,115,139 instr, 409,731,816 B peak) the in-blob one is 1.5 % fewer instructions and
+8,650,752 B lower peak. But it writes the **whole blob**: 217,420,007 B against the sidecar's
+62,823,832 B, **3.46x the bytes**. That ratio is arithmetic from the two artifacts' own sizes, not an
+instrument reading — `/usr/bin/time -l`'s `block output operations` counter reports **0** for every run
+on this APFS volume, for a 217 MB write included, so it measures nothing here and no I/O figure is
+quoted from it. What the recording run costs in wall-clock I/O on a slower volume is **not measured**.
+
+Three facts bound how often that write happens, and they are why it is a trade rather than a regression:
+a run that re-parsed anything records nothing (so no run pays `saveCache`'s write *and* this one), a
+steady warm run republishes nothing at all (`saved=0`, asserted by `warmsnapcheck` arm S8), and the
+records inside the copy are never re-serialised — the offset table is reused verbatim, which the sizes
+confirm to the byte: envoy's record region is 154,243,039 B in both arms, and 154,243,039 + 11,036x32 +
+24 = 154,596,215, exactly the OFF blob.
+
+#### Band 3 — disk: PASS on the registered constraint; the ceiling now applies LITERALLY, and its unit defect still decides vscode
+
+**The move fixes this band's worst property.** Under a sidecar, the registered ceiling — "ripwire's
+blob must remain the smallest on-disk index measured" — passed *vacuously* if read literally, because a
+sidecar leaves blob growth at exactly zero. The previous reading had to say so and take the verdict on
+blob + sidecar instead. There is now **one artifact**, so the ceiling applies to it as written and
+cannot be satisfied by moving bytes out of the thing being measured.
+
+| repo | blob with section | section | growth over no-section blob | growth % | peer's smallest index | ratio | required |
+|---|---|---|---|---|---|---|---|
+| envoy | **217,420,007** | 62,823,792 | +62,823,792 | +40.6 % | graft 524,177,408 | **2.411x** | 1.5x |
+| cpython | **228,398,679** | 76,839,248 | +76,839,248 | +50.7 % | graphify 424,792,064 | **1.860x** | 1.5x |
+| vscode | **397,190,903** | 112,597,544 | +112,597,544 | +39.6 % | graphify 612,589,568 | **1.542x** | 1.5x |
+
+The blob grows by **exactly** the section's length, because the records and the offset table are
+byte-identical to the no-section blob's — verified above by reconstructing the OFF blob's size from the
+record region and the table.
+
+**Against the card's derived MB figures, which is what was asked.** The ceilings are "under 270 MB on
+cpython, 333 MB on envoy, 389 MB on vscode":
+
+* **envoy 217,420,007 B — PASSES under either unit reading** (217.4 decimal MB, 207.3 MiB), with 116 MB
+  of room against 333.
+* **cpython 228,398,679 B — PASSES under either reading** (228.4 MB, 217.8 MiB) against 270.
+* **vscode 397,190,903 B — PASSES as MiB (378.8) and FAILS as decimal MB (397.2)** against 389. This is
+  the unit defect the 2026-11-14 reading disclosed and it is unchanged: every value in the card's index
+  table is labelled MB but is **MiB** (verified against the harness's own `index_on_disk_bytes` —
+  284,452,991 B is the 271.3 the card prints, which is MiB, not the 284.5 decimal MB would give). The
+  ambiguity is 4.9 % and the margin is 2.8 %, so the reading decides the outcome.
+
+**The verdict is therefore taken on the band's primary registered sentence** — "the smallest on-disk
+index measured, with at least 1.5x of margin" — which is unit-invariant, is the constraint the MB
+figures were *derived from*, and takes both sides of the ratio from the same harness field. **PASS on
+all three, binding at vscode with 2.8 % of margin on the ratio.** The threshold, 1.5x, is untouched;
+this is a disambiguation of the band's derived form, recorded rather than quietly fixed precisely
+because it is not verdict-neutral.
+
+**The move is 24 bytes CHEAPER than the sidecar on disk, and the arithmetic is exact.** envoy's
+sidecar-era total was 154,596,199 + 62,823,832 = 217,420,031 B against 217,420,007 now; vscode's was
+284,593,343 + 112,597,584 = 397,190,927 against 397,190,903. Both differ by **−24 B**, and both halves
+of that are accounted for independently: the blob header grew **+16 B** (the no-section blob measures
+154,596,215 against the sidecar era's 154,596,199, exactly +16) and the section shrank **−40 B** (the
+`StatSig` the sidecar had to store to assert its binding to the blob — 62,823,792 against 62,823,832,
+exactly −40). The structural binding is not a figure of speech: it is 40 bytes per artifact that no
+longer need storing.
+
+**One disclosed, unexplained delta.** cpython's section measures 76,839,248 B against the sidecar era's
+76,873,824 — **34,576 B smaller**, where only 40 of those bytes are the dropped `StatSig`. envoy and
+vscode reproduce to the byte, so the two cpython fills were not over identical tree state. I did not
+chase it: it is 0.045 % of the section and the band's verdict does not turn on it. Recorded rather than
+smoothed over.
 
 **Owner call left open, for the next round and not retroactively:** a 1.5x requirement met at 1.542x
 will not survive the next large repo. Whether 1.5x is still the right constraint is a decision for
 before the next measurement, not after this one.
 
-#### Band 4 — correctness: PASS, on the stronger form of the contract
+#### Band 4 — correctness: PASS, the ship/no-ship gate, on the stronger form of the contract
 
-Byte identity was asserted not merely load-versus-build but against a `--no-cache` run that reads no
-blob at all. On envoy, **seven runs share one stdout sha256 (v)**: the recording run, three loading
-runs, two runs with the feature off, and the from-scratch `--no-cache` build. The gate
-`test/warmsnapcheck.sh` is red-first (40 PASS / 67 FAIL against the parent binary, failing on the
-vacuity lines rather than on trivially-equal output) and green after at 132 PASS / 0 FAIL on both the
-dev and the ASan/UBSan build. Its vacuity guard requires a `RIPWIRE_SNAPSHOT_STATS=1` line on the very
-run compared, so a build without the feature cannot pass. All five invalidation arms the band named —
-a file added, deleted, modified in place at the same size, added inside a new subdirectory, and a
-changed `.gitignore` — are present, plus version, checksum at four offsets, truncation, dependency and
-options-key arms.
+**Byte identity, on three repos and three languages' worth of resolve rules.** Asserted not merely
+load-versus-build but against a `--no-cache` run that reads no blob at all. Per repo, **eleven runs
+share one stdout sha256**: the five timed runs with the section served, the five with
+`RIPWIRE_NO_WARMSNAP=1`, and the from-scratch `--no-cache` build.
+
+| repo | runs compared | distinct stdout digests | digest |
+|---|---|---|---|
+| envoy | 11 | **1** | `b187c78618c608534b33e78ea6a25f97a31843e61a8df0a2505c95ac280081eb` |
+| vscode | 11 | **1** | `491fe087d4b7dfaa1b327141301f02141453db83678ca8832ab69d0cade6a4c8` |
+| cpython | 11 | **1** | `9291e0b06d32f96a66c4882dec28b0b70405cd8bfab4dc7ca3bd923d28a70789` |
+
+envoy's and cpython's runs each emit a degrade disclosure on **stderr** (a `.json` nesting refusal; the
+value-reference depth cap). Those are identical across every arm and touch no stdout byte, which is the
+contract: a refusal changes cost, never content.
+
+**Refusal, which is the half that matters more.** `test/warmsnapcheck.sh` is **143 PASS / 0 FAIL**,
+rewritten for the in-blob layout, and its damage arms are *stronger* than the sidecar's were. A sidecar
+could be damaged by writing to a file; a section sits inside a checksummed blob, so each arm now proves
+the refusal is **warmsnap.h's own guard and not the blob reader's** by asserting `reparsed=0` on the
+very run that refused — the records were still served out of the blob the damaged section lives in:
+
+* **S2** the section's version byte patched in place -> `why=version`, records still served, and the
+  next run re-records into the blob;
+* **S3** one byte flipped at 30/50/70/90 % of the section -> `why=checksum`, four times, records still
+  served;
+* **S4** the section cut in half inside a blob whose header span, table offsets and trailer checksum are
+  all rewritten to stay valid -> refused, records still served. Truncating the *file* could not test
+  this: it would break the blob's exact-fit invariant and be refused before warmsnap.h saw a byte. The
+  helper that rebuilds the blob carries a second copy of `blobChecksum`, so it is controlled — rebuilding
+  around the **whole** section must reproduce the blob byte for byte, which fails loudly if that copy
+  ever drifts;
+* **S6** the blob removed -> `why=absent`, the whole section gone with it, because the binding is
+  structural;
+* **S7** another `--exclude` set -> `why=options`;
+* **S8**, new, gates the **structural invalidation the design rests on**, on the blob's own header rather
+  than on behaviour: after an edit the blob a re-parsing run republishes names **no section at all**
+  (`snapLength` 0), that run recorded nothing (so it was charged one blob write, not two), the next clean
+  run records again, the run after that loads it, a steady warm run republishes nothing, and **nothing is
+  ever written beside the blob on any run** — arm (D3)'s contract, restated locally;
+* **L(a)-(f)** all five tree-movement arms the band named — a file added (with and without a pause after
+  the recording run), deleted, modified in place at the same size (plainly, and with its mtime restored
+  so only ctime moved), added inside a new subdirectory, a `.gitignore` changed — plus a file added under
+  a directory git reported ignored as a whole.
+
+**The vacuity guard holds.** Every identity arm re-asserts the load on the very run whose bytes it
+compares, and requires a `RIPWIRE_SNAPSHOT_STATS=1` line on that run, so a build without the feature
+cannot pass by printing equal output. `test/cacheidentitycheck.sh` — the gate whose arm (D3) the sidecar
+failed — is **ALL PASS with that arm byte-untouched**; it does not appear in this lane's diff at all.
 
 #### The registered honest failure mode did NOT occur
 
 The card predicted the section might grow past Band 3 if the resolve-only tables (`varType`,
 `localNameSet`, `localShadowSpans`, `acc`) had to be serialized with it. They did not: only resolve
-*outcomes* are stored. What did bind was the row layout — a fixed-row encoding put vscode's sidecar at
+*outcomes* are stored. What did bind was the row layout — a fixed-row encoding put vscode's payload at
 251.9 MB and over the ceiling, and it took a delta+varint row stream, sparse per-symbol arrays and
-front-coded path lists to reach 112,642,120 B.
+front-coded path lists to reach the 112,597,544 B the section measures now.
 
 #### Correction to the analysis that MOTIVATED this registration
 
@@ -14881,11 +15058,22 @@ after the restore.
 #### Not measured, and therefore not claimed
 
 Linux; Release builds; verbs other than the flagless map on the large repos (the rich `--for` class is
-in the gate but not timed); the cold path, which Band 3b puts out of scope by owner ruling.
-Multi-root, `--scip`, `--pin-census`, `--max-memory` and single-file roots are not served by the
-snapshot at all. Stored PageRank is the uniform-teleport default only. One envoy run in one batch of
-nine refused part of the snapshot and did not reproduce in 25 consecutive attempts; refusal is the safe
-direction, but the cause was not found and is recorded here rather than left out.
+in the gate but not timed). Cold **CPU** is out of scope by Band 3b's owner ruling and was measured only
+as a control on the cold-peak correction above; cold **peak** is in scope, did rise, and is reported
+under Band 2. Multi-root, `--scip`, `--pin-census`, `--max-memory` and single-file roots are not served
+by the snapshot at all. Stored PageRank is the uniform-teleport default only.
+
+What the recording run's blob rewrite costs in wall-clock I/O is **not measured**: it writes 3.46x the
+bytes the sidecar did, and `/usr/bin/time -l`'s `block output operations` counter reads 0 for every run
+on this APFS volume, so no instrument here can price it. On a slower volume it could matter.
+
+Two loose ends carried forward rather than dropped. One envoy run in one batch of nine, during the
+sidecar measurement, refused part of the snapshot and did not reproduce in 25 consecutive attempts;
+refusal is the safe direction, but the cause was not found, and the in-blob re-measurement did not
+reproduce it either (15 warm runs across three repos, every one `why=ok`) — which is not the same as
+having explained it. And the +37.6 % cold peak rise on envoy under Band 2 has no isolated cause; it is a
+cost this lane carries for state it then discards on exactly the runs that pay it, which makes it worth
+a look in its own round.
 
 ## `--impact`'s inline importer ring, gated on two fields the header already prints — PRE-REGISTERED 2026-11-15 (before any `src/` change and before the readout below exists)
 
