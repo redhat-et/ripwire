@@ -14,6 +14,7 @@
 // Kept apart from forfilesyms.h matchWords (the <syms> block's words): that list and stemmer were measured on <syms>, this one
 // on the tail (the two differ in ~40 stop words and in the -er/-ation suffixes); one moving would move the other's numbers.
 
+#include "infra/sortutil.h" // svLess: the stop list's byte order (the Linux G1 leg aborts on the default comparator)
 #include "lexical.h"   // subtokens — the shared identifier splitter
 
 #include <algorithm>
@@ -69,7 +70,7 @@ inline constexpr std::array<std::string_view, 177> kTailTermStop {
     "using", "very", "via", "want", "was", "way", "ways", "we", "were", "what", "when", "where", "where's", "which", "who", "whom",
     "whose", "why", "will", "with", "without", "work", "works", "would", "write", "writes", "written", "yes", "you", "your"
 };
-static_assert( std::ranges::is_sorted( kTailTermStop ), "kTailTermStop is binary-searched: keep it sorted" );
+static_assert( std::ranges::is_sorted( kTailTermStop, rw::sortutil::svLess ), "kTailTermStop is binary-searched: keep it sorted" );
 
 // The lab's suffix stem (emul.py stem): the first suffix that leaves 3+ bytes is cut; -ies becomes -y.
 inline constexpr std::array<std::string_view, 10> kTailTermSuffixes { "ations", "ation", "ings", "ing", "ers", "er", "ies", "es", "ed", "s" };
@@ -84,7 +85,7 @@ inline std::vector<std::string> tailTaskTerms( std::string_view task )
     for( std::string& w : raw )
     {
         const bool digits = std::ranges::all_of( w, []( char c ) { return c >= '0' && c <= '9'; } );
-        if( w.size() < 3 || digits || std::ranges::binary_search( kTailTermStop, std::string_view( w ) ) )
+        if( w.size() < 3 || digits || std::ranges::binary_search( kTailTermStop, std::string_view( w ), rw::sortutil::svLess ) )
         {
             continue;
         }
